@@ -139,10 +139,15 @@ class SuggestionErrorResponse(_StrictModel):
     message: str
 
 
+class SuggestionHTTPErrorResponse(_StrictModel):
+    detail: SuggestionErrorResponse
+
+
 __all__ = [
     "SuggestionCapabilitiesResponse",
     "SuggestionDecisionRequest",
     "SuggestionErrorResponse",
+    "SuggestionHTTPErrorResponse",
     "SuggestionItemResponse",
     "SuggestionListResponse",
     "SuggestionMutationResponse",

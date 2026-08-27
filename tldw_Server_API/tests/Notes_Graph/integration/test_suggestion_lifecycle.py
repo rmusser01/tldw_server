@@ -39,6 +39,26 @@ def _note_fingerprint(db: CharactersRAGDB, note_id: str) -> str:
     return content_fingerprint(note["title"], note["content"])
 
 
+def _expected_run_envelope(run) -> dict[str, object]:
+    return {
+        "run_id": run.id,
+        "provider": run.provider,
+        "model": run.model,
+        "state": run.state.value,
+        "revision": run.revision,
+        "created_at": run.created_at,
+        "started_at": run.started_at,
+        "completed_at": run.completed_at,
+        "suggestion_count": run.suggestion_count,
+        "related_note_count": run.related_note_count,
+        "tag_count": run.tag_count,
+        "invalid_item_count": run.invalid_item_count,
+        "cancellation_available": run.state.value in {"admitting", "queued", "running"},
+        "error_code": run.error_code,
+        "guidance_key": run.guidance_key,
+    }
+
+
 def _seed_run(
     db: CharactersRAGDB,
     *,
@@ -925,12 +945,7 @@ def _exercise_capability_failure_replay(db: CharactersRAGDB) -> None:
     db.execute_query("DELETE FROM note_graph_suggestion_runs WHERE id=?", (failed.id,))
     capability_replay = _admit_for(db, capability_source, "capability-change")
     assert capability_replay.run is None
-    assert capability_replay.replay_envelope == {
-        "run_id": failed.id,
-        "state": "failed",
-        "error_code": "notes_graph_capabilities_changed_before_queue",
-        "guidance_key": "retry_generation",
-    }
+    assert capability_replay.replay_envelope == _expected_run_envelope(failed)
 
 
 def _exercise_task5_store_protocol(db: CharactersRAGDB) -> None:
@@ -1870,12 +1885,7 @@ def _exercise_operation_specific_error_contracts(db: CharactersRAGDB) -> None:
     db.execute_query("DELETE FROM note_graph_suggestion_runs WHERE id=?", (valid_failed.id,))
     valid_replay = _admit_for(db, invalid_source, "invalid-admission-pairs")
     assert valid_replay.run is None
-    assert valid_replay.replay_envelope == {
-        "run_id": valid_failed.id,
-        "state": "failed",
-        "error_code": "notes_graph_admission_failed",
-        "guidance_key": "retry_generation",
-    }
+    assert valid_replay.replay_envelope == _expected_run_envelope(valid_failed)
     capability_source = "81000000-0000-4000-8000-000000000002"
     db.add_note("Capability admission", "body", note_id=capability_source)
     capability = _admit_for(db, capability_source, "round-three-capability")
@@ -1889,12 +1899,10 @@ def _exercise_operation_specific_error_contracts(db: CharactersRAGDB) -> None:
         now=NOW,
     )
     db.execute_query("DELETE FROM note_graph_suggestion_runs WHERE id=?", (capability_failed.id,))
-    assert _admit_for(db, capability_source, "round-three-capability").replay_envelope == {
-        "run_id": capability_failed.id,
-        "state": "failed",
-        "error_code": "notes_graph_capabilities_changed_before_queue",
-        "guidance_key": "retry_generation",
-    }
+    assert (
+        _admit_for(db, capability_source, "round-three-capability").replay_envelope
+        == _expected_run_envelope(capability_failed)
+    )
 
     job_missing_source = "81000000-0000-4000-8000-000000000003"
     db.add_note("Missing admission job", "body", note_id=job_missing_source)
@@ -1916,12 +1924,10 @@ def _exercise_operation_specific_error_contracts(db: CharactersRAGDB) -> None:
         "retry_generation",
     )
     db.execute_query("DELETE FROM note_graph_suggestion_runs WHERE id=?", (job_missing.id,))
-    assert _admit_for(db, job_missing_source, "round-three-job-missing").replay_envelope == {
-        "run_id": job_missing.id,
-        "state": "failed",
-        "error_code": "notes_graph_job_missing",
-        "guidance_key": "retry_generation",
-    }
+    assert (
+        _admit_for(db, job_missing_source, "round-three-job-missing").replay_envelope
+        == _expected_run_envelope(job_missing)
+    )
 
     worker_pairs = (
         ("notes_graph_capabilities_changed_before_provider", "retry_generation"),

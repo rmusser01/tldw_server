@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import hashlib
+import json
+from dataclasses import asdict, dataclass
 
 from tldw_Server_API.app.core.Chat.chat_target_resolution import (
     get_default_model_for_provider,
@@ -13,6 +15,9 @@ from tldw_Server_API.app.core.LLM_Calls import adapter_registry
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import _resolve_openai_api_base
 
 from .suggestion_capabilities import (
+    DEFAULT_ALLOWED_ACTIONS,
+    DEFAULT_OUTBOUND_DATA_CATEGORIES,
+    HARD_SUGGESTION_CAPABILITY_LIMITS,
     ProviderCapabilityContract,
     SuggestionCapabilities,
     build_suggestion_capabilities,
@@ -26,6 +31,44 @@ class ResolvedSuggestionProvider:
 
     capabilities: SuggestionCapabilities
     provider: GenerationProvider
+
+
+def unavailable_generation_capability(
+    *,
+    provider: str | None,
+    model: str | None,
+    reason: str = "notes_graph_provider_disallowed",
+) -> SuggestionCapabilities:
+    """Build a deterministic sanitized readiness response without provider secrets."""
+
+    safe_provider = provider.strip() if isinstance(provider, str) and provider.strip() else "unconfigured"
+    safe_model = model.strip() if isinstance(model, str) and model.strip() else "unconfigured"
+    origin_revision = f"sha256:{hashlib.sha256(b'notes-graph-unconfigured-origin-v1').hexdigest()}"
+    revision_payload = {
+        "provider": safe_provider,
+        "model": safe_model,
+        "endpoint_origin_revision": origin_revision,
+        "data_boundary": "unknown",
+        "outbound_data_categories": list(DEFAULT_OUTBOUND_DATA_CATEGORIES),
+        "limits": asdict(HARD_SUGGESTION_CAPABILITY_LIMITS),
+        "reason": reason,
+    }
+    revision = hashlib.sha256(
+        json.dumps(revision_payload, sort_keys=True, separators=(",", ":")).encode("ascii")
+    ).hexdigest()
+    return SuggestionCapabilities(
+        provider=safe_provider,
+        model=safe_model,
+        endpoint_origin_revision=origin_revision,
+        data_boundary="unknown",
+        disclosure_external=False,
+        outbound_data_categories=DEFAULT_OUTBOUND_DATA_CATEGORIES,
+        generation_available=False,
+        unavailable_reason=reason,
+        limits=HARD_SUGGESTION_CAPABILITY_LIMITS,
+        allowed_actions=DEFAULT_ALLOWED_ACTIONS,
+        revision=f"sha256:{revision}",
+    )
 
 
 def resolve_generation_capability(
@@ -78,4 +121,5 @@ def resolve_generation_capability(
 __all__ = [
     "ResolvedSuggestionProvider",
     "resolve_generation_capability",
+    "unavailable_generation_capability",
 ]

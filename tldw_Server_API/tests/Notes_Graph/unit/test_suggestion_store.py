@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.chacha import note_graph_suggestion_store
 from tldw_Server_API.app.core.DB_Management.chacha.note_graph_suggestion_store import (
     NoteGraphSuggestionStore,
 )
@@ -64,6 +65,26 @@ def _admit(
         idempotency_key=key,
         now=NOW,
     )
+
+
+def _expected_run_envelope(run) -> dict[str, object]:
+    return {
+        "run_id": run.id,
+        "provider": run.provider,
+        "model": run.model,
+        "state": run.state.value,
+        "revision": run.revision,
+        "created_at": run.created_at,
+        "started_at": run.started_at,
+        "completed_at": run.completed_at,
+        "suggestion_count": run.suggestion_count,
+        "related_note_count": run.related_note_count,
+        "tag_count": run.tag_count,
+        "invalid_item_count": run.invalid_item_count,
+        "cancellation_available": run.state.value in {"admitting", "queued", "running"},
+        "error_code": run.error_code,
+        "guidance_key": run.guidance_key,
+    }
 
 
 def _queue_and_run(db: CharactersRAGDB, admission):
@@ -285,19 +306,17 @@ def test_request_fingerprints_and_key_digests_are_versioned_bounded_and_safe(db)
         "run_admit",
         {
             "source_note_id": SOURCE_ID,
-            "source_fingerprint": _fingerprint(db, SOURCE_ID),
-            "provider": "openai",
-            "model": "model-a",
+            "requested_provider": "openai",
+            "requested_model": "model-a",
             "prompt_contract_version": "prompt-v1",
         },
     )
     second = store.canonical_request_fingerprint(
         "run_admit",
         {
-            "model": "model-a",
-            "provider": "openai",
+            "requested_model": "model-a",
+            "requested_provider": "openai",
             "prompt_contract_version": "prompt-v1",
-            "source_fingerprint": _fingerprint(db, SOURCE_ID),
             "source_note_id": SOURCE_ID,
         },
     )
@@ -312,9 +331,8 @@ def test_request_fingerprints_and_key_digests_are_versioned_bounded_and_safe(db)
             "run_admit",
             {
                 "source_note_id": SOURCE_ID,
-                "source_fingerprint": _fingerprint(db, SOURCE_ID),
-                "provider": "openai",
-                "model": "model-a",
+                "requested_provider": "openai",
+                "requested_model": "model-a",
                 "prompt_contract_version": "prompt-v1",
                 "authorization_material": "alternate secret name",
             },
@@ -428,12 +446,7 @@ def test_explicit_run_transition_and_admission_failure_are_fenced_and_receipt_at
     ).fetchone()
     assert receipt["state"] == "failed"
     assert int(receipt["http_status"]) == 503
-    assert json.loads(receipt["replay_envelope"]) == {
-        "error_code": "notes_graph_admission_failed",
-        "guidance_key": "retry_generation",
-        "run_id": admission.run.id,
-        "state": "failed",
-    }
+    assert json.loads(receipt["replay_envelope"]) == _expected_run_envelope(failed)
 
     db.execute_query(
         "DELETE FROM note_graph_suggestion_runs WHERE id=?",
@@ -476,7 +489,7 @@ def test_receipt_replay_is_terminal_or_operation_specific_and_mismatch_is_stable
     terminal = _admit(db, key="receipt-key")
     assert queued.state.value == "queued"
     assert terminal.disposition == "terminal_replay"
-    assert terminal.replay_envelope == {"run_id": in_progress.run.id, "state": "queued"}
+    assert terminal.replay_envelope == _expected_run_envelope(queued)
 
     with pytest.raises(RuntimeError, match="notes_graph_suggestion_idempotency_mismatch"):
         db.note_graph_suggestion_store.admit_run(
@@ -1049,6 +1062,7 @@ def test_acceptance_guard_renewal_and_finalizer_share_the_exact_fence(db) -> Non
         )
     assert finalized.envelope == {
         "accepted_resource_identity": "44444444-4444-4444-8444-444444444444",
+        "authorization_scope": "relationship",
         "revision": 3,
         "state": "accepted",
         "suggestion_id": "guard-finalize",
@@ -1149,6 +1163,7 @@ def test_expired_acceptance_scan_claims_higher_fence_and_only_resolves_existing_
         now=NOW + timedelta(minutes=5, seconds=1),
     )
     assert resolved.envelope == {
+        "authorization_scope": "relationship",
         "revision": takeover.revision + 1,
         "state": "pending",
         "suggestion_id": "expired-acceptance",
@@ -1346,7 +1361,9 @@ def test_accept_reject_race_closes_the_losing_operation_receipt(db) -> None:
         idempotency_key="reject-lost-key",
         now=NOW,
     )
-    assert losing_reject.envelope == accepted.envelope
+    assert losing_reject.envelope == {
+        key: value for key, value in accepted.envelope.items() if key != "authorization_scope"
+    }
     assert losing_reject.disposition == "completed"
 
     _stage_and_activate(db, key="reject-wins-run", suggestion_id="reject-wins")
@@ -1371,6 +1388,7 @@ def test_accept_reject_race_closes_the_losing_operation_receipt(db) -> None:
     assert losing_accept.envelope == {
         **rejected.envelope,
         "error_code": "notes_graph_suggestion_rejected",
+        "authorization_scope": "relationship",
     }
     assert losing_accept.disposition == "completed"
 
@@ -1413,6 +1431,7 @@ def test_deleted_keyword_identity_marks_acceptance_stale_and_closes_receipt(db) 
         now=NOW,
     )
     assert stale.envelope == {
+        "authorization_scope": "existing_tag",
         "error_code": "notes_graph_canonical_resource_stale",
         "revision": 3,
         "state": "stale",
@@ -1447,6 +1466,7 @@ def test_acceptance_replay_and_fences_never_expose_another_receipts_lease(db) ->
     )
     assert released.disposition == "completed"
     assert released.envelope == {
+        "authorization_scope": "relationship",
         "revision": 3,
         "state": "pending",
         "suggestion_id": "lease-isolation",
@@ -1776,6 +1796,44 @@ def test_evidence_read_bounds_fail_closed(db, limit) -> None:
             suggestion_ids=("suggestion",),
             limit=limit,
         )
+
+
+def test_evidence_read_loads_each_unique_note_once(db, monkeypatch) -> None:
+    _stage_and_activate(db, key="evidence-cache", suggestion_id="evidence-cache")
+    with db.transaction() as conn:
+        conn.execute(
+            "INSERT INTO note_graph_suggestion_evidence("
+            "suggestion_id,owner_user_id,dataset_id,side,ordinal,note_id,field,"
+            "content_fingerprint,start_offset,end_offset) "
+            "SELECT suggestion_id,owner_user_id,dataset_id,side,1,note_id,field,"
+            "content_fingerprint,start_offset,end_offset "
+            "FROM note_graph_suggestion_evidence WHERE suggestion_id=? AND side='source' "
+            "AND ordinal=0",
+            ("evidence-cache",),
+        )
+
+    original = note_graph_suggestion_store.content_fingerprint
+    calls: list[tuple[str, str]] = []
+
+    def counted_fingerprint(title: str, content: str) -> str:
+        calls.append((title, content))
+        return original(title, content)
+
+    monkeypatch.setattr(note_graph_suggestion_store, "content_fingerprint", counted_fingerprint)
+    evidence = db.note_graph_suggestion_store.list_suggestion_evidence(
+        dataset_id=DATASET_ID,
+        source_note_id=SOURCE_ID,
+        source_fingerprint=_fingerprint(db, SOURCE_ID),
+        suggestion_ids=("evidence-cache",),
+        limit=6,
+    )
+
+    assert len(evidence) == 3
+    assert len(calls) == 2
+    repeated_source = [item.excerpt_note for item in evidence if item.evidence.side.value == "source"]
+    assert len(repeated_source) == 2
+    assert repeated_source[0].title is repeated_source[1].title
+    assert repeated_source[0].content is repeated_source[1].content
 
 
 def test_retention_uses_exact_horizons_and_preserves_current_review_state(db) -> None:

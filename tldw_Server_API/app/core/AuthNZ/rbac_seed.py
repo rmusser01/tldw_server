@@ -22,6 +22,7 @@ PermissionDef = tuple[str, str, str]
 _BASELINE_ROLES: Sequence[RoleDef] = (
     ("admin", "Administrator", True),
     ("user", "Standard User", True),
+    ("moderator", "Moderator (curated elevated access)", True),
     ("viewer", "Read-only User", True),
     ("reviewer", "Claims Reviewer", True),
 )
@@ -42,6 +43,13 @@ _BASELINE_PERMISSIONS: Sequence[PermissionDef] = (
     ("moderation.audit.read", "Read moderation review audit events", "moderation"),
     ("notifications.read", "Read personal notifications", "notifications"),
     ("notifications.control", "Manage personal notifications", "notifications"),
+    (
+        "notes.graph.suggest",
+        "Generate and review Notes graph suggestions",
+        "notes",
+    ),
+    ("notes.link_keyword", "Accept Notes keyword-link suggestions", "notes"),
+    ("keywords.create", "Create keywords while accepting suggestions", "keywords"),
 )
 
 _MCP_PERMISSIONS: Sequence[PermissionDef] = (
@@ -61,7 +69,24 @@ def _is_postgres_connection(conn: Any) -> bool:
 def _build_role_grants(permission_names: Iterable[str], *, include_mcp_permissions: bool) -> dict[str, list[str]]:
     base = set(permission_names)
     grants: dict[str, list[str]] = {
-        "user": [p for p in ("media.read", "media.create", "sql.read", "sql.target:media_db") if p in base],
+        "user": [
+            p
+            for p in (
+                "media.read",
+                "media.create",
+                "sql.read",
+                "sql.target:media_db",
+                "notes.graph.suggest",
+                "notes.link_keyword",
+                "keywords.create",
+            )
+            if p in base
+        ],
+        "moderator": [
+            p
+            for p in ("notes.graph.suggest", "notes.link_keyword", "keywords.create")
+            if p in base
+        ],
         "viewer": [p for p in ("media.read",) if p in base],
         "reviewer": [
             p

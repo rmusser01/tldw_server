@@ -50,7 +50,7 @@ async def test_ensure_baseline_rbac_seed_sqlite_idempotent() -> None:
 
         cur = await conn.execute("SELECT name FROM roles")
         roles = {row[0] for row in await cur.fetchall()}
-        assert {"admin", "user", "viewer"} <= roles
+        assert {"admin", "user", "moderator", "viewer"} <= roles
 
         expected_permissions = {
             "media.read",
@@ -65,12 +65,17 @@ async def test_ensure_baseline_rbac_seed_sqlite_idempotent() -> None:
             "tools.execute:*",
             "notifications.read",
             "notifications.control",
+            "notes.graph.suggest",
+            "notes.link_keyword",
+            "keywords.create",
         }
         cur = await conn.execute("SELECT name FROM permissions")
         perms = {row[0] for row in await cur.fetchall()}
         assert expected_permissions <= perms
 
-        cur = await conn.execute("SELECT id, name FROM roles WHERE name IN ('admin','user','viewer','reviewer')")
+        cur = await conn.execute(
+            "SELECT id, name FROM roles WHERE name IN ('admin','user','moderator','viewer','reviewer')"
+        )
         role_id = {row[1]: row[0] for row in await cur.fetchall()}
 
         cur = await conn.execute(
@@ -81,6 +86,7 @@ async def test_ensure_baseline_rbac_seed_sqlite_idempotent() -> None:
                 'media.read','media.create','media.delete','system.configure',
                 'users.manage_roles','sql.read','sql.target:media_db','modules.read',
                 'prompts.read','tools.execute:*','notifications.read','notifications.control'
+                ,'notes.graph.suggest','notes.link_keyword','keywords.create'
             )
             """
         )
@@ -99,6 +105,20 @@ async def test_ensure_baseline_rbac_seed_sqlite_idempotent() -> None:
         assert perm_id["prompts.read"] in user_perm_ids
         assert perm_id["notifications.read"] in user_perm_ids
         assert perm_id["notifications.control"] in user_perm_ids
+        assert perm_id["notes.graph.suggest"] in user_perm_ids
+        assert perm_id["notes.link_keyword"] in user_perm_ids
+        assert perm_id["keywords.create"] in user_perm_ids
+
+        cur = await conn.execute(
+            "SELECT permission_id FROM role_permissions WHERE role_id = ?",
+            (role_id["moderator"],),
+        )
+        moderator_perm_ids = {row[0] for row in await cur.fetchall()}
+        assert {
+            perm_id["notes.graph.suggest"],
+            perm_id["notes.link_keyword"],
+            perm_id["keywords.create"],
+        } <= moderator_perm_ids
 
         cur = await conn.execute(
             "SELECT permission_id FROM role_permissions WHERE role_id = ?",
@@ -108,6 +128,9 @@ async def test_ensure_baseline_rbac_seed_sqlite_idempotent() -> None:
         assert perm_id["media.read"] in viewer_perm_ids
         assert perm_id["notifications.read"] in viewer_perm_ids
         assert perm_id["notifications.control"] in viewer_perm_ids
+        assert perm_id["notes.graph.suggest"] not in viewer_perm_ids
+        assert perm_id["notes.link_keyword"] not in viewer_perm_ids
+        assert perm_id["keywords.create"] not in viewer_perm_ids
 
         cur = await conn.execute(
             "SELECT permission_id FROM role_permissions WHERE role_id = ?",

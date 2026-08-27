@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from types import SimpleNamespace
 from typing import Any, Callable
 
 from .suggestion_observability import SuggestionEventName, record_event
@@ -161,6 +160,35 @@ class SuggestionAdmissionService:
         if len(recent) >= 20:
             raise RuntimeError("notes_graph_admission_rate_limited")
 
+    def replay(
+        self,
+        *,
+        dataset_id: str,
+        source_note_id: str,
+        requested_provider: str | None,
+        requested_model: str | None,
+        prompt_contract_version: str,
+        idempotency_key: str,
+    ) -> SuggestionAdmission | None:
+        """Resolve an exact terminal receipt before current provider/source checks."""
+
+        replay = self._store.get_run_admission_replay(
+            dataset_id=dataset_id,
+            source_note_id=source_note_id,
+            requested_provider=requested_provider,
+            requested_model=requested_model,
+            prompt_contract_version=prompt_contract_version,
+            idempotency_key=idempotency_key,
+        )
+        if replay is None:
+            return None
+        return SuggestionAdmission(
+            replay.disposition,
+            None,
+            None,
+            replay.replay_envelope,
+        )
+
     def admit(
         self,
         *,
@@ -169,6 +197,8 @@ class SuggestionAdmissionService:
         source_fingerprint: str,
         provider: str,
         model: str,
+        requested_provider: str | None = None,
+        requested_model: str | None = None,
         capability_revision: str,
         prompt_contract_version: str,
         idempotency_key: str,
@@ -181,6 +211,8 @@ class SuggestionAdmissionService:
             source_fingerprint=source_fingerprint,
             provider=provider,
             model=model,
+            requested_provider=requested_provider,
+            requested_model=requested_model,
             capability_revision=capability_revision,
             prompt_contract_version=prompt_contract_version,
             idempotency_key=idempotency_key,
@@ -188,11 +220,9 @@ class SuggestionAdmissionService:
         )
         if admission.run is None:
             envelope = admission.replay_envelope or {}
-            run_id = str(envelope.get("run_id") or "")
-            replay_run = SimpleNamespace(id=run_id, state=envelope.get("state")) if run_id else None
             return SuggestionAdmission(
                 admission.disposition,
-                replay_run,
+                None,
                 None,
                 envelope,
             )
@@ -301,7 +331,7 @@ class SuggestionCancellationCoordinator:
         *,
         dataset_id: str,
         run_id: str,
-        expected_state: str,
+        expected_state: str | None,
         expected_revision: int,
         idempotency_key: str,
         now: datetime,

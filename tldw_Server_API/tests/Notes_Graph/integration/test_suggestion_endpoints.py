@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from starlette.requests import Request
@@ -25,6 +25,9 @@ from tldw_Server_API.app.core.AuthNZ.permissions import (
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
 from tldw_Server_API.app.core.Notes_Graph.suggestion_api import SuggestionAPIError
+from tldw_Server_API.app.core.Sync.v2.notes_link_coordinator import (
+    NotesLinkDatasetConflictError,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -34,7 +37,12 @@ FINGERPRINT = f"sha256:{'5' * 64}"
 NOW = datetime(2026, 8, 27, 20, 0, tzinfo=timezone.utc)
 
 
-def _principal(permissions: tuple[str, ...]) -> AuthPrincipal:
+def _principal(
+    permissions: tuple[str, ...],
+    *,
+    roles: tuple[str, ...] = ("user",),
+    is_admin: bool = False,
+) -> AuthPrincipal:
     return AuthPrincipal(
         kind="user",
         user_id=1,
@@ -42,9 +50,9 @@ def _principal(permissions: tuple[str, ...]) -> AuthPrincipal:
         subject=None,
         token_type="access",
         jti=None,
-        roles=["user"],
+        roles=list(roles),
         permissions=list(permissions),
-        is_admin=False,
+        is_admin=is_admin,
         org_ids=[],
         team_ids=[],
     )
@@ -160,10 +168,16 @@ class FakeAPI:
         )
 
 
-def _app(fake: FakeAPI, permissions: tuple[str, ...]) -> FastAPI:
+def _app(
+    fake: FakeAPI,
+    permissions: tuple[str, ...],
+    *,
+    principal: AuthPrincipal | None = None,
+    override_rate_limit: bool = True,
+) -> FastAPI:
     app = FastAPI()
     app.include_router(endpoint.router, prefix="/api/v1/notes")
-    principal = _principal(permissions)
+    principal = principal or _principal(permissions)
 
     async def auth_principal(request: Request) -> AuthPrincipal:
         request.state.auth = AuthContext(
@@ -181,6 +195,7 @@ def _app(fake: FakeAPI, permissions: tuple[str, ...]) -> FastAPI:
     app.dependency_overrides[endpoint.get_request_user] = request_user
     app.dependency_overrides[endpoint.get_chacha_db_for_user] = lambda: SimpleNamespace()
     app.dependency_overrides[endpoint.try_get_job_manager] = lambda: SimpleNamespace()
+    app.dependency_overrides[auth_deps.get_db_pool] = lambda: SimpleNamespace()
     endpoint.build_notes_graph_suggestions_api = lambda **_kwargs: fake
 
     async def allow() -> None:
@@ -194,7 +209,7 @@ def _app(fake: FakeAPI, permissions: tuple[str, ...]) -> FastAPI:
             call = dependency.call
             if getattr(call, "_tldw_token_scope", False):
                 app.dependency_overrides[call] = allow
-            if getattr(call, "_tldw_rate_limit_resource", None) is not None:
+            if override_rate_limit and getattr(call, "_tldw_rate_limit_resource", None) is not None:
                 app.dependency_overrides[call] = allow
     return app
 
@@ -275,6 +290,42 @@ def test_in_progress_cancellation_returns_authoritative_cancelling_run() -> None
     }
 
 
+def test_terminal_admission_replay_returns_the_original_public_run_envelope() -> None:
+    fake = FakeAPI()
+    envelope = {
+        "run_id": "run-replay",
+        "provider": "openai",
+        "model": "model-original",
+        "state": "queued",
+        "revision": 7,
+        "created_at": NOW.isoformat().replace("+00:00", "Z"),
+        "started_at": None,
+        "completed_at": None,
+        "suggestion_count": 4,
+        "related_note_count": 3,
+        "tag_count": 1,
+        "invalid_item_count": 2,
+        "cancellation_available": True,
+        "error_code": None,
+        "guidance_key": None,
+    }
+    fake.admit_run = lambda **_kwargs: SimpleNamespace(
+        disposition="terminal_replay",
+        run=None,
+        job=None,
+        replay_envelope=envelope,
+    )
+    with TestClient(_app(fake, _base_permissions()), raise_server_exceptions=False) as client:
+        response = client.post(
+            f"/api/v1/notes/{NOTE_ID}/graph/suggestions/runs",
+            json={"provider": "openai", "model": "model-original"},
+            headers={"If-Match": f'"{REVISION}"', "Idempotency-Key": "run-key"},
+        )
+
+    assert response.status_code == 202
+    assert response.json() == {"id": "run-replay", **{k: v for k, v in envelope.items() if k != "run_id"}}
+
+
 def test_run_admission_rejects_a_non_hex_capability_etag_before_calling_the_facade() -> None:
     fake = FakeAPI()
     with TestClient(_app(fake, _base_permissions())) as client:
@@ -282,6 +333,20 @@ def test_run_admission_rejects_a_non_hex_capability_etag_before_calling_the_faca
             f"/api/v1/notes/{NOTE_ID}/graph/suggestions/runs",
             json={"provider": "openai", "model": "model-a"},
             headers={"If-Match": f'"sha256:{"g" * 64}"', "Idempotency-Key": "run-key"},
+        )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["error_code"] == "notes_graph_invalid_request"
+    assert fake.calls == []
+
+
+def test_run_admission_rejects_bare_unquoted_if_match() -> None:
+    fake = FakeAPI()
+    with TestClient(_app(fake, _base_permissions())) as client:
+        response = client.post(
+            f"/api/v1/notes/{NOTE_ID}/graph/suggestions/runs",
+            json={"provider": "openai", "model": "model-a"},
+            headers={"If-Match": REVISION, "Idempotency-Key": "run-key"},
         )
 
     assert response.status_code == 422
@@ -380,3 +445,181 @@ def test_accept_enforces_kind_specific_permissions_from_authoritative_principal(
             headers={"Idempotency-Key": "decision-key"},
         )
     assert response.status_code == expected
+
+
+def test_accept_does_not_trust_forged_is_admin_boolean() -> None:
+    fake = FakeAPI()
+    forged = _principal(_base_permissions(), is_admin=True)
+    with TestClient(_app(fake, _base_permissions(), principal=forged)) as client:
+        response = client.post(
+            f"/api/v1/notes/{NOTE_ID}/graph/suggestions/suggestion-1/accept",
+            json={
+                "expected_revision": 1,
+                "expected_source_fingerprint": FINGERPRINT,
+                "expected_target_fingerprint": None,
+            },
+            headers={"Idempotency-Key": "decision-key"},
+        )
+
+    assert response.status_code == 403
+    assert all(name != "accept" for name, _kwargs in fake.calls)
+
+
+@pytest.mark.parametrize(
+    "required",
+    [
+        (NOTES_GRAPH_WRITE,),
+        (NOTES_LINK_KEYWORD,),
+        (NOTES_LINK_KEYWORD, KEYWORDS_CREATE),
+    ],
+)
+def test_accept_allows_verified_admin_claims_for_each_suggestion_kind(
+    required: tuple[str, ...],
+) -> None:
+    fake = FakeAPI()
+    fake.accept_permissions = required
+    verified_admin = _principal(_base_permissions(), roles=("admin",), is_admin=False)
+    with TestClient(_app(fake, _base_permissions(), principal=verified_admin)) as client:
+        response = client.post(
+            f"/api/v1/notes/{NOTE_ID}/graph/suggestions/suggestion-1/accept",
+            json={
+                "expected_revision": 1,
+                "expected_source_fingerprint": FINGERPRINT,
+                "expected_target_fingerprint": None,
+            },
+            headers={"Idempotency-Key": "decision-key"},
+        )
+
+    assert response.status_code == 200
+
+
+_ROUTE_CASES = (
+    ("get", f"/api/v1/notes/{NOTE_ID}/graph/suggestions/capabilities", None, {}),
+    (
+        "post",
+        f"/api/v1/notes/{NOTE_ID}/graph/suggestions/runs",
+        {"provider": "openai", "model": "model-a"},
+        {"If-Match": f'"{REVISION}"', "Idempotency-Key": "run-key"},
+    ),
+    ("get", f"/api/v1/notes/{NOTE_ID}/graph/suggestions/runs", None, {}),
+    ("get", f"/api/v1/notes/{NOTE_ID}/graph/suggestions/runs/run-1", None, {}),
+    (
+        "post",
+        f"/api/v1/notes/{NOTE_ID}/graph/suggestions/runs/run-1/cancel",
+        {"expected_revision": 2},
+        {"Idempotency-Key": "cancel-key"},
+    ),
+    ("get", f"/api/v1/notes/{NOTE_ID}/graph/suggestions", None, {}),
+    (
+        "post",
+        f"/api/v1/notes/{NOTE_ID}/graph/suggestions/rejections/reset",
+        {
+            "expected_rejection_revision": 1,
+            "source_fingerprint": FINGERPRINT,
+            "confirm": True,
+        },
+        {"Idempotency-Key": "reset-key"},
+    ),
+    (
+        "post",
+        f"/api/v1/notes/{NOTE_ID}/graph/suggestions/suggestion-1/accept",
+        {
+            "expected_revision": 1,
+            "expected_source_fingerprint": FINGERPRINT,
+            "expected_target_fingerprint": None,
+        },
+        {"Idempotency-Key": "accept-key"},
+    ),
+    (
+        "post",
+        f"/api/v1/notes/{NOTE_ID}/graph/suggestions/suggestion-1/reject",
+        {
+            "expected_revision": 1,
+            "expected_source_fingerprint": FINGERPRINT,
+            "expected_target_fingerprint": None,
+        },
+        {"Idempotency-Key": "reject-key"},
+    ),
+)
+
+
+@pytest.mark.parametrize(("method", "path", "body", "headers"), _ROUTE_CASES)
+def test_invalid_or_cross_owner_dataset_is_sanitized_404_on_every_route(
+    monkeypatch,
+    method: str,
+    path: str,
+    body: dict[str, object] | None,
+    headers: dict[str, str],
+) -> None:
+    def reject_dataset(**_kwargs):
+        raise NotesLinkDatasetConflictError()
+
+    monkeypatch.setattr(endpoint, "resolve_notes_link_dataset_authority", reject_dataset)
+    with TestClient(
+        _app(FakeAPI(), _base_permissions()),
+        raise_server_exceptions=False,
+    ) as client:
+        response = client.request(
+            method,
+            path,
+            params={"dataset_id": "other-owner-dataset"},
+            json=body,
+            headers=headers,
+        )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == {
+        "error_code": "notes_graph_suggestion_not_found",
+        "message": endpoint.SUGGESTION_ERROR_MESSAGES["notes_graph_suggestion_not_found"],
+    }
+
+
+@pytest.mark.parametrize(("method", "path", "body", "headers"), _ROUTE_CASES)
+def test_rbac_rate_limit_is_stable_structured_429_on_every_route(
+    monkeypatch,
+    method: str,
+    path: str,
+    body: dict[str, object] | None,
+    headers: dict[str, str],
+) -> None:
+    async def deny_rate(*_args, **_kwargs):
+        raise HTTPException(status_code=429, detail="generic RBAC detail")
+
+    monkeypatch.setattr(auth_deps, "enforce_rbac_rate_limit", deny_rate)
+    with TestClient(
+        _app(FakeAPI(), _base_permissions(), override_rate_limit=False),
+    ) as client:
+        response = client.request(method, path, json=body, headers=headers)
+
+    assert response.status_code == 429
+    assert response.json()["detail"] == {
+        "error_code": "notes_graph_admission_rate_limited",
+        "message": endpoint.SUGGESTION_ERROR_MESSAGES["notes_graph_admission_rate_limited"],
+    }
+
+
+def test_openapi_declares_bounded_headers_and_structured_suggestion_errors() -> None:
+    schema = _app(FakeAPI(), _base_permissions()).openapi()
+    run_operation = schema["paths"]["/api/v1/notes/{note_id}/graph/suggestions/runs"]["post"]
+    parameters = {item["name"]: item["schema"] for item in run_operation["parameters"]}
+
+    def string_branch(name: str) -> dict[str, object]:
+        return next(
+            branch
+            for branch in parameters[name].get("anyOf", (parameters[name],))
+            if branch.get("type") == "string"
+        )
+
+    assert string_branch("Idempotency-Key")["minLength"] == 1
+    assert string_branch("Idempotency-Key")["maxLength"] == 256
+    assert string_branch("If-Match")["minLength"] == 1
+    assert string_branch("If-Match")["maxLength"] == 128
+    for operation_path in schema["paths"].values():
+        for operation in operation_path.values():
+            if "notes-graph-suggestions" not in operation.get("tags", []):
+                continue
+            for status_code in ("404", "409", "412", "422", "429", "503"):
+                response_schema = operation["responses"][status_code]["content"][
+                    "application/json"
+                ]["schema"]
+                assert response_schema["$ref"].endswith("/SuggestionHTTPErrorResponse")

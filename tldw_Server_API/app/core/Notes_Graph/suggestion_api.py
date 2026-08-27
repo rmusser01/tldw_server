@@ -21,7 +21,10 @@ from tldw_Server_API.app.core.DB_Management.chacha.note_graph_suggestion_store i
 
 from .suggestion_capabilities import SuggestionCapabilities
 from .suggestion_content import EvidenceReference, content_fingerprint, reconstruct_evidence
-from .suggestion_provider import resolve_generation_capability
+from .suggestion_provider import (
+    resolve_generation_capability,
+    unavailable_generation_capability,
+)
 
 
 class SuggestionAPIError(RuntimeError):
@@ -217,7 +220,13 @@ class NotesGraphSuggestionsAPI:
             resolved = self._resolve_capability(provider=provider, model=model)
             capabilities, _generation_provider = self._resolved_parts(resolved)
         except Exception as exc:
-            raise self._translate(exc) from exc
+            if str(exc) == "notes_graph_provider_model_disallowed":
+                capabilities = unavailable_generation_capability(
+                    provider=provider,
+                    model=model,
+                )
+            else:
+                raise self._translate(exc) from exc
 
         unavailable_reason = None
         try:
@@ -256,6 +265,23 @@ class NotesGraphSuggestionsAPI:
         capability_revision: str,
         idempotency_key: str,
     ) -> Any:
+        prompt_contract_version = "notes-graph-suggestion-prompt-v1"
+        replay = None
+        replay_admission = getattr(self._admission, "replay", None)
+        if replay_admission is not None:
+            try:
+                replay = replay_admission(
+                    dataset_id=self._dataset_id,
+                    source_note_id=note_id,
+                    requested_provider=provider,
+                    requested_model=model,
+                    prompt_contract_version=prompt_contract_version,
+                    idempotency_key=idempotency_key,
+                )
+            except Exception as exc:
+                raise self._translate(exc) from exc
+        if replay is not None:
+            return replay
         source = self._source(note_id)
         capabilities = self.get_capabilities(note_id=note_id, provider=provider, model=model)
 
@@ -279,8 +305,10 @@ class NotesGraphSuggestionsAPI:
                 source_fingerprint=content_fingerprint(source.title, source.content),
                 provider=capabilities.provider,
                 model=capabilities.model,
+                requested_provider=provider,
+                requested_model=model,
                 capability_revision=capabilities.revision,
-                prompt_contract_version="notes-graph-suggestion-prompt-v1",
+                prompt_contract_version=prompt_contract_version,
                 idempotency_key=idempotency_key,
                 now=self._clock(),
                 validate_before_enqueue=validate,
@@ -347,18 +375,10 @@ class NotesGraphSuggestionsAPI:
         idempotency_key: str,
     ) -> Any:
         try:
-            run = self.get_run(note_id=note_id, run_id=run_id)
-            expected_state = getattr(run.state, "value", run.state)
-        except SuggestionAPIError as exc:
-            if exc.status_code != 404:
-                raise
-            # The receipt lookup precedes resource loading and does not bind expected_state.
-            expected_state = "running"
-        try:
             result = self._cancellation.cancel(
                 dataset_id=self._dataset_id,
                 run_id=run_id,
-                expected_state=expected_state,
+                expected_state=None,
                 expected_revision=expected_revision,
                 idempotency_key=idempotency_key,
                 now=self._clock(),
@@ -469,7 +489,36 @@ class NotesGraphSuggestionsAPI:
         *,
         note_id: str,
         suggestion_id: str,
+        expected_revision: int | None = None,
+        expected_source_fingerprint: str | None = None,
+        expected_target_fingerprint: str | None = None,
+        idempotency_key: str | None = None,
     ) -> tuple[str, ...]:
+        if (
+            expected_revision is not None
+            and expected_source_fingerprint is not None
+            and idempotency_key is not None
+            and hasattr(self._store, "get_acceptance_authorization_scope")
+        ):
+            try:
+                scope = self._store.get_acceptance_authorization_scope(
+                    dataset_id=self._dataset_id,
+                    source_note_id=note_id,
+                    suggestion_id=suggestion_id,
+                    expected_revision=expected_revision,
+                    expected_source_fingerprint=expected_source_fingerprint,
+                    expected_target_fingerprint=expected_target_fingerprint,
+                    idempotency_key=idempotency_key,
+                )
+            except Exception as exc:
+                raise self._translate(exc) from exc
+            if scope == "relationship":
+                return ("notes.graph.write",)
+            if scope == "existing_tag":
+                return ("notes.link_keyword",)
+            if scope == "new_tag":
+                return ("notes.link_keyword", "keywords.create")
+            raise SuggestionAPIError(503, "notes_graph_suggestions_unavailable")
         suggestion = self._suggestion(note_id=note_id, suggestion_id=suggestion_id)
         if suggestion.kind == NoteGraphSuggestionKind.RELATED_NOTE:
             return ("notes.graph.write",)
@@ -479,6 +528,19 @@ class NotesGraphSuggestionsAPI:
         return tuple(required)
 
     def accept_suggestion(self, *, note_id: str, suggestion_id: str, **kwargs: Any) -> Any:
+        probe = getattr(self._store, "get_terminal_acceptance_replay", None)
+        if probe is not None:
+            try:
+                replay = probe(
+                    dataset_id=self._dataset_id,
+                    source_note_id=note_id,
+                    suggestion_id=suggestion_id,
+                    **kwargs,
+                )
+            except Exception as exc:
+                raise self._translate(exc) from exc
+            if replay is not None:
+                return replay
         self._suggestion(note_id=note_id, suggestion_id=suggestion_id)
         try:
             return self._decisions.accept(
@@ -490,6 +552,19 @@ class NotesGraphSuggestionsAPI:
             raise self._translate(exc) from exc
 
     def reject_suggestion(self, *, note_id: str, suggestion_id: str, **kwargs: Any) -> Any:
+        probe = getattr(self._store, "get_terminal_rejection_replay", None)
+        if probe is not None:
+            try:
+                replay = probe(
+                    dataset_id=self._dataset_id,
+                    source_note_id=note_id,
+                    suggestion_id=suggestion_id,
+                    **kwargs,
+                )
+            except Exception as exc:
+                raise self._translate(exc) from exc
+            if replay is not None:
+                return replay
         self._suggestion(note_id=note_id, suggestion_id=suggestion_id)
         try:
             return self._decisions.reject(
@@ -501,6 +576,18 @@ class NotesGraphSuggestionsAPI:
             raise self._translate(exc) from exc
 
     def reset_rejections(self, *, note_id: str, **kwargs: Any) -> Any:
+        probe = getattr(self._store, "get_terminal_rejection_reset_replay", None)
+        if probe is not None:
+            try:
+                replay = probe(
+                    dataset_id=self._dataset_id,
+                    source_note_id=note_id,
+                    **kwargs,
+                )
+            except Exception as exc:
+                raise self._translate(exc) from exc
+            if replay is not None:
+                return replay
         self._source(note_id)
         try:
             return self._decisions.reset_rejections(

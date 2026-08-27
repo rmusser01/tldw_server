@@ -132,12 +132,18 @@ def _api(
     worker_ready=lambda: True,
     admission_service=None,
     cancellation_coordinator=None,
+    decision_service=None,
+    resolve_capability=None,
 ) -> NotesGraphSuggestionsAPI:
     resolved = SimpleNamespace(
         capabilities=capabilities or _capabilities(),
         provider=SimpleNamespace(adapter="openai", model="model-a"),
     )
     class DefaultAdmission:
+        @staticmethod
+        def replay(**_kwargs):
+            return None
+
         @staticmethod
         def admit(**kwargs):
             run = SimpleNamespace(
@@ -154,8 +160,8 @@ def _api(
         dataset_id="dataset-1",
         admission_service=admission_service or DefaultAdmission(),
         cancellation_coordinator=cancellation_coordinator or SimpleNamespace(),
-        decision_service=SimpleNamespace(),
-        resolve_capability=lambda **_kwargs: resolved,
+        decision_service=decision_service or SimpleNamespace(),
+        resolve_capability=resolve_capability or (lambda **_kwargs: resolved),
         worker_ready=worker_ready,
         feature_ready=lambda: True,
         cursor_codec=OpaqueSuggestionCursorCodec(b"cursor-secret-at-least-32-bytes"),
@@ -249,6 +255,219 @@ def test_admission_maps_current_provider_unavailability_to_stable_503() -> None:
     )
 
 
+def test_terminal_admission_replay_precedes_source_and_capability_resolution() -> None:
+    envelope = {
+        "run_id": "run-replay",
+        "provider": "openai",
+        "model": "model-a",
+        "state": "queued",
+        "revision": 2,
+        "created_at": NOW.isoformat(),
+        "started_at": None,
+        "completed_at": None,
+        "suggestion_count": 0,
+        "related_note_count": 0,
+        "tag_count": 0,
+        "invalid_item_count": 0,
+        "cancellation_available": True,
+        "error_code": None,
+        "guidance_key": None,
+    }
+
+    class NoCurrentSourceStore(Store):
+        @staticmethod
+        def load_source_note(**_kwargs):
+            raise AssertionError("terminal replay must not load the source note")
+
+    class Admission:
+        @staticmethod
+        def replay(**kwargs):
+            assert kwargs["source_note_id"] == SOURCE_ID
+            return SimpleNamespace(
+                disposition="terminal_replay",
+                run=None,
+                replay_envelope=envelope,
+            )
+
+        @staticmethod
+        def admit(**_kwargs):
+            raise AssertionError("terminal replay must not continue admission")
+
+    def unavailable_resolver(**_kwargs):
+        raise AssertionError("terminal replay must not resolve current capability")
+
+    result = _api(
+        store=NoCurrentSourceStore(),
+        admission_service=Admission(),
+        resolve_capability=unavailable_resolver,
+    ).admit_run(
+        note_id=SOURCE_ID,
+        provider="openai",
+        model="model-a",
+        capability_revision=f"sha256:{'9' * 64}",
+        idempotency_key="terminal-replay-key",
+    )
+
+    assert result.replay_envelope == envelope
+
+
+def test_capability_preflight_sanitizes_missing_provider_while_admission_stays_422() -> None:
+    def missing_provider(**_kwargs):
+        raise ValueError("notes_graph_provider_model_disallowed")
+
+    api = _api(resolve_capability=missing_provider)
+    capabilities = api.get_capabilities(note_id=SOURCE_ID, provider=None, model=None)
+
+    assert capabilities.generation_available is False
+    assert capabilities.unavailable_reason == "notes_graph_provider_disallowed"
+    assert capabilities.revision.startswith("sha256:")
+    assert not hasattr(capabilities, "endpoint_url")
+
+    with pytest.raises(SuggestionAPIError) as exc_info:
+        api.admit_run(
+            note_id=SOURCE_ID,
+            provider=None,
+            model=None,
+            capability_revision=capabilities.revision,
+            idempotency_key="missing-provider-key",
+        )
+    assert (exc_info.value.status_code, exc_info.value.code) == (
+        422,
+        "notes_graph_provider_disallowed",
+    )
+
+
+def test_terminal_decision_replays_precede_shorter_lived_resources_and_sync_readiness() -> None:
+    accept = SimpleNamespace(
+        envelope={
+            "suggestion_id": "suggestion-1",
+            "state": "accepted",
+            "revision": 2,
+            "accepted_resource_identity": "edge-1",
+            "authorization_scope": "relationship",
+        }
+    )
+    reject = SimpleNamespace(
+        envelope={"suggestion_id": "suggestion-1", "state": "rejected", "revision": 2}
+    )
+    reset = SimpleNamespace(
+        envelope={
+            "source_note_id": SOURCE_ID,
+            "cleared_count": 2,
+            "rejection_set_revision": 8,
+        }
+    )
+
+    class ReceiptFirstStore(Store):
+        @staticmethod
+        def load_source_note(**_kwargs):
+            raise AssertionError("terminal decision replay must not load a note")
+
+        @staticmethod
+        def get_suggestion(**_kwargs):
+            raise AssertionError("terminal decision replay must not load a suggestion")
+
+        @staticmethod
+        def get_acceptance_authorization_scope(**kwargs):
+            assert kwargs["idempotency_key"] == "accept-key"
+            return "relationship"
+
+        @staticmethod
+        def get_terminal_acceptance_replay(**_kwargs):
+            return accept
+
+        @staticmethod
+        def get_terminal_rejection_replay(**_kwargs):
+            return reject
+
+        @staticmethod
+        def get_terminal_rejection_reset_replay(**_kwargs):
+            return reset
+
+    class Decisions:
+        @staticmethod
+        def accept(**_kwargs):
+            return accept
+
+        @staticmethod
+        def reject(**_kwargs):
+            return reject
+
+        @staticmethod
+        def reset_rejections(**_kwargs):
+            return reset
+
+    api = _api(store=ReceiptFirstStore(), decision_service=Decisions())
+    request = {
+        "expected_revision": 1,
+        "expected_source_fingerprint": SOURCE_FINGERPRINT,
+        "expected_target_fingerprint": TARGET_FINGERPRINT,
+        "idempotency_key": "accept-key",
+    }
+
+    assert api.accept_permission_requirements(
+        note_id=SOURCE_ID,
+        suggestion_id="suggestion-1",
+        **request,
+    ) == ("notes.graph.write",)
+    assert api.accept_suggestion(
+        note_id=SOURCE_ID,
+        suggestion_id="suggestion-1",
+        **request,
+    ) is accept
+    assert api.reject_suggestion(
+        note_id=SOURCE_ID,
+        suggestion_id="suggestion-1",
+        expected_revision=1,
+        expected_source_fingerprint=SOURCE_FINGERPRINT,
+        expected_target_fingerprint=TARGET_FINGERPRINT,
+        idempotency_key="reject-key",
+    ) is reject
+    assert api.reset_rejections(
+        note_id=SOURCE_ID,
+        source_fingerprint=SOURCE_FINGERPRINT,
+        expected_revision=7,
+        idempotency_key="reset-key",
+    ) is reset
+
+
+def test_terminal_cancellation_replay_precedes_current_run_and_source_state() -> None:
+    terminal = SimpleNamespace(
+        cancellation=SimpleNamespace(
+            source_note_id=SOURCE_ID,
+            replay_envelope={"run_id": "run-1", "state": "cancelling", "revision": 4},
+        ),
+        accepted=True,
+    )
+
+    class NoCurrentRunStore(Store):
+        @staticmethod
+        def load_source_note(**_kwargs):
+            raise AssertionError("terminal cancellation replay must not load the source")
+
+        @staticmethod
+        def get_run(**_kwargs):
+            raise AssertionError("terminal cancellation replay must not load the run")
+
+    class Cancellation:
+        @staticmethod
+        def cancel(**kwargs):
+            assert kwargs["expected_state"] is None
+            return terminal
+
+    result = _api(
+        store=NoCurrentRunStore(),
+        cancellation_coordinator=Cancellation(),
+    ).cancel_run(
+        note_id=SOURCE_ID,
+        run_id="run-1",
+        expected_revision=3,
+        idempotency_key="cancel-key",
+    )
+
+    assert result is terminal
+
+
 def test_suggestion_page_cursor_is_encoded_outside_store_and_evidence_is_reconstructed() -> None:
     store = Store()
     api = _api(store=store)
@@ -329,7 +548,7 @@ def test_cancellation_replays_owner_scoped_receipt_after_run_cleanup() -> None:
     )
 
     assert result.cancellation.replay_envelope["run_id"] == "run-1"
-    assert calls[0]["expected_state"] == "running"
+    assert calls[0]["expected_state"] is None
 
 
 def test_cancellation_missing_run_and_receipt_remains_non_enumerating() -> None:

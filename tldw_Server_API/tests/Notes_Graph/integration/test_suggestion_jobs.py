@@ -79,12 +79,32 @@ def _admit(notes, jobs, *, key="request-1", model="model-a", now=NOW):
     )
 
 
+def _expected_run_envelope(run) -> dict[str, object]:
+    return {
+        "run_id": run.id,
+        "provider": run.provider,
+        "model": run.model,
+        "state": run.state.value,
+        "revision": run.revision,
+        "created_at": run.created_at,
+        "started_at": run.started_at,
+        "completed_at": run.completed_at,
+        "suggestion_count": run.suggestion_count,
+        "related_note_count": run.related_note_count,
+        "tag_count": run.tag_count,
+        "invalid_item_count": run.invalid_item_count,
+        "cancellation_available": run.state.value in {"admitting", "queued", "running"},
+        "error_code": run.error_code,
+        "guidance_key": run.guidance_key,
+    }
 def test_admission_uses_content_free_exact_job_contract_and_replays(stores) -> None:
     notes, jobs = stores
     first = _admit(notes, jobs)
     replay = _admit(notes, jobs)
 
-    assert first.run.id == first.job["idempotency_key"] == replay.run.id
+    assert first.run.id == first.job["idempotency_key"]
+    assert replay.run is None
+    assert replay.replay_envelope["run_id"] == first.run.id
     assert (first.job["domain"], first.job["queue"], first.job["job_type"]) == (
         JOB_DOMAIN,
         JOB_QUEUE,
@@ -97,7 +117,7 @@ def test_admission_uses_content_free_exact_job_contract_and_replays(stores) -> N
     assert first.run.job_id == first.job["uuid"]
     assert first.run.expected_completion_token.startswith("placeholder_")
     assert replay.disposition == "terminal_replay"
-    assert replay.replay_envelope == {"run_id": first.run.id, "state": "queued"}
+    assert replay.replay_envelope == _expected_run_envelope(first.run)
     assert jobs.count_jobs(domain=JOB_DOMAIN, owner_user_id="owner-1") == 1
 
 
@@ -118,7 +138,7 @@ def test_terminal_admission_replay_returns_the_stored_envelope_without_jobs_look
     replay = _admit(notes, jobs, key="terminal-envelope")
 
     assert replay.disposition == "terminal_replay"
-    assert replay.replay_envelope == {"run_id": first.run.id, "state": "queued"}
+    assert replay.replay_envelope == _expected_run_envelope(first.run)
     assert replay.job is None
 
 

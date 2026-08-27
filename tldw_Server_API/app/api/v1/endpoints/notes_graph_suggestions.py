@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
 
@@ -11,6 +11,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     TokenScopeGuard,
     User,
     get_request_user,
+    principal_has_admin_bypass_claims,
     rbac_rate_limit,
 )
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
@@ -19,6 +20,7 @@ from tldw_Server_API.app.api.v1.endpoints.notes_graph import _normalize_note_id
 from tldw_Server_API.app.api.v1.schemas.notes_graph_suggestions import (
     SuggestionCapabilitiesResponse,
     SuggestionDecisionRequest,
+    SuggestionHTTPErrorResponse,
     SuggestionListResponse,
     SuggestionMutationResponse,
     SuggestionResetRequest,
@@ -34,10 +36,19 @@ from tldw_Server_API.app.core.Notes_Graph.suggestion_api import (
     build_notes_graph_suggestions_api,
 )
 from tldw_Server_API.app.core.Sync.v2.notes_link_coordinator import (
+    NotesLinkDatasetConflictError,
+    NotesLinkSyncInactiveDatasetError,
     resolve_notes_link_dataset_authority,
 )
 
-router = APIRouter(tags=["notes", "notes-graph-suggestions"])
+_SUGGESTION_ERROR_RESPONSES = {
+    code: {"model": SuggestionHTTPErrorResponse}
+    for code in (404, 409, 412, 422, 429, 503)
+}
+router = APIRouter(
+    tags=["notes", "notes-graph-suggestions"],
+    responses=_SUGGESTION_ERROR_RESPONSES,
+)
 
 SUGGESTION_ERROR_MESSAGES = {
     "notes_graph_active_run_conflict": "A matching suggestion run is already active.",
@@ -63,6 +74,23 @@ SUGGESTION_ERROR_MESSAGES = {
     "notes_graph_sync_not_ready": "Notes Sync is not ready for this decision.",
 }
 
+_RATE_LIMIT_DETAIL = {
+    "error_code": "notes_graph_admission_rate_limited",
+    "message": SUGGESTION_ERROR_MESSAGES["notes_graph_admission_rate_limited"],
+}
+_suggestion_rate_limit = rbac_rate_limit(
+    "notes.graph.suggest",
+    detail=_RATE_LIMIT_DETAIL,
+)
+IdempotencyKeyHeader = Annotated[
+    str | None,
+    Header(alias="Idempotency-Key", min_length=1, max_length=256),
+]
+IfMatchHeader = Annotated[
+    str | None,
+    Header(alias="If-Match", min_length=1, max_length=128),
+]
+
 
 def _http_error(exc: SuggestionAPIError) -> HTTPException:
     code = exc.code if exc.code in SUGGESTION_ERROR_MESSAGES else "notes_graph_suggestions_unavailable"
@@ -74,10 +102,13 @@ def _http_error(exc: SuggestionAPIError) -> HTTPException:
 
 
 def _dataset_key(*, owner_user_id: str, dataset_id: str | None) -> str:
-    authority = resolve_notes_link_dataset_authority(
-        user_id=owner_user_id,
-        dataset_id=dataset_id,
-    )
+    try:
+        authority = resolve_notes_link_dataset_authority(
+            user_id=owner_user_id,
+            dataset_id=dataset_id,
+        )
+    except (NotesLinkDatasetConflictError, NotesLinkSyncInactiveDatasetError) as exc:
+        raise SuggestionAPIError(404, "notes_graph_suggestion_not_found") from exc
     return authority[1].dataset_id if authority is not None else f"legacy:{owner_user_id}"
 
 
@@ -106,9 +137,16 @@ def _required_idempotency_key(value: str | None) -> str:
 
 def _required_if_match(value: str | None) -> str:
     raw = value.strip() if isinstance(value, str) else ""
-    if raw.startswith('W/') or "," in raw or raw == "*":
+    if (
+        raw.startswith("W/")
+        or "," in raw
+        or raw == "*"
+        or len(raw) < 2
+        or not raw.startswith('"')
+        or not raw.endswith('"')
+    ):
         raw = ""
-    if len(raw) >= 2 and raw.startswith('"') and raw.endswith('"'):
+    else:
         raw = raw[1:-1]
     if (
         not raw.startswith("sha256:")
@@ -157,6 +195,12 @@ def _run_response(run: Any) -> SuggestionRunResponse:
     )
 
 
+def _run_replay_response(envelope: dict[str, Any]) -> SuggestionRunResponse:
+    payload = dict(envelope)
+    payload["id"] = payload.pop("run_id")
+    return SuggestionRunResponse.model_validate(payload)
+
+
 def _mutation_response(envelope: dict[str, Any]) -> SuggestionMutationResponse:
     resource_id = str(
         envelope.get("suggestion_id")
@@ -173,9 +217,8 @@ def _mutation_response(envelope: dict[str, Any]) -> SuggestionMutationResponse:
 
 
 def _principal_allows(principal: AuthPrincipal, permissions: tuple[str, ...]) -> bool:
-    roles = {str(role).lower() for role in principal.roles}
     claims = set(principal.permissions)
-    return bool(principal.is_admin or "admin" in roles or "*" in claims) or all(
+    return principal_has_admin_bypass_claims(principal) or all(
         permission in claims for permission in permissions
     )
 
@@ -194,7 +237,7 @@ async def get_suggestion_capabilities(
     db: Any = Depends(get_chacha_db_for_user),
     jobs: Any = Depends(try_get_job_manager),
     _principal: AuthPrincipal = Depends(_require_suggestion_permissions),
-    _rate: None = Depends(rbac_rate_limit("notes.graph.suggest")),
+    _rate: None = Depends(_suggestion_rate_limit),
     _scope: None = Depends(
         TokenScopeGuard("notes", require_if_present=True, endpoint_id="notes.graph.suggest")
     ),
@@ -221,13 +264,13 @@ async def create_suggestion_run(
     note_id: str,
     body: SuggestionRunCreateRequest,
     dataset_id: str | None = Query(default=None, min_length=1, max_length=256),
-    if_match: str | None = Header(default=None, alias="If-Match"),
-    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    if_match: IfMatchHeader = None,
+    idempotency_key: IdempotencyKeyHeader = None,
     user: User = Depends(get_request_user),
     db: Any = Depends(get_chacha_db_for_user),
     jobs: Any = Depends(try_get_job_manager),
     _principal: AuthPrincipal = Depends(_require_suggestion_permissions),
-    _rate: None = Depends(rbac_rate_limit("notes.graph.suggest")),
+    _rate: None = Depends(_suggestion_rate_limit),
     _scope: None = Depends(
         TokenScopeGuard("notes", require_if_present=True, endpoint_id="notes.graph.suggest")
     ),
@@ -242,6 +285,11 @@ async def create_suggestion_run(
         )
     except SuggestionAPIError as exc:
         raise _http_error(exc) from exc
+    replay_envelope = getattr(admitted, "replay_envelope", None)
+    if replay_envelope is not None:
+        return _run_replay_response(replay_envelope)
+    if admitted.run is None:
+        raise _http_error(SuggestionAPIError(503, "notes_graph_suggestions_unavailable"))
     return _run_response(admitted.run)
 
 
@@ -256,7 +304,7 @@ async def list_suggestion_runs(
     db: Any = Depends(get_chacha_db_for_user),
     jobs: Any = Depends(try_get_job_manager),
     _principal: AuthPrincipal = Depends(_require_suggestion_permissions),
-    _rate: None = Depends(rbac_rate_limit("notes.graph.suggest")),
+    _rate: None = Depends(_suggestion_rate_limit),
     _scope: None = Depends(
         TokenScopeGuard("notes", require_if_present=True, endpoint_id="notes.graph.suggest")
     ),
@@ -285,7 +333,7 @@ async def get_suggestion_run(
     db: Any = Depends(get_chacha_db_for_user),
     jobs: Any = Depends(try_get_job_manager),
     _principal: AuthPrincipal = Depends(_require_suggestion_permissions),
-    _rate: None = Depends(rbac_rate_limit("notes.graph.suggest")),
+    _rate: None = Depends(_suggestion_rate_limit),
     _scope: None = Depends(
         TokenScopeGuard("notes", require_if_present=True, endpoint_id="notes.graph.suggest")
     ),
@@ -306,12 +354,12 @@ async def cancel_suggestion_run(
     run_id: str,
     body: SuggestionRunCancelRequest,
     dataset_id: str | None = Query(default=None, min_length=1, max_length=256),
-    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    idempotency_key: IdempotencyKeyHeader = None,
     user: User = Depends(get_request_user),
     db: Any = Depends(get_chacha_db_for_user),
     jobs: Any = Depends(try_get_job_manager),
     _principal: AuthPrincipal = Depends(_require_suggestion_permissions),
-    _rate: None = Depends(rbac_rate_limit("notes.graph.suggest")),
+    _rate: None = Depends(_suggestion_rate_limit),
     _scope: None = Depends(
         TokenScopeGuard("notes", require_if_present=True, endpoint_id="notes.graph.suggest")
     ),
@@ -349,7 +397,7 @@ async def list_suggestions(
     db: Any = Depends(get_chacha_db_for_user),
     jobs: Any = Depends(try_get_job_manager),
     _principal: AuthPrincipal = Depends(_require_suggestion_permissions),
-    _rate: None = Depends(rbac_rate_limit("notes.graph.suggest")),
+    _rate: None = Depends(_suggestion_rate_limit),
     _scope: None = Depends(
         TokenScopeGuard("notes", require_if_present=True, endpoint_id="notes.graph.suggest")
     ),
@@ -398,12 +446,12 @@ async def reset_suggestion_rejections(
     note_id: str,
     body: SuggestionResetRequest,
     dataset_id: str | None = Query(default=None, min_length=1, max_length=256),
-    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    idempotency_key: IdempotencyKeyHeader = None,
     user: User = Depends(get_request_user),
     db: Any = Depends(get_chacha_db_for_user),
     jobs: Any = Depends(try_get_job_manager),
     _principal: AuthPrincipal = Depends(_require_suggestion_permissions),
-    _rate: None = Depends(rbac_rate_limit("notes.graph.suggest")),
+    _rate: None = Depends(_suggestion_rate_limit),
     _scope: None = Depends(
         TokenScopeGuard("notes", require_if_present=True, endpoint_id="notes.graph.suggest")
     ),
@@ -426,22 +474,27 @@ async def accept_suggestion(
     suggestion_id: str,
     body: SuggestionDecisionRequest,
     dataset_id: str | None = Query(default=None, min_length=1, max_length=256),
-    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    idempotency_key: IdempotencyKeyHeader = None,
     user: User = Depends(get_request_user),
     db: Any = Depends(get_chacha_db_for_user),
     jobs: Any = Depends(try_get_job_manager),
     principal: AuthPrincipal = Depends(_require_suggestion_permissions),
-    _rate: None = Depends(rbac_rate_limit("notes.graph.suggest")),
+    _rate: None = Depends(_suggestion_rate_limit),
     _scope: None = Depends(
         TokenScopeGuard("notes", require_if_present=True, endpoint_id="notes.graph.suggest")
     ),
 ) -> SuggestionMutationResponse:
-    api = _api(user=user, db=db, jobs=jobs, dataset_id=dataset_id)
-    normalized_note_id = _normalize_note_id(note_id)
     try:
+        api = _api(user=user, db=db, jobs=jobs, dataset_id=dataset_id)
+        normalized_note_id = _normalize_note_id(note_id)
+        normalized_idempotency_key = _required_idempotency_key(idempotency_key)
         required = api.accept_permission_requirements(
             note_id=normalized_note_id,
             suggestion_id=suggestion_id,
+            expected_revision=body.expected_revision,
+            expected_source_fingerprint=body.expected_source_fingerprint,
+            expected_target_fingerprint=body.expected_target_fingerprint,
+            idempotency_key=normalized_idempotency_key,
         )
         if principal is None or not _principal_allows(principal, required):
             raise HTTPException(status_code=403, detail=f"Permission denied: missing {', '.join(required)}")
@@ -451,7 +504,7 @@ async def accept_suggestion(
             expected_revision=body.expected_revision,
             expected_source_fingerprint=body.expected_source_fingerprint,
             expected_target_fingerprint=body.expected_target_fingerprint,
-            idempotency_key=_required_idempotency_key(idempotency_key),
+            idempotency_key=normalized_idempotency_key,
         )
     except SuggestionAPIError as exc:
         raise _http_error(exc) from exc
@@ -464,12 +517,12 @@ async def reject_suggestion(
     suggestion_id: str,
     body: SuggestionDecisionRequest,
     dataset_id: str | None = Query(default=None, min_length=1, max_length=256),
-    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    idempotency_key: IdempotencyKeyHeader = None,
     user: User = Depends(get_request_user),
     db: Any = Depends(get_chacha_db_for_user),
     jobs: Any = Depends(try_get_job_manager),
     _principal: AuthPrincipal = Depends(_require_suggestion_permissions),
-    _rate: None = Depends(rbac_rate_limit("notes.graph.suggest")),
+    _rate: None = Depends(_suggestion_rate_limit),
     _scope: None = Depends(
         TokenScopeGuard("notes", require_if_present=True, endpoint_id="notes.graph.suggest")
     ),

@@ -52,6 +52,7 @@ def test_migration_095_seeds_catalog_and_only_notes_writing_roles() -> None:
     )
 
     migration_095_seed_notes_graph_suggestion_permissions(conn)
+    migration_095_seed_notes_graph_suggestion_permissions(conn)
 
     permissions = {
         row[0]
