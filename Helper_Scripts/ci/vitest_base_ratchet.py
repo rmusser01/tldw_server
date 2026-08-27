@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from collections import Counter
 from collections.abc import Sequence
@@ -37,6 +38,12 @@ _SAFETY_BLOCKING_COUNTERS = (
     "hookErrorCount",
     "incompleteSuiteCount",
     "incompleteTestCount",
+)
+_VOLATILE_NODE_SCHEDULER_FRAME_PATTERNS = (
+    re.compile(
+        r"\s*at runNextTicks \(node:internal/process/task_queues:\d+:\d+\)\s*"
+    ),
+    re.compile(r"\s*at processTimers \(node:internal/timers:\d+:\d+\)\s*"),
 )
 _COLLECTION_FAILURE_FULL_NAME = "<collection failure>"
 
@@ -159,6 +166,16 @@ def _normalize_failure_message(
     }
     for root_variant in sorted(variants, key=len, reverse=True):
         normalized = normalized.replace(root_variant, variants[root_variant])
+    normalized = "\n".join(
+        line
+        for line in normalized.splitlines()
+        if not any(
+            pattern.fullmatch(line)
+            for pattern in _VOLATILE_NODE_SCHEDULER_FRAME_PATTERNS
+        )
+    )
+    if not normalized.strip():
+        raise RatchetError("failure has an empty diagnostic after normalization")
     return normalized
 
 

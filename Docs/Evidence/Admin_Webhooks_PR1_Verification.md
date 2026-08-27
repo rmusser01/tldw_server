@@ -14,13 +14,13 @@
   `517d7b016089e220fa55eab3483f212031b6f5cb`
 - Exact-head Qodo follow-up test commit:
   `7253450461a58f0724fba77de84c97e5ec26b548`
-- Last immutable pushed head before the lifecycle-race follow-up:
-  `cc885b47c86ec5fc64a1cdcc901839136c1a5909`
+- Last immutable pushed head before the scheduler-frame follow-up:
+  `d561d0fcddbedd057b588f6663bf6b0717e7e1b5`
 - Rebased onto: `origin/dev` at
-  `9ee0b5a16dca9f5cf6372a3dd2798b84075501fc`
+  `2306c1939f3b460f9c62da8ae83a1aa47c02ee0d`
 - Final ratchet comparison base: `origin/dev` at
-  `9ee0b5a16dca9f5cf6372a3dd2798b84075501fc`
-- Final verification timestamp: `2026-08-27T07:20:04Z`
+  `2306c1939f3b460f9c62da8ae83a1aa47c02ee0d`
+- Final verification timestamp: `2026-08-27T09:41:12Z`
 - Host: macOS 26.5.2 (25F84), arm64
 - Python: 3.11.13
 - Node.js: 20.19.5 (the version family pinned by repository UI CI)
@@ -50,7 +50,7 @@ This evidence file is a documentation-only follow-up to those source trees.
 | Focused Python typecheck | PASS |
 | Bandit | PASS |
 | Backend sensitive-log scans | PASS |
-| Focused admin UI matrix | PASS: 77 passed |
+| Focused admin UI matrix | PASS: 80 passed |
 | Qodo analyzer testability remediation | PASS: 5 passed; package typecheck and lint passed |
 | TypeScript typecheck | PASS |
 | Changed-file ESLint | PASS |
@@ -1253,3 +1253,69 @@ Turbopack's local helper port bind; the identical unrestricted command passed.
 Playwright's generated `next-env.d.ts` development-path drift was restored and
 is excluded. Commit/push, refreshed exact-head Qodo analysis, hosted CI, and a
 final unresolved-thread audit remain required before merge.
+
+## Exact-Base Scheduler-Frame Ratchet Follow-Up
+
+Exact-head frontend-required run
+[33051757387](https://github.com/rmusser01/tldw_server/actions/runs/33051757387)
+at source `d561d0fcddbe` exposed two independent shard outcomes. Shard 4
+[job 98451132518](https://github.com/rmusser01/tldw_server/actions/runs/33051757387/job/98451132518)
+reported four ratchet regressions in Research Workspace and Media Review tests.
+Shard 6
+[job 98451132533](https://github.com/rmusser01/tldw_server/actions/runs/33051757387/job/98451132533)
+lost a Vitest worker after approximately 30 minutes and emitted an unfinished
+`pending` assertion. The shard 6 result is an infrastructure/process failure;
+the ratchet correctly rejected the incomplete report and that fail-closed
+behavior remains unchanged. It requires a fresh exact-head retry, not an
+application-code waiver.
+
+Shard 4 was compared against the workflow-selected exact base
+`2306c1939f3b460f9c62da8ae83a1aa47c02ee0d`. None of the reported test files,
+their product components, the media-detail utility, or the owning package
+lockfile changed between that base and head. Repeated identical-source local
+runs demonstrated that Node can nondeterministically add or omit only these
+two scheduler frames in otherwise byte-equivalent Vitest failure causes:
+
+```text
+at runNextTicks (node:internal/process/task_queues:65:5)
+at processTimers (node:internal/timers:538:9)
+```
+
+Because package-mode failure identity includes normalized `failureMessages`,
+those optional frames alone converted inherited failures into regressions. A
+minimal TDD contract first failed with an identical head/base cause where only
+the head contained those frames. Initial review then found that a substring
+predicate could erase custom diagnostics or package frames that merely
+contained a Node-internal marker. Two additional TDD cases reproduced that
+false inheritance in package and strict modes. Normalization now full-matches
+only the two observed V8 scheduler-frame forms, including function name,
+internal source location, numeric line, and numeric column. Scheduler-only
+diagnostics fail closed after normalization. Exception text, rendered
+diagnostics, repository/package stack frames, changed causes, duplicate
+multiplicity, strict safety validation, and unfinished-report rejection remain
+part of the comparison.
+
+Fresh local evidence at `2026-08-27T09:41:12Z`:
+
+```text
+scheduler-frame regression TDD RED:   1 failed (classified as regression)
+scheduler-only diagnostic TDD RED:     1 failed (missing fail-closed rejection)
+review collision contracts TDD RED:    2 failed (false inheritance)
+scheduler contracts GREEN:             4 passed
+changed-cause/fingerprint safety set:  8 passed
+complete ratchet helper tests:         58 passed
+CI/workflow/ratchet contracts:         169 passed, 1 warning
+real saved head/base comparison:       inherited=22 regressions=0
+embedded frontend-required Bash:       22/22 passed bash -n
+focused Ruff and Python compilation:   PASS
+independent re-review:                  PASS, no Critical/Important findings
+git diff --check:                       PASS
+```
+
+The ratchet helper's new SHA-256 is
+`94a320034b0e7f3175267c69564f2a282e4750f54d26287d7cafbe527f55138e`
+and both frontend-required call sites pin that value. The unchanged
+deterministic-config, execution-order reporter, and admin safety-reporter
+digests still match their workflow pins. Commit/push, fresh exact-head Qodo
+analysis, complete hosted CI, and a final unresolved-thread audit remain
+mandatory before merge.

@@ -4,7 +4,7 @@ title: Implement canonical admin webhook control plane and migration
 status: In Progress
 assignee: []
 created_date: 2026-08-21 20:41
-updated_date: 2026-08-27 07:54
+updated_date: 2026-08-27 09:44
 labels:
 - admin
 - webhooks
@@ -68,6 +68,7 @@ Detailed plan: Docs/superpowers/plans/2026-08-21-canonical-admin-webhook-control
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-08-21: Created after approval of TASK-13013. Planning scope is upstream PR 1 only; delivery substrate/recovery and durable producers/final activation remain separate future tasks.
 
@@ -225,6 +226,10 @@ The claimed nested-suite bug is factually incorrect and was not implemented. Rea
 2026-08-27 same-row legacy test-ownership remediation: fresh Qodo at pushed head 43c56eef80 identified a valid collapse/re-expansion and overlapping-test race. TDD RED reproduced both as 3 history calls where 2 were permitted; expansion-scoped test ownership now invalidates on newer same-row tests, row switch, collapse, and unmount. Focused GREEN 2/2; complete page 32/32; six-file webhook/reporter matrix 79/79; CI/workflow/ratchet contracts 165/165; typecheck PASS; lint 0 errors/41 inherited warnings; production build 49/49 routes; Chromium lifecycle 1/1; Ruff, py_compile, digest pins, and diff checks PASS. The separate Qodo claim based on the truthful repository-wide baseline is inconsistent with the required exact-base ratchet and will receive a reasoned thread disposition. Remaining gates: commit/push, fresh exact-head Qodo, hosted CI, and final thread audit.
 2026-08-27 independent re-review found one Important follow-up ordering: an older test could already be awaiting its history request when a newer same-row test began. A dedicated TDD regression first failed because older.completed was published. Test-triggered history now carries its originating test token; a newer expanded-row test invalidates only prior test-owned history and clears loading, while manual history remains independent. Owner-aware success/error/finally guards close stale publication. The same reviewer confirmed no remaining Critical or Important findings. Final-source verification: ownership regressions 3/3, complete page 33/33, six-file matrix 80/80, CI/workflow/ratchet 165/165, typecheck PASS, lint 0 errors/41 inherited warnings, build 49/49 routes, Chromium lifecycle 1/1. Remaining gates: commit/push, fresh exact-head Qodo, hosted CI, and final review-thread audit.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+2026-08-27 exact-head frontend-ratchet follow-up: frontend-required run 33051757387 at pushed head d561d0fcdd exposed two independent shard outcomes. Shard 6 job 98451132533 lost a Vitest worker and produced an unfinished pending assertion; the helper correctly failed closed and no pending-report waiver was added. Shard 4 job 98451132518 reported four regressions even though the affected tests, product files, media-detail utility, and package lockfile were unchanged from exact base 2306c1939f. Repeated exact-source reproduction showed otherwise identical failure diagnostics nondeterministically adding runNextTicks and processTimers Node scheduler frames. TDD RED proved the false classification and a separate scheduler-only diagnostic bypass. Independent review found the initial substring filter could erase custom diagnostics and package frames; two additional package/strict RED cases reproduced that collision. The final helper full-matches only the two observed V8 scheduler-frame forms and rejects an empty post-normalization diagnostic. Final local verification: four scheduler contracts passed; eight changed-cause/fingerprint safety tests passed; complete helper 58 passed; CI/workflow/ratchet matrix 169 passed with 1 warning; saved real reports compare inherited=22 regressions=0; all 22 embedded frontend-required Bash blocks pass bash -n; Ruff, py_compile, all artifact digest pins, and git diff --check pass. Independent re-review found no Critical or Important issues. Helper SHA-256 94a320034b0e7f3175267c69564f2a282e4750f54d26287d7cafbe527f55138e is pinned at both workflow call sites. Evidence updated in Docs/Evidence/Admin_Webhooks_PR1_Verification.md. Remaining gates are commit/push, fresh Qodo agentic review, complete exact-head hosted CI including a clean shard 6 retry, and final unresolved-thread audit; TASK-13014 remains In Progress.
+<!-- SECTION:NOTES:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed
