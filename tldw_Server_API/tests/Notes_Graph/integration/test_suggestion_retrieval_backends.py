@@ -5,8 +5,12 @@ import pytest
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.chacha.note_graph_suggestion_store import (
     NotesGraphFTSNotReadyError,
+    NotesGraphSourceTooLargeError,
 )
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    BackendConnectionWrapper,
+    CharactersRAGDB,
+)
 from tldw_Server_API.app.core.Notes_Graph.suggestion_content import content_fingerprint
 from tldw_Server_API.app.core.Notes_Graph.suggestion_retrieval import SuggestionRetriever
 
@@ -64,6 +68,41 @@ def test_postgres_retrieval_uses_owner_dataset_scope_and_fts(
     try:
         _authorize_dataset(db)
         assert _seed_and_retrieve(db) == ["00000000-0000-4000-8000-000000000002"]
+    finally:
+        db.close_connection()
+
+
+def test_postgres_retrieval_rejects_oversized_source_before_payload_transfer(
+    pg_database_config,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = CharactersRAGDB(":memory:", client_id="owner-1", backend=backend)
+    try:
+        _authorize_dataset(db)
+        source = "00000000-0000-4000-8000-000000000010"
+        db.add_note("retrieval", "x" * 1_000_001, note_id=source)
+        executed_sql: list[str] = []
+        original_execute = BackendConnectionWrapper.execute
+
+        def capture_execute(self, query: str, params=None):
+            executed_sql.append(query)
+            return original_execute(self, query, params)
+
+        monkeypatch.setattr(BackendConnectionWrapper, "execute", capture_execute)
+
+        with pytest.raises(NotesGraphSourceTooLargeError, match="notes_graph_source_too_large"):
+            SuggestionRetriever(db.note_graph_suggestion_store).retrieve(
+                dataset_id=DATASET_ID, source_note_id=source
+            )
+
+        source_payload_queries = [
+            query for query in executed_sql if "SELECT n.id, n.title, n.content" in query
+        ]
+        assert len(source_payload_queries) == 1
+        assert "octet_length(COALESCE(n.title, '')) + octet_length(COALESCE(n.content, ''))" in source_payload_queries[0]
+        assert "<= ?" in source_payload_queries[0]
+        assert not any("notes_fts_tsv @@" in query for query in executed_sql)
     finally:
         db.close_connection()
 
