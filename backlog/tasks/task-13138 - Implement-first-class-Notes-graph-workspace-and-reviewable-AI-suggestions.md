@@ -2,28 +2,27 @@
 id: TASK-13138
 title: Implement first-class Notes graph workspace and reviewable AI suggestions
 status: In Progress
-created_date: 2026-08-27 03:40
+assignee: []
+created_date: '2026-08-27 03:40'
+updated_date: '2026-08-27 07:36'
 labels:
-- notes
-- knowledge-graph
-- webui
-- browser-extension
-- llm
-- jobs
-priority: High
+  - notes
+  - knowledge-graph
+  - webui
+  - browser-extension
+  - llm
+  - jobs
+dependencies: []
 references:
-- TASK-13134
-- TASK-13135
-- TASK-13136
-- TASK-13137
+  - TASK-13134
+  - TASK-13135
+  - TASK-13136
+  - TASK-13137
 documentation:
-- Docs/superpowers/specs/2026-08-26-notes-second-brain-graph-suggestions-design.md
-- Docs/superpowers/plans/2026-08-26-notes-second-brain-graph-suggestions.md
-updated_date: 2026-08-27 07:14
-modified_files:
-- tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py
-- tldw_Server_API/tests/DB_Management/test_chacha_migration_v64.py
-- tldw_Server_API/tests/DB_Management/test_chacha_postgres_migration_v64.py
+  - >-
+    Docs/superpowers/specs/2026-08-26-notes-second-brain-graph-suggestions-design.md
+  - Docs/superpowers/plans/2026-08-26-notes-second-brain-graph-suggestions.md
+priority: high
 ---
 
 ## Description
@@ -64,8 +63,10 @@ Add Graph as a first-class Notes view mode shared by the WebUI and browser exten
 <!-- SECTION:PLAN:BEGIN -->
 Execute the approved 12-task test-first plan in Docs/superpowers/plans/2026-08-26-notes-second-brain-graph-suggestions.md. It stages schema/store work, bounded retrieval and provider contracts, Jobs publication, guarded Sync decisions, nested API/RBAC, the shared Graph workspace, accessibility, E2E, documentation, and security verification.
 <!-- SECTION:PLAN:END -->
+
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Deferred work is tracked separately: TASK-13134 embeddings and semantic edges; TASK-13135 automatic background organization; TASK-13136 library-wide recurring themes; TASK-13137 saved graph views/layouts. This task remains review-first and on-demand.
 
@@ -86,9 +87,17 @@ Final Task 1 candidate verification: exact required v61-v64 migration regression
 Task 1 Fix Round 1 completed locally: v64 now enforces composite owner/dataset foreign keys across graph tables, receipt source-note cascade on hard note deletion, and lifecycle-aware canonical unique identities for related pairs and tags. Verification: focused SQLite/PostgreSQL v64 suite passed 15 tests; required v61/v62/v64 migration regression suite passed 33 tests; Ruff passed; Bandit reported 0 findings. Report updated at .superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-1-report.md. Parent task remains In Progress for later tasks.
 Task 1 Fix Round 2: replaced composite receipt FK `ON DELETE SET NULL` with scope-preserving `NO ACTION` plus equivalent SQLite/PostgreSQL BEFORE DELETE triggers that clear only the nullable receipt IDs. Added SQLite/live PostgreSQL tests for referenced receipt deletion and preservation of pending/rejected current-fingerprint suggestions. Verification: 35 migration tests passed; Ruff passed; Bandit reported 0 findings. Report: `.superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-1-report.md`.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+Task 2 completed in notes-second-brain-planning. Added deterministic bounded owner/dataset-scoped Notes graph retrieval, canonical source grounding, exact fingerprint suppression, backend-portable FTS, byte-limit enforcement, tag bounds, and SQLite/PostgreSQL integration coverage. Modified: tldw_Server_API/app/core/Notes_Graph/suggestion_content.py; tldw_Server_API/app/core/Notes_Graph/suggestion_retrieval.py; tldw_Server_API/app/core/DB_Management/chacha/note_graph_suggestion_store.py; tldw_Server_API/tests/Notes_Graph/unit/test_suggestion_content.py; tldw_Server_API/tests/Notes_Graph/unit/test_suggestion_retrieval.py; tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_retrieval_backends.py; .superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-2-report.md. Verification: Task 2 20 passed/0 skipped, directly affected Notes FTS 3 passed/57 deselected, Ruff clean, Bandit 0 findings. Report: .superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-2-report.md.
+<!-- SECTION:NOTES:END -->
+
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+
+<!-- SECTION:FINAL_SUMMARY:END -->
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 <!-- SECTION:FINAL_SUMMARY:END -->
 
