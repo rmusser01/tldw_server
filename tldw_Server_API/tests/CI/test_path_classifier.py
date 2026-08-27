@@ -44,7 +44,6 @@ def test_admin_ui_change_enables_frontend_without_e2e() -> None:
     assert flags["e2e_changed"] is False
 
 
-@pytest.mark.unit
 @pytest.mark.parametrize(
     ("path", "backend_changed", "tldw_frontend_changed", "admin_ui_changed"),
     (
@@ -86,6 +85,7 @@ def test_admin_ui_change_enables_frontend_without_e2e() -> None:
         ),
     ),
 )
+@pytest.mark.unit
 def test_shared_vitest_guardrail_selects_every_consuming_gate(
     path: str,
     backend_changed: bool,
