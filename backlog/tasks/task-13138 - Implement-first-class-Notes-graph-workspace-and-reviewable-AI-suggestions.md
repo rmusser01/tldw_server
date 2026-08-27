@@ -4,7 +4,7 @@ title: Implement first-class Notes graph workspace and reviewable AI suggestions
 status: In Progress
 assignee: []
 created_date: '2026-08-27 03:40'
-updated_date: '2026-08-27 08:09'
+updated_date: '2026-08-27 08:13'
 labels:
   - notes
   - knowledge-graph
@@ -93,6 +93,8 @@ Task 2 completed in notes-second-brain-planning. Added deterministic bounded own
 Task 2 Fix Round 1 completed locally. Added fail-closed exact owner/dataset authority validation, exact SQLite/PostgreSQL FTS trigger/structure contract checks, bounded first-ranked-60 metadata shortlist before exclusions or text transfer, shortlist-only oversized aggregation, and strengthened independent evidence-offset property assertions. Modified: .gitignore; tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py; tldw_Server_API/app/core/DB_Management/chacha/note_graph_suggestion_store.py; tldw_Server_API/app/core/Notes_Graph/suggestion_retrieval.py; tldw_Server_API/tests/Notes_Graph/unit/test_suggestion_content.py; tldw_Server_API/tests/Notes_Graph/unit/test_suggestion_retrieval.py; tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_retrieval_backends.py. Verification: Task 2 suites 25 passed/0 skipped (2 established warnings); focused Notes search 1 passed/57 deselected; PostgreSQL FTS 8 passed; Ruff clean; Bandit 0 results. The broader legacy v10 migration test remains an unrelated known failure: _migrate_from_v57_to_v58 queries absent legacy note_edges. Local report retained but ignored at .superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-2-report.md and removed from git index.
 
 Task 2 Fix Round 2 completed locally. Closed the remaining live PostgreSQL selected-source byte-guard coverage gap with a characterization integration test. It asserts NotesGraphSourceTooLargeError(notes_graph_source_too_large), verifies the only source title/content query includes the octet_length byte predicate, and confirms candidate FTS is not reached. Modified: tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_retrieval_backends.py. Verification: focused live PostgreSQL characterization 1 passed/0 skipped; Task 2 suites 26 passed/0 skipped (2 established warnings); focused Notes SQLite search 1 passed/57 deselected; PostgreSQL FTS 8 passed; Ruff clean. Bandit not applicable: no production code changes. Report remains local and ignored at .superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-2-report.md.
+
+Task 2 Fix Round 3 completed locally. Tightened the live PostgreSQL oversized-source characterization test from an unanchored pytest regex match to exact str(exc.value) == notes_graph_source_too_large equality while retaining the exception type and SQL byte-guard/no-FTS ordering assertions. Modified: tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_retrieval_backends.py. Verification: focused live PostgreSQL test 1 passed/0 skipped (2 established warnings); Task 2 suites 26 passed/0 skipped (2 established warnings); Ruff clean. Bandit not applicable: no production code changes. Report remains local and ignored at .superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-2-report.md.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

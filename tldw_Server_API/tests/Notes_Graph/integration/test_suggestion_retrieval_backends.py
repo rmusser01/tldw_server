@@ -91,11 +91,12 @@ def test_postgres_retrieval_rejects_oversized_source_before_payload_transfer(
 
         monkeypatch.setattr(BackendConnectionWrapper, "execute", capture_execute)
 
-        with pytest.raises(NotesGraphSourceTooLargeError, match="notes_graph_source_too_large"):
+        with pytest.raises(NotesGraphSourceTooLargeError) as exc:
             SuggestionRetriever(db.note_graph_suggestion_store).retrieve(
                 dataset_id=DATASET_ID, source_note_id=source
             )
 
+        assert str(exc.value) == "notes_graph_source_too_large"
         source_payload_queries = [
             query for query in executed_sql if "SELECT n.id, n.title, n.content" in query
         ]
