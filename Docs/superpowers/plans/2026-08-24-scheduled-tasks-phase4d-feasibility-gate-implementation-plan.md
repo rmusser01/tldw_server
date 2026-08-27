@@ -54,8 +54,8 @@
 | --- | --- | --- | --- | --- |
 | 1 | Freeze the certification vocabulary and fail-closed evaluator | All outcome and freshness rules are deterministic and mock evidence cannot certify | Pure unit tests | Complete |
 | 2 | Produce reproducible current-state evidence | Seven requirement records and a sanitized manifest are generated for an exact deployment class | Helper and characterization tests | Complete |
-| 3 | Publish and enforce the API-first readiness gate | Versioned capability metadata, typed Run Now refusal, no Agent scheduler enqueue, and worker defense-in-depth agree | Schema/service/API/OpenAPI/feed/consumer tests | In Progress |
-| 4 | Publish the decision and current baseline | ADR, operator guide, JSON/Markdown evidence, and dependency tasks agree | Artifact validator and docs checks | Not Started |
+| 3 | Publish and enforce the API-first readiness gate | Versioned capability metadata, typed Run Now refusal, no Agent scheduler enqueue, and worker defense-in-depth agree | Schema/service/API/OpenAPI/feed/consumer tests | Complete |
+| 4 | Publish the decision and current baseline | ADR, operator guide, JSON/Markdown evidence, and dependency tasks agree | Artifact validator and docs checks | In Progress |
 | 5 | Complete regression and security gates | Focused cross-module tests, compile, lint, Bandit, diff review, and Backlog evidence pass | Verification matrix | Not Started |
 
 ## File Map
@@ -362,7 +362,7 @@ Expected: one commit containing the reusable sanitized harness and its tests, wi
 - Consumes: `ExecutionCertification` from an injectable resolver and an independently injected `execution_stack_ready` input that is false in this task.
 - Produces: additive versioned `execution_certification` metadata, honest execution-action status, a typed manual refusal, no Agent scheduler enqueue, and worker-side refusal of already-queued Agent Jobs.
 
-- [ ] **Step 1: Write failing schema and service tests**
+- [x] **Step 1: Write failing schema and service tests**
 
 Add `ScheduledTaskExecutionCertificationCapability` with exactly:
 
@@ -392,7 +392,7 @@ Add API tests that Run Now on an `agent_task` returns HTTP 409 with code `schedu
 
 Add scheduler tests that an `agent_task` definition is not armed during load/reconcile/rescan, an already-armed race is refused again in `_fire()`, and no Job is created. Recurring-question definitions continue to arm and enqueue normally. Add a consumer test that an already-queued `agent_task` Job creates no adapter call even when a test executor is registered; it completes with a typed skipped result and a valid blocked run/audit record when the definition exists.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```bash
 source "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.venv/bin/activate"
@@ -405,7 +405,7 @@ python -m pytest -q --tb=short \
 
 Expected: FAIL because the response lacks `execution_certification`, currently advertises Agent `run_now` as available, Run Now enqueues an Agent Job, and the scheduler has no Agent readiness gate.
 
-- [ ] **Step 3: Implement the projection and gate**
+- [x] **Step 3: Implement the projection and gate**
 
 Add optional certification and execution-stack readiness resolvers to `ScheduledTaskAutomationService.__init__`; default them to `resolve_current_agent_execution_certification` and a source-defined function that returns false. The certification resolver must be side-effect-free and must not perform host probes on an API request. The production stack-readiness function must not read environment or configuration; only a later reviewed code slice may replace it. Reuse the same pure readiness helper in the service, scheduler, and consumer instead of duplicating outcome logic.
 
@@ -413,7 +413,7 @@ Add optional certification and execution-stack readiness resolvers to `Scheduled
 
 Map `draft_only` and `unsupported` to disabled execution actions with stable reasons `execution_certification_draft_only` or `execution_certification_unsupported`. Map `certified` plus the current false stack input to disabled with `agent_execution_stack_unimplemented`. Run Now raises the same typed reason before idempotency or Job creation. For `unsupported`, preview-create, definition-create, and duplicate raise `agent_automation_unsupported` before persistence; retain ordinary management of existing definitions. The scheduler refuses Agent arming and rechecks at fire time. The consumer rechecks after the TASK-13127 owner-scoped definition preflight and records a skipped blocked run without calling an executor. Do not change recurring-question scheduling/execution or draft-only definition mutation.
 
-- [ ] **Step 4: Run GREEN and API regressions**
+- [x] **Step 4: Run GREEN and API regressions**
 
 ```bash
 source "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.venv/bin/activate"
@@ -426,7 +426,9 @@ python -m pytest -q --tb=short \
 
 Expected: PASS. Capability discovery remains additive, owner-independent, and protected by `TASKS_READ`; direct API, scheduler, and stale-Job paths all fail closed for Agent execution while Recurring Questions are unchanged.
 
-- [ ] **Step 5: Commit the API gate**
+Recorded result: eight focused RED cases failed at the absent schema, unsupported-admission, Run Now, scheduler, and worker gates. The focused GREEN rerun passed all eight. The final four-file regression matrix passed 102 tests with 11 warnings in 89.61 seconds. Ruff and compileall passed. Bandit report `/tmp/bandit_task_13129_stage3.json` contains zero findings and zero errors across 4,359 production lines.
+
+- [x] **Step 5: Commit the API gate**
 
 ```bash
 git add \

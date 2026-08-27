@@ -11,7 +11,6 @@ from uuid import uuid4
 from pydantic import BaseModel
 
 from tldw_Server_API.app.api.v1.schemas.scheduled_tasks_automation_schemas import (
-    ScheduledTaskRunNowResponse,
     ScheduledTaskActionCapability,
     ScheduledTaskAuditEventResponse,
     ScheduledTaskAuditListResponse,
@@ -22,10 +21,12 @@ from tldw_Server_API.app.api.v1.schemas.scheduled_tasks_automation_schemas impor
     ScheduledTaskDefinitionResponse,
     ScheduledTaskDefinitionUpdateRequest,
     ScheduledTaskDuplicateRequest,
+    ScheduledTaskExecutionCertificationCapability,
     ScheduledTaskPreviewCreateRequest,
     ScheduledTaskPreviewListResponse,
     ScheduledTaskPreviewResponse,
     ScheduledTaskResultResponse,
+    ScheduledTaskRunNowResponse,
     ScheduledTaskRunResponse,
 )
 from tldw_Server_API.app.core.AuthNZ.permissions import TASKS_CONTROL
@@ -33,8 +34,15 @@ from tldw_Server_API.app.core.DB_Management.Scheduled_Tasks_DB import (
     AuditEventRow,
     DefinitionRow,
     PreviewRow,
-    ScheduledTasksTransaction,
     ScheduledTasksDatabase,
+    ScheduledTasksTransaction,
+)
+from tldw_Server_API.app.core.Scheduled_Tasks.execution_certification import (
+    AgentExecutionDispatchReadiness,
+    ExecutionCertification,
+    agent_execution_dispatch_readiness,
+    current_agent_execution_stack_ready,
+    resolve_current_agent_execution_certification,
 )
 from tldw_Server_API.app.core.Scheduled_Tasks.recurring_question_models import (
     FINDING_POLICY_PRESETS,
@@ -48,14 +56,33 @@ PREVIEW_TTL = timedelta(hours=24)
 IDEMPOTENCY_TTL = timedelta(hours=24)
 DEFAULT_DEFINITION_HEALTH = "execution_unavailable"
 _SUPPORTED_SCHEDULE_KINDS = {"one_time", "interval", "daily", "weekly", "cron"}
+_DRAFT_CERTIFICATION_RECOVERY = (
+    "Complete server-verified Scheduled Agent execution certification "
+    "for this deployment class."
+)
+_UNSUPPORTED_CERTIFICATION_RECOVERY = (
+    "Use an untrusted-eligible runtime with strict deny-all networking, "
+    "then rerun Scheduled Agent execution certification."
+)
+_EXECUTION_STACK_RECOVERY = (
+    "Install the reviewed Scheduled Agent execution stack before enabling execution."
+)
 
 
 class ScheduledTaskAutomationError(Exception):
     """Expected, user-actionable scheduled task automation failure."""
 
-    def __init__(self, code: str):
+    def __init__(
+        self,
+        code: str,
+        *,
+        reason: str | None = None,
+        recovery_action: str | None = None,
+    ):
         super().__init__(code)
         self.code = code
+        self.reason = reason
+        self.recovery_action = recovery_action
 
 
 def _utcnow() -> datetime:
@@ -222,25 +249,118 @@ def _normalize_visibility_policy(family: str, value: Any) -> str:
     return "metadata_only" if family == "agent_task" else "findings_only"
 
 
+def _certification_recovery_action(outcome: str) -> str | None:
+    if outcome == "unsupported":
+        return _UNSUPPORTED_CERTIFICATION_RECOVERY
+    if outcome == "draft_only":
+        return _DRAFT_CERTIFICATION_RECOVERY
+    return None
+
+
+def _readiness_recovery_action(reason: str | None) -> str | None:
+    if reason == "agent_execution_stack_unimplemented":
+        return _EXECUTION_STACK_RECOVERY
+    if reason == "execution_certification_unsupported":
+        return _UNSUPPORTED_CERTIFICATION_RECOVERY
+    if reason == "execution_certification_draft_only":
+        return _DRAFT_CERTIFICATION_RECOVERY
+    return None
+
+
 class ScheduledTaskAutomationService:
     """Business service for Scheduled Tasks-owned automation definitions."""
 
-    def __init__(self, repository: ScheduledTasksDatabase | None = None):
+    def __init__(
+        self,
+        repository: ScheduledTasksDatabase | None = None,
+        *,
+        execution_certification_resolver: Callable[
+            [], ExecutionCertification
+        ] = resolve_current_agent_execution_certification,
+        execution_stack_ready_resolver: Callable[
+            [], bool
+        ] = current_agent_execution_stack_ready,
+    ):
         self._repository = repository
         self._schema_ready_keys: set[tuple[int, str]] = set()
+        self._execution_certification_resolver = (
+            execution_certification_resolver
+        )
+        self._execution_stack_ready_resolver = execution_stack_ready_resolver
+
+    def _agent_execution_readiness(
+        self,
+    ) -> tuple[ExecutionCertification, AgentExecutionDispatchReadiness]:
+        certification = self._execution_certification_resolver()
+        readiness = agent_execution_dispatch_readiness(
+            certification,
+            execution_stack_ready=self._execution_stack_ready_resolver(),
+        )
+        return certification, readiness
+
+    @staticmethod
+    def _certification_capability(
+        certification: ExecutionCertification,
+    ) -> ScheduledTaskExecutionCertificationCapability:
+        return ScheduledTaskExecutionCertificationCapability(
+            outcome=certification.outcome,
+            deployment_class_id=certification.deployment_class_id,
+            evidence_id=certification.evidence_id,
+            evidence_source=certification.evidence_source,
+            observed_at=certification.observed_at,
+            expires_at=certification.expires_at,
+            reason_codes=list(certification.reason_codes),
+            recovery_action=_certification_recovery_action(
+                certification.outcome
+            ),
+        )
+
+    @staticmethod
+    def _agent_gated_action(
+        *,
+        certification: ExecutionCertification,
+        readiness: AgentExecutionDispatchReadiness,
+        status: str = "disabled",
+    ) -> ScheduledTaskActionCapability:
+        return ScheduledTaskActionCapability(
+            status=status,
+            reason=readiness.reason,
+            required_permissions=[TASKS_CONTROL],
+            evidence_source=certification.evidence_source,
+            recovery_action=_readiness_recovery_action(readiness.reason),
+            observed_at=certification.observed_at,
+            expires_at=certification.expires_at,
+        )
+
+    def _require_agent_execution_available(self, family: str) -> None:
+        if family != "agent_task":
+            return
+        _certification, readiness = self._agent_execution_readiness()
+        if readiness.ready:
+            return
+        raise ScheduledTaskAutomationError(
+            "agent_execution_unavailable",
+            reason=readiness.reason,
+            recovery_action=_readiness_recovery_action(readiness.reason),
+        )
+
+    def _require_agent_automation_supported(self, family: str) -> None:
+        if family != "agent_task":
+            return
+        certification, readiness = self._agent_execution_readiness()
+        if certification.outcome != "unsupported":
+            return
+        raise ScheduledTaskAutomationError(
+            "agent_automation_unsupported",
+            reason=readiness.reason,
+            recovery_action=_readiness_recovery_action(readiness.reason),
+        )
 
     def get_capabilities(self) -> ScheduledTaskAutomationCapabilitiesResponse:
-        """Return capabilities with honest per-family execution truth.
+        """Return additive per-family capability and feasibility truth."""
 
-        Since TASK-13020/13021, definitions execute server-side through
-        the Jobs pipeline (scheduler feed + agent_task consumer) in
-        generation-only phase 1: recurring_question runs execute; agent_task
-        runs execute generation-only; tools are explicitly NOT executable
-        pending the approval-escalation design. The ``run_now`` action is
-        available on both families (TASK-13022).
-        """
         def _execution_actions(
-            tools_reason: str, execute_status: str = "available"
+            tools_reason: str,
         ) -> dict[str, ScheduledTaskActionCapability]:
             actions = self._definition_actions()
             actions["run_now"] = ScheduledTaskActionCapability(
@@ -248,10 +368,8 @@ class ScheduledTaskAutomationService:
                 required_permissions=[TASKS_CONTROL],
             )
             actions["execute"] = ScheduledTaskActionCapability(
-                status=execute_status,
-                reason="phase1_generation_only"
-                if execute_status == "available"
-                else tools_reason,
+                status="available",
+                reason="phase1_generation_only",
                 required_permissions=[TASKS_CONTROL],
             )
             actions["execute_tools"] = ScheduledTaskActionCapability(
@@ -267,6 +385,33 @@ class ScheduledTaskAutomationService:
                 "recurring_question has no tool surface; tools are not applicable"
             )
         )
+        certification, readiness = self._agent_execution_readiness()
+        agent_actions = self._definition_actions()
+        agent_actions["execute"] = self._agent_gated_action(
+            certification=certification,
+            readiness=readiness,
+        )
+        agent_actions["run_now"] = self._agent_gated_action(
+            certification=certification,
+            readiness=readiness,
+        )
+        agent_actions["execute_tools"] = ScheduledTaskActionCapability(
+            status="planned",
+            reason="agent_tool_execution_requires_reviewed_approval_mediation",
+            required_permissions=[TASKS_CONTROL],
+        )
+        if certification.outcome == "unsupported":
+            for action_name in (
+                "preview",
+                "create_definition",
+                "update_definition",
+                "duplicate",
+            ):
+                agent_actions[action_name] = self._agent_gated_action(
+                    certification=certification,
+                    readiness=readiness,
+                    status="unavailable",
+                )
         return ScheduledTaskAutomationCapabilitiesResponse(
             items=[
                 ScheduledTaskAutomationCapability(
@@ -289,14 +434,21 @@ class ScheduledTaskAutomationService:
                 ),
                 ScheduledTaskAutomationCapability(
                     family="agent_task",
-                    family_availability="available",
-                    actions=_execution_actions(
-                        "agent_task is not executable in phase 1: its message "
-                        "is redacted at rest (metadata_only policy) and "
-                        "tool use awaits the approval-escalation design",
-                        execute_status="planned",
+                    family_availability=(
+                        "unavailable"
+                        if certification.outcome == "unsupported"
+                        else "available"
                     ),
+                    actions=agent_actions,
                     related_capabilities={"acp": {"status": "not_checked"}},
+                    reason=(
+                        readiness.reason
+                        if certification.outcome == "unsupported"
+                        else None
+                    ),
+                    execution_certification=self._certification_capability(
+                        certification
+                    ),
                 ),
             ]
         )
@@ -310,6 +462,7 @@ class ScheduledTaskAutomationService:
         idempotency_key: str | None = None,
     ) -> ScheduledTaskPreviewResponse:
         request = payload if isinstance(payload, ScheduledTaskPreviewCreateRequest) else ScheduledTaskPreviewCreateRequest(**payload)
+        self._require_agent_automation_supported(request.family)
         payload_hash = _canonical_hash(self._preview_hash_payload(request))
         return self._with_idempotency(
             owner_id=owner_id,
@@ -379,6 +532,12 @@ class ScheduledTaskAutomationService:
             if isinstance(payload, ScheduledTaskDefinitionCreateRequest)
             else ScheduledTaskDefinitionCreateRequest(**payload)
         )
+        preview = self._repo(owner_id).get_preview(
+            owner_id=owner_id,
+            preview_id=request.preview_id,
+        )
+        if preview is not None:
+            self._require_agent_automation_supported(preview.family)
         payload_hash = _canonical_hash(request.model_dump(mode="json"))
         return self._with_idempotency(
             owner_id=owner_id,
@@ -588,7 +747,8 @@ class ScheduledTaskAutomationService:
         ``definition_disabled`` (a manual trigger must not silently
         resurrect a definition the owner paused).
         """
-        from datetime import datetime, timezone as _tz
+        from datetime import datetime
+        from datetime import timezone as _tz
 
         from tldw_Server_API.app.core.Jobs.manager import JobManager
         from tldw_Server_API.app.services.scheduled_task_automation_scheduler import (
@@ -599,6 +759,7 @@ class ScheduledTaskAutomationService:
         definition = repo.get_definition(owner_id=owner_id, definition_id=definition_id)
         if definition is None:
             raise ScheduledTaskAutomationError("definition_not_found")
+        self._require_agent_execution_available(definition.family)
         if definition.lifecycle == "archived":
             raise ScheduledTaskAutomationError("definition_archived")
         if definition.lifecycle == "disabled" and definition.disabled_lock_kind in {
@@ -764,6 +925,11 @@ class ScheduledTaskAutomationService:
         request_id: str | None = None,
     ) -> ScheduledTaskDefinitionResponse:
         request = payload if isinstance(payload, ScheduledTaskDuplicateRequest) else ScheduledTaskDuplicateRequest(**payload)
+        source = self._get_definition_row(
+            owner_id=owner_id,
+            definition_id=definition_id,
+        )
+        self._require_agent_automation_supported(source.family)
         payload_hash = _canonical_hash({"definition_id": definition_id, **request.model_dump(mode="json")})
         return self._with_idempotency(
             owner_id=owner_id,
@@ -837,6 +1003,7 @@ class ScheduledTaskAutomationService:
         request: ScheduledTaskPreviewCreateRequest,
         payload_hash: str,
     ) -> ScheduledTaskPreviewResponse:
+        self._require_agent_automation_supported(request.family)
         normalized, validation_errors, warnings = self._normalize_preview(request)
         status = "invalid" if validation_errors else "valid"
         row = tx.create_preview(
@@ -870,6 +1037,7 @@ class ScheduledTaskAutomationService:
         request_id: str | None,
     ) -> ScheduledTaskDefinitionResponse:
         preview = self._require_valid_preview(tx=tx, owner_id=owner_id, preview_id=request.preview_id)
+        self._require_agent_automation_supported(preview.family)
         if preview.mode != "create" or preview.definition_id is not None:
             raise ScheduledTaskAutomationError("preview_mode_mismatch")
         normalized = preview.normalized_config
@@ -1152,6 +1320,7 @@ class ScheduledTaskAutomationService:
         request_id: str | None,
     ) -> ScheduledTaskDefinitionResponse:
         source = self._get_definition_row(tx=tx, owner_id=owner_id, definition_id=definition_id)
+        self._require_agent_automation_supported(source.family)
         if source.lifecycle == "archived":
             raise ScheduledTaskAutomationError("definition_archived")
         if source.lifecycle == "disabled" and source.disabled_lock_kind in {"admin", "security"}:

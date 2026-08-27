@@ -500,6 +500,12 @@ def agent_execution_dispatch_readiness(
     return AgentExecutionDispatchReadiness(ready=True, reason=None)
 
 
+def current_agent_execution_stack_ready() -> bool:
+    """Return the source-defined Phase 4D execution-stack readiness state."""
+
+    return False
+
+
 def _normalize_build_sha(value: str | None) -> str:
     normalized = str(value or "").strip()
     if not _BUILD_SHA_PATTERN.fullmatch(normalized):

@@ -18,11 +18,14 @@ from typing import Any
 import pytest
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
+from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.Scheduled_Tasks_DB import (
     DefinitionRow,
     ScheduledTasksDatabase,
 )
-from tldw_Server_API.app.core.config import settings
+from tldw_Server_API.app.core.Scheduled_Tasks.execution_certification import (
+    ExecutionCertification,
+)
 from tldw_Server_API.app.services.reminders_scheduler import _normalize_slot_to_utc_iso
 from tldw_Server_API.app.services.scheduled_task_automation_scheduler import (
     ARMED_HEALTH,
@@ -34,6 +37,19 @@ from tldw_Server_API.app.services.scheduled_task_automation_scheduler import (
 )
 
 pytestmark = pytest.mark.unit
+
+
+def _certified_execution() -> ExecutionCertification:
+    observed_at = datetime(2026, 8, 26, 12, 0, tzinfo=timezone.utc)
+    return ExecutionCertification(
+        outcome="certified",
+        deployment_class_id="sha256:" + ("1" * 64),
+        evidence_id="sha256:" + ("2" * 64),
+        evidence_source="server_verified",
+        observed_at=observed_at,
+        expires_at=observed_at + timedelta(hours=24),
+        reason_codes=(),
+    )
 
 
 @pytest.fixture()
@@ -374,6 +390,66 @@ async def test_arms_next_occurrence_with_slot_bound_in_args(automation_scheduler
     finally:
         scheduler._aps.shutdown(wait=False)
         scheduler._aps = None
+
+
+@pytest.mark.asyncio
+async def test_agent_definition_never_arms_during_load_rescan_or_reconcile(
+    automation_scheduler_env,
+    monkeypatch,
+) -> None:
+    user_id = 998
+    definition = _create_definition(
+        user_id,
+        family="agent_task",
+        schedule={"kind": "daily", "at": "23:59"},
+    )
+    scheduler = _AutomationScheduler()
+    scheduler._execution_certification_resolver = _certified_execution
+    scheduler._execution_stack_ready_resolver = lambda: False
+    scheduler._aps = AsyncIOScheduler(timezone="UTC")
+    scheduler._aps.start()
+    monkeypatch.setattr(scheduler, "_enumerate_user_ids", lambda: {user_id})
+    try:
+        await scheduler._load_all()
+        assert scheduler._aps.get_jobs() == []  # nosec B101
+
+        await scheduler._rescan_once()
+        assert scheduler._aps.get_jobs() == []  # nosec B101
+
+        scheduler._started = True
+        await scheduler.reconcile_definition(
+            definition_id=definition.id,
+            user_id=user_id,
+        )
+        assert scheduler._aps.get_jobs() == []  # nosec B101
+    finally:
+        scheduler._aps.shutdown(wait=False)
+        scheduler._aps = None
+
+
+@pytest.mark.asyncio
+async def test_agent_definition_race_refuses_again_at_fire(
+    automation_scheduler_env,
+) -> None:
+    user_id = 999
+    definition = _create_definition(
+        user_id,
+        family="agent_task",
+        schedule={"kind": "cron", "cron": "* * * * *"},
+    )
+    scheduler = _bare_scheduler(user_id)
+    scheduler._execution_certification_resolver = _certified_execution
+    scheduler._execution_stack_ready_resolver = lambda: False
+    created = _capture_jobs(scheduler)
+    slot = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+
+    await scheduler._fire(
+        definition.id,
+        user_id,
+        _normalize_slot_to_utc_iso(slot),
+    )
+
+    assert created == []  # nosec B101
 
 
 # ---------------------------------------------------------------------------

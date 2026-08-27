@@ -8,20 +8,51 @@ from typing import Any
 import pytest
 from fastapi import Request
 
-from tldw_Server_API.app.api.v1.endpoints import scheduled_tasks_control_plane
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.api.v1.endpoints import scheduled_tasks_control_plane
 from tldw_Server_API.app.core.AuthNZ.permissions import TASKS_CONTROL, TASKS_READ
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.Scheduled_Tasks_DB import ScheduledTasksDatabase
+from tldw_Server_API.app.core.Scheduled_Tasks.execution_certification import (
+    ExecutionCertification,
+)
 from tldw_Server_API.app.services.scheduled_task_automation_service import (
     ScheduledTaskAutomationError,
+    ScheduledTaskAutomationService,
 )
 from tldw_Server_API.app.services.scheduled_task_recurring_question_service import (
     ScheduledTaskRecurringQuestionService,
 )
 
 RAW_SENTINEL = "RAW_AGENT_SECRET_DO_NOT_LEAK_ENDPOINT_4B"
+CERTIFICATION_NOW = datetime(2026, 8, 26, 12, 0, tzinfo=timezone.utc)
+
+
+def _execution_certification(
+    outcome: str = "draft_only",
+) -> ExecutionCertification:
+    return ExecutionCertification(
+        outcome=outcome,
+        deployment_class_id="sha256:" + ("1" * 64),
+        evidence_id="sha256:" + ("2" * 64) if outcome == "certified" else None,
+        evidence_source=(
+            "server_verified"
+            if outcome == "certified"
+            else "repository_characterization"
+        ),
+        observed_at=CERTIFICATION_NOW,
+        expires_at=CERTIFICATION_NOW + timedelta(hours=24),
+        reason_codes=(
+            ()
+            if outcome == "certified"
+            else (
+                ("runtime_not_untrusted_eligible",)
+                if outcome == "unsupported"
+                else ("isolation_attestation_missing",)
+            )
+        ),
+    )
 
 
 class _FakeJobManager:
@@ -83,6 +114,8 @@ def scheduled_tasks_client(client_user_only, tmp_path):
     repo.ensure_schema()
     job_manager = _FakeJobManager()
     service = ScheduledTaskRecurringQuestionService(repository=repo, job_manager=job_manager)
+    service._execution_certification_resolver = _execution_certification
+    service._execution_stack_ready_resolver = lambda: False
     _override_auth(client_user_only)
     client_user_only.app.dependency_overrides[
         scheduled_tasks_control_plane.get_scheduled_task_automation_service
@@ -192,23 +225,46 @@ def test_capabilities_report_definition_and_execution_actions(scheduled_tasks_cl
     body = response.json()
     families = {item["family"]: item for item in body["items"]}
     assert {"recurring_question", "agent_task"} <= set(families)  # nosec B101
-    for family in ("recurring_question", "agent_task"):
-        actions = families[family]["actions"]
-        assert actions["preview"]["status"] == "available"  # nosec B101
-        assert actions["create_definition"]["status"] == "available"  # nosec B101
-        # TASK-13022/13110: execution truth -- recurring_question runs are
-        # executable (phase-1 generation-only); agent_task is planned (its
-        # message is redacted at rest); run_now is available on both.
-        if family == "recurring_question":
-            assert actions["execute"]["status"] == "available"  # nosec B101
-            assert actions["execute"]["reason"] == "phase1_generation_only"  # nosec B101
-        else:
-            assert actions["execute"]["status"] == "planned"  # nosec B101
-            assert "redacted at rest" in actions["execute"]["reason"]  # nosec B101
-        assert actions["run_now"]["status"] == "available"  # nosec B101
-        assert actions["execute_tools"]["status"] == "planned"  # nosec B101
-
     recurring_actions = families["recurring_question"]["actions"]
+    assert recurring_actions["preview"]["status"] == "available"  # nosec B101
+    assert recurring_actions["create_definition"]["status"] == "available"  # nosec B101
+    assert recurring_actions["execute"]["status"] == "available"  # nosec B101
+    assert recurring_actions["execute"]["reason"] == "phase1_generation_only"  # nosec B101
+    assert recurring_actions["run_now"]["status"] == "available"  # nosec B101
+    assert recurring_actions["execute_tools"]["status"] == "planned"  # nosec B101
+
+    agent = families["agent_task"]
+    agent_actions = agent["actions"]
+    assert agent["schema_version"] == "2026-08-24"  # nosec B101
+    assert agent["family_availability"] == "available"  # nosec B101
+    assert agent["execution_certification"] == {  # nosec B101
+        "schema_version": "scheduled_task_execution_certification.v1",
+        "outcome": "draft_only",
+        "deployment_class_id": "sha256:" + ("1" * 64),
+        "evidence_id": None,
+        "evidence_source": "repository_characterization",
+        "observed_at": CERTIFICATION_NOW.isoformat().replace("+00:00", "Z"),
+        "expires_at": (
+            CERTIFICATION_NOW + timedelta(hours=24)
+        ).isoformat().replace("+00:00", "Z"),
+        "reason_codes": ["isolation_attestation_missing"],
+        "recovery_action": (
+            "Complete server-verified Scheduled Agent execution certification "
+            "for this deployment class."
+        ),
+    }
+    for action_name in ("execute", "run_now"):
+        action = agent_actions[action_name]
+        assert action["status"] == "disabled"  # nosec B101
+        assert action["reason"] == "execution_certification_draft_only"  # nosec B101
+        assert action["evidence_source"] == "repository_characterization"  # nosec B101
+        assert action["observed_at"] is not None  # nosec B101
+        assert action["expires_at"] is not None  # nosec B101
+        assert action["recovery_action"]  # nosec B101
+    assert agent_actions["preview"]["status"] == "available"  # nosec B101
+    assert agent_actions["create_definition"]["status"] == "available"  # nosec B101
+    assert agent_actions["execute_tools"]["status"] == "planned"  # nosec B101
+
     for action in (
         "preview",
         "create_definition",
@@ -232,6 +288,69 @@ def test_capabilities_report_definition_and_execution_actions(scheduled_tasks_cl
         "disabled",
     }
     assert "degraded" not in {action["status"] for action in recurring_actions.values()}  # nosec B101
+
+
+def test_default_current_agent_capability_fails_closed(monkeypatch):
+    monkeypatch.delenv("TLDW_BUILD_SHA", raising=False)
+
+    items = {
+        item.family: item
+        for item in ScheduledTaskAutomationService().get_capabilities().items
+    }
+    agent = items["agent_task"]
+
+    assert agent.execution_certification is not None  # nosec B101
+    assert agent.execution_certification.outcome in {  # nosec B101
+        "draft_only",
+        "unsupported",
+    }
+    assert agent.actions["execute"].status == "disabled"  # nosec B101
+    assert agent.actions["run_now"].status == "disabled"  # nosec B101
+    assert agent.actions["execute"].recovery_action  # nosec B101
+    assert agent.actions["execute"].observed_at is not None  # nosec B101
+
+
+def test_certification_alone_does_not_advertise_agent_execution():
+    service = ScheduledTaskAutomationService(
+        execution_certification_resolver=lambda: _execution_certification(
+            "certified"
+        ),
+        execution_stack_ready_resolver=lambda: False,
+    )
+
+    agent = {
+        item.family: item for item in service.get_capabilities().items
+    }["agent_task"]
+
+    assert agent.execution_certification is not None  # nosec B101
+    assert agent.execution_certification.outcome == "certified"  # nosec B101
+    assert agent.actions["execute"].status == "disabled"  # nosec B101
+    assert agent.actions["run_now"].status == "disabled"  # nosec B101
+    assert agent.actions["execute"].reason == "agent_execution_stack_unimplemented"  # nosec B101
+    assert agent.actions["run_now"].reason == "agent_execution_stack_unimplemented"  # nosec B101
+
+
+def test_openapi_exposes_execution_certification_without_new_execution_route(
+    scheduled_tasks_client,
+):
+    scheduled_tasks_client.app.openapi_schema = None
+    response = scheduled_tasks_client.get("/openapi.json")
+
+    assert response.status_code == 200, response.text  # nosec B101
+    document = response.json()
+    schemas = document["components"]["schemas"]
+    capability = schemas["ScheduledTaskAutomationCapability"]["properties"]
+    assert "execution_certification" in capability  # nosec B101
+    assert "ScheduledTaskExecutionCertificationCapability" in json.dumps(  # nosec B101
+        capability["execution_certification"]
+    )
+    assert (  # nosec B101
+        "/api/v1/scheduled-tasks/capabilities" in document["paths"]
+    )
+    assert (  # nosec B101
+        "/api/v1/scheduled-tasks/definitions/{definition_id}/execute"
+        not in document["paths"]
+    )
 
 
 def test_preview_create_list_and_detail_return_valid_and_invalid_statuses(scheduled_tasks_client, auth_headers):
@@ -895,6 +1014,158 @@ def test_run_now_triggers_real_dispatch_and_returns_run_reference(
         f"definition:{definition['id']}:{body['run_slot_utc']}"
     )  # nosec B101
     assert created[0]["payload"]["manual"] is True  # nosec B101
+
+
+@pytest.mark.integration
+def test_agent_run_now_refuses_before_job_or_audit(
+    scheduled_tasks_client, auth_headers, monkeypatch
+):
+    definition = _create_definition(
+        scheduled_tasks_client,
+        auth_headers,
+        family="agent_task",
+        name="Blocked agent run",
+    )
+    repo = scheduled_tasks_client.scheduled_task_automation_repo
+    before_audits, before_total = repo.list_audit_events(
+        owner_id=880,
+        definition_id=definition["id"],
+    )
+    assert before_audits  # nosec B101
+
+    def _fail_if_called(_self=None, **_kwargs):
+        raise AssertionError("Agent Run Now must not enqueue")
+
+    from tldw_Server_API.app.core.Jobs import manager as jobs_manager_module
+
+    monkeypatch.setattr(
+        jobs_manager_module.JobManager,
+        "create_job",
+        _fail_if_called,
+    )
+    response = scheduled_tasks_client.post(
+        f"/api/v1/scheduled-tasks/definitions/{definition['id']}/run",
+        headers=auth_headers,
+    )
+
+    _assert_error_envelope(
+        response,
+        code="scheduled_task_agent_execution_unavailable",
+        status_code=409,
+    )
+    detail = response.json()["detail"]
+    assert detail["details"]["reason"] == "execution_certification_draft_only"  # nosec B101
+    assert detail["details"]["recovery_action"]  # nosec B101
+    _after_audits, after_total = repo.list_audit_events(
+        owner_id=880,
+        definition_id=definition["id"],
+    )
+    assert after_total == before_total  # nosec B101
+
+
+@pytest.mark.integration
+def test_unsupported_agent_creation_and_duplicate_refuse_without_persistence(
+    scheduled_tasks_client,
+    auth_headers,
+):
+    source = _create_definition(
+        scheduled_tasks_client,
+        auth_headers,
+        family="agent_task",
+        name="Existing unsupported agent",
+    )
+    pending_preview = _create_preview(
+        scheduled_tasks_client,
+        auth_headers,
+        family="agent_task",
+        name="Pending unsupported agent",
+    )
+    service = scheduled_tasks_client.scheduled_task_automation_service
+    service._execution_certification_resolver = lambda: _execution_certification(
+        "unsupported"
+    )
+    capabilities = scheduled_tasks_client.get(
+        "/api/v1/scheduled-tasks/capabilities",
+        headers=auth_headers,
+    ).json()
+    agent_capability = {
+        item["family"]: item for item in capabilities["items"]
+    }["agent_task"]
+    assert agent_capability["family_availability"] == "unavailable"  # nosec B101
+    assert agent_capability["execution_certification"]["outcome"] == "unsupported"  # nosec B101
+    for action_name in ("preview", "create_definition", "duplicate"):
+        assert agent_capability["actions"][action_name]["status"] == "unavailable"  # nosec B101
+    for action_name in ("execute", "run_now"):
+        assert agent_capability["actions"][action_name]["status"] == "disabled"  # nosec B101
+    before_definitions = scheduled_tasks_client.get(
+        "/api/v1/scheduled-tasks/definitions?family=agent_task",
+        headers=auth_headers,
+    ).json()["total"]
+    before_previews = scheduled_tasks_client.get(
+        "/api/v1/scheduled-tasks/previews?family=agent_task",
+        headers=auth_headers,
+    ).json()["total"]
+
+    preview_response = scheduled_tasks_client.post(
+        "/api/v1/scheduled-tasks/previews",
+        headers=auth_headers,
+        json=_payload(family="agent_task", name="Must not persist"),
+    )
+    create_response = scheduled_tasks_client.post(
+        "/api/v1/scheduled-tasks/definitions",
+        headers=auth_headers,
+        json={"preview_id": pending_preview["id"]},
+    )
+    duplicate_response = scheduled_tasks_client.post(
+        f"/api/v1/scheduled-tasks/definitions/{source['id']}/duplicate",
+        headers=auth_headers,
+        json={"name": "Must not duplicate"},
+    )
+
+    for response in (preview_response, create_response, duplicate_response):
+        _assert_error_envelope(
+            response,
+            code="scheduled_task_agent_automation_unsupported",
+            status_code=409,
+        )
+        details = response.json()["detail"]["details"]
+        assert details["reason"] == "execution_certification_unsupported"  # nosec B101
+        assert details["recovery_action"]  # nosec B101
+
+    listed = scheduled_tasks_client.get(
+        "/api/v1/scheduled-tasks/definitions?family=agent_task",
+        headers=auth_headers,
+    )
+    detail = scheduled_tasks_client.get(
+        f"/api/v1/scheduled-tasks/definitions/{source['id']}",
+        headers=auth_headers,
+    )
+    paused = scheduled_tasks_client.post(
+        f"/api/v1/scheduled-tasks/definitions/{source['id']}/pause",
+        headers=auth_headers,
+    )
+    archived = scheduled_tasks_client.post(
+        f"/api/v1/scheduled-tasks/definitions/{source['id']}/archive",
+        headers=auth_headers,
+    )
+
+    assert listed.status_code == 200, listed.text  # nosec B101
+    assert listed.json()["total"] == before_definitions  # nosec B101
+    assert detail.status_code == 200, detail.text  # nosec B101
+    assert paused.status_code == 200, paused.text  # nosec B101
+    assert archived.status_code == 200, archived.text  # nosec B101
+    preview_detail = scheduled_tasks_client.get(
+        f"/api/v1/scheduled-tasks/previews/{pending_preview['id']}",
+        headers=auth_headers,
+    )
+    assert preview_detail.status_code == 200, preview_detail.text  # nosec B101
+    assert preview_detail.json()["status"] == "valid"  # nosec B101
+    after_previews = scheduled_tasks_client.get(
+        "/api/v1/scheduled-tasks/previews?family=agent_task",
+        headers=auth_headers,
+    )
+    assert after_previews.status_code == 200, after_previews.text  # nosec B101
+    assert after_previews.json()["total"] == before_previews  # nosec B101
 
 
 @pytest.mark.integration
