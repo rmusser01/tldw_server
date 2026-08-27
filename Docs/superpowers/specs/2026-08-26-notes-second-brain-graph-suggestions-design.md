@@ -2,7 +2,7 @@
 
 - **Date:** 2026-08-26
 - **Task:** `TASK-13138`
-- **Status:** Written-spec review approved; awaiting final user approval
+- **Status:** Approved for implementation planning
 - **Reviewed baseline:** `origin/dev` at `2306c1939f3b460f9c62da8ae83a1aa47c02ee0d`
 - **Deferred tasks:** `TASK-13134`, `TASK-13135`, `TASK-13136`, and `TASK-13137`
 
@@ -152,6 +152,11 @@ source nodes; the response still reports ordinary node/edge truncation if those
 projections consume the remaining budget. Above the eligibility threshold the
 control is disabled with a concise explanation and the focused workflow remains
 available. This slice does not virtualize an unbounded whole-library graph.
+Every authoritative graph response therefore includes the owner-scoped
+`active_note_count`, the effective `all_notes_note_cap` already clamped to that
+response's `limits.max_nodes`, and `all_notes_eligible`. These fields are part of
+the ordinary `notes.graph.read` contract, not suggestion capabilities, so a graph
+reader without `notes.graph.suggest` receives the same bounded workspace controls.
 
 ### Inspector
 

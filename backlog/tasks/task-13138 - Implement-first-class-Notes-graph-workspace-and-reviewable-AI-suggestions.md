@@ -18,7 +18,8 @@ references:
 - TASK-13137
 documentation:
 - Docs/superpowers/specs/2026-08-26-notes-second-brain-graph-suggestions-design.md
-updated_date: 2026-08-27 04:31
+- Docs/superpowers/plans/2026-08-26-notes-second-brain-graph-suggestions.md
+updated_date: 2026-08-27 05:58
 ---
 
 ## Description
@@ -57,9 +58,8 @@ Add Graph as a first-class Notes view mode shared by the WebUI and browser exten
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Follow the approved design specification. Implement test-first in reviewable stages: persistence/state invariants; bounded shortlist and provider pipeline; Jobs/API contracts; acceptance/rejection/reconciliation; shared Notes Graph workspace; accessibility/responsive behavior; observability, retention, documentation, and quality evaluation.
+Execute the approved 12-task test-first plan in Docs/superpowers/plans/2026-08-26-notes-second-brain-graph-suggestions.md. It stages schema/store work, bounded retrieval and provider contracts, Jobs publication, guarded Sync decisions, nested API/RBAC, the shared Graph workspace, accessibility, E2E, documentation, and security verification.
 <!-- SECTION:PLAN:END -->
-
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
@@ -71,6 +71,9 @@ Analysis limits were refined from post-load code-point counts to backend-portabl
 First independent spec review found five state-machine blockers. The spec now binds provider configuration/data categories through worker invocation, revalidates freshness at activation, reconciles every active run state, fences canonical mutations inside coordinator transactions, and persists 90-day idempotency receipts for every mutating route.
 Second spec review found an interrupted enqueue/cancellation continuation ambiguity. Operation receipts now distinguish terminal replay from narrowly scoped in-progress continuation, maintenance resends the same idempotent cancellation command, and provider adapters must disable internal retries. Third review approved the written spec with no blocking issues; its advisory replay-wording clarification was also incorporated.
 Verification before amendment commit: third independent review status Approved with no issues; advisory wording incorporated. `git diff --check` passed. The Backlog acceptance-criteria assertion reported sequential criteria 1-23. Scope is two documentation/tracking files. Runtime tests and Bandit are not applicable to this docs-only design amendment.
+
+Implementation plan completed at Docs/superpowers/plans/2026-08-26-notes-second-brain-graph-suggestions.md. Three independent plan-review iterations were completed. Review findings addressed queue-specific 30-day Jobs receipt retention, graph-reader All-notes metadata, reload run discovery, non-vacuous observability coverage, complete Bandit scope, keyword lifecycle/RBAC tests, exact offline quality thresholds, and a baseline-aware Ruff gate. Final reviewer status: Approved with no issues.
+Plan verification: 12 tasks and 82 explicit checkbox steps; all modification/deletion paths exist or are created by an earlier task; no TODO/TBD/placeholder markers; all Python commands use the repository virtual environment; `git diff --check` passed before staging. Runtime tests and Bandit are not applicable to this documentation-only planning change.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
