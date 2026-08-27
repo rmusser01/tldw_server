@@ -4,7 +4,7 @@ title: Implement canonical admin webhook control plane and migration
 status: In Progress
 assignee: []
 created_date: 2026-08-21 20:41
-updated_date: 2026-08-27 18:22
+updated_date: 2026-08-27 20:12
 labels:
 - admin
 - webhooks
@@ -39,6 +39,7 @@ modified_files:
 - apps/packages/ui/src/components/Option/Prompt/Studio/StudioTabContainer.tsx
 - apps/packages/ui/src/components/Option/Prompt/__tests__/StudioTabContainer.stage6-navigation.test.tsx
 - tldw_Server_API/tests/CI/test_required_workflow_contracts.py
+- admin-ui/app/acp-agents/__tests__/page.test.tsx
 ---
 
 ## Description
@@ -243,6 +244,8 @@ The real report comparison exposed a separate schema-3 comparator defect: the fa
 
 Final local gates: Studio navigation 16/16; CI ratchet/workflow contracts 117/117 (56 isolated-config marker warnings only); Ruff passed; Python 3.12 py_compile passed; git diff --check passed; both helper digest pins verified. Canonical frontend TypeScript diagnostics are byte-for-byte identical to exact base: 80 inherited errors, zero references to changed files. Prettier also fails both touched TypeScript files on exact base, so no file-wide formatting churn was introduced. TASK-13014 remains In Progress pending commit/push, fresh exact-head Qodo review, green hosted frontend CI, and final unresolved-thread audit.
 2026-08-27 exact-head Qodo test-quality follow-up at 9b215ee2f9db9341f6c87ecea547e4dcdf2e9296: Qodo reported two rule findings, both valid and bounded to StudioTabContainer.stage6-navigation.test.tsx. LocationSearchProbe now declares an explicit React.ReactElement return type. The four onboarding step/tab transitions now use it.each so every case has fresh render/store state and an independently named failure while retaining React Strict Mode coverage. Verification: focused Studio navigation 19/19 passed at a 1024 MiB heap; canonical TypeScript output remains byte-for-byte identical to exact base (80 inherited errors, no changed-file references); git diff --check passed. Fresh independent review, commit/push, Qodo thread resolution/refresh, exact-head hosted CI, and final thread audit remain pending; TASK-13014 stays In Progress.
+2026-08-27 hosted exact-head frontend-required run 33103363333 passed all eight frontend unit shards, including shard 6 at the restored 4096 MiB budget, then exposed one admin-ui ratchet differential in unchanged test app/acp-agents/__tests__/page.test.tsx > ACPAgentsPage renders policy rules and actions when policies are loaded. Hosted head queried the rendered policies tab immediately after observing only the API call; exact-base replay happened to render before the query. Focused and local full-suite head replays pass, confirming a scheduler-sensitive test race. Remediation will await the rendered tab button before interaction and add the test file to this bounded CI-remediation unit.
+2026-08-27 ACP policies-tab race remediation is locally verified. The test now awaits the rendered `Permission Policies (1)` button rather than observing only the API call. Focused file 8/8 passed; the affected test passed 20/20 repeated focused runs; the focused run with the exact JSON+safety reporter stack passed 8/8 and strict validate-success accepted both reports; admin-ui lint passed with 0 errors/41 inherited warnings; admin-ui typecheck passed; git diff --check passed. A complete local admin-ui run exercised all 148 files/807 tests and the ACP file passed 8/8; the run still exited 1 because this local environment exposes 117 pre-existing failures and 130 hook errors, so the strict safety reporter correctly refused a local full-suite ratchet. Hosted exact-head CI remains the authoritative complete gate after review/push.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Definition of Done
 <!-- DOD:BEGIN -->
