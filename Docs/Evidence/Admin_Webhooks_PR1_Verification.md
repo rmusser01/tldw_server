@@ -14,11 +14,13 @@
   `517d7b016089e220fa55eab3483f212031b6f5cb`
 - Exact-head Qodo follow-up test commit:
   `7253450461a58f0724fba77de84c97e5ec26b548`
+- Last immutable pushed head before the lifecycle-race follow-up:
+  `cc885b47c86ec5fc64a1cdcc901839136c1a5909`
 - Rebased onto: `origin/dev` at
   `9ee0b5a16dca9f5cf6372a3dd2798b84075501fc`
 - Final ratchet comparison base: `origin/dev` at
   `9ee0b5a16dca9f5cf6372a3dd2798b84075501fc`
-- Final verification timestamp: `2026-08-26T02:17:51Z`
+- Final verification timestamp: `2026-08-27T07:20:04Z`
 - Host: macOS 26.5.2 (25F84), arm64
 - Python: 3.11.13
 - Node.js: 20.19.5 (the version family pinned by repository UI CI)
@@ -1104,7 +1106,7 @@ Table-driven tests freeze each routing contract.
 Final local evidence for the follow-up source:
 
 ```text
-focused webhook/reporter matrix:      75 passed across 6 files
+focused webhook/reporter matrix:      77 passed across 6 files
 admin UI package typecheck:           PASS
 admin UI package lint:                PASS, 0 errors/41 inherited warnings
 admin UI production build:            PASS, 49/49 routes
@@ -1119,7 +1121,7 @@ git diff --check:                      PASS
 
 The unrestricted production build passed after the restricted sandbox denied
 Turbopack's internal local port bind. The prior complete admin UI baseline run
-reported 117 failures and 673 passes across unrelated surfaces; all 75 tests in
+reported 117 failures and 673 passes across unrelated surfaces; all 77 tests in
 the changed webhook/reporter surface pass at this follow-up source. Those
 repository-wide failures remain governed by the exact-base ratchet and were
 not altered by this remediation.
@@ -1134,3 +1136,61 @@ vitest-safety-reporter.mjs:          cf7621d1658a1a3e1b1d16c392dc9af3fe6751072bd
 
 Independent re-review, fresh Qodo analysis, exact-head hosted CI, and the final
 review-thread audit remain mandatory before merge.
+
+## Exact-Head Lifecycle and Docs-Gate Follow-Up
+
+Qodo's review of pushed head `cc885b47c8` identified two valid follow-up
+findings. The new parameterized path-classifier contract lacked an accepted
+direct pytest marker. The legacy delivery-history controller also allowed an
+older row's request to publish success, failure, or loading completion after
+the administrator expanded a different row; the post-test refresh used the
+same stale expanded-row closure.
+
+TDD reproduced both controller failures before implementation. One deferred
+history response completed after a row switch and published under the new row,
+including clearing its loading state. A deferred test delivery completed after
+a row switch and performed an obsolete history refresh for the original row.
+The controller now assigns each legacy history request an identity token tied
+to the current expanded row. Row switches, collapse, and unmount synchronously
+invalidate ownership, and success, failure, and `finally` state changes all
+recheck both row and token. Test delivery captures whether its row was expanded
+at command start and refreshes only when that same row still owns expansion.
+The classifier test now carries `@pytest.mark.unit` above parameterization.
+
+Independent re-review found no Critical or Important findings in these changes.
+It specifically confirmed stale success, failure, and `finally` suppression,
+collapse and unmount invalidation, same-row refresh behavior, and direct marker
+coverage.
+
+The prior pushed head's `onboarding-docs-gate` then failed 1 of 190 tests in
+[run 33047266119](https://github.com/rmusser01/tldw_server/actions/runs/33047266119).
+The failing contract showed that exact base `origin/dev` at `2306c1939f3b`
+already contained `Docs/ADR/040-synchronized-moodboards-and-studio-authority.md`
+without its required tracked `Docs/Published/ADR` copy. All docs boundary,
+command-boundary, and endpoint-drift steps passed. The canonical refresh also
+exposed six unrelated content drifts. A direct local suite run without the
+workflow's required refresh reproduced those as two content-identity failures
+with 188 other tests passing. The exact hosted order, refresh followed by the
+complete docs suite, passed all 190 tests. The six unrelated generated changes
+were then restored and remain excluded from this PR follow-up. Only the missing
+ADR-040 published artifact is retained, and the previously failing focused docs
+contract passes locally.
+
+Fresh local evidence for this follow-up:
+
+```text
+focused webhook/reporter matrix:      77 passed across 6 files
+CI/workflow/ratchet contracts:        165 passed
+admin UI package typecheck:           PASS
+admin UI package lint:                PASS, 0 errors/41 inherited warnings
+admin UI production build:            PASS, 49/49 routes
+Chromium webhook lifecycle:           1 passed
+focused docs published-file contract: 1 passed
+hosted-order complete docs suite:      190 passed
+focused Ruff and Python compilation:  PASS
+```
+
+The reporter and ratchet source files are unchanged, so their pinned SHA-256
+values remain the values recorded immediately above. Fresh exact-head Qodo
+analysis, hosted CI, and a final unresolved-thread audit remain required before
+merge.

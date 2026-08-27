@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { usePrivilegedActionDialog } from '@/components/ui/privileged-action-dialog';
 import { useToast } from '@/components/ui/toast';
@@ -83,6 +83,19 @@ export const useWebhooksPageController = () => {
   const [replacementUrl, setReplacementUrl] = useState('');
   const [replacementUrlError, setReplacementUrlError] = useState('');
   const [mutatingId, setMutatingId] = useState<number | null>(null);
+  const legacyExpandedIdRef = useRef<string | null>(legacyExpandedId);
+  const activeLegacyDeliveryRequestRef = useRef<symbol | null>(null);
+
+  useEffect(() => {
+    if (legacyExpandedIdRef.current === legacyExpandedId) return;
+    legacyExpandedIdRef.current = legacyExpandedId;
+    activeLegacyDeliveryRequestRef.current = null;
+  }, [legacyExpandedId]);
+
+  useEffect(() => () => {
+    legacyExpandedIdRef.current = null;
+    activeLegacyDeliveryRequestRef.current = null;
+  }, []);
 
   const clearCreateForm = useCallback(() => {
     setCreateUrl('');
@@ -394,7 +407,55 @@ export const useWebhooksPageController = () => {
     }
   };
 
+  const beginLegacyDeliveryRequest = (
+    registrationId: string,
+    expandRegistration: boolean,
+  ) => {
+    if (!expandRegistration && legacyExpandedIdRef.current !== registrationId) return null;
+    const requestToken = Symbol('legacy-delivery-history');
+    activeLegacyDeliveryRequestRef.current = requestToken;
+    if (expandRegistration) {
+      legacyExpandedIdRef.current = registrationId;
+      setLegacyExpandedId(registrationId);
+      setLegacyDeliveries([]);
+    }
+    setLegacyDeliveryLoading(true);
+    return requestToken;
+  };
+
+  const isActiveLegacyDeliveryRequest = (
+    registrationId: string,
+    requestToken: symbol,
+  ) => (
+    legacyExpandedIdRef.current === registrationId
+    && activeLegacyDeliveryRequestRef.current === requestToken
+  );
+
+  const loadLegacyDeliveryHistory = async (
+    registrationId: string,
+    requestToken: symbol,
+  ) => {
+    try {
+      const history = await legacyWebhookApi.getWebhookDeliveries(registrationId, {
+        limit: 50,
+        offset: 0,
+      });
+      if (!isActiveLegacyDeliveryRequest(registrationId, requestToken)) return;
+      setLegacyDeliveries(history.items);
+    } catch {
+      if (!isActiveLegacyDeliveryRequest(registrationId, requestToken)) return;
+      setLegacyDeliveries([]);
+      showError('Legacy delivery history could not be loaded');
+    } finally {
+      if (isActiveLegacyDeliveryRequest(registrationId, requestToken)) {
+        activeLegacyDeliveryRequestRef.current = null;
+        setLegacyDeliveryLoading(false);
+      }
+    }
+  };
+
   const testLegacyRegistration = async (registration: LegacyWebhookView) => {
+    const refreshIfStillExpanded = legacyExpandedIdRef.current === registration.id;
     try {
       const delivery = await legacyWebhookApi.testWebhook(registration.id);
       if (delivery.success) {
@@ -402,12 +463,11 @@ export const useWebhooksPageController = () => {
       } else {
         showError('Legacy test delivery failed');
       }
-      if (legacyExpandedId === registration.id) {
-        const history = await legacyWebhookApi.getWebhookDeliveries(registration.id, {
-          limit: 50,
-          offset: 0,
-        });
-        setLegacyDeliveries(history.items);
+      if (refreshIfStillExpanded) {
+        const requestToken = beginLegacyDeliveryRequest(registration.id, false);
+        if (requestToken) {
+          await loadLegacyDeliveryHistory(registration.id, requestToken);
+        }
       }
     } catch {
       showError('Legacy test delivery failed');
@@ -415,24 +475,17 @@ export const useWebhooksPageController = () => {
   };
 
   const toggleLegacyDeliveries = async (registration: LegacyWebhookView) => {
-    if (legacyExpandedId === registration.id) {
+    if (legacyExpandedIdRef.current === registration.id) {
+      legacyExpandedIdRef.current = null;
+      activeLegacyDeliveryRequestRef.current = null;
       setLegacyExpandedId(null);
       setLegacyDeliveries([]);
+      setLegacyDeliveryLoading(false);
       return;
     }
-    setLegacyExpandedId(registration.id);
-    setLegacyDeliveryLoading(true);
-    try {
-      const history = await legacyWebhookApi.getWebhookDeliveries(registration.id, {
-        limit: 50,
-        offset: 0,
-      });
-      setLegacyDeliveries(history.items);
-    } catch {
-      setLegacyDeliveries([]);
-      showError('Legacy delivery history could not be loaded');
-    } finally {
-      setLegacyDeliveryLoading(false);
+    const requestToken = beginLegacyDeliveryRequest(registration.id, true);
+    if (requestToken) {
+      await loadLegacyDeliveryHistory(registration.id, requestToken);
     }
   };
 

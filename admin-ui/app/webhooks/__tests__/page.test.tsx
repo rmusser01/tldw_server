@@ -154,6 +154,16 @@ const canonicalPage = (items = [REGISTRATION], total = items.length, offset = 0)
   offset,
 });
 
+const deferred = <T,>() => {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, reject, resolve };
+};
+
 const renderReadyPage = async () => {
   render(<WebhooksPage />);
   await screen.findByRole('heading', { name: 'Webhooks' });
@@ -697,6 +707,179 @@ describe('legacy webhook compatibility mode', () => {
     await user.click(screen.getByRole('button', { name: /^test$/i }));
     await waitFor(() => expect(mocks.legacy.testWebhook).toHaveBeenCalledWith('legacy-1'));
     expect(mocks.canonical.getWebhookCatalog).not.toHaveBeenCalled();
+  });
+
+  it('keeps an older delivery-history response out of the newly expanded row', async () => {
+    const firstHistory = deferred<{ items: Array<Record<string, unknown>>; total: number }>();
+    const secondHistory = deferred<{ items: Array<Record<string, unknown>>; total: number }>();
+    const firstDelivery = {
+      id: 'delivery-first',
+      webhookId: 'legacy-1',
+      eventType: 'first.completed',
+      statusCode: 200,
+      responseTimeMs: 15,
+      success: true,
+      error: null,
+      attemptedAt: '2026-08-22T12:00:00Z',
+      payloadPreview: null,
+    };
+    const secondDelivery = {
+      ...firstDelivery,
+      id: 'delivery-second',
+      webhookId: 'legacy-2',
+      eventType: 'second.completed',
+    };
+    mocks.detect.mockResolvedValue({
+      kind: 'legacy',
+      status: { ...STATUS, route_selection: 'legacy' },
+      client: mocks.legacy,
+    });
+    mocks.legacy.getWebhooks.mockResolvedValue({
+      items: [
+        {
+          id: 'legacy-1',
+          targetUrl: 'https://legacy-one.example/hook',
+          eventTypes: ['incident.created'],
+          enabled: true,
+          createdAt: null,
+          updatedAt: null,
+        },
+        {
+          id: 'legacy-2',
+          targetUrl: 'https://legacy-two.example/hook',
+          eventTypes: ['incident.created'],
+          enabled: true,
+          createdAt: null,
+          updatedAt: null,
+        },
+      ],
+      total: 2,
+    });
+    mocks.legacy.getWebhookDeliveries.mockImplementation((webhookId: string) => (
+      webhookId === 'legacy-1' ? firstHistory.promise : secondHistory.promise
+    ));
+    const user = userEvent.setup();
+    render(<WebhooksPage />);
+
+    const firstRow = (await screen.findByText('https://legacy-one.example/hook')).closest('tr');
+    const secondRow = screen.getByText('https://legacy-two.example/hook').closest('tr');
+    expect(firstRow).not.toBeNull();
+    expect(secondRow).not.toBeNull();
+    await user.click(within(firstRow!).getByRole('button', { name: /show delivery history/i }));
+    await waitFor(() => expect(mocks.legacy.getWebhookDeliveries).toHaveBeenCalledWith(
+      'legacy-1',
+      { limit: 50, offset: 0 },
+    ));
+    await user.click(within(secondRow!).getByRole('button', { name: /show delivery history/i }));
+    await waitFor(() => expect(mocks.legacy.getWebhookDeliveries).toHaveBeenCalledWith(
+      'legacy-2',
+      { limit: 50, offset: 0 },
+    ));
+
+    await act(async () => {
+      firstHistory.resolve({ items: [firstDelivery], total: 1 });
+      await firstHistory.promise;
+    });
+
+    expect(screen.getByText(/loading delivery history/i)).toBeInTheDocument();
+    expect(screen.queryByText('first.completed')).not.toBeInTheDocument();
+
+    await act(async () => {
+      secondHistory.resolve({ items: [secondDelivery], total: 1 });
+      await secondHistory.promise;
+    });
+    expect(await screen.findByText('second.completed')).toBeInTheDocument();
+    expect(screen.queryByText('first.completed')).not.toBeInTheDocument();
+  });
+
+  it('does not refresh a tested webhook after the admin expands another row', async () => {
+    const testDelivery = deferred<Record<string, unknown>>();
+    const historyByWebhook = {
+      'legacy-1': {
+        items: [],
+        total: 0,
+      },
+      'legacy-2': {
+        items: [{
+          id: 'delivery-second',
+          webhookId: 'legacy-2',
+          eventType: 'second.completed',
+          statusCode: 200,
+          responseTimeMs: 15,
+          success: true,
+          error: null,
+          attemptedAt: '2026-08-22T12:00:00Z',
+          payloadPreview: null,
+        }],
+        total: 1,
+      },
+    };
+    mocks.detect.mockResolvedValue({
+      kind: 'legacy',
+      status: { ...STATUS, route_selection: 'legacy' },
+      client: mocks.legacy,
+    });
+    mocks.legacy.getWebhooks.mockResolvedValue({
+      items: [
+        {
+          id: 'legacy-1',
+          targetUrl: 'https://legacy-one.example/hook',
+          eventTypes: ['incident.created'],
+          enabled: true,
+          createdAt: null,
+          updatedAt: null,
+        },
+        {
+          id: 'legacy-2',
+          targetUrl: 'https://legacy-two.example/hook',
+          eventTypes: ['incident.created'],
+          enabled: true,
+          createdAt: null,
+          updatedAt: null,
+        },
+      ],
+      total: 2,
+    });
+    mocks.legacy.getWebhookDeliveries.mockImplementation((webhookId: 'legacy-1' | 'legacy-2') => (
+      Promise.resolve(historyByWebhook[webhookId])
+    ));
+    mocks.legacy.testWebhook.mockReturnValue(testDelivery.promise);
+    const user = userEvent.setup();
+    render(<WebhooksPage />);
+
+    const firstRow = (await screen.findByText('https://legacy-one.example/hook')).closest('tr');
+    const secondRow = screen.getByText('https://legacy-two.example/hook').closest('tr');
+    expect(firstRow).not.toBeNull();
+    expect(secondRow).not.toBeNull();
+    await user.click(within(firstRow!).getByRole('button', { name: /show delivery history/i }));
+    await screen.findByText(/no legacy deliveries recorded/i);
+    await user.click(within(firstRow!).getByRole('button', { name: /^test$/i }));
+    await waitFor(() => expect(mocks.legacy.testWebhook).toHaveBeenCalledWith('legacy-1'));
+    await user.click(within(secondRow!).getByRole('button', { name: /show delivery history/i }));
+    expect(await screen.findByText('second.completed')).toBeInTheDocument();
+
+    await act(async () => {
+      testDelivery.resolve({
+        id: 'delivery-test',
+        webhookId: 'legacy-1',
+        eventType: 'webhook.test',
+        statusCode: 200,
+        responseTimeMs: 15,
+        success: true,
+        error: null,
+        attemptedAt: '2026-08-22T12:00:00Z',
+        payloadPreview: null,
+      });
+      await testDelivery.promise;
+    });
+
+    await waitFor(() => expect(mocks.toastSuccess).toHaveBeenCalledWith(
+      'Legacy test delivery succeeded',
+    ));
+    expect(mocks.legacy.getWebhookDeliveries.mock.calls.filter(
+      ([webhookId]) => webhookId === 'legacy-1',
+    )).toHaveLength(1);
+    expect(screen.getByText('second.completed')).toBeInTheDocument();
   });
 
   it('rejects an unsafe destination before calling the legacy API', async () => {

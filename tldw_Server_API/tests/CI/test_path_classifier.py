@@ -44,6 +44,7 @@ def test_admin_ui_change_enables_frontend_without_e2e() -> None:
     assert flags["e2e_changed"] is False
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     ("path", "backend_changed", "tldw_frontend_changed", "admin_ui_changed"),
     (
