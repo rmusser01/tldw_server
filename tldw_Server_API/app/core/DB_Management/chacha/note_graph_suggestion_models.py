@@ -91,6 +91,7 @@ class NoteGraphSuggestionOperationReceipt:
     operation_kind: NoteGraphSuggestionOperationKind
     owner_user_id: str
     dataset_id: str
+    source_note_id: str
     resource_identity: str
     idempotency_key_digest: str
     request_fingerprint: str

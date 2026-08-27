@@ -19,7 +19,12 @@ references:
 documentation:
 - Docs/superpowers/specs/2026-08-26-notes-second-brain-graph-suggestions-design.md
 - Docs/superpowers/plans/2026-08-26-notes-second-brain-graph-suggestions.md
-updated_date: 2026-08-27 06:31
+updated_date: 2026-08-27 06:54
+modified_files:
+- tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py
+- tldw_Server_API/app/core/DB_Management/chacha/note_graph_suggestion_models.py
+- tldw_Server_API/tests/DB_Management/test_chacha_migration_v64.py
+- tldw_Server_API/tests/DB_Management/test_chacha_postgres_migration_v64.py
 ---
 
 ## Description
@@ -79,6 +84,7 @@ Implementation started with the subagent-driven-development workflow after confi
 Task 1 started: implementing ChaChaNotes schema v64 and the typed graph-suggestion store skeleton from the approved plan. Scope is SQLite/PostgreSQL migration parity, typed records/store initialization, focused migration tests, regression coverage, Bandit, and a task report.
 Task 1 implementation completed locally: schema v64 adds SQLite/PostgreSQL Notes graph suggestion tables, indexes, forced PostgreSQL RLS, typed records, and an owner-bound store skeleton. Verification: required v61-v64 migration regression suite passed (25 tests); Ruff passed on touched Python files; Bandit scanned the production scope with 0 findings. Final report: .superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-1-report.md. Parent task remains In Progress for later tasks.
 Final Task 1 candidate verification: exact required v61-v64 migration regression suite passed 26 tests (including live PostgreSQL v63-to-v64 upgrade); Ruff passed; `git diff --check` passed; Bandit found 0 findings. Parent task remains In Progress for later tasks.
+Task 1 Fix Round 1 completed locally: v64 now enforces composite owner/dataset foreign keys across graph tables, receipt source-note cascade on hard note deletion, and lifecycle-aware canonical unique identities for related pairs and tags. Verification: focused SQLite/PostgreSQL v64 suite passed 15 tests; required v61/v62/v64 migration regression suite passed 33 tests; Ruff passed; Bandit reported 0 findings. Report updated at .superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-1-report.md. Parent task remains In Progress for later tasks.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 

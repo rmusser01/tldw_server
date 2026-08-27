@@ -6724,6 +6724,7 @@ CREATE TABLE note_graph_suggestion_operation_receipts(
   operation_kind TEXT NOT NULL CHECK(operation_kind IN ('run_admit', 'run_cancel', 'suggestion_accept', 'suggestion_reject', 'rejections_reset')),
   owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
   dataset_id TEXT NOT NULL CHECK(length(trim(dataset_id)) > 0),
+  source_note_id TEXT NOT NULL,
   resource_identity TEXT NOT NULL CHECK(length(trim(resource_identity)) > 0),
   idempotency_key_digest TEXT NOT NULL CHECK(length(trim(idempotency_key_digest)) > 0),
   request_fingerprint TEXT NOT NULL CHECK(length(trim(request_fingerprint)) > 0),
@@ -6733,16 +6734,19 @@ CREATE TABLE note_graph_suggestion_operation_receipts(
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   completed_at DATETIME,
   expires_at DATETIME NOT NULL,
-  UNIQUE(owner_user_id, dataset_id, operation_kind, resource_identity, idempotency_key_digest)
+  UNIQUE(owner_user_id, dataset_id, id),
+  UNIQUE(owner_user_id, dataset_id, operation_kind, resource_identity, idempotency_key_digest),
+  FOREIGN KEY(owner_user_id, source_note_id) REFERENCES notes(client_id, id)
+    ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 CREATE TABLE note_graph_suggestion_runs(
   id TEXT PRIMARY KEY CHECK(length(trim(id)) > 0),
   owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
   dataset_id TEXT NOT NULL CHECK(length(trim(dataset_id)) > 0),
-  source_note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  source_note_id TEXT NOT NULL,
   source_fingerprint TEXT NOT NULL CHECK(length(trim(source_fingerprint)) > 0),
-  admission_receipt_id TEXT REFERENCES note_graph_suggestion_operation_receipts(id) ON DELETE SET NULL,
+  admission_receipt_id TEXT,
   provider TEXT,
   model TEXT,
   capability_revision TEXT,
@@ -6761,29 +6765,37 @@ CREATE TABLE note_graph_suggestion_runs(
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   started_at DATETIME,
   completed_at DATETIME,
-  expires_at DATETIME NOT NULL
+  expires_at DATETIME NOT NULL,
+  UNIQUE(owner_user_id, dataset_id, id),
+  FOREIGN KEY(owner_user_id, source_note_id) REFERENCES notes(client_id, id)
+    ON DELETE CASCADE ON UPDATE CASCADE,
+  FOREIGN KEY(owner_user_id, dataset_id, admission_receipt_id)
+    REFERENCES note_graph_suggestion_operation_receipts(owner_user_id, dataset_id, id)
+    ON DELETE SET NULL ON UPDATE CASCADE
 );
 
 CREATE TABLE note_graph_suggestion_rejection_sets(
   owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
   dataset_id TEXT NOT NULL CHECK(length(trim(dataset_id)) > 0),
-  source_note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  source_note_id TEXT NOT NULL,
   source_fingerprint TEXT NOT NULL CHECK(length(trim(source_fingerprint)) > 0),
   revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1),
   rejection_count INTEGER NOT NULL DEFAULT 0 CHECK(rejection_count >= 0),
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY(owner_user_id, dataset_id, source_note_id, source_fingerprint)
+  PRIMARY KEY(owner_user_id, dataset_id, source_note_id, source_fingerprint),
+  FOREIGN KEY(owner_user_id, source_note_id) REFERENCES notes(client_id, id)
+    ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 CREATE TABLE note_graph_suggestions(
   id TEXT PRIMARY KEY CHECK(length(trim(id)) > 0),
-  run_id TEXT NOT NULL REFERENCES note_graph_suggestion_runs(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  run_id TEXT NOT NULL,
   owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
   dataset_id TEXT NOT NULL CHECK(length(trim(dataset_id)) > 0),
   kind TEXT NOT NULL CHECK(kind IN ('related_note', 'tag')),
-  source_note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  source_note_id TEXT NOT NULL,
   source_fingerprint TEXT NOT NULL CHECK(length(trim(source_fingerprint)) > 0),
-  target_note_id TEXT REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  target_note_id TEXT,
   target_fingerprint TEXT,
   normalized_tag TEXT,
   display_tag TEXT,
@@ -6797,10 +6809,21 @@ CREATE TABLE note_graph_suggestions(
   decision_at DATETIME,
   acceptance_lease_token TEXT,
   acceptance_lease_expires_at DATETIME,
-  decision_receipt_id TEXT REFERENCES note_graph_suggestion_operation_receipts(id) ON DELETE SET NULL,
+  decision_receipt_id TEXT,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   expires_at DATETIME,
+  UNIQUE(owner_user_id, dataset_id, id),
+  FOREIGN KEY(owner_user_id, dataset_id, run_id)
+    REFERENCES note_graph_suggestion_runs(owner_user_id, dataset_id, id)
+    ON DELETE CASCADE ON UPDATE CASCADE,
+  FOREIGN KEY(owner_user_id, source_note_id) REFERENCES notes(client_id, id)
+    ON DELETE CASCADE ON UPDATE CASCADE,
+  FOREIGN KEY(owner_user_id, target_note_id) REFERENCES notes(client_id, id)
+    ON DELETE CASCADE ON UPDATE CASCADE,
+  FOREIGN KEY(owner_user_id, dataset_id, decision_receipt_id)
+    REFERENCES note_graph_suggestion_operation_receipts(owner_user_id, dataset_id, id)
+    ON DELETE SET NULL ON UPDATE CASCADE,
   CHECK(
     (kind = 'related_note' AND target_note_id IS NOT NULL AND target_fingerprint IS NOT NULL AND normalized_tag IS NULL AND display_tag IS NULL)
     OR (kind = 'tag' AND target_note_id IS NULL AND target_fingerprint IS NULL AND normalized_tag IS NOT NULL AND display_tag IS NOT NULL)
@@ -6808,17 +6831,22 @@ CREATE TABLE note_graph_suggestions(
 );
 
 CREATE TABLE note_graph_suggestion_evidence(
-  suggestion_id TEXT NOT NULL REFERENCES note_graph_suggestions(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  suggestion_id TEXT NOT NULL,
   owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
   dataset_id TEXT NOT NULL CHECK(length(trim(dataset_id)) > 0),
   side TEXT NOT NULL CHECK(side IN ('source', 'target')),
   ordinal INTEGER NOT NULL CHECK(ordinal >= 0),
-  note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  note_id TEXT NOT NULL,
   field TEXT NOT NULL CHECK(field IN ('title', 'content')),
   content_fingerprint TEXT NOT NULL CHECK(length(trim(content_fingerprint)) > 0),
   start_offset INTEGER NOT NULL CHECK(start_offset >= 0),
   end_offset INTEGER NOT NULL CHECK(end_offset > start_offset),
-  PRIMARY KEY(suggestion_id, side, ordinal)
+  PRIMARY KEY(suggestion_id, side, ordinal),
+  FOREIGN KEY(owner_user_id, dataset_id, suggestion_id)
+    REFERENCES note_graph_suggestions(owner_user_id, dataset_id, id)
+    ON DELETE CASCADE ON UPDATE CASCADE,
+  FOREIGN KEY(owner_user_id, note_id) REFERENCES notes(client_id, id)
+    ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 CREATE INDEX idx_note_graph_suggestion_runs_owner_dataset_note_state
@@ -6838,6 +6866,18 @@ CREATE INDEX idx_note_graph_suggestions_suppression_related
   ON note_graph_suggestions(owner_user_id, dataset_id, source_note_id, source_fingerprint, target_note_id, target_fingerprint);
 CREATE INDEX idx_note_graph_suggestions_suppression_tag
   ON note_graph_suggestions(owner_user_id, dataset_id, source_note_id, source_fingerprint, normalized_tag);
+CREATE UNIQUE INDEX idx_note_graph_suggestions_canonical_related_identity
+  ON note_graph_suggestions(
+    owner_user_id, dataset_id,
+    CASE WHEN source_note_id < target_note_id THEN source_note_id ELSE target_note_id END,
+    CASE WHEN source_note_id < target_note_id THEN target_note_id ELSE source_note_id END,
+    CASE WHEN source_note_id < target_note_id THEN source_fingerprint ELSE target_fingerprint END,
+    CASE WHEN source_note_id < target_note_id THEN target_fingerprint ELSE source_fingerprint END
+  )
+  WHERE kind = 'related_note' AND state IN ('staged', 'pending', 'accepting', 'rejected');
+CREATE UNIQUE INDEX idx_note_graph_suggestions_canonical_tag_identity
+  ON note_graph_suggestions(owner_user_id, dataset_id, source_note_id, source_fingerprint, normalized_tag)
+  WHERE kind = 'tag' AND state IN ('staged', 'pending', 'accepting', 'rejected');
 CREATE INDEX idx_note_graph_suggestions_acceptance_lease
   ON note_graph_suggestions(state, acceptance_lease_expires_at);
 CREATE INDEX idx_note_graph_suggestions_retention
@@ -6852,6 +6892,7 @@ CREATE TABLE IF NOT EXISTS note_graph_suggestion_operation_receipts(
   operation_kind TEXT NOT NULL CHECK(operation_kind IN ('run_admit', 'run_cancel', 'suggestion_accept', 'suggestion_reject', 'rejections_reset')),
   owner_user_id TEXT NOT NULL CHECK(char_length(btrim(owner_user_id)) > 0),
   dataset_id TEXT NOT NULL CHECK(char_length(btrim(dataset_id)) > 0),
+  source_note_id TEXT NOT NULL,
   resource_identity TEXT NOT NULL CHECK(char_length(btrim(resource_identity)) > 0),
   idempotency_key_digest TEXT NOT NULL CHECK(char_length(btrim(idempotency_key_digest)) > 0),
   request_fingerprint TEXT NOT NULL CHECK(char_length(btrim(request_fingerprint)) > 0),
@@ -6861,15 +6902,18 @@ CREATE TABLE IF NOT EXISTS note_graph_suggestion_operation_receipts(
   created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
   completed_at TIMESTAMPTZ,
   expires_at TIMESTAMPTZ NOT NULL,
-  UNIQUE(owner_user_id, dataset_id, operation_kind, resource_identity, idempotency_key_digest)
+  UNIQUE(owner_user_id, dataset_id, id),
+  UNIQUE(owner_user_id, dataset_id, operation_kind, resource_identity, idempotency_key_digest),
+  FOREIGN KEY(owner_user_id, source_note_id) REFERENCES notes(client_id, id)
+    ON DELETE CASCADE ON UPDATE CASCADE
 );
 CREATE TABLE IF NOT EXISTS note_graph_suggestion_runs(
   id TEXT PRIMARY KEY CHECK(char_length(btrim(id)) > 0),
   owner_user_id TEXT NOT NULL CHECK(char_length(btrim(owner_user_id)) > 0),
   dataset_id TEXT NOT NULL CHECK(char_length(btrim(dataset_id)) > 0),
-  source_note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  source_note_id TEXT NOT NULL,
   source_fingerprint TEXT NOT NULL CHECK(char_length(btrim(source_fingerprint)) > 0),
-  admission_receipt_id TEXT REFERENCES note_graph_suggestion_operation_receipts(id) ON DELETE SET NULL,
+  admission_receipt_id TEXT,
   provider TEXT, model TEXT, capability_revision TEXT, prompt_contract_version TEXT,
   job_id TEXT, expected_completion_token TEXT,
   state TEXT NOT NULL CHECK(state IN ('admitting', 'queued', 'running', 'cancelling', 'publishing', 'succeeded', 'failed', 'cancelled', 'stale')),
@@ -6881,27 +6925,35 @@ CREATE TABLE IF NOT EXISTS note_graph_suggestion_runs(
   invalid_item_count INTEGER NOT NULL DEFAULT 0 CHECK(invalid_item_count >= 0),
   error_code TEXT, guidance_key TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  started_at TIMESTAMPTZ, completed_at TIMESTAMPTZ, expires_at TIMESTAMPTZ NOT NULL
+  started_at TIMESTAMPTZ, completed_at TIMESTAMPTZ, expires_at TIMESTAMPTZ NOT NULL,
+  UNIQUE(owner_user_id, dataset_id, id),
+  FOREIGN KEY(owner_user_id, source_note_id) REFERENCES notes(client_id, id)
+    ON DELETE CASCADE ON UPDATE CASCADE,
+  FOREIGN KEY(owner_user_id, dataset_id, admission_receipt_id)
+    REFERENCES note_graph_suggestion_operation_receipts(owner_user_id, dataset_id, id)
+    ON DELETE SET NULL ON UPDATE CASCADE
 );
 CREATE TABLE IF NOT EXISTS note_graph_suggestion_rejection_sets(
   owner_user_id TEXT NOT NULL CHECK(char_length(btrim(owner_user_id)) > 0),
   dataset_id TEXT NOT NULL CHECK(char_length(btrim(dataset_id)) > 0),
-  source_note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  source_note_id TEXT NOT NULL,
   source_fingerprint TEXT NOT NULL CHECK(char_length(btrim(source_fingerprint)) > 0),
   revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1),
   rejection_count INTEGER NOT NULL DEFAULT 0 CHECK(rejection_count >= 0),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY(owner_user_id, dataset_id, source_note_id, source_fingerprint)
+  PRIMARY KEY(owner_user_id, dataset_id, source_note_id, source_fingerprint),
+  FOREIGN KEY(owner_user_id, source_note_id) REFERENCES notes(client_id, id)
+    ON DELETE CASCADE ON UPDATE CASCADE
 );
 CREATE TABLE IF NOT EXISTS note_graph_suggestions(
   id TEXT PRIMARY KEY CHECK(char_length(btrim(id)) > 0),
-  run_id TEXT NOT NULL REFERENCES note_graph_suggestion_runs(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  run_id TEXT NOT NULL,
   owner_user_id TEXT NOT NULL CHECK(char_length(btrim(owner_user_id)) > 0),
   dataset_id TEXT NOT NULL CHECK(char_length(btrim(dataset_id)) > 0),
   kind TEXT NOT NULL CHECK(kind IN ('related_note', 'tag')),
-  source_note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  source_note_id TEXT NOT NULL,
   source_fingerprint TEXT NOT NULL CHECK(char_length(btrim(source_fingerprint)) > 0),
-  target_note_id TEXT REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  target_note_id TEXT,
   target_fingerprint TEXT, normalized_tag TEXT, display_tag TEXT, keyword_sync_id TEXT,
   match_strength TEXT CHECK(match_strength IN ('strong', 'possible')),
   rationale TEXT CHECK(rationale IS NULL OR char_length(rationale) <= 240),
@@ -6909,24 +6961,40 @@ CREATE TABLE IF NOT EXISTS note_graph_suggestions(
   revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1),
   decision_reason TEXT, accepted_resource_identity TEXT, decision_at TIMESTAMPTZ,
   acceptance_lease_token TEXT, acceptance_lease_expires_at TIMESTAMPTZ,
-  decision_receipt_id TEXT REFERENCES note_graph_suggestion_operation_receipts(id) ON DELETE SET NULL,
+  decision_receipt_id TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
   expires_at TIMESTAMPTZ,
+  UNIQUE(owner_user_id, dataset_id, id),
+  FOREIGN KEY(owner_user_id, dataset_id, run_id)
+    REFERENCES note_graph_suggestion_runs(owner_user_id, dataset_id, id)
+    ON DELETE CASCADE ON UPDATE CASCADE,
+  FOREIGN KEY(owner_user_id, source_note_id) REFERENCES notes(client_id, id)
+    ON DELETE CASCADE ON UPDATE CASCADE,
+  FOREIGN KEY(owner_user_id, target_note_id) REFERENCES notes(client_id, id)
+    ON DELETE CASCADE ON UPDATE CASCADE,
+  FOREIGN KEY(owner_user_id, dataset_id, decision_receipt_id)
+    REFERENCES note_graph_suggestion_operation_receipts(owner_user_id, dataset_id, id)
+    ON DELETE SET NULL ON UPDATE CASCADE,
   CHECK((kind = 'related_note' AND target_note_id IS NOT NULL AND target_fingerprint IS NOT NULL AND normalized_tag IS NULL AND display_tag IS NULL) OR (kind = 'tag' AND target_note_id IS NULL AND target_fingerprint IS NULL AND normalized_tag IS NOT NULL AND display_tag IS NOT NULL))
 );
 CREATE TABLE IF NOT EXISTS note_graph_suggestion_evidence(
-  suggestion_id TEXT NOT NULL REFERENCES note_graph_suggestions(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  suggestion_id TEXT NOT NULL,
   owner_user_id TEXT NOT NULL CHECK(char_length(btrim(owner_user_id)) > 0),
   dataset_id TEXT NOT NULL CHECK(char_length(btrim(dataset_id)) > 0),
   side TEXT NOT NULL CHECK(side IN ('source', 'target')),
   ordinal INTEGER NOT NULL CHECK(ordinal >= 0),
-  note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  note_id TEXT NOT NULL,
   field TEXT NOT NULL CHECK(field IN ('title', 'content')),
   content_fingerprint TEXT NOT NULL CHECK(char_length(btrim(content_fingerprint)) > 0),
   start_offset INTEGER NOT NULL CHECK(start_offset >= 0),
   end_offset INTEGER NOT NULL CHECK(end_offset > start_offset),
-  PRIMARY KEY(suggestion_id, side, ordinal)
+  PRIMARY KEY(suggestion_id, side, ordinal),
+  FOREIGN KEY(owner_user_id, dataset_id, suggestion_id)
+    REFERENCES note_graph_suggestions(owner_user_id, dataset_id, id)
+    ON DELETE CASCADE ON UPDATE CASCADE,
+  FOREIGN KEY(owner_user_id, note_id) REFERENCES notes(client_id, id)
+    ON DELETE CASCADE ON UPDATE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_note_graph_suggestion_runs_owner_dataset_note_state ON note_graph_suggestion_runs(owner_user_id, dataset_id, source_note_id, state, created_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_note_graph_suggestion_runs_active_source ON note_graph_suggestion_runs(owner_user_id, dataset_id, source_note_id) WHERE state IN ('admitting', 'queued', 'running', 'cancelling', 'publishing');
@@ -6936,6 +7004,18 @@ CREATE INDEX IF NOT EXISTS idx_note_graph_suggestions_owner_dataset_source_state
 CREATE INDEX IF NOT EXISTS idx_note_graph_suggestions_target_state ON note_graph_suggestions(owner_user_id, dataset_id, target_note_id, state);
 CREATE INDEX IF NOT EXISTS idx_note_graph_suggestions_suppression_related ON note_graph_suggestions(owner_user_id, dataset_id, source_note_id, source_fingerprint, target_note_id, target_fingerprint);
 CREATE INDEX IF NOT EXISTS idx_note_graph_suggestions_suppression_tag ON note_graph_suggestions(owner_user_id, dataset_id, source_note_id, source_fingerprint, normalized_tag);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_note_graph_suggestions_canonical_related_identity
+  ON note_graph_suggestions(
+    owner_user_id, dataset_id,
+    (CASE WHEN source_note_id < target_note_id THEN source_note_id ELSE target_note_id END),
+    (CASE WHEN source_note_id < target_note_id THEN target_note_id ELSE source_note_id END),
+    (CASE WHEN source_note_id < target_note_id THEN source_fingerprint ELSE target_fingerprint END),
+    (CASE WHEN source_note_id < target_note_id THEN target_fingerprint ELSE source_fingerprint END)
+  )
+  WHERE kind = 'related_note' AND state IN ('staged', 'pending', 'accepting', 'rejected');
+CREATE UNIQUE INDEX IF NOT EXISTS idx_note_graph_suggestions_canonical_tag_identity
+  ON note_graph_suggestions(owner_user_id, dataset_id, source_note_id, source_fingerprint, normalized_tag)
+  WHERE kind = 'tag' AND state IN ('staged', 'pending', 'accepting', 'rejected');
 CREATE INDEX IF NOT EXISTS idx_note_graph_suggestions_acceptance_lease ON note_graph_suggestions(state, acceptance_lease_expires_at);
 CREATE INDEX IF NOT EXISTS idx_note_graph_suggestions_retention ON note_graph_suggestions(state, expires_at);
 CREATE INDEX IF NOT EXISTS idx_note_graph_suggestion_evidence_note ON note_graph_suggestion_evidence(owner_user_id, dataset_id, note_id);

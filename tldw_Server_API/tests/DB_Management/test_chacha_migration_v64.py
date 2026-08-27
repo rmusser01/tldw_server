@@ -34,10 +34,140 @@ def _version(conn: sqlite3.Connection) -> int:
     )
 
 
-def _create_note(conn: sqlite3.Connection, note_id: str) -> None:
+def _create_note(conn: sqlite3.Connection, note_id: str, owner_user_id: str = "owner-a") -> None:
     conn.execute(
         "INSERT INTO notes(id, title, content, client_id) VALUES (?, ?, ?, ?)",
-        (note_id, note_id, "content", "owner-a"),
+        (note_id, note_id, "content", owner_user_id),
+    )
+
+
+def _insert_receipt(
+    conn: sqlite3.Connection,
+    receipt_id: str,
+    *,
+    owner_user_id: str = "owner-a",
+    dataset_id: str = "dataset-a",
+    source_note_id: str = "source-note",
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO note_graph_suggestion_operation_receipts(
+            id, operation_kind, owner_user_id, dataset_id, source_note_id,
+            resource_identity, idempotency_key_digest, request_fingerprint,
+            state, expires_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        """,
+        (
+            receipt_id,
+            "run_admit",
+            owner_user_id,
+            dataset_id,
+            source_note_id,
+            f"resource-{receipt_id}",
+            f"key-{receipt_id}",
+            f"request-{receipt_id}",
+            "completed",
+        ),
+    )
+
+
+def _insert_run(
+    conn: sqlite3.Connection,
+    run_id: str,
+    *,
+    owner_user_id: str = "owner-a",
+    dataset_id: str = "dataset-a",
+    source_note_id: str = "source-note",
+    admission_receipt_id: str | None = None,
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO note_graph_suggestion_runs(
+            id, owner_user_id, dataset_id, source_note_id, source_fingerprint,
+            admission_receipt_id, state, revision, created_at, expires_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        """,
+        (
+            run_id,
+            owner_user_id,
+            dataset_id,
+            source_note_id,
+            f"fingerprint-{source_note_id}",
+            admission_receipt_id,
+            "succeeded",
+            1,
+        ),
+    )
+
+
+def _insert_related_suggestion(
+    conn: sqlite3.Connection,
+    suggestion_id: str,
+    *,
+    run_id: str,
+    source_note_id: str,
+    target_note_id: str,
+    source_fingerprint: str,
+    target_fingerprint: str,
+    owner_user_id: str = "owner-a",
+    dataset_id: str = "dataset-a",
+    decision_receipt_id: str | None = None,
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO note_graph_suggestions(
+            id, run_id, owner_user_id, dataset_id, kind, source_note_id,
+            source_fingerprint, target_note_id, target_fingerprint, state,
+            revision, decision_receipt_id, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        """,
+        (
+            suggestion_id,
+            run_id,
+            owner_user_id,
+            dataset_id,
+            "related_note",
+            source_note_id,
+            source_fingerprint,
+            target_note_id,
+            target_fingerprint,
+            "pending",
+            1,
+            decision_receipt_id,
+        ),
+    )
+
+
+def _insert_tag_suggestion(
+    conn: sqlite3.Connection,
+    suggestion_id: str,
+    *,
+    run_id: str,
+    source_note_id: str = "source-note",
+    source_fingerprint: str = "fingerprint-source-note",
+    normalized_tag: str = "research",
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO note_graph_suggestions(
+            id, run_id, owner_user_id, dataset_id, kind, source_note_id,
+            source_fingerprint, normalized_tag, display_tag, state, revision,
+            created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        """,
+        (
+            suggestion_id,
+            run_id,
+            "owner-a",
+            "dataset-a",
+            "tag",
+            source_note_id,
+            source_fingerprint,
+            normalized_tag,
+            normalized_tag.title(),
+            "pending",
+            1,
+        ),
     )
 
 
@@ -192,5 +322,187 @@ def test_sqlite_v64_failure_rolls_back_partial_ddl_and_preserves_v63(
         }
         assert _version(conn) == 63
         assert not _TABLES.intersection(tables_after_failure)
+    finally:
+        db.close_all_connections()
+
+
+def test_sqlite_v64_rejects_cross_scope_parent_references(tmp_path: Path) -> None:
+    db = _initialize(tmp_path / "chacha-v64-cross-scope.sqlite")
+    try:
+        conn = db.get_connection()
+        _create_note(conn, "source-note")
+        _create_note(conn, "owner-b-note", "owner-b")
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert_run(conn, "wrong-note-owner", source_note_id="owner-b-note")
+
+        _insert_receipt(conn, "receipt-a")
+        _insert_receipt(
+            conn,
+            "receipt-b",
+            owner_user_id="owner-b",
+            dataset_id="dataset-b",
+            source_note_id="owner-b-note",
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert_run(
+                conn,
+                "wrong-receipt-dataset",
+                dataset_id="dataset-b",
+                admission_receipt_id="receipt-a",
+            )
+
+        _insert_run(conn, "run-a", admission_receipt_id="receipt-a")
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert_related_suggestion(
+                conn,
+                "wrong-run-dataset",
+                run_id="run-a",
+                source_note_id="source-note",
+                target_note_id="source-note",
+                source_fingerprint="source-fingerprint",
+                target_fingerprint="target-fingerprint",
+                dataset_id="dataset-b",
+            )
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert_related_suggestion(
+                conn,
+                "wrong-target-owner",
+                run_id="run-a",
+                source_note_id="source-note",
+                target_note_id="owner-b-note",
+                source_fingerprint="source-fingerprint",
+                target_fingerprint="target-fingerprint",
+            )
+
+        _insert_related_suggestion(
+            conn,
+            "suggestion-a",
+            run_id="run-a",
+            source_note_id="source-note",
+            target_note_id="source-note",
+            source_fingerprint="source-fingerprint",
+            target_fingerprint="target-fingerprint",
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert_related_suggestion(
+                conn,
+                "wrong-decision-receipt",
+                run_id="run-a",
+                source_note_id="source-note",
+                target_note_id="source-note",
+                source_fingerprint="other-source-fingerprint",
+                target_fingerprint="other-target-fingerprint",
+                decision_receipt_id="receipt-b",
+            )
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                """
+                INSERT INTO note_graph_suggestion_evidence(
+                    suggestion_id, owner_user_id, dataset_id, side, ordinal, note_id,
+                    field, content_fingerprint, start_offset, end_offset
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "suggestion-a",
+                    "owner-a",
+                    "dataset-b",
+                    "source",
+                    0,
+                    "source-note",
+                    "content",
+                    "source-fingerprint",
+                    0,
+                    1,
+                ),
+            )
+    finally:
+        db.close_all_connections()
+
+
+def test_sqlite_v64_note_hard_delete_cascades_receipt_graph(tmp_path: Path) -> None:
+    db = _initialize(tmp_path / "chacha-v64-receipt-cascade.sqlite")
+    try:
+        conn = db.get_connection()
+        _create_note(conn, "source-note")
+        _insert_receipt(conn, "receipt-a")
+        _insert_run(conn, "run-a", admission_receipt_id="receipt-a")
+        _insert_tag_suggestion(conn, "suggestion-a", run_id="run-a")
+        conn.execute(
+            """
+            INSERT INTO note_graph_suggestion_evidence(
+                suggestion_id, owner_user_id, dataset_id, side, ordinal, note_id,
+                field, content_fingerprint, start_offset, end_offset
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "suggestion-a",
+                "owner-a",
+                "dataset-a",
+                "source",
+                0,
+                "source-note",
+                "content",
+                "fingerprint-source-note",
+                0,
+                1,
+            ),
+        )
+
+        conn.execute("DELETE FROM notes WHERE client_id = ? AND id = ?", ("owner-a", "source-note"))
+
+        for table in (
+            "note_graph_suggestion_operation_receipts",
+            "note_graph_suggestion_runs",
+            "note_graph_suggestions",
+            "note_graph_suggestion_evidence",
+        ):
+            assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0  # nosec B608
+    finally:
+        db.close_all_connections()
+
+
+def test_sqlite_v64_rejects_duplicate_tag_and_reverse_related_pair(tmp_path: Path) -> None:
+    db = _initialize(tmp_path / "chacha-v64-canonical-identity.sqlite")
+    try:
+        conn = db.get_connection()
+        _create_note(conn, "alpha")
+        _create_note(conn, "beta")
+        _insert_run(conn, "run-alpha", source_note_id="alpha")
+        _insert_run(conn, "run-beta", source_note_id="beta")
+        _insert_related_suggestion(
+            conn,
+            "related-alpha-beta",
+            run_id="run-alpha",
+            source_note_id="alpha",
+            target_note_id="beta",
+            source_fingerprint="fingerprint-alpha",
+            target_fingerprint="fingerprint-beta",
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert_related_suggestion(
+                conn,
+                "related-beta-alpha",
+                run_id="run-beta",
+                source_note_id="beta",
+                target_note_id="alpha",
+                source_fingerprint="fingerprint-beta",
+                target_fingerprint="fingerprint-alpha",
+            )
+
+        _insert_tag_suggestion(
+            conn,
+            "tag-one",
+            run_id="run-alpha",
+            source_note_id="alpha",
+            source_fingerprint="fingerprint-alpha",
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert_tag_suggestion(
+                conn,
+                "tag-two",
+                run_id="run-alpha",
+                source_note_id="alpha",
+                source_fingerprint="fingerprint-alpha",
+            )
     finally:
         db.close_all_connections()
