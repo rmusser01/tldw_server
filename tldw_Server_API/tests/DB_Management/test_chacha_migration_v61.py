@@ -141,7 +141,7 @@ def test_sqlite_v61_fresh_schema_has_composite_keys_foreign_keys_and_indexes(
             "PRAGMA foreign_key_list(shared_workspace_chat_requests)"
         ).fetchall()
 
-    assert version == 63
+    assert version == CharactersRAGDB._CURRENT_SCHEMA_VERSION
     assert thread_columns["recipient_user_id"] == ("TEXT", 1, 1)
     assert thread_columns["share_id"] == ("INTEGER", 1, 2)
     assert thread_columns["owner_user_id"][:2] == ("TEXT", 1)
@@ -314,5 +314,5 @@ def test_sqlite_v60_upgrade_matches_fresh_schema_and_initializer_is_rerunnable(
         assert upgraded.execute(
             "SELECT version FROM db_schema_version WHERE schema_name = ?",
             (CharactersRAGDB._SCHEMA_NAME,),
-        ).fetchone()[0] == 63
+        ).fetchone()[0] == CharactersRAGDB._CURRENT_SCHEMA_VERSION
         assert upgraded.execute("PRAGMA foreign_key_check").fetchall() == []

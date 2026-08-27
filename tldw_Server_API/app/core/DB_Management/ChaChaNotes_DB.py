@@ -699,8 +699,8 @@ class CharactersRAGDB:
         is_memory_db (bool): True if the database is in-memory.
         db_path_str (str): String representation of the database path for SQLite connection.
     """
-    _CURRENT_SCHEMA_VERSION = 63  # Schema v63 scopes moodboards and Studio after clone v62
-    _POSTGRES_SCHEMA_VERSION = 63
+    _CURRENT_SCHEMA_VERSION = 64  # Schema v64 adds durable Notes graph suggestion persistence
+    _POSTGRES_SCHEMA_VERSION = 64
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _LOCAL_UNBOUND_TASK_DATASET_ID = "local-unbound"
     _NOTE_TASK_V60_TABLES = (
@@ -6718,6 +6718,250 @@ CREATE INDEX IF NOT EXISTS idx_workspaces_system_operation
   ON workspaces(system_operation_kind, system_operation_state, system_operation_id);
 """
 
+    _MIGRATION_SQL_V63_TO_V64 = """
+CREATE TABLE note_graph_suggestion_operation_receipts(
+  id TEXT PRIMARY KEY CHECK(length(trim(id)) > 0),
+  operation_kind TEXT NOT NULL CHECK(operation_kind IN ('run_admit', 'run_cancel', 'suggestion_accept', 'suggestion_reject', 'rejections_reset')),
+  owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(length(trim(dataset_id)) > 0),
+  resource_identity TEXT NOT NULL CHECK(length(trim(resource_identity)) > 0),
+  idempotency_key_digest TEXT NOT NULL CHECK(length(trim(idempotency_key_digest)) > 0),
+  request_fingerprint TEXT NOT NULL CHECK(length(trim(request_fingerprint)) > 0),
+  state TEXT NOT NULL CHECK(state IN ('in_progress', 'completed', 'failed')),
+  http_status INTEGER CHECK(http_status BETWEEN 100 AND 599),
+  replay_envelope TEXT,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  completed_at DATETIME,
+  expires_at DATETIME NOT NULL,
+  UNIQUE(owner_user_id, dataset_id, operation_kind, resource_identity, idempotency_key_digest)
+);
+
+CREATE TABLE note_graph_suggestion_runs(
+  id TEXT PRIMARY KEY CHECK(length(trim(id)) > 0),
+  owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(length(trim(dataset_id)) > 0),
+  source_note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  source_fingerprint TEXT NOT NULL CHECK(length(trim(source_fingerprint)) > 0),
+  admission_receipt_id TEXT REFERENCES note_graph_suggestion_operation_receipts(id) ON DELETE SET NULL,
+  provider TEXT,
+  model TEXT,
+  capability_revision TEXT,
+  prompt_contract_version TEXT,
+  job_id TEXT,
+  expected_completion_token TEXT,
+  state TEXT NOT NULL CHECK(state IN ('admitting', 'queued', 'running', 'cancelling', 'publishing', 'succeeded', 'failed', 'cancelled', 'stale')),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1),
+  result_digest TEXT,
+  suggestion_count INTEGER NOT NULL DEFAULT 0 CHECK(suggestion_count >= 0),
+  related_note_count INTEGER NOT NULL DEFAULT 0 CHECK(related_note_count >= 0),
+  tag_count INTEGER NOT NULL DEFAULT 0 CHECK(tag_count >= 0),
+  invalid_item_count INTEGER NOT NULL DEFAULT 0 CHECK(invalid_item_count >= 0),
+  error_code TEXT,
+  guidance_key TEXT,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  started_at DATETIME,
+  completed_at DATETIME,
+  expires_at DATETIME NOT NULL
+);
+
+CREATE TABLE note_graph_suggestion_rejection_sets(
+  owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(length(trim(dataset_id)) > 0),
+  source_note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  source_fingerprint TEXT NOT NULL CHECK(length(trim(source_fingerprint)) > 0),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1),
+  rejection_count INTEGER NOT NULL DEFAULT 0 CHECK(rejection_count >= 0),
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(owner_user_id, dataset_id, source_note_id, source_fingerprint)
+);
+
+CREATE TABLE note_graph_suggestions(
+  id TEXT PRIMARY KEY CHECK(length(trim(id)) > 0),
+  run_id TEXT NOT NULL REFERENCES note_graph_suggestion_runs(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(length(trim(dataset_id)) > 0),
+  kind TEXT NOT NULL CHECK(kind IN ('related_note', 'tag')),
+  source_note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  source_fingerprint TEXT NOT NULL CHECK(length(trim(source_fingerprint)) > 0),
+  target_note_id TEXT REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  target_fingerprint TEXT,
+  normalized_tag TEXT,
+  display_tag TEXT,
+  keyword_sync_id TEXT,
+  match_strength TEXT CHECK(match_strength IN ('strong', 'possible')),
+  rationale TEXT CHECK(rationale IS NULL OR length(rationale) <= 240),
+  state TEXT NOT NULL CHECK(state IN ('staged', 'pending', 'accepting', 'accepted', 'rejected', 'stale')),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1),
+  decision_reason TEXT,
+  accepted_resource_identity TEXT,
+  decision_at DATETIME,
+  acceptance_lease_token TEXT,
+  acceptance_lease_expires_at DATETIME,
+  decision_receipt_id TEXT REFERENCES note_graph_suggestion_operation_receipts(id) ON DELETE SET NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  expires_at DATETIME,
+  CHECK(
+    (kind = 'related_note' AND target_note_id IS NOT NULL AND target_fingerprint IS NOT NULL AND normalized_tag IS NULL AND display_tag IS NULL)
+    OR (kind = 'tag' AND target_note_id IS NULL AND target_fingerprint IS NULL AND normalized_tag IS NOT NULL AND display_tag IS NOT NULL)
+  )
+);
+
+CREATE TABLE note_graph_suggestion_evidence(
+  suggestion_id TEXT NOT NULL REFERENCES note_graph_suggestions(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(length(trim(dataset_id)) > 0),
+  side TEXT NOT NULL CHECK(side IN ('source', 'target')),
+  ordinal INTEGER NOT NULL CHECK(ordinal >= 0),
+  note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  field TEXT NOT NULL CHECK(field IN ('title', 'content')),
+  content_fingerprint TEXT NOT NULL CHECK(length(trim(content_fingerprint)) > 0),
+  start_offset INTEGER NOT NULL CHECK(start_offset >= 0),
+  end_offset INTEGER NOT NULL CHECK(end_offset > start_offset),
+  PRIMARY KEY(suggestion_id, side, ordinal)
+);
+
+CREATE INDEX idx_note_graph_suggestion_runs_owner_dataset_note_state
+  ON note_graph_suggestion_runs(owner_user_id, dataset_id, source_note_id, state, created_at DESC);
+CREATE UNIQUE INDEX idx_note_graph_suggestion_runs_active_source
+  ON note_graph_suggestion_runs(owner_user_id, dataset_id, source_note_id)
+  WHERE state IN ('admitting', 'queued', 'running', 'cancelling', 'publishing');
+CREATE INDEX idx_note_graph_suggestion_runs_retention
+  ON note_graph_suggestion_runs(state, expires_at);
+CREATE INDEX idx_note_graph_suggestion_operation_receipts_retention
+  ON note_graph_suggestion_operation_receipts(owner_user_id, dataset_id, state, expires_at);
+CREATE INDEX idx_note_graph_suggestions_owner_dataset_source_state
+  ON note_graph_suggestions(owner_user_id, dataset_id, source_note_id, state, updated_at DESC);
+CREATE INDEX idx_note_graph_suggestions_target_state
+  ON note_graph_suggestions(owner_user_id, dataset_id, target_note_id, state);
+CREATE INDEX idx_note_graph_suggestions_suppression_related
+  ON note_graph_suggestions(owner_user_id, dataset_id, source_note_id, source_fingerprint, target_note_id, target_fingerprint);
+CREATE INDEX idx_note_graph_suggestions_suppression_tag
+  ON note_graph_suggestions(owner_user_id, dataset_id, source_note_id, source_fingerprint, normalized_tag);
+CREATE INDEX idx_note_graph_suggestions_acceptance_lease
+  ON note_graph_suggestions(state, acceptance_lease_expires_at);
+CREATE INDEX idx_note_graph_suggestions_retention
+  ON note_graph_suggestions(state, expires_at);
+CREATE INDEX idx_note_graph_suggestion_evidence_note
+  ON note_graph_suggestion_evidence(owner_user_id, dataset_id, note_id);
+"""
+
+    _MIGRATION_SQL_V63_TO_V64_POSTGRES = """
+CREATE TABLE IF NOT EXISTS note_graph_suggestion_operation_receipts(
+  id TEXT PRIMARY KEY CHECK(char_length(btrim(id)) > 0),
+  operation_kind TEXT NOT NULL CHECK(operation_kind IN ('run_admit', 'run_cancel', 'suggestion_accept', 'suggestion_reject', 'rejections_reset')),
+  owner_user_id TEXT NOT NULL CHECK(char_length(btrim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(char_length(btrim(dataset_id)) > 0),
+  resource_identity TEXT NOT NULL CHECK(char_length(btrim(resource_identity)) > 0),
+  idempotency_key_digest TEXT NOT NULL CHECK(char_length(btrim(idempotency_key_digest)) > 0),
+  request_fingerprint TEXT NOT NULL CHECK(char_length(btrim(request_fingerprint)) > 0),
+  state TEXT NOT NULL CHECK(state IN ('in_progress', 'completed', 'failed')),
+  http_status INTEGER CHECK(http_status BETWEEN 100 AND 599),
+  replay_envelope TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  completed_at TIMESTAMPTZ,
+  expires_at TIMESTAMPTZ NOT NULL,
+  UNIQUE(owner_user_id, dataset_id, operation_kind, resource_identity, idempotency_key_digest)
+);
+CREATE TABLE IF NOT EXISTS note_graph_suggestion_runs(
+  id TEXT PRIMARY KEY CHECK(char_length(btrim(id)) > 0),
+  owner_user_id TEXT NOT NULL CHECK(char_length(btrim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(char_length(btrim(dataset_id)) > 0),
+  source_note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  source_fingerprint TEXT NOT NULL CHECK(char_length(btrim(source_fingerprint)) > 0),
+  admission_receipt_id TEXT REFERENCES note_graph_suggestion_operation_receipts(id) ON DELETE SET NULL,
+  provider TEXT, model TEXT, capability_revision TEXT, prompt_contract_version TEXT,
+  job_id TEXT, expected_completion_token TEXT,
+  state TEXT NOT NULL CHECK(state IN ('admitting', 'queued', 'running', 'cancelling', 'publishing', 'succeeded', 'failed', 'cancelled', 'stale')),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1),
+  result_digest TEXT,
+  suggestion_count INTEGER NOT NULL DEFAULT 0 CHECK(suggestion_count >= 0),
+  related_note_count INTEGER NOT NULL DEFAULT 0 CHECK(related_note_count >= 0),
+  tag_count INTEGER NOT NULL DEFAULT 0 CHECK(tag_count >= 0),
+  invalid_item_count INTEGER NOT NULL DEFAULT 0 CHECK(invalid_item_count >= 0),
+  error_code TEXT, guidance_key TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  started_at TIMESTAMPTZ, completed_at TIMESTAMPTZ, expires_at TIMESTAMPTZ NOT NULL
+);
+CREATE TABLE IF NOT EXISTS note_graph_suggestion_rejection_sets(
+  owner_user_id TEXT NOT NULL CHECK(char_length(btrim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(char_length(btrim(dataset_id)) > 0),
+  source_note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  source_fingerprint TEXT NOT NULL CHECK(char_length(btrim(source_fingerprint)) > 0),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1),
+  rejection_count INTEGER NOT NULL DEFAULT 0 CHECK(rejection_count >= 0),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(owner_user_id, dataset_id, source_note_id, source_fingerprint)
+);
+CREATE TABLE IF NOT EXISTS note_graph_suggestions(
+  id TEXT PRIMARY KEY CHECK(char_length(btrim(id)) > 0),
+  run_id TEXT NOT NULL REFERENCES note_graph_suggestion_runs(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  owner_user_id TEXT NOT NULL CHECK(char_length(btrim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(char_length(btrim(dataset_id)) > 0),
+  kind TEXT NOT NULL CHECK(kind IN ('related_note', 'tag')),
+  source_note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  source_fingerprint TEXT NOT NULL CHECK(char_length(btrim(source_fingerprint)) > 0),
+  target_note_id TEXT REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  target_fingerprint TEXT, normalized_tag TEXT, display_tag TEXT, keyword_sync_id TEXT,
+  match_strength TEXT CHECK(match_strength IN ('strong', 'possible')),
+  rationale TEXT CHECK(rationale IS NULL OR char_length(rationale) <= 240),
+  state TEXT NOT NULL CHECK(state IN ('staged', 'pending', 'accepting', 'accepted', 'rejected', 'stale')),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1),
+  decision_reason TEXT, accepted_resource_identity TEXT, decision_at TIMESTAMPTZ,
+  acceptance_lease_token TEXT, acceptance_lease_expires_at TIMESTAMPTZ,
+  decision_receipt_id TEXT REFERENCES note_graph_suggestion_operation_receipts(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  expires_at TIMESTAMPTZ,
+  CHECK((kind = 'related_note' AND target_note_id IS NOT NULL AND target_fingerprint IS NOT NULL AND normalized_tag IS NULL AND display_tag IS NULL) OR (kind = 'tag' AND target_note_id IS NULL AND target_fingerprint IS NULL AND normalized_tag IS NOT NULL AND display_tag IS NOT NULL))
+);
+CREATE TABLE IF NOT EXISTS note_graph_suggestion_evidence(
+  suggestion_id TEXT NOT NULL REFERENCES note_graph_suggestions(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  owner_user_id TEXT NOT NULL CHECK(char_length(btrim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(char_length(btrim(dataset_id)) > 0),
+  side TEXT NOT NULL CHECK(side IN ('source', 'target')),
+  ordinal INTEGER NOT NULL CHECK(ordinal >= 0),
+  note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  field TEXT NOT NULL CHECK(field IN ('title', 'content')),
+  content_fingerprint TEXT NOT NULL CHECK(char_length(btrim(content_fingerprint)) > 0),
+  start_offset INTEGER NOT NULL CHECK(start_offset >= 0),
+  end_offset INTEGER NOT NULL CHECK(end_offset > start_offset),
+  PRIMARY KEY(suggestion_id, side, ordinal)
+);
+CREATE INDEX IF NOT EXISTS idx_note_graph_suggestion_runs_owner_dataset_note_state ON note_graph_suggestion_runs(owner_user_id, dataset_id, source_note_id, state, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_note_graph_suggestion_runs_active_source ON note_graph_suggestion_runs(owner_user_id, dataset_id, source_note_id) WHERE state IN ('admitting', 'queued', 'running', 'cancelling', 'publishing');
+CREATE INDEX IF NOT EXISTS idx_note_graph_suggestion_runs_retention ON note_graph_suggestion_runs(state, expires_at);
+CREATE INDEX IF NOT EXISTS idx_note_graph_suggestion_operation_receipts_retention ON note_graph_suggestion_operation_receipts(owner_user_id, dataset_id, state, expires_at);
+CREATE INDEX IF NOT EXISTS idx_note_graph_suggestions_owner_dataset_source_state ON note_graph_suggestions(owner_user_id, dataset_id, source_note_id, state, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_note_graph_suggestions_target_state ON note_graph_suggestions(owner_user_id, dataset_id, target_note_id, state);
+CREATE INDEX IF NOT EXISTS idx_note_graph_suggestions_suppression_related ON note_graph_suggestions(owner_user_id, dataset_id, source_note_id, source_fingerprint, target_note_id, target_fingerprint);
+CREATE INDEX IF NOT EXISTS idx_note_graph_suggestions_suppression_tag ON note_graph_suggestions(owner_user_id, dataset_id, source_note_id, source_fingerprint, normalized_tag);
+CREATE INDEX IF NOT EXISTS idx_note_graph_suggestions_acceptance_lease ON note_graph_suggestions(state, acceptance_lease_expires_at);
+CREATE INDEX IF NOT EXISTS idx_note_graph_suggestions_retention ON note_graph_suggestions(state, expires_at);
+CREATE INDEX IF NOT EXISTS idx_note_graph_suggestion_evidence_note ON note_graph_suggestion_evidence(owner_user_id, dataset_id, note_id);
+
+ALTER TABLE note_graph_suggestion_operation_receipts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE note_graph_suggestion_operation_receipts FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS note_graph_suggestion_operation_receipts_tenant_isolation ON note_graph_suggestion_operation_receipts;
+CREATE POLICY note_graph_suggestion_operation_receipts_tenant_isolation ON note_graph_suggestion_operation_receipts USING (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true)) WITH CHECK (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true));
+ALTER TABLE note_graph_suggestion_runs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE note_graph_suggestion_runs FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS note_graph_suggestion_runs_tenant_isolation ON note_graph_suggestion_runs;
+CREATE POLICY note_graph_suggestion_runs_tenant_isolation ON note_graph_suggestion_runs USING (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true)) WITH CHECK (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true));
+ALTER TABLE note_graph_suggestion_rejection_sets ENABLE ROW LEVEL SECURITY;
+ALTER TABLE note_graph_suggestion_rejection_sets FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS note_graph_suggestion_rejection_sets_tenant_isolation ON note_graph_suggestion_rejection_sets;
+CREATE POLICY note_graph_suggestion_rejection_sets_tenant_isolation ON note_graph_suggestion_rejection_sets USING (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true)) WITH CHECK (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true));
+ALTER TABLE note_graph_suggestions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE note_graph_suggestions FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS note_graph_suggestions_tenant_isolation ON note_graph_suggestions;
+CREATE POLICY note_graph_suggestions_tenant_isolation ON note_graph_suggestions USING (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true)) WITH CHECK (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true));
+ALTER TABLE note_graph_suggestion_evidence ENABLE ROW LEVEL SECURITY;
+ALTER TABLE note_graph_suggestion_evidence FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS note_graph_suggestion_evidence_tenant_isolation ON note_graph_suggestion_evidence;
+CREATE POLICY note_graph_suggestion_evidence_tenant_isolation ON note_graph_suggestion_evidence USING (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true)) WITH CHECK (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true));
+"""
+
     _SHARED_WORKSPACE_CHAT_V61_POSTGRES_VERIFY_SQL = """
 DO $shared_workspace_chat_v61_verify$
 BEGIN
@@ -6889,6 +7133,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         from tldw_Server_API.app.core.DB_Management.chacha.note_graph_projection_store import (
             NoteGraphProjectionStore,
         )
+        from tldw_Server_API.app.core.DB_Management.chacha.note_graph_suggestion_store import (
+            NoteGraphSuggestionStore,
+        )
         from tldw_Server_API.app.core.DB_Management.chacha.note_link_store import NotesLinkStore
         from tldw_Server_API.app.core.DB_Management.chacha.note_store import NoteStore
         from tldw_Server_API.app.core.DB_Management.chacha.persona_state_store import (
@@ -6907,6 +7154,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         self.note_attachment_store = NoteAttachmentStore(self)
         self.notes_link_store = NotesLinkStore(self)
         self.note_graph_projection_store = NoteGraphProjectionStore(self)
+        self.note_graph_suggestion_store = NoteGraphSuggestionStore(self)
         self.task_store = TaskStore(self)
         self.keyword_store = KeywordStore(self)
         self.persona_state_store = PersonaStateStore(self)
@@ -7832,6 +8080,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             (60, "_migrate_from_v60_to_v61_sqlite"),
             (61, "_migrate_from_v61_to_v62_sqlite"),
             (62, "_migrate_from_v62_to_v63_sqlite"),
+            (63, "_migrate_from_v63_to_v64_sqlite"),
         ):
             method = getattr(self, method_name, None)
             if method is not None:
@@ -13454,6 +13703,39 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             raise SchemaError("Notes moodboard/Studio v63 migration failed version verification.")  # noqa: TRY003
         self._notes_moodboard_studio_v61_migration_checkpoint("version")
 
+    def _migrate_from_v63_to_v64_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Add durable, owner/dataset-scoped Notes graph suggestion storage."""
+        if self._get_db_version(conn) != 63:
+            raise SchemaError("Notes graph suggestion v64 migration requires schema version 63.")  # noqa: TRY003
+        savepoint = "note_graph_suggestion_v64_migration"
+        savepoint_active = False
+        try:
+            conn.execute(f"SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
+            savepoint_active = True
+            for statement in split_sql_statements(self._MIGRATION_SQL_V63_TO_V64):
+                conn.execute(statement)
+            cursor = conn.execute(
+                "UPDATE db_schema_version SET version = ? WHERE schema_name = ? AND version = ?",
+                (64, self._SCHEMA_NAME, 63),
+            )
+            if cursor.rowcount != 1 or self._get_db_version(conn) != 64:
+                raise SchemaError("Notes graph suggestion v64 SQLite version transition failed.")  # noqa: TRY003
+            conn.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
+            savepoint_active = False
+        except (SchemaError, sqlite3.Error) as exc:
+            if savepoint_active:
+                try:
+                    conn.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
+                    conn.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
+                except sqlite3.Error as rollback_exc:
+                    raise SchemaError(
+                        "Notes graph suggestion v64 SQLite migration rollback failed: "
+                        f"{rollback_exc}"
+                    ) from exc
+            if isinstance(exc, SchemaError):
+                raise
+            raise SchemaError(f"Notes graph suggestion v64 SQLite migration failed: {exc}") from exc
+
     @staticmethod
     def _notes_moodboard_studio_v61_postgres_checkpoint(_stage: str) -> None:
         """Fault-injection seam after durable PostgreSQL v61 phase commits."""
@@ -16667,6 +16949,18 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if self._get_schema_version_postgres(conn) != 62:
             raise SchemaError("Workspace clone lifecycle v62 PostgreSQL version verification failed.")  # noqa: TRY003
 
+    def _migrate_from_v63_to_v64_postgres(self, conn: Any) -> None:
+        """Add durable, forced-RLS Notes graph suggestion persistence."""
+        if self._get_schema_version_postgres(conn) != 63:
+            raise SchemaError("Notes graph suggestion v64 PostgreSQL migration requires schema version 63.")  # noqa: TRY003
+        self._apply_postgres_migration_script(
+            self._MIGRATION_SQL_V63_TO_V64_POSTGRES,
+            conn,
+            expected_version=64,
+        )
+        if self._get_schema_version_postgres(conn) != 64:
+            raise SchemaError("Notes graph suggestion v64 PostgreSQL version verification failed.")  # noqa: TRY003
+
     def _notes_graph_schema_postgres(self, conn: Any) -> None:
         """Create owner-scoped graph projections and direct-write invalidation."""
 
@@ -17407,6 +17701,21 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             return
         self._verify_notes_moodboard_studio_schema_sqlite(conn)
 
+    def _ensure_note_graph_suggestion_schema_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Verify the schema-version-owned Notes graph suggestion relations."""
+        if self._get_db_version(conn) < 64:
+            return
+        required_tables = {
+            "note_graph_suggestion_operation_receipts",
+            "note_graph_suggestion_runs",
+            "note_graph_suggestion_rejection_sets",
+            "note_graph_suggestions",
+            "note_graph_suggestion_evidence",
+        }
+        missing = required_tables - self._sqlite_table_names(conn)
+        if missing:
+            raise SchemaError(f"Notes graph suggestion v64 SQLite schema is incomplete: {sorted(missing)}")
+
     def _ensure_note_studio_schema_postgres(self, conn: Any) -> None:
         """Create the legacy sidecar before v63 or verify schema-owned v63 state."""
         if self._get_schema_version_postgres(conn) >= 63:
@@ -17434,6 +17743,23 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         )
         for statement in statements:
             self.backend.execute(statement, connection=conn)
+
+    def _ensure_note_graph_suggestion_schema_postgres(self, conn: Any) -> None:
+        """Verify the schema-version-owned Notes graph suggestion relations."""
+        if self._get_schema_version_postgres(conn) < 64:
+            return
+        required_tables = (
+            "note_graph_suggestion_operation_receipts",
+            "note_graph_suggestion_runs",
+            "note_graph_suggestion_rejection_sets",
+            "note_graph_suggestions",
+            "note_graph_suggestion_evidence",
+        )
+        missing = [
+            table for table in required_tables if not self.backend.table_exists(table, connection=conn)
+        ]
+        if missing:
+            raise SchemaError(f"Notes graph suggestion v64 PostgreSQL schema is incomplete: {missing}")
 
     def _supports_notes_moodboard_studio_v61(self) -> bool:
         """Return whether this database instance has the v61 product catalog revision."""
@@ -19296,6 +19622,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     else:
                         if target_version >= 63:
                             self._verify_notes_moodboard_studio_schema_sqlite(conn)
+                        if target_version >= 64:
+                            self._ensure_note_graph_suggestion_schema_sqlite(conn)
                         elif target_version >= 60:
                             self._verify_note_task_schema_sqlite(conn)
                         logger.debug(f"Database schema '{self._SCHEMA_NAME}' is up to date (Version {target_version}).")
@@ -19992,11 +20320,15 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if target_version >= 63 and current_db_version == 62:
                     self._migrate_from_v62_to_v63_sqlite(conn)
                     current_db_version = self._get_db_version(conn)
+                if target_version >= 64 and current_db_version == 63:
+                    self._migrate_from_v63_to_v64_sqlite(conn)
+                    current_db_version = self._get_db_version(conn)
 
                 self._ensure_recent_persona_schema_sqlite(conn)
                 self._ensure_recent_voice_command_schema_sqlite(conn)
                 self._ensure_note_folder_schema_sqlite(conn)
                 self._ensure_note_studio_schema_sqlite(conn)
+                self._ensure_note_graph_suggestion_schema_sqlite(conn)
                 self._ensure_web_clipper_schema_sqlite(conn)
                 self._ensure_prompt_presets_schema_sqlite(conn)
                 self._ensure_workspace_assistant_defaults_schema_sqlite(conn)
@@ -20012,6 +20344,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         f"Schema migration process completed, but final DB version is {final_version_check}, expected {target_version}. Manual check required.")
                 if final_version_check >= 63:
                     self._verify_notes_moodboard_studio_schema_sqlite(conn)
+                if final_version_check >= 64:
+                    self._ensure_note_graph_suggestion_schema_sqlite(conn)
                 elif final_version_check >= 60:
                     self._verify_note_task_schema_sqlite(conn)
                 # Verify core FTS tables after migrations complete
@@ -23749,6 +24083,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._verify_note_task_schema_postgres(conn)
                 if current_version >= 63:
                     self._verify_notes_moodboard_studio_schema_postgres(conn)
+                if current_version >= 64:
+                    self._ensure_note_graph_suggestion_schema_postgres(conn)
 
             if current_version < 36:
                 self._ensure_postgres_workspaces_table_base(conn)
@@ -23963,6 +24299,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._ensure_note_studio_schema_postgres(conn)
                 self._migrate_from_v62_to_v63_postgres(conn)
                 current_version = 63
+            if current_version < 64:
+                self._migrate_from_v63_to_v64_postgres(conn)
+                current_version = 64
             self._runtime_schema_version = current_version
 
             if current_version > target_version:
@@ -23985,6 +24324,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             self._ensure_recent_voice_command_schema_postgres(conn)
             self._ensure_note_folder_schema_postgres(conn)
             self._ensure_note_studio_schema_postgres(conn)
+            self._ensure_note_graph_suggestion_schema_postgres(conn)
             self._ensure_web_clipper_schema_postgres(conn)
             self._ensure_prompt_presets_schema_postgres(conn)
             self._ensure_workspace_subresource_schema_postgres(conn)
