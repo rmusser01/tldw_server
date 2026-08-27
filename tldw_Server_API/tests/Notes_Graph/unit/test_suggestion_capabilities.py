@@ -13,6 +13,7 @@ from tldw_Server_API.app.core.Notes_Graph.suggestion_capabilities import (
     build_suggestion_capabilities,
     canonical_endpoint_origin_digest,
 )
+from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
 
 pytestmark = pytest.mark.unit
 
@@ -30,13 +31,15 @@ def _contract(**overrides: object) -> ProviderCapabilityContract:
             allow_response_format=True,
             candidate_count=1,
             privacy_safe_errors=True,
+            maximum_timeout_seconds=120,
+            required_endpoint_scope=ConfiguredEndpointScope.from_url(
+                "https://API.Example.test:443/v1/chat/completions"
+            ),
         ),
         "data_boundary": "remote",
         "outbound_data_categories": DEFAULT_OUTBOUND_DATA_CATEGORIES,
         "limits": SuggestionCapabilityLimits(),
         "prompt_contract_version": PROMPT_CONTRACT_VERSION,
-        "supports_one_attempt": True,
-        "enforces_same_origin_redirects": True,
         "credentials_available": True,
         "provider_healthy": True,
         "health_heartbeat": "heartbeat-a",
@@ -50,7 +53,13 @@ def test_revision_covers_only_approved_stable_fields() -> None:
     stable_changes = (
         {"adapter": "anthropic"},
         {"model": "model-b"},
-        {"endpoint_url": "https://other.example.test/v1"},
+        {
+            "endpoint_url": "https://other.example.test/v1",
+            "call_policy": replace(
+                _contract().call_policy,
+                required_endpoint_scope=ConfiguredEndpointScope.from_url("https://other.example.test/v1"),
+            ),
+        },
         {
             "call_policy": replace(
                 _contract().call_policy,
@@ -112,14 +121,7 @@ def test_unknown_data_boundary_is_disclosed_as_external(
 @pytest.mark.parametrize(
     ("changes", "reason"),
     [
-        (
-            {"supports_one_attempt": False},
-            "notes_graph_provider_retry_policy_unsupported",
-        ),
-        (
-            {"enforces_same_origin_redirects": False},
-            "notes_graph_provider_redirect_policy_unsupported",
-        ),
+        ({"adapter": "anthropic"}, "notes_graph_provider_call_policy_unsupported"),
         (
             {"credentials_available": False},
             "notes_graph_provider_not_configured",
@@ -174,7 +176,7 @@ def test_default_disclosure_and_effective_limits_are_exact() -> None:
     )
 
 
-def test_transport_and_readiness_facts_must_be_explicit() -> None:
+def test_readiness_facts_must_be_explicit() -> None:
     with pytest.raises(TypeError):
         ProviderCapabilityContract(
             adapter="openai",
@@ -223,3 +225,52 @@ def test_capability_preflight_verifies_effective_call_policy(
 
     assert capability.generation_available is False
     assert capability.unavailable_reason == reason
+
+
+@pytest.mark.parametrize(
+    ("field_name", "invalid_value"),
+    [
+        ("max_candidates", 0),
+        ("max_relationships", -1),
+        ("max_tags", True),
+        ("max_new_tags", 3),
+        ("max_tag_catalog", 101),
+        ("max_estimated_input_tokens", 24_001),
+        ("max_output_tokens", 2_001),
+        ("provider_timeout_seconds", 121),
+        ("response_candidates", 2),
+    ],
+)
+def test_effective_limits_reject_nonpositive_noninteger_and_above_hard_values(
+    field_name: str,
+    invalid_value: object,
+) -> None:
+    with pytest.raises((TypeError, ValueError)):
+        SuggestionCapabilityLimits(**{field_name: invalid_value})
+
+
+def test_configured_lower_limits_are_revision_bound() -> None:
+    lower = SuggestionCapabilityLimits(
+        max_candidates=2,
+        max_relationships=1,
+        max_tags=2,
+        max_new_tags=1,
+        max_tag_catalog=3,
+        max_estimated_input_tokens=2_000,
+        max_output_tokens=500,
+        provider_timeout_seconds=30,
+        response_candidates=1,
+    )
+
+    capability = build_suggestion_capabilities(_contract(limits=lower))
+
+    assert capability.limits is lower
+    assert capability.revision != build_suggestion_capabilities(_contract()).revision
+
+
+def test_caller_cannot_self_attest_transport_safety() -> None:
+    with pytest.raises(TypeError):
+        _contract(supports_one_attempt=True)
+
+    with pytest.raises(TypeError):
+        _contract(enforces_same_origin_redirects=True)

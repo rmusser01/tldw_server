@@ -4,7 +4,7 @@ title: Implement first-class Notes graph workspace and reviewable AI suggestions
 status: In Progress
 assignee: []
 created_date: 2026-08-27 03:40
-updated_date: 2026-08-27 11:22
+updated_date: 2026-08-27 12:02
 labels:
 - notes
 - knowledge-graph
@@ -42,6 +42,10 @@ modified_files:
 - tldw_Server_API/tests/Notes_Graph/unit/test_suggestion_capabilities.py
 - tldw_Server_API/tests/Notes_Graph/unit/test_suggestion_generation.py
 - tldw_Server_API/tests/LLM_Adapters/unit/test_notes_graph_suggestion_call_policy.py
+- tldw_Server_API/app/core/Chat/chat_service.py
+- tldw_Server_API/app/core/LLM_Calls/adapter_registry.py
+- tldw_Server_API/app/core/LLM_Calls/capability_registry.py
+- tldw_Server_API/app/core/LLM_Calls/providers/openai_adapter.py
 ---
 
 ## Description
@@ -85,6 +89,7 @@ Execute the approved 12-task test-first plan in Docs/superpowers/plans/2026-08-2
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Deferred work is tracked separately: TASK-13134 embeddings and semantic edges; TASK-13135 automatic background organization; TASK-13136 library-wide recurring themes; TASK-13137 saved graph views/layouts. This task remains review-first and on-demand.
 
@@ -132,7 +137,12 @@ Task 3 Fix Round 3 started from exact base 4faf2e73c10b291055cb8c5ff1739fdfb2e66
 Task 3 Fix Round 3 completed from exact base 4faf2e73c10b291055cb8c5ff1739fdfb2e6676f. Unreleased v64 now persists paired five-minute maintenance lease tokens/expiries and an owner/dataset active-run scan index. The store claims deterministic bounded batches (1..100), fences reconcile/release by owner, dataset, state, revision, exact non-expired token, clears leases on all competing run transitions, and keeps Jobs/provider I/O outside ChaChaNotes. Admission and worker error/guidance contracts are exact operation-specific mappings; job/publication outcomes are derived and run-admit replay rejects unsafe persisted cross-products. Strict RED: 6 failed/42 deselected/0 skipped/2 warnings; lease subcycles each failed on SQLite/live PostgreSQL before fixes. GREEN: focused 6 passed; Task 3 53 passed; v64 SQLite/live PostgreSQL 30 passed; Task 2 26 passed; NoteStore/projection/Sync 58 passed; final deduplicated run 167 passed/0 skipped/2 inherited warnings. Ruff clean; Bandit 0 findings; git diff --check passed. Report appended locally at .superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-3-report.md and remains ignored.
 Task 4 started from exact base 65d98c8624160152f8af7b87b7daf1dbd64c9aca. Scope is capability disclosure, deterministic opaque revisions, strict bounded local validation, deterministic match strength, and one provider call through ProviderCallPolicy/perform_chat_api_call_async. Inspected established prompt-improvement call-policy tests, structured-output negotiation, canonical endpoint scope, provider config resolution, and capability derivation before edits. The three required test files will be written and run RED before the two production modules.
 Task 4 completed from exact base 65d98c8624160152f8af7b87b7daf1dbd64c9aca. Added deterministic provider capability disclosure with canonical endpoint-origin digest, exact stable limits/data categories, unknown-as-external boundary behavior, strict bounded one-call generation through ProviderCallPolicy/perform_chat_api_call_async, local JSON/schema validation, and server-computed Strong/Possible match strength. No Jobs, persistence, API, service, or shared adapter/policy changes were made. Final required plus existing no-retry suite: 56 passed/0 skipped/4 inherited warnings. Ruff check clean; Ruff format check reported 5 files formatted; Bandit 0 findings/0 errors/0 nosec/0 skipped across 794 production LOC; git diff --check passed. Prompt-improvement regressions were not required because shared policy code was unchanged. Privacy/one-call self-review found no sensitive logging or persisted transport material. Ignored report: .superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-4-report.md.
+Task 4 Fix Round 1/3 started from exact base b2af691006235d1d49492a25ad3ddb0aba9a92c1. Scope is the seven verified review findings and latest ledger ruling: derive one-attempt/same-origin safety from an audited adapter contract bound to the actual ConfiguredEndpointScope, enforce opt-in hard transport/wall-clock timeouts without changing ordinary or Prompt Improvement behavior, bind one validated effective-limits authority through disclosure/request/parse, reject ambiguous response candidates, normalize NFC before matching, reject duplicate/deep JSON safely, and record exact inherited warning evidence. Focused tests will be written and run RED before production edits; shared production changes are limited to the opt-in provider policy/adapter enforcement required by the ruling.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+Task 4 Fix Round 1 completed from exact base b2af691006235d1d49492a25ad3ddb0aba9a92c1. Replaced caller-attested transport booleans with an exact-concrete-adapter registry contract and bound the disclosed ConfiguredEndpointScope to the OpenAI centralized fetch transport. Strict opt-in calls use one retry attempt, same-origin-only redirects, configured timeout clamping, and an outer async deadline; ordinary and Prompt Improvement behavior remains unchanged. One validated effective limits object now drives disclosure revision, prompt/request caps, parser caps, output size, candidate count, and timeout. Added exact-one-choice normalization, NFC matching, duplicate-key/depth-safe JSON rejection, and real counting-transport 307/308 coverage. Strict RED: 67 failed/7 passed/4 warnings. GREEN: Task 4 focused 74 passed/0 skipped/4 inherited warnings; required Task 4 plus no-retry, Prompt Improvement, and OpenAI adapter regressions 128 passed/0 skipped/4 inherited warnings. Ruff lint clean; five Task 4 files/tests Ruff-format clean; four pre-existing shared files intentionally retain baseline formatting to avoid mechanical churn; Bandit 0 findings; git diff --check passed. Ignored report appended at .superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-4-report.md.
+<!-- SECTION:NOTES:END -->
+
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->

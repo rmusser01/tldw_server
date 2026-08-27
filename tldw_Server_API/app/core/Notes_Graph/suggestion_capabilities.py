@@ -7,6 +7,7 @@ import json
 from dataclasses import asdict, dataclass, field
 from typing import Literal
 
+from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
 from tldw_Server_API.app.core.LLM_Calls.capability_registry import ProviderCallPolicy
 from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
 
@@ -28,20 +29,47 @@ DEFAULT_ALLOWED_ACTIONS = (
 
 DataBoundary = Literal["local", "remote", "unknown"]
 
+_HARD_LIMIT_VALUES = {
+    "max_candidates": 30,
+    "max_relationships": 5,
+    "max_tags": 5,
+    "max_new_tags": 2,
+    "max_tag_catalog": 100,
+    "max_estimated_input_tokens": 24_000,
+    "max_output_tokens": 2_000,
+    "provider_timeout_seconds": 120,
+    "response_candidates": 1,
+}
+
 
 @dataclass(frozen=True, slots=True)
 class SuggestionCapabilityLimits:
     """Hard generation limits disclosed to the client and bound by revision."""
 
-    max_candidates: int = 30
-    max_relationships: int = 5
-    max_tags: int = 5
-    max_new_tags: int = 2
-    max_tag_catalog: int = 100
-    max_estimated_input_tokens: int = 24_000
-    max_output_tokens: int = 2_000
-    provider_timeout_seconds: int = 120
-    response_candidates: int = 1
+    max_candidates: int = _HARD_LIMIT_VALUES["max_candidates"]
+    max_relationships: int = _HARD_LIMIT_VALUES["max_relationships"]
+    max_tags: int = _HARD_LIMIT_VALUES["max_tags"]
+    max_new_tags: int = _HARD_LIMIT_VALUES["max_new_tags"]
+    max_tag_catalog: int = _HARD_LIMIT_VALUES["max_tag_catalog"]
+    max_estimated_input_tokens: int = _HARD_LIMIT_VALUES["max_estimated_input_tokens"]
+    max_output_tokens: int = _HARD_LIMIT_VALUES["max_output_tokens"]
+    provider_timeout_seconds: int = _HARD_LIMIT_VALUES["provider_timeout_seconds"]
+    response_candidates: int = _HARD_LIMIT_VALUES["response_candidates"]
+
+    def __post_init__(self) -> None:
+        for field_name, hard_maximum in _HARD_LIMIT_VALUES.items():
+            value = getattr(self, field_name)
+            if type(value) is not int:
+                raise TypeError(f"{field_name} must be an integer")
+            if value <= 0:
+                raise ValueError(f"{field_name} must be positive")
+            if value > hard_maximum:
+                raise ValueError(f"{field_name} exceeds its hard maximum")
+        if self.response_candidates != 1:
+            raise ValueError("response_candidates must equal 1")
+
+
+HARD_SUGGESTION_CAPABILITY_LIMITS = SuggestionCapabilityLimits()
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,8 +81,6 @@ class ProviderCapabilityContract:
     endpoint_url: str = field(repr=False)
     call_policy: ProviderCallPolicy
     data_boundary: DataBoundary
-    supports_one_attempt: bool
-    enforces_same_origin_redirects: bool
     credentials_available: bool
     provider_healthy: bool
     outbound_data_categories: tuple[str, ...] = DEFAULT_OUTBOUND_DATA_CATEGORIES
@@ -93,6 +119,13 @@ def canonical_endpoint_origin_digest(endpoint_url: str) -> str:
     return f"sha256:{hashlib.sha256(canonical).hexdigest()}"
 
 
+def _scope_origin_digest(scope: ConfiguredEndpointScope | None) -> str | None:
+    if scope is None:
+        return None
+    canonical = f"{scope.scheme}://{scope.host}:{scope.port}".encode()
+    return f"sha256:{hashlib.sha256(canonical).hexdigest()}"
+
+
 def _policy_revision_fields(policy: ProviderCallPolicy) -> dict[str, object]:
     return {
         "max_transport_attempts": policy.max_transport_attempts,
@@ -104,17 +137,27 @@ def _policy_revision_fields(policy: ProviderCallPolicy) -> dict[str, object]:
         "temperature": policy.temperature,
         "top_p": policy.top_p,
         "privacy_safe_errors": policy.privacy_safe_errors,
+        "maximum_timeout_seconds": policy.maximum_timeout_seconds,
+        "required_endpoint_origin_revision": _scope_origin_digest(policy.required_endpoint_scope),
     }
 
 
 def _availability(contract: ProviderCapabilityContract) -> tuple[bool, str | None]:
-    if not contract.supports_one_attempt:
-        return False, "notes_graph_provider_retry_policy_unsupported"
     policy = contract.call_policy
     if policy.max_transport_attempts != 1:
         return False, "notes_graph_provider_retry_policy_unsupported"
-    if not contract.enforces_same_origin_redirects:
-        return False, "notes_graph_provider_redirect_policy_unsupported"
+    transport = get_registry().get_audited_call_policy_transport(contract.adapter)
+    if (
+        transport is None
+        or transport.maximum_transport_attempts != 1
+        or not transport.enforces_configured_endpoint_scope
+        or not transport.enforces_maximum_timeout
+    ):
+        return False, "notes_graph_provider_call_policy_unsupported"
+    try:
+        endpoint_scope = ConfiguredEndpointScope.from_url(contract.endpoint_url)
+    except ValueError:
+        return False, "notes_graph_provider_call_policy_unsupported"
     if (
         policy.allow_streaming is not False
         or policy.allow_tools is not False
@@ -122,6 +165,8 @@ def _availability(contract: ProviderCapabilityContract) -> tuple[bool, str | Non
         or policy.allow_response_format not in {False, True}
         or policy.candidate_count != 1
         or not policy.privacy_safe_errors
+        or policy.required_endpoint_scope != endpoint_scope
+        or policy.maximum_timeout_seconds != contract.limits.provider_timeout_seconds
     ):
         return False, "notes_graph_provider_call_policy_unsupported"
     if not contract.credentials_available:
@@ -172,6 +217,7 @@ def build_suggestion_capabilities(
 __all__ = [
     "DEFAULT_ALLOWED_ACTIONS",
     "DEFAULT_OUTBOUND_DATA_CATEGORIES",
+    "HARD_SUGGESTION_CAPABILITY_LIMITS",
     "PROMPT_CONTRACT_VERSION",
     "ProviderCapabilityContract",
     "SuggestionCapabilities",

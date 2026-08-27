@@ -1,15 +1,21 @@
 from __future__ import annotations
 
+import asyncio
 import io
-from dataclasses import replace
 from typing import Any
 
+import httpx
 import pytest
 from loguru import logger
 
+from tldw_Server_API.app.core import http_client
+from tldw_Server_API.app.core.LLM_Calls import adapter_registry
+from tldw_Server_API.app.core.LLM_Calls.adapter_registry import ChatProviderRegistry
+from tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter import OpenAIAdapter
 from tldw_Server_API.app.core.Notes_Graph import suggestion_generation
 from tldw_Server_API.app.core.Notes_Graph.suggestion_capabilities import (
     ProviderCapabilityContract,
+    SuggestionCapabilityLimits,
     build_suggestion_capabilities,
 )
 from tldw_Server_API.app.core.Notes_Graph.suggestion_content import (
@@ -21,14 +27,13 @@ from tldw_Server_API.app.core.Notes_Graph.suggestion_generation import (
     SuggestionGenerationError,
     build_generation_request,
     generate_suggestions_once,
-    validate_redirect_origin,
 )
 from tldw_Server_API.app.core.Notes_Graph.suggestion_retrieval import RetrievalResult
 
 pytestmark = pytest.mark.unit
 
 
-def _prepared():
+def _prepared(*, limits: SuggestionCapabilityLimits | None = None):
     title = "Private title"
     content = "Private source evidence"
     retrieval = RetrievalResult(
@@ -53,6 +58,7 @@ def _prepared():
         retrieval=retrieval,
         source_title=title,
         source_content=content,
+        limits=limits or SuggestionCapabilityLimits(),
     )
 
 
@@ -61,10 +67,14 @@ def _provider(**overrides: object) -> GenerationProvider:
         "adapter": "openai",
         "model": "gpt-test",
         "api_key": "PRIVATE-CREDENTIAL",
-        "app_config": {"openai_api": {"api_retries": 9}},
+        "app_config": {
+            "openai_api": {
+                "api_retries": 9,
+                "api_base_url": "https://api.openai.com/v1",
+            }
+        },
         "provider_capabilities": {"supports_json_schema": True},
-        "supports_one_attempt": True,
-        "enforces_same_origin_redirects": True,
+        "endpoint_url": "https://api.openai.com/v1",
     }
     values.update(overrides)
     return GenerationProvider(**values)  # type: ignore[arg-type]
@@ -104,7 +114,9 @@ async def test_generation_uses_exactly_one_bounded_provider_call(
         policy.allow_response_format,
         policy.candidate_count,
         policy.privacy_safe_errors,
-    ) == (1, False, False, False, True, 1, True)
+        policy.maximum_timeout_seconds,
+        policy.required_endpoint_scope.matches("https://api.openai.com/v1/chat/completions"),
+    ) == (1, False, False, False, True, 1, True, 120, True)
 
 
 @pytest.mark.asyncio
@@ -130,22 +142,88 @@ async def test_structured_mode_is_capability_dependent_but_local_json_is_mandato
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("provider", "reason"),
+    "response",
     [
-        (
-            _provider(supports_one_attempt=False),
-            "notes_graph_provider_retry_policy_unsupported",
-        ),
-        (
-            _provider(enforces_same_origin_redirects=False),
-            "notes_graph_provider_redirect_policy_unsupported",
-        ),
+        {"choices": []},
+        {
+            "choices": [
+                {"message": {"content": '{"relationships":[],"tags":[]}'}},
+                {"message": {"content": '{"relationships":[],"tags":[]}'}},
+            ]
+        },
+        {
+            "choices": [],
+            "content": '{"relationships":[],"tags":[]}',
+        },
     ],
 )
+async def test_zero_multiple_and_ambiguous_choice_responses_are_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+    response: dict[str, Any],
+) -> None:
+    async def fake_call(**_kwargs: Any) -> dict[str, Any]:
+        return response
+
+    monkeypatch.setattr(suggestion_generation, "perform_chat_api_call_async", fake_call)
+
+    with pytest.raises(SuggestionGenerationError) as exc_info:
+        await generate_suggestions_once(prepared=_prepared(), provider=_provider())
+
+    assert exc_info.value.code == "notes_graph_suggestion_invalid_model_output"
+
+
+@pytest.mark.asyncio
+async def test_unambiguous_non_choice_content_response_is_accepted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_call(**_kwargs: Any) -> dict[str, Any]:
+        return {"content": '{"relationships":[],"tags":[]}'}
+
+    monkeypatch.setattr(suggestion_generation, "perform_chat_api_call_async", fake_call)
+
+    result = await generate_suggestions_once(prepared=_prepared(), provider=_provider())
+
+    assert result.relationships == ()
+    assert result.tags == ()
+
+
+@pytest.mark.asyncio
+async def test_configured_lower_limits_reach_provider_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, Any]] = []
+    limits = SuggestionCapabilityLimits(
+        max_candidates=2,
+        max_relationships=1,
+        max_tags=2,
+        max_new_tags=1,
+        max_tag_catalog=3,
+        max_estimated_input_tokens=2_000,
+        max_output_tokens=500,
+        provider_timeout_seconds=30,
+        response_candidates=1,
+    )
+
+    async def fake_call(**kwargs: Any) -> dict[str, Any]:
+        calls.append(kwargs)
+        return {"choices": [{"message": {"content": '{"relationships":[],"tags":[]}'}}]}
+
+    monkeypatch.setattr(suggestion_generation, "perform_chat_api_call_async", fake_call)
+
+    await generate_suggestions_once(
+        prepared=_prepared(limits=limits),
+        provider=_provider(),
+    )
+
+    assert calls[0]["max_tokens"] == 500
+    assert calls[0]["timeout"] == 30
+    assert calls[0]["n"] == 1
+    assert calls[0]["call_policy"].maximum_timeout_seconds == 30
+
+
+@pytest.mark.asyncio
 async def test_unsupported_transport_contract_fails_before_provider_call(
     monkeypatch: pytest.MonkeyPatch,
-    provider: GenerationProvider,
-    reason: str,
 ) -> None:
     calls = 0
 
@@ -156,24 +234,167 @@ async def test_unsupported_transport_contract_fails_before_provider_call(
 
     monkeypatch.setattr(suggestion_generation, "perform_chat_api_call_async", fake_call)
     with pytest.raises(SuggestionGenerationError) as exc_info:
-        await generate_suggestions_once(prepared=_prepared(), provider=provider)
+        await generate_suggestions_once(
+            prepared=_prepared(),
+            provider=_provider(adapter="anthropic"),
+        )
 
-    assert exc_info.value.code == reason
+    assert exc_info.value.code == "notes_graph_provider_call_policy_unsupported"
     assert calls == 0
 
 
-def test_canonical_same_origin_redirects_only() -> None:
-    validate_redirect_origin(
-        "HTTPS://Example.test:443/v1/chat/completions",
-        "https://example.test/redirected",
-    )
+def _install_openai_adapter(
+    monkeypatch: pytest.MonkeyPatch,
+    adapter: OpenAIAdapter,
+) -> None:
+    registry = ChatProviderRegistry(include_defaults=False)
+    registry.register_adapter("openai", adapter)
+    monkeypatch.setattr(adapter_registry, "get_registry", lambda: registry)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status_code", [307, 308])
+async def test_actual_adapter_follows_only_same_origin_redirects(
+    monkeypatch: pytest.MonkeyPatch,
+    status_code: int,
+) -> None:
+    requests: list[str] = []
+    endpoint = "http://127.0.0.1:18071/v1"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(str(request.url))
+        if request.url.path.endswith("/chat/completions"):
+            return httpx.Response(
+                status_code,
+                headers={"location": "/v1/redirected"},
+                request=request,
+            )
+        return httpx.Response(
+            200,
+            request=request,
+            json={"choices": [{"message": {"content": '{"relationships":[],"tags":[]}'}}]},
+        )
+
+    adapter = OpenAIAdapter()
+    _install_openai_adapter(monkeypatch, adapter)
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        adapter.http_fetcher = lambda **kwargs: http_client.fetch(client=client, **kwargs)
+        result = await generate_suggestions_once(
+            prepared=_prepared(),
+            provider=_provider(
+                endpoint_url=endpoint,
+                app_config={"openai_api": {"api_base_url": endpoint}},
+            ),
+        )
+
+    assert result.relationships == ()
+    assert requests == [
+        f"{endpoint}/chat/completions",
+        "http://127.0.0.1:18071/v1/redirected",
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status_code", [307, 308])
+async def test_actual_adapter_rejects_cross_origin_redirect_before_second_request(
+    monkeypatch: pytest.MonkeyPatch,
+    status_code: int,
+) -> None:
+    requests: list[str] = []
+    endpoint = "http://127.0.0.1:18072/v1"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(str(request.url))
+        return httpx.Response(
+            status_code,
+            headers={"location": "http://127.0.0.1:18073/stolen"},
+            request=request,
+        )
+
+    adapter = OpenAIAdapter()
+    _install_openai_adapter(monkeypatch, adapter)
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        adapter.http_fetcher = lambda **kwargs: http_client.fetch(client=client, **kwargs)
+        with pytest.raises(SuggestionGenerationError) as exc_info:
+            await generate_suggestions_once(
+                prepared=_prepared(),
+                provider=_provider(
+                    endpoint_url=endpoint,
+                    app_config={"openai_api": {"api_base_url": endpoint}},
+                ),
+            )
+
+    assert exc_info.value.code == "notes_graph_provider_call_failed"
+    assert requests == [f"{endpoint}/chat/completions"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("configured_timeout", "expected_timeout"),
+    [(30, 30.0), (999, 120.0)],
+)
+async def test_actual_adapter_clamps_configured_timeout_to_effective_limit(
+    monkeypatch: pytest.MonkeyPatch,
+    configured_timeout: int,
+    expected_timeout: float,
+) -> None:
+    captured_timeouts: list[float] = []
+    endpoint = "http://127.0.0.1:18074/v1"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            request=request,
+            json={"choices": [{"message": {"content": '{"relationships":[],"tags":[]}'}}]},
+        )
+
+    adapter = OpenAIAdapter()
+    _install_openai_adapter(monkeypatch, adapter)
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+
+        def fetcher(**kwargs: Any) -> httpx.Response:
+            captured_timeouts.append(float(kwargs["timeout"]))
+            return http_client.fetch(client=client, **kwargs)
+
+        adapter.http_fetcher = fetcher
+        await generate_suggestions_once(
+            prepared=_prepared(),
+            provider=_provider(
+                endpoint_url=endpoint,
+                app_config={
+                    "openai_api": {
+                        "api_base_url": endpoint,
+                        "api_timeout": configured_timeout,
+                    }
+                },
+            ),
+        )
+
+    assert captured_timeouts == [expected_timeout]
+
+
+@pytest.mark.asyncio
+async def test_outer_wall_clock_deadline_is_sanitized(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = OpenAIAdapter()
+    adapter.async_chat_is_native = True
+
+    async def slow_chat(_request: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
+        await asyncio.sleep(2)
+        return {}
+
+    adapter.achat = slow_chat
+    _install_openai_adapter(monkeypatch, adapter)
 
     with pytest.raises(SuggestionGenerationError) as exc_info:
-        validate_redirect_origin(
-            "https://example.test/v1/chat/completions",
-            "https://other.example.test/v1/chat/completions",
+        await generate_suggestions_once(
+            prepared=_prepared(limits=SuggestionCapabilityLimits(provider_timeout_seconds=1)),
+            provider=_provider(),
         )
-    assert exc_info.value.code == "notes_graph_provider_cross_origin_redirect"
+
+    assert exc_info.value.code == "notes_graph_provider_call_failed"
+    assert exc_info.value.__cause__ is None
 
 
 @pytest.mark.asyncio
@@ -209,26 +430,34 @@ async def test_provider_failures_do_not_expose_prompt_credentials_endpoint_or_re
 
 
 def test_capability_and_invocation_transport_preflights_agree() -> None:
-    provider = _provider(supports_one_attempt=False)
+    provider = _provider(adapter="anthropic")
     capability = build_suggestion_capabilities(
         ProviderCapabilityContract(
             adapter=provider.adapter,
             model=provider.model,
             endpoint_url="https://example.test/v1",
-            call_policy=suggestion_generation.build_provider_call_policy(allow_response_format=True),
+            call_policy=suggestion_generation.build_provider_call_policy(
+                allow_response_format=True,
+                endpoint_url="https://example.test/v1",
+            ),
             data_boundary="unknown",
-            supports_one_attempt=provider.supports_one_attempt,
-            enforces_same_origin_redirects=provider.enforces_same_origin_redirects,
             credentials_available=True,
             provider_healthy=True,
         )
     )
 
     assert capability.generation_available is False
-    assert capability.unavailable_reason == "notes_graph_provider_retry_policy_unsupported"
-    assert replace(provider, supports_one_attempt=True).supports_one_attempt is True
+    assert capability.unavailable_reason == "notes_graph_provider_call_policy_unsupported"
 
 
-def test_generation_transport_proofs_must_be_explicit() -> None:
+def test_generation_endpoint_binding_must_be_explicit() -> None:
     with pytest.raises(TypeError):
         GenerationProvider(adapter="openai", model="gpt-test")
+
+
+def test_generation_transport_safety_cannot_be_self_attested() -> None:
+    with pytest.raises(TypeError):
+        _provider(supports_one_attempt=True)
+
+    with pytest.raises(TypeError):
+        _provider(enforces_same_origin_redirects=True)

@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call_async
+from tldw_Server_API.app.core.LLM_Calls import adapter_registry
 from tldw_Server_API.app.core.LLM_Calls.capability_registry import ProviderCallPolicy
 from tldw_Server_API.app.core.LLM_Calls.structured_generation import (
     StructuredGenerationCapabilityError,
@@ -18,7 +19,11 @@ from tldw_Server_API.app.core.LLM_Calls.structured_generation import (
 )
 from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
 
-from .suggestion_capabilities import PROMPT_CONTRACT_VERSION
+from .suggestion_capabilities import (
+    HARD_SUGGESTION_CAPABILITY_LIMITS,
+    PROMPT_CONTRACT_VERSION,
+    SuggestionCapabilityLimits,
+)
 from .suggestion_content import (
     EvidenceReference,
     canonicalize_note_content,
@@ -28,13 +33,13 @@ from .suggestion_content import (
 )
 from .suggestion_retrieval import RetrievalResult, RetrievedCandidate
 
-MAX_RELATIONSHIP_SUGGESTIONS = 5
-MAX_TAG_SUGGESTIONS = 5
-MAX_NEW_TAG_SUGGESTIONS = 2
-MAX_TAG_CATALOG = 100
-MAX_ESTIMATED_INPUT_TOKENS = 24_000
-MAX_OUTPUT_TOKENS = 2_000
-PROVIDER_TIMEOUT_SECONDS = 120
+MAX_RELATIONSHIP_SUGGESTIONS = HARD_SUGGESTION_CAPABILITY_LIMITS.max_relationships
+MAX_TAG_SUGGESTIONS = HARD_SUGGESTION_CAPABILITY_LIMITS.max_tags
+MAX_NEW_TAG_SUGGESTIONS = HARD_SUGGESTION_CAPABILITY_LIMITS.max_new_tags
+MAX_TAG_CATALOG = HARD_SUGGESTION_CAPABILITY_LIMITS.max_tag_catalog
+MAX_ESTIMATED_INPUT_TOKENS = HARD_SUGGESTION_CAPABILITY_LIMITS.max_estimated_input_tokens
+MAX_OUTPUT_TOKENS = HARD_SUGGESTION_CAPABILITY_LIMITS.max_output_tokens
+PROVIDER_TIMEOUT_SECONDS = HARD_SUGGESTION_CAPABILITY_LIMITS.provider_timeout_seconds
 MAX_RATIONALE_CODE_POINTS = 240
 MAX_VERBATIM_OVERLAP_WORDS = 12
 
@@ -48,51 +53,70 @@ _SYSTEM_MESSAGE = (
     "or match strength; the server computes those values."
 )
 
-_OUTPUT_SCHEMA: dict[str, Any] = {
-    "type": "object",
-    "additionalProperties": False,
-    "required": ["relationships", "tags"],
-    "properties": {
-        "relationships": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "additionalProperties": False,
-                "required": [
-                    "target_note_id",
-                    "rationale",
-                    "source_evidence_ids",
-                    "target_evidence_ids",
-                ],
-                "properties": {
-                    "target_note_id": {"type": "string"},
-                    "rationale": {"type": "string", "maxLength": MAX_RATIONALE_CODE_POINTS},
-                    "source_evidence_ids": {"type": "array", "items": {"type": "string"}},
-                    "target_evidence_ids": {"type": "array", "items": {"type": "string"}},
+
+def _output_schema(limits: SuggestionCapabilityLimits) -> dict[str, Any]:
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["relationships", "tags"],
+        "properties": {
+            "relationships": {
+                "type": "array",
+                "maxItems": limits.max_relationships,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": [
+                        "target_note_id",
+                        "rationale",
+                        "source_evidence_ids",
+                        "target_evidence_ids",
+                    ],
+                    "properties": {
+                        "target_note_id": {"type": "string"},
+                        "rationale": {
+                            "type": "string",
+                            "maxLength": MAX_RATIONALE_CODE_POINTS,
+                        },
+                        "source_evidence_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                        "target_evidence_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                    },
+                },
+            },
+            "tags": {
+                "type": "array",
+                "maxItems": limits.max_tags,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": [
+                        "existing_tag_id",
+                        "new_tag",
+                        "rationale",
+                        "source_evidence_ids",
+                    ],
+                    "properties": {
+                        "existing_tag_id": {"type": ["string", "null"]},
+                        "new_tag": {"type": ["string", "null"]},
+                        "rationale": {
+                            "type": "string",
+                            "maxLength": MAX_RATIONALE_CODE_POINTS,
+                        },
+                        "source_evidence_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                    },
                 },
             },
         },
-        "tags": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "additionalProperties": False,
-                "required": [
-                    "existing_tag_id",
-                    "new_tag",
-                    "rationale",
-                    "source_evidence_ids",
-                ],
-                "properties": {
-                    "existing_tag_id": {"type": ["string", "null"]},
-                    "new_tag": {"type": ["string", "null"]},
-                    "rationale": {"type": "string", "maxLength": MAX_RATIONALE_CODE_POINTS},
-                    "source_evidence_ids": {"type": "array", "items": {"type": "string"}},
-                },
-            },
-        },
-    },
-}
+    }
 
 
 class SuggestionGenerationError(ValueError):
@@ -133,6 +157,7 @@ class PreparedSuggestionRequest:
     source_evidence: tuple[PromptEvidence, ...] = field(repr=False)
     candidate_evidence: Mapping[str, tuple[PromptEvidence, ...]] = field(repr=False)
     existing_tags: tuple[ExistingTagPrompt, ...] = field(repr=False)
+    limits: SuggestionCapabilityLimits
     estimated_input_tokens: int
 
     @property
@@ -189,12 +214,10 @@ class GenerationProvider:
 
     adapter: str
     model: str
-    supports_one_attempt: bool
-    enforces_same_origin_redirects: bool
+    endpoint_url: str = field(repr=False)
     api_key: str | None = field(default=None, repr=False)
     app_config: Mapping[str, Any] | None = field(default=None, repr=False)
     provider_capabilities: Mapping[str, Any] = field(default_factory=dict)
-    endpoint_url: str | None = field(default=None, repr=False)
 
 
 def _normalized_tag(value: str) -> tuple[str, str]:
@@ -231,6 +254,7 @@ def _build_prompt_payload(
     candidates: Sequence[RetrievedCandidate],
     candidate_evidence: Mapping[str, tuple[PromptEvidence, ...]],
     existing_tags: tuple[ExistingTagPrompt, ...],
+    limits: SuggestionCapabilityLimits,
 ) -> dict[str, Any]:
     return {
         "contract": PROMPT_CONTRACT_VERSION,
@@ -257,11 +281,11 @@ def _build_prompt_payload(
             "existing_tags": [{"existing_tag_id": tag.tag_id, "label": tag.display_tag} for tag in existing_tags],
         },
         "output_contract": {
-            "relationships_max": MAX_RELATIONSHIP_SUGGESTIONS,
-            "tags_max": MAX_TAG_SUGGESTIONS,
-            "new_tags_max": MAX_NEW_TAG_SUGGESTIONS,
+            "relationships_max": limits.max_relationships,
+            "tags_max": limits.max_tags,
+            "new_tags_max": limits.max_new_tags,
             "rationale_code_points_max": MAX_RATIONALE_CODE_POINTS,
-            "schema": _OUTPUT_SCHEMA,
+            "schema": _output_schema(limits),
         },
     }
 
@@ -271,10 +295,11 @@ def build_generation_request(
     retrieval: RetrievalResult,
     source_title: str,
     source_content: str,
+    limits: SuggestionCapabilityLimits = HARD_SUGGESTION_CAPABILITY_LIMITS,
 ) -> PreparedSuggestionRequest:
     """Build one bounded prompt and its opaque in-memory reference maps."""
 
-    if retrieval.estimated_input_tokens > MAX_ESTIMATED_INPUT_TOKENS:
+    if retrieval.estimated_input_tokens > limits.max_estimated_input_tokens:
         raise SuggestionGenerationError("notes_graph_suggestion_input_too_large")
     if content_fingerprint(source_title, source_content) != retrieval.source_fingerprint:
         raise SuggestionGenerationError("notes_graph_suggestion_stale_evidence")
@@ -286,7 +311,7 @@ def build_generation_request(
         content=canonical_source.content,
         prefix="source-evidence",
     )
-    candidates = list(retrieval.candidates[:30])
+    candidates = list(retrieval.candidates[: limits.max_candidates])
     candidate_evidence: dict[str, tuple[PromptEvidence, ...]] = {}
     for candidate_index, candidate in enumerate(candidates, start=1):
         candidate_evidence[candidate.note_id] = _evidence_for_note(
@@ -298,7 +323,7 @@ def build_generation_request(
 
     existing_tags: list[ExistingTagPrompt] = []
     seen_tags: set[str] = set()
-    for raw_tag in retrieval.tag_catalog[:MAX_TAG_CATALOG]:
+    for raw_tag in retrieval.tag_catalog[: limits.max_tag_catalog]:
         normalized, display = _normalized_tag(raw_tag)
         if not normalized or normalized in seen_tags:
             continue
@@ -318,6 +343,7 @@ def build_generation_request(
             candidates=candidates,
             candidate_evidence=candidate_evidence,
             existing_tags=tuple(existing_tags),
+            limits=limits,
         )
         user_message = json.dumps(
             payload,
@@ -326,7 +352,7 @@ def build_generation_request(
             sort_keys=True,
         )
         estimated_tokens = estimate_tokens(_SYSTEM_MESSAGE) + estimate_tokens(user_message)
-        if estimated_tokens <= MAX_ESTIMATED_INPUT_TOKENS:
+        if estimated_tokens <= limits.max_estimated_input_tokens:
             break
         if not candidates:
             raise SuggestionGenerationError("notes_graph_suggestion_input_too_large")
@@ -342,12 +368,14 @@ def build_generation_request(
         source_evidence=source_evidence,
         candidate_evidence=candidate_evidence,
         existing_tags=tuple(existing_tags),
+        limits=limits,
         estimated_input_tokens=estimated_tokens,
     )
 
 
 def _normalized_words(value: str) -> tuple[str, ...]:
-    return tuple(match.group(0).casefold() for match in _WORD_PATTERN.finditer(value))
+    normalized = unicodedata.normalize("NFC", value)
+    return tuple(match.group(0).casefold() for match in _WORD_PATTERN.finditer(normalized))
 
 
 def _contains_phrase(text_words: Sequence[str], phrase_words: Sequence[str]) -> bool:
@@ -441,7 +469,8 @@ def _relationship_strength(
         return "Possible match"
     candidate = next(item for item in prepared.retrieval.candidates if item.note_id == target_note_id)
     candidate_words = set(_normalized_words(f"{candidate.title} {candidate.content}"))
-    term_overlap = len(candidate_words.intersection(prepared.retrieval.terms))
+    retrieval_terms = {word for term in prepared.retrieval.terms for word in _normalized_words(term)}
+    term_overlap = len(candidate_words.intersection(retrieval_terms))
     title_words = _normalized_words(candidate.title)
     source_words = _normalized_words(f"{prepared.source_title} {prepared.source_content}")
     title_phrase_occurs = len(title_words) > 1 and _contains_phrase(source_words, title_words)
@@ -455,6 +484,28 @@ def _tag_strength(normalized_tag: str, *, is_new: bool, prepared: PreparedSugges
     return "Strong match" if _contains_phrase(source_words, _normalized_words(normalized_tag)) else "Possible match"
 
 
+def _strict_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate JSON object key")
+        result[key] = value
+    return result
+
+
+def _json_depth_is_bounded(value: Any, *, maximum_depth: int = 64) -> bool:
+    stack = [(value, 1)]
+    while stack:
+        current, depth = stack.pop()
+        if depth > maximum_depth:
+            return False
+        if isinstance(current, Mapping):
+            stack.extend((item, depth + 1) for item in current.values())
+        elif isinstance(current, list):
+            stack.extend((item, depth + 1) for item in current)
+    return True
+
+
 def parse_and_validate_generation(
     raw_text: str,
     *,
@@ -462,17 +513,19 @@ def parse_and_validate_generation(
 ) -> ValidatedSuggestionGeneration:
     """Strictly parse top-level JSON and locally validate each suggestion."""
 
-    if not isinstance(raw_text, str) or estimate_tokens(raw_text) > MAX_OUTPUT_TOKENS:
+    if not isinstance(raw_text, str) or estimate_tokens(raw_text) > prepared.limits.max_output_tokens:
         raise SuggestionGenerationError("notes_graph_suggestion_invalid_model_output")
     try:
         payload = json.loads(
             raw_text,
             parse_constant=lambda _value: (_ for _ in ()).throw(ValueError()),
+            object_pairs_hook=_strict_json_object,
         )
-    except (TypeError, ValueError):
+    except (RecursionError, TypeError, ValueError):
         raise SuggestionGenerationError("notes_graph_suggestion_invalid_model_output") from None
     if (
         not isinstance(payload, dict)
+        or not _json_depth_is_bounded(payload)
         or set(payload) != {"relationships", "tags"}
         or not isinstance(payload["relationships"], list)
         or not isinstance(payload["tags"], list)
@@ -496,7 +549,7 @@ def parse_and_validate_generation(
         "target_evidence_ids",
     }
     for item in payload["relationships"]:
-        if len(relationships) >= MAX_RELATIONSHIP_SUGGESTIONS:
+        if len(relationships) >= prepared.limits.max_relationships:
             break
         if not isinstance(item, dict) or set(item) != relationship_keys:
             continue
@@ -533,7 +586,7 @@ def parse_and_validate_generation(
     new_tag_count = 0
     tag_keys = {"existing_tag_id", "new_tag", "rationale", "source_evidence_ids"}
     for item in payload["tags"]:
-        if len(tags) >= MAX_TAG_SUGGESTIONS:
+        if len(tags) >= prepared.limits.max_tags:
             break
         if not isinstance(item, dict) or set(item) != tag_keys:
             continue
@@ -563,7 +616,7 @@ def parse_and_validate_generation(
                 is_new = False
             else:
                 is_new = True
-        if normalized in seen_tag_values or (is_new and new_tag_count >= MAX_NEW_TAG_SUGGESTIONS):
+        if normalized in seen_tag_values or (is_new and new_tag_count >= prepared.limits.max_new_tags):
             continue
         seen_tag_values.add(normalized)
         new_tag_count += int(is_new)
@@ -594,7 +647,12 @@ def parse_and_validate_generation(
     )
 
 
-def build_provider_call_policy(*, allow_response_format: bool) -> ProviderCallPolicy:
+def build_provider_call_policy(
+    *,
+    allow_response_format: bool,
+    endpoint_url: str,
+    limits: SuggestionCapabilityLimits = HARD_SUGGESTION_CAPABILITY_LIMITS,
+) -> ProviderCallPolicy:
     """Return the immutable one-attempt policy for one suggestion invocation."""
 
     return ProviderCallPolicy(
@@ -605,10 +663,15 @@ def build_provider_call_policy(*, allow_response_format: bool) -> ProviderCallPo
         allow_response_format=allow_response_format,
         candidate_count=1,
         privacy_safe_errors=True,
+        maximum_timeout_seconds=limits.provider_timeout_seconds,
+        required_endpoint_scope=ConfiguredEndpointScope.from_url(endpoint_url),
     )
 
 
-def _structured_response_format(provider: GenerationProvider) -> dict[str, Any] | None:
+def _structured_response_format(
+    provider: GenerationProvider,
+    limits: SuggestionCapabilityLimits,
+) -> dict[str, Any] | None:
     capabilities = dict(provider.provider_capabilities)
     explicitly_supported = bool(
         capabilities.get("supports_json_schema") is True
@@ -623,7 +686,10 @@ def _structured_response_format(provider: GenerationProvider) -> dict[str, Any] 
             provider=provider.adapter,
             requested={
                 "type": "json_schema",
-                "json_schema": {"name": "notes_graph_suggestions", "schema": _OUTPUT_SCHEMA},
+                "json_schema": {
+                    "name": "notes_graph_suggestions",
+                    "schema": _output_schema(limits),
+                },
             },
             provider_capabilities=capabilities,
         )
@@ -637,31 +703,22 @@ def _response_text(response: Any) -> str:
         return response
     if not isinstance(response, Mapping):
         return ""
-    choices = response.get("choices")
-    if isinstance(choices, Sequence) and not isinstance(choices, (str, bytes)) and choices:
+    if "choices" in response:
+        choices = response["choices"]
+        if not isinstance(choices, list) or len(choices) != 1:
+            return ""
+        if any(isinstance(response.get(key), str) for key in ("content", "output_text", "text")):
+            return ""
         first = choices[0]
-        if isinstance(first, Mapping):
-            message = first.get("message")
-            if isinstance(message, Mapping) and isinstance(message.get("content"), str):
-                return message["content"]
-            if isinstance(first.get("text"), str):
-                return first["text"]
-    for key in ("content", "output_text", "text"):
-        if isinstance(response.get(key), str):
-            return response[key]
-    return ""
-
-
-def validate_redirect_origin(endpoint_url: str, redirect_url: str) -> None:
-    """Reject redirects outside the configured endpoint's canonical origin."""
-
-    try:
-        scope = ConfiguredEndpointScope.from_url(endpoint_url)
-        matches = scope.matches(redirect_url)
-    except ValueError:
-        matches = False
-    if not matches:
-        raise SuggestionGenerationError("notes_graph_provider_cross_origin_redirect")
+        if not isinstance(first, Mapping):
+            return ""
+        message = first.get("message")
+        message_content = message.get("content") if isinstance(message, Mapping) else None
+        text = first.get("text")
+        values = [value for value in (message_content, text) if isinstance(value, str)]
+        return values[0] if len(values) == 1 else ""
+    values = [response[key] for key in ("content", "output_text", "text") if isinstance(response.get(key), str)]
+    return values[0] if len(values) == 1 else ""
 
 
 async def generate_suggestions_once(
@@ -671,25 +728,35 @@ async def generate_suggestions_once(
 ) -> ValidatedSuggestionGeneration:
     """Perform exactly one provider call and strictly validate its first response."""
 
-    if not provider.supports_one_attempt:
-        raise SuggestionGenerationError("notes_graph_provider_retry_policy_unsupported")
-    if not provider.enforces_same_origin_redirects:
-        raise SuggestionGenerationError("notes_graph_provider_redirect_policy_unsupported")
-
-    response_format = _structured_response_format(provider)
-    call_policy = build_provider_call_policy(allow_response_format=response_format is not None)
+    transport = adapter_registry.get_registry().get_audited_call_policy_transport(provider.adapter)
+    if (
+        transport is None
+        or transport.maximum_transport_attempts != 1
+        or not transport.enforces_configured_endpoint_scope
+        or not transport.enforces_maximum_timeout
+    ):
+        raise SuggestionGenerationError("notes_graph_provider_call_policy_unsupported")
+    try:
+        response_format = _structured_response_format(provider, prepared.limits)
+        call_policy = build_provider_call_policy(
+            allow_response_format=response_format is not None,
+            endpoint_url=provider.endpoint_url,
+            limits=prepared.limits,
+        )
+    except (TypeError, ValueError):
+        raise SuggestionGenerationError("notes_graph_provider_call_policy_unsupported") from None
     call_args: dict[str, Any] = {
         "api_endpoint": provider.adapter,
         "messages_payload": [{"role": "user", "content": prepared.user_message}],
         "system_message": prepared.system_message,
         "api_key": provider.api_key,
         "model": provider.model,
-        "max_tokens": MAX_OUTPUT_TOKENS,
-        "timeout": PROVIDER_TIMEOUT_SECONDS,
+        "max_tokens": prepared.limits.max_output_tokens,
+        "timeout": prepared.limits.provider_timeout_seconds,
         "streaming": False,
         "tools": None,
         "stop": None,
-        "n": 1,
+        "n": prepared.limits.response_candidates,
         "app_config": dict(provider.app_config or {}),
         "call_policy": call_policy,
     }
@@ -719,5 +786,4 @@ __all__ = [
     "build_provider_call_policy",
     "generate_suggestions_once",
     "parse_and_validate_generation",
-    "validate_redirect_origin",
 ]

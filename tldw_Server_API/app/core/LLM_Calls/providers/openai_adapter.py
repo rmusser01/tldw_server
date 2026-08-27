@@ -11,14 +11,24 @@ except ImportError:  # pragma: no cover - optional for static analysis
     httpx = None
 
 from tldw_Server_API.app.core.http_client import (
+    RetryPolicy,
+)
+from tldw_Server_API.app.core.http_client import (
     create_client as _hc_create_client,
+)
+from tldw_Server_API.app.core.http_client import (
+    fetch as _hc_fetch,
 )
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import _safe_cast
 from tldw_Server_API.app.core.LLM_Calls.cache_intents import (
     apply_billing_prompt_cache_intent,
     attach_cache_intent_metadata,
 )
-from tldw_Server_API.app.core.LLM_Calls.capability_registry import normalize_payload, validate_payload
+from tldw_Server_API.app.core.LLM_Calls.capability_registry import (
+    ProviderCallPolicy,
+    normalize_payload,
+    validate_payload,
+)
 from tldw_Server_API.app.core.LLM_Calls.openai_credentials import (
     openai_credential_headers,
 )
@@ -59,6 +69,7 @@ _OPENAI_ADAPTER_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
 
 class OpenAIAdapter(ChatProvider):
     name = "openai"
+    http_fetcher = staticmethod(_hc_fetch)
 
     def capabilities(self) -> dict[str, Any]:
         return {
@@ -264,6 +275,16 @@ class OpenAIAdapter(ChatProvider):
             return float(fallback)
         return float(self.capabilities().get("default_timeout_seconds", 60))
 
+    def _strict_call_policy(self, request: dict[str, Any]) -> ProviderCallPolicy | None:
+        policy = request.get("call_policy")
+        if (
+            isinstance(policy, ProviderCallPolicy)
+            and policy.maximum_timeout_seconds is not None
+            and policy.required_endpoint_scope is not None
+        ):
+            return policy
+        return None
+
     def _openai_headers(
         self,
         api_key: str | None,
@@ -290,6 +311,30 @@ class OpenAIAdapter(ChatProvider):
             headers = merge_extra_headers(self._openai_headers(api_key, request), request)
             try:
                 resolved_timeout = self._resolve_timeout(request, timeout)
+                strict_policy = self._strict_call_policy(request)
+                if strict_policy is not None:
+                    scope = strict_policy.required_endpoint_scope
+                    if scope is None or not scope.matches(url):
+                        raise ValueError("Configured endpoint scope mismatch")
+                    resolved_timeout = min(
+                        resolved_timeout,
+                        float(strict_policy.maximum_timeout_seconds),
+                    )
+                    resp = self.http_fetcher(
+                        method="POST",
+                        url=url,
+                        headers=headers,
+                        json=payload,
+                        timeout=resolved_timeout,
+                        allow_redirects=True,
+                        retry=RetryPolicy(attempts=1),
+                        configured_endpoint=scope,
+                        sensitive_observability=True,
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+                    self._raise_if_in_band_provider_error(data, phase="chat_response")
+                    return attach_cache_intent_metadata(data, cache_intent_diagnostic)
                 with http_client_factory(timeout=resolved_timeout) as client:
                     resp = client.post(url, headers=headers, json=payload)
                     resp.raise_for_status()
