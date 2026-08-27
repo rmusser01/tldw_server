@@ -32,7 +32,7 @@ const promptStudioServiceMocks = vi.hoisted(() => ({
 let latestSocket: MockWebSocket | null = null
 let settingsProjectsQueryOptions: any = null
 
-const LocationSearchProbe = () => {
+const LocationSearchProbe = (): React.ReactElement => {
   const location = useLocation()
   return <output data-testid="location-search">{location.search}</output>
 }
@@ -393,24 +393,23 @@ describe("StudioTabContainer stage 6 navigation and polling", () => {
     expect(usePromptStudioStore.getState().activeSubTab).toBe("projects")
   })
 
-  it("lets onboarding steps deep-link into gated tabs when no project is selected", () => {
-    render(
-      <React.StrictMode>
-        <MemoryRouter>
-          <StudioTabContainer />
-          <LocationSearchProbe />
-        </MemoryRouter>
-      </React.StrictMode>
-    )
+  it.each([
+    [2, "prompts"],
+    [3, "testCases"],
+    [4, "evaluations"],
+    [5, "optimizations"]
+  ] as const)(
+    "lets onboarding step %i deep-link into %s when no project is selected",
+    (step, tab) => {
+      render(
+        <React.StrictMode>
+          <MemoryRouter>
+            <StudioTabContainer />
+            <LocationSearchProbe />
+          </MemoryRouter>
+        </React.StrictMode>
+      )
 
-    const steps: Array<[number, string]> = [
-      [2, "prompts"],
-      [3, "testCases"],
-      [4, "evaluations"],
-      [5, "optimizations"]
-    ]
-
-    for (const [step, tab] of steps) {
       const stepButton = screen.getByTestId(`studio-onboarding-step-${step}`)
       expect(stepButton).not.toBeDisabled()
       fireEvent.click(stepButton)
@@ -419,7 +418,7 @@ describe("StudioTabContainer stage 6 navigation and polling", () => {
         `subtab=${tab}`
       )
     }
-  })
+  )
 
   it("preserves an initial sub-tab deep link under React Strict Mode", async () => {
     render(

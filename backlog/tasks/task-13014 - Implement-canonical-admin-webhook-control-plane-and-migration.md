@@ -4,7 +4,7 @@ title: Implement canonical admin webhook control plane and migration
 status: In Progress
 assignee: []
 created_date: 2026-08-21 20:41
-updated_date: 2026-08-27 18:07
+updated_date: 2026-08-27 18:22
 labels:
 - admin
 - webhooks
@@ -242,6 +242,7 @@ The claimed nested-suite bug is factually incorrect and was not implemented. Rea
 The real report comparison exposed a separate schema-3 comparator defect: the failed-assertion pass reused ancestorTitles from the final assertion in a file, so sibling suites could not match their own structured provenance. Focused RED reproduced the missing-provenance error; the helper now reads and validates ancestorTitles from each current failed assertion. The focused regression passes and the saved real head/base reports compare inherited=25 regressions=0. Helper SHA-256 74fa9548fe0b9c36e83caed664cf33b1face02686ee63bb0c70d6856f0fb5ca1 is pinned in both frontend-required ratchet jobs.
 
 Final local gates: Studio navigation 16/16; CI ratchet/workflow contracts 117/117 (56 isolated-config marker warnings only); Ruff passed; Python 3.12 py_compile passed; git diff --check passed; both helper digest pins verified. Canonical frontend TypeScript diagnostics are byte-for-byte identical to exact base: 80 inherited errors, zero references to changed files. Prettier also fails both touched TypeScript files on exact base, so no file-wide formatting churn was introduced. TASK-13014 remains In Progress pending commit/push, fresh exact-head Qodo review, green hosted frontend CI, and final unresolved-thread audit.
+2026-08-27 exact-head Qodo test-quality follow-up at 9b215ee2f9db9341f6c87ecea547e4dcdf2e9296: Qodo reported two rule findings, both valid and bounded to StudioTabContainer.stage6-navigation.test.tsx. LocationSearchProbe now declares an explicit React.ReactElement return type. The four onboarding step/tab transitions now use it.each so every case has fresh render/store state and an independently named failure while retaining React Strict Mode coverage. Verification: focused Studio navigation 19/19 passed at a 1024 MiB heap; canonical TypeScript output remains byte-for-byte identical to exact base (80 inherited errors, no changed-file references); git diff --check passed. Fresh independent review, commit/push, Qodo thread resolution/refresh, exact-head hosted CI, and final thread audit remain pending; TASK-13014 stays In Progress.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Definition of Done
 <!-- DOD:BEGIN -->
