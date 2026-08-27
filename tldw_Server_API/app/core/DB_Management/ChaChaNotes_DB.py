@@ -6852,7 +6852,10 @@ CREATE TABLE note_graph_suggestion_evidence(
 CREATE INDEX idx_note_graph_suggestion_runs_owner_dataset_note_state
   ON note_graph_suggestion_runs(owner_user_id, dataset_id, source_note_id, state, created_at DESC);
 CREATE UNIQUE INDEX idx_note_graph_suggestion_runs_active_source
-  ON note_graph_suggestion_runs(owner_user_id, dataset_id, source_note_id)
+  ON note_graph_suggestion_runs(
+    owner_user_id, dataset_id, source_note_id, source_fingerprint,
+    provider, model, prompt_contract_version
+  )
   WHERE state IN ('admitting', 'queued', 'running', 'cancelling', 'publishing');
 CREATE INDEX idx_note_graph_suggestion_runs_retention
   ON note_graph_suggestion_runs(state, expires_at);
@@ -6874,10 +6877,22 @@ CREATE UNIQUE INDEX idx_note_graph_suggestions_canonical_related_identity
     CASE WHEN source_note_id < target_note_id THEN source_fingerprint ELSE target_fingerprint END,
     CASE WHEN source_note_id < target_note_id THEN target_fingerprint ELSE source_fingerprint END
   )
-  WHERE kind = 'related_note' AND state IN ('staged', 'pending', 'accepting', 'rejected');
+  WHERE kind = 'related_note' AND state IN ('pending', 'accepting', 'rejected');
 CREATE UNIQUE INDEX idx_note_graph_suggestions_canonical_tag_identity
   ON note_graph_suggestions(owner_user_id, dataset_id, source_note_id, source_fingerprint, normalized_tag)
-  WHERE kind = 'tag' AND state IN ('staged', 'pending', 'accepting', 'rejected');
+  WHERE kind = 'tag' AND state IN ('pending', 'accepting', 'rejected');
+CREATE UNIQUE INDEX idx_note_graph_suggestions_staged_related_identity
+  ON note_graph_suggestions(
+    owner_user_id, dataset_id, run_id,
+    CASE WHEN source_note_id < target_note_id THEN source_note_id ELSE target_note_id END,
+    CASE WHEN source_note_id < target_note_id THEN target_note_id ELSE source_note_id END,
+    CASE WHEN source_note_id < target_note_id THEN source_fingerprint ELSE target_fingerprint END,
+    CASE WHEN source_note_id < target_note_id THEN target_fingerprint ELSE source_fingerprint END
+  )
+  WHERE kind = 'related_note' AND state = 'staged';
+CREATE UNIQUE INDEX idx_note_graph_suggestions_staged_tag_identity
+  ON note_graph_suggestions(owner_user_id, dataset_id, run_id, source_note_id, source_fingerprint, normalized_tag)
+  WHERE kind = 'tag' AND state = 'staged';
 CREATE INDEX idx_note_graph_suggestions_acceptance_lease
   ON note_graph_suggestions(state, acceptance_lease_expires_at);
 CREATE INDEX idx_note_graph_suggestions_retention
@@ -6997,7 +7012,12 @@ CREATE TABLE IF NOT EXISTS note_graph_suggestion_evidence(
     ON DELETE CASCADE ON UPDATE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_note_graph_suggestion_runs_owner_dataset_note_state ON note_graph_suggestion_runs(owner_user_id, dataset_id, source_note_id, state, created_at DESC);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_note_graph_suggestion_runs_active_source ON note_graph_suggestion_runs(owner_user_id, dataset_id, source_note_id) WHERE state IN ('admitting', 'queued', 'running', 'cancelling', 'publishing');
+CREATE UNIQUE INDEX IF NOT EXISTS idx_note_graph_suggestion_runs_active_source
+  ON note_graph_suggestion_runs(
+    owner_user_id, dataset_id, source_note_id, source_fingerprint,
+    provider, model, prompt_contract_version
+  )
+  WHERE state IN ('admitting', 'queued', 'running', 'cancelling', 'publishing');
 CREATE INDEX IF NOT EXISTS idx_note_graph_suggestion_runs_retention ON note_graph_suggestion_runs(state, expires_at);
 CREATE INDEX IF NOT EXISTS idx_note_graph_suggestion_operation_receipts_retention ON note_graph_suggestion_operation_receipts(owner_user_id, dataset_id, state, expires_at);
 CREATE INDEX IF NOT EXISTS idx_note_graph_suggestions_owner_dataset_source_state ON note_graph_suggestions(owner_user_id, dataset_id, source_note_id, state, updated_at DESC);
@@ -7012,10 +7032,22 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_note_graph_suggestions_canonical_related_i
     (CASE WHEN source_note_id < target_note_id THEN source_fingerprint ELSE target_fingerprint END),
     (CASE WHEN source_note_id < target_note_id THEN target_fingerprint ELSE source_fingerprint END)
   )
-  WHERE kind = 'related_note' AND state IN ('staged', 'pending', 'accepting', 'rejected');
+  WHERE kind = 'related_note' AND state IN ('pending', 'accepting', 'rejected');
 CREATE UNIQUE INDEX IF NOT EXISTS idx_note_graph_suggestions_canonical_tag_identity
   ON note_graph_suggestions(owner_user_id, dataset_id, source_note_id, source_fingerprint, normalized_tag)
-  WHERE kind = 'tag' AND state IN ('staged', 'pending', 'accepting', 'rejected');
+  WHERE kind = 'tag' AND state IN ('pending', 'accepting', 'rejected');
+CREATE UNIQUE INDEX IF NOT EXISTS idx_note_graph_suggestions_staged_related_identity
+  ON note_graph_suggestions(
+    owner_user_id, dataset_id, run_id,
+    (CASE WHEN source_note_id < target_note_id THEN source_note_id ELSE target_note_id END),
+    (CASE WHEN source_note_id < target_note_id THEN target_note_id ELSE source_note_id END),
+    (CASE WHEN source_note_id < target_note_id THEN source_fingerprint ELSE target_fingerprint END),
+    (CASE WHEN source_note_id < target_note_id THEN target_fingerprint ELSE source_fingerprint END)
+  )
+  WHERE kind = 'related_note' AND state = 'staged';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_note_graph_suggestions_staged_tag_identity
+  ON note_graph_suggestions(owner_user_id, dataset_id, run_id, source_note_id, source_fingerprint, normalized_tag)
+  WHERE kind = 'tag' AND state = 'staged';
 CREATE INDEX IF NOT EXISTS idx_note_graph_suggestions_acceptance_lease ON note_graph_suggestions(state, acceptance_lease_expires_at);
 CREATE INDEX IF NOT EXISTS idx_note_graph_suggestions_retention ON note_graph_suggestions(state, expires_at);
 CREATE INDEX IF NOT EXISTS idx_note_graph_suggestion_evidence_note ON note_graph_suggestion_evidence(owner_user_id, dataset_id, note_id);

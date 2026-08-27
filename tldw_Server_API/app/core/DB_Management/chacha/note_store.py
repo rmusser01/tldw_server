@@ -218,6 +218,10 @@ class NoteStore:
 
         try:
             def _execute(transaction_conn: sqlite3.Connection | BackendConnectionWrapper) -> bool:
+                previous = transaction_conn.execute(
+                    "SELECT title, content FROM notes WHERE id = ?",
+                    (normalized_note_id,),
+                ).fetchone()
                 if expected_product_version is None:
                     transaction_conn.execute(query, params)
                 elif expected_product_version == 0:
@@ -312,6 +316,13 @@ class NoteStore:
                     note_id=normalized_note_id,
                     deleted=False,
                 )
+                if previous is not None and (
+                    previous["title"] != exact_title or previous["content"] != content
+                ):
+                    self._db.note_graph_suggestion_store.invalidate_for_note_change(
+                        note_id=normalized_note_id,
+                        conn=transaction_conn,
+                    )
                 logger.info("Upserted note projection from Sync v2 for ID: {}.", normalized_note_id)
                 return True
 
@@ -2044,6 +2055,14 @@ class NoteStore:
         current_content = current_note.get("content", "") if current_note else ""
         next_content = update_data.get("content", current_content)
         projection = parse_wikilinks(str(next_content or ""), source_note_id=note_id)
+        content_changed = current_note is not None and (
+            ("content" in update_data and update_data["content"] != current_note.get("content"))
+            or (
+                "title" in update_data
+                and isinstance(update_data["title"], str)
+                and update_data["title"].strip() != current_note.get("title")
+            )
+        )
 
         now = self._db._get_current_utc_timestamp_iso()
         fields_to_update_sql = []
@@ -2111,6 +2130,11 @@ class NoteStore:
                     projection=projection,
                     conn=transaction_conn,
                 )
+                if content_changed:
+                    self._db.note_graph_suggestion_store.invalidate_for_note_change(
+                        note_id=note_id,
+                        conn=transaction_conn,
+                    )
                 logger.info(f"Updated note ID {note_id} from version {expected_version} to version {next_version_val}.")
                 return True
 
@@ -2188,6 +2212,10 @@ class NoteStore:
                     conn=conn,
                 )
                 self._advance_studio_lifecycle(conn, note_id=note_id, deleted=True)
+                self._db.note_graph_suggestion_store.invalidate_for_note_change(
+                    note_id=note_id,
+                    conn=conn,
+                )
                 logger.info(
                     f"Soft-deleted note ID {note_id} (was v{expected_version}), new version {next_version_val}.")
                 return True
@@ -2231,6 +2259,10 @@ class NoteStore:
                         conn=conn,
                     )
                     self._advance_studio_lifecycle(conn, note_id=note_id, deleted=True)
+                    self._db.note_graph_suggestion_store.invalidate_for_note_change(
+                        note_id=note_id,
+                        conn=conn,
+                    )
                 return rc > 0
         except BackendDatabaseError as e:
             raise CharactersRAGDBError(f"Failed to delete note: {e}") from e  # noqa: TRY003

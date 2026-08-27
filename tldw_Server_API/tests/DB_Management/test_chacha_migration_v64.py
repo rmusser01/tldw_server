@@ -229,20 +229,38 @@ def test_sqlite_v64_fresh_schema_has_graph_suggestion_tables_constraints_and_ind
             """
             INSERT INTO note_graph_suggestion_runs(
                 id, owner_user_id, dataset_id, source_note_id, source_fingerprint,
-                state, revision, created_at, expires_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                provider, model, prompt_contract_version, state, revision, created_at, expires_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             """,
-            ("run-active", "owner-a", "dataset-a", "source-note", "source-fingerprint", "queued", 1),
+            (
+                "run-active", "owner-a", "dataset-a", "source-note", "source-fingerprint",
+                "openai", "model-a", "prompt-v1", "queued", 1,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO note_graph_suggestion_runs(
+                id, owner_user_id, dataset_id, source_note_id, source_fingerprint,
+                provider, model, prompt_contract_version, state, revision, created_at, expires_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            """,
+            (
+                "run-different-fingerprint", "owner-a", "dataset-a", "source-note",
+                "new-fingerprint", "openai", "model-a", "prompt-v1", "running", 1,
+            ),
         )
         with pytest.raises(sqlite3.IntegrityError):
             conn.execute(
                 """
                 INSERT INTO note_graph_suggestion_runs(
                     id, owner_user_id, dataset_id, source_note_id, source_fingerprint,
-                    state, revision, created_at, expires_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    provider, model, prompt_contract_version, state, revision, created_at, expires_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 """,
-                ("run-conflict", "owner-a", "dataset-a", "source-note", "new-fingerprint", "running", 1),
+                (
+                    "run-conflict", "owner-a", "dataset-a", "source-note", "source-fingerprint",
+                    "openai", "model-a", "prompt-v1", "running", 1,
+                ),
             )
         with pytest.raises(sqlite3.IntegrityError):
             conn.execute(
@@ -268,6 +286,8 @@ def test_sqlite_v64_fresh_schema_has_graph_suggestion_tables_constraints_and_ind
         "idx_note_graph_suggestions_owner_dataset_source_state",
         "idx_note_graph_suggestions_acceptance_lease",
         "idx_note_graph_suggestions_retention",
+        "idx_note_graph_suggestions_staged_related_identity",
+        "idx_note_graph_suggestions_staged_tag_identity",
     } <= suggestion_indexes
     assert "idx_note_graph_suggestion_operation_receipts_retention" in receipt_indexes
     assert {

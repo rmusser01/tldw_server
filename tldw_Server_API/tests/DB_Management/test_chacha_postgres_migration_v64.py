@@ -146,7 +146,10 @@ def test_postgres_v64_ddl_has_owner_scoped_tables_checks_indexes_and_forced_rls(
         "CHECK(operation_kind IN ('run_admit', 'run_cancel', 'suggestion_accept', 'suggestion_reject', 'rejections_reset'))",
         "CHECK(state IN ('staged', 'pending', 'accepting', 'accepted', 'rejected', 'stale'))",
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_note_graph_suggestion_runs_active_source",
+        "source_note_id, source_fingerprint, provider, model, prompt_contract_version",
         "WHERE state IN ('admitting', 'queued', 'running', 'cancelling', 'publishing')",
+        "idx_note_graph_suggestions_staged_related_identity",
+        "idx_note_graph_suggestions_staged_tag_identity",
         "idx_note_graph_suggestions_acceptance_lease",
         "idx_note_graph_suggestion_operation_receipts_retention",
         "FOREIGN KEY(owner_user_id, source_note_id) REFERENCES notes(client_id, id)",
@@ -254,6 +257,8 @@ def test_postgres_v64_live_schema_has_owner_scoped_graph_suggestion_contract(
             "idx_note_graph_suggestion_runs_retention",
             "idx_note_graph_suggestions_acceptance_lease",
             "idx_note_graph_suggestions_retention",
+            "idx_note_graph_suggestions_staged_related_identity",
+            "idx_note_graph_suggestions_staged_tag_identity",
             "idx_note_graph_suggestion_operation_receipts_retention",
         } <= {str(row["indexname"]) for row in indexes}
         assert {str(row["relname"]) for row in relations} == set(tables)

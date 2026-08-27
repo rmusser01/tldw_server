@@ -3,26 +3,33 @@ id: TASK-13138
 title: Implement first-class Notes graph workspace and reviewable AI suggestions
 status: In Progress
 assignee: []
-created_date: '2026-08-27 03:40'
-updated_date: '2026-08-27 08:13'
+created_date: 2026-08-27 03:40
+updated_date: 2026-08-27 08:50
 labels:
-  - notes
-  - knowledge-graph
-  - webui
-  - browser-extension
-  - llm
-  - jobs
+- notes
+- knowledge-graph
+- webui
+- browser-extension
+- llm
+- jobs
 dependencies: []
 references:
-  - TASK-13134
-  - TASK-13135
-  - TASK-13136
-  - TASK-13137
+- TASK-13134
+- TASK-13135
+- TASK-13136
+- TASK-13137
 documentation:
-  - >-
-    Docs/superpowers/specs/2026-08-26-notes-second-brain-graph-suggestions-design.md
-  - Docs/superpowers/plans/2026-08-26-notes-second-brain-graph-suggestions.md
+- Docs/superpowers/specs/2026-08-26-notes-second-brain-graph-suggestions-design.md
+- Docs/superpowers/plans/2026-08-26-notes-second-brain-graph-suggestions.md
 priority: high
+modified_files:
+- tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py
+- tldw_Server_API/app/core/DB_Management/chacha/note_graph_suggestion_store.py
+- tldw_Server_API/app/core/DB_Management/chacha/note_store.py
+- tldw_Server_API/tests/DB_Management/test_chacha_migration_v64.py
+- tldw_Server_API/tests/DB_Management/test_chacha_postgres_migration_v64.py
+- tldw_Server_API/tests/Notes_Graph/unit/test_suggestion_store.py
+- tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_lifecycle.py
 ---
 
 ## Description
@@ -66,7 +73,6 @@ Execute the approved 12-task test-first plan in Docs/superpowers/plans/2026-08-2
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Deferred work is tracked separately: TASK-13134 embeddings and semantic edges; TASK-13135 automatic background organization; TASK-13136 library-wide recurring themes; TASK-13137 saved graph views/layouts. This task remains review-first and on-demand.
 
@@ -86,7 +92,6 @@ Task 1 implementation completed locally: schema v64 adds SQLite/PostgreSQL Notes
 Final Task 1 candidate verification: exact required v61-v64 migration regression suite passed 26 tests (including live PostgreSQL v63-to-v64 upgrade); Ruff passed; `git diff --check` passed; Bandit found 0 findings. Parent task remains In Progress for later tasks.
 Task 1 Fix Round 1 completed locally: v64 now enforces composite owner/dataset foreign keys across graph tables, receipt source-note cascade on hard note deletion, and lifecycle-aware canonical unique identities for related pairs and tags. Verification: focused SQLite/PostgreSQL v64 suite passed 15 tests; required v61/v62/v64 migration regression suite passed 33 tests; Ruff passed; Bandit reported 0 findings. Report updated at .superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-1-report.md. Parent task remains In Progress for later tasks.
 Task 1 Fix Round 2: replaced composite receipt FK `ON DELETE SET NULL` with scope-preserving `NO ACTION` plus equivalent SQLite/PostgreSQL BEFORE DELETE triggers that clear only the nullable receipt IDs. Added SQLite/live PostgreSQL tests for referenced receipt deletion and preservation of pending/rejected current-fingerprint suggestions. Verification: 35 migration tests passed; Ruff passed; Bandit reported 0 findings. Report: `.superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-1-report.md`.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 Task 2 completed in notes-second-brain-planning. Added deterministic bounded owner/dataset-scoped Notes graph retrieval, canonical source grounding, exact fingerprint suppression, backend-portable FTS, byte-limit enforcement, tag bounds, and SQLite/PostgreSQL integration coverage. Modified: tldw_Server_API/app/core/Notes_Graph/suggestion_content.py; tldw_Server_API/app/core/Notes_Graph/suggestion_retrieval.py; tldw_Server_API/app/core/DB_Management/chacha/note_graph_suggestion_store.py; tldw_Server_API/tests/Notes_Graph/unit/test_suggestion_content.py; tldw_Server_API/tests/Notes_Graph/unit/test_suggestion_retrieval.py; tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_retrieval_backends.py; .superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-2-report.md. Verification: Task 2 20 passed/0 skipped, directly affected Notes FTS 3 passed/57 deselected, Ruff clean, Bandit 0 findings. Report: .superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-2-report.md.
 
@@ -95,8 +100,19 @@ Task 2 Fix Round 1 completed locally. Added fail-closed exact owner/dataset auth
 Task 2 Fix Round 2 completed locally. Closed the remaining live PostgreSQL selected-source byte-guard coverage gap with a characterization integration test. It asserts NotesGraphSourceTooLargeError(notes_graph_source_too_large), verifies the only source title/content query includes the octet_length byte predicate, and confirms candidate FTS is not reached. Modified: tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_retrieval_backends.py. Verification: focused live PostgreSQL characterization 1 passed/0 skipped; Task 2 suites 26 passed/0 skipped (2 established warnings); focused Notes SQLite search 1 passed/57 deselected; PostgreSQL FTS 8 passed; Ruff clean. Bandit not applicable: no production code changes. Report remains local and ignored at .superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-2-report.md.
 
 Task 2 Fix Round 3 completed locally. Tightened the live PostgreSQL oversized-source characterization test from an unanchored pytest regex match to exact str(exc.value) == notes_graph_source_too_large equality while retaining the exception type and SQL byte-guard/no-FTS ordering assertions. Modified: tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_retrieval_backends.py. Verification: focused live PostgreSQL test 1 passed/0 skipped (2 established warnings); Task 2 suites 26 passed/0 skipped (2 established warnings); Ruff clean. Bandit not applicable: no production code changes. Report remains local and ignored at .superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-2-report.md.
-<!-- SECTION:NOTES:END -->
+Task 3 started in notes-second-brain-planning at base 47f76468362839c3ace61df10a8e824362097eaf. Scope: durable ChaChaNotes suggestion runs/receipts/publication/retention plus same-transaction NoteStore invalidation hooks. Reused patterns inspected before edits: Jobs owner-scoped idempotency receipts and constant-time fingerprint replay checks; Slides/shared-workspace revision and lease-fence CAS transitions; Notes attachment/Sync bounded HMAC cursor encoding; NoteStore projection/sidecar lifecycle hooks inside product transactions; Jobs bounded retention candidate selection. Strict two-file RED will precede production edits.
+Task 3 complete: implemented the durable ChaChaNotes suggestion run/receipt/decision state machine, atomic staged publication, five-minute fenced acceptance leases, signed pagination, bounded exact-horizon retention, and same-transaction NoteStore invalidation hooks. Corrected the unreleased v64 active-run index to the approved full tuple and split hidden staged uniqueness from visible canonical identity after focused SQLite/PostgreSQL RED demonstrations.
 
+Verification:
+- Required Task 3 GREEN: 21 passed, 0 skipped, 2 warnings.
+- Task 1 v64 SQLite/PostgreSQL migration regressions: 17 passed, 0 skipped, 2 warnings.
+- Task 2 retrieval regressions: 26 passed, 0 skipped, 2 warnings.
+- Direct NoteStore/projection lifecycle regressions: 36 passed, 0 skipped, 2 warnings.
+- Ruff all touched Python: clean.
+- Bandit touched production Python: 0 findings, 0 errors.
+- Live PostgreSQL exercised active-run identity, note lifecycle invalidation, publication, receipt replay, acceptance fencing, reject/reset, and retention; no established-fixture skips.
+- Local ignored report: .superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-3-report.md
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
