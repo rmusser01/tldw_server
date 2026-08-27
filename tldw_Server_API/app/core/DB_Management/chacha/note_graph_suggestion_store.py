@@ -25,6 +25,10 @@ class NotesGraphFTSNotReadyError(RuntimeError):
     """Raised when Notes FTS structures are unavailable or structurally incomplete."""
 
 
+class NotesGraphDatasetScopeError(RuntimeError):
+    """Raised when an owner is not authorized for the requested Notes dataset."""
+
+
 @dataclass(frozen=True, slots=True)
 class SuggestionNoteRecord:
     """A bounded owner-scoped note payload returned after a SQL byte predicate."""
@@ -55,7 +59,7 @@ class NoteGraphSuggestionStore:
     def _scope(self, dataset_id: str) -> str:
         dataset = str(dataset_id).strip()
         if not dataset:
-            raise ValueError("dataset_id cannot be empty")
+            raise NotesGraphDatasetScopeError("notes_graph_dataset_scope_invalid")
         return dataset
 
     def _deleted_value(self) -> bool | int:
@@ -68,31 +72,116 @@ class NoteGraphSuggestionStore:
     ) -> SuggestionReadT:
         if not self.is_postgres:
             with self._db.transaction() as conn:
+                self._require_dataset_scope(conn, dataset_id)
                 return fn(conn)
         with self._db.transaction() as conn:
             conn.execute("SELECT set_config('app.current_dataset_id', ?, true)", (dataset_id,))
+            self._require_dataset_scope(conn, dataset_id)
             return fn(conn)
+
+    def _require_dataset_scope(self, conn: SuggestionConnection, dataset_id: str) -> None:
+        row = conn.execute(
+            "SELECT 1 FROM note_task_scope_authority "
+            "WHERE owner_user_id = ? AND dataset_id = ?",
+            (self.owner_user_id, dataset_id),
+        ).fetchone()
+        if row is None:
+            raise NotesGraphDatasetScopeError("notes_graph_dataset_scope_invalid")
 
     def _source_byte_expression(self) -> str:
         if self.is_postgres:
             return "octet_length(COALESCE(n.title, '')) + octet_length(COALESCE(n.content, ''))"
         return "length(CAST(COALESCE(n.title, '') AS BLOB)) + length(CAST(COALESCE(n.content, '') AS BLOB))"
 
+    @staticmethod
+    def _normalized_sql(value: str) -> str:
+        return " ".join(value.lower().split()).rstrip(";")
+
     def _ensure_fts_ready(self, conn: SuggestionConnection) -> None:
         if self.is_postgres:
             row = conn.execute(
-                "SELECT 1 FROM information_schema.columns "
+                "SELECT data_type, udt_name FROM information_schema.columns "
                 "WHERE table_schema = current_schema() AND table_name = 'notes' "
                 "AND column_name = 'notes_fts_tsv'"
             ).fetchone()
-            if row is None:
+            if row is None or row["data_type"] != "tsvector" or row["udt_name"] != "tsvector":
+                raise NotesGraphFTSNotReadyError("notes_graph_fts_not_ready")
+            trigger = conn.execute(
+                "SELECT trigger_row.tgtype, function_row.proname, function_row.prosrc "
+                "FROM pg_trigger trigger_row "
+                "JOIN pg_proc function_row ON function_row.oid = trigger_row.tgfoid "
+                "WHERE trigger_row.tgrelid = 'notes'::regclass "
+                "AND trigger_row.tgname = 'update_notes_fts_tsv_trigger' "
+                "AND NOT trigger_row.tgisinternal"
+            ).fetchone()
+            expected_function = self._normalized_sql(
+                """
+                BEGIN
+                    NEW."notes_fts_tsv" := to_tsvector('english', coalesce(NEW."title", '') || ' ' || coalesce(NEW."content", ''));
+                    RETURN NEW;
+                END;
+                """
+            )
+            if (
+                trigger is None
+                or int(trigger["tgtype"]) != 23
+                or str(trigger["proname"]) != "update_notes_fts_tsv_function"
+                or self._normalized_sql(str(trigger["prosrc"])) != expected_function
+            ):
+                raise NotesGraphFTSNotReadyError("notes_graph_fts_not_ready")
+            index = conn.execute(
+                "SELECT access_method.amname, index_row.indisvalid, "
+                "array_agg(attribute_row.attname ORDER BY key_column.ordinality) AS columns "
+                "FROM pg_index index_row "
+                "JOIN pg_class index_relation ON index_relation.oid = index_row.indexrelid "
+                "JOIN pg_class table_relation ON table_relation.oid = index_row.indrelid "
+                "JOIN pg_am access_method ON access_method.oid = index_relation.relam "
+                "JOIN unnest(index_row.indkey) WITH ORDINALITY AS key_column(attnum, ordinality) ON true "
+                "JOIN pg_attribute attribute_row ON attribute_row.attrelid = table_relation.oid "
+                "AND attribute_row.attnum = key_column.attnum "
+                "WHERE table_relation.oid = 'notes'::regclass "
+                "AND index_relation.relname = 'idx_notes_notes_fts_tsv' "
+                "GROUP BY access_method.amname, index_row.indisvalid"
+            ).fetchone()
+            if (
+                index is None
+                or str(index["amname"]) != "gin"
+                or not bool(index["indisvalid"])
+                or tuple(index["columns"]) != ("notes_fts_tsv",)
+            ):
                 raise NotesGraphFTSNotReadyError("notes_graph_fts_not_ready")
             return
         rows = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type IN ('table', 'trigger') "
+            "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE type IN ('table', 'trigger') "
             "AND name IN ('notes_fts', 'notes_ai', 'notes_au', 'notes_ad')"
         ).fetchall()
-        if {str(row["name"]) for row in rows} != {"notes_fts", "notes_ai", "notes_au", "notes_ad"}:
+        by_name = {str(row["name"]): row for row in rows}
+        table_definition, trigger_definitions = self._db._notes_fts_sqlite_contract()
+        expected_trigger_definitions = {
+            definition.split()[2]: self._normalized_sql(definition)
+            for definition in trigger_definitions
+        }
+        table = by_name.get("notes_fts")
+        if (
+            table is None
+            or str(table["type"]) != "table"
+            or self._normalized_sql(str(table["sql"] or ""))
+            != self._normalized_sql(table_definition)
+        ):
+            raise NotesGraphFTSNotReadyError("notes_graph_fts_not_ready")
+        if set(by_name) != {"notes_fts", *expected_trigger_definitions}:
+            raise NotesGraphFTSNotReadyError("notes_graph_fts_not_ready")
+        for trigger_name, expected_definition in expected_trigger_definitions.items():
+            trigger = by_name.get(trigger_name)
+            if (
+                trigger is None
+                or str(trigger["type"]) != "trigger"
+                or str(trigger["tbl_name"]) != "notes"
+                or self._normalized_sql(str(trigger["sql"] or "")) != expected_definition
+            ):
+                raise NotesGraphFTSNotReadyError("notes_graph_fts_not_ready")
+        columns = conn.execute("PRAGMA table_info(notes_fts)").fetchall()
+        if tuple(str(column["name"]) for column in columns) != ("title", "content"):
             raise NotesGraphFTSNotReadyError("notes_graph_fts_not_ready")
 
     def load_source_note(self, *, dataset_id: str, note_id: str) -> SuggestionNoteRecord:
@@ -135,15 +224,15 @@ class NoteGraphSuggestionStore:
         terms: tuple[str, ...],
         source_fingerprint: str,
         limit: int,
-    ) -> tuple[tuple[SuggestionNoteRecord, ...], int]:
+    ) -> tuple[tuple[SuggestionNoteRecord, ...], int, int]:
         """Return at most 60 FTS-ranked byte-safe candidates and an oversized aggregate."""
 
         del source_fingerprint
         dataset = self._scope(dataset_id)
         if not terms or not 1 <= len(terms) <= 24 or not 1 <= limit <= 60:
-            return (), 0
+            return (), 0, 0
 
-        def read(conn: SuggestionConnection) -> tuple[tuple[SuggestionNoteRecord, ...], int]:
+        def read(conn: SuggestionConnection) -> tuple[tuple[SuggestionNoteRecord, ...], int, int]:
             self._ensure_fts_ready(conn)
             byte_expression = self._source_byte_expression()
             direct_exclusion = (
@@ -168,50 +257,73 @@ class NoteGraphSuggestionStore:
             direct_exclusion += ")"
             if self.is_postgres:
                 tsquery = " | ".join(terms)
-                select_sql = (
-                    "SELECT n.id, n.title, n.content, n.version, n.last_modified "
+                ranked_sql = (
+                    "WITH ranked AS MATERIALIZED ("
+                    "SELECT n.id AS note_id, ts_rank(n.notes_fts_tsv, to_tsquery('english', ?)) AS rank_value "
                     "FROM notes n WHERE n.client_id = ? AND n.deleted = ? AND n.id <> ? "
                     "AND n.notes_fts_tsv @@ to_tsquery('english', ?) "
-                    f"AND ({byte_expression}) <= ? AND {direct_exclusion} "  # nosec B608
-                    "ORDER BY ts_rank(n.notes_fts_tsv, to_tsquery('english', ?)) DESC, n.id ASC LIMIT ?"
+                    "ORDER BY rank_value DESC, n.id ASC LIMIT ?"
+                    ") SELECT ranked.note_id, "
+                    f"({byte_expression}) AS byte_count, "  # nosec B608
+                    f"CASE WHEN {direct_exclusion} THEN 0 ELSE 1 END AS direct_connected "  # nosec B608
+                    "FROM ranked JOIN notes n ON n.id = ranked.note_id "
+                    "ORDER BY ranked.rank_value DESC, ranked.note_id ASC"
                 )
-                count_sql = (
-                    "SELECT COUNT(*) AS count FROM notes n WHERE n.client_id = ? AND n.deleted = ? "
-                    "AND n.id <> ? AND n.notes_fts_tsv @@ to_tsquery('english', ?) "
-                    f"AND ({byte_expression}) > ? AND {direct_exclusion}"  # nosec B608
-                )
-                prefix = (self.owner_user_id, self._deleted_value(), source_note_id, tsquery)
-                rows = conn.execute(select_sql, (*prefix, 250_000, *direct_params, tsquery, limit)).fetchall()
-                count_row = conn.execute(count_sql, (*prefix, 250_000, *direct_params)).fetchone()
+                ranked_rows = conn.execute(
+                    ranked_sql,
+                    (tsquery, self.owner_user_id, self._deleted_value(), source_note_id, tsquery, limit, *direct_params),
+                ).fetchall()
             else:
                 fts_query = " OR ".join(f'"{term}"' for term in terms)
-                select_sql = (
-                    "SELECT n.id, n.title, n.content, n.version, n.last_modified "
+                ranked_sql = (
+                    "WITH ranked AS MATERIALIZED ("
+                    "SELECT n.id AS note_id, bm25(notes_fts) AS rank_value "
                     "FROM notes_fts JOIN notes n ON notes_fts.rowid = n.rowid "
                     "WHERE notes_fts MATCH ? AND n.client_id = ? AND n.deleted = ? AND n.id <> ? "
-                    f"AND ({byte_expression}) <= ? AND {direct_exclusion} "  # nosec B608
-                    "ORDER BY bm25(notes_fts) ASC, n.id ASC LIMIT ?"
+                    "ORDER BY rank_value ASC, n.id ASC LIMIT ?"
+                    ") SELECT ranked.note_id, "
+                    f"({byte_expression}) AS byte_count, "  # nosec B608
+                    f"CASE WHEN {direct_exclusion} THEN 0 ELSE 1 END AS direct_connected "  # nosec B608
+                    "FROM ranked JOIN notes n ON n.id = ranked.note_id "
+                    "ORDER BY ranked.rank_value ASC, ranked.note_id ASC"
                 )
-                count_sql = (
-                    "SELECT COUNT(*) AS count FROM notes_fts JOIN notes n ON notes_fts.rowid = n.rowid "
-                    "WHERE notes_fts MATCH ? AND n.client_id = ? AND n.deleted = ? AND n.id <> ? "
-                    f"AND ({byte_expression}) > ? AND {direct_exclusion}"  # nosec B608
+                ranked_rows = conn.execute(
+                    ranked_sql,
+                    (fts_query, self.owner_user_id, self._deleted_value(), source_note_id, limit, *direct_params),
+                ).fetchall()
+
+            oversized_count = sum(
+                int(row["byte_count"]) > 250_000 and not bool(row["direct_connected"])
+                for row in ranked_rows
+            )
+            eligible_ids = tuple(
+                str(row["note_id"])
+                for row in ranked_rows
+                if int(row["byte_count"]) <= 250_000 and not bool(row["direct_connected"])
+            )
+            if not eligible_ids:
+                return (), oversized_count, len(ranked_rows)
+            placeholders = ", ".join("?" for _ in eligible_ids)
+            payload_rows = conn.execute(
+                "SELECT n.id, n.title, n.content, n.version, n.last_modified FROM notes n "
+                f"WHERE n.id IN ({placeholders}) AND n.client_id = ? AND n.deleted = ? "  # nosec B608
+                f"AND ({byte_expression}) <= ?",  # nosec B608
+                (*eligible_ids, self.owner_user_id, self._deleted_value(), 250_000),
+            ).fetchall()
+            records_by_id = {
+                str(row["id"]): SuggestionNoteRecord(
+                    note_id=str(row["id"]),
+                    title=str(row["title"] or ""),
+                    content=str(row["content"] or ""),
+                    version=int(row["version"]),
+                    last_modified=str(row["last_modified"]),
                 )
-                prefix = (fts_query, self.owner_user_id, self._deleted_value(), source_note_id)
-                rows = conn.execute(select_sql, (*prefix, 250_000, *direct_params, limit)).fetchall()
-                count_row = conn.execute(count_sql, (*prefix, 250_000, *direct_params)).fetchone()
+                for row in payload_rows
+            }
             return (
-                tuple(
-                    SuggestionNoteRecord(
-                        note_id=str(row["id"]),
-                        title=str(row["title"] or ""),
-                        content=str(row["content"] or ""),
-                        version=int(row["version"]),
-                        last_modified=str(row["last_modified"]),
-                    )
-                    for row in rows
-                ),
-                int(count_row["count"]),
+                tuple(records_by_id[note_id] for note_id in eligible_ids if note_id in records_by_id),
+                oversized_count,
+                len(ranked_rows),
             )
 
         return self._with_dataset_scope(dataset, read)

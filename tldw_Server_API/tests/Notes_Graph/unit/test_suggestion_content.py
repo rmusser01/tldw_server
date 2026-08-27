@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import unicodedata
 
 import pytest
 from hypothesis import given
@@ -102,7 +103,8 @@ def test_evidence_windows_never_cross_canonical_fields_or_exceed_limits(
     max_windows: int,
     max_code_points: int,
 ) -> None:
-    canonical = canonicalize_note_content(title, content)
+    oracle_title = unicodedata.normalize("NFC", title.replace("\r\n", "\n").replace("\r", "\n"))
+    oracle_content = unicodedata.normalize("NFC", content.replace("\r\n", "\n").replace("\r", "\n"))
     windows = split_evidence_windows(
         note_id="note-1",
         title=title,
@@ -112,14 +114,13 @@ def test_evidence_windows_never_cross_canonical_fields_or_exceed_limits(
     )
 
     assert len(windows) <= max_windows
-    previous = (0, 0)
+    prior_ends = {"title": 0, "content": 0}
     for window in windows:
-        field_text = canonical.title if window.field == "title" else canonical.content
+        field_text = oracle_title if window.field == "title" else oracle_content
         assert 0 <= window.start_offset < window.end_offset <= len(field_text)
         assert window.end_offset - window.start_offset <= max_code_points
+        assert prior_ends[window.field] <= window.start_offset
         assert reconstruct_evidence(window, title=title, content=content) == field_text[
             window.start_offset : window.end_offset
         ]
-        position = (0 if window.field == "title" else 1, window.start_offset)
-        assert position >= previous
-        previous = position
+        prior_ends[window.field] = window.end_offset

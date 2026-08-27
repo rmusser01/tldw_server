@@ -91,7 +91,7 @@ class SuggestionRetriever:
         source = self._store.load_source_note(dataset_id=dataset_id, note_id=source_note_id)
         source_fingerprint = content_fingerprint(source.title, source.content)
         terms = derive_retrieval_terms(source.title, source.content)
-        candidate_rows, oversized_count = self._store.fetch_ranked_candidates(
+        candidate_rows, oversized_count, ranked_shortlist_count = self._store.fetch_ranked_candidates(
             dataset_id=dataset_id,
             source_note_id=source.note_id,
             terms=terms,
@@ -127,7 +127,7 @@ class SuggestionRetriever:
             terms=terms,
             candidates=tuple(candidates),
             tag_catalog=tag_catalog,
-            backend_overfetch_count=len(candidate_rows),
+            backend_overfetch_count=ranked_shortlist_count,
             excluded_oversized_candidate_count=oversized_count,
             projection_fresh=projection_fresh,
             estimated_input_tokens=(evidence_code_points + 3) // 4,

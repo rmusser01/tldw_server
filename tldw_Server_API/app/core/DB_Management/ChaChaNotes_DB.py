@@ -20748,6 +20748,51 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             logger.error("Failed rebuilding conversations_fts: {}", exc)
             raise SchemaError(f"Failed rebuilding conversations_fts: {exc}") from exc  # noqa: TRY003
 
+    @staticmethod
+    def _notes_fts_sqlite_contract() -> tuple[str, tuple[str, ...]]:
+        """Return the exact SQLite Notes FTS table and trigger definitions."""
+
+        return (
+            """
+            CREATE VIRTUAL TABLE notes_fts
+            USING fts5(
+              title,content,
+              content='notes',
+              content_rowid='rowid'
+            )
+            """,
+            (
+                """
+                CREATE TRIGGER notes_ai
+                AFTER INSERT ON notes BEGIN
+                  INSERT INTO notes_fts(rowid,title,content)
+                  SELECT new.rowid,new.title,new.content
+                  WHERE new.deleted = 0;
+                END
+                """,
+                """
+                CREATE TRIGGER notes_au
+                AFTER UPDATE ON notes BEGIN
+                  INSERT INTO notes_fts(notes_fts,rowid,title,content)
+                  SELECT 'delete',old.rowid,old.title,old.content
+                  WHERE old.deleted = 0;
+
+                  INSERT INTO notes_fts(rowid,title,content)
+                  SELECT new.rowid,new.title,new.content
+                  WHERE new.deleted = 0;
+                END
+                """,
+                """
+                CREATE TRIGGER notes_ad
+                AFTER DELETE ON notes BEGIN
+                  INSERT INTO notes_fts(notes_fts,rowid,title,content)
+                  SELECT 'delete',old.rowid,old.title,old.content
+                  WHERE old.deleted = 0;
+                END
+                """,
+            ),
+        )
+
     def _ensure_notes_fts_triggers_sqlite(self, conn: sqlite3.Connection) -> None:
         """Normalize notes FTS triggers to avoid invalid delete operations.
 
@@ -20759,37 +20804,15 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         """
 
         try:
+            _, trigger_definitions = self._notes_fts_sqlite_contract()
             conn.executescript(
-                """
+                """\
                 DROP TRIGGER IF EXISTS notes_ai;
                 DROP TRIGGER IF EXISTS notes_au;
                 DROP TRIGGER IF EXISTS notes_ad;
-
-                CREATE TRIGGER notes_ai
-                AFTER INSERT ON notes BEGIN
-                  INSERT INTO notes_fts(rowid,title,content)
-                  SELECT new.rowid,new.title,new.content
-                  WHERE new.deleted = 0;
-                END;
-
-                CREATE TRIGGER notes_au
-                AFTER UPDATE ON notes BEGIN
-                  INSERT INTO notes_fts(notes_fts,rowid,title,content)
-                  SELECT 'delete',old.rowid,old.title,old.content
-                  WHERE old.deleted = 0;
-
-                  INSERT INTO notes_fts(rowid,title,content)
-                  SELECT new.rowid,new.title,new.content
-                  WHERE new.deleted = 0;
-                END;
-
-                CREATE TRIGGER notes_ad
-                AFTER DELETE ON notes BEGIN
-                  INSERT INTO notes_fts(notes_fts,rowid,title,content)
-                  SELECT 'delete',old.rowid,old.title,old.content
-                  WHERE old.deleted = 0;
-                END;
                 """
+                + ";\n".join(trigger_definitions)
+                + ";"
             )
         except sqlite3.Error as exc:
             raise SchemaError(f"Failed ensuring notes FTS triggers: {exc}") from exc  # noqa: TRY003

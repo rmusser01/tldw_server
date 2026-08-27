@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.chacha.note_graph_suggestion_store import (
+    NotesGraphFTSNotReadyError,
     NotesGraphSourceTooLargeError,
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
@@ -21,6 +22,11 @@ pytestmark = pytest.mark.unit
 @pytest.fixture()
 def db(tmp_path) -> CharactersRAGDB:
     database = CharactersRAGDB(str(tmp_path / "suggestion-retrieval.db"), client_id="owner-1")
+    with database.transaction() as conn:
+        conn.execute(
+            "INSERT INTO note_task_scope_authority(owner_user_id,dataset_id) VALUES (?,?)",
+            (database.client_id, "dataset-1"),
+        )
     yield database
     database.close_connection()
 
@@ -158,3 +164,46 @@ def test_retrieval_estimates_only_bounded_evidence_windows(db: CharactersRAGDB) 
     )
 
     assert result.estimated_input_tokens <= 24_000
+
+
+def test_retrieval_rejects_an_unbound_dataset_without_disclosing_notes(db: CharactersRAGDB) -> None:
+    source = _note(db, _id(700), "retrieval", "graph")
+
+    with pytest.raises(RuntimeError, match="notes_graph_dataset_scope_invalid"):
+        SuggestionRetriever(db.note_graph_suggestion_store).retrieve(
+            dataset_id="dataset-not-authorized", source_note_id=source
+        )
+
+
+def test_retrieval_fails_closed_when_a_notes_fts_trigger_definition_drifts(db: CharactersRAGDB) -> None:
+    source = _note(db, _id(701), "retrieval", "graph")
+    with db.transaction() as conn:
+        conn.execute("DROP TRIGGER notes_au")
+        conn.execute(
+            "CREATE TRIGGER notes_au AFTER UPDATE ON notes BEGIN SELECT 1; END"
+        )
+
+    with pytest.raises(NotesGraphFTSNotReadyError, match="notes_graph_fts_not_ready"):
+        SuggestionRetriever(db.note_graph_suggestion_store).retrieve(
+            dataset_id="dataset-1", source_note_id=source
+        )
+
+
+def test_retrieval_fails_closed_when_notes_fts_is_not_the_expected_virtual_table(
+    db: CharactersRAGDB,
+) -> None:
+    source = _note(db, _id(702), "retrieval", "graph")
+    with db.transaction() as conn:
+        for trigger_name in ("notes_ai", "notes_au", "notes_ad"):
+            conn.execute(f"DROP TRIGGER {trigger_name}")
+        conn.execute("DROP TABLE notes_fts")
+        conn.execute("CREATE TABLE notes_fts(title TEXT, content TEXT)")
+        for trigger_name in ("notes_ai", "notes_au", "notes_ad"):
+            conn.execute(
+                f"CREATE TRIGGER {trigger_name} AFTER UPDATE ON notes BEGIN SELECT 1; END"
+            )
+
+    with pytest.raises(NotesGraphFTSNotReadyError, match="notes_graph_fts_not_ready"):
+        SuggestionRetriever(db.note_graph_suggestion_store).retrieve(
+            dataset_id="dataset-1", source_note_id=source
+        )
