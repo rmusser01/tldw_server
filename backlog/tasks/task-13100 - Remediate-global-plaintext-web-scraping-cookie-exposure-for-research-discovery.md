@@ -3,18 +3,22 @@ id: TASK-13100
 title: Remediate global plaintext web-scraping cookie exposure for research discovery
 status: To Do
 assignee: []
-created_date: '2026-08-21 19:36'
+created_date: 2026-08-21 19:36
 labels:
-  - security
-  - web-scraping
-  - authnz
-  - multi-user
-  - research-discovery
+- security
+- web-scraping
+- authnz
+- multi-user
+- research-discovery
 dependencies: []
 references:
-  - TASK-12968
-  - TASK-12964
+- TASK-12968
+- TASK-12964
+- TASK-13139
 priority: high
+documentation:
+- Docs/superpowers/specs/2026-08-27-agent-native-web-research-quality-provenance-roadmap.md
+updated_date: 2026-08-28 01:00
 ---
 
 ## Description
@@ -34,12 +38,22 @@ Eliminate the existing global plaintext domain-cookie store and cross-user raw c
 - [ ] #7 Focused tests, API contract checks, lint/format checks, Bandit, and diff hygiene pass, with operational upgrade notes for affected deployments.
 <!-- AC:END -->
 
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. Inventory and remove ordinary-user raw cookie read/list/write endpoints and global CookieManager call sites.
+2. Disable persistent web-scraping cookies in multi-user mode; retain only explicit request-scoped cookies where an approved current workflow requires them.
+3. Quarantine then securely remove or administratively retire the legacy plaintext cookie file with documented upgrade behavior.
+4. Prove credentialless discovery, MCP fetch, caches, logs, Jobs metadata, and browser gates never consult ambient cookie state.
+5. Defer an encrypted owner-scoped cookie vault until a concrete authenticated-retrieval use case is separately designed and approved.
+<!-- SECTION:PLAN:END -->
+
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created as the research-discovery replacement for the ambiguous active TASK-12969 record. The superseded discovery record is archived at `backlog/archive/tasks/task-12969 - Remediate-global-plaintext-web-scraping-cookie-exposure.md` after every discovery-specific reference was migrated. The replacement was rekeyed from the historical branch-local TASK-13013 allocation to TASK-13100 after the latest-dev rebase exposed unrelated active TASK-13013 claimants; historical commit subjects remain unchanged.
-<!-- SECTION:NOTES:END -->
-
+2026-08-27 program reconciliation (TASK-13139): choose the minimal safe first release. Remove raw cookie-management endpoints, disable persistent cookies in multi-user deployments, allow only explicit request-scoped cookies on already-approved paths, and quarantine/retire the legacy plaintext file. An encrypted owner-scoped cookie vault is deliberately deferred until a real authenticated-retrieval requirement exists; do not build one speculatively.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed
