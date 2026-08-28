@@ -7409,11 +7409,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         from tldw_Server_API.app.core.DB_Management.chacha.character_store import (
             CharacterStore,
         )
-        from tldw_Server_API.app.core.DB_Management.chacha.conversation_store import (
-            ConversationStore,
-        )
         from tldw_Server_API.app.core.DB_Management.chacha.conversation_resume_store import (
             ConversationResumeStore,
+        )
+        from tldw_Server_API.app.core.DB_Management.chacha.conversation_store import (
+            ConversationStore,
         )
         from tldw_Server_API.app.core.DB_Management.chacha.keyword_store import (
             KeywordStore,

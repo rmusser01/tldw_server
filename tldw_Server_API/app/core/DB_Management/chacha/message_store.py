@@ -746,33 +746,35 @@ class MessageStore:
                 existing_versions,
             )
 
-        message_id = self.add_message(
-            {
-                "id": projection_id,
-                "conversation_id": conversation_id,
-                "parent_message_id": parent_message_id,
-                "sender": sender,
-                "content": content or "",
-                "timestamp": timestamp,
-                "ranking": ranking,
-                "client_id": sync_client_id,
-            }
-        )
-        if message_id is None:
-            raise CharactersRAGDBError("Failed to append Sync v2 message projection.")  # noqa: TRY003
-        if object_revision != 1:
-            self._db.execute_query(
-                "UPDATE messages SET version = ?, client_id = ? WHERE id = ?",
-                (object_revision, sync_client_id, message_id),
-                commit=True,
+        with self._db.transaction() as conn:
+            message_id = self.add_message(
+                {
+                    "id": projection_id,
+                    "conversation_id": conversation_id,
+                    "parent_message_id": parent_message_id,
+                    "sender": sender,
+                    "content": content or "",
+                    "timestamp": timestamp,
+                    "ranking": ranking,
+                    "client_id": sync_client_id,
+                },
+                conn=conn,
             )
-        self._set_sync_v2_message_metadata_or_raise(
-            message_id=message_id,
-            stable_message_id=normalized_stable_id,
-            payload_hash=payload_hash,
-            object_revision=object_revision,
-            projection_conflict=is_conflict,
-        )
+            if message_id is None:
+                raise CharactersRAGDBError("Failed to append Sync v2 message projection.")  # noqa: TRY003
+            if object_revision != 1:
+                conn.execute(
+                    "UPDATE messages SET version = ?, client_id = ? WHERE id = ?",
+                    (object_revision, sync_client_id, message_id),
+                )
+            self._set_sync_v2_message_metadata_or_raise(
+                message_id=message_id,
+                stable_message_id=normalized_stable_id,
+                payload_hash=payload_hash,
+                object_revision=object_revision,
+                projection_conflict=is_conflict,
+                conn=conn,
+            )
         return {
             "message_id": message_id,
             "stable_message_id": normalized_stable_id,
@@ -821,12 +823,17 @@ class MessageStore:
             )
 
         matched_ids = {str(version["id"]) for version in matched_versions}
-        target_ids = [str(version["id"]) for version in existing_versions]
         now = self._db._get_current_utc_timestamp_iso()
-        updated = 0
+        affected_conversation_ids = {
+            str(version["conversation_id"])
+            for version in existing_versions
+            if not bool(version["deleted"])
+        }
         with self._db.transaction() as conn:
-            for target_id in target_ids:
-                cursor = conn.execute(
+            for version in existing_versions:
+                if bool(version["deleted"]):
+                    continue
+                conn.execute(
                     """
                     UPDATE messages
                        SET deleted = ?,
@@ -835,30 +842,31 @@ class MessageStore:
                            client_id = ?
                      WHERE id = ?
                     """,
-                    (True, now, object_revision, sync_client_id, target_id),
+                    (True, now, object_revision, sync_client_id, version["id"]),
                 )
-                updated += cursor.rowcount
-        if updated == 0:
-            raise ConflictError(  # noqa: TRY003
-                "Message not found for Sync v2 tombstone.",
-                entity="messages",
-                entity_id=normalized_stable_id,
-            )
-        for version in existing_versions:
-            sync_meta = dict(((version.get("metadata") or {}).get("extra") or {}).get("sync_v2") or {})
-            sync_meta.setdefault("stable_message_id", normalized_stable_id)
-            sync_meta.setdefault("payload_hash", object_hash if str(version["id"]) in matched_ids else "")
-            sync_meta.update(
-                {
-                    "object_revision": object_revision,
-                    "tombstoned": True,
-                }
-            )
-            persisted = self.set_message_metadata_extra(version["id"], {"sync_v2": sync_meta}, merge=True)
-            if not persisted:
-                raise CharactersRAGDBError(  # noqa: TRY003
-                    f"Failed to persist Sync v2 tombstone metadata for message {version['id']}."
+            for version in existing_versions:
+                sync_meta = dict(((version.get("metadata") or {}).get("extra") or {}).get("sync_v2") or {})
+                sync_meta.setdefault("stable_message_id", normalized_stable_id)
+                sync_meta.setdefault("payload_hash", object_hash if str(version["id"]) in matched_ids else "")
+                sync_meta.update(
+                    {
+                        "object_revision": object_revision,
+                        "tombstoned": True,
+                    }
                 )
+                persisted = self.set_message_metadata_extra(
+                    version["id"],
+                    {"sync_v2": sync_meta},
+                    merge=True,
+                    conn=conn,
+                    _advance_history=False,
+                )
+                if not persisted:
+                    raise CharactersRAGDBError(  # noqa: TRY003
+                        f"Failed to persist Sync v2 tombstone metadata for message {version['id']}."
+                    )
+            for affected_conversation_id in sorted(affected_conversation_ids):
+                self._advance_history_version(conn, affected_conversation_id)
         return True
 
     def get_messages_by_sync_stable_id(
@@ -917,6 +925,7 @@ class MessageStore:
         payload_hash: str,
         object_revision: int,
         projection_conflict: bool,
+        conn: Any | None = None,
     ) -> None:
         persisted = self.set_message_metadata_extra(
             message_id,
@@ -929,6 +938,8 @@ class MessageStore:
                 }
             },
             merge=True,
+            conn=conn,
+            _advance_history=False,
         )
         if not persisted:
             raise CharactersRAGDBError(  # noqa: TRY003
@@ -1508,6 +1519,8 @@ class MessageStore:
         tool_calls: Any | None,
         extra: Any | None,
         conn: Any,
+        *,
+        advance_history: bool = True,
     ) -> bool:
         cursor = conn.execute(
             "SELECT m.conversation_id, mm.message_id AS metadata_message_id, "
@@ -1538,8 +1551,9 @@ class MessageStore:
                 json.dumps(extra) if extra is not None else None,
             ),
         )
-        conversation_id = str(self._row_value(row, "conversation_id"))
-        self._advance_history_version(conn, conversation_id)
+        if advance_history:
+            conversation_id = str(self._row_value(row, "conversation_id"))
+            self._advance_history_version(conn, conversation_id)
         return True
 
     def add_message_metadata(
@@ -1658,6 +1672,7 @@ class MessageStore:
         merge: bool = True,
         *,
         conn: Any | None = None,
+        _advance_history: bool = True,
     ) -> bool:
         """Set or merge structured extra metadata for a message.
 
@@ -1697,6 +1712,7 @@ class MessageStore:
                     current.get('tool_calls'),
                     new_extra,
                     transaction_conn,
+                    advance_history=_advance_history,
                 )
         except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
             if conn is not None:

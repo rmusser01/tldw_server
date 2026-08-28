@@ -792,6 +792,193 @@ def test_caller_owned_metadata_fence_failure_propagates_and_rolls_back(
     db.close_connection()
 
 
+def test_sync_append_advances_history_once_and_replay_does_not_advance(
+    tmp_path: Path,
+) -> None:
+    db = CharactersRAGDB(
+        db_path=str(tmp_path / "character-sync-append-fence.sqlite"),
+        client_id="sync-append-owner",
+    )
+    conversation_id = db.add_conversation(
+        {"character_id": 1, "title": "Atomic Sync append"}
+    )
+    assert conversation_id is not None
+    assert db.get_roleplay_resume_state(conversation_id)["history_version"] == 1
+
+    first = db.append_message_from_sync(
+        stable_message_id="sync-atomic-append",
+        conversation_id=conversation_id,
+        sender="user",
+        content="Synced once",
+        timestamp="2026-08-28T08:00:00+00:00",
+        sync_client_id="sync-device",
+        object_revision=3,
+        payload_hash="sha256:sync-atomic-append",
+    )
+    assert first["created"] is True
+    assert db.get_roleplay_resume_state(conversation_id)["history_version"] == 2
+    assert db.get_message_by_id(first["message_id"])["version"] == 3
+    assert db.get_conversation_behavior_snapshot(conversation_id)["status"] == "missing"
+
+    replay = db.append_message_from_sync(
+        stable_message_id="sync-atomic-append",
+        conversation_id=conversation_id,
+        sender="user",
+        content="Synced once",
+        timestamp="2026-08-28T08:00:00+00:00",
+        sync_client_id="sync-device",
+        object_revision=3,
+        payload_hash="sha256:sync-atomic-append",
+    )
+    assert replay["idempotent"] is True
+    assert db.get_roleplay_resume_state(conversation_id)["history_version"] == 2
+    db.close_connection()
+
+
+def test_sync_append_metadata_failure_rolls_back_message_and_history(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db = CharactersRAGDB(
+        db_path=str(tmp_path / "character-sync-append-rollback.sqlite"),
+        client_id="sync-append-rollback-owner",
+    )
+    conversation_id = db.add_conversation(
+        {"character_id": 1, "title": "Rolled-back Sync append"}
+    )
+    assert conversation_id is not None
+    original = db.message_store._set_sync_v2_message_metadata_or_raise
+
+    def _fail_after_metadata(**kwargs: Any) -> None:
+        original(**kwargs)
+        raise CharactersRAGDBError("injected Sync append metadata failure")
+
+    monkeypatch.setattr(
+        db.message_store,
+        "_set_sync_v2_message_metadata_or_raise",
+        _fail_after_metadata,
+    )
+    with pytest.raises(CharactersRAGDBError, match="injected Sync append metadata failure"):
+        db.append_message_from_sync(
+            stable_message_id="sync-rollback-append",
+            conversation_id=conversation_id,
+            sender="user",
+            content="Must roll back",
+            timestamp="2026-08-28T08:01:00+00:00",
+            sync_client_id="sync-device",
+            object_revision=2,
+            payload_hash="sha256:sync-rollback-append",
+        )
+
+    assert db.get_message_by_id("sync-rollback-append", include_deleted=True) is None
+    assert db.get_roleplay_resume_state(conversation_id)["history_version"] == 1
+    assert db.get_conversation_behavior_snapshot(conversation_id)["status"] == "missing"
+    db.close_connection()
+
+
+def test_sync_tombstone_advances_history_once_and_replay_does_not_advance(
+    tmp_path: Path,
+) -> None:
+    db = CharactersRAGDB(
+        db_path=str(tmp_path / "character-sync-tombstone-fence.sqlite"),
+        client_id="sync-tombstone-owner",
+    )
+    conversation_id = db.add_conversation(
+        {"character_id": 1, "title": "Atomic Sync tombstone"}
+    )
+    assert conversation_id is not None
+    db.append_message_from_sync(
+        stable_message_id="sync-atomic-tombstone",
+        conversation_id=conversation_id,
+        sender="assistant",
+        content="Delete through Sync",
+        timestamp="2026-08-28T08:02:00+00:00",
+        sync_client_id="sync-device",
+        object_revision=1,
+        payload_hash="sha256:sync-atomic-tombstone",
+    )
+
+    assert db.tombstone_message_from_sync(
+        stable_message_id="sync-atomic-tombstone",
+        sync_client_id="sync-device",
+        object_revision=2,
+        object_hash="sha256:sync-atomic-tombstone",
+    )
+    assert db.get_roleplay_resume_state(conversation_id)["history_version"] == 3
+
+    assert db.tombstone_message_from_sync(
+        stable_message_id="sync-atomic-tombstone",
+        sync_client_id="sync-device",
+        object_revision=2,
+        object_hash="sha256:sync-atomic-tombstone",
+    )
+    assert db.get_roleplay_resume_state(conversation_id)["history_version"] == 3
+    assert db.get_conversation_behavior_snapshot(conversation_id)["status"] == "missing"
+    db.close_connection()
+
+
+@pytest.mark.parametrize("failure_point", ["metadata", "fence"])
+def test_sync_tombstone_failure_rolls_back_deletion_metadata_and_history(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_point: str,
+) -> None:
+    db = CharactersRAGDB(
+        db_path=str(tmp_path / f"character-sync-tombstone-{failure_point}.sqlite"),
+        client_id="sync-tombstone-rollback-owner",
+    )
+    conversation_id = db.add_conversation(
+        {"character_id": 1, "title": "Rolled-back Sync tombstone"}
+    )
+    assert conversation_id is not None
+    message_id = "sync-rollback-tombstone"
+    db.append_message_from_sync(
+        stable_message_id=message_id,
+        conversation_id=conversation_id,
+        sender="assistant",
+        content="Keep after rollback",
+        timestamp="2026-08-28T08:03:00+00:00",
+        sync_client_id="sync-device",
+        object_revision=1,
+        payload_hash="sha256:sync-rollback-tombstone",
+    )
+    original_metadata = db.get_message_metadata(message_id)
+    assert original_metadata is not None
+
+    if failure_point == "metadata":
+        original = db.message_store.set_message_metadata_extra
+
+        def _fail_after_metadata(*args: Any, **kwargs: Any) -> bool:
+            assert original(*args, **kwargs)
+            raise CharactersRAGDBError("injected Sync tombstone metadata failure")
+
+        monkeypatch.setattr(db.message_store, "set_message_metadata_extra", _fail_after_metadata)
+    else:
+        original_fence = db.message_store._advance_history_version
+
+        def _fail_after_fence(conn: Any, target_conversation_id: str) -> None:
+            original_fence(conn, target_conversation_id)
+            raise CharactersRAGDBError("injected Sync tombstone fence failure")
+
+        monkeypatch.setattr(db.message_store, "_advance_history_version", _fail_after_fence)
+
+    with pytest.raises(CharactersRAGDBError, match=f"injected Sync tombstone {failure_point} failure"):
+        db.tombstone_message_from_sync(
+            stable_message_id=message_id,
+            sync_client_id="sync-device",
+            object_revision=2,
+            object_hash="sha256:sync-rollback-tombstone",
+        )
+
+    message = db.get_message_by_id(message_id, include_deleted=True)
+    assert message is not None
+    assert bool(message["deleted"]) is False
+    assert message["version"] == 1
+    assert db.get_message_metadata(message_id) == original_metadata
+    assert db.get_roleplay_resume_state(conversation_id)["history_version"] == 2
+    db.close_connection()
+
+
 def test_commit_false_image_append_retries_without_splitting_history_fence(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
