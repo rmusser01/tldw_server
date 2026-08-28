@@ -143,6 +143,7 @@ _JOBS_ARCHIVE_BASE64_MAX_CHARS = (
     4 * ((JOBS_ARCHIVE_COMPRESSED_MAX_BYTES + 2) // 3)
 )
 _JOBS_ARCHIVE_GZIP_CHUNK_BYTES = 65_536
+_INVALID_SLIDES_ARCHIVE_BLOB = object()
 
 
 def _parse_slides_archive_json(value: Any) -> Any:
@@ -212,9 +213,12 @@ def _strict_archive_compressed_bytes(value: Any) -> bytes:
             or len(encoded) % 4 != 0
         ):
             raise ValueError("archive base64 input is outside the fixed bound")
-        compressed = base64.b64decode(encoded.encode("ascii"), validate=True)
+        encoded_bytes = encoded.encode("ascii")
+        compressed = base64.b64decode(encoded_bytes, validate=True)
         if len(compressed) > JOBS_ARCHIVE_COMPRESSED_MAX_BYTES:
             raise ValueError("archive compressed input is outside the fixed bound")
+        if base64.b64encode(compressed) != encoded_bytes:
+            raise ValueError("archive base64 input is not canonically encoded")
         return compressed
     raise ValueError("archive compressed input uses an unsupported encoding")
 
@@ -226,9 +230,9 @@ def _decode_slides_archive_blob(value: Any) -> Any:
     try:
         compressed = _strict_archive_compressed_bytes(value)
         decoded = _bounded_gzip_decompress(compressed).decode("utf-8")
-        return _parse_slides_archive_json(decoded)
+        return json.loads(decoded)
     except (binascii.Error, TypeError, ValueError, UnicodeError, zlib.error):
-        return _parse_slides_archive_json(value)
+        return _INVALID_SLIDES_ARCHIVE_BLOB
 
 
 def normalize_slides_archive_projection(row: Any) -> dict[str, Any]:

@@ -950,6 +950,107 @@ _ARCHIVE_JSON_MAX_BYTES = 1_048_576
 _ARCHIVE_COMPRESSED_MAX_BYTES = _ARCHIVE_JSON_MAX_BYTES + 65_536
 
 
+def _canonical_archive_marker(payload: dict) -> dict:
+    return {
+        "schema_version": 1,
+        "token": _token("d"),
+        "kind": "complete",
+        "origin": "authnz",
+        "delivery_id": payload["delivery_id"],
+        "attempt_id": str(uuid4()),
+        "applied_at": "2026-01-01T00:00:00+00:00",
+    }
+
+
+def _replace_with_raw_compressed_archive_postgres(
+    jobs_pg_dsn: str,
+    job: dict,
+    *,
+    payload: dict,
+    marker: dict,
+    compressed_field: str,
+    compressed_value: bytes,
+) -> tuple:
+    payload_value = None if compressed_field == "payload" else json.dumps(payload)
+    result_value = None if compressed_field == "result" else json.dumps(marker)
+    payload_compressed = compressed_value if compressed_field == "payload" else None
+    result_compressed = compressed_value if compressed_field == "result" else None
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO jobs_archive(id, uuid, domain, queue, job_type, "
+            "idempotency_key, payload, result, status, payload_compressed, "
+            "result_compressed) "
+            "VALUES(%s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,'completed',%s,%s)",
+            (
+                job["id"],
+                job["uuid"],
+                job["domain"],
+                job["queue"],
+                job["job_type"],
+                job["idempotency_key"],
+                payload_value,
+                result_value,
+                payload_compressed,
+                result_compressed,
+            ),
+        )
+        cur.execute("DELETE FROM jobs WHERE id=%s", (job["id"],))
+        cur.execute(
+            "SELECT payload, payload_compressed, result, result_compressed, status "
+            "FROM jobs_archive WHERE id=%s",
+            (job["id"],),
+        )
+        return tuple(cur.fetchone())
+
+
+def _postgres_archive_snapshot(jobs_pg_dsn: str, job_id: int) -> tuple:
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT payload, payload_compressed, result, result_compressed, status "
+            "FROM jobs_archive WHERE id=%s",
+            (job_id,),
+        )
+        return tuple(cur.fetchone())
+
+
+@pytest.mark.parametrize("compressed_field", ("payload", "result"))
+def test_postgres_compressed_archive_lookup_rejects_raw_json_without_gzip_framing(
+    jobs_pg_dsn,
+    compressed_field,
+) -> None:
+    manager = _manager(jobs_pg_dsn)
+    job = _canonical(manager, suffix=f"raw-{compressed_field}")
+    payload = job["payload"]
+    marker = _canonical_archive_marker(payload)
+    logical_value = payload if compressed_field == "payload" else marker
+    compressed_value = json.dumps(
+        logical_value,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    before = _replace_with_raw_compressed_archive_postgres(
+        jobs_pg_dsn,
+        job,
+        payload=payload,
+        marker=marker,
+        compressed_field=compressed_field,
+        compressed_value=compressed_value,
+    )
+
+    found = manager.find_job_by_identity(
+        FindJobByIdentityCommand(
+            domain="admin_webhooks",
+            queue="delivery",
+            job_type="admin_webhook_delivery",
+            idempotency_key=job["idempotency_key"],
+            expected_payload=payload,
+        )
+    )
+
+    assert found.state is JobIdentityLookupState.CONFLICT
+    assert found.row is None
+    assert _postgres_archive_snapshot(jobs_pg_dsn, int(job["id"])) == before
+
+
 @pytest.mark.parametrize("attack", ("oversized_input", "decompression_bomb"))
 def test_postgres_compressed_archive_lookup_rejects_bounded_decode_attacks_without_mutation(
     jobs_pg_dsn,

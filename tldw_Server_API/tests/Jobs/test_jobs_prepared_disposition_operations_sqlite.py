@@ -1002,6 +1002,170 @@ def test_sqlite_compressed_archive_identity_lookup_decodes_payload_and_proof(
 
 _ARCHIVE_JSON_MAX_BYTES = 1_048_576
 _ARCHIVE_COMPRESSED_MAX_BYTES = _ARCHIVE_JSON_MAX_BYTES + 65_536
+_BASE64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+
+
+def _canonical_archive_marker(payload: dict) -> dict:
+    return {
+        "schema_version": 1,
+        "token": _token("d"),
+        "kind": "complete",
+        "origin": "authnz",
+        "delivery_id": payload["delivery_id"],
+        "attempt_id": str(uuid4()),
+        "applied_at": "2026-01-01T00:00:00+00:00",
+    }
+
+
+def _replace_with_compressed_archive_sqlite(
+    manager: JobManager,
+    job: dict,
+    *,
+    payload: dict,
+    marker: dict,
+    compressed_field: str,
+    compressed_value,
+) -> tuple:
+    payload_value = None if compressed_field == "payload" else json.dumps(payload)
+    result_value = None if compressed_field == "result" else json.dumps(marker)
+    payload_compressed = compressed_value if compressed_field == "payload" else None
+    result_compressed = compressed_value if compressed_field == "result" else None
+    conn = manager._connect()
+    try:
+        conn.execute(
+            "INSERT INTO jobs_archive(id, uuid, domain, queue, job_type, "
+            "idempotency_key, payload, result, status, payload_compressed, "
+            "result_compressed) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                job["id"],
+                job["uuid"],
+                job["domain"],
+                job["queue"],
+                job["job_type"],
+                job["idempotency_key"],
+                payload_value,
+                result_value,
+                "completed",
+                payload_compressed,
+                result_compressed,
+            ),
+        )
+        conn.execute("DELETE FROM jobs WHERE id=?", (job["id"],))
+        conn.commit()
+        row = conn.execute(
+            "SELECT payload, payload_compressed, result, result_compressed, status "
+            "FROM jobs_archive WHERE id=?",
+            (job["id"],),
+        ).fetchone()
+        return tuple(row)
+    finally:
+        conn.close()
+
+
+def _sqlite_archive_snapshot(manager: JobManager, job_id: int) -> tuple:
+    conn = manager._connect()
+    try:
+        row = conn.execute(
+            "SELECT payload, payload_compressed, result, result_compressed, status "
+            "FROM jobs_archive WHERE id=?",
+            (job_id,),
+        ).fetchone()
+        return tuple(row)
+    finally:
+        conn.close()
+
+
+def _noncanonical_gzip64(value: dict, variant: str) -> str:
+    raw_json = json.dumps(value, separators=(",", ":")).encode("utf-8")
+    for whitespace in range(8):
+        compressed = gzip.compress(raw_json + b" " * whitespace, mtime=0)
+        encoded = base64.b64encode(compressed).decode("ascii")
+        if variant == "excess_padding" and not encoded.endswith("="):
+            noncanonical = encoded + "===="
+            break
+        if variant == "nonzero_pad_bits" and encoded.endswith("="):
+            characters = list(encoded)
+            index = -3 if encoded.endswith("==") else -2
+            canonical_index = _BASE64_ALPHABET.index(characters[index])
+            characters[index] = _BASE64_ALPHABET[canonical_index + 1]
+            noncanonical = "".join(characters)
+            break
+    else:
+        raise AssertionError("could not construct noncanonical base64 fixture")
+    assert base64.b64decode(noncanonical, validate=True) == compressed
+    assert base64.b64encode(compressed).decode("ascii") != noncanonical
+    return "gzip64:" + noncanonical
+
+
+@pytest.mark.parametrize("compressed_field", ("payload", "result"))
+@pytest.mark.parametrize("storage", ("text", "bytes"))
+def test_sqlite_compressed_archive_lookup_rejects_raw_json_without_gzip_framing(
+    tmp_path,
+    compressed_field,
+    storage,
+) -> None:
+    manager = JobManager(tmp_path / f"archive-raw-{compressed_field}-{storage}.db")
+    job = _canonical(manager, suffix=f"raw-{compressed_field}-{storage}")
+    payload = json.loads(job["payload"])
+    marker = _canonical_archive_marker(payload)
+    logical_value = payload if compressed_field == "payload" else marker
+    raw_json = json.dumps(logical_value, separators=(",", ":"))
+    compressed_value = raw_json if storage == "text" else raw_json.encode("utf-8")
+    before = _replace_with_compressed_archive_sqlite(
+        manager,
+        job,
+        payload=payload,
+        marker=marker,
+        compressed_field=compressed_field,
+        compressed_value=compressed_value,
+    )
+
+    found = manager.find_job_by_identity(
+        FindJobByIdentityCommand(
+            domain="admin_webhooks",
+            queue="delivery",
+            job_type="admin_webhook_delivery",
+            idempotency_key=job["idempotency_key"],
+            expected_payload=payload,
+        )
+    )
+
+    assert found.state is JobIdentityLookupState.CONFLICT
+    assert found.row is None
+    assert _sqlite_archive_snapshot(manager, int(job["id"])) == before
+
+
+@pytest.mark.parametrize("variant", ("excess_padding", "nonzero_pad_bits"))
+def test_sqlite_compressed_archive_lookup_rejects_noncanonical_base64_spelling(
+    tmp_path,
+    variant,
+) -> None:
+    manager = JobManager(tmp_path / f"archive-base64-{variant}.db")
+    job = _canonical(manager, suffix=variant)
+    payload = json.loads(job["payload"])
+    marker = _canonical_archive_marker(payload)
+    before = _replace_with_compressed_archive_sqlite(
+        manager,
+        job,
+        payload=payload,
+        marker=marker,
+        compressed_field="payload",
+        compressed_value=_noncanonical_gzip64(payload, variant),
+    )
+
+    found = manager.find_job_by_identity(
+        FindJobByIdentityCommand(
+            domain="admin_webhooks",
+            queue="delivery",
+            job_type="admin_webhook_delivery",
+            idempotency_key=job["idempotency_key"],
+            expected_payload=payload,
+        )
+    )
+
+    assert found.state is JobIdentityLookupState.CONFLICT
+    assert found.row is None
+    assert _sqlite_archive_snapshot(manager, int(job["id"])) == before
 
 
 @pytest.mark.parametrize("attack", ("oversized_input", "decompression_bomb"))

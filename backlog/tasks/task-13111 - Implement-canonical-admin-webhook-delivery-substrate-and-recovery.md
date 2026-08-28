@@ -4,7 +4,7 @@ title: Implement canonical admin webhook delivery substrate and recovery
 status: In Progress
 assignee: []
 created_date: '2026-08-23 03:15'
-updated_date: '2026-08-28 20:26'
+updated_date: '2026-08-28 20:48'
 labels:
   - admin
   - webhooks
@@ -99,6 +99,10 @@ Task 3 Fix Round 1/5 started at FIX_BASE 803ae280f66e990f7b4ffdf29e31cae311d648d
 2026-08-28: Started Task 3 Fix Round 2/5 at FIX_BASE 56fc110798fb44200e0fe6bd90b7973e059bdf2e. Scope: revalidate final canonical admission payload after shared transforms; exact backend-precision schedule comparison; durable no-attempt expired-lease recovery evidence across acquisition/sweeper; and bounded strict archive decompression. Strict focused RED precedes production edits; PostgreSQL-required zero-skip final gate.
 
 2026-08-28 Fix Round 2/5 complete at pre-commit tree: canonical admin-webhook payload is revalidated after shared transforms; schedules use exact backend storage precision; no-attempt recovery now preserves bounded durable evidence and consumes it on reacquisition/cancel; archive decompression is strictly framed and bounded. RED: 25 failed, 139 passed, 0 skipped. Final mandatory PostgreSQL-required gate: 368 passed, 0 skipped, 2 warnings. Focused Ruff and Bandit pass; diff check clean. Evidence: .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-3-report.md.
+
+2026-08-28: Started Task 3 Fix Round 3/5 at FIX_BASE 45a1fbd90d09af8d45c43b88e59ec8a335ac9c63. Scope: make every compressed-column decode failure unambiguously invalid; reject raw JSON bytes/text and noncanonical standard-base64 spelling; preserve valid bounded SQLite gzip64 and PostgreSQL gzip-byte archive lookup. Strict focused RED precedes production edits; PostgreSQL-required zero-skip final gate.
+
+2026-08-28: Task 3 Fix Round 3/5 complete at pre-commit tree. Compressed decode failures now return a private invalid sentinel instead of reinterpreting raw compressed-column data as JSON; gzip64 requires exact standard-base64 re-encoding equality. RED: 8 failed, 4 passed, 0 skipped. Focused GREEN: 14 passed, 0 skipped. Final PostgreSQL-required Task 3/lifecycle gate: 376 passed, 0 skipped, 2 warnings. Focused Ruff/Bandit and diff checks pass; full Jobs Ruff remains only three unchanged baseline I001 findings. Evidence: .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-3-report.md.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
