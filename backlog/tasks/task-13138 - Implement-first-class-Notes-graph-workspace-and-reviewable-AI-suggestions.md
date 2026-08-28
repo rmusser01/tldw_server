@@ -4,7 +4,7 @@ title: Implement first-class Notes graph workspace and reviewable AI suggestions
 status: Done
 assignee: []
 created_date: 2026-08-27 03:40
-updated_date: 2026-08-28 22:05
+updated_date: 2026-08-28 23:33
 labels:
 - notes
 - knowledge-graph
@@ -18,6 +18,7 @@ references:
 - TASK-13135
 - TASK-13136
 - TASK-13137
+- https://github.com/rmusser01/tldw_server/pull/2832
 documentation:
 - Docs/superpowers/specs/2026-08-26-notes-second-brain-graph-suggestions-design.md
 - Docs/superpowers/plans/2026-08-26-notes-second-brain-graph-suggestions.md
@@ -204,11 +205,12 @@ Task 12 Fix Round 4 completed from exact base b66f352092c0dd1b417788f3cfefced796
 
 Final cumulative review fix wave started at b37cc2a78f. Validating six reviewer findings before test-first changes: nested cancellation note identity, concurrent owner admission limits, owner-isolated maintenance, shared maintenance budget, 90-day accepted-audit retention, and provisional-target review context.
 Final cumulative review closure completed in commits `d0d790492b`, `6fc56d1ab0`, `288c064f0d`, and `3f98840afb`. The fixes keep unloaded provisional targets inert, isolate maintenance per owner, enforce atomic owner-scoped Jobs admission, validate cancellation note identity transactionally, retain accepted audit metadata for 90 days, and charge the shared 100-row maintenance budget monotonically at durable run and expired-acceptance claim boundaries even when later reconciliation fails. Final verification: backend Notes Graph matrix 482/483 with only the unchanged delete-link copy assertion; focused frontend 145/145; broad Notes frontend 328/397 with the same 69 failures in the same 27 unchanged files; WebUI E2E 3/3; TASK-13138 extension E2E 2/2 and whole-file inherited baseline 2/4. Complete Ruff passed; Bandit reported 0 findings and 0 errors across 87,969 lines; ESLint reported 0 errors and 349 inherited warnings; WebUI/shared TypeScript reproduced exact 80/170 diagnostic baselines with zero touched-file matches; locale duplicate/coverage and 85/85 graph mirror passed. The unchanged Tags-help copy assertion and missing glossary fixture were reproduced. `git diff --check`, dependency, skip/only, port, and tracked-status checks passed; ports 18001/18082 are stopped and the two unrelated untracked Watchlists templates remain excluded. Human-authored PR Change summary remains required before merge.
+PR opened against `dev`: https://github.com/rmusser01/tldw_server/pull/2832. The PR body includes the requester-provided human-authored Change summary and the final verified baseline-aware validation evidence.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented the first-class Notes Graph workspace and reviewable, source-grounded AI suggestions across the shared WebUI/browser-extension UI, nested Notes graph API, Jobs worker and maintenance lifecycle, durable owner-scoped storage, guarded accept/reject/reset decisions, accessibility, responsive behavior, and documentation. Cumulative review additionally hardened cancellation identity, transactional admission limits, owner-isolated and monotonically budgeted maintenance, 90-day accepted-audit retention, and provisional-target interaction safety. Final verification covers 482 passing backend tests with one unchanged copy baseline, 145/145 focused frontend tests, WebUI E2E 3/3, TASK-13138 extension E2E 2/2, complete Ruff/Bandit/ESLint gates, exact inherited TypeScript baselines with zero touched diagnostics, and locale/mirror integrity. Known inherited baselines remain documented; the human-authored PR Change summary is still required before merge. Deferred work remains TASK-13134, TASK-13135, TASK-13136, and TASK-13137.
+Implemented the first-class Notes Graph workspace and reviewable, source-grounded AI suggestions across the shared WebUI/browser-extension UI, nested Notes graph API, Jobs worker and maintenance lifecycle, durable owner-scoped storage, guarded accept/reject/reset decisions, accessibility, responsive behavior, and documentation. Cumulative review additionally hardened cancellation identity, transactional admission limits, owner-isolated and monotonically budgeted maintenance, 90-day accepted-audit retention, and provisional-target interaction safety. Final verification covers 482 passing backend tests with one unchanged copy baseline, 145/145 focused frontend tests, WebUI E2E 3/3, TASK-13138 extension E2E 2/2, complete Ruff/Bandit/ESLint gates, exact inherited TypeScript baselines with zero touched diagnostics, and locale/mirror integrity. Known inherited baselines remain documented. The requester-provided human-authored Change summary is included in PR #2832: https://github.com/rmusser01/tldw_server/pull/2832. Deferred work remains TASK-13134, TASK-13135, TASK-13136, and TASK-13137.
 <!-- SECTION:FINAL_SUMMARY:END -->
 ## Definition of Done
 <!-- DOD:BEGIN -->
