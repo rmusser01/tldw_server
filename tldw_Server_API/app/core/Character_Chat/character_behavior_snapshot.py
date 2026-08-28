@@ -1,0 +1,268 @@
+"""Canonical version-1 behavior snapshots for character conversations."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import math
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import Any
+
+
+SNAPSHOT_SCHEMA_VERSION = 1
+DEFAULT_MAX_SNAPSHOT_BYTES = 1024 * 1024
+
+_SNAPSHOT_KEYS = frozenset({"schema_version", "participants", "routing_defaults"})
+_PARTICIPANT_KEYS = frozenset(
+    {
+        "source",
+        "identity",
+        "prompt",
+        "greeting",
+        "generation_defaults",
+        "exemplars",
+        "world_books",
+        "default_memory",
+    }
+)
+_SOURCE_KEYS = frozenset({"kind", "id", "version"})
+_SOURCE_KINDS = frozenset({"character"})
+_IDENTITY_KEYS = frozenset({"name", "aliases"})
+_PROMPT_KEYS = frozenset(
+    {
+        "system_prompt",
+        "description",
+        "personality",
+        "scenario",
+        "message_example",
+        "post_history_instructions",
+        "prompt_relevant_extensions",
+    }
+)
+_PROMPT_TEXT_KEYS = _PROMPT_KEYS - {"prompt_relevant_extensions"}
+_GREETING_KEYS = frozenset({"content", "source", "source_index"})
+_ROUTING_KEYS = frozenset({"turn_taking_mode"})
+_CREDENTIAL_KEYS = frozenset(
+    {
+        "api_key",
+        "apikey",
+        "access_token",
+        "auth_token",
+        "authorization",
+        "bearer_token",
+        "client_secret",
+        "credential",
+        "credentials",
+        "password",
+        "private_key",
+        "refresh_token",
+        "secret",
+    }
+)
+
+
+@dataclass(frozen=True)
+class BehaviorSnapshotV1:
+    """Frozen boundary around a canonical behavior-snapshot payload."""
+
+    schema_version: int
+    payload: dict[str, Any]
+    canonical_bytes: bytes
+    digest: str
+    size_bytes: int
+
+
+def build_behavior_snapshot(
+    payload: Mapping[str, Any],
+    *,
+    max_bytes: int = DEFAULT_MAX_SNAPSHOT_BYTES,
+) -> BehaviorSnapshotV1:
+    """Validate, copy, and canonically encode a version-1 behavior snapshot."""
+    if not isinstance(payload, Mapping):
+        raise ValueError("snapshot must be an object")
+    if type(max_bytes) is not int or max_bytes <= 0:
+        raise ValueError("max_bytes must be a positive integer")
+
+    normalized = _normalize_json(dict(payload), path="snapshot")
+    _validate_snapshot(normalized)
+    canonical_bytes = json.dumps(
+        normalized,
+        allow_nan=False,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    if len(canonical_bytes) > max_bytes:
+        raise ValueError(
+            f"behavior snapshot size {len(canonical_bytes)} exceeds maximum {max_bytes} bytes"
+        )
+    return BehaviorSnapshotV1(
+        schema_version=SNAPSHOT_SCHEMA_VERSION,
+        payload=normalized,
+        canonical_bytes=canonical_bytes,
+        digest=f"sha256:{hashlib.sha256(canonical_bytes).hexdigest()}",
+        size_bytes=len(canonical_bytes),
+    )
+
+
+def _normalize_json(value: Any, *, path: str) -> Any:
+    if isinstance(value, str):
+        return value.replace("\r\n", "\n").replace("\r", "\n")
+    if value is None or isinstance(value, (bool, int)):
+        return value
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError(f"{path} floats must be finite")
+        return value
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        raise ValueError(f"{path} must not contain binary values")
+    if isinstance(value, list):
+        return [
+            _normalize_json(item, path=f"{path}[{index}]")
+            for index, item in enumerate(value)
+        ]
+    if isinstance(value, dict):
+        normalized: dict[str, Any] = {}
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise ValueError(f"{path} keys must be JSON-compatible strings")
+            normalized_key = key.replace("\r\n", "\n").replace("\r", "\n")
+            if normalized_key in normalized:
+                raise ValueError(f"{path} has duplicate keys after line-ending normalization")
+            normalized[normalized_key] = _normalize_json(
+                item,
+                path=f"{path}.{normalized_key}",
+            )
+        return normalized
+    raise ValueError(f"{path} must contain only JSON-compatible values")
+
+
+def _validate_snapshot(snapshot: dict[str, Any]) -> None:
+    _require_exact_keys(snapshot, _SNAPSHOT_KEYS, path="snapshot")
+    if type(snapshot["schema_version"]) is not int or snapshot["schema_version"] != 1:
+        raise ValueError("snapshot.schema_version must equal 1")
+
+    participants = snapshot["participants"]
+    if not isinstance(participants, list):
+        raise ValueError("snapshot.participants must be a list")
+    if not participants:
+        raise ValueError("snapshot must contain at least one participant")
+
+    seen_sources: set[tuple[str, str]] = set()
+    for index, participant in enumerate(participants):
+        source_identity = _validate_participant(participant, index=index)
+        if source_identity in seen_sources:
+            raise ValueError(
+                "snapshot contains duplicate participant source "
+                f"{source_identity[0]}:{source_identity[1]}"
+            )
+        seen_sources.add(source_identity)
+
+    routing = _require_object(snapshot["routing_defaults"], path="snapshot.routing_defaults")
+    _require_exact_keys(routing, _ROUTING_KEYS, path="snapshot.routing_defaults")
+    if routing["turn_taking_mode"] != "single":
+        raise ValueError("snapshot.routing_defaults.turn_taking_mode must equal 'single'")
+
+
+def _validate_participant(participant: Any, *, index: int) -> tuple[str, str]:
+    path = f"snapshot.participants[{index}]"
+    participant = _require_object(participant, path=path)
+    _require_exact_keys(participant, _PARTICIPANT_KEYS, path=path)
+
+    source = _require_object(participant["source"], path=f"{path}.source")
+    _require_exact_keys(source, _SOURCE_KEYS, path=f"{path}.source")
+    if source["kind"] not in _SOURCE_KINDS:
+        raise ValueError(f"{path}.source.kind must be one of {sorted(_SOURCE_KINDS)}")
+    if not isinstance(source["id"], str) or not source["id"]:
+        raise ValueError(f"{path}.source.id must be a non-empty string")
+    if type(source["version"]) is not int or source["version"] < 1:
+        raise ValueError(f"{path}.source.version must be a positive integer")
+
+    identity = _require_object(participant["identity"], path=f"{path}.identity")
+    _require_exact_keys(identity, _IDENTITY_KEYS, path=f"{path}.identity")
+    if not isinstance(identity["name"], str) or not identity["name"]:
+        raise ValueError(f"{path}.identity.name must be a non-empty string")
+    if not isinstance(identity["aliases"], list) or not all(
+        isinstance(alias, str) for alias in identity["aliases"]
+    ):
+        raise ValueError(f"{path}.identity.aliases must be a list of strings")
+
+    prompt = _require_object(participant["prompt"], path=f"{path}.prompt")
+    _require_exact_keys(prompt, _PROMPT_KEYS, path=f"{path}.prompt")
+    for key in _PROMPT_TEXT_KEYS:
+        if not isinstance(prompt[key], str):
+            raise ValueError(f"{path}.prompt.{key} must be a string")
+    extensions = _require_object(
+        prompt["prompt_relevant_extensions"],
+        path=f"{path}.prompt.prompt_relevant_extensions",
+    )
+    _reject_credential_keys(extensions, path=f"{path}.prompt.prompt_relevant_extensions")
+
+    greeting = _require_object(participant["greeting"], path=f"{path}.greeting")
+    _require_exact_keys(greeting, _GREETING_KEYS, path=f"{path}.greeting")
+    if not isinstance(greeting["content"], str):
+        raise ValueError(f"{path}.greeting.content must be a string")
+    if not isinstance(greeting["source"], str) or not greeting["source"]:
+        raise ValueError(f"{path}.greeting.source must be a non-empty string")
+    if type(greeting["source_index"]) is not int or greeting["source_index"] < 0:
+        raise ValueError(f"{path}.greeting.source_index must be a non-negative integer")
+
+    generation_defaults = _require_object(
+        participant["generation_defaults"],
+        path=f"{path}.generation_defaults",
+    )
+    _reject_credential_keys(generation_defaults, path=f"{path}.generation_defaults")
+
+    for field_name in ("exemplars", "world_books"):
+        entries = participant[field_name]
+        if not isinstance(entries, list):
+            raise ValueError(f"{path}.{field_name} must be a list")
+        for entry_index, entry in enumerate(entries):
+            entry_path = f"{path}.{field_name}[{entry_index}]"
+            entry = _require_object(entry, path=entry_path)
+            _reject_credential_keys(entry, path=entry_path)
+
+    memory = participant["default_memory"]
+    if memory is not None:
+        memory = _require_object(memory, path=f"{path}.default_memory")
+        _reject_credential_keys(memory, path=f"{path}.default_memory")
+
+    return source["kind"], source["id"]
+
+
+def _require_object(value: Any, *, path: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValueError(f"{path} must be an object")
+    return value
+
+
+def _require_exact_keys(value: dict[str, Any], allowed: frozenset[str], *, path: str) -> None:
+    unexpected = sorted(value.keys() - allowed)
+    if unexpected:
+        raise ValueError(f"{path} has unexpected keys: {unexpected}")
+    missing = sorted(allowed - value.keys())
+    if missing:
+        raise ValueError(f"{path} has missing keys: {missing}")
+
+
+def _reject_credential_keys(value: Any, *, path: str) -> None:
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            _reject_credential_keys(item, path=f"{path}[{index}]")
+        return
+    if not isinstance(value, dict):
+        return
+    for key, item in value.items():
+        normalized_key = key.casefold().replace("-", "_").replace(" ", "_")
+        if normalized_key in _CREDENTIAL_KEYS:
+            raise ValueError(f"{path} contains credential-like key {key!r}")
+        _reject_credential_keys(item, path=f"{path}.{key}")
+
+
+__all__ = [
+    "BehaviorSnapshotV1",
+    "DEFAULT_MAX_SNAPSHOT_BYTES",
+    "SNAPSHOT_SCHEMA_VERSION",
+    "build_behavior_snapshot",
+]
