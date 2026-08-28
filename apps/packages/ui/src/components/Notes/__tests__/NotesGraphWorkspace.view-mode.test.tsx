@@ -1,5 +1,7 @@
+import type { NotesGraphResponse } from "@/services/note-graph-suggestions"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -70,7 +72,7 @@ vi.mock("../NotesGraphCanvas", async () => {
   }
 })
 
-const graph = {
+const graph: NotesGraphResponse = {
   nodes: [
     {
       id: "note:a",
@@ -389,6 +391,106 @@ describe("NotesGraphWorkspace first-class view mode", () => {
     expect(state.focus).toHaveBeenCalledWith("b")
   })
 
+  it("keys suggestions to a selected loaded note without refocusing the graph neighborhood", () => {
+    const state = baseWorkspaceState()
+    const onSelectNote = vi.fn()
+    mockUseNotesGraphWorkspace.mockReturnValue(state)
+    renderWorkspace({ onSelectNote })
+
+    const canvasProps = mockCanvas.mock.calls.at(-1)?.[0] as {
+      onSelectNode: (nodeId: string) => void
+    }
+    act(() => canvasProps.onSelectNode("note:b"))
+
+    expect(onSelectNote).toHaveBeenCalledWith("b")
+    expect(state.focus).not.toHaveBeenCalled()
+    expect(mockUseNotesGraphSuggestions).toHaveBeenLastCalledWith(
+      expect.objectContaining({ enabled: true, noteId: "b" })
+    )
+    expect(mockCanvas).toHaveBeenLastCalledWith(
+      expect.objectContaining({ selectedNodeId: "note:b" })
+    )
+  })
+
+  it.each([
+    ["tag:topic", "tag"],
+    ["source:book", "source"]
+  ] as const)(
+    "disables suggestion calls and controls for a selected %s node",
+    (nodeId, type) => {
+      const state = baseWorkspaceState()
+      state.graph = {
+        ...graph,
+        nodes: [
+          ...graph.nodes,
+          {
+            id: nodeId,
+            type,
+            label: `${type} node`,
+            created_at: null,
+            deleted: null,
+            degree: 1,
+            tag_count: null,
+            primary_source_id: null
+          }
+        ]
+      }
+      mockUseNotesGraphWorkspace.mockReturnValue(state)
+      renderWorkspace()
+
+      const canvasProps = mockCanvas.mock.calls.at(-1)?.[0] as {
+        onSelectNode: (selectedId: string) => void
+      }
+      act(() => canvasProps.onSelectNode(nodeId))
+
+      expect(state.focus).not.toHaveBeenCalled()
+      expect(mockUseNotesGraphSuggestions).toHaveBeenLastCalledWith(
+        expect.objectContaining({ enabled: false, noteId: null })
+      )
+      expect(
+        screen.queryByRole("tab", { name: "Suggestions" })
+      ).not.toBeInTheDocument()
+      fireEvent.click(screen.getByRole("button", { name: "Edge visibility" }))
+      expect(
+        screen.queryByRole("checkbox", {
+          name: "option:notesSearch.graphSuggestions"
+        })
+      ).not.toBeInTheDocument()
+      expect(mockCanvas).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          provisionalOverlays: [],
+          showProvisional: false
+        })
+      )
+    }
+  )
+
+  it("disables suggestion calls and controls when no canonical note is selected", () => {
+    const state = baseWorkspaceState()
+    state.graph = { ...graph, nodes: [] }
+    mockUseNotesGraphWorkspace.mockReturnValue(state)
+    renderWorkspace({ selectedNoteId: null })
+
+    expect(mockUseNotesGraphSuggestions).toHaveBeenLastCalledWith(
+      expect.objectContaining({ enabled: false, noteId: null })
+    )
+    expect(
+      screen.queryByRole("tab", { name: "Suggestions" })
+    ).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Edge visibility" }))
+    expect(
+      screen.queryByRole("checkbox", {
+        name: "option:notesSearch.graphSuggestions"
+      })
+    ).not.toBeInTheDocument()
+    expect(mockCanvas).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        provisionalOverlays: [],
+        showProvisional: false
+      })
+    )
+  })
+
   it("passes provisional overlays separately and expands only on an explicit command", () => {
     const state = baseWorkspaceState()
     mockUseNotesGraphWorkspace.mockReturnValue(state)
@@ -426,7 +528,66 @@ describe("NotesGraphWorkspace first-class view mode", () => {
     expect(screen.queryByText("Suggestions")).not.toBeInTheDocument()
   })
 
-  it("catches relationship decision failures, announces once, and restores focus", async () => {
+  it.each(["acceptance", "rejection"] as const)(
+    "disables both relationship decisions while %s is pending",
+    (pendingMutation) => {
+      mockUseNotesGraphSuggestions.mockReturnValue({
+        provisionalBySuggestionId: {
+          s1: {
+            edge: {
+              id: "suggestion-edge:s1",
+              suggestionId: "s1",
+              source: "note:a",
+              target: "suggestion-node:s1",
+              type: "provisional_suggestion",
+              directed: false
+            },
+            node: {
+              id: "suggestion-node:s1",
+              suggestionId: "s1",
+              type: "provisional_note",
+              label: "Suggested note"
+            }
+          }
+        },
+        capabilities: { allowed_actions: ["accept", "reject"] },
+        suggestions: [
+          {
+            id: "s1",
+            kind: "related_note",
+            target_title: "Suggested note",
+            target_note_id: "target",
+            match_strength: "possible",
+            rationale: "Grounded",
+            evidence: []
+          }
+        ],
+        mutations: {
+          acceptance: { isPending: pendingMutation === "acceptance" },
+          rejection: { isPending: pendingMutation === "rejection" }
+        }
+      })
+      renderWorkspace()
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: "option:notesSearch.graphRelationships"
+        })
+      )
+
+      expect(
+        screen.getByRole("button", {
+          name: "notesSearch.graphAcceptSuggestion"
+        })
+      ).toBeDisabled()
+      expect(
+        screen.getByRole("button", {
+          name: "notesSearch.graphRejectSuggestion"
+        })
+      ).toBeDisabled()
+    }
+  )
+
+  it("remounts repeated relationship failure announcements and restores focus", async () => {
     const accept = vi.fn().mockRejectedValue(new Error("conflict"))
     mockUseNotesGraphSuggestions.mockReturnValue({
       provisionalBySuggestionId: {
@@ -480,10 +641,21 @@ describe("NotesGraphWorkspace first-class view mode", () => {
 
     await waitFor(() => expect(accept).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(acceptButton).toHaveFocus())
+    const liveRegion = document.querySelector('[aria-live="polite"]')
+    const firstAnnouncement = liveRegion?.firstElementChild
+    expect(firstAnnouncement).not.toBeNull()
     expect(document.querySelectorAll('[aria-live="polite"]')).toHaveLength(1)
-    expect(document.querySelector('[aria-live="polite"]')).toHaveTextContent(
+    expect(liveRegion).toHaveTextContent(
       "option:notesSearch.graphSuggestionDecisionFailed"
     )
+
+    fireEvent.click(acceptButton)
+    await waitFor(() => expect(accept).toHaveBeenCalledTimes(2))
+    await waitFor(() =>
+      expect(liveRegion?.firstElementChild).not.toBe(firstAnnouncement)
+    )
+    await waitFor(() => expect(acceptButton).toHaveFocus())
+    expect(document.querySelectorAll('[aria-live="polite"]')).toHaveLength(1)
   })
 
   it("focuses an activated relationship when Canvas is active again", async () => {

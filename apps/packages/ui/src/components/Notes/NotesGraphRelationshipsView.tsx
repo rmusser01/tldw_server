@@ -284,10 +284,18 @@ const NotesGraphRelationshipsView: React.FC<
   const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE))
   const safePage = Math.min(page, pageCount - 1)
   const pageRows = rows.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE)
-  const rowPositions = React.useMemo(
-    () => new Map(rows.map((row, index) => [row.id, index + 1])),
-    [rows]
-  )
+  const rowSetMetadata = React.useMemo(() => {
+    const metadata = new Map<string, { position: number; setSize: number }>()
+    groups.forEach((group) => {
+      group.rows.forEach((row, index) => {
+        metadata.set(row.id, {
+          position: index + 1,
+          setSize: group.rows.length
+        })
+      })
+    })
+    return metadata
+  }, [groups])
   const rootRef = React.useRef<HTMLElement | null>(null)
   const firstRowRef = React.useRef<HTMLDivElement | null>(null)
   const previousPageRef = React.useRef(safePage)
@@ -365,16 +373,19 @@ const NotesGraphRelationshipsView: React.FC<
                 </h2>
                 <div role="list" aria-labelledby={headingId}>
                   {groupRows.map((row) => {
-                    const position = rowPositions.get(row.id) ?? 1
-                    const firstOnPage = position === safePage * PAGE_SIZE + 1
+                    const setMetadata = rowSetMetadata.get(row.id) ?? {
+                      position: 1,
+                      setSize: groupRows.length
+                    }
+                    const firstOnPage = pageRows[0] === row
                     if (row.suggestion) {
                       return (
                         <div
                           ref={firstOnPage ? firstRowRef : undefined}
                           key={row.id}
                           role="listitem"
-                          aria-posinset={position}
-                          aria-setsize={rows.length}>
+                          aria-posinset={setMetadata.position}
+                          aria-setsize={setMetadata.setSize}>
                           <NotesGraphSuggestionReviewRow
                             item={row.suggestion}
                             title={row.counterpart.label}
@@ -409,8 +420,8 @@ const NotesGraphRelationshipsView: React.FC<
                         ref={firstOnPage ? firstRowRef : undefined}
                         key={row.id}
                         role="listitem"
-                        aria-posinset={position}
-                        aria-setsize={rows.length}
+                        aria-posinset={setMetadata.position}
+                        aria-setsize={setMetadata.setSize}
                         className="border-b border-border px-3 py-1">
                         <button
                           type="button"

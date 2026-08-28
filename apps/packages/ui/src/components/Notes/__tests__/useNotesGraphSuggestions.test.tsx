@@ -218,6 +218,71 @@ describe("useNotesGraphSuggestions", () => {
     expect(result.current.provisionalBySuggestionId).toEqual({})
   })
 
+  it("scopes capability, list, and generation calls to the newly selected note", async () => {
+    mocks.createRun.mockResolvedValue(
+      run("run-created", "queued", "2026-08-27T12:00:00Z")
+    )
+    const client = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false }
+      }
+    })
+    const { result, rerender } = renderHook(
+      ({ noteId }) =>
+        useNotesGraphSuggestions({
+          authorityScope: "authority-a",
+          enabled: true,
+          isOnline: true,
+          noteId,
+          loadedNodeIds: new Set(["note:a", "note:b"])
+        }),
+      { initialProps: { noteId: "a" }, wrapper: wrapper(client) }
+    )
+    await settleQueries()
+
+    mocks.getCapabilities.mockClear()
+    mocks.listRuns.mockClear()
+    mocks.listSuggestions.mockClear()
+    mocks.createCommand.mockClear()
+    mocks.createRun.mockClear()
+
+    rerender({ noteId: "b" })
+    await settleQueries()
+    await act(async () => {
+      await result.current.generate()
+    })
+
+    expect(mocks.getCapabilities).toHaveBeenCalledWith(
+      expect.objectContaining({ noteId: "b" })
+    )
+    expect(mocks.listRuns).toHaveBeenCalledWith(
+      expect.objectContaining({ noteId: "b" })
+    )
+    expect(mocks.listSuggestions).toHaveBeenCalledWith(
+      expect.objectContaining({ noteId: "b" })
+    )
+    expect(mocks.createCommand).toHaveBeenCalledWith(
+      expect.objectContaining({ noteId: "b" })
+    )
+    expect(mocks.createRun).toHaveBeenCalledWith(
+      expect.objectContaining({ noteId: "b" }),
+      expect.anything(),
+      expect.anything()
+    )
+    for (const mock of [
+      mocks.getCapabilities,
+      mocks.listRuns,
+      mocks.listSuggestions,
+      mocks.createCommand
+    ]) {
+      expect(mock).toHaveBeenCalled()
+      for (const [input] of mock.mock.calls) {
+        expect(input).toEqual(expect.objectContaining({ noteId: "b" }))
+      }
+    }
+  })
+
   it("clears a reconciled terminal owner, fences its stale list row, and adopts fresh recovery", async () => {
     let resolveRecoveryRuns:
       | ((page: { items: ReturnType<typeof run>[]; next_cursor: null }) => void)

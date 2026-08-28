@@ -111,7 +111,7 @@ describe("NotesGraphRelationshipsView", () => {
     ])
   })
 
-  it("selects counterparts and paginates at 100 with logical set positions", async () => {
+  it("uses group-relative set positions across pagination boundaries", async () => {
     const onSelectNode = vi.fn()
     const manyGraph = {
       ...graph,
@@ -119,17 +119,30 @@ describe("NotesGraphRelationshipsView", () => {
         node("note:a", "Alpha"),
         ...Array.from({ length: 101 }, (_, index) =>
           node(`note:${index}`, `Node ${String(index).padStart(3, "0")}`)
-        )
+        ),
+        node("note:incoming-1", "Incoming 1"),
+        node("note:incoming-2", "Incoming 2")
       ],
-      edges: Array.from({ length: 101 }, (_, index) => ({
-        id: `edge:${index}`,
-        source: "note:a",
-        target: `note:${index}`,
-        type: "manual" as const,
-        directed: true,
-        weight: null,
-        label: null
-      }))
+      edges: [
+        ...Array.from({ length: 101 }, (_, index) => ({
+          id: `edge:${index}`,
+          source: "note:a",
+          target: `note:${index}`,
+          type: "manual" as const,
+          directed: true,
+          weight: null,
+          label: null
+        })),
+        ...[1, 2].map((index) => ({
+          id: `incoming:${index}`,
+          source: `note:incoming-${index}`,
+          target: "note:a",
+          type: "manual" as const,
+          directed: true,
+          weight: null,
+          label: null
+        }))
+      ]
     }
     render(
       <NotesGraphRelationshipsView
@@ -152,10 +165,17 @@ describe("NotesGraphRelationshipsView", () => {
     expect(firstPageItems[99]).toHaveAttribute("aria-posinset", "100")
     expect(firstPageItems[99]).toHaveAttribute("aria-setsize", "101")
     fireEvent.click(screen.getByRole("button", { name: "Next page" }))
-    const finalRow = screen.getByTestId("notes-graph-relationship-row")
-    expect(screen.getByRole("listitem")).toHaveAttribute("aria-posinset", "101")
-    await waitFor(() => expect(finalRow).toHaveFocus())
-    fireEvent.click(finalRow)
+    const secondPageItems = screen.getAllByRole("listitem")
+    expect(secondPageItems).toHaveLength(3)
+    expect(secondPageItems[0]).toHaveAttribute("aria-posinset", "101")
+    expect(secondPageItems[0]).toHaveAttribute("aria-setsize", "101")
+    expect(secondPageItems[1]).toHaveAttribute("aria-posinset", "1")
+    expect(secondPageItems[1]).toHaveAttribute("aria-setsize", "2")
+    expect(secondPageItems[2]).toHaveAttribute("aria-posinset", "2")
+    expect(secondPageItems[2]).toHaveAttribute("aria-setsize", "2")
+    const finalOutgoingRow = screen.getByRole("button", { name: "Node 100" })
+    await waitFor(() => expect(finalOutgoingRow).toHaveFocus())
+    fireEvent.click(finalOutgoingRow)
     expect(onSelectNode).toHaveBeenCalledWith("note:100")
 
     fireEvent.click(screen.getByRole("button", { name: "Previous page" }))

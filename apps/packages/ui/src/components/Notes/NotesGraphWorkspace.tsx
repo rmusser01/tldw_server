@@ -70,7 +70,10 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
   const [viewMode, setViewMode] = React.useState<"canvas" | "relationships">(
     "canvas"
   )
-  const [announcement, setAnnouncement] = React.useState("")
+  const [announcement, setAnnouncement] = React.useState({
+    id: 0,
+    message: ""
+  })
   const maxNodeCap = radius === 2 ? 200 : 300
   const maxNodes = Math.min(
     Math.max(20, Number(maxNodesInput) || 120),
@@ -98,22 +101,6 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
     () => new Set(workspace.graph?.nodes.map((node) => node.id) ?? []),
     [workspace.graph]
   )
-  const suggestions = useNotesGraphSuggestions({
-    authorityScope,
-    enabled: Boolean(
-      hasActiveNotes &&
-        workspace.graph?.suggestions_authorized === true &&
-        workspace.focusNoteId
-    ),
-    isOnline,
-    noteId: workspace.focusNoteId,
-    loadedNodeIds,
-    fallbackTargetLabel: t("option:notesSearch.graphSuggestedNote")
-  })
-  const provisionalOverlays = React.useMemo(
-    () => Object.values(suggestions.provisionalBySuggestionId),
-    [suggestions.provisionalBySuggestionId]
-  )
   const normalizedSelectedId = React.useMemo(() => {
     const normalized = normalizeGraphNoteId(selectedNoteId)
     return normalized ? `note:${normalized}` : null
@@ -125,7 +112,36 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
     selectedNodeId ??
     normalizedSelectedId ??
     (workspace.focusNoteId ? `note:${workspace.focusNoteId}` : null)
-  const suggestionsAuthorized = workspace.graph?.suggestions_authorized === true
+  const selectedSuggestionNoteId = React.useMemo(() => {
+    const selectedNode = workspace.graph?.nodes.find(
+      (node) => node.id === currentSelectedNodeId
+    )
+    if (selectedNode?.type !== "note" || !selectedNode.id.startsWith("note:"))
+      return null
+    return normalizeGraphNoteId(selectedNode.id) || null
+  }, [currentSelectedNodeId, workspace.graph])
+  const suggestionsAuthorized = Boolean(
+    workspace.graph?.suggestions_authorized === true && selectedSuggestionNoteId
+  )
+  const suggestions = useNotesGraphSuggestions({
+    authorityScope,
+    enabled: hasActiveNotes && suggestionsAuthorized,
+    isOnline,
+    noteId: selectedSuggestionNoteId,
+    loadedNodeIds,
+    fallbackTargetLabel: t("option:notesSearch.graphSuggestedNote")
+  })
+  const provisionalOverlays = React.useMemo(
+    () => Object.values(suggestions.provisionalBySuggestionId),
+    [suggestions.provisionalBySuggestionId]
+  )
+  const isDecisionPending = Boolean(
+    suggestions.mutations?.acceptance?.isPending ||
+      suggestions.mutations?.rejection?.isPending
+  )
+  const announce = React.useCallback((message: string) => {
+    setAnnouncement((current) => ({ id: current.id + 1, message }))
+  }, [])
 
   const handleSelectNode = React.useCallback(
     (nodeId: string) => {
@@ -162,13 +178,13 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
         (entry) => entry.id === suggestionId
       )
       if (!item) {
-        setAnnouncement(t("option:notesSearch.graphSuggestionDecisionFailed"))
+        announce(t("option:notesSearch.graphSuggestionDecisionFailed"))
         return false
       }
       try {
         if (action === "accept") await suggestions.accept(item)
         else await suggestions.reject(item)
-        setAnnouncement(
+        announce(
           t(
             action === "accept"
               ? "option:notesSearch.graphSuggestionAccepted"
@@ -177,11 +193,11 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
         )
         return true
       } catch {
-        setAnnouncement(t("option:notesSearch.graphSuggestionDecisionFailed"))
+        announce(t("option:notesSearch.graphSuggestionDecisionFailed"))
         return false
       }
     },
-    [suggestions, t]
+    [announce, suggestions, t]
   )
   const focusCurrent = React.useCallback(() => {
     const current = normalizeGraphNoteId(selectedNoteId)
@@ -361,12 +377,12 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
                 canAccept={Boolean(
                   suggestions.capabilities?.allowed_actions.includes(
                     "accept"
-                  ) && !suggestions.mutations?.acceptance?.isPending
+                  ) && !isDecisionPending
                 )}
                 canReject={Boolean(
                   suggestions.capabilities?.allowed_actions.includes(
                     "reject"
-                  ) && !suggestions.mutations?.rejection?.isPending
+                  ) && !isDecisionPending
                 )}
                 onSelectNode={handleFocusNode}
                 onDecideSuggestion={handleSuggestionDecision}
@@ -383,14 +399,16 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
               isOnline={isOnline}
               controller={suggestions}
               onSelectNode={handleFocusNode}
-              onAnnounce={setAnnouncement}
+              onAnnounce={announce}
               onDecideSuggestion={handleSuggestionDecision}
             />
           </div>
         </div>
       ) : null}
       <p className="sr-only" aria-live="polite" aria-atomic="true">
-        {announcement}
+        {announcement.message ? (
+          <span key={announcement.id}>{announcement.message}</span>
+        ) : null}
       </p>
     </section>
   )
