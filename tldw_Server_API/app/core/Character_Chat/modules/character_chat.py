@@ -823,6 +823,7 @@ def start_new_chat_session(
         conv_payload = {
             "character_id": character_id,
             "title": conv_title,
+            "client_id": str(db.client_id),
         }
         def _restore_first_message_template(text: str) -> str:
             restored = text

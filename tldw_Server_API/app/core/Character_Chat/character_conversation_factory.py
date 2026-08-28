@@ -1140,6 +1140,38 @@ def _find_materialized_preset(
     return None
 
 
+def _frozen_character_prompt_preset(
+    participants: Sequence[Mapping[str, Any]],
+) -> tuple[str, str]:
+    """Resolve character-scope preset authority from frozen character extensions."""
+    primary = participants[0] if participants else {}
+    prompt = primary.get("prompt") if isinstance(primary, Mapping) else None
+    prompt_extensions = (
+        prompt.get("prompt_relevant_extensions")
+        if isinstance(prompt, Mapping)
+        else None
+    )
+    character_extensions = (
+        prompt_extensions.get("character_extensions")
+        if isinstance(prompt_extensions, Mapping)
+        else None
+    )
+    frozen_character = {
+        "extensions": (
+            dict(character_extensions)
+            if isinstance(character_extensions, Mapping)
+            else {}
+        )
+    }
+    preset_id = resolve_character_prompt_preset(frozen_character)
+    selection_source = (
+        "character"
+        if _character_prompt_preset_is_explicit(frozen_character, preset_id)
+        else "default"
+    )
+    return preset_id, selection_source
+
+
 def _materialize_overlay(
     conn: Any,
     overlay: Mapping[str, Any],
@@ -1455,21 +1487,17 @@ def _materialize_roleplay_behavior_settings_once(
         "presetScope",
     }
     if preset_keys.intersection(changed_keys):
-        preset_raw = (
-            merged_settings.get("chatPresetOverrideId")
-            or merged_settings.get("promptPreset")
-            or merged_settings.get("prompt_preset")
+        preset_scope = (
+            str(merged_settings.get("presetScope") or "character").strip().lower()
         )
-        preset_id = str(preset_raw).strip() if preset_raw else ""
-        if (
-            not preset_id
-            and str(merged_settings.get("presetScope") or "character")
-            .strip()
-            .lower()
-            == "chat"
-        ):
-            preset_id = DEFAULT_PROMPT_PRESET
-        if preset_id:
+        if preset_scope == "chat":
+            preset_raw = (
+                merged_settings.get("chatPresetOverrideId")
+                or merged_settings.get("promptPreset")
+                or merged_settings.get("prompt_preset")
+            )
+            preset_id = str(preset_raw).strip() if preset_raw else ""
+            preset_id = preset_id or DEFAULT_PROMPT_PRESET
             reusable = _find_materialized_preset(
                 preset_id,
                 current=current_values.get("prompt_preset"),
@@ -1482,7 +1510,15 @@ def _materialize_roleplay_behavior_settings_once(
                 owner_user_id=owner_user_id,
             )
         else:
-            values.pop("prompt_preset", None)
+            preset_id, selection_source = _frozen_character_prompt_preset(
+                participants
+            )
+            values["prompt_preset"] = _load_preset(
+                conn,
+                preset_id,
+                selection_source=selection_source,
+                owner_user_id=owner_user_id,
+            )
 
     if "conversationContext" in changed_keys:
         context = merged_settings.get("conversationContext")
@@ -1648,6 +1684,17 @@ def create_character_conversation(
     max_snapshot_bytes: int = DEFAULT_MAX_SNAPSHOT_BYTES,
 ) -> str:
     """Create conversation, settings, messages, and snapshot in one transaction."""
+    owner_user_id = str(getattr(db, "client_id", "") or "").strip()
+    if not owner_user_id:
+        raise InputError("Character conversation requires a scoped database owner.")
+    supplied_owner = conversation_data.get("client_id")
+    if supplied_owner is not None and str(supplied_owner).strip() != owner_user_id:
+        raise InputError(
+            "Conversation client_id must match the scoped database owner."
+        )
+    conversation_payload = dict(conversation_data)
+    conversation_payload["client_id"] = owner_user_id
+
     primary_id = conversation_data.get("character_id")
     if isinstance(primary_id, bool):
         raise InputError("character_id must be a positive integer.")
@@ -1667,7 +1714,6 @@ def create_character_conversation(
     creation_settings = dict(conversation_settings or {})
     reject_resumable_behavior_credentials(creation_settings)
     validate_resumable_behavior_boole(creation_settings)
-    owner_user_id = str(conversation_data.get("client_id") or "").strip()
 
     # Ensure optional world-book tables exist before opening the create transaction.
     WorldBookService(db)
@@ -1755,7 +1801,7 @@ def create_character_conversation(
                         )
                     )
 
-                conversation_id = db.add_conversation(dict(conversation_data), conn=conn)
+                conversation_id = db.add_conversation(conversation_payload, conn=conn)
                 if not conversation_id:
                     raise InputError("Failed to create character conversation.")
                 db.conversation_resume_store.put_creation_settings(

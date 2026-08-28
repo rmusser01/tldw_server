@@ -15,6 +15,9 @@ from tldw_Server_API.app.core.Character_Chat.character_behavior_snapshot import 
 from tldw_Server_API.app.core.Character_Chat.character_conversation_factory import (
     create_character_conversation,
 )
+from tldw_Server_API.app.core.Character_Chat.modules.character_chat import (
+    start_new_chat_session,
+)
 from tldw_Server_API.app.core.Character_Chat.modules.character_io import (
     load_chat_history_from_file_and_save_to_db,
 )
@@ -277,7 +280,7 @@ def test_configured_defaults_and_generation_aliases_create_valid_effective_setti
         conversation_data={
             "character_id": character_id,
             "title": "Configured defaults",
-            "client_id": "1",
+            "client_id": str(character_db.client_id),
         },
         conversation_settings={
             "token": "legitimate-settings-token",
@@ -421,7 +424,7 @@ def test_creation_materializes_effective_builtin_prompt_preset(
         conversation_data={
             "character_id": character_id,
             "title": "Preset snapshot",
-            "client_id": "1",
+            "client_id": str(character_db.client_id),
         },
         provider="local-llm",
         model="local-test",
@@ -474,7 +477,7 @@ def test_prompt_preset_id_is_trimmed_or_rejected_before_materialization(
         conversation_data={
             "character_id": character_id,
             "title": "Normalized preset",
-            "client_id": "1",
+            "client_id": str(character_db.client_id),
         },
         prompt_preset_id="  st_default  ",
         provider="local-llm",
@@ -517,7 +520,7 @@ def test_invalid_provider_or_model_is_explicitly_ineligible(
         conversation_data={
             "character_id": character_id,
             "title": "Invalid settings",
-            "client_id": "1",
+            "client_id": str(character_db.client_id),
         },
         provider=provider,
         model=model,
@@ -600,7 +603,7 @@ def test_drift_retry_freezes_initial_provider_model_and_sampling(
         conversation_data={
             "character_id": character_id,
             "title": "Frozen defaults",
-            "client_id": "1",
+            "client_id": str(character_db.client_id),
         },
     )
 
@@ -668,7 +671,7 @@ def test_credential_settings_rejection_rolls_back_creation(
             conversation_data={
                 "character_id": character_id,
                 "title": "Credential settings",
-                "client_id": "1",
+                "client_id": str(character_db.client_id),
             },
             provider="local-llm",
             model="local-test",
@@ -698,7 +701,7 @@ def test_ordinary_token_settings_remain_allowed(character_db):
         conversation_data={
             "character_id": character_id,
             "title": "Ordinary token settings",
-            "client_id": "1",
+            "client_id": str(character_db.client_id),
         },
         provider="local-llm",
         model="local-test",
@@ -966,7 +969,7 @@ def test_list_omits_detail_only_resume_authority_without_loading_snapshot_bodies
         conversation_data={
             "character_id": character_id,
             "title": "Resumable list item",
-            "client_id": "1",
+            "client_id": str(character_db.client_id),
         },
         provider="local-llm",
         model="local-test",
@@ -982,7 +985,7 @@ def test_list_omits_detail_only_resume_authority_without_loading_snapshot_bodies
         {
             "character_id": character_id,
             "title": "Legacy list item",
-            "client_id": "1",
+            "client_id": str(character_db.client_id),
         }
     )
     store = character_db.conversation_resume_store
@@ -1129,7 +1132,7 @@ def test_creation_oversize_snapshot_rolls_back(character_db):
             conversation_data={
                 "character_id": sources["primary_id"],
                 "title": "Too large",
-                "client_id": "test_client",
+                "client_id": str(character_db.client_id),
             },
             participant_character_ids=[sources["second_id"]],
             provider="local-llm",
@@ -1157,7 +1160,7 @@ def test_creation_partial_sampling_merges_character_defaults_and_remains_stable(
         conversation_data={
             "character_id": character_id,
             "title": "Incomplete",
-            "client_id": "test_client",
+            "client_id": str(character_db.client_id),
         },
         provider="local-llm",
         model="local-test",
@@ -1215,7 +1218,7 @@ def test_creation_source_drift_exhaustion_rolls_back(character_db, monkeypatch):
             conversation_data={
                 "character_id": character_id,
                 "title": "Drifting",
-                "client_id": "test_client",
+                "client_id": str(character_db.client_id),
             },
             provider="local-llm",
             model="local-test",
@@ -1273,7 +1276,7 @@ def test_postgres_style_creation_drift_retries_one_complete_source_view_and_samp
         conversation_data={
             "character_id": character_id,
             "title": "Coherent retry",
-            "client_id": "test_client",
+            "client_id": str(character_db.client_id),
         },
         provider="local-llm",
         model="local-test",
@@ -1295,10 +1298,18 @@ def test_legacy_and_invalid_storage_are_non_resumable_and_body_redacted(
 ):
     character_id = character_db.add_character_card({"name": "Legacy Ari"})
     legacy_id = character_db.add_conversation(
-        {"character_id": character_id, "title": "Legacy", "client_id": "1"}
+        {
+            "character_id": character_id,
+            "title": "Legacy",
+            "client_id": str(character_db.client_id),
+        }
     )
     invalid_id = character_db.add_conversation(
-        {"character_id": character_id, "title": "Invalid", "client_id": "1"}
+        {
+            "character_id": character_id,
+            "title": "Invalid",
+            "client_id": str(character_db.client_id),
+        }
     )
     with character_db.transaction() as conn:
         conn.execute(
@@ -1572,7 +1583,7 @@ def test_history_version_advances_for_ancestor_and_branch_with_stable_tail_and_r
         conversation_data={
             "character_id": character_id,
             "title": "History fences",
-            "client_id": "1",
+            "client_id": str(character_db.client_id),
         },
         provider="local-llm",
         model="local-test",
@@ -1990,7 +2001,7 @@ def test_pin_writer_rebuilds_materialized_controls_once(
         conversation_data={
             "character_id": character_id,
             "title": "Pinned settings",
-            "client_id": "1",
+            "client_id": str(character_db.client_id),
         },
         provider="local-llm",
         model="local-test",
@@ -2534,6 +2545,49 @@ def test_preset_scope_chat_without_override_materializes_builtin_default(
 
 
 @pytest.mark.integration
+def test_preset_scope_character_ignores_retained_chat_override(
+    test_client,
+    auth_headers,
+    character_db,
+) -> None:
+    sources = _create_behavior_sources(character_db)
+    created = test_client.post(
+        "/api/v1/chats/",
+        headers=auth_headers,
+        json={
+            "character_id": sources["primary_id"],
+            "prompt_preset_id": "snapshot-cinematic",
+            "provider": "local-llm",
+            "model": "local-test",
+        },
+    )
+    assert created.status_code == 201, created.text
+    conversation_id = created.json()["id"]
+    before = character_db.get_roleplay_resume_state(conversation_id)
+    assert before["settings"]["chatPresetOverrideId"] == "snapshot-cinematic"
+    initial_preset = before["behavior_snapshot"]["payload"]["participants"][0][
+        "prompt"
+    ]["prompt_relevant_extensions"]["prompt_preset"]
+    assert initial_preset["preset_id"] == "snapshot-cinematic"
+
+    updated = test_client.put(
+        f"/api/v1/chats/{conversation_id}/settings",
+        headers=auth_headers,
+        json={"settings": {"presetScope": "character"}},
+    )
+
+    assert updated.status_code == 200, updated.text
+    after = character_db.get_roleplay_resume_state(conversation_id)
+    assert after["settings"]["chatPresetOverrideId"] == "snapshot-cinematic"
+    assert after["materialized_settings"]["values"]["behavior_controls"][
+        "preset_scope"
+    ] == "character"
+    preset = after["materialized_settings"]["values"]["prompt_preset"]
+    assert preset["preset_id"] == "default"
+    assert preset["selection_source"] == "default"
+
+
+@pytest.mark.integration
 def test_creation_freezes_active_persona_memory_entries(
     test_client,
     auth_headers,
@@ -2749,3 +2803,146 @@ def test_postgres_style_settings_materialization_rejects_sustained_source_drift(
     after = character_db.get_roleplay_resume_state(conversation_id)
     assert after["settings_version"] == before["settings_version"]
     assert after["settings"] == before["settings"]
+
+
+@pytest.mark.integration
+def test_module_creator_materializes_database_owner_memory(
+    character_db,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("DEFAULT_LLM_PROVIDER", "local-llm")
+    monkeypatch.setenv("CHAR_CHAT_MODEL", "local-test")
+    owner_user_id = str(character_db.client_id)
+    character_id = character_db.add_character_card({"name": "Owned Memory Creator"})
+    persona_id = f"char:{character_id}"
+    character_db.create_persona_profile(
+        {"id": persona_id, "user_id": owner_user_id, "name": "Owned Memory Creator"}
+    )
+    character_db.add_persona_memory_entry(
+        {
+            "persona_id": persona_id,
+            "user_id": owner_user_id,
+            "memory_type": "fact",
+            "content": "Only the database owner can materialize this memory.",
+            "salience": 1.0,
+        }
+    )
+
+    conversation_id, _character, _history, _image = start_new_chat_session(
+        character_db,
+        character_id,
+        "Alice",
+    )
+
+    assert conversation_id is not None
+    conversation = character_db.get_conversation_by_id(conversation_id)
+    assert conversation["client_id"] == owner_user_id
+    participant = character_db.get_roleplay_resume_state(conversation_id)[
+        "behavior_snapshot"
+    ]["payload"]["participants"][0]
+    assert [
+        entry["content"]
+        for entry in participant["default_memory"]["persona_memory_entries"]
+    ] == ["Only the database owner can materialize this memory."]
+
+
+@pytest.mark.integration
+def test_factory_derives_owner_from_scoped_database(
+    character_db,
+) -> None:
+    owner_user_id = str(character_db.client_id)
+    character_id = character_db.add_character_card({"name": "Derived Factory Owner"})
+    persona_id = f"char:{character_id}"
+    character_db.create_persona_profile(
+        {"id": persona_id, "user_id": owner_user_id, "name": "Derived Factory Owner"}
+    )
+    character_db.add_persona_memory_entry(
+        {
+            "persona_id": persona_id,
+            "user_id": owner_user_id,
+            "memory_type": "fact",
+            "content": "The factory must derive this scoped memory owner.",
+            "salience": 1.0,
+        }
+    )
+
+    conversation_id = create_character_conversation(
+        character_db,
+        conversation_data={"character_id": character_id, "title": "Derived owner"},
+        provider="local-llm",
+        model="local-test",
+    )
+
+    conversation = character_db.get_conversation_by_id(conversation_id)
+    assert conversation["client_id"] == owner_user_id
+    participant = character_db.get_roleplay_resume_state(conversation_id)[
+        "behavior_snapshot"
+    ]["payload"]["participants"][0]
+    assert [
+        entry["content"]
+        for entry in participant["default_memory"]["persona_memory_entries"]
+    ] == ["The factory must derive this scoped memory owner."]
+
+
+@pytest.mark.integration
+def test_factory_rejects_conflicting_conversation_owner(character_db) -> None:
+    character_id = character_db.add_character_card({"name": "Conflicting Owner"})
+
+    with pytest.raises(InputError, match="scoped database owner"):
+        create_character_conversation(
+            character_db,
+            conversation_data={
+                "character_id": character_id,
+                "title": "Wrong owner",
+                "client_id": "mallory",
+            },
+            provider="local-llm",
+            model="local-test",
+        )
+
+    assert character_db.get_conversations_for_character(character_id) == []
+
+
+@pytest.mark.integration
+def test_module_creator_uses_database_owner_for_postgres_custom_preset(
+    character_db,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("DEFAULT_LLM_PROVIDER", "local-llm")
+    monkeypatch.setenv("CHAR_CHAT_MODEL", "local-test")
+    assert character_db.upsert_prompt_preset(
+        preset_id="owner-only-preset",
+        name="Owner-only preset",
+        section_order=["system_prompt"],
+        section_templates={"system_prompt": "{{system_prompt}}"},
+    )
+    character_id = character_db.add_character_card({"name": "Owned Preset Creator"})
+    monkeypatch.setattr(
+        character_conversation_factory,
+        "resolve_character_prompt_preset",
+        lambda _character: "owner-only-preset",
+    )
+    monkeypatch.setattr(
+        character_conversation_factory,
+        "_is_postgres_connection",
+        lambda _conn: True,
+    )
+
+    conversation_id, _character, _history, _image = start_new_chat_session(
+        character_db,
+        character_id,
+        "Alice",
+    )
+
+    assert conversation_id is not None
+    preset = character_db.get_roleplay_resume_state(conversation_id)[
+        "behavior_snapshot"
+    ]["payload"]["participants"][0]["prompt"]["prompt_relevant_extensions"][
+        "prompt_preset"
+    ]
+    assert preset["preset_id"] == "owner-only-preset"
+    assert preset["source"] == {
+        "kind": "prompt_preset",
+        "id": "owner-only-preset",
+        "version": 1,
+    }
