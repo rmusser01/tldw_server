@@ -7,12 +7,12 @@ time, and delivery of the outcome as a user notification through the same
 channel reminders use.
 
 Phase-1 boundary (tldw_chatbook ADR-077, decision 4, owner-accepted):
-execution is **side-effect-free only**. ``recurring_question`` runs
-generate their answer through the registered executor; ``agent_task``
-runs execute in generation-only mode; tool-using configurations are NOT
-executed — they resolve to an explicit ``skipped`` run with an actionable
-reason until the approval-escalation design exists. The boundary is
-enforced HERE, by the consumer, not assumed from the definition.
+``recurring_question`` runs generate their answer through the registered
+executor. ``agent_task`` runs fail closed before executor lookup unless
+both deployment certification and the separately delivered execution stack
+are ready. Tool-using configurations are also rejected independently. These
+boundaries are enforced HERE, by the consumer, not assumed from the
+definition or scheduler.
 
 Timeout semantics (ADR-077 decision 5): a run cancelled at its execution
 deadline records the distinct ``timed_out`` status — the client displays
@@ -41,6 +41,12 @@ from tldw_Server_API.app.core.DB_Management.Scheduled_Tasks_DB import (
     ScheduledTasksDatabase,
 )
 from tldw_Server_API.app.core.exceptions import BadRequestError
+from tldw_Server_API.app.core.Scheduled_Tasks.execution_certification import (
+    ExecutionCertification,
+    agent_execution_dispatch_readiness,
+    current_agent_execution_stack_ready,
+    resolve_current_agent_execution_certification,
+)
 
 AUTOMATION_DOMAIN = "scheduled_tasks"
 AUTOMATION_JOB_TYPE = "agent_task_run"
@@ -92,9 +98,7 @@ def _phase1_tools_requested(definition: DefinitionRow) -> bool:
         return True
     if isinstance(tools, str) and tools.strip().lower() not in ("", "false", "none", "0"):
         return True
-    if isinstance(tools, bool) and tools:
-        return True
-    return False
+    return bool(isinstance(tools, bool) and tools)
 
 
 def _normalize_slot_utc(value: Any) -> str:
@@ -143,6 +147,12 @@ async def handle_agent_task_job(
     scheduled_db: ScheduledTasksDatabase | None = None,
     collections_db: CollectionsDatabase | None = None,
     execution_timeout_seconds: float = RUN_EXECUTION_TIMEOUT_SECONDS,
+    execution_certification_resolver: Callable[
+        [], ExecutionCertification
+    ] = resolve_current_agent_execution_certification,
+    execution_stack_ready_resolver: Callable[
+        [], bool
+    ] = current_agent_execution_stack_ready,
 ) -> dict[str, Any]:
     """Consume one ``agent_task_run`` Job: run row, execute, notify, audit.
 
@@ -238,6 +248,38 @@ async def handle_agent_task_job(
             execution_timeout_seconds=execution_timeout_seconds,
         )
         return {"status": "skipped", "definition_id": definition_id, "run_id": run["id"]}
+
+    if definition.family == "agent_task":
+        readiness = agent_execution_dispatch_readiness(
+            execution_certification_resolver(),
+            execution_stack_ready=execution_stack_ready_resolver(),
+        )
+        if not readiness.ready:
+            reason = readiness.reason or "agent_execution_unavailable"
+            _finish(
+                sdb,
+                cdb,
+                definition=definition,
+                run_id=run["id"],
+                status="skipped",
+                error=reason,
+                summary=(
+                    "Scheduled Agent execution is blocked by the deployment "
+                    f"readiness gate ({reason})."
+                ),
+                jobs_job_id=(
+                    str(job.get("id"))
+                    if job.get("id") is not None
+                    else None
+                ),
+                execution_timeout_seconds=execution_timeout_seconds,
+            )
+            return {
+                "status": "skipped",
+                "definition_id": definition_id,
+                "run_id": run["id"],
+                "reason": reason,
+            }
 
     # Phase-1 boundary, enforced by the consumer (not assumed): tools are
     # out of bounds until the approval-escalation design exists.

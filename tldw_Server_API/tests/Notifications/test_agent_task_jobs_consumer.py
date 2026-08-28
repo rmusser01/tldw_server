@@ -26,10 +26,26 @@ from tldw_Server_API.app.core.Scheduled_Tasks.agent_task_jobs import (
     handle_agent_task_job,
     register_executor,
 )
+from tldw_Server_API.app.core.Scheduled_Tasks.execution_certification import (
+    ExecutionCertification,
+)
 
 pytestmark = pytest.mark.unit
 
 SLOT = "2026-08-21T09:00:00+00:00"
+
+
+def _certified_execution() -> ExecutionCertification:
+    observed_at = datetime(2026, 8, 26, 12, 0, tzinfo=timezone.utc)
+    return ExecutionCertification(
+        outcome="certified",
+        deployment_class_id="sha256:" + ("1" * 64),
+        evidence_id="sha256:" + ("2" * 64),
+        evidence_source="server_verified",
+        observed_at=observed_at,
+        expires_at=observed_at + timedelta(hours=24),
+        reason_codes=(),
+    )
 
 
 @pytest.fixture()
@@ -40,21 +56,13 @@ def consumer_env(monkeypatch, tmp_path):
     settings.USER_DB_BASE_DIR = str(base_dir)
     monkeypatch.setenv("USER_DB_BASE_DIR", str(base_dir))
     monkeypatch.setenv("JOBS_DB_PATH", str(base_dir / "jobs.db"))
-    _orig_executors = dict(getattr(__import__(
-        "tldw_Server_API.app.core.Scheduled_Tasks.agent_task_jobs", fromlist=["_EXECUTORS"]
-    ), "_EXECUTORS"))
-    __import__(
-        "tldw_Server_API.app.core.Scheduled_Tasks.agent_task_jobs", fromlist=["_EXECUTORS"]
-    )._EXECUTORS.clear()
+    _orig_executors = dict(agent_task_jobs._EXECUTORS)
+    agent_task_jobs._EXECUTORS.clear()
     try:
         yield
     finally:
-        module = __import__(
-            "tldw_Server_API.app.core.Scheduled_Tasks.agent_task_jobs",
-            fromlist=["_EXECUTORS"],
-        )
-        module._EXECUTORS.clear()
-        module._EXECUTORS.update(_orig_executors)
+        agent_task_jobs._EXECUTORS.clear()
+        agent_task_jobs._EXECUTORS.update(_orig_executors)
         if prev_base_dir is not None:
             settings.USER_DB_BASE_DIR = prev_base_dir
         else:
@@ -365,6 +373,48 @@ async def test_cross_owner_definition_is_treated_as_missing(
 # ---------------------------------------------------------------------------
 # Phase-1 boundary (enforced by the consumer)
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_queued_agent_job_is_blocked_before_registered_executor(
+    consumer_env,
+) -> None:
+    user_id = 1025
+    definition = _create_definition(
+        user_id,
+        family="agent_task",
+        input_config={
+            "agent_ref": "agent:triage",
+            "message_ref": "redacted:example",
+        },
+    )
+    executor = AsyncMock(return_value="must not execute")
+    register_executor("agent_task", executor)
+
+    result = await handle_agent_task_job(
+        _job(definition, user_id),
+        execution_certification_resolver=_certified_execution,
+        execution_stack_ready_resolver=lambda: False,
+    )
+
+    assert result["status"] == "skipped"  # nosec B101
+    assert result["definition_id"] == definition.id  # nosec B101
+    assert result["run_id"] is not None  # nosec B101
+    assert result["reason"] == "agent_execution_stack_unimplemented"  # nosec B101
+    executor.assert_not_awaited()
+    sdb = ScheduledTasksDatabase.for_user(user_id=user_id)
+    run = sdb.get_scheduled_task_run_by_slot(
+        definition_id=definition.id,
+        run_slot_key=SLOT,
+    )
+    assert run is not None  # nosec B101
+    assert run["status"] == "skipped"  # nosec B101
+    assert run["error"] == "agent_execution_stack_unimplemented"  # nosec B101
+    audits, _total = sdb.list_audit_events(
+        owner_id=user_id,
+        definition_id=definition.id,
+    )
+    assert any(event.event_type == "run_skipped" for event in audits)  # nosec B101
 
 
 @pytest.mark.asyncio

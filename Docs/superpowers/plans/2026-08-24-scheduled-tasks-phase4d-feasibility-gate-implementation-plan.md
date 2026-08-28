@@ -34,7 +34,7 @@
 - Certification is necessary but not sufficient for execution. In this slice, `execute` and `run_now` for the `agent_task` family are always `disabled`: non-certified deployments report the certification blocker, while a synthetic certified fixture reports `agent_execution_stack_unimplemented`. No state maps to `available` until the later 4D.1B execution stack adds an independently tested readiness input.
 - Manual Run Now, scheduler arming/fire, and worker admission apply the same conjunction. They reject or skip `agent_task` before adapter execution in this slice, including a synthetically certified deployment, while recurring-question execution remains unchanged.
 - Preserve standalone Agent Tasks. Its ordinary interactive ACP lifecycle and UX are a separate job/persona and are not gated or renamed by this work.
-- ADR number 040 is current at plan time. Recheck `Docs/ADR/README.md` and the directory immediately before edits; if 040 has been claimed on current dev, update this plan and TASK-13129 to the next free number before creating the ADR.
+- ADR-040 is occupied by synchronized moodboards on the implementation baseline. ADR-041 is reserved for this feasibility decision; recheck `Docs/ADR/README.md` immediately before creating the ADR and advance again if current `dev` claims it first.
 
 ## Evidence Domains And Current Gaps
 
@@ -52,11 +52,11 @@
 
 | Stage | Goal | Success Criteria | Tests | Status |
 | --- | --- | --- | --- | --- |
-| 1 | Freeze the certification vocabulary and fail-closed evaluator | All outcome and freshness rules are deterministic and mock evidence cannot certify | Pure unit tests | Not Started |
-| 2 | Produce reproducible current-state evidence | Seven requirement records and a sanitized manifest are generated for an exact deployment class | Helper and characterization tests | Not Started |
-| 3 | Publish and enforce the API-first readiness gate | Versioned capability metadata, typed Run Now refusal, no Agent scheduler enqueue, and worker defense-in-depth agree | Schema/service/API/OpenAPI/feed/consumer tests | Not Started |
-| 4 | Publish the decision and current baseline | ADR, operator guide, JSON/Markdown evidence, and dependency tasks agree | Artifact validator and docs checks | Not Started |
-| 5 | Complete regression and security gates | Focused cross-module tests, compile, lint, Bandit, diff review, and Backlog evidence pass | Verification matrix | Not Started |
+| 1 | Freeze the certification vocabulary and fail-closed evaluator | All outcome and freshness rules are deterministic and mock evidence cannot certify | Pure unit tests | Complete |
+| 2 | Produce reproducible current-state evidence | Seven requirement records and a sanitized manifest are generated for an exact deployment class | Helper and characterization tests | Complete |
+| 3 | Publish and enforce the API-first readiness gate | Versioned capability metadata, typed Run Now refusal, no Agent scheduler enqueue, and worker defense-in-depth agree | Schema/service/API/OpenAPI/feed/consumer tests | Complete |
+| 4 | Publish the decision and current baseline | ADR, operator guide, JSON/Markdown evidence, and dependency tasks agree | Artifact validator and docs checks | Complete |
+| 5 | Complete regression and security gates | Focused cross-module tests, compile, lint, Bandit, diff review, and Backlog evidence pass | Verification matrix | Complete |
 
 ## File Map
 
@@ -66,7 +66,7 @@
 - `tldw_Server_API/tests/Notifications/test_scheduled_task_execution_certification.py` - pure outcome, subject-binding, freshness, and runtime-eligibility tests in the existing Scheduled Tasks test area.
 - `Helper_Scripts/Testing-related/scheduled_agent_execution_certification.py` - sanitized manifest/evidence generator and explicit host-gated refusal/run controls.
 - `tldw_Server_API/tests/Helper_Scripts/test_scheduled_agent_execution_certification.py` - helper CLI, evidence schema, sentinel exclusion, and no-false-certification tests.
-- `Docs/ADR/040-scheduled-agent-execution-feasibility.md` - accepted/rejected deployment-class decision and consequences.
+- `Docs/ADR/041-scheduled-agent-execution-feasibility.md` - accepted/rejected deployment-class decision and consequences.
 - `Docs/Development/Scheduled_Agent_Execution_Certification.md` - operator commands, trust/evidence contract, outcome interpretation, and rerun rules.
 - `Docs/Evidence/Scheduled_Agent_Execution/2026-08-24-phase4d0f-baseline.json` - machine-readable current repository result.
 - `Docs/Evidence/Scheduled_Agent_Execution/2026-08-24-phase4d0f-baseline.md` - bounded human-readable result and gaps.
@@ -74,7 +74,7 @@
 **Modify**
 
 - `tldw_Server_API/app/api/v1/schemas/scheduled_tasks_automation_schemas.py` - additive typed certification capability.
-- `Docs/ADR/README.md` - register ADR-040 in the canonical ADR index.
+- `Docs/ADR/README.md` - register ADR-041 in the canonical ADR index.
 - `tldw_Server_API/app/services/scheduled_task_automation_service.py` - inject/resolve certification and gate Agent capability projection and Run Now admission.
 - `tldw_Server_API/app/services/scheduled_task_automation_scheduler.py` - prevent Agent definitions from arming or enqueueing before the complete execution stack is ready.
 - `tldw_Server_API/app/core/Scheduled_Tasks/agent_task_jobs.py` - worker-side defense in depth for already-queued Agent Jobs.
@@ -109,7 +109,7 @@
 - Consumes: completed TASK-13127, current `origin/dev`, the approved Phase 4D spec, and existing Sandbox/ACP/MCP evidence contracts.
 - Produces: one clean implementation worktree and an explicit record of every evidence source and known limitation.
 
-- [ ] **Step 1: Start only after TASK-13127 is merged**
+- [x] **Step 1: Start only after TASK-13127 is merged**
 
 ```bash
 git fetch origin dev
@@ -122,20 +122,20 @@ backlog task TASK-13127 --plain
 
 Expected: clean worktree on current dev and TASK-13127 Done. If TASK-13127 is not merged, stop; do not combine the prerequisite and security gate.
 
-- [ ] **Step 2: Confirm ADR 040 is free**
+- [x] **Step 2: Reserve the next free ADR after finding ADR-040 occupied**
 
 ```bash
 ls Docs/ADR
-rg -n '^# ADR-040:' Docs/ADR
+rg -n '^# ADR-04[01]:' Docs/ADR
 ```
 
-Expected: no existing ADR-040. If it exists, update this plan and TASK-13129 to the next free number before any ADR file is created.
+Observed: ADR-040 is occupied by synchronized moodboards. ADR-041 is the next free number and is reserved in this plan and TASK-13129 before any ADR file is created.
 
-- [ ] **Step 3: Mark TASK-13129 In Progress and record the evidence inventory**
+- [x] **Step 3: Mark TASK-13129 In Progress and record the evidence inventory**
 
 Use Backlog.md MCP to record the dev SHA and the exact reusable sources from the evidence table. Record these baseline facts: ordinary ACP stores raw prompts; ACP sandbox creation has no dispatch token/idempotency key; current cancellation lacks the required event journal; MCP credential brokering is partial; no deployment class is currently certified.
 
-- [ ] **Step 4: Run the focused pre-change baseline**
+- [x] **Step 4: Run the focused pre-change baseline**
 
 ```bash
 source "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.venv/bin/activate"
@@ -149,7 +149,7 @@ python -m pytest -q --tb=short \
   tldw_Server_API/tests/MCP_Hub/test_mcp_slot_status.py
 ```
 
-Expected: record exact counts and pre-existing skips/failures in TASK-13129. These tests establish reusable primitives; they do not count as Phase 4D.0F certification.
+Observed on baseline SHA `2306c1939f3b460f9c62da8ae83a1aa47c02ee0d`: 171 passed, 0 failed, 0 skipped, and 19 warnings in 78.28 seconds. These tests establish reusable primitives; they do not count as Phase 4D.0F certification.
 
 ### Task 1: Define Deployment Identity And Fail-Closed Outcome Rules
 
@@ -161,7 +161,7 @@ Expected: record exact counts and pre-existing skips/failures in TASK-13129. The
 - Consumes: a normalized `DeploymentClass`, seven `RequirementEvidence` records, runtime isolation/network metadata, and an injected UTC clock.
 - Produces: immutable `ExecutionCertification` with outcome, opaque deployment-class ID, optional evidence ID, validity timestamps, and bounded stable reason codes.
 
-- [ ] **Step 1: Write failing type and identity tests**
+- [x] **Step 1: Write failing type and identity tests**
 
 Cover the exact public vocabulary:
 
@@ -176,7 +176,7 @@ EvidenceVerification = Literal[
 
 Define these seven closed requirement IDs in the order shown in the evidence table. Test that `DeploymentClass.canonical_payload()` sorts fields and that `deployment_class_id` is `sha256:` plus 64 lowercase hex characters. Changing any identity field must change the digest; insertion order must not.
 
-- [ ] **Step 2: Write failing evaluator tests**
+- [x] **Step 2: Write failing evaluator tests**
 
 Test all rules independently:
 
@@ -190,7 +190,7 @@ Test all rules independently:
 - ordinary missing dependencies, including the absent scheduled transcript mode, produce `draft_only`, not a false claim that the runtime itself was breached;
 - reason codes are sorted, deduplicated, bounded, and contain no free text.
 
-- [ ] **Step 3: Run RED**
+- [x] **Step 3: Run RED**
 
 ```bash
 source "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.venv/bin/activate"
@@ -200,7 +200,7 @@ python -m pytest -q --tb=short \
 
 Expected: FAIL during collection because `execution_certification.py` does not exist.
 
-- [ ] **Step 4: Implement the minimal pure domain**
+- [x] **Step 4: Implement the minimal pure domain**
 
 Use frozen dataclasses and pure helpers. `evaluate_execution_certification(subject, evidence, verification_receipt, *, now)` must never read environment, files, databases, or network. Validate all requirement IDs, subject digests, timestamps, verification levels, evidence IDs, and the already-verified receipt's bundle digest before applying the outcome rules. The receipt type is an internal trust-boundary input, is never accepted from the API or evidence JSON, and has no production constructor in this task. Unit tests may construct it only through a test helper to prove the outcome table; that does not create a production certification path.
 
@@ -208,7 +208,7 @@ Add `resolve_current_agent_execution_certification()` as a separate fail-closed 
 
 Add a separate pure `agent_execution_dispatch_readiness(certification, *, execution_stack_ready)` decision. It returns ready only when certification is `certified` **and** the later stack input is true. The production call sites in this task always pass a source-defined false constant; no environment variable, config file, API parameter, or evidence artifact can change it. Tests prove a certified fixture remains blocked with `agent_execution_stack_unimplemented`.
 
-- [ ] **Step 5: Run GREEN and commit the domain unit**
+- [x] **Step 5: Run GREEN and commit the domain unit**
 
 ```bash
 source "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.venv/bin/activate"
@@ -234,7 +234,7 @@ Expected: pure tests pass and the first commit cannot activate execution.
 - Consumes: explicit `--host-os`, `--host-arch`, `--runtime`, `--auth-mode`, `--adapter-id`, `--adapter-version`, `--source-commit`, `--server-build-sha`, `--image-digest`, `--mount-policy-hash`, `--egress-policy-hash`, `--credential-policy-hash`, `--tenant-boundary-policy-hash`, `--mediation-policy-hash`, `--isolation-profile-version`, output format/destination, and optional host-gated run flag.
 - Produces: schema `scheduled-agent-execution-certification.v1`, one exact deployment-class digest, seven sanitized requirement records, the derived outcome, and a command manifest.
 
-- [ ] **Step 1: Write failing manifest and sanitization tests**
+- [x] **Step 1: Write failing manifest and sanitization tests**
 
 The default invocation emits a manifest and repository characterization without launching a sandbox. Test exact top-level keys:
 
@@ -255,7 +255,7 @@ Each requirement contains only `requirement_id`, `state`, `verification`, `subje
 
 Seed tests with prompt, credential, path, hostname, tool-argument, and environment sentinels and assert none appears anywhere in JSON or Markdown output. Test that absolute paths and all argument values are removed before serialization. Recompute `evidence_id` from canonical sanitized content and reject a mismatched digest during artifact validation.
 
-- [ ] **Step 2: Define all seven evidence commands**
+- [x] **Step 2: Define all seven evidence commands**
 
 Use these stable command IDs:
 
@@ -273,13 +273,13 @@ For transcript characterization, write a random sentinel to a temporary ordinary
 
 For adapter recovery, verify generic Sandbox session/run idempotency exists but ACP sandbox `create_session()` has no dispatch-token parameter and its durable control record has no dispatch token. For monotonic evidence, verify current cancel/terminal primitives exist but no per-attempt ordered journal contract is available. For credentials, verify the managed external broker exists while current ACP session env remains a possible ambient channel. Partial primitives remain `missing`, not `passed`.
 
-- [ ] **Step 3: Make hostile execution opt-in and fail closed**
+- [x] **Step 3: Make hostile execution opt-in and fail closed**
 
 `--run-hostile` requires `--evidence-dir`, a local server URL, an API key environment-variable name, and a pre-existing server-verified attestation reference for the exact deployment class. Missing any prerequisite exits non-zero before launch and records `hostile_probe_blocked_by_missing_attestation` in the in-memory result only; it must not write a misleading pass artifact.
 
 The generated hostile test vector must enumerate attempts against a controlled host-file sentinel, a controlled denied network listener, public egress, subprocess launch, direct MCP/tool access, inherited environment sentinel, and ambient credential sentinel. The harness records pass only when every attempt is denied and the server verifies the exact attestation. In this task's baseline, the hostile command is expected to refuse because the attestation dependency is absent.
 
-- [ ] **Step 4: Run RED, implement, then run GREEN**
+- [x] **Step 4: Run RED, implement, then run GREEN**
 
 ```bash
 source "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.venv/bin/activate"
@@ -289,7 +289,7 @@ python -m pytest -q --tb=short \
 
 Expected RED: collection fails because the helper is absent. Expected GREEN after implementation: all helper tests pass; eligible current profiles emit `draft_only`; ineligible profiles emit `unsupported`; no fixture can emit `certified` without seven server-verified records.
 
-- [ ] **Step 5: Verify the CLI behavior**
+- [x] **Step 5: Verify the CLI behavior**
 
 ```bash
 source "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.venv/bin/activate"
@@ -331,7 +331,9 @@ python Helper_Scripts/Testing-related/scheduled_agent_execution_certification.py
 
 Expected: Docker reports `draft_only`; worktree reports `unsupported`; neither output contains an absolute local path, raw prompt, credential value, or raw environment value.
 
-- [ ] **Step 6: Commit the evidence harness**
+Recorded result: RED produced 21 expected failures while the helper was absent. GREEN produced 21 passes and 2 warnings. Docker JSON contained seven requirements and seven commands with `draft_only`; worktree Markdown reported `unsupported`. A same-run JSON/Markdown pair validated successfully. Fully populated hostile prerequisites exited 2 with `hostile_probe_blocked_server_attestation_verifier_unimplemented` and launched nothing. Ruff and compileall passed; Bandit reported zero findings after replacing optimization-sensitive assertions with explicit validation.
+
+- [x] **Step 6: Commit the evidence harness**
 
 ```bash
 git add \
@@ -360,7 +362,7 @@ Expected: one commit containing the reusable sanitized harness and its tests, wi
 - Consumes: `ExecutionCertification` from an injectable resolver and an independently injected `execution_stack_ready` input that is false in this task.
 - Produces: additive versioned `execution_certification` metadata, honest execution-action status, a typed manual refusal, no Agent scheduler enqueue, and worker-side refusal of already-queued Agent Jobs.
 
-- [ ] **Step 1: Write failing schema and service tests**
+- [x] **Step 1: Write failing schema and service tests**
 
 Add `ScheduledTaskExecutionCertificationCapability` with exactly:
 
@@ -390,7 +392,7 @@ Add API tests that Run Now on an `agent_task` returns HTTP 409 with code `schedu
 
 Add scheduler tests that an `agent_task` definition is not armed during load/reconcile/rescan, an already-armed race is refused again in `_fire()`, and no Job is created. Recurring-question definitions continue to arm and enqueue normally. Add a consumer test that an already-queued `agent_task` Job creates no adapter call even when a test executor is registered; it completes with a typed skipped result and a valid blocked run/audit record when the definition exists.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```bash
 source "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.venv/bin/activate"
@@ -403,7 +405,7 @@ python -m pytest -q --tb=short \
 
 Expected: FAIL because the response lacks `execution_certification`, currently advertises Agent `run_now` as available, Run Now enqueues an Agent Job, and the scheduler has no Agent readiness gate.
 
-- [ ] **Step 3: Implement the projection and gate**
+- [x] **Step 3: Implement the projection and gate**
 
 Add optional certification and execution-stack readiness resolvers to `ScheduledTaskAutomationService.__init__`; default them to `resolve_current_agent_execution_certification` and a source-defined function that returns false. The certification resolver must be side-effect-free and must not perform host probes on an API request. The production stack-readiness function must not read environment or configuration; only a later reviewed code slice may replace it. Reuse the same pure readiness helper in the service, scheduler, and consumer instead of duplicating outcome logic.
 
@@ -411,7 +413,7 @@ Add optional certification and execution-stack readiness resolvers to `Scheduled
 
 Map `draft_only` and `unsupported` to disabled execution actions with stable reasons `execution_certification_draft_only` or `execution_certification_unsupported`. Map `certified` plus the current false stack input to disabled with `agent_execution_stack_unimplemented`. Run Now raises the same typed reason before idempotency or Job creation. For `unsupported`, preview-create, definition-create, and duplicate raise `agent_automation_unsupported` before persistence; retain ordinary management of existing definitions. The scheduler refuses Agent arming and rechecks at fire time. The consumer rechecks after the TASK-13127 owner-scoped definition preflight and records a skipped blocked run without calling an executor. Do not change recurring-question scheduling/execution or draft-only definition mutation.
 
-- [ ] **Step 4: Run GREEN and API regressions**
+- [x] **Step 4: Run GREEN and API regressions**
 
 ```bash
 source "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.venv/bin/activate"
@@ -424,7 +426,9 @@ python -m pytest -q --tb=short \
 
 Expected: PASS. Capability discovery remains additive, owner-independent, and protected by `TASKS_READ`; direct API, scheduler, and stale-Job paths all fail closed for Agent execution while Recurring Questions are unchanged.
 
-- [ ] **Step 5: Commit the API gate**
+Recorded result: eight focused RED cases failed at the absent schema, unsupported-admission, Run Now, scheduler, and worker gates. The focused GREEN rerun passed all eight. The final four-file regression matrix passed 102 tests with 11 warnings in 89.61 seconds. Ruff and compileall passed. Bandit report `/tmp/bandit_task_13129_stage3.json` contains zero findings and zero errors across 4,359 production lines.
+
+- [x] **Step 5: Commit the API gate**
 
 ```bash
 git add \
@@ -446,7 +450,7 @@ Expected: one API-first commit with no frontend, Watchlists, standalone Agent Ta
 ### Task 4: Generate The Baseline, ADR, Operator Guide, And Dependencies
 
 **Files:**
-- Create: `Docs/ADR/040-scheduled-agent-execution-feasibility.md`
+- Create: `Docs/ADR/041-scheduled-agent-execution-feasibility.md`
 - Modify: `Docs/ADR/README.md`
 - Create: `Docs/Development/Scheduled_Agent_Execution_Certification.md`
 - Create: `Docs/Evidence/Scheduled_Agent_Execution/2026-08-24-phase4d0f-baseline.json`
@@ -457,7 +461,7 @@ Expected: one API-first commit with no frontend, Watchlists, standalone Agent Ta
 - Consumes: the helper at the two preceding commits and current runtime metadata.
 - Produces: a reproducible reviewed decision that no deployment class is certified yet, plus bounded follow-on dependency tasks.
 
-- [ ] **Step 1: Generate the exact current baseline artifacts**
+- [x] **Step 1: Generate the exact current baseline artifacts**
 
 Run the helper for the implementation host's observed OS/architecture/AuthNZ/runtime/adapter tuple and use the current implementation commit SHA as both `source_commit` and the baseline build identity. The values below are examples for the current worktree host and must be replaced if observation differs; the helper must refuse a claimed host OS/architecture that disagrees with its local observation unless `--repository-characterization-only` is explicit. The JSON artifact is evidence for that one exact, unverified deployment class. The Markdown artifact renders the same record and adds a clearly labeled repository-static eligibility appendix for all runtime values; neither the appendix nor a repository-characterization baseline is deployment certification evidence.
 
@@ -499,21 +503,21 @@ The static appendix applies these expected default outcomes when all non-runtime
 
 The generator must validate that the JSON record and corresponding Markdown deployment-class section have identical outcome/reason codes before writing. It must also validate the static appendix directly from `runtime_capabilities.py`. Any unexpected `certified` result is a release-blocking failure.
 
-- [ ] **Step 2: Write ADR-040**
+- [x] **Step 2: Write ADR-041**
 
-Use the repository ADR template and add ADR-040 to `Docs/ADR/README.md` with its final status and one-sentence decision. The decision is:
+Use the repository ADR template and add ADR-041 to `Docs/ADR/README.md` with its final status and one-sentence decision. The decision is:
 
 > No current deployment class is certified for Scheduled Tasks Agent automation execution. Statically eligible isolation runtimes remain draft-only until all seven server-verified evidence domains pass for an exact deployment class; host-local and current non-eligible runtimes are unsupported. Existing ordinary ACP, Sandbox, and MCP primitives are retained as dependencies but are not treated as proof.
 
 Alternatives rejected must include: trusting Docker/container isolation alone; reusing ordinary ACP transcripts; treating Sandbox idempotency as adapter dispatch recovery; treating generic MCP credentials/governance as scheduled grants; and hiding Agent automation entirely instead of retaining an explicit draft-only API state.
 
-- [ ] **Step 3: Write the operator guide**
+- [x] **Step 3: Write the operator guide**
 
 Document the exact CLI invocations, evidence schema, seven requirement definitions, trust levels, freshness/subject invalidation, safe refusal behavior, artifact redaction, API projection, and rerun procedure. State that changing evidence JSON manually cannot certify a deployment. Document that host-gated raw artifacts remain outside the repository and only sanitized digests/results are committed.
 
-- [ ] **Step 4: Attach confirmed evidence to the pre-created dependency tasks**
+- [x] **Step 4: Attach confirmed evidence to the pre-created dependency tasks**
 
-Use Backlog.md MCP to add ADR-040 and both baseline artifacts to these existing tasks:
+Use Backlog.md MCP to add ADR-041 and both baseline artifacts to these existing tasks:
 
 1. `TASK-13130`: `isolation_attestation` and `hostile_boundary`.
 2. `TASK-13131`: `scheduled_transcript_non_disclosure`.
@@ -522,7 +526,7 @@ Use Backlog.md MCP to add ADR-040 and both baseline artifacts to these existing 
 
 Record `operational_fail_closed` as a cross-cutting exit criterion on TASK-13129 and all four dependency tasks rather than creating a fifth implementation silo. Do not begin any dependency task in this branch.
 
-- [ ] **Step 5: Validate documentation and artifact consistency**
+- [x] **Step 5: Validate documentation and artifact consistency**
 
 ```bash
 source "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.venv/bin/activate"
@@ -531,7 +535,7 @@ python Helper_Scripts/Testing-related/scheduled_agent_execution_certification.py
   Docs/Evidence/Scheduled_Agent_Execution/2026-08-24-phase4d0f-baseline.json \
   Docs/Evidence/Scheduled_Agent_Execution/2026-08-24-phase4d0f-baseline.md
 ! rg -n '[T]ODO|[T]BD|[F]IXME|certified.*true' \
-  Docs/ADR/040-scheduled-agent-execution-feasibility.md \
+  Docs/ADR/041-scheduled-agent-execution-feasibility.md \
   Docs/ADR/README.md \
   Docs/Development/Scheduled_Agent_Execution_Certification.md \
   Docs/Evidence/Scheduled_Agent_Execution/2026-08-24-phase4d0f-baseline.*
@@ -541,11 +545,19 @@ python Helper_Scripts/Testing-related/scheduled_agent_execution_certification.py
 
 Expected: artifact validation passes; both negated scans exit 0 because no match exists; no document claims a certified current deployment. Review operator-guide prose separately because it intentionally names prohibited data categories without including values.
 
-- [ ] **Step 6: Commit the evidence decision**
+Recorded result: the regenerated artifact pair validates exactly. Evidence
+`sha256:1df8024b73472ea0a02a323fbad0d2f864d8b5f604611cb01bf49478f60a5874`
+reports `draft_only` for deployment class
+`sha256:76a1074c303c74cd6db3f6823f391133e44437a0da019f99f5b02b95b2cb3337`.
+Both prohibited-content scans returned no matches after the command-manifest
+placeholder was narrowed from an API-key-shaped name to a generic credential
+environment name. The focused helper suite passed 22 tests with 2 warnings.
+
+- [x] **Step 6: Commit the evidence decision**
 
 ```bash
 git add \
-  Docs/ADR/040-scheduled-agent-execution-feasibility.md \
+  Docs/ADR/041-scheduled-agent-execution-feasibility.md \
   Docs/ADR/README.md \
   Docs/Development/Scheduled_Agent_Execution_Certification.md \
   Docs/Evidence/Scheduled_Agent_Execution/2026-08-24-phase4d0f-baseline.json \
@@ -571,7 +583,7 @@ Expected: only the ADR and index, guide, validated evidence, TASK-13129, and the
 - Consumes: all four implementation units and generated evidence.
 - Produces: a reviewed, test-backed gate with no execution capability enabled.
 
-- [ ] **Step 1: Run focused and adjacent tests**
+- [x] **Step 1: Run focused and adjacent tests**
 
 ```bash
 source "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.venv/bin/activate"
@@ -592,7 +604,10 @@ python -m pytest -q --tb=short \
 
 Expected: PASS except explicitly recorded host-gated skips. A skipped host probe cannot count as passing evidence.
 
-- [ ] **Step 2: Run syntax, lint, and Bandit gates**
+Recorded result: 275 passed, 0 failed, 0 skipped, and 19 warnings in
+93.04 seconds. No host-gated skip was counted as evidence.
+
+- [x] **Step 2: Run syntax, lint, and Bandit gates**
 
 ```bash
 source "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.venv/bin/activate"
@@ -624,7 +639,11 @@ python -m bandit -r \
 
 Expected: compile and lint exit 0; Bandit reports no new findings in touched Python.
 
-- [ ] **Step 3: Perform the security self-review**
+Recorded result: compileall and Ruff exited 0. Bandit report
+`/tmp/bandit_task_13129.json` contains zero findings and zero errors across
+4,965 production lines.
+
+- [x] **Step 3: Perform the security self-review**
 
 Verify all of the following:
 
@@ -638,7 +657,14 @@ Verify all of the following:
 - recurring questions, Watchlists, and standalone Agent Tasks are unchanged;
 - there is no frontend inference or execution implementation in the diff.
 
-- [ ] **Step 4: Finalize TASK-13129 and amend the evidence commit**
+Recorded result: all checks passed. The current resolver can emit only
+repository characterization; the production stack gate is source-defined
+false; exact-subject, freshness, receipt, hostile-admission, redaction, and
+cross-layer API/scheduler/worker invariants remain fail closed. Recurring
+Questions are unchanged, and the branch contains no frontend, Watchlists, or
+standalone Agent Tasks changes.
+
+- [x] **Step 4: Finalize TASK-13129 and amend the evidence commit**
 
 Use Backlog.md MCP to record exact test counts, host-gated skips, artifact evidence IDs, Bandit result, API/admission behavior, ADR decision, and TASK-13130 through TASK-13133. Check acceptance criteria and definition-of-done only after verification. Mark Done when the gate and documentation are complete even though the outcome is `draft_only`/`unsupported`; the task's objective is an honest feasibility decision, not forced certification.
 
@@ -650,7 +676,7 @@ git commit --amend --no-edit
 
 Expected: the final Backlog evidence is included in the existing evidence/ADR commit, retaining four implementation commits.
 
-- [ ] **Step 5: Review the complete branch diff after finalization**
+- [x] **Step 5: Review the complete branch diff after finalization**
 
 ```bash
 git diff --check origin/dev...HEAD

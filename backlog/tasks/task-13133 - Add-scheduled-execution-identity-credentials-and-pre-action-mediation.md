@@ -16,7 +16,11 @@ priority: High
 references:
 - Docs/superpowers/specs/2026-08-24-scheduled-tasks-phase4d-agent-task-execution-design.md
 - Docs/superpowers/plans/2026-08-24-scheduled-tasks-phase4d-feasibility-gate-implementation-plan.md
-updated_date: 2026-08-24 17:55
+updated_date: 2026-08-27 03:15
+documentation:
+- Docs/ADR/041-scheduled-agent-execution-feasibility.md
+- Docs/Evidence/Scheduled_Agent_Execution/2026-08-24-phase4d0f-baseline.json
+- Docs/Evidence/Scheduled_Agent_Execution/2026-08-24-phase4d0f-baseline.md
 ---
 
 ## Description
@@ -38,9 +42,8 @@ Implement scheduled execution identity, version-bound act-as and credential-use 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+Phase 4D.0F evidence handoff: this task owns `brokered_credentials_and_mediation`. Baseline evidence `sha256:1df8024b73472ea0a02a323fbad0d2f864d8b5f604611cb01bf49478f60a5874` records it as missing repository characterization; the managed MCP credential broker is a dependency, not a Scheduled Tasks grant/action-token binding. `operational_fail_closed` is a cross-cutting exit criterion: revocation, policy/version changes, broker or governance outages, installation, upgrades, and health failures must deny issuance/action or disable scheduled execution.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->

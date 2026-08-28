@@ -34,6 +34,34 @@ class ScheduledTaskActionCapability(BaseModel):
     status: ScheduledTaskAutomationActionStatus
     reason: str | None = None
     required_permissions: list[str] = Field(default_factory=list)
+    evidence_source: Literal[
+        "server_verified",
+        "repository_characterization",
+        "none",
+    ] | None = None
+    recovery_action: str | None = None
+    observed_at: datetime | None = None
+    expires_at: datetime | None = None
+
+
+class ScheduledTaskExecutionCertificationCapability(BaseModel):
+    """Sanitized Agent execution feasibility for one deployment class."""
+
+    schema_version: Literal[
+        "scheduled_task_execution_certification.v1"
+    ] = "scheduled_task_execution_certification.v1"
+    outcome: Literal["certified", "draft_only", "unsupported"]
+    deployment_class_id: str
+    evidence_id: str | None = None
+    evidence_source: Literal[
+        "server_verified",
+        "repository_characterization",
+        "none",
+    ]
+    observed_at: datetime | None = None
+    expires_at: datetime | None = None
+    reason_codes: list[str] = Field(default_factory=list)
+    recovery_action: str | None = None
 
 
 class ScheduledTaskAutomationCapability(BaseModel):
@@ -45,7 +73,10 @@ class ScheduledTaskAutomationCapability(BaseModel):
     missing_dependencies: list[str] = Field(default_factory=list)
     related_capabilities: dict[str, Any] = Field(default_factory=dict)
     reason: str | None = None
-    schema_version: str = "2026-06-09"
+    execution_certification: (
+        ScheduledTaskExecutionCertificationCapability | None
+    ) = None
+    schema_version: str = "2026-08-24"
 
 
 class ScheduledTaskAutomationCapabilitiesResponse(BaseModel):

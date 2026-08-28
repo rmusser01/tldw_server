@@ -4,8 +4,8 @@ from datetime import datetime, timezone
 from typing import Any, NoReturn
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, rbac_rate_limit, RequirePermission, User
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequirePermission, User, get_request_user, rbac_rate_limit
 from tldw_Server_API.app.api.v1.schemas.reminders_schemas import (
     ReminderTaskCreateRequest,
     ReminderTaskUpdateRequest,
@@ -22,7 +22,6 @@ from tldw_Server_API.app.api.v1.schemas.scheduled_tasks_automation_schemas impor
     ScheduledTaskDefinitionUpdateRequest,
     ScheduledTaskDuplicateRequest,
     ScheduledTaskMarkSolvedRequest,
-    ScheduledTaskRunNowResponse,
     ScheduledTaskPreviewCreateRequest,
     ScheduledTaskPreviewListResponse,
     ScheduledTaskPreviewMode,
@@ -34,6 +33,7 @@ from tldw_Server_API.app.api.v1.schemas.scheduled_tasks_automation_schemas impor
     ScheduledTaskResultReviewRequest,
     ScheduledTaskReviewState,
     ScheduledTaskRunListResponse,
+    ScheduledTaskRunNowResponse,
     ScheduledTaskRunResponse,
     ScheduledTaskRunStatus,
 )
@@ -92,6 +92,16 @@ def _scheduled_task_error(
 
 
 _AUTOMATION_ERROR_MAP: dict[str, tuple[int, str, str]] = {
+    "agent_execution_unavailable": (
+        status.HTTP_409_CONFLICT,
+        "scheduled_task_agent_execution_unavailable",
+        "Scheduled Agent execution is unavailable for this deployment.",
+    ),
+    "agent_automation_unsupported": (
+        status.HTTP_409_CONFLICT,
+        "scheduled_task_agent_automation_unsupported",
+        "Scheduled Agent automation is unsupported for this deployment.",
+    ),
     "scheduled_task_family_unavailable": (
         status.HTTP_409_CONFLICT,
         "scheduled_task_family_unavailable",
@@ -315,12 +325,15 @@ def _raise_automation_error(request: Request, exc: ScheduledTaskAutomationError)
             "Scheduled task automation request could not be completed.",
         ),
     )
+    details = {"reason": exc.reason or raw_code}
+    if exc.recovery_action:
+        details["recovery_action"] = exc.recovery_action
     raise _scheduled_task_error(
         request=request,
         status_code=status_code,
         code=code,
         message=message,
-        details={"reason": raw_code},
+        details=details,
     ) from exc
 
 

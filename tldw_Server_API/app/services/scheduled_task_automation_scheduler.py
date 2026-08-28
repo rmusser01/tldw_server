@@ -38,9 +38,10 @@ Env:
   SCHEDULED_TASKS_AUTOMATION_RESCAN_SEC         -> rescan interval (>= 30)
   AUTOMATION_JOBS_QUEUE                         -> queue name (default: default)
 
-The gate ships OFF: arming before the ``agent_task_run`` consumer
-(TASK-13021) is deployed only queues jobs nobody executes, so enable it
-together with the consumer.
+The service gate ships OFF. Even when the generic scheduler is enabled,
+``agent_task`` definitions are not armed or enqueued until deployment
+certification and the separately delivered Agent execution stack are both
+ready. Recurring Question scheduling is unchanged.
 """
 
 from __future__ import annotations
@@ -48,6 +49,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -57,13 +59,19 @@ from apscheduler.triggers.date import DateTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from loguru import logger
 
+from tldw_Server_API.app.core.config import settings as core_settings
+from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.Scheduled_Tasks_DB import (
     DefinitionRow,
     ScheduledTasksDatabase,
 )
-from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Jobs.manager import JobManager
-from tldw_Server_API.app.core.config import settings as core_settings
+from tldw_Server_API.app.core.Scheduled_Tasks.execution_certification import (
+    ExecutionCertification,
+    agent_execution_dispatch_readiness,
+    current_agent_execution_stack_ready,
+    resolve_current_agent_execution_certification,
+)
 from tldw_Server_API.app.core.testing import env_flag_enabled
 from tldw_Server_API.app.services.reminders_scheduler import (
     _NONCRITICAL_EXCEPTIONS,
@@ -74,6 +82,7 @@ from tldw_Server_API.app.services.reminders_scheduler import (
 AUTOMATION_DOMAIN = "scheduled_tasks"
 AUTOMATION_JOB_TYPE = "agent_task_run"
 ARMED_HEALTH = "ready"
+UNAVAILABLE_HEALTH = "execution_unavailable"
 SCHEDULER_ACTOR = "automation-scheduler"
 _MIN_RESCAN_SECONDS = 30
 
@@ -190,13 +199,57 @@ class _AutomationScheduler:
     callback still enqueues the occurrence it was armed for).
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        execution_certification_resolver: Callable[
+            [], ExecutionCertification
+        ] = resolve_current_agent_execution_certification,
+        execution_stack_ready_resolver: Callable[
+            [], bool
+        ] = current_agent_execution_stack_ready,
+    ) -> None:
+        """Initialize scheduler state and injectable Agent readiness inputs."""
+
         self._aps: AsyncIOScheduler | None = None
         self._db_cache: dict[int, ScheduledTasksDatabase] = {}
         self._lock = asyncio.Lock()
         self._started = False
         self._rescan_task: asyncio.Task | None = None
         self._jobs = JobManager()
+        self._execution_certification_resolver = (
+            execution_certification_resolver
+        )
+        self._execution_stack_ready_resolver = execution_stack_ready_resolver
+
+    def _agent_execution_ready(
+        self,
+        definition: DefinitionRow,
+        user_id: int,
+    ) -> bool:
+        """Apply core readiness and persist honest blocked scheduler state."""
+
+        if definition.family != "agent_task":
+            return True
+        readiness = agent_execution_dispatch_readiness(
+            self._execution_certification_resolver(),
+            execution_stack_ready=self._execution_stack_ready_resolver(),
+        )
+        if not readiness.ready:
+            logger.warning(
+                "Automation scheduler blocked Agent definition {}: {}",
+                definition.id,
+                readiness.reason,
+            )
+            if self._aps is not None:
+                with contextlib.suppress(_NONCRITICAL_EXCEPTIONS):
+                    self._aps.remove_job(_job_id(definition.id))
+            self._mark_unavailable(
+                definition,
+                user_id,
+                reason=readiness.reason or "agent_execution_unavailable",
+            )
+        return readiness.ready
 
     async def start(self) -> None:
         """Start the scheduler: initial arm pass plus the periodic rescan loop."""
@@ -355,6 +408,8 @@ class _AutomationScheduler:
         """
         if not self._aps:
             return False
+        if not self._agent_execution_ready(definition, user_id):
+            return False
         trigger, reason = build_trigger(definition.schedule)
         if trigger is None:
             logger.warning(
@@ -392,20 +447,25 @@ class _AutomationScheduler:
         self._mark_ready(definition, user_id)
         return True
 
-    def _mark_ready(self, definition: DefinitionRow, user_id: int) -> None:
-        """Health honesty (TASK-13020 AC#4): armed definitions read ``ready``.
+    def _mark_health(
+        self,
+        definition: DefinitionRow,
+        user_id: int,
+        *,
+        health: str,
+        event_type: str,
+        summary: str,
+    ) -> None:
+        """Persist and audit one scheduler-owned health transition on change."""
 
-        Written only on change so rescans do not churn the definition's
-        version column; audited through the standard trail.
-        """
-        if definition.health == ARMED_HEALTH:
+        if definition.health == health:
             return
         db = self._get_db(user_id)
         try:
             updated = db.update_definition(
                 owner_id=user_id,
                 definition_id=definition.id,
-                patch={"health": ARMED_HEALTH, "updated_by": SCHEDULER_ACTOR},
+                patch={"health": health, "updated_by": SCHEDULER_ACTOR},
             )
         except _NONCRITICAL_EXCEPTIONS as exc:
             logger.warning(
@@ -416,15 +476,49 @@ class _AutomationScheduler:
             db.create_audit_event(
                 owner_id=user_id,
                 definition_id=definition.id,
-                event_type="scheduler_armed",
+                event_type=event_type,
                 actor=SCHEDULER_ACTOR,
-                summary=(
-                    f"Definition armed by scheduler (schedule kind "
-                    f"'{definition.schedule.get('kind')}'); health -> ready."
-                ),
+                summary=summary,
                 before={"health": definition.health},
                 after={"health": updated.health},
             )
+
+    def _mark_ready(self, definition: DefinitionRow, user_id: int) -> None:
+        """Health honesty (TASK-13020 AC#4): armed definitions read ``ready``.
+
+        Written only on change so rescans do not churn the definition's
+        version column; audited through the standard trail.
+        """
+        self._mark_health(
+            definition,
+            user_id,
+            health=ARMED_HEALTH,
+            event_type="scheduler_armed",
+            summary=(
+                f"Definition armed by scheduler (schedule kind "
+                f"'{definition.schedule.get('kind')}'); health -> ready."
+            ),
+        )
+
+    def _mark_unavailable(
+        self,
+        definition: DefinitionRow,
+        user_id: int,
+        *,
+        reason: str,
+    ) -> None:
+        """Persist the unavailable health state for a readiness-blocked Agent."""
+
+        self._mark_health(
+            definition,
+            user_id,
+            health=UNAVAILABLE_HEALTH,
+            event_type="scheduler_blocked",
+            summary=(
+                "Definition blocked by Scheduled Agent readiness gate "
+                f"({reason}); health -> execution_unavailable."
+            ),
+        )
 
     async def _run_definition_schedule(
         self, definition_id: str, user_id: int, slot_iso: str
@@ -449,6 +543,8 @@ class _AutomationScheduler:
         except KeyError:
             return
         if definition is None or definition.lifecycle != "configured":
+            return
+        if not self._agent_execution_ready(definition, user_id):
             return
 
         # The schedule may have become unusable between arming and this
@@ -515,6 +611,8 @@ class _AutomationScheduler:
         except _NONCRITICAL_EXCEPTIONS:
             return
         if definition is None or definition.lifecycle != "configured":
+            return
+        if not self._agent_execution_ready(definition, user_id):
             return
         trigger, _reason = build_trigger(definition.schedule)
         if trigger is None:
