@@ -396,7 +396,8 @@ def _single_update_acquire(cur: Any, *, command: AcquireJobCommand) -> dict[str,
             "retry_count = CASE WHEN status='processing' THEN retry_count + 1 ELSE retry_count END, "
             "started_at = COALESCE(started_at, NOW()), acquired_at = COALESCE(acquired_at, NOW()), "
             "leased_until = NOW() + (%s || ' seconds')::interval, worker_id = %s, lease_id = %s, "
-            "completion_token = NULL WHERE id IN (SELECT id FROM picked) RETURNING *",
+            "completion_token = NULL, no_attempt_recovery_fingerprint = NULL "
+            "WHERE id IN (SELECT id FROM picked) RETURNING *",
         ]
     )
     cur.execute(
@@ -420,7 +421,8 @@ def _two_step_acquire(cur: Any, *, command: AcquireJobCommand) -> dict[str, Any]
             "retry_count = CASE WHEN status = 'processing' THEN retry_count + 1 ELSE retry_count END, "
             "started_at = COALESCE(started_at, NOW()), acquired_at = COALESCE(acquired_at, NOW()), "
             "leased_until = NOW() + (%s || ' seconds')::interval, "
-            "worker_id = %s, lease_id = %s, completion_token = NULL WHERE id = %s"
+            "worker_id = %s, lease_id = %s, completion_token = NULL, "
+            "no_attempt_recovery_fingerprint = NULL WHERE id = %s"
         ),
         (command.lease_seconds, command.worker_id, command.lease_id, job_id),
     )
@@ -847,7 +849,8 @@ def apply_prepared_disposition(
                         "UPDATE jobs SET status='cancelled',result=%s::jsonb,"
                         "prepared_disposition_fingerprint=%s,"
                         "cancellation_reason=%s,cancelled_at=NOW(),completed_at=NOW(),"
-                        "completion_token=%s WHERE id=%s AND status='queued'",
+                        "completion_token=%s,no_attempt_recovery_fingerprint=NULL "
+                        "WHERE id=%s AND status='queued'",
                         (
                             marker_json,
                             facts_fingerprint,

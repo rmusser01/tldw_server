@@ -115,6 +115,97 @@ def test_admin_webhook_delivery_admission_rejects_every_noncanonical_fact_before
         manager.admit_job(**_noncanonical_admission(case))
 
 
+def _guard_canonical_transform_side_effects(monkeypatch, manager) -> list[str]:
+    calls: list[str] = []
+
+    def fail_connect():
+        calls.append("connect")
+        pytest.fail("transformed canonical admission reached SQL")
+
+    def fail_emit(*_args, **_kwargs):
+        calls.append("emit")
+        pytest.fail("transformed canonical admission emitted create side effects")
+
+    monkeypatch.setattr(manager, "_connect", fail_connect)
+    monkeypatch.setattr(manager, "_emit_create_side_effects", fail_emit)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Jobs.manager.increment_json_truncated",
+        lambda *_args, **_kwargs: calls.append("truncate_metric"),
+    )
+    return calls
+
+
+def test_canonical_admission_rejects_configured_redaction_before_side_effects(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    manager = JobManager(tmp_path / "canonical-redaction.db")
+    calls = _guard_canonical_transform_side_effects(monkeypatch, manager)
+    monkeypatch.setenv("JOBS_SECRET_REDACT", "true")
+    monkeypatch.setenv("JOBS_SECRET_PATTERNS", r"^[0-9a-f-]{36}$")
+
+    with pytest.raises(ValueError, match="canonical"):
+        manager.admit_job(**_canonical_kwargs(key="redaction"))
+
+    assert calls == []
+
+
+def test_canonical_admission_rejects_configured_encryption_before_side_effects(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    manager = JobManager(tmp_path / "canonical-encryption.db")
+    calls = _guard_canonical_transform_side_effects(monkeypatch, manager)
+    monkeypatch.setenv("JOBS_ENCRYPT_ADMIN_WEBHOOKS", "true")
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Jobs.manager.encrypt_json_blob",
+        lambda _payload: {
+            "_enc": "aesgcm:v1",
+            "nonce": "nonce",
+            "ct": "ciphertext",
+            "tag": "tag",
+        },
+    )
+
+    with pytest.raises(ValueError, match="canonical"):
+        manager.admit_job(**_canonical_kwargs(key="encryption"))
+
+    assert calls == []
+
+
+def test_canonical_admission_rejects_truncation_before_metric_or_sql(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    manager = JobManager(tmp_path / "canonical-truncation.db")
+    calls = _guard_canonical_transform_side_effects(monkeypatch, manager)
+    monkeypatch.setenv("JOBS_MAX_JSON_BYTES", "1")
+    monkeypatch.setenv("JOBS_JSON_TRUNCATE", "true")
+
+    with pytest.raises(ValueError, match="canonical"):
+        manager.admit_job(**_canonical_kwargs(key="truncation"))
+
+    assert calls == []
+
+
+def test_canonical_admission_rejects_mocked_payload_transform_before_side_effects(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    manager = JobManager(tmp_path / "canonical-transform.db")
+    calls = _guard_canonical_transform_side_effects(monkeypatch, manager)
+    monkeypatch.setattr(
+        manager,
+        "_maybe_encrypt_json",
+        lambda payload, _domain: {**payload, "unexpected": True},
+    )
+
+    with pytest.raises(ValueError, match="canonical"):
+        manager.admit_job(**_canonical_kwargs(key="mocked-transform"))
+
+    assert calls == []
+
+
 @pytest.mark.parametrize("field", ("domain", "queue", "job_type", "payload", "key"))
 def test_find_identity_rejects_noncanonical_facts_before_sql(
     monkeypatch,

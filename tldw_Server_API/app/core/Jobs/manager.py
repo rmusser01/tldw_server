@@ -258,6 +258,21 @@ def _require_canonical_admin_webhook_identity(
         raise ValueError("canonical admin webhook identity is invalid") from exc
 
 
+def _require_unchanged_canonical_admin_webhook_payload(
+    payload: object,
+    *,
+    delivery_id: str,
+) -> None:
+    """Reject any shared admission transform that changes canonical payload."""
+
+    try:
+        transformed_delivery_id = canonical_admin_webhook_delivery_id(payload)
+    except ValueError as exc:
+        raise ValueError("canonical admin webhook payload was transformed") from exc
+    if transformed_delivery_id != delivery_id:
+        raise ValueError("canonical admin webhook payload was transformed")
+
+
 def _require_aware_utc(value: datetime | None, *, field_name: str) -> datetime:
     if value is None:
         value = datetime.now(tz=_tz.utc)
@@ -3502,8 +3517,9 @@ class JobManager:
             or quarantine_threshold <= 0
         ):
             raise ValueError("quarantine_threshold must be a positive integer")
+        canonical_delivery_id: str | None = None
         if is_admin_webhook_delivery_queue(domain, queue):
-            delivery_id = _require_canonical_admin_webhook_identity(
+            canonical_delivery_id = _require_canonical_admin_webhook_identity(
                 domain=domain,
                 queue=queue,
                 job_type=job_type,
@@ -3511,7 +3527,7 @@ class JobManager:
             )
             canonical = (
                 idempotency_key
-                == canonical_admin_webhook_idempotency_key(delivery_id)
+                == canonical_admin_webhook_idempotency_key(canonical_delivery_id)
                 and owner_user_id is None
                 and project_id is None
                 and batch_group is None
@@ -3603,12 +3619,22 @@ class JobManager:
                 )  # noqa: TRY003 - public rejection text is an API compatibility contract.
             if found:
                 payload = cleaned
+        if canonical_delivery_id is not None:
+            _require_unchanged_canonical_admin_webhook_payload(
+                payload,
+                delivery_id=canonical_delivery_id,
+            )
 
         # JSON payload size cap
         max_bytes = int(os.getenv("JOBS_MAX_JSON_BYTES", "1048576") or "1048576")
         truncate = JobManager._is_truthy(os.getenv("JOBS_JSON_TRUNCATE", ""))
         # Optional encryption at rest for payload
         payload = self._maybe_encrypt_json(payload, domain)
+        if canonical_delivery_id is not None:
+            _require_unchanged_canonical_admin_webhook_payload(
+                payload,
+                delivery_id=canonical_delivery_id,
+            )
         try:
             payload_json = json.dumps(payload)
         except (TypeError, ValueError) as exc:
@@ -3626,6 +3652,11 @@ class JobManager:
         if payload_bytes > max_bytes:
             if truncate:
                 payload = {"_truncated": True, "len_bytes": payload_bytes}
+                if canonical_delivery_id is not None:
+                    _require_unchanged_canonical_admin_webhook_payload(
+                        payload,
+                        delivery_id=canonical_delivery_id,
+                    )
                 payload_json = json.dumps(payload)
                 with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
                     increment_json_truncated({"domain": domain, "queue": queue, "job_type": job_type}, "payload")
@@ -3644,6 +3675,11 @@ class JobManager:
                         return AdmissionResult.existing(row=existing)
                 raise error  # noqa: TRY003
 
+        if canonical_delivery_id is not None:
+            _require_unchanged_canonical_admin_webhook_payload(
+                payload,
+                delivery_id=canonical_delivery_id,
+            )
         # Note: completion_token enforcement applies to finalize paths (complete/fail), not creation.
         conn = self._connect()
         try:
@@ -5799,6 +5835,8 @@ class JobManager:
                             cur.execute(
                                 (
                                     "UPDATE jobs SET status='queued', available_at=NULL, "
+                                    "no_attempt_recovery_fingerprint="
+                                    "prepared_disposition_fingerprint, "
                                     "leased_until=NULL, worker_id=NULL, lease_id=NULL, "
                                     "completion_token=NULL, acquired_at=NULL, started_at=NULL "
                                     "WHERE id=%s AND status='processing' "
@@ -5954,6 +5992,8 @@ class JobManager:
                             changed = conn.execute(
                                 (
                                     "UPDATE jobs SET status='queued', available_at=NULL, "
+                                    "no_attempt_recovery_fingerprint="
+                                    "prepared_disposition_fingerprint, "
                                     "leased_until=NULL, worker_id=NULL, lease_id=NULL, "
                                     "completion_token=NULL, acquired_at=NULL, started_at=NULL "
                                     "WHERE id=? AND status='processing' "

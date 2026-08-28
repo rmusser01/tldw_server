@@ -8,7 +8,7 @@ import json
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 from uuid import UUID
@@ -166,37 +166,69 @@ def canonical_admin_webhook_row_matches(
         or row.get("max_retries") != ADMIN_WEBHOOK_DELIVERY_MAX_RETRIES
     ):
         return False
-    available_at = _stored_utc(row.get("available_at"))
-    if row.get("available_at") is not None and available_at is None:
+    raw_available_at = row.get("available_at")
+    available_at = _stored_utc(raw_available_at)
+    if raw_available_at is not None and available_at is None:
         return False
+    recovery_fingerprint = row.get("no_attempt_recovery_fingerprint")
+    if recovery_fingerprint is not None and (
+        not isinstance(recovery_fingerprint, str)
+        or _OPAQUE_TOKEN_RE.fullmatch(recovery_fingerprint) is None
+    ):
+        return False
+    prepared_fingerprint = row.get("prepared_disposition_fingerprint")
     if row.get("status") == "queued":
         if marker is None:
-            if available_at is not None:
+            if available_at is not None or recovery_fingerprint is not None:
+                return False
+        elif marker["kind"] not in {
+            PreparedDispositionKind.RETRY.value,
+            PreparedDispositionKind.DEFER.value,
+        }:
+            return False
+        elif available_at is None:
+            if (
+                recovery_fingerprint is None
+                or recovery_fingerprint != prepared_fingerprint
+            ):
                 return False
         elif (
-            marker["kind"]
-            not in {
-                PreparedDispositionKind.RETRY.value,
-                PreparedDispositionKind.DEFER.value,
-            }
-            or available_at is None
-            or not _canonical_schedule_matches(marker, available_at=available_at)
+            recovery_fingerprint is not None
+            or not _canonical_schedule_matches(
+                marker,
+                available_at=available_at,
+                sqlite_second_precision=isinstance(raw_available_at, str),
+            )
         ):
             return False
-    if row.get("status") == "processing" and available_at is not None:
-        acquired_at = _stored_utc(row.get("acquired_at"))
-        if (
-            marker is None
-            or marker["kind"]
-            not in {
-                PreparedDispositionKind.RETRY.value,
-                PreparedDispositionKind.DEFER.value,
-            }
-            or not _canonical_schedule_matches(marker, available_at=available_at)
-            or acquired_at is None
-            or available_at > acquired_at
-        ):
+    if row.get("status") == "processing":
+        if recovery_fingerprint is not None:
             return False
+        if marker is not None and marker["kind"] not in {
+            PreparedDispositionKind.RETRY.value,
+            PreparedDispositionKind.DEFER.value,
+        }:
+            return False
+        if available_at is not None:
+            acquired_at = _stored_utc(row.get("acquired_at"))
+            if (
+                marker is None
+                or marker["kind"]
+                not in {
+                    PreparedDispositionKind.RETRY.value,
+                    PreparedDispositionKind.DEFER.value,
+                }
+                or not _canonical_schedule_matches(
+                    marker,
+                    available_at=available_at,
+                    sqlite_second_precision=isinstance(raw_available_at, str),
+                )
+                or acquired_at is None
+                or available_at > acquired_at
+            ):
+                return False
+    if row.get("status") not in {"queued", "processing"} and recovery_fingerprint is not None:
+        return False
     return (
         row.get("expired_lease_policy")
         == ExpiredLeasePolicy.REQUEUE_NO_ATTEMPT.value
@@ -306,6 +338,7 @@ def _canonical_schedule_matches(
     marker: dict[str, Any],
     *,
     available_at: datetime,
+    sqlite_second_precision: bool,
 ) -> bool:
     """Verify the stored schedule is the marker's database-clock maximum."""
 
@@ -314,7 +347,12 @@ def _canonical_schedule_matches(
     if applied_at is None or original_not_before is None:
         return False
     expected = max(applied_at, original_not_before)
-    return abs(available_at - expected) < timedelta(seconds=1)
+    if sqlite_second_precision:
+        return (
+            available_at.microsecond == 0
+            and available_at == expected.replace(microsecond=0)
+        )
+    return available_at == expected
 
 
 class NoTransitionReason(str, Enum):

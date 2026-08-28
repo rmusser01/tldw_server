@@ -4,7 +4,7 @@ title: Implement canonical admin webhook delivery substrate and recovery
 status: In Progress
 assignee: []
 created_date: '2026-08-23 03:15'
-updated_date: '2026-08-28 19:46'
+updated_date: '2026-08-28 20:26'
 labels:
   - admin
   - webhooks
@@ -95,6 +95,10 @@ Task 3 complete: added backend-neutral exact prepared dispositions, no-attempt d
 Task 3 Fix Round 1/5 started at FIX_BASE 803ae280f66e990f7b4ffdf29e31cae311d648d7. Scope: canonical identity boundary, exact-token replay fact conflicts, Slides replay control validation, compressed archive identity lookup, and defer event reason evidence. Strict focused RED before production edits; mandatory PostgreSQL zero-skip gate required.
 
 2026-08-28: Task 3 Fix Round 1/5 complete. Hardened canonical admin_webhooks:delivery admission/facade/backend identity and controls; exact-token reason/delay replay facts via bounded internal fingerprint; Slides immutable control replay/race validation; real compressed archive lookup; and current defer reason event evidence. Added strict marker/schedule forgery rejection. RED: 68 failed/95 passed, then 4 focused semantic failures. Final PostgreSQL-required Task 3/lifecycle gate: 343 passed, 0 skipped, 2 baseline warnings. Focused Ruff, Bandit, and diff checks pass. Full Jobs Ruff remains only the three unchanged baseline I001 findings; unrelated PostgreSQL Slides nullable-parameter audit issue remains unchanged.
+
+2026-08-28: Started Task 3 Fix Round 2/5 at FIX_BASE 56fc110798fb44200e0fe6bd90b7973e059bdf2e. Scope: revalidate final canonical admission payload after shared transforms; exact backend-precision schedule comparison; durable no-attempt expired-lease recovery evidence across acquisition/sweeper; and bounded strict archive decompression. Strict focused RED precedes production edits; PostgreSQL-required zero-skip final gate.
+
+2026-08-28 Fix Round 2/5 complete at pre-commit tree: canonical admin-webhook payload is revalidated after shared transforms; schedules use exact backend storage precision; no-attempt recovery now preserves bounded durable evidence and consumes it on reacquisition/cancel; archive decompression is strictly framed and bounded. RED: 25 failed, 139 passed, 0 skipped. Final mandatory PostgreSQL-required gate: 368 passed, 0 skipped, 2 warnings. Focused Ruff and Bandit pass; diff check clean. Evidence: .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-3-report.md.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

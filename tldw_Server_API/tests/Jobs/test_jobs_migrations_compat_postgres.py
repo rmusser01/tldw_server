@@ -38,7 +38,8 @@ def test_pg_schema_has_aux_tables_and_indexes(jobs_pg_dsn):
                 "SELECT column_name, is_nullable, column_default "
                 "FROM information_schema.columns "
                 "WHERE table_schema=current_schema() AND table_name='jobs' "
-                "AND column_name IN ('expired_lease_policy', 'quarantine_threshold')"
+                "AND column_name IN ('expired_lease_policy', 'quarantine_threshold', "
+                "'no_attempt_recovery_fingerprint')"
             )
             columns = {row[0]: row[1:] for row in cur.fetchall()}
             assert columns["expired_lease_policy"] == (
@@ -46,6 +47,7 @@ def test_pg_schema_has_aux_tables_and_indexes(jobs_pg_dsn):
                 "'consume_retry'::text",
             )
             assert columns["quarantine_threshold"] == ("YES", None)
+            assert columns["no_attempt_recovery_fingerprint"] == ("YES", None)
 
     ensure_jobs_tables_pg(jobs_pg_dsn)
     with psycopg.connect(jobs_pg_dsn) as conn:

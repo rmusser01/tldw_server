@@ -30,6 +30,7 @@ def test_sqlite_schema_additional_tables_and_indexes(tmp_path):
         }
         assert columns["expired_lease_policy"] == (1, "'consume_retry'")
         assert columns["quarantine_threshold"] == (0, None)
+        assert columns["no_attempt_recovery_fingerprint"] == (0, None)
         ensure_jobs_tables(db_path)
         assert has_table("job_events")
         assert has_table("job_queue_controls")

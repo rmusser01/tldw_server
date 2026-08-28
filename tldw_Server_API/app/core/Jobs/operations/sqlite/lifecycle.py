@@ -433,7 +433,8 @@ def acquire_job(
                     "retry_count = CASE WHEN status='processing' THEN retry_count + 1 ELSE retry_count END, ",
                     "started_at = COALESCE(started_at, DATETIME(?)), ",
                     "acquired_at = COALESCE(acquired_at, DATETIME(?)), ",
-                    "leased_until = DATETIME(?, ?), worker_id = ?, lease_id = ?, completion_token = NULL ",
+                    "leased_until = DATETIME(?, ?), worker_id = ?, lease_id = ?, ",
+                    "completion_token = NULL, no_attempt_recovery_fingerprint = NULL ",
                     "WHERE id IN (",
                     candidate_sql,
                     ")",
@@ -468,7 +469,8 @@ def acquire_job(
                     "retry_count = CASE WHEN status = 'processing' THEN retry_count + 1 ELSE retry_count END, "
                     "started_at = COALESCE(started_at, DATETIME(?)), "
                     "acquired_at = COALESCE(acquired_at, DATETIME(?)), "
-                    "leased_until = DATETIME(?, ?), worker_id = ?, lease_id = ?, completion_token = NULL "
+                    "leased_until = DATETIME(?, ?), worker_id = ?, lease_id = ?, "
+                    "completion_token = NULL, no_attempt_recovery_fingerprint = NULL "
                     "WHERE id = ? AND status = 'queued'"
                 ),
                 (
@@ -843,7 +845,8 @@ def apply_prepared_disposition(
                     "UPDATE jobs SET status='cancelled', result=?, "
                     "prepared_disposition_fingerprint=?, cancellation_reason=?, "
                     "cancelled_at=DATETIME('now'), completed_at=DATETIME('now'), "
-                    "completion_token=? WHERE id=? AND status='queued'",
+                    "completion_token=?, no_attempt_recovery_fingerprint=NULL "
+                    "WHERE id=? AND status='queued'",
                     (
                         marker_json,
                         facts_fingerprint,

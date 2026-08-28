@@ -236,6 +236,12 @@ CREATE TABLE IF NOT EXISTS jobs (
       prepared_disposition_fingerprint IS NULL OR
       prepared_disposition_fingerprint ~ '^[0-9a-f]{64}$'
     ),
+  no_attempt_recovery_fingerprint TEXT
+    CONSTRAINT jobs_no_attempt_recovery_fingerprint_valid
+    CHECK (
+      no_attempt_recovery_fingerprint IS NULL OR
+      no_attempt_recovery_fingerprint ~ '^[0-9a-f]{64}$'
+    ),
   retry_count INTEGER DEFAULT 0,
   available_at TIMESTAMPTZ,
   started_at TIMESTAMPTZ,
@@ -922,6 +928,10 @@ def _ensure_pg_execution_control_columns(cur: Any) -> None:
         "prepared_disposition_fingerprint TEXT"
     )
     cur.execute(
+        "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS "
+        "no_attempt_recovery_fingerprint TEXT"
+    )
+    cur.execute(
         "UPDATE jobs SET expired_lease_policy='consume_retry' "
         "WHERE expired_lease_policy IS NULL"
     )
@@ -995,6 +1005,30 @@ def _ensure_pg_execution_control_columns(cur: Any) -> None:
     cur.execute(
         "ALTER TABLE jobs VALIDATE CONSTRAINT "
         "jobs_prepared_disposition_fingerprint_valid"
+    )
+    cur.execute(
+        """
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+            WHERE conname='jobs_no_attempt_recovery_fingerprint_valid'
+              AND conrelid='jobs'::regclass
+          ) THEN
+            ALTER TABLE jobs ADD CONSTRAINT
+            jobs_no_attempt_recovery_fingerprint_valid
+            CHECK (
+              no_attempt_recovery_fingerprint IS NULL OR
+              no_attempt_recovery_fingerprint ~ '^[0-9a-f]{64}$'
+            ) NOT VALID;
+          END IF;
+        END
+        $$
+        """
+    )
+    cur.execute(
+        "ALTER TABLE jobs VALIDATE CONSTRAINT "
+        "jobs_no_attempt_recovery_fingerprint_valid"
     )
 
 

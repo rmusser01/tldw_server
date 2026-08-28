@@ -8,11 +8,12 @@ database path. This scaffolds the future core JobManager backend.
 from __future__ import annotations
 
 import base64
+import binascii
 import contextlib
-import gzip
 import json
 import os
 import sqlite3
+import zlib
 from pathlib import Path
 from typing import Any
 
@@ -134,6 +135,15 @@ SLIDES_ARCHIVE_EXACT_FIELDS = (
 
 SLIDES_ARCHIVE_COMPRESSED_FIELDS = ("payload_compressed", "result_compressed")
 
+# Jobs payload JSON defaults to a 1 MiB admission cap. Archive readback uses the
+# same fixed logical limit plus bounded gzip overhead for compressed input.
+JOBS_ARCHIVE_JSON_MAX_BYTES = 1_048_576
+JOBS_ARCHIVE_COMPRESSED_MAX_BYTES = JOBS_ARCHIVE_JSON_MAX_BYTES + 65_536
+_JOBS_ARCHIVE_BASE64_MAX_CHARS = (
+    4 * ((JOBS_ARCHIVE_COMPRESSED_MAX_BYTES + 2) // 3)
+)
+_JOBS_ARCHIVE_GZIP_CHUNK_BYTES = 65_536
+
 
 def _parse_slides_archive_json(value: Any) -> Any:
     """Normalize a stored JSON value without requiring a Jobs manager instance."""
@@ -152,21 +162,73 @@ def _parse_slides_archive_json(value: Any) -> Any:
     return value
 
 
+def _bounded_gzip_decompress(compressed: bytes) -> bytes:
+    """Decode one complete gzip member without exceeding archive bounds."""
+
+    if not 1 <= len(compressed) <= JOBS_ARCHIVE_COMPRESSED_MAX_BYTES:
+        raise ValueError("archive compressed input is outside the fixed bound")
+    decompressor = zlib.decompressobj(16 + zlib.MAX_WBITS)
+    output = bytearray()
+    for offset in range(0, len(compressed), _JOBS_ARCHIVE_GZIP_CHUNK_BYTES):
+        remaining = JOBS_ARCHIVE_JSON_MAX_BYTES - len(output)
+        if remaining <= 0:
+            raise ValueError("archive JSON exceeds the fixed bound")
+        chunk = compressed[offset : offset + _JOBS_ARCHIVE_GZIP_CHUNK_BYTES]
+        decoded = decompressor.decompress(chunk, remaining)
+        output.extend(decoded)
+        if decompressor.unconsumed_tail:
+            raise ValueError("archive JSON exceeds the fixed bound")
+        if decompressor.unused_data:
+            raise ValueError("archive gzip contains trailing or concatenated data")
+    remaining = JOBS_ARCHIVE_JSON_MAX_BYTES - len(output)
+    if remaining > 0:
+        output.extend(decompressor.flush(remaining))
+    if (
+        len(output) > JOBS_ARCHIVE_JSON_MAX_BYTES
+        or not decompressor.eof
+        or decompressor.unused_data
+        or decompressor.unconsumed_tail
+    ):
+        raise ValueError("archive gzip stream is incomplete or exceeds its bound")
+    return bytes(output)
+
+
+def _strict_archive_compressed_bytes(value: Any) -> bytes:
+    """Validate one backend archive encoding before allocating decoded bytes."""
+
+    if isinstance(value, memoryview):
+        if value.nbytes > JOBS_ARCHIVE_COMPRESSED_MAX_BYTES:
+            raise ValueError("archive compressed input is outside the fixed bound")
+        return value.tobytes()
+    if isinstance(value, (bytes, bytearray)):
+        if len(value) > JOBS_ARCHIVE_COMPRESSED_MAX_BYTES:
+            raise ValueError("archive compressed input is outside the fixed bound")
+        return bytes(value)
+    if isinstance(value, str) and value.startswith("gzip64:"):
+        encoded = value[len("gzip64:") :]
+        if (
+            not encoded
+            or len(encoded) > _JOBS_ARCHIVE_BASE64_MAX_CHARS
+            or len(encoded) % 4 != 0
+        ):
+            raise ValueError("archive base64 input is outside the fixed bound")
+        compressed = base64.b64decode(encoded.encode("ascii"), validate=True)
+        if len(compressed) > JOBS_ARCHIVE_COMPRESSED_MAX_BYTES:
+            raise ValueError("archive compressed input is outside the fixed bound")
+        return compressed
+    raise ValueError("archive compressed input uses an unsupported encoding")
+
+
 def _decode_slides_archive_blob(value: Any) -> Any:
-    """Decode the SQLite/PostgreSQL archive compression formats."""
+    """Decode one bounded, strictly framed SQLite/PostgreSQL archive blob."""
     if value is None:
         return None
-    if isinstance(value, memoryview):
-        value = value.tobytes()
     try:
-        if isinstance(value, (bytes, bytearray)):
-            return _parse_slides_archive_json(gzip.decompress(bytes(value)).decode("utf-8"))
-        if isinstance(value, str) and value.startswith("gzip64:"):
-            compressed = base64.b64decode(value[len("gzip64:") :])
-            return _parse_slides_archive_json(gzip.decompress(compressed).decode("utf-8"))
-    except (OSError, TypeError, ValueError, UnicodeError):
+        compressed = _strict_archive_compressed_bytes(value)
+        decoded = _bounded_gzip_decompress(compressed).decode("utf-8")
+        return _parse_slides_archive_json(decoded)
+    except (binascii.Error, TypeError, ValueError, UnicodeError, zlib.error):
         return _parse_slides_archive_json(value)
-    return _parse_slides_archive_json(value)
 
 
 def normalize_slides_archive_projection(row: Any) -> dict[str, Any]:
@@ -243,6 +305,12 @@ CREATE TABLE IF NOT EXISTS jobs (
     prepared_disposition_fingerprint IS NULL OR (
       LENGTH(prepared_disposition_fingerprint) = 64 AND
       prepared_disposition_fingerprint NOT GLOB '*[^0-9a-f]*'
+    )
+  ),
+  no_attempt_recovery_fingerprint TEXT CHECK (
+    no_attempt_recovery_fingerprint IS NULL OR (
+      LENGTH(no_attempt_recovery_fingerprint) = 64 AND
+      no_attempt_recovery_fingerprint NOT GLOB '*[^0-9a-f]*'
     )
   ),
   retry_count INTEGER DEFAULT 0,
@@ -1194,6 +1262,13 @@ def ensure_jobs_tables(db_path: Path | None = None) -> Path:
                     "CHECK (prepared_disposition_fingerprint IS NULL OR "
                     "(LENGTH(prepared_disposition_fingerprint) = 64 AND "
                     "prepared_disposition_fingerprint NOT GLOB '*[^0-9a-f]*'))"
+                )
+            if "no_attempt_recovery_fingerprint" not in columns:
+                conn.execute(
+                    "ALTER TABLE jobs ADD COLUMN no_attempt_recovery_fingerprint TEXT "
+                    "CHECK (no_attempt_recovery_fingerprint IS NULL OR "
+                    "(LENGTH(no_attempt_recovery_fingerprint) = 64 AND "
+                    "no_attempt_recovery_fingerprint NOT GLOB '*[^0-9a-f]*'))"
                 )
             with contextlib.suppress(_JOBS_DB_EXCEPTIONS):
                 conn.execute("ALTER TABLE jobs_archive ADD COLUMN batch_group TEXT")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gzip
 import json
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
@@ -629,6 +630,232 @@ def test_postgres_identity_lookup_rejects_forged_later_schedule(
     assert result.state is JobIdentityLookupState.CONFLICT
 
 
+@pytest.mark.parametrize(
+    ("microsecond", "expected_state"),
+    (
+        (123456, JobIdentityLookupState.ACTIVE),
+        (123457, JobIdentityLookupState.CONFLICT),
+    ),
+)
+def test_postgres_identity_lookup_uses_exact_microsecond_storage_precision(
+    jobs_pg_dsn,
+    microsecond,
+    expected_state,
+) -> None:
+    manager = _manager(jobs_pg_dsn)
+    job = _canonical(manager, suffix="schedule-precision")
+    delivery_id = job["payload"]["delivery_id"]
+    marker = {
+        "schema_version": 1,
+        "token": _token("2"),
+        "kind": "defer",
+        "origin": "infrastructure",
+        "delivery_id": delivery_id,
+        "original_not_before_at": "2026-01-01T00:00:30.123456+00:00",
+        "applied_at": "2026-01-01T00:00:00.100000+00:00",
+    }
+    available_at = datetime(
+        2026,
+        1,
+        1,
+        0,
+        0,
+        30,
+        microsecond,
+        tzinfo=timezone.utc,
+    )
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE jobs SET result=%s::jsonb, "
+            "prepared_disposition_fingerprint=%s, available_at=%s WHERE id=%s",
+            (json.dumps(marker), _token("1"), available_at, job["id"]),
+        )
+
+    result = manager.find_job_by_identity(
+        FindJobByIdentityCommand(
+            domain="admin_webhooks",
+            queue="delivery",
+            job_type="admin_webhook_delivery",
+            idempotency_key=f"admin-webhook-delivery:{delivery_id}",
+            expected_payload={"delivery_id": delivery_id},
+        )
+    )
+
+    assert result.state is expected_state
+
+
+def _historical_retry_with_expired_lease_postgres(
+    jobs_pg_dsn: str,
+    manager: JobManager,
+    job: dict,
+) -> PreparedJobDisposition:
+    first_lease = _acquire(manager, worker="worker-1")
+    delivery_id = job["payload"]["delivery_id"]
+    disposition = PreparedJobDisposition.retry(
+        token=_token("8"),
+        delivery_id=delivery_id,
+        attempt_id=str(uuid4()),
+        delay_seconds=1,
+        not_before_at=datetime.now(timezone.utc) - timedelta(seconds=60),
+        reason_code="receiver_503",
+    )
+    assert _apply(
+        manager,
+        job,
+        disposition,
+        leased=first_lease,
+    ).outcome is OperationOutcome.APPLIED
+    assert _acquire(manager, worker="worker-2") is not None
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE jobs SET leased_until=NOW()-interval '10 minutes', "
+            "retry_count=2, failure_streak_code='receiver_503', "
+            "failure_streak_count=4, quarantined_at=NULL WHERE id=%s",
+            (job["id"],),
+        )
+    return disposition
+
+
+def _sweep_historical_retry_postgres(
+    jobs_pg_dsn: str,
+    manager: JobManager,
+    job: dict,
+) -> PreparedJobDisposition:
+    disposition = _historical_retry_with_expired_lease_postgres(
+        jobs_pg_dsn,
+        manager,
+        job,
+    )
+    stats = manager.integrity_sweep(
+        fix=True,
+        domain="admin_webhooks",
+        queue="delivery",
+        job_type="admin_webhook_delivery",
+    )
+    assert stats["fixed"] == 1
+    return disposition
+
+
+def test_postgres_no_attempt_sweep_preserves_marker_and_supports_lookup(
+    jobs_pg_dsn,
+) -> None:
+    manager = _manager(jobs_pg_dsn)
+    job = _canonical(manager, suffix="recovery-lookup")
+    disposition = _sweep_historical_retry_postgres(jobs_pg_dsn, manager, job)
+    persisted = manager.get_job(int(job["id"]))
+
+    found = manager.find_job_by_identity(
+        FindJobByIdentityCommand(
+            domain="admin_webhooks",
+            queue="delivery",
+            job_type="admin_webhook_delivery",
+            idempotency_key=f"admin-webhook-delivery:{disposition.delivery_id}",
+            expected_payload={"delivery_id": disposition.delivery_id},
+        )
+    )
+
+    assert found.state is JobIdentityLookupState.ACTIVE
+    assert persisted["status"] == "queued"
+    assert persisted["available_at"] is None
+    assert persisted["result"]["token"] == disposition.token
+    assert persisted["no_attempt_recovery_fingerprint"] == persisted[
+        "prepared_disposition_fingerprint"
+    ]
+    assert int(persisted["retry_count"]) == 2
+    assert persisted["failure_streak_code"] == "receiver_503"
+    assert int(persisted["failure_streak_count"]) == 4
+    assert persisted["quarantined_at"] is None
+
+
+def test_postgres_no_attempt_sweep_supports_trusted_cancel_and_consumes_evidence(
+    jobs_pg_dsn,
+) -> None:
+    manager = _manager(jobs_pg_dsn)
+    job = _canonical(manager, suffix="recovery-cancel")
+    previous = _sweep_historical_retry_postgres(jobs_pg_dsn, manager, job)
+
+    cancelled = _apply(
+        manager,
+        job,
+        PreparedJobDisposition.cancel(
+            token=_token("9"),
+            delivery_id=previous.delivery_id,
+            reason_code="registration_disabled",
+        ),
+        leased=None,
+    )
+    persisted = manager.get_job(int(job["id"]))
+
+    assert cancelled.outcome is OperationOutcome.APPLIED
+    assert persisted["status"] == "cancelled"
+    assert persisted["no_attempt_recovery_fingerprint"] is None
+    assert int(persisted["retry_count"]) == 2
+    assert int(persisted["failure_streak_count"]) == 4
+
+
+def test_postgres_acquisition_recovery_consumes_evidence_atomically(
+    jobs_pg_dsn,
+) -> None:
+    manager = _manager(jobs_pg_dsn)
+    job = _canonical(manager, suffix="recovery-reacquire")
+    disposition = _historical_retry_with_expired_lease_postgres(
+        jobs_pg_dsn,
+        manager,
+        job,
+    )
+
+    reacquired = manager.acquire_next_job(
+        domain="admin_webhooks",
+        queue="delivery",
+        job_type="admin_webhook_delivery",
+        lease_seconds=120,
+        worker_id="worker-3",
+    )
+
+    assert reacquired is not None
+    assert reacquired["status"] == "processing"
+    assert reacquired["result"]["token"] == disposition.token
+    assert reacquired["no_attempt_recovery_fingerprint"] is None
+    assert int(reacquired["retry_count"]) == 2
+    assert int(reacquired["failure_streak_count"]) == 4
+
+
+def test_postgres_missing_schedule_without_recovery_evidence_conflicts(
+    jobs_pg_dsn,
+) -> None:
+    manager = _manager(jobs_pg_dsn)
+    job = _canonical(manager, suffix="missing-recovery-evidence")
+    delivery_id = job["payload"]["delivery_id"]
+    marker = {
+        "schema_version": 1,
+        "token": _token("a"),
+        "kind": "retry",
+        "origin": "authnz",
+        "delivery_id": delivery_id,
+        "attempt_id": str(uuid4()),
+        "original_not_before_at": "2026-01-01T00:00:30+00:00",
+        "applied_at": "2026-01-01T00:00:00+00:00",
+    }
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE jobs SET result=%s::jsonb, "
+            "prepared_disposition_fingerprint=%s, available_at=NULL WHERE id=%s",
+            (json.dumps(marker), _token("b"), job["id"]),
+        )
+
+    found = manager.find_job_by_identity(
+        FindJobByIdentityCommand(
+            domain="admin_webhooks",
+            queue="delivery",
+            job_type="admin_webhook_delivery",
+            idempotency_key=f"admin-webhook-delivery:{delivery_id}",
+            expected_payload={"delivery_id": delivery_id},
+        )
+    )
+
+    assert found.state is JobIdentityLookupState.CONFLICT
+
+
 @pytest.mark.parametrize("changed_fact", ("reason_code", "delay_seconds"))
 def test_postgres_exact_token_replay_conflicts_on_internal_fact_change_without_mutation(
     jobs_pg_dsn,
@@ -717,6 +944,71 @@ def test_postgres_compressed_archive_identity_lookup_decodes_payload_and_proof(
     assert found.row is not None
     assert found.row["payload"] == payload
     assert found.row["result"] == applied.metadata
+
+
+_ARCHIVE_JSON_MAX_BYTES = 1_048_576
+_ARCHIVE_COMPRESSED_MAX_BYTES = _ARCHIVE_JSON_MAX_BYTES + 65_536
+
+
+@pytest.mark.parametrize("attack", ("oversized_input", "decompression_bomb"))
+def test_postgres_compressed_archive_lookup_rejects_bounded_decode_attacks_without_mutation(
+    jobs_pg_dsn,
+    attack,
+) -> None:
+    manager = _manager(jobs_pg_dsn)
+    job = _canonical(manager, suffix=attack)
+    payload = job["payload"]
+    payload_json = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    if attack == "oversized_input":
+        member = gzip.compress(payload_json)
+        compressed = member + b"\0" * (
+            _ARCHIVE_COMPRESSED_MAX_BYTES - len(member) + 1
+        )
+    else:
+        compressed = gzip.compress(b" " * (_ARCHIVE_JSON_MAX_BYTES + 1) + payload_json)
+
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO jobs_archive(id, uuid, domain, queue, job_type, "
+            "idempotency_key, payload, result, status, payload_compressed) "
+            "VALUES(%s,%s,%s,%s,%s,%s,NULL,NULL,'queued',%s)",
+            (
+                job["id"],
+                job["uuid"],
+                job["domain"],
+                job["queue"],
+                job["job_type"],
+                job["idempotency_key"],
+                compressed,
+            ),
+        )
+        cur.execute("DELETE FROM jobs WHERE id=%s", (job["id"],))
+        cur.execute(
+            "SELECT payload, payload_compressed, result, result_compressed, status "
+            "FROM jobs_archive WHERE id=%s",
+            (job["id"],),
+        )
+        before = cur.fetchone()
+
+    found = manager.find_job_by_identity(
+        FindJobByIdentityCommand(
+            domain="admin_webhooks",
+            queue="delivery",
+            job_type="admin_webhook_delivery",
+            idempotency_key=job["idempotency_key"],
+            expected_payload=payload,
+        )
+    )
+
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT payload, payload_compressed, result, result_compressed, status "
+            "FROM jobs_archive WHERE id=%s",
+            (job["id"],),
+        )
+        after = cur.fetchone()
+    assert found.state is JobIdentityLookupState.CONFLICT
+    assert after == before
 
 
 @pytest.mark.parametrize("origin", ("infrastructure", "recovery"))
