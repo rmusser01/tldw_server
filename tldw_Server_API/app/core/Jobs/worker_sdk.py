@@ -260,6 +260,7 @@ class WorkerSDK:
         # Allow test overrides without monkeypatching global asyncio.sleep
         # (keeps event loop behavior stable under tests)
         self._sleep = asyncio.sleep
+        self._utcnow = lambda: datetime.now(timezone.utc)
         self._detached_completion_callbacks: set[asyncio.Task[None]] = set()
         # Detect test mode for more responsive sleeps and optional iteration caps
         try:
@@ -457,21 +458,84 @@ class WorkerSDK:
                 logger.debug("Auto-renew reached max iterations; exiting loop")
                 return
 
-    async def _auto_renew_prepared(self, context: WorkerExecutionContext) -> None:
+    async def _auto_renew_prepared(
+        self,
+        context: WorkerExecutionContext,
+        stop_requested: asyncio.Event,
+    ) -> None:
         lease = int(max(1, self.cfg.lease_seconds))
         jitter = max(0, int(self.cfg.renew_jitter_seconds))
         threshold = max(1, int(self.cfg.renew_threshold_seconds))
         iters = 0
-        while True:
-            sleep_for = max(1, lease - threshold) + (
-                secrets.randbelow(jitter + 1) if jitter else 0
-            )
-            await self._sleep(float(sleep_for))
+
+        remaining = context.snapshot().leased_until
+        seconds_remaining = (
+            None
+            if remaining is None
+            else (remaining - self._utcnow()).total_seconds()
+        )
+        if seconds_remaining is None or seconds_remaining <= threshold:
             if not await context.ensure_lease_horizon(lease):
                 return
             iters += 1
             if self._max_iters and iters >= self._max_iters:
                 return
+
+        while True:
+            leased_until = context.snapshot().leased_until
+            if leased_until is None:
+                context._renewal_lost = True
+                return
+            seconds_remaining = (leased_until - self._utcnow()).total_seconds()
+            if seconds_remaining <= 0:
+                context._renewal_lost = True
+                return
+
+            renewal_margin = min(float(threshold), seconds_remaining / 2.0)
+            base_sleep = seconds_remaining - renewal_margin
+            earlier_jitter = float(secrets.randbelow(jitter + 1)) if jitter else 0.0
+            sleep_for = max(
+                base_sleep / 2.0,
+                base_sleep - earlier_jitter,
+            )
+            await self._sleep(sleep_for)
+            if stop_requested.is_set():
+                return
+            if not await context.ensure_lease_horizon(lease):
+                return
+            iters += 1
+            if self._max_iters and iters >= self._max_iters:
+                return
+
+    async def _stop_prepared_renewal(
+        self,
+        renew_task: asyncio.Task[None],
+        stop_requested: asyncio.Event,
+    ) -> None:
+        """Cancel and consume renewal while preserving new outer cancellation."""
+
+        outer_cancellation: asyncio.CancelledError | None = None
+        stop_requested.set()
+        renew_task.cancel()
+
+        while not renew_task.done():
+            try:
+                await asyncio.shield(renew_task)
+            except asyncio.CancelledError as exc:
+                if not renew_task.cancelled():
+                    outer_cancellation = exc
+            except Exception:  # noqa: BLE001 - consumed below with class-only logging
+                break
+
+        if not renew_task.cancelled():
+            try:
+                renew_task.result()
+            except Exception as exc:  # noqa: BLE001 - renewal isolation boundary
+                logger.bind(error_type=type(exc).__name__).warning(
+                    "Jobs prepared renewal task failed"
+                )
+        if outer_cancellation is not None:
+            raise outer_cancellation
 
     async def run_prepared(
         self,
@@ -531,10 +595,17 @@ class WorkerSDK:
 
             acquired_job = copy.deepcopy(job)
             try:
+                job_id = int(copy.deepcopy(acquired_job["id"]))
+                domain = str(copy.deepcopy(acquired_job["domain"]))
+                queue = str(copy.deepcopy(acquired_job["queue"]))
+                job_type_name = str(copy.deepcopy(acquired_job["job_type"]))
+                expected_payload = copy.deepcopy(acquired_job["payload"])
+                worker_id = str(copy.deepcopy(self.cfg.worker_id))
+                lease_id = str(copy.deepcopy(acquired_job["lease_id"]))
                 context = WorkerExecutionContext(
                     self.jm,
-                    acquired_job,
-                    worker_id=self.cfg.worker_id,
+                    copy.deepcopy(acquired_job),
+                    worker_id=worker_id,
                 )
             except Exception as exc:  # noqa: BLE001 - acquired row boundary
                 logger.bind(error_type=type(exc).__name__).warning(
@@ -542,7 +613,10 @@ class WorkerSDK:
                 )
                 continue
 
-            renew_task = asyncio.create_task(self._auto_renew_prepared(context))
+            renewal_stop = asyncio.Event()
+            renew_task = asyncio.create_task(
+                self._auto_renew_prepared(context, renewal_stop)
+            )
             try:
                 error_class: type[BaseException] | None = None
                 try:
@@ -558,7 +632,7 @@ class WorkerSDK:
                 if error_class is not None:
                     try:
                         disposition = handler_error_disposition(
-                            acquired_job,
+                            copy.deepcopy(acquired_job),
                             error_class,
                         )
                     except Exception as exc:  # noqa: BLE001 - factory boundary
@@ -575,13 +649,13 @@ class WorkerSDK:
                 try:
                     result = self.jm.apply_prepared_disposition(
                         ApplyPreparedDispositionCommand(
-                            job_id=int(acquired_job["id"]),
-                            domain=str(acquired_job["domain"]),
-                            queue=str(acquired_job["queue"]),
-                            job_type=str(acquired_job["job_type"]),
-                            expected_payload=acquired_job["payload"],
-                            worker_id=self.cfg.worker_id,
-                            lease_id=str(acquired_job["lease_id"]),
+                            job_id=job_id,
+                            domain=domain,
+                            queue=queue,
+                            job_type=job_type_name,
+                            expected_payload=expected_payload,
+                            worker_id=worker_id,
+                            lease_id=lease_id,
                             disposition=disposition,
                         )
                     )
@@ -603,7 +677,7 @@ class WorkerSDK:
                     ):
                         await self._invoke_prepared_disposition_callback(
                             on_disposition_applied,
-                            acquired_job,
+                            copy.deepcopy(acquired_job),
                             disposition,
                             result,
                             callback_name="prepared-disposition-applied",
@@ -611,21 +685,13 @@ class WorkerSDK:
                 elif on_disposition_rejected is not None:
                     await self._invoke_prepared_disposition_callback(
                         on_disposition_rejected,
-                        acquired_job,
+                        copy.deepcopy(acquired_job),
                         disposition,
                         result,
                         callback_name="prepared-disposition-rejected",
                     )
             finally:
-                renew_task.cancel()
-                try:
-                    await renew_task
-                except asyncio.CancelledError:
-                    pass
-                except Exception as exc:  # noqa: BLE001 - renewal isolation boundary
-                    logger.bind(error_type=type(exc).__name__).warning(
-                        "Jobs prepared renewal task failed"
-                    )
+                await self._stop_prepared_renewal(renew_task, renewal_stop)
 
     async def run(
         self,

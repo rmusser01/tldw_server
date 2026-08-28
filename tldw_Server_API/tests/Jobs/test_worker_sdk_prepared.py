@@ -7,8 +7,11 @@ from loguru import logger
 
 from tldw_Server_API.app.core.Jobs import worker_sdk as worker_sdk_module
 from tldw_Server_API.app.core.Jobs.operations.contracts import (
+    ApplyPreparedDispositionCommand,
+    EnsureLeaseHorizonCommand,
     LeaseHorizonResult,
     NoTransitionReason,
+    OperationOutcome,
     PreparedDispositionOrigin,
     PreparedDispositionResult,
     PreparedJobDisposition,
@@ -18,10 +21,11 @@ from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
 DELIVERY_ID = "de305d54-75b4-431b-adb2-eb6b9e546014"
 ATTEMPT_ID = "123e4567-e89b-42d3-a456-426614174000"
 LEASED_UNTIL = datetime(2026, 8, 28, 12, 0, tzinfo=timezone.utc)
+NOW = LEASED_UNTIL - timedelta(seconds=30)
 RENEWED_UNTIL = LEASED_UNTIL + timedelta(minutes=5)
 
 
-def _job() -> dict[str, object]:
+def _job(*, leased_until: object = LEASED_UNTIL) -> dict[str, object]:
     return {
         "id": 17,
         "uuid": "bffb6b56-0db3-4fe8-b2f8-a77d6131bf6d",
@@ -31,7 +35,7 @@ def _job() -> dict[str, object]:
         "payload": {"delivery_id": DELIVERY_ID},
         "worker_id": "worker-1",
         "lease_id": "lease-1",
-        "leased_until": LEASED_UNTIL,
+        "leased_until": leased_until,
     }
 
 
@@ -62,30 +66,65 @@ def _applied_result(*, already_applied: bool = False) -> PreparedDispositionResu
 class PreparedManager:
     def __init__(self) -> None:
         self.jobs = [_job()]
+        self.expected_lease_seconds = 4
         self.acquire_calls: list[dict[str, object]] = []
         self.apply_calls: list[object] = []
         self.horizon_calls: list[object] = []
+        self.events: list[tuple[str, object]] = []
         self.fallback_calls: list[str] = []
         self.apply_result: object = _applied_result()
         self.horizon_result: object = LeaseHorizonResult.applied(
             leased_until=RENEWED_UNTIL
         )
+        self.horizon_results: list[object] = []
 
     def acquire_next_job(self, **kwargs):
+        assert kwargs == {
+            "domain": "admin_webhooks",
+            "queue": "delivery",
+            "lease_seconds": self.expected_lease_seconds,
+            "worker_id": "worker-1",
+            "owner_user_id": None,
+            "job_type": None,
+        }
         self.acquire_calls.append(kwargs)
         return self.jobs.pop(0) if self.jobs else None
 
     def apply_prepared_disposition(self, command):
+        assert isinstance(command, ApplyPreparedDispositionCommand)
+        assert command.job_id == 17
+        assert command.domain == "admin_webhooks"
+        assert command.queue == "delivery"
+        assert command.job_type == "admin_webhook_delivery"
+        assert command.expected_payload == {"delivery_id": DELIVERY_ID}
+        assert command.worker_id == "worker-1"
+        assert command.lease_id == "lease-1"
+        assert isinstance(command.disposition, PreparedJobDisposition)
         self.apply_calls.append(command)
         if isinstance(self.apply_result, BaseException):
             raise self.apply_result
         return self.apply_result
 
     def ensure_lease_horizon(self, command):
+        assert isinstance(command, EnsureLeaseHorizonCommand)
+        assert command.job_id == 17
+        assert command.domain == "admin_webhooks"
+        assert command.queue == "delivery"
+        assert command.job_type == "admin_webhook_delivery"
+        assert command.expected_payload == {"delivery_id": DELIVERY_ID}
+        assert command.worker_id == "worker-1"
+        assert command.lease_id == "lease-1"
+        assert command.minimum_seconds > 0
         self.horizon_calls.append(command)
-        if isinstance(self.horizon_result, BaseException):
-            raise self.horizon_result
-        return self.horizon_result
+        self.events.append(("ensure", command.minimum_seconds))
+        result = (
+            self.horizon_results.pop(0)
+            if self.horizon_results
+            else self.horizon_result
+        )
+        if isinstance(result, BaseException):
+            raise result
+        return result
 
     def complete_job(self, *_args, **_kwargs):
         self.fallback_calls.append("complete_job")
@@ -109,16 +148,19 @@ class PreparedManager:
 
 
 def _sdk(manager: PreparedManager, **config_overrides) -> WorkerSDK:
-    config = WorkerConfig(
-        domain="admin_webhooks",
-        queue="delivery",
-        worker_id="worker-1",
-        lease_seconds=4,
-        renew_threshold_seconds=3,
-        renew_jitter_seconds=0,
-        **config_overrides,
-    )
-    return WorkerSDK(manager, config)
+    config_values = {
+        "domain": "admin_webhooks",
+        "queue": "delivery",
+        "worker_id": "worker-1",
+        "lease_seconds": 4,
+        "renew_threshold_seconds": 3,
+        "renew_jitter_seconds": 0,
+    }
+    config_values.update(config_overrides)
+    manager.expected_lease_seconds = config_values["lease_seconds"]
+    sdk = WorkerSDK(manager, WorkerConfig(**config_values))
+    sdk._utcnow = lambda: NOW
+    return sdk
 
 
 async def _allow_acquire() -> bool:
@@ -130,6 +172,29 @@ def _closed_error_disposition(
     _error_class: type[BaseException],
 ) -> PreparedJobDisposition:
     return _infrastructure_defer()
+
+
+async def _run_once(
+    sdk: WorkerSDK,
+    handler,
+    *,
+    error_disposition=_closed_error_disposition,
+    on_applied=None,
+    on_rejected=None,
+) -> None:
+    async def one_job(job_row, context):
+        try:
+            return await handler(job_row, context)
+        finally:
+            sdk.stop()
+
+    await sdk.run_prepared(
+        handler=one_job,
+        pre_acquire_guard=_allow_acquire,
+        handler_error_disposition=error_disposition,
+        on_disposition_applied=on_applied,
+        on_disposition_rejected=on_rejected,
+    )
 
 
 @pytest.mark.asyncio
@@ -152,6 +217,28 @@ async def test_pre_acquire_guard_fails_closed_without_acquiring(guard_failure):
         pre_acquire_guard=guard,
         handler_error_disposition=_closed_error_disposition,
     )
+
+    assert manager.acquire_calls == []
+    assert manager.apply_calls == []
+
+
+@pytest.mark.asyncio
+async def test_pre_acquire_guard_cancellation_propagates_without_acquiring():
+    manager = PreparedManager()
+    sdk = _sdk(manager)
+
+    async def cancelled_guard() -> bool:
+        raise asyncio.CancelledError
+
+    async def handler(_job_row, _context):
+        pytest.fail("handler must not run after guard cancellation")
+
+    with pytest.raises(asyncio.CancelledError):
+        await sdk.run_prepared(
+            handler=handler,
+            pre_acquire_guard=cancelled_guard,
+            handler_error_disposition=_closed_error_disposition,
+        )
 
     assert manager.acquire_calls == []
     assert manager.apply_calls == []
@@ -437,6 +524,61 @@ async def test_handler_exception_factory_receives_only_exception_class_and_job()
 
 
 @pytest.mark.asyncio
+async def test_error_factory_mutation_cannot_change_cas_facts_or_callback_job():
+    manager = PreparedManager()
+    sdk = _sdk(manager)
+    factory_jobs = []
+    callback_jobs = []
+    logs: list[str] = []
+    sink = logger.add(logs.append, format="{message}|{extra}", level="DEBUG")
+
+    async def handler(_job_row, _context):
+        raise HandlerSecretError("handler-secret-cas")
+
+    def mutate_factory(job_row, error_class):
+        assert error_class is HandlerSecretError
+        factory_jobs.append(job_row)
+        job_row["id"] = 991
+        job_row["domain"] = "factory-secret-domain"
+        job_row["queue"] = "factory-secret-queue"
+        job_row["job_type"] = "factory-secret-type"
+        job_row["payload"]["delivery_id"] = (
+            "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        )
+        job_row["lease_id"] = "factory-secret-lease"
+        sdk.cfg.worker_id = "factory-secret-worker"
+        return _complete()
+
+    async def on_applied(job_row, _disposition, _result):
+        callback_jobs.append(job_row)
+
+    try:
+        await _run_once(
+            sdk,
+            handler,
+            error_disposition=mutate_factory,
+            on_applied=on_applied,
+        )
+    finally:
+        logger.remove(sink)
+
+    assert len(manager.apply_calls) == 1
+    command = manager.apply_calls[0]
+    assert command.job_id == 17
+    assert command.domain == "admin_webhooks"
+    assert command.queue == "delivery"
+    assert command.job_type == "admin_webhook_delivery"
+    assert command.expected_payload == {"delivery_id": DELIVERY_ID}
+    assert command.worker_id == "worker-1"
+    assert command.lease_id == "lease-1"
+    assert callback_jobs == [_job()]
+    assert callback_jobs[0] is not factory_jobs[0]
+    assert "factory-secret" not in "".join(logs)
+    assert len(manager.apply_calls) == 1
+    assert manager.fallback_calls == []
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("factory_failure", ["raises", "malformed"])
 async def test_error_factory_failure_leaves_job_for_lease_recovery(factory_failure):
     manager = PreparedManager()
@@ -550,6 +692,187 @@ async def test_callback_failure_cannot_apply_a_second_transition(callback_behavi
 
     assert len(manager.apply_calls) == 1
     assert manager.fallback_calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "initial_horizon",
+    [None, "not-a-timestamp", NOW - timedelta(seconds=1), NOW + timedelta(seconds=2)],
+    ids=["missing", "malformed", "expired", "inside-threshold"],
+)
+async def test_initial_unsafe_lease_evidence_ensures_before_any_sleep(
+    initial_horizon,
+):
+    manager = PreparedManager()
+    manager.jobs = [_job(leased_until=initial_horizon)]
+    sdk = _sdk(manager)
+    sdk._max_iters = 1
+
+    async def record_sleep(seconds):
+        manager.events.append(("sleep", seconds))
+        await asyncio.sleep(0)
+
+    sdk._sleep = record_sleep
+
+    async def handler(_job_row, _context):
+        while not manager.horizon_calls:
+            await asyncio.sleep(0)
+        return _infrastructure_defer()
+
+    await _run_once(sdk, handler)
+
+    assert manager.events[0][0] == "ensure"
+    assert len(manager.horizon_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_capped_acquired_lease_ensures_before_expiry_without_busy_loop():
+    manager = PreparedManager()
+    capped_until = NOW + timedelta(seconds=5)
+    manager.jobs = [_job(leased_until=capped_until)]
+    manager.horizon_result = LeaseHorizonResult.applied(leased_until=capped_until)
+    sdk = _sdk(
+        manager,
+        lease_seconds=30,
+        renew_threshold_seconds=10,
+        renew_jitter_seconds=0,
+    )
+    sdk._max_iters = 2
+    clock = [NOW]
+    sdk._utcnow = lambda: clock[0]
+    sleep_calls = []
+
+    async def advance_clock(seconds):
+        sleep_calls.append(seconds)
+        manager.events.append(("sleep", seconds))
+        clock[0] += timedelta(seconds=seconds)
+        await asyncio.sleep(0)
+
+    sdk._sleep = advance_clock
+
+    async def handler(_job_row, _context):
+        while len(manager.horizon_calls) < 2:
+            await asyncio.sleep(0)
+        return _infrastructure_defer()
+
+    await _run_once(sdk, handler)
+
+    assert manager.events[0] == ("ensure", 30)
+    assert len(manager.horizon_calls) == 2
+    assert len(sleep_calls) == 1
+    assert 0 < sleep_calls[0] < 5
+
+
+@pytest.mark.asyncio
+async def test_prepared_renewal_jitter_only_moves_deadline_earlier(monkeypatch):
+    manager = PreparedManager()
+    manager.jobs = [_job(leased_until=NOW + timedelta(seconds=30))]
+    sdk = _sdk(
+        manager,
+        lease_seconds=30,
+        renew_threshold_seconds=10,
+        renew_jitter_seconds=5,
+    )
+    sdk._max_iters = 1
+    sleep_calls = []
+
+    monkeypatch.setattr(
+        worker_sdk_module.secrets,
+        "randbelow",
+        lambda upper: upper - 1,
+    )
+
+    async def record_sleep(seconds):
+        sleep_calls.append(seconds)
+        await asyncio.sleep(0)
+
+    sdk._sleep = record_sleep
+
+    async def handler(_job_row, _context):
+        while not manager.horizon_calls:
+            await asyncio.sleep(0)
+        return _infrastructure_defer()
+
+    await _run_once(sdk, handler)
+
+    assert sleep_calls == [15.0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "malformed_result",
+    [
+        object(),
+        LeaseHorizonResult(
+            outcome=OperationOutcome.APPLIED,
+            ensured=True,
+            leased_until=None,
+        ),
+    ],
+    ids=["wrong-object", "applied-without-deadline"],
+)
+async def test_malformed_horizon_result_fails_closed_and_stays_visible(
+    malformed_result,
+):
+    manager = PreparedManager()
+    manager.horizon_result = malformed_result
+    sdk = _sdk(manager)
+
+    async def never_renew(_seconds):
+        await asyncio.Event().wait()
+
+    sdk._sleep = never_renew
+    observed = []
+
+    async def handler(_job_row, context):
+        observed.append(
+            (
+                await context.ensure_lease_horizon(90),
+                context.renewal_lost,
+                context.snapshot(),
+            )
+        )
+        return _infrastructure_defer()
+
+    await _run_once(sdk, handler)
+
+    assert observed[0][0] is False
+    assert observed[0][1] is True
+    assert observed[0][2].renewal_lost is True
+    assert len(manager.apply_calls) == 1
+    assert manager.fallback_calls == []
+
+
+@pytest.mark.asyncio
+async def test_horizon_failure_remains_sticky_after_later_success():
+    manager = PreparedManager()
+    manager.horizon_results = [
+        LeaseHorizonResult.no_transition(
+            NoTransitionReason.STALE_LEASE,
+            leased_until=LEASED_UNTIL,
+        ),
+        LeaseHorizonResult.applied(leased_until=RENEWED_UNTIL),
+    ]
+    sdk = _sdk(manager)
+
+    async def never_renew(_seconds):
+        await asyncio.Event().wait()
+
+    sdk._sleep = never_renew
+    observed = []
+
+    async def handler(_job_row, context):
+        first = await context.ensure_lease_horizon(90)
+        second = await context.ensure_lease_horizon(90)
+        observed.append((first, second, context.snapshot()))
+        return _infrastructure_defer()
+
+    await _run_once(sdk, handler)
+
+    assert observed[0][0:2] == (False, True)
+    assert observed[0][2].leased_until == RENEWED_UNTIL
+    assert observed[0][2].renewal_lost is True
+    assert len(manager.horizon_calls) == 2
 
 
 @pytest.mark.asyncio
@@ -734,4 +1057,60 @@ async def test_handler_cancellation_cancels_and_awaits_renewal_then_reraises():
 
     assert renewal_cancelled.is_set()
     assert manager.apply_calls == []
+    assert manager.fallback_calls == []
+
+
+@pytest.mark.asyncio
+async def test_outer_cancellation_during_resistant_renewal_cleanup_propagates():
+    manager = PreparedManager()
+    sdk = _sdk(manager)
+    renewal_started = asyncio.Event()
+    cleanup_started = asyncio.Event()
+    release_cleanup = asyncio.Event()
+    guard_calls = 0
+
+    async def guard() -> bool:
+        nonlocal guard_calls
+        guard_calls += 1
+        if guard_calls > 1:
+            sdk.stop()
+            return False
+        return True
+
+    async def cancellation_resistant_sleep(_seconds):
+        renewal_started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cleanup_started.set()
+            while not release_cleanup.is_set():
+                try:
+                    await release_cleanup.wait()
+                except asyncio.CancelledError:
+                    continue
+
+    sdk._sleep = cancellation_resistant_sleep
+
+    async def handler(_job_row, _context):
+        await renewal_started.wait()
+        return _complete()
+
+    task = asyncio.create_task(
+        sdk.run_prepared(
+            handler=handler,
+            pre_acquire_guard=guard,
+            handler_error_disposition=_closed_error_disposition,
+        )
+    )
+    await asyncio.wait_for(cleanup_started.wait(), timeout=1)
+    task.cancel()
+    await asyncio.sleep(0)
+    release_cleanup.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(task, timeout=1)
+
+    assert guard_calls == 1
+    assert len(manager.acquire_calls) == 1
+    assert len(manager.apply_calls) == 1
     assert manager.fallback_calls == []

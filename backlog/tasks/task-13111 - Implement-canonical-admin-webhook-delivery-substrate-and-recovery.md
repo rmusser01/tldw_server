@@ -4,7 +4,7 @@ title: Implement canonical admin webhook delivery substrate and recovery
 status: In Progress
 assignee: []
 created_date: '2026-08-23 03:15'
-updated_date: '2026-08-28 23:13'
+updated_date: '2026-08-28 23:42'
 labels:
   - admin
   - webhooks
@@ -117,6 +117,10 @@ Task 3 Fix Round 1/5 started at FIX_BASE 803ae280f66e990f7b4ffdf29e31cae311d648d
 2026-08-28: Task 3 post-Fix-Round-5 breaker remediation complete at pre-commit tree. Added one recursive type-exact archive comparator (including SQLite NaN and signed infinity semantics), separated SQL-column presence from parsed JSON null with bounded private query evidence, and applied exact comparison across migration, collision/prune, receipt replay/prune, and generic identity paths without metadata leakage. RED: 49 failed/25 passed/0 skipped, plus corrected direct subset 5 failed/3 passed. Focused breaker GREEN: 74 passed/0 skipped; prior malformed/framing/reload/secrecy GREEN: 74 passed/0 skipped. Mandatory PostgreSQL-required Task 3/lifecycle gate: 407 passed/0 skipped. Stable complete SQLite Slides plus both idempotency suites: 176 passed/0 skipped. Focused Ruff passed 15 changed Python files; Bandit passed 8 production files; diff check clean. Known optional PostgreSQL audit IndeterminateDatatype baseline remains intentionally unchanged. Evidence: .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-3-report.md.
 
 2026-08-28: Task 4 complete at pre-commit tree. Added fail-closed prepared WorkerSDK path with observable renewal/horizon state, closed handler-error evidence, one typed disposition application, origin-aware bounded callbacks, and no default double finalization; legacy run guard semantics remain green. RED: 31 failed/38 passed/2 warnings because run_prepared was absent. GREEN: 69 passed/2 baseline warnings. Focused Ruff, Bandit, and diff checks pass. Evidence: .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-4-report.md.
+
+2026-08-28: Started Task 4 Fix Round 1/5 at FIX_BASE 3e9a946bfa144df0eaa4236bcdb4b3cca9def179. Scope: authoritative acquired-deadline renewal scheduling, outer-cancellation-safe renewal teardown, immutable prepared CAS facts with defensive callback/factory copies, and adversarial command/horizon/guard coverage. Strict RED precedes production edits; prepared plus legacy full gate remains required.
+
+2026-08-28: Completed Task 4 Fix Round 1/5 at fix base 3e9a946b. Prepared renewal now schedules from authoritative leased_until, immediately ensures unsafe initial horizons, bounds short-lease renewal to avoid busy loops, and applies jitter earlier only. Renewal teardown preserves outer cancellation after cancellation-resistant child cleanup using a Python 3.10-compatible stop event. CAS facts are frozen before user code and factory/callback jobs are defensive copies. Added adversarial coverage for capped/missing/malformed horizons, sticky renewal loss, guard/teardown cancellation, and factory mutation. Verification: 81 passed, 2 baseline warnings; focused Ruff, Bandit, git diff --check, and Python 3.10 py_compile all passed. Report: .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-4-report.md
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
