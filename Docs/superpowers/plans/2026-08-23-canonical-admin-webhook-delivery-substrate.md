@@ -12,15 +12,16 @@
 
 **Backlog task:** `TASK-13111`
 
-**Dependency:** PR #2806 / `TASK-13014` must be merged into `dev` before implementation starts.
+**Dependency:** Satisfied. PR #2806 / `TASK-13014` merged into `dev` as `24f79419061ba85e9273b38a05431d6fd46ca40f`; tracking PR #2828 then merged as `9fd2246157ce8a32ae6a6691a75efab788229f77`.
 
 ## Global Constraints
 
 - This plan implements only upstream PR 2, "Delivery Substrate And Recovery." Durable user/incident producers, incident file-marker capture, final legacy-handler deletion, final canonical route activation, operational admin UI completion, and public release remain PR 3 work.
-- The branch may be planned from reviewed PR 1 head `89f03feda2401b94d13572b9adaff4447e61c726`, but implementation must not begin until PR #2806 is merged and this branch is rebased onto the resulting current `origin/dev`.
+- PR 2 implementation starts from a fresh branch containing final reviewed PR 1 head `f37d4c448ace69b56e208ca1f9bda94c571d86f3` and the merged `TASK-13014` closeout. Before implementation, fetch `origin/dev` and prove that reviewed head remains an ancestor.
 - `TLDW_ADMIN_WEBHOOKS_MODE` continues to default to `off`. Tests may construct mode `on` explicitly. No deployment or release configuration enables canonical mode in PR 2.
 - `tldw_Server_API/app/services/admin_webhooks_service.py` and `tldw_Server_API/app/services/jobs_webhooks_service.py` are unrelated legacy implementations. Canonical modules must not import them, reuse their direct SQL, raw/generic HTTP behavior, global URL, cursor file, or outbox semantics. They remain isolated until PR 3 removes temporary compatibility behavior.
 - Jobs payloads contain exactly `{"delivery_id":"<opaque delivery UUID>"}`. Jobs rows never contain target URLs, secrets, event bodies, signatures, response bodies, or ordinary response headers.
+- Canonical Jobs identity is fixed to domain `admin_webhooks`, queue `delivery`, job type `admin_webhook_delivery`, and idempotency key `admin-webhook-delivery:<delivery_id>`. The queue is registered in `JobManager.DOMAIN_ALLOWED_QUEUES`; canonical code uses typed admission and lookup-only facades rather than interpreting `create_job()` exceptions. Typed admission and legacy `create_job()` share one complete validation, transformation, persistence, metric, event/audit, gauge, and invariant pipeline; only terminal result mapping differs.
 - AuthNZ owns event, delivery, attempt, idempotency, and component-heartbeat SQL. The router owns no SQL; the repository performs no HTTP; the worker accepts no caller payload or secret from Jobs.
 - Event bodies are deterministic compact UTF-8 JSON, reject NaN/Infinity, are at most 65,536 decrypted bytes, and are encrypted with `WebhookKeyRing.encrypt_event_body()` before persistence. Exact body bytes are reused for every delivery of one event.
 - Event, delivery, and attempt IDs are lowercase canonical UUID strings generated with `uuid.uuid4()` by the service before their transaction. Claim, test-attempt, and disposition tokens are independent 32-random-byte lowercase hex values and are never reused across purposes.
@@ -34,9 +35,10 @@
 - A processing attempt becomes recoverable only after `started_at + timeout_seconds + 90 seconds`. A replacement lease defers without an attempt until that time, then records `outcome_unknown` and a prepared retry or terminal disposition; it never immediately sends.
 - The enqueue handshake is AuthNZ claim, idempotent Jobs create/read with key `admin-webhook-delivery:<delivery_id>`, conditional Jobs-ID attach, then `queued`. Every crash point must converge without duplicate automatic delivery or duplicate Jobs row.
 - Every post-attempt or cancellation Jobs disposition has a random opaque application token persisted in AuthNZ before Jobs mutation. Retry/defer also persist the absolute original not-before timestamp; retry retains its bounded operator-visible delay. Jobs records a bounded reserved result marker containing only token, kind, delivery ID, attempt ID when present, and the same not-before timestamp when scheduled. A repeated token is idempotent and reuses that absolute schedule rather than starting a new delay; no token, target, payload, or secret appears in logs.
-- One narrow exception handles AuthNZ loss after Jobs acquisition but before attempt reservation: the prepared worker applies an infrastructure-only Jobs `defer` with a fresh token/not-before, leaves AuthNZ `queued` unchanged, and emits no acknowledgement. This path is legal only while no attempt is reserved, sends no HTTP, and changes no retry/failure/quarantine counter, so loss/reapplication cannot misrepresent or duplicate a request.
+- One narrow exception handles AuthNZ loss after Jobs acquisition but before attempt reservation: the prepared worker applies an infrastructure-only Jobs `defer` with a fresh token and no caller-computed schedule, leaves AuthNZ `queued` unchanged, and emits no acknowledgement. This path is legal only while no attempt is reserved, sends no HTTP, and changes no retry/failure/quarantine counter, so loss/reapplication cannot misrepresent or duplicate a request.
 - Prepared dispositions are exactly `complete`, `retry`, `fail`, `cancel`, and no-attempt `defer`. `WorkerSDK` applies one prepared disposition under the current lease instead of also invoking its default completion/failure path.
 - Acquisition preflight exceptions fail closed for the new prepared-worker path. Infrastructure failure after acquisition returns a bounded `defer` without increasing attempt, retry, failure-streak, or quarantine counters.
+- Every infrastructure-failure no-attempt defer carries no absolute schedule. On first application, the Jobs backend atomically calculates `not_before_at = database_now + 30 seconds`, persists it in the reserved-result marker, and schedules the row from that value; exact-token replay returns and reuses the stored timestamp. Stale-attempt recovery is a separate no-acknowledgement defer carrying the explicit AuthNZ-derived deterministic stale timestamp, never an infrastructure-delay calculation.
 - Existing `WorkerSDK.run()` behavior and existing workers remain backward compatible. Canonical delivery uses a new typed prepared-worker entry point and lease context rather than changing existing handler arity or making current fail-open guards globally fail closed.
 - Delivery attempts use `Security/http_hop.py`; canonical code never creates raw `httpx` clients. Status-only mode repeats URL policy and DNS checks, pins an approved peer, preserves hostname TLS/Host semantics, ignores ambient proxies, disables redirects, bounds headers/time, does not iterate or buffer the response body, and exposes only status, latency, and parsed bounded `Retry-After`.
 - Full target URL, secret, body, signature, ordinary receiver headers/body, exception text, and incident narrative never enter delivery history, Jobs, metrics, audit, logs, or API responses. Dataclasses holding decrypted target/secret/body use `repr=False`.
@@ -49,10 +51,10 @@
 - Runtime health is durable across separate API/worker processes. An additive AuthNZ runtime-heartbeat table stores bounded component/instance IDs, readiness, stable reason code, and timestamps; it stores no hostnames, URLs, payloads, secrets, or free text.
 - Terminal deliveries and dependent events are retained for 30 days. Retention uses bounded batches, removes expired idempotency rows, never deletes nonterminal work, and does not purge registration tombstones until existing admission-bound eligibility is satisfied.
 - Metrics use only closed low-cardinality labels: state, kind, event type, reason code, status class, component, and backend. Webhook/delivery/event/attempt IDs and target hostname are log fields where needed, never metric labels.
-- Synthetic event capture and the first delivery attempt use `mark_first_canonical_activity()` transactionally. Replays, rejected requests, no-attempt deferrals, and recovery acknowledgements do not create a new activity marker.
-- SQLite and PostgreSQL must have equivalent constraints and repository behavior. AuthNZ/Jobs recovery tests cover SQLite/SQLite, SQLite/PostgreSQL, PostgreSQL/SQLite, and PostgreSQL/PostgreSQL with zero PostgreSQL skips in the required gate.
+- Synthetic event capture and the first delivery attempt use `mark_first_canonical_activity()` transactionally. Manual-redelivery creation also closes the rollback window in its creation transaction using the schema's existing closed `delivery_attempt` activity category before enqueue; it does not insert an attempt row at that point. Replays, conflicts, rejected requests, no-attempt deferrals, and recovery acknowledgements do not create a new activity marker.
+- SQLite and PostgreSQL must have equivalent constraints and repository behavior. AuthNZ/Jobs recovery tests cover SQLite/SQLite, SQLite/PostgreSQL, PostgreSQL/SQLite, and PostgreSQL/PostgreSQL with zero PostgreSQL skips in the required gate. Every pytest command runs with `RUN_JOBS=1` so Jobs coverage cannot silently skip.
 - All implementation commits update `TASK-13111`. Touched Python passes focused pytest, Ruff, Bandit, and `git diff --check`; the final evidence file records exact counts and environment.
-- Do not stage or alter unrelated watchlist template files already present in the planning worktree.
+- Start implementation in a fresh isolated worktree from current `origin/dev`; never copy or stage unrelated files from older worktrees.
 
 ---
 
@@ -89,6 +91,7 @@
 - `tldw_Server_API/tests/Admin_Webhooks/test_retention_health_runtime.py`
 - `tldw_Server_API/tests/Jobs/test_jobs_prepared_disposition_operations_sqlite.py`
 - `tldw_Server_API/tests/Jobs/test_jobs_prepared_disposition_operations_postgres.py`
+- `tldw_Server_API/tests/Jobs/test_jobs_manager_admission_facade.py`
 - `tldw_Server_API/tests/Jobs/test_worker_sdk_prepared.py`
 - `Docs/Admin_Webhooks_Delivery_Runbook.md` - worker, reconciler, backlog, dead delivery, test, redelivery, disable, and retention operations available in PR 2.
 - `Docs/Evidence/Admin_Webhooks_PR2_Verification.md` - exact PR 2 gate evidence.
@@ -101,7 +104,7 @@
 - `tldw_Server_API/app/core/Admin_Webhooks/control_plane.py` - transactional cancel/supersede integration and real delivery-capability health.
 - `tldw_Server_API/app/core/Admin_Webhooks/crypto.py` - retain contextual event-body helpers and add only validation needed by persisted delivery reads.
 - `tldw_Server_API/app/core/DB_Management/admin_webhooks_repository.py` - all PR 2 AuthNZ SQL and unit-of-work compare-and-set operations.
-- `tldw_Server_API/app/core/AuthNZ/migrations.py` - additive SQLite migration 092 for pending-disposition tokens/not-before timestamps, per-attempt request timeout, runtime heartbeats, and recovery indexes.
+- `tldw_Server_API/app/core/AuthNZ/migrations.py` - additive SQLite migration 095 for pending-disposition tokens/not-before timestamps, per-attempt request timeout, runtime heartbeats, and recovery indexes.
 - `tldw_Server_API/app/core/AuthNZ/pg_migrations_extra.py` - equivalent idempotent PostgreSQL ensure path and indexes.
 - `tldw_Server_API/app/core/Jobs/operations/contracts.py` - typed prepared dispositions, exact delay/defer, lease horizon, and results.
 - `tldw_Server_API/app/core/Jobs/migrations.py` - additive/default-compatible SQLite per-job lease-recovery policy and quarantine threshold.
@@ -118,7 +121,7 @@
 - `tldw_Server_API/app/api/v1/schemas/admin_webhooks.py` - test, redelivery, delivery-history, attempt, and health schemas.
 - `tldw_Server_API/app/api/v1/endpoints/admin/admin_webhooks.py` - canonical test/redelivery/history routes and expanded sanitized status.
 - `tldw_Server_API/app/services/startup_optional_workers.py` - declarative canonical delivery runtime worker spec enabled only by validated canonical mode/runtime configuration.
-- `tldw_Server_API/tests/Admin_Webhooks/test_migration_sqlite.py` - 091-to-092 upgrade and fresh-install assertions.
+- `tldw_Server_API/tests/Admin_Webhooks/test_migration_sqlite.py` - 094-to-095 upgrade and fresh-install assertions.
 - `tldw_Server_API/tests/Admin_Webhooks/test_migration_postgres.py` - equivalent PostgreSQL upgrade/fresh ensure assertions.
 - `tldw_Server_API/tests/Admin_Webhooks/test_control_plane.py` - cancellation/supersession/config-race and activation-health behavior.
 - `tldw_Server_API/tests/Admin_Webhooks/test_api.py` - canonical error, authorization, audit, cache, idempotency, and static-route ordering coverage.
@@ -138,39 +141,41 @@
 - `apps/tldw-frontend/lib/api/openapi.fingerprint.json` - record the reviewed canonical PR 2 API delta.
 - `backlog/tasks/task-13111 - Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md` - execution notes, evidence, blockers, and PR state.
 
-### Task 0: Merge Gate, Rebase, Baseline, And Task Activation
+### Task 0: Merged Dependency Gate, Baseline, And Task Activation
 
 **Files:**
 - Modify: `backlog/tasks/task-13111 - Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md`
 
 **Interfaces:**
 - Consumes: merged PR #2806, current `origin/dev`, approved design, and this plan.
-- Produces: a clean implementation branch based on merged PR 1 with `TASK-13111` In Progress and baseline evidence.
+- Produces: a clean implementation branch based on current `origin/dev` with `TASK-13111` In Progress and baseline evidence.
 
 - [ ] **Step 1: Prove PR 1 is merged before touching implementation files**
 
 ```bash
 gh pr view 2806 --repo rmusser01/tldw_server --json state,mergedAt,mergeCommit,url
+gh pr view 2828 --repo rmusser01/tldw_server --json state,mergedAt,mergeCommit,url
 git fetch origin dev
-git merge-base --is-ancestor 89f03feda2401b94d13572b9adaff4447e61c726 origin/dev
+git merge-base --is-ancestor f37d4c448ace69b56e208ca1f9bda94c571d86f3 origin/dev
 ```
 
-Expected: PR state is `MERGED`, `mergedAt` and `mergeCommit` are non-null, and `merge-base` exits 0. If any assertion fails, stop. Planning may remain committed locally, but PR 2 implementation and a stacked PR are forbidden.
+Expected: both PR states are `MERGED`, `mergedAt` and `mergeCommit` are non-null, and `merge-base` exits 0. If any assertion fails, stop before touching runtime code.
 
-- [ ] **Step 2: Rebase the planning branch and verify migration allocation**
+- [ ] **Step 2: Create a fresh implementation branch and verify migration allocation**
 
 ```bash
-git rebase origin/dev
-if [ "$(git branch --show-current)" = "codex/admin-webhooks-delivery-plan" ]; then
-  git branch -m codex/admin-webhooks-delivery-substrate
-fi
-test "$(git branch --show-current)" = "codex/admin-webhooks-delivery-substrate"
+REPO_ROOT="$(cd "$(git rev-parse --git-common-dir)/.." && pwd)"
+git -C "$REPO_ROOT" check-ignore -q .worktrees
+git -C "$REPO_ROOT" worktree add \
+  "$REPO_ROOT/.worktrees/admin-webhooks-delivery-substrate" \
+  -b codex/admin-webhooks-delivery-substrate origin/dev
+cd "$REPO_ROOT/.worktrees/admin-webhooks-delivery-substrate"
 git log -1 --format='%H %s'
 git status --short
 rg -n "migration_09[0-9]|Migration 09[0-9]" tldw_Server_API/app/core/AuthNZ/migrations.py
 ```
 
-Expected: only the task/plan commit is ahead of `origin/dev`; unrelated watchlist templates remain untracked and untouched; migration 092 is unused. If another merged change claims 092, update this plan, both migration test files, and `TASK-13111` to the next free number before implementation.
+Expected: the implementation branch equals current `origin/dev`, the worktree is clean, migration 094 is the latest allocation, and migration 095 is unused. If another merged change claims 095, update this plan, both migration test files, and `TASK-13111` to the next free number before implementation.
 
 - [ ] **Step 3: Mark the task active and attach this plan**
 
@@ -184,7 +189,7 @@ Expected: `TASK-13111` is In Progress, depends on completed `TASK-13014`, and li
 - [ ] **Step 4: Run the pre-change baseline**
 
 ```bash
-PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
+RUN_JOBS=1 PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
   tldw_Server_API/tests/Admin_Webhooks \
   tldw_Server_API/tests/Jobs/test_jobs_operation_contracts.py \
   tldw_Server_API/tests/Jobs/test_jobs_migrations_sqlite.py \
@@ -225,11 +230,11 @@ git commit -m "chore(backlog): start admin webhook delivery task"
 
 **Interfaces:**
 - Consumes: PR 1 schema version 1 and registration contracts.
-- Produces: stable delivery enums/records/settings plus additive migration 092 with `pending_jobs_disposition_token`, `pending_jobs_disposition_not_before_at`, `admin_webhook_delivery_attempts.request_timeout_seconds`, and durable per-instance runtime heartbeat rows. The canonical migration-state `schema_version` remains 1 because PR 1 intentionally constrains that full canonical schema contract to 1; PR 2 readiness probes its additive extension explicitly.
+- Produces: stable delivery enums/records/settings plus additive migration 095 with `pending_jobs_disposition_token`, `pending_jobs_disposition_not_before_at`, `admin_webhook_delivery_attempts.request_timeout_seconds`, and durable per-instance runtime heartbeat rows. The canonical migration-state `schema_version` remains 1 because PR 1 intentionally constrains that full canonical schema contract to 1; PR 2 readiness probes its additive extension explicitly.
 
 - [ ] **Step 1: Write failing domain/config tests**
 
-Cover exact enum values, terminal-state sets, retry schedule `(60, 300, 1800)`, max attempts 4, quarantine threshold 5, 72-hour expiry, 30-day retention, 30-second commit margin, 90-second stale-attempt margin, claim TTL default 60 seconds bounded 5-300, loop interval default 1 second bounded 1-60, heartbeat interval default 10 seconds bounded 1-60, heartbeat freshness default 30 seconds and strictly greater than the interval, and invalid booleans/integers without leaking raw environment values.
+Cover exact enum values, terminal-state sets, retry schedule `(60, 300, 1800)`, max attempts 4, quarantine threshold 5, fixed infrastructure-defer delay 30 seconds, 72-hour expiry, 30-day retention, 30-second commit margin, 90-second stale-attempt margin, claim TTL default 60 seconds bounded 5-300, loop interval default 1 second bounded 1-60, heartbeat interval default 10 seconds bounded 1-60, heartbeat freshness default 30 seconds and strictly greater than the interval, and invalid booleans/integers without leaking raw environment values.
 
 ```python
 def test_delivery_protocol_invariants_are_not_operator_expandable() -> None:
@@ -243,7 +248,7 @@ def test_delivery_protocol_invariants_are_not_operator_expandable() -> None:
 
 - [ ] **Step 2: Write failing SQLite and PostgreSQL migration tests**
 
-Assert fresh install and 091 upgrade produce:
+Assert fresh install and 094 upgrade produce:
 
 ```text
 admin_webhook_deliveries.pending_jobs_disposition_token TEXT NULL
@@ -256,18 +261,18 @@ admin_webhook_runtime_heartbeats(
 )
 ```
 
-New PR 2 attempt rows require timeout 1-30; nullable upgrade rows are tolerated only for a database that somehow contains pre-PR-2 attempts and recover conservatively with the fixed 30-second maximum. `component` accepts only `worker`, `reconciler`, or `retention`; IDs/reasons are bounded; `ready` is boolean-equivalent; timestamps are required as specified. Add equivalent recovery indexes for pending/enqueue-claimed/disposition work and heartbeat freshness. Test rerun idempotence, no row loss, and preservation of migration-state `schema_version=1`. SQLite 091 data must survive 092; PostgreSQL ensure must work on both empty and existing schemas.
+New PR 2 attempt rows require timeout 1-30; nullable upgrade rows are tolerated only for a database that somehow contains pre-PR-2 attempts and recover conservatively with the fixed 30-second maximum. `component` accepts only `worker`, `reconciler`, or `retention`; IDs/reasons are bounded; `ready` is boolean-equivalent; timestamps are required as specified. Add equivalent recovery indexes for pending/enqueue-claimed/disposition work and heartbeat freshness. Test rerun idempotence, no row loss, and preservation of migration-state `schema_version=1`. SQLite 094 data must survive 095; PostgreSQL ensure must work on both empty and existing schemas.
 
 - [ ] **Step 3: Run RED**
 
 ```bash
-PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
+RUN_JOBS=1 PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
   tldw_Server_API/tests/Admin_Webhooks/test_domain_config_catalog.py \
   tldw_Server_API/tests/Admin_Webhooks/test_migration_sqlite.py \
   tldw_Server_API/tests/Admin_Webhooks/test_migration_postgres.py
 ```
 
-Expected: failures identify missing delivery contracts, migration 092, disposition token/not-before/attempt-timeout fields, heartbeat table, and explicit PR 2 schema-extension preflight.
+Expected: failures identify missing delivery contracts, migration 095, disposition token/not-before/attempt-timeout fields, heartbeat table, and explicit PR 2 schema-extension preflight.
 
 - [ ] **Step 4: Implement closed delivery types and settings**
 
@@ -275,14 +280,14 @@ Add `DeliveryKind`, `DeliveryState`, `AttemptState`, `JobsDispositionKind`, `Del
 
 Protocol constants are fixed properties, not arbitrary environment overrides. Only bounded operational cadence/claim/heartbeat values are configurable. `AdminWebhookSettings.from_environment()` remains deterministic from the supplied mapping.
 
-- [ ] **Step 5: Implement additive migration 092 on both backends**
+- [ ] **Step 5: Implement additive migration 095 on both backends**
 
 SQLite adds the nullable disposition and attempt-timeout columns after checking `PRAGMA table_info` and creates the heartbeat table/indexes transactionally. PostgreSQL uses `ADD COLUMN IF NOT EXISTS` plus equivalent checks/indexes. Neither backend rewrites `admin_webhook_migration_state` or changes its constrained canonical `schema_version=1`. Add `AdminWebhookRepository.delivery_schema_ready()` to inspect the required column/table/index contract without leaking SQL into services. Because SQLite cannot safely add the new cross-column checks to an existing table, enforce and test repository invariants on both backends: pending disposition and token are both null or both non-null; retry/defer require an absolute not-before time; complete/fail/cancel require it null; only retry uses the existing bounded delay column; every newly reserved attempt has timeout 1-30.
 
 - [ ] **Step 6: Run GREEN and static checks**
 
 ```bash
-PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
+RUN_JOBS=1 PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
   tldw_Server_API/tests/Admin_Webhooks/test_domain_config_catalog.py \
   tldw_Server_API/tests/Admin_Webhooks/test_migration_sqlite.py \
   tldw_Server_API/tests/Admin_Webhooks/test_migration_postgres.py
@@ -296,7 +301,7 @@ PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
 - [ ] **Step 7: Update the task and commit**
 
 ```bash
-backlog task edit 13111 --notes "Added migration-092 recovery token/runtime heartbeat contract while preserving canonical schema version 1; focused migration/domain tests pass on recorded backends."
+backlog task edit 13111 --append-notes "Added migration-095 recovery token/runtime heartbeat contract while preserving canonical schema version 1; focused migration/domain tests pass on recorded backends."
 git add \
   tldw_Server_API/app/core/Admin_Webhooks/domain.py \
   tldw_Server_API/app/core/Admin_Webhooks/config.py \
@@ -321,7 +326,7 @@ git commit -m "feat(admin-webhooks): define delivery recovery schema"
 - Create: `tldw_Server_API/tests/Admin_Webhooks/test_event_expansion.py`
 
 **Interfaces:**
-- Consumes: canonical schema version 1 plus the verified migration-092 delivery extension, `WebhookKeyRing`, active registration snapshots, generated opaque IDs, and a transaction clock.
+- Consumes: canonical schema version 1 plus the verified migration-095 delivery extension, `WebhookKeyRing`, active registration snapshots, generated opaque IDs, and a transaction clock.
 - Produces: backend-equivalent repository/UoW methods for encrypted capture/fanout, history, enqueue claims, attempt reservation/outcome, disposition tokens, heartbeat, expiry, and retention.
 
 - [ ] **Step 1: Write a shared repository contract suite and thin backend fixtures**
@@ -376,7 +381,7 @@ Prove stale claim/lease/attempt/disposition tokens lose without mutation; attemp
 - [ ] **Step 4: Run RED**
 
 ```bash
-PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
+RUN_JOBS=1 PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
   tldw_Server_API/tests/Admin_Webhooks/test_delivery_repository_sqlite.py \
   tldw_Server_API/tests/Admin_Webhooks/test_delivery_repository_postgres.py \
   tldw_Server_API/tests/Admin_Webhooks/test_event_expansion.py
@@ -397,7 +402,7 @@ Retention order is expired idempotency, eligible terminal deliveries, now-orphan
 - [ ] **Step 7: Run GREEN, backend parity, and SQL-sensitive checks**
 
 ```bash
-PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
+RUN_JOBS=1 PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
   tldw_Server_API/tests/Admin_Webhooks/test_delivery_repository_sqlite.py \
   tldw_Server_API/tests/Admin_Webhooks/test_delivery_repository_postgres.py \
   tldw_Server_API/tests/Admin_Webhooks/test_event_expansion.py \
@@ -411,7 +416,7 @@ PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
 - [ ] **Step 8: Update the task and commit**
 
 ```bash
-backlog task edit 13111 --notes "Implemented dual-backend encrypted event/fanout, delivery/attempt CAS, disposition, heartbeat, history, expiry, and retention repositories; parity tests recorded."
+backlog task edit 13111 --append-notes "Implemented dual-backend encrypted event/fanout, delivery/attempt CAS, disposition, heartbeat, history, expiry, and retention repositories; parity tests recorded."
 git add \
   tldw_Server_API/app/core/DB_Management/admin_webhooks_repository.py \
   tldw_Server_API/app/core/Admin_Webhooks/crypto.py \
@@ -445,6 +450,7 @@ git commit -m "feat(admin-webhooks): persist delivery state and attempts"
 - Modify: `tldw_Server_API/tests/Jobs/test_jobs_lease_reclaim_budget_postgres.py`
 - Create: `tldw_Server_API/tests/Jobs/test_jobs_prepared_disposition_operations_sqlite.py`
 - Create: `tldw_Server_API/tests/Jobs/test_jobs_prepared_disposition_operations_postgres.py`
+- Create: `tldw_Server_API/tests/Jobs/test_jobs_manager_admission_facade.py`
 
 **Interfaces:**
 - Consumes: one canonical Jobs row, current worker/lease identity for processing transitions, an opaque disposition token, closed disposition kind, and exact bounded schedule. A trusted canonical reconciler may apply tokenized cancel only to queued work without a lease.
@@ -454,16 +460,19 @@ git commit -m "feat(admin-webhooks): persist delivery state and attempts"
 
 ```text
 PreparedDispositionKind(COMPLETE, RETRY, FAIL, CANCEL, DEFER)
-PreparedDispositionOrigin(AUTHNZ, INFRASTRUCTURE)
+PreparedDispositionOrigin(AUTHNZ, INFRASTRUCTURE, RECOVERY)
 ExpiredLeasePolicy(CONSUME_RETRY, REQUEUE_NO_ATTEMPT)
 PreparedJobDisposition
 ApplyPreparedDispositionCommand
 PreparedDispositionResult
 EnsureLeaseHorizonCommand
 LeaseHorizonResult
+FindJobByIdentityCommand
+JobIdentityLookupState(ACTIVE, ARCHIVED, MISSING, CONFLICT)
+JobIdentityLookupResult
 ```
 
-Validate token length/charset, delivery/attempt ID bounds, allowed fields by kind, delay 1-1800 only for retry, absolute timezone-aware `not_before_at` required only for retry/defer, stable reason code bounds, deep-copy/frozen result metadata, and no arbitrary exception text. `origin=INFRASTRUCTURE` is legal only for defer with no attempt ID and never requests an AuthNZ acknowledgement; every other disposition has `origin=AUTHNZ`. `CreateJobCommand` gains `expired_lease_policy=CONSUME_RETRY` and nullable positive `quarantine_threshold`; existing callers retain those defaults. Prepared retry reads the threshold captured on the Jobs row rather than accepting a conflicting per-attempt override. Factory methods are `complete()`, `retry()`, `fail()`, `cancel()`, and `defer()`.
+Validate token length/charset, delivery/attempt ID bounds, allowed fields by kind, delay 1-1800 only for retry, stable reason code bounds, deep-copy/frozen result metadata, and no arbitrary exception text. AuthNZ retry requires an absolute timezone-aware `not_before_at`; `origin=INFRASTRUCTURE` is legal only for a no-attempt defer with no caller-provided timestamp and never requests an AuthNZ acknowledgement; `origin=RECOVERY` is legal only for a no-attempt defer with an explicit timezone-aware AuthNZ-derived stale timestamp and also requests no acknowledgement. Complete/retry/fail/cancel use `origin=AUTHNZ`. `CreateJobCommand` gains `expired_lease_policy=CONSUME_RETRY` and nullable positive `quarantine_threshold`; existing callers retain those defaults. Prepared retry reads the threshold captured on the Jobs row rather than accepting a conflicting per-attempt override. Factory methods are `complete()`, `retry()`, `fail()`, `cancel()`, `infrastructure_defer()`, and `recovery_defer_until()`.
 
 - [ ] **Step 2: Write additive Jobs schema/admission RED tests**
 
@@ -476,6 +485,8 @@ quarantine_threshold INTEGER NULL, positive when present
 
 Existing rows backfill the default and preserve current behavior. Admission persists requested controls atomically and idempotent-existing create verifies they match. Canonical enqueue uses `requeue_no_attempt` and threshold 5; invalid policies/thresholds fail before SQL. Archive need not copy these nonterminal controls, but terminal `result` must retain prepared-disposition proof.
 
+Register `delivery` as the built-in queue for domain `admin_webhooks`. Refactor one shared internal admission pipeline used by both public facades. It performs the existing queue/job-type policy, fair-share checks and priority transformation, secret scan/redaction/rejection, optional payload encryption, JSON size handling, trace/UUID initialization, backend admission, metrics, durable event/audit emission, gauges, and invariant checks exactly once. `JobManager.admit_job()` accepts the same validated keyword contract as `create_job()` plus the two persisted execution controls and returns the existing `AdmissionResult`; `create_job()` delegates to it and preserves its current dict return and exception mapping. Add parity tests proving both paths perform identical validation, transformations, inserted/existing side effects, and invariant checks, with typed `ADMISSION_REJECTED` as the only mapping difference and no side effects on rejection. Add lookup-only active/archive queries by exact domain, queue, job type, and idempotency key. Missing lookup returns `MISSING` without inserting a row; multiple or identity-inconsistent matches return `CONFLICT`.
+
 Extend the existing migration-compatibility assertions rather than replacing them: all auxiliary Jobs tables/indexes remain present, rerunning ensure functions remains idempotent, and old rows/callers observe the exact default policy and null threshold on both backends.
 
 - [ ] **Step 3: Write backend RED tests for exact state transitions**
@@ -486,9 +497,14 @@ For both backends prove:
 - retry: `processing -> queued`, `retry_count += 1`, `available_at = max(database_now, original_not_before_at)`, and no generic backoff/jitter;
 - fail: `processing -> failed` without retry;
 - cancel: matching-lease `processing -> cancelled`, or trusted canonical reconciler `queued -> cancelled` without a lease, with stable reason;
-- defer: `processing -> queued` at `max(database_now, original_not_before_at)` with retry count, failure streak, and quarantine counters unchanged;
+- recovery defer: `processing -> queued` at `max(database_now, explicit_stale_not_before_at)` with retry count, failure streak, and quarantine counters unchanged;
+- first application of `infrastructure_defer` atomically computes, persists, and schedules exactly `database_now + 30 seconds`; caller/application clocks cannot influence it, and exact-token replay reuses that stored absolute timestamp;
+- `recovery_defer_until` schedules from its explicit AuthNZ-derived stale timestamp without substituting the infrastructure delay and retains that same timestamp on exact-token replay;
 - normal retryable attempts do not quarantine before the AuthNZ four-attempt cap when threshold is 5;
 - same token/kind/delivery is idempotent and returns `already_applied=true`;
+- lookup-only identity returns the one matching active or archived job and never creates work;
+- a previously applied AuthNZ retry token observed after the job has been reacquired under a newer processing lease reports the prior application plus current processing state and performs no transition; canonical pre-reservation recovery must acknowledge that token and continue the current lease rather than treating it as finalization;
+- a previously applied infrastructure/recovery defer marker observed after reacquisition is historical no-acknowledgement evidence: canonical handling never invokes an AuthNZ callback, never reapplies it, and continues only under the current lease; it does not conflict with a later exact AuthNZ disposition for that current lease;
 - same token with different facts is a backend conflict;
 - stale worker/lease cannot apply a new token;
 - unleased complete/retry/fail/defer is always rejected; unleased cancel cannot terminalize processing work and may touch only the expected canonical domain/queue/type/payload;
@@ -502,37 +518,7 @@ Expired lease recovery for `requeue_no_attempt` changes `processing -> queued`, 
 - [ ] **Step 4: Run RED**
 
 ```bash
-PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
-  tldw_Server_API/tests/Jobs/test_jobs_operation_contracts.py \
-  tldw_Server_API/tests/Jobs/test_jobs_migrations_sqlite.py \
-  tldw_Server_API/tests/Jobs/test_jobs_migrations_postgres.py \
-  tldw_Server_API/tests/Jobs/test_jobs_migrations_compat_sqlite.py \
-  tldw_Server_API/tests/Jobs/test_jobs_migrations_compat_postgres.py \
-  tldw_Server_API/tests/Jobs/test_jobs_lease_reclaim_budget_sqlite.py \
-  tldw_Server_API/tests/Jobs/test_jobs_lease_reclaim_budget_postgres.py \
-  tldw_Server_API/tests/Jobs/test_jobs_prepared_disposition_operations_sqlite.py \
-  tldw_Server_API/tests/Jobs/test_jobs_prepared_disposition_operations_postgres.py
-```
-
-- [ ] **Step 5: Implement schema, admission, and lifecycle operations atomically**
-
-Add the Jobs columns through existing idempotent migration conventions and thread them through typed admission. Do not route prepared retry through the existing generic exponential calculation. Each backend transaction locks/reads the current row, recognizes an already-applied reserved marker, validates the current lease for a new token, performs one state/counter/outbox update, and returns typed evidence. PostgreSQL uses database timestamps and row locking; SQLite uses one immediate transaction and injected clock conventions already used by lifecycle operations. Refactor expired-lease recovery narrowly enough that acquisition and integrity-sweep callers use the persisted row policy; do not special-case the `admin_webhooks` domain in SQL.
-
-- [ ] **Step 6: Add narrow `JobManager` facades**
-
-Expose:
-
-```text
-ensure_lease_horizon(command: EnsureLeaseHorizonCommand) -> LeaseHorizonResult
-apply_prepared_disposition(command: ApplyPreparedDispositionCommand) -> PreparedDispositionResult
-```
-
-The facade selects the backend, preserves RLS/domain checks, refuses prepared disposition for jobs outside the requested canonical domain/queue/type/payload, and does not expose `_connect()` to canonical webhook code. The unleased form is accepted only for `cancel` against a currently queued canonical delivery job; every processing transition still requires matching worker and lease IDs.
-
-- [ ] **Step 7: Run GREEN plus existing lifecycle regression**
-
-```bash
-PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
+RUN_JOBS=1 PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
   tldw_Server_API/tests/Jobs/test_jobs_operation_contracts.py \
   tldw_Server_API/tests/Jobs/test_jobs_migrations_sqlite.py \
   tldw_Server_API/tests/Jobs/test_jobs_migrations_postgres.py \
@@ -542,6 +528,57 @@ PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
   tldw_Server_API/tests/Jobs/test_jobs_lease_reclaim_budget_postgres.py \
   tldw_Server_API/tests/Jobs/test_jobs_prepared_disposition_operations_sqlite.py \
   tldw_Server_API/tests/Jobs/test_jobs_prepared_disposition_operations_postgres.py \
+  tldw_Server_API/tests/Jobs/test_jobs_manager_admission_facade.py
+```
+
+- [ ] **Step 5: Implement schema, admission, and lifecycle operations atomically**
+
+Add the Jobs columns through existing idempotent migration conventions and thread them through the shared facade pipeline before backend admission. Do not route prepared retry through the existing generic exponential calculation. Each backend transaction locks/reads the current row, recognizes an already-applied reserved marker, validates the current lease for a new token, performs one state/counter/outbox update, and returns typed evidence. On a new infrastructure-defer token, that transaction obtains the Jobs database timestamp, derives the one absolute 30-second schedule, and stores it with the marker; it never accepts an application-clock substitute. PostgreSQL uses database timestamps and row locking; SQLite uses one immediate transaction and its injected database-clock convention already used by lifecycle operations. Refactor expired-lease recovery narrowly enough that acquisition and integrity-sweep callers use the persisted row policy; do not special-case the `admin_webhooks` domain in SQL. Implement lookup-only identity through the same backend operation boundary, including archived lookup and conflict detection, without reusing create as a probe.
+
+- [ ] **Step 6: Add narrow `JobManager` facades**
+
+Expose:
+
+```text
+admit_job(
+    *,
+    domain: str,
+    queue: str,
+    job_type: str,
+    payload: dict[str, Any],
+    owner_user_id: str | None,
+    project_id: int | None = None,
+    batch_group: str | None = None,
+    priority: int = 5,
+    max_retries: int = 3,
+    available_at: datetime | None = None,
+    idempotency_key: str | None = None,
+    request_id: str | None = None,
+    trace_id: str | None = None,
+    expired_lease_policy: ExpiredLeasePolicy = CONSUME_RETRY,
+    quarantine_threshold: int | None = None,
+) -> AdmissionResult
+find_job_by_identity(command: FindJobByIdentityCommand) -> JobIdentityLookupResult
+ensure_lease_horizon(command: EnsureLeaseHorizonCommand) -> LeaseHorizonResult
+apply_prepared_disposition(command: ApplyPreparedDispositionCommand) -> PreparedDispositionResult
+```
+
+The facade selects the backend, preserves RLS/domain checks, refuses prepared disposition for jobs outside the requested canonical domain/queue/type/payload, and does not expose `_connect()` to canonical webhook code. A single private pipeline backs both admission facades; `admit_job()` preserves typed created/existing/backend-rejected outcomes while `create_job()` only maps that result to its existing dict/exception contract. Pre-admission validation exceptions remain identical. No validation, transformation, encryption, limit, trace, metric, audit/event, gauge, or invariant behavior may diverge. `find_job_by_identity()` is read-only and fails closed on ambiguity. The unleased disposition form is accepted only for `cancel` against a currently queued canonical delivery job; every processing transition still requires matching worker and lease IDs.
+
+- [ ] **Step 7: Run GREEN plus existing lifecycle regression**
+
+```bash
+RUN_JOBS=1 PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
+  tldw_Server_API/tests/Jobs/test_jobs_operation_contracts.py \
+  tldw_Server_API/tests/Jobs/test_jobs_migrations_sqlite.py \
+  tldw_Server_API/tests/Jobs/test_jobs_migrations_postgres.py \
+  tldw_Server_API/tests/Jobs/test_jobs_migrations_compat_sqlite.py \
+  tldw_Server_API/tests/Jobs/test_jobs_migrations_compat_postgres.py \
+  tldw_Server_API/tests/Jobs/test_jobs_lease_reclaim_budget_sqlite.py \
+  tldw_Server_API/tests/Jobs/test_jobs_lease_reclaim_budget_postgres.py \
+  tldw_Server_API/tests/Jobs/test_jobs_prepared_disposition_operations_sqlite.py \
+  tldw_Server_API/tests/Jobs/test_jobs_prepared_disposition_operations_postgres.py \
+  tldw_Server_API/tests/Jobs/test_jobs_manager_admission_facade.py \
   tldw_Server_API/tests/Jobs/test_jobs_acquire_operations_sqlite.py \
   tldw_Server_API/tests/Jobs/test_jobs_acquire_operations_postgres.py \
   tldw_Server_API/tests/Jobs/test_jobs_renew_release_operations_sqlite.py \
@@ -552,7 +589,7 @@ PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
 - [ ] **Step 8: Update the task and commit**
 
 ```bash
-backlog task edit 13111 --notes "Added backend-neutral exact prepared disposition/no-attempt defer and observable lease-horizon operations with SQLite/PostgreSQL parity."
+backlog task edit 13111 --append-notes "Added backend-neutral exact prepared disposition/no-attempt defer and observable lease-horizon operations with SQLite/PostgreSQL parity."
 git add \
   tldw_Server_API/app/core/Jobs/operations/contracts.py \
   tldw_Server_API/app/core/Jobs/migrations.py \
@@ -573,6 +610,7 @@ git add \
   tldw_Server_API/tests/Jobs/test_jobs_lease_reclaim_budget_postgres.py \
   tldw_Server_API/tests/Jobs/test_jobs_prepared_disposition_operations_sqlite.py \
   tldw_Server_API/tests/Jobs/test_jobs_prepared_disposition_operations_postgres.py \
+  tldw_Server_API/tests/Jobs/test_jobs_manager_admission_facade.py \
   "backlog/tasks/task-13111 - Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md"
 git diff --cached --check
 git commit -m "feat(jobs): support prepared worker dispositions"
@@ -602,28 +640,28 @@ PreparedJobHandler
 PreparedDispositionCallback
 ```
 
-Test pre-acquire false and exception paths never call `acquire_next_job`; post-acquisition handler returns each disposition; SDK invokes `apply_prepared_disposition()` exactly once and never `complete_job()`/`fail_job()`; a rejected apply invokes only `on_disposition_rejected`; successful/idempotent apply invokes bounded `on_disposition_applied`; and callback timeout/error cannot trigger a second Jobs transition. A handler exception or malformed result calls the injected error-disposition factory with only the exception class, applies its prepared no-attempt defer, and never serializes/logs exception text.
+Test pre-acquire false and exception paths never call `acquire_next_job`; post-acquisition handler returns each disposition; SDK invokes `apply_prepared_disposition()` exactly once and never `complete_job()`/`fail_job()`; a rejected apply invokes only `on_disposition_rejected`; successful/idempotent `origin=AUTHNZ` apply invokes bounded `on_disposition_applied`; successful/idempotent infrastructure/recovery apply never invokes that callback; and callback timeout/error cannot trigger a second Jobs transition. A handler exception or malformed result calls the injected error-disposition factory with only the exception class, returns a timestamp-free `infrastructure_defer()`, lets `apply_prepared_disposition()` derive the absolute schedule from the Jobs database clock, and never serializes/logs exception text.
 
 Test auto-renew updates the observable lease snapshot. Renewal false/exception sets `renewal_lost` permanently and stops renewal. `ensure_lease_horizon()` returns false on stale lease/backend failure without hiding it. Cancellation during handler still cancels renewal and exits cleanly.
 
 - [ ] **Step 2: Run RED**
 
 ```bash
-PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
+RUN_JOBS=1 PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
   tldw_Server_API/tests/Jobs/test_worker_sdk_prepared.py \
   tldw_Server_API/tests/Jobs/test_worker_sdk.py
 ```
 
 - [ ] **Step 3: Implement `run_prepared()` over shared private loop primitives**
 
-Keep existing one-argument `JobHandler` and `run()` public behavior intact. Add a separate two-argument prepared handler path. Pre-acquire guard exceptions fail closed only in `run_prepared()`. Require an actual `PreparedJobDisposition`; a `dict`, `None`, handler exception, or malformed value is passed to the required closed error-disposition factory, never treated as default success/failure. The canonical factory returns an infrastructure-only no-attempt defer.
+Keep existing one-argument `JobHandler` and `run()` public behavior intact. Add a separate two-argument prepared handler path. Pre-acquire guard exceptions fail closed only in `run_prepared()`. Require an actual `PreparedJobDisposition`; a `dict`, `None`, handler exception, or malformed value is passed to the required closed error-disposition factory, never treated as default success/failure. The canonical factory returns a timestamp-free infrastructure-only no-attempt defer; neither the SDK nor handler reads a database clock to construct it.
 
-The prepared path starts renewal only after acquisition checks, passes one mutable-internal/read-only-public lease context, and applies exactly one prepared disposition. It runs one bounded acknowledgement callback only for `origin=AUTHNZ`; an infrastructure defer has no cross-database acknowledgement. It never invokes default completion/failure after a prepared handler result.
+The prepared path starts renewal only after acquisition checks, passes one mutable-internal/read-only-public lease context, and applies exactly one prepared disposition. It runs one bounded acknowledgement callback only for `origin=AUTHNZ`; infrastructure and stale-recovery defers have no cross-database acknowledgement. It never invokes default completion/failure after a prepared handler result.
 
 - [ ] **Step 4: Run GREEN and prove legacy behavior**
 
 ```bash
-PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
+RUN_JOBS=1 PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
   tldw_Server_API/tests/Jobs/test_worker_sdk_prepared.py \
   tldw_Server_API/tests/Jobs/test_worker_sdk.py
 ../../.venv/bin/ruff check \
@@ -634,7 +672,7 @@ PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
 - [ ] **Step 5: Update the task and commit**
 
 ```bash
-backlog task edit 13111 --notes "Added fail-closed prepared WorkerSDK path with observable renewal/horizon state and no default double finalization; legacy run regression remains green."
+backlog task edit 13111 --append-notes "Added fail-closed prepared WorkerSDK path with observable renewal/horizon state and no default double finalization; legacy run regression remains green."
 git add \
   tldw_Server_API/app/core/Jobs/worker_sdk.py \
   tldw_Server_API/tests/Jobs/test_worker_sdk_prepared.py \
@@ -686,7 +724,7 @@ Cover classification: 2xx success; network/timeout/408/429/5xx retryable; 3xx an
 - [ ] **Step 4: Run RED**
 
 ```bash
-PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
+RUN_JOBS=1 PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
   tldw_Server_API/tests/Security/test_http_hop_contract.py \
   tldw_Server_API/tests/Security/test_http_hop_transport.py \
   tldw_Server_API/tests/Security/test_http_hop_streaming.py \
@@ -704,7 +742,7 @@ Reuse `_PinnedBackend`, peer verification, TLS context, header guard, request va
 - [ ] **Step 7: Run GREEN, security regressions, Ruff, and Bandit**
 
 ```bash
-PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
+RUN_JOBS=1 PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
   tldw_Server_API/tests/Security/test_http_hop_contract.py \
   tldw_Server_API/tests/Security/test_http_hop_transport.py \
   tldw_Server_API/tests/Security/test_http_hop_streaming.py \
@@ -720,7 +758,7 @@ PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
 - [ ] **Step 8: Update the task and commit**
 
 ```bash
-backlog task edit 13111 --notes "Extended peer-verified HTTP hop with no-buffer status-only mode and added deterministic signed one-attempt executor; transport/security vectors pass."
+backlog task edit 13111 --append-notes "Extended peer-verified HTTP hop with no-buffer status-only mode and added deterministic signed one-attempt executor; transport/security vectors pass."
 git add \
   tldw_Server_API/app/core/Security/http_hop.py \
   tldw_Server_API/app/core/Admin_Webhooks/executor.py \
@@ -768,7 +806,7 @@ Within the existing patch/rotate/delete transaction assert:
 - [ ] **Step 3: Run RED**
 
 ```bash
-PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
+RUN_JOBS=1 PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
   tldw_Server_API/tests/Admin_Webhooks/test_delivery_domain.py \
   tldw_Server_API/tests/Admin_Webhooks/test_event_expansion.py \
   tldw_Server_API/tests/Admin_Webhooks/test_control_plane.py
@@ -785,7 +823,7 @@ Extend `AdminWebhookControlPlane.patch()`, `rotate_secret()`, and `delete()` onl
 - [ ] **Step 6: Run GREEN and existing control-plane regressions**
 
 ```bash
-PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
+RUN_JOBS=1 PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
   tldw_Server_API/tests/Admin_Webhooks/test_delivery_domain.py \
   tldw_Server_API/tests/Admin_Webhooks/test_event_expansion.py \
   tldw_Server_API/tests/Admin_Webhooks/test_control_plane.py \
@@ -799,7 +837,7 @@ PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
 - [ ] **Step 7: Update the task and commit**
 
 ```bash
-backlog task edit 13111 --notes "Added internal encrypted synthetic capture/fanout and transactional registration-work cancellation/supersession without producer or UI activation."
+backlog task edit 13111 --append-notes "Added internal encrypted synthetic capture/fanout and transactional registration-work cancellation/supersession without producer or UI activation."
 git add \
   tldw_Server_API/app/core/Admin_Webhooks/delivery.py \
   tldw_Server_API/app/core/Admin_Webhooks/control_plane.py \
@@ -820,7 +858,7 @@ git commit -m "feat(admin-webhooks): capture synthetic events and retire stale w
 - Create: `tldw_Server_API/tests/Admin_Webhooks/test_recovery_backend_matrix.py`
 
 **Interfaces:**
-- Consumes: AuthNZ repository, a narrow `JobsDeliveryQueue` adapter over `JobManager.create_job()/get_job_or_archived()`, random claim token, injected clock, and one delivery ID.
+- Consumes: AuthNZ repository, a narrow `JobsDeliveryQueue` adapter over typed `JobManager.admit_job()`, `find_job_by_identity()`, and known-ID reads, random claim token, injected clock, and one delivery ID.
 - Produces: `AdminWebhookReconciler.reconcile_enqueue_once()` and idempotent attach/recovery for all AuthNZ/Jobs backend combinations.
 
 - [ ] **Step 1: Define a narrow queue adapter and write unit RED tests**
@@ -828,12 +866,13 @@ git commit -m "feat(admin-webhooks): capture synthetic events and retire stale w
 The adapter exposes only:
 
 ```text
-create_or_get_delivery_job(delivery_id, expires_at) -> JobsDeliveryRecord
+admit_delivery_job(delivery_id, expires_at) -> JobsDeliveryAdmission
+find_delivery_job_by_identity(delivery_id) -> JobsDeliveryRecord | None
 get_delivery_job(jobs_job_id) -> JobsDeliveryRecord | None
 apply_queued_cancel(jobs_job_id, delivery_id, disposition_token, reason_code) -> PreparedDispositionResult
 ```
 
-Creation uses domain `admin_webhooks`, queue `delivery`, job type `admin_webhook_delivery`, payload containing only delivery ID, idempotency key `admin-webhook-delivery:<delivery_id>`, `max_retries=3`, `expired_lease_policy=requeue_no_attempt`, `quarantine_threshold=5`, and no owner. Validate an idempotent existing row has the expected domain/queue/type/payload plus those immutable execution controls; any mismatch fails closed as a Jobs conflict.
+Admission uses the registered domain `admin_webhooks`, queue `delivery`, job type `admin_webhook_delivery`, payload containing only delivery ID, idempotency key `admin-webhook-delivery:<delivery_id>`, `max_retries=3`, `expired_lease_policy=requeue_no_attempt`, `quarantine_threshold=5`, and no owner. Preserve typed admission outcomes. Validate an idempotent existing row has the expected domain/queue/type/payload plus those immutable execution controls; any mismatch fails closed as a Jobs conflict. Identity lookup uses those same fixed fields but never inserts a row.
 
 - [ ] **Step 2: Write every enqueue crash-window test**
 
@@ -848,11 +887,11 @@ Inject a crash at these boundaries and rerun reconciliation:
 
 For each boundary assert one automatic delivery, one Jobs row/idempotency key, one attached Jobs ID, no stale claim, and final `queued`. An unexpired foreign claim is not stolen; an expired claim is recovered conditionally. A missing Jobs row after claim is recreated/read through the same idempotent create command. A mismatched existing Jobs payload makes delivery `dead:jobs_identity_conflict` without sending.
 
-Transient Jobs database errors and admission results `QUEUE_PAUSED`, `QUEUE_DRAINING`, quota, or fair-share rejection clear only the matching AuthNZ claim back to `pending`, record a closed enqueue-failure metric, and retry on a later reconciler pass without creating an attempt or terminalizing delivery. A backend/schema conflict or idempotent-existing identity mismatch is permanent and records `dead:jobs_identity_conflict`. Repeated transient rejection remains bounded by the 72-hour delivery expiry.
+Transient Jobs database errors and typed `ADMISSION_REJECTED` outcomes clear only the matching AuthNZ claim back to `pending`, record a closed enqueue-failure metric, and retry on a later reconciler pass without creating an attempt or terminalizing delivery. Queue pause/drain remains an acquisition control and is not invented as an admission result. A backend/schema conflict, ambiguous identity lookup, or idempotent-existing identity mismatch is permanent and records `dead:jobs_identity_conflict`. Repeated transient rejection remains bounded by the 72-hour delivery expiry.
 
 - [ ] **Step 3: Add cancellation/expiry races**
 
-If delivery becomes canceled/superseded/dead before attach, do not mark it queued; persist/apply tokenized queued cancel recovery for any created Jobs row. If it expires before Jobs create, terminalize `dead:delivery_expired` without creating a job. If it expires after Jobs create, attach identity only as needed to apply canonical queued cancellation; never make it runnable. If the Jobs row is already processing, the reconciler leaves the cancel disposition pending for the lease holder and never claims the request was unsent. Reconciler heartbeat failure does not mutate delivery state.
+If delivery becomes canceled/superseded/dead before attach, do not mark it queued. Use lookup-only identity recovery: when no Jobs row exists, finish without creating one; when a matching queued row exists, attach identity only as needed and persist/apply tokenized cancellation; when the row is processing, leave the cancel disposition pending for the lease holder and never claim the request was unsent. If it expires before Jobs create, terminalize `dead:delivery_expired` without creating a job. If it expires after Jobs create, use the same lookup-only branch to cancel the orphan; never call admission as a cancellation probe and never make terminal AuthNZ work runnable. Reconciler heartbeat failure does not mutate delivery state.
 
 - [ ] **Step 4: Parameterize the four-backend enqueue matrix**
 
@@ -865,12 +904,12 @@ AuthNZ PostgreSQL / Jobs SQLite
 AuthNZ PostgreSQL / Jobs PostgreSQL
 ```
 
-Run all six crash boundaries and cancellation/expiry cases for each pair. The PostgreSQL fixture uses `TLDW_TEST_POSTGRES_REQUIRED=1` in the required gate.
+Run all six crash boundaries, lookup-only missing/existing orphan branches, and cancellation/expiry cases for each pair. The PostgreSQL fixture uses `TLDW_TEST_POSTGRES_REQUIRED=1` and `RUN_JOBS=1` in the required gate.
 
 - [ ] **Step 5: Run RED**
 
 ```bash
-PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
+RUN_JOBS=1 PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
   tldw_Server_API/tests/Admin_Webhooks/test_enqueue_reconciler.py \
   tldw_Server_API/tests/Admin_Webhooks/test_recovery_backend_matrix.py -k enqueue
 ```
@@ -882,7 +921,7 @@ Each iteration claims at most 100 rows ordered by expiry/creation/ID, handles on
 - [ ] **Step 7: Run GREEN and verify no direct Jobs SQL**
 
 ```bash
-PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
+RUN_JOBS=1 PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
   tldw_Server_API/tests/Admin_Webhooks/test_enqueue_reconciler.py \
   tldw_Server_API/tests/Admin_Webhooks/test_recovery_backend_matrix.py -k enqueue
 if rg -n "_connect\(|SELECT .* FROM jobs|UPDATE jobs|INSERT INTO jobs" \
@@ -895,7 +934,7 @@ fi
 - [ ] **Step 8: Update the task and commit**
 
 ```bash
-backlog task edit 13111 --notes "Implemented recoverable idempotent AuthNZ-to-Jobs enqueue claims; every crash window converges across the four backend combinations."
+backlog task edit 13111 --append-notes "Implemented recoverable idempotent AuthNZ-to-Jobs enqueue claims; every crash window converges across the four backend combinations."
 git add \
   tldw_Server_API/app/core/Admin_Webhooks/reconciler.py \
   tldw_Server_API/tests/Admin_Webhooks/test_enqueue_reconciler.py \
@@ -921,10 +960,10 @@ git commit -m "feat(admin-webhooks): reconcile delivery enqueue"
 
 Before any executor call, assert this order:
 
-1. validate Jobs payload/domain/queue/type and load delivery bundle; if AuthNZ is unavailable before any reservation, return the infrastructure-only Jobs defer and leave AuthNZ unchanged;
-2. if AuthNZ has an unapplied pending disposition, return it with its original absolute not-before time and without I/O;
+1. validate Jobs payload/domain/queue/type and load delivery bundle; if AuthNZ is unavailable before any reservation, return timestamp-free `infrastructure_defer()` and leave AuthNZ unchanged;
+2. if AuthNZ has an unapplied pending disposition, compare it with the acquired Jobs row's bounded reserved-result marker: when the marker is absent or is historical infrastructure/recovery evidence from an earlier lease, return the original AuthNZ disposition and absolute not-before time without I/O; when the same AuthNZ token was already applied before a lost acknowledgement and this job has since been reacquired, acknowledge the exact prior token in AuthNZ and continue the current lease rather than returning an already-applied token; a different AuthNZ-origin marker is a fail-closed conflict;
 3. if delivery is terminal or lifecycle/config/secret/tombstone/active checks fail, commit/return the matching cancel/fail disposition without I/O;
-4. if another processing attempt is not stale, return no-attempt defer until deterministic stale time;
+4. if another processing attempt is not stale, return `recovery_defer_until(stale_at)` with the explicit AuthNZ-derived deterministic stale timestamp;
 5. if stale, close it `outcome_unknown` using its persisted request timeout, consume its slot, and return a scheduled retry/terminal disposition without I/O;
 6. contextually decrypt/validate target, secret, and exact event bytes and run the first delivery-time egress policy check without receiver HTTP I/O;
 7. prove delivery lifetime and call `ensure_lease_horizon(timeout + 30)`;
@@ -932,7 +971,7 @@ Before any executor call, assert this order:
 9. immediately invoke the executor exactly once using the already-reviewed decrypted snapshot; the executor repeats DNS/egress/peer policy, but does not reload a potentially changed registration;
 10. conditionally finish the same attempt and persist one pending prepared disposition before return.
 
-Key/mode/database/policy/lease-horizon infrastructure failures before reservation return bounded no-attempt defer. Delivery expiry before reservation returns terminal fail. A lease loss after reservation permits the real executor outcome to be attempted conditionally; stale token rejection leaves later recovery to mark `outcome_unknown`.
+Key/mode/database/policy/lease-horizon infrastructure failures before reservation return timestamp-free `infrastructure_defer()`; the Jobs apply transaction computes and persists `jobs_database_now + 30 seconds`. The stale-attempt path instead carries its explicit AuthNZ-derived stale timestamp and never substitutes the infrastructure schedule. Delivery expiry before reservation returns terminal fail. A lease loss after reservation permits the real executor outcome to be attempted conditionally; stale token rejection leaves later recovery to mark `outcome_unknown`.
 
 - [ ] **Step 2: Write append-only and hard-budget tests**
 
@@ -940,7 +979,7 @@ Prove sequence 1-4 across retries and lease losses; an interrupted slot becomes 
 
 - [ ] **Step 3: Write post-attempt crash-window tests**
 
-Inject crashes:
+For AuthNZ-origin complete/retry/fail/cancel dispositions, inject crashes:
 
 1. before attempt reservation commit;
 2. after reservation commit/before I/O;
@@ -949,7 +988,9 @@ Inject crashes:
 5. after Jobs apply/before AuthNZ acknowledgement;
 6. after AuthNZ acknowledgement/before worker-loop return.
 
-Expected semantics are explicit: boundaries 2-3 eventually record `outcome_unknown`; boundary 4 applies the stored disposition with no new request; boundary 5 proves Jobs reserved result/state and marks the matching token applied; boundary 6 is an idempotent no-op. Reapplying retry/defer uses the original persisted not-before timestamp, so a lost acknowledgement never starts another full delay. Cover complete/retry/fail/cancel/defer and all four backend pairs.
+Expected semantics are explicit: boundaries 2-3 eventually record `outcome_unknown`; boundary 4 applies the stored disposition with no new request; boundary 5 proves Jobs reserved result/state and marks the matching AuthNZ token applied; boundary 6 is an idempotent no-op. For retry boundary 5, advance through the original not-before time and reacquire the row before AuthNZ acknowledgement: the new handler must acknowledge the already-applied retry token, clear the old pending state, continue under the current lease, and produce at most one next attempt. It must not reapply the old transition, increment retry/quarantine counters twice, extend the original schedule, or leave the processing lease unresolved. Complete/fail/cancel terminal lost acknowledgements are repaired from the terminal Jobs marker without reacquisition.
+
+Separately crash after Jobs applies each no-acknowledgement `infrastructure_defer` and `recovery_defer_until` but before the worker loop returns. Assert no AuthNZ acknowledgement callback is invoked, the one stored schedule/token survives, and later reacquisition treats that marker as historical evidence: it neither reapplies nor acknowledges the old defer, does not change retry/failure/quarantine counters, and continues only under the new lease. Cover every AuthNZ-origin disposition and both no-acknowledgement defer origins across all four backend pairs.
 
 - [ ] **Step 4: Write cancellation/configuration/in-flight race tests**
 
@@ -958,19 +999,19 @@ Disable, rotate, update, or delete winning before reservation sends nothing and 
 - [ ] **Step 5: Run RED**
 
 ```bash
-PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
+RUN_JOBS=1 PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
   tldw_Server_API/tests/Admin_Webhooks/test_worker.py \
   tldw_Server_API/tests/Admin_Webhooks/test_recovery_backend_matrix.py -k 'disposition or attempt or cancellation'
 ```
 
 - [ ] **Step 6: Implement the prepared handler and bounded callbacks**
 
-The handler returns only `PreparedJobDisposition`. It never calls Jobs finalizers directly. `on_disposition_applied` conditionally acknowledges the exact AuthNZ token; rejection leaves it pending. Extend `AdminWebhookReconciler` to inspect `get_job_or_archived()` reserved disposition evidence, acknowledge exact lost-ack matches, reapply pending state under a replacement lease without I/O, cancel orphan Jobs rows, and repair Jobs terminal/AuthNZ nonterminal mirrors monotonically.
+The handler returns only `PreparedJobDisposition`. It never calls Jobs finalizers directly. `on_disposition_applied` conditionally acknowledges only an exact `origin=AUTHNZ` token; rejection leaves it pending, while infrastructure/recovery origins never invoke this callback. Before attempt reservation, the handler reconciles an acquired row's reserved-result marker with AuthNZ: an exact already-applied AuthNZ retry token is acknowledged and execution continues under that current lease; an unapplied AuthNZ token is returned once when the marker is absent or only historical no-acknowledgement evidence; a historical infrastructure/recovery defer marker is neither acknowledged nor reapplied; and a conflicting AuthNZ identity/token fails closed with timestamp-free `infrastructure_defer()`. Extend `AdminWebhookReconciler` to use known-ID and lookup-only identity reads, acknowledge exact AuthNZ lost-ack matches, cancel orphan Jobs rows without creating them, and repair Jobs terminal/AuthNZ nonterminal mirrors monotonically.
 
 - [ ] **Step 7: Run GREEN and the prepared SDK integration**
 
 ```bash
-PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
+RUN_JOBS=1 PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
   tldw_Server_API/tests/Admin_Webhooks/test_worker.py \
   tldw_Server_API/tests/Admin_Webhooks/test_recovery_backend_matrix.py \
   tldw_Server_API/tests/Jobs/test_worker_sdk_prepared.py \
@@ -984,7 +1025,7 @@ PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
 - [ ] **Step 8: Update the task and commit**
 
 ```bash
-backlog task edit 13111 --notes "Implemented lease-aware one-attempt worker and durable complete/retry/fail/cancel/defer recovery; crash and hard-attempt matrices pass without extra I/O."
+backlog task edit 13111 --append-notes "Implemented lease-aware one-attempt worker and durable complete/retry/fail/cancel/defer recovery; crash and hard-attempt matrices pass without extra I/O."
 git add \
   tldw_Server_API/app/core/Admin_Webhooks/worker.py \
   tldw_Server_API/app/core/Admin_Webhooks/reconciler.py \
@@ -1027,7 +1068,7 @@ Add deterministic configuration-race tests. Rotation, configuration mutation, or
 - [ ] **Step 4: Run RED**
 
 ```bash
-PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
+RUN_JOBS=1 PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
   tldw_Server_API/tests/Admin_Webhooks/test_test_delivery.py
 ```
 
@@ -1038,7 +1079,7 @@ Generate every identity before the transaction so a retried transaction reuses i
 - [ ] **Step 6: Run GREEN and no-Jobs proof**
 
 ```bash
-PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
+RUN_JOBS=1 PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
   tldw_Server_API/tests/Admin_Webhooks/test_test_delivery.py \
   tldw_Server_API/tests/Admin_Webhooks/test_executor.py
 if rg -n "create_or_get_delivery_job|create_job\(" \
@@ -1051,7 +1092,7 @@ fi
 - [ ] **Step 7: Update the task and commit**
 
 ```bash
-backlog task edit 13111 --notes "Implemented persisted one-attempt synchronous tests with precondition/idempotency replay and interrupted-attempt recovery; no Jobs/retry path is reachable."
+backlog task edit 13111 --append-notes "Implemented persisted one-attempt synchronous tests with precondition/idempotency replay and interrupted-attempt recovery; no Jobs/retry path is reachable."
 git add \
   tldw_Server_API/app/core/Admin_Webhooks/delivery.py \
   tldw_Server_API/app/core/Admin_Webhooks/reconciler.py \
@@ -1094,9 +1135,9 @@ Forbid unknown/null fields. IDs and reason codes are bounded. Delivery responses
 
 - [ ] **Step 2: Write manual-redelivery service RED tests**
 
-Require active non-deleted current registration, available key, completed migration, strong ETag, reviewed current delivery-config version, source delivery belonging to that registration, and an existing decryptable historical event. Create a new `kind=manual` delivery with current config/secret versions, same event ID, new delivery ID, `redelivery_of_id`, pending state, 72-hour expiry, and completed idempotency record in one transaction.
+Require active non-deleted current registration, available key, completed migration, strong ETag, reviewed current delivery-config version, source delivery belonging to that registration, and an existing decryptable historical event. Create a new `kind=manual` delivery with current config/secret versions, same event ID, new delivery ID, `redelivery_of_id`, pending state, 72-hour expiry, completed idempotency record, and `mark_first_canonical_activity("delivery_attempt")` in one transaction. This marker intentionally closes the structural legacy-restore window at accepted redelivery creation while retaining the schema's existing closed activity categories; it does not insert an attempt row before Jobs acquisition.
 
-When original and current config versions differ, `confirm_changed_configuration` must be true or return a stable conflict. Audit sets `redelivery_to_changed_config=true` and records old/current versions, IDs, actor, outcome, and request ID only. Exact replay precedes current preconditions and never creates another row. Same key/different source/config/confirmation conflicts.
+When original and current config versions differ, `confirm_changed_configuration` must be true or return a stable conflict. Audit sets `redelivery_to_changed_config=true` and records old/current versions, IDs, actor, outcome, and request ID only. Exact replay precedes current preconditions, never creates another row, and does not rewrite the activity marker. Same key/different source/config/confirmation conflicts and rejected preconditions leave the marker unchanged.
 
 - [ ] **Step 3: Write route/auth/audit/error RED tests**
 
@@ -1115,7 +1156,7 @@ Declare static `/catalog` and `/status`, then collection routes, then nested `/d
 - [ ] **Step 4: Run RED**
 
 ```bash
-PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
+RUN_JOBS=1 PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
   tldw_Server_API/tests/Admin_Webhooks/test_redelivery_history_api.py \
   tldw_Server_API/tests/Admin_Webhooks/test_api.py \
   tldw_Server_API/tests/Admin_Webhooks/test_openapi.py
@@ -1138,7 +1179,7 @@ Expected: only the three reviewed PR 2 route families and expanded status/delive
 - [ ] **Step 7: Run GREEN and leak assertions**
 
 ```bash
-PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
+RUN_JOBS=1 PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
   tldw_Server_API/tests/Admin_Webhooks/test_test_delivery.py \
   tldw_Server_API/tests/Admin_Webhooks/test_redelivery_history_api.py \
   tldw_Server_API/tests/Admin_Webhooks/test_api.py \
@@ -1152,7 +1193,7 @@ PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
 - [ ] **Step 8: Update the task and commit**
 
 ```bash
-backlog task edit 13111 --notes "Exposed canonical persisted test, manual redelivery, and sanitized history APIs with ETag/idempotency/audit/OpenAPI contracts; no PR 3 UI or producer work included."
+backlog task edit 13111 --append-notes "Exposed canonical persisted test, manual redelivery, and sanitized history APIs with ETag/idempotency/audit/OpenAPI contracts; no PR 3 UI or producer work included."
 git add \
   tldw_Server_API/app/core/Admin_Webhooks/delivery.py \
   tldw_Server_API/app/api/v1/schemas/admin_webhooks.py \
@@ -1188,7 +1229,7 @@ git commit -m "feat(admin-webhooks): expose delivery operations and history"
 
 - [ ] **Step 1: Write observability/health RED tests**
 
-Health aggregates canonical schema version, explicit migration-092 delivery-extension readiness, migration completion, key availability/primary match, Jobs database access, exact queue/type registration, freshest ready worker heartbeat, freshest ready reconciler heartbeat, retention heartbeat, backlog counts by state, and oldest pending age. Heartbeats are fresh only within configured freshness; stale/unready rows report stable reason codes. Multiple instances choose the freshest ready evidence without deleting another live instance.
+Health aggregates canonical schema version, explicit migration-095 delivery-extension readiness, migration completion, key availability/primary match, Jobs database access, exact queue/type registration, freshest ready worker heartbeat, freshest ready reconciler heartbeat, retention heartbeat, backlog counts by state, and oldest pending age. Heartbeats are fresh only within configured freshness; stale/unready rows report stable reason codes. Multiple instances choose the freshest ready evidence without deleting another live instance.
 
 `delivery_capability_ready` requires canonical schema version 1, successful `delivery_schema_ready()` extension preflight, completed migration, key match, Jobs preflight, and fresh worker/reconciler heartbeats. Retention staleness degrades status but does not by itself permit acquisition. Activating a registration requires capability ready; metadata read/disable/delete/history remain available in degraded states under existing key rules.
 
@@ -1209,7 +1250,7 @@ At 29d23h59m terminal metadata remains. At 30d, a bounded batch removes terminal
 - [ ] **Step 5: Run RED**
 
 ```bash
-PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
+RUN_JOBS=1 PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
   tldw_Server_API/tests/Admin_Webhooks/test_retention_health_runtime.py \
   tldw_Server_API/tests/Admin_Webhooks/test_control_plane.py \
   tldw_Server_API/tests/Admin_Webhooks/test_api.py \
@@ -1231,7 +1272,7 @@ Document default-off status, exact environment/cadence bounds, mode/key/Jobs pre
 - [ ] **Step 9: Run GREEN and shutdown/status regressions**
 
 ```bash
-PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
+RUN_JOBS=1 PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
   tldw_Server_API/tests/Admin_Webhooks/test_retention_health_runtime.py \
   tldw_Server_API/tests/Admin_Webhooks/test_control_plane.py \
   tldw_Server_API/tests/Admin_Webhooks/test_api.py \
@@ -1246,7 +1287,7 @@ PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
 - [ ] **Step 10: Update the task and commit**
 
 ```bash
-backlog task edit 13111 --notes "Added durable worker/reconciler/retention health, bounded metrics/retention, mode-gated lifecycle runtime, and PR 2 operations runbook."
+backlog task edit 13111 --append-notes "Added durable worker/reconciler/retention health, bounded metrics/retention, mode-gated lifecycle runtime, and PR 2 operations runbook."
 git add \
   tldw_Server_API/app/core/Admin_Webhooks/observability.py \
   tldw_Server_API/app/services/admin_webhook_delivery_runtime.py \
@@ -1278,7 +1319,7 @@ git commit -m "feat(admin-webhooks): operate delivery runtime safely"
 - [ ] **Step 1: Run the complete SQLite/API/security matrix**
 
 ```bash
-PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
+RUN_JOBS=1 PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
   tldw_Server_API/tests/Admin_Webhooks \
   tldw_Server_API/tests/Jobs/test_jobs_operation_contracts.py \
   tldw_Server_API/tests/Jobs/test_jobs_migrations_sqlite.py \
@@ -1288,6 +1329,7 @@ PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
   tldw_Server_API/tests/Jobs/test_jobs_lease_reclaim_budget_sqlite.py \
   tldw_Server_API/tests/Jobs/test_jobs_renew_release_operations_sqlite.py \
   tldw_Server_API/tests/Jobs/test_jobs_prepared_disposition_operations_sqlite.py \
+  tldw_Server_API/tests/Jobs/test_jobs_manager_admission_facade.py \
   tldw_Server_API/tests/Jobs/test_worker_sdk.py \
   tldw_Server_API/tests/Jobs/test_worker_sdk_prepared.py \
   tldw_Server_API/tests/Jobs/parity/test_sqlite_parity.py \
@@ -1304,7 +1346,7 @@ Expected: all selected tests pass. Record exact count, warnings, duration, and a
 - [ ] **Step 2: Run required PostgreSQL and four-backend crash matrix with zero skips**
 
 ```bash
-TLDW_TEST_POSTGRES_REQUIRED=1 PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
+RUN_JOBS=1 TLDW_TEST_POSTGRES_REQUIRED=1 PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
   tldw_Server_API/tests/Admin_Webhooks/test_migration_postgres.py \
   tldw_Server_API/tests/Admin_Webhooks/test_repository_postgres.py \
   tldw_Server_API/tests/Admin_Webhooks/test_delivery_repository_postgres.py \
@@ -1324,7 +1366,7 @@ Expected: all four AuthNZ/Jobs pairs and every enqueue/disposition/cancel crash 
 - [ ] **Step 3: Run deterministic protocol and security-focused gates separately**
 
 ```bash
-PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
+RUN_JOBS=1 PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
   tldw_Server_API/tests/Admin_Webhooks/test_executor.py \
   tldw_Server_API/tests/Admin_Webhooks/test_worker.py \
   tldw_Server_API/tests/Admin_Webhooks/test_test_delivery.py \
@@ -1355,10 +1397,17 @@ The evidence maps tests to DNS change, private/reserved ranges, redirects, proxi
 ../../.venv/bin/python -m bandit -q -r \
   tldw_Server_API/app/core/Admin_Webhooks \
   tldw_Server_API/app/core/DB_Management/admin_webhooks_repository.py \
+  tldw_Server_API/app/core/AuthNZ/migrations.py \
+  tldw_Server_API/app/core/AuthNZ/pg_migrations_extra.py \
+  tldw_Server_API/app/core/Jobs/migrations.py \
+  tldw_Server_API/app/core/Jobs/pg_migrations.py \
+  tldw_Server_API/app/core/Jobs/manager.py \
   tldw_Server_API/app/core/Jobs/operations \
   tldw_Server_API/app/core/Jobs/worker_sdk.py \
   tldw_Server_API/app/core/Security/http_hop.py \
   tldw_Server_API/app/services/admin_webhook_delivery_runtime.py \
+  tldw_Server_API/app/services/startup_optional_workers.py \
+  tldw_Server_API/app/api/v1/schemas/admin_webhooks.py \
   tldw_Server_API/app/api/v1/endpoints/admin/admin_webhooks.py
 git diff --check origin/dev...
 if rg -n "logger\..*(url|secret|signature|payload|response|ciphertext)|labels=.*(id|host|url|email|secret|payload)" \
@@ -1401,7 +1450,7 @@ Expected: fingerprint is current and the human-reviewed delta contains only PR 2
 - [ ] **Step 8: Commit verification evidence**
 
 ```bash
-backlog task edit 13111 --notes "PR 2 verification complete: exact counts and all four backend/crash/security gates recorded in Docs/Evidence/Admin_Webhooks_PR2_Verification.md."
+backlog task edit 13111 --append-notes "PR 2 verification complete: exact counts and all four backend/crash/security gates recorded in Docs/Evidence/Admin_Webhooks_PR2_Verification.md."
 git add \
   Docs/Evidence/Admin_Webhooks_PR2_Verification.md \
   apps/tldw-frontend/lib/api/openapi.fingerprint.json \
@@ -1435,7 +1484,7 @@ git diff origin/dev...HEAD -- \
   tldw_Server_API/app/api/v1/endpoints/admin/admin_webhooks.py
 ```
 
-Expected: only PR 2 files are tracked; unrelated watchlist templates remain untracked and unstaged; no producer/UI/final activation work appears.
+Expected: only PR 2 files are tracked; no unrelated files and no producer/UI/final activation work appear.
 
 - [ ] **Step 2: Invoke `superpowers:requesting-code-review`**
 
@@ -1461,7 +1510,11 @@ The PR body states scope/exclusions, architecture, recovery semantics, test coun
 
 ```bash
 PR_URL="$(gh pr view --repo rmusser01/tldw_server --json url --jq .url)"
-backlog task edit 13111 --ref "$PR_URL" --notes "PR 2 opened against dev after full verification and code review. Keep In Progress until review feedback is resolved and the user confirms merge."
+backlog task edit 13111 \
+  --ref "https://github.com/rmusser01/tldw_server/pull/2806" \
+  --ref "https://github.com/rmusser01/tldw_server/pull/2828" \
+  --ref "$PR_URL" \
+  --append-notes "PR 2 opened against dev after full verification and code review. Keep In Progress until review feedback is resolved and the user confirms merge."
 git add "backlog/tasks/task-13111 - Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md"
 git diff --cached --check
 git commit -m "chore(backlog): link admin webhook delivery PR"
@@ -1500,4 +1553,4 @@ Report PR URL, head commit, checks, review findings/resolutions, evidence path, 
 
 ## Execution Handoff
 
-Implementation is intentionally blocked until PR #2806 is merged and `origin/dev` contains reviewed PR 1 head `89f03feda2401b94d13572b9adaff4447e61c726`. After that gate, use `superpowers:subagent-driven-development` in the rebased worktree for task-by-task execution and two-stage review, or `superpowers:executing-plans` for sequential checkpoints. Do not implement from this unmerged planning base and do not open a stacked PR.
+The dependency gate is satisfied: PR #2806 and tracking PR #2828 are merged, and current `origin/dev` contains final reviewed PR 1 head `f37d4c448ace69b56e208ca1f9bda94c571d86f3`. After this planning artifact is merged, create a fresh isolated implementation worktree from current `origin/dev` and use `superpowers:subagent-driven-development` for task-by-task execution and two-stage review, or `superpowers:executing-plans` for sequential checkpoints. Keep runtime implementation out of the planning PR.
