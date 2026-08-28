@@ -3,25 +3,24 @@ id: TASK-13138
 title: Implement first-class Notes graph workspace and reviewable AI suggestions
 status: Done
 assignee: []
-created_date: '2026-08-27 03:40'
-updated_date: '2026-08-28 20:35'
+created_date: 2026-08-27 03:40
+updated_date: 2026-08-28 22:05
 labels:
-  - notes
-  - knowledge-graph
-  - webui
-  - browser-extension
-  - llm
-  - jobs
+- notes
+- knowledge-graph
+- webui
+- browser-extension
+- llm
+- jobs
 dependencies: []
 references:
-  - TASK-13134
-  - TASK-13135
-  - TASK-13136
-  - TASK-13137
+- TASK-13134
+- TASK-13135
+- TASK-13136
+- TASK-13137
 documentation:
-  - >-
-    Docs/superpowers/specs/2026-08-26-notes-second-brain-graph-suggestions-design.md
-  - Docs/superpowers/plans/2026-08-26-notes-second-brain-graph-suggestions.md
+- Docs/superpowers/specs/2026-08-26-notes-second-brain-graph-suggestions-design.md
+- Docs/superpowers/plans/2026-08-26-notes-second-brain-graph-suggestions.md
 priority: high
 ---
 
@@ -66,7 +65,6 @@ Execute the approved 12-task test-first plan in Docs/superpowers/plans/2026-08-2
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Deferred work is tracked separately: TASK-13134 embeddings and semantic edges; TASK-13135 automatic background organization; TASK-13136 library-wide recurring themes; TASK-13137 saved graph views/layouts. This task remains review-first and on-demand.
 
@@ -183,7 +181,6 @@ Task 11 Review Round 2/3 completed. RED: NotesGraphWorkspace.view-mode 21 passed
 Task 11 Review Round 3/3 started from exact head 0b3c6768011cc3a7356367c62e46d4692cd00f4a. Scope is limited to authority-owning pending Canvas focus plus same-authority delivery and A-to-B discard regressions. Task 12, dependencies, lockfiles, E2E servers, and the two unrelated untracked Watchlists templates remain out of scope.
 Task 11 Review Round 3/3 completed. RED: NotesGraphWorkspace.view-mode 25 passed / 1 expected A-to-B same-ID deferred-focus failure. GREEN: focused 26/26; Task 11 106/106; Workspace + Stage 21/22 36/36. Pinned Prettier and zero-warning ESLint pass. TypeScript remains the exact inherited 315-line baseline with zero touched diagnostics. Deferred Canvas focus now stores authorityScope plus nodeId, delivers once only for an exact authority match, and discards A-owned focus after B commits. Backend, Task 12, dependencies/lockfiles, E2E servers, and unrelated Watchlists templates remain untouched.
 Task 12 implementation resumed directly from exact base adb4ebd833de37461234e969743fff55773f29b8. Scope is release tests/evaluation, shared route parity, deterministic WebUI/extension browser evidence, documentation, and cumulative security verification only. Strict RED must stop with NEEDS_CONTEXT before any production behavior edit; dependencies, lockfiles, deferred feature work, and the two unrelated Watchlists templates remain excluded.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 Task 12 completed from base adb4ebd833de37461234e969743fff55773f29b8. Release evidence includes privacy/observability and offline quality evaluation, shared route and real-ICU contracts, real WebUI Chromium E2E, controller-accepted deterministic MV3 extension E2E, documentation/mirrors, and cumulative security gates. The only production delta is the controller-authorized common:loading.title correction with a focused regression. Full evidence and all 23 AC/final-checklist mappings: .superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-12-report.md. Inherited records: backend 469/470 one unchanged delete-link copy failure; broad frontend 325/394 with 69 failures in 27 unchanged legacy files; extension whole-file 2/4 with both new Task 12 cases passing and two unchanged old selector failures; exact 315-line TypeScript baseline with zero touched diagnostics; stale Tags-help copy and missing glossary fixture. Deferred work remains TASK-13134, TASK-13135, TASK-13136, and TASK-13137. Task 12 commit subject: docs: complete Notes graph suggestions rollout (TASK-13138).
 
@@ -204,14 +201,15 @@ Task 12 Review Fix Round 3 completed after controller feasibility ruling. The re
 Task 12 Fix Round 4 started from exact base b66f352092c0dd1b417788f3cfefced796047985. Scope is test-only: prove vertical child containment and unclipped real review rows, plus action-specific 12px helper clearance derived from both tag actions. No production behavior change is authorized or expected.
 
 Task 12 Fix Round 4 completed from exact base b66f352092c0dd1b417788f3cfefced796047985 with test-only oracle hardening. Controlled mutation RED forced the real tag review row to 100px and failed on scrollHeight 340 > 100; the probe was removed. GREEN requires every real related/tag child vertically within its row, both rows free of internal clipped overflow, screenshot placement derived from both tag actions and all horizontally overlapping helpers, and independent >=12px Accept/Reject helper clearance. Final verification: WebUI 3/3; Task 12 frontend 142/142; extension Task 12 2/2 with unchanged inherited whole-file 2/4; ESLint clean; WebUI/shared TypeScript exact inherited 80/170 diagnostic baselines with zero touched matches; locale/mirror 85/85; screenshots controller-approved and byte-identical; diff/security/artifact/port checks clean. No production change or open Task 12 finding remains.
-<!-- SECTION:NOTES:END -->
 
+Final cumulative review fix wave started at b37cc2a78f. Validating six reviewer findings before test-first changes: nested cancellation note identity, concurrent owner admission limits, owner-isolated maintenance, shared maintenance budget, 90-day accepted-audit retention, and provisional-target review context.
+Final cumulative review closure completed in commits `d0d790492b`, `6fc56d1ab0`, `288c064f0d`, and `3f98840afb`. The fixes keep unloaded provisional targets inert, isolate maintenance per owner, enforce atomic owner-scoped Jobs admission, validate cancellation note identity transactionally, retain accepted audit metadata for 90 days, and charge the shared 100-row maintenance budget monotonically at durable run and expired-acceptance claim boundaries even when later reconciliation fails. Final verification: backend Notes Graph matrix 482/483 with only the unchanged delete-link copy assertion; focused frontend 145/145; broad Notes frontend 328/397 with the same 69 failures in the same 27 unchanged files; WebUI E2E 3/3; TASK-13138 extension E2E 2/2 and whole-file inherited baseline 2/4. Complete Ruff passed; Bandit reported 0 findings and 0 errors across 87,969 lines; ESLint reported 0 errors and 349 inherited warnings; WebUI/shared TypeScript reproduced exact 80/170 diagnostic baselines with zero touched-file matches; locale duplicate/coverage and 85/85 graph mirror passed. The unchanged Tags-help copy assertion and missing glossary fixture were reproduced. `git diff --check`, dependency, skip/only, port, and tracked-status checks passed; ports 18001/18082 are stopped and the two unrelated untracked Watchlists templates remain excluded. Human-authored PR Change summary remains required before merge.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented the first-class Notes Graph workspace and reviewable, source-grounded AI suggestions across the shared WebUI/browser-extension UI, nested Notes graph API, Jobs worker/maintenance lifecycle, durable owner-scoped storage, guarded accept/reject/reset decisions, accessibility, responsive behavior, and documentation. Task 12 release evidence now includes literal event/path privacy contracts, full sentinel/log/metric/telemetry-init checks, canonical shared-tag/source retrieval cases, real ordered top-30 pressure, exact WebUI/MV3 request ledgers, complete lifecycle/content/keyboard checks, and unobscured desktop/320px/page-scale-200/720px browser artifacts. Verification and all 23 acceptance-criteria mappings are recorded in .superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-12-report.md. Known inherited baselines remain documented; the human-authored PR Change summary is still required before merge. Deferred work remains TASK-13134, TASK-13135, TASK-13136, and TASK-13137.
+Implemented the first-class Notes Graph workspace and reviewable, source-grounded AI suggestions across the shared WebUI/browser-extension UI, nested Notes graph API, Jobs worker and maintenance lifecycle, durable owner-scoped storage, guarded accept/reject/reset decisions, accessibility, responsive behavior, and documentation. Cumulative review additionally hardened cancellation identity, transactional admission limits, owner-isolated and monotonically budgeted maintenance, 90-day accepted-audit retention, and provisional-target interaction safety. Final verification covers 482 passing backend tests with one unchanged copy baseline, 145/145 focused frontend tests, WebUI E2E 3/3, TASK-13138 extension E2E 2/2, complete Ruff/Bandit/ESLint gates, exact inherited TypeScript baselines with zero touched diagnostics, and locale/mirror integrity. Known inherited baselines remain documented; the human-authored PR Change summary is still required before merge. Deferred work remains TASK-13134, TASK-13135, TASK-13136, and TASK-13137.
 <!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed
