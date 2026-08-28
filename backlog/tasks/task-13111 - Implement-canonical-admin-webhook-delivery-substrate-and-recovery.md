@@ -4,7 +4,7 @@ title: Implement canonical admin webhook delivery substrate and recovery
 status: In Progress
 assignee: []
 created_date: '2026-08-23 03:15'
-updated_date: '2026-08-28 15:00'
+updated_date: '2026-08-28 15:20'
 labels:
   - admin
   - webhooks
@@ -68,6 +68,10 @@ The initial draft was created from an earlier reviewed PR 1 head. Planning revie
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 2026-08-28: PR 2 implementation baseline at 1ad2f1e5b30c49ea75396e4b713496b73e875fec completed. The scoped baseline suite collected 760 tests: 642 passed and 117 PostgreSQL-dependent tests skipped locally. The only sandbox failure was test_public_http_hop_uses_real_socket_without_following_redirect because the sandbox denied a 127.0.0.1 ephemeral bind; rerunning that exact test with host loopback permission passed (1 passed, 2 warnings). This is an environment-conditioned baseline pass, not a product failure.
+
+2026-08-28: Started Task 1 delivery contract and migration-095 implementation in codex/admin-webhooks-delivery-substrate. Scope includes the preflight-ruled AdminWebhookRepository.delivery_schema_ready() probe and focused coverage.
+
+2026-08-28: Task 1 added migration-095 recovery tokens, per-attempt timeout, durable runtime heartbeats, fixed delivery settings/types, and the delivery schema readiness probe while preserving canonical schema version 1. Focused gate: 98 passed, 5 PostgreSQL tests skipped locally because no PostgreSQL instance was available; Ruff and git diff --check passed.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

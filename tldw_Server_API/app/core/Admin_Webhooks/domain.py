@@ -53,6 +53,10 @@ class WebhookErrorCode(str, Enum):
     OPERATION_FAILED = "admin_webhook_operation_failed"
     USER_PRINCIPAL_REQUIRED = "admin_webhook_user_principal_required"
     DELIVERY_UNAVAILABLE = "admin_webhook_delivery_unavailable"
+    TEST_DELIVERY_UNAVAILABLE = "admin_webhook_test_delivery_unavailable"
+    REDELIVERY_CONFIRMATION_REQUIRED = "admin_webhook_redelivery_confirmation_required"
+    DELIVERY_HISTORY_UNAVAILABLE = "admin_webhook_delivery_history_unavailable"
+    RECOVERY_UNAVAILABLE = "admin_webhook_recovery_unavailable"
 
     @property
     def http_status(self) -> int:
@@ -86,8 +90,184 @@ _ERROR_STATUS = {
     WebhookErrorCode.OPERATION_FAILED: 503,
     WebhookErrorCode.USER_PRINCIPAL_REQUIRED: 403,
     WebhookErrorCode.DELIVERY_UNAVAILABLE: 503,
+    WebhookErrorCode.TEST_DELIVERY_UNAVAILABLE: 503,
+    WebhookErrorCode.REDELIVERY_CONFIRMATION_REQUIRED: 428,
+    WebhookErrorCode.DELIVERY_HISTORY_UNAVAILABLE: 503,
+    WebhookErrorCode.RECOVERY_UNAVAILABLE: 503,
     WebhookErrorCode.REQUEST_REJECTED: 400,
 }
+
+
+class DeliveryKind(str, Enum):
+    """Closed origin for one persisted webhook delivery."""
+
+    AUTOMATIC = "automatic"
+    MANUAL = "manual"
+    TEST = "test"
+
+
+class DeliveryState(str, Enum):
+    """Closed state machine for persisted webhook delivery work."""
+
+    PENDING = "pending"
+    ENQUEUE_CLAIMED = "enqueue_claimed"
+    QUEUED = "queued"
+    PROCESSING = "processing"
+    RETRY_WAIT = "retry_wait"
+    SUCCEEDED = "succeeded"
+    DEAD = "dead"
+    CANCELED = "canceled"
+    SUPERSEDED = "superseded"
+
+    @classmethod
+    def terminal_states(cls) -> frozenset[DeliveryState]:
+        """Return terminal delivery states that never regress."""
+        return frozenset({cls.SUCCEEDED, cls.DEAD, cls.CANCELED, cls.SUPERSEDED})
+
+
+class AttemptState(str, Enum):
+    """Closed state machine for one append-only attempt record."""
+
+    PROCESSING = "processing"
+    SUCCEEDED = "succeeded"
+    RETRYABLE = "retryable"
+    FAILED = "failed"
+    CANCELED = "canceled"
+    SUPERSEDED = "superseded"
+    OUTCOME_UNKNOWN = "outcome_unknown"
+
+    @classmethod
+    def terminal_states(cls) -> frozenset[AttemptState]:
+        """Return attempt states that no longer own network I/O."""
+        return frozenset(set(cls) - {cls.PROCESSING})
+
+
+class JobsDispositionKind(str, Enum):
+    """Closed acknowledgement required from the Jobs scheduler."""
+
+    COMPLETE = "complete"
+    RETRY = "retry"
+    FAIL = "fail"
+    CANCEL = "cancel"
+    DEFER = "defer"
+
+
+class DeliveryReasonCode(str, Enum):
+    """Stable bounded reasons retained in delivery and attempt metadata."""
+
+    ATTEMPT_BUDGET_EXHAUSTED = "attempt_budget_exhausted"
+    CANCELED_DELETED = "canceled_deleted"
+    CANCELED_DISABLED = "canceled_disabled"
+    CANCELED_SECRET_ROTATION = "canceled_secret_rotation"
+    DELIVERY_EXPIRED = "delivery_expired"
+    JOBS_IDENTITY_CONFLICT = "jobs_identity_conflict"
+    OUTCOME_UNKNOWN = "outcome_unknown"
+    SUPERSEDED_CONFIG = "superseded_config"
+    TEST_ATTEMPT_INTERRUPTED = "test_attempt_interrupted"
+
+
+class EventSourceKind(str, Enum):
+    """Closed source identity shape for an immutable webhook event."""
+
+    AGGREGATE = "aggregate"
+    COMMAND = "command"
+
+
+class DeliveryRuntimeComponent(str, Enum):
+    """Closed runtime components that write durable heartbeat evidence."""
+
+    WORKER = "worker"
+    RECONCILER = "reconciler"
+    RETENTION = "retention"
+
+
+@dataclass(frozen=True)
+class WebhookEvent:
+    """Public immutable event metadata without a body or encryption material."""
+
+    id: str
+    event_type: str
+    api_version: str
+    source_kind: EventSourceKind
+    created_at: datetime
+
+
+@dataclass(frozen=True)
+class WebhookDelivery:
+    """Sanitized delivery history metadata without destination or Jobs tokens."""
+
+    id: str
+    event_id: str
+    webhook_id: int
+    kind: DeliveryKind
+    state: DeliveryState
+    delivery_config_version: int
+    secret_version: int
+    attempt_count: int
+    status_code: int | None
+    latency_ms: int | None
+    reason_code: DeliveryReasonCode | None
+    expires_at: datetime
+    created_at: datetime
+    updated_at: datetime
+    terminal_at: datetime | None = None
+    redelivery_of_id: str | None = None
+
+
+@dataclass(frozen=True)
+class WebhookDeliveryAttempt:
+    """Sanitized append-only attempt metadata without network request material."""
+
+    id: str
+    delivery_id: str
+    attempt_number: int
+    state: AttemptState
+    request_timeout_seconds: int | None
+    status_code: int | None
+    latency_ms: int | None
+    reason_code: DeliveryReasonCode | None
+    requested_retry_delay_seconds: int | None
+    started_at: datetime
+    finished_at: datetime | None
+
+
+@dataclass(frozen=True)
+class DeliveryHistoryPage:
+    """Bounded page of sanitized delivery history."""
+
+    items: tuple[WebhookDelivery, ...]
+    total: int
+    limit: int
+    offset: int
+
+
+@dataclass(frozen=True)
+class DeliveryRuntimeHeartbeat:
+    """Durable per-instance readiness metadata without host or error text."""
+
+    component: DeliveryRuntimeComponent
+    instance_id: str
+    ready: bool
+    reason_code: DeliveryReasonCode | None
+    heartbeat_at: datetime
+    last_success_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
+class DeliveryHealthSnapshot:
+    """Sanitized delivery capability inputs consumed by status surfaces."""
+
+    schema_ready: bool
+    delivery_schema_ready: bool
+    migration_complete: bool
+    key_ready: bool
+    jobs_ready: bool
+    worker_ready: bool
+    reconciler_ready: bool
+    retention_ready: bool
+    delivery_capability_ready: bool
 
 
 @dataclass(frozen=True)

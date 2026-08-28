@@ -21,6 +21,13 @@ from tldw_Server_API.app.core.Admin_Webhooks.config import (
     is_production_environment_mapping,
 )
 from tldw_Server_API.app.core.Admin_Webhooks.domain import (
+    AttemptState,
+    DeliveryKind,
+    DeliveryReasonCode,
+    DeliveryRuntimeComponent,
+    DeliveryState,
+    EventSourceKind,
+    JobsDispositionKind,
     WebhookError,
     WebhookErrorCode,
     build_idempotency_scope,
@@ -50,6 +57,123 @@ def test_settings_default_off_and_validate_bounds() -> None:
     assert settings.allow_http_dev is False
     assert settings.idempotency_ttl_seconds == 86_400
     assert settings.rollback_window_days == 7
+
+
+@pytest.mark.unit
+def test_delivery_protocol_invariants_are_not_operator_expandable() -> None:
+    settings = AdminWebhookSettings.from_environment({})
+
+    assert settings.delivery_retry_delays_seconds == (60, 300, 1800)
+    assert settings.delivery_max_attempts == 4
+    assert settings.jobs_quarantine_threshold == 5
+    assert settings.delivery_infrastructure_defer_seconds == 30
+    assert settings.delivery_expiry_seconds == 72 * 60 * 60
+    assert settings.delivery_retention_days == 30
+    assert settings.delivery_commit_margin_seconds == 30
+    assert settings.delivery_stale_attempt_margin_seconds == 90
+    assert settings.delivery_claim_ttl_seconds == 60
+    assert settings.delivery_loop_interval_seconds == 1
+    assert settings.delivery_heartbeat_interval_seconds == 10
+    assert settings.delivery_heartbeat_freshness_seconds == 30
+
+
+@pytest.mark.unit
+def test_delivery_enums_are_closed_and_have_stable_values() -> None:
+    assert tuple(DeliveryKind) == (
+        DeliveryKind.AUTOMATIC,
+        DeliveryKind.MANUAL,
+        DeliveryKind.TEST,
+    )
+    assert tuple(DeliveryState) == (
+        DeliveryState.PENDING,
+        DeliveryState.ENQUEUE_CLAIMED,
+        DeliveryState.QUEUED,
+        DeliveryState.PROCESSING,
+        DeliveryState.RETRY_WAIT,
+        DeliveryState.SUCCEEDED,
+        DeliveryState.DEAD,
+        DeliveryState.CANCELED,
+        DeliveryState.SUPERSEDED,
+    )
+    assert DeliveryState.terminal_states() == frozenset(
+        {
+            DeliveryState.SUCCEEDED,
+            DeliveryState.DEAD,
+            DeliveryState.CANCELED,
+            DeliveryState.SUPERSEDED,
+        }
+    )
+    assert tuple(AttemptState) == (
+        AttemptState.PROCESSING,
+        AttemptState.SUCCEEDED,
+        AttemptState.RETRYABLE,
+        AttemptState.FAILED,
+        AttemptState.CANCELED,
+        AttemptState.SUPERSEDED,
+        AttemptState.OUTCOME_UNKNOWN,
+    )
+    assert AttemptState.terminal_states() == frozenset(set(AttemptState) - {AttemptState.PROCESSING})
+    assert tuple(JobsDispositionKind) == (
+        JobsDispositionKind.COMPLETE,
+        JobsDispositionKind.RETRY,
+        JobsDispositionKind.FAIL,
+        JobsDispositionKind.CANCEL,
+        JobsDispositionKind.DEFER,
+    )
+    assert tuple(EventSourceKind) == (
+        EventSourceKind.AGGREGATE,
+        EventSourceKind.COMMAND,
+    )
+    assert tuple(DeliveryRuntimeComponent) == (
+        DeliveryRuntimeComponent.WORKER,
+        DeliveryRuntimeComponent.RECONCILER,
+        DeliveryRuntimeComponent.RETENTION,
+    )
+    assert {code.value for code in DeliveryReasonCode} >= {
+        "attempt_budget_exhausted",
+        "canceled_disabled",
+        "canceled_secret_rotation",
+        "delivery_expired",
+        "superseded_config",
+        "test_attempt_interrupted",
+    }
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("TLDW_ADMIN_WEBHOOK_DELIVERY_CLAIM_TTL_SECONDS", "4"),
+        ("TLDW_ADMIN_WEBHOOK_DELIVERY_CLAIM_TTL_SECONDS", "301"),
+        ("TLDW_ADMIN_WEBHOOK_DELIVERY_LOOP_INTERVAL_SECONDS", "000"),
+        ("TLDW_ADMIN_WEBHOOK_DELIVERY_LOOP_INTERVAL_SECONDS", "61"),
+        ("TLDW_ADMIN_WEBHOOK_DELIVERY_HEARTBEAT_INTERVAL_SECONDS", "000"),
+        ("TLDW_ADMIN_WEBHOOK_DELIVERY_HEARTBEAT_INTERVAL_SECONDS", "61"),
+        ("TLDW_ADMIN_WEBHOOK_DELIVERY_HEARTBEAT_FRESHNESS_SECONDS", "000"),
+        ("TLDW_ADMIN_WEBHOOK_DELIVERY_HEARTBEAT_FRESHNESS_SECONDS", "61"),
+        ("TLDW_ADMIN_WEBHOOK_DELIVERY_CLAIM_TTL_SECONDS", "not-a-number"),
+    ],
+)
+@pytest.mark.unit
+def test_delivery_settings_reject_invalid_values_without_echoing_them(
+    name: str,
+    value: str,
+) -> None:
+    with pytest.raises(ValueError) as exc_info:
+        AdminWebhookSettings.from_environment({name: value})
+
+    assert name in str(exc_info.value)
+    assert value not in str(exc_info.value)
+
+
+@pytest.mark.unit
+def test_delivery_settings_require_heartbeat_freshness_after_interval() -> None:
+    with pytest.raises(ValueError, match="FRESHNESS"):
+        AdminWebhookSettings.from_environment(
+            {
+                "TLDW_ADMIN_WEBHOOK_DELIVERY_HEARTBEAT_INTERVAL_SECONDS": "30",
+                "TLDW_ADMIN_WEBHOOK_DELIVERY_HEARTBEAT_FRESHNESS_SECONDS": "30",
+            }
+        )
 
 
 @pytest.mark.parametrize("value", ["", "enabled", "disabled"])

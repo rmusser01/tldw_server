@@ -82,6 +82,50 @@ class AdminWebhookSettings:
     allow_http_dev: bool
     idempotency_ttl_seconds: int
     rollback_window_days: int
+    delivery_claim_ttl_seconds: int = 60
+    delivery_loop_interval_seconds: int = 1
+    delivery_heartbeat_interval_seconds: int = 10
+    delivery_heartbeat_freshness_seconds: int = 30
+
+    @property
+    def delivery_retry_delays_seconds(self) -> tuple[int, int, int]:
+        """Return the fixed protocol retry schedule."""
+        return (60, 300, 1800)
+
+    @property
+    def delivery_max_attempts(self) -> int:
+        """Return the hard protocol ceiling for network attempts."""
+        return 4
+
+    @property
+    def jobs_quarantine_threshold(self) -> int:
+        """Return the fixed Jobs quarantine threshold for webhook work."""
+        return 5
+
+    @property
+    def delivery_infrastructure_defer_seconds(self) -> int:
+        """Return the fixed no-attempt infrastructure defer interval."""
+        return 30
+
+    @property
+    def delivery_expiry_seconds(self) -> int:
+        """Return the fixed automatic-delivery expiry interval."""
+        return 72 * 60 * 60
+
+    @property
+    def delivery_retention_days(self) -> int:
+        """Return the fixed terminal-delivery retention interval."""
+        return 30
+
+    @property
+    def delivery_commit_margin_seconds(self) -> int:
+        """Return the fixed pre-I/O commit safety margin."""
+        return 30
+
+    @property
+    def delivery_stale_attempt_margin_seconds(self) -> int:
+        """Return the fixed stale-attempt recovery margin."""
+        return 90
 
     @classmethod
     def from_environment(
@@ -133,6 +177,38 @@ class AdminWebhookSettings:
             7,
             30,
         )
+        delivery_claim_ttl_seconds = _parse_bounded_positive_int(
+            environ,
+            "TLDW_ADMIN_WEBHOOK_DELIVERY_CLAIM_TTL_SECONDS",
+            60,
+            300,
+        )
+        if delivery_claim_ttl_seconds < 5:
+            raise ValueError(
+                "TLDW_ADMIN_WEBHOOK_DELIVERY_CLAIM_TTL_SECONDS must be between 5 and 300"
+            )
+        delivery_loop_interval_seconds = _parse_bounded_positive_int(
+            environ,
+            "TLDW_ADMIN_WEBHOOK_DELIVERY_LOOP_INTERVAL_SECONDS",
+            1,
+            60,
+        )
+        delivery_heartbeat_interval_seconds = _parse_bounded_positive_int(
+            environ,
+            "TLDW_ADMIN_WEBHOOK_DELIVERY_HEARTBEAT_INTERVAL_SECONDS",
+            10,
+            60,
+        )
+        delivery_heartbeat_freshness_seconds = _parse_bounded_positive_int(
+            environ,
+            "TLDW_ADMIN_WEBHOOK_DELIVERY_HEARTBEAT_FRESHNESS_SECONDS",
+            30,
+            60,
+        )
+        if delivery_heartbeat_freshness_seconds <= delivery_heartbeat_interval_seconds:
+            raise ValueError(
+                "TLDW_ADMIN_WEBHOOK_DELIVERY_HEARTBEAT_FRESHNESS_SECONDS must exceed heartbeat interval"
+            )
         return cls(
             mode=mode,
             route_selection=(
@@ -145,4 +221,8 @@ class AdminWebhookSettings:
             allow_http_dev=allow_http_dev,
             idempotency_ttl_seconds=86_400,
             rollback_window_days=rollback_window_days,
+            delivery_claim_ttl_seconds=delivery_claim_ttl_seconds,
+            delivery_loop_interval_seconds=delivery_loop_interval_seconds,
+            delivery_heartbeat_interval_seconds=delivery_heartbeat_interval_seconds,
+            delivery_heartbeat_freshness_seconds=delivery_heartbeat_freshness_seconds,
         )

@@ -60,6 +60,34 @@ _MIGRATION_JSON_COLUMNS = {
     "source_mapping_json": dict,
     "source_rejections_json": list,
 }
+_DELIVERY_SCHEMA_COLUMNS = {
+    "admin_webhook_deliveries": frozenset(
+        {
+            "pending_jobs_disposition_token",
+            "pending_jobs_disposition_not_before_at",
+        }
+    ),
+    "admin_webhook_delivery_attempts": frozenset({"request_timeout_seconds"}),
+    "admin_webhook_runtime_heartbeats": frozenset(
+        {
+            "component",
+            "instance_id",
+            "ready",
+            "reason_code",
+            "heartbeat_at",
+            "last_success_at",
+            "created_at",
+            "updated_at",
+        }
+    ),
+}
+_DELIVERY_SCHEMA_INDEXES = frozenset(
+    {
+        "idx_admin_webhook_deliveries_recovery",
+        "idx_admin_webhook_deliveries_disposition_recovery",
+        "idx_admin_webhook_runtime_heartbeats_freshness",
+    }
+)
 _MIGRATION_MUTABLE_COLUMNS = frozenset(
     {
         "phase",
@@ -880,6 +908,79 @@ class AdminWebhookRepository:
                 connection,
                 is_postgres=self.is_postgres,
             ).get_migration_state(lock=False)
+
+    async def delivery_schema_ready(self) -> bool:
+        """Return whether the additive delivery extension is fully present."""
+        async with self._read_connection() as connection:
+            unit = AdminWebhookUnitOfWork(connection, is_postgres=self.is_postgres)
+            if self.is_postgres:
+                table_rows = await unit._fetch(
+                    """
+                    SELECT table_name
+                    FROM information_schema.tables
+                    WHERE table_schema = current_schema()
+                      AND table_name = ANY(?::text[])
+                    """,
+                    (tuple(_DELIVERY_SCHEMA_COLUMNS),),
+                )
+                column_rows = await unit._fetch(
+                    """
+                    SELECT table_name, column_name
+                    FROM information_schema.columns
+                    WHERE table_schema = current_schema()
+                      AND table_name = ANY(?::text[])
+                    """,
+                    (tuple(_DELIVERY_SCHEMA_COLUMNS),),
+                )
+                index_rows = await unit._fetch(
+                    """
+                    SELECT indexname
+                    FROM pg_indexes
+                    WHERE schemaname = current_schema()
+                      AND indexname = ANY(?::text[])
+                    """,
+                    (tuple(_DELIVERY_SCHEMA_INDEXES),),
+                )
+                tables = {str(row["table_name"]) for row in table_rows}
+                indexes = {str(row["indexname"]) for row in index_rows}
+            else:
+                table_rows = await unit._fetch(
+                    """
+                    SELECT name
+                    FROM sqlite_master
+                    WHERE type = 'table' AND name IN (?, ?, ?)
+                    """,
+                    tuple(_DELIVERY_SCHEMA_COLUMNS),
+                )
+                columns = {table: set() for table in _DELIVERY_SCHEMA_COLUMNS}
+                for table in _DELIVERY_SCHEMA_COLUMNS:
+                    rows = await unit._fetch(f"PRAGMA table_info({table})")
+                    columns[table] = {str(row["name"]) for row in rows}
+                index_rows = await unit._fetch(
+                    """
+                    SELECT name
+                    FROM sqlite_master
+                    WHERE type = 'index' AND name IN (?, ?, ?)
+                    """,
+                    tuple(_DELIVERY_SCHEMA_INDEXES),
+                )
+                tables = {str(row["name"]) for row in table_rows}
+                indexes = {str(row["name"]) for row in index_rows}
+
+            if self.is_postgres:
+                columns = {table: set() for table in _DELIVERY_SCHEMA_COLUMNS}
+                for row in column_rows:
+                    table = str(row["table_name"])
+                    column = str(row["column_name"])
+                    columns[table].add(column)
+            return (
+                tables == set(_DELIVERY_SCHEMA_COLUMNS)
+                and all(
+                    required <= columns[table]
+                    for table, required in _DELIVERY_SCHEMA_COLUMNS.items()
+                )
+                and indexes == _DELIVERY_SCHEMA_INDEXES
+            )
 
     async def get_legacy_import_snapshot(self) -> LegacyImportDatabaseSnapshot:
         """Read legacy rows and canonical ID-allocation state without mutation."""

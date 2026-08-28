@@ -6,10 +6,16 @@ from pathlib import Path
 import pytest
 
 from tldw_Server_API.app.core.AuthNZ import migrations
+from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
 from tldw_Server_API.app.core.AuthNZ.migrations import (
     CANONICAL_ADMIN_WEBHOOK_SQLITE_DDL,
     apply_authnz_migrations,
     migration_094_create_canonical_admin_webhook_tables,
+    migration_096_add_admin_webhook_delivery_recovery,
+)
+from tldw_Server_API.app.core.AuthNZ.settings import Settings
+from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
+    AdminWebhookRepository,
 )
 
 CANONICAL_TABLES = {
@@ -20,6 +26,7 @@ CANONICAL_TABLES = {
     "admin_webhook_delivery_attempts",
     "admin_webhook_idempotency",
     "admin_webhook_migration_state",
+    "admin_webhook_runtime_heartbeats",
 }
 
 EXPECTED_COLUMNS = {
@@ -82,6 +89,8 @@ EXPECTED_COLUMNS = {
         "reason_code",
         "pending_jobs_disposition",
         "pending_jobs_disposition_delay_seconds",
+        "pending_jobs_disposition_token",
+        "pending_jobs_disposition_not_before_at",
         "jobs_disposition_applied",
         "completed_after_config_change",
         "terminal_at",
@@ -104,8 +113,19 @@ EXPECTED_COLUMNS = {
         "latency_ms",
         "reason_code",
         "requested_retry_delay_seconds",
+        "request_timeout_seconds",
         "jobs_disposition_applied",
         "created_at",
+    },
+    "admin_webhook_runtime_heartbeats": {
+        "component",
+        "instance_id",
+        "ready",
+        "reason_code",
+        "heartbeat_at",
+        "last_success_at",
+        "created_at",
+        "updated_at",
     },
     "admin_webhook_idempotency": {
         "id",
@@ -257,9 +277,9 @@ def _insert_command_event(conn: sqlite3.Connection, event_id: str = "event-1") -
     )
 
 
-@pytest.mark.parametrize("starting_version", [0, 79, 80, 82, 93])
+@pytest.mark.parametrize("starting_version", [0, 79, 80, 82, 93, 94])
 @pytest.mark.unit
-def test_sqlite_094_is_additive_across_supported_upgrade_points(
+def test_sqlite_095_is_additive_across_supported_upgrade_points(
     tmp_path: Path,
     starting_version: int,
 ) -> None:
@@ -301,7 +321,7 @@ def test_sqlite_094_is_additive_across_supported_upgrade_points(
         names = _table_names(conn)
         assert names >= CANONICAL_TABLES
         assert names >= {"admin_webhooks", "admin_webhooks_delivery_log"}
-        assert _current_schema_version(conn) == 94
+        assert _current_schema_version(conn) == 96
         if legacy_row is not None:
             assert conn.execute(
                 "SELECT * FROM admin_webhooks WHERE id = 44"
@@ -313,6 +333,7 @@ def test_sqlite_094_has_exact_columns_foreign_keys_and_seed_state() -> None:
     conn = sqlite3.connect(":memory:")
     conn.execute("PRAGMA foreign_keys = ON")
     migration_094_create_canonical_admin_webhook_tables(conn)
+    migration_096_add_admin_webhook_delivery_recovery(conn)
 
     assert _table_names(conn) >= CANONICAL_TABLES
     for table, expected in EXPECTED_COLUMNS.items():
@@ -358,6 +379,106 @@ def test_sqlite_094_has_exact_columns_foreign_keys_and_seed_state() -> None:
         "redelivery_of_id",
         "id",
     ) in delivery_fks
+
+
+@pytest.mark.unit
+def test_sqlite_096_preserves_094_rows_and_enforces_new_schema_bounds() -> None:
+    conn = sqlite3.connect(":memory:")
+    conn.execute("PRAGMA foreign_keys = ON")
+    migration_094_create_canonical_admin_webhook_tables(conn)
+    _insert_registration(conn)
+    _insert_command_event(conn)
+    conn.execute(
+        """
+        INSERT INTO admin_webhook_deliveries (
+            id, event_id, webhook_id, kind, delivery_config_version,
+            secret_version, state, expires_at
+        ) VALUES ('delivery-1', 'event-1', 1, 'automatic', 1, 1,
+                  'pending', '2026-07-04T00:00:00Z')
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO admin_webhook_delivery_attempts (
+            id, delivery_id, attempt_number, test_attempt_token, started_at, state
+        ) VALUES ('attempt-1', 'delivery-1', 1, 'test-token',
+                  '2026-07-01T00:00:00Z', 'processing')
+        """
+    )
+
+    migration_096_add_admin_webhook_delivery_recovery(conn)
+    migration_096_add_admin_webhook_delivery_recovery(conn)
+
+    assert conn.execute(
+        "SELECT id, state FROM admin_webhook_deliveries WHERE id = 'delivery-1'"
+    ).fetchone() == ("delivery-1", "pending")
+    assert conn.execute(
+        "SELECT id, request_timeout_seconds FROM admin_webhook_delivery_attempts"
+    ).fetchone() == ("attempt-1", None)
+    assert conn.execute(
+        "SELECT schema_version FROM admin_webhook_migration_state WHERE singleton_id = 1"
+    ).fetchone() == (1,)
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            """
+            INSERT INTO admin_webhook_runtime_heartbeats (
+                component, instance_id, ready, heartbeat_at
+            ) VALUES ('unknown', 'instance-1', 1, '2026-07-01T00:00:00Z')
+            """
+        )
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            """
+            UPDATE admin_webhook_deliveries
+            SET pending_jobs_disposition_token = ? WHERE id = 'delivery-1'
+            """,
+            ("x" * 256,),
+        )
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            """
+            INSERT INTO admin_webhook_runtime_heartbeats (
+                component, instance_id, ready, heartbeat_at
+            ) VALUES ('worker', ?, 1, '2026-07-01T00:00:00Z')
+            """,
+            ("x" * 129,),
+        )
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            """
+            UPDATE admin_webhook_delivery_attempts
+            SET request_timeout_seconds = 31 WHERE id = 'attempt-1'
+            """
+        )
+
+
+@pytest.mark.unit
+async def test_sqlite_delivery_schema_ready_requires_the_095_extension(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "delivery-schema-ready.db"
+    apply_authnz_migrations(db_path)
+    pool = DatabasePool(
+        Settings(AUTH_MODE="single_user", DATABASE_URL=f"sqlite:///{db_path}")
+    )
+    await pool.initialize()
+    try:
+        repository = AdminWebhookRepository(pool)
+        assert await repository.delivery_schema_ready() is True
+    finally:
+        await pool.close()
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("DROP INDEX idx_admin_webhook_runtime_heartbeats_freshness")
+
+    incomplete_pool = DatabasePool(
+        Settings(AUTH_MODE="single_user", DATABASE_URL=f"sqlite:///{db_path}")
+    )
+    await incomplete_pool.initialize()
+    try:
+        assert await AdminWebhookRepository(incomplete_pool).delivery_schema_ready() is False
+    finally:
+        await incomplete_pool.close()
 
 
 @pytest.mark.unit

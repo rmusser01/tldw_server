@@ -3135,6 +3135,67 @@ CANONICAL_ADMIN_WEBHOOK_POSTGRES_DDL = (
 )
 
 
+ADMIN_WEBHOOK_DELIVERY_RECOVERY_POSTGRES_DDL = (
+    """
+    ALTER TABLE admin_webhook_deliveries
+    ADD COLUMN IF NOT EXISTS pending_jobs_disposition_token TEXT
+        CHECK (
+            pending_jobs_disposition_token IS NULL
+            OR char_length(pending_jobs_disposition_token) BETWEEN 1 AND 255
+        )
+    """,
+    """
+    ALTER TABLE admin_webhook_deliveries
+    ADD COLUMN IF NOT EXISTS pending_jobs_disposition_not_before_at TIMESTAMPTZ
+    """,
+    """
+    ALTER TABLE admin_webhook_delivery_attempts
+    ADD COLUMN IF NOT EXISTS request_timeout_seconds INTEGER
+        CHECK (
+            request_timeout_seconds IS NULL
+            OR request_timeout_seconds BETWEEN 1 AND 30
+        )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS admin_webhook_runtime_heartbeats (
+        component TEXT NOT NULL CHECK (
+            component IN ('worker', 'reconciler', 'retention')
+        ),
+        instance_id TEXT NOT NULL CHECK (char_length(instance_id) BETWEEN 1 AND 128),
+        ready BOOLEAN NOT NULL,
+        reason_code TEXT CHECK (
+            reason_code IS NULL OR char_length(reason_code) BETWEEN 1 AND 128
+        ),
+        heartbeat_at TIMESTAMPTZ NOT NULL,
+        last_success_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (component, instance_id)
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_admin_webhook_deliveries_recovery
+    ON admin_webhook_deliveries(
+        state, enqueue_claim_expires_at, expires_at, created_at
+    )
+    WHERE state IN ('pending', 'enqueue_claimed')
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_admin_webhook_deliveries_disposition_recovery
+    ON admin_webhook_deliveries(
+        jobs_disposition_applied,
+        pending_jobs_disposition_not_before_at,
+        updated_at
+    )
+    WHERE pending_jobs_disposition IS NOT NULL
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_admin_webhook_runtime_heartbeats_freshness
+    ON admin_webhook_runtime_heartbeats(component, ready, heartbeat_at DESC)
+    """,
+)
+
+
 async def ensure_admin_webhook_canonical_tables_pg(
     pool: DatabasePool | None = None,
 ) -> bool:
@@ -3145,6 +3206,8 @@ async def ensure_admin_webhook_canonical_tables_pg(
             return False
         async with db_pool.transaction() as conn:
             for statement in CANONICAL_ADMIN_WEBHOOK_POSTGRES_DDL:
+                await conn.execute(statement)
+            for statement in ADMIN_WEBHOOK_DELIVERY_RECOVERY_POSTGRES_DDL:
                 await conn.execute(statement)
             await conn.execute(
                 """

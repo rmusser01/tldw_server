@@ -1977,6 +1977,93 @@ def migration_095_seed_notes_graph_suggestion_permissions(conn: sqlite3.Connecti
     logger.info("Migration 095: Seeded Notes graph suggestion permissions")
 
 
+def migration_096_add_admin_webhook_delivery_recovery(
+    conn: sqlite3.Connection,
+) -> None:
+    """Add the canonical delivery recovery and runtime-heartbeat extension."""
+    delivery_columns = {
+        str(row[1])
+        for row in conn.execute("PRAGMA table_info(admin_webhook_deliveries)").fetchall()
+    }
+    required_delivery_columns = (
+        (
+            "pending_jobs_disposition_token",
+            "ALTER TABLE admin_webhook_deliveries "
+            "ADD COLUMN pending_jobs_disposition_token TEXT CHECK ("
+            "pending_jobs_disposition_token IS NULL "
+            "OR length(pending_jobs_disposition_token) BETWEEN 1 AND 255)",
+        ),
+        (
+            "pending_jobs_disposition_not_before_at",
+            "ALTER TABLE admin_webhook_deliveries "
+            "ADD COLUMN pending_jobs_disposition_not_before_at TEXT",
+        ),
+    )
+    for column, statement in required_delivery_columns:
+        if column not in delivery_columns:
+            conn.execute(statement)
+
+    attempt_columns = {
+        str(row[1])
+        for row in conn.execute(
+            "PRAGMA table_info(admin_webhook_delivery_attempts)"
+        ).fetchall()
+    }
+    if "request_timeout_seconds" not in attempt_columns:
+        conn.execute(
+            "ALTER TABLE admin_webhook_delivery_attempts "
+            "ADD COLUMN request_timeout_seconds INTEGER "
+            "CHECK (request_timeout_seconds BETWEEN 1 AND 30)"
+        )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS admin_webhook_runtime_heartbeats (
+            component TEXT NOT NULL CHECK (
+                component IN ('worker', 'reconciler', 'retention')
+            ),
+            instance_id TEXT NOT NULL CHECK (length(instance_id) BETWEEN 1 AND 128),
+            ready INTEGER NOT NULL CHECK (ready IN (0, 1)),
+            reason_code TEXT CHECK (
+                reason_code IS NULL OR length(reason_code) BETWEEN 1 AND 128
+            ),
+            heartbeat_at TEXT NOT NULL,
+            last_success_at TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (component, instance_id)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_admin_webhook_deliveries_recovery
+        ON admin_webhook_deliveries(
+            state, enqueue_claim_expires_at, expires_at, created_at
+        )
+        WHERE state IN ('pending', 'enqueue_claimed')
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_admin_webhook_deliveries_disposition_recovery
+        ON admin_webhook_deliveries(
+            jobs_disposition_applied,
+            pending_jobs_disposition_not_before_at,
+            updated_at
+        )
+        WHERE pending_jobs_disposition IS NOT NULL
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_admin_webhook_runtime_heartbeats_freshness
+        ON admin_webhook_runtime_heartbeats(component, ready, heartbeat_at DESC)
+        """
+    )
+    logger.info("Migration 096: Added admin webhook delivery recovery schema")
+
+
 def rollback_086_drop_prototype_workspace_tables(conn: sqlite3.Connection) -> None:
     """Rollback migration 086 by dropping prototype workspace metadata tables."""
     conn.execute("DROP TABLE IF EXISTS prototype_promotion_requests")
@@ -6273,6 +6360,11 @@ def get_authnz_migrations() -> list[Migration]:
             95,
             "Seed Notes graph suggestion permissions",
             migration_095_seed_notes_graph_suggestion_permissions,
+        ),
+        Migration(
+            96,
+            "Add admin webhook delivery recovery schema",
+            migration_096_add_admin_webhook_delivery_recovery,
         ),
     ]
 

@@ -6,6 +6,9 @@ import pytest
 from tldw_Server_API.app.core.AuthNZ.pg_migrations_extra import (
     ensure_admin_webhook_canonical_tables_pg,
 )
+from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
+    AdminWebhookRepository,
+)
 from tldw_Server_API.tests.Admin_Webhooks.test_migration_sqlite import (
     EXPECTED_COLUMNS,
 )
@@ -21,6 +24,7 @@ CANONICAL_TABLES = {
     "admin_webhook_delivery_attempts",
     "admin_webhook_idempotency",
     "admin_webhook_migration_state",
+    "admin_webhook_runtime_heartbeats",
 }
 
 
@@ -106,6 +110,7 @@ async def test_postgres_schema_is_additive_idempotent_and_preserves_legacy_rows(
 
     assert await ensure_admin_webhook_canonical_tables_pg(test_db_pool)
     assert await ensure_admin_webhook_canonical_tables_pg(test_db_pool)
+    assert await AdminWebhookRepository(test_db_pool).delivery_schema_ready() is True
 
     rows = await test_db_pool.fetch(
         """
@@ -172,6 +177,17 @@ async def test_postgres_schema_is_additive_idempotent_and_preserves_legacy_rows(
         "source_rejections_json": "[]",
         "rollback_retirement_phase": "not_applicable",
     }
+
+
+@pytest.mark.integration
+async def test_postgres_delivery_schema_ready_requires_recovery_indexes(test_db_pool) -> None:
+    assert await ensure_admin_webhook_canonical_tables_pg(test_db_pool)
+    repository = AdminWebhookRepository(test_db_pool)
+    assert await repository.delivery_schema_ready() is True
+
+    await test_db_pool.execute("DROP INDEX idx_admin_webhook_runtime_heartbeats_freshness")
+
+    assert await repository.delivery_schema_ready() is False
 
 
 @pytest.mark.integration
