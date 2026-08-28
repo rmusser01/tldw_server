@@ -1,6 +1,6 @@
 # Agent-Native Web Research Quality and Provenance Roadmap
 
-**Status:** Proposed after current-dev reconciliation
+**Status:** Approved 2026-08-27
 
 **Program task:** TASK-13139
 
@@ -8,7 +8,7 @@
 
 **Source comparison:** [DonSeTch](https://github.com/dondai44423/donsetch)
 
-**Reconciled base:** `origin/dev` at `24f79419061ba85e9273b38a05431d6fd46ca40f`
+**Reconciled base:** `origin/dev` at `9fd2246157ce8a32ae6a6691a75efab788229f77`
 
 ## 1. Purpose
 
