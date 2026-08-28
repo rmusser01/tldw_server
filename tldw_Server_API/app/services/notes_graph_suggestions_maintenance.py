@@ -12,6 +12,7 @@ from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
     get_chacha_db_for_user_id,
 )
 from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDBError
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Notes_Graph.suggestion_maintenance import (
     MaintenancePassResult,
@@ -22,6 +23,7 @@ from tldw_Server_API.app.core.Notes_Graph.suggestion_maintenance import (
 
 _MAINTENANCE_ERRORS = (
     AttributeError,
+    CharactersRAGDBError,
     ConnectionError,
     OSError,
     RuntimeError,
@@ -76,15 +78,30 @@ class _MaintenanceRunner:
                             MaintenanceScope(store, dataset)
                             for dataset in store.list_maintenance_dataset_ids(limit=100)
                         )
+                        owner_claimed = 0
+
+                        def account_claims(count: int) -> None:
+                            nonlocal claimed, owner_claimed, remaining
+                            if count < 0 or count > remaining:
+                                raise RuntimeError("notes_graph_maintenance_budget_invalid")
+                            claimed += count
+                            owner_claimed += count
+                            remaining -= count
+
                         result = SuggestionMaintenance(
                             jobs=self._jobs,
                             scopes=scopes,
-                        ).run_pass(now=now, limit=remaining)
-                        claimed += result.claimed
+                        ).run_pass(
+                            now=now,
+                            limit=remaining,
+                            on_claimed=account_claims,
+                        )
+                        if result.claimed != owner_claimed:
+                            raise RuntimeError("notes_graph_maintenance_budget_invalid")
                         reconciled += result.reconciled
                         released += result.released
                         cleaned += result.cleaned
-                        remaining -= min(remaining, result.claimed + result.cleaned)
+                        remaining -= min(remaining, result.cleaned)
                     except _MAINTENANCE_ERRORS:
                         logger.warning("Notes graph suggestions owner maintenance failed safely")
                     finally:

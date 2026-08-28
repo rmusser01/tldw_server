@@ -283,7 +283,13 @@ class SuggestionMaintenance:
             error_code=error_code,
         )
 
-    def run_pass(self, *, now: datetime, limit: int = 100) -> MaintenancePassResult:
+    def run_pass(
+        self,
+        *,
+        now: datetime,
+        limit: int = 100,
+        on_claimed: Callable[[int], None] | None = None,
+    ) -> MaintenancePassResult:
         if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
             raise ValueError("notes_graph_maintenance_limit_invalid")
         remaining = limit
@@ -298,6 +304,8 @@ class SuggestionMaintenance:
             )
             claimed += len(runs)
             remaining -= len(runs)
+            if runs and on_claimed is not None:
+                on_claimed(len(runs))
             for run in runs:
                 cancellation_context = None
                 try:
@@ -360,11 +368,14 @@ class SuggestionMaintenance:
                 break
             if scope.decision_service is None:
                 continue
-            decisions = scope.decision_service.reconcile_expired(
-                dataset_id=scope.dataset_id,
-                limit=acceptance_remaining,
-                now=now,
-            )
+            reconciliation_kwargs = {
+                "dataset_id": scope.dataset_id,
+                "limit": acceptance_remaining,
+                "now": now,
+            }
+            if on_claimed is not None:
+                reconciliation_kwargs["on_claimed"] = on_claimed
+            decisions = scope.decision_service.reconcile_expired(**reconciliation_kwargs)
             claimed += len(decisions)
             reconciled += len(decisions)
             acceptance_remaining -= min(acceptance_remaining, len(decisions))

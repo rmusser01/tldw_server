@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDBError
 from tldw_Server_API.app.core.Notes_Graph.suggestion_maintenance import (
     MaintenanceScope,
     SuggestionMaintenance,
@@ -198,6 +199,29 @@ def test_maintenance_shares_run_and_acceptance_claim_budget_at_exact_cap() -> No
     assert store.cleaned == []
 
 
+def test_maintenance_reports_acceptance_claims_before_reconciliation_failure() -> None:
+    class Store(_ClaimStore):
+        def __init__(self) -> None:
+            super().__init__(0)
+
+    class Decisions:
+        @staticmethod
+        def reconcile_expired(*, on_claimed, **_kwargs):
+            on_claimed(30)
+            raise RuntimeError("acceptance reconciliation failed after claim")
+
+    claimed: list[int] = []
+    maintenance = SuggestionMaintenance(
+        jobs=_UnavailableJobs(),
+        scopes=(MaintenanceScope(Store(), "dataset-1", Decisions()),),
+    )
+
+    with pytest.raises(RuntimeError, match="failed after claim"):
+        maintenance.run_pass(now=NOW, on_claimed=claimed.append)
+
+    assert claimed == [30]
+
+
 @pytest.mark.asyncio
 async def test_maintenance_loop_runs_at_most_once_per_minute() -> None:
     stop = asyncio.Event()
@@ -376,7 +400,7 @@ async def test_maintenance_isolates_owner_failures_and_closes_each_database_prom
         def claim_runs_for_maintenance(self, *, limit, **kwargs):
             events.append(("claim", self.owner, limit))
             if self.owner == "2" and failure_point == "maintenance":
-                raise RuntimeError("broken owner maintenance")
+                raise CharactersRAGDBError("broken owner maintenance")
             return super().claim_runs_for_maintenance(limit=limit, **kwargs)
 
     class Database:
@@ -416,6 +440,80 @@ async def test_maintenance_isolates_owner_failures_and_closes_each_database_prom
     if failure_point != "open":
         assert events.index(("close", "2", None)) < events.index(("open", "3", None))
     assert events[-1] == ("close", "3", None)
+
+
+@pytest.mark.asyncio
+async def test_maintenance_debits_claims_before_owner_reconciliation_failure(
+    monkeypatch,
+) -> None:
+    stores: dict[str, _ClaimStore] = {}
+
+    class UsersRepo:
+        async def list_users(self, *, offset, limit):
+            assert (offset, limit) == (0, 200)
+            return ([{"id": 1}, {"id": 2}], 2)
+
+    class Store(_ClaimStore):
+        def __init__(self, owner: str) -> None:
+            super().__init__(80)
+            self.owner = owner
+
+        def list_maintenance_dataset_ids(self, *, limit):
+            assert limit == 100
+            return (f"dataset-{self.owner}",)
+
+        def claim_runs_for_maintenance(self, *, limit, **kwargs):
+            runs = super().claim_runs_for_maintenance(limit=limit, **kwargs)
+            for run in runs:
+                run.owner_user_id = f"owner-{self.owner}"
+            return runs
+
+        def reconcile_run_after_job_lookup(self, **_kwargs):
+            if self.owner == "1":
+                raise CharactersRAGDBError("owner reconciliation failed after claim")
+            raise AssertionError("healthy owner jobs should remain nonterminal")
+
+    class Database:
+        def __init__(self, owner: str) -> None:
+            self.store = Store(owner)
+            self.note_graph_suggestion_store = self.store
+            stores[owner] = self.store
+
+        def release_context_connection(self):
+            return None
+
+    async def get_database(user_id, *, client_id):
+        assert client_id == str(user_id)
+        return Database(str(user_id))
+
+    class Jobs:
+        @staticmethod
+        def get_job_or_archived_by_uuid(job_id, *, owner_user_id, **_kwargs):
+            if owner_user_id != "owner-1":
+                return None
+            return {
+                "uuid": job_id,
+                "owner_user_id": owner_user_id,
+                "domain": "notes",
+                "queue": "graph-suggestions",
+                "job_type": "note_graph_suggestions",
+                "status": "completed",
+            }
+
+    monkeypatch.setattr(
+        notes_graph_suggestions_maintenance,
+        "get_chacha_db_for_user_id",
+        get_database,
+    )
+    result = await notes_graph_suggestions_maintenance._MaintenanceRunner(
+        jobs=Jobs(),
+        users_repo=UsersRepo(),
+    ).run_pass(now=NOW)
+
+    assert stores["1"].claim_limits == [100]
+    assert stores["2"].claim_limits == [20]
+    assert result.claimed == 100
+    assert result.released == 20
 
 
 def test_maintenance_resumes_cancellation_receipt_with_guarded_jobs_command(

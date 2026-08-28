@@ -484,6 +484,7 @@ class SuggestionDecisionService:
         dataset_id: str,
         limit: int = 100,
         now: datetime | None = None,
+        on_claimed: Callable[[int], None] | None = None,
     ) -> tuple[MutationResult, ...]:
         """Resolve a bounded claimed set without creating canonical product state."""
 
@@ -493,6 +494,8 @@ class SuggestionDecisionService:
             limit=limit,
             now=reconciliation_time,
         )
+        if claims and on_claimed is not None:
+            on_claimed(len(claims))
         results: list[MutationResult] = []
         for fence in claims:
             result = self._resolve(fence, now=reconciliation_time)

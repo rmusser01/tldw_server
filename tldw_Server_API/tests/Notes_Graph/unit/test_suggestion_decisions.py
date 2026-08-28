@@ -255,6 +255,30 @@ def test_reconciliation_only_calls_store_resolution_and_never_mutates_product() 
     assert organization.captures == []
 
 
+def test_reconcile_expired_reports_claims_before_resolution_failure() -> None:
+    class FailingStore(FakeStore):
+        def resolve_expired_acceptance(self, **_kwargs: Any) -> MutationResult:
+            raise RuntimeError("acceptance reconciliation failed after claim")
+
+    store = FailingStore(_suggestion(NoteGraphSuggestionKind.RELATED_NOTE))
+    service = SuggestionDecisionService(
+        store=store,
+        link_coordinator=FakeLinkCoordinator(),
+        organization_coordinator=FakeOrganizationCoordinator(),
+        clock=lambda: NOW,
+    )
+    claimed: list[int] = []
+
+    with pytest.raises(RuntimeError, match="failed after claim"):
+        service.reconcile_expired(
+            dataset_id="dataset-1",
+            limit=100,
+            on_claimed=claimed.append,
+        )
+
+    assert claimed == [1]
+
+
 def test_maintenance_runs_acceptance_reconciliation_without_generation_authority() -> None:
     class MaintenanceStore:
         def claim_runs_for_maintenance(self, **_kwargs: Any) -> tuple[()]:
