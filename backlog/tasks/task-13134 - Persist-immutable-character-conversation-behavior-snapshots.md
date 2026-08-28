@@ -4,7 +4,7 @@ title: Persist immutable character-conversation behavior snapshots
 status: In Progress
 assignee: []
 created_date: 2026-08-28 05:06
-updated_date: 2026-08-28 06:50
+updated_date: 2026-08-28 08:41
 labels:
 - character-chat
 - api
@@ -61,4 +61,5 @@ Reason: This changes persistent schema, historical-data policy, and conversation
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Stage 1 canonical snapshot checkpoint completed. TDD evidence: initial collection RED because the module was absent; fail-closed/hardening RED reached 10 failing new cases; final targeted suite passed 49 tests. Independent specification review PASS and code-quality review PASS after hardening. Targeted Ruff, Bandit, and git diff checks passed. Commits: 2b17ba3819 and 5bae47f9b6.
+Stage 2 storage checkpoint completed. Allocated ChaCha schema v55 from verified v54 head for SQLite and PostgreSQL; added fail-closed immutable snapshot storage, explicit legacy missing reads, settings/history fences, caller-owned transaction seams, and exactly-once prompt-history fencing including image, metadata/pin, and atomic Sync append/tombstone paths. TDD began with 9/9 migration failures and successive focused RED cases for integrity/atomicity gaps. Final evidence: required migration/PostgreSQL suite 43 passed, existing Sync tests 9 passed, writable-path message/hydration regressions 33 passed, independent specification review PASS, independent quality/security review PASS, Ruff/Bandit/diff checks passed with only documented pre-existing lint debt. Commits: c9dbdf1bde, 2788284c4a, ff4ea7ac80, c15b8c4173.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
