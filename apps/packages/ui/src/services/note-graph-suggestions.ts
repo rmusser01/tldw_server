@@ -6,8 +6,6 @@ import { z } from "zod"
 const FINGERPRINT = /^sha256:[0-9a-f]{64}$/
 const STRONG_ETAG = /^"(sha256:[0-9a-f]{64})"$/
 const MAX_LIST_ITEMS = 100
-const MAX_GRAPH_NODES = 2000
-const MAX_GRAPH_EDGES = 8000
 const MAX_CURSOR_LENGTH = 4096
 
 const ERROR_MESSAGES = {
@@ -75,11 +73,17 @@ const RUN_ERROR_CODES = new Set([
   "notes_graph_capabilities_changed_before_provider",
   "notes_graph_fingerprint_stale",
   "notes_graph_fts_not_ready",
+  "notes_graph_job_missing",
+  "notes_graph_publication_receipt_mismatch",
+  "notes_graph_publication_receipt_missing",
+  "notes_graph_publication_state_missing",
   "notes_graph_provider_retry_policy_unsupported",
   "notes_graph_provider_unavailable",
+  "notes_graph_source_changed",
   "notes_graph_source_too_large",
   "notes_graph_suggestion_no_valid_items",
-  "notes_graph_suggestion_suppression_limit"
+  "notes_graph_suggestion_suppression_limit",
+  "notes_graph_target_changed"
 ])
 
 const RUN_GUIDANCE_KEYS = new Set([
@@ -119,11 +123,11 @@ export type NotesGraphNode = {
   id: string
   type: "note" | "tag" | "source"
   label: string
-  created_at?: string | null
-  deleted?: boolean | null
-  degree?: number | null
-  tag_count?: number | null
-  primary_source_id?: string | null
+  created_at: string | null
+  deleted: boolean | null
+  degree: number | null
+  tag_count: number | null
+  primary_source_id: string | null
 }
 
 export type NotesGraphEdge = {
@@ -372,28 +376,19 @@ const truncateCodePoints = (value: string, maximum: number): string =>
 const boundedTextSchema = (maximum: number) =>
   z.string().transform((value) => truncateCodePoints(value, maximum))
 
-const idSchema = z
-  .string()
-  .min(1)
-  .refine((value) => Array.from(value).length <= 512)
-const inputIdSchema = z
-  .string()
-  .trim()
-  .min(1)
-  .refine((value) => Array.from(value).length <= 512)
+const idSchema = z.string().min(1)
+const inputIdSchema = z.string().trim().min(1)
+const boundedInputTextSchema = (maximum: number) =>
+  inputIdSchema.refine((value) => Array.from(value).length <= maximum)
+const datasetIdSchema = boundedInputTextSchema(256)
+const idempotencyKeySchema = boundedInputTextSchema(256)
+const providerInputSchema = boundedInputTextSchema(128)
+const modelInputSchema = boundedInputTextSchema(256)
 const fingerprintSchema = z.string().regex(FINGERPRINT)
 const cursorSchema = z.string().max(MAX_CURSOR_LENGTH)
-const safeCountSchema = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)
-const positiveRevisionSchema = z
-  .number()
-  .int()
-  .min(1)
-  .max(Number.MAX_SAFE_INTEGER)
-const nonnegativeRevisionSchema = z
-  .number()
-  .int()
-  .min(0)
-  .max(Number.MAX_SAFE_INTEGER)
+const safeCountSchema = z.number().int().min(0)
+const positiveRevisionSchema = z.number().int().min(1)
+const nonnegativeRevisionSchema = z.number().int().min(0)
 
 const edgeTypeSchema = z.enum([
   "manual",
@@ -537,12 +532,12 @@ const request = async <T>(
 const graphNodeSchema = z.strictObject({
   id: idSchema,
   type: z.enum(["note", "tag", "source"]),
-  label: boundedTextSchema(512),
-  created_at: boundedTextSchema(64).nullable().optional(),
-  deleted: z.boolean().nullable().optional(),
-  degree: z.number().int().min(0).max(MAX_GRAPH_EDGES).nullable().optional(),
-  tag_count: z.number().int().min(0).max(MAX_GRAPH_NODES).nullable().optional(),
-  primary_source_id: idSchema.nullable().optional()
+  label: z.string(),
+  created_at: z.string().nullable(),
+  deleted: z.boolean().nullable(),
+  degree: z.number().int().min(0).nullable(),
+  tag_count: z.number().int().min(0).nullable(),
+  primary_source_id: idSchema.nullable()
 })
 
 const graphEdgeSchema = z.strictObject({
@@ -551,60 +546,39 @@ const graphEdgeSchema = z.strictObject({
   target: idSchema,
   type: edgeTypeSchema,
   directed: z.boolean(),
-  weight: z.number().finite().min(0).nullable().optional().default(null),
-  label: boundedTextSchema(256).nullable().optional().default(null)
+  weight: z.number().finite().min(0).nullable(),
+  label: z.string().nullable()
 })
 
 const graphResponseSchema = z.strictObject({
-  nodes: z.array(graphNodeSchema).max(MAX_GRAPH_NODES),
-  edges: z.array(graphEdgeSchema).max(MAX_GRAPH_EDGES),
+  nodes: z.array(graphNodeSchema),
+  edges: z.array(graphEdgeSchema),
   truncated: z.boolean(),
-  truncated_by: z
-    .array(boundedTextSchema(64))
-    .transform((items) => items.slice(0, 16)),
+  truncated_by: z.array(z.string()),
   has_more: z.boolean(),
   cursor: cursorSchema.nullable(),
   limits: z.strictObject({
-    max_nodes: z.number().int().min(1).max(MAX_GRAPH_NODES),
-    max_edges: z.number().int().min(0).max(MAX_GRAPH_EDGES),
-    max_degree: z.number().int().min(1).max(MAX_GRAPH_NODES)
+    max_nodes: z.number().int().min(1),
+    max_edges: z.number().int().min(0),
+    max_degree: z.number().int().min(1)
   }),
   radius_cap_applied: z.boolean(),
   active_note_count: safeCountSchema,
-  all_notes_note_cap: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+  all_notes_note_cap: z.number().int().min(1),
   all_notes_eligible: z.boolean()
 })
 
 const graphInputSchema = z.strictObject({
   centerNoteId: inputIdSchema.optional(),
-  datasetId: inputIdSchema.optional(),
+  datasetId: datasetIdSchema.optional(),
   radius: z
     .union([z.literal(1), z.literal(2)])
     .optional()
     .default(1),
-  edgeTypes: z.array(edgeTypeSchema).max(5).optional().default([]),
-  maxNodes: z
-    .number()
-    .int()
-    .min(1)
-    .optional()
-    .default(120)
-    .transform((value) => Math.min(value, MAX_GRAPH_NODES)),
-  maxEdges: z
-    .number()
-    .int()
-    .min(0)
-    .optional()
-    .default(480)
-    .transform((value) => Math.min(value, MAX_GRAPH_EDGES)),
-  maxDegree: z
-    .number()
-    .int()
-    .min(1)
-    .optional()
-    .transform((value) =>
-      value == null ? undefined : Math.min(value, MAX_GRAPH_NODES)
-    ),
+  edgeTypes: z.array(edgeTypeSchema).optional().default([]),
+  maxNodes: z.number().int().min(1).optional().default(120),
+  maxEdges: z.number().int().min(0).optional().default(480),
+  maxDegree: z.number().int().min(1).optional(),
   cursor: cursorSchema.optional()
 })
 
@@ -641,12 +615,12 @@ export const fetchNotesGraph = async (
 }
 
 const capabilitySchema = z.strictObject({
-  provider: boundedTextSchema(128),
-  model: boundedTextSchema(256),
+  provider: z.string(),
+  model: z.string(),
   endpoint_origin_revision: fingerprintSchema,
   data_boundary: z.enum(["local", "remote", "unknown"]),
   disclosure_external: z.boolean(),
-  outbound_data_categories: z.array(outboundCategorySchema).max(5),
+  outbound_data_categories: z.array(outboundCategorySchema),
   generation_available: z.boolean(),
   unavailable_reason: z
     .string()
@@ -665,7 +639,7 @@ const capabilitySchema = z.strictObject({
     provider_timeout_seconds: z.number().int().min(1).max(120),
     response_candidates: z.literal(1)
   }),
-  allowed_actions: z.array(actionSchema).max(5),
+  allowed_actions: z.array(actionSchema),
   revision: fingerprintSchema
 })
 
@@ -691,9 +665,9 @@ export const getNotesGraphSuggestionCapabilities = async (
   const parsed = parseInput(
     z.strictObject({
       noteId: inputIdSchema,
-      datasetId: inputIdSchema.optional(),
-      provider: z.string().trim().min(1).max(128).optional(),
-      model: z.string().trim().min(1).max(256).optional()
+      datasetId: datasetIdSchema.optional(),
+      provider: providerInputSchema.optional(),
+      model: modelInputSchema.optional()
     }),
     input
   )
@@ -748,9 +722,9 @@ export const createNotesGraphSuggestionCommand = (
   const parsed = parseInput(
     z.strictObject({
       noteId: inputIdSchema,
-      datasetId: inputIdSchema.optional(),
-      provider: z.string().trim().min(1).max(128).optional(),
-      model: z.string().trim().min(1).max(256).optional()
+      datasetId: datasetIdSchema.optional(),
+      provider: providerInputSchema.optional(),
+      model: modelInputSchema.optional()
     }),
     input
   )
@@ -759,17 +733,17 @@ export const createNotesGraphSuggestionCommand = (
 
 const runSchema = z.strictObject({
   id: idSchema,
-  provider: boundedTextSchema(128),
-  model: boundedTextSchema(256),
+  provider: z.string(),
+  model: z.string(),
   state: runStateSchema,
   revision: positiveRevisionSchema,
-  created_at: boundedTextSchema(64),
-  started_at: boundedTextSchema(64).nullable(),
-  completed_at: boundedTextSchema(64).nullable(),
-  suggestion_count: z.number().int().min(0).max(MAX_LIST_ITEMS),
-  related_note_count: z.number().int().min(0).max(MAX_LIST_ITEMS),
-  tag_count: z.number().int().min(0).max(MAX_LIST_ITEMS),
-  invalid_item_count: z.number().int().min(0).max(1_000),
+  created_at: z.string(),
+  started_at: z.string().nullable(),
+  completed_at: z.string().nullable(),
+  suggestion_count: safeCountSchema,
+  related_note_count: safeCountSchema,
+  tag_count: safeCountSchema,
+  invalid_item_count: safeCountSchema,
   cancellation_available: z.boolean(),
   error_code: z
     .string()
@@ -790,10 +764,10 @@ const normalizeRun = (value: unknown): NotesGraphSuggestionRun =>
 
 const runCommandSchema = z.strictObject({
   noteId: inputIdSchema,
-  datasetId: inputIdSchema.optional(),
-  provider: z.string().trim().min(1).max(128).optional(),
-  model: z.string().trim().min(1).max(256).optional(),
-  idempotencyKey: inputIdSchema
+  datasetId: datasetIdSchema.optional(),
+  provider: providerInputSchema.optional(),
+  model: modelInputSchema.optional(),
+  idempotencyKey: idempotencyKeySchema
 })
 
 const postRun = async (
@@ -852,15 +826,9 @@ export const listNotesGraphSuggestionRuns = async (
   const parsed = parseInput(
     z.strictObject({
       noteId: inputIdSchema,
-      datasetId: inputIdSchema.optional(),
-      states: z.array(runStateSchema).max(9).optional(),
-      limit: z
-        .number()
-        .int()
-        .min(1)
-        .optional()
-        .default(20)
-        .transform((value) => Math.min(value, MAX_LIST_ITEMS)),
+      datasetId: datasetIdSchema.optional(),
+      states: z.array(runStateSchema).optional(),
+      limit: z.number().int().min(1).max(MAX_LIST_ITEMS).optional().default(20),
       cursor: cursorSchema.optional()
     }),
     input
@@ -892,7 +860,7 @@ export const getNotesGraphSuggestionRun = async (
   const parsed = parseInput(
     z.strictObject({
       noteId: inputIdSchema,
-      datasetId: inputIdSchema.optional(),
+      datasetId: datasetIdSchema.optional(),
       runId: inputIdSchema
     }),
     input
@@ -912,7 +880,7 @@ const mutationSchema = z.strictObject({
   resource_id: idSchema,
   state: mutationStateSchema,
   revision: nonnegativeRevisionSchema,
-  cleared_count: safeCountSchema.nullable().optional().default(null)
+  cleared_count: safeCountSchema.nullable()
 })
 
 const mutation = (value: unknown): NotesGraphSuggestionMutation =>
@@ -924,10 +892,10 @@ export const cancelNotesGraphSuggestionRun = async (
   const parsed = parseInput(
     z.strictObject({
       noteId: inputIdSchema,
-      datasetId: inputIdSchema.optional(),
+      datasetId: datasetIdSchema.optional(),
       runId: inputIdSchema,
       expectedRevision: positiveRevisionSchema,
-      idempotencyKey: inputIdSchema
+      idempotencyKey: idempotencyKeySchema
     }),
     input
   )
@@ -955,7 +923,7 @@ const evidenceSchema = z
     note_id: idSchema,
     field: z.enum(["title", "content"]),
     start_offset: safeCountSchema,
-    end_offset: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+    end_offset: z.number().int().min(1),
     text: boundedTextSchema(480)
   })
   .refine((value) => value.end_offset > value.start_offset)
@@ -971,13 +939,13 @@ const suggestionSchema = z
     source_fingerprint: fingerprintSchema,
     target_note_id: idSchema.nullable(),
     target_fingerprint: fingerprintSchema.nullable(),
-    normalized_tag: boundedTextSchema(120).nullable(),
-    display_tag: boundedTextSchema(120).nullable(),
+    normalized_tag: z.string().nullable(),
+    display_tag: z.string().nullable(),
     existing_tag: z.boolean(),
     match_strength: z.enum(["strong", "possible"]).nullable(),
     rationale: boundedTextSchema(240).nullable(),
     evidence: z.array(evidenceSchema).transform((items) => items.slice(0, 6)),
-    updated_at: boundedTextSchema(64)
+    updated_at: z.string()
   })
   .superRefine((value, context) => {
     if (
@@ -995,10 +963,7 @@ const suggestionSchema = z
   })
 
 const suggestionPageSchema = z.strictObject({
-  items: z
-    .array(suggestionSchema)
-    .max(1_000)
-    .transform((items) => items.slice(0, MAX_LIST_ITEMS)),
+  items: z.array(suggestionSchema).max(MAX_LIST_ITEMS),
   next_cursor: cursorSchema.nullable(),
   current_source_fingerprint: fingerprintSchema,
   rejection_set_revision: nonnegativeRevisionSchema,
@@ -1011,15 +976,9 @@ export const listNotesGraphSuggestions = async (
   const parsed = parseInput(
     z.strictObject({
       noteId: inputIdSchema,
-      datasetId: inputIdSchema.optional(),
-      states: z.array(suggestionStateSchema).max(6).optional(),
-      limit: z
-        .number()
-        .int()
-        .min(1)
-        .optional()
-        .default(20)
-        .transform((value) => Math.min(value, MAX_LIST_ITEMS)),
+      datasetId: datasetIdSchema.optional(),
+      states: z.array(suggestionStateSchema).optional(),
+      limit: z.number().int().min(1).max(MAX_LIST_ITEMS).optional().default(20),
       cursor: cursorSchema.optional()
     }),
     input
@@ -1048,12 +1007,12 @@ const decide = async (
   const parsed = parseInput(
     z.strictObject({
       noteId: inputIdSchema,
-      datasetId: inputIdSchema.optional(),
+      datasetId: datasetIdSchema.optional(),
       suggestionId: inputIdSchema,
       expectedRevision: positiveRevisionSchema,
       expectedSourceFingerprint: fingerprintSchema,
       expectedTargetFingerprint: fingerprintSchema.nullable().optional(),
-      idempotencyKey: inputIdSchema
+      idempotencyKey: idempotencyKeySchema
     }),
     input
   )
@@ -1091,10 +1050,10 @@ export const resetNotesGraphSuggestionRejections = async (
   const parsed = parseInput(
     z.strictObject({
       noteId: inputIdSchema,
-      datasetId: inputIdSchema.optional(),
+      datasetId: datasetIdSchema.optional(),
       expectedRejectionRevision: nonnegativeRevisionSchema,
       sourceFingerprint: fingerprintSchema,
-      idempotencyKey: inputIdSchema
+      idempotencyKey: idempotencyKeySchema
     }),
     input
   )

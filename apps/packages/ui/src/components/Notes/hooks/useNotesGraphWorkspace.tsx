@@ -5,7 +5,11 @@ import {
   type NotesGraphResponse,
   fetchNotesGraph
 } from "@/services/note-graph-suggestions"
-import { useInfiniteQuery } from "@tanstack/react-query"
+import {
+  type InfiniteData,
+  useInfiniteQuery,
+  useQueryClient
+} from "@tanstack/react-query"
 import * as React from "react"
 
 const DEFAULT_EDGE_TYPES: NotesGraphEdgeType[] = [
@@ -37,10 +41,7 @@ type NavigationState = {
   scope: "focused" | "all"
 }
 
-type GraphPage = {
-  scopeIdentity: string
-  graph: NotesGraphResponse
-}
+type GraphInfiniteData = InfiniteData<NotesGraphResponse, string | undefined>
 
 const mergeById = <T extends { id: string }>(
   pages: T[][],
@@ -54,38 +55,95 @@ const mergeById = <T extends { id: string }>(
 }
 
 const aggregatePages = (
-  data: { pages: GraphPage[] } | undefined,
-  scopeIdentity: string
+  data: GraphInfiniteData | undefined
 ): NotesGraphResponse | null => {
-  const pages = data?.pages.filter(
-    (page) => page.scopeIdentity === scopeIdentity
+  const pages = data?.pages
+  if (!pages?.length) return null
+  const first = pages[0]
+  const last = pages[pages.length - 1]
+  const nodes = mergeById<NotesGraphNode>(
+    pages.map((page) => page.nodes),
+    first.limits.max_nodes
   )
-  if (!pages?.length || pages.length !== data?.pages.length) return null
-  const first = pages[0].graph
-  const last = pages[pages.length - 1].graph
+  const nodeIds = new Set(nodes.map((node) => node.id))
   return {
     ...first,
-    nodes: mergeById<NotesGraphNode>(
-      pages.map((page) => page.graph.nodes),
-      first.limits.max_nodes
-    ),
+    nodes,
     edges: mergeById<NotesGraphEdge>(
-      pages.map((page) => page.graph.edges),
+      pages.map((page) =>
+        page.edges.filter(
+          (edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target)
+        )
+      ),
       first.limits.max_edges
     ),
-    truncated: pages.some((page) => page.graph.truncated),
+    truncated: pages.some((page) => page.truncated),
     truncated_by: Array.from(
-      new Set(pages.flatMap((page) => page.graph.truncated_by))
+      new Set(pages.flatMap((page) => page.truncated_by))
     ),
     has_more: last.has_more,
     cursor: last.cursor
   }
 }
 
+const boundGraphData = (data: GraphInfiniteData): GraphInfiniteData => {
+  const first = data.pages[0]
+  if (!first) return data
+  const nodeIds = new Set<string>()
+  const edgeIds = new Set<string>()
+  const responseCursors = new Set<string>()
+  const pages: NotesGraphResponse[] = []
+  const pageParams: Array<string | undefined> = []
+
+  for (let index = 0; index < data.pages.length; index += 1) {
+    const page = data.pages[index]
+    const requestCursor = data.pageParams[index]
+    const nodes = page.nodes.filter((node) => {
+      if (nodeIds.has(node.id) || nodeIds.size >= first.limits.max_nodes)
+        return false
+      nodeIds.add(node.id)
+      return true
+    })
+    const edges = page.edges.filter((edge) => {
+      if (edgeIds.has(edge.id) || edgeIds.size >= first.limits.max_edges)
+        return false
+      if (!nodeIds.has(edge.source) || !nodeIds.has(edge.target)) return false
+      edgeIds.add(edge.id)
+      return true
+    })
+    const madeProgress = nodes.length > 0 || edges.length > 0
+    const repeatedCursor = Boolean(
+      page.cursor &&
+        (page.cursor === requestCursor || responseCursors.has(page.cursor))
+    )
+    const reachedLimit =
+      nodeIds.size >= first.limits.max_nodes ||
+      edgeIds.size >= first.limits.max_edges
+    const mustStop =
+      page.has_more && (!madeProgress || repeatedCursor || reachedLimit)
+
+    pages.push(
+      mustStop
+        ? { ...page, nodes, edges, has_more: false, cursor: null }
+        : {
+            ...page,
+            nodes,
+            edges
+          }
+    )
+    pageParams.push(requestCursor)
+    if (page.cursor) responseCursors.add(page.cursor)
+    if (mustStop) break
+  }
+
+  return { pages, pageParams }
+}
+
 const authority = (value: string | null | undefined): string | null =>
   typeof value === "string" && value.length > 0 ? value : null
 
 export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
+  const queryClient = useQueryClient()
   const authorityScope = authority(options.authorityScope)
   const inputIdentity = JSON.stringify([
     authorityScope,
@@ -122,15 +180,6 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
   const radius = options.radius ?? 1
   const maxNodes = options.maxNodes ?? 120
   const maxEdges = options.maxEdges ?? 480
-  const scopeIdentity = JSON.stringify([
-    authorityScope,
-    options.datasetId ?? null,
-    effectiveNavigation.scope,
-    centerNoteId ?? null,
-    radius,
-    maxNodes,
-    maxEdges
-  ])
   const enabled = Boolean(
     authorityScope &&
       options.enabled &&
@@ -138,24 +187,44 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
       (effectiveNavigation.scope === "all" || centerNoteId)
   )
 
-  const graphQuery = useInfiniteQuery({
-    queryKey: [
-      ...notesGraphWorkspaceQueryKey,
+  const queryKey = React.useMemo(
+    () =>
+      [
+        ...notesGraphWorkspaceQueryKey,
+        authorityScope,
+        options.datasetId ?? null,
+        effectiveNavigation.scope,
+        centerNoteId ?? null,
+        radius,
+        maxNodes,
+        maxEdges
+      ] as const,
+    [
       authorityScope,
-      options.datasetId ?? null,
+      centerNoteId,
       effectiveNavigation.scope,
-      centerNoteId ?? null,
-      radius,
+      maxEdges,
       maxNodes,
-      maxEdges
-    ],
+      options.datasetId,
+      radius
+    ]
+  )
+  const graphQuery = useInfiniteQuery<
+    NotesGraphResponse,
+    Error,
+    GraphInfiniteData,
+    typeof queryKey,
+    string | undefined
+  >({
+    queryKey,
     initialPageParam: undefined as string | undefined,
     enabled,
     retry: false,
     refetchOnWindowFocus: false,
-    queryFn: async ({ pageParam }) => ({
-      scopeIdentity,
-      graph: await fetchNotesGraph({
+    structuralSharing: (_previous, next: GraphInfiniteData) =>
+      boundGraphData(next),
+    queryFn: async ({ pageParam }) => {
+      const page = await fetchNotesGraph({
         centerNoteId,
         datasetId: options.datasetId,
         radius,
@@ -163,14 +232,24 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
         maxEdges,
         cursor: pageParam
       })
-    }),
-    getNextPageParam: (lastPage) =>
-      lastPage.graph.has_more ? lastPage.graph.cursor ?? undefined : undefined
+      return pageParam === undefined
+        ? boundGraphData({ pages: [page], pageParams: [pageParam] }).pages[0]
+        : page
+    },
+    getNextPageParam: (_lastPage, allPages, _lastPageParam, allPageParams) => {
+      const bounded = boundGraphData({
+        pages: allPages,
+        pageParams: allPageParams
+      })
+      if (bounded.pages.length !== allPages.length) return undefined
+      const last = bounded.pages.at(-1)
+      return last?.has_more ? last.cursor ?? undefined : undefined
+    }
   })
 
   const graph = React.useMemo(
-    () => aggregatePages(graphQuery.data, scopeIdentity),
-    [graphQuery.data, scopeIdentity]
+    () => aggregatePages(graphQuery.data),
+    [graphQuery.data]
   )
 
   const allNotes = React.useMemo(() => {
@@ -197,11 +276,32 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
     )
   }, [graph, search])
 
+  const expansionInFlight =
+    React.useRef<Promise<NotesGraphResponse | null> | null>(null)
   const expand = React.useCallback(async () => {
-    if (!enabled || !graph?.has_more || !graph.cursor) return graph
-    const result = await graphQuery.fetchNextPage()
-    return aggregatePages(result.data, scopeIdentity)
-  }, [enabled, graph, graphQuery, scopeIdentity])
+    if (expansionInFlight.current) return await expansionInFlight.current
+    if (
+      !enabled ||
+      graphQuery.isFetchingNextPage ||
+      !graph?.has_more ||
+      !graph.cursor
+    )
+      return graph
+
+    const expansion = (async () => {
+      await graphQuery.fetchNextPage()
+      return aggregatePages(
+        queryClient.getQueryData<GraphInfiniteData>(queryKey)
+      )
+    })()
+    expansionInFlight.current = expansion
+    try {
+      return await expansion
+    } finally {
+      if (expansionInFlight.current === expansion)
+        expansionInFlight.current = null
+    }
+  }, [enabled, graph, graphQuery, queryClient, queryKey])
 
   const focus = React.useCallback(
     (noteId: string) => {
@@ -234,9 +334,9 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
 
   const refresh = React.useCallback(async () => {
     if (!enabled) return graph
-    const result = await graphQuery.refetch({ cancelRefetch: true })
-    return aggregatePages(result.data, scopeIdentity)
-  }, [enabled, graph, graphQuery, scopeIdentity])
+    await graphQuery.refetch({ cancelRefetch: true })
+    return aggregatePages(queryClient.getQueryData<GraphInfiniteData>(queryKey))
+  }, [enabled, graph, graphQuery, queryClient, queryKey])
 
   return {
     graph,

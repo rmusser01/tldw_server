@@ -43,6 +43,23 @@ const graph = (overrides: Record<string, unknown> = {}) => ({
   ...overrides
 })
 
+const cachedGraphPages = (client: QueryClient) => {
+  const cached = client
+    .getQueryCache()
+    .findAll()
+    .find((query) => query.queryKey[0] === "notes-graph-workspace")?.state
+    .data as
+    | {
+        pages?: Array<
+          ReturnType<typeof graph> | { graph: ReturnType<typeof graph> }
+        >
+      }
+    | undefined
+  return (cached?.pages ?? []).map((page) =>
+    "graph" in page ? page.graph : page
+  )
+}
+
 const wrapper =
   (client: QueryClient) =>
   ({ children }: { children: React.ReactNode }) => (
@@ -170,6 +187,295 @@ describe("useNotesGraphWorkspace", () => {
       expect.objectContaining({ centerNoteId: "note:d", cursor: undefined })
     )
     expect(result.current.graph?.nodes[0].id).toBe("note:d")
+  })
+
+  it("single-flights expansion and stops when a continuing cursor adds no progress", async () => {
+    let resolveExpansion:
+      | ((value: ReturnType<typeof graph>) => void)
+      | undefined
+    const expansionResponse = new Promise<ReturnType<typeof graph>>(
+      (resolve) => {
+        resolveExpansion = resolve
+      }
+    )
+    mocks.fetchNotesGraph
+      .mockResolvedValueOnce(
+        graph({
+          has_more: true,
+          cursor: "repeat-cursor",
+          limits: { max_nodes: 10, max_edges: 10, max_degree: 40 }
+        })
+      )
+      .mockImplementation(() => expansionResponse)
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } }
+    })
+    const { result } = renderHook(
+      () =>
+        useNotesGraphWorkspace({
+          authorityScope: "authority-a",
+          enabled: true,
+          isOnline: true,
+          initialFocusNoteId: "note:a"
+        }),
+      { wrapper: wrapper(client) }
+    )
+    await flush()
+
+    let firstExpansion: Promise<unknown>
+    let concurrentExpansion: Promise<unknown>
+    act(() => {
+      firstExpansion = result.current.expand()
+      concurrentExpansion = result.current.expand()
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(mocks.fetchNotesGraph).toHaveBeenCalledTimes(2)
+
+    await act(async () => {
+      resolveExpansion?.(
+        graph({
+          has_more: true,
+          cursor: "next-cursor",
+          limits: { max_nodes: 10, max_edges: 10, max_degree: 40 }
+        })
+      )
+      await Promise.all([firstExpansion!, concurrentExpansion!])
+    })
+    await flush()
+
+    expect(result.current.canExpand).toBe(false)
+    expect(cachedGraphPages(client)).toHaveLength(2)
+    await act(async () => {
+      await result.current.expand()
+    })
+    expect(mocks.fetchNotesGraph).toHaveBeenCalledTimes(2)
+  })
+
+  it("stops a repeated cursor even when the page adds a new node", async () => {
+    mocks.fetchNotesGraph
+      .mockResolvedValueOnce(
+        graph({
+          nodes: [{ id: "note:a", type: "note", label: "Alpha" }],
+          edges: [],
+          has_more: true,
+          cursor: "same-cursor",
+          limits: { max_nodes: 10, max_edges: 10, max_degree: 40 }
+        })
+      )
+      .mockResolvedValueOnce(
+        graph({
+          nodes: [{ id: "note:b", type: "note", label: "Beta" }],
+          edges: [],
+          has_more: true,
+          cursor: "same-cursor",
+          limits: { max_nodes: 10, max_edges: 10, max_degree: 40 }
+        })
+      )
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } }
+    })
+    const { result } = renderHook(
+      () =>
+        useNotesGraphWorkspace({
+          authorityScope: "authority-a",
+          enabled: true,
+          isOnline: true,
+          initialFocusNoteId: "note:a"
+        }),
+      { wrapper: wrapper(client) }
+    )
+    await flush()
+
+    await act(async () => {
+      await result.current.expand()
+    })
+    await flush()
+
+    expect(result.current.graph?.nodes.map((node) => node.id)).toEqual([
+      "note:a",
+      "note:b"
+    ])
+    expect(result.current.canExpand).toBe(false)
+    await act(async () => {
+      await result.current.expand()
+    })
+    expect(mocks.fetchNotesGraph).toHaveBeenCalledTimes(2)
+  })
+
+  it("bounds cached pages at authoritative limits and removes dangling edges", async () => {
+    mocks.fetchNotesGraph
+      .mockResolvedValueOnce(
+        graph({
+          nodes: [
+            { id: "note:a", type: "note", label: "Alpha" },
+            { id: "note:b", type: "note", label: "Beta" }
+          ],
+          edges: [
+            {
+              id: "edge:one",
+              source: "note:a",
+              target: "note:b",
+              type: "manual",
+              directed: false,
+              weight: 1,
+              label: null
+            }
+          ],
+          has_more: true,
+          cursor: "page-2",
+          limits: { max_nodes: 3, max_edges: 10, max_degree: 40 }
+        })
+      )
+      .mockResolvedValueOnce(
+        graph({
+          nodes: [
+            { id: "note:c", type: "note", label: "Gamma" },
+            { id: "note:d", type: "note", label: "Delta" }
+          ],
+          edges: [
+            {
+              id: "edge:two",
+              source: "note:b",
+              target: "note:c",
+              type: "manual",
+              directed: false,
+              weight: 1,
+              label: null
+            },
+            {
+              id: "edge:dangling",
+              source: "note:c",
+              target: "note:d",
+              type: "manual",
+              directed: false,
+              weight: 1,
+              label: null
+            }
+          ],
+          has_more: true,
+          cursor: "page-3",
+          limits: { max_nodes: 3, max_edges: 10, max_degree: 40 }
+        })
+      )
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } }
+    })
+    const { result } = renderHook(
+      () =>
+        useNotesGraphWorkspace({
+          authorityScope: "authority-a",
+          enabled: true,
+          isOnline: true,
+          initialFocusNoteId: "note:a"
+        }),
+      { wrapper: wrapper(client) }
+    )
+    await flush()
+
+    await act(async () => {
+      await result.current.expand()
+    })
+    await flush()
+
+    const pages = cachedGraphPages(client)
+    const cachedNodes = pages.flatMap((page) => page.nodes)
+    const cachedEdges = pages.flatMap((page) => page.edges)
+    const nodeIds = new Set(cachedNodes.map((node) => node.id))
+    expect(
+      new Set(cachedNodes.map((node) => node.id)).size
+    ).toBeLessThanOrEqual(3)
+    expect(
+      new Set(cachedEdges.map((edge) => edge.id)).size
+    ).toBeLessThanOrEqual(2)
+    expect(
+      cachedEdges.every(
+        (edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target)
+      )
+    ).toBe(true)
+    expect(result.current.graph?.nodes.map((node) => node.id)).toEqual([
+      "note:a",
+      "note:b",
+      "note:c"
+    ])
+    expect(result.current.graph?.edges.map((edge) => edge.id)).toEqual([
+      "edge:one",
+      "edge:two"
+    ])
+    expect(result.current.canExpand).toBe(false)
+  })
+
+  it("stops page growth when the authoritative edge limit is reached", async () => {
+    mocks.fetchNotesGraph
+      .mockResolvedValueOnce(
+        graph({
+          nodes: [
+            { id: "note:a", type: "note", label: "Alpha" },
+            { id: "note:b", type: "note", label: "Beta" }
+          ],
+          edges: [
+            {
+              id: "edge:one",
+              source: "note:a",
+              target: "note:b",
+              type: "manual",
+              directed: false,
+              weight: 1,
+              label: null
+            }
+          ],
+          has_more: true,
+          cursor: "edge-page-2",
+          limits: { max_nodes: 10, max_edges: 2, max_degree: 40 }
+        })
+      )
+      .mockResolvedValueOnce(
+        graph({
+          nodes: [{ id: "note:c", type: "note", label: "Gamma" }],
+          edges: [
+            {
+              id: "edge:two",
+              source: "note:b",
+              target: "note:c",
+              type: "manual",
+              directed: false,
+              weight: 1,
+              label: null
+            }
+          ],
+          has_more: true,
+          cursor: "edge-page-3",
+          limits: { max_nodes: 10, max_edges: 2, max_degree: 40 }
+        })
+      )
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } }
+    })
+    const { result } = renderHook(
+      () =>
+        useNotesGraphWorkspace({
+          authorityScope: "authority-a",
+          enabled: true,
+          isOnline: true,
+          initialFocusNoteId: "note:a"
+        }),
+      { wrapper: wrapper(client) }
+    )
+    await flush()
+
+    await act(async () => {
+      await result.current.expand()
+    })
+    await flush()
+
+    expect(result.current.graph?.nodes).toHaveLength(3)
+    expect(result.current.graph?.edges).toHaveLength(2)
+    expect(result.current.canExpand).toBe(false)
+    await act(async () => {
+      await result.current.expand()
+    })
+    expect(mocks.fetchNotesGraph).toHaveBeenCalledTimes(2)
   })
 
   it("derives All-notes eligibility only from authoritative count, note cap, and max_nodes", async () => {

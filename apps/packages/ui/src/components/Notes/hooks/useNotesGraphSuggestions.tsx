@@ -29,6 +29,8 @@ const ACTIVE_RUN_STATES = new Set<NotesGraphSuggestionRun["state"]>([
   "publishing"
 ])
 const DEFAULT_POLL_INTERVAL_MS = 1500
+const SUGGESTION_LIST_STATES = ["pending", "accepting"] as const
+const SUGGESTION_LIST_LIMIT = 100
 
 export type ProvisionalNotesGraphOverlay = {
   edge: {
@@ -59,19 +61,8 @@ export type UseNotesGraphSuggestionsOptions = {
   pollIntervalMs?: number
 }
 
-type Scoped<T> = {
-  scopeIdentity: string
-  data: T
-}
-
 const authority = (value: string | null | undefined): string | null =>
   typeof value === "string" && value.length > 0 ? value : null
-
-const scopedData = <T,>(
-  value: Scoped<T> | undefined,
-  scopeIdentity: string
-): T | undefined =>
-  value?.scopeIdentity === scopeIdentity ? value.data : undefined
 
 const authoritativeNodeId = (
   noteId: string,
@@ -118,70 +109,74 @@ export function useNotesGraphSuggestions(
   const queryClient = useQueryClient()
   const authorityScope = authority(options.authorityScope)
   const noteId = options.noteId ?? ""
-  const scopeIdentity = JSON.stringify([
+  const commandAuthority = JSON.stringify([
     authorityScope,
-    noteId,
     options.datasetId ?? null,
-    options.provider ?? null,
-    options.model ?? null
+    noteId
   ])
-  const baseKey = React.useMemo(
+  const suggestionScopeKey = React.useMemo(
     () =>
       [
         "notes-graph-suggestions",
         authorityScope,
-        noteId,
         options.datasetId ?? null,
+        noteId
+      ] as const,
+    [authorityScope, noteId, options.datasetId]
+  )
+  const providerKey = React.useMemo(
+    () =>
+      [
+        ...suggestionScopeKey,
+        "provider",
         options.provider ?? null,
         options.model ?? null
       ] as const,
-    [authorityScope, noteId, options.datasetId, options.model, options.provider]
+    [options.model, options.provider, suggestionScopeKey]
   )
   const enabled = Boolean(
     authorityScope && options.enabled && options.isOnline && noteId
   )
 
   const capabilitiesKey = React.useMemo(
-    () => [...baseKey, "capabilities"] as const,
-    [baseKey]
+    () => [...providerKey, "capabilities"] as const,
+    [providerKey]
   )
   const capabilitiesQueryRaw = useQuery({
     queryKey: capabilitiesKey,
     enabled,
+    notifyOnChangeProps: "all",
     retry: false,
     refetchOnWindowFocus: false,
-    queryFn: async () => ({
-      scopeIdentity,
-      data: await getNotesGraphSuggestionCapabilities({
+    queryFn: () =>
+      getNotesGraphSuggestionCapabilities({
         noteId,
         datasetId: options.datasetId,
         provider: options.provider,
         model: options.model
       })
-    })
   })
-  const capabilities = scopedData(capabilitiesQueryRaw.data, scopeIdentity)
+  const capabilities = capabilitiesQueryRaw.data
 
   const runsKey = React.useMemo(
-    () => [...baseKey, "runs", "active"] as const,
-    [baseKey]
+    () => [...providerKey, "runs", "active"] as const,
+    [providerKey]
   )
   const runsQueryRaw = useQuery({
     queryKey: runsKey,
     enabled: enabled && Boolean(capabilities),
+    notifyOnChangeProps: "all",
     retry: false,
     refetchOnWindowFocus: false,
-    queryFn: async () => ({
-      scopeIdentity,
-      data: await listNotesGraphSuggestionRuns({
+    queryFn: () =>
+      listNotesGraphSuggestionRuns({
         noteId,
         datasetId: options.datasetId,
         states: Array.from(ACTIVE_RUN_STATES),
         limit: 100
       })
-    })
   })
-  const runsPage = scopedData(runsQueryRaw.data, scopeIdentity)
+  const runsPage = runsQueryRaw.data
 
   const adoptedRun = React.useMemo(
     () => newestMatchingRun(runsPage?.items ?? [], capabilities),
@@ -189,8 +184,8 @@ export function useNotesGraphSuggestions(
   )
   const seedRun = adoptedRun
   const runKey = React.useMemo(
-    () => [...baseKey, "run", seedRun?.id ?? null] as const,
-    [baseKey, seedRun?.id]
+    () => [...providerKey, "run", seedRun?.id ?? null] as const,
+    [providerKey, seedRun?.id]
   )
   const runQueryRaw = useQuery({
     queryKey: runKey,
@@ -198,106 +193,121 @@ export function useNotesGraphSuggestions(
       enabled &&
       Boolean(seedRun?.id) &&
       Boolean(seedRun?.state && ACTIVE_RUN_STATES.has(seedRun.state)),
+    notifyOnChangeProps: "all",
     retry: false,
     refetchOnReconnect: false,
     refetchOnWindowFocus: false,
-    queryFn: async () => ({
-      scopeIdentity,
-      data: await getNotesGraphSuggestionRun({
+    queryFn: () =>
+      getNotesGraphSuggestionRun({
         noteId,
         runId: seedRun?.id ?? "",
         datasetId: options.datasetId
-      })
-    }),
+      }),
     refetchInterval: (query) => {
       if (query.state.error) return false
-      const current = scopedData(
-        query.state.data as Scoped<NotesGraphSuggestionRun> | undefined,
-        scopeIdentity
-      )
+      const current = query.state.data as NotesGraphSuggestionRun | undefined
       return ACTIVE_RUN_STATES.has(current?.state ?? seedRun?.state ?? "stale")
         ? Math.max(250, options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS)
         : false
     },
     refetchIntervalInBackground: false
   })
-  const runDetail = scopedData(runQueryRaw.data, scopeIdentity)
+  const runDetail = runQueryRaw.data
   const activeRun = runDetail ?? seedRun
 
   const suggestionsKey = React.useMemo(
-    () => [...baseKey, "items"] as const,
-    [baseKey]
+    () =>
+      [
+        ...suggestionScopeKey,
+        "items",
+        SUGGESTION_LIST_STATES.join(","),
+        SUGGESTION_LIST_LIMIT
+      ] as const,
+    [suggestionScopeKey]
   )
   const suggestionsQueryRaw = useQuery({
     queryKey: suggestionsKey,
     enabled,
+    notifyOnChangeProps: "all",
     retry: false,
     refetchOnWindowFocus: false,
-    queryFn: async () => ({
-      scopeIdentity,
-      data: await listNotesGraphSuggestions({
+    queryFn: () =>
+      listNotesGraphSuggestions({
         noteId,
         datasetId: options.datasetId,
-        states: ["pending", "accepting"],
-        limit: 100
+        states: [...SUGGESTION_LIST_STATES],
+        limit: SUGGESTION_LIST_LIMIT
       })
-    })
   })
-  const suggestionPage = scopedData(suggestionsQueryRaw.data, scopeIdentity)
+  const suggestionPage = suggestionsQueryRaw.data
   const suggestions = React.useMemo(
     () => suggestionPage?.items ?? [],
     [suggestionPage?.items]
   )
   const currentCommandAuthority = React.useRef({
-    scopeIdentity,
+    commandAuthority,
     allowed: enabled,
     epoch: 0
   })
   if (
-    currentCommandAuthority.current.scopeIdentity !== scopeIdentity ||
+    currentCommandAuthority.current.commandAuthority !== commandAuthority ||
     currentCommandAuthority.current.allowed !== enabled
   ) {
     currentCommandAuthority.current = {
-      scopeIdentity,
+      commandAuthority,
       allowed: enabled,
       epoch: currentCommandAuthority.current.epoch + 1
     }
   }
   const authorityEpoch = currentCommandAuthority.current.epoch
   const hasCommandAuthority = (
-    commandScopeIdentity: string,
+    expectedCommandAuthority: string,
     commandAuthorityEpoch: number
   ): boolean =>
     currentCommandAuthority.current.allowed &&
-    currentCommandAuthority.current.scopeIdentity === commandScopeIdentity &&
+    currentCommandAuthority.current.commandAuthority ===
+      expectedCommandAuthority &&
     currentCommandAuthority.current.epoch === commandAuthorityEpoch
-  const reconciledTerminalRuns = React.useRef(new Set<string>())
+  const reconciliationScope = JSON.stringify(providerKey)
+  const terminalReconciliation = React.useRef({
+    scope: reconciliationScope,
+    identity: null as string | null
+  })
+  if (terminalReconciliation.current.scope !== reconciliationScope) {
+    terminalReconciliation.current = {
+      scope: reconciliationScope,
+      identity: null
+    }
+  }
 
   React.useEffect(() => {
     if (runDetail?.state !== "succeeded") return
-    const reconciliationKey = `${scopeIdentity}:${runDetail.id}:${runDetail.revision}`
-    if (reconciledTerminalRuns.current.has(reconciliationKey)) return
-    reconciledTerminalRuns.current.add(reconciliationKey)
+    const reconciliationKey = `${runDetail.id}:${runDetail.revision}`
+    if (terminalReconciliation.current.identity === reconciliationKey) return
+    terminalReconciliation.current.identity = reconciliationKey
     void queryClient.invalidateQueries({
       queryKey: suggestionsKey,
       exact: true
     })
-  }, [queryClient, runDetail, scopeIdentity, suggestionsKey])
+  }, [queryClient, runDetail, suggestionsKey])
 
   const generationMutation = useMutation({
-    mutationKey: [...baseKey, "generate"],
+    mutationKey: [...providerKey, "generate"],
     retry: retryNetworkOnce,
     mutationFn: async (variables: {
       command: ReturnType<typeof createNotesGraphSuggestionCommand>
       capability: NotesGraphSuggestionCapabilities
-      scopeIdentity: string
+      commandAuthority: string
       authorityEpoch: number
       capabilitiesKey: readonly unknown[]
       runsKey: readonly unknown[]
-      baseKey: readonly unknown[]
+      providerKey: readonly unknown[]
     }) => {
       if (
-        !hasCommandAuthority(variables.scopeIdentity, variables.authorityEpoch)
+        !hasCommandAuthority(
+          variables.commandAuthority,
+          variables.authorityEpoch
+        )
       ) {
         throw new NotesGraphSuggestionClientError(
           422,
@@ -316,65 +326,59 @@ export function useNotesGraphSuggestions(
         {
           canRetry: () =>
             hasCommandAuthority(
-              variables.scopeIdentity,
+              variables.commandAuthority,
               variables.authorityEpoch
             ),
           onCapabilitiesChanged: (nextCapability) => {
             if (
               !hasCommandAuthority(
-                variables.scopeIdentity,
+                variables.commandAuthority,
                 variables.authorityEpoch
               )
             )
               return
-            queryClient.setQueryData(variables.capabilitiesKey, {
-              scopeIdentity: variables.scopeIdentity,
-              data: nextCapability
-            } satisfies Scoped<NotesGraphSuggestionCapabilities>)
+            queryClient.setQueryData(variables.capabilitiesKey, nextCapability)
           }
         }
       )
     },
     onSuccess: (run, variables) => {
       if (
-        !hasCommandAuthority(variables.scopeIdentity, variables.authorityEpoch)
+        !hasCommandAuthority(
+          variables.commandAuthority,
+          variables.authorityEpoch
+        )
       )
         return
       queryClient.setQueryData<
-        Scoped<Awaited<ReturnType<typeof listNotesGraphSuggestionRuns>>>
-      >(variables.runsKey, (current) => {
-        const page = scopedData(current, variables.scopeIdentity)
-        return {
-          scopeIdentity: variables.scopeIdentity,
-          data: {
-            items: [
-              run,
-              ...(page?.items ?? []).filter((item) => item.id !== run.id)
-            ],
-            next_cursor: page?.next_cursor ?? null
-          }
-        }
-      })
-      queryClient.setQueryData([...variables.baseKey, "run", run.id], {
-        scopeIdentity: variables.scopeIdentity,
-        data: run
-      } satisfies Scoped<NotesGraphSuggestionRun>)
+        Awaited<ReturnType<typeof listNotesGraphSuggestionRuns>>
+      >(variables.runsKey, (page) => ({
+        items: [
+          run,
+          ...(page?.items ?? []).filter((item) => item.id !== run.id)
+        ],
+        next_cursor: page?.next_cursor ?? null
+      }))
+      queryClient.setQueryData([...variables.providerKey, "run", run.id], run)
     }
   })
 
   const cancelMutation = useMutation({
-    mutationKey: [...baseKey, "cancel"],
+    mutationKey: [...providerKey, "cancel"],
     retry: retryNetworkOnce,
     mutationFn: (variables: {
       run: NotesGraphSuggestionRun
       idempotencyKey: string
-      scopeIdentity: string
+      commandAuthority: string
       authorityEpoch: number
-      baseKey: readonly unknown[]
+      providerKey: readonly unknown[]
       runsKey: readonly unknown[]
     }) => {
       if (
-        !hasCommandAuthority(variables.scopeIdentity, variables.authorityEpoch)
+        !hasCommandAuthority(
+          variables.commandAuthority,
+          variables.authorityEpoch
+        )
       ) {
         throw new NotesGraphSuggestionClientError(
           422,
@@ -391,12 +395,15 @@ export function useNotesGraphSuggestions(
     },
     onSuccess: async (_result, variables) => {
       if (
-        !hasCommandAuthority(variables.scopeIdentity, variables.authorityEpoch)
+        !hasCommandAuthority(
+          variables.commandAuthority,
+          variables.authorityEpoch
+        )
       )
         return
       await Promise.all([
         queryClient.invalidateQueries({
-          queryKey: [...variables.baseKey, "run"]
+          queryKey: [...variables.providerKey, "run"]
         }),
         queryClient.invalidateQueries({
           queryKey: variables.runsKey,
@@ -407,41 +414,37 @@ export function useNotesGraphSuggestions(
   })
 
   const removeSuggestion = React.useCallback(
-    (
-      suggestionId: string,
-      commandScopeIdentity: string,
-      commandSuggestionsKey: readonly unknown[]
-    ) => {
+    (suggestionId: string, commandSuggestionsKey: readonly unknown[]) => {
       queryClient.setQueryData<
-        Scoped<Awaited<ReturnType<typeof listNotesGraphSuggestions>>>
-      >(commandSuggestionsKey, (current) => {
-        const page = scopedData(current, commandScopeIdentity)
-        if (!page) return current
-        return {
-          scopeIdentity: commandScopeIdentity,
-          data: {
-            ...page,
-            items: page.items.filter((item) => item.id !== suggestionId)
-          }
-        }
-      })
+        Awaited<ReturnType<typeof listNotesGraphSuggestions>>
+      >(commandSuggestionsKey, (page) =>
+        page
+          ? {
+              ...page,
+              items: page.items.filter((item) => item.id !== suggestionId)
+            }
+          : page
+      )
     },
     [queryClient]
   )
 
   const acceptMutation = useMutation({
-    mutationKey: [...baseKey, "accept"],
+    mutationKey: [...suggestionScopeKey, "accept"],
     retry: retryNetworkOnce,
     mutationFn: (variables: {
       item: NotesGraphSuggestion
       idempotencyKey: string
-      scopeIdentity: string
+      commandAuthority: string
       authorityEpoch: number
       suggestionsKey: readonly unknown[]
       authorityScope: string
     }) => {
       if (
-        !hasCommandAuthority(variables.scopeIdentity, variables.authorityEpoch)
+        !hasCommandAuthority(
+          variables.commandAuthority,
+          variables.authorityEpoch
+        )
       ) {
         throw new NotesGraphSuggestionClientError(
           422,
@@ -460,14 +463,13 @@ export function useNotesGraphSuggestions(
     },
     onSuccess: async (_result, variables) => {
       if (
-        !hasCommandAuthority(variables.scopeIdentity, variables.authorityEpoch)
+        !hasCommandAuthority(
+          variables.commandAuthority,
+          variables.authorityEpoch
+        )
       )
         return
-      removeSuggestion(
-        variables.item.id,
-        variables.scopeIdentity,
-        variables.suggestionsKey
-      )
+      removeSuggestion(variables.item.id, variables.suggestionsKey)
       await queryClient.invalidateQueries({
         queryKey: [...notesGraphWorkspaceQueryKey, variables.authorityScope]
       })
@@ -475,17 +477,20 @@ export function useNotesGraphSuggestions(
   })
 
   const rejectMutation = useMutation({
-    mutationKey: [...baseKey, "reject"],
+    mutationKey: [...suggestionScopeKey, "reject"],
     retry: retryNetworkOnce,
     mutationFn: (variables: {
       item: NotesGraphSuggestion
       idempotencyKey: string
-      scopeIdentity: string
+      commandAuthority: string
       authorityEpoch: number
       suggestionsKey: readonly unknown[]
     }) => {
       if (
-        !hasCommandAuthority(variables.scopeIdentity, variables.authorityEpoch)
+        !hasCommandAuthority(
+          variables.commandAuthority,
+          variables.authorityEpoch
+        )
       ) {
         throw new NotesGraphSuggestionClientError(
           422,
@@ -504,29 +509,31 @@ export function useNotesGraphSuggestions(
     },
     onSuccess: (_result, variables) => {
       if (
-        !hasCommandAuthority(variables.scopeIdentity, variables.authorityEpoch)
+        !hasCommandAuthority(
+          variables.commandAuthority,
+          variables.authorityEpoch
+        )
       )
         return
-      removeSuggestion(
-        variables.item.id,
-        variables.scopeIdentity,
-        variables.suggestionsKey
-      )
+      removeSuggestion(variables.item.id, variables.suggestionsKey)
     }
   })
 
   const resetMutation = useMutation({
-    mutationKey: [...baseKey, "reset-rejections"],
+    mutationKey: [...suggestionScopeKey, "reset-rejections"],
     retry: retryNetworkOnce,
     mutationFn: (variables: {
       idempotencyKey: string
       page: NonNullable<typeof suggestionPage>
-      scopeIdentity: string
+      commandAuthority: string
       authorityEpoch: number
       suggestionsKey: readonly unknown[]
     }) => {
       if (
-        !hasCommandAuthority(variables.scopeIdentity, variables.authorityEpoch)
+        !hasCommandAuthority(
+          variables.commandAuthority,
+          variables.authorityEpoch
+        )
       ) {
         throw new NotesGraphSuggestionClientError(
           422,
@@ -545,7 +552,10 @@ export function useNotesGraphSuggestions(
     },
     onSuccess: async (_result, variables) => {
       if (
-        !hasCommandAuthority(variables.scopeIdentity, variables.authorityEpoch)
+        !hasCommandAuthority(
+          variables.commandAuthority,
+          variables.authorityEpoch
+        )
       )
         return
       await queryClient.invalidateQueries({
@@ -581,9 +591,11 @@ export function useNotesGraphSuggestions(
     const overlays: Record<string, ProvisionalNotesGraphOverlay> = {}
     suggestions.forEach((item) => {
       if (item.kind !== "related_note" || !item.target_note_id) return
-      const source =
-        authoritativeNodeId(item.source_note_id, options.loadedNodeIds) ??
-        item.source_note_id
+      const source = authoritativeNodeId(
+        item.source_note_id,
+        options.loadedNodeIds
+      )
+      if (!source) return
       const target = authoritativeNodeId(
         item.target_note_id,
         options.loadedNodeIds
@@ -611,20 +623,12 @@ export function useNotesGraphSuggestions(
     return overlays
   }, [options.loadedNodeIds, suggestions])
 
-  const capabilitiesQuery = {
-    ...capabilitiesQueryRaw,
-    data: capabilities
-  }
-  const runsQuery = { ...runsQueryRaw, data: runsPage }
-  const runQuery = { ...runQueryRaw, data: runDetail }
-  const suggestionsQuery = { ...suggestionsQueryRaw, data: suggestionPage }
-
   return {
     capabilities: capabilities ?? null,
-    capabilitiesQuery,
-    runsQuery,
-    runQuery,
-    suggestionsQuery,
+    capabilitiesQuery: capabilitiesQueryRaw,
+    runsQuery: runsQueryRaw,
+    runQuery: runQueryRaw,
+    suggestionsQuery: suggestionsQueryRaw,
     activeRun: activeRun ?? null,
     suggestions,
     provisionalBySuggestionId,
@@ -647,11 +651,11 @@ export function useNotesGraphSuggestions(
       return await generationMutation.mutateAsync({
         command,
         capability: capabilities,
-        scopeIdentity,
+        commandAuthority,
         authorityEpoch,
         capabilitiesKey,
         runsKey,
-        baseKey
+        providerKey
       })
     },
     cancel: async () => {
@@ -661,9 +665,9 @@ export function useNotesGraphSuggestions(
       return await cancelMutation.mutateAsync({
         run: activeRun,
         idempotencyKey: idempotencyKey(),
-        scopeIdentity,
+        commandAuthority,
         authorityEpoch,
-        baseKey,
+        providerKey,
         runsKey
       })
     },
@@ -679,7 +683,7 @@ export function useNotesGraphSuggestions(
       return await acceptMutation.mutateAsync({
         item,
         idempotencyKey: idempotencyKey(),
-        scopeIdentity,
+        commandAuthority,
         authorityEpoch,
         suggestionsKey,
         authorityScope
@@ -697,7 +701,7 @@ export function useNotesGraphSuggestions(
       return await rejectMutation.mutateAsync({
         item,
         idempotencyKey: idempotencyKey(),
-        scopeIdentity,
+        commandAuthority,
         authorityEpoch,
         suggestionsKey
       })
@@ -714,7 +718,7 @@ export function useNotesGraphSuggestions(
       return await resetMutation.mutateAsync({
         idempotencyKey: idempotencyKey(),
         page: suggestionPage,
-        scopeIdentity,
+        commandAuthority,
         authorityEpoch,
         suggestionsKey
       })

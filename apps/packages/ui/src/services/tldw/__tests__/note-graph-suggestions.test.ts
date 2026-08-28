@@ -149,7 +149,7 @@ describe("Notes graph suggestion client", () => {
       noteId: "note / one",
       datasetId: "dataset / alpha",
       states: ["queued", "running"],
-      limit: 200,
+      limit: 100,
       cursor: "run cursor"
     })
     await getNotesGraphSuggestionRun({
@@ -161,7 +161,7 @@ describe("Notes graph suggestion client", () => {
       noteId: "note / one",
       datasetId: "dataset / alpha",
       states: ["pending", "accepting"],
-      limit: 200,
+      limit: 100,
       cursor: "suggestion cursor"
     })
     await cancelNotesGraphSuggestionRun({
@@ -372,33 +372,45 @@ describe("Notes graph suggestion client", () => {
     })
   })
 
-  it("bounds graph and suggestion normalization to authoritative response limits and six Unicode excerpts", async () => {
+  it("preserves Task 8 graph fields and bounds only source-grounded suggestion excerpts", async () => {
+    const longLabel = "Long graph label ".repeat(400)
     mocks.bgRequest
       .mockResolvedValueOnce({
-        nodes: Array.from({ length: 12 }, (_, index) => ({
-          id: `note:${index}`,
-          type: "note",
-          label: `Note ${index}`
-        })),
-        edges: Array.from({ length: 12 }, (_, index) => ({
-          id: `edge:${index}`,
-          source: "note:0",
-          target: `note:${index + 1}`,
-          type: "manual",
-          directed: false
-        })),
-        truncated: true,
-        truncated_by: ["nodes"],
-        has_more: true,
-        cursor: "next graph cursor",
-        limits: { max_nodes: 3, max_edges: 4, max_degree: 2 },
+        nodes: [
+          {
+            id: "note:0",
+            type: "note",
+            label: longLabel,
+            created_at: null,
+            deleted: false,
+            degree: 9001,
+            tag_count: 3001,
+            primary_source_id: null
+          }
+        ],
+        edges: [
+          {
+            id: "edge:0",
+            source: "note:0",
+            target: "note:0",
+            type: "manual",
+            directed: false,
+            weight: 1,
+            label: longLabel
+          }
+        ],
+        truncated: false,
+        truncated_by: [longLabel],
+        has_more: false,
+        cursor: null,
+        limits: { max_nodes: 5000, max_edges: 9000, max_degree: 5000 },
         radius_cap_applied: false,
         active_note_count: 12,
-        all_notes_note_cap: 3,
-        all_notes_eligible: false
+        all_notes_note_cap: 5000,
+        all_notes_eligible: true
       })
       .mockResolvedValueOnce({
-        items: Array.from({ length: 140 }, (_, index) => ({
+        items: Array.from({ length: 100 }, (_, index) => ({
           ...suggestionPayload(`suggestion-${index}`),
           evidence: Array.from({ length: 8 }, (_, evidenceIndex) => ({
             side: evidenceIndex % 2 ? "target" : "source",
@@ -414,6 +426,20 @@ describe("Notes graph suggestion client", () => {
         rejection_set_revision: 4,
         rejection_count: 1
       })
+      .mockResolvedValueOnce({
+        items: [
+          {
+            ...runPayload("run-large", "succeeded"),
+            provider: longLabel,
+            model: longLabel,
+            suggestion_count: 101,
+            related_note_count: 101,
+            tag_count: 101,
+            invalid_item_count: 2001
+          }
+        ],
+        next_cursor: null
+      })
 
     const graph = await fetchNotesGraph({
       centerNoteId: "note/source",
@@ -424,23 +450,78 @@ describe("Notes graph suggestion client", () => {
     })
     const suggestions = await listNotesGraphSuggestions({
       noteId: "note/source",
-      limit: 999
+      limit: 100
     })
+    const runs = await listNotesGraphSuggestionRuns({ noteId: "note/source" })
 
-    expect(graph.nodes).toHaveLength(3)
-    expect(graph.edges).toHaveLength(4)
-    expect(graph.limits).toEqual({ max_nodes: 3, max_edges: 4, max_degree: 2 })
+    expect(graph.nodes[0].label).toBe(longLabel)
+    expect(graph.nodes[0]).toMatchObject({ degree: 9001, tag_count: 3001 })
+    expect(graph.edges[0]).toMatchObject({ weight: 1, label: longLabel })
+    expect(graph.truncated_by).toEqual([longLabel])
+    expect(graph.limits).toEqual({
+      max_nodes: 5000,
+      max_edges: 9000,
+      max_degree: 5000
+    })
     expect(suggestions.items).toHaveLength(100)
     expect(suggestions.items[0].rationale).toHaveLength(240)
     expect(suggestions.items[0].evidence).toHaveLength(6)
     expect([...suggestions.items[0].evidence[0].text]).toHaveLength(480)
     expect(suggestions.items[0].evidence[0].text.endsWith("😀")).toBe(true)
+    expect(runs.items[0]).toMatchObject({
+      provider: longLabel,
+      model: longLabel,
+      suggestion_count: 101,
+      related_note_count: 101,
+      tag_count: 101,
+      invalid_item_count: 2001
+    })
     expect(String(mocks.bgRequest.mock.calls[0][0].path)).toContain(
-      "max_nodes=2000"
+      "max_nodes=9999"
     )
     expect(String(mocks.bgRequest.mock.calls[0][0].path)).toContain(
-      "max_edges=8000"
+      "max_edges=99999"
     )
+  })
+
+  it("rejects a graph edge whose serialized Task 8 weight is omitted", async () => {
+    mocks.bgRequest.mockResolvedValueOnce({
+      nodes: [
+        {
+          id: "note:1",
+          type: "note",
+          label: "One",
+          created_at: null,
+          deleted: false,
+          degree: 1,
+          tag_count: 0,
+          primary_source_id: null
+        }
+      ],
+      edges: [
+        {
+          id: "edge:1",
+          source: "note:1",
+          target: "note:1",
+          type: "manual",
+          directed: false,
+          label: null
+        }
+      ],
+      truncated: false,
+      truncated_by: [],
+      has_more: false,
+      cursor: null,
+      limits: { max_nodes: 120, max_edges: 480, max_degree: 40 },
+      radius_cap_applied: false,
+      active_note_count: 1,
+      all_notes_note_cap: 100,
+      all_notes_eligible: true
+    })
+
+    await expect(
+      fetchNotesGraph({ centerNoteId: "note:1" })
+    ).rejects.toMatchObject({ code: "notes_graph_invalid_response" })
   })
 
   it("fails closed on malformed limits, counts, revisions, actions, categories, states, and mutation envelopes", async () => {
@@ -557,6 +638,8 @@ describe("Notes graph suggestion client", () => {
     const invalidCalls = [
       () =>
         fetchNotesGraph({ centerNoteId: "note-1", cursor: "x".repeat(4097) }),
+      () => listNotesGraphSuggestionRuns({ noteId: "note-1", limit: 101 }),
+      () => listNotesGraphSuggestions({ noteId: "note-1", limit: 101 }),
       () =>
         cancelNotesGraphSuggestionRun({
           noteId: "note-1",
@@ -591,29 +674,39 @@ describe("Notes graph suggestion client", () => {
     expect(mocks.bgRequest).not.toHaveBeenCalled()
   })
 
-  it("preserves both public admission failure codes and rejects unsafe run states", async () => {
+  it("preserves the complete Task 8 persisted public run error allowlist", async () => {
+    const persistedTask8RunErrorCodes = [
+      "notes_graph_admission_failed",
+      "notes_graph_capabilities_changed_before_queue",
+      "notes_graph_job_missing",
+      "notes_graph_capabilities_changed_before_provider",
+      "notes_graph_fingerprint_stale",
+      "notes_graph_fts_not_ready",
+      "notes_graph_provider_retry_policy_unsupported",
+      "notes_graph_provider_unavailable",
+      "notes_graph_source_too_large",
+      "notes_graph_suggestion_no_valid_items",
+      "notes_graph_suggestion_suppression_limit",
+      "notes_graph_publication_state_missing",
+      "notes_graph_publication_receipt_mismatch",
+      "notes_graph_publication_receipt_missing",
+      "notes_graph_source_changed",
+      "notes_graph_target_changed"
+    ]
     mocks.bgRequest.mockResolvedValueOnce({
-      items: [
-        {
-          ...runPayload("run-admission", "failed"),
-          error_code: "notes_graph_admission_failed",
-          guidance_key: "retry_generation"
-        },
-        {
-          ...runPayload("run-capability", "failed"),
-          error_code: "notes_graph_capabilities_changed_before_queue",
-          guidance_key: "retry_generation"
-        }
-      ],
+      items: persistedTask8RunErrorCodes.map((errorCode, index) => ({
+        ...runPayload(`run-${index}`, "failed"),
+        error_code: errorCode,
+        guidance_key: errorCode.endsWith("_changed") ? null : "retry_generation"
+      })),
       next_cursor: null
     })
 
     const page = await listNotesGraphSuggestionRuns({ noteId: "note-1" })
 
-    expect(page.items.map((item) => item.error_code)).toEqual([
-      "notes_graph_admission_failed",
-      "notes_graph_capabilities_changed_before_queue"
-    ])
+    expect(page.items.map((item) => item.error_code)).toEqual(
+      persistedTask8RunErrorCodes
+    )
   })
 
   it("maps raw failures to the stable sanitized error contract", async () => {

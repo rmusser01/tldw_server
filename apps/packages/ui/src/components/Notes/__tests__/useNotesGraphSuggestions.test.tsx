@@ -126,6 +126,23 @@ const suggestionPage = (items = [suggestion()]) => ({
   rejection_count: 1
 })
 
+const cachedSuggestionIds = (client: QueryClient): string[] | undefined => {
+  const cached = client
+    .getQueryCache()
+    .findAll()
+    .find((query) => query.queryKey.includes("items"))?.state.data as
+    | { items?: Array<{ id: string }> }
+    | { data?: { items?: Array<{ id: string }> } }
+    | undefined
+  return "data" in (cached ?? {})
+    ? (cached as { data?: { items?: Array<{ id: string }> } }).data?.items?.map(
+        (item) => item.id
+      )
+    : (cached as { items?: Array<{ id: string }> } | undefined)?.items?.map(
+        (item) => item.id
+      )
+}
+
 const wrapper =
   (client: QueryClient) =>
   ({ children }: { children: React.ReactNode }) => (
@@ -507,16 +524,7 @@ describe("useNotesGraphSuggestions", () => {
     await act(async () => {
       await result.current.accept(result.current.suggestions[0])
     })
-    const acceptedCache = client
-      .getQueryCache()
-      .findAll()
-      .find((query) => query.queryKey.at(-1) === "items")?.state.data as
-      | { data?: { items?: Array<{ id: string }> } }
-      | undefined
-    expect(acceptedCache?.data?.items?.map((item) => item.id)).toEqual([
-      "suggestion-two",
-      "tag-one"
-    ])
+    expect(cachedSuggestionIds(client)).toEqual(["suggestion-two", "tag-one"])
     await settleQueries()
     expect(mocks.accept).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -566,6 +574,177 @@ describe("useNotesGraphSuggestions", () => {
     expect(result.current.provisionalBySuggestionId).toEqual({})
     await flush()
     expect(mocks.listSuggestions).toHaveBeenCalledTimes(listCalls)
+  })
+
+  it("omits provisional relationships whose authoritative source is not loaded", async () => {
+    mocks.listSuggestions.mockResolvedValue(
+      suggestionPage([
+        suggestion({
+          id: "loaded-source",
+          source_note_id: "source-note",
+          target_note_id: "target-note"
+        }),
+        suggestion({
+          id: "unloaded-source",
+          source_note_id: "other-source",
+          target_note_id: "target-note"
+        })
+      ])
+    )
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
+    })
+    const { result } = renderHook(
+      () =>
+        useNotesGraphSuggestions({
+          authorityScope: "authority-a",
+          enabled: true,
+          isOnline: true,
+          noteId: "source-note",
+          loadedNodeIds: new Set(["note:source-note", "note:target-note"])
+        }),
+      { wrapper: wrapper(client) }
+    )
+    await flush()
+
+    expect(result.current.provisionalBySuggestionId).toEqual({
+      "loaded-source": {
+        edge: {
+          id: "suggestion-edge:loaded-source",
+          suggestionId: "loaded-source",
+          source: "note:source-note",
+          target: "note:target-note",
+          type: "provisional_suggestion",
+          directed: false
+        },
+        node: null
+      }
+    })
+  })
+
+  it("keeps decided suggestions removed when the provider changes", async () => {
+    mocks.getCapabilities.mockImplementation(({ provider, model }) =>
+      Promise.resolve({
+        ...capability(),
+        provider: provider ?? "provider-one",
+        model: model ?? "model-one"
+      })
+    )
+    mocks.listSuggestions.mockResolvedValue(
+      suggestionPage([
+        suggestion(),
+        suggestion({ id: "suggestion-two", target_note_id: "target-two" })
+      ])
+    )
+    mocks.reject.mockResolvedValue({
+      resource_id: "suggestion-one",
+      state: "rejected",
+      revision: 3,
+      cleared_count: null
+    })
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
+    })
+    const { result, rerender } = renderHook(
+      ({ provider, model }) =>
+        useNotesGraphSuggestions({
+          authorityScope: "authority-a",
+          enabled: true,
+          isOnline: true,
+          noteId: "source-note",
+          provider,
+          model,
+          loadedNodeIds: new Set(["source-note"])
+        }),
+      {
+        initialProps: { provider: "provider-one", model: "model-one" },
+        wrapper: wrapper(client)
+      }
+    )
+    await flush()
+
+    await act(async () => {
+      await result.current.reject(result.current.suggestions[0])
+    })
+    await settleQueries()
+    expect(result.current.suggestions.map((item) => item.id)).toEqual([
+      "suggestion-two"
+    ])
+    expect(mocks.listSuggestions).toHaveBeenCalledTimes(1)
+
+    rerender({ provider: "provider-two", model: "model-two" })
+    expect(result.current.suggestions.map((item) => item.id)).toEqual([
+      "suggestion-two"
+    ])
+    await settleQueries()
+    expect(mocks.listSuggestions).toHaveBeenCalledTimes(1)
+    expect(result.current.suggestions.map((item) => item.id)).toEqual([
+      "suggestion-two"
+    ])
+  })
+
+  it("reconciles one suggestion cache on terminal success across provider changes", async () => {
+    mocks.getCapabilities.mockImplementation(({ provider, model }) =>
+      Promise.resolve({
+        ...capability(),
+        provider: provider ?? "provider-one",
+        model: model ?? "model-one"
+      })
+    )
+    mocks.listRuns
+      .mockResolvedValueOnce({
+        items: [run("run-one", "running", "2026-08-27T12:00:00Z")],
+        next_cursor: null
+      })
+      .mockResolvedValue({ items: [], next_cursor: null })
+    mocks.getRun.mockResolvedValue(
+      run("run-one", "succeeded", "2026-08-27T12:00:00Z", 2)
+    )
+    mocks.listSuggestions
+      .mockResolvedValueOnce(
+        suggestionPage([suggestion({ id: "before-publication" })])
+      )
+      .mockResolvedValueOnce(
+        suggestionPage([suggestion({ id: "published-suggestion" })])
+      )
+      .mockResolvedValue(
+        suggestionPage([suggestion({ id: "before-publication" })])
+      )
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
+    })
+    const { result, rerender } = renderHook(
+      ({ provider, model }) =>
+        useNotesGraphSuggestions({
+          authorityScope: "authority-a",
+          enabled: true,
+          isOnline: true,
+          noteId: "source-note",
+          provider,
+          model,
+          loadedNodeIds: new Set(["source-note"])
+        }),
+      {
+        initialProps: { provider: "provider-one", model: "model-one" },
+        wrapper: wrapper(client)
+      }
+    )
+    await flush()
+
+    expect(result.current.suggestions.map((item) => item.id)).toEqual([
+      "published-suggestion"
+    ])
+    expect(mocks.listSuggestions).toHaveBeenCalledTimes(2)
+
+    rerender({ provider: "provider-two", model: "model-two" })
+    expect(result.current.suggestions.map((item) => item.id)).toEqual([
+      "published-suggestion"
+    ])
+    await settleQueries()
+    expect(mocks.listSuggestions).toHaveBeenCalledTimes(2)
+    expect(result.current.suggestions.map((item) => item.id)).toEqual([
+      "published-suggestion"
+    ])
   })
 
   it("exposes no suggestion, evidence, rationale, or run from another authority", async () => {
@@ -868,15 +1047,7 @@ describe("useNotesGraphSuggestions", () => {
     await act(async () => {
       await result.current.reject(result.current.suggestions[0])
     })
-    const rejectedCache = client
-      .getQueryCache()
-      .findAll()
-      .find((query) => query.queryKey.at(-1) === "items")?.state.data as
-      | { data?: { items?: Array<{ id: string }> } }
-      | undefined
-    expect(rejectedCache?.data?.items?.map((item) => item.id)).toEqual([
-      "suggestion-two"
-    ])
+    expect(cachedSuggestionIds(client)).toEqual(["suggestion-two"])
     await settleQueries()
 
     expect(result.current.suggestions.map((item) => item.id)).toEqual([
