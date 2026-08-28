@@ -1,10 +1,10 @@
 ---
-id: TASK-13013
+id: TASK-13141
 title: Design canonical admin outgoing webhooks
 status: Done
 assignee: []
 created_date: '2026-08-21 19:48'
-updated_date: '2026-08-21 20:39'
+updated_date: '2026-08-28 05:22'
 labels:
   - admin
   - webhooks
@@ -56,6 +56,8 @@ The oversized delivery review unit was split into three upstream PRs: control pl
 Fresh documentation verification on 2026-08-21: origin/dev resolves to 2e0815c1e4577902a220044619822ab6b1cb395f; the stale-wording scan returned no matches; Backlog CLI parsed TASK-13013; git diff --check passed. The changed set is design/Backlog history only, so runtime tests and Bandit are not applicable. User approval remains pending before implementation planning.
 
 2026-08-21 approval gate: user approved the reviewed design, including the registration bounds, fail-closed mode-on source mutation policy, three-PR upstream activation sequence, and conditional hosted compatibility approach. Implementation planning may proceed; runtime implementation remains out of scope for this task.
+
+2026-08-28 TASK-13013.10 identity normalization: this completed canonical webhook design moved from legacy TASK-13013 to canonical TASK-13141. The public release-readiness program remains the sole TASK-13013 record. Historical commits may retain the legacy ID; current design and implementation links use TASK-13141.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

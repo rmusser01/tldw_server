@@ -4,7 +4,7 @@
 
 **Date:** 2026-07-13
 
-**Backlog:** TASK-13013 (reconciles historical TASK-12955, TASK-12956, and TASK-12958)
+**Backlog:** TASK-13142 (legacy ID: TASK-13013; reconciles historical TASK-12955, TASK-12956, and TASK-12958)
 
 **Authoritative source:** approved commit `1a038599753e780f32f62243871026ca9b6d2c06`
 
@@ -419,4 +419,4 @@ No release gate requires cataloging or migrating every internal prompt. The inve
 
 ## Superseded planning artifacts
 
-The previous foundation, broad-domain, Context Integrity approval, and protected-job-pinning plans were based on the rejected architecture and must not be executed. They remain superseded. Human review approved this revision on 2026-07-15; the replacement implementation plan is tracked by TASK-13013.
+The previous foundation, broad-domain, Context Integrity approval, and protected-job-pinning plans were based on the rejected architecture and must not be executed. They remain superseded. Human review approved this revision on 2026-07-15; the replacement implementation plan is tracked by TASK-13142.

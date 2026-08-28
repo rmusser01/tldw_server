@@ -13,10 +13,10 @@
 ## Source of truth and execution prerequisites
 
 - Approved specification: `Docs/superpowers/specs/2026-07-12-user-customizable-service-prompts-design.md`.
-- Planning/reconciliation task: `TASK-13013`.
+- Planning/reconciliation task: `TASK-13142` (legacy ID: `TASK-13013`).
 - Approved source commit: `1a038599753e780f32f62243871026ca9b6d2c06`.
 - Reconciled current-`dev` planning commit: `e6665ddf89`.
-- Before runtime edits, search Backlog.md and create one implementation task referencing `TASK-13013` and this plan. Export its allocated ID as `TASK_ID`, record the exact generated task-record path as `TASK_FILE`, and use `TASK_ID` in every implementation commit. Stage `TASK_FILE` in Task 1 so the task exists in Git, and stage every later metadata change before the commit that claims that progress.
+- Before runtime edits, search Backlog.md and create one implementation task referencing `TASK-13142` and this plan. Export its allocated ID as `TASK_ID`, record the exact generated task-record path as `TASK_FILE`, and use `TASK_ID` in every implementation commit. Stage `TASK_FILE` in Task 1 so the task exists in Git, and stage every later metadata change before the commit that claims that progress.
 - Work in an isolated worktree based on current `origin/dev`. If the project-local worktree has no `.venv`, create an ignored symlink to the repository environment with `ln -s ../../.venv .venv`, then run `source .venv/bin/activate`.
 - Install the existing frontend workspace dependencies once with `cd apps && bun install`. Do not add a dependency for parsing, rendering, state, or navigation.
 - CI shard changes are explicitly out of scope for this slice. Keep Python tests under already-covered `Prompt_Management`, `Translation`, and `Services` directories.

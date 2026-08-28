@@ -1,10 +1,10 @@
 ---
-id: TASK-12116
+id: TASK-13140
 title: Design OpenRouter and generic TTS gateway integration
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-07-16 15:18'
+updated_date: '2026-08-28 05:22'
 labels:
   - tts
   - openrouter
@@ -46,20 +46,16 @@ Docs/superpowers/plans/2026-07-16-openrouter-tts-gateway-implementation-plan.md
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 User approved the written spec on 2026-07-16. Final spec review approved with no blocking findings. Implementation plan completed and independently reviewed through three whole-plan passes; final status Approved with no issues or recommendations. Created child implementation task TASK-12116.1 in To Do. Verification: git diff --check passed for planning artifacts. Bandit skipped because this task changes only Markdown/Backlog planning metadata and no executable code.
-<!-- SECTION:NOTES:END -->
+
+2026-08-28 TASK-13013.10 identity normalization: this completed design record moved from legacy TASK-12116 to canonical TASK-13140 so the active frontend release-safety task remains the sole TASK-12116 record. The implementation child remains TASK-12116.1 and now explicitly points to TASK-13140; design and implementation documentation use TASK-13140 for this parent. Historical commit subjects and immutable evidence may still mention legacy TASK-12116.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Completed and user-approved the OpenRouter plus generic named TTS gateway design. Produced an implementation-ready TDD plan covering config normalization, dynamic registry, transport/audio validation, credential-scoped discovery, BYOK, explicit routing, bounded fallback/conversion, API/catalogs, history/presets/jobs including server audiobooks, WebUI capability negotiation and persistence, security validation, documentation, and final review. Implementation is tracked separately in TASK-12116.1.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

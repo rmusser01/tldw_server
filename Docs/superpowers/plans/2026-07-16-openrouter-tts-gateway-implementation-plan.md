@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.10+, FastAPI, Pydantic, httpx/aiohttp through the shared HTTP client, asyncio, dataclasses, stdlib OrderedDict, existing TTS adapters/services, existing AuthNZ BYOK repositories, ffmpeg through AudioConverter, pytest, Hypothesis, Bandit, TypeScript, React, TanStack Query, Ant Design, Vitest.
 
-Design backlog: TASK-12116
+Design backlog: TASK-13140 (legacy ID: TASK-12116)
 Implementation backlog: TASK-12116.1
 Spec: Docs/superpowers/specs/2026-07-15-openrouter-tts-gateway-design.md
 
@@ -27,7 +27,7 @@ Spec: Docs/superpowers/specs/2026-07-15-openrouter-tts-gateway-design.md
 ### Task 0.1: Start the implementation task in an isolated branch
 
 - [x] Invoke the superpowers:using-git-worktrees skill before changing implementation files.
-- [x] Read TASK-12116.1 and confirm it links TASK-12116, this plan, and the approved spec.
+- [x] Read TASK-12116.1 and confirm it links TASK-13140, this plan, and the approved spec.
 - [x] Set TASK-12116.1 to In Progress and keep its notes current with touched files, commits, verification, and blockers.
 - [x] Create or switch the isolated worktree to branch codex/openrouter-tts-gateways.
 - [x] Do not copy, stage, or discard unrelated dirty-worktree changes.

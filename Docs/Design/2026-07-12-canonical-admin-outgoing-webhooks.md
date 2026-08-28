@@ -7,7 +7,7 @@ Revalidated: 2026-08-21 against `origin/dev` at
 
 Status: Approved design and reviewed implementation plan on 2026-08-21
 
-Backlog: TASK-13013 (replaces the colliding historical TASK-12950 record)
+Backlog: TASK-13141 (legacy ID: TASK-13013; replaces the colliding historical TASK-12950 record)
 
 ## Summary
 
