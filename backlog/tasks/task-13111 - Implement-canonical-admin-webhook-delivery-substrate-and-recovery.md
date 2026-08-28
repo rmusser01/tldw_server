@@ -3,29 +3,24 @@ id: TASK-13111
 title: Implement canonical admin webhook delivery substrate and recovery
 status: In Progress
 assignee: []
-created_date: 2026-08-23 03:15
-updated_date: 2026-08-28 17:53
+created_date: '2026-08-23 03:15'
+updated_date: '2026-08-28 18:49'
 labels:
-- admin
-- webhooks
-- jobs
-- security
-- recovery
+  - admin
+  - webhooks
+  - jobs
+  - security
+  - recovery
 dependencies:
-- TASK-13014
+  - TASK-13014
 references:
-- https://github.com/rmusser01/tldw_server/pull/2806
-- https://github.com/rmusser01/tldw_server/pull/2828
+  - 'https://github.com/rmusser01/tldw_server/pull/2806'
+  - 'https://github.com/rmusser01/tldw_server/pull/2828'
 documentation:
-- Docs/Design/2026-07-12-canonical-admin-outgoing-webhooks.md
-- Docs/superpowers/plans/2026-08-23-canonical-admin-webhook-delivery-substrate.md
+  - Docs/Design/2026-07-12-canonical-admin-outgoing-webhooks.md
+  - >-
+    Docs/superpowers/plans/2026-08-23-canonical-admin-webhook-delivery-substrate.md
 priority: high
-modified_files:
-- tldw_Server_API/app/core/DB_Management/admin_webhooks_repository.py
-- tldw_Server_API/app/core/Admin_Webhooks/crypto.py
-- tldw_Server_API/tests/Admin_Webhooks/test_delivery_repository_sqlite.py
-- tldw_Server_API/tests/Admin_Webhooks/test_delivery_repository_postgres.py
-- tldw_Server_API/tests/Admin_Webhooks/test_event_expansion.py
 ---
 
 ## Description
@@ -94,6 +89,8 @@ The initial draft was created from an earlier reviewed PR 1 head. Planning revie
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 2026-08-28: Task 2 Fix Round 2 complete. Added backend-neutral real-transaction acknowledgement rollback evidence and full malformed persisted-coordinate/constraint coverage on SQLite and PostgreSQL. No production defect was exposed, so production and crypto code were unchanged. RED: 2 collection errors from missing shared contracts. Corrective subset: 5 passed, 0 skipped, 6 warnings. Full PostgreSQL-required Task 2 suite: 70 passed, 0 skipped, 122 warnings. Ruff and git diff --check passed; Bandit/crypto were not required because production did not change.
+
+Task 3 complete: added backend-neutral exact prepared dispositions, no-attempt defer, lease-horizon and identity lookup operations; unified typed/legacy admission; persisted expired-lease recovery controls; and SQLite/PostgreSQL parity. Mandatory Task 3 plus lifecycle suite: 263 passed, 0 skipped. Focused Ruff and Bandit passed. Full Jobs Ruff remains blocked only by pre-existing I001 findings in unchanged audit_bridge.py, metrics.py, and tracing.py.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 
 from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Jobs.operations.contracts import ExpiredLeasePolicy
 
 pytestmark = pytest.mark.unit
 
@@ -316,6 +317,94 @@ def test_sqlite_integrity_sweep_honors_expired_lease_retry_budget(
     assert exhausted_after["error_message"] == "Job lease expired; retry budget exhausted"
     assert exhausted_after["lease_id"] is None
     assert exhausted_after["worker_id"] is None
+
+
+@pytest.mark.parametrize("single_update", [False, True])
+def test_sqlite_expired_requeue_no_attempt_preserves_all_attempt_state(
+    tmp_path,
+    monkeypatch,
+    single_update,
+):
+    jm = _manager(tmp_path, monkeypatch, single_update=single_update)
+    created = jm.create_job(
+        domain="admin_webhooks",
+        queue="delivery",
+        job_type="admin_webhook_delivery",
+        payload={"delivery_id": "00000000-0000-4000-8000-000000000001"},
+        owner_user_id=None,
+        max_retries=3,
+        expired_lease_policy=ExpiredLeasePolicy.REQUEUE_NO_ATTEMPT,
+        quarantine_threshold=5,
+    )
+    acquired = jm.acquire_next_job(
+        domain="admin_webhooks",
+        queue="delivery",
+        job_type="admin_webhook_delivery",
+        lease_seconds=30,
+        worker_id="worker-1",
+    )
+    assert acquired is not None
+    conn = jm._connect()
+    try:
+        conn.execute(
+            "UPDATE jobs SET leased_until=DATETIME('now', '-10 minutes'), "
+            "retry_count=2, failure_streak_code='receiver_503', "
+            "failure_streak_count=4, quarantined_at=NULL WHERE id=?",
+            (created["id"],),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    reclaimed = jm.acquire_next_job(
+        domain="admin_webhooks",
+        queue="delivery",
+        job_type="admin_webhook_delivery",
+        lease_seconds=30,
+        worker_id="worker-2",
+    )
+
+    assert reclaimed is not None
+    assert reclaimed["worker_id"] == "worker-2"
+    assert int(reclaimed["retry_count"]) == 2
+    assert int(reclaimed["max_retries"]) == 3
+    assert reclaimed["failure_streak_code"] == "receiver_503"
+    assert int(reclaimed["failure_streak_count"]) == 4
+
+
+def test_sqlite_integrity_sweep_requeues_no_attempt_without_counter_mutation(
+    tmp_path,
+    monkeypatch,
+):
+    jm = _manager(tmp_path, monkeypatch, single_update=False)
+    created = jm.create_job(
+        domain="admin_webhooks",
+        queue="delivery",
+        job_type="admin_webhook_delivery",
+        payload={"delivery_id": "00000000-0000-4000-8000-000000000002"},
+        owner_user_id=None,
+        expired_lease_policy=ExpiredLeasePolicy.REQUEUE_NO_ATTEMPT,
+        quarantine_threshold=5,
+    )
+    assert jm.acquire_next_job(
+        domain="admin_webhooks",
+        queue="delivery",
+        lease_seconds=30,
+        worker_id="worker-1",
+    )
+    _expire_lease(jm, int(created["id"]), retry_count=2)
+
+    stats = jm.integrity_sweep(fix=True, domain="admin_webhooks")
+    persisted = jm.get_job(int(created["id"]))
+
+    assert stats["fixed"] == 1
+    assert persisted["status"] == "queued"
+    assert int(persisted["retry_count"]) == 2
+    assert persisted["worker_id"] is None
+    assert persisted["lease_id"] is None
+    assert persisted["leased_until"] is None
+    assert persisted["acquired_at"] is None
+    assert persisted["started_at"] is None
 
 
 @pytest.mark.parametrize("single_update", [False, True])

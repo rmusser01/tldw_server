@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from tldw_Server_API.app.core.DB_Management import sqlite_policy
-from tldw_Server_API.app.core.Jobs.migrations import ensure_jobs_tables
+from tldw_Server_API.app.core.Jobs.migrations import JOBS_SQLITE_DDL, ensure_jobs_tables
 
 
 def test_sqlite_schema_persists_owner_scoped_idempotency_receipts(tmp_path):
@@ -118,8 +118,17 @@ def test_sqlite_schema_has_expected_columns_and_indexes(tmp_path):
             "error_code",
             "error_class",
             "error_stack",
+            "expired_lease_policy",
+            "quarantine_threshold",
         ]:
             assert expected in cols
+        column_details = {
+            row[1]: row
+            for row in conn.execute("PRAGMA table_info(jobs)").fetchall()
+        }
+        assert column_details["expired_lease_policy"][3] == 1
+        assert column_details["expired_lease_policy"][4] == "'consume_retry'"
+        assert column_details["quarantine_threshold"][3] == 0
         # Archive table exists
         row = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='jobs_archive'").fetchone()
         assert row and row[0] == "jobs_archive"
@@ -179,3 +188,36 @@ def test_ensure_jobs_tables_sanitizes_schema_failure_log(tmp_path, monkeypatch):
     assert "Failed to ensure Jobs schema" in rendered
     assert str(db_path) not in rendered
     assert secret not in rendered
+
+
+def test_sqlite_forward_migration_backfills_execution_controls(tmp_path):
+    db_path = tmp_path / "legacy_jobs.db"
+    legacy_ddl = JOBS_SQLITE_DDL.replace(
+        "  expired_lease_policy TEXT NOT NULL DEFAULT 'consume_retry' "
+        "CHECK (expired_lease_policy IN ('consume_retry','requeue_no_attempt')),\n",
+        "",
+    ).replace(
+        "  quarantine_threshold INTEGER CHECK "
+        "(quarantine_threshold IS NULL OR quarantine_threshold > 0),\n",
+        "",
+    )
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(legacy_ddl)
+        conn.execute(
+            "INSERT INTO jobs(uuid, domain, queue, job_type, payload, status) "
+            "VALUES('legacy', 'legacy', 'default', 'work', '{}', 'queued')"
+        )
+
+    ensure_jobs_tables(db_path)
+
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT expired_lease_policy, quarantine_threshold FROM jobs WHERE id=1"
+        ).fetchone()
+        assert row == ("consume_retry", None)
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "UPDATE jobs SET expired_lease_policy='invalid' WHERE id=1"
+            )
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute("UPDATE jobs SET quarantine_threshold=0 WHERE id=1")

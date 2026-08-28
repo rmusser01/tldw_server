@@ -6,7 +6,9 @@ import ast
 import io
 import tokenize
 from dataclasses import FrozenInstanceError, fields
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 
@@ -15,18 +17,276 @@ from tldw_Server_API.app.core.Jobs.operations.contracts import (
     AcquireJobCommand,
     AdmissionRejectionReason,
     AdmissionResult,
+    ApplyPreparedDispositionCommand,
     BatchRenewLeaseItem,
     BatchRenewLeasesCommand,
     BatchRenewLeasesResult,
     CreateJobCommand,
+    EnsureLeaseHorizonCommand,
+    ExpiredLeasePolicy,
+    FindJobByIdentityCommand,
+    JobIdentityLookupResult,
+    JobIdentityLookupState,
+    LeaseHorizonResult,
     LifecycleResult,
     NoTransitionReason,
     OperationOutcome,
+    PreparedDispositionKind,
+    PreparedDispositionOrigin,
+    PreparedDispositionResult,
+    PreparedJobDisposition,
     ReleaseJobCommand,
     RenewLeaseCommand,
 )
 
 pytestmark = pytest.mark.unit
+
+
+def _uuid() -> str:
+    return str(uuid4())
+
+
+def _token(character: str = "a") -> str:
+    return character * 64
+
+
+def _aware(seconds: int = 0) -> datetime:
+    return datetime(2026, 8, 28, tzinfo=timezone.utc) + timedelta(seconds=seconds)
+
+
+def test_prepared_disposition_factories_build_the_closed_protocol() -> None:
+    delivery_id = _uuid()
+    attempt_id = _uuid()
+    retry_at = _aware(60)
+    stale_at = _aware(120)
+
+    complete = PreparedJobDisposition.complete(
+        token=_token("a"), delivery_id=delivery_id, attempt_id=attempt_id
+    )
+    retry = PreparedJobDisposition.retry(
+        token=_token("b"),
+        delivery_id=delivery_id,
+        attempt_id=attempt_id,
+        delay_seconds=60,
+        not_before_at=retry_at,
+        reason_code="receiver_503",
+    )
+    fail = PreparedJobDisposition.fail(
+        token=_token("c"),
+        delivery_id=delivery_id,
+        attempt_id=attempt_id,
+        reason_code="receiver_400",
+    )
+    cancel = PreparedJobDisposition.cancel(
+        token=_token("d"),
+        delivery_id=delivery_id,
+        reason_code="registration_disabled",
+    )
+    infrastructure = PreparedJobDisposition.infrastructure_defer(
+        token=_token("e"),
+        delivery_id=delivery_id,
+        reason_code="authnz_unavailable",
+    )
+    recovery = PreparedJobDisposition.recovery_defer_until(
+        token=_token("f"),
+        delivery_id=delivery_id,
+        not_before_at=stale_at,
+        reason_code="attempt_not_stale",
+    )
+
+    assert complete.kind is PreparedDispositionKind.COMPLETE
+    assert retry.kind is PreparedDispositionKind.RETRY
+    assert retry.origin is PreparedDispositionOrigin.AUTHNZ
+    assert retry.delay_seconds == 60
+    assert retry.not_before_at == retry_at
+    assert fail.kind is PreparedDispositionKind.FAIL
+    assert cancel.kind is PreparedDispositionKind.CANCEL
+    assert infrastructure == PreparedJobDisposition(
+        token=_token("e"),
+        kind=PreparedDispositionKind.DEFER,
+        origin=PreparedDispositionOrigin.INFRASTRUCTURE,
+        delivery_id=delivery_id,
+        reason_code="authnz_unavailable",
+    )
+    assert infrastructure.not_before_at is None
+    assert recovery.origin is PreparedDispositionOrigin.RECOVERY
+    assert recovery.not_before_at == stale_at
+
+
+@pytest.mark.parametrize("token", ["a" * 63, "A" * 64, "g" * 64, "a" * 65])
+def test_prepared_disposition_rejects_malformed_tokens(token: str) -> None:
+    with pytest.raises(ValueError, match="token"):
+        PreparedJobDisposition.complete(
+            token=token, delivery_id=_uuid(), attempt_id=_uuid()
+        )
+
+
+@pytest.mark.parametrize("field_name", ["delivery_id", "attempt_id"])
+def test_prepared_disposition_rejects_noncanonical_uuid4_ids(field_name: str) -> None:
+    values = {
+        "token": _token(),
+        "delivery_id": _uuid(),
+        "attempt_id": _uuid(),
+    }
+    values[field_name] = "not-a-canonical-uuid"
+    with pytest.raises(ValueError, match=field_name):
+        PreparedJobDisposition.complete(**values)
+
+
+@pytest.mark.parametrize("delay", [0, -1, 1801, True])
+def test_retry_rejects_unbounded_delay(delay: int) -> None:
+    with pytest.raises(ValueError, match="delay_seconds"):
+        PreparedJobDisposition.retry(
+            token=_token(),
+            delivery_id=_uuid(),
+            attempt_id=_uuid(),
+            delay_seconds=delay,
+            not_before_at=_aware(),
+            reason_code="receiver_503",
+        )
+
+
+def test_prepared_disposition_rejects_illegal_origin_and_field_combinations() -> None:
+    common = {"token": _token(), "delivery_id": _uuid()}
+    with pytest.raises(ValueError):
+        PreparedJobDisposition(
+            **common,
+            kind=PreparedDispositionKind.COMPLETE,
+            origin=PreparedDispositionOrigin.INFRASTRUCTURE,
+            attempt_id=_uuid(),
+        )
+    with pytest.raises(TypeError):
+        PreparedJobDisposition.infrastructure_defer(
+            **common,
+            reason_code="authnz_unavailable",
+            not_before_at=_aware(),  # type: ignore[call-arg]
+        )
+    with pytest.raises(ValueError, match="timezone-aware"):
+        PreparedJobDisposition.recovery_defer_until(
+            **common,
+            reason_code="attempt_not_stale",
+            not_before_at=datetime(2026, 8, 28),
+        )
+    with pytest.raises(ValueError, match="reason_code"):
+        PreparedJobDisposition.fail(
+            **common,
+            attempt_id=_uuid(),
+            reason_code="arbitrary exception text with spaces and secrets",
+        )
+
+
+def test_prepared_commands_and_results_copy_mutable_payloads() -> None:
+    payload = {"delivery_id": _uuid(), "nested": {"value": 1}}
+    disposition = PreparedJobDisposition.cancel(
+        token=_token(),
+        delivery_id=payload["delivery_id"],
+        reason_code="registration_disabled",
+    )
+    command = ApplyPreparedDispositionCommand(
+        job_id=7,
+        domain="admin_webhooks",
+        queue="delivery",
+        job_type="admin_webhook_delivery",
+        expected_payload=payload,
+        disposition=disposition,
+    )
+    metadata = {"schema_version": 1, "token": _token(), "nested": {"value": 1}}
+    result = PreparedDispositionResult.applied(
+        state="cancelled", metadata=metadata, already_applied=False
+    )
+    payload["nested"]["value"] = 2
+    metadata["nested"]["value"] = 2
+
+    assert command.expected_payload["nested"] == {"value": 1}
+    assert result.metadata["nested"] == {"value": 1}
+    assert "message" not in {item.name for item in fields(PreparedDispositionResult)}
+    with pytest.raises(FrozenInstanceError):
+        command.job_id = 8
+
+
+def test_lease_horizon_and_identity_contracts_are_closed_and_frozen() -> None:
+    payload = {"delivery_id": _uuid()}
+    horizon = EnsureLeaseHorizonCommand(
+        job_id=1,
+        domain="admin_webhooks",
+        queue="delivery",
+        job_type="admin_webhook_delivery",
+        expected_payload=payload,
+        worker_id="worker-1",
+        lease_id="lease-1",
+        minimum_seconds=60,
+    )
+    lookup = FindJobByIdentityCommand(
+        domain="admin_webhooks",
+        queue="delivery",
+        job_type="admin_webhook_delivery",
+        idempotency_key=f"admin-webhook-delivery:{payload['delivery_id']}",
+        expected_payload=payload,
+    )
+    lookup_result = JobIdentityLookupResult.found(
+        JobIdentityLookupState.ACTIVE, {"id": 1, "payload": payload}
+    )
+    lease_result = LeaseHorizonResult.applied(leased_until=_aware(60))
+    payload["delivery_id"] = _uuid()
+
+    assert horizon.expected_payload != payload
+    assert lookup.expected_payload != payload
+    assert lookup_result.row["payload"] != payload
+    assert lease_result.ensured is True
+    with pytest.raises(ValueError, match="minimum_seconds"):
+        EnsureLeaseHorizonCommand(
+            **{**horizon.__dict__, "minimum_seconds": 0}
+        )
+
+
+def test_create_job_execution_controls_are_default_compatible_and_validated() -> None:
+    default = CreateJobCommand(
+        domain="chatbooks",
+        queue="default",
+        job_type="export",
+        payload={},
+        owner_user_id=None,
+    )
+    canonical = CreateJobCommand(
+        domain="admin_webhooks",
+        queue="delivery",
+        job_type="admin_webhook_delivery",
+        payload={"delivery_id": _uuid()},
+        owner_user_id=None,
+        expired_lease_policy=ExpiredLeasePolicy.REQUEUE_NO_ATTEMPT,
+        quarantine_threshold=5,
+    )
+
+    assert default.expired_lease_policy is ExpiredLeasePolicy.CONSUME_RETRY
+    assert default.quarantine_threshold is None
+    assert canonical.expired_lease_policy is ExpiredLeasePolicy.REQUEUE_NO_ATTEMPT
+    assert canonical.quarantine_threshold == 5
+    with pytest.raises(ValueError, match="expired_lease_policy"):
+        CreateJobCommand(
+            domain="x", queue="default", job_type="x", payload={}, owner_user_id=None,
+            expired_lease_policy="unknown",  # type: ignore[arg-type]
+        )
+    with pytest.raises(ValueError, match="quarantine_threshold"):
+        CreateJobCommand(
+            domain="x", queue="default", job_type="x", payload={}, owner_user_id=None,
+            quarantine_threshold=0,
+        )
+
+
+def test_prepared_operation_contracts_are_exported() -> None:
+    assert {
+        "ApplyPreparedDispositionCommand",
+        "EnsureLeaseHorizonCommand",
+        "ExpiredLeasePolicy",
+        "FindJobByIdentityCommand",
+        "JobIdentityLookupResult",
+        "JobIdentityLookupState",
+        "LeaseHorizonResult",
+        "PreparedDispositionKind",
+        "PreparedDispositionOrigin",
+        "PreparedDispositionResult",
+        "PreparedJobDisposition",
+    }.issubset(contracts.__all__)
 
 
 def test_create_job_command_carries_public_job_facts() -> None:

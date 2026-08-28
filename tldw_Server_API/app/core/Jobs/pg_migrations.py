@@ -224,6 +224,12 @@ CREATE TABLE IF NOT EXISTS jobs (
   status TEXT NOT NULL CHECK (status IN ('queued','processing','completed','failed','cancelled','quarantined')),
   priority INTEGER DEFAULT 5 CHECK (priority >= 1 AND priority <= 10),
   max_retries INTEGER DEFAULT 3 CHECK (max_retries >= 0 AND max_retries <= 100),
+  expired_lease_policy TEXT NOT NULL DEFAULT 'consume_retry'
+    CONSTRAINT jobs_expired_lease_policy_valid
+    CHECK (expired_lease_policy IN ('consume_retry','requeue_no_attempt')),
+  quarantine_threshold INTEGER
+    CONSTRAINT jobs_quarantine_threshold_positive
+    CHECK (quarantine_threshold IS NULL OR quarantine_threshold > 0),
   retry_count INTEGER DEFAULT 0,
   available_at TIMESTAMPTZ,
   started_at TIMESTAMPTZ,
@@ -894,6 +900,70 @@ def _ensure_pg_dependency_snapshot_columns(cur: Any) -> None:
         "depends_on_cancellation_reason FROM job_dependencies LIMIT 0"
     )
 
+
+def _ensure_pg_execution_control_columns(cur: Any) -> None:
+    """Add, backfill, and validate required per-job execution controls."""
+
+    cur.execute(
+        "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS "
+        "expired_lease_policy TEXT NOT NULL DEFAULT 'consume_retry'"
+    )
+    cur.execute(
+        "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS quarantine_threshold INTEGER"
+    )
+    cur.execute(
+        "UPDATE jobs SET expired_lease_policy='consume_retry' "
+        "WHERE expired_lease_policy IS NULL"
+    )
+    cur.execute(
+        "ALTER TABLE jobs ALTER COLUMN expired_lease_policy "
+        "SET DEFAULT 'consume_retry'"
+    )
+    cur.execute(
+        "ALTER TABLE jobs ALTER COLUMN expired_lease_policy SET NOT NULL"
+    )
+    cur.execute(
+        """
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+            WHERE conname='jobs_expired_lease_policy_valid'
+              AND conrelid='jobs'::regclass
+          ) THEN
+            ALTER TABLE jobs ADD CONSTRAINT jobs_expired_lease_policy_valid
+            CHECK (expired_lease_policy IN ('consume_retry','requeue_no_attempt'))
+            NOT VALID;
+          END IF;
+        END
+        $$
+        """
+    )
+    cur.execute(
+        "ALTER TABLE jobs VALIDATE CONSTRAINT jobs_expired_lease_policy_valid"
+    )
+    cur.execute(
+        """
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+            WHERE conname='jobs_quarantine_threshold_positive'
+              AND conrelid='jobs'::regclass
+          ) THEN
+            ALTER TABLE jobs ADD CONSTRAINT jobs_quarantine_threshold_positive
+            CHECK (quarantine_threshold IS NULL OR quarantine_threshold > 0)
+            NOT VALID;
+          END IF;
+        END
+        $$
+        """
+    )
+    cur.execute(
+        "ALTER TABLE jobs VALIDATE CONSTRAINT jobs_quarantine_threshold_positive"
+    )
+
+
 def _audit_slides_generation_pg(cur) -> tuple[str | None, int]:
     """Persist bounded legacy diagnostics before archive index creation."""
     cur.execute(
@@ -1156,9 +1226,10 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
             )
             try:
                 _ensure_pg_dependency_snapshot_columns(f)
+                _ensure_pg_execution_control_columns(f)
             except required_migration_exceptions as exc:
                 raise RuntimeError(
-                    "PostgreSQL Jobs dependency snapshot migration failed"
+                    "PostgreSQL Jobs required schema migration failed"
                 ) from exc
             try:
                 f.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS completion_token TEXT")

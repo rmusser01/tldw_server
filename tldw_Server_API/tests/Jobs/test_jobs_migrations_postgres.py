@@ -143,6 +143,40 @@ def test_pg_forward_migration_adds_missing_columns_and_partial_indexes(jobs_pg_d
         )
 
 
+def test_pg_forward_migration_backfills_execution_controls(jobs_pg_dsn):
+    ensure_jobs_tables_pg(jobs_pg_dsn)
+    with psycopg.connect(jobs_pg_dsn, autocommit=True) as conn:
+        with conn.cursor() as cur:
+            cur.execute("ALTER TABLE jobs DROP COLUMN IF EXISTS expired_lease_policy")
+            cur.execute("ALTER TABLE jobs DROP COLUMN IF EXISTS quarantine_threshold")
+            cur.execute(
+                "INSERT INTO jobs(uuid, domain, queue, job_type, payload, status) "
+                "VALUES('legacy-controls', 'legacy', 'default', 'work', '{}'::jsonb, 'queued')"
+            )
+
+    ensure_jobs_tables_pg(jobs_pg_dsn)
+
+    with psycopg.connect(jobs_pg_dsn) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT expired_lease_policy, quarantine_threshold FROM jobs "
+                "WHERE uuid='legacy-controls'"
+            )
+            assert cur.fetchone() == ("consume_retry", None)
+            cur.execute("SAVEPOINT invalid_policy")
+            with pytest.raises(psycopg.errors.CheckViolation):
+                cur.execute(
+                    "UPDATE jobs SET expired_lease_policy='invalid' "
+                    "WHERE uuid='legacy-controls'"
+                )
+            cur.execute("ROLLBACK TO SAVEPOINT invalid_policy")
+            with pytest.raises(psycopg.errors.CheckViolation):
+                cur.execute(
+                    "UPDATE jobs SET quarantine_threshold=0 "
+                    "WHERE uuid='legacy-controls'"
+                )
+
+
 def _read_pg_archive_batch_index_state(cur, index_name):
     cur.execute(
         "SELECT i.indrelid = 'jobs_archive'::regclass, i.indisvalid, "

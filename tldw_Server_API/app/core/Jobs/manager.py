@@ -70,14 +70,22 @@ from .operations.contracts import (
     AcquireJobCommand,
     AdmissionRejectionReason,
     AdmissionResult,
+    ApplyPreparedDispositionCommand,
     BatchRenewLeaseItem,
     BatchRenewLeasesCommand,
     CreateJobCommand,
+    EnsureLeaseHorizonCommand,
+    ExpiredLeasePolicy,
+    FindJobByIdentityCommand,
     IdempotentOperationAdmission,
     IdempotentOperationCommand,
     IdempotentOperationDisposition,
     IdempotentOperationUnavailableError,
+    JobIdentityLookupResult,
+    LeaseHorizonResult,
     OperationOutcome,
+    PreparedDispositionKind,
+    PreparedDispositionResult,
     ReleaseJobCommand,
     RenewLeaseCommand,
     TerminalOperationResultPatchCommand,
@@ -85,7 +93,10 @@ from .operations.contracts import (
 )
 from .operations.postgres import acquire_job as _postgres_acquire_job
 from .operations.postgres import admit_idempotent_operation as _postgres_admit_idempotent_operation
+from .operations.postgres import apply_prepared_disposition as _postgres_apply_prepared_disposition
 from .operations.postgres import create_job_admission as _postgres_create_job_admission
+from .operations.postgres import ensure_lease_horizon as _postgres_ensure_lease_horizon
+from .operations.postgres import find_job_by_identity as _postgres_find_job_by_identity
 from .operations.postgres import (
     get_job_or_archived_by_idempotency_key as _postgres_get_job_or_archived_by_idempotency_key,
 )
@@ -101,7 +112,10 @@ from .operations.postgres import renew_leases_batch as _postgres_renew_leases_ba
 from .operations.postgres import replay_idempotent_operation as _postgres_replay_idempotent_operation
 from .operations.sqlite import acquire_job as _sqlite_acquire_job
 from .operations.sqlite import admit_idempotent_operation as _sqlite_admit_idempotent_operation
+from .operations.sqlite import apply_prepared_disposition as _sqlite_apply_prepared_disposition
 from .operations.sqlite import create_job_admission as _sqlite_create_job_admission
+from .operations.sqlite import ensure_lease_horizon as _sqlite_ensure_lease_horizon
+from .operations.sqlite import find_job_by_identity as _sqlite_find_job_by_identity
 from .operations.sqlite import (
     get_job_or_archived_by_idempotency_key as _sqlite_get_job_or_archived_by_idempotency_key,
 )
@@ -615,6 +629,7 @@ class JobManager:
         "sharing": ("workspace-clone",),
         "writing": ("writing-review", "writing-ai"),
         "scheduled_tasks": ("scheduled-tasks",),
+        "admin_webhooks": ("delivery",),
     }
 
     # --- Shutdown/acquisition gate (process-wide) ---
@@ -2934,6 +2949,8 @@ class JobManager:
         idempotency_key: str | None,
         request_id: str | None,
         trace_id: str | None,
+        expired_lease_policy: ExpiredLeasePolicy,
+        quarantine_threshold: int | None,
     ) -> CreateJobCommand:
         """Build the backend-neutral create command after facade validation."""
 
@@ -2951,6 +2968,8 @@ class JobManager:
             batch_group=batch_group,
             request_id=request_id,
             trace_id=trace_id,
+            expired_lease_policy=expired_lease_policy,
+            quarantine_threshold=quarantine_threshold,
         )
 
     def _owner_scope_admission_lookup(
@@ -3021,6 +3040,10 @@ class JobManager:
             if result.admission_rejection_reason is AdmissionRejectionReason.QUOTA_EXCEEDED:
                 raise ValueError(result.message or "Quota exceeded")  # noqa: TRY003
             raise ValueError(result.message or "Admission rejected")  # noqa: TRY003
+        if result.outcome is OperationOutcome.BACKEND_CONFLICT:
+            raise RuntimeError(result.message or "Job admission conflict")  # noqa: TRY003
+        if result.outcome not in {OperationOutcome.APPLIED, OperationOutcome.NO_TRANSITION}:
+            raise RuntimeError(result.message or "Job admission failed")  # noqa: TRY003
         if result.row is None:
             raise RuntimeError("Job admission did not return a row")  # noqa: TRY003
         return result.row
@@ -3350,7 +3373,7 @@ class JobManager:
             self._assert_invariants(result.job)
         return result
 
-    def create_job(
+    def admit_job(
         self,
         *,
         domain: str,
@@ -3367,8 +3390,10 @@ class JobManager:
         request_id: str | None = None,
         trace_id: str | None = None,
         owner_scope_admission: OwnerScopeAdmissionPolicy | None = None,
-    ) -> dict[str, Any]:
-        """Create a new job.
+        expired_lease_policy: ExpiredLeasePolicy = ExpiredLeasePolicy.CONSUME_RETRY,
+        quarantine_threshold: int | None = None,
+    ) -> AdmissionResult:
+        """Run the complete admission pipeline and return its typed outcome.
 
         Args:
             domain: Logical domain (e.g., "chatbooks", "prompt_studio").
@@ -3383,10 +3408,22 @@ class JobManager:
             available_at: Optional schedule time before the job becomes acquirable.
             idempotency_key: If provided, duplicate creates return the same row.
             owner_scope_admission: Optional transactional owner/job-scope limits.
+            expired_lease_policy: Behavior when a processing lease expires.
+            quarantine_threshold: Optional consecutive-failure quarantine limit.
 
-        Returns:
-            A dict representing the created (or existing, if idempotent) job row.
+        ``create_job`` delegates here and maps only the final typed outcome to
+        its legacy dict/exception contract.
         """
+        try:
+            expired_lease_policy = ExpiredLeasePolicy(expired_lease_policy)
+        except (TypeError, ValueError):
+            raise ValueError("expired_lease_policy is invalid") from None
+        if quarantine_threshold is not None and (
+            isinstance(quarantine_threshold, bool)
+            or not isinstance(quarantine_threshold, int)
+            or quarantine_threshold <= 0
+        ):
+            raise ValueError("quarantine_threshold must be a positive integer")
         slides_generation = _is_slides_generation_scope(domain, queue, job_type)
         if slides_generation:
             if not isinstance(owner_user_id, str) or not owner_user_id.strip():
@@ -3398,7 +3435,7 @@ class JobManager:
                 idempotency_key=idempotency_key,
             )
             if existing is not None:
-                return existing
+                return AdmissionResult.existing(row=existing)
 
         # Queue name policy
         allowed_queues = self._get_allowed_queues(domain)
@@ -3413,7 +3450,7 @@ class JobManager:
                     rejection=error,
                 )
                 if existing is not None:
-                    return existing
+                    return AdmissionResult.existing(row=existing)
             raise error  # noqa: TRY003
 
         # Fair-share scheduling: enforce per-user concurrency limits and adjust priority
@@ -3437,7 +3474,7 @@ class JobManager:
                         rejection=exc,
                     )
                     if existing is not None:
-                        return existing
+                        return AdmissionResult.existing(row=existing)
                 raise
             except _JOB_NONCRITICAL_EXCEPTIONS as _fs_exc:
                 logger.warning(f"Fair-share scheduling check skipped: {_fs_exc}")
@@ -3474,7 +3511,7 @@ class JobManager:
                     rejection=exc,
                 )
                 if existing is not None:
-                    return existing
+                    return AdmissionResult.existing(row=existing)
             raise
         payload_bytes = len(payload_json.encode("utf-8"))
         if payload_bytes > max_bytes:
@@ -3494,7 +3531,7 @@ class JobManager:
                         rejection=error,
                     )
                     if existing is not None:
-                        return existing
+                        return AdmissionResult.existing(row=existing)
                 raise error  # noqa: TRY003
 
         # Note: completion_token enforcement applies to finalize paths (complete/fail), not creation.
@@ -3546,7 +3583,7 @@ class JobManager:
                         rejection=error,
                     )
                     if existing is not None:
-                        return existing
+                        return AdmissionResult.existing(row=existing)
                 raise error  # noqa: TRY003
 
             if self.backend == "postgres":
@@ -3564,6 +3601,8 @@ class JobManager:
                     idempotency_key=idempotency_key,
                     request_id=request_id,
                     trace_id=trace_id,
+                    expired_lease_policy=expired_lease_policy,
+                    quarantine_threshold=quarantine_threshold,
                 )
                 advisory_xact_lock_key = None
                 pre_admission_lookup = None
@@ -3608,7 +3647,14 @@ class JobManager:
                     advisory_xact_lock_key=advisory_xact_lock_key,
                     pre_admission_lookup=pre_admission_lookup,
                 )
-                d = self._map_admission_result(result)
+                if result.outcome not in {
+                    OperationOutcome.APPLIED,
+                    OperationOutcome.NO_TRANSITION,
+                }:
+                    return result
+                if result.row is None:
+                    raise RuntimeError("Job admission did not return a row")  # noqa: TRY003
+                d = result.row
                 if slides_generation:
                     self._validate_slides_generation_admission(
                         conn,
@@ -3639,7 +3685,7 @@ class JobManager:
                 with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
                     self._assert_invariants(d)
                 self._emit_create_side_effects(result, backend="postgres", idempotency_key=idempotency_key)
-                return d
+                return result
             else:
                 command = self._build_create_job_command(
                     domain=domain,
@@ -3655,6 +3701,8 @@ class JobManager:
                     idempotency_key=idempotency_key,
                     request_id=request_id,
                     trace_id=trace_id,
+                    expired_lease_policy=expired_lease_policy,
+                    quarantine_threshold=quarantine_threshold,
                 )
                 pre_admission_lookup = None
                 if owner_scope_admission is not None:
@@ -3692,7 +3740,14 @@ class JobManager:
                             ),
                             pre_admission_lookup=pre_admission_lookup,
                         )
-                        d = self._map_admission_result(result)
+                        if result.outcome not in {
+                            OperationOutcome.APPLIED,
+                            OperationOutcome.NO_TRANSITION,
+                        }:
+                            return result
+                        if result.row is None:
+                            raise RuntimeError("Job admission did not return a row")  # noqa: TRY003
+                        d = result.row
                         if slides_generation:
                             self._validate_slides_generation_admission(
                                 conn,
@@ -3705,7 +3760,7 @@ class JobManager:
                         with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
                             self._assert_invariants(d)
                         self._emit_create_side_effects(result, backend="sqlite", idempotency_key=idempotency_key)
-                        return d
+                        return result
                     except sqlite3.OperationalError as exc:
                         if attempt == 0 and self._sqlite_missing_column_error(exc, "batch_group"):  # noqa: SIM102
                             if self._sqlite_ensure_batch_group(conn):
@@ -3713,6 +3768,177 @@ class JobManager:
                         raise
         finally:
             conn.close()
+
+    def create_job(
+        self,
+        *,
+        domain: str,
+        queue: str,
+        job_type: str,
+        payload: dict[str, Any],
+        owner_user_id: str | None,
+        project_id: int | None = None,
+        batch_group: str | None = None,
+        priority: int = 5,
+        max_retries: int = 3,
+        available_at: datetime | None = None,
+        idempotency_key: str | None = None,
+        request_id: str | None = None,
+        trace_id: str | None = None,
+        owner_scope_admission: OwnerScopeAdmissionPolicy | None = None,
+        expired_lease_policy: ExpiredLeasePolicy = ExpiredLeasePolicy.CONSUME_RETRY,
+        quarantine_threshold: int | None = None,
+    ) -> dict[str, Any]:
+        """Create a job using the typed admission pipeline and legacy mapping."""
+
+        result = self.admit_job(
+            domain=domain,
+            queue=queue,
+            job_type=job_type,
+            payload=payload,
+            owner_user_id=owner_user_id,
+            project_id=project_id,
+            batch_group=batch_group,
+            priority=priority,
+            max_retries=max_retries,
+            available_at=available_at,
+            idempotency_key=idempotency_key,
+            request_id=request_id,
+            trace_id=trace_id,
+            owner_scope_admission=owner_scope_admission,
+            expired_lease_policy=expired_lease_policy,
+            quarantine_threshold=quarantine_threshold,
+        )
+        return self._map_admission_result(result)
+
+    def find_job_by_identity(
+        self,
+        command: FindJobByIdentityCommand,
+    ) -> JobIdentityLookupResult:
+        """Read one exact active/archive identity without creating work."""
+
+        conn = self._connect()
+        try:
+            if self.backend == "postgres":
+                return _postgres_find_job_by_identity(
+                    conn,
+                    self._pg_cursor,
+                    command=command,
+                )
+            return _sqlite_find_job_by_identity(conn, command=command)
+        finally:
+            conn.close()
+
+    def ensure_lease_horizon(
+        self,
+        command: EnsureLeaseHorizonCommand,
+    ) -> LeaseHorizonResult:
+        """Ensure an exact processing lease horizon within the configured cap."""
+
+        max_seconds = max(
+            1,
+            int(os.getenv("JOBS_LEASE_MAX_SECONDS", "3600") or "3600"),
+        )
+        capped_command = replace(
+            command,
+            minimum_seconds=min(command.minimum_seconds, max_seconds),
+        )
+        conn = self._connect()
+        try:
+            if self.backend == "postgres":
+                return _postgres_ensure_lease_horizon(
+                    conn,
+                    self._pg_cursor,
+                    command=capped_command,
+                )
+            return _sqlite_ensure_lease_horizon(conn, command=capped_command)
+        finally:
+            conn.close()
+
+    def apply_prepared_disposition(
+        self,
+        command: ApplyPreparedDispositionCommand,
+    ) -> PreparedDispositionResult:
+        """Apply one exact prepared transition and observe it once post-commit."""
+
+        counters_enabled = JobManager._is_truthy(
+            os.getenv("JOBS_COUNTERS_ENABLED", "")
+        )
+        outbox_enabled = JobManager._is_truthy(os.getenv("JOBS_EVENTS_OUTBOX", ""))
+        conn = self._connect()
+        try:
+            if self.backend == "postgres":
+                result = _postgres_apply_prepared_disposition(
+                    conn,
+                    self._pg_cursor,
+                    command=command,
+                    counters_enabled=counters_enabled,
+                    outbox_enabled=outbox_enabled,
+                )
+            else:
+                result = _sqlite_apply_prepared_disposition(
+                    conn,
+                    command=command,
+                    counters_enabled=counters_enabled,
+                    outbox_enabled=outbox_enabled,
+                )
+        finally:
+            conn.close()
+
+        if result.outcome is not OperationOutcome.APPLIED or result.already_applied:
+            return result
+
+        job = self.get_job(command.job_id)
+        if job is None:
+            return result
+        disposition = command.disposition
+        if disposition.kind is PreparedDispositionKind.COMPLETE:
+            event_type = "job.completed"
+        elif disposition.kind is PreparedDispositionKind.RETRY:
+            event_type = (
+                "job.quarantined"
+                if result.state == "quarantined"
+                else "job.retry_scheduled"
+            )
+        elif disposition.kind is PreparedDispositionKind.FAIL:
+            event_type = "job.failed"
+        elif disposition.kind is PreparedDispositionKind.CANCEL:
+            event_type = "job.cancelled"
+        else:
+            event_type = "job.deferred"
+        attrs = {
+            "kind": disposition.kind.value,
+            "origin": disposition.origin.value,
+        }
+        if disposition.reason_code is not None:
+            attrs["reason_code"] = disposition.reason_code
+
+        with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
+            if disposition.kind is PreparedDispositionKind.COMPLETE:
+                increment_completed(job)
+            elif (
+                disposition.kind is PreparedDispositionKind.RETRY
+                and result.state == "queued"
+            ):
+                increment_retries(job)
+            elif disposition.kind is PreparedDispositionKind.FAIL:
+                increment_failures(job, reason="terminal")
+            elif disposition.kind is PreparedDispositionKind.CANCEL:
+                increment_cancelled(job)
+        with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
+            self._assert_invariants(job)
+        with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
+            self._update_gauges(
+                domain=command.domain,
+                queue=command.queue,
+                job_type=command.job_type,
+            )
+        with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
+            if outbox_enabled:
+                submit_job_audit_event(event_type, job=job, attrs=attrs)
+            else:
+                emit_job_event(event_type, job=job, attrs=attrs)
+        return result
 
     def _dependency_path_exists_in_transaction(
         self,
@@ -5408,7 +5634,8 @@ class JobManager:
                         (
                             "SELECT id, uuid, domain, queue, job_type, owner_user_id, request_id, trace_id, "
                             "COALESCE(retry_count, 0) AS effective_retry_count, "
-                            "COALESCE(max_retries, %s) AS effective_max_retries "
+                            "COALESCE(max_retries, %s) AS effective_max_retries, "
+                            "COALESCE(expired_lease_policy, 'consume_retry') AS effective_expired_lease_policy "
                             f"FROM jobs WHERE {' AND '.join(where)} "  # nosec B608
                             "ORDER BY leased_until ASC NULLS FIRST, id ASC "
                             "LIMIT %s FOR UPDATE SKIP LOCKED"
@@ -5420,8 +5647,29 @@ class JobManager:
                         row = dict(raw_row)
                         retry_count = int(row["effective_retry_count"])
                         max_retries = int(row["effective_max_retries"])
-                        requeue = retry_count < max_retries
-                        if requeue:
+                        no_attempt = (
+                            row["effective_expired_lease_policy"]
+                            == ExpiredLeasePolicy.REQUEUE_NO_ATTEMPT.value
+                        )
+                        requeue = no_attempt or retry_count < max_retries
+                        if no_attempt:
+                            cur.execute(
+                                (
+                                    "UPDATE jobs SET status='queued', available_at=NULL, "
+                                    "leased_until=NULL, worker_id=NULL, lease_id=NULL, "
+                                    "completion_token=NULL, acquired_at=NULL, started_at=NULL "
+                                    "WHERE id=%s AND status='processing' "
+                                    "AND (leased_until IS NULL OR leased_until <= NOW()) "
+                                    "AND expired_lease_policy='requeue_no_attempt'"
+                                ),
+                                (int(row["id"]),),
+                            )
+                            event_type = "job.deferred"
+                            attrs = {
+                                "error_code": _LEASE_EXPIRED_ERROR_CODE,
+                                "origin": "recovery",
+                            }
+                        elif requeue:
                             cur.execute(
                                 (
                                     "UPDATE jobs SET status='queued', "
@@ -5543,7 +5791,8 @@ class JobManager:
                         (
                             "SELECT id, uuid, domain, queue, job_type, owner_user_id, request_id, trace_id, "
                             "COALESCE(retry_count, 0) AS effective_retry_count, "
-                            "COALESCE(max_retries, ?) AS effective_max_retries "
+                            "COALESCE(max_retries, ?) AS effective_max_retries, "
+                            "COALESCE(expired_lease_policy, 'consume_retry') AS effective_expired_lease_policy "
                             f"FROM jobs WHERE {scoped_where} "  # nosec B608
                             "ORDER BY leased_until ASC, id ASC LIMIT ?"
                         ),
@@ -5553,8 +5802,29 @@ class JobManager:
                         row = dict(raw_row)
                         retry_count = int(row["effective_retry_count"])
                         max_retries = int(row["effective_max_retries"])
-                        requeue = retry_count < max_retries
-                        if requeue:
+                        no_attempt = (
+                            row["effective_expired_lease_policy"]
+                            == ExpiredLeasePolicy.REQUEUE_NO_ATTEMPT.value
+                        )
+                        requeue = no_attempt or retry_count < max_retries
+                        if no_attempt:
+                            changed = conn.execute(
+                                (
+                                    "UPDATE jobs SET status='queued', available_at=NULL, "
+                                    "leased_until=NULL, worker_id=NULL, lease_id=NULL, "
+                                    "completion_token=NULL, acquired_at=NULL, started_at=NULL "
+                                    "WHERE id=? AND status='processing' "
+                                    "AND (leased_until IS NULL OR leased_until <= DATETIME('now')) "
+                                    "AND expired_lease_policy='requeue_no_attempt'"
+                                ),
+                                (int(row["id"]),),
+                            )
+                            event_type = "job.deferred"
+                            attrs = {
+                                "error_code": _LEASE_EXPIRED_ERROR_CODE,
+                                "origin": "recovery",
+                            }
+                        elif requeue:
                             changed = conn.execute(
                                 (
                                     "UPDATE jobs SET status='queued', "
@@ -5662,7 +5932,7 @@ class JobManager:
             with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
                 if event_type == "job.retry_scheduled":
                     increment_retries(job)
-                else:
+                elif event_type == "job.failed":
                     increment_failures(job, reason="terminal")
             with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
                 self._update_gauges(

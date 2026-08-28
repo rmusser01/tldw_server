@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager, nullcontext
@@ -13,10 +14,20 @@ from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
 )
 from tldw_Server_API.app.core.Jobs.operations.contracts import (
     AcquireJobCommand,
+    ApplyPreparedDispositionCommand,
     BatchRenewLeasesCommand,
     BatchRenewLeasesResult,
+    EnsureLeaseHorizonCommand,
+    FindJobByIdentityCommand,
+    JobIdentityLookupResult,
+    JobIdentityLookupState,
+    LeaseHorizonResult,
     LifecycleResult,
     NoTransitionReason,
+    OperationOutcome,
+    PreparedDispositionKind,
+    PreparedDispositionOrigin,
+    PreparedDispositionResult,
     ReleaseJobCommand,
     RenewLeaseCommand,
 )
@@ -476,3 +487,523 @@ def acquire_job(
         if counters_enabled:
             _bump_acquired_counters(conn, acquired=acquired)
         return LifecycleResult.applied(row=acquired)
+
+
+def _parse_json_object(value: Any) -> dict[str, Any] | None:
+    if isinstance(value, dict):
+        return value
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _aware_sqlite_timestamp(value: str | datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        try:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _database_times(conn: sqlite3.Connection) -> tuple[datetime, datetime]:
+    row = conn.execute(
+        "SELECT STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'), "
+        "STRFTIME('%Y-%m-%dT%H:%M:%fZ','now','+30 seconds')"
+    ).fetchone()
+    if row is None:
+        raise RuntimeError("Jobs database clock unavailable")
+    now = _aware_sqlite_timestamp(row[0])
+    deferred = _aware_sqlite_timestamp(row[1])
+    if now is None or deferred is None:
+        raise RuntimeError("Jobs database clock returned an invalid timestamp")
+    return now, deferred
+
+
+def _marker_not_before(marker: dict[str, Any]) -> datetime | None:
+    return _aware_sqlite_timestamp(marker.get("original_not_before_at"))
+
+
+def _marker_matches(
+    marker: dict[str, Any],
+    command: ApplyPreparedDispositionCommand,
+) -> bool:
+    if _aware_sqlite_timestamp(marker.get("applied_at")) is None:
+        return False
+    disposition = command.disposition
+    expected = {
+        "schema_version": 1,
+        "token": disposition.token,
+        "kind": disposition.kind.value,
+        "origin": disposition.origin.value,
+        "delivery_id": disposition.delivery_id,
+    }
+    if disposition.attempt_id is not None:
+        expected["attempt_id"] = disposition.attempt_id
+    if disposition.not_before_at is not None:
+        expected["original_not_before_at"] = disposition.not_before_at.isoformat()
+    elif disposition.origin is PreparedDispositionOrigin.INFRASTRUCTURE:
+        if _marker_not_before(marker) is None:
+            return False
+        expected["original_not_before_at"] = marker["original_not_before_at"]
+    comparable = {key: marker.get(key) for key in expected}
+    return comparable == expected and set(marker) == {*expected, "applied_at"}
+
+
+def _identity_matches(
+    row: dict[str, Any],
+    *,
+    domain: str,
+    queue: str,
+    job_type: str,
+    expected_payload: dict[str, Any],
+) -> bool:
+    return (
+        row.get("domain") == domain
+        and row.get("queue") == queue
+        and row.get("job_type") == job_type
+        and _parse_json_object(row.get("payload")) == expected_payload
+    )
+
+
+def _prepared_counter_transition(
+    conn: sqlite3.Connection,
+    *,
+    row: dict[str, Any],
+    new_status: str,
+) -> None:
+    old_status = str(row.get("status") or "")
+    old_scheduled = old_status == "queued" and row.get("available_at") is not None
+    ready_delta = int(new_status == "queued") - int(old_status == "queued" and not old_scheduled)
+    scheduled_delta = int(new_status == "queued") - int(old_scheduled)
+    if new_status == "queued":
+        ready_delta = 0
+        scheduled_delta = 1 - int(old_scheduled)
+    processing_delta = -int(old_status == "processing")
+    quarantined_delta = int(new_status == "quarantined") - int(old_status == "quarantined")
+    conn.execute(
+        "INSERT INTO job_counters(domain,queue,job_type,ready_count,scheduled_count,"
+        "processing_count,quarantined_count) VALUES(?,?,?,?,?,?,?) "
+        "ON CONFLICT(domain,queue,job_type) DO UPDATE SET "
+        "ready_count=MAX(job_counters.ready_count + excluded.ready_count,0), "
+        "scheduled_count=MAX(job_counters.scheduled_count + excluded.scheduled_count,0), "
+        "processing_count=MAX(job_counters.processing_count + excluded.processing_count,0), "
+        "quarantined_count=MAX(job_counters.quarantined_count + excluded.quarantined_count,0), "
+        "updated_at=DATETIME('now')",
+        (
+            row.get("domain"),
+            row.get("queue"),
+            row.get("job_type"),
+            ready_delta,
+            scheduled_delta,
+            processing_delta,
+            quarantined_delta,
+        ),
+    )
+
+
+def _insert_prepared_event(
+    conn: sqlite3.Connection,
+    *,
+    row: dict[str, Any],
+    event_type: str,
+    marker: dict[str, Any],
+) -> None:
+    attrs = {
+        "kind": marker["kind"],
+        "origin": marker["origin"],
+        "reason_code": row.get("error_code") or row.get("cancellation_reason"),
+    }
+    conn.execute(
+        "INSERT INTO job_events(job_id,domain,queue,job_type,event_type,attrs_json,"
+        "owner_user_id,request_id,trace_id,created_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?,DATETIME('now'))",
+        (
+            row.get("id"),
+            row.get("domain"),
+            row.get("queue"),
+            row.get("job_type"),
+            event_type,
+            json.dumps(attrs, separators=(",", ":"), sort_keys=True),
+            row.get("owner_user_id"),
+            row.get("request_id"),
+            row.get("trace_id"),
+        ),
+    )
+
+
+def apply_prepared_disposition(
+    conn: sqlite3.Connection,
+    *,
+    command: ApplyPreparedDispositionCommand,
+    counters_enabled: bool,
+    outbox_enabled: bool,
+) -> PreparedDispositionResult:
+    """Apply one exact prepared transition under a SQLite write transaction."""
+
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        selected = conn.execute(
+            "SELECT * FROM jobs WHERE id=?",
+            (command.job_id,),
+        ).fetchone()
+        if selected is None:
+            conn.commit()
+            return PreparedDispositionResult.no_transition(NoTransitionReason.MISSING)
+        row = dict(selected)
+        if not _identity_matches(
+            row,
+            domain=command.domain,
+            queue=command.queue,
+            job_type=command.job_type,
+            expected_payload=command.expected_payload,
+        ):
+            conn.commit()
+            return PreparedDispositionResult.conflict(state=str(row.get("status")))
+
+        marker = _parse_json_object(row.get("result"))
+        if marker is not None and marker.get("token") == command.disposition.token:
+            if not _marker_matches(marker, command):
+                conn.commit()
+                return PreparedDispositionResult.conflict(state=str(row.get("status")))
+            result = PreparedDispositionResult.applied(
+                state=str(row.get("status")),
+                metadata=marker,
+                already_applied=True,
+                not_before_at=(
+                    _aware_sqlite_timestamp(row.get("available_at"))
+                    or _marker_not_before(marker)
+                ),
+            )
+            conn.commit()
+            return result
+
+        disposition = command.disposition
+        status = str(row.get("status") or "")
+        queued_cancel = (
+            disposition.kind is PreparedDispositionKind.CANCEL
+            and status == "queued"
+            and command.worker_id is None
+            and command.lease_id is None
+        )
+        if not queued_cancel:
+            if status != "processing":
+                conn.commit()
+                return PreparedDispositionResult.no_transition(
+                    NoTransitionReason.WRONG_STATUS,
+                    state=status,
+                )
+            if (
+                command.worker_id is None
+                or command.lease_id is None
+                or row.get("worker_id") != command.worker_id
+                or row.get("lease_id") != command.lease_id
+            ):
+                conn.commit()
+                return PreparedDispositionResult.no_transition(
+                    NoTransitionReason.STALE_LEASE,
+                    state=status,
+                )
+
+        database_now, infrastructure_not_before = _database_times(conn)
+        not_before: datetime | None = None
+        if disposition.kind is PreparedDispositionKind.RETRY:
+            not_before = max(database_now, disposition.not_before_at)
+        elif disposition.origin is PreparedDispositionOrigin.INFRASTRUCTURE:
+            not_before = infrastructure_not_before
+        elif disposition.origin is PreparedDispositionOrigin.RECOVERY:
+            not_before = max(database_now, disposition.not_before_at)
+
+        marker = {
+            "schema_version": 1,
+            "token": disposition.token,
+            "kind": disposition.kind.value,
+            "origin": disposition.origin.value,
+            "delivery_id": disposition.delivery_id,
+        }
+        if disposition.attempt_id is not None:
+            marker["attempt_id"] = disposition.attempt_id
+        if not_before is not None:
+            marker["original_not_before_at"] = (
+                disposition.not_before_at.isoformat()
+                if disposition.not_before_at is not None
+                else not_before.isoformat()
+            )
+        marker["applied_at"] = database_now.isoformat()
+        marker_json = json.dumps(marker, separators=(",", ":"), sort_keys=True)
+
+        event_type: str
+        new_status: str
+        if disposition.kind is PreparedDispositionKind.COMPLETE:
+            new_status = "completed"
+            event_type = "job.completed"
+            changed = conn.execute(
+                "UPDATE jobs SET status='completed', result=?, completed_at=DATETIME('now'), "
+                "leased_until=NULL,worker_id=NULL,lease_id=NULL,completion_token=? "
+                "WHERE id=? AND status='processing' AND worker_id=? AND lease_id=?",
+                (
+                    marker_json,
+                    disposition.token,
+                    command.job_id,
+                    command.worker_id,
+                    command.lease_id,
+                ),
+            )
+        elif disposition.kind is PreparedDispositionKind.RETRY:
+            current_streak = int(row.get("failure_streak_count") or 0)
+            next_streak = (
+                current_streak + 1
+                if row.get("failure_streak_code") == disposition.reason_code
+                else 1
+            )
+            threshold = row.get("quarantine_threshold")
+            quarantine = threshold is not None and next_streak >= int(threshold)
+            new_status = "quarantined" if quarantine else "queued"
+            event_type = "job.quarantined" if quarantine else "job.retry_scheduled"
+            changed = conn.execute(
+                "UPDATE jobs SET status=?, result=?, retry_count=COALESCE(retry_count,0)+1, "
+                "failure_streak_code=?, failure_streak_count=?, error_code=?, "
+                "available_at=?, quarantined_at=CASE WHEN ? THEN DATETIME('now') ELSE quarantined_at END, "
+                "completed_at=CASE WHEN ? THEN DATETIME('now') ELSE completed_at END, "
+                "leased_until=NULL,worker_id=NULL,lease_id=NULL,completion_token=?, "
+                "acquired_at=NULL,started_at=NULL WHERE id=? AND status='processing' "
+                "AND worker_id=? AND lease_id=?",
+                (
+                    new_status,
+                    marker_json,
+                    disposition.reason_code,
+                    next_streak,
+                    disposition.reason_code,
+                    _sqlite_timestamp(not_before),
+                    int(quarantine),
+                    int(quarantine),
+                    disposition.token if quarantine else None,
+                    command.job_id,
+                    command.worker_id,
+                    command.lease_id,
+                ),
+            )
+        elif disposition.kind is PreparedDispositionKind.FAIL:
+            new_status = "failed"
+            event_type = "job.failed"
+            changed = conn.execute(
+                "UPDATE jobs SET status='failed', result=?, error_code=?, error_message=?, "
+                "last_error=?, completed_at=DATETIME('now'), leased_until=NULL,worker_id=NULL,"
+                "lease_id=NULL,completion_token=? WHERE id=? AND status='processing' "
+                "AND worker_id=? AND lease_id=?",
+                (
+                    marker_json,
+                    disposition.reason_code,
+                    disposition.reason_code,
+                    disposition.reason_code,
+                    disposition.token,
+                    command.job_id,
+                    command.worker_id,
+                    command.lease_id,
+                ),
+            )
+        elif disposition.kind is PreparedDispositionKind.CANCEL:
+            new_status = "cancelled"
+            event_type = "job.cancelled"
+            if queued_cancel:
+                changed = conn.execute(
+                    "UPDATE jobs SET status='cancelled', result=?, cancellation_reason=?, "
+                    "cancelled_at=DATETIME('now'), completed_at=DATETIME('now'), "
+                    "completion_token=? WHERE id=? AND status='queued'",
+                    (
+                        marker_json,
+                        disposition.reason_code,
+                        disposition.token,
+                        command.job_id,
+                    ),
+                )
+            else:
+                changed = conn.execute(
+                    "UPDATE jobs SET status='cancelled', result=?, cancellation_reason=?, "
+                    "cancelled_at=DATETIME('now'), completed_at=DATETIME('now'), "
+                    "leased_until=NULL,worker_id=NULL,lease_id=NULL,completion_token=? "
+                    "WHERE id=? AND status='processing' AND worker_id=? AND lease_id=?",
+                    (
+                        marker_json,
+                        disposition.reason_code,
+                        disposition.token,
+                        command.job_id,
+                        command.worker_id,
+                        command.lease_id,
+                    ),
+                )
+        else:
+            new_status = "queued"
+            event_type = "job.deferred"
+            changed = conn.execute(
+                "UPDATE jobs SET status='queued', result=?, available_at=?, "
+                "leased_until=NULL,worker_id=NULL,lease_id=NULL,completion_token=NULL, "
+                "acquired_at=NULL,started_at=NULL WHERE id=? AND status='processing' "
+                "AND worker_id=? AND lease_id=?",
+                (
+                    marker_json,
+                    _sqlite_timestamp(not_before),
+                    command.job_id,
+                    command.worker_id,
+                    command.lease_id,
+                ),
+            )
+
+        if changed.rowcount != 1:
+            conn.rollback()
+            return PreparedDispositionResult.no_transition(
+                NoTransitionReason.STALE_LEASE,
+                state=status,
+            )
+        if counters_enabled:
+            _prepared_counter_transition(conn, row=row, new_status=new_status)
+        updated = dict(
+            conn.execute("SELECT * FROM jobs WHERE id=?", (command.job_id,)).fetchone()
+        )
+        if outbox_enabled:
+            _insert_prepared_event(
+                conn,
+                row=updated,
+                event_type=event_type,
+                marker=marker,
+            )
+        conn.commit()
+        persisted_not_before = (
+            _aware_sqlite_timestamp(updated.get("available_at"))
+            if new_status == "queued"
+            else None
+        )
+        return PreparedDispositionResult.applied(
+            state=new_status,
+            metadata=marker,
+            already_applied=False,
+            not_before_at=persisted_not_before,
+        )
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def ensure_lease_horizon(
+    conn: sqlite3.Connection,
+    *,
+    command: EnsureLeaseHorizonCommand,
+) -> LeaseHorizonResult:
+    """Extend but never shorten one exact SQLite processing lease."""
+
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        selected = conn.execute(
+            "SELECT * FROM jobs WHERE id=?",
+            (command.job_id,),
+        ).fetchone()
+        if selected is None:
+            conn.commit()
+            return LeaseHorizonResult.no_transition(NoTransitionReason.MISSING)
+        row = dict(selected)
+        observed = _aware_sqlite_timestamp(row.get("leased_until"))
+        if not _identity_matches(
+            row,
+            domain=command.domain,
+            queue=command.queue,
+            job_type=command.job_type,
+            expected_payload=command.expected_payload,
+        ):
+            conn.commit()
+            return LeaseHorizonResult(
+                outcome=OperationOutcome.BACKEND_CONFLICT,
+                ensured=False,
+                leased_until=observed,
+            )
+        if row.get("status") != "processing":
+            conn.commit()
+            return LeaseHorizonResult.no_transition(
+                NoTransitionReason.WRONG_STATUS,
+                leased_until=observed,
+            )
+        if row.get("worker_id") != command.worker_id or row.get("lease_id") != command.lease_id:
+            conn.commit()
+            return LeaseHorizonResult.no_transition(
+                NoTransitionReason.STALE_LEASE,
+                leased_until=observed,
+            )
+        conn.execute(
+            "UPDATE jobs SET leased_until=MAX(COALESCE(leased_until,DATETIME('now')), "
+            "DATETIME('now','+' || ? || ' seconds')) WHERE id=? AND status='processing' "
+            "AND worker_id=? AND lease_id=?",
+            (
+                command.minimum_seconds,
+                command.job_id,
+                command.worker_id,
+                command.lease_id,
+            ),
+        )
+        leased_until = _aware_sqlite_timestamp(
+            conn.execute(
+                "SELECT leased_until FROM jobs WHERE id=?",
+                (command.job_id,),
+            ).fetchone()[0]
+        )
+        conn.commit()
+        return LeaseHorizonResult.applied(leased_until=leased_until)
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def find_job_by_identity(
+    conn: sqlite3.Connection,
+    *,
+    command: FindJobByIdentityCommand,
+) -> JobIdentityLookupResult:
+    """Find one exact active or archived SQLite job without inserting work."""
+
+    with conn:
+        active_rows = conn.execute(
+            "SELECT * FROM jobs WHERE domain=? AND queue=? AND job_type=? "
+            "AND idempotency_key=?",
+            (
+                command.domain,
+                command.queue,
+                command.job_type,
+                command.idempotency_key,
+            ),
+        ).fetchall()
+        archived_rows = conn.execute(
+            "SELECT * FROM jobs_archive WHERE domain=? AND queue=? AND job_type=? "
+            "AND idempotency_key=?",
+            (
+                command.domain,
+                command.queue,
+                command.job_type,
+                command.idempotency_key,
+            ),
+        ).fetchall()
+    matches = [
+        (JobIdentityLookupState.ACTIVE, dict(row)) for row in active_rows
+    ] + [
+        (JobIdentityLookupState.ARCHIVED, dict(row)) for row in archived_rows
+    ]
+    if not matches:
+        return JobIdentityLookupResult.missing()
+    if len(matches) != 1:
+        return JobIdentityLookupResult.conflict()
+    state, row = matches[0]
+    payload = _parse_json_object(row.get("payload"))
+    if payload != command.expected_payload:
+        return JobIdentityLookupResult.conflict()
+    row["payload"] = payload
+    result = _parse_json_object(row.get("result"))
+    if result is not None:
+        row["result"] = result
+    return JobIdentityLookupResult.found(state, row)

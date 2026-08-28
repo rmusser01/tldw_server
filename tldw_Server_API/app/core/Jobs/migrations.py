@@ -237,6 +237,8 @@ CREATE TABLE IF NOT EXISTS jobs (
   status TEXT NOT NULL CHECK (status IN ('queued','processing','completed','failed','cancelled','quarantined')),
   priority INTEGER DEFAULT 5 CHECK (priority >= 1 AND priority <= 10),
   max_retries INTEGER DEFAULT 3 CHECK (max_retries >= 0 AND max_retries <= 100),
+  expired_lease_policy TEXT NOT NULL DEFAULT 'consume_retry' CHECK (expired_lease_policy IN ('consume_retry','requeue_no_attempt')),
+  quarantine_threshold INTEGER CHECK (quarantine_threshold IS NULL OR quarantine_threshold > 0),
   retry_count INTEGER DEFAULT 0,
   available_at TEXT,
   started_at TEXT,
@@ -1165,6 +1167,21 @@ def ensure_jobs_tables(db_path: Path | None = None) -> Path:
                 conn.execute("BEGIN IMMEDIATE")
             with contextlib.suppress(_JOBS_DB_EXCEPTIONS):
                 conn.execute("ALTER TABLE jobs ADD COLUMN batch_group TEXT")
+            columns = {
+                str(row[1])
+                for row in conn.execute("PRAGMA table_info(jobs)").fetchall()
+            }
+            if "expired_lease_policy" not in columns:
+                conn.execute(
+                    "ALTER TABLE jobs ADD COLUMN expired_lease_policy TEXT "
+                    "NOT NULL DEFAULT 'consume_retry' CHECK "
+                    "(expired_lease_policy IN ('consume_retry','requeue_no_attempt'))"
+                )
+            if "quarantine_threshold" not in columns:
+                conn.execute(
+                    "ALTER TABLE jobs ADD COLUMN quarantine_threshold INTEGER "
+                    "CHECK (quarantine_threshold IS NULL OR quarantine_threshold > 0)"
+                )
             with contextlib.suppress(_JOBS_DB_EXCEPTIONS):
                 conn.execute("ALTER TABLE jobs_archive ADD COLUMN batch_group TEXT")
             with contextlib.suppress(_JOBS_DB_EXCEPTIONS):

@@ -5,11 +5,13 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
+from uuid import UUID
 
 
 class OperationOutcome(str, Enum):
@@ -21,6 +23,72 @@ class OperationOutcome(str, Enum):
     BACKEND_CONFLICT = "backend_conflict"
     BACKEND_SCHEMA_ERROR = "backend_schema_error"
     BACKEND_ERROR = "backend_error"
+
+
+class PreparedDispositionKind(str, Enum):
+    """Closed Jobs transitions returned by prepared workers."""
+
+    COMPLETE = "complete"
+    RETRY = "retry"
+    FAIL = "fail"
+    CANCEL = "cancel"
+    DEFER = "defer"
+
+
+class PreparedDispositionOrigin(str, Enum):
+    """Authority that prepared a Jobs disposition."""
+
+    AUTHNZ = "authnz"
+    INFRASTRUCTURE = "infrastructure"
+    RECOVERY = "recovery"
+
+
+class ExpiredLeasePolicy(str, Enum):
+    """Per-job behavior when a processing lease expires."""
+
+    CONSUME_RETRY = "consume_retry"
+    REQUEUE_NO_ATTEMPT = "requeue_no_attempt"
+
+
+class JobIdentityLookupState(str, Enum):
+    """Closed results for exact active/archive identity lookup."""
+
+    ACTIVE = "active"
+    ARCHIVED = "archived"
+    MISSING = "missing"
+    CONFLICT = "conflict"
+
+
+_OPAQUE_TOKEN_RE = re.compile(r"^[0-9a-f]{64}$")
+_REASON_CODE_RE = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
+
+
+def _canonical_uuid4(value: object, *, field_name: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{field_name} must be a canonical UUIDv4")
+    try:
+        parsed = UUID(value)
+    except (AttributeError, ValueError):
+        raise ValueError(f"{field_name} must be a canonical UUIDv4") from None
+    if parsed.version != 4 or str(parsed) != value:
+        raise ValueError(f"{field_name} must be a canonical UUIDv4")
+    return value
+
+
+def _aware_utc(value: datetime, *, field_name: str) -> datetime:
+    if (
+        not isinstance(value, datetime)
+        or value.tzinfo is None
+        or value.utcoffset() is None
+    ):
+        raise ValueError(f"{field_name} must be timezone-aware")
+    return value.astimezone(timezone.utc)
+
+
+def _bounded_identity(value: object, *, field_name: str, maximum: int) -> str:
+    if not isinstance(value, str) or not 1 <= len(value) <= maximum:
+        raise ValueError(f"{field_name} must be between 1 and {maximum} characters")
+    return value
 
 
 class NoTransitionReason(str, Enum):
@@ -172,6 +240,479 @@ class CreateJobCommand:
     batch_group: str | None = None
     request_id: str | None = None
     trace_id: str | None = None
+    expired_lease_policy: ExpiredLeasePolicy = ExpiredLeasePolicy.CONSUME_RETRY
+    quarantine_threshold: int | None = None
+
+    def __post_init__(self) -> None:
+        """Validate controls that must fail before any backend operation."""
+
+        try:
+            policy = ExpiredLeasePolicy(self.expired_lease_policy)
+        except (TypeError, ValueError):
+            raise ValueError("expired_lease_policy is invalid") from None
+        threshold = self.quarantine_threshold
+        if threshold is not None and (
+            isinstance(threshold, bool)
+            or not isinstance(threshold, int)
+            or threshold <= 0
+        ):
+            raise ValueError("quarantine_threshold must be a positive integer")
+        object.__setattr__(self, "expired_lease_policy", policy)
+
+
+@dataclass(frozen=True)
+class PreparedJobDisposition:
+    """Validated exact transition prepared outside the Jobs database."""
+
+    token: str
+    kind: PreparedDispositionKind
+    origin: PreparedDispositionOrigin
+    delivery_id: str
+    attempt_id: str | None = None
+    delay_seconds: int | None = None
+    not_before_at: datetime | None = None
+    reason_code: str | None = None
+
+    def __post_init__(self) -> None:
+        try:
+            kind = PreparedDispositionKind(self.kind)
+            origin = PreparedDispositionOrigin(self.origin)
+        except (TypeError, ValueError):
+            raise ValueError("prepared disposition kind or origin is invalid") from None
+        if not isinstance(self.token, str) or _OPAQUE_TOKEN_RE.fullmatch(self.token) is None:
+            raise ValueError("token must be 64 lowercase hexadecimal characters")
+        _canonical_uuid4(self.delivery_id, field_name="delivery_id")
+        if self.attempt_id is not None:
+            _canonical_uuid4(self.attempt_id, field_name="attempt_id")
+        if self.reason_code is not None and (
+            not isinstance(self.reason_code, str)
+            or _REASON_CODE_RE.fullmatch(self.reason_code) is None
+        ):
+            raise ValueError("reason_code is invalid")
+
+        authnz_kinds = {
+            PreparedDispositionKind.COMPLETE,
+            PreparedDispositionKind.RETRY,
+            PreparedDispositionKind.FAIL,
+            PreparedDispositionKind.CANCEL,
+        }
+        if kind in authnz_kinds and origin is not PreparedDispositionOrigin.AUTHNZ:
+            raise ValueError("complete, retry, fail, and cancel require AuthNZ origin")
+        if kind is PreparedDispositionKind.DEFER and origin is PreparedDispositionOrigin.AUTHNZ:
+            raise ValueError("defer requires infrastructure or recovery origin")
+
+        if kind in {
+            PreparedDispositionKind.COMPLETE,
+            PreparedDispositionKind.RETRY,
+            PreparedDispositionKind.FAIL,
+        } and self.attempt_id is None:
+            raise ValueError(f"{kind.value} requires attempt_id")
+        if kind is PreparedDispositionKind.DEFER and self.attempt_id is not None:
+            raise ValueError("defer cannot include attempt_id")
+
+        if kind is PreparedDispositionKind.RETRY:
+            if (
+                isinstance(self.delay_seconds, bool)
+                or not isinstance(self.delay_seconds, int)
+                or not 1 <= self.delay_seconds <= 1800
+            ):
+                raise ValueError("delay_seconds must be between 1 and 1800")
+            if self.not_before_at is None:
+                raise ValueError("retry requires not_before_at")
+            normalized_not_before = _aware_utc(
+                self.not_before_at,
+                field_name="not_before_at",
+            )
+        elif self.delay_seconds is not None:
+            raise ValueError("delay_seconds is legal only for retry")
+        else:
+            normalized_not_before = self.not_before_at
+
+        if kind is not PreparedDispositionKind.RETRY:
+            if origin is PreparedDispositionOrigin.INFRASTRUCTURE:
+                if self.not_before_at is not None:
+                    raise ValueError("infrastructure defer cannot provide not_before_at")
+                normalized_not_before = None
+            elif origin is PreparedDispositionOrigin.RECOVERY:
+                if self.not_before_at is None:
+                    raise ValueError("recovery defer requires not_before_at")
+                normalized_not_before = _aware_utc(
+                    self.not_before_at,
+                    field_name="not_before_at",
+                )
+            elif self.not_before_at is not None:
+                raise ValueError("not_before_at is legal only for retry or recovery defer")
+
+        requires_reason = kind in {
+            PreparedDispositionKind.RETRY,
+            PreparedDispositionKind.FAIL,
+            PreparedDispositionKind.CANCEL,
+            PreparedDispositionKind.DEFER,
+        }
+        if requires_reason and self.reason_code is None:
+            raise ValueError(f"{kind.value} requires reason_code")
+        if kind is PreparedDispositionKind.COMPLETE and self.reason_code is not None:
+            raise ValueError("complete cannot include reason_code")
+
+        object.__setattr__(self, "kind", kind)
+        object.__setattr__(self, "origin", origin)
+        object.__setattr__(self, "not_before_at", normalized_not_before)
+
+    @classmethod
+    def complete(
+        cls,
+        *,
+        token: str,
+        delivery_id: str,
+        attempt_id: str,
+    ) -> PreparedJobDisposition:
+        return cls(
+            token=token,
+            kind=PreparedDispositionKind.COMPLETE,
+            origin=PreparedDispositionOrigin.AUTHNZ,
+            delivery_id=delivery_id,
+            attempt_id=attempt_id,
+        )
+
+    @classmethod
+    def retry(
+        cls,
+        *,
+        token: str,
+        delivery_id: str,
+        attempt_id: str,
+        delay_seconds: int,
+        not_before_at: datetime,
+        reason_code: str,
+    ) -> PreparedJobDisposition:
+        return cls(
+            token=token,
+            kind=PreparedDispositionKind.RETRY,
+            origin=PreparedDispositionOrigin.AUTHNZ,
+            delivery_id=delivery_id,
+            attempt_id=attempt_id,
+            delay_seconds=delay_seconds,
+            not_before_at=not_before_at,
+            reason_code=reason_code,
+        )
+
+    @classmethod
+    def fail(
+        cls,
+        *,
+        token: str,
+        delivery_id: str,
+        attempt_id: str,
+        reason_code: str,
+    ) -> PreparedJobDisposition:
+        return cls(
+            token=token,
+            kind=PreparedDispositionKind.FAIL,
+            origin=PreparedDispositionOrigin.AUTHNZ,
+            delivery_id=delivery_id,
+            attempt_id=attempt_id,
+            reason_code=reason_code,
+        )
+
+    @classmethod
+    def cancel(
+        cls,
+        *,
+        token: str,
+        delivery_id: str,
+        reason_code: str,
+        attempt_id: str | None = None,
+    ) -> PreparedJobDisposition:
+        return cls(
+            token=token,
+            kind=PreparedDispositionKind.CANCEL,
+            origin=PreparedDispositionOrigin.AUTHNZ,
+            delivery_id=delivery_id,
+            attempt_id=attempt_id,
+            reason_code=reason_code,
+        )
+
+    @classmethod
+    def infrastructure_defer(
+        cls,
+        *,
+        token: str,
+        delivery_id: str,
+        reason_code: str,
+    ) -> PreparedJobDisposition:
+        return cls(
+            token=token,
+            kind=PreparedDispositionKind.DEFER,
+            origin=PreparedDispositionOrigin.INFRASTRUCTURE,
+            delivery_id=delivery_id,
+            reason_code=reason_code,
+        )
+
+    @classmethod
+    def recovery_defer_until(
+        cls,
+        *,
+        token: str,
+        delivery_id: str,
+        not_before_at: datetime,
+        reason_code: str,
+    ) -> PreparedJobDisposition:
+        return cls(
+            token=token,
+            kind=PreparedDispositionKind.DEFER,
+            origin=PreparedDispositionOrigin.RECOVERY,
+            delivery_id=delivery_id,
+            not_before_at=not_before_at,
+            reason_code=reason_code,
+        )
+
+
+@dataclass(frozen=True)
+class ApplyPreparedDispositionCommand:
+    """Exact Jobs row, lease, and canonical payload for one disposition."""
+
+    job_id: int
+    domain: str
+    queue: str
+    job_type: str
+    expected_payload: dict[str, Any]
+    disposition: PreparedJobDisposition
+    worker_id: str | None = None
+    lease_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if isinstance(self.job_id, bool) or not isinstance(self.job_id, int) or self.job_id <= 0:
+            raise ValueError("job_id must be a positive integer")
+        _bounded_identity(self.domain, field_name="domain", maximum=64)
+        _bounded_identity(self.queue, field_name="queue", maximum=64)
+        _bounded_identity(self.job_type, field_name="job_type", maximum=128)
+        if not isinstance(self.expected_payload, dict):
+            raise ValueError("expected_payload must be an object")
+        if (self.worker_id is None) != (self.lease_id is None):
+            raise ValueError("worker_id and lease_id must be provided together")
+        for field_name in ("worker_id", "lease_id"):
+            value = getattr(self, field_name)
+            if value is not None:
+                _bounded_identity(value, field_name=field_name, maximum=200)
+        object.__setattr__(self, "expected_payload", copy.deepcopy(self.expected_payload))
+
+
+@dataclass(frozen=True)
+class EnsureLeaseHorizonCommand:
+    """Exact processing lease whose remaining horizon must be ensured."""
+
+    job_id: int
+    domain: str
+    queue: str
+    job_type: str
+    expected_payload: dict[str, Any]
+    worker_id: str
+    lease_id: str
+    minimum_seconds: int
+
+    def __post_init__(self) -> None:
+        if isinstance(self.job_id, bool) or not isinstance(self.job_id, int) or self.job_id <= 0:
+            raise ValueError("job_id must be a positive integer")
+        if (
+            isinstance(self.minimum_seconds, bool)
+            or not isinstance(self.minimum_seconds, int)
+            or self.minimum_seconds <= 0
+        ):
+            raise ValueError("minimum_seconds must be a positive integer")
+        for field_name, maximum in (
+            ("domain", 64),
+            ("queue", 64),
+            ("job_type", 128),
+            ("worker_id", 200),
+            ("lease_id", 200),
+        ):
+            _bounded_identity(
+                getattr(self, field_name),
+                field_name=field_name,
+                maximum=maximum,
+            )
+        if not isinstance(self.expected_payload, dict):
+            raise ValueError("expected_payload must be an object")
+        object.__setattr__(self, "expected_payload", copy.deepcopy(self.expected_payload))
+
+
+@dataclass(frozen=True)
+class FindJobByIdentityCommand:
+    """Read-only exact active/archive Jobs identity lookup."""
+
+    domain: str
+    queue: str
+    job_type: str
+    idempotency_key: str
+    expected_payload: dict[str, Any]
+
+    def __post_init__(self) -> None:
+        for field_name, maximum in (
+            ("domain", 64),
+            ("queue", 64),
+            ("job_type", 128),
+            ("idempotency_key", 512),
+        ):
+            _bounded_identity(
+                getattr(self, field_name),
+                field_name=field_name,
+                maximum=maximum,
+            )
+        if not isinstance(self.expected_payload, dict):
+            raise ValueError("expected_payload must be an object")
+        object.__setattr__(self, "expected_payload", copy.deepcopy(self.expected_payload))
+
+
+@dataclass(frozen=True)
+class PreparedDispositionResult:
+    """Immutable result of one exact prepared-disposition application."""
+
+    outcome: OperationOutcome
+    state: str | None = None
+    already_applied: bool = False
+    metadata: dict[str, Any] | None = None
+    not_before_at: datetime | None = None
+    no_transition_reason: NoTransitionReason | None = None
+
+    def __post_init__(self) -> None:
+        if self.outcome is OperationOutcome.APPLIED:
+            if self.state is None or self.metadata is None:
+                raise ValueError("applied prepared disposition requires state and metadata")
+        elif self.already_applied:
+            raise ValueError("only applied dispositions may be already_applied")
+        if self.outcome is OperationOutcome.NO_TRANSITION and self.no_transition_reason is None:
+            raise ValueError("no-transition prepared disposition requires a reason")
+        if self.outcome is not OperationOutcome.NO_TRANSITION and self.no_transition_reason is not None:
+            raise ValueError("only no-transition prepared dispositions include a reason")
+        if self.not_before_at is not None:
+            object.__setattr__(
+                self,
+                "not_before_at",
+                _aware_utc(self.not_before_at, field_name="not_before_at"),
+            )
+        object.__setattr__(
+            self,
+            "metadata",
+            copy.deepcopy(self.metadata) if self.metadata is not None else None,
+        )
+
+    @classmethod
+    def applied(
+        cls,
+        *,
+        state: str,
+        metadata: dict[str, Any],
+        already_applied: bool,
+        not_before_at: datetime | None = None,
+    ) -> PreparedDispositionResult:
+        return cls(
+            outcome=OperationOutcome.APPLIED,
+            state=state,
+            already_applied=already_applied,
+            metadata=metadata,
+            not_before_at=not_before_at,
+        )
+
+    @classmethod
+    def no_transition(
+        cls,
+        reason: NoTransitionReason,
+        *,
+        state: str | None = None,
+    ) -> PreparedDispositionResult:
+        return cls(
+            outcome=OperationOutcome.NO_TRANSITION,
+            state=state,
+            no_transition_reason=reason,
+        )
+
+    @classmethod
+    def conflict(cls, *, state: str | None = None) -> PreparedDispositionResult:
+        return cls(outcome=OperationOutcome.BACKEND_CONFLICT, state=state)
+
+
+@dataclass(frozen=True)
+class LeaseHorizonResult:
+    """Observed lease horizon after an atomic ensure operation."""
+
+    outcome: OperationOutcome
+    ensured: bool
+    leased_until: datetime | None = None
+    no_transition_reason: NoTransitionReason | None = None
+
+    def __post_init__(self) -> None:
+        if self.outcome is OperationOutcome.APPLIED and not self.ensured:
+            raise ValueError("applied lease horizon must be ensured")
+        if self.outcome is OperationOutcome.NO_TRANSITION and self.no_transition_reason is None:
+            raise ValueError("no-transition lease horizon requires a reason")
+        if self.outcome is not OperationOutcome.NO_TRANSITION and self.no_transition_reason is not None:
+            raise ValueError("only no-transition lease horizon includes a reason")
+        if self.leased_until is not None:
+            object.__setattr__(
+                self,
+                "leased_until",
+                _aware_utc(self.leased_until, field_name="leased_until"),
+            )
+
+    @classmethod
+    def applied(cls, *, leased_until: datetime) -> LeaseHorizonResult:
+        return cls(
+            outcome=OperationOutcome.APPLIED,
+            ensured=True,
+            leased_until=leased_until,
+        )
+
+    @classmethod
+    def no_transition(
+        cls,
+        reason: NoTransitionReason,
+        *,
+        leased_until: datetime | None = None,
+    ) -> LeaseHorizonResult:
+        return cls(
+            outcome=OperationOutcome.NO_TRANSITION,
+            ensured=False,
+            leased_until=leased_until,
+            no_transition_reason=reason,
+        )
+
+
+@dataclass(frozen=True)
+class JobIdentityLookupResult:
+    """Immutable exact identity lookup result."""
+
+    state: JobIdentityLookupState
+    row: dict[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        if self.state in {JobIdentityLookupState.ACTIVE, JobIdentityLookupState.ARCHIVED}:
+            if self.row is None:
+                raise ValueError("found identity lookup requires a row")
+        elif self.row is not None:
+            raise ValueError("missing or conflicting identity lookup cannot include a row")
+        object.__setattr__(
+            self,
+            "row",
+            copy.deepcopy(self.row) if self.row is not None else None,
+        )
+
+    @classmethod
+    def found(
+        cls,
+        state: JobIdentityLookupState,
+        row: dict[str, Any],
+    ) -> JobIdentityLookupResult:
+        if state not in {JobIdentityLookupState.ACTIVE, JobIdentityLookupState.ARCHIVED}:
+            raise ValueError("found lookup state must be active or archived")
+        return cls(state=state, row=row)
+
+    @classmethod
+    def missing(cls) -> JobIdentityLookupResult:
+        return cls(state=JobIdentityLookupState.MISSING)
+
+    @classmethod
+    def conflict(cls) -> JobIdentityLookupResult:
+        return cls(state=JobIdentityLookupState.CONFLICT)
 
 
 @dataclass(frozen=True)
@@ -502,6 +1043,7 @@ class LifecycleResult:
 
 
 __all__ = [
+    "ApplyPreparedDispositionCommand",
     "AdmissionRejectionReason",
     "AdmissionResult",
     "AcquireJobCommand",
@@ -509,9 +1051,19 @@ __all__ = [
     "BatchRenewLeasesCommand",
     "BatchRenewLeasesResult",
     "CreateJobCommand",
+    "EnsureLeaseHorizonCommand",
+    "ExpiredLeasePolicy",
+    "FindJobByIdentityCommand",
+    "JobIdentityLookupResult",
+    "JobIdentityLookupState",
+    "LeaseHorizonResult",
     "LifecycleResult",
     "NoTransitionReason",
     "OperationOutcome",
+    "PreparedDispositionKind",
+    "PreparedDispositionOrigin",
+    "PreparedDispositionResult",
+    "PreparedJobDisposition",
     "ReleaseJobCommand",
     "RenewLeaseCommand",
 ]
