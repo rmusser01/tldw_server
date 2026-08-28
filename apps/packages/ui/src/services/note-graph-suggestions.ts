@@ -55,7 +55,7 @@ const ERROR_MESSAGES = {
 
 export type NotesGraphSuggestionErrorCode = keyof typeof ERROR_MESSAGES
 
-const CAPABILITY_UNAVAILABLE_REASONS = new Set([
+const CAPABILITY_UNAVAILABLE_REASONS = [
   "notes_graph_fts_not_ready",
   "notes_graph_provider_call_policy_unsupported",
   "notes_graph_provider_disallowed",
@@ -65,9 +65,9 @@ const CAPABILITY_UNAVAILABLE_REASONS = new Set([
   "notes_graph_provider_unavailable",
   "notes_graph_suggestions_disabled",
   "notes_graph_suggestions_worker_unavailable"
-])
+] as const
 
-const RUN_ERROR_CODES = new Set([
+const RUN_ERROR_CODES = [
   "notes_graph_admission_failed",
   "notes_graph_capabilities_changed_before_queue",
   "notes_graph_capabilities_changed_before_provider",
@@ -84,14 +84,14 @@ const RUN_ERROR_CODES = new Set([
   "notes_graph_suggestion_no_valid_items",
   "notes_graph_suggestion_suppression_limit",
   "notes_graph_target_changed"
-])
+] as const
 
-const RUN_GUIDANCE_KEYS = new Set([
+const RUN_GUIDANCE_KEYS = [
   "configure_provider",
   "contact_administrator",
   "refresh_note",
   "retry_generation"
-])
+] as const
 
 export class NotesGraphSuggestionClientError extends Error {
   readonly status: number
@@ -181,6 +181,14 @@ export type NotesGraphSuggestionCapabilityLimits = {
   response_candidates: 1
 }
 
+export type NotesGraphCapabilityUnavailableReason =
+  (typeof CAPABILITY_UNAVAILABLE_REASONS)[number]
+
+export type NotesGraphSuggestionRunErrorCode = (typeof RUN_ERROR_CODES)[number]
+
+export type NotesGraphSuggestionRunGuidanceKey =
+  (typeof RUN_GUIDANCE_KEYS)[number]
+
 export type NotesGraphSuggestionCapabilities = {
   provider: string
   model: string
@@ -189,7 +197,7 @@ export type NotesGraphSuggestionCapabilities = {
   disclosure_external: boolean
   outbound_data_categories: NotesGraphOutboundDataCategory[]
   generation_available: boolean
-  unavailable_reason: string | null
+  unavailable_reason: NotesGraphCapabilityUnavailableReason | null
   limits: NotesGraphSuggestionCapabilityLimits
   allowed_actions: NotesGraphSuggestionAction[]
   revision: string
@@ -210,8 +218,8 @@ export type NotesGraphSuggestionRun = {
   tag_count: number
   invalid_item_count: number
   cancellation_available: boolean
-  error_code: string | null
-  guidance_key: string | null
+  error_code: NotesGraphSuggestionRunErrorCode | null
+  guidance_key: NotesGraphSuggestionRunGuidanceKey | null
 }
 
 export type NotesGraphSuggestionEvidence = {
@@ -370,11 +378,8 @@ const invalidResponse = (): NotesGraphSuggestionClientError =>
 const invalidRequest = (): NotesGraphSuggestionClientError =>
   new NotesGraphSuggestionClientError(422, "notes_graph_invalid_request")
 
-const truncateCodePoints = (value: string, maximum: number): string =>
-  Array.from(value).slice(0, maximum).join("")
-
 const boundedTextSchema = (maximum: number) =>
-  z.string().transform((value) => truncateCodePoints(value, maximum))
+  z.string().refine((value) => Array.from(value).length <= maximum)
 
 const idSchema = z.string().min(1)
 const inputIdSchema = z.string().trim().min(1)
@@ -550,23 +555,32 @@ const graphEdgeSchema = z.strictObject({
   label: z.string().nullable()
 })
 
-const graphResponseSchema = z.strictObject({
-  nodes: z.array(graphNodeSchema),
-  edges: z.array(graphEdgeSchema),
-  truncated: z.boolean(),
-  truncated_by: z.array(z.string()),
-  has_more: z.boolean(),
-  cursor: cursorSchema.nullable(),
-  limits: z.strictObject({
-    max_nodes: z.number().int().min(1),
-    max_edges: z.number().int().min(0),
-    max_degree: z.number().int().min(1)
-  }),
-  radius_cap_applied: z.boolean(),
-  active_note_count: safeCountSchema,
-  all_notes_note_cap: z.number().int().min(1),
-  all_notes_eligible: z.boolean()
-})
+const graphResponseSchema = z
+  .strictObject({
+    nodes: z.array(graphNodeSchema),
+    edges: z.array(graphEdgeSchema),
+    truncated: z.boolean(),
+    truncated_by: z.array(z.string()),
+    has_more: z.boolean(),
+    cursor: cursorSchema.nullable(),
+    limits: z.strictObject({
+      max_nodes: z.number().int().min(1),
+      max_edges: z.number().int().min(0),
+      max_degree: z.number().int().min(1)
+    }),
+    radius_cap_applied: z.boolean(),
+    active_note_count: safeCountSchema,
+    all_notes_note_cap: z.number().int().min(1),
+    all_notes_eligible: z.boolean()
+  })
+  .superRefine((value, context) => {
+    if (value.nodes.length > value.limits.max_nodes) {
+      context.addIssue({ code: "custom", message: "node limit exceeded" })
+    }
+    if (value.edges.length > value.limits.max_edges) {
+      context.addIssue({ code: "custom", message: "edge limit exceeded" })
+    }
+  })
 
 const graphInputSchema = z.strictObject({
   centerNoteId: inputIdSchema.optional(),
@@ -583,12 +597,7 @@ const graphInputSchema = z.strictObject({
 })
 
 const normalizeGraph = (value: unknown): NotesGraphResponse => {
-  const graph = parseResponseAs<NotesGraphResponse>(graphResponseSchema, value)
-  return {
-    ...graph,
-    nodes: graph.nodes.slice(0, graph.limits.max_nodes),
-    edges: graph.edges.slice(0, graph.limits.max_edges)
-  }
+  return parseResponseAs<NotesGraphResponse>(graphResponseSchema, value)
 }
 
 export const fetchNotesGraph = async (
@@ -622,12 +631,7 @@ const capabilitySchema = z.strictObject({
   disclosure_external: z.boolean(),
   outbound_data_categories: z.array(outboundCategorySchema),
   generation_available: z.boolean(),
-  unavailable_reason: z
-    .string()
-    .nullable()
-    .transform((value) =>
-      value !== null && CAPABILITY_UNAVAILABLE_REASONS.has(value) ? value : null
-    ),
+  unavailable_reason: z.enum(CAPABILITY_UNAVAILABLE_REASONS).nullable(),
   limits: z.strictObject({
     max_candidates: z.number().int().min(1).max(30),
     max_relationships: z.number().int().min(1).max(5),
@@ -745,18 +749,8 @@ const runSchema = z.strictObject({
   tag_count: safeCountSchema,
   invalid_item_count: safeCountSchema,
   cancellation_available: z.boolean(),
-  error_code: z
-    .string()
-    .nullable()
-    .transform((value) =>
-      value !== null && RUN_ERROR_CODES.has(value) ? value : null
-    ),
-  guidance_key: z
-    .string()
-    .nullable()
-    .transform((value) =>
-      value !== null && RUN_GUIDANCE_KEYS.has(value) ? value : null
-    )
+  error_code: z.enum(RUN_ERROR_CODES).nullable(),
+  guidance_key: z.enum(RUN_GUIDANCE_KEYS).nullable()
 })
 
 const normalizeRun = (value: unknown): NotesGraphSuggestionRun =>
@@ -944,7 +938,7 @@ const suggestionSchema = z
     existing_tag: z.boolean(),
     match_strength: z.enum(["strong", "possible"]).nullable(),
     rationale: boundedTextSchema(240).nullable(),
-    evidence: z.array(evidenceSchema).transform((items) => items.slice(0, 6)),
+    evidence: z.array(evidenceSchema).max(6),
     updated_at: z.string()
   })
   .superRefine((value, context) => {

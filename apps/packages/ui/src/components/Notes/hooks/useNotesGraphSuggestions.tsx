@@ -61,6 +61,13 @@ export type UseNotesGraphSuggestionsOptions = {
   pollIntervalMs?: number
 }
 
+type TrackedRunIdentity = {
+  scope: string
+  id: string
+  provider: string
+  model: string
+}
+
 const authority = (value: string | null | undefined): string | null =>
   typeof value === "string" && value.length > 0 ? value : null
 
@@ -114,6 +121,11 @@ export function useNotesGraphSuggestions(
     options.datasetId ?? null,
     noteId
   ])
+  const generationAuthority = JSON.stringify([
+    commandAuthority,
+    options.provider ?? null,
+    options.model ?? null
+  ])
   const suggestionScopeKey = React.useMemo(
     () =>
       [
@@ -137,6 +149,15 @@ export function useNotesGraphSuggestions(
   const enabled = Boolean(
     authorityScope && options.enabled && options.isOnline && noteId
   )
+  const [trackedRunIdentity, setTrackedRunIdentity] =
+    React.useState<TrackedRunIdentity | null>(null)
+  const trackedRun =
+    trackedRunIdentity?.scope === commandAuthority ? trackedRunIdentity : null
+  React.useEffect(() => {
+    setTrackedRunIdentity((current) =>
+      current?.scope === commandAuthority ? current : null
+    )
+  }, [commandAuthority])
 
   const capabilitiesKey = React.useMemo(
     () => [...providerKey, "capabilities"] as const,
@@ -164,7 +185,7 @@ export function useNotesGraphSuggestions(
   )
   const runsQueryRaw = useQuery({
     queryKey: runsKey,
-    enabled: enabled && Boolean(capabilities),
+    enabled: enabled && Boolean(capabilities) && !trackedRun,
     notifyOnChangeProps: "all",
     retry: false,
     refetchOnWindowFocus: false,
@@ -182,17 +203,47 @@ export function useNotesGraphSuggestions(
     () => newestMatchingRun(runsPage?.items ?? [], capabilities),
     [capabilities, runsPage?.items]
   )
-  const seedRun = adoptedRun
+  React.useEffect(() => {
+    if (!adoptedRun || trackedRun) return
+    setTrackedRunIdentity((current) =>
+      current?.scope === commandAuthority
+        ? current
+        : {
+            scope: commandAuthority,
+            id: adoptedRun.id,
+            provider: adoptedRun.provider,
+            model: adoptedRun.model
+          }
+    )
+  }, [adoptedRun, commandAuthority, trackedRun])
+  const runOwner =
+    trackedRun ??
+    (adoptedRun
+      ? {
+          scope: commandAuthority,
+          id: adoptedRun.id,
+          provider: adoptedRun.provider,
+          model: adoptedRun.model
+        }
+      : null)
+  const seedRun = adoptedRun?.id === runOwner?.id ? adoptedRun : null
+  const runProviderKey = React.useMemo(
+    () =>
+      [
+        ...suggestionScopeKey,
+        "provider",
+        runOwner?.provider ?? null,
+        runOwner?.model ?? null
+      ] as const,
+    [runOwner?.model, runOwner?.provider, suggestionScopeKey]
+  )
   const runKey = React.useMemo(
-    () => [...providerKey, "run", seedRun?.id ?? null] as const,
-    [providerKey, seedRun?.id]
+    () => [...runProviderKey, "run", runOwner?.id ?? null] as const,
+    [runOwner?.id, runProviderKey]
   )
   const runQueryRaw = useQuery({
     queryKey: runKey,
-    enabled:
-      enabled &&
-      Boolean(seedRun?.id) &&
-      Boolean(seedRun?.state && ACTIVE_RUN_STATES.has(seedRun.state)),
+    enabled: enabled && Boolean(runOwner?.id),
     notifyOnChangeProps: "all",
     retry: false,
     refetchOnReconnect: false,
@@ -200,7 +251,7 @@ export function useNotesGraphSuggestions(
     queryFn: () =>
       getNotesGraphSuggestionRun({
         noteId,
-        runId: seedRun?.id ?? "",
+        runId: runOwner?.id ?? "",
         datasetId: options.datasetId
       }),
     refetchInterval: (query) => {
@@ -213,7 +264,14 @@ export function useNotesGraphSuggestions(
     refetchIntervalInBackground: false
   })
   const runDetail = runQueryRaw.data
-  const activeRun = runDetail ?? seedRun
+  const ownedRun = runDetail ?? seedRun
+  const activeRun =
+    ownedRun &&
+    runOwner &&
+    capabilities?.provider === runOwner.provider &&
+    capabilities.model === runOwner.model
+      ? ownedRun
+      : null
 
   const suggestionsKey = React.useMemo(
     () =>
@@ -268,7 +326,32 @@ export function useNotesGraphSuggestions(
     currentCommandAuthority.current.commandAuthority ===
       expectedCommandAuthority &&
     currentCommandAuthority.current.epoch === commandAuthorityEpoch
-  const reconciliationScope = JSON.stringify(providerKey)
+  const currentGenerationAuthority = React.useRef({
+    generationAuthority,
+    allowed: enabled,
+    epoch: 0
+  })
+  if (
+    currentGenerationAuthority.current.generationAuthority !==
+      generationAuthority ||
+    currentGenerationAuthority.current.allowed !== enabled
+  ) {
+    currentGenerationAuthority.current = {
+      generationAuthority,
+      allowed: enabled,
+      epoch: currentGenerationAuthority.current.epoch + 1
+    }
+  }
+  const generationEpoch = currentGenerationAuthority.current.epoch
+  const hasGenerationAuthority = (
+    expectedGenerationAuthority: string,
+    expectedGenerationEpoch: number
+  ): boolean =>
+    currentGenerationAuthority.current.allowed &&
+    currentGenerationAuthority.current.generationAuthority ===
+      expectedGenerationAuthority &&
+    currentGenerationAuthority.current.epoch === expectedGenerationEpoch
+  const reconciliationScope = commandAuthority
   const terminalReconciliation = React.useRef({
     scope: reconciliationScope,
     identity: null as string | null
@@ -299,14 +382,16 @@ export function useNotesGraphSuggestions(
       capability: NotesGraphSuggestionCapabilities
       commandAuthority: string
       authorityEpoch: number
+      generationAuthority: string
+      generationEpoch: number
       capabilitiesKey: readonly unknown[]
       runsKey: readonly unknown[]
-      providerKey: readonly unknown[]
+      suggestionScopeKey: readonly unknown[]
     }) => {
       if (
-        !hasCommandAuthority(
-          variables.commandAuthority,
-          variables.authorityEpoch
+        !hasGenerationAuthority(
+          variables.generationAuthority,
+          variables.generationEpoch
         )
       ) {
         throw new NotesGraphSuggestionClientError(
@@ -325,15 +410,15 @@ export function useNotesGraphSuggestions(
         capability,
         {
           canRetry: () =>
-            hasCommandAuthority(
-              variables.commandAuthority,
-              variables.authorityEpoch
+            hasGenerationAuthority(
+              variables.generationAuthority,
+              variables.generationEpoch
             ),
           onCapabilitiesChanged: (nextCapability) => {
             if (
-              !hasCommandAuthority(
-                variables.commandAuthority,
-                variables.authorityEpoch
+              !hasGenerationAuthority(
+                variables.generationAuthority,
+                variables.generationEpoch
               )
             )
               return
@@ -359,7 +444,23 @@ export function useNotesGraphSuggestions(
         ],
         next_cursor: page?.next_cursor ?? null
       }))
-      queryClient.setQueryData([...variables.providerKey, "run", run.id], run)
+      queryClient.setQueryData(
+        [
+          ...variables.suggestionScopeKey,
+          "provider",
+          run.provider,
+          run.model,
+          "run",
+          run.id
+        ],
+        run
+      )
+      setTrackedRunIdentity({
+        scope: variables.commandAuthority,
+        id: run.id,
+        provider: run.provider,
+        model: run.model
+      })
     }
   })
 
@@ -371,13 +472,15 @@ export function useNotesGraphSuggestions(
       idempotencyKey: string
       commandAuthority: string
       authorityEpoch: number
-      providerKey: readonly unknown[]
+      generationAuthority: string
+      generationEpoch: number
+      runKey: readonly unknown[]
       runsKey: readonly unknown[]
     }) => {
       if (
-        !hasCommandAuthority(
-          variables.commandAuthority,
-          variables.authorityEpoch
+        !hasGenerationAuthority(
+          variables.generationAuthority,
+          variables.generationEpoch
         )
       ) {
         throw new NotesGraphSuggestionClientError(
@@ -403,7 +506,8 @@ export function useNotesGraphSuggestions(
         return
       await Promise.all([
         queryClient.invalidateQueries({
-          queryKey: [...variables.providerKey, "run"]
+          queryKey: variables.runKey,
+          exact: true
         }),
         queryClient.invalidateQueries({
           queryKey: variables.runsKey,
@@ -636,6 +740,12 @@ export function useNotesGraphSuggestions(
     generate: async () => {
       requireAuthority()
       requireOnline()
+      if (ownedRun && ACTIVE_RUN_STATES.has(ownedRun.state)) {
+        throw new NotesGraphSuggestionClientError(
+          409,
+          "notes_graph_owner_active_run_conflict"
+        )
+      }
       const command = createNotesGraphSuggestionCommand({
         noteId,
         datasetId: options.datasetId,
@@ -653,9 +763,11 @@ export function useNotesGraphSuggestions(
         capability: capabilities,
         commandAuthority,
         authorityEpoch,
+        generationAuthority,
+        generationEpoch,
         capabilitiesKey,
         runsKey,
-        providerKey
+        suggestionScopeKey
       })
     },
     cancel: async () => {
@@ -667,7 +779,9 @@ export function useNotesGraphSuggestions(
         idempotencyKey: idempotencyKey(),
         commandAuthority,
         authorityEpoch,
-        providerKey,
+        generationAuthority,
+        generationEpoch,
+        runKey,
         runsKey
       })
     },

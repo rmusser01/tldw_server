@@ -95,14 +95,14 @@ const suggestionPayload = (id: string) => ({
   display_tag: null,
   existing_tag: false,
   match_strength: "strong",
-  rationale: "R".repeat(500),
-  evidence: Array.from({ length: 8 }, (_, index) => ({
+  rationale: "Related concept",
+  evidence: Array.from({ length: 6 }, (_, index) => ({
     side: index % 2 ? "target" : "source",
     note_id: index % 2 ? "note/target" : "note/source",
     field: "content",
     start_offset: index,
     end_offset: index + 1,
-    text: "E".repeat(700)
+    text: `Evidence ${index}`
   })),
   updated_at: "2026-08-27T12:00:00Z"
 })
@@ -372,13 +372,16 @@ describe("Notes graph suggestion client", () => {
     })
   })
 
-  it("preserves Task 8 graph fields and bounds only source-grounded suggestion excerpts", async () => {
+  it("preserves valid Task 8 response fields without rewriting them", async () => {
     const longLabel = "Long graph label ".repeat(400)
+    const longId = `note:${"x".repeat(5000)}`
+    const rationale = "😀".repeat(240)
+    const evidenceText = "😀".repeat(480)
     mocks.bgRequest
       .mockResolvedValueOnce({
         nodes: [
           {
-            id: "note:0",
+            id: longId,
             type: "note",
             label: longLabel,
             created_at: null,
@@ -391,8 +394,8 @@ describe("Notes graph suggestion client", () => {
         edges: [
           {
             id: "edge:0",
-            source: "note:0",
-            target: "note:0",
+            source: longId,
+            target: longId,
             type: "manual",
             directed: false,
             weight: 1,
@@ -412,13 +415,14 @@ describe("Notes graph suggestion client", () => {
       .mockResolvedValueOnce({
         items: Array.from({ length: 100 }, (_, index) => ({
           ...suggestionPayload(`suggestion-${index}`),
-          evidence: Array.from({ length: 8 }, (_, evidenceIndex) => ({
+          rationale,
+          evidence: Array.from({ length: 6 }, (_, evidenceIndex) => ({
             side: evidenceIndex % 2 ? "target" : "source",
             note_id: evidenceIndex % 2 ? "note/target" : "note/source",
             field: "content",
             start_offset: evidenceIndex,
             end_offset: evidenceIndex + 1,
-            text: "😀".repeat(700)
+            text: evidenceText
           }))
         })),
         next_cursor: "next suggestion cursor",
@@ -455,6 +459,7 @@ describe("Notes graph suggestion client", () => {
     const runs = await listNotesGraphSuggestionRuns({ noteId: "note/source" })
 
     expect(graph.nodes[0].label).toBe(longLabel)
+    expect(graph.nodes[0].id).toBe(longId)
     expect(graph.nodes[0]).toMatchObject({ degree: 9001, tag_count: 3001 })
     expect(graph.edges[0]).toMatchObject({ weight: 1, label: longLabel })
     expect(graph.truncated_by).toEqual([longLabel])
@@ -464,10 +469,9 @@ describe("Notes graph suggestion client", () => {
       max_degree: 5000
     })
     expect(suggestions.items).toHaveLength(100)
-    expect(suggestions.items[0].rationale).toHaveLength(240)
+    expect(suggestions.items[0].rationale).toBe(rationale)
     expect(suggestions.items[0].evidence).toHaveLength(6)
-    expect([...suggestions.items[0].evidence[0].text]).toHaveLength(480)
-    expect(suggestions.items[0].evidence[0].text.endsWith("😀")).toBe(true)
+    expect(suggestions.items[0].evidence[0].text).toBe(evidenceText)
     expect(runs.items[0]).toMatchObject({
       provider: longLabel,
       model: longLabel,
@@ -483,6 +487,162 @@ describe("Notes graph suggestion client", () => {
       "max_edges=99999"
     )
   })
+
+  it.each([
+    [
+      "overlong rationale",
+      () => ({
+        items: [
+          {
+            ...suggestionPayload("suggestion-rationale"),
+            rationale: "😀".repeat(241)
+          }
+        ],
+        next_cursor: null,
+        current_source_fingerprint: fingerprint("c"),
+        rejection_set_revision: 0,
+        rejection_count: 0
+      }),
+      () => listNotesGraphSuggestions({ noteId: "note-1" })
+    ],
+    [
+      "overlong evidence text",
+      () => ({
+        items: [
+          {
+            ...suggestionPayload("suggestion-evidence-text"),
+            evidence: [
+              {
+                ...suggestionPayload("unused").evidence[0],
+                text: "😀".repeat(481)
+              }
+            ]
+          }
+        ],
+        next_cursor: null,
+        current_source_fingerprint: fingerprint("c"),
+        rejection_set_revision: 0,
+        rejection_count: 0
+      }),
+      () => listNotesGraphSuggestions({ noteId: "note-1" })
+    ],
+    [
+      "too many evidence excerpts",
+      () => ({
+        items: [
+          {
+            ...suggestionPayload("suggestion-evidence-count"),
+            evidence: Array.from({ length: 7 }, (_, index) => ({
+              ...suggestionPayload("unused").evidence[0],
+              start_offset: index,
+              end_offset: index + 1
+            }))
+          }
+        ],
+        next_cursor: null,
+        current_source_fingerprint: fingerprint("c"),
+        rejection_set_revision: 0,
+        rejection_count: 0
+      }),
+      () => listNotesGraphSuggestions({ noteId: "note-1" })
+    ],
+    [
+      "nodes beyond reported graph limit",
+      () => ({
+        nodes: [
+          {
+            id: "note:1",
+            type: "note",
+            label: "One",
+            created_at: null,
+            deleted: false,
+            degree: 0,
+            tag_count: 0,
+            primary_source_id: null
+          },
+          {
+            id: "note:2",
+            type: "note",
+            label: "Two",
+            created_at: null,
+            deleted: false,
+            degree: 0,
+            tag_count: 0,
+            primary_source_id: null
+          }
+        ],
+        edges: [],
+        truncated: true,
+        truncated_by: ["max_nodes"],
+        has_more: true,
+        cursor: "next",
+        limits: { max_nodes: 1, max_edges: 2, max_degree: 40 },
+        radius_cap_applied: false,
+        active_note_count: 2,
+        all_notes_note_cap: 100,
+        all_notes_eligible: true
+      }),
+      () => fetchNotesGraph({ centerNoteId: "note-1" })
+    ],
+    [
+      "edges beyond reported graph limit",
+      () => ({
+        nodes: [
+          {
+            id: "note:1",
+            type: "note",
+            label: "One",
+            created_at: null,
+            deleted: false,
+            degree: 2,
+            tag_count: 0,
+            primary_source_id: null
+          }
+        ],
+        edges: [
+          {
+            id: "edge:1",
+            source: "note:1",
+            target: "note:1",
+            type: "manual",
+            directed: false,
+            weight: 1,
+            label: null
+          },
+          {
+            id: "edge:2",
+            source: "note:1",
+            target: "note:1",
+            type: "manual",
+            directed: false,
+            weight: 1,
+            label: null
+          }
+        ],
+        truncated: true,
+        truncated_by: ["max_edges"],
+        has_more: true,
+        cursor: "next",
+        limits: { max_nodes: 2, max_edges: 1, max_degree: 40 },
+        radius_cap_applied: false,
+        active_note_count: 1,
+        all_notes_note_cap: 100,
+        all_notes_eligible: true
+      }),
+      () => fetchNotesGraph({ centerNoteId: "note-1" })
+    ]
+  ])(
+    "rejects a %s response instead of rewriting it",
+    async (_label, response, call) => {
+      mocks.bgRequest.mockResolvedValueOnce(response())
+
+      await expect(call()).rejects.toMatchObject({
+        status: 502,
+        code: "notes_graph_invalid_response",
+        message: "The Notes graph server returned an invalid response."
+      })
+    }
+  )
 
   it("rejects a graph edge whose serialized Task 8 weight is omitted", async () => {
     mocks.bgRequest.mockResolvedValueOnce({
@@ -737,7 +897,7 @@ describe("Notes graph suggestion client", () => {
     expect(isNotesGraphCapabilitiesChangedError(error)).toBe(false)
   })
 
-  it("preserves allowlisted status codes and drops unsafe capability and run text", async () => {
+  it("rejects unknown closed response codes and sanitizes transport errors", async () => {
     mocks.bgRequest
       .mockResolvedValueOnce({
         ok: true,
@@ -770,24 +930,31 @@ describe("Notes graph suggestion client", () => {
         }
       })
 
-    const capabilities = await getNotesGraphSuggestionCapabilities({
+    const capabilityError = await getNotesGraphSuggestionCapabilities({
       noteId: "note-1"
-    })
-    const runs = await listNotesGraphSuggestionRuns({ noteId: "note-1" })
+    }).catch((value) => value)
+    const runError = await listNotesGraphSuggestionRuns({
+      noteId: "note-1"
+    }).catch((value) => value)
     const error = await listNotesGraphSuggestionRuns({
       noteId: "note-1"
     }).catch((value) => value)
 
-    expect(capabilities.unavailable_reason).toBeNull()
-    expect(runs.items[0]).toMatchObject({
-      error_code: null,
-      guidance_key: null
+    expect(capabilityError).toMatchObject({
+      status: 502,
+      code: "notes_graph_invalid_response",
+      message: "The Notes graph server returned an invalid response."
+    })
+    expect(runError).toMatchObject({
+      status: 502,
+      code: "notes_graph_invalid_response",
+      message: "The Notes graph server returned an invalid response."
     })
     expect(error).toMatchObject({
       code: "notes_graph_provider_not_configured",
       message: "The selected provider is not configured."
     })
-    expect(JSON.stringify({ capabilities, runs, error })).not.toContain(
+    expect(JSON.stringify({ capabilityError, runError, error })).not.toContain(
       "secret"
     )
   })

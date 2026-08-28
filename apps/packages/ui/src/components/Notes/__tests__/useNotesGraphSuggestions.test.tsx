@@ -399,6 +399,79 @@ describe("useNotesGraphSuggestions", () => {
     expect(mocks.createRun).toHaveBeenCalledTimes(1)
   })
 
+  it.each(["provider", "model"] as const)(
+    "permanently revokes generation 412 recovery on a %s switch, including ABA",
+    async (transition) => {
+      let generationConfig: { canRetry?: () => boolean } | undefined
+      let rejectGeneration: ((error: unknown) => void) | undefined
+      mocks.getCapabilities.mockImplementation(({ provider, model }) =>
+        Promise.resolve({
+          ...capability(),
+          provider: provider ?? "provider-one",
+          model: model ?? "model-one"
+        })
+      )
+      mocks.createRun.mockImplementationOnce(
+        (_command, _capability, config) =>
+          new Promise((_resolve, reject) => {
+            generationConfig = config
+            rejectGeneration = reject
+          })
+      )
+      const client = new QueryClient({
+        defaultOptions: {
+          queries: { retry: false },
+          mutations: { retry: false }
+        }
+      })
+      const initialProps = {
+        provider: "provider-one",
+        model: "model-one"
+      }
+      const { result, rerender } = renderHook(
+        ({ provider, model }) =>
+          useNotesGraphSuggestions({
+            authorityScope: "authority-a",
+            enabled: true,
+            isOnline: true,
+            noteId: "source-note",
+            provider,
+            model,
+            loadedNodeIds: new Set()
+          }),
+        { initialProps, wrapper: wrapper(client) }
+      )
+      await flush()
+
+      let failurePromise: Promise<unknown>
+      act(() => {
+        failurePromise = result.current.generate().then(
+          () => null,
+          (error) => error
+        )
+      })
+      await act(async () => {
+        await Promise.resolve()
+      })
+      expect(generationConfig?.canRetry?.()).toBe(true)
+
+      rerender({
+        provider: transition === "provider" ? "provider-two" : "provider-one",
+        model: transition === "model" ? "model-two" : "model-one"
+      })
+      expect(generationConfig?.canRetry?.()).toBe(false)
+      rerender(initialProps)
+      expect(generationConfig?.canRetry?.()).toBe(false)
+
+      await act(async () => {
+        rejectGeneration?.({ status: 412 })
+        await vi.runAllTimersAsync()
+      })
+      expect(await failurePromise!).toMatchObject({ status: 412 })
+      expect(mocks.createRun).toHaveBeenCalledTimes(1)
+    }
+  )
+
   it("cancels the adopted active run with one retained command key", async () => {
     mocks.listRuns.mockResolvedValue({
       items: [run("run-new", "running", "2026-08-27T12:00:00Z", 4)],
@@ -745,6 +818,119 @@ describe("useNotesGraphSuggestions", () => {
     expect(result.current.suggestions.map((item) => item.id)).toEqual([
       "published-suggestion"
     ])
+  })
+
+  it("retains one adopted provider run across a switch and reconciles its terminal publication", async () => {
+    const oldProviderRun = run(
+      "run-provider-one",
+      "running",
+      "2026-08-27T12:00:00Z"
+    )
+    const unrelatedRun = {
+      ...run("run-provider-two", "running", "2026-08-27T13:00:00Z"),
+      provider: "provider-two",
+      model: "model-two"
+    }
+    mocks.getCapabilities.mockImplementation(({ provider, model }) =>
+      Promise.resolve({
+        ...capability(),
+        provider: provider ?? "provider-one",
+        model: model ?? "model-one"
+      })
+    )
+    mocks.listRuns.mockImplementation(({ states: _states }) =>
+      Promise.resolve({
+        items:
+          mocks.getCapabilities.mock.calls.at(-1)?.[0]?.provider ===
+          "provider-two"
+            ? [unrelatedRun]
+            : [oldProviderRun],
+        next_cursor: null
+      })
+    )
+    mocks.getRun.mockResolvedValueOnce(oldProviderRun).mockResolvedValueOnce({
+      ...oldProviderRun,
+      state: "succeeded",
+      revision: 2,
+      cancellation_available: false
+    })
+    mocks.listSuggestions
+      .mockResolvedValueOnce(
+        suggestionPage([suggestion({ id: "before-publication" })])
+      )
+      .mockResolvedValueOnce(
+        suggestionPage([suggestion({ id: "published-suggestion" })])
+      )
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
+    })
+    const { result, rerender } = renderHook(
+      ({ provider, model }) =>
+        useNotesGraphSuggestions({
+          authorityScope: "authority-a",
+          enabled: true,
+          isOnline: true,
+          noteId: "source-note",
+          provider,
+          model,
+          loadedNodeIds: new Set(),
+          pollIntervalMs: 500
+        }),
+      {
+        initialProps: { provider: "provider-one", model: "model-one" },
+        wrapper: wrapper(client)
+      }
+    )
+    await settleQueries()
+
+    expect(result.current.activeRun?.id).toBe("run-provider-one")
+    expect(mocks.listRuns).toHaveBeenCalledTimes(1)
+
+    rerender({ provider: "provider-two", model: "model-two" })
+    expect(result.current.activeRun).toBeNull()
+    await settleQueries()
+    expect(mocks.listRuns).toHaveBeenCalledTimes(1)
+    await expect(result.current.generate()).rejects.toMatchObject({
+      status: 409,
+      code: "notes_graph_owner_active_run_conflict"
+    })
+    expect(mocks.createRun).not.toHaveBeenCalled()
+    await expect(result.current.cancel()).rejects.toThrow(
+      "No active suggestion run"
+    )
+    expect(mocks.cancel).not.toHaveBeenCalled()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500)
+    })
+    await settleQueries()
+    expect(mocks.getRun).toHaveBeenCalledTimes(2)
+    expect(mocks.getRun).toHaveBeenLastCalledWith(
+      expect.objectContaining({ runId: "run-provider-one" })
+    )
+    expect(mocks.listSuggestions).toHaveBeenCalledTimes(2)
+    expect(result.current.suggestions.map((item) => item.id)).toEqual([
+      "published-suggestion"
+    ])
+    expect(result.current.activeRun).toBeNull()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000)
+    })
+    expect(mocks.getRun).toHaveBeenCalledTimes(2)
+    expect(mocks.listSuggestions).toHaveBeenCalledTimes(2)
+
+    rerender({ provider: "provider-one", model: "model-one" })
+    expect(result.current.activeRun).toMatchObject({
+      id: "run-provider-one",
+      state: "succeeded"
+    })
+    expect(
+      client
+        .getQueryCache()
+        .findAll()
+        .filter((query) => query.queryKey.includes("run-provider-one"))
+    ).toHaveLength(1)
   })
 
   it("exposes no suggestion, evidence, rationale, or run from another authority", async () => {

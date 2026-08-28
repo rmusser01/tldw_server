@@ -194,6 +194,7 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
         authorityScope,
         options.datasetId ?? null,
         effectiveNavigation.scope,
+        effectiveNavigation.focusNoteId,
         centerNoteId ?? null,
         radius,
         maxNodes,
@@ -202,12 +203,26 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
     [
       authorityScope,
       centerNoteId,
+      effectiveNavigation.focusNoteId,
       effectiveNavigation.scope,
       maxEdges,
       maxNodes,
       options.datasetId,
       radius
     ]
+  )
+  const queryIdentity = JSON.stringify(queryKey)
+  const fetchPage = React.useCallback(
+    (pageParam: string | undefined) =>
+      fetchNotesGraph({
+        centerNoteId,
+        datasetId: options.datasetId,
+        radius,
+        maxNodes,
+        maxEdges,
+        cursor: pageParam
+      }),
+    [centerNoteId, maxEdges, maxNodes, options.datasetId, radius]
   )
   const graphQuery = useInfiniteQuery<
     NotesGraphResponse,
@@ -224,14 +239,7 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
     structuralSharing: (_previous, next: GraphInfiniteData) =>
       boundGraphData(next),
     queryFn: async ({ pageParam }) => {
-      const page = await fetchNotesGraph({
-        centerNoteId,
-        datasetId: options.datasetId,
-        radius,
-        maxNodes,
-        maxEdges,
-        cursor: pageParam
-      })
+      const page = await fetchPage(pageParam)
       return pageParam === undefined
         ? boundGraphData({ pages: [page], pageParams: [pageParam] }).pages[0]
         : page
@@ -276,32 +284,71 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
     )
   }, [graph, search])
 
-  const expansionInFlight =
-    React.useRef<Promise<NotesGraphResponse | null> | null>(null)
-  const expand = React.useCallback(async () => {
-    if (expansionInFlight.current) return await expansionInFlight.current
+  const expansionInFlight = React.useRef(
+    new Map<string, Promise<NotesGraphResponse | null>>()
+  )
+  const expand = React.useCallback((): Promise<NotesGraphResponse | null> => {
+    const pending = expansionInFlight.current.get(queryIdentity)
+    if (pending) return pending
     if (
       !enabled ||
       graphQuery.isFetchingNextPage ||
       !graph?.has_more ||
       !graph.cursor
     )
-      return graph
+      return Promise.resolve(graph)
 
-    const expansion = (async () => {
-      await graphQuery.fetchNextPage()
-      return aggregatePages(
-        queryClient.getQueryData<GraphInfiniteData>(queryKey)
-      )
-    })()
-    expansionInFlight.current = expansion
-    try {
-      return await expansion
-    } finally {
-      if (expansionInFlight.current === expansion)
-        expansionInFlight.current = null
+    const requestCursor = graph.cursor
+    const expansionPageKey = [
+      ...queryKey,
+      "cursor-page",
+      requestCursor
+    ] as const
+    const expansion = queryClient
+      .fetchQuery({
+        queryKey: expansionPageKey,
+        queryFn: () => fetchPage(requestCursor),
+        retry: false,
+        staleTime: Infinity,
+        gcTime: 0
+      })
+      .then((page) => {
+        queryClient.setQueryData<GraphInfiniteData>(queryKey, (current) => {
+          const currentGraph = aggregatePages(current)
+          if (
+            !current ||
+            !currentGraph?.has_more ||
+            currentGraph.cursor !== requestCursor
+          ) {
+            return current
+          }
+          return boundGraphData({
+            pages: [...current.pages, page],
+            pageParams: [...current.pageParams, requestCursor]
+          })
+        })
+        return aggregatePages(
+          queryClient.getQueryData<GraphInfiniteData>(queryKey)
+        )
+      })
+    expansionInFlight.current.set(queryIdentity, expansion)
+    const clear = () => {
+      if (expansionInFlight.current.get(queryIdentity) === expansion) {
+        expansionInFlight.current.delete(queryIdentity)
+      }
+      queryClient.removeQueries({ queryKey: expansionPageKey, exact: true })
     }
-  }, [enabled, graph, graphQuery, queryClient, queryKey])
+    void expansion.then(clear, clear)
+    return expansion
+  }, [
+    enabled,
+    fetchPage,
+    graph,
+    graphQuery,
+    queryClient,
+    queryIdentity,
+    queryKey
+  ])
 
   const focus = React.useCallback(
     (noteId: string) => {
@@ -351,7 +398,12 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
     visibleEdgeTypes,
     toggleEdgeType,
     allNotes,
-    canExpand: Boolean(enabled && graph?.has_more && graph.cursor),
+    canExpand: Boolean(
+      enabled &&
+        !graphQuery.isFetchingNextPage &&
+        graph?.has_more &&
+        graph.cursor
+    ),
     expand,
     focus,
     showAllNotes,

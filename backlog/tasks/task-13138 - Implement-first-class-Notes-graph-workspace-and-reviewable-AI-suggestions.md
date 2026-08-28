@@ -4,7 +4,7 @@ title: Implement first-class Notes graph workspace and reviewable AI suggestions
 status: In Progress
 assignee: []
 created_date: 2026-08-27 03:40
-updated_date: 2026-08-28 02:58
+updated_date: 2026-08-28 03:51
 labels:
 - notes
 - knowledge-graph
@@ -198,6 +198,8 @@ Task 9 Fix Round 1/3 completed from exact base 1b4d1446177823c8d2370e1b04f156b42
 Task 9 Fix Round 1/3 final verification update: self-review removed the remaining string-status retry coercion and added live authority revocation around the service-owned 412 recovery, preventing capability refresh or a second POST after an account/server/offline transition while preserving the same UUID for authorized retries. Final required gate is 36 passed/0 skipped; ESLint and Prettier remain clean; the shared UI TypeScript output exactly matches the prior 315-line inherited baseline with zero touched diagnostics.
 Task 9 Fix Round 2/3 started from exact base 2ab3cadaf8022f5ede7396bdde34f062c8ffed8a. Scope is limited to the five approved shared-client/query findings: finite bounded graph expansion, loaded-source provisional overlays, exact Task 8 schema parity, complete persisted public run errors, and provider-independent suggestion caches. Strict focused RED will precede production edits; Task 10 UI remains excluded.
 Task 9 Fix Round 2/3 completed from exact base 2ab3cadaf8022f5ede7396bdde34f062c8ffed8a. Infinite graph cache writes are now finite and authority-bounded; provisional overlays require a loaded source; Task 8 runtime schemas and persisted public run errors are complete; and suggestion caches are provider-independent while capability/run caches remain provider-scoped. Final required gate: 44 passed/0 skipped. Affected gate: 170 passed with the same 3 inherited Notes presentation assertion failures. Prettier and ESLint clean; package TypeScript remains the exact 315-line inherited baseline with zero touched/imported diagnostics; Bandit not applicable; diff check clean. Full Fix Round 2 evidence is in the ignored task-9-report.md. Parent TASK-13138 remains In Progress for Tasks 10-12.
+Task 9 Fix Round 3/3 started from exact base 860c6b472290d69e193aa120cd40cd76aee102ce. Scope is limited to the final three findings: complete-key expansion single-flight isolation, strict no-rewrite Task 8 response validation, and separate provider/model generation authority with one bounded owned-run tracker. Strict focused RED preceded production edits; Task 10 UI remains excluded.
+Task 9 Fix Round 3/3 completed from exact base 860c6b472290d69e193aa120cd40cd76aee102ce. Expansion is now single-flighted by the complete graph key, including interleaved exact-key reuse; Task 8 responses validate without authoritative rewrites; and provider/model generation authority is separated from the shared decision cache with one bounded owned-run tracker. Final required gate: 57 passed/0 skipped. Affected gate: 170 passed with the same 3 inherited Notes presentation assertion failures. Prettier and ESLint clean; package TypeScript remains the exact 315-line inherited baseline with zero touched/imported diagnostics; Bandit not applicable; diff check clean. Full Fix Round 3 RED/GREEN, original-finding audit, and privacy/offline/race review are in the ignored task-9-report.md. Parent TASK-13138 remains In Progress for Tasks 10-12.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
