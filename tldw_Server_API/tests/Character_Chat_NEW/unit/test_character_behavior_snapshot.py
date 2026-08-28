@@ -347,6 +347,20 @@ def test_build_behavior_snapshot_rejects_credentials_in_extensible_maps(extensib
         "apiToken",
         "consumerSecret",
         "signingSecret",
+        "vendorAccessToken",
+        "vendorAuthToken",
+        "vendorBearerToken",
+        "vendorRefreshToken",
+        "vendorClientSecret",
+        "vendorApiKey",
+        "vendorApiToken",
+        "vendorPrivateKey",
+        "vendorXApiKey",
+        "oauthToken",
+        "sessionToken",
+        "csrfToken",
+        "idToken",
+        "oauthAccessToken",
     ],
 )
 def test_build_behavior_snapshot_rejects_credential_key_separator_variants(
@@ -366,7 +380,12 @@ def test_build_behavior_snapshot_accepts_token_as_legitimate_extension_content()
     source = _source()
     source["participants"][0]["prompt"]["prompt_relevant_extensions"] = {
         "token": "The word token is legitimate prompt content.",
-        "nested": {"token_budget": 512, "description": "Keep token references."},
+        "nested": {
+            "token_budget": 512,
+            "tokenBudget": 256,
+            "max_tokens": 1024,
+            "description": "Keep token references.",
+        },
     }
 
     snapshot = build_behavior_snapshot(source)

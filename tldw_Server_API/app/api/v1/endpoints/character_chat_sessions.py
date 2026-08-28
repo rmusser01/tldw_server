@@ -7197,7 +7197,13 @@ async def list_chat_sessions(
             settings_payload: Optional[dict[str, Any]] = None
             if include_settings:
                 settings_row = db.get_conversation_settings(conv['id'])
-                settings_payload = (settings_row or {}).get("settings") or {}
+                stored_settings = (settings_row or {}).get("settings")
+                settings_payload = (
+                    dict(stored_settings)
+                    if isinstance(stored_settings, Mapping)
+                    else {}
+                )
+                settings_payload.pop("roleplayResumeV1", None)
             chats.append(
                 _convert_db_conversation_to_list_item(
                     _attach_conversation_assistant_names_from_lookups(

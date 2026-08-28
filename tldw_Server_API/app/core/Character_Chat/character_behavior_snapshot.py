@@ -48,6 +48,7 @@ _CREDENTIAL_KEYS = frozenset(
     {
         "api_key",
         "apikey",
+        "api_token",
         "access_token",
         "auth_token",
         "authorization",
@@ -61,6 +62,9 @@ _CREDENTIAL_KEYS = frozenset(
         "secret",
         "x_api_key",
     }
+)
+_CREDENTIAL_SUFFIXES = tuple(
+    f"_{term}" for term in sorted(_CREDENTIAL_KEYS) if "_" in term
 )
 _CREDENTIAL_SEPARATOR_RE = re.compile(r"[\W_]+")
 _LOWER_TO_UPPER_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
@@ -274,6 +278,10 @@ def is_credential_key(key: str) -> bool:
     normalized = _ACRONYM_TO_WORD_RE.sub("_", normalized)
     normalized = _CREDENTIAL_SEPARATOR_RE.sub("_", normalized.casefold()).strip("_")
     if normalized in _CREDENTIAL_KEYS:
+        return True
+    if normalized.endswith(_CREDENTIAL_SUFFIXES):
+        return True
+    if normalized != "token" and normalized.endswith("_token"):
         return True
     parts = normalized.split("_")
     if len(parts) < 2:

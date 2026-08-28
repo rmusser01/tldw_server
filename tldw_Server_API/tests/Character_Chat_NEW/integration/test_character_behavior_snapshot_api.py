@@ -627,6 +627,20 @@ def test_drift_retry_freezes_initial_provider_model_and_sampling(
         "apiToken",
         "consumerSecret",
         "signingSecret",
+        "vendorAccessToken",
+        "vendorAuthToken",
+        "vendorBearerToken",
+        "vendorRefreshToken",
+        "vendorClientSecret",
+        "vendorApiKey",
+        "vendorApiToken",
+        "vendorPrivateKey",
+        "vendorXApiKey",
+        "oauthToken",
+        "sessionToken",
+        "csrfToken",
+        "idToken",
+        "oauthAccessToken",
     ],
 )
 def test_credential_settings_rejection_rolls_back_creation(
@@ -677,13 +691,19 @@ def test_ordinary_token_settings_remain_allowed(character_db):
         model="local-test",
         conversation_settings={
             "token": "ordinary prompt metadata",
-            "nested": {"token_budget": 512},
+            "nested": {
+                "token_budget": 512,
+                "tokenBudget": 256,
+                "max_tokens": 1024,
+            },
         },
     )
 
     settings = character_db.get_roleplay_resume_state(conversation_id)["settings"]
     assert settings["token"] == "ordinary prompt metadata"
     assert settings["nested"]["token_budget"] == 512
+    assert settings["nested"]["tokenBudget"] == 256
+    assert settings["nested"]["max_tokens"] == 1024
 
 
 @pytest.mark.integration
@@ -1012,6 +1032,23 @@ def test_list_omits_detail_only_resume_authority_without_loading_snapshot_bodies
             "UPDATE conversation_behavior_snapshots SET canonical_json = ? WHERE conversation_id = ?",
             (tampered_json, resumable_id),
         )
+
+    list_after_tamper = test_client.get(
+        "/api/v1/chats/?limit=10&include_settings=true",
+        headers=auth_headers,
+    )
+    assert list_after_tamper.status_code == 200, list_after_tamper.text
+    tampered_list_item = next(
+        item
+        for item in list_after_tamper.json()["chats"]
+        if item["id"] == resumable_id
+    )
+    assert "roleplayResumeV1" not in tampered_list_item["settings"]
+    assert detail_only_fields.isdisjoint(tampered_list_item)
+    persisted_settings = character_db.get_conversation_settings(resumable_id)[
+        "settings"
+    ]
+    assert "roleplayResumeV1" in persisted_settings
 
     tampered_detail = test_client.get(
         f"/api/v1/chats/{resumable_id}",
