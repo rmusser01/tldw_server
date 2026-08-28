@@ -25,6 +25,7 @@ from tldw_Server_API.app.core.Admin_Webhooks.domain import (
     EventSourceKind,
     JobsDispositionKind,
 )
+from tldw_Server_API.app.core.AuthNZ.exceptions import TransactionError
 from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
     AdminWebhookRepository,
     AttemptCompletion,
@@ -63,6 +64,7 @@ def opaque_token(label: str) -> str:
 
 class DeliveryRepositoryFixture(Protocol):
     repository: AdminWebhookRepository
+    integrity_error: type[BaseException]
 
     async def execute(self, query: str, *params: object) -> None: ...
 
@@ -421,9 +423,31 @@ def test_malformed_persisted_coordinates_fail_closed() -> None:
 
     delivery = persisted_delivery_row()
     delivery["state"] = DeliveryState.ENQUEUE_CLAIMED.value
-    delivery["enqueue_claim_token"] = "not-hex"
+    delivery["enqueue_claim_token"] = "A" * 64
     delivery["enqueue_claim_expires_at"] = NOW + timedelta(minutes=1)
     with pytest.raises(ValueError, match="enqueue claim token"):
+        _stored_delivery_from_row(delivery)
+
+    delivery = persisted_delivery_row()
+    delivery["state"] = DeliveryState.PENDING.value
+    delivery["redelivery_of_id"] = canonical_uuid4("redelivery").upper()
+    with pytest.raises(ValueError, match="persisted redelivery ID"):
+        _stored_delivery_from_row(delivery)
+
+    delivery = persisted_delivery_row()
+    delivery.update(
+        {
+            "state": DeliveryState.RETRY_WAIT.value,
+            "jobs_job_id": "job-1",
+            "attempt_count": 1,
+            "current_attempt_id": canonical_uuid4("pending-attempt"),
+            "pending_jobs_disposition": JobsDispositionKind.RETRY.value,
+            "pending_jobs_disposition_delay_seconds": 30,
+            "pending_jobs_disposition_token": "A" * 64,
+            "pending_jobs_disposition_not_before_at": NOW + timedelta(minutes=1),
+        }
+    )
+    with pytest.raises(ValueError, match="pending disposition shape"):
         _stored_delivery_from_row(delivery)
 
     with pytest.raises(ValueError, match="event ID"):
@@ -472,7 +496,7 @@ def test_malformed_persisted_coordinates_fail_closed() -> None:
         _heartbeat_from_row(
             {
                 "component": DeliveryRuntimeComponent.WORKER.value,
-                "instance_id": "not-a-uuid",
+                "instance_id": canonical_uuid4("runtime-instance").upper(),
                 "ready": True,
                 "reason_code": None,
                 "heartbeat_at": NOW,
@@ -1445,6 +1469,89 @@ async def exercise_atomic_disposition_acknowledgement(
         )
 
 
+async def exercise_acknowledgement_second_step_rollback(
+    fixture: DeliveryRepositoryFixture,
+) -> None:
+    repository = fixture.repository
+    _, delivery_id, attempt_id, disposition_token = await _prepare_retry_disposition(
+        fixture, "ack-second-step-rollback"
+    )
+    assert not bool(
+        await fixture.fetchval(
+            "SELECT jobs_disposition_applied FROM admin_webhook_deliveries WHERE id = ?",
+            delivery_id,
+        )
+    )
+    assert not bool(
+        await fixture.fetchval(
+            "SELECT jobs_disposition_applied FROM admin_webhook_delivery_attempts WHERE id = ?",
+            attempt_id,
+        )
+    )
+
+    attempt_update_succeeded = False
+    delivery_cas_lost = False
+    replacement_token = opaque_token("ack-second-step-replacement")
+    with pytest.raises(TransactionError, match="transaction"):
+        async with repository.transaction() as tx:
+            original_fetchrow = tx._fetchrow
+
+            async def lose_delivery_cas(
+                query: str,
+                params: tuple[object, ...] = (),
+            ) -> dict[str, object] | None:
+                nonlocal attempt_update_succeeded, delivery_cas_lost
+                if (
+                    "UPDATE admin_webhook_deliveries" in query
+                    and "SET jobs_disposition_applied = TRUE" in query
+                ):
+                    assert attempt_update_succeeded
+                    await tx._execute(
+                        """
+                        UPDATE admin_webhook_deliveries
+                        SET pending_jobs_disposition_token = ?
+                        WHERE id = ?
+                        """,
+                        (replacement_token, delivery_id),
+                    )
+                    delivery_cas_lost = True
+                row = await original_fetchrow(query, params)
+                if (
+                    "UPDATE admin_webhook_delivery_attempts" in query
+                    and "SET jobs_disposition_applied = TRUE" in query
+                ):
+                    assert row is not None
+                    attempt_update_succeeded = True
+                return row
+
+            tx._fetchrow = lose_delivery_cas  # type: ignore[method-assign]
+            await tx.acknowledge_jobs_disposition(
+                delivery_id, disposition_token, "queued"
+            )
+
+    assert attempt_update_succeeded
+    assert delivery_cas_lost
+    assert not bool(
+        await fixture.fetchval(
+            "SELECT jobs_disposition_applied FROM admin_webhook_deliveries WHERE id = ?",
+            delivery_id,
+        )
+    )
+    assert not bool(
+        await fixture.fetchval(
+            "SELECT jobs_disposition_applied FROM admin_webhook_delivery_attempts WHERE id = ?",
+            attempt_id,
+        )
+    )
+    assert (
+        await fixture.fetchval(
+            "SELECT pending_jobs_disposition_token FROM admin_webhook_deliveries WHERE id = ?",
+            delivery_id,
+        )
+        == disposition_token
+    )
+
+
 async def exercise_malformed_persisted_coordinates(
     fixture: DeliveryRepositoryFixture,
 ) -> None:
@@ -1462,7 +1569,7 @@ async def exercise_malformed_persisted_coordinates(
             enqueue_claim_expires_at = ?
         WHERE id = ?
         """,
-        "not-hex",
+        "A" * 64,
         NOW + timedelta(minutes=1),
         delivery_id,
     )
@@ -1476,7 +1583,7 @@ async def exercise_malformed_persisted_coordinates(
             last_success_at, created_at, updated_at
         ) VALUES ('worker', ?, TRUE, NULL, ?, ?, ?, ?)
         """,
-        "not-a-uuid",
+        canonical_uuid4("persisted-runtime-instance").upper(),
         NOW,
         NOW,
         NOW,
@@ -1484,6 +1591,162 @@ async def exercise_malformed_persisted_coordinates(
     )
     with pytest.raises(ValueError, match="runtime instance ID"):
         await repository.list_runtime_heartbeats()
+
+
+async def exercise_persisted_coordinate_matrix(
+    fixture: DeliveryRepositoryFixture,
+) -> None:
+    repository = fixture.repository
+
+    event = event_insert(
+        event_id=canonical_uuid4("persisted-event-probe"),
+        source_identity="persisted-event-command",
+        event_type="contract.persisted-event-coordinate",
+    )
+    malformed_event_id = canonical_uuid4("persisted-event-coordinate").upper()
+    await fixture.execute(
+        """
+        INSERT INTO admin_webhook_events (
+            id, event_type, api_version, source_kind, aggregate_type,
+            aggregate_id, aggregate_version, source_command_id,
+            source_component, source_request_id, body_ciphertext_json,
+            body_key_id, body_size_bytes, created_at
+        ) VALUES (?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        malformed_event_id,
+        event.event_type,
+        event.api_version,
+        event.source_kind.value,
+        event.source_command_id,
+        event.source_component,
+        event.source_request_id,
+        event.body.ciphertext_json,
+        event.body.key_id,
+        event.body_size_bytes,
+        event.created_at,
+    )
+    async with repository.transaction() as tx:
+        with pytest.raises(ValueError, match="persisted event ID"):
+            await tx._event_by_source(event)
+    await fixture.execute(
+        "DELETE FROM admin_webhook_events WHERE id = ?", malformed_event_id
+    )
+
+    webhook_id, delivery_id = await _captured_delivery(
+        repository,
+        event_id="persisted-delivery-coordinate",
+        command_id="persisted-delivery-command",
+        isolated=True,
+    )
+    event_id = str(
+        await fixture.fetchval(
+            "SELECT event_id FROM admin_webhook_deliveries WHERE id = ?", delivery_id
+        )
+    )
+    malformed_delivery_id = "00000000-0000-1000-8000-000000000002"
+    await fixture.execute(
+        "UPDATE admin_webhook_deliveries SET id = ? WHERE id = ?",
+        malformed_delivery_id,
+        delivery_id,
+    )
+    with pytest.raises(ValueError, match="persisted delivery ID"):
+        await repository.list_delivery_history(webhook_id, limit=10)
+    await fixture.execute(
+        "UPDATE admin_webhook_deliveries SET id = ? WHERE id = ?",
+        delivery_id,
+        malformed_delivery_id,
+    )
+
+    test_delivery_id = canonical_uuid4("persisted-test-delivery")
+    valid_test_token = opaque_token("persisted-test-token")
+    test_attempt_id = canonical_uuid4("persisted-test-attempt")
+    async with repository.transaction() as tx:
+        await tx.insert_delivery(
+            test_delivery_id,
+            event_id=event_id,
+            webhook_id=webhook_id,
+            kind=DeliveryKind.TEST,
+            expires_at=NOW + timedelta(hours=72),
+            now=NOW,
+        )
+        reservation = await tx.reserve_test_attempt(
+            valid_test_token,
+            test_delivery_id,
+            test_attempt_id,
+            10,
+            NOW,
+        )
+        assert reservation is not None and reservation.reserved
+    await fixture.execute(
+        "UPDATE admin_webhook_delivery_attempts SET test_attempt_token = ? WHERE id = ?",
+        "A" * 64,
+        test_attempt_id,
+    )
+    with pytest.raises(ValueError, match="persisted test attempt token"):
+        await repository.list_delivery_attempts(webhook_id, test_delivery_id)
+    await fixture.execute(
+        "UPDATE admin_webhook_delivery_attempts SET test_attempt_token = ? WHERE id = ?",
+        valid_test_token,
+        test_attempt_id,
+    )
+
+    _, attempt_delivery_id, attempt_id, disposition_token = (
+        await _prepare_retry_disposition(fixture, "persisted-attempt-coordinate")
+    )
+    malformed_attempt_id = canonical_uuid4("persisted-attempt-coordinate").upper()
+    await fixture.execute(
+        "UPDATE admin_webhook_delivery_attempts SET id = ? WHERE id = ?",
+        malformed_attempt_id,
+        attempt_id,
+    )
+    with pytest.raises(ValueError, match="persisted attempt ID"):
+        await repository.list_delivery_attempts(
+            int(
+                await fixture.fetchval(
+                    "SELECT webhook_id FROM admin_webhook_deliveries WHERE id = ?",
+                    attempt_delivery_id,
+                )
+            ),
+            attempt_delivery_id,
+        )
+    await fixture.execute(
+        "UPDATE admin_webhook_delivery_attempts SET id = ? WHERE id = ?",
+        attempt_id,
+        malformed_attempt_id,
+    )
+
+    malformed_redelivery = canonical_uuid4("persisted-redelivery").upper()
+    with pytest.raises(fixture.integrity_error):
+        await fixture.execute(
+            "UPDATE admin_webhook_deliveries SET redelivery_of_id = ? WHERE id = ?",
+            malformed_redelivery,
+            delivery_id,
+        )
+    assert (
+        await fixture.fetchval(
+            "SELECT redelivery_of_id FROM admin_webhook_deliveries WHERE id = ?",
+            delivery_id,
+        )
+        is None
+    )
+
+    with pytest.raises(fixture.integrity_error):
+        await fixture.execute(
+            """
+            UPDATE admin_webhook_deliveries
+            SET pending_jobs_disposition_token = ?
+            WHERE id = ?
+            """,
+            "A" * 64,
+            attempt_delivery_id,
+        )
+    assert (
+        await fixture.fetchval(
+            "SELECT pending_jobs_disposition_token FROM admin_webhook_deliveries WHERE id = ?",
+            attempt_delivery_id,
+        )
+        == disposition_token
+    )
 
 
 async def exercise_disposition_scheduling_persistence(

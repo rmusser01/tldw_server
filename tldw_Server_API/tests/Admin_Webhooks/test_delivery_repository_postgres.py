@@ -13,12 +13,14 @@ from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
     AdminWebhookRepository,
 )
 from tldw_Server_API.tests.Admin_Webhooks.test_event_expansion import (
+    exercise_acknowledgement_second_step_rollback,
     exercise_atomic_disposition_acknowledgement,
     exercise_cancellation_cas_and_processing_preservation,
     exercise_capture_and_history,
     exercise_delivery_state_machine,
     exercise_disposition_scheduling_persistence,
     exercise_malformed_persisted_coordinates,
+    exercise_persisted_coordinate_matrix,
     exercise_recovery_runtime_and_retention,
     exercise_stale_recovery_and_cancellation,
 )
@@ -31,6 +33,7 @@ pytestmark = pytest.mark.postgres
 class PostgreSQLDeliveryRepositoryFixture:
     repository: AdminWebhookRepository
     pool: object
+    integrity_error = asyncpg.IntegrityConstraintViolationError
 
     async def execute(self, query: str, *params: object) -> None:
         await self.pool.execute(query, *params)  # type: ignore[attr-defined]
@@ -139,3 +142,17 @@ async def test_postgres_disposition_scheduling_persistence_contract(
     delivery_repo: PostgreSQLDeliveryRepositoryFixture,
 ) -> None:
     await exercise_disposition_scheduling_persistence(delivery_repo)
+
+
+@pytest.mark.integration
+async def test_postgres_acknowledgement_second_step_rollback_contract(
+    delivery_repo: PostgreSQLDeliveryRepositoryFixture,
+) -> None:
+    await exercise_acknowledgement_second_step_rollback(delivery_repo)
+
+
+@pytest.mark.integration
+async def test_postgres_persisted_coordinate_matrix_contract(
+    delivery_repo: PostgreSQLDeliveryRepositoryFixture,
+) -> None:
+    await exercise_persisted_coordinate_matrix(delivery_repo)

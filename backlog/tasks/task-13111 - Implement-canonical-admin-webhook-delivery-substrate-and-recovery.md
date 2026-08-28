@@ -4,7 +4,7 @@ title: Implement canonical admin webhook delivery substrate and recovery
 status: In Progress
 assignee: []
 created_date: 2026-08-23 03:15
-updated_date: 2026-08-28 17:35
+updated_date: 2026-08-28 17:53
 labels:
 - admin
 - webhooks
@@ -59,6 +59,7 @@ Detailed plan: Docs/superpowers/plans/2026-08-23-canonical-admin-webhook-deliver
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 The initial draft was created from an earlier reviewed PR 1 head. Planning review identified and incorporated additive schema-extension readiness while preserving canonical schema version 1, durable disposition tokens and absolute not-before timestamps, per-attempt persisted request timeout, runtime heartbeat persistence, queued cancellation without a worker lease, infrastructure-only pre-attempt deferral, and persisted Jobs expired-lease/quarantine controls. Final gate audit added Jobs migration compatibility/parity coverage, exact synchronous-test replay/preflight/reservation ordering, immutable enqueue controls, and first-canonical-activity traceability.
 
@@ -89,7 +90,12 @@ The initial draft was created from an earlier reviewed PR 1 head. Planning revie
 2026-08-28: Task 2 complete. Implemented dual-backend encrypted event capture/set-based fanout, bounded history/readback, enqueue/attempt/disposition CAS, stale recovery, cancellation, expiry, runtime heartbeat, and ordered retention repositories plus bounded ProtectedValue validation. Strict RED: 3 expected collection errors, 5 warnings. Required final focused suite: 42 passed, 0 skipped, 78 pre-existing environment/dependency/shared-fixture warnings with PostgreSQL required. Crypto regression: 35 passed. Ruff and git diff --check passed. Bandit had only 22 low-confidence B608 reports from fixed module SQL fragments/allowlisted table interpolation; a scan excluding the separately triaged B608 class passed.
 2026-08-28: Started Task 2 Fix Round 1. Scope: cancellation locking/full-snapshot CAS and processing preservation; disposition scheduling invariants; canonical UUIDv4/token/runtime coordinates; atomic disposition acknowledgement; mandatory retention, attempt-budget, synchronous-test, and malformed-row contract coverage. Strict TDD RED will be recorded before production changes.
 2026-08-28: Task 2 Fix Round 1 complete. Cancellation now locks PostgreSQL pre-reservation candidates, uses SQLite write transactions, excludes processing, and applies exact state/current-attempt/Jobs/enqueue-coordinate/version CAS with rollback-visible stale-state errors. Disposition scheduling, canonical UUIDv4/token/runtime coordinates, and atomic attempt+delivery acknowledgement are fail closed. Added dual-backend race, processing-preservation, all-kind scheduling, acknowledgement, retention-order/nonterminal, fifth-attempt no-mutation, synchronous terminal-readback, and malformed-row coverage. Required five-file suite: 66 passed, 0 skipped, 118 pre-existing environment/dependency/shared-fixture warnings with PostgreSQL required. Crypto: 35 passed, 0 skipped, 2 pre-existing warnings. Ruff and diff checks pass. Raw Bandit reports 24 medium-severity/low-confidence B608 findings, all fixed column fragments or closed identifier selections/allowlists with bound caller values; excluding reviewed B608, Bandit passes.
+2026-08-28: Started Task 2 Fix Round 2. Test-focused scope: prove real SQLite/PostgreSQL rollback when acknowledgement loses the delivery-marker CAS after updating the terminal attempt, and complete backend-backed malformed persisted coordinate/constraint evidence for event, delivery, attempt, redelivery, synchronous test token, and pending disposition token. Production changes only if RED exposes a defect.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+2026-08-28: Task 2 Fix Round 2 complete. Added backend-neutral real-transaction acknowledgement rollback evidence and full malformed persisted-coordinate/constraint coverage on SQLite and PostgreSQL. No production defect was exposed, so production and crypto code were unchanged. RED: 2 collection errors from missing shared contracts. Corrective subset: 5 passed, 0 skipped, 6 warnings. Full PostgreSQL-required Task 2 suite: 70 passed, 0 skipped, 122 warnings. Ruff and git diff --check passed; Bandit/crypto were not required because production did not change.
+<!-- SECTION:NOTES:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed

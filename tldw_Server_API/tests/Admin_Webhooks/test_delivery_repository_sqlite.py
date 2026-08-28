@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -12,12 +13,14 @@ from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
     AdminWebhookRepository,
 )
 from tldw_Server_API.tests.Admin_Webhooks.test_event_expansion import (
+    exercise_acknowledgement_second_step_rollback,
     exercise_atomic_disposition_acknowledgement,
     exercise_cancellation_cas_and_processing_preservation,
     exercise_capture_and_history,
     exercise_delivery_state_machine,
     exercise_disposition_scheduling_persistence,
     exercise_malformed_persisted_coordinates,
+    exercise_persisted_coordinate_matrix,
     exercise_recovery_runtime_and_retention,
     exercise_stale_recovery_and_cancellation,
 )
@@ -27,6 +30,7 @@ from tldw_Server_API.tests.Admin_Webhooks.test_event_expansion import (
 class SQLiteDeliveryRepositoryFixture:
     repository: AdminWebhookRepository
     pool: DatabasePool
+    integrity_error = sqlite3.IntegrityError
 
     async def execute(self, query: str, *params: object) -> None:
         await self.pool.execute(query, *params)
@@ -108,3 +112,17 @@ async def test_sqlite_disposition_scheduling_persistence_contract(
     delivery_repo: SQLiteDeliveryRepositoryFixture,
 ) -> None:
     await exercise_disposition_scheduling_persistence(delivery_repo)
+
+
+@pytest.mark.unit
+async def test_sqlite_acknowledgement_second_step_rollback_contract(
+    delivery_repo: SQLiteDeliveryRepositoryFixture,
+) -> None:
+    await exercise_acknowledgement_second_step_rollback(delivery_repo)
+
+
+@pytest.mark.unit
+async def test_sqlite_persisted_coordinate_matrix_contract(
+    delivery_repo: SQLiteDeliveryRepositoryFixture,
+) -> None:
+    await exercise_persisted_coordinate_matrix(delivery_repo)
