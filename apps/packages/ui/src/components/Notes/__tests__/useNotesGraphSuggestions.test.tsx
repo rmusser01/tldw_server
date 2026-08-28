@@ -189,25 +189,38 @@ describe("useNotesGraphSuggestions", () => {
     vi.useRealTimers()
   })
 
-  it("adopts the newest matching nonterminal run after reload, polls it, and stops at terminal", async () => {
-    mocks.listRuns.mockResolvedValue({
-      items: [
-        run("run-terminal", "succeeded", "2026-08-27T13:00:00Z"),
-        run("run-old", "queued", "2026-08-27T10:00:00Z"),
-        {
-          ...run("run-other-model", "running", "2026-08-27T14:00:00Z"),
-          model: "other"
-        },
-        run("run-new", "running", "2026-08-27T12:00:00Z")
-      ],
+  it("clears a reconciled terminal owner, fences its stale list row, and adopts fresh recovery", async () => {
+    let resolveRecoveryRuns:
+      | ((page: { items: ReturnType<typeof run>[]; next_cursor: null }) => void)
+      | undefined
+    const recoveryRuns = new Promise<{
+      items: ReturnType<typeof run>[]
       next_cursor: null
+    }>((resolve) => {
+      resolveRecoveryRuns = resolve
     })
+    mocks.listRuns
+      .mockResolvedValueOnce({
+        items: [
+          run("run-terminal", "succeeded", "2026-08-27T13:00:00Z"),
+          {
+            ...run("run-other-model", "running", "2026-08-27T14:00:00Z"),
+            model: "other"
+          },
+          run("run-new", "running", "2026-08-27T12:00:00Z")
+        ],
+        next_cursor: null
+      })
+      .mockImplementationOnce(() => recoveryRuns)
     mocks.getRun
       .mockResolvedValueOnce(
         run("run-new", "running", "2026-08-27T12:00:00Z", 2)
       )
       .mockResolvedValueOnce(
         run("run-new", "succeeded", "2026-08-27T12:00:00Z", 3)
+      )
+      .mockResolvedValueOnce(
+        run("run-recovered", "running", "2026-08-27T15:00:00Z", 1)
       )
     mocks.listSuggestions.mockResolvedValue(suggestionPage())
     const client = new QueryClient({
@@ -226,7 +239,7 @@ describe("useNotesGraphSuggestions", () => {
         }),
       { wrapper: wrapper(client) }
     )
-    await flush()
+    await settleQueries()
 
     expect(first.result.current.activeRun?.id).toBe("run-new")
     expect(mocks.getRun).toHaveBeenCalledWith(
@@ -237,11 +250,12 @@ describe("useNotesGraphSuggestions", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1000)
     })
-    await flush()
+    await settleQueries()
 
-    expect(first.result.current.activeRun?.state).toBe("succeeded")
+    expect(first.result.current.activeRun).toBeNull()
     expect(mocks.getRun).toHaveBeenCalledTimes(2)
     expect(mocks.listSuggestions).toHaveBeenCalledTimes(2)
+    expect(mocks.listRuns).toHaveBeenCalledTimes(2)
     await act(async () => {
       await vi.advanceTimersByTimeAsync(3000)
     })
@@ -249,26 +263,22 @@ describe("useNotesGraphSuggestions", () => {
     expect(mocks.listSuggestions).toHaveBeenCalledTimes(2)
     expect(mocks.createRun).not.toHaveBeenCalled()
 
-    first.unmount()
-    const reloadedClient = new QueryClient({
-      defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
+    await act(async () => {
+      resolveRecoveryRuns?.({
+        items: [run("run-recovered", "running", "2026-08-27T15:00:00Z", 1)],
+        next_cursor: null
+      })
     })
-    mocks.getRun
-      .mockReset()
-      .mockResolvedValue(run("run-new", "succeeded", "2026-08-27T12:00:00Z", 3))
-    renderHook(
-      () =>
-        useNotesGraphSuggestions({
-          authorityScope: "authority-a",
-          enabled: true,
-          isOnline: true,
-          noteId: "source-note",
-          loadedNodeIds: new Set(["note:source-note"]),
-          pollIntervalMs: 1000
-        }),
-      { wrapper: wrapper(reloadedClient) }
+    await settleQueries()
+
+    expect(first.result.current.activeRun).toMatchObject({
+      id: "run-recovered",
+      state: "running"
+    })
+    expect(mocks.getRun).toHaveBeenCalledTimes(3)
+    expect(mocks.getRun).toHaveBeenLastCalledWith(
+      expect.objectContaining({ runId: "run-recovered" })
     )
-    await flush()
     expect(mocks.createRun).not.toHaveBeenCalled()
   })
 
@@ -921,10 +931,9 @@ describe("useNotesGraphSuggestions", () => {
     expect(mocks.listSuggestions).toHaveBeenCalledTimes(2)
 
     rerender({ provider: "provider-one", model: "model-one" })
-    expect(result.current.activeRun).toMatchObject({
-      id: "run-provider-one",
-      state: "succeeded"
-    })
+    await settleQueries()
+    expect(result.current.activeRun).toBeNull()
+    expect(mocks.getRun).toHaveBeenCalledTimes(2)
     expect(
       client
         .getQueryCache()
@@ -1032,7 +1041,7 @@ describe("useNotesGraphSuggestions", () => {
         next_cursor: null
       })
     mocks.getRun.mockImplementation(({ runId }) =>
-      Promise.resolve(run(runId, "failed", "2026-08-27T12:00:00Z"))
+      Promise.resolve(run(runId, "queued", "2026-08-27T12:00:00Z"))
     )
     mocks.listSuggestions
       .mockResolvedValueOnce(
@@ -1079,6 +1088,72 @@ describe("useNotesGraphSuggestions", () => {
     await settleQueries()
     expect(result.current.suggestions[0].id).toBe("suggestion-c")
     expect(result.current.activeRun?.id).toBe("run-c")
+  })
+
+  it("does not let stale terminal reconciliation clear a newer scope owner", async () => {
+    let resolveReconciliation: (() => void) | undefined
+    const reconciliation = new Promise<void>((resolve) => {
+      resolveReconciliation = resolve
+    })
+    mocks.listRuns
+      .mockResolvedValueOnce({
+        items: [run("run-a", "running", "2026-08-27T12:00:00Z")],
+        next_cursor: null
+      })
+      .mockResolvedValueOnce({
+        items: [run("run-b", "running", "2026-08-27T13:00:00Z")],
+        next_cursor: null
+      })
+    mocks.getRun.mockImplementation(({ runId }) =>
+      Promise.resolve(
+        run(
+          runId,
+          runId === "run-a" ? "succeeded" : "running",
+          "2026-08-27T12:00:00Z"
+        )
+      )
+    )
+    mocks.listSuggestions
+      .mockResolvedValueOnce(
+        suggestionPage([suggestion({ id: "suggestion-a" })])
+      )
+      .mockResolvedValueOnce(
+        suggestionPage([suggestion({ id: "suggestion-b" })])
+      )
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
+    })
+    vi.spyOn(client, "invalidateQueries").mockImplementationOnce(
+      () => reconciliation
+    )
+    const { result, rerender } = renderHook(
+      ({ noteId }) =>
+        useNotesGraphSuggestions({
+          authorityScope: "authority-a",
+          enabled: true,
+          isOnline: true,
+          noteId,
+          loadedNodeIds: new Set()
+        }),
+      {
+        initialProps: { noteId: "note-a" },
+        wrapper: wrapper(client)
+      }
+    )
+    await settleQueries()
+    expect(result.current.activeRun).toBeNull()
+
+    rerender({ noteId: "note-b" })
+    expect(result.current.activeRun).toBeNull()
+    await settleQueries()
+    expect(result.current.activeRun?.id).toBe("run-b")
+
+    await act(async () => {
+      resolveReconciliation?.()
+      await reconciliation
+    })
+    await settleQueries()
+    expect(result.current.activeRun?.id).toBe("run-b")
   })
 
   it("does not adopt a late mutation result after an authority switch", async () => {
@@ -1158,47 +1233,67 @@ describe("useNotesGraphSuggestions", () => {
     )
   })
 
-  it("stops run polling on error and resumes only after explicit online recovery", async () => {
-    mocks.listRuns.mockResolvedValue({
-      items: [run("run-error", "running", "2026-08-27T12:00:00Z")],
+  it("clears a detail-error owner, fences its stale list row, and adopts fresh recovery", async () => {
+    let resolveRecoveryRuns:
+      | ((page: { items: ReturnType<typeof run>[]; next_cursor: null }) => void)
+      | undefined
+    const recoveryRuns = new Promise<{
+      items: ReturnType<typeof run>[]
       next_cursor: null
+    }>((resolve) => {
+      resolveRecoveryRuns = resolve
     })
-    mocks.getRun.mockRejectedValueOnce(new Error("permission denied"))
+    mocks.listRuns
+      .mockResolvedValueOnce({
+        items: [run("run-error", "running", "2026-08-27T12:00:00Z")],
+        next_cursor: null
+      })
+      .mockImplementationOnce(() => recoveryRuns)
+    mocks.getRun
+      .mockRejectedValueOnce(new Error("permission denied"))
+      .mockResolvedValueOnce(
+        run("run-recovered", "running", "2026-08-27T13:00:00Z", 1)
+      )
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
     })
-    const { result, rerender } = renderHook(
-      ({ online }) =>
+    const { result } = renderHook(
+      () =>
         useNotesGraphSuggestions({
           authorityScope: "authority-a",
           enabled: true,
-          isOnline: online,
+          isOnline: true,
           noteId: "source-note",
           loadedNodeIds: new Set(),
           pollIntervalMs: 500
         }),
       {
-        initialProps: { online: true },
         wrapper: wrapper(client)
       }
     )
     await settleQueries()
-    expect(result.current.runQuery.isError).toBe(true)
+    expect(result.current.activeRun).toBeNull()
     expect(mocks.getRun).toHaveBeenCalledTimes(1)
+    expect(mocks.listRuns).toHaveBeenCalledTimes(2)
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(3000)
     })
     expect(mocks.getRun).toHaveBeenCalledTimes(1)
 
-    mocks.getRun.mockResolvedValueOnce(
-      run("run-error", "running", "2026-08-27T12:00:00Z", 2)
-    )
-    rerender({ online: false })
-    rerender({ online: true })
+    await act(async () => {
+      resolveRecoveryRuns?.({
+        items: [run("run-recovered", "running", "2026-08-27T13:00:00Z", 1)],
+        next_cursor: null
+      })
+    })
     await settleQueries()
+
     expect(mocks.getRun).toHaveBeenCalledTimes(2)
-    expect(result.current.runQuery.isError).toBe(false)
+    expect(result.current.activeRun).toMatchObject({
+      id: "run-recovered",
+      state: "running"
+    })
   })
 
   it("removes a rejected suggestion from the exact scoped cache immediately", async () => {

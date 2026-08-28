@@ -68,6 +68,23 @@ type TrackedRunIdentity = {
   model: string
 }
 
+type RunTrackerState = {
+  tracked: TrackedRunIdentity | null
+  resolved: TrackedRunIdentity | null
+}
+
+const sameRunIdentity = (
+  left: TrackedRunIdentity | null,
+  right: TrackedRunIdentity
+): boolean =>
+  Boolean(
+    left &&
+      left.scope === right.scope &&
+      left.id === right.id &&
+      left.provider === right.provider &&
+      left.model === right.model
+  )
+
 const authority = (value: string | null | undefined): string | null =>
   typeof value === "string" && value.length > 0 ? value : null
 
@@ -82,7 +99,8 @@ const authoritativeNodeId = (
 
 const newestMatchingRun = (
   runs: NotesGraphSuggestionRun[],
-  capability: NotesGraphSuggestionCapabilities | undefined
+  capability: NotesGraphSuggestionCapabilities | undefined,
+  resolved: TrackedRunIdentity | null
 ): NotesGraphSuggestionRun | null => {
   if (!capability) return null
   return (
@@ -91,7 +109,13 @@ const newestMatchingRun = (
         (run) =>
           ACTIVE_RUN_STATES.has(run.state) &&
           run.provider === capability.provider &&
-          run.model === capability.model
+          run.model === capability.model &&
+          !(
+            resolved &&
+            run.id === resolved.id &&
+            run.provider === resolved.provider &&
+            run.model === resolved.model
+          )
       )
       .sort((left, right) => {
         const time = Date.parse(right.created_at) - Date.parse(left.created_at)
@@ -149,15 +173,35 @@ export function useNotesGraphSuggestions(
   const enabled = Boolean(
     authorityScope && options.enabled && options.isOnline && noteId
   )
-  const [trackedRunIdentity, setTrackedRunIdentity] =
-    React.useState<TrackedRunIdentity | null>(null)
+  const [runTracker, setRunTracker] = React.useState<RunTrackerState>({
+    tracked: null,
+    resolved: null
+  })
   const trackedRun =
-    trackedRunIdentity?.scope === commandAuthority ? trackedRunIdentity : null
+    runTracker.tracked?.scope === commandAuthority ? runTracker.tracked : null
+  const resolvedRun =
+    runTracker.resolved?.scope === commandAuthority ? runTracker.resolved : null
   React.useEffect(() => {
-    setTrackedRunIdentity((current) =>
-      current?.scope === commandAuthority ? current : null
-    )
+    setRunTracker((current) => {
+      const tracked =
+        current.tracked?.scope === commandAuthority ? current.tracked : null
+      const resolved =
+        current.resolved?.scope === commandAuthority ? current.resolved : null
+      return tracked === current.tracked && resolved === current.resolved
+        ? current
+        : { tracked, resolved }
+    })
   }, [commandAuthority])
+  const resolveTrackedRun = React.useCallback(
+    (identity: TrackedRunIdentity) => {
+      setRunTracker((current) =>
+        sameRunIdentity(current.tracked, identity)
+          ? { tracked: null, resolved: identity }
+          : current
+      )
+    },
+    []
+  )
 
   const capabilitiesKey = React.useMemo(
     () => [...providerKey, "capabilities"] as const,
@@ -183,9 +227,18 @@ export function useNotesGraphSuggestions(
     () => [...providerKey, "runs", "active"] as const,
     [providerKey]
   )
+  const canRecoverResolvedOwner = Boolean(
+    !resolvedRun ||
+      (capabilities?.provider === resolvedRun.provider &&
+        capabilities.model === resolvedRun.model)
+  )
   const runsQueryRaw = useQuery({
     queryKey: runsKey,
-    enabled: enabled && Boolean(capabilities) && !trackedRun,
+    enabled:
+      enabled &&
+      Boolean(capabilities) &&
+      !trackedRun &&
+      canRecoverResolvedOwner,
     notifyOnChangeProps: "all",
     retry: false,
     refetchOnWindowFocus: false,
@@ -200,32 +253,39 @@ export function useNotesGraphSuggestions(
   const runsPage = runsQueryRaw.data
 
   const adoptedRun = React.useMemo(
-    () => newestMatchingRun(runsPage?.items ?? [], capabilities),
-    [capabilities, runsPage?.items]
+    () => newestMatchingRun(runsPage?.items ?? [], capabilities, resolvedRun),
+    [capabilities, resolvedRun, runsPage?.items]
   )
   React.useEffect(() => {
     if (!adoptedRun || trackedRun) return
-    setTrackedRunIdentity((current) =>
-      current?.scope === commandAuthority
-        ? current
-        : {
+    const identity = {
+      scope: commandAuthority,
+      id: adoptedRun.id,
+      provider: adoptedRun.provider,
+      model: adoptedRun.model
+    }
+    setRunTracker((current) => {
+      if (
+        current.tracked?.scope === commandAuthority ||
+        sameRunIdentity(current.resolved, identity)
+      )
+        return current
+      return { ...current, tracked: identity }
+    })
+  }, [adoptedRun, commandAuthority, trackedRun])
+  const runOwner = React.useMemo<TrackedRunIdentity | null>(
+    () =>
+      trackedRun ??
+      (adoptedRun
+        ? {
             scope: commandAuthority,
             id: adoptedRun.id,
             provider: adoptedRun.provider,
             model: adoptedRun.model
           }
-    )
-  }, [adoptedRun, commandAuthority, trackedRun])
-  const runOwner =
-    trackedRun ??
-    (adoptedRun
-      ? {
-          scope: commandAuthority,
-          id: adoptedRun.id,
-          provider: adoptedRun.provider,
-          model: adoptedRun.model
-        }
-      : null)
+        : null),
+    [adoptedRun, commandAuthority, trackedRun]
+  )
   const seedRun = adoptedRun?.id === runOwner?.id ? adoptedRun : null
   const runProviderKey = React.useMemo(
     () =>
@@ -268,10 +328,17 @@ export function useNotesGraphSuggestions(
   const activeRun =
     ownedRun &&
     runOwner &&
+    !runQueryRaw.error &&
+    ACTIVE_RUN_STATES.has(ownedRun.state) &&
     capabilities?.provider === runOwner.provider &&
     capabilities.model === runOwner.model
       ? ownedRun
       : null
+
+  React.useEffect(() => {
+    if (!runQueryRaw.error || !runOwner) return
+    resolveTrackedRun(runOwner)
+  }, [resolveTrackedRun, runOwner, runQueryRaw.error])
 
   const suggestionsKey = React.useMemo(
     () =>
@@ -364,15 +431,26 @@ export function useNotesGraphSuggestions(
   }
 
   React.useEffect(() => {
-    if (runDetail?.state !== "succeeded") return
-    const reconciliationKey = `${runDetail.id}:${runDetail.revision}`
+    if (runDetail?.state !== "succeeded" || !runOwner) return
+    const reconciliationKey = JSON.stringify([
+      runOwner.scope,
+      runOwner.id,
+      runOwner.provider,
+      runOwner.model,
+      runDetail.revision
+    ])
     if (terminalReconciliation.current.identity === reconciliationKey) return
     terminalReconciliation.current.identity = reconciliationKey
-    void queryClient.invalidateQueries({
-      queryKey: suggestionsKey,
-      exact: true
-    })
-  }, [queryClient, runDetail, suggestionsKey])
+    void queryClient
+      .invalidateQueries({
+        queryKey: suggestionsKey,
+        exact: true
+      })
+      .then(
+        () => resolveTrackedRun(runOwner),
+        () => undefined
+      )
+  }, [queryClient, resolveTrackedRun, runDetail, runOwner, suggestionsKey])
 
   const generationMutation = useMutation({
     mutationKey: [...providerKey, "generate"],
@@ -455,12 +533,15 @@ export function useNotesGraphSuggestions(
         ],
         run
       )
-      setTrackedRunIdentity({
-        scope: variables.commandAuthority,
-        id: run.id,
-        provider: run.provider,
-        model: run.model
-      })
+      setRunTracker((current) => ({
+        ...current,
+        tracked: {
+          scope: variables.commandAuthority,
+          id: run.id,
+          provider: run.provider,
+          model: run.model
+        }
+      }))
     }
   })
 
