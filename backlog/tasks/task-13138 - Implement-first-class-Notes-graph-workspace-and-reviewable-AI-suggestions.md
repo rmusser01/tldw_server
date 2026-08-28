@@ -3,25 +3,24 @@ id: TASK-13138
 title: Implement first-class Notes graph workspace and reviewable AI suggestions
 status: Done
 assignee: []
-created_date: '2026-08-27 03:40'
-updated_date: '2026-08-28 15:39'
+created_date: 2026-08-27 03:40
+updated_date: 2026-08-28 17:41
 labels:
-  - notes
-  - knowledge-graph
-  - webui
-  - browser-extension
-  - llm
-  - jobs
+- notes
+- knowledge-graph
+- webui
+- browser-extension
+- llm
+- jobs
 dependencies: []
 references:
-  - TASK-13134
-  - TASK-13135
-  - TASK-13136
-  - TASK-13137
+- TASK-13134
+- TASK-13135
+- TASK-13136
+- TASK-13137
 documentation:
-  - >-
-    Docs/superpowers/specs/2026-08-26-notes-second-brain-graph-suggestions-design.md
-  - Docs/superpowers/plans/2026-08-26-notes-second-brain-graph-suggestions.md
+- Docs/superpowers/specs/2026-08-26-notes-second-brain-graph-suggestions-design.md
+- Docs/superpowers/plans/2026-08-26-notes-second-brain-graph-suggestions.md
 priority: high
 ---
 
@@ -57,6 +56,22 @@ Add Graph as a first-class Notes view mode shared by the WebUI and browser exten
 - [x] #22 Static reset routing, loaded-graph search scope, paginated Relationships accessibility behavior, and the documented 90-day idempotency replay horizon are covered by contract tests.
 - [x] #23 All mutating suggestion routes use durable operation receipts with request fingerprints and bounded replay envelopes; reset is revision-guarded so replay cannot delete later rejections.
 <!-- AC:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented the first-class Notes Graph workspace and reviewable, source-grounded AI suggestions across the shared WebUI/browser-extension UI, nested Notes graph API, Jobs worker/maintenance lifecycle, durable owner-scoped storage, guarded accept/reject/reset decisions, accessibility, responsive behavior, and documentation. Task 12 release evidence now includes literal event/path privacy contracts, full sentinel/log/metric/telemetry-init checks, canonical shared-tag/source retrieval cases, real ordered top-30 pressure, exact WebUI/MV3 request ledgers, complete lifecycle/content/keyboard checks, and unobscured desktop/320px/page-scale-200/720px browser artifacts. Verification and all 23 acceptance-criteria mappings are recorded in .superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-12-report.md. Known inherited baselines remain documented; the human-authored PR Change summary is still required before merge. Deferred work remains TASK-13134, TASK-13135, TASK-13136, and TASK-13137.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
+<!-- DOD:END -->
 
 ## Implementation Plan
 
@@ -188,24 +203,8 @@ Task 12 implementation resumed directly from exact base adb4ebd833de37461234e969
 Task 12 completed from base adb4ebd833de37461234e969743fff55773f29b8. Release evidence includes privacy/observability and offline quality evaluation, shared route and real-ICU contracts, real WebUI Chromium E2E, controller-accepted deterministic MV3 extension E2E, documentation/mirrors, and cumulative security gates. The only production delta is the controller-authorized common:loading.title correction with a focused regression. Full evidence and all 23 AC/final-checklist mappings: .superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-12-report.md. Inherited records: backend 469/470 one unchanged delete-link copy failure; broad frontend 325/394 with 69 failures in 27 unchanged legacy files; extension whole-file 2/4 with both new Task 12 cases passing and two unchanged old selector failures; exact 315-line TypeScript baseline with zero touched diagnostics; stale Tags-help copy and missing glossary fixture. Deferred work remains TASK-13134, TASK-13135, TASK-13136, and TASK-13137. Task 12 commit subject: docs: complete Notes graph suggestions rollout (TASK-13138).
 
 Task 12 tracked file inventory: Docs/API/Notes_Graph_Suggestions.md; Docs/Code_Documentation/Data_Flow_Atlas.md; Docs/Product/Graphing-Notes-PRD.md; Docs/Published/Code_Documentation/Data_Flow_Atlas.md; Docs/Published/User_Guides/WebUI_Extension/Notes_Graph_Suggestions.md; Docs/User_Guides/WebUI_Extension/Notes_Graph_Suggestions.md; apps/extension/tests/e2e/notes-ux.spec.ts; apps/packages/ui/src/components/Notes/NotesGraphWorkspace.tsx; apps/packages/ui/src/components/Notes/__tests__/NotesGraphWorkspace.loading-i18n.test.tsx; apps/packages/ui/src/routes/__tests__/option-notes-route-identity.test.tsx; apps/tldw-frontend/e2e/workflows/notes-graph-suggestions.spec.ts; tldw_Server_API/app/core/Notes_Graph/README.md; tldw_Server_API/tests/Notes_Graph/evaluation/fixtures/suggestion_grounding_cases.json; tldw_Server_API/tests/Notes_Graph/evaluation/test_suggestion_privacy_observability_contract.py; tldw_Server_API/tests/Notes_Graph/evaluation/test_suggestion_quality_corpus.py; and this TASK-13138 record. Local ignored evidence: task-12-report.md, progress.md, and four Playwright screenshots.
+
+Task 12 Review Fix Round 1/3 started from exact base 07a8355ee8814522935ecbc79b94afc17c346673. Scope is limited to mutation-sensitive observability/privacy evaluation, explicit shared-membership and top-30 quality pressure, deterministic WebUI/extension request/lifecycle/keyboard/visual evidence hardening, local fixture simplification/setup error handling, and official Backlog marker repair. The authorized loading-key correction remains the only production change; dependencies, deferred features, and unrelated Watchlists templates remain excluded.
+
+Task 12 Review Fix Round 1/3 completed from exact base 07a8355ee8814522935ecbc79b94afc17c346673. Literal 13-event and per-path occurrence contracts, full scoped Loguru/sentinel/metric-label audits, real telemetry initializer fail-closed probes, canonical shared-tag/source memberships, 40-candidate ordered top-30 pressure, cutoff and duplicate mutation proofs, exact WebUI/MV3 request ledgers, complete lifecycle/content/keyboard checks, and unobscured desktop/320/page-scale-200/720 visual evidence now close every review finding. Final controller ruling separates page-scale origin integrity from responsive reflow and removes nondeterministic pinch-pan simulation; no new production issue was implicated. Verification: evaluation 2/2; focused frontend 142/142; WebUI 3/3; new extension cases 2/2; full extension 2/4 with two unchanged inherited selector failures; stable backend 469/470 after isolated Hypothesis timing-flake pass; Ruff clean; ESLint zero errors; Bandit zero findings; mirror/locale/artifact/diff checks clean; zero touched TypeScript diagnostics against inherited baselines. Full evidence: .superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-12-report.md. Fix commit subject: test: harden Notes graph rollout evidence (TASK-13138).
 <!-- SECTION:NOTES:END -->
-
-## Final Summary
-
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implementation complete and locally verified across all 12 planned tasks. Task 12 adds deterministic release evidence and documentation, with one narrowly authorized loading-label localization fix. Focused Task 12 gates pass; cumulative inherited failures are documented and unchanged. No push, PR, merge, or branch finishing was performed. Before merge, the human requester must provide the required Change summary explaining what changed and why.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-## Definition of Done
-<!-- DOD:BEGIN -->
-- [x] #1 Acceptance criteria completed
-- [x] #2 Tests or verification recorded
-- [x] #3 Documentation updated when relevant
-- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [x] #5 Final summary added
-- [x] #6 Known skips or blockers documented
-<!-- DOD:END -->

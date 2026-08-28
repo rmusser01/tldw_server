@@ -1,4 +1,10 @@
-import { test, expect, type BrowserContext, type Worker } from '@playwright/test'
+import {
+  test,
+  expect,
+  type BrowserContext,
+  type Page,
+  type Worker
+} from '@playwright/test'
 import { launchWithBuiltExtension } from './utils/extension-build'
 import {
   waitForConnectionStore,
@@ -15,6 +21,15 @@ const PROVIDER = 'Deterministic Extension Provider With A Long Disclosure Name'
 const MODEL = 'extension-grounding-model-with-a-long-version-label'
 const TARGET_TITLE =
   'Grounded extension parity target with a deliberately long title that wraps cleanly'
+const SUGGESTION_BASE = `/api/v1/notes/${NOTE_ID}/graph/suggestions`
+const UUID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+type SuggestionRequest = {
+  method: string
+  path: string
+  commandUuid: string | null
+}
 
 const installNotesGraphMocks = async (
   context: BrowserContext,
@@ -27,11 +42,7 @@ const installNotesGraphMocks = async (
     ({ authorized, constants }) => {
       try {
         let accepted = false
-        const suggestionRequests: Array<{
-          method: string
-          path: string
-          commandUuid: string | null
-        }> = []
+        const suggestionRequests: SuggestionRequest[] = []
         const apiRequests: string[] = []
         let graphRequests = 0
         ;(globalThis as any).__notesGraphSuggestionRequests = suggestionRequests
@@ -182,6 +193,12 @@ const installNotesGraphMocks = async (
               ...headers
             }
           })
+        const staticPrefixResponses: Array<[string, unknown]> = [
+          ['/api/v1/notes/keywords', { keywords: [], total: 0 }],
+          ['/api/v1/notes/collections', { collections: [], total: 0 }],
+          ['/api/v1/notes/moodboards', { moodboards: [], total: 0 }],
+          ['/api/v1/notes/trash', { notes: [], total: 0 }]
+        ]
 
         const originalFetch = globalThis.fetch.bind(globalThis)
         const handler = async (
@@ -206,7 +223,7 @@ const installNotesGraphMocks = async (
               commandUuid:
                 headers.get('Idempotency-Key') || headers.get('idempotency-key') || null
             })
-            if (path.endsWith('/capabilities')) {
+            if (path.endsWith('/capabilities') && method === 'GET') {
               return ok(capability, {
                 etag: `"${constants.capabilityRevision}"`
               })
@@ -223,7 +240,10 @@ const installNotesGraphMocks = async (
                 rejection_count: 0
               })
             }
-            if (path.endsWith('/extension-related-suggestion/accept')) {
+            if (
+              path.endsWith('/extension-related-suggestion/accept') &&
+              method === 'POST'
+            ) {
               accepted = true
               return ok({
                 resource_id: 'extension-related-suggestion',
@@ -232,6 +252,7 @@ const installNotesGraphMocks = async (
                 cleared_count: null
               })
             }
+            throw new Error(`Unhandled suggestion request: ${method} ${path}`)
           }
           if (
             path.startsWith('/api/v1/notes/title-settings') ||
@@ -252,18 +273,10 @@ const installNotesGraphMocks = async (
             return ok({ ...note, links: [] })
           }
           if (path.includes('/neighbors')) return ok({ nodes: [], edges: [] })
-          if (path.startsWith('/api/v1/notes/keywords')) {
-            return ok({ keywords: [], total: 0 })
-          }
-          if (path.startsWith('/api/v1/notes/collections')) {
-            return ok({ collections: [], total: 0 })
-          }
-          if (path.startsWith('/api/v1/notes/moodboards')) {
-            return ok({ moodboards: [], total: 0 })
-          }
-          if (path.startsWith('/api/v1/notes/trash')) {
-            return ok({ notes: [], total: 0 })
-          }
+          const staticResponse = staticPrefixResponses.find(([prefix]) =>
+            path.startsWith(prefix)
+          )
+          if (staticResponse) return ok(staticResponse[1])
           if (path === '/api/v1/health' || path === '/api/v1/health/live') {
             return ok({ status: 'ok' })
           }
@@ -287,8 +300,10 @@ const installNotesGraphMocks = async (
         ;(globalThis as any).__notesGraphMockInstalled =
           globalThis.fetch === handler
         return globalThis.fetch === handler
-      } catch {
-        return false
+      } catch (error) {
+        throw new Error('Notes graph service-worker fixture setup failed', {
+          cause: error
+        })
       }
     },
     {
@@ -321,6 +336,57 @@ const connectedLaunchOptions = {
     }
   }
 } as const
+
+const dismissTourIfVisible = async (page: Page) => {
+  const skipTour = page.getByText('Skip tour', { exact: true })
+  if ((await skipTour.count()) > 0 && (await skipTour.isVisible())) {
+    await skipTour.click()
+  }
+}
+
+const closeMobileNotesList = async (page: Page) => {
+  const backdrop = page.getByTestId('notes-mobile-sidebar-backdrop')
+  if ((await backdrop.count()) > 0 && (await backdrop.isVisible())) {
+    await backdrop.click()
+  }
+  const list = page.getByTestId('notes-list-region')
+  await expect(list).toHaveClass(/-translate-x-full/)
+  await expect
+    .poll(async () => {
+      const bounds = await list.boundingBox()
+      return bounds ? bounds.x + bounds.width : 0
+    })
+    .toBeLessThanOrEqual(1)
+  await expect(backdrop).toHaveCount(0)
+}
+
+const assertExactSuggestionRequests = async (
+  worker: Worker,
+  expected: Record<string, number>
+) => {
+  const calls = await worker.evaluate<SuggestionRequest[]>(
+    () => (globalThis as any).__notesGraphSuggestionRequests ?? []
+  )
+  const multiset = Object.fromEntries(
+    calls.reduce<Array<[string, number]>>((entries, call) => {
+      const key = `${call.method} ${call.path}`
+      const existing = entries.find(([candidate]) => candidate === key)
+      if (existing) existing[1] += 1
+      else entries.push([key, 1])
+      return entries
+    }, [])
+  )
+  expect(multiset).toEqual(expected)
+  const commands = calls.filter((call) => call.method !== 'GET')
+  expect(
+    commands.every(
+      (call) => Boolean(call.commandUuid) && UUID.test(call.commandUuid ?? '')
+    )
+  ).toBe(true)
+  expect(new Set(commands.map((call) => call.commandUuid)).size).toBe(
+    commands.length
+  )
+}
 
 test.describe('Notes workspace UX', () => {
   test('shows offline empty state and disables editor when not connected', async () => {
@@ -407,10 +473,7 @@ test.describe('Notes workspace UX', () => {
       window.location.hash = '/notes'
     })
     await expect(page).toHaveURL(optionsUrl + '#/notes')
-    await page
-      .getByText('Skip tour', { exact: true })
-      .click({ timeout: 5_000 })
-      .catch(() => {})
+    await dismissTourIfVisible(page)
     await waitForConnectionStore(page, 'notes-graph-connected')
     await forceConnected(
       page,
@@ -471,18 +534,41 @@ test.describe('Notes workspace UX', () => {
     ).toBeVisible()
 
     await page.setViewportSize({ width: 320, height: 900 })
+    await closeMobileNotesList(page)
     const geometry = await page.getByTestId('notes-graph-workspace').evaluate((root) => {
       const rect = root.getBoundingClientRect()
       return {
         left: rect.left,
         right: rect.right,
         viewport: innerWidth,
-        overflow: document.documentElement.scrollWidth - innerWidth
+        overflow: document.documentElement.scrollWidth - innerWidth,
+        visibleOverlays: Array.from(
+          document.querySelectorAll(
+            '[role="dialog"], [data-testid="notes-mobile-sidebar-backdrop"], .ant-drawer-mask'
+          )
+        ).filter((element) => {
+          const bounds = element.getBoundingClientRect()
+          const style = getComputedStyle(element)
+          return (
+            bounds.width > 0 &&
+            bounds.height > 0 &&
+            style.visibility !== 'hidden' &&
+            style.display !== 'none' &&
+            Number(style.opacity || '1') > 0
+          )
+        }).length
       }
     })
     expect(geometry.left).toBeGreaterThanOrEqual(-1)
     expect(geometry.right).toBeLessThanOrEqual(geometry.viewport + 1)
     expect(geometry.overflow).toBeLessThanOrEqual(1)
+    expect(geometry.visibleOverlays).toBe(0)
+    await assertExactSuggestionRequests(worker, {
+      [`GET ${SUGGESTION_BASE}`]: 1,
+      [`GET ${SUGGESTION_BASE}/capabilities`]: 1,
+      [`GET ${SUGGESTION_BASE}/runs`]: 1,
+      [`POST ${SUGGESTION_BASE}/extension-related-suggestion/accept`]: 1
+    })
     await context.close()
   })
 
@@ -497,10 +583,7 @@ test.describe('Notes workspace UX', () => {
       window.location.hash = '/notes'
     })
     await expect(page).toHaveURL(optionsUrl + '#/notes')
-    await page
-      .getByText('Skip tour', { exact: true })
-      .click({ timeout: 5_000 })
-      .catch(() => {})
+    await dismissTourIfVisible(page)
     await waitForConnectionStore(page, 'notes-graph-read-only-connected')
     await forceConnected(
       page,
@@ -518,10 +601,7 @@ test.describe('Notes workspace UX', () => {
     await expect(page.getByRole('tab', { name: 'Suggestions' })).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Generate' })).toHaveCount(0)
     await page.waitForTimeout(500)
-    const suggestionRequests = await worker.evaluate(
-      () => (globalThis as any).__notesGraphSuggestionRequests ?? []
-    )
-    expect(suggestionRequests).toEqual([])
+    await assertExactSuggestionRequests(worker, {})
     await context.close()
   })
 })

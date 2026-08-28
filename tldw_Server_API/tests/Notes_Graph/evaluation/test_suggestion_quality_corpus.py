@@ -37,14 +37,20 @@ CASE_KEYS = {
     "match_kind",
     "source",
     "candidates",
+    "memberships",
     "existing_tags",
     "response",
     "expected_targets",
     "expected_tags",
+    "expected_top30",
+    "cutoff_expected_targets",
     "largest",
 }
 SOURCE_KEYS = {"id", "title", "content", "repeat"}
 CANDIDATE_KEYS = {"id", "title", "content", "repeat", "role", "expected"}
+MEMBERSHIP_KEYS = {"tags", "sources"}
+TAG_MEMBERSHIP_KEYS = {"tag", "note_ids"}
+SOURCE_MEMBERSHIP_KEYS = {"source", "external_ref", "note_ids"}
 RESPONSE_KEYS = {"relationships", "tags"}
 RELATIONSHIP_KEYS = {
     "target_id",
@@ -75,6 +81,7 @@ def _load_corpus() -> dict[str, object]:
         assert isinstance(case["largest"], bool)
         assert set(case["source"]) == SOURCE_KEYS
         assert isinstance(case["source"]["repeat"], int) and case["source"]["repeat"] >= 1
+        assert set(case["memberships"]) == MEMBERSHIP_KEYS
         assert set(case["response"]) == RESPONSE_KEYS
         assert isinstance(case["existing_tags"], list)
         assert isinstance(case["expected_targets"], list)
@@ -95,6 +102,20 @@ def _load_corpus() -> dict[str, object]:
         assert set(case["expected_targets"]) == {
             item["id"] for item in case["candidates"] if item["expected"]
         }
+        assert isinstance(case["expected_top30"], list)
+        assert isinstance(case["cutoff_expected_targets"], list)
+        assert set(case["cutoff_expected_targets"]) <= set(case["expected_targets"])
+        assert all(note_id in all_ids for note_id in case["expected_top30"])
+        for membership in case["memberships"]["tags"]:
+            assert set(membership) == TAG_MEMBERSHIP_KEYS
+            assert len(membership["note_ids"]) >= 2
+            assert case["source"]["id"] in membership["note_ids"]
+            assert all(note_id in all_ids for note_id in membership["note_ids"])
+        for membership in case["memberships"]["sources"]:
+            assert set(membership) == SOURCE_MEMBERSHIP_KEYS
+            assert len(membership["note_ids"]) >= 2
+            assert case["source"]["id"] in membership["note_ids"]
+            assert all(note_id in all_ids for note_id in membership["note_ids"])
         for relationship in case["response"]["relationships"]:
             assert set(relationship) == RELATIONSHIP_KEYS
         for tag in case["response"]["tags"]:
@@ -228,7 +249,25 @@ def _seed_case(tmp_path: Path, case: dict[str, object]):
     db = CharactersRAGDB(str(db_path), client_id="quality-owner")
     _authorize(db)
     source = case["source"]
-    db.add_note(source["title"], _expanded(source), note_id=source["id"])
+    conversation_by_note: dict[str, str] = {}
+    for index, membership in enumerate(case["memberships"]["sources"]):
+        conversation_id = db.add_conversation(
+            {
+                "title": f"Quality source {case['id']} {index}",
+                "source": membership["source"],
+                "external_ref": membership["external_ref"],
+            }
+        )
+        assert conversation_id is not None
+        for note_id in membership["note_ids"]:
+            assert note_id not in conversation_by_note
+            conversation_by_note[note_id] = conversation_id
+    db.add_note(
+        source["title"],
+        _expanded(source),
+        note_id=source["id"],
+        conversation_id=conversation_by_note.get(source["id"]),
+    )
     cross_owner = CharactersRAGDB(str(db_path), client_id="other-owner")
     try:
         for candidate in case["candidates"]:
@@ -237,11 +276,19 @@ def _seed_case(tmp_path: Path, case: dict[str, object]):
                 candidate["title"],
                 _expanded(candidate),
                 note_id=candidate["id"],
+                conversation_id=conversation_by_note.get(candidate["id"]),
             )
     finally:
         cross_owner.close_all_connections()
-    for tag in case["existing_tags"]:
-        db.add_keyword(tag)
+    keyword_ids = {tag: db.add_keyword(tag) for tag in case["existing_tags"]}
+    for membership in case["memberships"]["tags"]:
+        keyword_id = keyword_ids.get(membership["tag"])
+        if keyword_id is None:
+            keyword_id = db.add_keyword(membership["tag"])
+            keyword_ids[membership["tag"]] = keyword_id
+        assert keyword_id is not None
+        for note_id in membership["note_ids"]:
+            assert db.link_note_to_keyword(note_id, keyword_id)
     for index, candidate in enumerate(case["candidates"]):
         if candidate["role"] == "already_linked":
             db.notes_link_store.upsert(
@@ -307,6 +354,23 @@ def _normalized(value: str) -> str:
     return unicodedata.normalize("NFC", value.strip()).casefold()
 
 
+def _assert_expected_retrieval(case_id: str, retrieved_ids: list[str], expected_ids: list[str]) -> None:
+    matched = [note_id for note_id in expected_ids if note_id in retrieved_ids]
+    assert len(matched) == len(expected_ids), (
+        f"{case_id} expected-target retrieval {len(matched)}/{len(expected_ids)}; "
+        f"missing={sorted(set(expected_ids) - set(matched))}"
+    )
+
+
+def _assert_unique_relationships(case_id: str, target_ids: list[str], expected_count: int) -> None:
+    assert len(target_ids) == expected_count, (
+        f"{case_id} accepted relationship count {len(target_ids)}/{expected_count}"
+    )
+    assert len(target_ids) == len(set(target_ids)), (
+        f"{case_id} duplicate accepted relationship targets: {target_ids}"
+    )
+
+
 def test_offline_grounding_corpus_meets_quality_and_budget_contracts(tmp_path) -> None:
     corpus = _load_corpus()
     expected_total = retrieved_total = 0
@@ -320,7 +384,8 @@ def test_offline_grounding_corpus_meets_quality_and_budget_contracts(tmp_path) -
         db, retrieval, prepared = _seed_case(tmp_path, case)
         prepared_by_case[case["id"]] = prepared
         try:
-            retrieved_ids = {item.note_id for item in retrieval.candidates}
+            retrieved_order = [item.note_id for item in retrieval.candidates]
+            retrieved_ids = set(retrieved_order)
             expected = set(case["expected_targets"])
             expected_total += len(expected)
             retrieved_total += len(expected & retrieved_ids)
@@ -332,13 +397,24 @@ def test_offline_grounding_corpus_meets_quality_and_budget_contracts(tmp_path) -
             assert not forbidden & retrieved_ids, (
                 f"{case['id']} invalid retrieval output: {sorted(forbidden & retrieved_ids)}"
             )
+            membership_targets = {
+                note_id
+                for membership_kind in ("tags", "sources")
+                for membership in case["memberships"][membership_kind]
+                for note_id in membership["note_ids"]
+                if note_id != case["source"]["id"]
+            }
+            _assert_expected_retrieval(case["id"], retrieved_order, sorted(membership_targets))
+            if case["largest"]:
+                assert retrieved_order == case["expected_top30"]
 
             payload = _recorded_payload(case, prepared)
             raw = json.dumps(payload, ensure_ascii=False)
             result = parse_and_validate_generation(raw, prepared=prepared)
-            result_targets = {item.target_note_id for item in result.relationships}
-            assert result_targets <= retrieved_ids
-            assert result_targets == set(case["expected_targets"])
+            result_targets = [item.target_note_id for item in result.relationships]
+            _assert_unique_relationships(case["id"], result_targets, len(case["expected_targets"]))
+            assert set(result_targets) <= retrieved_ids
+            assert set(result_targets) == set(case["expected_targets"])
 
             valid_source = {item.reference for item in prepared.source_evidence}
             valid_targets = {
@@ -386,7 +462,13 @@ def test_offline_grounding_corpus_meets_quality_and_budget_contracts(tmp_path) -
 
             if case["largest"]:
                 largest_seen = True
+                assert len(case["candidates"]) > 30
                 assert len(retrieval.candidates) == 30
+                _assert_expected_retrieval(
+                    case["id"],
+                    retrieved_order,
+                    case["cutoff_expected_targets"],
+                )
                 assert len(retrieval.tag_catalog) == MAX_TAG_CATALOG == 100
                 assert len(prepared.candidate_ids) == 30
                 assert prepared.estimated_input_tokens <= MAX_ESTIMATED_INPUT_TOKENS
@@ -396,6 +478,24 @@ def test_offline_grounding_corpus_meets_quality_and_budget_contracts(tmp_path) -
                 assert sum(tag.is_new for tag in result.tags) == MAX_NEW_TAG_SUGGESTIONS == 2
                 assert len(prepared.source_evidence) == 4
                 assert all(len(evidence) == 2 for evidence in prepared.candidate_evidence.values())
+
+                cutoff_mutation = [
+                    note_id
+                    for note_id in retrieved_order
+                    if note_id != case["cutoff_expected_targets"][-1]
+                ]
+                with pytest.raises(AssertionError, match=r"expected-target retrieval 2/3"):
+                    _assert_expected_retrieval(
+                        case["id"],
+                        cutoff_mutation,
+                        case["cutoff_expected_targets"],
+                    )
+            with pytest.raises(AssertionError, match="duplicate accepted relationship targets"):
+                _assert_unique_relationships(
+                    case["id"],
+                    [*result_targets, result_targets[0]],
+                    len(result_targets) + 1,
+                )
         finally:
             db.close_all_connections()
 

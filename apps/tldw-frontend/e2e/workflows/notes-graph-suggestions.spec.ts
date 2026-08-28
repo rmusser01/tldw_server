@@ -21,6 +21,7 @@ const LONG_TAG =
   "Systems Thinking Across Distributed Knowledge Workflows And Durable Evidence"
 const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const SUGGESTION_BASE = `/api/v1/notes/${SOURCE_NOTE_ID}/graph/suggestions`
 
 const note = {
   id: SOURCE_NOTE_ID,
@@ -31,6 +32,13 @@ const note = {
   created_at: NOW,
   updated_at: NOW
 }
+
+const STATIC_NOTE_RESPONSES: Array<[string, unknown]> = [
+  ["/api/v1/notes/keywords", { keywords: [], total: 0 }],
+  ["/api/v1/notes/collections", { collections: [], total: 0 }],
+  ["/api/v1/notes/moodboards", { moodboards: [], total: 0 }],
+  ["/api/v1/notes/trash", { notes: [], total: 0 }]
+]
 
 const graphNode = (
   id: string,
@@ -116,6 +124,7 @@ const tagSuggestion = {
 }
 
 type TerminalState = "succeeded" | "stale" | "failed"
+type RunState = "queued" | "running" | "publishing" | TerminalState
 type SuggestionCall = {
   method: string
   path: string
@@ -127,33 +136,50 @@ class NotesGraphFixture {
   readonly graphCalls: string[] = []
   readonly outcomes: TerminalState[]
   readonly authorized: boolean
-  readonly reloadGate: boolean
   accepted = false
   rejected = false
   reset = false
-  recovered = false
   published = false
   private runs: Array<{
     id: string
     outcome: TerminalState
-    poll: number
+    state: RunState
     cancelled: boolean
+    servedState: RunState | "cancelled" | null
+    releaseDetail: (() => void) | null
   }> = []
 
   constructor(options: {
     authorized?: boolean
     outcomes?: TerminalState[]
-    reloadGate?: boolean
   } = {}) {
     this.authorized = options.authorized ?? true
     this.outcomes = options.outcomes ?? ["succeeded"]
-    this.reloadGate = options.reloadGate ?? false
   }
 
   get admissionCalls() {
     return this.calls.filter(
       (call) => call.method === "POST" && call.path.endsWith("/runs")
     )
+  }
+
+  setRunState(runId: string, state: RunState) {
+    const record = this.runs.find((item) => item.id === runId)
+    if (!record) throw new Error(`Unknown run ${runId}`)
+    const sequence: RunState[] = ["queued", "running", "publishing", record.outcome]
+    if (!sequence.includes(state)) {
+      throw new Error(`Invalid ${runId} fixture transition to ${state}`)
+    }
+    record.state = state
+    if (state === "succeeded") this.published = true
+    record.releaseDetail?.()
+    record.releaseDetail = null
+  }
+
+  count(method: string, pathSuffix: string) {
+    return this.calls.filter(
+      (call) => call.method === method && call.path.endsWith(pathSuffix)
+    ).length
   }
 
   private graph() {
@@ -284,7 +310,7 @@ class NotesGraphFixture {
       related_note_count: state === "succeeded" ? 1 : 0,
       tag_count: state === "succeeded" ? 1 : 0,
       invalid_item_count: 0,
-      cancellation_available: ["queued", "running", "publishing"].includes(state),
+      cancellation_available: ["queued", "running"].includes(state),
       error_code:
         state === "failed"
           ? "notes_graph_provider_unavailable"
@@ -300,16 +326,17 @@ class NotesGraphFixture {
     }
   }
 
-  private terminalOrProgress(record: (typeof this.runs)[number]) {
-    if (record.cancelled) return this.run(record, "cancelled", 2)
-    if (this.reloadGate && record.id === "run-1" && !this.recovered) {
-      return this.run(record, "queued", 1)
+  private async nextRunResponse(record: (typeof this.runs)[number]) {
+    let state: RunState | "cancelled" = record.cancelled ? "cancelled" : record.state
+    if (record.servedState === state) {
+      await new Promise<void>((resolve) => {
+        record.releaseDetail = resolve
+      })
+      state = record.cancelled ? "cancelled" : record.state
     }
-    const states = ["running", "publishing", record.outcome]
-    const state = states[Math.min(record.poll, states.length - 1)]
-    record.poll += 1
-    if (state === "succeeded") this.published = true
-    return this.run(record, state, Math.min(record.poll + 1, 4))
+    record.servedState = state
+    const revision = ["queued", "running", "publishing"].indexOf(state) + 1
+    return this.run(record, state, revision > 0 ? revision : 4)
   }
 
   private suggestions() {
@@ -369,8 +396,10 @@ class NotesGraphFixture {
         const record = {
           id: `run-${this.runs.length + 1}`,
           outcome,
-          poll: 0,
-          cancelled: false
+          state: "queued" as const,
+          cancelled: false,
+          servedState: null,
+          releaseDetail: null
         }
         this.runs.push(record)
         await this.fulfill(route, this.run(record, "queued", 1))
@@ -378,12 +407,11 @@ class NotesGraphFixture {
       }
       if (requestPath.endsWith("/runs") && method === "GET") {
         const active = this.runs.filter((record) => {
-          const terminal = record.cancelled || record.poll >= 3
+          const terminal = record.cancelled || record.state === record.outcome
           return !terminal
         })
-        if (this.runs.length && active.length) this.recovered = true
         await this.fulfill(route, {
-          items: active.map((record) => this.run(record, "queued", 1)),
+          items: active.map((record) => this.run(record, record.state, 1)),
           next_cursor: null
         })
         return
@@ -392,7 +420,7 @@ class NotesGraphFixture {
       if (runMatch && method === "GET") {
         const record = this.runs.find((item) => item.id === runMatch[1])
         if (!record) throw new Error(`Unknown run ${runMatch[1]}`)
-        await this.fulfill(route, this.terminalOrProgress(record))
+        await this.fulfill(route, await this.nextRunResponse(record))
         return
       }
       const cancelMatch = requestPath.match(/\/runs\/(run-\d+)\/cancel$/)
@@ -400,6 +428,8 @@ class NotesGraphFixture {
         const record = this.runs.find((item) => item.id === cancelMatch[1])
         if (!record) throw new Error(`Unknown run ${cancelMatch[1]}`)
         record.cancelled = true
+        record.releaseDetail?.()
+        record.releaseDetail = null
         await this.fulfill(route, {
           resource_id: record.id,
           state: "cancelling",
@@ -472,20 +502,11 @@ class NotesGraphFixture {
       await this.fulfill(route, { nodes: [], edges: [] })
       return
     }
-    if (requestPath.startsWith("/api/v1/notes/keywords")) {
-      await this.fulfill(route, { keywords: [], total: 0 })
-      return
-    }
-    if (requestPath.startsWith("/api/v1/notes/collections")) {
-      await this.fulfill(route, { collections: [], total: 0 })
-      return
-    }
-    if (requestPath.startsWith("/api/v1/notes/moodboards")) {
-      await this.fulfill(route, { moodboards: [], total: 0 })
-      return
-    }
-    if (requestPath.startsWith("/api/v1/notes/trash")) {
-      await this.fulfill(route, { notes: [], total: 0 })
+    const staticResponse = STATIC_NOTE_RESPONSES.find(([prefix]) =>
+      requestPath.startsWith(prefix)
+    )
+    if (staticResponse) {
+      await this.fulfill(route, staticResponse[1])
       return
     }
     await route.continue()
@@ -510,6 +531,59 @@ const openSuggestions = async (page: Page) => {
   await expect(tab).toBeVisible()
   await tab.click()
   await expect(tab).toHaveAttribute("aria-selected", "true")
+}
+
+const closeMobileNotesList = async (page: Page) => {
+  const backdrop = page.getByTestId("notes-mobile-sidebar-backdrop")
+  if ((await backdrop.count()) > 0 && (await backdrop.isVisible())) {
+    await backdrop.click()
+  }
+  const list = page.getByTestId("notes-list-region")
+  await expect(list).toHaveClass(/-translate-x-full/)
+  await expect
+    .poll(async () => {
+      const bounds = await list.boundingBox()
+      return bounds ? bounds.x + bounds.width : 0
+    })
+    .toBeLessThanOrEqual(1)
+  await expect(backdrop).toHaveCount(0)
+}
+
+const closeDesktopNotesList = async (page: Page) => {
+  const toggle = page.getByTestId("notes-desktop-sidebar-toggle")
+  await expect(toggle).toBeVisible()
+  if ((await toggle.getAttribute("aria-label")) === "Collapse sidebar") {
+    await toggle.click()
+  }
+  await expect(toggle).toHaveAttribute("aria-label", "Expand sidebar")
+  const list = page.getByTestId("notes-list-region")
+  await expect(list).toHaveClass(/w-0/)
+  await expect.poll(async () => (await list.boundingBox())?.width ?? 0).toBeLessThanOrEqual(1)
+}
+
+const advanceRun = async (
+  page: Page,
+  fixture: NotesGraphFixture,
+  runId: string,
+  terminal: TerminalState
+) => {
+  const terminalLabels: Record<TerminalState, string> = {
+    succeeded: "Succeeded",
+    stale: "Stale",
+    failed: "Failed"
+  }
+  const states: Array<[RunState, string]> = [
+    ["running", "Running"],
+    ["publishing", "Publishing"],
+    [terminal, terminalLabels[terminal]]
+  ]
+  for (const [state, label] of states) {
+    fixture.setRunState(runId, state)
+    await expect(page.getByTestId("notes-graph-suggestion-run-status")).toHaveText(
+      label,
+      { timeout: state === terminal ? 15_000 : 10_000 }
+    )
+  }
 }
 
 const canvasPixels = async (page: Page) =>
@@ -549,9 +623,11 @@ const geometry = async (page: Page) =>
       }
     }
     const primary = workspace.querySelector('[data-testid="notes-graph-primary-view"]')
+    const toolbar = workspace.querySelector('[data-testid="notes-graph-toolbar"]')
     const inspector = workspace.querySelector(
       '[data-testid="notes-graph-inspector-region"]'
     )
+    const visualViewport = window.visualViewport
     const controls = Array.from(
       workspace.querySelectorAll("button:not([hidden]), input:not([hidden]), select:not([hidden])")
     ).filter((element) => {
@@ -573,10 +649,39 @@ const geometry = async (page: Page) =>
     }
     return {
       viewportWidth: innerWidth,
+      visualViewport: visualViewport
+        ? {
+            width: visualViewport.width,
+            height: visualViewport.height,
+            scale: visualViewport.scale,
+            offsetLeft: visualViewport.offsetLeft,
+            offsetTop: visualViewport.offsetTop,
+            right: visualViewport.offsetLeft + visualViewport.width,
+            bottom: visualViewport.offsetTop + visualViewport.height
+          }
+        : null,
       horizontalOverflow: document.documentElement.scrollWidth - innerWidth,
       workspace: box(workspace),
+      toolbar: toolbar ? box(toolbar) : null,
       primary: primary ? box(primary) : null,
       inspector: inspector ? box(inspector) : null,
+      controlBoxes: controls.map(box),
+      toolbarControlBoxes: controls.filter((element) => toolbar?.contains(element)).map(box),
+      visibleOverlayCount: Array.from(
+        document.querySelectorAll(
+          '[role="dialog"], [data-testid="notes-mobile-sidebar-backdrop"], .ant-drawer-mask'
+        )
+      ).filter((element) => {
+        const rect = element.getBoundingClientRect()
+        const style = getComputedStyle(element)
+        return (
+          rect.width > 0 &&
+          rect.height > 0 &&
+          style.visibility !== "hidden" &&
+          style.display !== "none" &&
+          Number(style.opacity || "1") > 0
+        )
+      }).length,
       overlapPairs
     }
   })
@@ -588,8 +693,36 @@ const assertVisualContract = async (page: Page) => {
   expect(report.workspace.right, JSON.stringify(report)).toBeLessThanOrEqual(
     report.viewportWidth + 1
   )
+  expect(report.visualViewport, JSON.stringify(report)).not.toBeNull()
+  expect(report.workspace.left, JSON.stringify(report)).toBeGreaterThanOrEqual(
+    (report.visualViewport?.offsetLeft ?? 0) - 1
+  )
+  expect(report.workspace.right, JSON.stringify(report)).toBeLessThanOrEqual(
+    (report.visualViewport?.right ?? report.viewportWidth) + 1
+  )
+  expect(report.toolbar?.left, JSON.stringify(report)).toBeGreaterThanOrEqual(
+    (report.visualViewport?.offsetLeft ?? 0) - 1
+  )
+  expect(report.toolbar?.right, JSON.stringify(report)).toBeLessThanOrEqual(
+    (report.visualViewport?.right ?? report.viewportWidth) + 1
+  )
+  expect(report.inspector?.left, JSON.stringify(report)).toBeGreaterThanOrEqual(
+    (report.visualViewport?.offsetLeft ?? 0) - 1
+  )
+  expect(report.inspector?.right, JSON.stringify(report)).toBeLessThanOrEqual(
+    (report.visualViewport?.right ?? report.viewportWidth) + 1
+  )
+  for (const bounds of report.controlBoxes) {
+    expect(bounds.left, JSON.stringify(report)).toBeGreaterThanOrEqual(
+      (report.visualViewport?.offsetLeft ?? 0) - 1
+    )
+    expect(bounds.right, JSON.stringify(report)).toBeLessThanOrEqual(
+      (report.visualViewport?.right ?? report.viewportWidth) + 1
+    )
+  }
   expect(report.primary?.width, JSON.stringify(report)).toBeGreaterThan(250)
   expect(report.inspector?.width, JSON.stringify(report)).toBeGreaterThan(250)
+  expect(report.visibleOverlayCount, JSON.stringify(report)).toBe(0)
   expect(report.overlapPairs, JSON.stringify(report)).toEqual([])
   await expect(page.getByTestId("notes-graph-workspace").locator("[aria-live]"))
     .toHaveCount(1)
@@ -601,12 +734,117 @@ const assertVisualContract = async (page: Page) => {
   return { geometry: report, pixels }
 }
 
+const assertPageScaleOriginContract = async (page: Page) => {
+  const report = await geometry(page)
+  const viewport = report.visualViewport
+  expect(viewport, JSON.stringify(report)).not.toBeNull()
+  expect(viewport?.scale, JSON.stringify(report)).toBeCloseTo(2, 1)
+  expect(viewport?.width, JSON.stringify(report)).toBeCloseTo(720, 0)
+  expect(viewport?.offsetLeft, JSON.stringify(report)).toBeCloseTo(0, 0)
+  expect(viewport?.offsetTop, JSON.stringify(report)).toBeCloseTo(0, 0)
+  expect(report.horizontalOverflow, JSON.stringify(report)).toBeLessThanOrEqual(1)
+  expect(report.workspace.left, JSON.stringify(report)).toBeGreaterThanOrEqual(-1)
+  expect(report.workspace.right, JSON.stringify(report)).toBeLessThanOrEqual(
+    report.viewportWidth + 1
+  )
+  for (const bounds of [report.toolbar, report.primary]) {
+    expect(bounds, JSON.stringify(report)).not.toBeNull()
+    expect(bounds?.left, JSON.stringify(report)).toBeGreaterThanOrEqual(
+      (viewport?.offsetLeft ?? 0) - 1
+    )
+    expect(bounds?.left, JSON.stringify(report)).toBeLessThan(viewport?.right ?? 0)
+    expect(
+      Math.min(bounds?.right ?? 0, viewport?.right ?? 0) -
+        Math.max(bounds?.left ?? 0, viewport?.offsetLeft ?? 0),
+      JSON.stringify(report)
+    ).toBeGreaterThan(250)
+  }
+  const visibleToolbarControls = report.toolbarControlBoxes.filter(
+    (bounds) =>
+      bounds.right > (viewport?.offsetLeft ?? 0) &&
+      bounds.left < (viewport?.right ?? 0)
+  )
+  expect(visibleToolbarControls.length, JSON.stringify(report)).toBeGreaterThan(0)
+  const fullyContainedToolbarControls = visibleToolbarControls.filter(
+    (bounds) =>
+      bounds.left >= (viewport?.offsetLeft ?? 0) - 1 &&
+      bounds.right <= (viewport?.right ?? 0) + 1
+  )
+  expect(fullyContainedToolbarControls.length, JSON.stringify(report)).toBeGreaterThanOrEqual(4)
+  for (const bounds of visibleToolbarControls) {
+    const visibleLeft = Math.max(bounds.left, viewport?.offsetLeft ?? 0)
+    const visibleRight = Math.min(bounds.right, viewport?.right ?? 0)
+    expect(visibleLeft, JSON.stringify(report)).toBeGreaterThanOrEqual(
+      viewport?.offsetLeft ?? 0
+    )
+    expect(visibleRight, JSON.stringify(report)).toBeLessThanOrEqual(
+      viewport?.right ?? 0
+    )
+    expect(visibleRight - visibleLeft, JSON.stringify(report)).toBeGreaterThan(0)
+  }
+  expect(report.inspector?.left, JSON.stringify(report)).toBeGreaterThanOrEqual(
+    (viewport?.right ?? 0) - 1
+  )
+  expect(report.inspector?.left, JSON.stringify(report)).toBeGreaterThanOrEqual(-1)
+  expect(report.inspector?.right, JSON.stringify(report)).toBeLessThanOrEqual(
+    report.viewportWidth + 1
+  )
+  expect(report.visibleOverlayCount, JSON.stringify(report)).toBe(0)
+  expect(report.overlapPairs, JSON.stringify(report)).toEqual([])
+  const pixels = await canvasPixels(page)
+  expect(pixels.canvasCount, JSON.stringify(pixels)).toBeGreaterThan(0)
+  expect(pixels.paintedPixels, JSON.stringify(pixels)).toBeGreaterThan(50)
+  expect(pixels.distinctColors, JSON.stringify(pixels)).toBeGreaterThan(1)
+  return { geometry: report, pixels }
+}
+
+const bringResponsiveInspectorIntoView = async (page: Page) => {
+  await page
+    .getByTestId("notes-graph-inspector-region")
+    .evaluate((element) => element.scrollIntoView({ block: "center" }))
+  const report = await geometry(page)
+  expect(report.inspector?.top, JSON.stringify(report)).toBeGreaterThanOrEqual(
+    (report.visualViewport?.offsetTop ?? 0) - 1
+  )
+  expect(report.inspector?.bottom, JSON.stringify(report)).toBeLessThanOrEqual(
+    (report.visualViewport?.bottom ?? 0) + 1
+  )
+  expect(report.visibleOverlayCount, JSON.stringify(report)).toBe(0)
+  expect(report.overlapPairs, JSON.stringify(report)).toEqual([])
+  return report
+}
+
 const screenshot = async (page: Page, name: string) => {
   const directory = path.resolve(process.cwd(), "test-results/notes-graph-suggestions")
   mkdirSync(directory, { recursive: true })
   const output = path.join(directory, `${name}.png`)
-  await page.screenshot({ path: output, fullPage: true })
+  await page.screenshot({ path: output, fullPage: false })
   return output
+}
+
+const requestMultiset = (calls: SuggestionCall[]) =>
+  Object.fromEntries(
+    [...calls]
+      .map((call) => `${call.method} ${call.path}`)
+      .sort()
+      .reduce<Array<[string, number]>>((entries, key) => {
+        const previous = entries.at(-1)
+        if (previous?.[0] === key) previous[1] += 1
+        else entries.push([key, 1])
+        return entries
+      }, [])
+  )
+
+const assertExactSuggestionRequests = (
+  calls: SuggestionCall[],
+  expected: Record<string, number>
+) => {
+  expect(requestMultiset(calls)).toEqual(expected)
+  const commands = calls.filter((call) => call.method !== "GET")
+  expect(commands.every((call) => Boolean(call.commandUuid && UUID.test(call.commandUuid)))).toBe(
+    true
+  )
+  expect(new Set(commands.map((call) => call.commandUuid)).size).toBe(commands.length)
 }
 
 const attachEvidence = async (
@@ -632,7 +870,7 @@ test.describe("Notes graph suggestions", () => {
   test("recovers one run, reviews grounded suggestions, and keeps responsive canvas geometry", async ({
     authedPage: page
   }, testInfo) => {
-    const fixture = new NotesGraphFixture({ reloadGate: true })
+    const fixture = new NotesGraphFixture()
     await installFixture(page, fixture)
     await page.setViewportSize({ width: 1440, height: 1000 })
     await openGraph(page)
@@ -641,6 +879,9 @@ test.describe("Notes graph suggestions", () => {
     await expect(page.getByTestId("notes-graph-all-disabled-reason")).toContainText(
       "up to 8 active notes"
     )
+    await openSuggestions(page)
+    await page.getByRole("tab", { name: "Details" }).click()
+    await expect(page.getByRole("heading", { name: note.title, exact: true })).toBeVisible()
     await openSuggestions(page)
     await expect(page.getByText(LONG_PROVIDER, { exact: true })).toBeVisible()
     await expect(page.getByText(LONG_MODEL, { exact: true })).toBeVisible()
@@ -651,6 +892,7 @@ test.describe("Notes graph suggestions", () => {
     await expect(page.getByTestId("notes-graph-suggestion-run-status")).toHaveText(
       "Queued"
     )
+    await expect.poll(() => fixture.count("GET", "/runs/run-1")).toBeGreaterThanOrEqual(1)
     expect(fixture.admissionCalls).toHaveLength(1)
 
     await page.reload({ waitUntil: "domcontentloaded" })
@@ -659,12 +901,57 @@ test.describe("Notes graph suggestions", () => {
     await graphEntry.click()
     await openSuggestions(page)
     await expect(page.getByTestId("notes-graph-suggestion-run-status")).toHaveText(
+      "Queued"
+    )
+    await expect.poll(() => fixture.count("GET", "/runs/run-1")).toBeGreaterThanOrEqual(1)
+    fixture.setRunState("run-1", "running")
+    await expect(page.getByTestId("notes-graph-suggestion-run-status")).toHaveText(
+      "Running",
+      { timeout: 10_000 }
+    )
+    fixture.setRunState("run-1", "publishing")
+    await expect(page.getByTestId("notes-graph-suggestion-run-status")).toHaveText(
+      "Publishing",
+      { timeout: 10_000 }
+    )
+    await expect(page.getByRole("button", { name: "Cancel generation" })).toBeDisabled()
+    fixture.setRunState("run-1", "succeeded")
+    await expect(page.getByTestId("notes-graph-suggestion-run-status")).toHaveText(
       "Succeeded",
       { timeout: 15_000 }
     )
     await expect(page.getByText(LONG_TARGET, { exact: true })).toBeVisible()
     await expect(page.getByText(LONG_TAG, { exact: true })).toBeVisible()
+    const relatedReview = page.locator(
+      '[data-suggestion-review-row="related-suggestion"]'
+    )
+    await expect(relatedReview.getByText(relatedSuggestion.rationale, { exact: true })).toBeVisible()
+    await expect(relatedReview.getByText(relatedSuggestion.evidence[0].text, { exact: true })).toBeVisible()
+    await expect(relatedReview.getByText(relatedSuggestion.evidence[1].text, { exact: true })).toBeVisible()
     expect(fixture.admissionCalls).toHaveLength(1)
+
+    const relationshipsMode = page.getByRole("button", {
+      name: "Relationships",
+      exact: true
+    })
+    await relationshipsMode.focus()
+    await relationshipsMode.press("Enter")
+    await expect(page.getByTestId("notes-graph-relationships-view")).toBeVisible()
+    const detailsTab = page.getByRole("tab", { name: "Details" })
+    const suggestionsTab = page.getByRole("tab", { name: "Suggestions" })
+    await detailsTab.focus()
+    await detailsTab.press("End")
+    await expect(suggestionsTab).toBeFocused()
+    await expect(suggestionsTab).toHaveAttribute("aria-selected", "true")
+    await suggestionsTab.press("Home")
+    await expect(detailsTab).toBeFocused()
+    await expect(detailsTab).toHaveAttribute("aria-selected", "true")
+    await detailsTab.press("ArrowRight")
+    await expect(suggestionsTab).toBeFocused()
+    await expect(suggestionsTab).toHaveAttribute("aria-selected", "true")
+    await suggestionsTab.press("ArrowLeft")
+    await expect(detailsTab).toBeFocused()
+    await expect(detailsTab).toHaveAttribute("aria-selected", "true")
 
     const visualEvidence: Record<string, unknown> = {}
     await page.getByRole("button", { name: "Canvas", exact: true }).click()
@@ -674,9 +961,14 @@ test.describe("Notes graph suggestions", () => {
     await page.getByRole("button", { name: "Collapse sidebar" }).click()
     await expect(page.getByRole("button", { name: "Expand sidebar" }).last()).toBeVisible()
     await page.setViewportSize({ width: 320, height: 900 })
+    await closeMobileNotesList(page)
     visualEvidence.mobile320 = await assertVisualContract(page)
+    visualEvidence.mobile320InspectorViewport = await bringResponsiveInspectorIntoView(page)
     visualEvidence.mobile320Screenshot = await screenshot(page, "mobile-320")
 
+    await page.evaluate(() => window.scrollTo(0, 0))
+    await page.setViewportSize({ width: 1440, height: 1000 })
+    await closeDesktopNotesList(page)
     const cdp = await page.context().newCDPSession(page)
     await cdp.send("Emulation.setPageScaleFactor", { pageScaleFactor: 2 })
     await expect
@@ -684,19 +976,20 @@ test.describe("Notes graph suggestions", () => {
       .toBeCloseTo(2, 1)
     visualEvidence.pageScale200 = {
       scale: await page.evaluate(() => window.visualViewport?.scale ?? 1),
-      ...(await assertVisualContract(page))
+      origin: await assertPageScaleOriginContract(page)
     }
     visualEvidence.pageScale200Screenshot = await screenshot(page, "page-scale-200")
     await cdp.send("Emulation.setPageScaleFactor", { pageScaleFactor: 1 })
 
     await page.setViewportSize({ width: 720, height: 900 })
+    await closeMobileNotesList(page)
     visualEvidence.effectiveReflow720 = await assertVisualContract(page)
+    visualEvidence.effectiveReflow720InspectorViewport = await bringResponsiveInspectorIntoView(page)
     visualEvidence.effectiveReflow720Screenshot = await screenshot(
       page,
       "effective-reflow-720"
     )
 
-    await page.setViewportSize({ width: 1440, height: 1000 })
     await openSuggestions(page)
     const graphCallsBeforeAccept = fixture.graphCalls.length
     await page.getByRole("button", { name: `Accept ${LONG_TARGET}` }).click()
@@ -754,14 +1047,16 @@ test.describe("Notes graph suggestions", () => {
     expect((await canvasPixels(page)).paintedPixels).toBeGreaterThan(50)
     await page.context().setOffline(false)
 
-    const commandCalls = fixture.calls.filter((call) => call.method === "POST")
-    expect(commandCalls.length).toBeGreaterThanOrEqual(4)
-    expect(commandCalls.every((call) => call.commandUuid && UUID.test(call.commandUuid))).toBe(
-      true
-    )
-    expect(new Set(commandCalls.map((call) => call.commandUuid)).size).toBe(
-      commandCalls.length
-    )
+    assertExactSuggestionRequests(fixture.calls, {
+      [`GET ${SUGGESTION_BASE}/capabilities`]: 2,
+      [`GET ${SUGGESTION_BASE}/runs`]: 3,
+      [`GET ${SUGGESTION_BASE}/runs/run-1`]: 4,
+      [`GET ${SUGGESTION_BASE}`]: 4,
+      [`POST ${SUGGESTION_BASE}/related-suggestion/accept`]: 1,
+      [`POST ${SUGGESTION_BASE}/rejections/reset`]: 1,
+      [`POST ${SUGGESTION_BASE}/runs`]: 1,
+      [`POST ${SUGGESTION_BASE}/tag-suggestion/reject`]: 1
+    })
     await attachEvidence(testInfo, fixture, visualEvidence)
   })
 
@@ -769,14 +1064,17 @@ test.describe("Notes graph suggestions", () => {
     authedPage: page
   }) => {
     const fixture = new NotesGraphFixture({
-      outcomes: ["succeeded", "stale", "failed"],
-      reloadGate: true
+      outcomes: ["succeeded", "stale", "failed"]
     })
     await installFixture(page, fixture)
     await openGraph(page)
     await openSuggestions(page)
 
     await page.getByRole("button", { name: "Generate", exact: true }).click()
+    await expect(page.getByTestId("notes-graph-suggestion-run-status")).toHaveText(
+      "Queued"
+    )
+    await expect.poll(() => fixture.count("GET", "/runs/run-1")).toBeGreaterThanOrEqual(1)
     await page.getByRole("button", { name: "Cancel generation" }).click()
     await expect(page.getByTestId("notes-graph-suggestion-run-status")).toHaveText(
       "Cancelled",
@@ -785,16 +1083,28 @@ test.describe("Notes graph suggestions", () => {
 
     await page.getByRole("button", { name: "Regenerate" }).click()
     await expect(page.getByTestId("notes-graph-suggestion-run-status")).toHaveText(
-      "Stale",
-      { timeout: 15_000 }
+      "Queued"
     )
+    await expect.poll(() => fixture.count("GET", "/runs/run-2")).toBeGreaterThanOrEqual(1)
+    await advanceRun(page, fixture, "run-2", "stale")
 
     await page.getByRole("button", { name: "Regenerate" }).click()
     await expect(page.getByTestId("notes-graph-suggestion-run-status")).toHaveText(
-      "Failed",
-      { timeout: 15_000 }
+      "Queued"
     )
+    await expect.poll(() => fixture.count("GET", "/runs/run-3")).toBeGreaterThanOrEqual(1)
+    await advanceRun(page, fixture, "run-3", "failed")
     expect(fixture.admissionCalls).toHaveLength(3)
+    assertExactSuggestionRequests(fixture.calls, {
+      [`GET ${SUGGESTION_BASE}/capabilities`]: 1,
+      [`GET ${SUGGESTION_BASE}/runs`]: 4,
+      [`GET ${SUGGESTION_BASE}/runs/run-1`]: 2,
+      [`GET ${SUGGESTION_BASE}/runs/run-2`]: 4,
+      [`GET ${SUGGESTION_BASE}/runs/run-3`]: 4,
+      [`GET ${SUGGESTION_BASE}`]: 1,
+      [`POST ${SUGGESTION_BASE}/runs`]: 3,
+      [`POST ${SUGGESTION_BASE}/runs/run-1/cancel`]: 1
+    })
   })
 
   test("keeps read-only and non-note scopes free of nested suggestion requests", async ({
@@ -806,7 +1116,7 @@ test.describe("Notes graph suggestions", () => {
     await expect(page.getByRole("tab", { name: "Suggestions" })).toHaveCount(0)
     await expect(page.getByRole("button", { name: "Generate" })).toHaveCount(0)
     await page.waitForTimeout(500)
-    expect(readOnly.calls).toEqual([])
+    assertExactSuggestionRequests(readOnly.calls, {})
 
     await page.unroute("**/api/v1/**")
     const authorized = new NotesGraphFixture()
@@ -818,6 +1128,11 @@ test.describe("Notes graph suggestions", () => {
     await expect(page.getByTestId("notes-graph-canvas")).toBeVisible()
     await expect(page.getByRole("tab", { name: "Suggestions" })).toBeVisible()
     await expect.poll(() => authorized.calls.length).toBe(3)
+    assertExactSuggestionRequests(authorized.calls, {
+      [`GET ${SUGGESTION_BASE}/capabilities`]: 1,
+      [`GET ${SUGGESTION_BASE}/runs`]: 1,
+      [`GET ${SUGGESTION_BASE}`]: 1
+    })
     const beforeNonNote = authorized.calls.length
     await page
       .getByRole("button", { name: "Web source with a long canonical label" })
@@ -826,5 +1141,10 @@ test.describe("Notes graph suggestions", () => {
     await expect(page.getByRole("tab", { name: "Suggestions" })).toHaveCount(0)
     await page.waitForTimeout(750)
     expect(authorized.calls).toHaveLength(beforeNonNote)
+    assertExactSuggestionRequests(authorized.calls, {
+      [`GET ${SUGGESTION_BASE}/capabilities`]: 1,
+      [`GET ${SUGGESTION_BASE}/runs`]: 1,
+      [`GET ${SUGGESTION_BASE}`]: 1
+    })
   })
 })

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import json
+import math
 import re
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -11,6 +12,9 @@ from types import SimpleNamespace
 import pytest
 from loguru import logger
 
+import tldw_Server_API.app.core.Metrics as MetricsModule
+import tldw_Server_API.app.core.Metrics.telemetry as telemetry_module
+import tldw_Server_API.app.services.startup_telemetry as startup_telemetry
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Notes_Graph import suggestion_observability as observability
@@ -60,7 +64,44 @@ SENTINELS = {
     "RAW_PROVIDER_FAILURE_Z9Q",
     *TARGET_IDS,
 }
-EXPECTED_EVENTS = {event.value for event in observability.SuggestionEventName}
+EXPECTED_EVENTS = {
+    "run_admitted",
+    "shortlist_completed",
+    "provider_started",
+    "provider_completed",
+    "validation_rejected",
+    "staged",
+    "published",
+    "cancelled",
+    "failed",
+    "accepted",
+    "rejected",
+    "stale",
+    "reconciled",
+}
+EXPECTED_PATH_EVENTS = {
+    "generation_success": [
+        "run_admitted",
+        "shortlist_completed",
+        "provider_started",
+        "provider_completed",
+        "validation_rejected",
+        "staged",
+        "published",
+    ],
+    "accept": ["accepted"],
+    "reject": ["rejected"],
+    "expired_acceptance_reconciliation": ["reconciled"],
+    "cancellation_admission": ["run_admitted"],
+    "cancellation_reconciliation": ["cancelled", "reconciled"],
+    "worker_failure": ["shortlist_completed", "provider_started", "failed"],
+    "worker_stale": [
+        "shortlist_completed",
+        "provider_started",
+        "provider_completed",
+        "stale",
+    ],
+}
 EXPECTED_METRICS = {
     "notes_graph_suggestion_queue_latency_seconds",
     "notes_graph_suggestion_run_duration_seconds",
@@ -73,6 +114,41 @@ EXPECTED_METRICS = {
     "notes_graph_suggestion_run_errors_total",
     "notes_graph_suggestion_decisions_total",
     "notes_graph_suggestion_acceptance_reconciliation_total",
+}
+EXPECTED_ERROR_CODES = {
+    "notes_graph_capabilities_changed_before_provider",
+    "notes_graph_fingerprint_stale",
+    "notes_graph_fts_not_ready",
+    "notes_graph_generation_cancelled",
+    "notes_graph_job_contract_invalid",
+    "notes_graph_job_missing",
+    "notes_graph_job_result_contract_invalid",
+    "notes_graph_provider_retry_policy_unsupported",
+    "notes_graph_provider_unavailable",
+    "notes_graph_publication_receipt_mismatch",
+    "notes_graph_publication_receipt_missing",
+    "notes_graph_publication_state_missing",
+    "notes_graph_run_conflict",
+    "notes_graph_source_too_large",
+    "notes_graph_suggestion_no_valid_items",
+    "notes_graph_suggestion_suppression_limit",
+}
+METRIC_LABEL_VALUES = {
+    "notes_graph_suggestion_queue_latency_seconds": {},
+    "notes_graph_suggestion_run_duration_seconds": {},
+    "notes_graph_suggestion_candidate_count": {},
+    "notes_graph_suggestion_evidence_count": {},
+    "notes_graph_suggestion_provider_input_tokens": {},
+    "notes_graph_suggestion_provider_output_tokens": {},
+    "notes_graph_suggestion_validated_count": {},
+    "notes_graph_suggestion_dropped_count": {},
+    "notes_graph_suggestion_run_errors_total": {"error_code": EXPECTED_ERROR_CODES},
+    "notes_graph_suggestion_decisions_total": {
+        "outcome": {"accepted", "rejected", "stale"},
+    },
+    "notes_graph_suggestion_acceptance_reconciliation_total": {
+        "outcome": {"completed", "released", "failed"},
+    },
 }
 SAFE_EVENT_KEYS = {
     "event",
@@ -324,16 +400,34 @@ async def _run_closed_worker_failure(*, stale: bool) -> None:
 
 
 def _assert_no_feature_telemetry_initialization() -> None:
-    feature_root = Path(__file__).parents[3] / "app" / "core" / "Notes_Graph"
-    forbidden_imports = ("opentelemetry", "sentry_sdk", "telemetry")
+    app_root = Path(__file__).parents[3] / "app"
+    paths = sorted((app_root / "core" / "Notes_Graph").rglob("*.py"))
+    paths.extend(sorted((app_root / "core" / "DB_Management" / "chacha").glob("note_graph_suggestion*.py")))
+    paths.extend(sorted((app_root / "services").glob("notes_graph_suggestion*.py")))
+    paths.extend(
+        [
+            app_root / "services" / "startup_study_privilege_jobs_pollers.py",
+            app_root / "api" / "v1" / "endpoints" / "notes_graph_suggestions.py",
+            app_root / "api" / "v1" / "schemas" / "notes_graph_suggestions.py",
+            app_root / "api" / "v1" / "router_groups" / "content.py",
+        ]
+    )
+    forbidden_imports = (
+        "opentelemetry",
+        "sentry_sdk",
+        "tldw_Server_API.app.core.Metrics.telemetry",
+        "tldw_Server_API.app.services.startup_telemetry",
+    )
     forbidden_calls = {
-        "configure_exporter",
-        "initialize_exporter",
-        "install_exporter",
-        "start_exporter",
+        "initialize_telemetry",
+        "get_telemetry_manager",
+        "instrument_fastapi_app",
+        "initialize_startup_telemetry",
+        "_initialize_telemetry",
+        "_instrument_fastapi_app",
     }
     findings: list[str] = []
-    for path in sorted(feature_root.glob("suggestion_*.py")):
+    for path in paths:
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
@@ -343,11 +437,11 @@ def _assert_no_feature_telemetry_initialization() -> None:
             else:
                 modules = []
             if any(module.startswith(forbidden_imports) for module in modules):
-                findings.append(f"{path.name}:{node.lineno}:import")
+                findings.append(f"{path.relative_to(app_root)}:{node.lineno}:import")
             if isinstance(node, ast.Call):
                 name = getattr(node.func, "attr", getattr(node.func, "id", ""))
                 if name in forbidden_calls:
-                    findings.append(f"{path.name}:{node.lineno}:{name}")
+                    findings.append(f"{path.relative_to(app_root)}:{node.lineno}:{name}")
     assert not findings, f"feature telemetry initialization found: {findings}"
 
 
@@ -358,31 +452,47 @@ async def test_real_suggestion_paths_emit_only_the_closed_privacy_safe_contract(
 ) -> None:
     monkeypatch.setenv("JOBS_ALLOWED_QUEUES_NOTES", JOB_QUEUE)
     events: list[dict[str, object]] = []
+    path_events = {path: [] for path in EXPECTED_PATH_EVENTS}
+    active_path = {"name": "setup"}
     structured_logs: list[dict[str, object]] = []
     registry = RecordingRegistry()
     original_write = observability._write_event
 
     def capture_event(payload: dict[str, object]) -> None:
         events.append(dict(payload))
+        if active_path["name"] in path_events:
+            path_events[active_path["name"]].append(str(payload["event"]))
         original_write(payload)
 
-    sink_id = logger.add(
-        lambda message: structured_logs.append(
-            {
-                "message": message.record["message"],
-                "extra": dict(message.record["extra"]),
-            }
-        )
-        if message.record["message"] == "Notes graph suggestion lifecycle event"
-        else None
-    )
     monkeypatch.setattr(observability, "_write_event", capture_event)
     monkeypatch.setattr(observability, "get_metrics_registry", lambda: registry)
+
+    def fail_telemetry(*_args, **_kwargs):
+        pytest.fail("Notes graph feature path initialized repository telemetry")
+
+    for module, names in (
+        (
+            telemetry_module,
+            ("initialize_telemetry", "get_telemetry_manager", "instrument_fastapi_app"),
+        ),
+        (MetricsModule, ("initialize_telemetry", "get_telemetry_manager")),
+        (
+            startup_telemetry,
+            (
+                "initialize_startup_telemetry",
+                "_initialize_telemetry",
+                "_instrument_fastapi_app",
+            ),
+        ),
+    ):
+        for name in names:
+            monkeypatch.setattr(module, name, fail_telemetry, raising=True)
 
     notes = CharactersRAGDB(str(tmp_path / "notes.db"), client_id="owner-privacy")
     jobs = JobManager(tmp_path / "jobs.db")
     receipts: list[object] = []
     job_records: list[dict[str, object]] = []
+    sink_id: int | None = None
     try:
         notes.add_note(
             "PRIVACY_TITLE_Z9Q",
@@ -402,6 +512,21 @@ async def test_real_suggestion_paths_emit_only_the_closed_privacy_safe_contract(
                 (notes.client_id, DATASET_ID),
             )
 
+        sink_id = logger.add(
+            lambda message: structured_logs.append(
+                {
+                    "message": message.record["message"],
+                    "extra": dict(message.record["extra"]),
+                    "exception": str(message.record["exception"] or ""),
+                    "name": message.record["name"],
+                    "module": message.record["module"],
+                    "function": message.record["function"],
+                    "level": message.record["level"].name,
+                }
+            )
+        )
+
+        active_path["name"] = "generation_success"
         admission, acquired, result, published = await _run_success(notes, jobs)
         assert set(admission.job["payload"]) == JOB_PAYLOAD_KEYS
         assert set(result) == JOB_RESULT_KEYS
@@ -431,6 +556,7 @@ async def test_real_suggestion_paths_emit_only_the_closed_privacy_safe_contract(
             organization_coordinator=SimpleNamespace(),
             clock=lambda: NOW,
         )
+        active_path["name"] = "accept"
         accepted = decisions.accept(
             dataset_id=DATASET_ID,
             suggestion_id=related[0].id,
@@ -439,6 +565,7 @@ async def test_real_suggestion_paths_emit_only_the_closed_privacy_safe_contract(
             expected_target_fingerprint=related[0].target_fingerprint,
             idempotency_key="privacy-accept",
         )
+        active_path["name"] = "reject"
         rejected = decisions.reject(
             dataset_id=DATASET_ID,
             suggestion_id=related[1].id,
@@ -456,6 +583,7 @@ async def test_real_suggestion_paths_emit_only_the_closed_privacy_safe_contract(
             idempotency_key="privacy-expired",
             now=NOW,
         )
+        active_path["name"] = "expired_acceptance_reconciliation"
         reconciled_decisions = decisions.reconcile_expired(
             dataset_id=DATASET_ID,
             now=NOW + timedelta(minutes=6),
@@ -466,6 +594,7 @@ async def test_real_suggestion_paths_emit_only_the_closed_privacy_safe_contract(
             + [item.envelope for item in reconciled_decisions]
         )
 
+        active_path["name"] = "cancellation_admission"
         cancellation_admission = _admit(
             notes,
             jobs,
@@ -486,6 +615,7 @@ async def test_real_suggestion_paths_emit_only_the_closed_privacy_safe_contract(
         )
         assert cancellation.accepted is True
         receipts.append(cancellation.cancellation.replay_envelope)
+        active_path["name"] = "cancellation_reconciliation"
         maintenance = SuggestionMaintenance(
             jobs=jobs,
             scopes=(
@@ -505,11 +635,14 @@ async def test_real_suggestion_paths_emit_only_the_closed_privacy_safe_contract(
         assert cancelled_job is not None
         job_records.append(cancelled_job)
 
+        active_path["name"] = "terminal_replay"
         replay = _admit(notes, jobs, key="privacy-success", model="recorded-response")
         assert replay.disposition == "terminal_replay"
         receipts.append(replay.replay_envelope)
 
+        active_path["name"] = "worker_failure"
         await _run_closed_worker_failure(stale=False)
+        active_path["name"] = "worker_stale"
         await _run_closed_worker_failure(stale=True)
 
         with notes.transaction() as conn:
@@ -520,10 +653,12 @@ async def test_real_suggestion_paths_emit_only_the_closed_privacy_safe_contract(
                 ).fetchall()
             ]
     finally:
-        logger.remove(sink_id)
+        if sink_id is not None:
+            logger.remove(sink_id)
         notes.close_all_connections()
 
     assert {item["event"] for item in events} == EXPECTED_EVENTS
+    assert path_events == EXPECTED_PATH_EVENTS
     assert {call[1] for call in registry.calls} == EXPECTED_METRICS
     for event in events:
         assert set(event) <= SAFE_EVENT_KEYS
@@ -535,10 +670,19 @@ async def test_real_suggestion_paths_emit_only_the_closed_privacy_safe_contract(
         )
         if "count" in event:
             assert 0 <= int(event["count"]) <= 1_000_000
+        if "duration_seconds" in event:
+            assert math.isfinite(float(event["duration_seconds"]))
+            assert 0 <= float(event["duration_seconds"]) <= 86_400
+        if "error_code" in event:
+            assert event["error_code"] in EXPECTED_ERROR_CODES
     for _method, name, value, labels in registry.calls:
         assert name in EXPECTED_METRICS
-        assert set(labels) <= {"error_code", "outcome"}
-        assert 0 <= float(value) <= 1_000_000
+        assert set(labels) == set(METRIC_LABEL_VALUES[name])
+        assert math.isfinite(float(value))
+        upper_bound = 86_400 if name.endswith("_seconds") else 1_000_000
+        assert 0 <= float(value) <= upper_bound
+        for label, label_value in labels.items():
+            assert label_value in METRIC_LABEL_VALUES[name][label]
 
     for job in job_records:
         assert job is not None

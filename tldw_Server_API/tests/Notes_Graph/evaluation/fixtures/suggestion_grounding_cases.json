@@ -51,8 +51,45 @@
           "repeat": 1,
           "role": "rejected",
           "expected": false
+        },
+        {
+          "id": "13000000-0000-4000-8000-000000000007",
+          "title": "Shared cardiology tag candidate",
+          "content": "Atrial fibrillation anticoagulation evidence remains eligible with a shared tag.",
+          "repeat": 1,
+          "role": "same_owner",
+          "expected": false
+        },
+        {
+          "id": "13000000-0000-4000-8000-000000000008",
+          "title": "Shared clinical source candidate",
+          "content": "Atrial fibrillation apixaban review remains eligible with a shared source.",
+          "repeat": 1,
+          "role": "same_owner",
+          "expected": false
         }
       ],
+      "memberships": {
+        "tags": [
+          {
+            "tag": "Atrial Cardiology",
+            "note_ids": [
+              "13000000-0000-4000-8000-000000000001",
+              "13000000-0000-4000-8000-000000000007"
+            ]
+          }
+        ],
+        "sources": [
+          {
+            "source": "medical-journal",
+            "external_ref": "atrial-review-2026",
+            "note_ids": [
+              "13000000-0000-4000-8000-000000000001",
+              "13000000-0000-4000-8000-000000000008"
+            ]
+          }
+        ]
+      },
       "existing_tags": ["Atrial Cardiology"],
       "response": {
         "relationships": [
@@ -80,6 +117,8 @@
       },
       "expected_targets": ["13000000-0000-4000-8000-000000000002"],
       "expected_tags": ["atrial cardiology", "stroke prevention"],
+      "expected_top30": [],
+      "cutoff_expected_targets": [],
       "largest": false
     },
     {
@@ -110,6 +149,7 @@
           "expected": false
         }
       ],
+      "memberships": {"tags": [], "sources": []},
       "existing_tags": [],
       "response": {
         "relationships": [
@@ -124,6 +164,8 @@
       },
       "expected_targets": ["13000000-0000-4000-8000-000000000102"],
       "expected_tags": [],
+      "expected_top30": [],
+      "cutoff_expected_targets": [],
       "largest": false
     },
     {
@@ -154,6 +196,7 @@
           "expected": false
         }
       ],
+      "memberships": {"tags": [], "sources": []},
       "existing_tags": [],
       "response": {
         "relationships": [
@@ -175,6 +218,8 @@
       },
       "expected_targets": ["13000000-0000-4000-8000-000000000202"],
       "expected_tags": ["distributed systems"],
+      "expected_top30": [],
+      "cutoff_expected_targets": [],
       "largest": false
     },
     {
@@ -205,6 +250,7 @@
           "expected": false
         }
       ],
+      "memberships": {"tags": [], "sources": []},
       "existing_tags": ["Sync Conflict Resolution"],
       "response": {
         "relationships": [
@@ -226,6 +272,8 @@
       },
       "expected_targets": ["13000000-0000-4000-8000-000000000302"],
       "expected_tags": ["sync conflict resolution"],
+      "expected_top30": [],
+      "cutoff_expected_targets": [],
       "largest": false
     },
     {
@@ -256,6 +304,7 @@
           "expected": false
         }
       ],
+      "memberships": {"tags": [], "sources": []},
       "existing_tags": [],
       "response": {
         "relationships": [
@@ -277,6 +326,8 @@
       },
       "expected_targets": ["13000000-0000-4000-8000-000000000402"],
       "expected_tags": ["café 🧠 research"],
+      "expected_top30": [],
+      "cutoff_expected_targets": [],
       "largest": false
     },
     {
@@ -307,6 +358,7 @@
           "expected": false
         }
       ],
+      "memberships": {"tags": [], "sources": []},
       "existing_tags": ["Bayesian Model Evaluation"],
       "response": {
         "relationships": [
@@ -328,6 +380,8 @@
       },
       "expected_targets": ["13000000-0000-4000-8000-000000000502"],
       "expected_tags": ["bayesian model evaluation"],
+      "expected_top30": [],
+      "cutoff_expected_targets": [],
       "largest": false
     },
     {
@@ -358,6 +412,7 @@
           "expected": false
         }
       ],
+      "memberships": {"tags": [], "sources": []},
       "existing_tags": [],
       "response": {
         "relationships": [
@@ -391,6 +446,8 @@
       },
       "expected_targets": ["13000000-0000-4000-8000-000000000602"],
       "expected_tags": ["fermentation"],
+      "expected_top30": [],
+      "cutoff_expected_targets": [],
       "largest": false
     },
     {
@@ -404,37 +461,48 @@
         "repeat": 80
       },
       "candidates": [
-        {"id": "13000000-0000-4000-8000-000000000702", "title": "Atlas candidate 01", "content": "Atlas graph evidence synthesis planning candidate one.", "repeat": 20, "role": "same_owner", "expected": true},
-        {"id": "13000000-0000-4000-8000-000000000703", "title": "Atlas candidate 02", "content": "Atlas graph evidence synthesis planning candidate two.", "repeat": 20, "role": "same_owner", "expected": true},
-        {"id": "13000000-0000-4000-8000-000000000704", "title": "Atlas candidate 03", "content": "Atlas graph evidence synthesis planning candidate three.", "repeat": 20, "role": "same_owner", "expected": true},
-        {"id": "13000000-0000-4000-8000-000000000705", "title": "Atlas candidate 04", "content": "Atlas graph evidence synthesis planning candidate four.", "repeat": 20, "role": "same_owner", "expected": true},
-        {"id": "13000000-0000-4000-8000-000000000706", "title": "Atlas candidate 05", "content": "Atlas graph evidence synthesis planning candidate five.", "repeat": 20, "role": "same_owner", "expected": true},
-        {"id": "13000000-0000-4000-8000-000000000707", "title": "Atlas distractor 06", "content": "Atlas graph evidence synthesis planning distractor six.", "repeat": 20, "role": "same_owner", "expected": false},
-        {"id": "13000000-0000-4000-8000-000000000708", "title": "Atlas distractor 07", "content": "Atlas graph evidence synthesis planning distractor seven.", "repeat": 20, "role": "same_owner", "expected": false},
-        {"id": "13000000-0000-4000-8000-000000000709", "title": "Atlas distractor 08", "content": "Atlas graph evidence synthesis planning distractor eight.", "repeat": 20, "role": "same_owner", "expected": false},
-        {"id": "13000000-0000-4000-8000-000000000710", "title": "Atlas distractor 09", "content": "Atlas graph evidence synthesis planning distractor nine.", "repeat": 20, "role": "same_owner", "expected": false},
-        {"id": "13000000-0000-4000-8000-000000000711", "title": "Atlas distractor 10", "content": "Atlas graph evidence synthesis planning distractor ten.", "repeat": 20, "role": "same_owner", "expected": false},
-        {"id": "13000000-0000-4000-8000-000000000712", "title": "Atlas distractor 11", "content": "Atlas graph evidence synthesis planning distractor eleven.", "repeat": 20, "role": "same_owner", "expected": false},
-        {"id": "13000000-0000-4000-8000-000000000713", "title": "Atlas distractor 12", "content": "Atlas graph evidence synthesis planning distractor twelve.", "repeat": 20, "role": "same_owner", "expected": false},
-        {"id": "13000000-0000-4000-8000-000000000714", "title": "Atlas distractor 13", "content": "Atlas graph evidence synthesis planning distractor thirteen.", "repeat": 20, "role": "same_owner", "expected": false},
-        {"id": "13000000-0000-4000-8000-000000000715", "title": "Atlas distractor 14", "content": "Atlas graph evidence synthesis planning distractor fourteen.", "repeat": 20, "role": "same_owner", "expected": false},
-        {"id": "13000000-0000-4000-8000-000000000716", "title": "Atlas distractor 15", "content": "Atlas graph evidence synthesis planning distractor fifteen.", "repeat": 20, "role": "same_owner", "expected": false},
-        {"id": "13000000-0000-4000-8000-000000000717", "title": "Atlas distractor 16", "content": "Atlas graph evidence synthesis planning distractor sixteen.", "repeat": 20, "role": "same_owner", "expected": false},
-        {"id": "13000000-0000-4000-8000-000000000718", "title": "Atlas distractor 17", "content": "Atlas graph evidence synthesis planning distractor seventeen.", "repeat": 20, "role": "same_owner", "expected": false},
-        {"id": "13000000-0000-4000-8000-000000000719", "title": "Atlas distractor 18", "content": "Atlas graph evidence synthesis planning distractor eighteen.", "repeat": 20, "role": "same_owner", "expected": false},
-        {"id": "13000000-0000-4000-8000-000000000720", "title": "Atlas distractor 19", "content": "Atlas graph evidence synthesis planning distractor nineteen.", "repeat": 20, "role": "same_owner", "expected": false},
-        {"id": "13000000-0000-4000-8000-000000000721", "title": "Atlas distractor 20", "content": "Atlas graph evidence synthesis planning distractor twenty.", "repeat": 20, "role": "same_owner", "expected": false},
-        {"id": "13000000-0000-4000-8000-000000000722", "title": "Atlas distractor 21", "content": "Atlas graph evidence synthesis planning distractor twenty one.", "repeat": 20, "role": "same_owner", "expected": false},
-        {"id": "13000000-0000-4000-8000-000000000723", "title": "Atlas distractor 22", "content": "Atlas graph evidence synthesis planning distractor twenty two.", "repeat": 20, "role": "same_owner", "expected": false},
-        {"id": "13000000-0000-4000-8000-000000000724", "title": "Atlas distractor 23", "content": "Atlas graph evidence synthesis planning distractor twenty three.", "repeat": 20, "role": "same_owner", "expected": false},
-        {"id": "13000000-0000-4000-8000-000000000725", "title": "Atlas distractor 24", "content": "Atlas graph evidence synthesis planning distractor twenty four.", "repeat": 20, "role": "same_owner", "expected": false},
-        {"id": "13000000-0000-4000-8000-000000000726", "title": "Atlas distractor 25", "content": "Atlas graph evidence synthesis planning distractor twenty five.", "repeat": 20, "role": "same_owner", "expected": false},
-        {"id": "13000000-0000-4000-8000-000000000727", "title": "Atlas distractor 26", "content": "Atlas graph evidence synthesis planning distractor twenty six.", "repeat": 20, "role": "same_owner", "expected": false},
-        {"id": "13000000-0000-4000-8000-000000000728", "title": "Atlas distractor 27", "content": "Atlas graph evidence synthesis planning distractor twenty seven.", "repeat": 20, "role": "same_owner", "expected": false},
-        {"id": "13000000-0000-4000-8000-000000000729", "title": "Atlas distractor 28", "content": "Atlas graph evidence synthesis planning distractor twenty eight.", "repeat": 20, "role": "same_owner", "expected": false},
-        {"id": "13000000-0000-4000-8000-000000000730", "title": "Atlas distractor 29", "content": "Atlas graph evidence synthesis planning distractor twenty nine.", "repeat": 20, "role": "same_owner", "expected": false},
-        {"id": "13000000-0000-4000-8000-000000000731", "title": "Atlas distractor 30", "content": "Atlas graph evidence synthesis planning distractor thirty.", "repeat": 20, "role": "same_owner", "expected": false}
+        {"id": "13000000-0000-4000-8000-000000000702", "title": "Atlas candidate", "content": "Atlas graph evidence synthesis planning.", "repeat": 20, "role": "same_owner", "expected": true},
+        {"id": "13000000-0000-4000-8000-000000000703", "title": "Atlas candidate", "content": "Atlas graph evidence synthesis planning.", "repeat": 20, "role": "same_owner", "expected": true},
+        {"id": "13000000-0000-4000-8000-000000000704", "title": "Atlas candidate", "content": "Atlas graph evidence synthesis planning.", "repeat": 20, "role": "same_owner", "expected": false},
+        {"id": "13000000-0000-4000-8000-000000000705", "title": "Atlas candidate", "content": "Atlas graph evidence synthesis planning.", "repeat": 20, "role": "same_owner", "expected": false},
+        {"id": "13000000-0000-4000-8000-000000000706", "title": "Atlas candidate", "content": "Atlas graph evidence synthesis planning.", "repeat": 20, "role": "same_owner", "expected": false},
+        {"id": "13000000-0000-4000-8000-000000000707", "title": "Atlas candidate", "content": "Atlas graph evidence synthesis planning.", "repeat": 20, "role": "same_owner", "expected": false},
+        {"id": "13000000-0000-4000-8000-000000000708", "title": "Atlas candidate", "content": "Atlas graph evidence synthesis planning.", "repeat": 20, "role": "same_owner", "expected": false},
+        {"id": "13000000-0000-4000-8000-000000000709", "title": "Atlas candidate", "content": "Atlas graph evidence synthesis planning.", "repeat": 20, "role": "same_owner", "expected": false},
+        {"id": "13000000-0000-4000-8000-000000000710", "title": "Atlas candidate", "content": "Atlas graph evidence synthesis planning.", "repeat": 20, "role": "same_owner", "expected": false},
+        {"id": "13000000-0000-4000-8000-000000000711", "title": "Atlas candidate", "content": "Atlas graph evidence synthesis planning.", "repeat": 20, "role": "same_owner", "expected": false},
+        {"id": "13000000-0000-4000-8000-000000000712", "title": "Atlas candidate", "content": "Atlas graph evidence synthesis planning.", "repeat": 20, "role": "same_owner", "expected": false},
+        {"id": "13000000-0000-4000-8000-000000000713", "title": "Atlas candidate", "content": "Atlas graph evidence synthesis planning.", "repeat": 20, "role": "same_owner", "expected": false},
+        {"id": "13000000-0000-4000-8000-000000000714", "title": "Atlas candidate", "content": "Atlas graph evidence synthesis planning.", "repeat": 20, "role": "same_owner", "expected": false},
+        {"id": "13000000-0000-4000-8000-000000000715", "title": "Atlas candidate", "content": "Atlas graph evidence synthesis planning.", "repeat": 20, "role": "same_owner", "expected": false},
+        {"id": "13000000-0000-4000-8000-000000000716", "title": "Atlas candidate", "content": "Atlas graph evidence synthesis planning.", "repeat": 20, "role": "same_owner", "expected": false},
+        {"id": "13000000-0000-4000-8000-000000000717", "title": "Atlas candidate", "content": "Atlas graph evidence synthesis planning.", "repeat": 20, "role": "same_owner", "expected": false},
+        {"id": "13000000-0000-4000-8000-000000000718", "title": "Atlas candidate", "content": "Atlas graph evidence synthesis planning.", "repeat": 20, "role": "same_owner", "expected": false},
+        {"id": "13000000-0000-4000-8000-000000000719", "title": "Atlas candidate", "content": "Atlas graph evidence synthesis planning.", "repeat": 20, "role": "same_owner", "expected": false},
+        {"id": "13000000-0000-4000-8000-000000000720", "title": "Atlas candidate", "content": "Atlas graph evidence synthesis planning.", "repeat": 20, "role": "same_owner", "expected": false},
+        {"id": "13000000-0000-4000-8000-000000000721", "title": "Atlas candidate", "content": "Atlas graph evidence synthesis planning.", "repeat": 20, "role": "same_owner", "expected": false},
+        {"id": "13000000-0000-4000-8000-000000000722", "title": "Atlas candidate", "content": "Atlas graph evidence synthesis planning.", "repeat": 20, "role": "same_owner", "expected": false},
+        {"id": "13000000-0000-4000-8000-000000000723", "title": "Atlas candidate", "content": "Atlas graph evidence synthesis planning.", "repeat": 20, "role": "same_owner", "expected": false},
+        {"id": "13000000-0000-4000-8000-000000000724", "title": "Atlas candidate", "content": "Atlas graph evidence synthesis planning.", "repeat": 20, "role": "same_owner", "expected": false},
+        {"id": "13000000-0000-4000-8000-000000000725", "title": "Atlas candidate", "content": "Atlas graph evidence synthesis planning.", "repeat": 20, "role": "same_owner", "expected": false},
+        {"id": "13000000-0000-4000-8000-000000000726", "title": "Atlas candidate", "content": "Atlas graph evidence synthesis planning.", "repeat": 20, "role": "same_owner", "expected": false},
+        {"id": "13000000-0000-4000-8000-000000000727", "title": "Atlas candidate", "content": "Atlas graph evidence synthesis planning.", "repeat": 20, "role": "same_owner", "expected": false},
+        {"id": "13000000-0000-4000-8000-000000000728", "title": "Atlas candidate", "content": "Atlas graph evidence synthesis planning.", "repeat": 20, "role": "same_owner", "expected": false},
+        {"id": "13000000-0000-4000-8000-000000000729", "title": "Atlas candidate", "content": "Atlas graph evidence synthesis planning.", "repeat": 20, "role": "same_owner", "expected": true},
+        {"id": "13000000-0000-4000-8000-000000000730", "title": "Atlas candidate", "content": "Atlas graph evidence synthesis planning.", "repeat": 20, "role": "same_owner", "expected": true},
+        {"id": "13000000-0000-4000-8000-000000000731", "title": "Atlas candidate", "content": "Atlas graph evidence synthesis planning.", "repeat": 20, "role": "same_owner", "expected": true},
+        {"id": "13000000-0000-4000-8000-000000000732", "title": "Atlas candidate", "content": "Atlas graph evidence synthesis planning.", "repeat": 20, "role": "same_owner", "expected": false},
+        {"id": "13000000-0000-4000-8000-000000000733", "title": "Atlas candidate", "content": "Atlas graph evidence synthesis planning.", "repeat": 20, "role": "same_owner", "expected": false},
+        {"id": "13000000-0000-4000-8000-000000000734", "title": "Atlas candidate", "content": "Atlas graph evidence synthesis planning.", "repeat": 20, "role": "same_owner", "expected": false},
+        {"id": "13000000-0000-4000-8000-000000000735", "title": "Atlas candidate", "content": "Atlas graph evidence synthesis planning.", "repeat": 20, "role": "same_owner", "expected": false},
+        {"id": "13000000-0000-4000-8000-000000000736", "title": "Atlas candidate", "content": "Atlas graph evidence synthesis planning.", "repeat": 20, "role": "same_owner", "expected": false},
+        {"id": "13000000-0000-4000-8000-000000000737", "title": "Atlas candidate", "content": "Atlas graph evidence synthesis planning.", "repeat": 20, "role": "same_owner", "expected": false},
+        {"id": "13000000-0000-4000-8000-000000000738", "title": "Atlas candidate", "content": "Atlas graph evidence synthesis planning.", "repeat": 20, "role": "same_owner", "expected": false},
+        {"id": "13000000-0000-4000-8000-000000000739", "title": "Atlas candidate", "content": "Atlas graph evidence synthesis planning.", "repeat": 20, "role": "same_owner", "expected": false},
+        {"id": "13000000-0000-4000-8000-000000000740", "title": "Atlas candidate", "content": "Atlas graph evidence synthesis planning.", "repeat": 20, "role": "same_owner", "expected": false},
+        {"id": "13000000-0000-4000-8000-000000000741", "title": "Atlas candidate", "content": "Atlas graph evidence synthesis planning.", "repeat": 20, "role": "same_owner", "expected": false}
       ],
+      "memberships": {"tags": [], "sources": []},
       "existing_tags": [
         "Atlas Tag 000", "Atlas Tag 001", "Atlas Tag 002", "Atlas Tag 003", "Atlas Tag 004",
         "Atlas Tag 005", "Atlas Tag 006", "Atlas Tag 007", "Atlas Tag 008", "Atlas Tag 009",
@@ -461,9 +529,9 @@
         "relationships": [
           {"target_id": "13000000-0000-4000-8000-000000000702", "rationale": "Recorded evidence supports bounded relationship one.", "source_evidence": 0, "target_evidence": 0},
           {"target_id": "13000000-0000-4000-8000-000000000703", "rationale": "Recorded evidence supports bounded relationship two.", "source_evidence": 1, "target_evidence": 0},
-          {"target_id": "13000000-0000-4000-8000-000000000704", "rationale": "Recorded evidence supports bounded relationship three.", "source_evidence": 2, "target_evidence": 0},
-          {"target_id": "13000000-0000-4000-8000-000000000705", "rationale": "Recorded evidence supports bounded relationship four.", "source_evidence": 3, "target_evidence": 0},
-          {"target_id": "13000000-0000-4000-8000-000000000706", "rationale": "Recorded evidence supports bounded relationship five.", "source_evidence": 0, "target_evidence": 1}
+          {"target_id": "13000000-0000-4000-8000-000000000729", "rationale": "Recorded evidence supports cutoff relationship three.", "source_evidence": 2, "target_evidence": 0},
+          {"target_id": "13000000-0000-4000-8000-000000000730", "rationale": "Recorded evidence supports cutoff relationship four.", "source_evidence": 3, "target_evidence": 0},
+          {"target_id": "13000000-0000-4000-8000-000000000731", "rationale": "Recorded evidence supports cutoff relationship five.", "source_evidence": 0, "target_evidence": 1}
         ],
         "tags": [
           {"existing_tag": "Atlas Tag 000", "new_tag": null, "rationale": "The evidence fits catalog label zero.", "source_evidence": 0},
@@ -476,9 +544,9 @@
       "expected_targets": [
         "13000000-0000-4000-8000-000000000702",
         "13000000-0000-4000-8000-000000000703",
-        "13000000-0000-4000-8000-000000000704",
-        "13000000-0000-4000-8000-000000000705",
-        "13000000-0000-4000-8000-000000000706"
+        "13000000-0000-4000-8000-000000000729",
+        "13000000-0000-4000-8000-000000000730",
+        "13000000-0000-4000-8000-000000000731"
       ],
       "expected_tags": [
         "atlas tag 000",
@@ -486,6 +554,43 @@
         "atlas tag 002",
         "graph synthesis",
         "unicode 🧠"
+      ],
+      "expected_top30": [
+        "13000000-0000-4000-8000-000000000702",
+        "13000000-0000-4000-8000-000000000703",
+        "13000000-0000-4000-8000-000000000704",
+        "13000000-0000-4000-8000-000000000705",
+        "13000000-0000-4000-8000-000000000706",
+        "13000000-0000-4000-8000-000000000707",
+        "13000000-0000-4000-8000-000000000708",
+        "13000000-0000-4000-8000-000000000709",
+        "13000000-0000-4000-8000-000000000710",
+        "13000000-0000-4000-8000-000000000711",
+        "13000000-0000-4000-8000-000000000712",
+        "13000000-0000-4000-8000-000000000713",
+        "13000000-0000-4000-8000-000000000714",
+        "13000000-0000-4000-8000-000000000715",
+        "13000000-0000-4000-8000-000000000716",
+        "13000000-0000-4000-8000-000000000717",
+        "13000000-0000-4000-8000-000000000718",
+        "13000000-0000-4000-8000-000000000719",
+        "13000000-0000-4000-8000-000000000720",
+        "13000000-0000-4000-8000-000000000721",
+        "13000000-0000-4000-8000-000000000722",
+        "13000000-0000-4000-8000-000000000723",
+        "13000000-0000-4000-8000-000000000724",
+        "13000000-0000-4000-8000-000000000725",
+        "13000000-0000-4000-8000-000000000726",
+        "13000000-0000-4000-8000-000000000727",
+        "13000000-0000-4000-8000-000000000728",
+        "13000000-0000-4000-8000-000000000729",
+        "13000000-0000-4000-8000-000000000730",
+        "13000000-0000-4000-8000-000000000731"
+      ],
+      "cutoff_expected_targets": [
+        "13000000-0000-4000-8000-000000000729",
+        "13000000-0000-4000-8000-000000000730",
+        "13000000-0000-4000-8000-000000000731"
       ],
       "largest": true
     }
