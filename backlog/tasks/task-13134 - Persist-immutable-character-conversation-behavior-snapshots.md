@@ -3,21 +3,19 @@ id: TASK-13134
 title: Persist immutable character-conversation behavior snapshots
 status: In Progress
 assignee: []
-created_date: '2026-08-28 05:06'
-updated_date: '2026-08-28 05:19'
+created_date: 2026-08-28 05:06
+updated_date: 2026-08-28 06:50
 labels:
-  - character-chat
-  - api
-  - persistence
-  - roleplay-resume
+- character-chat
+- api
+- persistence
+- roleplay-resume
 dependencies: []
 references:
-  - 'https://github.com/rmusser01/tldw_chatbook'
-  - >-
-    backlog/decisions/002-character-conversation-behavior-snapshot-and-fenced-completion.md
+- https://github.com/rmusser01/tldw_chatbook
+- backlog/decisions/002-character-conversation-behavior-snapshot-and-fenced-completion.md
 documentation:
-  - >-
-    Docs/superpowers/plans/2026-08-27-character-conversation-behavior-snapshot-contract.md
+- Docs/superpowers/plans/2026-08-27-character-conversation-behavior-snapshot-contract.md
 priority: high
 ---
 
@@ -58,3 +56,9 @@ Reason: This changes persistent schema, historical-data policy, and conversation
 - [ ] #6 Known skips or blockers documented
 - [ ] #7 ADR for behavior-snapshot storage and authority is accepted and linked.
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Stage 1 canonical snapshot checkpoint completed. TDD evidence: initial collection RED because the module was absent; fail-closed/hardening RED reached 10 failing new cases; final targeted suite passed 49 tests. Independent specification review PASS and code-quality review PASS after hardening. Targeted Ruff, Bandit, and git diff checks passed. Commits: 2b17ba3819 and 5bae47f9b6.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
