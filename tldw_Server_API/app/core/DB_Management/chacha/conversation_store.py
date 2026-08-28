@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
@@ -58,6 +59,7 @@ class ConversationStore:
                 CREATE TABLE IF NOT EXISTS conversation_settings(
                   conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
                   settings_json TEXT NOT NULL,
+                  settings_version INTEGER NOT NULL DEFAULT 1 CHECK(settings_version >= 1),
                   last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
                 """,
@@ -72,6 +74,7 @@ class ConversationStore:
                 CREATE TABLE IF NOT EXISTS conversation_settings(
                   conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
                   settings_json TEXT NOT NULL,
+                  settings_version INTEGER NOT NULL DEFAULT 1 CHECK(settings_version >= 1),
                   last_modified TIMESTAMP NOT NULL DEFAULT NOW()
                 )
                 """
@@ -127,25 +130,31 @@ class ConversationStore:
             self._ensure_conversation_settings_table()
             if self._db.backend_type == BackendType.SQLITE:
                 cursor = self._db.execute_query(
-                    "SELECT settings_json, last_modified FROM conversation_settings WHERE conversation_id = ?",
+                    "SELECT settings_json, settings_version, last_modified "
+                    "FROM conversation_settings WHERE conversation_id = ?",
                     (conversation_id,),
                 )
                 row = cursor.fetchone()
                 if not row:
                     return None
-                settings_json, last_modified = row
+                settings_json, settings_version, last_modified = row
             else:
                 result = self._db.backend.execute(
-                    "SELECT settings_json, last_modified FROM conversation_settings WHERE conversation_id = %s",
+                    "SELECT settings_json, settings_version, last_modified "
+                    "FROM conversation_settings WHERE conversation_id = %s",
                     (conversation_id,),
                 )
                 row = result.fetchone()
                 if not row:
                     return None
-                settings_json, last_modified = row
+                settings_json, settings_version, last_modified = row
 
             settings = json.loads(settings_json) if settings_json else {}
-            return {"settings": settings, "last_modified": last_modified}
+            return {
+                "settings": settings,
+                "settings_version": settings_version,
+                "last_modified": last_modified,
+            }
         except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
             logger.warning(f"get_conversation_settings failed for {conversation_id}: {exc}")
             return None
@@ -291,7 +300,12 @@ class ConversationStore:
 
         return "persona", normalized_assistant_id, None, normalized_memory_mode
 
-    def add_conversation(self, conv_data: dict[str, Any]) -> str | None:
+    def add_conversation(
+        self,
+        conv_data: dict[str, Any],
+        *,
+        conn: Any | None = None,
+    ) -> str | None:
         conv_id = conv_data.get("id") or self._db._generate_uuid()
         root_id = conv_data.get("root_id") or conv_id
 
@@ -379,8 +393,9 @@ class ConversationStore:
                 workspace_id,
             )
         try:
-            with self._db.transaction() as conn:
-                conn.execute(query, params)
+            transaction = nullcontext(conn) if conn is not None else self._db.transaction()
+            with transaction as transaction_conn:
+                transaction_conn.execute(query, params)
             logger.info(f"Added conversation ID: {conv_id}.")
             return conv_id
         except sqlite3.IntegrityError as exc:

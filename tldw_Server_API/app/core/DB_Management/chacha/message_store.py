@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+from contextlib import nullcontext
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -46,7 +47,37 @@ class MessageStore:
     # Message creation
     # ------------------------------------------------------------------
 
-    def add_message(self, msg_data: dict[str, Any]) -> str | None:
+    @staticmethod
+    def _row_value(row: Any, key: str, index: int = 0) -> Any:
+        if isinstance(row, dict):
+            return row.get(key)
+        mapping = getattr(row, "_mapping", None)
+        if mapping is not None:
+            return mapping.get(key)
+        try:
+            return row[key]
+        except (IndexError, KeyError, TypeError):
+            return row[index]
+
+    def _advance_history_version(self, conn: Any, conversation_id: str) -> None:
+        """Advance the resume history fence within the message mutation transaction."""
+        cursor = conn.execute(
+            "UPDATE conversations "
+            "SET history_version = history_version + 1, last_modified = ? "
+            "WHERE id = ? AND deleted = FALSE",
+            (self._db._get_current_utc_timestamp_iso(), conversation_id),
+        )
+        if cursor.rowcount != 1:
+            raise InputError(  # noqa: TRY003
+                f"Cannot mutate message history: Conversation ID '{conversation_id}' not found or deleted."
+            )
+
+    def add_message(
+        self,
+        msg_data: dict[str, Any],
+        *,
+        conn: Any | None = None,
+    ) -> str | None:
         """
         Adds a new message to a conversation, optionally with image data.
 
@@ -163,8 +194,9 @@ class MessageStore:
                 timestamp, msg_data.get('ranking'), now, client_id, 1, 0
             )
         try:
-            with self._db.transaction():
-                conv_cursor = self._db.execute_query(
+            transaction = nullcontext(conn) if conn is not None else self._db.transaction()
+            with transaction as transaction_conn:
+                conv_cursor = transaction_conn.execute(
                     "SELECT 1 FROM conversations WHERE id = ? AND deleted = FALSE",
                     (msg_data['conversation_id'],),
                 )
@@ -172,9 +204,10 @@ class MessageStore:
                     raise InputError(  # noqa: TRY003, TRY301
                         f"Cannot add message: Conversation ID '{msg_data['conversation_id']}' not found or deleted."
                     )
-                self._db.execute_query(query, params)
+                transaction_conn.execute(query, params)
                 if normalized_images:
-                    self._insert_message_images(msg_id, normalized_images)
+                    self._insert_message_images(msg_id, normalized_images, conn=transaction_conn)
+                self._advance_history_version(transaction_conn, msg_data['conversation_id'])
             logger.info(
                 'Added message ID: {} to conversation {} (Images stored: {}).',
                 msg_id,
@@ -200,7 +233,13 @@ class MessageStore:
     # Image helpers
     # ------------------------------------------------------------------
 
-    def _insert_message_images(self, message_id: str, images: list[tuple[bytes, str]]) -> None:
+    def _insert_message_images(
+        self,
+        message_id: str,
+        images: list[tuple[bytes, str]],
+        *,
+        conn: Any | None = None,
+    ) -> None:
         """Insert or replace message images for the given message."""
         if not images:
             return
@@ -220,7 +259,10 @@ class MessageStore:
             "image_data=excluded.image_data, image_mime_type=excluded.image_mime_type, "
             "created_at=CURRENT_TIMESTAMP"
         )
-        self._db.execute_many(query, params, commit=False)
+        if conn is not None:
+            conn.executemany(query, params)
+        else:
+            self._db.execute_many(query, params, commit=False)
 
     def append_message_image(
         self,
@@ -1094,7 +1136,14 @@ class MessageStore:
     # Message update
     # ------------------------------------------------------------------
 
-    def update_message(self, message_id: str, update_data: dict[str, Any], expected_version: int) -> bool | None:
+    def update_message(
+        self,
+        message_id: str,
+        update_data: dict[str, Any],
+        expected_version: int,
+        *,
+        conn: Any | None = None,
+    ) -> bool | None:
         """
         Updates an existing message using optimistic locking.
 
@@ -1171,8 +1220,14 @@ class MessageStore:
         query = f"UPDATE messages SET {', '.join(current_fields_to_update_sql)} WHERE id = ? AND version = ? AND deleted = FALSE"  # nosec B608
 
         try:
-            with self._db.transaction() as conn:
-                current_db_version = self._db._get_current_db_version(conn, "messages", "id", message_id)
+            transaction = nullcontext(conn) if conn is not None else self._db.transaction()
+            with transaction as transaction_conn:
+                current_db_version = self._db._get_current_db_version(
+                    transaction_conn,
+                    "messages",
+                    "id",
+                    message_id,
+                )
 
                 if current_db_version != expected_version:
                     raise ConflictError(  # noqa: TRY003, TRY301
@@ -1180,11 +1235,17 @@ class MessageStore:
                         entity="messages", entity_id=message_id
                     )
 
-                cursor = conn.execute(query, final_params_for_execute)
+                conversation_row = transaction_conn.execute(
+                    "SELECT conversation_id FROM messages WHERE id = ?",
+                    (message_id,),
+                ).fetchone()
+                cursor = transaction_conn.execute(query, final_params_for_execute)
 
                 if cursor.rowcount == 0:
-                    check_again_cursor = conn.execute("SELECT version, deleted FROM messages WHERE id = ?",
-                                                      (message_id,))
+                    check_again_cursor = transaction_conn.execute(
+                        "SELECT version, deleted FROM messages WHERE id = ?",
+                        (message_id,),
+                    )
                     final_state = check_again_cursor.fetchone()
                     msg = f"Update for message ID {message_id} (expected v{expected_version}) affected 0 rows."
                     if not final_state:
@@ -1195,6 +1256,10 @@ class MessageStore:
                         msg = f"Message ID {message_id} version changed to {final_state['version']} concurrently."
                     raise ConflictError(msg, entity="messages", entity_id=message_id)  # noqa: TRY301
 
+                self._advance_history_version(
+                    transaction_conn,
+                    str(self._row_value(conversation_row, "conversation_id")),
+                )
                 logger.info(
                     f"Updated message ID {message_id} from version {expected_version} to version {next_version_val}. Fields updated: {fields_to_update_sql if fields_to_update_sql else 'None'}")
                 return True
@@ -1215,7 +1280,13 @@ class MessageStore:
     # Soft delete
     # ------------------------------------------------------------------
 
-    def soft_delete_message(self, message_id: str, expected_version: int) -> bool | None:
+    def soft_delete_message(
+        self,
+        message_id: str,
+        expected_version: int,
+        *,
+        conn: Any | None = None,
+    ) -> bool | None:
         """
         Soft-deletes a message using optimistic locking.
 
@@ -1243,12 +1314,20 @@ class MessageStore:
         params = (now, next_version_val, self._db.client_id, message_id, expected_version)
 
         try:
-            with self._db.transaction() as conn:
+            transaction = nullcontext(conn) if conn is not None else self._db.transaction()
+            with transaction as transaction_conn:
                 try:
-                    current_db_version = self._db._get_current_db_version(conn, "messages", "id", message_id)
+                    current_db_version = self._db._get_current_db_version(
+                        transaction_conn,
+                        "messages",
+                        "id",
+                        message_id,
+                    )
                 except ConflictError:
-                    check_status_cursor = conn.execute("SELECT deleted, version FROM messages WHERE id = ?",
-                                                       (message_id,))
+                    check_status_cursor = transaction_conn.execute(
+                        "SELECT deleted, version FROM messages WHERE id = ?",
+                        (message_id,),
+                    )
                     record_status = check_status_cursor.fetchone()
                     if record_status and record_status['deleted']:
                         logger.info(f"Message ID {message_id} already soft-deleted. Success (idempotent).")
@@ -1261,11 +1340,17 @@ class MessageStore:
                         entity="messages", entity_id=message_id
                     )
 
-                cursor = conn.execute(query, params)
+                conversation_row = transaction_conn.execute(
+                    "SELECT conversation_id FROM messages WHERE id = ?",
+                    (message_id,),
+                ).fetchone()
+                cursor = transaction_conn.execute(query, params)
 
                 if cursor.rowcount == 0:
-                    check_again_cursor = conn.execute("SELECT version, deleted FROM messages WHERE id = ?",
-                                                      (message_id,))
+                    check_again_cursor = transaction_conn.execute(
+                        "SELECT version, deleted FROM messages WHERE id = ?",
+                        (message_id,),
+                    )
                     final_state = check_again_cursor.fetchone()
                     msg = f"Soft delete for message ID {message_id} (expected v{expected_version}) affected 0 rows."
                     if not final_state:
@@ -1279,6 +1364,10 @@ class MessageStore:
                         msg = f"Soft delete for message ID {message_id} (expected v{expected_version}) affected 0 rows."
                     raise ConflictError(msg, entity="messages", entity_id=message_id)  # noqa: TRY301
 
+                self._advance_history_version(
+                    transaction_conn,
+                    str(self._row_value(conversation_row, "conversation_id")),
+                )
                 logger.info(
                     f"Soft-deleted message ID {message_id} (was v{expected_version}), new version {next_version_val}.")
                 return True

@@ -5,6 +5,7 @@ from typing import Any
 
 __all__ = [
     "CharacterStore",
+    "ConversationResumeStore",
     "ConversationStore",
     "KeywordStore",
     "MessageStore",
@@ -38,6 +39,7 @@ __all__ = [
 
 _STORE_MODULES = {
     "CharacterStore": "tldw_Server_API.app.core.DB_Management.chacha.character_store",
+    "ConversationResumeStore": "tldw_Server_API.app.core.DB_Management.chacha.conversation_resume_store",
     "ConversationStore": "tldw_Server_API.app.core.DB_Management.chacha.conversation_store",
     "KeywordStore": "tldw_Server_API.app.core.DB_Management.chacha.keyword_store",
     "MessageStore": "tldw_Server_API.app.core.DB_Management.chacha.message_store",
