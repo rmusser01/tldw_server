@@ -51,6 +51,22 @@ MAX_MATERIALIZED_EXEMPLAR_BYTES = 256 * 1024
 MAX_MATERIALIZED_WORLD_BOOK_ENTRIES = 512
 MAX_MATERIALIZED_WORLD_BOOK_ENTRY_BYTES = 512 * 1024
 _MATERIALIZED_SOURCE_ROW_OVERHEAD_BYTES = 256
+PENDING_GREETING_SETTINGS_KEY = "roleplayPendingGreetingV1"
+_MATERIALIZED_EXEMPLAR_TEXT_FIELDS = (
+    "id",
+    "text",
+    "source_type",
+    "source_url_or_id",
+    "source_date",
+    "novelty_hint",
+    "emotion",
+    "scenario",
+    "rhetorical",
+    "register",
+    "safety_allowed",
+    "safety_blocked",
+    "rights_notes",
+)
 DEFAULT_AUTO_SUMMARY_THRESHOLD_MESSAGES = 40
 DEFAULT_AUTO_SUMMARY_WINDOW_MESSAGES = 12
 _EXACT_BOOLEAN_BEHAVIOR_FIELDS = frozenset(
@@ -762,8 +778,15 @@ def _load_world_books_for_participants(
     *,
     owner_user_id: str,
     preexisting_world_book_ids: Sequence[int] = (),
+    preexisting_world_books: Mapping[int, Mapping[str, Any]] | None = None,
+    existing_entry_count: int = 0,
+    existing_entry_bytes: int = 0,
 ) -> dict[int, list[dict[str, Any]]]:
     """Load bounded participant lore, expanding each shared book only once."""
+    frozen_books = {
+        int(book_id): dict(book)
+        for book_id, book in (preexisting_world_books or {}).items()
+    }
     raw_by_character: dict[int, list[dict[str, Any]]] = {}
     unique_books: dict[int, dict[str, Any]] = {}
     for character_id in participant_character_ids:
@@ -815,19 +838,34 @@ def _load_world_books_for_participants(
             f"A resumable chat supports at most {MAX_MATERIALIZED_WORLD_BOOKS} world books."
         )
 
-    entries_by_book = _load_world_book_entries(conn, list(unique_books))
+    new_book_ids = [book_id for book_id in unique_books if book_id not in frozen_books]
+    entries_by_book = _load_world_book_entries(
+        conn,
+        new_book_ids,
+        existing_row_count=existing_entry_count,
+        existing_byte_count=existing_entry_bytes,
+    )
 
     materialized_by_character: dict[int, list[dict[str, Any]]] = {}
     for character_id, books in raw_by_character.items():
         materialized: list[dict[str, Any]] = []
         for book in books:
             world_book_id = int(book["id"])
-            clean_book = {
-                key: _safe_json(value)
-                for key, value in book.items()
-                if key not in {"client_id", "deleted"}
-            }
-            clean_book["entries"] = entries_by_book[world_book_id]
+            if world_book_id in frozen_books:
+                clean_book = dict(frozen_books[world_book_id])
+                clean_book["attachment_enabled"] = _safe_json(
+                    book.get("attachment_enabled")
+                )
+                clean_book["attachment_priority"] = _safe_json(
+                    book.get("attachment_priority")
+                )
+            else:
+                clean_book = {
+                    key: _safe_json(value)
+                    for key, value in book.items()
+                    if key not in {"client_id", "deleted"}
+                }
+                clean_book["entries"] = entries_by_book[world_book_id]
             materialized.append(clean_book)
         materialized_by_character[character_id] = materialized
     return materialized_by_character
@@ -933,27 +971,16 @@ def _load_world_book_entries(
 def _load_exemplars_for_participants(
     conn: Any,
     participant_character_ids: Sequence[int],
+    *,
+    existing_row_count: int = 0,
+    existing_byte_count: int = 0,
 ) -> dict[int, list[dict[str, Any]]]:
     ordered_ids = list(
         dict.fromkeys(int(item) for item in participant_character_ids)
     )
     if not ordered_ids:
         return {}
-    text_columns = (
-        "id",
-        "text",
-        "source_type",
-        "source_url_or_id",
-        "source_date",
-        "novelty_hint",
-        "emotion",
-        "scenario",
-        "rhetorical",
-        "register",
-        "safety_allowed",
-        "safety_blocked",
-        "rights_notes",
-    )
+    text_columns = _MATERIALIZED_EXEMPLAR_TEXT_FIELDS
     row_count, byte_count = _source_collection_stats(
         conn,
         table="character_exemplars",
@@ -964,8 +991,8 @@ def _load_exemplars_for_participants(
     )
     _enforce_source_collection_budget(
         label="exemplars",
-        row_count=row_count,
-        byte_count=byte_count,
+        row_count=existing_row_count + row_count,
+        byte_count=existing_byte_count + byte_count,
         max_rows=MAX_MATERIALIZED_EXEMPLARS,
         max_bytes=MAX_MATERIALIZED_EXEMPLAR_BYTES,
     )
@@ -991,7 +1018,7 @@ def _load_exemplars_for_participants(
         "CROSS JOIN source_stats stats "
         f"WHERE exemplar.character_id IN ({placeholders}) "
         "AND exemplar.is_deleted = FALSE "
-        "AND stats.row_count <= ? AND stats.byte_count <= ? "
+        "AND stats.row_count + ? <= ? AND stats.byte_count + ? <= ? "
         "ORDER BY exemplar.character_id, exemplar.updated_at DESC, "
         "exemplar.created_at DESC, exemplar.id "
         f"LIMIT {MAX_MATERIALIZED_EXEMPLARS + 1}"
@@ -1002,7 +1029,9 @@ def _load_exemplars_for_participants(
         (
             *ordered_ids,
             *ordered_ids,
+            existing_row_count,
             MAX_MATERIALIZED_EXEMPLARS,
+            existing_byte_count,
             MAX_MATERIALIZED_EXEMPLAR_BYTES,
         ),
     )
@@ -1016,8 +1045,8 @@ def _load_exemplars_for_participants(
     )
     _enforce_source_collection_budget(
         label="exemplars",
-        row_count=current_count,
-        byte_count=current_bytes,
+        row_count=existing_row_count + current_count,
+        byte_count=existing_byte_count + current_bytes,
         max_rows=MAX_MATERIALIZED_EXEMPLARS,
         max_bytes=MAX_MATERIALIZED_EXEMPLAR_BYTES,
     )
@@ -1132,25 +1161,29 @@ def _materialize_behavior(
     greeting_random_value: float = 0.0,
     fallback_greeting: Mapping[str, Any] | None = None,
     preexisting_world_book_ids: Sequence[int] = (),
+    preexisting_world_books: Mapping[int, Mapping[str, Any]] | None = None,
+    existing_exemplar_count: int = 0,
+    existing_exemplar_bytes: int = 0,
+    existing_world_book_entry_count: int = 0,
+    existing_world_book_entry_bytes: int = 0,
 ) -> _MaterializedBehavior:
     requested_preset = str(prompt_preset_id or "").strip() or None
     participants: list[dict[str, Any]] = []
     primary_character: dict[str, Any] | None = None
-    world_books_by_character = _load_world_books_for_participants(
-        conn,
-        participant_character_ids,
-        owner_user_id=owner_user_id,
-        preexisting_world_book_ids=preexisting_world_book_ids,
-    )
-    exemplars_by_character = _load_exemplars_for_participants(
-        conn,
-        participant_character_ids,
-    )
-    for index, character_id in enumerate(participant_character_ids):
-        result = conn.execute(
-            "SELECT * FROM character_cards WHERE id = ? AND deleted = FALSE LIMIT 1",
-            (character_id,),
-        )
+    characters: dict[int, dict[str, Any]] = {}
+    for character_id in participant_character_ids:
+        if _is_postgres_connection(conn):
+            result = conn.execute(
+                "SELECT * FROM character_cards "
+                "WHERE id = ? AND client_id = ? AND deleted = FALSE LIMIT 1",
+                (character_id, owner_user_id),
+            )
+        else:
+            result = conn.execute(
+                "SELECT * FROM character_cards "
+                "WHERE id = ? AND deleted = FALSE LIMIT 1",
+                (character_id,),
+            )
         row = result.fetchone()
         if row is None:
             raise InputError(f"Character ID {character_id} not found.")
@@ -1159,6 +1192,24 @@ def _materialize_behavior(
             character.get("alternate_greetings"), []
         )
         character["extensions"] = _decode_json(character.get("extensions"), {})
+        characters[int(character_id)] = character
+    world_books_by_character = _load_world_books_for_participants(
+        conn,
+        participant_character_ids,
+        owner_user_id=owner_user_id,
+        preexisting_world_book_ids=preexisting_world_book_ids,
+        preexisting_world_books=preexisting_world_books,
+        existing_entry_count=existing_world_book_entry_count,
+        existing_entry_bytes=existing_world_book_entry_bytes,
+    )
+    exemplars_by_character = _load_exemplars_for_participants(
+        conn,
+        participant_character_ids,
+        existing_row_count=existing_exemplar_count,
+        existing_byte_count=existing_exemplar_bytes,
+    )
+    for index, character_id in enumerate(participant_character_ids):
+        character = characters[int(character_id)]
         resolved_preset = requested_preset or resolve_character_prompt_preset(character)
         selection_source = "default"
         if requested_preset:
@@ -1409,6 +1460,42 @@ def _materialized_world_book_entry_usage(
     return row_count, byte_count
 
 
+def _materialized_exemplar_usage(
+    participants: Sequence[Mapping[str, Any]],
+) -> tuple[int, int]:
+    seen_exemplars: set[tuple[str, str]] = set()
+    row_count = 0
+    byte_count = 0
+    for participant in participants:
+        participant_id = _source_id(participant) or ""
+        exemplars = participant.get("exemplars")
+        if not isinstance(exemplars, list):
+            continue
+        for exemplar in exemplars:
+            if not isinstance(exemplar, Mapping):
+                continue
+            exemplar_id = str(exemplar.get("id") or "")
+            identity = (participant_id, exemplar_id)
+            if identity in seen_exemplars:
+                continue
+            seen_exemplars.add(identity)
+            row_count += 1
+            for key in _MATERIALIZED_EXEMPLAR_TEXT_FIELDS:
+                value = exemplar.get(key)
+                if isinstance(value, (Mapping, list, tuple)):
+                    encoded = json.dumps(
+                        _safe_json(value),
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                else:
+                    encoded = str(value or "").encode("utf-8")
+                byte_count += len(encoded)
+            byte_count += _MATERIALIZED_SOURCE_ROW_OVERHEAD_BYTES
+    return row_count, byte_count
+
+
 def _materialize_world_books_by_id(
     conn: Any,
     world_book_ids: Sequence[int],
@@ -1625,10 +1712,8 @@ def _participant_ids_from_settings(
     return normalize_materialized_participant_ids(primary_character_id, raw_ids)
 
 
-def _resolve_selected_greeting(
-    conn: Any,
-    *,
-    character_id: int,
+def _selected_greeting_from_character(
+    character: Mapping[str, Any],
     selection_id: Any,
 ) -> dict[str, Any] | None:
     if selection_id is None:
@@ -1643,15 +1728,6 @@ def _resolve_selected_greeting(
         index = int(parts[1])
     except (IndexError, ValueError):
         raise InputError("Greeting selection ID is invalid.") from None
-    result = conn.execute(
-        "SELECT first_message, alternate_greetings, version FROM character_cards "
-        "WHERE id = ? AND deleted = FALSE LIMIT 1",
-        (character_id,),
-    )
-    row = result.fetchone()
-    if row is None:
-        raise InputError(f"Character ID {character_id} not found.")
-    character = _row_dict(row, result)
     greetings = collect_character_greeting_texts(character)
     if index < 0 or index >= len(greetings):
         raise InputError(f"Greeting index {index} is out of range.")
@@ -1664,6 +1740,138 @@ def _resolve_selected_greeting(
         "source_index": 0 if from_first_message else index,
         "character_version": int(character.get("version") or 1),
     }
+
+
+def _resolve_selected_greeting(
+    conn: Any,
+    *,
+    character_id: int,
+    selection_id: Any,
+) -> dict[str, Any] | None:
+    result = conn.execute(
+        "SELECT first_message, alternate_greetings, version FROM character_cards "
+        "WHERE id = ? AND deleted = FALSE LIMIT 1",
+        (character_id,),
+    )
+    row = result.fetchone()
+    if row is None:
+        raise InputError(f"Character ID {character_id} not found.")
+    return _selected_greeting_from_character(_row_dict(row, result), selection_id)
+
+
+def _pending_greeting_digest(values: Mapping[str, Any]) -> str:
+    canonical = json.dumps(
+        {"schemaVersion": 1, "values": dict(values)},
+        allow_nan=False,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    if len(canonical) > DEFAULT_MAX_SNAPSHOT_BYTES:
+        raise InputError("Pending greeting authority exceeds the size limit.")
+    return f"sha256:{hashlib.sha256(canonical).hexdigest()}"
+
+
+def build_pending_greeting_authority(
+    conn: Any,
+    *,
+    conversation: Mapping[str, Any],
+    resume_state: Mapping[str, Any],
+    selection_id: str,
+) -> dict[str, Any]:
+    """Freeze a selected greeting while completion authority is incomplete."""
+    snapshot = resume_state.get("behavior_snapshot")
+    if not isinstance(snapshot, Mapping) or snapshot.get("status") != "valid":
+        raise InputError("Conversation has no valid behavior snapshot.")
+    character_id = conversation.get("character_id")
+    result = conn.execute(
+        "SELECT first_message, alternate_greetings, version FROM character_cards "
+        "WHERE id = ? AND deleted = FALSE LIMIT 1",
+        (int(character_id),),
+    )
+    row = result.fetchone()
+    if row is None:
+        raise InputError(f"Character ID {character_id} not found.")
+    character = _row_dict(row, result)
+    greeting = _selected_greeting_from_character(character, selection_id)
+    if greeting is None:
+        raise InputError("Greeting selection ID is invalid.")
+    values = {
+        "base_snapshot": {
+            "schema_version": int(snapshot["schema_version"]),
+            "digest": str(snapshot["digest"]),
+        },
+        "character_id": int(character_id),
+        "greetings_checksum": compute_character_greetings_checksum(character),
+        "greeting": greeting,
+    }
+    return {
+        "schemaVersion": 1,
+        "digest": _pending_greeting_digest(values),
+        "values": values,
+    }
+
+
+def _validated_pending_greeting(
+    pending: Any,
+    *,
+    conversation: Mapping[str, Any],
+    snapshot: Mapping[str, Any],
+    merged_settings: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    if pending is None:
+        return None
+    if not isinstance(pending, Mapping) or set(pending) != {
+        "schemaVersion",
+        "digest",
+        "values",
+    }:
+        raise InputError("Stored pending greeting authority is invalid.")
+    values = pending.get("values")
+    if not isinstance(values, Mapping) or set(values) != {
+        "base_snapshot",
+        "character_id",
+        "greetings_checksum",
+        "greeting",
+    }:
+        raise InputError("Stored pending greeting authority is invalid.")
+    greeting = values.get("greeting")
+    if not isinstance(greeting, Mapping) or set(greeting) != {
+        "content",
+        "selection_id",
+        "source",
+        "source_index",
+        "character_version",
+    }:
+        raise InputError("Stored pending greeting authority is invalid.")
+    if (
+        pending.get("schemaVersion") != 1
+        or not isinstance(pending.get("digest"), str)
+        or not isinstance(values.get("greetings_checksum"), str)
+        or not isinstance(greeting.get("content"), str)
+        or not isinstance(greeting.get("selection_id"), str)
+        or greeting.get("source") not in {"first_message", "alternate_greeting"}
+        or type(greeting.get("source_index")) is not int
+        or greeting["source_index"] < 0
+        or type(greeting.get("character_version")) is not int
+        or greeting["character_version"] < 1
+    ):
+        raise InputError("Stored pending greeting authority is invalid.")
+    expected_binding = {
+        "schema_version": int(snapshot["schema_version"]),
+        "digest": str(snapshot["digest"]),
+    }
+    if (
+        values.get("base_snapshot") != expected_binding
+        or values.get("character_id") != int(conversation.get("character_id"))
+        or greeting.get("selection_id") != merged_settings.get("greetingSelectionId")
+        or values.get("greetings_checksum") != merged_settings.get("greetingsChecksum")
+    ):
+        raise InputError("Stored pending greeting authority is invalid.")
+    expected_digest = _pending_greeting_digest(values)
+    if pending.get("digest") != expected_digest:
+        raise InputError("Stored pending greeting authority is invalid.")
+    return dict(greeting)
 
 
 def _materialize_roleplay_behavior_settings_once(
@@ -1803,19 +2011,49 @@ def _materialize_roleplay_behavior_settings_once(
         for character_id in desired_participant_ids
         if str(character_id) in known_participants
     ]
-    preexisting_world_book_ids: set[int] = set()
-    for participant in known_desired_participants:
-        for world_book in participant.get("world_books") or []:
+    retained_context_books = [
+        dict(book)
+        for book in current_values.get("world_books") or []
+        if isinstance(book, Mapping)
+    ]
+    if "conversationContext" in changed_keys:
+        context = merged_settings.get("conversationContext")
+        requested_context_ids = (
+            set(normalize_materialized_world_book_ids(context.get("world_book_ids")))
+            if isinstance(context, Mapping) and "world_book_ids" in context
+            else set()
+        )
+        retained_context_books = [
+            book
+            for book in retained_context_books
+            if isinstance(book.get("id"), int) and book["id"] in requested_context_ids
+        ]
+    preexisting_world_books: dict[int, dict[str, Any]] = {}
+    for container in [
+        *known_desired_participants,
+        {"world_books": retained_context_books},
+    ]:
+        for world_book in container.get("world_books") or []:
             if not isinstance(world_book, Mapping):
                 continue
             try:
-                preexisting_world_book_ids.add(int(world_book["id"]))
+                preexisting_world_books.setdefault(
+                    int(world_book["id"]),
+                    dict(world_book),
+                )
             except (KeyError, TypeError, ValueError):
                 continue
+    preexisting_world_book_ids = set(preexisting_world_books)
     if len(preexisting_world_book_ids) > MAX_MATERIALIZED_WORLD_BOOKS:
         raise InputError(
             f"A resumable chat supports at most {MAX_MATERIALIZED_WORLD_BOOKS} world books."
         )
+    existing_exemplar_count, existing_exemplar_bytes = _materialized_exemplar_usage(
+        known_desired_participants
+    )
+    existing_entry_count, existing_entry_bytes = _materialized_world_book_entry_usage(
+        list(preexisting_world_books.values())
+    )
 
     missing_character_ids = [
         character_id
@@ -1832,6 +2070,11 @@ def _materialize_roleplay_behavior_settings_once(
             owner_user_id=owner_user_id,
             max_snapshot_bytes=max_bytes,
             preexisting_world_book_ids=tuple(preexisting_world_book_ids),
+            preexisting_world_books=preexisting_world_books,
+            existing_exemplar_count=existing_exemplar_count,
+            existing_exemplar_bytes=existing_exemplar_bytes,
+            existing_world_book_entry_count=existing_entry_count,
+            existing_world_book_entry_bytes=existing_entry_bytes,
         )
         known_participants.update(
             {
@@ -1876,6 +2119,20 @@ def _materialize_roleplay_behavior_settings_once(
         "effective_completion": effective,
         "participants": participants,
     }
+    pending_greeting = _validated_pending_greeting(
+        merged_settings.get(PENDING_GREETING_SETTINGS_KEY),
+        conversation=conversation,
+        snapshot=snapshot,
+        merged_settings=merged_settings,
+    )
+    if pending_greeting is not None:
+        values["greeting"] = pending_greeting
+    elif (
+        not isinstance(current_values.get("greeting"), Mapping)
+        and merged_settings.get("greetingSelectionId") is not None
+        and not {"greetingSelectionId", "useCharacterDefault"}.intersection(changed_keys)
+    ):
+        raise InputError("Stored pending greeting authority is missing.")
 
     preset_keys = {
         "chatPresetOverrideId",

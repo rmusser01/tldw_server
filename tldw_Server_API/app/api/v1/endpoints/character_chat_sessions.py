@@ -117,7 +117,9 @@ from tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade import (
     replace_placeholders,
 )
 from tldw_Server_API.app.core.Character_Chat.character_conversation_factory import (
+    PENDING_GREETING_SETTINGS_KEY,
     PROMPT_COMPLETION_SETTING_CLASSIFICATION,
+    build_pending_greeting_authority,
     collect_character_greeting_texts,
     create_character_conversation,
     materialize_roleplay_behavior_settings,
@@ -2933,7 +2935,7 @@ def _merge_conversation_settings(
 
 
 _INTERNAL_CHAT_SETTINGS_KEYS = frozenset(
-    {"roleplayResumeV1", "roleplayBehaviorV1"}
+    {"roleplayResumeV1", "roleplayBehaviorV1", PENDING_GREETING_SETTINGS_KEY}
 )
 _BEHAVIOR_SETTING_KEYS = frozenset(
     key
@@ -7508,6 +7510,7 @@ async def update_chat_settings(
                 )
                 if materialized is not None:
                     merged_settings["roleplayBehaviorV1"] = materialized
+                    merged_settings.pop(PENDING_GREETING_SETTINGS_KEY, None)
                     merged_settings["roleplayResumeV1"] = {
                         "resumeEligible": True,
                         "resumeIneligibleReason": None,
@@ -8487,6 +8490,7 @@ async def select_greeting(
                     )
                     if materialized is not None:
                         settings["roleplayBehaviorV1"] = materialized
+                        settings.pop(PENDING_GREETING_SETTINGS_KEY, None)
                         settings["roleplayResumeV1"] = {
                             "resumeEligible": True,
                             "resumeIneligibleReason": None,
@@ -8494,6 +8498,17 @@ async def select_greeting(
                                 "effective_completion"
                             ],
                         }
+                    else:
+                        pending_greeting = build_pending_greeting_authority(
+                            conn,
+                            conversation=conversation,
+                            resume_state=resume_state,
+                            selection_id=settings["greetingSelectionId"],
+                        )
+                        settings[PENDING_GREETING_SETTINGS_KEY] = pending_greeting
+                        settings["greetingsChecksum"] = pending_greeting["values"][
+                            "greetings_checksum"
+                        ]
                 updated = db.upsert_conversation_settings(
                     chat_id,
                     settings,
