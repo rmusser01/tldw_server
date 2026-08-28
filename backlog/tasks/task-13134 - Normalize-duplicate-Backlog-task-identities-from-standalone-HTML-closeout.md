@@ -26,7 +26,7 @@ modified_files:
 - backlog/tasks/task-12115 - Add-first-class-standalone-HTML-JS-presentation-generation.md
 - backlog/tasks/task-13134 - Normalize-duplicate-Backlog-task-identities-from-standalone-HTML-closeout.md
 - backlog/tasks/task-13135 - Make-chat-focus-mode-truly-fullscreen.md
-updated_date: 2026-08-27 02:54
+updated_date: 2026-08-28 05:05
 ---
 
 ## Description
@@ -67,6 +67,8 @@ PR: https://github.com/rmusser01/tldw_server/pull/2825 (target: dev).
 The earlier MCP task_view response for TASK-13116 referenced the pre-PR-#2826 path and was not accepted as current canonical evidence. Final verification uses repository frontmatter as the identity authority: active IDs must each have exactly one record, while retired TASK-13116 must have zero exact frontmatter records.
 
 2026-08-27 latest-dev correction verification: PR #2826's commit history confirms the Scheduled Tasks prerequisite record was renamed from TASK-13116 to TASK-13128. Repository-wide frontmatter counts across active, completed, and archived storage are exactly one for TASK-12115, TASK-13125, TASK-13126, TASK-13128, TASK-13134, and TASK-13135, and zero for retired TASK-13116. Backlog task_view resolves each active ID to its canonical current path. Broad task_search returned 100 rows for TASK-12115, TASK-13125, TASK-13126, TASK-13128, and TASK-13134 and 92 rows for TASK-13135; each result set contained exactly one record whose reported frontmatter ID equaled the active query. Stale standalone-closeout interim paths are absent. The Scheduled Tasks TASK-13125, TASK-13126, and TASK-13128 files are byte-for-byte unchanged from origin/dev. git diff --check passes. Product tests and Bandit are not applicable because this correction changes only Backlog Markdown.
+
+2026-08-27 final latest-dev rebase verification: rebased the PR branch without conflicts onto origin/dev 9fd2246157ce8a32ae6a6691a75efab788229f77. The rebased branch is five commits ahead and zero behind that base. Backlog task_view resolves TASK-12115, TASK-13125, TASK-13126, TASK-13128, TASK-13134, and TASK-13135 to their canonical current paths. Broad task_search returned the 100-result cap for every active query and exactly one result in each set whose reported frontmatter ID equals the query. Repository frontmatter remains exactly one per active scoped ID and zero for retired TASK-13116. The scoped diff remains Backlog Markdown only.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
