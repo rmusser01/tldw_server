@@ -113,7 +113,7 @@
 - Create: `tldw_Server_API/app/core/Character_Chat/character_behavior_snapshot.py`
 - Create: `tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_behavior_snapshot.py`
 
-- [ ] **Step 1: Write failing canonicalization and mutation-isolation tests**
+- [x] **Step 1: Write failing canonicalization and mutation-isolation tests**
 
 Build a two-participant source with shuffled mapping order. Assert deterministic digest, LF normalization, deep-copy isolation, participant coverage, and the following explicit top-level shape:
 
@@ -142,7 +142,7 @@ Build a two-participant source with shuffled mapping order. Assert deterministic
 }
 ```
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```bash
 /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest -q --tb=short \
@@ -151,11 +151,11 @@ Build a two-participant source with shuffled mapping order. Assert deterministic
 
 Expected: collection fails because the module does not exist.
 
-- [ ] **Step 3: Implement minimal canonicalization**
+- [x] **Step 3: Implement minimal canonicalization**
 
 Deep-copy JSON-compatible values; normalize line endings; serialize with `ensure_ascii=False`, `sort_keys=True`, and compact separators; digest canonical bytes with SHA-256 and prefix `sha256:`. Return a frozen boundary object containing schema version, payload, canonical bytes, digest, and size.
 
-- [ ] **Step 4: Add closed-schema/type/size fail-closed tests**
+- [x] **Step 4: Add closed-schema/type/size fail-closed tests**
 
 Prove the closed snapshot schema/classified source allowlist has no credential-bearing
 fields. Reject explicitly credential-named keys only inside deliberately extensible
@@ -164,7 +164,7 @@ duplicate participant identity, and configured-size overflow. Do not recursively
 reject generic words such as `token` inside legitimate prompt-extension content; key
 name scanning is not a substitute for the closed schema.
 
-- [ ] **Step 5: Run GREEN and commit**
+- [x] **Step 5: Run GREEN and commit**
 
 ```bash
 /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest -q --tb=short \
@@ -189,7 +189,7 @@ Expected: PASS; this commit has no API or DB changes.
 - Modify: `tldw_Server_API/app/core/DB_Management/chacha/conversation_store.py`
 - Modify: `tldw_Server_API/app/core/DB_Management/chacha/message_store.py`
 
-- [ ] **Step 1: Rebase, recheck the schema head, then write migration tests**
+- [x] **Step 1: Rebase, recheck the schema head, then write migration tests**
 
 Rebase on current `origin/dev`, record the actual schema head, and select exactly the
 next free version (`NEXT`; v64 only if the head is still v63). Create a head-version
@@ -200,7 +200,7 @@ starts at 1; conversations expose a monotonic `history_version`; legacy snapshot
 as `missing` with no current-source body. Inject a migration checkpoint failure and
 prove total rollback to the prior head.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```bash
 /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest -q --tb=short \
@@ -209,7 +209,7 @@ prove total rollback to the prior head.
 
 Expected: FAIL because the selected next-version migration and resume-store methods are absent.
 
-- [ ] **Step 3: Implement the next SQLite and PostgreSQL migration**
+- [x] **Step 3: Implement the next SQLite and PostgreSQL migration**
 
 Update both current schema constants and migration ladders using the versions found in
 Step 1. Enforce statuses `valid|missing|invalid`; valid rows require
@@ -217,7 +217,7 @@ version/digest/body/size, non-valid rows contain no snapshot body. Add
 `history_version >= 1` to the conversation resume state. Verify catalog, FK,
 uniqueness, digest check, indexes, and exact one-version advance for both backends.
 
-- [ ] **Step 4: Implement the focused store and transaction seams**
+- [x] **Step 4: Implement the focused store and transaction seams**
 
 Add:
 
@@ -233,7 +233,7 @@ otherwise. Centralize `history_version` advancement in the existing message muta
 primitives so add/edit/delete/restore/branch/tail paths cannot forget it. Register and
 delegate the new store following current ChaCha patterns.
 
-- [ ] **Step 5: Run backend tests and commit**
+- [x] **Step 5: Run backend tests and commit**
 
 ```bash
 /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest -q --tb=short \
@@ -361,7 +361,7 @@ git commit -m "feat(character-chat): snapshot behavior at conversation creation"
 - Modify: `tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_behavior_snapshot_api.py`
 - Modify: `tldw_Server_API/tests/Character_Chat_NEW/unit/test_chat_settings_merge.py`
 
-- [ ] **Step 1: Write failing materialization/history-version tests**
+- [x] **Step 1: Write failing materialization/history-version tests**
 
 Start at version 1 with a complete materialized effective provider/model and explicit
 sampling projection. Change deployment defaults and prove resume still uses the v1
@@ -376,7 +376,7 @@ change branch/tail selection; assert each successful mutation increments
 `history_version` exactly once in its transaction even when the final tail row itself
 is unchanged. Failed/rolled-back mutations do not advance it.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```bash
 /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest -q --tb=short \
@@ -388,7 +388,7 @@ is unchanged. Failed/rolled-back mutations do not advance it.
 
 Expected: FAIL because settings currently use timestamp/conversation-version behavior only.
 
-- [ ] **Step 3: Implement transactional materialization and versioning**
+- [x] **Step 3: Implement transactional materialization and versioning**
 
 Resolve known behavior references before storage, canonicalize embedded materialized
 values, validate provider/model plus the closed sampling schema, and update JSON plus
@@ -398,7 +398,7 @@ availability remain runtime state. The contract path consumes an explicit classi
 allowlist and rejects unclassified behavior input; preserve legacy unknown-key
 compatibility outside contract completion.
 
-- [ ] **Step 4: Make resume-state reads coherent**
+- [x] **Step 4: Make resume-state reads coherent**
 
 Return snapshot metadata, materialized settings/version, `history_version`, message
 count, and tail message ID/version from one transaction. Every central history
@@ -406,7 +406,7 @@ mutation advances `history_version`; retain tail/message versions for exact-row
 identity but never treat them as a complete history fence. Do not overload settings
 version for transcript mutations.
 
-- [ ] **Step 5: Verify TASK-13134**
+- [x] **Step 5: Verify TASK-13134**
 
 ```bash
 /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest -q --tb=short \
