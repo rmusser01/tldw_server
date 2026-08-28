@@ -364,7 +364,7 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
         <div
           className="flex flex-1 items-center justify-center text-sm text-text-muted"
           role="status">
-          {t("common:loading", { defaultValue: "Loading..." })}
+          {t("common:loading.title", { defaultValue: "Loading..." })}
         </div>
       ) : workspace.error && !workspace.graph ? (
         <div

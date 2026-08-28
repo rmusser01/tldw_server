@@ -1,13 +1,13 @@
 # Graphing-Notes-PRD
 
-Status: Draft (MVP scope agreed; partial implementation in progress)
+Status: Implemented (bounded graph workspace and reviewable suggestions)
 Owner: Notes/RAG Team
-Last updated: 2026-02-08 (review findings appended)
+Last updated: 2026-08-28
 Target Release: v0.2.x
 
 ## 1. Problem Statement
 
-Users want to visually explore how their notes relate to each other (links, tags, sources, and later similarity) to discover structure, navigate context, and spot clusters. Today there is no server-side API to compute and deliver a graph; clients must approximate via multiple calls and local joins.
+Users want to visually explore how their notes relate to each other (links, tags, sources, and later similarity) to discover structure, navigate context, and spot clusters. The product now provides bounded server-side graph APIs, a shared WebUI/extension graph workspace, and explicitly reviewable related-note and tag suggestions.
 
 ## 2. Goals
 
@@ -23,6 +23,10 @@ Users want to visually explore how their notes relate to each other (links, tags
 - Similarity edges (embedding kNN), NER/topic edges, or real-time graph streaming (WebSocket). These appear in Phase 2+.
 - Chunk/paragraph-level graphing; MVP is note-level only.
 - Cross-user graphs or public graph publishing.
+- Embedding indexing and semantic edges are deferred to TASK-13134.
+- Automatic background organization is deferred to TASK-13135.
+- Library-wide recurring themes are deferred to TASK-13136.
+- Saved graph views and layouts are deferred to TASK-13137.
 
 ## 4. Users and Use Cases
 
@@ -71,27 +75,20 @@ MVP includes:
 - Edge types: `manual` (explicit), `wikilink`, `backlink`, `tag_membership` (note↔tag), `source_membership` (note↔source).
 - Clique mode: Optional conversion of co-membership into note↔note edges (off by default in MVP).
 
-## 7a. Implementation Status (as of 2026-02-08)
+## 7a. Implementation Status (as of 2026-08-28)
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| DB table `note_edges` (V8→V9 migration) | **Done** | `ChaChaNotes_DB.py` — full schema, indexes, unique constraint |
-| DB methods (`create_manual_note_edge`, `delete_manual_note_edge`) | **Done** | Canonicalization, self-loop prevention, sync logging |
-| Pydantic schemas (`notes_graph.py`) | **Done** | All models defined: `NoteGraphRequest`, `NoteGraphResponse`, `NoteLinkCreate`, `GraphNode`, `GraphEdge`, enums |
-| Privilege catalog entries | **Done** | `notes.graph.read`, `.write`, `.suggest` in `privilege_catalog.yaml` |
-| Permission constants | **Done** | Exported from `permissions.py` |
-| Router registration in `main.py` | **Done** | Conditional inclusion in full app |
-| `POST /notes/{note_id}/links` | **Done** | Full implementation with RBAC, canonicalization, duplicate detection |
-| `DELETE /notes/links/{edge_id}` | **Stub** | Endpoint exists, returns placeholder response |
-| `GET /notes/graph` | **Stub** | Returns empty graph with limits metadata; no BFS/derived edges |
-| `GET /notes/{note_id}/neighbors` | **Stub** | Returns empty graph (radius=1 implied) |
-| BFS expansion / derived edge computation | **Not started** | Core graph generation logic |
-| Wikilink/backlink content parsing | **Not started** | No `[[id:UUID]]` or `[[Title]]` detection implemented |
-| Graph caching layer | **Not started** | No graph-specific cache |
-| Cytoscape format output | **Not started** | Schema exists but no formatter |
-| Tests | **Partial** | RBAC + link-create integration tests exist; no graph-generation tests |
+| Authoritative graph API | **Done** | Bounded default/Cytoscape responses, focused neighbors, filters, truncation, and revision-bound cursors |
+| Canonical manual links | **Done** | Owner-scoped create/list/detail/update/delete/restore through the Notes Sync mutation domain |
+| Derived projections | **Done** | Persisted wikilink/backlink projection, tag/source membership, rebuild readiness, and lifecycle hooks |
+| Cache and pruning | **Done** | Principal-free cache keys, deterministic expansion, degree/node/edge caps, and radius-2 limits |
+| Shared graph workspace | **Done** | One shared WebUI/extension Notes implementation with Canvas and accessible Relationships modes |
+| Reviewable suggestions | **Done** | Capability disclosure, bounded lexical grounding, one-attempt Jobs worker, provisional overlays, explicit decisions, and receipt-gated publication |
+| Authorization | **Done** | `notes.graph.read`, `notes.graph.write`, `notes.graph.suggest`, `notes` token scope, and owner/dataset isolation |
+| Verification | **Done** | Unit/integration/property/evaluation coverage plus desktop, 320px, high-scale, reflow, and extension browser gates |
 
-**Summary**: Plumbing (DB, schemas, auth, routing, manual link CRUD) is done. Core graph computation — BFS expansion, derived edge generation, pruning, pagination, caching — is entirely unimplemented.
+**Summary**: The bounded authoritative graph and reviewable suggestion rollout is implemented. Suggestions are provisional review state, never a new authoritative edge type. Accepting a suggestion delegates to the existing canonical link or keyword relationship coordinator.
 
 ## 8. Data Model Changes
 

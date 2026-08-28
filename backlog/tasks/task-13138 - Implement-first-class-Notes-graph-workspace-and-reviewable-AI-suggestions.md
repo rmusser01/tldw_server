@@ -1,118 +1,28 @@
 ---
 id: TASK-13138
 title: Implement first-class Notes graph workspace and reviewable AI suggestions
-status: In Progress
+status: Done
 assignee: []
-created_date: 2026-08-27 03:40
-updated_date: 2026-08-28 12:53
+created_date: '2026-08-27 03:40'
+updated_date: '2026-08-28 15:39'
 labels:
-- notes
-- knowledge-graph
-- webui
-- browser-extension
-- llm
-- jobs
+  - notes
+  - knowledge-graph
+  - webui
+  - browser-extension
+  - llm
+  - jobs
 dependencies: []
 references:
-- TASK-13134
-- TASK-13135
-- TASK-13136
-- TASK-13137
+  - TASK-13134
+  - TASK-13135
+  - TASK-13136
+  - TASK-13137
 documentation:
-- Docs/superpowers/specs/2026-08-26-notes-second-brain-graph-suggestions-design.md
-- Docs/superpowers/plans/2026-08-26-notes-second-brain-graph-suggestions.md
+  - >-
+    Docs/superpowers/specs/2026-08-26-notes-second-brain-graph-suggestions-design.md
+  - Docs/superpowers/plans/2026-08-26-notes-second-brain-graph-suggestions.md
 priority: high
-modified_files:
-- tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py
-- tldw_Server_API/app/core/DB_Management/chacha/note_graph_suggestion_models.py
-- tldw_Server_API/app/core/DB_Management/chacha/note_graph_suggestion_store.py
-- tldw_Server_API/app/core/DB_Management/chacha/note_store.py
-- tldw_Server_API/tests/DB_Management/test_chacha_migration_v64.py
-- tldw_Server_API/tests/DB_Management/test_chacha_postgres_migration_v64.py
-- tldw_Server_API/app/core/Notes_Graph/suggestion_content.py
-- tldw_Server_API/tests/Notes_Graph/unit/test_suggestion_content.py
-- tldw_Server_API/app/core/Notes_Graph/suggestion_retrieval.py
-- tldw_Server_API/tests/Notes_Graph/unit/test_suggestion_retrieval.py
-- tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_retrieval_backends.py
-- tldw_Server_API/app/core/Notes_Graph/suggestion_store.py
-- tldw_Server_API/tests/Notes_Graph/unit/test_suggestion_store.py
-- tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_lifecycle.py
-- tldw_Server_API/app/core/Notes_Graph/suggestion_capabilities.py
-- tldw_Server_API/app/core/Notes_Graph/suggestion_generation.py
-- tldw_Server_API/tests/Notes_Graph/unit/test_suggestion_capabilities.py
-- tldw_Server_API/tests/Notes_Graph/unit/test_suggestion_generation.py
-- tldw_Server_API/tests/LLM_Adapters/unit/test_notes_graph_suggestion_call_policy.py
-- tldw_Server_API/app/core/Chat/chat_service.py
-- tldw_Server_API/app/core/LLM_Calls/adapter_registry.py
-- tldw_Server_API/app/core/LLM_Calls/capability_registry.py
-- tldw_Server_API/app/core/LLM_Calls/providers/openai_adapter.py
-- tldw_Server_API/app/core/Jobs/manager.py
-- tldw_Server_API/app/core/Jobs/worker_sdk.py
-- tldw_Server_API/app/core/Notes_Graph/suggestion_jobs.py
-- tldw_Server_API/app/core/Notes_Graph/suggestion_maintenance.py
-- tldw_Server_API/app/core/Notes_Graph/suggestion_observability.py
-- tldw_Server_API/app/core/Notes_Graph/suggestion_service.py
-- tldw_Server_API/app/services/notes_graph_suggestions_maintenance.py
-- tldw_Server_API/app/services/notes_graph_suggestions_worker.py
-- tldw_Server_API/app/services/startup_study_privilege_jobs_pollers.py
-- tldw_Server_API/tests/Jobs/test_jobs_prune_postgres.py
-- tldw_Server_API/tests/Jobs/test_jobs_prune_sqlite.py
-- tldw_Server_API/tests/Jobs/test_worker_sdk.py
-- tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_jobs.py
-- tldw_Server_API/tests/Notes_Graph/unit/test_suggestion_observability.py
-- tldw_Server_API/tests/Services/test_notes_graph_suggestions_workers.py
-- tldw_Server_API/tests/Services/test_startup_study_privilege_jobs_pollers.py
-- tldw_Server_API/app/core/Jobs/operations/postgres/__init__.py
-- tldw_Server_API/app/core/Jobs/operations/postgres/idempotency.py
-- tldw_Server_API/app/core/Jobs/operations/sqlite/__init__.py
-- tldw_Server_API/app/core/Jobs/operations/sqlite/idempotency.py
-- tldw_Server_API/tests/Jobs/test_jobs_manager.py
-- tldw_Server_API/tests/Jobs/test_jobs_manager_postgres.py
-- apps/packages/ui/src/components/Notes/NotesGraphCanvas.tsx
-- apps/packages/ui/src/components/Notes/NotesGraphToolbar.tsx
-- apps/packages/ui/src/components/Notes/NotesGraphWorkspace.tsx
-- apps/packages/ui/src/components/Notes/NotesManagerPage.tsx
-- apps/packages/ui/src/components/Notes/notes-manager-utils.ts
-- apps/packages/ui/src/components/Notes/hooks/useNotesGraphAuthorityScope.ts
-- apps/packages/ui/src/components/Notes/__tests__/NotesGraphCanvas.graph-view.test.tsx
-- apps/packages/ui/src/components/Notes/__tests__/NotesGraphWorkspace.view-mode.test.tsx
-- apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage21.accessibility-modal-focus.test.tsx
-- apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage22.accessibility-regression.test.tsx
-- apps/packages/ui/src/components/Notes/__tests__/useNotesGraphAuthorityScope.test.tsx
-- apps/packages/ui/src/components/Notes/hooks/useNotesEditorState.tsx
-- apps/packages/ui/src/components/Notes/hooks/useNotesListManagement.tsx
-- apps/packages/ui/src/components/Notes/hooks/__tests__/useNotesListManagement.authority.test.tsx
-- apps/packages/ui/src/services/tldw/TldwAuth.ts
-- apps/packages/ui/src/services/__tests__/tldw-auth.logout.test.ts
-- apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage1.editor-reliability.test.tsx
-- apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage1.editor-reliability-followup.test.tsx
-- apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage12.recent-notes.test.tsx
-- apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage23.responsive-layout.test.tsx
-- apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage28.detail-loading-feedback.test.tsx
-- apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage46.list-reliability.test.tsx
-- apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage5.graph-panels.test.tsx
-- apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage6.manual-links.test.tsx
-- tldw_Server_API/app/api/v1/endpoints/notes_graph.py
-- tldw_Server_API/app/api/v1/endpoints/notes_graph_suggestions.py
-- tldw_Server_API/app/api/v1/schemas/notes_graph.py
-- tldw_Server_API/app/api/v1/schemas/notes_graph_suggestions.py
-- tldw_Server_API/app/core/Notes_Graph/formatters.py
-- tldw_Server_API/app/core/Notes_Graph/suggestion_api.py
-- tldw_Server_API/tests/AuthNZ_Unit/test_notes_graph_permissions_claims.py
-- tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_endpoints.py
-- tldw_Server_API/tests/Notes_Graph/unit/test_suggestion_api.py
-- apps/packages/ui/src/components/Notes/NotesGraphInspector.tsx
-- apps/packages/ui/src/components/Notes/NotesGraphRelationshipsView.tsx
-- apps/packages/ui/src/components/Notes/hooks/useNotesGraphSuggestions.tsx
-- apps/packages/ui/src/services/note-graph-suggestions.ts
-- apps/packages/ui/src/components/Notes/__tests__/NotesGraphInspector.suggestions.test.tsx
-- apps/packages/ui/src/components/Notes/__tests__/NotesGraphRelationshipsView.accessibility.test.tsx
-- apps/packages/ui/src/components/Notes/__tests__/NotesGraphWorkspace.axe.test.tsx
-- apps/packages/ui/src/components/Notes/__tests__/NotesGraphWorkspace.responsive.test.tsx
-- apps/packages/ui/src/components/Notes/__tests__/useNotesGraphSuggestions.test.tsx
-- apps/packages/ui/src/services/tldw/__tests__/note-graph-suggestions.test.ts
-- apps/packages/ui/src/assets/locale/en/option.json
-- apps/packages/ui/src/public/_locales/en/option.json
 ---
 
 ## Description
@@ -123,29 +33,29 @@ Add Graph as a first-class Notes view mode shared by the WebUI and browser exten
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Notes exposes Graph as a first-class view mode with a focused graph canvas, search, focus control, edge-type filters, layout/fit controls, and a responsive inspector rather than a routine modal.
-- [ ] #2 The graph initially focuses on the selected or most-recent note, supports bounded interactive expansion, and offers all-notes mode only below the configured cap.
-- [ ] #3 The inspector provides Details and Suggestions views, grounded evidence for both notes, Strong match/Possible match bands, accept/reject controls, provisional dashed edges, and tag suggestion chips.
-- [ ] #4 Canvas and Relationships views provide equivalent access to graph relationships; keyboard, focus, non-color state, narrow-screen, overflow, and long-content behavior are covered.
-- [ ] #5 Suggestion generation is exposed only beneath the existing Notes graph namespace and runs through Jobs with owner/dataset scoping, idempotent admission, max_retries=0, cancellation, bounded inputs/outputs, and no note content or credentials in Job payloads or logs.
-- [ ] #6 FTS searches the active owner-scoped Notes library and excludes only the selected note, trash, and directly linked note pairs; shared tag/source membership does not exclude candidates.
-- [ ] #7 One configured LLM invocation receives only a bounded allowlisted shortlist and tag catalog, treats notes as untrusted data, uses a strict output schema, and cannot introduce unknown note IDs, tools, provider settings, or unbounded fields.
-- [ ] #8 Suggestion runs and provisional suggestions are durable, paginated, retention bounded, and keyed by content fingerprints; evidence is stored as fingerprint-bound canonical-text offsets and reconstructed on read rather than copied into suggestion records.
-- [ ] #9 Relationship suggestions accept as ordinary undirected manual links with weight 1.0 and no model-selected semantic label/properties; tag suggestions use existing tag normalization and cap newly invented tags.
-- [ ] #10 Accept/reject operations are idempotent and race safe. Acceptance uses compare-and-swap plus the existing mutation path and a bounded reconciliation lease; unchanged-version rejection suppresses the same pair/tag across model or prompt versions.
-- [ ] #11 Accepting one tag does not stale sibling suggestions: title/body content fingerprints are independent of tag membership, and existing-tag acceptance resolves as an idempotent success.
-- [ ] #12 Request-time validation uses HTTP conflict/validation/rate-limit/readiness responses; failures after 202 are represented by durable run status, stable error codes, and sanitized user guidance.
-- [ ] #13 Generation validates the top-level response strictly, drops individually invalid or duplicate items, atomically persists the validated set, and records only aggregate validation counts; no invalid suggestion is exposed.
-- [ ] #14 Current projection freshness is verified or the run reports degraded/unavailable discovery rather than claiming a complete current-library search.
-- [ ] #15 A successful current-version run supersedes older pending suggestions while preserving current-version rejections; stale/obsolete records follow bounded retention and note/user deletion cascades.
-- [ ] #16 Backend unit/integration/property tests, frontend component/contract/accessibility tests, Playwright desktop/mobile visual checks, and an offline suggestion-quality evaluation corpus cover the approved design.
-- [ ] #17 Relevant Notes and API documentation is updated, touched code passes targeted tests and lint/type checks, and Bandit reports no new findings.
-- [ ] #18 A nested capability preflight discloses and ETag-binds the effective provider/model, endpoint-origin revision, local/remote/unknown data boundary, outbound data categories, permissions, and limits; the worker revalidates the same revision immediately before provider invocation.
-- [ ] #19 Publication verifies an immutable owner-scoped terminal Job receipt across active/archive Jobs and revalidates source/target freshness before a fenced ChaChaNotes activation transaction; abandoned active run states reconcile fail closed.
-- [ ] #20 Suggestion preprocessing enforces explicit pre-transfer UTF-8 byte limits for selected and candidate notes, reports oversized selected notes with actionable 422 guidance, and never silently truncates analyzed content.
-- [ ] #21 Suggestion reconciliation runs independently of provider-worker readiness, and acceptance uses a renewable lease plus an in-transaction coordinator guard that fences both canonical mutation and suggestion finalization.
-- [ ] #22 Static reset routing, loaded-graph search scope, paginated Relationships accessibility behavior, and the documented 90-day idempotency replay horizon are covered by contract tests.
-- [ ] #23 All mutating suggestion routes use durable operation receipts with request fingerprints and bounded replay envelopes; reset is revision-guarded so replay cannot delete later rejections.
+- [x] #1 Notes exposes Graph as a first-class view mode with a focused graph canvas, search, focus control, edge-type filters, layout/fit controls, and a responsive inspector rather than a routine modal.
+- [x] #2 The graph initially focuses on the selected or most-recent note, supports bounded interactive expansion, and offers all-notes mode only below the configured cap.
+- [x] #3 The inspector provides Details and Suggestions views, grounded evidence for both notes, Strong match/Possible match bands, accept/reject controls, provisional dashed edges, and tag suggestion chips.
+- [x] #4 Canvas and Relationships views provide equivalent access to graph relationships; keyboard, focus, non-color state, narrow-screen, overflow, and long-content behavior are covered.
+- [x] #5 Suggestion generation is exposed only beneath the existing Notes graph namespace and runs through Jobs with owner/dataset scoping, idempotent admission, max_retries=0, cancellation, bounded inputs/outputs, and no note content or credentials in Job payloads or logs.
+- [x] #6 FTS searches the active owner-scoped Notes library and excludes only the selected note, trash, and directly linked note pairs; shared tag/source membership does not exclude candidates.
+- [x] #7 One configured LLM invocation receives only a bounded allowlisted shortlist and tag catalog, treats notes as untrusted data, uses a strict output schema, and cannot introduce unknown note IDs, tools, provider settings, or unbounded fields.
+- [x] #8 Suggestion runs and provisional suggestions are durable, paginated, retention bounded, and keyed by content fingerprints; evidence is stored as fingerprint-bound canonical-text offsets and reconstructed on read rather than copied into suggestion records.
+- [x] #9 Relationship suggestions accept as ordinary undirected manual links with weight 1.0 and no model-selected semantic label/properties; tag suggestions use existing tag normalization and cap newly invented tags.
+- [x] #10 Accept/reject operations are idempotent and race safe. Acceptance uses compare-and-swap plus the existing mutation path and a bounded reconciliation lease; unchanged-version rejection suppresses the same pair/tag across model or prompt versions.
+- [x] #11 Accepting one tag does not stale sibling suggestions: title/body content fingerprints are independent of tag membership, and existing-tag acceptance resolves as an idempotent success.
+- [x] #12 Request-time validation uses HTTP conflict/validation/rate-limit/readiness responses; failures after 202 are represented by durable run status, stable error codes, and sanitized user guidance.
+- [x] #13 Generation validates the top-level response strictly, drops individually invalid or duplicate items, atomically persists the validated set, and records only aggregate validation counts; no invalid suggestion is exposed.
+- [x] #14 Current projection freshness is verified or the run reports degraded/unavailable discovery rather than claiming a complete current-library search.
+- [x] #15 A successful current-version run supersedes older pending suggestions while preserving current-version rejections; stale/obsolete records follow bounded retention and note/user deletion cascades.
+- [x] #16 Backend unit/integration/property tests, frontend component/contract/accessibility tests, Playwright desktop/mobile visual checks, and an offline suggestion-quality evaluation corpus cover the approved design.
+- [x] #17 Relevant Notes and API documentation is updated, touched code passes targeted tests and lint/type checks, and Bandit reports no new findings.
+- [x] #18 A nested capability preflight discloses and ETag-binds the effective provider/model, endpoint-origin revision, local/remote/unknown data boundary, outbound data categories, permissions, and limits; the worker revalidates the same revision immediately before provider invocation.
+- [x] #19 Publication verifies an immutable owner-scoped terminal Job receipt across active/archive Jobs and revalidates source/target freshness before a fenced ChaChaNotes activation transaction; abandoned active run states reconcile fail closed.
+- [x] #20 Suggestion preprocessing enforces explicit pre-transfer UTF-8 byte limits for selected and candidate notes, reports oversized selected notes with actionable 422 guidance, and never silently truncates analyzed content.
+- [x] #21 Suggestion reconciliation runs independently of provider-worker readiness, and acceptance uses a renewable lease plus an in-transaction coordinator guard that fences both canonical mutation and suggestion finalization.
+- [x] #22 Static reset routing, loaded-graph search scope, paginated Relationships accessibility behavior, and the documented 90-day idempotency replay horizon are covered by contract tests.
+- [x] #23 All mutating suggestion routes use durable operation receipts with request fingerprints and bounded replay envelopes; reset is revision-guarded so replay cannot delete later rejections.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -156,6 +66,7 @@ Execute the approved 12-task test-first plan in Docs/superpowers/plans/2026-08-2
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Deferred work is tracked separately: TASK-13134 embeddings and semantic edges; TASK-13135 automatic background organization; TASK-13136 library-wide recurring themes; TASK-13137 saved graph views/layouts. This task remains review-first and on-demand.
 
@@ -271,11 +182,18 @@ Task 11 Review Round 2/3 started from exact head 3cfd30f56a88ceeca6b98a379a02e38
 Task 11 Review Round 2/3 completed. RED: NotesGraphWorkspace.view-mode 21 passed / 4 expected failures, proving stale committed A inputs after controlled B/missing and same-ID A-to-B transitions. GREEN: focused 25/25; Task 11 105/105; Workspace + Stage 21/22 35/35; Task 9 client/hook 47/47. Pinned Prettier and zero-warning ESLint pass. TypeScript remains the exact inherited 315-line baseline with zero touched diagnostics. Selection is synchronously owned by authority plus controlled identity and validated against the current loaded graph; abandoned Suspense renders do not publish ownership. Backend, Task 12, dependencies/lockfiles, E2E servers, and unrelated Watchlists templates remain untouched.
 Task 11 Review Round 3/3 started from exact head 0b3c6768011cc3a7356367c62e46d4692cd00f4a. Scope is limited to authority-owning pending Canvas focus plus same-authority delivery and A-to-B discard regressions. Task 12, dependencies, lockfiles, E2E servers, and the two unrelated untracked Watchlists templates remain out of scope.
 Task 11 Review Round 3/3 completed. RED: NotesGraphWorkspace.view-mode 25 passed / 1 expected A-to-B same-ID deferred-focus failure. GREEN: focused 26/26; Task 11 106/106; Workspace + Stage 21/22 36/36. Pinned Prettier and zero-warning ESLint pass. TypeScript remains the exact inherited 315-line baseline with zero touched diagnostics. Deferred Canvas focus now stores authorityScope plus nodeId, delivers once only for an exact authority match, and discards A-owned focus after B commits. Backend, Task 12, dependencies/lockfiles, E2E servers, and unrelated Watchlists templates remain untouched.
+Task 12 implementation resumed directly from exact base adb4ebd833de37461234e969743fff55773f29b8. Scope is release tests/evaluation, shared route parity, deterministic WebUI/extension browser evidence, documentation, and cumulative security verification only. Strict RED must stop with NEEDS_CONTEXT before any production behavior edit; dependencies, lockfiles, deferred feature work, and the two unrelated Watchlists templates remain excluded.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+Task 12 completed from base adb4ebd833de37461234e969743fff55773f29b8. Release evidence includes privacy/observability and offline quality evaluation, shared route and real-ICU contracts, real WebUI Chromium E2E, controller-accepted deterministic MV3 extension E2E, documentation/mirrors, and cumulative security gates. The only production delta is the controller-authorized common:loading.title correction with a focused regression. Full evidence and all 23 AC/final-checklist mappings: .superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-12-report.md. Inherited records: backend 469/470 one unchanged delete-link copy failure; broad frontend 325/394 with 69 failures in 27 unchanged legacy files; extension whole-file 2/4 with both new Task 12 cases passing and two unchanged old selector failures; exact 315-line TypeScript baseline with zero touched diagnostics; stale Tags-help copy and missing glossary fixture. Deferred work remains TASK-13134, TASK-13135, TASK-13136, and TASK-13137. Task 12 commit subject: docs: complete Notes graph suggestions rollout (TASK-13138).
+
+Task 12 tracked file inventory: Docs/API/Notes_Graph_Suggestions.md; Docs/Code_Documentation/Data_Flow_Atlas.md; Docs/Product/Graphing-Notes-PRD.md; Docs/Published/Code_Documentation/Data_Flow_Atlas.md; Docs/Published/User_Guides/WebUI_Extension/Notes_Graph_Suggestions.md; Docs/User_Guides/WebUI_Extension/Notes_Graph_Suggestions.md; apps/extension/tests/e2e/notes-ux.spec.ts; apps/packages/ui/src/components/Notes/NotesGraphWorkspace.tsx; apps/packages/ui/src/components/Notes/__tests__/NotesGraphWorkspace.loading-i18n.test.tsx; apps/packages/ui/src/routes/__tests__/option-notes-route-identity.test.tsx; apps/tldw-frontend/e2e/workflows/notes-graph-suggestions.spec.ts; tldw_Server_API/app/core/Notes_Graph/README.md; tldw_Server_API/tests/Notes_Graph/evaluation/fixtures/suggestion_grounding_cases.json; tldw_Server_API/tests/Notes_Graph/evaluation/test_suggestion_privacy_observability_contract.py; tldw_Server_API/tests/Notes_Graph/evaluation/test_suggestion_quality_corpus.py; and this TASK-13138 record. Local ignored evidence: task-12-report.md, progress.md, and four Playwright screenshots.
+<!-- SECTION:NOTES:END -->
+
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implementation complete and locally verified across all 12 planned tasks. Task 12 adds deterministic release evidence and documentation, with one narrowly authorized loading-label localization fix. Focused Task 12 gates pass; cumulative inherited failures are documented and unchanged. No push, PR, merge, or branch finishing was performed. Before merge, the human requester must provide the required Change summary explaining what changed and why.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 <!-- SECTION:FINAL_SUMMARY:END -->
@@ -284,10 +202,10 @@ Task 11 Review Round 3/3 completed. RED: NotesGraphWorkspace.view-mode 25 passed
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
