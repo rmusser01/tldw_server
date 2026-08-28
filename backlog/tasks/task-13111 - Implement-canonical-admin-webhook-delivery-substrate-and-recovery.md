@@ -3,22 +3,23 @@ id: TASK-13111
 title: Implement canonical admin webhook delivery substrate and recovery
 status: In Progress
 assignee: []
-created_date: 2026-08-23 03:15
-updated_date: 2026-08-28 06:01
+created_date: '2026-08-23 03:15'
+updated_date: '2026-08-28 15:00'
 labels:
-- admin
-- webhooks
-- jobs
-- security
-- recovery
+  - admin
+  - webhooks
+  - jobs
+  - security
+  - recovery
 dependencies:
-- TASK-13014
+  - TASK-13014
 references:
-- https://github.com/rmusser01/tldw_server/pull/2806
-- https://github.com/rmusser01/tldw_server/pull/2828
+  - 'https://github.com/rmusser01/tldw_server/pull/2806'
+  - 'https://github.com/rmusser01/tldw_server/pull/2828'
 documentation:
-- Docs/Design/2026-07-12-canonical-admin-outgoing-webhooks.md
-- Docs/superpowers/plans/2026-08-23-canonical-admin-webhook-delivery-substrate.md
+  - Docs/Design/2026-07-12-canonical-admin-outgoing-webhooks.md
+  - >-
+    Docs/superpowers/plans/2026-08-23-canonical-admin-webhook-delivery-substrate.md
 priority: high
 ---
 
@@ -50,8 +51,10 @@ Implement upstream PR 2 from the approved canonical outgoing-webhook design. Del
 6. Run all four backend crash matrices, PostgreSQL-required, security, static, OpenAPI, and review gates.
 Detailed plan: Docs/superpowers/plans/2026-08-23-canonical-admin-webhook-delivery-substrate.md
 <!-- SECTION:PLAN:END -->
+
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 The initial draft was created from an earlier reviewed PR 1 head. Planning review identified and incorporated additive schema-extension readiness while preserving canonical schema version 1, durable disposition tokens and absolute not-before timestamps, per-attempt persisted request timeout, runtime heartbeat persistence, queued cancellation without a worker lease, infrastructure-only pre-attempt deferral, and persisted Jobs expired-lease/quarantine controls. Final gate audit added Jobs migration compatibility/parity coverage, exact synchronous-test replay/preflight/reservation ordering, immutable enqueue controls, and first-canonical-activity traceability.
 
@@ -63,6 +66,10 @@ The initial draft was created from an earlier reviewed PR 1 head. Planning revie
 
 2026-08-28: Final consistency review separated AuthNZ disposition acknowledgement from infrastructure/recovery no-ack defers, added their crash/reacquisition proof, and verified a later exact AuthNZ disposition is not blocked by historical defer evidence. Final focused re-review reported no findings.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+2026-08-28: PR 2 implementation baseline at 1ad2f1e5b30c49ea75396e4b713496b73e875fec completed. The scoped baseline suite collected 760 tests: 642 passed and 117 PostgreSQL-dependent tests skipped locally. The only sandbox failure was test_public_http_hop_uses_real_socket_without_following_redirect because the sandbox denied a 127.0.0.1 ephemeral bind; rerunning that exact test with host loopback permission passed (1 passed, 2 warnings). This is an environment-conditioned baseline pass, not a product failure.
+<!-- SECTION:NOTES:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed
