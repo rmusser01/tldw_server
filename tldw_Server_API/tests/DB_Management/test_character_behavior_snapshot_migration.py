@@ -737,6 +737,61 @@ def test_prompt_visible_image_and_pin_mutations_advance_and_rollback_history_fen
     db.close_connection()
 
 
+@pytest.mark.parametrize("mutation", ["add_metadata", "set_extra"])
+def test_caller_owned_metadata_fence_failure_propagates_and_rolls_back(
+    tmp_path: Path,
+    mutation: str,
+) -> None:
+    db = CharactersRAGDB(
+        db_path=str(tmp_path / f"character-metadata-fence-{mutation}.sqlite"),
+        client_id="metadata-fence-owner",
+    )
+    conversation_id = db.add_conversation(
+        {"character_id": 1, "title": "Metadata fence failure"}
+    )
+    assert conversation_id is not None
+    message_id = db.add_message(
+        {"conversation_id": conversation_id, "sender": "user", "content": "Pin me"}
+    )
+    assert message_id is not None
+
+    with db.transaction() as conn:
+        conn.execute(
+            "UPDATE conversations SET deleted = TRUE WHERE id = ?",
+            (conversation_id,),
+        )
+
+    with sqlite3.connect(db.db_path_str) as conn:
+        history_version = conn.execute(
+            "SELECT history_version FROM conversations WHERE id = ?",
+            (conversation_id,),
+        ).fetchone()[0]
+    assert db.get_message_metadata(message_id) is None
+
+    with pytest.raises(InputError, match="Cannot mutate message history"):
+        with db.transaction() as conn:
+            if mutation == "add_metadata":
+                db.add_message_metadata(
+                    message_id,
+                    extra={"pinned": True},
+                    conn=conn,
+                )
+            else:
+                db.set_message_metadata_extra(
+                    message_id,
+                    {"pinned": True},
+                    conn=conn,
+                )
+
+    assert db.get_message_metadata(message_id) is None
+    with sqlite3.connect(db.db_path_str) as conn:
+        assert conn.execute(
+            "SELECT history_version FROM conversations WHERE id = ?",
+            (conversation_id,),
+        ).fetchone()[0] == history_version
+    db.close_connection()
+
+
 def test_commit_false_image_append_retries_without_splitting_history_fence(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

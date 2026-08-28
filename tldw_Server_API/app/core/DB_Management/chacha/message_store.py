@@ -1566,6 +1566,8 @@ class MessageStore:
                     transaction_conn,
                 )
         except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
+            if conn is not None:
+                raise
             logger.warning(f"add_message_metadata failed for message {message_id}: {e}")
             return False
 
@@ -1697,6 +1699,8 @@ class MessageStore:
                     transaction_conn,
                 )
         except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
+            if conn is not None:
+                raise
             logger.warning(f"set_message_metadata_extra failed for {message_id}: {e}")
             return False
 
