@@ -121,10 +121,10 @@ class ConversationStore:
                     ).fetchone()
                     if locked is None:
                         return False
-                if self._db._CURRENT_SCHEMA_VERSION < 55:
+                if self._db._CURRENT_SCHEMA_VERSION < 64:
                     if expected_settings_version is not None:
                         raise ConflictError(
-                            "Conversation settings versioning is unavailable before schema v55.",
+                            "Conversation settings versioning is unavailable before schema v64.",
                             entity="conversation_settings",
                             entity_id=conversation_id,
                         )

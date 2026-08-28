@@ -1610,7 +1610,10 @@ def test_postgres_v64_contract_has_matching_constraints_indexes_and_initializer_
 
     backend = _PostgresRecordingBackend()
     db = _postgres_db(backend)
-    monkeypatch.setattr(db, "_get_schema_version_postgres", lambda conn: 63)
+    monkeypatch.setattr(db, "_get_schema_version_postgres", lambda conn, **kwargs: 63)
+    monkeypatch.setattr(db, "_verify_note_attachment_schema_postgres", lambda conn: None)
+    monkeypatch.setattr(db, "_verify_note_task_schema_postgres", lambda conn: None)
+    monkeypatch.setattr(db, "_verify_notes_moodboard_studio_schema_postgres", lambda conn: None)
     monkeypatch.setattr(db, "_ensure_postgres_fts", lambda conn: None)
     applied: list[str] = []
 
@@ -1659,7 +1662,10 @@ def test_postgres_v64_checkpoint_failure_uses_outer_transaction_rollback(
 ) -> None:
     backend = _PostgresRecordingBackend()
     db = _postgres_db(backend)
-    monkeypatch.setattr(db, "_get_schema_version_postgres", lambda conn: 63)
+    monkeypatch.setattr(db, "_get_schema_version_postgres", lambda conn, **kwargs: 63)
+    monkeypatch.setattr(db, "_verify_note_attachment_schema_postgres", lambda conn: None)
+    monkeypatch.setattr(db, "_verify_note_task_schema_postgres", lambda conn: None)
+    monkeypatch.setattr(db, "_verify_notes_moodboard_studio_schema_postgres", lambda conn: None)
 
     def _fail_checkpoint(_self: CharactersRAGDB, stage: str) -> None:
         assert stage == "schema-created"
