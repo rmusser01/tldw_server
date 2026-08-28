@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -13,10 +15,22 @@ from tldw_Server_API.app.core.Character_Chat.character_behavior_snapshot import 
     BehaviorSnapshotV1,
     build_behavior_snapshot,
 )
-from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+from tldw_Server_API.app.core.DB_Management.backends.base import (
+    BackendType,
+    QueryResult,
+)
+from tldw_Server_API.app.core.DB_Management.backends.base import (
+    DatabaseError as BackendDatabaseError,
+)
+from tldw_Server_API.app.core.DB_Management.chacha.conversation_resume_store import (
+    ConversationResumeStore,
+)
+from tldw_Server_API.app.core.DB_Management.chacha.message_store import MessageStore
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    BackendConnectionWrapper,
     CharactersRAGDB,
     CharactersRAGDBError,
+    ConflictError,
     InputError,
 )
 
@@ -189,7 +203,9 @@ def test_sqlite_v63_to_v64_migrates_catalog_and_legacy_reads_missing(
             "AND name = 'conversation_behavior_snapshots'"
         ).fetchone()["sql"].lower()
         assert "status in ('valid','missing','invalid')" in table_sql
+        assert "schema_version is not null" in table_sql
         assert "schema_version >= 1" in table_sql
+        assert "size_bytes is not null" in table_sql
         assert "size_bytes >= 1" in table_sql
         assert "canonical_json is null" in table_sql
         assert "digest is null" in table_sql
@@ -214,7 +230,7 @@ def test_sqlite_v64_constraints_enforce_one_to_one_status_body_digest_and_versio
     db_path = tmp_path / "character-behavior-constraints.sqlite"
     db = CharactersRAGDB(db_path=str(db_path), client_id="constraint-owner")
     conversation_ids = []
-    for suffix in range(7):
+    for suffix in range(20):
         conversation_id = db.add_conversation(
             {
                 "id": f"constraint-conversation-{suffix}",
@@ -298,6 +314,46 @@ def test_sqlite_v64_constraints_enforce_one_to_one_status_body_digest_and_versio
                 (conversation_ids[6],),
             )
 
+        valid_values: dict[str, Any] = {
+            "schema_version": snapshot.schema_version,
+            "canonical_json": canonical_json,
+            "digest": snapshot.digest,
+            "size_bytes": snapshot.size_bytes,
+        }
+        for offset, field in enumerate(valid_values, start=7):
+            values = dict(valid_values)
+            values[field] = None
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    "INSERT INTO conversation_behavior_snapshots "
+                    "(conversation_id, status, schema_version, canonical_json, digest, size_bytes) "
+                    "VALUES (?, 'valid', ?, ?, ?, ?)",
+                    (
+                        conversation_ids[offset],
+                        values["schema_version"],
+                        values["canonical_json"],
+                        values["digest"],
+                        values["size_bytes"],
+                    ),
+                )
+
+        nonvalid_values = {
+            "schema_version": snapshot.schema_version,
+            "canonical_json": canonical_json,
+            "digest": snapshot.digest,
+            "size_bytes": snapshot.size_bytes,
+        }
+        conversation_offset = 11
+        for status in ("missing", "invalid"):
+            for field, value in nonvalid_values.items():
+                with pytest.raises(sqlite3.IntegrityError):
+                    conn.execute(
+                        "INSERT INTO conversation_behavior_snapshots "
+                        f"(conversation_id, status, {field}) VALUES (?, ?, ?)",  # nosec B608
+                        (conversation_ids[conversation_offset], status, value),
+                    )
+                conversation_offset += 1
+
 
 def test_sqlite_v64_checkpoint_failure_rolls_back_all_schema_changes(
     tmp_path: Path,
@@ -327,6 +383,59 @@ def test_sqlite_v64_checkpoint_failure_rolls_back_all_schema_changes(
         assert "history_version" not in {
             row[1] for row in conn.execute("PRAGMA table_info('conversations')")
         }
+        assert "settings_version" not in {
+            row[1] for row in conn.execute("PRAGMA table_info('conversation_settings')")
+        }
+
+
+@pytest.mark.parametrize("drift_object", ["table", "index", "column"])
+def test_sqlite_v64_rejects_partial_preexisting_schema_and_preserves_v63(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    drift_object: str,
+) -> None:
+    db_path = tmp_path / f"character-behavior-drift-{drift_object}.sqlite"
+    _create_v63_legacy_database(db_path, monkeypatch)
+
+    with sqlite3.connect(db_path) as conn:
+        if drift_object == "table":
+            conn.execute(
+                """
+                CREATE TABLE conversation_behavior_snapshots(
+                  conversation_id TEXT PRIMARY KEY,
+                  status TEXT NOT NULL,
+                  schema_version INTEGER,
+                  canonical_json TEXT,
+                  digest TEXT,
+                  size_bytes INTEGER,
+                  created_at DATETIME
+                )
+                """
+            )
+        elif drift_object == "index":
+            conn.execute(
+                "CREATE INDEX idx_conversation_behavior_snapshots_status "
+                "ON conversations(title)"
+            )
+        else:
+            conn.execute(
+                "ALTER TABLE conversations ADD COLUMN history_version INTEGER DEFAULT 7"
+            )
+
+    with pytest.raises(CharactersRAGDBError):
+        migrated = CharactersRAGDB(db_path=str(db_path), client_id="drift-owner")
+        migrated.close_connection()
+
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute(
+            "SELECT version FROM db_schema_version WHERE schema_name = ?",
+            (CharactersRAGDB._SCHEMA_NAME,),
+        ).fetchone()[0] == 63
+        if drift_object != "table":
+            assert conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' "
+                "AND name = 'conversation_behavior_snapshots'"
+            ).fetchone() is None
         assert "settings_version" not in {
             row[1] for row in conn.execute("PRAGMA table_info('conversation_settings')")
         }
@@ -373,6 +482,51 @@ def test_snapshot_store_uses_canonical_authority_and_rejects_incoherent_values(
 
     assert db.get_conversation_behavior_snapshot(second_conversation)["status"] == "missing"
     db.close_connection()
+
+
+@pytest.mark.parametrize(
+    ("field", "tampered_value"),
+    [
+        ("canonical_json", "{}"),
+        ("digest", "sha256:" + ("0" * 64)),
+        ("size_bytes", 1),
+        ("schema_version", 99),
+    ],
+)
+def test_snapshot_store_fails_closed_on_persisted_authority_tamper(
+    tmp_path: Path,
+    field: str,
+    tampered_value: Any,
+) -> None:
+    db_path = tmp_path / f"character-behavior-tamper-{field}.sqlite"
+    db = CharactersRAGDB(db_path=str(db_path), client_id="tamper-owner")
+    conversation_id = db.add_conversation(
+        {"character_id": 1, "title": f"Tampered {field}"}
+    )
+    assert conversation_id is not None
+    with db.transaction() as conn:
+        db.put_behavior_snapshot(conversation_id, _snapshot(), conn=conn)
+    db.close_connection()
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("PRAGMA ignore_check_constraints = ON")
+        conn.execute(
+            f"UPDATE conversation_behavior_snapshots SET {field} = ? WHERE conversation_id = ?",  # nosec B608
+            (tampered_value, conversation_id),
+        )
+
+    reopened = CharactersRAGDB(db_path=str(db_path), client_id="tamper-owner")
+    stored = reopened.get_conversation_behavior_snapshot(conversation_id)
+    assert stored == {
+        "status": "invalid",
+        "schema_version": None,
+        "canonical_json": None,
+        "digest": None,
+        "size_bytes": None,
+        "created_at": None,
+        "payload": None,
+    }
+    reopened.close_connection()
 
 
 def test_caller_owned_creation_transaction_rolls_back_conversation_snapshot_and_message(
@@ -520,6 +674,113 @@ def test_message_mutations_advance_history_once_and_rollback_with_caller_connect
     db.close_connection()
 
 
+def test_prompt_visible_image_and_pin_mutations_advance_and_rollback_history_fence(
+    tmp_path: Path,
+) -> None:
+    db = CharactersRAGDB(
+        db_path=str(tmp_path / "character-history-prompt-visible.sqlite"),
+        client_id="prompt-visible-owner",
+    )
+    conversation_id = db.add_conversation(
+        {"character_id": 1, "title": "Prompt-visible mutations"}
+    )
+    assert conversation_id is not None
+    message_id = db.add_message(
+        {"conversation_id": conversation_id, "sender": "user", "content": "See this"}
+    )
+    assert message_id is not None
+    assert db.get_roleplay_resume_state(conversation_id)["history_version"] == 2
+
+    assert db.append_message_image(message_id, b"first-image", "image/png") == 0
+    assert db.get_roleplay_resume_state(conversation_id)["history_version"] == 3
+
+    with pytest.raises(RuntimeError, match="rollback image"):
+        with db.transaction() as conn:
+            assert db.append_message_image(
+                message_id,
+                b"rolled-back-image",
+                "image/png",
+                conn=conn,
+            ) == 1
+            assert db.get_roleplay_resume_state(conversation_id, conn=conn)["history_version"] == 4
+            raise RuntimeError("rollback image")
+
+    assert len(db.get_message_images(message_id)) == 1
+    assert db.get_roleplay_resume_state(conversation_id)["history_version"] == 3
+
+    assert db.set_message_metadata_extra(
+        message_id,
+        {"pinned": True},
+        conn=None,
+    )
+    assert db.get_roleplay_resume_state(conversation_id)["history_version"] == 4
+    assert db.set_message_metadata_extra(message_id, {"pinned": True})
+    assert db.get_roleplay_resume_state(conversation_id)["history_version"] == 4
+
+    with pytest.raises(RuntimeError, match="rollback pin"):
+        with db.transaction() as conn:
+            assert db.set_message_metadata_extra(
+                message_id,
+                {"pinned": False},
+                conn=conn,
+            )
+            assert db.get_roleplay_resume_state(conversation_id, conn=conn)["history_version"] == 5
+            raise RuntimeError("rollback pin")
+
+    metadata = db.get_message_metadata(message_id)
+    assert metadata is not None
+    assert metadata["extra"]["pinned"] is True
+    assert db.get_roleplay_resume_state(conversation_id)["history_version"] == 4
+
+    assert db.set_message_metadata_extra("missing-message", {"pinned": True}) is False
+    assert db.get_roleplay_resume_state(conversation_id)["history_version"] == 4
+    db.close_connection()
+
+
+def test_commit_false_image_append_retries_without_splitting_history_fence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db = CharactersRAGDB(
+        db_path=str(tmp_path / "character-history-image-retry.sqlite"),
+        client_id="image-retry-owner",
+    )
+    conversation_id = db.add_conversation(
+        {"character_id": 1, "title": "Transactional image retry"}
+    )
+    assert conversation_id is not None
+    message_id = db.add_message(
+        {"conversation_id": conversation_id, "sender": "user", "content": "Retry"}
+    )
+    assert message_id is not None
+
+    original_execute_query = db.execute_query
+    conflicts = 0
+
+    def _flaky_execute_query(query: str, *args: Any, **kwargs: Any) -> Any:
+        nonlocal conflicts
+        if "INSERT INTO message_images" in query and conflicts == 0:
+            conflicts += 1
+            raise sqlite3.IntegrityError(
+                "UNIQUE constraint failed: message_images.message_id, message_images.position"
+            )
+        return original_execute_query(query, *args, **kwargs)
+
+    monkeypatch.setattr(db, "execute_query", _flaky_execute_query)
+    with db.transaction():
+        assert db.append_message_image(
+            message_id,
+            b"retried-image",
+            "image/png",
+            commit=False,
+        ) == 0
+
+    assert conflicts == 1
+    assert len(db.get_message_images(message_id)) == 1
+    assert db.get_roleplay_resume_state(conversation_id)["history_version"] == 3
+    db.close_connection()
+
+
 class _PostgresTransaction:
     def __init__(self, backend: _PostgresRecordingBackend) -> None:
         self.backend = backend
@@ -540,11 +801,12 @@ class _PostgresTransaction:
 class _PostgresRecordingBackend:
     backend_type = BackendType.POSTGRESQL
 
-    def __init__(self) -> None:
+    def __init__(self, *, drift_object: str | None = None) -> None:
         self._pending: list[str] = []
         self.committed_statements: list[str] = []
         self.rolled_back = False
         self.schema_version = 63
+        self.drift_object = drift_object
 
     def transaction(self) -> _PostgresTransaction:
         return _PostgresTransaction(self)
@@ -556,6 +818,14 @@ class _PostgresRecordingBackend:
         self._pending.append(str(statement))
         normalized = " ".join(str(statement).lower().split())
         params = args[0] if args else None
+        drift_fragments = {
+            "table": "create table conversation_behavior_snapshots",
+            "index": "create index idx_conversation_behavior_snapshots_status",
+            "column": "alter table conversations add column history_version",
+        }
+        drift_fragment = drift_fragments.get(self.drift_object or "")
+        if drift_fragment and drift_fragment in normalized and "if not exists" not in normalized:
+            raise BackendDatabaseError(f"pre-existing PostgreSQL {self.drift_object}")
         if normalized.startswith("update db_schema_version set version = %s"):
             if params == (64, CharactersRAGDB._SCHEMA_NAME, 63) and self.schema_version == 63:
                 self.schema_version = 64
@@ -573,6 +843,267 @@ def _postgres_db(backend: _PostgresRecordingBackend) -> CharactersRAGDB:
     return db
 
 
+class _PostgresStoreBackend:
+    backend_type = BackendType.POSTGRESQL
+
+    def __init__(self, *, message_insert_error: str | None = None) -> None:
+        self.conversation_id = "postgres-store-conversation"
+        self.history_version = 1
+        self.message_insert_error = message_insert_error
+        self.messages: dict[str, dict[str, Any]] = {}
+        self.images: list[tuple[str, int, bytes, str]] = []
+        self.metadata: dict[str, dict[str, Any]] = {}
+        self.snapshot_row: dict[str, Any] | None = None
+        self.executed: list[tuple[str, tuple[Any, ...]]] = []
+
+    @staticmethod
+    def _result(rows: list[dict[str, Any]] | None = None, *, rowcount: int = 0) -> QueryResult:
+        resolved_rows = rows or []
+        description = [(key,) for key in resolved_rows[0]] if resolved_rows else None
+        return QueryResult(rows=resolved_rows, rowcount=rowcount, description=description)
+
+    def execute(
+        self,
+        statement: str,
+        params: tuple[Any, ...] | None = None,
+        **_kwargs: Any,
+    ) -> QueryResult:
+        normalized = " ".join(str(statement).lower().split())
+        values = tuple(params or ())
+        self.executed.append((normalized, values))
+
+        if normalized.startswith("insert into conversation_behavior_snapshots"):
+            self.snapshot_row = {
+                "status": "valid",
+                "schema_version": values[1],
+                "canonical_json": values[2],
+                "digest": values[3],
+                "size_bytes": values[4],
+                "created_at": "2026-08-28T00:00:00Z",
+            }
+            return self._result(rowcount=1)
+        if "from conversation_behavior_snapshots" in normalized:
+            return self._result(
+                [dict(self.snapshot_row)] if self.snapshot_row is not None else [],
+                rowcount=1 if self.snapshot_row is not None else 0,
+            )
+        if "select c.history_version, cs.settings_json, cs.settings_version" in normalized:
+            return self._result(
+                [
+                    {
+                        "history_version": self.history_version,
+                        "settings_json": json.dumps({"temperature": 0.2}),
+                        "settings_version": 1,
+                    }
+                ],
+                rowcount=1,
+            )
+        if normalized.startswith("select 1 from conversations"):
+            return self._result([{"present": 1}], rowcount=1)
+        if normalized.startswith("insert into messages "):
+            if self.message_insert_error is not None:
+                raise BackendDatabaseError(self.message_insert_error)
+            self.messages[str(values[0])] = {
+                "conversation_id": str(values[1]),
+                "content": values[4],
+                "version": int(values[11]),
+                "deleted": bool(values[12]),
+            }
+            return self._result(rowcount=1)
+        if normalized.startswith("select coalesce(max(position), -1) + 1"):
+            return self._result([{"next_position": len(self.images)}], rowcount=1)
+        if normalized.startswith("insert into message_images"):
+            self.images.append(
+                (str(values[0]), int(values[1]), bytes(values[2]), str(values[3]))
+            )
+            return self._result(rowcount=1)
+        if "left join message_metadata" in normalized:
+            message_id = str(values[0])
+            message = self.messages.get(message_id)
+            if message is None:
+                return self._result()
+            metadata = self.metadata.get(message_id)
+            return self._result(
+                [
+                    {
+                        "conversation_id": message["conversation_id"],
+                        "metadata_message_id": message_id if metadata is not None else None,
+                        "tool_calls_json": metadata.get("tool_calls_json") if metadata else None,
+                        "extra_json": metadata.get("extra_json") if metadata else None,
+                    }
+                ],
+                rowcount=1,
+            )
+        if normalized.startswith("insert into message_metadata"):
+            self.metadata[str(values[0])] = {
+                "tool_calls_json": values[1],
+                "extra_json": values[2],
+                "last_modified": "2026-08-28T00:00:00Z",
+            }
+            return self._result(rowcount=1)
+        if normalized.startswith("select tool_calls_json, extra_json, last_modified"):
+            metadata = self.metadata.get(str(values[0]))
+            return self._result([dict(metadata)] if metadata else [], rowcount=1 if metadata else 0)
+        if normalized.startswith("select version, deleted from messages"):
+            message = self.messages.get(str(values[0]))
+            return self._result(
+                [
+                    {
+                        "version": message["version"],
+                        "deleted": message["deleted"],
+                    }
+                ]
+                if message
+                else [],
+                rowcount=1 if message else 0,
+            )
+        if normalized.startswith("select conversation_id from messages"):
+            message = self.messages.get(str(values[0]))
+            return self._result(
+                [{"conversation_id": message["conversation_id"]}] if message else [],
+                rowcount=1 if message else 0,
+            )
+        if normalized.startswith("update messages set"):
+            message_id = str(values[-2])
+            message = self.messages[message_id]
+            if "deleted = true" in normalized:
+                message["deleted"] = True
+                message["version"] = int(values[1])
+            else:
+                if "content = %s" in normalized:
+                    message["content"] = values[0]
+                message["version"] = int(values[-4])
+            return self._result(rowcount=1)
+        if normalized.startswith("update conversations set history_version"):
+            self.history_version += 1
+            return self._result(rowcount=1)
+
+        raise AssertionError(f"Unexpected PostgreSQL store SQL: {normalized}")
+
+
+def _postgres_store_db(
+    backend: _PostgresStoreBackend,
+) -> tuple[CharactersRAGDB, BackendConnectionWrapper]:
+    db = CharactersRAGDB.__new__(CharactersRAGDB)
+    db._backend = backend
+    db._uses_shared_content_backend = False
+    db._backend_refresh_suspended = False
+    db._local = SimpleNamespace()
+    db.client_id = "postgres-store-owner"
+    db.db_path_str = "postgresql://recording"
+    db.message_store = MessageStore(db)
+    db.conversation_resume_store = ConversationResumeStore(db)
+    db._ensure_message_metadata_table = lambda: None
+    wrapper = BackendConnectionWrapper(db, object(), backend)
+    return db, wrapper
+
+
+def test_postgres_backend_wrapper_roundtrips_resume_store_contract() -> None:
+    backend = _PostgresStoreBackend()
+    db, wrapper = _postgres_store_db(backend)
+    snapshot = _snapshot()
+
+    db.conversation_resume_store.put_behavior_snapshot(
+        backend.conversation_id,
+        snapshot,
+        conn=wrapper,
+    )
+    state = db.conversation_resume_store.get_roleplay_resume_state(
+        backend.conversation_id,
+        conn=wrapper,
+    )
+
+    assert state["history_version"] == 1
+    assert state["settings_version"] == 1
+    assert state["behavior_snapshot"]["status"] == "valid"
+    assert state["behavior_snapshot"]["canonical_json"] == snapshot.canonical_bytes.decode()
+    assert state["behavior_snapshot"]["payload"] == snapshot.payload
+
+
+def test_postgres_backend_wrapper_caller_owned_message_mutations_advance_once() -> None:
+    backend = _PostgresStoreBackend()
+    db, wrapper = _postgres_store_db(backend)
+    store = db.message_store
+
+    message_id = store.add_message(
+        {
+            "id": "postgres-message",
+            "conversation_id": backend.conversation_id,
+            "sender": "user",
+            "content": "Original",
+        },
+        conn=wrapper,
+    )
+    assert message_id == "postgres-message"
+    assert backend.history_version == 2
+
+    assert store.update_message(
+        message_id,
+        {"content": "Edited"},
+        1,
+        conn=wrapper,
+    )
+    assert backend.history_version == 3
+
+    assert store.append_message_image(
+        message_id,
+        b"postgres-image",
+        "image/png",
+        conn=wrapper,
+    ) == 0
+    assert backend.history_version == 4
+
+    assert store.set_message_metadata_extra(
+        message_id,
+        {"pinned": True},
+        conn=wrapper,
+    )
+    assert backend.history_version == 5
+    assert store.set_message_metadata_extra(
+        message_id,
+        {"pinned": True},
+        conn=wrapper,
+    )
+    assert backend.history_version == 5
+
+    assert store.soft_delete_message(message_id, 2, conn=wrapper)
+    assert backend.history_version == 6
+
+
+@pytest.mark.parametrize("caller_owned", [False, True])
+@pytest.mark.parametrize(
+    ("backend_message", "expected_error"),
+    [
+        ("duplicate key value violates unique constraint messages_pkey", ConflictError),
+        ("insert violates foreign key constraint messages_conversation_id_fkey", CharactersRAGDBError),
+    ],
+)
+def test_postgres_backend_wrapper_add_message_normalizes_backend_errors(
+    caller_owned: bool,
+    backend_message: str,
+    expected_error: type[Exception],
+) -> None:
+    backend = _PostgresStoreBackend(message_insert_error=backend_message)
+    db, wrapper = _postgres_store_db(backend)
+    if not caller_owned:
+        db.transaction = lambda: nullcontext(wrapper)
+
+    kwargs = {"conn": wrapper} if caller_owned else {}
+    with pytest.raises(expected_error):
+        db.message_store.add_message(
+            {
+                "id": "failed-postgres-message",
+                "conversation_id": backend.conversation_id,
+                "sender": "user",
+                "content": "Failure",
+            },
+            **kwargs,
+        )
+
+    assert backend.messages == {}
+    assert backend.history_version == 1
+
+
 def test_postgres_v64_contract_has_matching_constraints_indexes_and_initializer_route(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -580,13 +1111,19 @@ def test_postgres_v64_contract_has_matching_constraints_indexes_and_initializer_
     assert "conversation_id text primary key" in ddl
     assert "references conversations(id) on delete cascade" in ddl
     assert "status in ('valid','missing','invalid')" in ddl
+    assert "schema_version is not null" in ddl
     assert "schema_version >= 1" in ddl
+    assert "size_bytes is not null" in ddl
     assert "digest ~ '^sha256:[0-9a-f]{64}$'" in ddl
     assert "octet_length(canonical_json) = size_bytes" in ddl
     assert "canonical_json is null" in ddl
-    assert "alter table conversations add column if not exists history_version" in ddl
+    assert "create table if not exists conversation_behavior_snapshots" not in ddl
+    assert "create index if not exists idx_conversation_behavior_snapshots_status" not in ddl
+    assert "alter table conversations add column if not exists history_version" not in ddl
+    assert "alter table conversations add column history_version" in ddl
     assert "check (history_version >= 1)" in ddl
-    assert "alter table conversation_settings add column if not exists settings_version" in ddl
+    assert "alter table conversation_settings add column if not exists settings_version" not in ddl
+    assert "alter table conversation_settings add column settings_version" in ddl
     assert "check (settings_version >= 1)" in ddl
     assert "idx_conversation_behavior_snapshots_status" in ddl
     assert "idx_conversation_behavior_snapshots_digest" in ddl
@@ -619,6 +1156,22 @@ def test_postgres_v64_migration_executes_exact_version_advance() -> None:
         "where schema_name = %s and version = %s returning version" in " ".join(sql.lower().split())
         for sql in backend.committed_statements
     )
+
+
+@pytest.mark.parametrize("drift_object", ["table", "index", "column"])
+def test_postgres_v64_rejects_partial_preexisting_schema_and_preserves_v63(
+    drift_object: str,
+) -> None:
+    backend = _PostgresRecordingBackend(drift_object=drift_object)
+    db = _postgres_db(backend)
+
+    with pytest.raises(BackendDatabaseError, match="pre-existing PostgreSQL"):
+        with backend.transaction() as conn:
+            db._migrate_from_v63_to_v64_postgres(conn)
+
+    assert backend.rolled_back is True
+    assert backend.schema_version == 63
+    assert backend.committed_statements == []
 
 
 def test_postgres_v64_checkpoint_failure_uses_outer_transaction_rollback(

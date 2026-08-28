@@ -7202,7 +7202,7 @@ $shared_workspace_chat_v61_verify$;
 """
 
     _MIGRATION_SQL_V63_TO_V64 = """
-CREATE TABLE IF NOT EXISTS conversation_behavior_snapshots(
+CREATE TABLE conversation_behavior_snapshots(
   conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
   status TEXT NOT NULL CHECK(status IN ('valid','missing','invalid')),
   schema_version INTEGER,
@@ -7213,12 +7213,14 @@ CREATE TABLE IF NOT EXISTS conversation_behavior_snapshots(
   CHECK(
     (
       status = 'valid'
+      AND schema_version IS NOT NULL
       AND schema_version >= 1
       AND canonical_json IS NOT NULL
       AND digest IS NOT NULL
       AND length(digest) = 71
       AND substr(digest, 1, 7) = 'sha256:'
       AND substr(digest, 8) NOT GLOB '*[^0-9a-f]*'
+      AND size_bytes IS NOT NULL
       AND size_bytes >= 1
       AND length(CAST(canonical_json AS BLOB)) = size_bytes
     )
@@ -7232,9 +7234,9 @@ CREATE TABLE IF NOT EXISTS conversation_behavior_snapshots(
     )
   )
 );
-CREATE INDEX IF NOT EXISTS idx_conversation_behavior_snapshots_status
+CREATE INDEX idx_conversation_behavior_snapshots_status
   ON conversation_behavior_snapshots(status);
-CREATE INDEX IF NOT EXISTS idx_conversation_behavior_snapshots_digest
+CREATE INDEX idx_conversation_behavior_snapshots_digest
   ON conversation_behavior_snapshots(digest);
 ALTER TABLE conversations
   ADD COLUMN history_version INTEGER NOT NULL DEFAULT 1 CHECK(history_version >= 1);
@@ -7248,7 +7250,7 @@ UPDATE db_schema_version
 """
 
     _MIGRATION_SQL_V63_TO_V64_POSTGRES = """
-CREATE TABLE IF NOT EXISTS conversation_behavior_snapshots(
+CREATE TABLE conversation_behavior_snapshots(
   conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
   status TEXT NOT NULL CHECK(status IN ('valid','missing','invalid')),
   schema_version INTEGER,
@@ -7259,9 +7261,12 @@ CREATE TABLE IF NOT EXISTS conversation_behavior_snapshots(
   CHECK(
     (
       status = 'valid'
+      AND schema_version IS NOT NULL
       AND schema_version >= 1
       AND canonical_json IS NOT NULL
+      AND digest IS NOT NULL
       AND digest ~ '^sha256:[0-9a-f]{64}$'
+      AND size_bytes IS NOT NULL
       AND size_bytes >= 1
       AND octet_length(canonical_json) = size_bytes
     )
@@ -7275,15 +7280,15 @@ CREATE TABLE IF NOT EXISTS conversation_behavior_snapshots(
     )
   )
 );
-CREATE INDEX IF NOT EXISTS idx_conversation_behavior_snapshots_status
+CREATE INDEX idx_conversation_behavior_snapshots_status
   ON conversation_behavior_snapshots(status);
-CREATE INDEX IF NOT EXISTS idx_conversation_behavior_snapshots_digest
+CREATE INDEX idx_conversation_behavior_snapshots_digest
   ON conversation_behavior_snapshots(digest);
 ALTER TABLE conversations
-  ADD COLUMN IF NOT EXISTS history_version INTEGER NOT NULL DEFAULT 1
+  ADD COLUMN history_version INTEGER NOT NULL DEFAULT 1
   CHECK (history_version >= 1);
 ALTER TABLE conversation_settings
-  ADD COLUMN IF NOT EXISTS settings_version INTEGER NOT NULL DEFAULT 1
+  ADD COLUMN settings_version INTEGER NOT NULL DEFAULT 1
   CHECK (settings_version >= 1);
 
 UPDATE db_schema_version

@@ -7,6 +7,9 @@ from contextlib import nullcontext
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
+from tldw_Server_API.app.core.DB_Management.backends.base import (
+    DatabaseError as BackendDatabaseError,
+)
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     _CHACHA_NONCRITICAL_EXCEPTIONS,
     BackendType,
@@ -223,6 +226,15 @@ class MessageStore:
                     entity_id=msg_id,
                 ) from e
             raise CharactersRAGDBError(f"Database integrity error adding message: {e}") from e  # noqa: TRY003
+        except BackendDatabaseError as e:
+            error_text = str(e).lower()
+            if "duplicate key" in error_text or "unique constraint" in error_text:
+                raise ConflictError(  # noqa: TRY003
+                    f"Message with ID '{msg_id}' already exists.",
+                    entity="messages",
+                    entity_id=msg_id,
+                ) from e
+            raise CharactersRAGDBError(f"Database error adding message: {e}") from e  # noqa: TRY003
         except InputError:
             raise
         except CharactersRAGDBError as e:
@@ -271,6 +283,7 @@ class MessageStore:
         mime_type: str,
         *,
         commit: bool = True,
+        conn: Any | None = None,
     ) -> int:
         """Append one image to a message after the current maximum image position."""
         if isinstance(image_bytes, memoryview):
@@ -291,31 +304,48 @@ class MessageStore:
                 f"Message image attachment exceeds maximum size of {max_image_bytes} bytes"
             )
 
-        def _append_once() -> int:
-            cursor = self._db.execute_query(
-                "SELECT COALESCE(MAX(position), -1) + 1 FROM message_images WHERE message_id = ?",
+        def _append_once(transaction_conn: Any, *, use_db_executor: bool = False) -> int:
+            def _execute(query: str, params: tuple[Any, ...]) -> Any:
+                if use_db_executor:
+                    return self._db.execute_query(query, params)
+                return transaction_conn.execute(query, params)
+
+            message_cursor = _execute(
+                "SELECT conversation_id FROM messages WHERE id = ? AND deleted = FALSE",
+                (message_id,),
+            )
+            message_row = message_cursor.fetchone()
+            if message_row is None:
+                raise InputError(  # noqa: TRY003
+                    f"Cannot append image: Message ID '{message_id}' not found or deleted."
+                )
+            conversation_id = str(self._row_value(message_row, "conversation_id"))
+
+            cursor = _execute(
+                "SELECT COALESCE(MAX(position), -1) + 1 AS next_position "
+                "FROM message_images WHERE message_id = ?",
                 (message_id,),
             )
             row = cursor.fetchone()
-            position = int(row[0] if row is not None else 0)
-            self._db.execute_query(
+            position = int(self._row_value(row, "next_position") if row is not None else 0)
+            _execute(
                 """
                 INSERT INTO message_images (message_id, position, image_data, image_mime_type)
                 VALUES (?, ?, ?, ?)
                 """,
                 (message_id, position, bytes(image_bytes), str(mime_type)),
-                commit=False,
             )
+            self._advance_history_version(transaction_conn, conversation_id)
             return position
 
-        def _append_with_retries(*, transactional: bool) -> int:
+        def _append_with_retries(existing_conn: Any | None = None) -> int:
             last_error: Exception | None = None
             for _ in range(5):
                 try:
-                    if transactional:
-                        with self._db.transaction():
-                            return _append_once()
-                    return _append_once()
+                    if existing_conn is not None:
+                        return _append_once(existing_conn, use_db_executor=True)
+                    with self._db.transaction() as owned_conn:
+                        return _append_once(owned_conn, use_db_executor=True)
                 except sqlite3.IntegrityError as exc:
                     last_error = exc
                     continue
@@ -323,9 +353,11 @@ class MessageStore:
                 f"Concurrent append conflict for message image positions on message_id={message_id}",
             ) from last_error
 
+        if conn is not None:
+            return _append_once(conn)
         if not commit:
-            return _append_with_retries(transactional=False)
-        return _append_with_retries(transactional=True)
+            return _append_with_retries(self._db.get_connection())
+        return _append_with_retries()
 
     def get_message_images(self, message_id: str) -> list[dict[str, Any]]:
         """Fetch all images associated with a message, ordered by position."""
@@ -1465,7 +1497,59 @@ class MessageStore:
     # Message metadata
     # ------------------------------------------------------------------
 
-    def add_message_metadata(self, message_id: str, tool_calls: Any | None = None, extra: Any | None = None) -> bool:
+    @staticmethod
+    def _metadata_json_value(value: Any) -> Any:
+        """Decode stored JSON text while accepting backend-decoded JSON values."""
+        return json.loads(value) if isinstance(value, str) else value
+
+    def _add_message_metadata_with_conn(
+        self,
+        message_id: str,
+        tool_calls: Any | None,
+        extra: Any | None,
+        conn: Any,
+    ) -> bool:
+        cursor = conn.execute(
+            "SELECT m.conversation_id, mm.message_id AS metadata_message_id, "
+            "mm.tool_calls_json, mm.extra_json "
+            "FROM messages m LEFT JOIN message_metadata mm ON mm.message_id = m.id "
+            "WHERE m.id = ?",
+            (message_id,),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return False
+
+        metadata_message_id = self._row_value(row, "metadata_message_id", 1)
+        if metadata_message_id is not None:
+            stored_tool_calls = self._metadata_json_value(self._row_value(row, "tool_calls_json", 2))
+            stored_extra = self._metadata_json_value(self._row_value(row, "extra_json", 3))
+            if stored_tool_calls == tool_calls and stored_extra == extra:
+                return True
+
+        conn.execute(
+            "INSERT INTO message_metadata(message_id, tool_calls_json, extra_json, last_modified) "
+            "VALUES (?, ?, ?, CURRENT_TIMESTAMP) "
+            "ON CONFLICT(message_id) DO UPDATE SET tool_calls_json=excluded.tool_calls_json, "
+            "extra_json=excluded.extra_json, last_modified=CURRENT_TIMESTAMP",
+            (
+                message_id,
+                json.dumps(tool_calls) if tool_calls is not None else None,
+                json.dumps(extra) if extra is not None else None,
+            ),
+        )
+        conversation_id = str(self._row_value(row, "conversation_id"))
+        self._advance_history_version(conn, conversation_id)
+        return True
+
+    def add_message_metadata(
+        self,
+        message_id: str,
+        tool_calls: Any | None = None,
+        extra: Any | None = None,
+        *,
+        conn: Any | None = None,
+    ) -> bool:
         """Upsert per-message metadata such as tool calls.
 
         Stores JSON-serialized metadata in an auxiliary table `message_metadata`.
@@ -1473,68 +1557,48 @@ class MessageStore:
         """
         try:
             self._db._ensure_message_metadata_table()
-            if self._db.backend_type == BackendType.SQLITE:
-                query = (
-                    "INSERT INTO message_metadata(message_id, tool_calls_json, extra_json, last_modified) "
-                    "VALUES (?, ?, ?, CURRENT_TIMESTAMP) "
-                    "ON CONFLICT(message_id) DO UPDATE SET tool_calls_json=excluded.tool_calls_json, "
-                    "extra_json=excluded.extra_json, last_modified=CURRENT_TIMESTAMP"
-                )
-                self._db.execute_query(
-                    query,
-                    (
-                        message_id,
-                        json.dumps(tool_calls) if tool_calls is not None else None,
-                        json.dumps(extra) if extra is not None else None,
-                    ),
-                    commit=True,
-                )
-                return True
-
-            upsert = (
-                "INSERT INTO message_metadata(message_id, tool_calls_json, extra_json, last_modified) "
-                "VALUES (%s, %s, %s, NOW()) "
-                "ON CONFLICT (message_id) DO UPDATE SET tool_calls_json = EXCLUDED.tool_calls_json, "
-                "extra_json = EXCLUDED.extra_json, last_modified = NOW()"
-            )
-            self._db.backend.execute(
-                upsert,
-                (
+            transaction = nullcontext(conn) if conn is not None else self._db.transaction()
+            with transaction as transaction_conn:
+                return self._add_message_metadata_with_conn(
                     message_id,
-                    json.dumps(tool_calls) if tool_calls is not None else None,
-                    json.dumps(extra) if extra is not None else None,
-                ),
-            )
-            return True  # noqa: TRY300
+                    tool_calls,
+                    extra,
+                    transaction_conn,
+                )
         except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
             logger.warning(f"add_message_metadata failed for message {message_id}: {e}")
             return False
 
-    def get_message_metadata(self, message_id: str) -> dict[str, Any] | None:
+    def get_message_metadata(
+        self,
+        message_id: str,
+        *,
+        conn: Any | None = None,
+    ) -> dict[str, Any] | None:
         """Fetch metadata for a message if present."""
         try:
             self._db._ensure_message_metadata_table()
-            if self._db.backend_type == BackendType.SQLITE:
-                cursor = self._db.execute_query(
-                    "SELECT tool_calls_json, extra_json, last_modified FROM message_metadata WHERE message_id = ?",
+            if conn is not None:
+                cursor = conn.execute(
+                    "SELECT tool_calls_json, extra_json, last_modified "
+                    "FROM message_metadata WHERE message_id = ?",
                     (message_id,),
                 )
-                row = cursor.fetchone()
-                if not row:
-                    return None
-                tc, ex, lm = row
             else:
-                result = self._db.backend.execute(
-                    "SELECT tool_calls_json, extra_json, last_modified FROM message_metadata WHERE message_id = %s",
-                    (message_id,)
+                cursor = self._db.execute_query(
+                    "SELECT tool_calls_json, extra_json, last_modified "
+                    "FROM message_metadata WHERE message_id = ?",
+                    (message_id,),
                 )
-                r = result.fetchone()
-                if not r:
-                    return None
-                tc, ex, lm = r
+            row = cursor.fetchone()
+            if not row:
+                return None
+            tc = self._row_value(row, "tool_calls_json")
+            ex = self._row_value(row, "extra_json", 1)
+            lm = self._row_value(row, "last_modified", 2)
             return {
-                "tool_calls": json.loads(tc) if tc else None,
-                "extra": json.loads(ex) if ex else None,
+                "tool_calls": self._metadata_json_value(tc) if tc is not None else None,
+                "extra": self._metadata_json_value(ex) if ex is not None else None,
                 "last_modified": lm,
             }
         except _CHACHA_NONCRITICAL_EXCEPTIONS:
@@ -1585,7 +1649,14 @@ class MessageStore:
         except _CHACHA_NONCRITICAL_EXCEPTIONS:
             return {}
 
-    def set_message_metadata_extra(self, message_id: str, extra: dict[str, Any], merge: bool = True) -> bool:
+    def set_message_metadata_extra(
+        self,
+        message_id: str,
+        extra: dict[str, Any],
+        merge: bool = True,
+        *,
+        conn: Any | None = None,
+    ) -> bool:
         """Set or merge structured extra metadata for a message.
 
         Expected shape for `extra`:
@@ -1599,24 +1670,32 @@ class MessageStore:
         tool_results are merged key-wise.
         """
         try:
-            current = self.get_message_metadata(message_id) or {}
-            current_extra = current.get('extra') or {}
-            if merge and isinstance(current_extra, dict) and isinstance(extra, dict):
-                merged = dict(current_extra)
-                # Merge tool_results specially
-                tr_existing = merged.get('tool_results') if isinstance(merged.get('tool_results'), dict) else {}
-                tr_incoming = extra.get('tool_results') if isinstance(extra.get('tool_results'), dict) else {}
-                if tr_existing or tr_incoming:
-                    merged['tool_results'] = {**tr_existing, **tr_incoming}
-                # Merge top-level keys (favor incoming)
-                for k, v in extra.items():
-                    if k == 'tool_results':
-                        continue
-                    merged[k] = v
-                new_extra = merged
-            else:
-                new_extra = extra
-            return self.add_message_metadata(message_id, tool_calls=current.get('tool_calls'), extra=new_extra)
+            self._db._ensure_message_metadata_table()
+            transaction = nullcontext(conn) if conn is not None else self._db.transaction()
+            with transaction as transaction_conn:
+                current = self.get_message_metadata(message_id, conn=transaction_conn) or {}
+                current_extra = current.get('extra') or {}
+                if merge and isinstance(current_extra, dict) and isinstance(extra, dict):
+                    merged = dict(current_extra)
+                    # Merge tool_results specially
+                    tr_existing = merged.get('tool_results') if isinstance(merged.get('tool_results'), dict) else {}
+                    tr_incoming = extra.get('tool_results') if isinstance(extra.get('tool_results'), dict) else {}
+                    if tr_existing or tr_incoming:
+                        merged['tool_results'] = {**tr_existing, **tr_incoming}
+                    # Merge top-level keys (favor incoming)
+                    for k, v in extra.items():
+                        if k == 'tool_results':
+                            continue
+                        merged[k] = v
+                    new_extra = merged
+                else:
+                    new_extra = extra
+                return self._add_message_metadata_with_conn(
+                    message_id,
+                    current.get('tool_calls'),
+                    new_extra,
+                    transaction_conn,
+                )
         except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
             logger.warning(f"set_message_metadata_extra failed for {message_id}: {e}")
             return False
