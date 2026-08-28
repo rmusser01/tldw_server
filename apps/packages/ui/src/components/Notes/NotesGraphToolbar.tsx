@@ -1,0 +1,286 @@
+import type { NotesGraphEdgeType } from "@/services/note-graph-suggestions"
+import { Tooltip } from "antd"
+import {
+  Focus,
+  Maximize2,
+  Plus,
+  RefreshCw,
+  SlidersHorizontal,
+  ZoomIn,
+  ZoomOut
+} from "lucide-react"
+import React from "react"
+import { useTranslation } from "react-i18next"
+
+import type { NotesGraphLayout } from "./hooks/useNotesGraphWorkspace"
+
+type GraphSearchResult = { id: string; label: string }
+
+type NotesGraphToolbarProps = {
+  search: string
+  searchResults: GraphSearchResult[]
+  radius: 1 | 2
+  maxNodes: number
+  maxNodeCap: number
+  layout: NotesGraphLayout
+  scope: "focused" | "all"
+  allNotes: {
+    activeNoteCount: number
+    effectiveNoteCap: number
+    eligible: boolean
+  }
+  visibleEdgeTypes: ReadonlySet<NotesGraphEdgeType>
+  showProvisional: boolean
+  canExpand: boolean
+  isRefreshing: boolean
+  onSearchChange: (value: string) => void
+  onSelectSearchResult: (nodeId: string) => void
+  onRadiusChange: (radius: 1 | 2) => void
+  onMaxNodesChange: (maxNodes: number) => void
+  onLayoutChange: (layout: NotesGraphLayout) => void
+  onShowFocused: () => void
+  onShowAllNotes: () => void
+  onToggleEdgeType: (edgeType: NotesGraphEdgeType) => void
+  onToggleProvisional: () => void
+  onFocusCurrent: () => void
+  onExpand: () => void
+  onRefresh: () => void
+  onZoomIn: () => void
+  onZoomOut: () => void
+  onFit: () => void
+}
+
+const EDGE_OPTIONS: Array<{ type: NotesGraphEdgeType; label: string }> = [
+  { type: "manual", label: "Manual links" },
+  { type: "wikilink", label: "Note links" },
+  { type: "backlink", label: "Backlinks" },
+  { type: "tag_membership", label: "Tag membership" },
+  { type: "source_membership", label: "Source membership" }
+]
+
+type IconButtonProps = {
+  label: string
+  disabled?: boolean
+  pressed?: boolean
+  onClick: () => void
+  children: React.ReactNode
+}
+
+const IconButton: React.FC<IconButtonProps> = ({
+  label,
+  disabled,
+  pressed,
+  onClick,
+  children
+}) => (
+  <Tooltip title={label}>
+    <button
+      type="button"
+      className="inline-flex h-9 w-9 flex-none items-center justify-center border border-border bg-surface text-text transition-colors hover:bg-surface2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-50"
+      aria-label={label}
+      aria-pressed={pressed}
+      disabled={disabled}
+      onClick={onClick}>
+      {children}
+    </button>
+  </Tooltip>
+)
+
+const NotesGraphToolbar: React.FC<NotesGraphToolbarProps> = ({
+  search,
+  searchResults,
+  radius,
+  maxNodes,
+  maxNodeCap,
+  layout,
+  scope,
+  allNotes,
+  visibleEdgeTypes,
+  showProvisional,
+  canExpand,
+  isRefreshing,
+  onSearchChange,
+  onSelectSearchResult,
+  onRadiusChange,
+  onMaxNodesChange,
+  onLayoutChange,
+  onShowFocused,
+  onShowAllNotes,
+  onToggleEdgeType,
+  onToggleProvisional,
+  onFocusCurrent,
+  onExpand,
+  onRefresh,
+  onZoomIn,
+  onZoomOut,
+  onFit
+}) => {
+  const { t } = useTranslation(["option", "common"])
+  const [edgeMenuOpen, setEdgeMenuOpen] = React.useState(false)
+  const iconSize = 16
+
+  return (
+    <div className="border-b border-border bg-surface px-3 py-2">
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="relative min-w-[180px] flex-1 sm:max-w-[280px]">
+          <label className="sr-only" htmlFor="notes-graph-search">
+            {t("option:notesSearch.graphSearchLoaded", {
+              defaultValue: "Search loaded nodes"
+            })}
+          </label>
+          <input
+            id="notes-graph-search"
+            type="search"
+            role="searchbox"
+            className="h-9 w-full border border-border bg-bg px-3 text-sm text-text outline-none placeholder:text-text-muted focus:ring-2 focus:ring-focus"
+            aria-label="Search loaded nodes"
+            placeholder={t("option:notesSearch.graphSearchLoaded", {
+              defaultValue: "Search loaded nodes"
+            })}
+            value={search}
+            onChange={(event) => onSearchChange(event.target.value)}
+          />
+          {search.trim() && searchResults.length > 0 ? (
+            <div className="absolute left-0 top-10 z-20 max-h-48 w-full overflow-auto border border-border bg-elevated shadow-lg">
+              {searchResults.map((node) => (
+                <button
+                  type="button"
+                  key={node.id}
+                  className="block w-full px-3 py-2 text-left text-sm text-text hover:bg-surface2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus"
+                  onClick={() => onSelectSearchResult(node.id)}>
+                  {node.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+
+        <label className="flex flex-col gap-1 text-xs text-text-muted">
+          {t("option:notesSearch.graphRadiusLabel", { defaultValue: "Radius" })}
+          <select
+            className="h-9 min-w-[76px] border border-border bg-bg px-2 text-sm text-text focus:ring-2 focus:ring-focus"
+            aria-label="Graph radius"
+            value={radius}
+            onChange={(event) =>
+              onRadiusChange(Number(event.target.value) as 1 | 2)
+            }>
+            <option value={1}>1</option>
+            <option value={2}>2</option>
+          </select>
+        </label>
+
+        <label className="flex flex-col gap-1 text-xs text-text-muted">
+          {t("option:notesSearch.graphMaxNodesLabel", {
+            defaultValue: "Max nodes"
+          })}
+          <input
+            type="number"
+            className="h-9 w-[92px] border border-border bg-bg px-2 text-sm text-text focus:ring-2 focus:ring-focus"
+            aria-label="Maximum graph nodes"
+            min={20}
+            max={maxNodeCap}
+            value={maxNodes}
+            onChange={(event) => onMaxNodesChange(Number(event.target.value))}
+          />
+        </label>
+
+        <label className="flex flex-col gap-1 text-xs text-text-muted">
+          {t("option:notesSearch.graphLayoutLabel", { defaultValue: "Layout" })}
+          <select
+            className="h-9 min-w-[112px] border border-border bg-bg px-2 text-sm text-text focus:ring-2 focus:ring-focus"
+            aria-label="Graph layout"
+            value={layout}
+            onChange={(event) =>
+              onLayoutChange(event.target.value as NotesGraphLayout)
+            }>
+            <option value="dagre">Dagre</option>
+            <option value="circle">Circle</option>
+            <option value="grid">Grid</option>
+            <option value="concentric">Concentric</option>
+          </select>
+        </label>
+
+        <div
+          className="inline-flex h-9 border border-border"
+          role="group"
+          aria-label="Graph scope">
+          <button
+            type="button"
+            className={`px-3 text-sm ${scope === "focused" ? "bg-primary text-white" : "bg-surface text-text"}`}
+            aria-pressed={scope === "focused"}
+            onClick={onShowFocused}>
+            Focused
+          </button>
+          <button
+            type="button"
+            className={`border-l border-border px-3 text-sm ${scope === "all" ? "bg-primary text-white" : "bg-surface text-text"}`}
+            aria-pressed={scope === "all"}
+            disabled={!allNotes.eligible}
+            onClick={onShowAllNotes}>
+            All notes
+          </button>
+        </div>
+
+        <IconButton label="Focus current note" onClick={onFocusCurrent}>
+          <Focus size={iconSize} aria-hidden="true" />
+        </IconButton>
+        <IconButton
+          label="Expand graph"
+          disabled={!canExpand}
+          onClick={onExpand}>
+          <Plus size={iconSize} aria-hidden="true" />
+        </IconButton>
+        <IconButton
+          label="Refresh graph"
+          disabled={isRefreshing}
+          onClick={onRefresh}>
+          <RefreshCw size={iconSize} aria-hidden="true" />
+        </IconButton>
+        <IconButton label="Zoom in" onClick={onZoomIn}>
+          <ZoomIn size={iconSize} aria-hidden="true" />
+        </IconButton>
+        <IconButton label="Zoom out" onClick={onZoomOut}>
+          <ZoomOut size={iconSize} aria-hidden="true" />
+        </IconButton>
+        <IconButton label="Fit graph to view" onClick={onFit}>
+          <Maximize2 size={iconSize} aria-hidden="true" />
+        </IconButton>
+
+        <div className="relative">
+          <IconButton
+            label="Edge visibility"
+            pressed={edgeMenuOpen}
+            onClick={() => setEdgeMenuOpen((open) => !open)}>
+            <SlidersHorizontal size={iconSize} aria-hidden="true" />
+          </IconButton>
+          {edgeMenuOpen ? (
+            <div className="absolute right-0 top-10 z-20 min-w-[190px] border border-border bg-elevated p-3 shadow-lg">
+              {EDGE_OPTIONS.map(({ type, label }) => (
+                <label
+                  key={type}
+                  className="flex min-h-8 items-center gap-2 text-sm text-text">
+                  <input
+                    type="checkbox"
+                    checked={visibleEdgeTypes.has(type)}
+                    onChange={() => onToggleEdgeType(type)}
+                  />
+                  {label}
+                </label>
+              ))}
+              <label className="flex min-h-8 items-center gap-2 border-t border-border pt-2 text-sm text-text">
+                <input
+                  type="checkbox"
+                  checked={showProvisional}
+                  onChange={onToggleProvisional}
+                />
+                Suggestions
+              </label>
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export default NotesGraphToolbar

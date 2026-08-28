@@ -162,7 +162,6 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   const [pinnedNoteIds, setPinnedNoteIds] = React.useState<string[]>([])
   const [titleSuggestStrategy, setTitleSuggestStrategy] =
     React.useState<NotesTitleSuggestStrategy>('heuristic')
-  const [graphModalOpen, setGraphModalOpen] = React.useState(false)
   const [graphMutationTick, setGraphMutationTick] = React.useState(0)
   const [manualLinkTargetId, setManualLinkTargetId] = React.useState<string | null>(null)
   const [manualLinkSaving, setManualLinkSaving] = React.useState(false)
@@ -187,7 +186,6 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   const richEditorRef = React.useRef<HTMLDivElement | null>(null)
   const attachmentInputRef = React.useRef<HTMLInputElement | null>(null)
   const markdownBeforeWysiwygRef = React.useRef<string | null>(null)
-  const graphModalReturnFocusRef = React.useRef<HTMLElement | null>(null)
   contentRef.current = content
 
   // ---- AI assist undo ----
@@ -1680,12 +1678,6 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     setWysiwygSessionDirty(false)
   }, [selectedId])
 
-  React.useEffect(() => {
-    if (selectedId == null) {
-      setGraphModalOpen(false)
-    }
-  }, [selectedId])
-
   // Wysiwyg sync
   React.useEffect(() => {
     if (editorInputMode !== 'wysiwyg') return
@@ -2045,7 +2037,6 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     recentNotes,
     pinnedNoteIds, pinnedNoteIdSet,
     titleSuggestStrategy, setTitleSuggestStrategy,
-    graphModalOpen, setGraphModalOpen,
     graphMutationTick, setGraphMutationTick,
     manualLinkTargetId, setManualLinkTargetId,
     manualLinkSaving, setManualLinkSaving,
@@ -2072,7 +2063,6 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     richEditorRef,
     attachmentInputRef,
     markdownBeforeWysiwygRef,
-    graphModalReturnFocusRef,
     saveNoteRef,
     // callbacks
     clearAutosaveTimeout,

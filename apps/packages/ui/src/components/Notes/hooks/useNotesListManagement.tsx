@@ -71,6 +71,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
   const [sortOption, setSortOption] = React.useState<NotesSortOption>('modified_desc')
   const [listMode, setListMode] = React.useState<'active' | 'trash'>('active')
   const [listViewMode, setListViewMode] = React.useState<NotesListViewMode>('list')
+  const listQueryViewMode = listViewMode === 'graph' ? 'list' : listViewMode
   const [total, setTotal] = React.useState(0)
   const [bulkSelectedIds, setBulkSelectedIds] = React.useState<string[]>([])
   const bulkSelectionAnchorRef = React.useRef<string | null>(null)
@@ -285,7 +286,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     queryKey: [
       'notes',
       listMode,
-      listViewMode,
+      listQueryViewMode,
       selectedMoodboardId ?? 'none',
       query,
       page,

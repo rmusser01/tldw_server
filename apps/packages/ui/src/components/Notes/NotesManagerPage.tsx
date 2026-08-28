@@ -22,8 +22,11 @@ import { shallow } from "zustand/shallow"
 import { updatePageTitle } from "@/utils/update-page-title"
 import { normalizeChatRole } from "@/utils/normalize-chat-role"
 import NotesEditorPane from "@/components/Notes/NotesEditorPane"
+import NotesGraphWorkspace from "@/components/Notes/NotesGraphWorkspace"
 import NotesStudioCreateModal from "@/components/Notes/NotesStudioCreateModal"
 import NotesSidebar from "@/components/Notes/NotesSidebar"
+import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
+import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
 import {
   useNotesKeywords,
   useNotesListManagement,
@@ -83,6 +86,7 @@ import {
   promptModal,
   NOTES_TUTORIAL_SHOWN_STORAGE_KEY,
   notesUiStorage,
+  resolveNotesGraphFocusNoteId,
 } from './notes-manager-utils'
 
 const LazyNotesManagerOverlays = React.lazy(() => import("./NotesManagerOverlays"))
@@ -116,6 +120,17 @@ const NotesManagerPage: React.FC = () => {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const { capabilities, loading: capsLoading } = useServerCapabilities()
+  const {
+    config: canonicalConnectionConfig,
+    loading: canonicalConnectionLoading,
+  } = useCanonicalConnectionConfig()
+  const notesGraphAuthorityScope = React.useMemo(
+    () =>
+      canonicalConnectionLoading
+        ? null
+        : buildChatSurfaceScopeKeyFromConfig(canonicalConnectionConfig),
+    [canonicalConnectionConfig, canonicalConnectionLoading]
+  )
   const message = useAntdMessage()
   const rawConfirmDanger = useConfirmDanger()
   const confirmDanger = React.useCallback((options: ConfirmDangerOptions) => {
@@ -310,6 +325,18 @@ const NotesManagerPage: React.FC = () => {
   }, [list.data, list.listMode, list.listViewMode, ed.pinnedNoteIdSet])
 
   const filteredCount = visibleNotes.length
+  const graphInitialFocusNoteId = React.useMemo(
+    () =>
+      resolveNotesGraphFocusNoteId(
+        ed.selectedId,
+        ed.recentNotes,
+        visibleNotes
+      ),
+    [ed.recentNotes, ed.selectedId, visibleNotes]
+  )
+  const hasActiveNotes =
+    list.listMode === 'active' &&
+    Boolean(graphInitialFocusNoteId || list.total > 0 || visibleNotes.length > 0)
   const orderedVisibleNoteIds = React.useMemo(
     () => visibleNotes.map((note) => String(note.id)),
     [visibleNotes]
@@ -672,7 +699,6 @@ const NotesManagerPage: React.FC = () => {
     kw.keywordRenameDraft != null ||
     kw.keywordMergeDraft != null ||
     imp.importModalOpen ||
-    ed.graphModalOpen ||
     shortcutHelpOpen
 
   // ---- Remaining logic that stays in the component ----
@@ -1890,17 +1916,10 @@ const NotesManagerPage: React.FC = () => {
     [message, navigate, t]
   )
 
-  // Graph modal
-  const openGraphModal = React.useCallback(() => {
-    ed.graphModalReturnFocusRef.current =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null
-    ed.setGraphModalOpen(true)
-  }, [ed])
-
-  const closeGraphModal = React.useCallback(() => {
-    ed.setGraphModalOpen(false)
-    ed.restoreFocusAfterOverlayClose(ed.graphModalReturnFocusRef.current)
-  }, [ed])
+  const openGraphWorkspace = React.useCallback(() => {
+    list.setListViewMode('graph')
+    list.setPage(1)
+  }, [list.setListViewMode, list.setPage])
 
   // Keyword picker handlers
   const handleKeywordPickerCancel = React.useCallback(() => {
@@ -2334,6 +2353,23 @@ const NotesManagerPage: React.FC = () => {
           </div>
         </button>
       )}
+      {list.listMode === 'active' && list.listViewMode === 'graph' ? (
+        <NotesGraphWorkspace
+          authorityScope={notesGraphAuthorityScope}
+          isOnline={isOnline}
+          initialFocusNoteId={graphInitialFocusNoteId}
+          selectedNoteId={ed.selectedId}
+          hasActiveNotes={hasActiveNotes}
+          isMobileViewport={isMobileViewport}
+          onOpenSidebar={() => setMobileSidebarOpen(true)}
+          onSelectNote={(noteId) => {
+            void ed.handleSelectNote(noteId)
+          }}
+          onCreateNote={() => {
+            void handleNewNote()
+          }}
+        />
+      ) : (
       <NotesEditorPane
         isMobileViewport={isMobileViewport}
         setMobileSidebarOpen={setMobileSidebarOpen}
@@ -2449,7 +2485,7 @@ const NotesManagerPage: React.FC = () => {
         handleSelectNote={async (id) => {
           await ed.handleSelectNote(id)
         }}
-        openGraphModal={openGraphModal}
+        openGraphWorkspace={openGraphWorkspace}
         createManualLink={createManualLink}
         removeManualLink={removeManualLink}
         debouncedLoadKeywordSuggestions={kw.debouncedLoadKeywordSuggestions}
@@ -2470,6 +2506,7 @@ const NotesManagerPage: React.FC = () => {
         handleEditorSelectionUpdate={handleEditorSelectionUpdate}
         applyWikilinkSuggestion={wl.applyWikilinkSuggestion}
       />
+      )}
       <NotesStudioCreateModal
         open={notesStudioCreateOpen}
         excerptText={notesStudioExcerptText}
@@ -2489,16 +2526,9 @@ const NotesManagerPage: React.FC = () => {
           <LazyNotesManagerOverlays
             kw={kw}
             imp={imp}
-            graph={{
-              graphModalOpen: ed.graphModalOpen,
-              selectedId: ed.selectedId,
-              graphMutationTick: ed.graphMutationTick,
-            }}
             isOnline={isOnline}
             shortcutHelpOpen={shortcutHelpOpen}
             setShortcutHelpOpen={setShortcutHelpOpen}
-            closeGraphModal={closeGraphModal}
-            handleSelectNote={ed.handleSelectNote}
             handleKeywordPickerCancel={handleKeywordPickerCancel}
             handleKeywordPickerApply={handleKeywordPickerApply}
             handleKeywordPickerSortModeChange={handleKeywordPickerSortModeChange}

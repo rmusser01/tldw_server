@@ -184,7 +184,7 @@ const seedAndSaveNote = async () => {
   })
 }
 
-describe("NotesManagerPage stage 21 accessibility modal focus handoff", () => {
+describe("NotesManagerPage stage 21 accessibility overlay and view focus handoff", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockConfirmDanger.mockResolvedValue(true)
@@ -262,9 +262,15 @@ describe("NotesManagerPage stage 21 accessibility modal focus handoff", () => {
     })
   })
 
-  it("restores focus to Open graph view trigger when graph modal closes from split mode", async () => {
+  it("moves focus into the first-class Graph view without opening a dialog", async () => {
     renderPage()
     await seedAndSaveNote()
+
+    expect(screen.getByTestId("notes-view-mode-list")).toBeInTheDocument()
+    expect(screen.getByTestId("notes-view-mode-timeline")).toBeInTheDocument()
+    expect(screen.getByTestId("notes-view-mode-inbox")).toBeInTheDocument()
+    expect(screen.getByTestId("notes-view-mode-moodboard")).toBeInTheDocument()
+    expect(screen.getByTestId("notes-view-mode-graph")).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole("button", { name: "Split" }))
     const openGraphButton = await screen.findByTestId("notes-open-graph-view")
@@ -272,14 +278,12 @@ describe("NotesManagerPage stage 21 accessibility modal focus handoff", () => {
     fireEvent.click(openGraphButton)
 
     await waitFor(() => {
-      expect(screen.getByTestId("notes-graph-radius-control")).toBeInTheDocument()
+      expect(screen.getByTestId("notes-graph-workspace")).toHaveFocus()
     })
-
-    const graphDialog = screen.getByRole("dialog")
-    fireEvent.keyDown(graphDialog, { key: "Escape" })
-
-    await waitFor(() => {
-      expect(openGraphButton).toHaveFocus()
-    })
+    expect(screen.getByTestId("notes-list-panel")).toBeInTheDocument()
+    expect(
+      screen.queryByRole("dialog", { name: "Notes graph view" })
+    ).not.toBeInTheDocument()
+    expect(mockNavigate).not.toHaveBeenCalled()
   })
 })

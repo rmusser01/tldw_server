@@ -519,7 +519,20 @@ export type ExportProgressState = {
   fetchedPages: number
   failedBatches: number
 }
-export type NotesListViewMode = 'list' | 'timeline' | 'inbox' | 'moodboard'
+export type NotesListViewMode = 'list' | 'timeline' | 'inbox' | 'moodboard' | 'graph'
+export const resolveNotesGraphFocusNoteId = <
+  TRecent extends { id: string | number },
+  TVisible extends { id: string | number }
+>(
+  selectedId: string | number | null,
+  recentNotes: TRecent[],
+  visibleNotes: TVisible[]
+): string | null => {
+  const normalized = normalizeGraphNoteId(
+    selectedId ?? recentNotes[0]?.id ?? visibleNotes[0]?.id
+  )
+  return normalized || null
+}
 export type MoodboardSummary = {
   id: number
   name: string

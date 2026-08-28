@@ -235,7 +235,7 @@ export interface NotesEditorPaneProps {
   saveAndStartNew: () => Promise<void>
   deleteNote: () => Promise<void>
   handleSelectNote: (id: string | number) => Promise<void>
-  openGraphModal: () => void
+  openGraphWorkspace: () => void
   createManualLink: () => Promise<void>
   removeManualLink: (edgeId: string) => Promise<void>
   debouncedLoadKeywordSuggestions: (text: string) => void
@@ -265,6 +265,45 @@ export interface NotesEditorPaneProps {
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
+
+export const NotesEditorEmptyState: React.FC<{
+  disabled: boolean
+  onCreateNote: () => void
+}> = ({ disabled, onCreateNote }) => {
+  const { t } = useTranslation(['option', 'common'])
+  return (
+    <div
+      className="flex flex-col items-center justify-center gap-4 px-8 py-12 text-center"
+      data-testid="notes-editor-empty-state"
+    >
+      <div className="text-lg font-medium text-text">
+        {t('option:notesSearch.editorEmptyTitle', {
+          defaultValue: 'Select or create a note'
+        })}
+      </div>
+      <div className="max-w-sm text-sm text-text-muted">
+        {t('option:notesSearch.editorEmptyDescription', {
+          defaultValue: 'Choose a note from the list to start editing, or create a new one.'
+        })}
+      </div>
+      <Button
+        type="primary"
+        onClick={onCreateNote}
+        disabled={disabled}
+        data-testid="notes-editor-empty-create"
+      >
+        {t('option:notesSearch.editorEmptyCreateAction', {
+          defaultValue: 'Create note'
+        })}
+      </Button>
+      <div className="mt-2 text-xs text-text-muted">
+        {t('option:notesSearch.editorEmptyHint', {
+          defaultValue: 'Tip: Type [[ in a note to link to another note.'
+        })}
+      </div>
+    </div>
+  )
+}
 
 const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
   isMobileViewport,
@@ -371,7 +410,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
   saveAndStartNew,
   deleteNote,
   handleSelectNote,
-  openGraphModal,
+  openGraphWorkspace,
   createManualLink,
   removeManualLink,
   debouncedLoadKeywordSuggestions,
@@ -580,39 +619,12 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
       />
       <div className="flex-1 flex flex-col px-4 py-3 overflow-auto">
         {showEmptyState && !loadingDetail && (
-          <div className="flex flex-col items-center justify-center gap-4 px-8 py-12 text-center" data-testid="notes-editor-empty-state">
-            <div className="text-lg font-medium text-text">
-              {t('option:notesSearch.editorEmptyTitle', {
-                defaultValue: 'Select or create a note'
-              })}
-            </div>
-            <div className="max-w-sm text-sm text-text-muted">
-              {t('option:notesSearch.editorEmptyDescription', {
-                defaultValue: 'Choose a note from the list to start editing, or create a new one.'
-              })}
-            </div>
-            <div className="flex gap-2">
-              <Button
-                type="primary"
-                onClick={() => {
-                  if (!editorDisabled) {
-                    void handleNewNote()
-                  }
-                }}
-                disabled={editorDisabled}
-                data-testid="notes-editor-empty-create"
-              >
-                {t('option:notesSearch.editorEmptyCreateAction', {
-                  defaultValue: 'Create note'
-                })}
-              </Button>
-            </div>
-            <div className="mt-2 text-xs text-text-muted">
-              {t('option:notesSearch.editorEmptyHint', {
-                defaultValue: 'Tip: Type [[ in a note to link to another note.'
-              })}
-            </div>
-          </div>
+          <NotesEditorEmptyState
+            disabled={editorDisabled}
+            onCreateNote={() => {
+              void handleNewNote()
+            }}
+          />
         )}
         {showStudioMarkdownOnlyNotice ? (
           <div className="mb-3 flex items-center justify-between gap-3 rounded border border-warn/40 bg-warn/10 px-3 py-2 text-sm text-warn">
@@ -985,7 +997,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
               <Button
                 size="small"
                 className="mt-2"
-                onClick={openGraphModal}
+                onClick={openGraphWorkspace}
                 data-testid="notes-open-graph-view"
               >
                 {t('option:notesSearch.graphOpenButton', {
