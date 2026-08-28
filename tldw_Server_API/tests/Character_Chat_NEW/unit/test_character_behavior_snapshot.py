@@ -341,6 +341,12 @@ def test_build_behavior_snapshot_rejects_credentials_in_extensible_maps(extensib
         "privateKey",
         "refreshToken",
         "xApiKey",
+        "secretKey",
+        "awsSecretAccessKey",
+        "openaiApiKey",
+        "apiToken",
+        "consumerSecret",
+        "signingSecret",
     ],
 )
 def test_build_behavior_snapshot_rejects_credential_key_separator_variants(

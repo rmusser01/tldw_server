@@ -20,7 +20,6 @@ from tldw_Server_API.app.core.Character_Chat.modules.character_generation_preset
     resolve_character_generation_settings,
 )
 from tldw_Server_API.app.core.Character_Chat.modules.character_prompt_presets import (
-    DEFAULT_PROMPT_PRESET,
     get_builtin_presets,
     resolve_character_prompt_preset,
 )
@@ -97,6 +96,32 @@ def _reject_credential_settings(value: Any, *, path: str = "conversation_setting
     elif isinstance(value, (list, tuple)):
         for index, item in enumerate(value):
             _reject_credential_settings(item, path=f"{path}[{index}]")
+
+
+def _normalize_prompt_preset_id(value: str | None) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise InputError("prompt_preset_id must be a non-empty string.")
+    return value.strip()
+
+
+def _character_prompt_preset_is_explicit(
+    character: Mapping[str, Any],
+    resolved_preset: str,
+) -> bool:
+    extensions = character.get("extensions")
+    if not isinstance(extensions, Mapping):
+        return False
+    selected: Any = None
+    tldw_extensions = extensions.get("tldw")
+    if isinstance(tldw_extensions, Mapping):
+        selected = tldw_extensions.get("prompt_preset") or tldw_extensions.get(
+            "promptPreset"
+        )
+    if not selected:
+        selected = extensions.get("prompt_preset") or extensions.get("promptPreset")
+    return isinstance(selected, str) and selected.strip() == resolved_preset
 
 
 def _decode_json(value: Any, default: Any) -> Any:
@@ -299,13 +324,11 @@ def _materialize_behavior(
         )
         character["extensions"] = _decode_json(character.get("extensions"), {})
         resolved_preset = requested_preset or resolve_character_prompt_preset(character)
-        selection_source = (
-            "creation_request"
-            if requested_preset
-            else "character"
-            if resolved_preset != DEFAULT_PROMPT_PRESET
-            else "default"
-        )
+        selection_source = "default"
+        if requested_preset:
+            selection_source = "creation_request"
+        elif _character_prompt_preset_is_explicit(character, resolved_preset):
+            selection_source = "character"
         preset = _load_preset(
             conn,
             resolved_preset,
@@ -378,9 +401,9 @@ def _normalize_sampling(
     if sampling is None:
         candidate = _character_sampling(character)
     else:
-        if set(sampling) != _SAMPLING_FIELDS:
+        if not set(sampling).issubset(_SAMPLING_FIELDS):
             return None
-        candidate = dict(sampling)
+        candidate = {**_character_sampling(character), **sampling}
     limits = {
         "temperature": (0.0, 2.0),
         "top_p": (0.0, 1.0),
@@ -500,6 +523,8 @@ def create_character_conversation(
             ordered_ids.append(normalized)
     if primary_id <= 0:
         raise InputError("character_id must be a positive integer.")
+
+    prompt_preset_id = _normalize_prompt_preset_id(prompt_preset_id)
 
     creation_settings = dict(conversation_settings or {})
     _reject_credential_settings(creation_settings)

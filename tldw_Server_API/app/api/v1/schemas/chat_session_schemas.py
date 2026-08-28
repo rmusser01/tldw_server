@@ -265,8 +265,8 @@ class ChatSessionUpdate(BaseModel):
         return _validate_conversation_state(value)
 
 
-class ChatSessionResponse(BaseModel):
-    """Schema for chat session responses."""
+class ChatSessionListItem(BaseModel):
+    """Chat list item without authoritative resume-detail fields."""
     id: str = Field(..., description="UUID of the chat session")
     scope_type: Literal["global", "workspace"] = Field(
         "global",
@@ -306,6 +306,13 @@ class ChatSessionResponse(BaseModel):
         None,
         description="Optional per-chat settings payload when explicitly requested.",
     )
+
+    model_config = {"from_attributes": True}
+
+
+class ChatSessionResponse(ChatSessionListItem):
+    """Detailed chat session response with authoritative resume metadata."""
+
     behavior_snapshot: "BehaviorSnapshotStatus" = Field(
         default_factory=lambda: BehaviorSnapshotStatus(status="missing")
     )
@@ -337,7 +344,7 @@ class ConversationTailFence(BaseModel):
 
 class ChatSessionListResponse(BaseModel):
     """Schema for listing chat sessions."""
-    chats: list[ChatSessionResponse] = Field(..., description="List of chat sessions")
+    chats: list[ChatSessionListItem] = Field(..., description="List of chat sessions")
     total: int = Field(..., description="Total number of chats")
     limit: int = Field(..., description="Number of items per page")
     offset: int = Field(..., description="Offset for pagination")

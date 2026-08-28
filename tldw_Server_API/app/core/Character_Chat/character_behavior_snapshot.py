@@ -273,7 +273,22 @@ def is_credential_key(key: str) -> bool:
     normalized = _LOWER_TO_UPPER_RE.sub("_", normalized)
     normalized = _ACRONYM_TO_WORD_RE.sub("_", normalized)
     normalized = _CREDENTIAL_SEPARATOR_RE.sub("_", normalized.casefold()).strip("_")
-    return normalized in _CREDENTIAL_KEYS
+    if normalized in _CREDENTIAL_KEYS:
+        return True
+    parts = normalized.split("_")
+    if len(parts) < 2:
+        return False
+    suffix = tuple(parts[-2:])
+    return (
+        parts[-1] == "secret"
+        or suffix
+        in {
+            ("api", "key"),
+            ("api", "token"),
+            ("private", "key"),
+        }
+        or (parts[-1] == "key" and "secret" in parts[:-1])
+    )
 
 
 __all__ = [

@@ -342,10 +342,54 @@ def test_api_omitted_sampling_preserves_character_generation_defaults(
 
 
 @pytest.mark.integration
+def test_api_partial_sampling_override_merges_with_character_generation_defaults(
+    test_client,
+    auth_headers,
+    character_db,
+):
+    character_id = character_db.add_character_card(
+        {
+            "name": "Partial Override Ari",
+            "extensions": {
+                "tldw": {
+                    "generation": {
+                        "temperature": "0.25",
+                        "topP": "0.55",
+                        "repetitionPenalty": "1.2",
+                        "stopSequences": "<ONE>; <TWO>",
+                    }
+                }
+            },
+        }
+    )
+
+    response = test_client.post(
+        "/api/v1/chats/",
+        headers=auth_headers,
+        json={
+            "character_id": character_id,
+            "provider": "local-llm",
+            "model": "local-test",
+            "temperature": 0.9,
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    state = character_db.get_roleplay_resume_state(response.json()["id"])
+    assert state["effective_completion"]["sampling"] == {
+        "temperature": 0.9,
+        "top_p": 0.55,
+        "repetition_penalty": 1.2,
+        "stop": ["<ONE>", "<TWO>"],
+    }
+
+
+@pytest.mark.integration
 @pytest.mark.parametrize(
     ("extensions", "expected_preset_id", "expected_selection_source"),
     [
         ({}, "default", "default"),
+        ({"tldw": {"promptPreset": "default"}}, "default", "character"),
         ({"tldw": {"promptPreset": "st_default"}}, "st_default", "character"),
     ],
 )
@@ -392,6 +436,47 @@ def test_creation_materializes_effective_builtin_prompt_preset(
         "id": expected_preset_id,
         "version": 1,
     }
+
+
+@pytest.mark.integration
+def test_prompt_preset_id_is_trimmed_or_rejected_before_materialization(
+    test_client,
+    auth_headers,
+    character_db,
+):
+    character_id = character_db.add_character_card({"name": "Preset Boundary Ari"})
+
+    rejected = test_client.post(
+        "/api/v1/chats/",
+        headers=auth_headers,
+        json={
+            "character_id": character_id,
+            "provider": "local-llm",
+            "model": "local-test",
+            "prompt_preset_id": "   ",
+        },
+    )
+    assert rejected.status_code == 400, rejected.text
+    assert character_db.get_conversations_for_character(character_id) == []
+
+    conversation_id = create_character_conversation(
+        character_db,
+        conversation_data={
+            "character_id": character_id,
+            "title": "Normalized preset",
+            "client_id": "1",
+        },
+        prompt_preset_id="  st_default  ",
+        provider="local-llm",
+        model="local-test",
+    )
+    state = character_db.get_roleplay_resume_state(conversation_id)
+    assert state["settings"]["chatPresetOverrideId"] == "st_default"
+    materialized = state["behavior_snapshot"]["payload"]["participants"][0][
+        "prompt"
+    ]["prompt_relevant_extensions"]["prompt_preset"]
+    assert materialized["preset_id"] == "st_default"
+    assert materialized["selection_source"] == "creation_request"
 
 
 @pytest.mark.integration
@@ -536,6 +621,12 @@ def test_drift_retry_freezes_initial_provider_model_and_sampling(
         "privateKey",
         "refreshToken",
         "xApiKey",
+        "secretKey",
+        "awsSecretAccessKey",
+        "openaiApiKey",
+        "apiToken",
+        "consumerSecret",
+        "signingSecret",
     ],
 )
 def test_credential_settings_rejection_rolls_back_creation(
@@ -569,6 +660,30 @@ def test_credential_settings_rejection_rolls_back_creation(
         assert conn.execute("SELECT COUNT(*) FROM conversations").fetchone()[0] == 0
         assert conn.execute("SELECT COUNT(*) FROM conversation_settings").fetchone()[0] == 0
         assert conn.execute("SELECT COUNT(*) FROM conversation_behavior_snapshots").fetchone()[0] == 0
+
+
+@pytest.mark.integration
+def test_ordinary_token_settings_remain_allowed(character_db):
+    character_id = character_db.add_character_card({"name": "Ordinary Token Ari"})
+
+    conversation_id = create_character_conversation(
+        character_db,
+        conversation_data={
+            "character_id": character_id,
+            "title": "Ordinary token settings",
+            "client_id": "1",
+        },
+        provider="local-llm",
+        model="local-test",
+        conversation_settings={
+            "token": "ordinary prompt metadata",
+            "nested": {"token_budget": 512},
+        },
+    )
+
+    settings = character_db.get_roleplay_resume_state(conversation_id)["settings"]
+    assert settings["token"] == "ordinary prompt metadata"
+    assert settings["nested"]["token_budget"] == 512
 
 
 @pytest.mark.integration
@@ -795,12 +910,14 @@ def test_source_mutation_and_deployment_default_changes_do_not_change_creation_b
 
 
 @pytest.mark.integration
-def test_list_uses_one_bounded_resume_projection_instead_of_full_state_per_row(
+def test_list_omits_detail_only_resume_authority_without_loading_snapshot_bodies(
     test_client,
     auth_headers,
     character_db,
 ):
-    character_id = character_db.add_character_card({"name": "List Projection Ari"})
+    character_id = character_db.add_character_card(
+        {"name": "List Projection Ari", "first_message": "Welcome back."}
+    )
     resumable_id = create_character_conversation(
         character_db,
         conversation_data={
@@ -810,6 +927,13 @@ def test_list_uses_one_bounded_resume_projection_instead_of_full_state_per_row(
         },
         provider="local-llm",
         model="local-test",
+        initial_messages=[
+            {
+                "sender": "List Projection Ari",
+                "content": "Welcome back.",
+                "role": "assistant",
+            }
+        ],
     )
     legacy_id = character_db.add_conversation(
         {
@@ -819,20 +943,24 @@ def test_list_uses_one_bounded_resume_projection_instead_of_full_state_per_row(
         }
     )
     store = character_db.conversation_resume_store
-    real_bulk = getattr(store, "get_roleplay_resume_summaries", lambda _ids: {})
 
     with (
         mock.patch.object(
             store,
             "get_roleplay_resume_summaries",
-            wraps=real_bulk,
+            side_effect=AssertionError("list must not load resume summaries"),
             create=True,
-        ) as bulk_read,
+        ) as summary_read,
         mock.patch.object(
             store,
             "get_roleplay_resume_state",
-            wraps=store.get_roleplay_resume_state,
+            side_effect=AssertionError("list must not load full resume state"),
         ) as full_read,
+        mock.patch.object(
+            store,
+            "get_conversation_behavior_snapshot",
+            side_effect=AssertionError("list must not load snapshot bodies"),
+        ) as snapshot_read,
     ):
         response = test_client.get(
             "/api/v1/chats/?limit=10",
@@ -840,13 +968,61 @@ def test_list_uses_one_bounded_resume_projection_instead_of_full_state_per_row(
         )
 
     assert response.status_code == 200, response.text
-    assert bulk_read.call_count == 1
+    assert summary_read.call_count == 0
     assert full_read.call_count == 0
+    assert snapshot_read.call_count == 0
     by_id = {chat["id"]: chat for chat in response.json()["chats"]}
-    assert by_id[resumable_id]["resume_eligible"] is True
-    assert by_id[resumable_id]["behavior_snapshot"]["status"] == "valid"
-    assert by_id[legacy_id]["resume_eligible"] is False
-    assert by_id[legacy_id]["behavior_snapshot"]["status"] == "missing"
+    detail_only_fields = {
+        "behavior_snapshot",
+        "resume_eligible",
+        "resume_ineligible_reason",
+        "settings_version",
+        "history_version",
+        "tail",
+    }
+    assert detail_only_fields.isdisjoint(by_id[resumable_id])
+    assert detail_only_fields.isdisjoint(by_id[legacy_id])
+
+    schema = test_client.app.openapi()["components"]["schemas"]["ChatSessionListItem"]
+    assert detail_only_fields.isdisjoint(schema["properties"])
+
+    valid_detail = test_client.get(
+        f"/api/v1/chats/{resumable_id}",
+        headers=auth_headers,
+    )
+    assert valid_detail.status_code == 200, valid_detail.text
+    assert valid_detail.json()["resume_eligible"] is True
+    assert valid_detail.json()["tail"]["message_id"] is not None
+    assert valid_detail.json()["tail"]["message_version"] == 1
+
+    with character_db.transaction() as conn:
+        row = conn.execute(
+            "SELECT canonical_json FROM conversation_behavior_snapshots WHERE conversation_id = ?",
+            (resumable_id,),
+        ).fetchone()
+        canonical_json = str(row[0])
+        tampered_json = canonical_json.replace(
+            "List Projection Ari",
+            "Mist Projection Ari",
+            1,
+        )
+        assert tampered_json != canonical_json
+        assert len(tampered_json) == len(canonical_json)
+        conn.execute(
+            "UPDATE conversation_behavior_snapshots SET canonical_json = ? WHERE conversation_id = ?",
+            (tampered_json, resumable_id),
+        )
+
+    tampered_detail = test_client.get(
+        f"/api/v1/chats/{resumable_id}",
+        headers=auth_headers,
+    )
+    assert tampered_detail.status_code == 200, tampered_detail.text
+    assert tampered_detail.json()["behavior_snapshot"]["status"] == "invalid"
+    assert tampered_detail.json()["resume_eligible"] is False
+    assert tampered_detail.json()["resume_ineligible_reason"] == (
+        "behavior_snapshot_invalid"
+    )
 
 
 @pytest.mark.integration
@@ -911,7 +1087,7 @@ def test_creation_oversize_snapshot_rolls_back(character_db):
 
 
 @pytest.mark.integration
-def test_creation_with_incomplete_settings_is_explicitly_non_resumable(
+def test_creation_partial_sampling_merges_character_defaults_and_remains_stable(
     character_db,
     monkeypatch,
 ):
@@ -934,9 +1110,14 @@ def test_creation_with_incomplete_settings_is_explicitly_non_resumable(
     state = character_db.get_roleplay_resume_state(conversation_id)
 
     assert state["behavior_snapshot"]["status"] == "valid"
-    assert state["resume_eligible"] is False
-    assert state["resume_ineligible_reason"] == "incomplete_effective_settings"
-    assert state["effective_completion"] is None
+    assert state["resume_eligible"] is True
+    assert state["resume_ineligible_reason"] is None
+    assert state["effective_completion"]["sampling"] == {
+        "temperature": 0.0,
+        "top_p": 1.0,
+        "repetition_penalty": 1.0,
+        "stop": [],
+    }
     assert _snapshot_storage_bytes(character_db, conversation_id) == before
 
 

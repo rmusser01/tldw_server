@@ -61,6 +61,7 @@ from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import (
     CharacterChatStreamPersistResponse,
     ChatLinkedResearchRunsListResponse,
     ChatSessionCreate,
+    ChatSessionListItem,
     ChatSessionListResponse,
     ChatSessionResponse,
     ChatSessionUpdate,
@@ -1755,45 +1756,62 @@ def reset_complete_windows() -> None:
 # Helper Functions
 # ========================================================================
 
+def _conversation_list_item_fields(
+    conv_data: dict[str, Any],
+    *,
+    settings: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    """Build fields shared by list and detail conversation responses."""
+    character_id = conv_data.get('character_id')
+    assistant_kind = conv_data.get('assistant_kind')
+    assistant_id = conv_data.get('assistant_id')
+    if assistant_id is None and assistant_kind == "character" and character_id is not None:
+        assistant_id = str(character_id)
+    return {
+        "id": conv_data.get('id', ''),
+        "scope_type": conv_data.get("scope_type") or "global",
+        "workspace_id": conv_data.get("workspace_id"),
+        "character_id": character_id,
+        "character_name": conv_data.get('character_name'),
+        "assistant_kind": assistant_kind,
+        "assistant_id": assistant_id,
+        "assistant_name": conv_data.get('assistant_name'),
+        "persona_memory_mode": conv_data.get('persona_memory_mode'),
+        "title": conv_data.get('title'),
+        "rating": conv_data.get('rating'),
+        "state": conv_data.get('state', 'in-progress'),
+        "topic_label": conv_data.get('topic_label'),
+        "cluster_id": conv_data.get('cluster_id'),
+        "source": conv_data.get('source'),
+        "external_ref": conv_data.get('external_ref'),
+        "created_at": conv_data.get('created_at', datetime.now(timezone.utc)),
+        "last_modified": conv_data.get('last_modified', datetime.now(timezone.utc)),
+        "version": conv_data.get('version', 1),
+        "parent_conversation_id": conv_data.get('parent_conversation_id'),
+        "root_id": conv_data.get('root_id'),
+        "forked_from_message_id": conv_data.get('forked_from_message_id'),
+        "settings": settings,
+        "message_count": conv_data.get('message_count', 0),
+    }
+
+
 def _convert_db_conversation_to_response(
     conv_data: dict[str, Any],
     *,
     settings: Optional[dict[str, Any]] = None,
     resume_state: Optional[dict[str, Any]] = None,
 ) -> ChatSessionResponse:
-    """Convert database conversation to response model."""
-    character_id = conv_data.get('character_id')
-    assistant_kind = conv_data.get('assistant_kind')
-    assistant_id = conv_data.get('assistant_id')
-    if assistant_id is None and assistant_kind == "character" and character_id is not None:
-        assistant_id = str(character_id)
+    """Convert database conversation to detail response model."""
     state = resume_state or {}
     snapshot = state.get("behavior_snapshot") or {"status": "missing"}
     tail = state.get("tail") or {"message_id": None, "message_version": None}
+    detail_fields = _conversation_list_item_fields(conv_data, settings=settings)
+    detail_fields["message_count"] = state.get(
+        "message_count",
+        conv_data.get('message_count', 0),
+    )
     return ChatSessionResponse(
-        id=conv_data.get('id', ''),
-        scope_type=conv_data.get("scope_type") or "global",
-        workspace_id=conv_data.get("workspace_id"),
-        character_id=character_id,
-        character_name=conv_data.get('character_name'),
-        assistant_kind=assistant_kind,
-        assistant_id=assistant_id,
-        assistant_name=conv_data.get('assistant_name'),
-        persona_memory_mode=conv_data.get('persona_memory_mode'),
-        title=conv_data.get('title'),
-        rating=conv_data.get('rating'),
-        state=conv_data.get('state', 'in-progress'),
-        topic_label=conv_data.get('topic_label'),
-        cluster_id=conv_data.get('cluster_id'),
-        source=conv_data.get('source'),
-        external_ref=conv_data.get('external_ref'),
-        created_at=conv_data.get('created_at', datetime.now(timezone.utc)),
-        last_modified=conv_data.get('last_modified', datetime.now(timezone.utc)),
-        version=conv_data.get('version', 1),
-        parent_conversation_id=conv_data.get('parent_conversation_id'),
-        root_id=conv_data.get('root_id'),
-        forked_from_message_id=conv_data.get('forked_from_message_id'),
-        settings=settings,
+        **detail_fields,
         behavior_snapshot={
             "status": snapshot.get("status", "missing"),
             "schema_version": snapshot.get("schema_version"),
@@ -1805,9 +1823,17 @@ def _convert_db_conversation_to_response(
         ),
         settings_version=state.get("settings_version"),
         history_version=state.get("history_version"),
-        message_count=state.get("message_count", conv_data.get('message_count', 0)),
         tail=tail,
     )
+
+
+def _convert_db_conversation_to_list_item(
+    conv_data: dict[str, Any],
+    *,
+    settings: Optional[dict[str, Any]] = None,
+) -> ChatSessionListItem:
+    """Convert a conversation without materializing detail-only resume authority."""
+    return ChatSessionListItem(**_conversation_list_item_fields(conv_data, settings=settings))
 
 
 def _assistant_display_name(record: Mapping[str, Any] | None) -> str | None:
@@ -4559,17 +4585,17 @@ async def create_chat_session(
                 memory_by_character_id=session_data.memory_by_character_id,
                 provider=session_data.provider,
                 model=session_data.model,
-                sampling=(
-                    {
-                        "temperature": session_data.temperature,
-                        "top_p": session_data.top_p,
-                        "repetition_penalty": session_data.repetition_penalty,
-                        "stop": session_data.stop,
-                    }
-                    if session_data.model_fields_set
-                    & {"temperature", "top_p", "repetition_penalty", "stop"}
-                    else None
-                ),
+                sampling={
+                    field: getattr(session_data, field)
+                    for field in (
+                        "temperature",
+                        "top_p",
+                        "repetition_penalty",
+                        "stop",
+                    )
+                    if field in session_data.model_fields_set
+                }
+                or None,
                 initial_messages=initial_messages,
                 primary_greeting={
                     "content": greeting_text if valid_greeting else "",
@@ -4683,6 +4709,9 @@ async def create_chat_session(
 
     except HTTPException:
         raise
+    except InputError as e:
+        logger.warning("Invalid chat-session creation input: {}", e)
+        raise map_db_error_to_http(e) from e
     except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Error creating chat session: {e}", exc_info=True)
         raise HTTPException(
@@ -7163,29 +7192,20 @@ async def list_chat_sessions(
             user_conversations,
             user_id_str,
         )
-        resume_summaries = db.get_roleplay_resume_summaries(
-            [
-                str(conv["id"])
-                for conv in user_conversations
-                if conv.get("id") and not conv.get("deleted")
-            ]
-        )
-
-        chats: list[ChatSessionResponse] = []
+        chats: list[ChatSessionListItem] = []
         for conv in user_conversations:
             settings_payload: Optional[dict[str, Any]] = None
             if include_settings:
                 settings_row = db.get_conversation_settings(conv['id'])
                 settings_payload = (settings_row or {}).get("settings") or {}
             chats.append(
-                _convert_db_conversation_to_response(
+                _convert_db_conversation_to_list_item(
                     _attach_conversation_assistant_names_from_lookups(
                         conv,
                         character_names=character_names,
                         persona_names=persona_names,
                     ),
                     settings=settings_payload,
-                    resume_state=resume_summaries.get(str(conv["id"])),
                 )
             )
 
