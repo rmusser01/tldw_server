@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import copy
 import hmac
 import os
 import re
@@ -9,6 +10,7 @@ import secrets
 import sqlite3
 from collections.abc import Awaitable
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Callable
 
 from loguru import logger
@@ -16,6 +18,15 @@ from loguru import logger
 from tldw_Server_API.app.core.testing import is_test_mode, is_truthy
 
 from .manager import JobManager
+from .operations.contracts import (
+    ApplyPreparedDispositionCommand,
+    EnsureLeaseHorizonCommand,
+    LeaseHorizonResult,
+    OperationOutcome,
+    PreparedDispositionOrigin,
+    PreparedDispositionResult,
+    PreparedJobDisposition,
+)
 
 try:
     import psycopg  # type: ignore
@@ -75,6 +86,129 @@ class WorkerTerminalOutcome:
 JobHandler = Callable[
     [dict[str, Any]],
     Awaitable[dict[str, Any] | WorkerTerminalOutcome | None],
+]
+
+
+@dataclass(frozen=True, slots=True)
+class WorkerLeaseSnapshot:
+    """Read-only lease evidence visible to one prepared handler."""
+
+    worker_id: str
+    lease_id: str
+    leased_until: datetime | None
+    renewal_lost: bool
+
+
+def _lease_datetime(value: object) -> datetime | None:
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    else:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+class WorkerExecutionContext:
+    """Prepared-handler access to current exact lease evidence."""
+
+    __slots__ = (
+        "_domain",
+        "_job_id",
+        "_job_type",
+        "_jm",
+        "_lease_id",
+        "_leased_until",
+        "_payload",
+        "_queue",
+        "_renewal_lost",
+        "_worker_id",
+    )
+
+    def __init__(
+        self,
+        jm: JobManager,
+        job: dict[str, Any],
+        *,
+        worker_id: str,
+    ) -> None:
+        self._jm = jm
+        self._job_id = int(job["id"])
+        self._domain = str(job["domain"])
+        self._queue = str(job["queue"])
+        self._job_type = str(job["job_type"])
+        payload = job["payload"]
+        if not isinstance(payload, dict):
+            raise TypeError("prepared job payload must be an object")
+        self._payload = copy.deepcopy(payload)
+        self._worker_id = worker_id
+        self._lease_id = str(job["lease_id"])
+        self._leased_until = _lease_datetime(job.get("leased_until"))
+        self._renewal_lost = False
+
+    @property
+    def renewal_lost(self) -> bool:
+        return self._renewal_lost
+
+    def snapshot(self) -> WorkerLeaseSnapshot:
+        return WorkerLeaseSnapshot(
+            worker_id=self._worker_id,
+            lease_id=self._lease_id,
+            leased_until=self._leased_until,
+            renewal_lost=self._renewal_lost,
+        )
+
+    async def ensure_lease_horizon(self, seconds: int) -> bool:
+        try:
+            result = self._jm.ensure_lease_horizon(
+                EnsureLeaseHorizonCommand(
+                    job_id=self._job_id,
+                    domain=self._domain,
+                    queue=self._queue,
+                    job_type=self._job_type,
+                    expected_payload=self._payload,
+                    worker_id=self._worker_id,
+                    lease_id=self._lease_id,
+                    minimum_seconds=seconds,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 - backend isolation boundary
+            self._renewal_lost = True
+            logger.bind(error_type=type(exc).__name__).warning(
+                "Jobs prepared lease horizon failed"
+            )
+            return False
+
+        if isinstance(result, LeaseHorizonResult) and result.leased_until is not None:
+            self._leased_until = result.leased_until
+        ensured = bool(
+            isinstance(result, LeaseHorizonResult)
+            and result.outcome is OperationOutcome.APPLIED
+            and result.ensured
+            and result.leased_until is not None
+        )
+        if not ensured:
+            self._renewal_lost = True
+        return ensured
+
+
+PreparedJobHandler = Callable[
+    [dict[str, Any], WorkerExecutionContext],
+    Awaitable[PreparedJobDisposition],
+]
+PreAcquireGuard = Callable[[], Awaitable[bool]]
+PreparedHandlerErrorDisposition = Callable[
+    [dict[str, Any], type[BaseException]],
+    PreparedJobDisposition,
+]
+PreparedDispositionCallback = Callable[
+    [dict[str, Any], PreparedJobDisposition, PreparedDispositionResult],
+    Awaitable[None],
 ]
 
 _WORKER_SDK_NONCRITICAL_EXCEPTIONS = (
@@ -164,6 +298,36 @@ class WorkerSDK:
         *,
         callback_name: str,
     ) -> None:
+        await self._invoke_callback(
+            callback,
+            job,
+            callback_value,
+            callback_name=callback_name,
+        )
+
+    async def _invoke_prepared_disposition_callback(
+        self,
+        callback: PreparedDispositionCallback,
+        job: dict[str, Any],
+        disposition: PreparedJobDisposition,
+        result: PreparedDispositionResult,
+        *,
+        callback_name: str,
+    ) -> None:
+        await self._invoke_callback(
+            callback,
+            job,
+            disposition,
+            result,
+            callback_name=callback_name,
+        )
+
+    async def _invoke_callback(
+        self,
+        callback: Callable[..., Awaitable[None]],
+        *callback_args: object,
+        callback_name: str,
+    ) -> None:
         """Run bounded post-finalization work without re-finalizing the job.
 
         The deadline cannot preempt callback code that blocks the event loop
@@ -185,7 +349,7 @@ class WorkerSDK:
             return
 
         async def invoke() -> None:
-            await callback(job, callback_value)  # type: ignore[arg-type]
+            await callback(*callback_args)
 
         callback_task = asyncio.create_task(invoke())
         try:
@@ -292,6 +456,176 @@ class WorkerSDK:
             if self._max_iters and iters >= self._max_iters:
                 logger.debug("Auto-renew reached max iterations; exiting loop")
                 return
+
+    async def _auto_renew_prepared(self, context: WorkerExecutionContext) -> None:
+        lease = int(max(1, self.cfg.lease_seconds))
+        jitter = max(0, int(self.cfg.renew_jitter_seconds))
+        threshold = max(1, int(self.cfg.renew_threshold_seconds))
+        iters = 0
+        while True:
+            sleep_for = max(1, lease - threshold) + (
+                secrets.randbelow(jitter + 1) if jitter else 0
+            )
+            await self._sleep(float(sleep_for))
+            if not await context.ensure_lease_horizon(lease):
+                return
+            iters += 1
+            if self._max_iters and iters >= self._max_iters:
+                return
+
+    async def run_prepared(
+        self,
+        *,
+        handler: PreparedJobHandler,
+        pre_acquire_guard: PreAcquireGuard,
+        handler_error_disposition: PreparedHandlerErrorDisposition,
+        owner_user_id: str | None = None,
+        job_type: str | None = None,
+        on_disposition_applied: PreparedDispositionCallback | None = None,
+        on_disposition_rejected: PreparedDispositionCallback | None = None,
+    ) -> None:
+        """Run a fail-closed worker loop with one exact typed disposition."""
+
+        backoff = max(1, int(self.cfg.backoff_base_seconds))
+        backoff_max = max(backoff, int(self.cfg.backoff_max_seconds))
+        while not self._stop.is_set():
+            try:
+                guard_ok = await pre_acquire_guard()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - guard is an isolation boundary
+                logger.bind(error_type=type(exc).__name__).warning(
+                    "Jobs prepared pre-acquire guard failed"
+                )
+                guard_ok = False
+            if not guard_ok:
+                await self._sleep_chunked(float(min(backoff, backoff_max)))
+                if self._stop.is_set():
+                    break
+                backoff = min(backoff * 2, backoff_max)
+                continue
+            if self._stop.is_set():
+                break
+
+            try:
+                job = self.jm.acquire_next_job(
+                    domain=self.cfg.domain,
+                    queue=self.cfg.queue,
+                    lease_seconds=self.cfg.lease_seconds,
+                    worker_id=self.cfg.worker_id,
+                    owner_user_id=owner_user_id,
+                    job_type=job_type,
+                )
+            except Exception as exc:  # noqa: BLE001 - backend isolation boundary
+                logger.bind(error_type=type(exc).__name__).warning(
+                    "Jobs prepared acquisition failed"
+                )
+                job = None
+            if not job:
+                await self._sleep_chunked(float(min(backoff, backoff_max)))
+                if self._stop.is_set():
+                    break
+                backoff = min(backoff * 2, backoff_max)
+                continue
+            backoff = max(1, int(self.cfg.backoff_base_seconds))
+
+            acquired_job = copy.deepcopy(job)
+            try:
+                context = WorkerExecutionContext(
+                    self.jm,
+                    acquired_job,
+                    worker_id=self.cfg.worker_id,
+                )
+            except Exception as exc:  # noqa: BLE001 - acquired row boundary
+                logger.bind(error_type=type(exc).__name__).warning(
+                    "Jobs prepared execution context failed"
+                )
+                continue
+
+            renew_task = asyncio.create_task(self._auto_renew_prepared(context))
+            try:
+                error_class: type[BaseException] | None = None
+                try:
+                    disposition = await handler(copy.deepcopy(acquired_job), context)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:  # noqa: BLE001 - handler isolation boundary
+                    error_class = type(exc)
+                    disposition = None
+
+                if not isinstance(disposition, PreparedJobDisposition):
+                    error_class = error_class or TypeError
+                if error_class is not None:
+                    try:
+                        disposition = handler_error_disposition(
+                            acquired_job,
+                            error_class,
+                        )
+                    except Exception as exc:  # noqa: BLE001 - factory boundary
+                        logger.bind(error_type=type(exc).__name__).warning(
+                            "Jobs prepared handler error disposition failed"
+                        )
+                        continue
+                    if not isinstance(disposition, PreparedJobDisposition):
+                        logger.bind(error_type=TypeError.__name__).warning(
+                            "Jobs prepared handler error disposition failed"
+                        )
+                        continue
+
+                try:
+                    result = self.jm.apply_prepared_disposition(
+                        ApplyPreparedDispositionCommand(
+                            job_id=int(acquired_job["id"]),
+                            domain=str(acquired_job["domain"]),
+                            queue=str(acquired_job["queue"]),
+                            job_type=str(acquired_job["job_type"]),
+                            expected_payload=acquired_job["payload"],
+                            worker_id=self.cfg.worker_id,
+                            lease_id=str(acquired_job["lease_id"]),
+                            disposition=disposition,
+                        )
+                    )
+                    if not isinstance(result, PreparedDispositionResult) or not isinstance(
+                        result.outcome,
+                        OperationOutcome,
+                    ):
+                        raise TypeError
+                except Exception as exc:  # noqa: BLE001 - typed apply boundary
+                    logger.bind(error_type=type(exc).__name__).warning(
+                        "Jobs prepared disposition apply failed"
+                    )
+                    continue
+
+                if result.outcome is OperationOutcome.APPLIED:
+                    if (
+                        disposition.origin is PreparedDispositionOrigin.AUTHNZ
+                        and on_disposition_applied is not None
+                    ):
+                        await self._invoke_prepared_disposition_callback(
+                            on_disposition_applied,
+                            acquired_job,
+                            disposition,
+                            result,
+                            callback_name="prepared-disposition-applied",
+                        )
+                elif on_disposition_rejected is not None:
+                    await self._invoke_prepared_disposition_callback(
+                        on_disposition_rejected,
+                        acquired_job,
+                        disposition,
+                        result,
+                        callback_name="prepared-disposition-rejected",
+                    )
+            finally:
+                renew_task.cancel()
+                try:
+                    await renew_task
+                except asyncio.CancelledError:
+                    pass
+                except Exception as exc:  # noqa: BLE001 - renewal isolation boundary
+                    logger.bind(error_type=type(exc).__name__).warning(
+                        "Jobs prepared renewal task failed"
+                    )
 
     async def run(
         self,

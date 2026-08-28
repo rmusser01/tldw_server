@@ -94,6 +94,81 @@ def _slides_jobs_key(character: str) -> str:
     return "slides:v1:" + character * 64
 
 
+@pytest.mark.asyncio
+async def test_legacy_acquire_guard_remains_post_acquisition_and_releases_false(
+    monkeypatch,
+    tmp_path,
+):
+    db_path = tmp_path / "jobs_wsdk_legacy_guard_false.db"
+    ensure_jobs_tables(db_path)
+    manager = JobManager(db_path)
+    job = manager.create_job(
+        domain="chatbooks",
+        queue="default",
+        job_type="guarded",
+        payload={},
+        owner_user_id="u",
+    )
+    sdk = WorkerSDK(
+        manager,
+        WorkerConfig(domain="chatbooks", queue="default", worker_id="worker"),
+    )
+    releases = []
+    original_release = manager.release_job
+
+    def release(*args, **kwargs):
+        releases.append((args, kwargs))
+        return original_release(*args, **kwargs)
+
+    monkeypatch.setattr(manager, "release_job", release)
+
+    async def guard(acquired_job):
+        assert int(acquired_job["id"]) == int(job["id"])
+        sdk.stop()
+        return False
+
+    async def handler(_job_row):
+        pytest.fail("legacy handler must not run after a false guard")
+
+    await sdk.run(handler=handler, acquire_guard=guard)
+
+    assert len(releases) == 1
+    assert (manager.get_job(int(job["id"])) or {})["status"] == "queued"
+
+
+@pytest.mark.asyncio
+async def test_legacy_acquire_guard_exception_remains_fail_open(tmp_path):
+    db_path = tmp_path / "jobs_wsdk_legacy_guard_exception.db"
+    ensure_jobs_tables(db_path)
+    manager = JobManager(db_path)
+    job = manager.create_job(
+        domain="chatbooks",
+        queue="default",
+        job_type="guarded",
+        payload={},
+        owner_user_id="u",
+    )
+    sdk = WorkerSDK(
+        manager,
+        WorkerConfig(domain="chatbooks", queue="default", worker_id="worker"),
+    )
+    handled = []
+
+    async def guard(acquired_job):
+        assert int(acquired_job["id"]) == int(job["id"])
+        raise RuntimeError("legacy guard remains fail open")
+
+    async def handler(acquired_job):
+        handled.append(int(acquired_job["id"]))
+        sdk.stop()
+        return {"ok": True}
+
+    await sdk.run(handler=handler, acquire_guard=guard)
+
+    assert handled == [int(job["id"])]
+    assert (manager.get_job(int(job["id"])) or {})["status"] == "completed"
+
+
 def _failure_test_worker(tmp_path, name: str, *, max_retries: int = 0):
     db_path = tmp_path / f"{name}.db"
     ensure_jobs_tables(db_path)

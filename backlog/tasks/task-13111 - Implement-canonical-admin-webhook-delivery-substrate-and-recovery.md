@@ -4,7 +4,7 @@ title: Implement canonical admin webhook delivery substrate and recovery
 status: In Progress
 assignee: []
 created_date: '2026-08-23 03:15'
-updated_date: '2026-08-28 22:49'
+updated_date: '2026-08-28 23:13'
 labels:
   - admin
   - webhooks
@@ -115,6 +115,8 @@ Task 3 Fix Round 1/5 started at FIX_BASE 803ae280f66e990f7b4ffdf29e31cae311d648d
 2026-08-28: Started Task 3 post-Fix-Round-5 breaker remediation at FIX_BASE 82a29ee11697b39eb07396174b0db06908aee14a. Scope: centralized type-exact JSON comparison including non-finite floats, raw SQL JSON-null presence evidence, and fail-closed parity across migration, collision/prune, replay, and identity paths. Strict focused RED precedes production edits; PostgreSQL-required zero-skip and all mandatory gates remain required.
 
 2026-08-28: Task 3 post-Fix-Round-5 breaker remediation complete at pre-commit tree. Added one recursive type-exact archive comparator (including SQLite NaN and signed infinity semantics), separated SQL-column presence from parsed JSON null with bounded private query evidence, and applied exact comparison across migration, collision/prune, receipt replay/prune, and generic identity paths without metadata leakage. RED: 49 failed/25 passed/0 skipped, plus corrected direct subset 5 failed/3 passed. Focused breaker GREEN: 74 passed/0 skipped; prior malformed/framing/reload/secrecy GREEN: 74 passed/0 skipped. Mandatory PostgreSQL-required Task 3/lifecycle gate: 407 passed/0 skipped. Stable complete SQLite Slides plus both idempotency suites: 176 passed/0 skipped. Focused Ruff passed 15 changed Python files; Bandit passed 8 production files; diff check clean. Known optional PostgreSQL audit IndeterminateDatatype baseline remains intentionally unchanged. Evidence: .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-3-report.md.
+
+2026-08-28: Task 4 complete at pre-commit tree. Added fail-closed prepared WorkerSDK path with observable renewal/horizon state, closed handler-error evidence, one typed disposition application, origin-aware bounded callbacks, and no default double finalization; legacy run guard semantics remain green. RED: 31 failed/38 passed/2 warnings because run_prepared was absent. GREEN: 69 passed/2 baseline warnings. Focused Ruff, Bandit, and diff checks pass. Evidence: .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-4-report.md.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
