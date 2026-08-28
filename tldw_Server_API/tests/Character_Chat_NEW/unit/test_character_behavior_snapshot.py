@@ -137,6 +137,24 @@ def test_build_behavior_snapshot_is_isolated_from_source_mutation():
 
 
 @pytest.mark.unit
+def test_behavior_snapshot_payload_access_is_defensively_isolated():
+    snapshot = build_behavior_snapshot(_source())
+    mutable_view = snapshot.payload
+
+    mutable_view["participants"][0]["identity"]["aliases"].append("Changed")
+    mutable_view["participants"].pop()
+
+    fresh_payload = snapshot.payload
+    assert fresh_payload["participants"][0]["identity"]["aliases"] == ["Ari"]
+    assert len(fresh_payload["participants"]) == 2
+    assert fresh_payload == json.loads(snapshot.canonical_bytes)
+    assert snapshot.size_bytes == len(snapshot.canonical_bytes)
+    assert snapshot.digest == (
+        f"sha256:{hashlib.sha256(snapshot.canonical_bytes).hexdigest()}"
+    )
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "path",
     [
@@ -171,6 +189,16 @@ def test_fixed_source_classification_has_no_credential_bearing_fields():
 
     source = _source()
     source["participants"][0]["source"]["kind"] = "provider"
+    with pytest.raises(ValueError, match="source.kind"):
+        build_behavior_snapshot(source)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("kind", [["character"], {"value": "character"}])
+def test_build_behavior_snapshot_rejects_non_string_source_kind(kind):
+    source = _source()
+    source["participants"][0]["source"]["kind"] = kind
+
     with pytest.raises(ValueError, match="source.kind"):
         build_behavior_snapshot(source)
 
@@ -289,6 +317,32 @@ def test_build_behavior_snapshot_rejects_credentials_in_extensible_maps(extensib
         participant[extensible_field] = [secret_map]
     else:
         participant[extensible_field] = secret_map
+
+    with pytest.raises(ValueError, match="credential-like key"):
+        build_behavior_snapshot(source)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "credential_key",
+    [
+        "api.key",
+        "api/key",
+        "api\tkey",
+        "api--key",
+        "api__key",
+        "API KEY",
+        "x-api-key",
+        "ＡＰＩ．ＫＥＹ",
+    ],
+)
+def test_build_behavior_snapshot_rejects_credential_key_separator_variants(
+    credential_key,
+):
+    source = _source()
+    source["participants"][0]["prompt"]["prompt_relevant_extensions"] = {
+        credential_key: "must-not-be-stored",
+    }
 
     with pytest.raises(ValueError, match="credential-like key"):
         build_behavior_snapshot(source)

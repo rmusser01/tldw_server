@@ -5,10 +5,11 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
+import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
-
 
 SNAPSHOT_SCHEMA_VERSION = 1
 DEFAULT_MAX_SNAPSHOT_BYTES = 1024 * 1024
@@ -58,8 +59,10 @@ _CREDENTIAL_KEYS = frozenset(
         "private_key",
         "refresh_token",
         "secret",
+        "x_api_key",
     }
 )
+_CREDENTIAL_SEPARATOR_RE = re.compile(r"[\W_]+")
 
 
 @dataclass(frozen=True)
@@ -67,10 +70,14 @@ class BehaviorSnapshotV1:
     """Frozen boundary around a canonical behavior-snapshot payload."""
 
     schema_version: int
-    payload: dict[str, Any]
     canonical_bytes: bytes
     digest: str
     size_bytes: int
+
+    @property
+    def payload(self) -> dict[str, Any]:
+        """Return a defensive payload copy decoded from the canonical authority."""
+        return json.loads(self.canonical_bytes)
 
 
 def build_behavior_snapshot(
@@ -99,7 +106,6 @@ def build_behavior_snapshot(
         )
     return BehaviorSnapshotV1(
         schema_version=SNAPSHOT_SCHEMA_VERSION,
-        payload=normalized,
         canonical_bytes=canonical_bytes,
         digest=f"sha256:{hashlib.sha256(canonical_bytes).hexdigest()}",
         size_bytes=len(canonical_bytes),
@@ -172,7 +178,7 @@ def _validate_participant(participant: Any, *, index: int) -> tuple[str, str]:
 
     source = _require_object(participant["source"], path=f"{path}.source")
     _require_exact_keys(source, _SOURCE_KEYS, path=f"{path}.source")
-    if source["kind"] not in _SOURCE_KINDS:
+    if not isinstance(source["kind"], str) or source["kind"] not in _SOURCE_KINDS:
         raise ValueError(f"{path}.source.kind must be one of {sorted(_SOURCE_KINDS)}")
     if not isinstance(source["id"], str) or not source["id"]:
         raise ValueError(f"{path}.source.id must be a non-empty string")
@@ -254,7 +260,10 @@ def _reject_credential_keys(value: Any, *, path: str) -> None:
     if not isinstance(value, dict):
         return
     for key, item in value.items():
-        normalized_key = key.casefold().replace("-", "_").replace(" ", "_")
+        normalized_key = _CREDENTIAL_SEPARATOR_RE.sub(
+            "_",
+            unicodedata.normalize("NFKC", key).casefold(),
+        ).strip("_")
         if normalized_key in _CREDENTIAL_KEYS:
             raise ValueError(f"{path} contains credential-like key {key!r}")
         _reject_credential_keys(item, path=f"{path}.{key}")
