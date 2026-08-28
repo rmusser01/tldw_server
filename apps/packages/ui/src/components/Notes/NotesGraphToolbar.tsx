@@ -1,5 +1,4 @@
 import type { NotesGraphEdgeType } from "@/services/note-graph-suggestions"
-import { Tooltip } from "antd"
 import {
   Focus,
   Maximize2,
@@ -11,6 +10,8 @@ import {
 } from "lucide-react"
 import React from "react"
 import { useTranslation } from "react-i18next"
+
+import IconButton from "@/components/Common/IconButton"
 
 import type { NotesGraphLayout } from "./hooks/useNotesGraphWorkspace"
 
@@ -58,33 +59,9 @@ const EDGE_OPTIONS: Array<{ type: NotesGraphEdgeType; label: string }> = [
   { type: "source_membership", label: "Source membership" }
 ]
 
-type IconButtonProps = {
-  label: string
-  disabled?: boolean
-  pressed?: boolean
-  onClick: () => void
-  children: React.ReactNode
-}
-
-const IconButton: React.FC<IconButtonProps> = ({
-  label,
-  disabled,
-  pressed,
-  onClick,
-  children
-}) => (
-  <Tooltip title={label}>
-    <button
-      type="button"
-      className="inline-flex h-9 w-9 flex-none items-center justify-center border border-border bg-surface text-text transition-colors hover:bg-surface2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-50"
-      aria-label={label}
-      aria-pressed={pressed}
-      disabled={disabled}
-      onClick={onClick}>
-      {children}
-    </button>
-  </Tooltip>
-)
+const EDGE_MENU_ID = "notes-graph-edge-menu"
+const iconButtonClassName =
+  "flex-none border border-border bg-surface text-text hover:bg-surface2 disabled:cursor-not-allowed disabled:opacity-50"
 
 const NotesGraphToolbar: React.FC<NotesGraphToolbarProps> = ({
   search,
@@ -120,7 +97,9 @@ const NotesGraphToolbar: React.FC<NotesGraphToolbarProps> = ({
   const iconSize = 16
 
   return (
-    <div className="border-b border-border bg-surface px-3 py-2">
+    <div
+      className="border-b border-border bg-surface px-3 py-2"
+      data-testid="notes-graph-toolbar">
       <div className="flex flex-wrap items-end gap-2">
         <div className="relative min-w-[180px] flex-1 sm:max-w-[280px]">
           <label className="sr-only" htmlFor="notes-graph-search">
@@ -206,14 +185,14 @@ const NotesGraphToolbar: React.FC<NotesGraphToolbarProps> = ({
           aria-label="Graph scope">
           <button
             type="button"
-            className={`px-3 text-sm ${scope === "focused" ? "bg-primary text-white" : "bg-surface text-text"}`}
+            className={`px-3 text-sm ${scope === "focused" ? "bg-primary text-primary-foreground" : "bg-surface text-text"}`}
             aria-pressed={scope === "focused"}
             onClick={onShowFocused}>
             Focused
           </button>
           <button
             type="button"
-            className={`border-l border-border px-3 text-sm ${scope === "all" ? "bg-primary text-white" : "bg-surface text-text"}`}
+            className={`border-l border-border px-3 text-sm ${scope === "all" ? "bg-primary text-primary-foreground" : "bg-surface text-text"}`}
             aria-pressed={scope === "all"}
             disabled={!allNotes.eligible}
             onClick={onShowAllNotes}>
@@ -221,40 +200,59 @@ const NotesGraphToolbar: React.FC<NotesGraphToolbarProps> = ({
           </button>
         </div>
 
-        <IconButton label="Focus current note" onClick={onFocusCurrent}>
+        <IconButton
+          ariaLabel="Focus current note"
+          className={iconButtonClassName}
+          onClick={onFocusCurrent}>
           <Focus size={iconSize} aria-hidden="true" />
         </IconButton>
         <IconButton
-          label="Expand graph"
+          ariaLabel="Expand graph"
+          className={iconButtonClassName}
           disabled={!canExpand}
           onClick={onExpand}>
           <Plus size={iconSize} aria-hidden="true" />
         </IconButton>
         <IconButton
-          label="Refresh graph"
+          ariaLabel="Refresh graph"
+          className={iconButtonClassName}
           disabled={isRefreshing}
           onClick={onRefresh}>
           <RefreshCw size={iconSize} aria-hidden="true" />
         </IconButton>
-        <IconButton label="Zoom in" onClick={onZoomIn}>
+        <IconButton
+          ariaLabel="Zoom in"
+          className={iconButtonClassName}
+          onClick={onZoomIn}>
           <ZoomIn size={iconSize} aria-hidden="true" />
         </IconButton>
-        <IconButton label="Zoom out" onClick={onZoomOut}>
+        <IconButton
+          ariaLabel="Zoom out"
+          className={iconButtonClassName}
+          onClick={onZoomOut}>
           <ZoomOut size={iconSize} aria-hidden="true" />
         </IconButton>
-        <IconButton label="Fit graph to view" onClick={onFit}>
+        <IconButton
+          ariaLabel="Fit graph to view"
+          className={iconButtonClassName}
+          onClick={onFit}>
           <Maximize2 size={iconSize} aria-hidden="true" />
         </IconButton>
 
         <div className="relative">
           <IconButton
-            label="Edge visibility"
-            pressed={edgeMenuOpen}
+            ariaLabel="Edge visibility"
+            className={iconButtonClassName}
+            hasPopup="menu"
+            ariaExpanded={edgeMenuOpen}
+            ariaControls={EDGE_MENU_ID}
             onClick={() => setEdgeMenuOpen((open) => !open)}>
             <SlidersHorizontal size={iconSize} aria-hidden="true" />
           </IconButton>
           {edgeMenuOpen ? (
-            <div className="absolute right-0 top-10 z-20 min-w-[190px] border border-border bg-elevated p-3 shadow-lg">
+            <div
+              id={EDGE_MENU_ID}
+              className="absolute right-0 top-12 z-20 min-w-[190px] border border-border bg-elevated p-3 shadow-lg">
               {EDGE_OPTIONS.map(({ type, label }) => (
                 <label
                   key={type}

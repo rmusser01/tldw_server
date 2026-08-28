@@ -4,7 +4,7 @@ title: Implement first-class Notes graph workspace and reviewable AI suggestions
 status: In Progress
 assignee: []
 created_date: 2026-08-27 03:40
-updated_date: 2026-08-28 05:34
+updated_date: 2026-08-28 07:46
 labels:
 - notes
 - knowledge-graph
@@ -68,6 +68,17 @@ modified_files:
 - tldw_Server_API/app/core/Jobs/operations/sqlite/idempotency.py
 - tldw_Server_API/tests/Jobs/test_jobs_manager.py
 - tldw_Server_API/tests/Jobs/test_jobs_manager_postgres.py
+- apps/packages/ui/src/components/Notes/NotesGraphCanvas.tsx
+- apps/packages/ui/src/components/Notes/NotesGraphToolbar.tsx
+- apps/packages/ui/src/components/Notes/NotesGraphWorkspace.tsx
+- apps/packages/ui/src/components/Notes/NotesManagerPage.tsx
+- apps/packages/ui/src/components/Notes/notes-manager-utils.ts
+- apps/packages/ui/src/components/Notes/hooks/useNotesGraphAuthorityScope.ts
+- apps/packages/ui/src/components/Notes/__tests__/NotesGraphCanvas.graph-view.test.tsx
+- apps/packages/ui/src/components/Notes/__tests__/NotesGraphWorkspace.view-mode.test.tsx
+- apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage21.accessibility-modal-focus.test.tsx
+- apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage22.accessibility-regression.test.tsx
+- apps/packages/ui/src/components/Notes/__tests__/useNotesGraphAuthorityScope.test.tsx
 ---
 
 ## Description
@@ -111,6 +122,7 @@ Execute the approved 12-task test-first plan in Docs/superpowers/plans/2026-08-2
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Deferred work is tracked separately: TASK-13134 embeddings and semantic edges; TASK-13135 automatic background organization; TASK-13136 library-wide recurring themes; TASK-13137 saved graph views/layouts. This task remains review-first and on-demand.
 
@@ -206,6 +218,9 @@ Task 9 exceptional Fix Round 4 final verification update: added a deferred termi
 Task 9 exceptional Fix Round 5 started from exact base c9f07661a41dda07364b5c40f21a69dd9455442b under explicit user authorization. Scope is limited to non-success terminal run cleanup for failed/cancelled/stale, reusing the exact tracker resolver and one resolved-identity fence. Parameterized strict RED precedes the minimal hook change; success, query-error, provider-switch, cache authority, generation retry, Task 10, and controller progress.md remain excluded.
 Task 9 exceptional Fix Round 5 completed from exact base c9f07661a41dda07364b5c40f21a69dd9455442b. Non-success terminal details (failed/cancelled/stale) now release only the exact tracked scope/run/provider/model identity through the existing bounded resolved fence, never expose the terminal owner as active, cannot re-adopt the fenced stale row, and permit a distinct fresh matching nonterminal run to recover. Non-success cleanup does not invalidate the shared suggestion list; successful publication behavior and the existing stale-identity race fence remain unchanged. Required gate: 61 passed/0 skipped. Affected gate: 170 passed with the same 3 inherited Notes presentation failures. Prettier and ESLint clean; TypeScript remains the exact inherited 315-line baseline with zero touched/imported diagnostics; Bandit not applicable; diff check clean. Full RED/GREEN and race/privacy evidence are in the ignored task-9-report.md. Parent TASK-13138 remains In Progress for Tasks 10-12.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+Task 10 Fix Round 1/3 completed from exact base f6a964c9c4582c0ca16b2e37c3048414978751f3. Replaced chat-derived Graph authority with a Notes-owned SHA-256 scope over normalized canonical origin plus verified active principal, with cookie/single-user/multi-user coverage, synchronous config/auth invalidation, credential-safe boundaries, and epoch-fenced A-B-A/stale completions. Preserved Cytoscape pan/zoom across fresh callbacks, restricted recents/active-library state to authoritative active notes, updated Stage 22 for the first-class workspace, added 320px/200%-equivalent vertical reflow, and reused the shared 44px IconButton with complete edge disclosure semantics and semantic foreground tokens. Verification: focused fix gate 35/35; affected Task 9 62/62; affected Task 10/Notes manager gate 52 passed with the single unchanged Stage 5 presentation baseline failure; ESLint zero errors and strict new/graph files zero warnings; pinned Prettier clean for new/graph files; TypeScript exactly matches the inherited 315-line baseline with zero touched diagnostics; git diff --check clean; Bandit not applicable to TypeScript-only scope. Full evidence: .superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-10-report.md. Parent task remains In Progress for Tasks 11-12.
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 

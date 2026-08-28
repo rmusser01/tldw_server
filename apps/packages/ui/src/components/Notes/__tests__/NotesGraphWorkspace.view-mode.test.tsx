@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import NotesGraphWorkspace from "../NotesGraphWorkspace"
 import {
+  hasNotesGraphActiveNotes,
   type NotesListViewMode,
   resolveNotesGraphFocusNoteId
 } from "../notes-manager-utils"
@@ -170,7 +171,7 @@ describe("NotesGraphWorkspace first-class view mode", () => {
     })
   })
 
-  it("accepts graph as a Notes view and resolves selected, recent, then visible focus", () => {
+  it("accepts graph as a Notes view and resolves selected, verified recent, then visible focus", () => {
     const graphMode: NotesListViewMode = "graph"
     expect(graphMode).toBe("graph")
     expect(
@@ -183,21 +184,52 @@ describe("NotesGraphWorkspace first-class view mode", () => {
     expect(
       resolveNotesGraphFocusNoteId(
         null,
-        [{ id: "recent", title: "Recent" }],
-        [{ id: "visible", title: "Visible" }]
+        [
+          { id: "cross-server", title: "Cross-server" },
+          { id: "recent", title: "Recent" }
+        ],
+        [
+          { id: "visible", title: "Visible", deleted: false },
+          { id: "recent", title: "Recent", deleted: false }
+        ]
       )
     ).toBe("recent")
     expect(
       resolveNotesGraphFocusNoteId(
         null,
-        [],
-        [{ id: "visible", title: "Visible" }]
+        [{ id: "deleted", title: "Deleted" }],
+        [
+          { id: "deleted", title: "Deleted", deleted: true },
+          { id: "visible", title: "Visible", deleted: false }
+        ]
       )
     ).toBe("visible")
+    expect(
+      resolveNotesGraphFocusNoteId(
+        null,
+        [{ id: "stale", title: "Stale" }],
+        [{ id: "visible", title: "Visible", deleted: false }]
+      )
+    ).toBe("visible")
+    expect(resolveNotesGraphFocusNoteId(null, [{ id: "stale" }], [])).toBeNull()
+  })
+
+  it("does not treat unverified recents or deleted rows as an active library", () => {
+    expect(hasNotesGraphActiveNotes(null, 0, [])).toBe(false)
+    expect(
+      hasNotesGraphActiveNotes(null, 0, [{ id: "deleted", deleted: true }])
+    ).toBe(false)
+    expect(
+      hasNotesGraphActiveNotes(null, 0, [{ id: "active", deleted: false }])
+    ).toBe(true)
+    expect(hasNotesGraphActiveNotes("loaded-selection", 0, [])).toBe(true)
   })
 
   it("passes only the opaque authority and mounted focus into the authoritative workspace hook", () => {
-    renderWorkspace({ initialFocusNoteId: "recent-note", selectedNoteId: null })
+    renderWorkspace({
+      initialFocusNoteId: "recent-note",
+      selectedNoteId: null
+    })
 
     expect(mockUseNotesGraphWorkspace).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -249,7 +281,11 @@ describe("NotesGraphWorkspace first-class view mode", () => {
       all_notes_eligible: true,
       limits: { ...graph.limits, max_nodes: 7 }
     }
-    state.allNotes = { activeNoteCount: 7, effectiveNoteCap: 7, eligible: true }
+    state.allNotes = {
+      activeNoteCount: 7,
+      effectiveNoteCap: 7,
+      eligible: true
+    }
     state.showAllNotes = vi.fn(() => true)
     mockUseNotesGraphWorkspace.mockReturnValue(state)
     renderWorkspace()
@@ -331,5 +367,24 @@ describe("NotesGraphWorkspace first-class view mode", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Open notes list" }))
     expect(onOpenSidebar).toHaveBeenCalledTimes(1)
+  })
+
+  it("reflows wrapped controls into a vertically scrollable 320px workspace", () => {
+    renderWorkspace({ isMobileViewport: true })
+
+    const workspace = screen.getByTestId("notes-graph-workspace")
+    const canvasSlot = screen.getByTestId("notes-graph-canvas-slot")
+    const toolbar = screen.getByTestId("notes-graph-toolbar")
+    Object.defineProperties(workspace, {
+      clientWidth: { configurable: true, value: 320 },
+      clientHeight: { configurable: true, value: 360 },
+      scrollHeight: { configurable: true, value: 1040 }
+    })
+
+    expect(workspace.clientWidth).toBe(320)
+    expect(workspace.scrollHeight).toBeGreaterThan(workspace.clientHeight)
+    expect(workspace).toHaveClass("overflow-y-auto")
+    expect(toolbar.querySelector(".flex-wrap")).toBeInTheDocument()
+    expect(canvasSlot).toHaveClass("min-h-[420px]", "sm:min-h-[520px]")
   })
 })

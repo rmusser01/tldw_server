@@ -33,11 +33,13 @@ const { cyHandlers, mockCytoscapeFactory, mockCyInstance, resetCyState } =
   vi.hoisted(() => {
     const handlers: Record<string, (event: CytoscapeTestEvent) => void> = {}
     let zoomLevel = 1
+    let panPosition = { x: 0, y: 0 }
     const instance = {
       on: vi.fn(),
       fit: vi.fn(),
       destroy: vi.fn(),
-      zoom: vi.fn()
+      zoom: vi.fn(),
+      pan: vi.fn()
     }
     instance.on.mockImplementation(
       (
@@ -63,6 +65,13 @@ const { cyHandlers, mockCytoscapeFactory, mockCyInstance, resetCyState } =
       }
       return zoomLevel
     })
+    instance.pan.mockImplementation((next?: { x: number; y: number }) => {
+      if (next) {
+        panPosition = next
+        return instance
+      }
+      return panPosition
+    })
 
     const factory = Object.assign(
       vi.fn((_config: CytoscapeTestConfig) => instance),
@@ -75,6 +84,7 @@ const { cyHandlers, mockCytoscapeFactory, mockCyInstance, resetCyState } =
       mockCyInstance: instance,
       resetCyState: () => {
         zoomLevel = 1
+        panPosition = { x: 0, y: 0 }
         Object.keys(handlers).forEach((key) => delete handlers[key])
       }
     }
@@ -383,6 +393,78 @@ describe("NotesGraphCanvas graph view", () => {
 
     expect(mockCytoscapeFactory).toHaveBeenCalledTimes(1)
   })
+
+  it("keeps zoom and pan while a fresh parent callback reaches the existing canvas", async () => {
+    const firstCallback = vi.fn()
+    const latestCallback = vi.fn()
+    const visibleEdgeTypes = new Set(["manual", "wikilink"] as const)
+    const provisionalOverlays: [] = []
+    const { rerender } = render(
+      <NotesGraphCanvas
+        graph={graph}
+        layout="dagre"
+        focusNoteId="a"
+        selectedNodeId="note:a"
+        visibleEdgeTypes={visibleEdgeTypes}
+        provisionalOverlays={provisionalOverlays}
+        showProvisional={false}
+        onSelectNode={firstCallback}
+      />
+    )
+    await waitFor(() => expect(mockCytoscapeFactory).toHaveBeenCalledTimes(1))
+    mockCyInstance.zoom(1.6)
+    mockCyInstance.pan({ x: 24, y: 12 })
+
+    rerender(
+      <NotesGraphCanvas
+        graph={graph}
+        layout="dagre"
+        focusNoteId="a"
+        selectedNodeId="note:a"
+        visibleEdgeTypes={visibleEdgeTypes}
+        provisionalOverlays={provisionalOverlays}
+        showProvisional={false}
+        onSelectNode={latestCallback}
+      />
+    )
+
+    expect(mockCytoscapeFactory).toHaveBeenCalledTimes(1)
+    expect(mockCyInstance.zoom()).toBe(1.6)
+    expect(mockCyInstance.pan()).toEqual({ x: 24, y: 12 })
+    act(() => {
+      cyHandlers["tap:node"]?.({
+        target: {
+          id: () => "note:b",
+          data: () => undefined
+        }
+      })
+    })
+    expect(firstCallback).not.toHaveBeenCalled()
+    expect(latestCallback).toHaveBeenCalledWith("note:b")
+  })
+
+  it("fills its responsive parent without defining a second minimum height", () => {
+    render(
+      <NotesGraphCanvas
+        graph={graph}
+        layout="dagre"
+        focusNoteId="a"
+        selectedNodeId={null}
+        visibleEdgeTypes={new Set(["manual"])}
+        provisionalOverlays={[]}
+        showProvisional={false}
+        onSelectNode={vi.fn()}
+      />
+    )
+
+    expect(screen.getByTestId("notes-graph-canvas")).toHaveClass(
+      "h-full",
+      "w-full"
+    )
+    expect(screen.getByTestId("notes-graph-canvas").className).not.toContain(
+      "min-h-"
+    )
+  })
 })
 
 describe("NotesGraphToolbar controls", () => {
@@ -443,8 +525,12 @@ describe("NotesGraphToolbar controls", () => {
     ]
     iconLabels.forEach((label) => {
       expect(screen.getByRole("button", { name: label })).toHaveClass(
-        "h-9",
-        "w-9"
+        "min-h-[44px]",
+        "min-w-[44px]"
+      )
+      expect(screen.getByRole("button", { name: label })).toHaveAttribute(
+        "title",
+        label
       )
     })
     expect(screen.getByText("Loaded alpha")).toBeInTheDocument()
@@ -476,6 +562,16 @@ describe("NotesGraphToolbar controls", () => {
       target: { value: "grid" }
     })
     fireEvent.click(screen.getByRole("button", { name: "Edge visibility" }))
+    expect(
+      screen.getByRole("button", { name: "Edge visibility" })
+    ).toHaveAttribute("aria-haspopup", "menu")
+    expect(
+      screen.getByRole("button", { name: "Edge visibility" })
+    ).toHaveAttribute("aria-expanded", "true")
+    expect(
+      screen.getByRole("button", { name: "Edge visibility" })
+    ).toHaveAttribute("aria-controls", "notes-graph-edge-menu")
+    expect(document.getElementById("notes-graph-edge-menu")).toBeInTheDocument()
     fireEvent.click(screen.getByRole("checkbox", { name: "Manual links" }))
     fireEvent.click(screen.getByRole("checkbox", { name: "Suggestions" }))
 
@@ -484,5 +580,16 @@ describe("NotesGraphToolbar controls", () => {
     expect(toolbarProps.onLayoutChange).toHaveBeenCalledWith("grid")
     expect(toolbarProps.onToggleEdgeType).toHaveBeenCalledWith("manual")
     expect(toolbarProps.onToggleProvisional).toHaveBeenCalled()
+  })
+
+  it("uses the semantic foreground token for the selected scope", () => {
+    render(<NotesGraphToolbar {...toolbarProps} />)
+
+    expect(screen.getByRole("button", { name: "Focused" })).toHaveClass(
+      "text-primary-foreground"
+    )
+    expect(screen.getByRole("button", { name: "Focused" })).not.toHaveClass(
+      "text-white"
+    )
   })
 })

@@ -311,19 +311,26 @@ describe("NotesManagerPage stage 22 accessibility regression", () => {
     expect(results.violations).toEqual([])
   })
 
-  it("has no core aria/name violations in the graph modal state", async () => {
+  it("has no core aria/name violations in the first-class graph workspace", async () => {
     renderPage()
     await seedAndSaveNote()
 
     fireEvent.click(screen.getByRole("button", { name: "Split" }))
     fireEvent.click(await screen.findByTestId("notes-open-graph-view"))
 
-    const radiusControl = await screen.findByTestId("notes-graph-radius-control")
-    const modalRoot = radiusControl.closest(".ant-modal-root") || document.body
+    const workspace = await screen.findByTestId("notes-graph-workspace")
+    expect(workspace).toHaveAccessibleName("Notes graph")
+    expect(
+      screen.getByRole("searchbox", { name: "Search loaded nodes" })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Focus current note" })
+    ).toHaveAttribute("title", "Focus current note")
+    expect(
+      screen.getByRole("button", { name: "Edge visibility" })
+    ).toHaveAttribute("aria-controls", "notes-graph-edge-menu")
 
-    const modalTitle = modalRoot.querySelector(".ant-modal-title")
-    expect(modalTitle).toHaveTextContent("Notes graph view")
-    const results = await runA11yRules(modalRoot, CORE_RULES)
+    const results = await runA11yRules(workspace, CORE_RULES)
     expect(results.violations).toEqual([])
   })
 

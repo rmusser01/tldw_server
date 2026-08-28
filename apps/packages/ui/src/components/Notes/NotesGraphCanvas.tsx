@@ -66,8 +66,10 @@ const NotesGraphCanvas = React.forwardRef<
     const cyRef = React.useRef<Core | null>(null)
     const focusNoteIdRef = React.useRef(focusNoteId)
     const selectedNodeIdRef = React.useRef(selectedNodeId)
+    const onSelectNodeRef = React.useRef(onSelectNode)
     focusNoteIdRef.current = focusNoteId
     selectedNodeIdRef.current = selectedNodeId
+    onSelectNodeRef.current = onSelectNode
 
     const syncNodeState = React.useCallback((cy: Core) => {
       if (typeof cy.$id !== "function") return
@@ -240,7 +242,9 @@ const NotesGraphCanvas = React.forwardRef<
         autounselectify: false
       })
 
-      cy.on("tap", "node", (event) => onSelectNode(event.target.id()))
+      cy.on("tap", "node", (event) =>
+        onSelectNodeRef.current(event.target.id())
+      )
       cy.on("mouseover", "node", (event) =>
         event.target.addClass("graph-label-hovered")
       )
@@ -258,7 +262,6 @@ const NotesGraphCanvas = React.forwardRef<
     }, [
       graph,
       layout,
-      onSelectNode,
       provisionalOverlays,
       showProvisional,
       syncNodeState,
@@ -273,7 +276,7 @@ const NotesGraphCanvas = React.forwardRef<
     return (
       <div
         ref={containerRef}
-        className="h-full min-h-[420px] w-full bg-bg sm:min-h-[520px]"
+        className="h-full w-full bg-bg"
         data-testid="notes-graph-canvas"
         role="img"
         aria-label="Notes graph canvas"

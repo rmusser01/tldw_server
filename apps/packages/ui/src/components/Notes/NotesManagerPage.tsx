@@ -26,7 +26,7 @@ import NotesGraphWorkspace from "@/components/Notes/NotesGraphWorkspace"
 import NotesStudioCreateModal from "@/components/Notes/NotesStudioCreateModal"
 import NotesSidebar from "@/components/Notes/NotesSidebar"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
-import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
+import { useNotesGraphAuthorityScope } from "@/components/Notes/hooks/useNotesGraphAuthorityScope"
 import {
   useNotesKeywords,
   useNotesListManagement,
@@ -86,6 +86,7 @@ import {
   promptModal,
   NOTES_TUTORIAL_SHOWN_STORAGE_KEY,
   notesUiStorage,
+  hasNotesGraphActiveNotes,
   resolveNotesGraphFocusNoteId,
 } from './notes-manager-utils'
 
@@ -124,13 +125,10 @@ const NotesManagerPage: React.FC = () => {
     config: canonicalConnectionConfig,
     loading: canonicalConnectionLoading,
   } = useCanonicalConnectionConfig()
-  const notesGraphAuthorityScope = React.useMemo(
-    () =>
-      canonicalConnectionLoading
-        ? null
-        : buildChatSurfaceScopeKeyFromConfig(canonicalConnectionConfig),
-    [canonicalConnectionConfig, canonicalConnectionLoading]
-  )
+  const notesGraphAuthorityScope = useNotesGraphAuthorityScope({
+    config: canonicalConnectionConfig,
+    loading: canonicalConnectionLoading,
+  })
   const message = useAntdMessage()
   const rawConfirmDanger = useConfirmDanger()
   const confirmDanger = React.useCallback((options: ConfirmDangerOptions) => {
@@ -336,7 +334,7 @@ const NotesManagerPage: React.FC = () => {
   )
   const hasActiveNotes =
     list.listMode === 'active' &&
-    Boolean(graphInitialFocusNoteId || list.total > 0 || visibleNotes.length > 0)
+    hasNotesGraphActiveNotes(ed.selectedId, list.total, visibleNotes)
   const orderedVisibleNoteIds = React.useMemo(
     () => visibleNotes.map((note) => String(note.id)),
     [visibleNotes]

@@ -17,6 +17,7 @@ const {
   mockClearSetting,
   mockGetAllNoteKeywordStats,
   mockSearchNoteKeywords,
+  mockGetCurrentUser,
   mockCytoscapeFactory
 } = vi.hoisted(() => {
   const cyInstance: Record<string, any> = {
@@ -41,6 +42,7 @@ const {
     mockClearSetting: vi.fn(),
     mockGetAllNoteKeywordStats: vi.fn(),
     mockSearchNoteKeywords: vi.fn(),
+    mockGetCurrentUser: vi.fn(),
     mockCytoscapeFactory: cytoscapeFactory
   }
 })
@@ -138,6 +140,10 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   }
 }))
 
+vi.mock("@/services/tldw/TldwAuth", () => ({
+  tldwAuth: { getCurrentUser: mockGetCurrentUser }
+}))
+
 vi.mock("@/components/Common/MarkdownPreview", () => ({
   MarkdownPreview: ({ content }: { content: string }) => (
     <div data-testid="markdown-preview-content">{content}</div>
@@ -193,6 +199,11 @@ describe("NotesManagerPage stage 21 accessibility overlay and view focus handoff
     mockClearSetting.mockResolvedValue(undefined)
     mockGetAllNoteKeywordStats.mockResolvedValue([{ keyword: "research", noteCount: 3 }])
     mockSearchNoteKeywords.mockResolvedValue(["research"])
+    mockGetCurrentUser.mockResolvedValue({
+      id: 1,
+      username: "notes-user",
+      is_active: true
+    })
 
     mockBgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
       const path = String(request.path || "")
@@ -281,9 +292,29 @@ describe("NotesManagerPage stage 21 accessibility overlay and view focus handoff
       expect(screen.getByTestId("notes-graph-workspace")).toHaveFocus()
     })
     expect(screen.getByTestId("notes-list-panel")).toBeInTheDocument()
-    expect(
-      screen.queryByRole("dialog", { name: "Notes graph view" })
-    ).not.toBeInTheDocument()
     expect(mockNavigate).not.toHaveBeenCalled()
+  })
+
+  it("does not request or reveal prior graph data before principal authority is ready", async () => {
+    mockGetCurrentUser.mockReset()
+    mockGetCurrentUser.mockReturnValue(new Promise(() => undefined))
+    renderPage()
+    await seedAndSaveNote()
+
+    fireEvent.click(screen.getByRole("button", { name: "Split" }))
+    fireEvent.click(await screen.findByTestId("notes-open-graph-view"))
+    await screen.findByTestId("notes-graph-workspace")
+
+    expect(
+      mockBgRequest.mock.calls.some(([request]) =>
+        String(request?.path || "").startsWith("/api/v1/notes/graph?")
+      )
+    ).toBe(false)
+    expect(
+      mockBgRequest.mock.calls.some(([request]) =>
+        String(request?.path || "").includes("/graph/suggestions")
+      )
+    ).toBe(false)
+    expect(screen.queryByTestId("notes-graph-canvas")).not.toBeInTheDocument()
   })
 })

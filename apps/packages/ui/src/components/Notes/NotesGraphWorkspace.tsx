@@ -159,7 +159,7 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
       role="region"
       aria-label="Notes graph"
       data-testid="notes-graph-workspace"
-      className={`${isMobileViewport ? "ml-0" : "ml-4"} flex min-h-[520px] min-w-0 flex-1 flex-col overflow-hidden bg-bg focus:outline-none focus:ring-2 focus:ring-focus`}>
+      className={`${isMobileViewport ? "ml-0" : "ml-4"} flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto bg-bg focus:outline-none focus:ring-2 focus:ring-focus`}>
       {isMobileViewport ? (
         <div className="flex h-11 flex-none items-center border-b border-border bg-surface px-3">
           <Tooltip title="Open notes list">
@@ -252,7 +252,9 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
           })}
         </div>
       ) : workspace.graph ? (
-        <div className="min-h-0 flex-1">
+        <div
+          className="min-h-[420px] flex-1 sm:min-h-[520px]"
+          data-testid="notes-graph-canvas-slot">
           <NotesGraphCanvas
             ref={canvasRef}
             graph={workspace.graph}
