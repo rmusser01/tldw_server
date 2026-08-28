@@ -13,6 +13,8 @@ from tldw_Server_API.app.core.Jobs.operations.contracts import (
     AdmissionResult,
     CreateJobCommand,
     OperationOutcome,
+    canonical_admin_webhook_row_matches,
+    is_admin_webhook_delivery_queue,
 )
 
 _MAX_QUEUED_MESSAGE = "Quota exceeded: max queued per user/domain"
@@ -23,6 +25,16 @@ _EXECUTION_CONTROL_CONFLICT_MESSAGE = "Idempotent job execution controls conflic
 def _execution_controls_match(row: dict[str, Any], command: CreateJobCommand) -> bool:
     """Return whether an existing row has the requested immutable controls."""
 
+    if is_admin_webhook_delivery_queue(command.domain, command.queue):
+        try:
+            payload = json.loads(row.get("payload"))
+        except (TypeError, ValueError):
+            return False
+        canonical_row = {**row, "payload": payload}
+        return canonical_admin_webhook_row_matches(
+            canonical_row,
+            expected_payload=command.payload,
+        )
     return (
         row.get("expired_lease_policy") == command.expired_lease_policy.value
         and row.get("quarantine_threshold") == command.quarantine_threshold

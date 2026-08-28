@@ -67,6 +67,12 @@ from .migrations import (
     slides_archive_projection_ready_sqlite,
 )
 from .operations.contracts import (
+    ADMIN_WEBHOOK_DELIVERY_DOMAIN,
+    ADMIN_WEBHOOK_DELIVERY_JOB_TYPE,
+    ADMIN_WEBHOOK_DELIVERY_MAX_RETRIES,
+    ADMIN_WEBHOOK_DELIVERY_PRIORITY,
+    ADMIN_WEBHOOK_DELIVERY_QUARANTINE_THRESHOLD,
+    ADMIN_WEBHOOK_DELIVERY_QUEUE,
     AcquireJobCommand,
     AdmissionRejectionReason,
     AdmissionResult,
@@ -90,6 +96,9 @@ from .operations.contracts import (
     RenewLeaseCommand,
     TerminalOperationResultPatchCommand,
     TerminalOperationResultPatchOutcome,
+    canonical_admin_webhook_delivery_id,
+    canonical_admin_webhook_idempotency_key,
+    is_admin_webhook_delivery_queue,
 )
 from .operations.postgres import acquire_job as _postgres_acquire_job
 from .operations.postgres import admit_idempotent_operation as _postgres_admit_idempotent_operation
@@ -226,6 +235,27 @@ def _is_slides_generation_scope(domain: object, queue: object, job_type: object)
         and queue == _SLIDES_GENERATION_QUEUE
         and job_type == _SLIDES_GENERATION_JOB_TYPE
     )
+
+
+def _require_canonical_admin_webhook_identity(
+    *,
+    domain: object,
+    queue: object,
+    job_type: object,
+    payload: object,
+) -> str:
+    """Validate the fixed canonical delivery identity before backend access."""
+
+    if (
+        domain != ADMIN_WEBHOOK_DELIVERY_DOMAIN
+        or queue != ADMIN_WEBHOOK_DELIVERY_QUEUE
+        or job_type != ADMIN_WEBHOOK_DELIVERY_JOB_TYPE
+    ):
+        raise ValueError("canonical admin webhook identity is invalid")
+    try:
+        return canonical_admin_webhook_delivery_id(payload)
+    except ValueError as exc:
+        raise ValueError("canonical admin webhook identity is invalid") from exc
 
 
 def _require_aware_utc(value: datetime | None, *, field_name: str) -> datetime:
@@ -1422,6 +1452,9 @@ class JobManager:
         *,
         owner_user_id: str,
         idempotency_key: str,
+        expected_expired_lease_policy: ExpiredLeasePolicy | None = None,
+        expected_quarantine_threshold: int | None = None,
+        validate_execution_controls: bool = False,
         expected_job_uuid: str | None = None,
         expected_job_id: int | None = None,
         rejection: Exception | None = None,
@@ -1455,6 +1488,15 @@ class JobManager:
                         cursor=cur,
                     )
                     if existing is not None:
+                        if validate_execution_controls:
+                            self._validate_slides_generation_admission(
+                                conn,
+                                existing,
+                                owner_user_id=owner_user_id,
+                                idempotency_key=idempotency_key,
+                                expired_lease_policy=expected_expired_lease_policy,
+                                quarantine_threshold=expected_quarantine_threshold,
+                            )
                         return existing
                     if rejection is not None:
                         raise rejection
@@ -1474,6 +1516,15 @@ class JobManager:
                     expected_job_id=expected_job_id,
                 )
                 if existing is not None:
+                    if validate_execution_controls:
+                        self._validate_slides_generation_admission(
+                            conn,
+                            existing,
+                            owner_user_id=owner_user_id,
+                            idempotency_key=idempotency_key,
+                            expired_lease_policy=expected_expired_lease_policy,
+                            quarantine_threshold=expected_quarantine_threshold,
+                        )
                     return existing
                 if rejection is not None:
                     raise rejection
@@ -1487,6 +1538,8 @@ class JobManager:
         *,
         owner_user_id: str,
         idempotency_key: str,
+        expired_lease_policy: ExpiredLeasePolicy,
+        quarantine_threshold: int | None,
         cursor: Any | None = None,
     ) -> dict[str, Any] | None:
         """Check readiness and resolve one correlation under the same fence."""
@@ -1498,12 +1551,22 @@ class JobManager:
             raise SlidesGenerationJobsUnavailableError(
                 "presentation.generate Jobs coordination is unavailable"
             )
-        return self._lookup_slides_generation_job_in_connection(
+        existing = self._lookup_slides_generation_job_in_connection(
             conn,
             owner_user_id=owner_user_id,
             idempotency_key=idempotency_key,
             cursor=cursor,
         )
+        if existing is not None:
+            self._validate_slides_generation_admission(
+                conn,
+                existing,
+                owner_user_id=owner_user_id,
+                idempotency_key=idempotency_key,
+                expired_lease_policy=expired_lease_policy,
+                quarantine_threshold=quarantine_threshold,
+            )
+        return existing
 
     def _record_slides_generation_diagnostic(
         self,
@@ -3055,10 +3118,12 @@ class JobManager:
         *,
         owner_user_id: str,
         idempotency_key: str,
+        expired_lease_policy: ExpiredLeasePolicy | None,
+        quarantine_threshold: int | None,
     ) -> None:
         """Reject an idempotent replay that is not the exact Slides authority."""
 
-        valid = (
+        identity_valid = (
             str(row.get("uuid") or "").strip() != ""
             and row.get("domain") == _SLIDES_GENERATION_DOMAIN
             and row.get("queue") == _SLIDES_GENERATION_QUEUE
@@ -3066,8 +3131,21 @@ class JobManager:
             and row.get("owner_user_id") == owner_user_id
             and row.get("idempotency_key") == idempotency_key
         )
-        if valid:
+        stored_policy = row.get(
+            "expired_lease_policy",
+            ExpiredLeasePolicy.CONSUME_RETRY.value,
+        )
+        stored_threshold = row.get("quarantine_threshold")
+        if identity_valid and (
+            expired_lease_policy is not None
+            and stored_policy == expired_lease_policy.value
+            and stored_threshold == quarantine_threshold
+        ):
             return
+        if identity_valid:
+            raise SlidesGenerationJobsUnavailableError(
+                "presentation.generate immutable execution controls conflict"
+            )
         self._record_slides_generation_diagnostic(
             conn,
             code="ambiguous_generation_legacy_row",
@@ -3424,7 +3502,34 @@ class JobManager:
             or quarantine_threshold <= 0
         ):
             raise ValueError("quarantine_threshold must be a positive integer")
+        if is_admin_webhook_delivery_queue(domain, queue):
+            delivery_id = _require_canonical_admin_webhook_identity(
+                domain=domain,
+                queue=queue,
+                job_type=job_type,
+                payload=payload,
+            )
+            canonical = (
+                idempotency_key
+                == canonical_admin_webhook_idempotency_key(delivery_id)
+                and owner_user_id is None
+                and project_id is None
+                and batch_group is None
+                and available_at is None
+                and priority == ADMIN_WEBHOOK_DELIVERY_PRIORITY
+                and max_retries == ADMIN_WEBHOOK_DELIVERY_MAX_RETRIES
+                and expired_lease_policy is ExpiredLeasePolicy.REQUEUE_NO_ATTEMPT
+                and quarantine_threshold
+                == ADMIN_WEBHOOK_DELIVERY_QUARANTINE_THRESHOLD
+            )
+            if not canonical:
+                raise ValueError("canonical admin webhook admission facts are invalid")
         slides_generation = _is_slides_generation_scope(domain, queue, job_type)
+        slides_replay_controls = {
+            "expected_expired_lease_policy": expired_lease_policy,
+            "expected_quarantine_threshold": quarantine_threshold,
+            "validate_execution_controls": True,
+        }
         if slides_generation:
             if not isinstance(owner_user_id, str) or not owner_user_id.strip():
                 raise ValueError("presentation.generate jobs require owner_user_id")
@@ -3433,6 +3538,7 @@ class JobManager:
             existing = self._serialized_slides_generation_replay(
                 owner_user_id=owner_user_id,
                 idempotency_key=idempotency_key,
+                **slides_replay_controls,
             )
             if existing is not None:
                 return AdmissionResult.existing(row=existing)
@@ -3447,6 +3553,7 @@ class JobManager:
                 existing = self._serialized_slides_generation_replay(
                     owner_user_id=owner_user_id,
                     idempotency_key=idempotency_key,
+                    **slides_replay_controls,
                     rejection=error,
                 )
                 if existing is not None:
@@ -3471,6 +3578,7 @@ class JobManager:
                     existing = self._serialized_slides_generation_replay(
                         owner_user_id=owner_user_id,
                         idempotency_key=idempotency_key,
+                        **slides_replay_controls,
                         rejection=exc,
                     )
                     if existing is not None:
@@ -3508,6 +3616,7 @@ class JobManager:
                 existing = self._serialized_slides_generation_replay(
                     owner_user_id=owner_user_id,
                     idempotency_key=idempotency_key,
+                    **slides_replay_controls,
                     rejection=exc,
                 )
                 if existing is not None:
@@ -3528,6 +3637,7 @@ class JobManager:
                     existing = self._serialized_slides_generation_replay(
                         owner_user_id=owner_user_id,
                         idempotency_key=idempotency_key,
+                        **slides_replay_controls,
                         rejection=error,
                     )
                     if existing is not None:
@@ -3580,6 +3690,7 @@ class JobManager:
                     existing = self._serialized_slides_generation_replay(
                         owner_user_id=owner_user_id,
                         idempotency_key=idempotency_key,
+                        **slides_replay_controls,
                         rejection=error,
                     )
                     if existing is not None:
@@ -3632,6 +3743,8 @@ class JobManager:
                             conn,
                             owner_user_id=str(owner_user_id),
                             idempotency_key=str(idempotency_key),
+                            expired_lease_policy=expired_lease_policy,
+                            quarantine_threshold=quarantine_threshold,
                             cursor=cur,
                         )
 
@@ -3661,6 +3774,8 @@ class JobManager:
                         d,
                         owner_user_id=str(owner_user_id),
                         idempotency_key=str(idempotency_key),
+                        expired_lease_policy=expired_lease_policy,
+                        quarantine_threshold=quarantine_threshold,
                     )
                 try:
                     pol = self._get_sla_policy(d.get("domain"), d.get("queue"), d.get("job_type"))
@@ -3719,6 +3834,8 @@ class JobManager:
                             active_conn,
                             owner_user_id=str(owner_user_id),
                             idempotency_key=str(idempotency_key),
+                            expired_lease_policy=expired_lease_policy,
+                            quarantine_threshold=quarantine_threshold,
                         )
 
                 for attempt in range(2):
@@ -3754,6 +3871,8 @@ class JobManager:
                                 d,
                                 owner_user_id=str(owner_user_id),
                                 idempotency_key=str(idempotency_key),
+                                expired_lease_policy=expired_lease_policy,
+                                quarantine_threshold=quarantine_threshold,
                             )
                         with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
                             self._update_gauges(domain=domain, queue=queue, job_type=job_type)
@@ -3817,6 +3936,16 @@ class JobManager:
     ) -> JobIdentityLookupResult:
         """Read one exact active/archive identity without creating work."""
 
+        delivery_id = _require_canonical_admin_webhook_identity(
+            domain=command.domain,
+            queue=command.queue,
+            job_type=command.job_type,
+            payload=command.expected_payload,
+        )
+        if command.idempotency_key != canonical_admin_webhook_idempotency_key(
+            delivery_id
+        ):
+            raise ValueError("canonical admin webhook idempotency key is invalid")
         conn = self._connect()
         try:
             if self.backend == "postgres":
@@ -3835,6 +3964,12 @@ class JobManager:
     ) -> LeaseHorizonResult:
         """Ensure an exact processing lease horizon within the configured cap."""
 
+        _require_canonical_admin_webhook_identity(
+            domain=command.domain,
+            queue=command.queue,
+            job_type=command.job_type,
+            payload=command.expected_payload,
+        )
         max_seconds = max(
             1,
             int(os.getenv("JOBS_LEASE_MAX_SECONDS", "3600") or "3600"),
@@ -3861,6 +3996,14 @@ class JobManager:
     ) -> PreparedDispositionResult:
         """Apply one exact prepared transition and observe it once post-commit."""
 
+        delivery_id = _require_canonical_admin_webhook_identity(
+            domain=command.domain,
+            queue=command.queue,
+            job_type=command.job_type,
+            payload=command.expected_payload,
+        )
+        if command.disposition.delivery_id != delivery_id:
+            raise ValueError("canonical admin webhook disposition delivery_id is invalid")
         counters_enabled = JobManager._is_truthy(
             os.getenv("JOBS_COUNTERS_ENABLED", "")
         )

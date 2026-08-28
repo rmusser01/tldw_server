@@ -8,7 +8,7 @@ import json
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any
 from uuid import UUID
@@ -62,6 +62,14 @@ class JobIdentityLookupState(str, Enum):
 _OPAQUE_TOKEN_RE = re.compile(r"^[0-9a-f]{64}$")
 _REASON_CODE_RE = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
 
+ADMIN_WEBHOOK_DELIVERY_DOMAIN = "admin_webhooks"
+ADMIN_WEBHOOK_DELIVERY_QUEUE = "delivery"
+ADMIN_WEBHOOK_DELIVERY_JOB_TYPE = "admin_webhook_delivery"
+ADMIN_WEBHOOK_DELIVERY_IDEMPOTENCY_PREFIX = "admin-webhook-delivery:"
+ADMIN_WEBHOOK_DELIVERY_PRIORITY = 5
+ADMIN_WEBHOOK_DELIVERY_MAX_RETRIES = 3
+ADMIN_WEBHOOK_DELIVERY_QUARANTINE_THRESHOLD = 5
+
 
 def _canonical_uuid4(value: object, *, field_name: str) -> str:
     if not isinstance(value, str):
@@ -89,6 +97,224 @@ def _bounded_identity(value: object, *, field_name: str, maximum: int) -> str:
     if not isinstance(value, str) or not 1 <= len(value) <= maximum:
         raise ValueError(f"{field_name} must be between 1 and {maximum} characters")
     return value
+
+
+def canonical_admin_webhook_delivery_id(payload: object) -> str:
+    """Return the sole canonical delivery ID or reject the payload shape."""
+
+    if not isinstance(payload, dict) or set(payload) != {"delivery_id"}:
+        raise ValueError("canonical admin webhook payload must contain only delivery_id")
+    return _canonical_uuid4(payload["delivery_id"], field_name="delivery_id")
+
+
+def canonical_admin_webhook_idempotency_key(delivery_id: str) -> str:
+    """Return the canonical Jobs idempotency key for one delivery."""
+
+    return f"{ADMIN_WEBHOOK_DELIVERY_IDEMPOTENCY_PREFIX}{delivery_id}"
+
+
+def is_admin_webhook_delivery_queue(domain: object, queue: object) -> bool:
+    """Return whether admission targets the reserved canonical queue."""
+
+    return (
+        domain == ADMIN_WEBHOOK_DELIVERY_DOMAIN
+        and queue == ADMIN_WEBHOOK_DELIVERY_QUEUE
+    )
+
+
+def canonical_admin_webhook_row_matches(
+    row: dict[str, Any],
+    *,
+    expected_payload: dict[str, Any],
+    archived: bool = False,
+) -> bool:
+    """Verify immutable canonical identity and controls on a persisted row."""
+
+    try:
+        delivery_id = canonical_admin_webhook_delivery_id(expected_payload)
+    except ValueError:
+        return False
+    if (
+        row.get("domain") != ADMIN_WEBHOOK_DELIVERY_DOMAIN
+        or row.get("queue") != ADMIN_WEBHOOK_DELIVERY_QUEUE
+        or row.get("job_type") != ADMIN_WEBHOOK_DELIVERY_JOB_TYPE
+        or row.get("payload") != expected_payload
+        or row.get("idempotency_key")
+        != canonical_admin_webhook_idempotency_key(delivery_id)
+    ):
+        return False
+    marker_valid, marker = _canonical_admin_webhook_marker(
+        row,
+        delivery_id=delivery_id,
+        archived=archived,
+    )
+    if not marker_valid:
+        return False
+    if archived:
+        return (
+            row.get("owner_user_id") is None
+            and row.get("project_id") is None
+            and row.get("batch_group") is None
+            and row.get("priority") in {None, ADMIN_WEBHOOK_DELIVERY_PRIORITY}
+            and row.get("max_retries") in {None, ADMIN_WEBHOOK_DELIVERY_MAX_RETRIES}
+        )
+    if (
+        row.get("owner_user_id") is not None
+        or row.get("project_id") is not None
+        or row.get("batch_group") is not None
+        or row.get("priority") != ADMIN_WEBHOOK_DELIVERY_PRIORITY
+        or row.get("max_retries") != ADMIN_WEBHOOK_DELIVERY_MAX_RETRIES
+    ):
+        return False
+    available_at = _stored_utc(row.get("available_at"))
+    if row.get("available_at") is not None and available_at is None:
+        return False
+    if row.get("status") == "queued":
+        if marker is None:
+            if available_at is not None:
+                return False
+        elif (
+            marker["kind"]
+            not in {
+                PreparedDispositionKind.RETRY.value,
+                PreparedDispositionKind.DEFER.value,
+            }
+            or available_at is None
+            or not _canonical_schedule_matches(marker, available_at=available_at)
+        ):
+            return False
+    if row.get("status") == "processing" and available_at is not None:
+        acquired_at = _stored_utc(row.get("acquired_at"))
+        if (
+            marker is None
+            or marker["kind"]
+            not in {
+                PreparedDispositionKind.RETRY.value,
+                PreparedDispositionKind.DEFER.value,
+            }
+            or not _canonical_schedule_matches(marker, available_at=available_at)
+            or acquired_at is None
+            or available_at > acquired_at
+        ):
+            return False
+    return (
+        row.get("expired_lease_policy")
+        == ExpiredLeasePolicy.REQUEUE_NO_ATTEMPT.value
+        and row.get("quarantine_threshold")
+        == ADMIN_WEBHOOK_DELIVERY_QUARANTINE_THRESHOLD
+    )
+
+
+def _stored_utc(value: object) -> datetime | None:
+    """Parse one SQLite/PostgreSQL stored timestamp for invariant comparison."""
+
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    else:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _canonical_admin_webhook_marker(
+    row: dict[str, Any],
+    *,
+    delivery_id: str,
+    archived: bool,
+) -> tuple[bool, dict[str, Any] | None]:
+    """Validate the strict public disposition marker without exposing facts."""
+
+    marker = row.get("result")
+    fingerprint = row.get("prepared_disposition_fingerprint")
+    if marker is None:
+        return (archived or fingerprint is None), None
+    if isinstance(marker, str):
+        try:
+            marker = json.loads(marker)
+        except (TypeError, ValueError):
+            return False, None
+    if not isinstance(marker, dict):
+        return False, None
+    if not archived and (
+        not isinstance(fingerprint, str)
+        or _OPAQUE_TOKEN_RE.fullmatch(fingerprint) is None
+    ):
+        return False, None
+    kind = marker.get("kind")
+    origin = marker.get("origin")
+    expected_keys = {
+        "schema_version",
+        "token",
+        "kind",
+        "origin",
+        "delivery_id",
+        "applied_at",
+    }
+    if kind in {
+        PreparedDispositionKind.COMPLETE.value,
+        PreparedDispositionKind.RETRY.value,
+        PreparedDispositionKind.FAIL.value,
+    }:
+        expected_keys.add("attempt_id")
+    elif kind == PreparedDispositionKind.CANCEL.value:
+        if marker.get("attempt_id") is not None:
+            expected_keys.add("attempt_id")
+    elif kind != PreparedDispositionKind.DEFER.value:
+        return False, None
+    if kind in {
+        PreparedDispositionKind.RETRY.value,
+        PreparedDispositionKind.DEFER.value,
+    }:
+        expected_keys.add("original_not_before_at")
+    if set(marker) != expected_keys:
+        return False, None
+    if kind == PreparedDispositionKind.DEFER.value:
+        if origin not in {
+            PreparedDispositionOrigin.INFRASTRUCTURE.value,
+            PreparedDispositionOrigin.RECOVERY.value,
+        }:
+            return False, None
+    elif origin != PreparedDispositionOrigin.AUTHNZ.value:
+        return False, None
+    try:
+        if "attempt_id" in expected_keys:
+            _canonical_uuid4(marker.get("attempt_id"), field_name="attempt_id")
+    except ValueError:
+        return False, None
+    valid = bool(
+        marker.get("schema_version") == 1
+        and not isinstance(marker.get("schema_version"), bool)
+        and marker.get("delivery_id") == delivery_id
+        and isinstance(marker.get("token"), str)
+        and _OPAQUE_TOKEN_RE.fullmatch(marker["token"]) is not None
+        and _stored_utc(marker.get("applied_at")) is not None
+        and (
+            "original_not_before_at" not in expected_keys
+            or _stored_utc(marker.get("original_not_before_at")) is not None
+        )
+    )
+    return valid, marker if valid else None
+
+
+def _canonical_schedule_matches(
+    marker: dict[str, Any],
+    *,
+    available_at: datetime,
+) -> bool:
+    """Verify the stored schedule is the marker's database-clock maximum."""
+
+    applied_at = _stored_utc(marker.get("applied_at"))
+    original_not_before = _stored_utc(marker.get("original_not_before_at"))
+    if applied_at is None or original_not_before is None:
+        return False
+    expected = max(applied_at, original_not_before)
+    return abs(available_at - expected) < timedelta(seconds=1)
 
 
 class NoTransitionReason(str, Enum):
@@ -465,6 +691,32 @@ class PreparedJobDisposition:
             not_before_at=not_before_at,
             reason_code=reason_code,
         )
+
+
+def prepared_disposition_fingerprint(disposition: PreparedJobDisposition) -> str:
+    """Hash every validated replay fact without expanding public result evidence."""
+
+    facts = {
+        "attempt_id": disposition.attempt_id,
+        "delay_seconds": disposition.delay_seconds,
+        "delivery_id": disposition.delivery_id,
+        "kind": disposition.kind.value,
+        "not_before_at": (
+            disposition.not_before_at.isoformat()
+            if disposition.not_before_at is not None
+            else None
+        ),
+        "origin": disposition.origin.value,
+        "reason_code": disposition.reason_code,
+        "token": disposition.token,
+    }
+    encoded = json.dumps(
+        facts,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -1043,6 +1295,13 @@ class LifecycleResult:
 
 
 __all__ = [
+    "ADMIN_WEBHOOK_DELIVERY_DOMAIN",
+    "ADMIN_WEBHOOK_DELIVERY_IDEMPOTENCY_PREFIX",
+    "ADMIN_WEBHOOK_DELIVERY_JOB_TYPE",
+    "ADMIN_WEBHOOK_DELIVERY_MAX_RETRIES",
+    "ADMIN_WEBHOOK_DELIVERY_PRIORITY",
+    "ADMIN_WEBHOOK_DELIVERY_QUARANTINE_THRESHOLD",
+    "ADMIN_WEBHOOK_DELIVERY_QUEUE",
     "ApplyPreparedDispositionCommand",
     "AdmissionRejectionReason",
     "AdmissionResult",
@@ -1050,6 +1309,9 @@ __all__ = [
     "BatchRenewLeaseItem",
     "BatchRenewLeasesCommand",
     "BatchRenewLeasesResult",
+    "canonical_admin_webhook_delivery_id",
+    "canonical_admin_webhook_idempotency_key",
+    "canonical_admin_webhook_row_matches",
     "CreateJobCommand",
     "EnsureLeaseHorizonCommand",
     "ExpiredLeasePolicy",
@@ -1064,6 +1326,8 @@ __all__ = [
     "PreparedDispositionOrigin",
     "PreparedDispositionResult",
     "PreparedJobDisposition",
+    "prepared_disposition_fingerprint",
     "ReleaseJobCommand",
     "RenewLeaseCommand",
+    "is_admin_webhook_delivery_queue",
 ]

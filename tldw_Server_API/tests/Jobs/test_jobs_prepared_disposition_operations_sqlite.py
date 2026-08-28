@@ -26,6 +26,7 @@ def _token(character: str) -> str:
 
 
 def _canonical(manager: JobManager, *, suffix: str) -> dict:
+    del suffix
     delivery_id = str(uuid4())
     result = manager.admit_job(
         domain="admin_webhooks",
@@ -33,7 +34,7 @@ def _canonical(manager: JobManager, *, suffix: str) -> dict:
         job_type="admin_webhook_delivery",
         payload={"delivery_id": delivery_id},
         owner_user_id=None,
-        idempotency_key=f"admin-webhook-delivery:{delivery_id}:{suffix}",
+        idempotency_key=f"admin-webhook-delivery:{delivery_id}",
         max_retries=3,
         expired_lease_policy=ExpiredLeasePolicy.REQUEUE_NO_ATTEMPT,
         quarantine_threshold=5,
@@ -465,9 +466,14 @@ def test_sqlite_identity_lookup_is_read_only_active_archived_missing_and_conflic
     )
 
     active = manager.find_job_by_identity(command)
+    missing_delivery_id = str(uuid4())
     missing = manager.find_job_by_identity(
         FindJobByIdentityCommand(
-            **{**command.__dict__, "idempotency_key": "missing"}
+            **{
+                **command.__dict__,
+                "idempotency_key": f"admin-webhook-delivery:{missing_delivery_id}",
+                "expected_payload": {"delivery_id": missing_delivery_id},
+            }
         )
     )
     assert active.state is JobIdentityLookupState.ACTIVE
@@ -517,3 +523,314 @@ def test_sqlite_identity_lookup_is_read_only_active_archived_missing_and_conflic
     finally:
         conn.close()
     assert manager.find_job_by_identity(command).state is JobIdentityLookupState.CONFLICT
+
+
+@pytest.mark.parametrize(
+    ("column", "value"),
+    (
+        ("domain", "other"),
+        ("queue", "other"),
+        ("job_type", "other"),
+        ("payload", json.dumps({"delivery_id": str(uuid4())})),
+        ("owner_user_id", "owner-1"),
+        ("project_id", 1),
+        ("batch_group", "batch-1"),
+        ("idempotency_key", f"admin-webhook-delivery:{uuid4()}:suffix"),
+        ("priority", 4),
+        ("max_retries", 2),
+        ("expired_lease_policy", "consume_retry"),
+        ("quarantine_threshold", 4),
+        ("available_at", "2099-01-01 00:00:00"),
+    ),
+)
+def test_sqlite_locked_disposition_rejects_each_persisted_canonical_mismatch(
+    tmp_path,
+    column,
+    value,
+) -> None:
+    manager = JobManager(tmp_path / f"locked-{column}.db")
+    job = _canonical(manager, suffix=column)
+    acquired = _acquire(manager)
+    delivery_id = json.loads(job["payload"])["delivery_id"]
+    conn = manager._connect()
+    try:
+        conn.execute(f"UPDATE jobs SET {column}=? WHERE id=?", (value, job["id"]))
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = _apply(
+        manager,
+        job,
+        PreparedJobDisposition.complete(
+            token=_token("7"),
+            delivery_id=delivery_id,
+            attempt_id=str(uuid4()),
+        ),
+        leased=acquired,
+    )
+
+    assert result.outcome is OperationOutcome.BACKEND_CONFLICT
+    assert manager.get_job(int(job["id"]))["status"] == "processing"
+
+
+@pytest.mark.parametrize(
+    ("column", "value"),
+    (
+        ("owner_user_id", "owner-1"),
+        ("project_id", 1),
+        ("batch_group", "batch-1"),
+        ("priority", 4),
+        ("max_retries", 2),
+        ("expired_lease_policy", "consume_retry"),
+        ("quarantine_threshold", 4),
+        ("available_at", "2099-01-01 00:00:00"),
+    ),
+)
+def test_sqlite_identity_lookup_rejects_persisted_canonical_control_mismatch(
+    tmp_path,
+    column,
+    value,
+) -> None:
+    manager = JobManager(tmp_path / f"lookup-control-{column}.db")
+    job = _canonical(manager, suffix=column)
+    payload = json.loads(job["payload"])
+    conn = manager._connect()
+    try:
+        conn.execute(f"UPDATE jobs SET {column}=? WHERE id=?", (value, job["id"]))
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = manager.find_job_by_identity(
+        FindJobByIdentityCommand(
+            domain="admin_webhooks",
+            queue="delivery",
+            job_type="admin_webhook_delivery",
+            idempotency_key=f"admin-webhook-delivery:{payload['delivery_id']}",
+            expected_payload=payload,
+        )
+    )
+
+    assert result.state is JobIdentityLookupState.CONFLICT
+
+
+def test_sqlite_identity_lookup_rejects_noncanonical_public_marker(tmp_path) -> None:
+    manager = JobManager(tmp_path / "lookup-marker.db")
+    job = _canonical(manager, suffix="marker")
+    acquired = _acquire(manager)
+    delivery_id = json.loads(job["payload"])["delivery_id"]
+    assert _apply(
+        manager,
+        job,
+        PreparedJobDisposition.complete(
+            token=_token("6"),
+            delivery_id=delivery_id,
+            attempt_id=str(uuid4()),
+        ),
+        leased=acquired,
+    ).outcome is OperationOutcome.APPLIED
+    persisted = manager.get_job(int(job["id"]))
+    leaked_marker = {**persisted["result"], "reason_code": "must_not_be_public"}
+    conn = manager._connect()
+    try:
+        conn.execute(
+            "UPDATE jobs SET result=? WHERE id=?",
+            (json.dumps(leaked_marker), job["id"]),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = manager.find_job_by_identity(
+        FindJobByIdentityCommand(
+            domain="admin_webhooks",
+            queue="delivery",
+            job_type="admin_webhook_delivery",
+            idempotency_key=f"admin-webhook-delivery:{delivery_id}",
+            expected_payload={"delivery_id": delivery_id},
+        )
+    )
+
+    assert result.state is JobIdentityLookupState.CONFLICT
+
+
+def test_sqlite_identity_lookup_rejects_forged_later_schedule(tmp_path) -> None:
+    manager = JobManager(tmp_path / "lookup-schedule-evidence.db")
+    job = _canonical(manager, suffix="schedule-evidence")
+    delivery_id = json.loads(job["payload"])["delivery_id"]
+    marker = {
+        "schema_version": 1,
+        "token": _token("5"),
+        "kind": "defer",
+        "origin": "infrastructure",
+        "delivery_id": delivery_id,
+        "original_not_before_at": "2026-01-01T00:00:30+00:00",
+        "applied_at": "2026-01-01T00:00:00+00:00",
+    }
+    conn = manager._connect()
+    try:
+        conn.execute(
+            "UPDATE jobs SET result=?, prepared_disposition_fingerprint=?, "
+            "available_at=? WHERE id=?",
+            (json.dumps(marker), _token("4"), "2099-01-01 00:00:00", job["id"]),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = manager.find_job_by_identity(
+        FindJobByIdentityCommand(
+            domain="admin_webhooks",
+            queue="delivery",
+            job_type="admin_webhook_delivery",
+            idempotency_key=f"admin-webhook-delivery:{delivery_id}",
+            expected_payload={"delivery_id": delivery_id},
+        )
+    )
+
+    assert result.state is JobIdentityLookupState.CONFLICT
+
+
+@pytest.mark.parametrize("changed_fact", ("reason_code", "delay_seconds"))
+def test_sqlite_exact_token_replay_conflicts_on_internal_fact_change_without_mutation(
+    tmp_path,
+    changed_fact,
+) -> None:
+    manager = JobManager(tmp_path / f"replay-{changed_fact}.db")
+    job = _canonical(manager, suffix=changed_fact)
+    acquired = _acquire(manager)
+    delivery_id = json.loads(job["payload"])["delivery_id"]
+    attempt_id = str(uuid4())
+    not_before = datetime.now(timezone.utc) + timedelta(seconds=90)
+    original = PreparedJobDisposition.retry(
+        token=_token("6"),
+        delivery_id=delivery_id,
+        attempt_id=attempt_id,
+        delay_seconds=90,
+        not_before_at=not_before,
+        reason_code="receiver_503",
+    )
+    assert _apply(manager, job, original, leased=acquired).outcome is OperationOutcome.APPLIED
+    before = manager.get_job(int(job["id"]))
+    changed = PreparedJobDisposition.retry(
+        token=original.token,
+        delivery_id=delivery_id,
+        attempt_id=attempt_id,
+        delay_seconds=91 if changed_fact == "delay_seconds" else 90,
+        not_before_at=not_before,
+        reason_code="receiver_429" if changed_fact == "reason_code" else "receiver_503",
+    )
+
+    replay = _apply(manager, job, changed, leased=acquired)
+    after = manager.get_job(int(job["id"]))
+
+    assert replay.outcome is OperationOutcome.BACKEND_CONFLICT
+    assert after["status"] == before["status"]
+    assert after["retry_count"] == before["retry_count"]
+    assert after["available_at"] == before["available_at"]
+    assert after["result"] == before["result"]
+
+
+def test_sqlite_compressed_archive_identity_lookup_decodes_payload_and_proof(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("JOBS_ARCHIVE_BEFORE_DELETE", "true")
+    monkeypatch.setenv("JOBS_ARCHIVE_COMPRESS", "true")
+    monkeypatch.setenv("JOBS_ARCHIVE_COMPRESS_DROP_JSON", "true")
+    manager = JobManager(tmp_path / "compressed-archive.db")
+    job = _canonical(manager, suffix="compressed")
+    acquired = _acquire(manager)
+    payload = json.loads(job["payload"])
+    applied = _apply(
+        manager,
+        job,
+        PreparedJobDisposition.complete(
+            token=_token("5"),
+            delivery_id=payload["delivery_id"],
+            attempt_id=str(uuid4()),
+        ),
+        leased=acquired,
+    )
+    conn = manager._connect()
+    try:
+        conn.execute(
+            "UPDATE jobs SET completed_at=DATETIME('now','-2 days') WHERE id=?",
+            (job["id"],),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    assert manager.prune_jobs(
+        statuses=["completed"],
+        older_than_days=1,
+        domain="admin_webhooks",
+        queue="delivery",
+        job_type="admin_webhook_delivery",
+    ) == 1
+
+    found = manager.find_job_by_identity(
+        FindJobByIdentityCommand(
+            domain="admin_webhooks",
+            queue="delivery",
+            job_type="admin_webhook_delivery",
+            idempotency_key=f"admin-webhook-delivery:{payload['delivery_id']}",
+            expected_payload=payload,
+        )
+    )
+
+    assert found.state is JobIdentityLookupState.ARCHIVED
+    assert found.row is not None
+    assert found.row["payload"] == payload
+    assert found.row["result"] == applied.metadata
+
+
+@pytest.mark.parametrize("origin", ("infrastructure", "recovery"))
+def test_sqlite_defer_event_uses_current_reason_not_stale_error(
+    tmp_path,
+    monkeypatch,
+    origin,
+) -> None:
+    monkeypatch.setenv("JOBS_EVENTS_OUTBOX", "true")
+    manager = JobManager(tmp_path / f"defer-event-{origin}.db")
+    job = _canonical(manager, suffix=origin)
+    acquired = _acquire(manager)
+    delivery_id = json.loads(job["payload"])["delivery_id"]
+    conn = manager._connect()
+    try:
+        conn.execute(
+            "UPDATE jobs SET error_code='stale_prior_error' WHERE id=?",
+            (job["id"],),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    reason = f"current_{origin}_reason"
+    disposition = (
+        PreparedJobDisposition.infrastructure_defer(
+            token=_token("3"),
+            delivery_id=delivery_id,
+            reason_code=reason,
+        )
+        if origin == "infrastructure"
+        else PreparedJobDisposition.recovery_defer_until(
+            token=_token("4"),
+            delivery_id=delivery_id,
+            not_before_at=datetime.now(timezone.utc) + timedelta(seconds=60),
+            reason_code=reason,
+        )
+    )
+
+    assert _apply(manager, job, disposition, leased=acquired).outcome is OperationOutcome.APPLIED
+    conn = manager._connect()
+    try:
+        event = conn.execute(
+            "SELECT attrs_json FROM job_events WHERE job_id=? "
+            "AND event_type='job.deferred' ORDER BY id DESC LIMIT 1",
+            (job["id"],),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert json.loads(event[0])["reason_code"] == reason

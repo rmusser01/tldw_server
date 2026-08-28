@@ -12,6 +12,7 @@ from typing import Any
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
     begin_immediate_if_needed,
 )
+from tldw_Server_API.app.core.Jobs.migrations import normalize_slides_archive_projection
 from tldw_Server_API.app.core.Jobs.operations.contracts import (
     AcquireJobCommand,
     ApplyPreparedDispositionCommand,
@@ -30,6 +31,9 @@ from tldw_Server_API.app.core.Jobs.operations.contracts import (
     PreparedDispositionResult,
     ReleaseJobCommand,
     RenewLeaseCommand,
+    canonical_admin_webhook_row_matches,
+    is_admin_webhook_delivery_queue,
+    prepared_disposition_fingerprint,
 )
 
 _ORDER_CLAUSES = {
@@ -567,12 +571,20 @@ def _identity_matches(
     queue: str,
     job_type: str,
     expected_payload: dict[str, Any],
+    archived: bool = False,
 ) -> bool:
+    payload = _parse_json_object(row.get("payload"))
+    if is_admin_webhook_delivery_queue(domain, queue):
+        return canonical_admin_webhook_row_matches(
+            {**row, "payload": payload},
+            expected_payload=expected_payload,
+            archived=archived,
+        )
     return (
         row.get("domain") == domain
         and row.get("queue") == queue
         and row.get("job_type") == job_type
-        and _parse_json_object(row.get("payload")) == expected_payload
+        and payload == expected_payload
     )
 
 
@@ -618,11 +630,12 @@ def _insert_prepared_event(
     row: dict[str, Any],
     event_type: str,
     marker: dict[str, Any],
+    reason_code: str | None,
 ) -> None:
     attrs = {
         "kind": marker["kind"],
         "origin": marker["origin"],
-        "reason_code": row.get("error_code") or row.get("cancellation_reason"),
+        "reason_code": reason_code,
     }
     conn.execute(
         "INSERT INTO job_events(job_id,domain,queue,job_type,event_type,attrs_json,"
@@ -671,9 +684,13 @@ def apply_prepared_disposition(
             conn.commit()
             return PreparedDispositionResult.conflict(state=str(row.get("status")))
 
+        facts_fingerprint = prepared_disposition_fingerprint(command.disposition)
         marker = _parse_json_object(row.get("result"))
         if marker is not None and marker.get("token") == command.disposition.token:
-            if not _marker_matches(marker, command):
+            if (
+                not _marker_matches(marker, command)
+                or row.get("prepared_disposition_fingerprint") != facts_fingerprint
+            ):
                 conn.commit()
                 return PreparedDispositionResult.conflict(state=str(row.get("status")))
             result = PreparedDispositionResult.applied(
@@ -748,11 +765,13 @@ def apply_prepared_disposition(
             new_status = "completed"
             event_type = "job.completed"
             changed = conn.execute(
-                "UPDATE jobs SET status='completed', result=?, completed_at=DATETIME('now'), "
+                "UPDATE jobs SET status='completed', result=?, "
+                "prepared_disposition_fingerprint=?, completed_at=DATETIME('now'), "
                 "leased_until=NULL,worker_id=NULL,lease_id=NULL,completion_token=? "
                 "WHERE id=? AND status='processing' AND worker_id=? AND lease_id=?",
                 (
                     marker_json,
+                    facts_fingerprint,
                     disposition.token,
                     command.job_id,
                     command.worker_id,
@@ -771,7 +790,8 @@ def apply_prepared_disposition(
             new_status = "quarantined" if quarantine else "queued"
             event_type = "job.quarantined" if quarantine else "job.retry_scheduled"
             changed = conn.execute(
-                "UPDATE jobs SET status=?, result=?, retry_count=COALESCE(retry_count,0)+1, "
+                "UPDATE jobs SET status=?, result=?, prepared_disposition_fingerprint=?, "
+                "retry_count=COALESCE(retry_count,0)+1, "
                 "failure_streak_code=?, failure_streak_count=?, error_code=?, "
                 "available_at=?, quarantined_at=CASE WHEN ? THEN DATETIME('now') ELSE quarantined_at END, "
                 "completed_at=CASE WHEN ? THEN DATETIME('now') ELSE completed_at END, "
@@ -781,6 +801,7 @@ def apply_prepared_disposition(
                 (
                     new_status,
                     marker_json,
+                    facts_fingerprint,
                     disposition.reason_code,
                     next_streak,
                     disposition.reason_code,
@@ -797,12 +818,14 @@ def apply_prepared_disposition(
             new_status = "failed"
             event_type = "job.failed"
             changed = conn.execute(
-                "UPDATE jobs SET status='failed', result=?, error_code=?, error_message=?, "
+                "UPDATE jobs SET status='failed', result=?, "
+                "prepared_disposition_fingerprint=?, error_code=?, error_message=?, "
                 "last_error=?, completed_at=DATETIME('now'), leased_until=NULL,worker_id=NULL,"
                 "lease_id=NULL,completion_token=? WHERE id=? AND status='processing' "
                 "AND worker_id=? AND lease_id=?",
                 (
                     marker_json,
+                    facts_fingerprint,
                     disposition.reason_code,
                     disposition.reason_code,
                     disposition.reason_code,
@@ -817,11 +840,13 @@ def apply_prepared_disposition(
             event_type = "job.cancelled"
             if queued_cancel:
                 changed = conn.execute(
-                    "UPDATE jobs SET status='cancelled', result=?, cancellation_reason=?, "
+                    "UPDATE jobs SET status='cancelled', result=?, "
+                    "prepared_disposition_fingerprint=?, cancellation_reason=?, "
                     "cancelled_at=DATETIME('now'), completed_at=DATETIME('now'), "
                     "completion_token=? WHERE id=? AND status='queued'",
                     (
                         marker_json,
+                        facts_fingerprint,
                         disposition.reason_code,
                         disposition.token,
                         command.job_id,
@@ -829,12 +854,14 @@ def apply_prepared_disposition(
                 )
             else:
                 changed = conn.execute(
-                    "UPDATE jobs SET status='cancelled', result=?, cancellation_reason=?, "
+                    "UPDATE jobs SET status='cancelled', result=?, "
+                    "prepared_disposition_fingerprint=?, cancellation_reason=?, "
                     "cancelled_at=DATETIME('now'), completed_at=DATETIME('now'), "
                     "leased_until=NULL,worker_id=NULL,lease_id=NULL,completion_token=? "
                     "WHERE id=? AND status='processing' AND worker_id=? AND lease_id=?",
                     (
                         marker_json,
+                        facts_fingerprint,
                         disposition.reason_code,
                         disposition.token,
                         command.job_id,
@@ -846,12 +873,14 @@ def apply_prepared_disposition(
             new_status = "queued"
             event_type = "job.deferred"
             changed = conn.execute(
-                "UPDATE jobs SET status='queued', result=?, available_at=?, "
+                "UPDATE jobs SET status='queued', result=?, "
+                "prepared_disposition_fingerprint=?, available_at=?, "
                 "leased_until=NULL,worker_id=NULL,lease_id=NULL,completion_token=NULL, "
                 "acquired_at=NULL,started_at=NULL WHERE id=? AND status='processing' "
                 "AND worker_id=? AND lease_id=?",
                 (
                     marker_json,
+                    facts_fingerprint,
                     _sqlite_timestamp(not_before),
                     command.job_id,
                     command.worker_id,
@@ -876,6 +905,7 @@ def apply_prepared_disposition(
                 row=updated,
                 event_type=event_type,
                 marker=marker,
+                reason_code=disposition.reason_code,
             )
         conn.commit()
         persisted_not_before = (
@@ -998,10 +1028,22 @@ def find_job_by_identity(
         return JobIdentityLookupResult.missing()
     if len(matches) != 1:
         return JobIdentityLookupResult.conflict()
-    state, row = matches[0]
-    payload = _parse_json_object(row.get("payload"))
-    if payload != command.expected_payload:
+    state, raw_row = matches[0]
+    row = (
+        normalize_slides_archive_projection(raw_row)
+        if state is JobIdentityLookupState.ARCHIVED
+        else raw_row
+    )
+    if not _identity_matches(
+        row,
+        domain=command.domain,
+        queue=command.queue,
+        job_type=command.job_type,
+        expected_payload=command.expected_payload,
+        archived=state is JobIdentityLookupState.ARCHIVED,
+    ):
         return JobIdentityLookupResult.conflict()
+    payload = _parse_json_object(row.get("payload"))
     row["payload"] = payload
     result = _parse_json_object(row.get("result"))
     if result is not None:

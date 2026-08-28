@@ -250,6 +250,7 @@ def test_postgres_expired_requeue_no_attempt_preserves_all_attempt_state(
         job_type="admin_webhook_delivery",
         payload={"delivery_id": "00000000-0000-4000-8000-000000000003"},
         owner_user_id=None,
+        idempotency_key="admin-webhook-delivery:00000000-0000-4000-8000-000000000003",
         max_retries=3,
         expired_lease_policy=ExpiredLeasePolicy.REQUEUE_NO_ATTEMPT,
         quarantine_threshold=5,
@@ -296,6 +297,8 @@ def test_postgres_integrity_sweep_requeues_no_attempt_without_counter_mutation(
         job_type="admin_webhook_delivery",
         payload={"delivery_id": "00000000-0000-4000-8000-000000000004"},
         owner_user_id=None,
+        idempotency_key="admin-webhook-delivery:00000000-0000-4000-8000-000000000004",
+        max_retries=3,
         expired_lease_policy=ExpiredLeasePolicy.REQUEUE_NO_ATTEMPT,
         quarantine_threshold=5,
     )

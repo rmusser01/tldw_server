@@ -239,6 +239,12 @@ CREATE TABLE IF NOT EXISTS jobs (
   max_retries INTEGER DEFAULT 3 CHECK (max_retries >= 0 AND max_retries <= 100),
   expired_lease_policy TEXT NOT NULL DEFAULT 'consume_retry' CHECK (expired_lease_policy IN ('consume_retry','requeue_no_attempt')),
   quarantine_threshold INTEGER CHECK (quarantine_threshold IS NULL OR quarantine_threshold > 0),
+  prepared_disposition_fingerprint TEXT CHECK (
+    prepared_disposition_fingerprint IS NULL OR (
+      LENGTH(prepared_disposition_fingerprint) = 64 AND
+      prepared_disposition_fingerprint NOT GLOB '*[^0-9a-f]*'
+    )
+  ),
   retry_count INTEGER DEFAULT 0,
   available_at TEXT,
   started_at TEXT,
@@ -1181,6 +1187,13 @@ def ensure_jobs_tables(db_path: Path | None = None) -> Path:
                 conn.execute(
                     "ALTER TABLE jobs ADD COLUMN quarantine_threshold INTEGER "
                     "CHECK (quarantine_threshold IS NULL OR quarantine_threshold > 0)"
+                )
+            if "prepared_disposition_fingerprint" not in columns:
+                conn.execute(
+                    "ALTER TABLE jobs ADD COLUMN prepared_disposition_fingerprint TEXT "
+                    "CHECK (prepared_disposition_fingerprint IS NULL OR "
+                    "(LENGTH(prepared_disposition_fingerprint) = 64 AND "
+                    "prepared_disposition_fingerprint NOT GLOB '*[^0-9a-f]*'))"
                 )
             with contextlib.suppress(_JOBS_DB_EXCEPTIONS):
                 conn.execute("ALTER TABLE jobs_archive ADD COLUMN batch_group TEXT")

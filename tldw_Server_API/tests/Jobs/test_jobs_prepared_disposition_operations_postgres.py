@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 import pytest
 
-from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Jobs.manager import (
+    JobManager,
+    SlidesGenerationJobsUnavailableError,
+)
 from tldw_Server_API.app.core.Jobs.operations.contracts import (
     ApplyPreparedDispositionCommand,
     EnsureLeaseHorizonCommand,
@@ -30,6 +34,7 @@ def _manager(jobs_pg_dsn: str) -> JobManager:
 
 
 def _canonical(manager: JobManager, *, suffix: str) -> dict:
+    del suffix
     delivery_id = str(uuid4())
     result = manager.admit_job(
         domain="admin_webhooks",
@@ -37,7 +42,7 @@ def _canonical(manager: JobManager, *, suffix: str) -> dict:
         job_type="admin_webhook_delivery",
         payload={"delivery_id": delivery_id},
         owner_user_id=None,
-        idempotency_key=f"admin-webhook-delivery:{delivery_id}:{suffix}",
+        idempotency_key=f"admin-webhook-delivery:{delivery_id}",
         max_retries=3,
         expired_lease_policy=ExpiredLeasePolicy.REQUEUE_NO_ATTEMPT,
         quarantine_threshold=5,
@@ -411,9 +416,14 @@ def test_postgres_identity_lookup_is_read_only_and_fails_closed_on_ambiguity(
         expected_payload=job["payload"],
     )
     assert manager.find_job_by_identity(command).state is JobIdentityLookupState.ACTIVE
+    missing_delivery_id = str(uuid4())
     missing = manager.find_job_by_identity(
         FindJobByIdentityCommand(
-            **{**command.__dict__, "idempotency_key": "missing"}
+            **{
+                **command.__dict__,
+                "idempotency_key": f"admin-webhook-delivery:{missing_delivery_id}",
+                "expected_payload": {"delivery_id": missing_delivery_id},
+            }
         )
     )
     assert missing.state is JobIdentityLookupState.MISSING
@@ -452,3 +462,340 @@ def test_postgres_identity_lookup_is_read_only_and_fails_closed_on_ambiguity(
             ),
         )
     assert manager.find_job_by_identity(command).state is JobIdentityLookupState.CONFLICT
+
+
+@pytest.mark.parametrize(
+    ("column", "value"),
+    (
+        ("domain", "other"),
+        ("queue", "other"),
+        ("job_type", "other"),
+        ("payload", {"delivery_id": str(uuid4())}),
+        ("owner_user_id", "owner-1"),
+        ("project_id", 1),
+        ("batch_group", "batch-1"),
+        ("idempotency_key", f"admin-webhook-delivery:{uuid4()}:suffix"),
+        ("priority", 4),
+        ("max_retries", 2),
+        ("expired_lease_policy", "consume_retry"),
+        ("quarantine_threshold", 4),
+        ("available_at", datetime(2099, 1, 1, tzinfo=timezone.utc)),
+    ),
+)
+def test_postgres_locked_disposition_rejects_each_persisted_canonical_mismatch(
+    jobs_pg_dsn,
+    column,
+    value,
+) -> None:
+    manager = _manager(jobs_pg_dsn)
+    job = _canonical(manager, suffix=column)
+    acquired = _acquire(manager)
+    delivery_id = job["payload"]["delivery_id"]
+    persisted_value = psycopg.types.json.Jsonb(value) if column == "payload" else value
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            psycopg.sql.SQL("UPDATE jobs SET {}=%s WHERE id=%s").format(
+                psycopg.sql.Identifier(column)
+            ),
+            (persisted_value, job["id"]),
+        )
+
+    result = _apply(
+        manager,
+        job,
+        PreparedJobDisposition.complete(
+            token=_token("7"),
+            delivery_id=delivery_id,
+            attempt_id=str(uuid4()),
+        ),
+        leased=acquired,
+    )
+
+    assert result.outcome is OperationOutcome.BACKEND_CONFLICT
+    assert manager.get_job(int(job["id"]))["status"] == "processing"
+
+
+@pytest.mark.parametrize(
+    ("column", "value"),
+    (
+        ("owner_user_id", "owner-1"),
+        ("project_id", 1),
+        ("batch_group", "batch-1"),
+        ("priority", 4),
+        ("max_retries", 2),
+        ("expired_lease_policy", "consume_retry"),
+        ("quarantine_threshold", 4),
+        ("available_at", datetime(2099, 1, 1, tzinfo=timezone.utc)),
+    ),
+)
+def test_postgres_identity_lookup_rejects_persisted_canonical_control_mismatch(
+    jobs_pg_dsn,
+    column,
+    value,
+) -> None:
+    manager = _manager(jobs_pg_dsn)
+    job = _canonical(manager, suffix=column)
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            psycopg.sql.SQL("UPDATE jobs SET {}=%s WHERE id=%s").format(
+                psycopg.sql.Identifier(column)
+            ),
+            (value, job["id"]),
+        )
+
+    result = manager.find_job_by_identity(
+        FindJobByIdentityCommand(
+            domain="admin_webhooks",
+            queue="delivery",
+            job_type="admin_webhook_delivery",
+            idempotency_key=f"admin-webhook-delivery:{job['payload']['delivery_id']}",
+            expected_payload=job["payload"],
+        )
+    )
+
+    assert result.state is JobIdentityLookupState.CONFLICT
+
+
+def test_postgres_identity_lookup_rejects_noncanonical_public_marker(
+    jobs_pg_dsn,
+) -> None:
+    manager = _manager(jobs_pg_dsn)
+    job = _canonical(manager, suffix="marker")
+    acquired = _acquire(manager)
+    delivery_id = job["payload"]["delivery_id"]
+    assert _apply(
+        manager,
+        job,
+        PreparedJobDisposition.complete(
+            token=_token("6"),
+            delivery_id=delivery_id,
+            attempt_id=str(uuid4()),
+        ),
+        leased=acquired,
+    ).outcome is OperationOutcome.APPLIED
+    persisted = manager.get_job(int(job["id"]))
+    leaked_marker = {**persisted["result"], "reason_code": "must_not_be_public"}
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE jobs SET result=%s::jsonb WHERE id=%s",
+            (json.dumps(leaked_marker), job["id"]),
+        )
+
+    result = manager.find_job_by_identity(
+        FindJobByIdentityCommand(
+            domain="admin_webhooks",
+            queue="delivery",
+            job_type="admin_webhook_delivery",
+            idempotency_key=f"admin-webhook-delivery:{delivery_id}",
+            expected_payload={"delivery_id": delivery_id},
+        )
+    )
+
+    assert result.state is JobIdentityLookupState.CONFLICT
+
+
+def test_postgres_identity_lookup_rejects_forged_later_schedule(
+    jobs_pg_dsn,
+) -> None:
+    manager = _manager(jobs_pg_dsn)
+    job = _canonical(manager, suffix="schedule-evidence")
+    delivery_id = job["payload"]["delivery_id"]
+    marker = {
+        "schema_version": 1,
+        "token": _token("5"),
+        "kind": "defer",
+        "origin": "infrastructure",
+        "delivery_id": delivery_id,
+        "original_not_before_at": "2026-01-01T00:00:30+00:00",
+        "applied_at": "2026-01-01T00:00:00+00:00",
+    }
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE jobs SET result=%s::jsonb, "
+            "prepared_disposition_fingerprint=%s, available_at=%s WHERE id=%s",
+            (json.dumps(marker), _token("4"), "2099-01-01 00:00:00+00", job["id"]),
+        )
+
+    result = manager.find_job_by_identity(
+        FindJobByIdentityCommand(
+            domain="admin_webhooks",
+            queue="delivery",
+            job_type="admin_webhook_delivery",
+            idempotency_key=f"admin-webhook-delivery:{delivery_id}",
+            expected_payload={"delivery_id": delivery_id},
+        )
+    )
+
+    assert result.state is JobIdentityLookupState.CONFLICT
+
+
+@pytest.mark.parametrize("changed_fact", ("reason_code", "delay_seconds"))
+def test_postgres_exact_token_replay_conflicts_on_internal_fact_change_without_mutation(
+    jobs_pg_dsn,
+    changed_fact,
+) -> None:
+    manager = _manager(jobs_pg_dsn)
+    job = _canonical(manager, suffix=changed_fact)
+    acquired = _acquire(manager)
+    delivery_id = job["payload"]["delivery_id"]
+    attempt_id = str(uuid4())
+    not_before = datetime.now(timezone.utc) + timedelta(seconds=90)
+    original = PreparedJobDisposition.retry(
+        token=_token("6"),
+        delivery_id=delivery_id,
+        attempt_id=attempt_id,
+        delay_seconds=90,
+        not_before_at=not_before,
+        reason_code="receiver_503",
+    )
+    assert _apply(manager, job, original, leased=acquired).outcome is OperationOutcome.APPLIED
+    before = manager.get_job(int(job["id"]))
+    changed = PreparedJobDisposition.retry(
+        token=original.token,
+        delivery_id=delivery_id,
+        attempt_id=attempt_id,
+        delay_seconds=91 if changed_fact == "delay_seconds" else 90,
+        not_before_at=not_before,
+        reason_code="receiver_429" if changed_fact == "reason_code" else "receiver_503",
+    )
+
+    replay = _apply(manager, job, changed, leased=acquired)
+    after = manager.get_job(int(job["id"]))
+
+    assert replay.outcome is OperationOutcome.BACKEND_CONFLICT
+    assert after["status"] == before["status"]
+    assert after["retry_count"] == before["retry_count"]
+    assert after["available_at"] == before["available_at"]
+    assert after["result"] == before["result"]
+
+
+def test_postgres_compressed_archive_identity_lookup_decodes_payload_and_proof(
+    jobs_pg_dsn,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("JOBS_ARCHIVE_BEFORE_DELETE", "true")
+    monkeypatch.setenv("JOBS_ARCHIVE_COMPRESS", "true")
+    monkeypatch.setenv("JOBS_ARCHIVE_COMPRESS_DROP_JSON", "true")
+    manager = _manager(jobs_pg_dsn)
+    job = _canonical(manager, suffix="compressed")
+    acquired = _acquire(manager)
+    payload = job["payload"]
+    applied = _apply(
+        manager,
+        job,
+        PreparedJobDisposition.complete(
+            token=_token("5"),
+            delivery_id=payload["delivery_id"],
+            attempt_id=str(uuid4()),
+        ),
+        leased=acquired,
+    )
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE jobs SET completed_at=NOW()-interval '2 days' WHERE id=%s",
+            (job["id"],),
+        )
+    assert manager.prune_jobs(
+        statuses=["completed"],
+        older_than_days=1,
+        domain="admin_webhooks",
+        queue="delivery",
+        job_type="admin_webhook_delivery",
+    ) == 1
+
+    found = manager.find_job_by_identity(
+        FindJobByIdentityCommand(
+            domain="admin_webhooks",
+            queue="delivery",
+            job_type="admin_webhook_delivery",
+            idempotency_key=f"admin-webhook-delivery:{payload['delivery_id']}",
+            expected_payload=payload,
+        )
+    )
+
+    assert found.state is JobIdentityLookupState.ARCHIVED
+    assert found.row is not None
+    assert found.row["payload"] == payload
+    assert found.row["result"] == applied.metadata
+
+
+@pytest.mark.parametrize("origin", ("infrastructure", "recovery"))
+def test_postgres_defer_event_uses_current_reason_not_stale_error(
+    jobs_pg_dsn,
+    monkeypatch,
+    origin,
+) -> None:
+    monkeypatch.setenv("JOBS_EVENTS_OUTBOX", "true")
+    manager = _manager(jobs_pg_dsn)
+    job = _canonical(manager, suffix=origin)
+    acquired = _acquire(manager)
+    delivery_id = job["payload"]["delivery_id"]
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE jobs SET error_code='stale_prior_error' WHERE id=%s",
+            (job["id"],),
+        )
+    reason = f"current_{origin}_reason"
+    disposition = (
+        PreparedJobDisposition.infrastructure_defer(
+            token=_token("3"),
+            delivery_id=delivery_id,
+            reason_code=reason,
+        )
+        if origin == "infrastructure"
+        else PreparedJobDisposition.recovery_defer_until(
+            token=_token("4"),
+            delivery_id=delivery_id,
+            not_before_at=datetime.now(timezone.utc) + timedelta(seconds=60),
+            reason_code=reason,
+        )
+    )
+
+    assert _apply(manager, job, disposition, leased=acquired).outcome is OperationOutcome.APPLIED
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT attrs_json FROM job_events WHERE job_id=%s "
+            "AND event_type='job.deferred' ORDER BY id DESC LIMIT 1",
+            (job["id"],),
+        )
+        event = cur.fetchone()[0]
+
+    assert event["reason_code"] == reason
+
+
+def test_postgres_slides_race_callback_validates_requested_execution_controls(
+    jobs_pg_dsn,
+    monkeypatch,
+) -> None:
+    manager = _manager(jobs_pg_dsn)
+    monkeypatch.setattr(
+        manager,
+        "_slides_generation_ready_in_connection",
+        lambda *_args, **_kwargs: True,
+    )
+    kwargs = {
+        "domain": "slides",
+        "queue": "default",
+        "job_type": "presentation.generate",
+        "payload": {"receipt_id": "receipt-1"},
+        "owner_user_id": "owner-1",
+        "idempotency_key": "slides-race-controls-pg",
+    }
+    manager.create_job(**kwargs)
+    monkeypatch.setattr(
+        manager,
+        "_serialized_slides_generation_replay",
+        lambda **_kwargs: None,
+    )
+
+    replayed = manager.admit_job(**kwargs)
+    assert replayed.outcome is OperationOutcome.NO_TRANSITION
+    assert replayed.no_transition_reason is NoTransitionReason.IDEMPOTENT_EXISTING
+    assert replayed.inserted is False
+
+    with pytest.raises(SlidesGenerationJobsUnavailableError):
+        manager.admit_job(
+            **kwargs,
+            expired_lease_policy=ExpiredLeasePolicy.REQUEUE_NO_ATTEMPT,
+            quarantine_threshold=5,
+        )

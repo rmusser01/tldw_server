@@ -4,7 +4,7 @@ title: Implement canonical admin webhook delivery substrate and recovery
 status: In Progress
 assignee: []
 created_date: '2026-08-23 03:15'
-updated_date: '2026-08-28 18:49'
+updated_date: '2026-08-28 19:46'
 labels:
   - admin
   - webhooks
@@ -91,6 +91,10 @@ The initial draft was created from an earlier reviewed PR 1 head. Planning revie
 2026-08-28: Task 2 Fix Round 2 complete. Added backend-neutral real-transaction acknowledgement rollback evidence and full malformed persisted-coordinate/constraint coverage on SQLite and PostgreSQL. No production defect was exposed, so production and crypto code were unchanged. RED: 2 collection errors from missing shared contracts. Corrective subset: 5 passed, 0 skipped, 6 warnings. Full PostgreSQL-required Task 2 suite: 70 passed, 0 skipped, 122 warnings. Ruff and git diff --check passed; Bandit/crypto were not required because production did not change.
 
 Task 3 complete: added backend-neutral exact prepared dispositions, no-attempt defer, lease-horizon and identity lookup operations; unified typed/legacy admission; persisted expired-lease recovery controls; and SQLite/PostgreSQL parity. Mandatory Task 3 plus lifecycle suite: 263 passed, 0 skipped. Focused Ruff and Bandit passed. Full Jobs Ruff remains blocked only by pre-existing I001 findings in unchanged audit_bridge.py, metrics.py, and tracing.py.
+
+Task 3 Fix Round 1/5 started at FIX_BASE 803ae280f66e990f7b4ffdf29e31cae311d648d7. Scope: canonical identity boundary, exact-token replay fact conflicts, Slides replay control validation, compressed archive identity lookup, and defer event reason evidence. Strict focused RED before production edits; mandatory PostgreSQL zero-skip gate required.
+
+2026-08-28: Task 3 Fix Round 1/5 complete. Hardened canonical admin_webhooks:delivery admission/facade/backend identity and controls; exact-token reason/delay replay facts via bounded internal fingerprint; Slides immutable control replay/race validation; real compressed archive lookup; and current defer reason event evidence. Added strict marker/schedule forgery rejection. RED: 68 failed/95 passed, then 4 focused semantic failures. Final PostgreSQL-required Task 3/lifecycle gate: 343 passed, 0 skipped, 2 baseline warnings. Focused Ruff, Bandit, and diff checks pass. Full Jobs Ruff remains only the three unchanged baseline I001 findings; unrelated PostgreSQL Slides nullable-parameter audit issue remains unchanged.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
