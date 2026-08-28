@@ -118,9 +118,11 @@ from tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade import (
 )
 from tldw_Server_API.app.core.Character_Chat.character_conversation_factory import (
     PROMPT_COMPLETION_SETTING_CLASSIFICATION,
+    collect_character_greeting_texts,
     create_character_conversation,
     materialize_roleplay_behavior_settings,
     reject_resumable_behavior_credentials,
+    validate_resumable_behavior_boole,
 )
 
 # Rate limiting
@@ -2037,6 +2039,14 @@ def _validate_chat_settings_payload(
             detail=f"Settings payload exceeds {MAX_CHAT_SETTINGS_BYTES} bytes"
         )
 
+    try:
+        validate_resumable_behavior_boole(settings)
+    except InputError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+
     author_note = settings.get("authorNote")
     if isinstance(author_note, str) and len(author_note) > MAX_AUTHOR_NOTE_CHARS:
         raise HTTPException(
@@ -3351,59 +3361,8 @@ def _resolve_chat_turn_context(
     }
 
 
-def _normalize_greeting_values(value: Any) -> list[str]:
-    def _normalize_string_entries(entries: list[Any]) -> list[str]:
-        normalized: list[str] = []
-        for entry in entries:
-            if not isinstance(entry, str):
-                continue
-            trimmed_entry = entry.strip()
-            if trimmed_entry:
-                normalized.append(trimmed_entry)
-        return normalized
-
-    if isinstance(value, str):
-        trimmed = value.strip()
-        if not trimmed:
-            return []
-        try:
-            parsed = json.loads(trimmed)
-        except json.JSONDecodeError:
-            return [trimmed]
-        if isinstance(parsed, list):
-            return _normalize_string_entries(parsed)
-        if isinstance(parsed, str):
-            try:
-                nested_parsed = json.loads(parsed)
-            except json.JSONDecodeError:
-                return [trimmed]
-            if isinstance(nested_parsed, list):
-                return _normalize_string_entries(nested_parsed)
-        return [trimmed]
-    if isinstance(value, list):
-        return _normalize_string_entries(value)
-    return []
-
-
 def _collect_character_greeting_texts(character: dict[str, Any]) -> list[str]:
-    greeting_fields = (
-        "greeting",
-        "first_message",
-        "firstMessage",
-        "greet",
-        "alternate_greetings",
-        "alternateGreetings",
-    )
-    greetings: list[str] = []
-    seen: set[str] = set()
-    for field_name in greeting_fields:
-        values = _normalize_greeting_values(character.get(field_name))
-        for value in values:
-            if value in seen:
-                continue
-            seen.add(value)
-            greetings.append(value)
-    return greetings
+    return collect_character_greeting_texts(character)
 
 
 def _compute_greetings_checksum(character: dict[str, Any]) -> str:

@@ -6,6 +6,9 @@ from fastapi import FastAPI, HTTPException
 from tldw_Server_API.app.api.v1.endpoints import character_chat_sessions as sessions
 from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import GreetingSelectRequest
 from tldw_Server_API.app.core.Character_Chat import character_conversation_factory
+from tldw_Server_API.app.core.Character_Chat.character_conversation_factory import (
+    build_materialized_behavior_controls,
+)
 from tldw_Server_API.app.core.DB_Management.chacha.conversation_resume_store import (
     build_materialized_behavior_settings,
 )
@@ -589,3 +592,32 @@ def test_materialized_reference_ids_are_deduplicated_and_bounded_before_lookup()
         normalize_participants(1, list(range(2, 35)))
     with pytest.raises(InputError, match="at most 64"):
         normalize_world_books(list(range(1, 66)))
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("authorNoteEnabled", "false"),
+        ("authorNoteGmOnly", 1),
+        ("authorNoteExcludeFromPrompt", 0),
+        ("greetingEnabled", "true"),
+        ("useCharacterDefault", 1),
+        ("autoSummaryEnabled", "false"),
+    ],
+)
+def test_materialized_behavior_controls_reject_non_boolean_known_flags(
+    field: str,
+    value: object,
+) -> None:
+    with pytest.raises(InputError, match=field):
+        build_materialized_behavior_controls({field: value})
+
+
+@pytest.mark.unit
+def test_settings_endpoint_rejects_non_boolean_behavior_flags() -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        sessions._validate_chat_settings_payload({"greetingEnabled": "false"})
+
+    assert exc_info.value.status_code == 422
+    assert "greetingEnabled" in str(exc_info.value.detail)

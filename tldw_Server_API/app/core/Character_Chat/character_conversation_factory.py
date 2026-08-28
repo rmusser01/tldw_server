@@ -20,6 +20,7 @@ from tldw_Server_API.app.core.Character_Chat.modules.character_generation_preset
     resolve_character_generation_settings,
 )
 from tldw_Server_API.app.core.Character_Chat.modules.character_prompt_presets import (
+    DEFAULT_PROMPT_PRESET,
     get_builtin_presets,
     resolve_character_prompt_preset,
 )
@@ -28,7 +29,7 @@ from tldw_Server_API.app.core.Chat.chat_service import is_model_known_for_provid
 from tldw_Server_API.app.core.DB_Management.chacha.conversation_resume_store import (
     build_materialized_behavior_settings,
 )
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import InputError
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import BackendType, InputError
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     ensure_app_config,
@@ -45,6 +46,16 @@ MAX_MATERIALIZED_PARTICIPANTS = 33
 MAX_MATERIALIZED_WORLD_BOOKS = 64
 DEFAULT_AUTO_SUMMARY_THRESHOLD_MESSAGES = 40
 DEFAULT_AUTO_SUMMARY_WINDOW_MESSAGES = 12
+_EXACT_BOOLEAN_BEHAVIOR_FIELDS = frozenset(
+    {
+        "authorNoteEnabled",
+        "authorNoteExcludeFromPrompt",
+        "authorNoteGmOnly",
+        "autoSummaryEnabled",
+        "greetingEnabled",
+        "useCharacterDefault",
+    }
+)
 
 # This is the reviewable contract inventory for every conversation-setting field
 # consumed by prompt construction or completion routing. Unknown legacy keys remain
@@ -228,18 +239,34 @@ def normalize_materialized_world_book_ids(values: Sequence[Any]) -> list[int]:
     return ordered
 
 
-def _coerce_behavior_bool(value: Any, *, default: bool) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return bool(value)
-    if isinstance(value, str):
-        normalized = value.strip().lower()
-        if normalized in {"1", "true", "yes", "on"}:
-            return True
-        if normalized in {"0", "false", "no", "off"}:
-            return False
-    return default
+def validate_resumable_behavior_boole(settings: Mapping[str, Any]) -> None:
+    """Reject loose boolean representations at the resumable trust boundary."""
+    for key in _EXACT_BOOLEAN_BEHAVIOR_FIELDS:
+        if key in settings and type(settings[key]) is not bool:
+            raise InputError(f"{key} must be a boolean.")
+    for container_key in ("chatGenerationOverride", "generationOverrides", "summary"):
+        container = settings.get(container_key)
+        if (
+            isinstance(container, Mapping)
+            and "enabled" in container
+            and type(container["enabled"]) is not bool
+        ):
+            raise InputError(f"{container_key}.enabled must be a boolean.")
+
+
+def _behavior_bool(
+    settings: Mapping[str, Any],
+    key: str,
+    *,
+    default: bool,
+) -> bool:
+    value = settings.get(key, default)
+    return value if type(value) is bool else default
+
+
+def _is_postgres_connection(conn: Any) -> bool:
+    backend = getattr(conn, "_backend", None)
+    return getattr(backend, "backend_type", None) == BackendType.POSTGRESQL
 
 
 def _bounded_behavior_int(
@@ -292,6 +319,7 @@ def build_materialized_behavior_controls(
     settings: Mapping[str, Any],
 ) -> dict[str, Any]:
     """Build the closed prompt/completion control authority from merged settings."""
+    validate_resumable_behavior_boole(settings)
     summary = settings.get("summary")
     summary = summary if isinstance(summary, Mapping) else {}
     threshold_raw = settings.get("autoSummaryThresholdMessages")
@@ -319,11 +347,9 @@ def build_materialized_behavior_controls(
     if window >= threshold:
         window = max(1, threshold - 1)
 
+    summary_enabled = settings.get("autoSummaryEnabled", summary.get("enabled", False))
     auto_summary: dict[str, Any] = {
-        "enabled": _coerce_behavior_bool(
-            settings.get("autoSummaryEnabled", summary.get("enabled")),
-            default=False,
-        ),
+        "enabled": summary_enabled if type(summary_enabled) is bool else False,
         "threshold_messages": threshold,
         "window_messages": window,
     }
@@ -354,24 +380,28 @@ def build_materialized_behavior_controls(
     return {
         "applied_overrides": applied_overrides,
         "author_note": {
-            "enabled": _coerce_behavior_bool(
-                settings.get("authorNoteEnabled"),
+            "enabled": _behavior_bool(
+                settings,
+                "authorNoteEnabled",
                 default=True,
             ),
-            "gm_only": _coerce_behavior_bool(
-                settings.get("authorNoteGmOnly"),
+            "gm_only": _behavior_bool(
+                settings,
+                "authorNoteGmOnly",
                 default=False,
             ),
-            "exclude_from_prompt": _coerce_behavior_bool(
-                settings.get("authorNoteExcludeFromPrompt"),
+            "exclude_from_prompt": _behavior_bool(
+                settings,
+                "authorNoteExcludeFromPrompt",
                 default=False,
             ),
             "position": _author_note_position(settings),
         },
         "auto_summary": auto_summary,
         "greeting": {
-            "enabled": _coerce_behavior_bool(
-                settings.get("greetingEnabled"),
+            "enabled": _behavior_bool(
+                settings,
+                "greetingEnabled",
                 default=True,
             ),
             "scope": (
@@ -385,8 +415,9 @@ def build_materialized_behavior_controls(
                 if settings.get("greetingSelectionId") is not None
                 else None
             ),
-            "use_character_default": _coerce_behavior_bool(
-                settings.get("useCharacterDefault"),
+            "use_character_default": _behavior_bool(
+                settings,
+                "useCharacterDefault",
                 default=True,
             ),
         },
@@ -466,6 +497,57 @@ def _decode_json(value: Any, default: Any) -> Any:
     return value if value is not None else default
 
 
+def _normalize_greeting_values(value: Any) -> list[str]:
+    def _strings(entries: Sequence[Any]) -> list[str]:
+        return [
+            item.strip()
+            for item in entries
+            if isinstance(item, str) and item.strip()
+        ]
+
+    if isinstance(value, str):
+        trimmed = value.strip()
+        if not trimmed:
+            return []
+        try:
+            parsed = json.loads(trimmed)
+        except json.JSONDecodeError:
+            return [trimmed]
+        if isinstance(parsed, list):
+            return _strings(parsed)
+        if isinstance(parsed, str):
+            try:
+                nested = json.loads(parsed)
+            except json.JSONDecodeError:
+                return [trimmed]
+            if isinstance(nested, list):
+                return _strings(nested)
+        return [trimmed]
+    if isinstance(value, list):
+        return _strings(value)
+    return []
+
+
+def collect_character_greeting_texts(character: Mapping[str, Any]) -> list[str]:
+    """Return live-picker greeting values: nonempty and ordered-deduplicated."""
+    greetings: list[str] = []
+    seen: set[str] = set()
+    for field_name in (
+        "greeting",
+        "first_message",
+        "firstMessage",
+        "greet",
+        "alternate_greetings",
+        "alternateGreetings",
+    ):
+        for value in _normalize_greeting_values(character.get(field_name)):
+            if value in seen:
+                continue
+            seen.add(value)
+            greetings.append(value)
+    return greetings
+
+
 def _character_sampling(character: Mapping[str, Any]) -> dict[str, Any]:
     resolved = resolve_character_generation_settings(dict(character))
     return {
@@ -486,12 +568,9 @@ def _load_preset(
     preset_id: str,
     *,
     selection_source: str,
+    owner_user_id: str,
 ) -> dict[str, Any]:
-    """Load a preset from the authenticated user's ChaCha database.
-
-    Prompt presets intentionally have no owner column: authorization is enforced by
-    dependency injection selecting a distinct ChaCha database file for each user.
-    """
+    """Load a preset through the backend's actual ownership boundary."""
     normalized = str(preset_id).strip()
     if normalized in {"default", "st_default"}:
         builtin = next(
@@ -509,16 +588,28 @@ def _load_preset(
                 "version": 1,
             },
         }
-    result = conn.execute(
-        """
-        SELECT preset_id, name, section_order_json, section_templates_json,
-               last_modified, version
-          FROM prompt_presets
-         WHERE preset_id = ? AND deleted = FALSE
-         LIMIT 1
-        """,
-        (normalized,),
-    )
+    if _is_postgres_connection(conn):
+        result = conn.execute(
+            """
+            SELECT preset_id, name, section_order_json, section_templates_json,
+                   last_modified, version
+              FROM prompt_presets
+             WHERE preset_id = ? AND client_id = ? AND deleted = FALSE
+             LIMIT 1
+            """,
+            (normalized, owner_user_id),
+        )
+    else:
+        result = conn.execute(
+            """
+            SELECT preset_id, name, section_order_json, section_templates_json,
+                   last_modified, version
+              FROM prompt_presets
+             WHERE preset_id = ? AND deleted = FALSE
+             LIMIT 1
+            """,
+            (normalized,),
+        )
     row = result.fetchone()
     if row is None:
         raise InputError(f"Prompt preset '{normalized}' not found.")
@@ -545,28 +636,51 @@ def _load_world_books_for_participants(
     conn: Any,
     participant_character_ids: Sequence[int],
     *,
+    owner_user_id: str,
     preexisting_world_book_ids: Sequence[int] = (),
 ) -> dict[int, list[dict[str, Any]]]:
     """Load bounded participant lore, expanding each shared book only once."""
     raw_by_character: dict[int, list[dict[str, Any]]] = {}
     unique_books: dict[int, dict[str, Any]] = {}
     for character_id in participant_character_ids:
-        books = _select_rows(
-            conn,
-            """
-            SELECT wb.*, cwb.enabled AS attachment_enabled,
-                   cwb.priority AS attachment_priority
-              FROM world_books wb
-              JOIN character_world_books cwb ON cwb.world_book_id = wb.id
-             WHERE cwb.character_id = ? AND wb.deleted = FALSE
-             ORDER BY cwb.priority DESC, wb.name, wb.id
-            """,
-            (character_id,),
-        )
+        if _is_postgres_connection(conn):
+            books = _select_rows(
+                conn,
+                """
+                SELECT wb.*, cwb.enabled AS attachment_enabled,
+                       cwb.priority AS attachment_priority
+                  FROM world_books wb
+                  JOIN character_world_books cwb ON cwb.world_book_id = wb.id
+                  JOIN character_cards cc ON cc.id = cwb.character_id
+                 WHERE cwb.character_id = ? AND cc.client_id = ?
+                   AND cc.deleted = FALSE AND wb.deleted = FALSE
+                 ORDER BY cwb.priority DESC, wb.name, wb.id
+                 LIMIT 65
+                """,
+                (character_id, owner_user_id),
+            )
+        else:
+            books = _select_rows(
+                conn,
+                """
+                SELECT wb.*, cwb.enabled AS attachment_enabled,
+                       cwb.priority AS attachment_priority
+                  FROM world_books wb
+                  JOIN character_world_books cwb ON cwb.world_book_id = wb.id
+                 WHERE cwb.character_id = ? AND wb.deleted = FALSE
+                 ORDER BY cwb.priority DESC, wb.name, wb.id
+                 LIMIT 65
+                """,
+                (character_id,),
+            )
         raw_by_character[int(character_id)] = books
         for book in books:
             world_book_id = int(book["id"])
             unique_books.setdefault(world_book_id, book)
+        if len({*preexisting_world_book_ids, *unique_books}) > MAX_MATERIALIZED_WORLD_BOOKS:
+            raise InputError(
+                f"A resumable chat supports at most {MAX_MATERIALIZED_WORLD_BOOKS} world books."
+            )
 
     combined_world_book_ids = {
         *preexisting_world_book_ids,
@@ -641,6 +755,51 @@ def _load_exemplars(conn: Any, character_id: int) -> list[dict[str, Any]]:
     ]
 
 
+def _load_persona_memory_entries(
+    conn: Any,
+    *,
+    owner_user_id: str,
+    character_id: int,
+) -> list[dict[str, Any]]:
+    rows = _select_rows(
+        conn,
+        """
+        SELECT id, memory_type, content, source_conversation_id,
+               salience, last_modified, version
+          FROM persona_memory_entries
+         WHERE user_id = ? AND persona_id = ?
+           AND archived = FALSE AND deleted = FALSE
+         ORDER BY last_modified DESC, id ASC
+         LIMIT 200
+        """,
+        (owner_user_id, f"char:{character_id}"),
+    )
+    rows.sort(
+        key=lambda row: (
+            float(row.get("salience") or 0.0),
+            str(row.get("last_modified") or ""),
+        ),
+        reverse=True,
+    )
+    return [
+        {
+            "id": str(row.get("id") or ""),
+            "memory_type": str(row.get("memory_type") or "manual"),
+            "content": str(row.get("content") or ""),
+            "source_conversation_id": (
+                str(row["source_conversation_id"])
+                if row.get("source_conversation_id") is not None
+                else None
+            ),
+            "salience": float(row.get("salience") or 0.0),
+            "last_modified": str(row.get("last_modified") or ""),
+            "version": int(row.get("version") or 1),
+        }
+        for row in rows
+        if str(row.get("content") or "").strip()
+    ]
+
+
 def _aliases(character: Mapping[str, Any]) -> list[str]:
     extensions = _decode_json(character.get("extensions"), {})
     candidates: Any = extensions.get("aliases") if isinstance(extensions, dict) else None
@@ -674,6 +833,7 @@ def _materialize_behavior(
     prompt_preset_id: str | None,
     memory_by_character_id: Mapping[str, str],
     primary_greeting: Mapping[str, Any] | None,
+    owner_user_id: str,
     max_snapshot_bytes: int,
     preexisting_world_book_ids: Sequence[int] = (),
 ) -> _MaterializedBehavior:
@@ -683,6 +843,7 @@ def _materialize_behavior(
     world_books_by_character = _load_world_books_for_participants(
         conn,
         participant_character_ids,
+        owner_user_id=owner_user_id,
         preexisting_world_book_ids=preexisting_world_book_ids,
     )
     for index, character_id in enumerate(participant_character_ids):
@@ -708,6 +869,7 @@ def _materialize_behavior(
             conn,
             resolved_preset,
             selection_source=selection_source,
+            owner_user_id=owner_user_id,
         )
         if primary_character is None:
             primary_character = character
@@ -716,6 +878,11 @@ def _materialize_behavior(
         if isinstance(extensions, dict):
             prompt_extensions["character_extensions"] = extensions
         memory = memory_by_character_id.get(str(character_id))
+        persona_memory_entries = _load_persona_memory_entries(
+            conn,
+            owner_user_id=owner_user_id,
+            character_id=character_id,
+        )
         source = {
             "kind": "character",
             "id": str(character_id),
@@ -750,8 +917,17 @@ def _materialize_behavior(
                 "exemplars": _load_exemplars(conn, character_id),
                 "world_books": world_books_by_character.get(character_id, []),
                 "default_memory": (
-                    {"content": memory, "source": "creation_request", "version": 1}
-                    if isinstance(memory, str)
+                    {
+                        "content": memory if isinstance(memory, str) else "",
+                        "source": (
+                            "creation_request"
+                            if isinstance(memory, str)
+                            else "persona_memory_entries"
+                        ),
+                        "version": 1,
+                        "persona_memory_entries": persona_memory_entries,
+                    }
+                    if isinstance(memory, str) or persona_memory_entries
                     else None
                 ),
             }
@@ -881,8 +1057,28 @@ def _source_id(value: Any) -> str | None:
     return str(source["id"])
 
 
-def _materialize_world_book_by_id(conn: Any, world_book_id: int) -> dict[str, Any]:
-    """Materialize from the already-authorized per-user ChaCha database."""
+def _materialize_world_book_by_id(
+    conn: Any,
+    world_book_id: int,
+    *,
+    owner_user_id: str,
+    participant_character_ids: Sequence[int],
+) -> dict[str, Any]:
+    """Materialize an explicitly addressed book through the backend auth boundary."""
+    if _is_postgres_connection(conn):
+        placeholders = ",".join("?" for _ in participant_character_ids)
+        if not placeholders:
+            raise InputError(f"World book ID {world_book_id} not found.")
+        authorized = conn.execute(
+            "SELECT 1 AS authorized FROM character_world_books cwb "
+            "JOIN character_cards cc ON cc.id = cwb.character_id "
+            "WHERE cwb.world_book_id = ? "
+            f"AND cwb.character_id IN ({placeholders}) "  # nosec B608
+            "AND cc.client_id = ? AND cc.deleted = FALSE LIMIT 1",
+            (world_book_id, *participant_character_ids, owner_user_id),
+        ).fetchone()
+        if authorized is None:
+            raise InputError(f"World book ID {world_book_id} not found.")
     result = conn.execute(
         "SELECT * FROM world_books WHERE id = ? AND deleted = FALSE LIMIT 1",
         (world_book_id,),
@@ -1060,22 +1256,21 @@ def _resolve_selected_greeting(
     if row is None:
         raise InputError(f"Character ID {character_id} not found.")
     character = _row_dict(row, result)
-    greetings = [str(character.get("first_message") or "")]
-    alternates = _decode_json(character.get("alternate_greetings"), [])
-    if isinstance(alternates, list):
-        greetings.extend(str(item) for item in alternates)
+    greetings = collect_character_greeting_texts(character)
     if index < 0 or index >= len(greetings):
         raise InputError(f"Greeting index {index} is out of range.")
+    first_messages = _normalize_greeting_values(character.get("first_message"))
+    from_first_message = bool(first_messages and greetings[index] == first_messages[0])
     return {
         "content": greetings[index],
         "selection_id": normalized_selection_id,
-        "source": "first_message" if index == 0 else "alternate_greeting",
-        "source_index": max(0, index - 1),
+        "source": "first_message" if from_first_message else "alternate_greeting",
+        "source_index": 0 if from_first_message else index,
         "character_version": int(character.get("version") or 1),
     }
 
 
-def materialize_roleplay_behavior_settings(
+def _materialize_roleplay_behavior_settings_once(
     conn: Any,
     *,
     conversation: Mapping[str, Any],
@@ -1205,6 +1400,7 @@ def materialize_roleplay_behavior_settings(
             prompt_preset_id=None,
             memory_by_character_id={},
             primary_greeting=None,
+            owner_user_id=owner_user_id,
             max_snapshot_bytes=max_bytes,
             preexisting_world_book_ids=tuple(preexisting_world_book_ids),
         )
@@ -1219,6 +1415,25 @@ def materialize_roleplay_behavior_settings(
         known_participants[str(character_id)]
         for character_id in desired_participant_ids
     ]
+    final_participant_book_ids = {
+        int(book["id"])
+        for participant in participants
+        for book in participant.get("world_books", [])
+        if isinstance(book, Mapping) and isinstance(book.get("id"), int)
+    }
+    current_context_book_ids = {
+        int(book["id"])
+        for book in current_values.get("world_books", [])
+        if isinstance(book, Mapping) and isinstance(book.get("id"), int)
+    }
+    if (
+        "conversationContext" not in changed_keys
+        and len(final_participant_book_ids | current_context_book_ids)
+        > MAX_MATERIALIZED_WORLD_BOOKS
+    ):
+        raise InputError(
+            f"A resumable chat supports at most {MAX_MATERIALIZED_WORLD_BOOKS} world books."
+        )
 
     values: dict[str, Any] = {
         **current_values,
@@ -1246,6 +1461,14 @@ def materialize_roleplay_behavior_settings(
             or merged_settings.get("prompt_preset")
         )
         preset_id = str(preset_raw).strip() if preset_raw else ""
+        if (
+            not preset_id
+            and str(merged_settings.get("presetScope") or "character")
+            .strip()
+            .lower()
+            == "chat"
+        ):
+            preset_id = DEFAULT_PROMPT_PRESET
         if preset_id:
             reusable = _find_materialized_preset(
                 preset_id,
@@ -1256,6 +1479,7 @@ def materialize_roleplay_behavior_settings(
                 conn,
                 preset_id,
                 selection_source="settings_mutation",
+                owner_user_id=owner_user_id,
             )
         else:
             values.pop("prompt_preset", None)
@@ -1266,12 +1490,16 @@ def materialize_roleplay_behavior_settings(
             book_ids = normalize_materialized_world_book_ids(
                 context.get("world_book_ids")
             )
+            if len(final_participant_book_ids | set(book_ids)) > MAX_MATERIALIZED_WORLD_BOOKS:
+                raise InputError(
+                    f"A resumable chat supports at most {MAX_MATERIALIZED_WORLD_BOOKS} world books."
+                )
             reusable_books: dict[int, dict[str, Any]] = {}
             for book in [
                 *(current_values.get("world_books") or []),
                 *(
                     book
-                    for participant in snapshot_participants
+                    for participant in participants
                     for book in participant.get("world_books", [])
                 ),
             ]:
@@ -1279,7 +1507,12 @@ def materialize_roleplay_behavior_settings(
                     reusable_books[int(book["id"])] = dict(book)
             values["world_books"] = [
                 reusable_books.get(book_id)
-                or _materialize_world_book_by_id(conn, book_id)
+                or _materialize_world_book_by_id(
+                    conn,
+                    book_id,
+                    owner_user_id=owner_user_id,
+                    participant_character_ids=desired_participant_ids,
+                )
                 for book_id in book_ids
             ]
         else:
@@ -1313,8 +1546,9 @@ def materialize_roleplay_behavior_settings(
         values["memory"] = {
             "character_memory_by_id": materialized_memory,
             "author_note": str(materialization_settings.get("authorNote") or ""),
-            "author_note_enabled": _coerce_behavior_bool(
-                materialization_settings.get("authorNoteEnabled"),
+            "author_note_enabled": _behavior_bool(
+                materialization_settings,
+                "authorNoteEnabled",
                 default=True,
             ),
             "author_note_position": _author_note_position(materialization_settings),
@@ -1360,6 +1594,44 @@ def materialize_roleplay_behavior_settings(
     return build_materialized_behavior_settings(values, max_bytes=max_bytes)
 
 
+def materialize_roleplay_behavior_settings(
+    conn: Any,
+    *,
+    conversation: Mapping[str, Any],
+    resume_state: Mapping[str, Any],
+    merged_settings: Mapping[str, Any],
+    owner_user_id: str,
+    changed_keys: set[str] | frozenset[str],
+    max_bytes: int = DEFAULT_MAX_SNAPSHOT_BYTES,
+) -> dict[str, Any]:
+    """Materialize one stable authority, retrying bounded PostgreSQL source drift."""
+    attempts = 2 if _is_postgres_connection(conn) else 1
+    for _attempt in range(attempts):
+        first = _materialize_roleplay_behavior_settings_once(
+            conn,
+            conversation=conversation,
+            resume_state=resume_state,
+            merged_settings=merged_settings,
+            owner_user_id=owner_user_id,
+            changed_keys=changed_keys,
+            max_bytes=max_bytes,
+        )
+        if attempts == 1:
+            return first
+        second = _materialize_roleplay_behavior_settings_once(
+            conn,
+            conversation=conversation,
+            resume_state=resume_state,
+            merged_settings=merged_settings,
+            owner_user_id=owner_user_id,
+            changed_keys=changed_keys,
+            max_bytes=max_bytes,
+        )
+        if first == second:
+            return second
+    raise InputError("Behavior sources changed during settings materialization.")
+
+
 def create_character_conversation(
     db: CharactersRAGDB,
     *,
@@ -1394,41 +1666,67 @@ def create_character_conversation(
 
     creation_settings = dict(conversation_settings or {})
     reject_resumable_behavior_credentials(creation_settings)
+    validate_resumable_behavior_boole(creation_settings)
+    owner_user_id = str(conversation_data.get("client_id") or "").strip()
 
     # Ensure optional world-book tables exist before opening the create transaction.
     WorldBookService(db)
     memory = dict(memory_by_character_id or {})
-    with db.transaction() as conn:
-        materialized = _materialize_behavior(
-            conn,
-            participant_character_ids=ordered_ids,
-            prompt_preset_id=prompt_preset_id,
-            memory_by_character_id=memory,
-            primary_greeting=primary_greeting,
-            max_snapshot_bytes=max_snapshot_bytes,
-        )
     app_config = ensure_app_config()
-    effective, reason = _resolve_effective_completion(
-        provider=provider,
-        model=model,
-        sampling=sampling,
-        character=materialized.primary_character,
-        app_config=app_config,
-    )
+    effective_identity: tuple[str, str] | None = None
+    identity_resolution_complete = False
+    identity_resolution_reason: str | None = None
 
     for attempt in range(2):
         try:
             with db.transaction() as conn:
+                first = _materialize_behavior(
+                    conn,
+                    participant_character_ids=ordered_ids,
+                    prompt_preset_id=prompt_preset_id,
+                    memory_by_character_id=memory,
+                    primary_greeting=primary_greeting,
+                    owner_user_id=owner_user_id,
+                    max_snapshot_bytes=max_snapshot_bytes,
+                )
+                if not identity_resolution_complete:
+                    initial_effective, identity_resolution_reason = (
+                        _resolve_effective_completion(
+                            provider=provider,
+                            model=model,
+                            sampling=sampling,
+                            character=first.primary_character,
+                            app_config=app_config,
+                        )
+                    )
+                    if initial_effective is not None:
+                        effective_identity = (
+                            initial_effective["provider"],
+                            initial_effective["model"],
+                        )
+                    identity_resolution_complete = True
                 current = _materialize_behavior(
                     conn,
                     participant_character_ids=ordered_ids,
                     prompt_preset_id=prompt_preset_id,
                     memory_by_character_id=memory,
                     primary_greeting=primary_greeting,
+                    owner_user_id=owner_user_id,
                     max_snapshot_bytes=max_snapshot_bytes,
                 )
-                if current.snapshot.canonical_bytes != materialized.snapshot.canonical_bytes:
+                if current.snapshot.canonical_bytes != first.snapshot.canonical_bytes:
                     raise _SourceDrift
+                if effective_identity is None:
+                    effective = None
+                    reason = identity_resolution_reason
+                else:
+                    effective, reason = _resolve_effective_completion(
+                        provider=effective_identity[0],
+                        model=effective_identity[1],
+                        sampling=sampling,
+                        character=current.primary_character,
+                        app_config=app_config,
+                    )
 
                 settings = dict(creation_settings)
                 settings["participantCharacterIds"] = ordered_ids
@@ -1478,15 +1776,6 @@ def create_character_conversation(
         except _SourceDrift:
             if attempt == 1:
                 raise InputError("Behavior sources changed during conversation creation.") from None
-            with db.transaction() as conn:
-                materialized = _materialize_behavior(
-                    conn,
-                    participant_character_ids=ordered_ids,
-                    prompt_preset_id=prompt_preset_id,
-                    memory_by_character_id=memory,
-                    primary_greeting=primary_greeting,
-                    max_snapshot_bytes=max_snapshot_bytes,
-                )
     raise InputError("Failed to create character conversation.")
 
 

@@ -476,7 +476,14 @@ class ConversationResumeStore:
                 and _MATERIALIZED_SETTINGS_KEY in settings
                 and materialized_settings is None
             )
-            if materialized_settings is not None:
+            materialized_binding_valid = False
+            if materialized_settings is not None and snapshot["status"] == "valid":
+                base_snapshot = materialized_settings["values"]["base_snapshot"]
+                materialized_binding_valid = (
+                    base_snapshot["schema_version"] == snapshot["schema_version"]
+                    and base_snapshot["digest"] == snapshot["digest"]
+                )
+            if materialized_settings is not None and materialized_binding_valid:
                 effective_completion = materialized_settings["values"][
                     "effective_completion"
                 ]
@@ -485,7 +492,11 @@ class ConversationResumeStore:
                 resume_eligible = False
                 resume_ineligible_reason = f"behavior_snapshot_{snapshot_status}"
                 effective_completion = None
-            elif materialized_invalid:
+            elif stored_eligible and (
+                materialized_invalid
+                or materialized_settings is None
+                or not materialized_binding_valid
+            ):
                 resume_eligible = False
                 resume_ineligible_reason = "invalid_effective_settings"
                 effective_completion = None

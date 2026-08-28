@@ -21,6 +21,7 @@ from tldw_Server_API.app.core.Character_Chat.modules.character_io import (
 from tldw_Server_API.app.core.Character_Chat.world_book_manager import WorldBookService
 from tldw_Server_API.app.core.DB_Management.chacha.conversation_resume_store import (
     ConversationResumeStore,
+    build_materialized_behavior_settings,
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import InputError
 
@@ -1231,6 +1232,62 @@ def test_creation_source_drift_exhaustion_rolls_back(character_db, monkeypatch):
 
 
 @pytest.mark.integration
+def test_postgres_style_creation_drift_retries_one_complete_source_view_and_sampling(
+    character_db,
+    monkeypatch,
+) -> None:
+    character_id = character_db.add_character_card({"name": "Drifting Defaults"})
+    real_materialize = character_conversation_factory._materialize_behavior
+    call_count = 0
+
+    def interleaved_materialize(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        materialized = real_materialize(*args, **kwargs)
+        if call_count == 1:
+            return materialized
+        payload = materialized.snapshot.payload
+        payload["participants"][0]["generation_defaults"]["sampling"][
+            "temperature"
+        ] = 0.2
+        refreshed_character = dict(materialized.primary_character)
+        refreshed_character["extensions"] = {
+            "tldw": {"generation": {"temperature": 0.2}}
+        }
+        return replace(
+            materialized,
+            snapshot=build_behavior_snapshot(
+                payload,
+                max_bytes=kwargs["max_snapshot_bytes"],
+            ),
+            primary_character=refreshed_character,
+        )
+
+    monkeypatch.setattr(
+        character_conversation_factory,
+        "_materialize_behavior",
+        interleaved_materialize,
+    )
+    conversation_id = create_character_conversation(
+        character_db,
+        conversation_data={
+            "character_id": character_id,
+            "title": "Coherent retry",
+            "client_id": "test_client",
+        },
+        provider="local-llm",
+        model="local-test",
+    )
+
+    state = character_db.get_roleplay_resume_state(conversation_id)
+    assert call_count == 4
+    assert state["behavior_snapshot"]["payload"]["participants"][0][
+        "generation_defaults"
+    ]["sampling"]["temperature"] == 0.2
+    assert state["effective_completion"]["sampling"]["temperature"] == 0.2
+
+
+@pytest.mark.integration
 def test_legacy_and_invalid_storage_are_non_resumable_and_body_redacted(
     test_client,
     auth_headers,
@@ -2336,6 +2393,359 @@ def test_participant_mutation_caps_combined_new_world_books_before_entry_expansi
 
     assert response.status_code in {400, 413, 422}, response.text
     assert entry_query_count == 0
+    after = character_db.get_roleplay_resume_state(conversation_id)
+    assert after["settings_version"] == before["settings_version"]
+    assert after["settings"] == before["settings"]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "binding_mutation",
+    ["missing", "digest_mismatch", "version_mismatch"],
+)
+def test_resume_readiness_requires_materialized_authority_bound_to_snapshot(
+    test_client,
+    auth_headers,
+    character_db,
+    binding_mutation: str,
+) -> None:
+    character_id = character_db.add_character_card({"name": "Bound Authority"})
+    created = test_client.post(
+        "/api/v1/chats/",
+        headers=auth_headers,
+        json={
+            "character_id": character_id,
+            "provider": "local-llm",
+            "model": "local-test",
+        },
+    )
+    assert created.status_code == 201, created.text
+    conversation_id = created.json()["id"]
+    before = character_db.get_roleplay_resume_state(conversation_id)
+    settings = dict(before["settings"])
+
+    if binding_mutation == "missing":
+        settings.pop("roleplayBehaviorV1")
+    else:
+        values = dict(before["materialized_settings"]["values"])
+        values["base_snapshot"] = dict(values["base_snapshot"])
+        if binding_mutation == "digest_mismatch":
+            values["base_snapshot"]["digest"] = "sha256:" + ("f" * 64)
+            settings["roleplayBehaviorV1"] = build_materialized_behavior_settings(values)
+        else:
+            values["base_snapshot"]["schema_version"] = 2
+            raw = dict(settings["roleplayBehaviorV1"])
+            raw["values"] = values
+            settings["roleplayBehaviorV1"] = raw
+
+    with character_db.transaction() as conn:
+        conn.execute(
+            "UPDATE conversation_settings SET settings_json = ? WHERE conversation_id = ?",
+            (json.dumps(settings), conversation_id),
+        )
+
+    state = character_db.get_roleplay_resume_state(conversation_id)
+    assert state["resume_eligible"] is False
+    assert state["resume_ineligible_reason"] == "invalid_effective_settings"
+    assert state["effective_completion"] is None
+
+
+@pytest.mark.integration
+def test_greeting_materialization_uses_live_nonempty_ordered_deduped_picker(
+    test_client,
+    auth_headers,
+    character_db,
+) -> None:
+    character_id = character_db.add_character_card(
+        {
+            "name": "Greeting Parity",
+            "first_message": "",
+            "alternate_greetings": ["", "Hello", "Hello", "Goodbye"],
+        }
+    )
+    created = test_client.post(
+        "/api/v1/chats/",
+        headers=auth_headers,
+        json={
+            "character_id": character_id,
+            "provider": "local-llm",
+            "model": "local-test",
+        },
+    )
+    assert created.status_code == 201, created.text
+    conversation_id = created.json()["id"]
+
+    listed = test_client.get(
+        f"/api/v1/chats/{conversation_id}/greetings",
+        headers=auth_headers,
+    )
+    assert listed.status_code == 200, listed.text
+    assert [item["text"] for item in listed.json()["greetings"]] == [
+        "Hello",
+        "Goodbye",
+    ]
+
+    selected = test_client.put(
+        f"/api/v1/chats/{conversation_id}/greetings/select",
+        headers=auth_headers,
+        json={"index": 1},
+    )
+    assert selected.status_code == 200, selected.text
+    greeting = character_db.get_roleplay_resume_state(conversation_id)[
+        "materialized_settings"
+    ]["values"]["greeting"]
+    assert greeting["content"] == "Goodbye"
+
+
+@pytest.mark.integration
+def test_preset_scope_chat_without_override_materializes_builtin_default(
+    test_client,
+    auth_headers,
+    character_db,
+) -> None:
+    character_id = character_db.add_character_card({"name": "Default Preset"})
+    created = test_client.post(
+        "/api/v1/chats/",
+        headers=auth_headers,
+        json={
+            "character_id": character_id,
+            "provider": "local-llm",
+            "model": "local-test",
+        },
+    )
+    assert created.status_code == 201, created.text
+    conversation_id = created.json()["id"]
+
+    updated = test_client.put(
+        f"/api/v1/chats/{conversation_id}/settings",
+        headers=auth_headers,
+        json={"settings": {"presetScope": "chat"}},
+    )
+    assert updated.status_code == 200, updated.text
+    preset = character_db.get_roleplay_resume_state(conversation_id)[
+        "materialized_settings"
+    ]["values"]["prompt_preset"]
+    assert preset["preset_id"] == "default"
+    assert preset["source"] == {
+        "kind": "builtin_prompt_preset",
+        "id": "default",
+        "version": 1,
+    }
+
+
+@pytest.mark.integration
+def test_creation_freezes_active_persona_memory_entries(
+    test_client,
+    auth_headers,
+    character_db,
+) -> None:
+    character_id = character_db.add_character_card({"name": "Memory Freeze"})
+    persona_id = f"char:{character_id}"
+    character_db.create_persona_profile(
+        {"id": persona_id, "user_id": "1", "name": "Memory Freeze"}
+    )
+    memory_id = character_db.add_persona_memory_entry(
+        {
+            "persona_id": persona_id,
+            "user_id": "1",
+            "memory_type": "fact",
+            "content": "The original immutable memory.",
+            "salience": 0.9,
+        }
+    )
+    created = test_client.post(
+        "/api/v1/chats/",
+        headers=auth_headers,
+        json={
+            "character_id": character_id,
+            "provider": "local-llm",
+            "model": "local-test",
+        },
+    )
+    assert created.status_code == 201, created.text
+    conversation_id = created.json()["id"]
+    before = character_db.get_roleplay_resume_state(conversation_id)
+    frozen = before["behavior_snapshot"]["payload"]["participants"][0][
+        "default_memory"
+    ]["persona_memory_entries"]
+    assert [entry["content"] for entry in frozen] == [
+        "The original immutable memory."
+    ]
+
+    with character_db.transaction() as conn:
+        conn.execute(
+            "UPDATE persona_memory_entries SET content = ?, version = version + 1 WHERE id = ?",
+            ("Mutable replacement.", memory_id),
+        )
+    after = character_db.get_roleplay_resume_state(conversation_id)
+    assert after["behavior_snapshot"]["payload"] == before["behavior_snapshot"][
+        "payload"
+    ]
+
+
+@pytest.mark.integration
+def test_participant_mutation_freezes_active_persona_memory_entries(
+    test_client,
+    auth_headers,
+    character_db,
+) -> None:
+    primary_id = character_db.add_character_card({"name": "Memory Primary"})
+    secondary_id = character_db.add_character_card({"name": "Memory Secondary"})
+    persona_id = f"char:{secondary_id}"
+    character_db.create_persona_profile(
+        {"id": persona_id, "user_id": "1", "name": "Memory Secondary"}
+    )
+    memory_id = character_db.add_persona_memory_entry(
+        {
+            "persona_id": persona_id,
+            "user_id": "1",
+            "memory_type": "relationship",
+            "content": "The secondary remembers the original pact.",
+            "salience": 0.8,
+        }
+    )
+    created = test_client.post(
+        "/api/v1/chats/",
+        headers=auth_headers,
+        json={
+            "character_id": primary_id,
+            "provider": "local-llm",
+            "model": "local-test",
+        },
+    )
+    assert created.status_code == 201, created.text
+    conversation_id = created.json()["id"]
+
+    updated = test_client.put(
+        f"/api/v1/chats/{conversation_id}/settings",
+        headers=auth_headers,
+        json={"settings": {"participantCharacterIds": [primary_id, secondary_id]}},
+    )
+    assert updated.status_code == 200, updated.text
+    frozen_state = character_db.get_roleplay_resume_state(conversation_id)
+    secondary = next(
+        participant
+        for participant in frozen_state["materialized_settings"]["values"][
+            "participants"
+        ]
+        if participant["source"]["id"] == str(secondary_id)
+    )
+    assert [
+        entry["content"]
+        for entry in secondary["default_memory"]["persona_memory_entries"]
+    ] == ["The secondary remembers the original pact."]
+
+    with character_db.transaction() as conn:
+        conn.execute(
+            "UPDATE persona_memory_entries SET content = ?, version = version + 1 WHERE id = ?",
+            ("Mutable replacement pact.", memory_id),
+        )
+    assert character_db.get_roleplay_resume_state(conversation_id)[
+        "materialized_settings"
+    ] == frozen_state["materialized_settings"]
+
+
+@pytest.mark.integration
+def test_world_book_cap_applies_to_participant_and_conversation_context_union(
+    test_client,
+    auth_headers,
+    character_db,
+) -> None:
+    character_id = character_db.add_character_card({"name": "Total Lore Cap"})
+    world_books = WorldBookService(character_db)
+    for index in range(32):
+        book_id = world_books.create_world_book(f"Attached total lore {index}")
+        assert world_books.attach_to_character(book_id, character_id)["success"] is True
+    explicit_ids = [
+        world_books.create_world_book(f"Explicit total lore {index}")
+        for index in range(33)
+    ]
+    created = test_client.post(
+        "/api/v1/chats/",
+        headers=auth_headers,
+        json={
+            "character_id": character_id,
+            "provider": "local-llm",
+            "model": "local-test",
+        },
+    )
+    assert created.status_code == 201, created.text
+    conversation_id = created.json()["id"]
+    before = character_db.get_roleplay_resume_state(conversation_id)
+
+    with mock.patch.object(
+        character_conversation_factory,
+        "_materialize_world_book_by_id",
+        wraps=character_conversation_factory._materialize_world_book_by_id,
+    ) as materialize_book:
+        updated = test_client.put(
+            f"/api/v1/chats/{conversation_id}/settings",
+            headers=auth_headers,
+            json={
+                "settings": {
+                    "conversationContext": {"world_book_ids": explicit_ids}
+                }
+            },
+        )
+
+    assert updated.status_code in {400, 413, 422}, updated.text
+    assert materialize_book.call_count == 0
+    after = character_db.get_roleplay_resume_state(conversation_id)
+    assert after["settings_version"] == before["settings_version"]
+    assert after["settings"] == before["settings"]
+
+
+@pytest.mark.integration
+def test_postgres_style_settings_materialization_rejects_sustained_source_drift(
+    test_client,
+    auth_headers,
+    character_db,
+    monkeypatch,
+) -> None:
+    character_id = character_db.add_character_card({"name": "Mutation Drift"})
+    created = test_client.post(
+        "/api/v1/chats/",
+        headers=auth_headers,
+        json={
+            "character_id": character_id,
+            "provider": "local-llm",
+            "model": "local-test",
+        },
+    )
+    assert created.status_code == 201, created.text
+    conversation_id = created.json()["id"]
+    before = character_db.get_roleplay_resume_state(conversation_id)
+    call_count = 0
+
+    def _drifting_book(*_args, **_kwargs):
+        nonlocal call_count
+        call_count += 1
+        return {
+            "id": 9,
+            "name": "Drifting lore",
+            "version": call_count,
+            "entries": [{"id": 1, "content": f"revision-{call_count}"}],
+        }
+
+    monkeypatch.setattr(
+        character_conversation_factory,
+        "_is_postgres_connection",
+        lambda _conn: True,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        character_conversation_factory,
+        "_materialize_world_book_by_id",
+        _drifting_book,
+    )
+    updated = test_client.put(
+        f"/api/v1/chats/{conversation_id}/settings",
+        headers=auth_headers,
+        json={"settings": {"conversationContext": {"world_book_ids": [9]}}},
+    )
+
+    assert updated.status_code in {400, 409, 422}, updated.text
+    assert call_count == 4
     after = character_db.get_roleplay_resume_state(conversation_id)
     assert after["settings_version"] == before["settings_version"]
     assert after["settings"] == before["settings"]

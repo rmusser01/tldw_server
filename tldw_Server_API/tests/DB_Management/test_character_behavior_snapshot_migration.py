@@ -11,6 +11,7 @@ from typing import Any
 
 import pytest
 
+from tldw_Server_API.app.core.Character_Chat import character_conversation_factory
 from tldw_Server_API.app.core.Character_Chat.character_behavior_snapshot import (
     BehaviorSnapshotV1,
     build_behavior_snapshot,
@@ -1672,3 +1673,84 @@ def test_postgres_v64_checkpoint_failure_uses_outer_transaction_rollback(
     assert backend.schema_version == 63
     assert backend.committed_statements == []
     assert any("conversation_behavior_snapshots" in sql for sql in backend._pending) is False
+
+
+class _PostgresAuthorityConnection:
+    _backend = SimpleNamespace(backend_type=BackendType.POSTGRESQL)
+
+    def __init__(self, *, authorize_world_book: bool = False) -> None:
+        self.authorize_world_book = authorize_world_book
+        self.executed: list[tuple[str, tuple[Any, ...]]] = []
+
+    def execute(self, statement: str, params: tuple[Any, ...] = ()) -> Any:
+        normalized = " ".join(statement.lower().split())
+        values = tuple(params)
+        self.executed.append((normalized, values))
+        if "from prompt_presets" in normalized:
+            rows = (
+                [
+                    {
+                        "preset_id": "owned-preset",
+                        "name": "Owned",
+                        "section_order_json": "[]",
+                        "section_templates_json": "{}",
+                        "last_modified": "2026-08-28T00:00:00Z",
+                        "version": 1,
+                    }
+                ]
+                if "client_id" in normalized and values == ("owned-preset", "alice")
+                else []
+            )
+            return _AuthorityResult(rows)
+        if "from character_world_books" in normalized:
+            rows = [{"authorized": 1}] if self.authorize_world_book else []
+            return _AuthorityResult(rows)
+        if "from world_books" in normalized:
+            return _AuthorityResult([{"id": 9, "name": "Owned lore", "version": 1}])
+        if "from world_book_entries" in normalized:
+            return _AuthorityResult([])
+        raise AssertionError(f"Unexpected authority SQL: {normalized}")
+
+
+class _AuthorityResult:
+    def __init__(self, rows: list[dict[str, Any]]) -> None:
+        self._rows = rows
+        self.description = [(key,) for key in rows[0]] if rows else None
+
+    def fetchone(self) -> dict[str, Any] | None:
+        return dict(self._rows[0]) if self._rows else None
+
+    def fetchall(self) -> list[dict[str, Any]]:
+        return [dict(row) for row in self._rows]
+
+
+def test_postgres_custom_prompt_preset_materialization_requires_client_owner() -> None:
+    conn = _PostgresAuthorityConnection()
+
+    preset = character_conversation_factory._load_preset(
+        conn,
+        "owned-preset",
+        selection_source="settings_mutation",
+        owner_user_id="alice",
+    )
+
+    assert preset["preset_id"] == "owned-preset"
+    preset_statement, preset_params = conn.executed[0]
+    assert "client_id" in preset_statement
+    assert preset_params == ("owned-preset", "alice")
+
+
+def test_postgres_explicit_world_book_requires_owned_participant_linkage() -> None:
+    conn = _PostgresAuthorityConnection(authorize_world_book=False)
+
+    with pytest.raises(InputError, match="not found"):
+        character_conversation_factory._materialize_world_book_by_id(
+            conn,
+            9,
+            owner_user_id="alice",
+            participant_character_ids=[3],
+        )
+
+    statements = [statement for statement, _params in conn.executed]
+    assert any("character_world_books" in statement for statement in statements)
+    assert not any("world_book_entries" in statement for statement in statements)
