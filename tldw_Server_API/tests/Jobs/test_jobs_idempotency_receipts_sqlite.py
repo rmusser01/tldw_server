@@ -206,6 +206,12 @@ def _archive_job(manager: JobManager, job_uuid: str, *, retain_active: bool = Fa
         conn.close()
 
 
+def _sqlite_archive_sidecar(value) -> str:
+    return "gzip64:" + base64.b64encode(
+        gzip.compress(json.dumps(value).encode("utf-8"))
+    ).decode("ascii")
+
+
 def test_first_request_atomically_creates_job_and_receipt(receipt_manager):
     result = receipt_manager.admit_idempotent_operation(_operation_command())
 
@@ -378,6 +384,148 @@ def test_archived_receipt_lookup_and_replay_reject_invalid_sidecar_without_mutat
         _table_count(receipt_manager, "job_events"),
     )
     assert after == before
+
+
+@pytest.mark.parametrize("field", ("payload", "result"))
+def test_archived_receipt_rejects_json_null_with_divergent_valid_sidecar(
+    receipt_manager,
+    field,
+):
+    command = _operation_command()
+    first = receipt_manager.admit_idempotent_operation(command)
+    _archive_job(receipt_manager, first.job["uuid"])
+    with sqlite3.connect(receipt_manager.db_path) as conn:
+        conn.execute(
+            f"UPDATE jobs_archive SET {field}='null', "  # nosec B608 - closed test parameter
+            f"{field}_compressed=? WHERE uuid=?",  # nosec B608 - closed test parameter
+            (_sqlite_archive_sidecar({"divergent": True}), first.job["uuid"]),
+        )
+    before = (
+        _receipt_rows(receipt_manager),
+        _table_count(receipt_manager, "jobs"),
+        _table_count(receipt_manager, "job_events"),
+    )
+
+    for call in (
+        lambda: receipt_manager.get_job_or_archived_by_uuid(first.job["uuid"]),
+        lambda: receipt_manager.replay_idempotent_operation(command),
+        lambda: receipt_manager.admit_idempotent_operation(command),
+    ):
+        with pytest.raises(contracts.IdempotentOperationUnavailableError) as exc_info:
+            call()
+        assert exc_info.value.args == ("job archive projection is unavailable",)
+        assert exc_info.value.__cause__ is None
+        assert exc_info.value.__context__ is None
+
+    assert before == (
+        _receipt_rows(receipt_manager),
+        _table_count(receipt_manager, "jobs"),
+        _table_count(receipt_manager, "job_events"),
+    )
+
+
+@pytest.mark.parametrize("field", ("payload", "result"))
+@pytest.mark.parametrize(
+    ("storage", "sidecar", "expected"),
+    (
+        ("json_null", None, None),
+        ("sql_null_sidecar", {"sidecar_only": True}, {"sidecar_only": True}),
+        ("sql_null", None, None),
+    ),
+)
+def test_archived_receipt_json_null_and_sql_null_controls(
+    receipt_manager,
+    field,
+    storage,
+    sidecar,
+    expected,
+):
+    first = receipt_manager.admit_idempotent_operation(_operation_command())
+    _archive_job(receipt_manager, first.job["uuid"])
+    primary = "null" if storage == "json_null" else None
+    compressed = (
+        _sqlite_archive_sidecar(sidecar)
+        if storage in {"json_null", "sql_null_sidecar"}
+        else None
+    )
+    with sqlite3.connect(receipt_manager.db_path) as conn:
+        conn.execute(
+            f"UPDATE jobs_archive SET {field}=?, "  # nosec B608 - closed test parameter
+            f"{field}_compressed=? WHERE uuid=?",  # nosec B608 - closed test parameter
+            (primary, compressed, first.job["uuid"]),
+        )
+
+    job = receipt_manager.get_job_or_archived_by_uuid(first.job["uuid"])
+
+    assert job is not None
+    assert job[field] == expected
+    assert not any(key.startswith("__slides_archive_") for key in job)
+
+
+@pytest.mark.parametrize(
+    ("active_value", "archived_value"),
+    ((True, 1), (1, 1.0)),
+)
+def test_receipt_backed_prune_rejects_nested_json_type_mismatch(
+    receipt_manager,
+    active_value,
+    archived_value,
+):
+    first = receipt_manager.admit_idempotent_operation(_operation_command())
+    with sqlite3.connect(receipt_manager.db_path) as conn:
+        conn.execute(
+            "UPDATE jobs SET status='completed', completed_at='2000-01-01 00:00:00', "
+            "payload=? WHERE uuid=?",
+            (
+                json.dumps({"nested": {"value": active_value}}),
+                first.job["uuid"],
+            ),
+        )
+    _archive_job(receipt_manager, first.job["uuid"], retain_active=True)
+    with sqlite3.connect(receipt_manager.db_path) as conn:
+        conn.execute(
+            "UPDATE jobs_archive SET payload=? WHERE uuid=?",
+            (
+                json.dumps({"nested": {"value": archived_value}}),
+                first.job["uuid"],
+            ),
+        )
+
+    with pytest.raises(contracts.IdempotentOperationUnavailableError):
+        receipt_manager.prune_jobs(statuses=["completed"], older_than_days=30)
+
+    assert receipt_manager.get_job_by_uuid(first.job["uuid"]) is not None
+
+
+@pytest.mark.parametrize("field", ("payload", "result"))
+def test_receipt_backed_prune_rejects_json_null_with_sidecar(
+    receipt_manager,
+    field,
+):
+    first = receipt_manager.admit_idempotent_operation(_operation_command())
+    logical = (
+        {"schema_version": 1}
+        if field == "payload"
+        else {"status": "completed"}
+    )
+    with sqlite3.connect(receipt_manager.db_path) as conn:
+        conn.execute(
+            "UPDATE jobs SET status='completed', completed_at='2000-01-01 00:00:00', "
+            "result=? WHERE uuid=?",
+            (json.dumps({"status": "completed"}), first.job["uuid"]),
+        )
+    _archive_job(receipt_manager, first.job["uuid"], retain_active=True)
+    with sqlite3.connect(receipt_manager.db_path) as conn:
+        conn.execute(
+            f"UPDATE jobs_archive SET {field}='null', "  # nosec B608 - closed test parameter
+            f"{field}_compressed=? WHERE uuid=?",  # nosec B608 - closed test parameter
+            (_sqlite_archive_sidecar(logical), first.job["uuid"]),
+        )
+
+    with pytest.raises(contracts.IdempotentOperationUnavailableError):
+        receipt_manager.prune_jobs(statuses=["completed"], older_than_days=30)
+
+    assert receipt_manager.get_job_by_uuid(first.job["uuid"]) is not None
 
 
 def test_receipt_backed_prune_collision_remap_has_no_exception_chain_or_mutation(

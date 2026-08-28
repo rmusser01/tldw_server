@@ -58,6 +58,8 @@ from .metrics import (
 )
 from .migrations import (
     SLIDES_ARCHIVE_EXACT_FIELDS,
+    SLIDES_ARCHIVE_PAYLOAD_PRESENT,
+    SLIDES_ARCHIVE_RESULT_PRESENT,
     SQLITE_ARCHIVE_CURSOR_OUTPUT_SQL,
     SQLITE_ARCHIVE_CURSOR_TIME_SQL,
     SlidesArchiveNormalizationError,
@@ -66,6 +68,7 @@ from .migrations import (
     normalize_slides_archive_projection,
     slides_archive_indexes_ready_sqlite,
     slides_archive_projection_ready_sqlite,
+    slides_archive_values_equal,
 )
 from .operations.contracts import (
     ADMIN_WEBHOOK_DELIVERY_DOMAIN,
@@ -1654,14 +1657,18 @@ class JobManager:
             if not rows:
                 if expected_job_uuid is None:
                     cur.execute(
-                        "SELECT * FROM jobs_archive WHERE domain='slides' AND queue='default' "
+                        "SELECT *, payload IS NOT NULL AS __slides_archive_payload_present, "
+                        "result IS NOT NULL AS __slides_archive_result_present "
+                        "FROM jobs_archive WHERE domain='slides' AND queue='default' "
                         "AND job_type='presentation.generate' AND owner_user_id=%s "
                         "AND idempotency_key=%s ORDER BY archived_at DESC, uuid LIMIT 1",
                         (owner_user_id, idempotency_key),
                     )
                 else:
                     cur.execute(
-                        "SELECT * FROM jobs_archive WHERE domain='slides' AND queue='default' "
+                        "SELECT *, payload IS NOT NULL AS __slides_archive_payload_present, "
+                        "result IS NOT NULL AS __slides_archive_result_present "
+                        "FROM jobs_archive WHERE domain='slides' AND queue='default' "
                         "AND job_type='presentation.generate' AND owner_user_id=%s "
                         "AND idempotency_key=%s AND uuid=%s "
                         "ORDER BY archived_at DESC, uuid LIMIT 2",
@@ -1845,7 +1852,13 @@ class JobManager:
             active["result"] = self._maybe_decrypt_json(
                 self._parse_json_value(active.get("result"))
             )
-            if any(archived.get(field) != active.get(field) for field in SLIDES_ARCHIVE_EXACT_FIELDS):
+            if any(
+                not slides_archive_values_equal(
+                    archived.get(field),
+                    active.get(field),
+                )
+                for field in SLIDES_ARCHIVE_EXACT_FIELDS
+            ):
                 raise SlidesGenerationJobsUnavailableError("unsafe presentation.generate archive collision")
             exact_collisions.add(job_uuid)
         return exact_collisions
@@ -9646,10 +9659,15 @@ class JobManager:
             WITH candidates AS (
               SELECT * FROM jobs{where_clause}
             )
-            SELECT {active_projection}, archived.archive_id AS archived__archive_id,
+            SELECT {active_projection},
+                   candidates.payload IS NOT NULL AS active__payload_present,
+                   candidates.result IS NOT NULL AS active__result_present,
+                   archived.archive_id AS archived__archive_id,
                    {archive_projection},
                    archived.payload_compressed AS archived__payload_compressed,
-                   archived.result_compressed AS archived__result_compressed
+                   archived.result_compressed AS archived__result_compressed,
+                   archived.payload IS NOT NULL AS archived__payload_present,
+                   archived.result IS NOT NULL AS archived__result_present
             FROM candidates
             LEFT JOIN jobs_archive AS archived ON archived.uuid = candidates.uuid
             ORDER BY candidates.id, archived.archive_id
@@ -9668,6 +9686,12 @@ class JobManager:
             active = {
                 field: row.get(f"active__{field}") for field in projection_fields
             }
+            active[SLIDES_ARCHIVE_PAYLOAD_PRESENT] = row.get(
+                "active__payload_present"
+            )
+            active[SLIDES_ARCHIVE_RESULT_PRESENT] = row.get(
+                "active__result_present"
+            )
             job_uuid = str(active.get("uuid") or "").strip()
             if not job_uuid:
                 raise IdempotentOperationUnavailableError(
@@ -9686,6 +9710,12 @@ class JobManager:
                         ),
                         "result_compressed": row.get(
                             "archived__result_compressed"
+                        ),
+                        SLIDES_ARCHIVE_PAYLOAD_PRESENT: row.get(
+                            "archived__payload_present"
+                        ),
+                        SLIDES_ARCHIVE_RESULT_PRESENT: row.get(
+                            "archived__result_present"
                         ),
                     }
                 )
@@ -9708,7 +9738,10 @@ class JobManager:
                     "job archive projection is unavailable"
                 )
             if any(
-                active.get(field) != archived.get(field)
+                not slides_archive_values_equal(
+                    active.get(field),
+                    archived.get(field),
+                )
                 for field in projection_fields
             ):
                 raise IdempotentOperationUnavailableError(

@@ -15,6 +15,7 @@ from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
 from tldw_Server_API.app.core.Jobs.migrations import (
     SlidesArchiveNormalizationError,
     normalize_slides_archive_projection,
+    slides_archive_values_equal,
 )
 from tldw_Server_API.app.core.Jobs.operations.contracts import (
     AcquireJobCommand,
@@ -589,7 +590,7 @@ def _identity_matches(
         row.get("domain") == domain
         and row.get("queue") == queue
         and row.get("job_type") == job_type
-        and payload == expected_payload
+        and slides_archive_values_equal(payload, expected_payload)
     )
 
 

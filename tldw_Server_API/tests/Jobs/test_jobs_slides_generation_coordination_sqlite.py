@@ -17,6 +17,13 @@ from tldw_Server_API.app.core.Jobs.manager import (
     SlidesGenerationJobsUnavailableError,
 )
 from tldw_Server_API.app.core.Jobs.migrations import ensure_jobs_tables
+from tldw_Server_API.app.core.Jobs.operations.contracts import (
+    FindJobByIdentityCommand,
+    JobIdentityLookupState,
+)
+from tldw_Server_API.app.core.Jobs.operations.sqlite.lifecycle import (
+    find_job_by_identity as find_sqlite_job_by_identity,
+)
 from tldw_Server_API.app.core.Slides import standalone_html_registry as registry_module
 
 UTC = timezone.utc
@@ -446,6 +453,84 @@ def test_sqlite_audit_compares_logical_compressed_archive_projection(
     assert readiness["diagnostic_code"] == ("ambiguous_generation_legacy_row" if divergent else None)
 
 
+@pytest.mark.parametrize(
+    ("active_value", "archived_value"),
+    ((True, 1), (1, 1.0)),
+)
+def test_sqlite_migration_audit_rejects_nested_json_type_mismatch(
+    tmp_path,
+    active_value,
+    archived_value,
+):
+    db_path = ensure_jobs_tables(tmp_path / "slides-typed-audit.db")
+    manager = JobManager(db_path)
+    job = manager.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload={"nested": {"value": active_value}},
+        owner_user_id="owner-1",
+        idempotency_key=f"typed-audit-{type(active_value).__name__}",
+    )
+    with sqlite3.connect(db_path) as conn:
+        _copy_job_to_archive(conn, job_id=int(job["id"]))
+        conn.execute(
+            "UPDATE jobs_archive SET payload=? WHERE uuid=?",
+            (
+                json.dumps({"nested": {"value": archived_value}}),
+                str(job["uuid"]),
+            ),
+        )
+
+    ensure_jobs_tables(db_path)
+    readiness = manager.get_slides_generation_readiness()
+
+    assert readiness["ready"] is False
+    assert readiness["diagnostic_code"] == "ambiguous_generation_legacy_row"
+
+
+@pytest.mark.parametrize("field", ("payload", "result"))
+def test_sqlite_migration_audit_rejects_json_null_with_divergent_sidecar(
+    tmp_path,
+    field,
+):
+    db_path = ensure_jobs_tables(tmp_path / f"slides-null-{field}-audit.db")
+    manager = JobManager(db_path)
+    job = manager.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload={"receipt_id": "receipt-1"},
+        owner_user_id="owner-1",
+        idempotency_key=f"null-{field}-audit",
+    )
+    logical = (
+        {"receipt_id": "receipt-1"}
+        if field == "payload"
+        else {"artifact": "result"}
+    )
+    sidecar = "gzip64:" + base64.b64encode(
+        gzip.compress(json.dumps(logical).encode("utf-8"))
+    ).decode("ascii")
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE jobs SET result=? WHERE id=?",
+            (json.dumps({"artifact": "result"}), int(job["id"])),
+        )
+        _copy_job_to_archive(conn, job_id=int(job["id"]))
+        conn.execute(
+            f"UPDATE jobs_archive SET {field}='null', "  # nosec B608 - closed test parameter
+            f"{field}_compressed=? WHERE uuid=?",  # nosec B608 - closed test parameter
+            (sidecar, str(job["uuid"])),
+        )
+
+    ensure_jobs_tables(db_path)
+    readiness = manager.get_slides_generation_readiness()
+
+    assert readiness["ready"] is False
+    assert readiness["diagnostic_code"] == "ambiguous_generation_legacy_row"
+
+
 @pytest.mark.parametrize("compressed_field", ("payload", "result"))
 @pytest.mark.parametrize(
     ("sidecar_kind", "primary_json_present"),
@@ -765,6 +850,183 @@ def test_sqlite_archive_collision_with_different_terminal_result_is_unsafe(
     with sqlite3.connect(db_path) as conn:
         assert conn.execute("SELECT COUNT(*) FROM jobs WHERE uuid=?", (job["uuid"],)).fetchone()[0] == 1
         assert conn.execute("SELECT COUNT(*) FROM jobs_archive WHERE uuid=?", (job["uuid"],)).fetchone()[0] == 1
+
+
+@pytest.mark.parametrize(
+    ("active_value", "archived_value"),
+    ((True, 1), (1, 1.0)),
+)
+def test_sqlite_archive_collision_rejects_nested_json_type_mismatch(
+    tmp_path,
+    monkeypatch,
+    active_value,
+    archived_value,
+):
+    db_path = ensure_jobs_tables(tmp_path / "slides-typed-collision.db")
+    manager = JobManager(db_path)
+    job = manager.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload={"nested": {"value": active_value}},
+        owner_user_id="owner-1",
+        idempotency_key=f"typed-collision-{type(active_value).__name__}",
+    )
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE jobs SET status='completed', "
+            "completed_at='2000-01-01 00:00:00' WHERE id=?",
+            (int(job["id"]),),
+        )
+        _copy_job_to_archive(conn, job_id=int(job["id"]))
+        conn.execute(
+            "UPDATE jobs_archive SET payload=? WHERE uuid=?",
+            (
+                json.dumps({"nested": {"value": archived_value}}),
+                str(job["uuid"]),
+            ),
+        )
+
+    monkeypatch.setattr(
+        manager,
+        "_slides_generation_ready_in_connection",
+        lambda _conn, **_kwargs: True,
+    )
+    monkeypatch.setenv("JOBS_ARCHIVE_BEFORE_DELETE", "true")
+    with pytest.raises(
+        SlidesGenerationJobsUnavailableError,
+        match="unsafe presentation.generate archive collision",
+    ):
+        manager.prune_jobs(
+            older_than_days=1,
+            domain="slides",
+            queue="default",
+            job_type="presentation.generate",
+        )
+
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM jobs WHERE uuid=?",
+            (str(job["uuid"]),),
+        ).fetchone()[0] == 1
+
+
+@pytest.mark.parametrize(
+    ("case", "active_value", "archived_value", "exact"),
+    (
+        ("nan", float("nan"), float("nan"), True),
+        ("positive-infinity", float("inf"), float("inf"), True),
+        ("negative-infinity", float("-inf"), float("-inf"), True),
+        ("nan-vs-infinity", float("nan"), float("inf"), False),
+        ("infinity-sign", float("inf"), float("-inf"), False),
+        ("negative-vs-positive", float("-inf"), float("inf"), False),
+    ),
+)
+def test_sqlite_archive_collision_uses_exact_nonfinite_float_semantics(
+    tmp_path,
+    monkeypatch,
+    case,
+    active_value,
+    archived_value,
+    exact,
+):
+    db_path = ensure_jobs_tables(tmp_path / f"slides-{case}-collision.db")
+    manager = JobManager(db_path)
+    job = manager.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload={"nested": [active_value]},
+        owner_user_id="owner-1",
+        idempotency_key=f"nonfinite-collision-{case}",
+    )
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE jobs SET status='completed', "
+            "completed_at='2000-01-01 00:00:00' WHERE id=?",
+            (int(job["id"]),),
+        )
+        _copy_job_to_archive(conn, job_id=int(job["id"]))
+        conn.execute(
+            "UPDATE jobs_archive SET payload=? WHERE uuid=?",
+            (
+                json.dumps({"nested": [archived_value]}),
+                str(job["uuid"]),
+            ),
+        )
+
+    monkeypatch.setattr(
+        manager,
+        "_slides_generation_ready_in_connection",
+        lambda _conn, **_kwargs: True,
+    )
+    monkeypatch.setenv("JOBS_ARCHIVE_BEFORE_DELETE", "true")
+    if exact:
+        assert manager.prune_jobs(older_than_days=1, domain="slides") == 1
+    else:
+        with pytest.raises(
+            SlidesGenerationJobsUnavailableError,
+            match="unsafe presentation.generate archive collision",
+        ):
+            manager.prune_jobs(older_than_days=1, domain="slides")
+
+    with sqlite3.connect(db_path) as conn:
+        active_count = conn.execute(
+            "SELECT COUNT(*) FROM jobs WHERE uuid=?",
+            (str(job["uuid"]),),
+        ).fetchone()[0]
+    assert active_count == (0 if exact else 1)
+
+
+@pytest.mark.parametrize("field", ("payload", "result"))
+def test_sqlite_archive_collision_rejects_json_null_with_divergent_sidecar(
+    tmp_path,
+    monkeypatch,
+    field,
+):
+    db_path = ensure_jobs_tables(tmp_path / f"slides-null-{field}-collision.db")
+    manager = JobManager(db_path)
+    payload = {"receipt_id": "receipt-1"}
+    result = {"artifact": "result"}
+    job = manager.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload=payload,
+        owner_user_id="owner-1",
+        idempotency_key=f"null-{field}-collision",
+    )
+    logical = payload if field == "payload" else result
+    sidecar = "gzip64:" + base64.b64encode(
+        gzip.compress(json.dumps(logical).encode("utf-8"))
+    ).decode("ascii")
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE jobs SET status='completed', result=?, "
+            "completed_at='2000-01-01 00:00:00' WHERE id=?",
+            (json.dumps(result), int(job["id"])),
+        )
+        _copy_job_to_archive(conn, job_id=int(job["id"]))
+        conn.execute(
+            f"UPDATE jobs_archive SET {field}='null', "  # nosec B608 - closed test parameter
+            f"{field}_compressed=? WHERE uuid=?",  # nosec B608 - closed test parameter
+            (sidecar, str(job["uuid"])),
+        )
+
+    monkeypatch.setattr(
+        manager,
+        "_slides_generation_ready_in_connection",
+        lambda _conn, **_kwargs: True,
+    )
+    monkeypatch.setenv("JOBS_ARCHIVE_BEFORE_DELETE", "true")
+    with pytest.raises(SlidesGenerationJobsUnavailableError):
+        manager.prune_jobs(older_than_days=1, domain="slides")
+
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM jobs WHERE uuid=?",
+            (str(job["uuid"]),),
+        ).fetchone()[0] == 1
 
 
 @pytest.mark.parametrize(
@@ -1194,6 +1456,128 @@ def test_sqlite_archived_slides_lookup_and_resolve_reject_invalid_sidecar(
             ).fetchone()
         )
     assert after == before
+
+
+@pytest.mark.parametrize("field", ("payload", "result"))
+def test_sqlite_archived_slides_lookup_rejects_json_null_with_sidecar(
+    tmp_path,
+    field,
+):
+    db_path = ensure_jobs_tables(tmp_path / f"slides-null-{field}-lookup.db")
+    manager = JobManager(db_path)
+    payload = {"receipt_id": "receipt-1"}
+    result = {"artifact": "result"}
+    job = manager.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload=payload,
+        owner_user_id="owner-1",
+        idempotency_key=f"null-{field}-lookup",
+    )
+    logical = payload if field == "payload" else result
+    sidecar = "gzip64:" + base64.b64encode(
+        gzip.compress(json.dumps(logical).encode("utf-8"))
+    ).decode("ascii")
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE jobs SET result=? WHERE id=?",
+            (json.dumps(result), int(job["id"])),
+        )
+        _copy_job_to_archive(conn, job_id=int(job["id"]))
+        conn.execute("DELETE FROM jobs WHERE id=?", (int(job["id"]),))
+        conn.execute(
+            f"UPDATE jobs_archive SET {field}='null', "  # nosec B608 - closed test parameter
+            f"{field}_compressed=? WHERE uuid=?",  # nosec B608 - closed test parameter
+            (sidecar, str(job["uuid"])),
+        )
+
+    for call in (
+        lambda: manager.lookup_slides_generation_job(
+            owner_user_id="owner-1",
+            idempotency_key=f"null-{field}-lookup",
+            expected_job_uuid=str(job["uuid"]),
+            expected_job_id=int(job["id"]),
+        ),
+        lambda: manager.resolve_slides_generation_job(
+            job_uuid=str(job["uuid"]),
+            owner_user_id="owner-1",
+            idempotency_key=f"null-{field}-lookup",
+            job_id=int(job["id"]),
+        ),
+    ):
+        with pytest.raises(SlidesGenerationJobsUnavailableError) as exc_info:
+            call()
+        assert exc_info.value.__cause__ is None
+        assert exc_info.value.__context__ is None
+
+
+@pytest.mark.parametrize(
+    ("case", "stored_value", "expected_value", "expected_state"),
+    (
+        ("bool-int", True, 1, JobIdentityLookupState.CONFLICT),
+        ("int-float", 1, 1.0, JobIdentityLookupState.CONFLICT),
+        ("nan", float("nan"), float("nan"), JobIdentityLookupState.ARCHIVED),
+        (
+            "positive-infinity",
+            float("inf"),
+            float("inf"),
+            JobIdentityLookupState.ARCHIVED,
+        ),
+        (
+            "negative-infinity",
+            float("-inf"),
+            float("-inf"),
+            JobIdentityLookupState.ARCHIVED,
+        ),
+        (
+            "infinity-sign",
+            float("inf"),
+            float("-inf"),
+            JobIdentityLookupState.CONFLICT,
+        ),
+    ),
+)
+def test_sqlite_archived_generic_identity_uses_exact_json_semantics(
+    tmp_path,
+    case,
+    stored_value,
+    expected_value,
+    expected_state,
+):
+    db_path = ensure_jobs_tables(tmp_path / f"slides-generic-{case}.db")
+    manager = JobManager(db_path)
+    payload = {"nested": [stored_value]}
+    job = manager.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload=payload,
+        owner_user_id="owner-1",
+        idempotency_key=f"generic-{case}",
+    )
+    with sqlite3.connect(db_path) as conn:
+        _copy_job_to_archive(conn, job_id=int(job["id"]))
+        conn.execute("DELETE FROM jobs WHERE id=?", (int(job["id"]),))
+
+    conn = manager._connect()
+    try:
+        found = find_sqlite_job_by_identity(
+            conn,
+            command=FindJobByIdentityCommand(
+                domain="slides",
+                queue="default",
+                job_type="presentation.generate",
+                idempotency_key=f"generic-{case}",
+                expected_payload={"nested": [expected_value]},
+            ),
+        )
+    finally:
+        conn.close()
+
+    assert found.state is expected_state
+    if found.row is not None:
+        assert not any(key.startswith("__slides_archive_") for key in found.row)
 
 
 def test_sqlite_two_managers_create_one_generation_correlation(tmp_path):

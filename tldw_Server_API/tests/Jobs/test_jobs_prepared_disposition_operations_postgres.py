@@ -1067,6 +1067,46 @@ def test_postgres_identity_lookup_rejects_invalid_sidecar_with_primary_json(
 
 
 @pytest.mark.parametrize("compressed_field", ("payload", "result"))
+def test_postgres_canonical_identity_rejects_json_null_with_valid_sidecar(
+    jobs_pg_dsn,
+    compressed_field,
+) -> None:
+    manager = _manager(jobs_pg_dsn)
+    job = _canonical(manager, suffix=f"null-{compressed_field}")
+    payload = job["payload"]
+    marker = _canonical_archive_marker(payload)
+    logical = payload if compressed_field == "payload" else marker
+    _replace_with_raw_compressed_archive_postgres(
+        jobs_pg_dsn,
+        job,
+        payload=payload,
+        marker=marker,
+        compressed_field=compressed_field,
+        compressed_value=gzip.compress(json.dumps(logical).encode("utf-8")),
+        retain_primary=True,
+    )
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            f"UPDATE jobs_archive SET {compressed_field}=%s::jsonb "  # nosec B608 - closed test parameter
+            "WHERE id=%s",
+            (json.dumps(None), int(job["id"])),
+        )
+
+    found = manager.find_job_by_identity(
+        FindJobByIdentityCommand(
+            domain="admin_webhooks",
+            queue="delivery",
+            job_type="admin_webhook_delivery",
+            idempotency_key=job["idempotency_key"],
+            expected_payload=payload,
+        )
+    )
+
+    assert found.state is JobIdentityLookupState.CONFLICT
+    assert found.row is None
+
+
+@pytest.mark.parametrize("compressed_field", ("payload", "result"))
 def test_postgres_compressed_archive_lookup_rejects_raw_json_without_gzip_framing(
     jobs_pg_dsn,
     compressed_field,

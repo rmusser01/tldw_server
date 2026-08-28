@@ -2,6 +2,7 @@ import base64
 import gzip
 import importlib
 import json
+import math
 import sqlite3
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -353,6 +354,127 @@ def test_archive_projection_accepts_matching_primary_and_sidecar_json(
     )
 
     assert normalized["payload"] == payload
+
+
+@pytest.mark.parametrize(
+    ("primary", "sidecar"),
+    (
+        ({"nested": {"value": True}}, {"nested": {"value": 1}}),
+        ({"nested": {"value": 1}}, {"nested": {"value": 1.0}}),
+    ),
+)
+def test_archive_projection_rejects_nested_json_type_mismatches(
+    primary,
+    sidecar,
+) -> None:
+    with pytest.raises(jobs_migrations.SlidesArchiveNormalizationError):
+        normalize_slides_archive_projection(
+            {
+                "payload": json.dumps(primary),
+                "result": None,
+                "payload_compressed": _archive_sidecar(
+                    sidecar,
+                    backend="sqlite",
+                ),
+                "result_compressed": None,
+            }
+        )
+
+
+@pytest.mark.parametrize("value", (float("nan"), float("inf"), float("-inf")))
+def test_archive_projection_accepts_matching_nested_nonfinite_float(value) -> None:
+    logical = {"nested": [value]}
+
+    normalized = normalize_slides_archive_projection(
+        {
+            "payload": json.dumps(logical),
+            "result": None,
+            "payload_compressed": _archive_sidecar(
+                logical,
+                backend="sqlite",
+            ),
+            "result_compressed": None,
+        }
+    )
+
+    actual = normalized["payload"]["nested"][0]
+    assert type(actual) is float
+    assert math.isnan(actual) if math.isnan(value) else actual == value
+
+
+@pytest.mark.parametrize(
+    ("primary", "sidecar"),
+    (
+        (float("nan"), float("inf")),
+        (float("inf"), float("-inf")),
+        (float("-inf"), float("inf")),
+    ),
+)
+def test_archive_projection_rejects_nonfinite_category_or_sign_mismatch(
+    primary,
+    sidecar,
+) -> None:
+    with pytest.raises(jobs_migrations.SlidesArchiveNormalizationError):
+        normalize_slides_archive_projection(
+            {
+                "payload": json.dumps({"nested": [primary]}),
+                "result": None,
+                "payload_compressed": _archive_sidecar(
+                    {"nested": [sidecar]},
+                    backend="sqlite",
+                ),
+                "result_compressed": None,
+            }
+        )
+
+
+@pytest.mark.parametrize("field", ("payload", "result"))
+def test_archive_projection_treats_present_json_null_as_authoritative(field) -> None:
+    row = {
+        "payload": None,
+        "result": None,
+        "payload_compressed": None,
+        "result_compressed": None,
+        f"__slides_archive_{field}_present": True,
+    }
+    row[f"{field}_compressed"] = _archive_sidecar(
+        {"divergent": True},
+        backend="sqlite",
+    )
+
+    with pytest.raises(jobs_migrations.SlidesArchiveNormalizationError):
+        normalize_slides_archive_projection(row)
+
+
+@pytest.mark.parametrize("field", ("payload", "result"))
+def test_archive_projection_json_null_controls_and_internal_metadata(field) -> None:
+    present = f"__slides_archive_{field}_present"
+    row = {
+        "payload": None,
+        "result": None,
+        "payload_compressed": None,
+        "result_compressed": None,
+        present: True,
+    }
+    row[f"{field}_compressed"] = _archive_sidecar(None, backend="sqlite")
+
+    matching_null = normalize_slides_archive_projection(row)
+    assert matching_null[field] is None
+    assert present not in matching_null
+
+    row[present] = False
+    row[f"{field}_compressed"] = _archive_sidecar(
+        {"sidecar_only": True},
+        backend="sqlite",
+    )
+    sidecar_only = normalize_slides_archive_projection(row)
+    assert sidecar_only[field] == {"sidecar_only": True}
+    assert present not in sidecar_only
+
+    row[f"{field}_compressed"] = None
+    no_sidecar = normalize_slides_archive_projection(row)
+    assert no_sidecar[field] is None
+    assert present not in no_sidecar
 
 
 def test_archive_normalization_failure_contract_survives_migrations_reload() -> None:

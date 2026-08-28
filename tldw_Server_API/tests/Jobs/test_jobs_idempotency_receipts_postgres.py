@@ -85,6 +85,10 @@ def _archive_job(
             cur.execute("DELETE FROM jobs WHERE uuid = %s", (job_uuid,))
 
 
+def _postgres_archive_sidecar(value) -> bytes:
+    return gzip.compress(json.dumps(value).encode("utf-8"))
+
+
 def test_postgres_first_request_and_exact_replay(receipt_manager, jobs_pg_dsn):
     first = receipt_manager.admit_idempotent_operation(_operation_command())
     replay = receipt_manager.admit_idempotent_operation(_operation_command())
@@ -201,6 +205,152 @@ def test_postgres_archived_receipt_lookup_and_replay_reject_invalid_sidecar(
         after_archive = tuple(cur.fetchone())
     after = (_counts(jobs_pg_dsn), after_archive)
     assert after == before
+
+
+@pytest.mark.parametrize("field", ("payload", "result"))
+def test_postgres_archived_receipt_rejects_json_null_with_valid_sidecar(
+    receipt_manager,
+    jobs_pg_dsn,
+    field,
+):
+    command = _operation_command()
+    first = receipt_manager.admit_idempotent_operation(command)
+    _archive_job(jobs_pg_dsn, first.job["uuid"])
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            f"UPDATE jobs_archive SET {field}=%s::jsonb, "  # nosec B608 - closed test parameter
+            f"{field}_compressed=%s WHERE uuid=%s",  # nosec B608 - closed test parameter
+            (
+                json.dumps(None),
+                _postgres_archive_sidecar({"divergent": True}),
+                first.job["uuid"],
+            ),
+        )
+    before = _counts(jobs_pg_dsn)
+
+    for call in (
+        lambda: receipt_manager.get_job_or_archived_by_uuid(first.job["uuid"]),
+        lambda: receipt_manager.replay_idempotent_operation(command),
+        lambda: receipt_manager.admit_idempotent_operation(command),
+    ):
+        with pytest.raises(IdempotentOperationUnavailableError) as exc_info:
+            call()
+        assert exc_info.value.args == ("job archive projection is unavailable",)
+        assert exc_info.value.__cause__ is None
+        assert exc_info.value.__context__ is None
+
+    assert _counts(jobs_pg_dsn) == before
+
+
+@pytest.mark.parametrize("field", ("payload", "result"))
+@pytest.mark.parametrize(
+    ("storage", "sidecar", "expected"),
+    (
+        ("json_null", None, None),
+        ("sql_null_sidecar", {"sidecar_only": True}, {"sidecar_only": True}),
+        ("sql_null", None, None),
+    ),
+)
+def test_postgres_archived_receipt_json_null_and_sql_null_controls(
+    receipt_manager,
+    jobs_pg_dsn,
+    field,
+    storage,
+    sidecar,
+    expected,
+):
+    first = receipt_manager.admit_idempotent_operation(_operation_command())
+    _archive_job(jobs_pg_dsn, first.job["uuid"])
+    primary = json.dumps(None) if storage == "json_null" else None
+    compressed = (
+        _postgres_archive_sidecar(sidecar)
+        if storage in {"json_null", "sql_null_sidecar"}
+        else None
+    )
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            f"UPDATE jobs_archive SET {field}=%s::jsonb, "  # nosec B608 - closed test parameter
+            f"{field}_compressed=%s WHERE uuid=%s",  # nosec B608 - closed test parameter
+            (primary, compressed, first.job["uuid"]),
+        )
+
+    job = receipt_manager.get_job_or_archived_by_uuid(first.job["uuid"])
+
+    assert job is not None
+    assert job[field] == expected
+    assert not any(key.startswith("__slides_archive_") for key in job)
+
+
+@pytest.mark.parametrize(
+    ("active_value", "archived_value"),
+    ((True, 1), (1, 1.0)),
+)
+def test_postgres_receipt_prune_rejects_nested_json_type_mismatch(
+    receipt_manager,
+    jobs_pg_dsn,
+    active_value,
+    archived_value,
+):
+    first = receipt_manager.admit_idempotent_operation(_operation_command())
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE jobs SET status='completed', completed_at=NOW()-interval '40 days', "
+            "payload=%s::jsonb WHERE uuid=%s",
+            (
+                json.dumps({"nested": {"value": active_value}}),
+                first.job["uuid"],
+            ),
+        )
+    _archive_job(jobs_pg_dsn, first.job["uuid"], retain_active=True)
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE jobs_archive SET payload=%s::jsonb WHERE uuid=%s",
+            (
+                json.dumps({"nested": {"value": archived_value}}),
+                first.job["uuid"],
+            ),
+        )
+
+    with pytest.raises(IdempotentOperationUnavailableError):
+        receipt_manager.prune_jobs(statuses=["completed"], older_than_days=30)
+
+    assert receipt_manager.get_job_by_uuid(first.job["uuid"]) is not None
+
+
+@pytest.mark.parametrize("field", ("payload", "result"))
+def test_postgres_receipt_prune_rejects_json_null_with_sidecar(
+    receipt_manager,
+    jobs_pg_dsn,
+    field,
+):
+    first = receipt_manager.admit_idempotent_operation(_operation_command())
+    logical = (
+        {"schema_version": 1}
+        if field == "payload"
+        else {"status": "completed"}
+    )
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE jobs SET status='completed', completed_at=NOW()-interval '40 days', "
+            "result=%s::jsonb WHERE uuid=%s",
+            (json.dumps({"status": "completed"}), first.job["uuid"]),
+        )
+    _archive_job(jobs_pg_dsn, first.job["uuid"], retain_active=True)
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            f"UPDATE jobs_archive SET {field}=%s::jsonb, "  # nosec B608 - closed test parameter
+            f"{field}_compressed=%s WHERE uuid=%s",  # nosec B608 - closed test parameter
+            (
+                json.dumps(None),
+                _postgres_archive_sidecar(logical),
+                first.job["uuid"],
+            ),
+        )
+
+    with pytest.raises(IdempotentOperationUnavailableError):
+        receipt_manager.prune_jobs(statuses=["completed"], older_than_days=30)
+
+    assert receipt_manager.get_job_by_uuid(first.job["uuid"]) is not None
 
 
 def test_postgres_receipt_backed_prune_collision_remap_has_no_chain_or_mutation(

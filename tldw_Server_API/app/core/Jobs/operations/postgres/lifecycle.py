@@ -14,6 +14,7 @@ from loguru import logger
 from tldw_Server_API.app.core.Jobs.migrations import (
     SlidesArchiveNormalizationError,
     normalize_slides_archive_projection,
+    slides_archive_values_equal,
 )
 from tldw_Server_API.app.core.Jobs.operations.contracts import (
     AcquireJobCommand,
@@ -584,7 +585,7 @@ def _identity_matches(
         row.get("domain") == domain
         and row.get("queue") == queue
         and row.get("job_type") == job_type
-        and payload == expected_payload
+        and slides_archive_values_equal(payload, expected_payload)
     )
 
 
@@ -1006,7 +1007,9 @@ def find_job_by_identity(
             )
             active_rows = cur.fetchall() or []
             cur.execute(
-                "SELECT * FROM jobs_archive WHERE domain=%s AND queue=%s AND job_type=%s "
+                "SELECT *, payload IS NOT NULL AS __slides_archive_payload_present, "
+                "result IS NOT NULL AS __slides_archive_result_present "
+                "FROM jobs_archive WHERE domain=%s AND queue=%s AND job_type=%s "
                 "AND idempotency_key=%s",
                 params,
             )

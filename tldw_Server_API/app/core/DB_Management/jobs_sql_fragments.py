@@ -62,7 +62,13 @@ def fetch_slides_archive_collision_rows(
         " AND domain='slides' AND queue='default' "
         "AND job_type='presentation.generate'"
     )
-    query = f"SELECT * FROM jobs{where_clause}{scoped_suffix}"  # nosec B608
+    presence_projection = (
+        ", payload IS NOT NULL AS __slides_archive_payload_present, "
+        "result IS NOT NULL AS __slides_archive_result_present"
+    )
+    query = (
+        f"SELECT *{presence_projection} FROM jobs{where_clause}{scoped_suffix}"  # nosec B608
+    )
     active_cursor = executor.execute(query, params) or executor
     active_rows = list(active_cursor.fetchall() or [])
     placeholder = "%s" if backend_name == BackendType.POSTGRESQL.value else "?"
@@ -72,7 +78,8 @@ def fetch_slides_archive_collision_rows(
         if not job_uuid:
             continue
         archive_cursor = executor.execute(
-            f"SELECT * FROM jobs_archive WHERE uuid={placeholder} LIMIT 2",  # nosec B608
+            f"SELECT *{presence_projection} FROM jobs_archive "  # nosec B608
+            f"WHERE uuid={placeholder} LIMIT 2",  # nosec B608
             (job_uuid,),
         ) or executor
         collisions.append((active_row, list(archive_cursor.fetchall() or [])))

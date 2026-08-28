@@ -1155,6 +1155,53 @@ def test_sqlite_identity_lookup_rejects_invalid_sidecar_with_primary_json(
 
 
 @pytest.mark.parametrize("compressed_field", ("payload", "result"))
+def test_sqlite_canonical_identity_rejects_json_null_with_valid_sidecar(
+    tmp_path,
+    compressed_field,
+) -> None:
+    manager = JobManager(tmp_path / f"archive-null-{compressed_field}.db")
+    job = _canonical(manager, suffix=f"null-{compressed_field}")
+    payload = json.loads(job["payload"])
+    marker = _canonical_archive_marker(payload)
+    logical = payload if compressed_field == "payload" else marker
+    sidecar = "gzip64:" + base64.b64encode(
+        gzip.compress(json.dumps(logical).encode("utf-8"))
+    ).decode("ascii")
+    _replace_with_compressed_archive_sqlite(
+        manager,
+        job,
+        payload=payload,
+        marker=marker,
+        compressed_field=compressed_field,
+        compressed_value=sidecar,
+        retain_primary=True,
+    )
+    conn = manager._connect()
+    try:
+        conn.execute(
+            f"UPDATE jobs_archive SET {compressed_field}='null' "  # nosec B608 - closed test parameter
+            "WHERE id=?",
+            (int(job["id"]),),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    found = manager.find_job_by_identity(
+        FindJobByIdentityCommand(
+            domain="admin_webhooks",
+            queue="delivery",
+            job_type="admin_webhook_delivery",
+            idempotency_key=job["idempotency_key"],
+            expected_payload=payload,
+        )
+    )
+
+    assert found.state is JobIdentityLookupState.CONFLICT
+    assert found.row is None
+
+
+@pytest.mark.parametrize("compressed_field", ("payload", "result"))
 @pytest.mark.parametrize("storage", ("text", "bytes"))
 def test_sqlite_compressed_archive_lookup_rejects_raw_json_without_gzip_framing(
     tmp_path,

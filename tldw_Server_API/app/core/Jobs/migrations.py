@@ -11,6 +11,7 @@ import base64
 import binascii
 import contextlib
 import json
+import math
 import os
 import sqlite3
 import zlib
@@ -141,6 +142,8 @@ SLIDES_ARCHIVE_EXACT_FIELDS = (
 )
 
 SLIDES_ARCHIVE_COMPRESSED_FIELDS = ("payload_compressed", "result_compressed")
+SLIDES_ARCHIVE_PAYLOAD_PRESENT = "__slides_archive_payload_present"
+SLIDES_ARCHIVE_RESULT_PRESENT = "__slides_archive_result_present"
 
 # Jobs payload JSON defaults to a 1 MiB admission cap. Archive readback uses the
 # same fixed logical limit plus bounded gzip overhead for compressed input.
@@ -169,19 +172,21 @@ def _parse_slides_archive_json(value: Any) -> Any:
     return value
 
 
-def _slides_archive_json_equal(left: Any, right: Any) -> bool:
-    """Compare decoded JSON without Python's bool/integer coercion."""
+def slides_archive_values_equal(left: Any, right: Any) -> bool:
+    """Compare logical archive values with exact recursive JSON semantics."""
     if type(left) is not type(right):
         return False
     if isinstance(left, dict):
         return left.keys() == right.keys() and all(
-            _slides_archive_json_equal(left[key], right[key]) for key in left
+            slides_archive_values_equal(left[key], right[key]) for key in left
         )
     if isinstance(left, list):
         return len(left) == len(right) and all(
-            _slides_archive_json_equal(left_item, right_item)
+            slides_archive_values_equal(left_item, right_item)
             for left_item, right_item in zip(left, right)
         )
+    if isinstance(left, float) and math.isnan(left):
+        return math.isnan(right)
     return left == right
 
 
@@ -261,20 +266,33 @@ def _decode_slides_archive_blob(value: Any) -> Any:
 def normalize_slides_archive_projection(row: Any) -> dict[str, Any]:
     """Return one logical projection or reject an invalid compressed field."""
     normalized = dict(row)
-    for field in ("payload", "result"):
-        primary = normalized.get(field)
-        primary = (
-            None if primary is None else _parse_slides_archive_json(primary)
-        )
+    presence_fields = {
+        "payload": SLIDES_ARCHIVE_PAYLOAD_PRESENT,
+        "result": SLIDES_ARCHIVE_RESULT_PRESENT,
+    }
+    for field, presence_field in presence_fields.items():
+        raw_primary = normalized.get(field)
+        presence = normalized.pop(presence_field, None)
+        if presence is None:
+            primary_present = raw_primary is not None
+        elif type(presence) is bool:
+            primary_present = presence
+        elif type(presence) is int and presence in (0, 1):
+            primary_present = bool(presence)
+        else:
+            raise SlidesArchiveNormalizationError
+        if not primary_present and raw_primary is not None:
+            raise SlidesArchiveNormalizationError
+        primary = _parse_slides_archive_json(raw_primary)
         compressed = normalized.get(f"{field}_compressed")
         if compressed is not None:
             sidecar = _decode_slides_archive_blob(compressed)
-            if primary is not None and not _slides_archive_json_equal(
+            if primary_present and not slides_archive_values_equal(
                 primary,
                 sidecar,
             ):
                 raise SlidesArchiveNormalizationError
-            if primary is None:
+            if not primary_present:
                 primary = sidecar
         normalized[field] = primary
     return normalized
@@ -1054,7 +1072,10 @@ def _audit_and_index_slides_generation(conn: sqlite3.Connection) -> None:
         archived_values["result_compressed"] = row[2 * projection_size + 1]
         archived = normalize_slides_archive_projection(archived_values)
         if any(
-            active.get(field) != archived.get(field)
+            not slides_archive_values_equal(
+                active.get(field),
+                archived.get(field),
+            )
             for field in SLIDES_ARCHIVE_EXACT_FIELDS
         ):
             cross_table_count += 1

@@ -83,12 +83,16 @@ def get_job_or_archived_by_uuid(
     rows = conn.execute(
         f"""
         SELECT {projection}, NULL AS payload_compressed,
-               NULL AS result_compressed, 0 AS archived
+               NULL AS result_compressed, 0 AS archived,
+               payload IS NOT NULL AS __slides_archive_payload_present,
+               result IS NOT NULL AS __slides_archive_result_present
         FROM jobs
         WHERE {where_sql}
         UNION ALL
         SELECT {projection}, payload_compressed,
-               result_compressed, 1 AS archived
+               result_compressed, 1 AS archived,
+               payload IS NOT NULL AS __slides_archive_payload_present,
+               result IS NOT NULL AS __slides_archive_result_present
         FROM jobs_archive
         WHERE {where_sql}
         """,  # nosec B608

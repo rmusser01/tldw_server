@@ -18,6 +18,13 @@ from tldw_Server_API.app.core.Jobs.manager import (
     SlidesGenerationJobsUnavailableError,
 )
 from tldw_Server_API.app.core.Jobs.migrations import SLIDES_ARCHIVE_EXACT_FIELDS
+from tldw_Server_API.app.core.Jobs.operations.contracts import (
+    FindJobByIdentityCommand,
+    JobIdentityLookupState,
+)
+from tldw_Server_API.app.core.Jobs.operations.postgres.lifecycle import (
+    find_job_by_identity as find_postgres_job_by_identity,
+)
 from tldw_Server_API.app.core.Jobs.pg_migrations import (
     ensure_jobs_rls_policies_pg,
     ensure_jobs_tables_pg,
@@ -26,6 +33,21 @@ from tldw_Server_API.app.core.Jobs.pg_migrations import (
 
 UTC = timezone.utc
 NOW = datetime(2026, 7, 16, 12, 0, tzinfo=UTC)
+
+
+class _CapturedAuditDiagnosticCursor:
+    def __init__(self, cursor):
+        self._cursor = cursor
+        self.diagnostic = None
+
+    def execute(self, statement, params=None):
+        if "SET diagnostic_code=%s, diagnostic_count=%s" in statement:
+            self.diagnostic = tuple(params[:2])
+            return None
+        return self._cursor.execute(statement, params)
+
+    def __getattr__(self, name):
+        return getattr(self._cursor, name)
 
 
 def test_active_owner_first_page_types_nullable_cursor_parameter(monkeypatch) -> None:
@@ -380,6 +402,104 @@ def test_postgres_audit_compares_logical_compressed_archive_projection(
 
     assert readiness["ready"] is (not divergent)
     assert readiness["diagnostic_code"] == ("ambiguous_generation_legacy_row" if divergent else None)
+
+
+@pytest.mark.pg_jobs
+@pytest.mark.parametrize(
+    ("active_value", "archived_value"),
+    ((True, 1), (1, 1.0)),
+)
+def test_postgres_migration_audit_rejects_nested_json_type_mismatch(
+    jobs_pg_dsn,
+    monkeypatch,
+    active_value,
+    archived_value,
+):
+    manager = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
+    monkeypatch.setattr(
+        manager,
+        "_slides_generation_ready_in_connection",
+        lambda _conn, **_kwargs: True,
+    )
+    job = manager.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload={"nested": {"value": active_value}},
+        owner_user_id="owner-1",
+        idempotency_key=f"typed-audit-{type(active_value).__name__}",
+    )
+    projection = ", ".join(("id", *SLIDES_ARCHIVE_EXACT_FIELDS))
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            f"INSERT INTO jobs_archive ({projection}) "  # nosec B608 - closed projection
+            f"SELECT {projection} FROM jobs WHERE id=%s",  # nosec B608 - closed projection
+            (int(job["id"]),),
+        )
+        cur.execute(
+            "UPDATE jobs_archive SET payload=%s::jsonb WHERE uuid=%s",
+            (
+                json.dumps({"nested": {"value": archived_value}}),
+                str(job["uuid"]),
+            ),
+        )
+
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        audit_cur = _CapturedAuditDiagnosticCursor(cur)
+        diagnostic = jobs_pg_migrations._audit_slides_generation_pg(audit_cur)
+
+    assert diagnostic == ("ambiguous_generation_legacy_row", 1)
+    assert audit_cur.diagnostic == diagnostic
+
+
+@pytest.mark.pg_jobs
+@pytest.mark.parametrize("field", ("payload", "result"))
+def test_postgres_migration_audit_rejects_json_null_with_divergent_sidecar(
+    jobs_pg_dsn,
+    monkeypatch,
+    field,
+):
+    manager = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
+    monkeypatch.setattr(
+        manager,
+        "_slides_generation_ready_in_connection",
+        lambda _conn, **_kwargs: True,
+    )
+    payload = {"receipt_id": "receipt-1"}
+    result = {"artifact": "result"}
+    job = manager.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload=payload,
+        owner_user_id="owner-1",
+        idempotency_key=f"null-{field}-audit",
+    )
+    projection = ", ".join(("id", *SLIDES_ARCHIVE_EXACT_FIELDS))
+    logical = payload if field == "payload" else result
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE jobs SET result=%s::jsonb WHERE id=%s",
+            (json.dumps(result), int(job["id"])),
+        )
+        cur.execute(
+            f"INSERT INTO jobs_archive ({projection}) "  # nosec B608 - closed projection
+            f"SELECT {projection} FROM jobs WHERE id=%s",  # nosec B608 - closed projection
+            (int(job["id"]),),
+        )
+        cur.execute(
+            f"UPDATE jobs_archive SET {field}=%s::jsonb, "  # nosec B608 - closed test parameter
+            f"{field}_compressed=%s WHERE uuid=%s",  # nosec B608 - closed test parameter
+            (
+                json.dumps(None),
+                gzip.compress(json.dumps(logical).encode("utf-8")),
+                str(job["uuid"]),
+            ),
+        )
+
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        with pytest.raises(jobs_pg_migrations.SlidesArchiveNormalizationError):
+            jobs_pg_migrations._audit_slides_generation_pg(cur)
 
 
 @pytest.mark.pg_jobs
@@ -1065,6 +1185,117 @@ def test_postgres_archive_collision_with_different_result_stays_diagnosed(
 
 @pytest.mark.pg_jobs
 @pytest.mark.parametrize(
+    ("active_value", "archived_value"),
+    ((True, 1), (1, 1.0)),
+)
+def test_postgres_archive_collision_rejects_nested_json_type_mismatch(
+    jobs_pg_dsn,
+    monkeypatch,
+    active_value,
+    archived_value,
+):
+    manager = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
+    monkeypatch.setattr(
+        manager,
+        "_slides_generation_ready_in_connection",
+        lambda _conn, **_kwargs: True,
+    )
+    job = manager.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload={"nested": {"value": active_value}},
+        owner_user_id="owner-1",
+        idempotency_key=f"typed-collision-{type(active_value).__name__}",
+    )
+    projection = ", ".join(("id", *SLIDES_ARCHIVE_EXACT_FIELDS))
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE jobs SET status='completed', completed_at=%s WHERE id=%s",
+            (NOW - timedelta(days=60), int(job["id"])),
+        )
+        cur.execute(
+            f"INSERT INTO jobs_archive ({projection}) "  # nosec B608 - closed projection
+            f"SELECT {projection} FROM jobs WHERE id=%s",  # nosec B608 - closed projection
+            (int(job["id"]),),
+        )
+        cur.execute(
+            "UPDATE jobs_archive SET payload=%s::jsonb WHERE uuid=%s",
+            (
+                json.dumps({"nested": {"value": archived_value}}),
+                str(job["uuid"]),
+            ),
+        )
+
+    monkeypatch.setenv("JOBS_ARCHIVE_BEFORE_DELETE", "true")
+    with pytest.raises(
+        SlidesGenerationJobsUnavailableError,
+        match="unsafe presentation.generate archive collision",
+    ):
+        manager.prune_jobs(older_than_days=1, domain="slides")
+
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) FROM jobs WHERE uuid=%s", (str(job["uuid"]),))
+        assert cur.fetchone()[0] == 1
+
+
+@pytest.mark.pg_jobs
+@pytest.mark.parametrize("field", ("payload", "result"))
+def test_postgres_archive_collision_rejects_json_null_with_divergent_sidecar(
+    jobs_pg_dsn,
+    monkeypatch,
+    field,
+):
+    manager = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
+    monkeypatch.setattr(
+        manager,
+        "_slides_generation_ready_in_connection",
+        lambda _conn, **_kwargs: True,
+    )
+    payload = {"receipt_id": "receipt-1"}
+    result = {"artifact": "result"}
+    job = manager.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload=payload,
+        owner_user_id="owner-1",
+        idempotency_key=f"null-{field}-collision",
+    )
+    projection = ", ".join(("id", *SLIDES_ARCHIVE_EXACT_FIELDS))
+    logical = payload if field == "payload" else result
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE jobs SET status='completed', result=%s::jsonb, completed_at=%s "
+            "WHERE id=%s",
+            (json.dumps(result), NOW - timedelta(days=60), int(job["id"])),
+        )
+        cur.execute(
+            f"INSERT INTO jobs_archive ({projection}) "  # nosec B608 - closed projection
+            f"SELECT {projection} FROM jobs WHERE id=%s",  # nosec B608 - closed projection
+            (int(job["id"]),),
+        )
+        cur.execute(
+            f"UPDATE jobs_archive SET {field}=%s::jsonb, "  # nosec B608 - closed test parameter
+            f"{field}_compressed=%s WHERE uuid=%s",  # nosec B608 - closed test parameter
+            (
+                json.dumps(None),
+                gzip.compress(json.dumps(logical).encode("utf-8")),
+                str(job["uuid"]),
+            ),
+        )
+
+    monkeypatch.setenv("JOBS_ARCHIVE_BEFORE_DELETE", "true")
+    with pytest.raises(SlidesGenerationJobsUnavailableError):
+        manager.prune_jobs(older_than_days=1, domain="slides")
+
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) FROM jobs WHERE uuid=%s", (str(job["uuid"]),))
+        assert cur.fetchone()[0] == 1
+
+
+@pytest.mark.pg_jobs
+@pytest.mark.parametrize(
     ("sidecar_kind", "primary_json_present"),
     (("malformed", False), ("malformed", True), ("divergent", True)),
 )
@@ -1290,6 +1521,126 @@ def test_postgres_archived_slides_lookup_and_resolve_reject_invalid_sidecar(
         )
         after = tuple(cur.fetchone())
     assert after == before
+
+
+@pytest.mark.pg_jobs
+@pytest.mark.parametrize("field", ("payload", "result"))
+def test_postgres_archived_slides_lookup_rejects_json_null_with_sidecar(
+    jobs_pg_dsn,
+    monkeypatch,
+    field,
+):
+    manager = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
+    monkeypatch.setattr(
+        manager,
+        "_slides_generation_ready_in_connection",
+        lambda _conn, **_kwargs: True,
+    )
+    payload = {"receipt_id": "receipt-1"}
+    result = {"artifact": "result"}
+    job = manager.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload=payload,
+        owner_user_id="owner-1",
+        idempotency_key=f"null-{field}-lookup",
+    )
+    projection = ", ".join(("id", *SLIDES_ARCHIVE_EXACT_FIELDS))
+    logical = payload if field == "payload" else result
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE jobs SET result=%s::jsonb WHERE id=%s",
+            (json.dumps(result), int(job["id"])),
+        )
+        cur.execute(
+            f"INSERT INTO jobs_archive ({projection}) "  # nosec B608 - closed projection
+            f"SELECT {projection} FROM jobs WHERE id=%s",  # nosec B608 - closed projection
+            (int(job["id"]),),
+        )
+        cur.execute("DELETE FROM jobs WHERE id=%s", (int(job["id"]),))
+        cur.execute(
+            f"UPDATE jobs_archive SET {field}=%s::jsonb, "  # nosec B608 - closed test parameter
+            f"{field}_compressed=%s WHERE uuid=%s",  # nosec B608 - closed test parameter
+            (
+                json.dumps(None),
+                gzip.compress(json.dumps(logical).encode("utf-8")),
+                str(job["uuid"]),
+            ),
+        )
+
+    for call in (
+        lambda: manager.lookup_slides_generation_job(
+            owner_user_id="owner-1",
+            idempotency_key=f"null-{field}-lookup",
+            expected_job_uuid=str(job["uuid"]),
+            expected_job_id=int(job["id"]),
+        ),
+        lambda: manager.resolve_slides_generation_job(
+            job_uuid=str(job["uuid"]),
+            owner_user_id="owner-1",
+            idempotency_key=f"null-{field}-lookup",
+            job_id=int(job["id"]),
+        ),
+    ):
+        with pytest.raises(SlidesGenerationJobsUnavailableError) as exc_info:
+            call()
+        assert exc_info.value.__cause__ is None
+        assert exc_info.value.__context__ is None
+
+
+@pytest.mark.pg_jobs
+@pytest.mark.parametrize(
+    ("case", "stored_value", "expected_value"),
+    (("bool-int", True, 1), ("int-float", 1, 1.0)),
+)
+def test_postgres_archived_generic_identity_rejects_json_type_mismatch(
+    jobs_pg_dsn,
+    case,
+    stored_value,
+    expected_value,
+):
+    manager = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
+    job_uuid = str(uuid.uuid4())
+    projection = ", ".join(("id", *SLIDES_ARCHIVE_EXACT_FIELDS))
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO jobs(uuid, domain, queue, job_type, owner_user_id, "
+            "idempotency_key, payload, status) VALUES "
+            "(%s, 'slides', 'default', 'presentation.generate', 'owner-1', "
+            "%s, %s::jsonb, 'queued') RETURNING id",
+            (
+                job_uuid,
+                f"generic-{case}",
+                json.dumps({"nested": [stored_value]}),
+            ),
+        )
+        job_id = int(cur.fetchone()[0])
+        cur.execute(
+            f"INSERT INTO jobs_archive ({projection}) "  # nosec B608 - closed projection
+            f"SELECT {projection} FROM jobs WHERE id=%s",  # nosec B608 - closed projection
+            (job_id,),
+        )
+        cur.execute("DELETE FROM jobs WHERE id=%s", (job_id,))
+
+    conn = manager._connect()
+    try:
+        found = find_postgres_job_by_identity(
+            conn,
+            manager._pg_cursor,
+            command=FindJobByIdentityCommand(
+                domain="slides",
+                queue="default",
+                job_type="presentation.generate",
+                idempotency_key=f"generic-{case}",
+                expected_payload={"nested": [expected_value]},
+            ),
+        )
+    finally:
+        conn.close()
+
+    assert found.state is JobIdentityLookupState.CONFLICT
+    assert found.row is None
 
 
 @pytest.mark.pg_jobs

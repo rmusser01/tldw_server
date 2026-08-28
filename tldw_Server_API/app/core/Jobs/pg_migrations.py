@@ -15,8 +15,11 @@ from tldw_Server_API.app.core.testing import is_truthy as _is_truthy
 from .migrations import (
     SLIDES_ARCHIVE_COMPRESSED_FIELDS,
     SLIDES_ARCHIVE_EXACT_FIELDS,
+    SLIDES_ARCHIVE_PAYLOAD_PRESENT,
+    SLIDES_ARCHIVE_RESULT_PRESENT,
     SlidesArchiveNormalizationError,
     normalize_slides_archive_projection,
+    slides_archive_values_equal,
 )
 
 _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS = (
@@ -1106,7 +1109,11 @@ def _audit_slides_generation_pg(cur) -> tuple[str | None, int]:
         f"""
         SELECT {active_projection}, {archived_projection},
                archived.payload_compressed AS archived_payload_compressed,
-               archived.result_compressed AS archived_result_compressed
+               archived.result_compressed AS archived_result_compressed,
+               active.payload IS NOT NULL AS active_payload_present,
+               active.result IS NOT NULL AS active_result_present,
+               archived.payload IS NOT NULL AS archived_payload_present,
+               archived.result IS NOT NULL AS archived_result_present
         FROM jobs active
         JOIN jobs_archive archived ON archived.uuid = active.uuid
         WHERE active.uuid IS NOT NULL AND BTRIM(active.uuid) <> ''
@@ -1137,6 +1144,18 @@ def _audit_slides_generation_pg(cur) -> tuple[str | None, int]:
             archived_values["result_compressed"] = row.get(
                 "archived_result_compressed"
             )
+            active_values[SLIDES_ARCHIVE_PAYLOAD_PRESENT] = row.get(
+                "active_payload_present"
+            )
+            active_values[SLIDES_ARCHIVE_RESULT_PRESENT] = row.get(
+                "active_result_present"
+            )
+            archived_values[SLIDES_ARCHIVE_PAYLOAD_PRESENT] = row.get(
+                "archived_payload_present"
+            )
+            archived_values[SLIDES_ARCHIVE_RESULT_PRESENT] = row.get(
+                "archived_result_present"
+            )
         else:
             active_values = dict(
                 zip(SLIDES_ARCHIVE_EXACT_FIELDS, row[:projection_size])
@@ -1149,10 +1168,25 @@ def _audit_slides_generation_pg(cur) -> tuple[str | None, int]:
             )
             archived_values["payload_compressed"] = row[2 * projection_size]
             archived_values["result_compressed"] = row[2 * projection_size + 1]
+            active_values[SLIDES_ARCHIVE_PAYLOAD_PRESENT] = row[
+                2 * projection_size + 2
+            ]
+            active_values[SLIDES_ARCHIVE_RESULT_PRESENT] = row[
+                2 * projection_size + 3
+            ]
+            archived_values[SLIDES_ARCHIVE_PAYLOAD_PRESENT] = row[
+                2 * projection_size + 4
+            ]
+            archived_values[SLIDES_ARCHIVE_RESULT_PRESENT] = row[
+                2 * projection_size + 5
+            ]
         active = normalize_slides_archive_projection(active_values)
         archived = normalize_slides_archive_projection(archived_values)
         if any(
-            active.get(field) != archived.get(field)
+            not slides_archive_values_equal(
+                active.get(field),
+                archived.get(field),
+            )
             for field in SLIDES_ARCHIVE_EXACT_FIELDS
         ):
             cross_table_count += 1
