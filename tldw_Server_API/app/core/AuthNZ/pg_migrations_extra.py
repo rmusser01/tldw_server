@@ -3141,7 +3141,7 @@ ADMIN_WEBHOOK_DELIVERY_RECOVERY_POSTGRES_DDL = (
     ADD COLUMN IF NOT EXISTS pending_jobs_disposition_token TEXT
         CHECK (
             pending_jobs_disposition_token IS NULL
-            OR char_length(pending_jobs_disposition_token) BETWEEN 1 AND 255
+            OR pending_jobs_disposition_token ~ '^[0-9a-f]{64}$'
         )
     """,
     """
@@ -3164,7 +3164,23 @@ ADMIN_WEBHOOK_DELIVERY_RECOVERY_POSTGRES_DDL = (
         instance_id TEXT NOT NULL CHECK (char_length(instance_id) BETWEEN 1 AND 128),
         ready BOOLEAN NOT NULL,
         reason_code TEXT CHECK (
-            reason_code IS NULL OR char_length(reason_code) BETWEEN 1 AND 128
+            (ready AND reason_code IS NULL)
+            OR (
+                NOT ready AND reason_code IN (
+                    'mode_off',
+                    'mode_migrate',
+                    'schema_unready',
+                    'migration_pending',
+                    'key_unavailable',
+                    'key_configuration_mismatch',
+                    'jobs_unavailable',
+                    'database_unavailable',
+                    'worker_unavailable',
+                    'reconciler_unavailable',
+                    'retention_unavailable',
+                    'heartbeat_stale'
+                )
+            )
         ),
         heartbeat_at TIMESTAMPTZ NOT NULL,
         last_success_at TIMESTAMPTZ,

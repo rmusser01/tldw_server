@@ -25,6 +25,7 @@ from tldw_Server_API.app.core.Admin_Webhooks.domain import (
     DeliveryKind,
     DeliveryReasonCode,
     DeliveryRuntimeComponent,
+    DeliveryRuntimeReasonCode,
     DeliveryState,
     EventSourceKind,
     JobsDispositionKind,
@@ -128,6 +129,20 @@ def test_delivery_enums_are_closed_and_have_stable_values() -> None:
         DeliveryRuntimeComponent.WORKER,
         DeliveryRuntimeComponent.RECONCILER,
         DeliveryRuntimeComponent.RETENTION,
+    )
+    assert tuple(DeliveryRuntimeReasonCode) == (
+        DeliveryRuntimeReasonCode.MODE_OFF,
+        DeliveryRuntimeReasonCode.MODE_MIGRATE,
+        DeliveryRuntimeReasonCode.SCHEMA_UNREADY,
+        DeliveryRuntimeReasonCode.MIGRATION_PENDING,
+        DeliveryRuntimeReasonCode.KEY_UNAVAILABLE,
+        DeliveryRuntimeReasonCode.KEY_CONFIGURATION_MISMATCH,
+        DeliveryRuntimeReasonCode.JOBS_UNAVAILABLE,
+        DeliveryRuntimeReasonCode.DATABASE_UNAVAILABLE,
+        DeliveryRuntimeReasonCode.WORKER_UNAVAILABLE,
+        DeliveryRuntimeReasonCode.RECONCILER_UNAVAILABLE,
+        DeliveryRuntimeReasonCode.RETENTION_UNAVAILABLE,
+        DeliveryRuntimeReasonCode.HEARTBEAT_STALE,
     )
     assert {code.value for code in DeliveryReasonCode} >= {
         "attempt_budget_exhausted",

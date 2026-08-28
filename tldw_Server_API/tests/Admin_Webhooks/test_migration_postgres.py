@@ -185,9 +185,189 @@ async def test_postgres_delivery_schema_ready_requires_recovery_indexes(test_db_
     repository = AdminWebhookRepository(test_db_pool)
     assert await repository.delivery_schema_ready() is True
 
-    await test_db_pool.execute("DROP INDEX idx_admin_webhook_runtime_heartbeats_freshness")
+    connection = await asyncpg.connect(test_db_pool.settings.DATABASE_URL)
+    try:
+        await connection.execute("DROP INDEX idx_admin_webhook_runtime_heartbeats_freshness")
+        await connection.execute(
+            """
+            CREATE INDEX idx_admin_webhook_runtime_heartbeats_freshness
+            ON admin_webhook_runtime_heartbeats(component, ready, heartbeat_at)
+            """
+        )
+    finally:
+        await connection.close()
 
     assert await repository.delivery_schema_ready() is False
+
+
+@pytest.mark.integration
+async def test_postgres_delivery_schema_ready_rejects_wrong_recovery_index_predicate(
+    test_db_pool,
+) -> None:
+    assert await ensure_admin_webhook_canonical_tables_pg(test_db_pool)
+    repository = AdminWebhookRepository(test_db_pool)
+    assert await repository.delivery_schema_ready() is True
+
+    connection = await asyncpg.connect(test_db_pool.settings.DATABASE_URL)
+    try:
+        await connection.execute("DROP INDEX idx_admin_webhook_deliveries_recovery")
+        await connection.execute(
+            """
+            CREATE INDEX idx_admin_webhook_deliveries_recovery
+            ON admin_webhook_deliveries(
+                state, enqueue_claim_expires_at, expires_at, created_at
+            )
+            WHERE state = 'pending'
+            """
+        )
+    finally:
+        await connection.close()
+
+    assert await repository.delivery_schema_ready() is False
+
+
+@pytest.mark.integration
+async def test_postgres_delivery_schema_ready_rejects_incompatible_column_contract(
+    test_db_pool,
+) -> None:
+    assert await ensure_admin_webhook_canonical_tables_pg(test_db_pool)
+    repository = AdminWebhookRepository(test_db_pool)
+    assert await repository.delivery_schema_ready() is True
+
+    connection = await asyncpg.connect(test_db_pool.settings.DATABASE_URL)
+    try:
+        await connection.execute(
+            """
+            ALTER TABLE admin_webhook_delivery_attempts
+            ALTER COLUMN request_timeout_seconds SET NOT NULL
+            """
+        )
+    finally:
+        await connection.close()
+
+    assert await repository.delivery_schema_ready() is False
+
+
+@pytest.mark.integration
+async def test_postgres_095_enforces_delivery_and_heartbeat_boundaries(test_db_pool) -> None:
+    assert await ensure_admin_webhook_canonical_tables_pg(test_db_pool)
+    await _insert_registration(test_db_pool)
+    await _insert_command_event(test_db_pool)
+    await test_db_pool.execute(
+        """
+        INSERT INTO admin_webhook_deliveries (
+            id, event_id, webhook_id, kind, delivery_config_version,
+            secret_version, state, expires_at, pending_jobs_disposition_token
+        ) VALUES ('delivery-boundary', 'event-1', 1, 'test', 1, 1, 'pending',
+                  '2026-07-04T00:00:00Z', $1)
+        """,
+        "a" * 64,
+    )
+    for invalid_token in ("a" * 63, "A" * 64, "https://receiver.example/secret"):
+        with pytest.raises(asyncpg.CheckViolationError):
+            await test_db_pool.execute(
+                """
+                UPDATE admin_webhook_deliveries
+                SET pending_jobs_disposition_token = $1
+                WHERE id = 'delivery-boundary'
+                """,
+                invalid_token,
+            )
+    for attempt_number, timeout in enumerate((1, 30), start=1):
+        await test_db_pool.execute(
+            """
+            INSERT INTO admin_webhook_delivery_attempts (
+                id, delivery_id, attempt_number, test_attempt_token, started_at,
+                state, request_timeout_seconds
+            ) VALUES ($1, 'delivery-boundary', $2, $3, '2026-07-01T00:00:00Z',
+                      'processing', $4)
+            """,
+            f"attempt-{timeout}",
+            attempt_number,
+            f"test-token-{timeout}",
+            timeout,
+        )
+    for attempt_number, timeout in enumerate((0, 31), start=3):
+        with pytest.raises(asyncpg.CheckViolationError):
+            await test_db_pool.execute(
+                """
+                INSERT INTO admin_webhook_delivery_attempts (
+                    id, delivery_id, attempt_number, test_attempt_token, started_at,
+                    state, request_timeout_seconds
+                ) VALUES ($1, 'delivery-boundary', $2, $3, '2026-07-01T00:00:00Z',
+                          'processing', $4)
+                """,
+                f"attempt-invalid-{timeout}",
+                attempt_number,
+                f"test-token-invalid-{timeout}",
+                timeout,
+            )
+    await test_db_pool.execute(
+        """
+        INSERT INTO admin_webhook_runtime_heartbeats (
+            component, instance_id, ready, reason_code, heartbeat_at
+        ) VALUES ('worker', 'runtime-unready', FALSE, 'database_unavailable',
+                  CURRENT_TIMESTAMP)
+        """
+    )
+    await test_db_pool.execute(
+        """
+        INSERT INTO admin_webhook_runtime_heartbeats (
+            component, instance_id, ready, heartbeat_at, last_success_at
+        ) VALUES ('retention', $1, TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        """,
+        "x" * 128,
+    )
+    with pytest.raises(asyncpg.CheckViolationError):
+        await test_db_pool.execute(
+            """
+            INSERT INTO admin_webhook_runtime_heartbeats (
+                component, instance_id, ready, reason_code, heartbeat_at
+            ) VALUES ('worker', 'arbitrary-reason', FALSE,
+                      'https://receiver.example/secret', CURRENT_TIMESTAMP)
+            """
+        )
+    with pytest.raises(asyncpg.NotNullViolationError):
+        await test_db_pool.execute(
+            """
+            INSERT INTO admin_webhook_runtime_heartbeats (
+                component, instance_id, ready, heartbeat_at
+            ) VALUES ('worker', 'invalid-ready', NULL, CURRENT_TIMESTAMP)
+            """
+        )
+    with pytest.raises(asyncpg.CheckViolationError):
+        await test_db_pool.execute(
+            """
+            INSERT INTO admin_webhook_runtime_heartbeats (
+                component, instance_id, ready, reason_code, heartbeat_at
+            ) VALUES ('worker', 'ready-with-reason', TRUE, 'database_unavailable',
+                      CURRENT_TIMESTAMP)
+            """
+        )
+    with pytest.raises(asyncpg.CheckViolationError):
+        await test_db_pool.execute(
+            """
+            INSERT INTO admin_webhook_runtime_heartbeats (
+                component, instance_id, ready, heartbeat_at
+            ) VALUES ('unknown', 'invalid-component', TRUE, CURRENT_TIMESTAMP)
+            """
+        )
+    with pytest.raises(asyncpg.CheckViolationError):
+        await test_db_pool.execute(
+            """
+            INSERT INTO admin_webhook_runtime_heartbeats (
+                component, instance_id, ready, heartbeat_at
+            ) VALUES ('worker', '', TRUE, CURRENT_TIMESTAMP)
+            """
+        )
+    with pytest.raises(asyncpg.NotNullViolationError):
+        await test_db_pool.execute(
+            """
+            INSERT INTO admin_webhook_runtime_heartbeats (
+                component, instance_id, ready, reason_code
+            ) VALUES ('worker', 'missing-heartbeat', FALSE, 'database_unavailable')
+            """
+        )
 
 
 @pytest.mark.integration

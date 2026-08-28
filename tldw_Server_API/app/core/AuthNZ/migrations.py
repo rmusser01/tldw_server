@@ -1991,7 +1991,8 @@ def migration_096_add_admin_webhook_delivery_recovery(
             "ALTER TABLE admin_webhook_deliveries "
             "ADD COLUMN pending_jobs_disposition_token TEXT CHECK ("
             "pending_jobs_disposition_token IS NULL "
-            "OR length(pending_jobs_disposition_token) BETWEEN 1 AND 255)",
+            "OR (length(pending_jobs_disposition_token) = 64 "
+            "AND pending_jobs_disposition_token NOT GLOB '*[^0-9a-f]*'))",
         ),
         (
             "pending_jobs_disposition_not_before_at",
@@ -2025,7 +2026,23 @@ def migration_096_add_admin_webhook_delivery_recovery(
             instance_id TEXT NOT NULL CHECK (length(instance_id) BETWEEN 1 AND 128),
             ready INTEGER NOT NULL CHECK (ready IN (0, 1)),
             reason_code TEXT CHECK (
-                reason_code IS NULL OR length(reason_code) BETWEEN 1 AND 128
+                (ready = 1 AND reason_code IS NULL)
+                OR (
+                    ready = 0 AND reason_code IN (
+                        'mode_off',
+                        'mode_migrate',
+                        'schema_unready',
+                        'migration_pending',
+                        'key_unavailable',
+                        'key_configuration_mismatch',
+                        'jobs_unavailable',
+                        'database_unavailable',
+                        'worker_unavailable',
+                        'reconciler_unavailable',
+                        'retention_unavailable',
+                        'heartbeat_stale'
+                    )
+                )
             ),
             heartbeat_at TEXT NOT NULL,
             last_success_at TEXT,

@@ -88,6 +88,161 @@ _DELIVERY_SCHEMA_INDEXES = frozenset(
         "idx_admin_webhook_runtime_heartbeats_freshness",
     }
 )
+_DELIVERY_SCHEMA_COLUMN_CONTRACT = {
+    "admin_webhook_deliveries": {
+        "pending_jobs_disposition_token": ("TEXT", False, 0),
+        "pending_jobs_disposition_not_before_at": ("TEXT", False, 0),
+    },
+    "admin_webhook_delivery_attempts": {
+        "request_timeout_seconds": ("INTEGER", False, 0),
+    },
+    "admin_webhook_runtime_heartbeats": {
+        "component": ("TEXT", True, 1),
+        "instance_id": ("TEXT", True, 2),
+        "ready": ("INTEGER", True, 0),
+        "reason_code": ("TEXT", False, 0),
+        "heartbeat_at": ("TEXT", True, 0),
+        "last_success_at": ("TEXT", False, 0),
+        "created_at": ("TEXT", True, 0),
+        "updated_at": ("TEXT", True, 0),
+    },
+}
+_DELIVERY_POSTGRES_COLUMN_CONTRACT = {
+    "admin_webhook_deliveries": {
+        "pending_jobs_disposition_token": ("text", "YES"),
+        "pending_jobs_disposition_not_before_at": ("timestamp with time zone", "YES"),
+    },
+    "admin_webhook_delivery_attempts": {
+        "request_timeout_seconds": ("integer", "YES"),
+    },
+    "admin_webhook_runtime_heartbeats": {
+        "component": ("text", "NO"),
+        "instance_id": ("text", "NO"),
+        "ready": ("boolean", "NO"),
+        "reason_code": ("text", "YES"),
+        "heartbeat_at": ("timestamp with time zone", "NO"),
+        "last_success_at": ("timestamp with time zone", "YES"),
+        "created_at": ("timestamp with time zone", "NO"),
+        "updated_at": ("timestamp with time zone", "NO"),
+    },
+}
+_DELIVERY_SCHEMA_INDEX_COLUMNS = {
+    "idx_admin_webhook_deliveries_recovery": (
+        "state",
+        "enqueue_claim_expires_at",
+        "expires_at",
+        "created_at",
+    ),
+    "idx_admin_webhook_deliveries_disposition_recovery": (
+        "jobs_disposition_applied",
+        "pending_jobs_disposition_not_before_at",
+        "updated_at",
+    ),
+    "idx_admin_webhook_runtime_heartbeats_freshness": (
+        "component",
+        "ready",
+        "heartbeat_at",
+    ),
+}
+_DELIVERY_RUNTIME_REASON_VALUES = (
+    "mode_off",
+    "mode_migrate",
+    "schema_unready",
+    "migration_pending",
+    "key_unavailable",
+    "key_configuration_mismatch",
+    "jobs_unavailable",
+    "database_unavailable",
+    "worker_unavailable",
+    "reconciler_unavailable",
+    "retention_unavailable",
+    "heartbeat_stale",
+)
+_DELIVERY_SQLITE_INDEX_DEFINITIONS = {
+    "idx_admin_webhook_deliveries_recovery": (
+        "createindexidx_admin_webhook_deliveries_recovery"
+        "onadmin_webhook_deliveries(state,enqueue_claim_expires_at,expires_at,created_at)"
+        "wherestatein('pending','enqueue_claimed')"
+    ),
+    "idx_admin_webhook_deliveries_disposition_recovery": (
+        "createindexidx_admin_webhook_deliveries_disposition_recovery"
+        "onadmin_webhook_deliveries(jobs_disposition_applied,"
+        "pending_jobs_disposition_not_before_at,updated_at)"
+        "wherepending_jobs_dispositionisnotnull"
+    ),
+    "idx_admin_webhook_runtime_heartbeats_freshness": (
+        "createindexidx_admin_webhook_runtime_heartbeats_freshness"
+        "onadmin_webhook_runtime_heartbeats(component,ready,heartbeat_atdesc)"
+    ),
+}
+
+
+def _compact_schema_sql(value: str) -> str:
+    """Normalize backend DDL for fail-closed structural comparisons."""
+    return re.sub(r"\s+", "", value.lower()).replace("::text", "")
+
+
+def _strip_outer_parentheses(value: str) -> str:
+    """Remove only balanced outer parentheses from a catalog expression."""
+    while value.startswith("(") and value.endswith(")"):
+        depth = 0
+        for index, character in enumerate(value):
+            if character == "(":
+                depth += 1
+            elif character == ")":
+                depth -= 1
+            if depth == 0 and index != len(value) - 1:
+                return value
+        value = value[1:-1]
+    return value
+
+
+def _has_required_delivery_checks(
+    definitions: Sequence[str], *, is_postgres: bool
+) -> bool:
+    """Return whether the extension's bounded values are enforced by checks."""
+    checks = tuple(_compact_schema_sql(definition) for definition in definitions)
+    all_checks = " ".join(checks)
+    structural_checks = all_checks.replace("(", "").replace(")", "")
+    token_contract = (
+        "pending_jobs_disposition_token~'^[0-9a-f]{64}$'" in all_checks
+        if is_postgres
+        else (
+            "length(pending_jobs_disposition_token)=64" in all_checks
+            and "pending_jobs_disposition_tokennotglob'*[^0-9a-f]*'" in all_checks
+        )
+    )
+    instance_length_contract = (
+        "char_length(instance_id)>=1" in all_checks
+        and "char_length(instance_id)<=128" in all_checks
+        if is_postgres
+        else "length(instance_id)between1and128" in all_checks
+    )
+    timeout_contract = (
+        "request_timeout_seconds>=1" in all_checks
+        and "request_timeout_seconds<=30" in all_checks
+        if is_postgres
+        else "request_timeout_secondsbetween1and30" in all_checks
+    )
+    ready_reason_contract = (
+        "component=anyarray['worker','reconciler','retention']" in structural_checks
+        and "readyandreason_codeisnull" in structural_checks
+        and "notreadyandreason_code=anyarray[" in structural_checks
+        if is_postgres
+        else (
+            "componentin'worker','reconciler','retention'" in structural_checks
+            and "ready=1andreason_codeisnull" in structural_checks
+            and "ready=0andreason_codein" in structural_checks
+        )
+    )
+    return (
+        token_contract
+        and timeout_contract
+        and instance_length_contract
+        and ready_reason_contract
+        and "reason_code" in all_checks
+        and all(reason in all_checks for reason in _DELIVERY_RUNTIME_REASON_VALUES)
+    )
 _MIGRATION_MUTABLE_COLUMNS = frozenset(
     {
         "phase",
@@ -925,61 +1080,185 @@ class AdminWebhookRepository:
                 )
                 column_rows = await unit._fetch(
                     """
-                    SELECT table_name, column_name
+                    SELECT table_name, column_name, data_type, is_nullable
                     FROM information_schema.columns
                     WHERE table_schema = current_schema()
                       AND table_name = ANY(?::text[])
                     """,
                     (tuple(_DELIVERY_SCHEMA_COLUMNS),),
                 )
+                constraint_rows = await unit._fetch(
+                    """
+                    SELECT table_constraints.table_name,
+                           table_constraints.constraint_type,
+                           COALESCE(check_constraints.check_clause, '') AS definition
+                    FROM information_schema.table_constraints AS table_constraints
+                    LEFT JOIN information_schema.check_constraints AS check_constraints
+                        ON check_constraints.constraint_catalog
+                            = table_constraints.constraint_catalog
+                       AND check_constraints.constraint_schema
+                            = table_constraints.constraint_schema
+                       AND check_constraints.constraint_name
+                            = table_constraints.constraint_name
+                    WHERE table_constraints.table_schema = current_schema()
+                      AND table_constraints.table_name = ANY(?::text[])
+                    """,
+                    (tuple(_DELIVERY_SCHEMA_COLUMNS),),
+                )
+                primary_key_rows = await unit._fetch(
+                    """
+                    SELECT key_column_usage.column_name
+                    FROM information_schema.table_constraints AS table_constraints
+                    JOIN information_schema.key_column_usage AS key_column_usage
+                        ON key_column_usage.constraint_catalog
+                            = table_constraints.constraint_catalog
+                       AND key_column_usage.constraint_schema
+                            = table_constraints.constraint_schema
+                       AND key_column_usage.constraint_name
+                            = table_constraints.constraint_name
+                    WHERE table_constraints.table_schema = current_schema()
+                      AND table_constraints.table_name = 'admin_webhook_runtime_heartbeats'
+                      AND table_constraints.constraint_type = 'PRIMARY KEY'
+                    ORDER BY key_column_usage.ordinal_position
+                    """,
+                )
                 index_rows = await unit._fetch(
                     """
-                    SELECT indexname
-                    FROM pg_indexes
-                    WHERE schemaname = current_schema()
-                      AND indexname = ANY(?::text[])
+                    SELECT index_class.relname AS index_name,
+                           array_agg(attribute.attname ORDER BY key_columns.ordinality)
+                               FILTER (WHERE key_columns.ordinality <= index_data.indnkeyatts)
+                               AS column_names,
+                           pg_get_expr(index_data.indpred, index_data.indrelid)
+                               AS predicate,
+                           pg_get_indexdef(index_data.indexrelid) AS definition
+                    FROM pg_index AS index_data
+                    JOIN pg_class AS index_class ON index_class.oid = index_data.indexrelid
+                    JOIN pg_class AS relation ON relation.oid = index_data.indrelid
+                    JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+                    JOIN LATERAL unnest(index_data.indkey)
+                        WITH ORDINALITY AS key_columns(attribute_number, ordinality)
+                        ON TRUE
+                    JOIN pg_attribute AS attribute
+                        ON attribute.attrelid = relation.oid
+                       AND attribute.attnum = key_columns.attribute_number
+                    WHERE namespace.nspname = current_schema()
+                      AND index_class.relname = ANY(?::text[])
+                    GROUP BY index_class.relname, index_data.indexrelid,
+                             index_data.indnkeyatts,
+                             index_data.indpred, index_data.indrelid
                     """,
                     (tuple(_DELIVERY_SCHEMA_INDEXES),),
                 )
                 tables = {str(row["table_name"]) for row in table_rows}
-                indexes = {str(row["indexname"]) for row in index_rows}
+                columns = {
+                    table: {
+                        str(row["column_name"]): (
+                            str(row["data_type"]),
+                            str(row["is_nullable"]),
+                        )
+                        for row in column_rows
+                        if str(row["table_name"]) == table
+                    }
+                    for table in _DELIVERY_POSTGRES_COLUMN_CONTRACT
+                }
+                constraint_definitions = [
+                    str(row["definition"])
+                    for row in constraint_rows
+                    if str(row["constraint_type"]) == "CHECK"
+                ]
+                heartbeat_primary_key = tuple(
+                    str(row["column_name"]) for row in primary_key_rows
+                )
+                index_contracts = {
+                    str(row["index_name"]): (
+                        tuple(str(column) for column in row["column_names"]),
+                        _strip_outer_parentheses(
+                            _compact_schema_sql(str(row["predicate"] or ""))
+                        ),
+                        _compact_schema_sql(str(row["definition"])),
+                    )
+                    for row in index_rows
+                }
             else:
                 table_rows = await unit._fetch(
                     """
-                    SELECT name
+                    SELECT name, sql
                     FROM sqlite_master
                     WHERE type = 'table' AND name IN (?, ?, ?)
                     """,
                     tuple(_DELIVERY_SCHEMA_COLUMNS),
                 )
-                columns = {table: set() for table in _DELIVERY_SCHEMA_COLUMNS}
+                columns: dict[str, dict[str, tuple[str, bool, int]]] = {}
                 for table in _DELIVERY_SCHEMA_COLUMNS:
                     rows = await unit._fetch(f"PRAGMA table_info({table})")
-                    columns[table] = {str(row["name"]) for row in rows}
+                    columns[table] = {
+                        str(row["name"]): (
+                            str(row["type"]).upper(),
+                            bool(row["notnull"]),
+                            int(row["pk"]),
+                        )
+                        for row in rows
+                    }
                 index_rows = await unit._fetch(
                     """
-                    SELECT name
+                    SELECT name, sql
                     FROM sqlite_master
                     WHERE type = 'index' AND name IN (?, ?, ?)
                     """,
                     tuple(_DELIVERY_SCHEMA_INDEXES),
                 )
                 tables = {str(row["name"]) for row in table_rows}
-                indexes = {str(row["name"]) for row in index_rows}
+                table_definitions = [str(row["sql"] or "") for row in table_rows]
+                index_definitions = {
+                    str(row["name"]): _compact_schema_sql(str(row["sql"] or ""))
+                    for row in index_rows
+                }
+                return (
+                    tables == set(_DELIVERY_SCHEMA_COLUMNS)
+                    and all(
+                        columns[table].get(column) == contract
+                        for table, contract_columns in _DELIVERY_SCHEMA_COLUMN_CONTRACT.items()
+                        for column, contract in contract_columns.items()
+                    )
+                    and _has_required_delivery_checks(
+                        table_definitions, is_postgres=False
+                    )
+                    and index_definitions == _DELIVERY_SQLITE_INDEX_DEFINITIONS
+                )
 
-            if self.is_postgres:
-                columns = {table: set() for table in _DELIVERY_SCHEMA_COLUMNS}
-                for row in column_rows:
-                    table = str(row["table_name"])
-                    column = str(row["column_name"])
-                    columns[table].add(column)
+            expected_indexes = _DELIVERY_SCHEMA_INDEX_COLUMNS
+            recovery_predicate = "state=any(array['pending','enqueue_claimed'])"
+            disposition_predicate = "pending_jobs_dispositionisnotnull"
             return (
                 tables == set(_DELIVERY_SCHEMA_COLUMNS)
                 and all(
-                    required <= columns[table]
-                    for table, required in _DELIVERY_SCHEMA_COLUMNS.items()
+                    columns[table].get(column) == contract
+                    for table, contract_columns in _DELIVERY_POSTGRES_COLUMN_CONTRACT.items()
+                    for column, contract in contract_columns.items()
                 )
-                and indexes == _DELIVERY_SCHEMA_INDEXES
+                and _has_required_delivery_checks(
+                    constraint_definitions, is_postgres=True
+                )
+                and heartbeat_primary_key == ("component", "instance_id")
+                and set(index_contracts) == _DELIVERY_SCHEMA_INDEXES
+                and all(
+                    index_contracts[index_name][0] == expected_columns
+                    for index_name, expected_columns in expected_indexes.items()
+                )
+                and index_contracts["idx_admin_webhook_deliveries_recovery"][1]
+                == recovery_predicate
+                and index_contracts[
+                    "idx_admin_webhook_deliveries_disposition_recovery"
+                ][1]
+                == disposition_predicate
+                and index_contracts[
+                    "idx_admin_webhook_runtime_heartbeats_freshness"
+                ][1]
+                == ""
+                and "heartbeat_atdesc)"
+                in index_contracts[
+                    "idx_admin_webhook_runtime_heartbeats_freshness"
+                ][2]
             )
 
     async def get_legacy_import_snapshot(self) -> LegacyImportDatabaseSnapshot:

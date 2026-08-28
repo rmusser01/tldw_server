@@ -166,6 +166,23 @@ class DeliveryReasonCode(str, Enum):
     TEST_ATTEMPT_INTERRUPTED = "test_attempt_interrupted"
 
 
+class DeliveryRuntimeReasonCode(str, Enum):
+    """Closed readiness reasons retained in runtime heartbeat metadata."""
+
+    MODE_OFF = "mode_off"
+    MODE_MIGRATE = "mode_migrate"
+    SCHEMA_UNREADY = "schema_unready"
+    MIGRATION_PENDING = "migration_pending"
+    KEY_UNAVAILABLE = "key_unavailable"
+    KEY_CONFIGURATION_MISMATCH = "key_configuration_mismatch"
+    JOBS_UNAVAILABLE = "jobs_unavailable"
+    DATABASE_UNAVAILABLE = "database_unavailable"
+    WORKER_UNAVAILABLE = "worker_unavailable"
+    RECONCILER_UNAVAILABLE = "reconciler_unavailable"
+    RETENTION_UNAVAILABLE = "retention_unavailable"
+    HEARTBEAT_STALE = "heartbeat_stale"
+
+
 class EventSourceKind(str, Enum):
     """Closed source identity shape for an immutable webhook event."""
 
@@ -248,7 +265,7 @@ class DeliveryRuntimeHeartbeat:
     component: DeliveryRuntimeComponent
     instance_id: str
     ready: bool
-    reason_code: DeliveryReasonCode | None
+    reason_code: DeliveryRuntimeReasonCode | None
     heartbeat_at: datetime
     last_success_at: datetime | None
     created_at: datetime
