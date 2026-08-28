@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   clearCookieSingleUserSession: vi.fn(),
   clearManualSingleUserCredentials: vi.fn(),
   getConfig: vi.fn(),
+  isHostedMode: vi.fn(),
   updateConfig: vi.fn()
 }))
 
@@ -29,6 +30,8 @@ describe("TldwAuthService single-user logout", () => {
     mocks.clearCookieSingleUserSession.mockReset()
     mocks.clearManualSingleUserCredentials.mockReset()
     mocks.bgRequest.mockReset()
+    mocks.isHostedMode.mockReset()
+    mocks.isHostedMode.mockReturnValue(false)
     mocks.clearCookieSingleUserSession.mockResolvedValue(undefined)
     mocks.clearManualSingleUserCredentials.mockResolvedValue(undefined)
     mocks.bgRequest.mockResolvedValue({ authenticated: false })
@@ -40,9 +43,22 @@ describe("TldwAuthService single-user logout", () => {
       authMode: "single-user",
       authSource: "cookie-session"
     })
+    let localStateCleared = false
+    mocks.clearCookieSingleUserSession.mockImplementation(async () => {
+      localStateCleared = true
+    })
+    const boundaries: Array<{ kind: string; localStateCleared: boolean }> = []
+    const onBoundary = (event: Event) => {
+      boundaries.push({
+        kind: String((event as CustomEvent).detail?.kind || ""),
+        localStateCleared
+      })
+    }
+    window.addEventListener("tldw:auth-principal-changed", onBoundary)
     const auth = new TldwAuthService()
 
     await auth.logout()
+    window.removeEventListener("tldw:auth-principal-changed", onBoundary)
 
     expect(mocks.bgRequest).toHaveBeenCalledWith({
       path: "/api/v1/auth/single-user/session",
@@ -53,6 +69,7 @@ describe("TldwAuthService single-user logout", () => {
       mocks.clearCookieSingleUserSession.mock.invocationCallOrder[0]
     )
     expect(mocks.clearManualSingleUserCredentials).not.toHaveBeenCalled()
+    expect(boundaries).toEqual([{ kind: "logout", localStateCleared: true }])
   })
 
   it("preserves cookie state and reports a server logout failure", async () => {
@@ -62,12 +79,17 @@ describe("TldwAuthService single-user logout", () => {
       authSource: "cookie-session"
     })
     mocks.bgRequest.mockRejectedValue(new Error("logout unavailable"))
+    const boundaries: string[] = []
+    const onBoundary = () => boundaries.push("logout")
+    window.addEventListener("tldw:auth-principal-changed", onBoundary)
     const auth = new TldwAuthService()
 
     await expect(auth.logout()).rejects.toThrow("logout unavailable")
+    window.removeEventListener("tldw:auth-principal-changed", onBoundary)
 
     expect(mocks.clearCookieSingleUserSession).not.toHaveBeenCalled()
     expect(mocks.clearManualSingleUserCredentials).not.toHaveBeenCalled()
+    expect(boundaries).toEqual([])
   })
 
   it("keeps manual single-user logout local", async () => {
@@ -77,14 +99,53 @@ describe("TldwAuthService single-user logout", () => {
       authSource: "manual",
       apiKey: "secret"
     })
+    let localStateCleared = false
+    mocks.clearManualSingleUserCredentials.mockImplementation(async () => {
+      localStateCleared = true
+    })
+    const boundaries: Array<{ kind: string; localStateCleared: boolean }> = []
+    const onBoundary = (event: Event) => {
+      boundaries.push({
+        kind: String((event as CustomEvent).detail?.kind || ""),
+        localStateCleared
+      })
+    }
+    window.addEventListener("tldw:auth-principal-changed", onBoundary)
     const auth = new TldwAuthService()
 
     await auth.logout()
+    window.removeEventListener("tldw:auth-principal-changed", onBoundary)
 
     expect(mocks.clearManualSingleUserCredentials).toHaveBeenCalledOnce()
     expect(mocks.bgRequest).not.toHaveBeenCalled()
     expect(mocks.clearCookieSingleUserSession).not.toHaveBeenCalled()
+    expect(boundaries).toEqual([{ kind: "logout", localStateCleared: true }])
   })
+
+  it.each([
+    ["manual", "clearManualSingleUserCredentials"],
+    ["cookie-session", "clearCookieSingleUserSession"]
+  ] as const)(
+    "does not emit logout when %s local credential clearing fails",
+    async (authSource, clearMethod) => {
+      mocks.getConfig.mockResolvedValue({
+        serverUrl: "https://api.example.test",
+        authMode: "single-user",
+        authSource
+      })
+      mocks[clearMethod].mockRejectedValue(new Error("clear failed"))
+      const boundaries: string[] = []
+      const onBoundary = () => boundaries.push("logout")
+      window.addEventListener("tldw:auth-principal-changed", onBoundary)
+
+      await expect(new TldwAuthService().logout()).rejects.toThrow(
+        "clear failed"
+      )
+      window.removeEventListener("tldw:auth-principal-changed", onBoundary)
+
+      expect(boundaries).toEqual([])
+    }
+  )
 
   it("treats an active cookie session as authenticated without a readable key", async () => {
     mocks.getConfig.mockResolvedValue({
@@ -103,7 +164,7 @@ vi.mock("@/services/splash-events", () => ({
 }))
 
 vi.mock("@/services/tldw/deployment-mode", () => ({
-  isHostedTldwDeployment: () => false
+  isHostedTldwDeployment: mocks.isHostedMode
 }))
 
 describe("TldwAuthService logout", () => {
@@ -118,6 +179,7 @@ describe("TldwAuthService logout", () => {
     })
     mocks.bgRequest.mockResolvedValue(undefined)
     mocks.updateConfig.mockResolvedValue(undefined)
+    mocks.isHostedMode.mockReturnValue(false)
   })
 
   afterEach(() => {
@@ -126,23 +188,30 @@ describe("TldwAuthService logout", () => {
   })
 
   it("clears Task 14 records after tokens and before the logout boundary without reading values", async () => {
-    const draftKey = "tldw:presentation-studio:html:draft:v1:https%3A%2F%2Ftldw.example:42"
-    const resumeKey = "tldw:presentation-studio:html:resume:v1:https%3A%2F%2Ftldw.example:42"
+    const draftKey =
+      "tldw:presentation-studio:html:draft:v1:https%3A%2F%2Ftldw.example:42"
+    const resumeKey =
+      "tldw:presentation-studio:html:resume:v1:https%3A%2F%2Ftldw.example:42"
     sessionStorage.setItem(draftKey, "PRIVATE DIRECT MATERIAL")
     sessionStorage.setItem(resumeKey, '{"idempotencyKey":"PRIVATE-KEY"}')
     sessionStorage.setItem("unrelated:session:key", "keep")
-    const getSpy = vi.spyOn(Object.getPrototypeOf(window.sessionStorage) as Storage, "getItem")
+    const getSpy = vi.spyOn(
+      Object.getPrototypeOf(window.sessionStorage) as Storage,
+      "getItem"
+    )
     let tokensCleared = false
     mocks.updateConfig.mockImplementation(async () => {
       tokensCleared = true
     })
-    const boundarySnapshots: Array<{ tokensCleared: boolean; keys: Array<string | null> }> = []
+    const boundarySnapshots: Array<{
+      tokensCleared: boolean
+      keys: Array<string | null>
+    }> = []
     const onLogout = () => {
       boundarySnapshots.push({
         tokensCleared,
-        keys: Array.from(
-          { length: sessionStorage.length },
-          (_, index) => sessionStorage.key(index)
+        keys: Array.from({ length: sessionStorage.length }, (_, index) =>
+          sessionStorage.key(index)
         )
       })
     }
@@ -156,12 +225,53 @@ describe("TldwAuthService logout", () => {
       accessToken: undefined,
       refreshToken: undefined
     })
-    expect(boundarySnapshots).toEqual([{
-      tokensCleared: true,
-      keys: ["unrelated:session:key"]
-    }])
+    expect(boundarySnapshots).toEqual([
+      {
+        tokensCleared: true,
+        keys: ["unrelated:session:key"]
+      }
+    ])
     expect(getSpy).not.toHaveBeenCalled()
     getSpy.mockRestore()
     expect(sessionStorage.getItem("unrelated:session:key")).toBe("keep")
+  })
+
+  it("dispatches one logout boundary after hosted credentials are cleared", async () => {
+    mocks.isHostedMode.mockReturnValue(true)
+    let localStateCleared = false
+    mocks.updateConfig.mockImplementation(async () => {
+      localStateCleared = true
+    })
+    const boundaries: Array<{ kind: string; localStateCleared: boolean }> = []
+    const onBoundary = (event: Event) => {
+      boundaries.push({
+        kind: String((event as CustomEvent).detail?.kind || ""),
+        localStateCleared
+      })
+    }
+    window.addEventListener("tldw:auth-principal-changed", onBoundary)
+
+    await new TldwAuthService().logout()
+    window.removeEventListener("tldw:auth-principal-changed", onBoundary)
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith({
+      path: "/api/auth/logout",
+      method: "POST"
+    })
+    expect(boundaries).toEqual([{ kind: "logout", localStateCleared: true }])
+  })
+
+  it("does not emit logout when multi-user local token clearing fails", async () => {
+    mocks.updateConfig.mockRejectedValue(new Error("token clear failed"))
+    const boundaries: string[] = []
+    const onBoundary = () => boundaries.push("logout")
+    window.addEventListener("tldw:auth-principal-changed", onBoundary)
+
+    await expect(new TldwAuthService().logout()).rejects.toThrow(
+      "token clear failed"
+    )
+    window.removeEventListener("tldw:auth-principal-changed", onBoundary)
+
+    expect(boundaries).toEqual([])
   })
 })

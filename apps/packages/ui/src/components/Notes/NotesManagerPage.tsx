@@ -198,6 +198,7 @@ const NotesManagerPage: React.FC = () => {
   const markGeneratedEditRef = React.useRef<(action: NotesAssistAction) => void>(() => {})
 
   const list = useNotesListManagement({
+    authorityScope: notesGraphAuthorityScope,
     isOnline,
     message,
     confirmDanger,
@@ -249,6 +250,7 @@ const NotesManagerPage: React.FC = () => {
 
   // ---- Editor hook (use actual deps now that list and kw are available) ----
   const ed = useNotesEditorState({
+    authorityScope: notesGraphAuthorityScope,
     isOnline,
     isMobileViewport,
     message,
@@ -277,6 +279,53 @@ const NotesManagerPage: React.FC = () => {
     setHasActiveDraft(false)
     ed.resetEditor()
   }, [ed.resetEditor])
+  const selectedAuthorityEvidenceRef = React.useRef<{
+    noteId: string
+    authorityScope: string
+  } | null>(null)
+  const renderedSelectedIdRef = React.useRef<string | null>(null)
+  const renderedSelectedId =
+    ed.selectedId == null ? null : String(ed.selectedId)
+  if (renderedSelectedIdRef.current !== renderedSelectedId) {
+    renderedSelectedIdRef.current = renderedSelectedId
+    selectedAuthorityEvidenceRef.current =
+      renderedSelectedId && notesGraphAuthorityScope
+        ? {
+            noteId: renderedSelectedId,
+            authorityScope: notesGraphAuthorityScope
+          }
+        : null
+  }
+  const authoritySelectedId =
+    notesGraphAuthorityScope &&
+    selectedAuthorityEvidenceRef.current?.authorityScope ===
+      notesGraphAuthorityScope &&
+    selectedAuthorityEvidenceRef.current.noteId === renderedSelectedId
+      ? ed.selectedId
+      : null
+  const lastVerifiedAuthorityScopeRef = React.useRef<string | null>(null)
+  React.useEffect(() => {
+    if (!notesGraphAuthorityScope) return
+    const previousAuthority = lastVerifiedAuthorityScopeRef.current
+    lastVerifiedAuthorityScopeRef.current = notesGraphAuthorityScope
+    if (!previousAuthority || previousAuthority === notesGraphAuthorityScope) {
+      return
+    }
+    selectedAuthorityEvidenceRef.current = null
+    resetEditorToEmptyState()
+  }, [notesGraphAuthorityScope, resetEditorToEmptyState])
+  React.useEffect(() => {
+    const resetOnLogout = (event: Event) => {
+      if ((event as CustomEvent).detail?.kind !== 'logout') return
+      selectedAuthorityEvidenceRef.current = null
+      lastVerifiedAuthorityScopeRef.current = null
+      resetEditorToEmptyState()
+    }
+    window.addEventListener('tldw:auth-principal-changed', resetOnLogout)
+    return () => {
+      window.removeEventListener('tldw:auth-principal-changed', resetOnLogout)
+    }
+  }, [resetEditorToEmptyState])
   const startDraftSession = React.useCallback(() => {
     setHasActiveDraft(true)
     ed.resetEditor()
@@ -326,15 +375,15 @@ const NotesManagerPage: React.FC = () => {
   const graphInitialFocusNoteId = React.useMemo(
     () =>
       resolveNotesGraphFocusNoteId(
-        ed.selectedId,
+        authoritySelectedId,
         ed.recentNotes,
         visibleNotes
       ),
-    [ed.recentNotes, ed.selectedId, visibleNotes]
+    [authoritySelectedId, ed.recentNotes, visibleNotes]
   )
   const hasActiveNotes =
     list.listMode === 'active' &&
-    hasNotesGraphActiveNotes(ed.selectedId, list.total, visibleNotes)
+    hasNotesGraphActiveNotes(authoritySelectedId, list.total, visibleNotes)
   const orderedVisibleNoteIds = React.useMemo(
     () => visibleNotes.map((note) => String(note.id)),
     [visibleNotes]
@@ -398,10 +447,18 @@ const NotesManagerPage: React.FC = () => {
     isError: noteNeighborsError,
     refetch: refetchNoteNeighbors
   } = useQuery({
-    queryKey: ['note-graph-neighbors', ed.selectedId, ed.graphMutationTick],
-    enabled: isOnline && ed.selectedId != null,
+    queryKey: [
+      'note-graph-neighbors',
+      notesGraphAuthorityScope,
+      authoritySelectedId,
+      ed.graphMutationTick
+    ],
+    enabled:
+      isOnline &&
+      notesGraphAuthorityScope != null &&
+      authoritySelectedId != null,
     queryFn: async () => {
-      const noteId = encodeURIComponent(String(ed.selectedId))
+      const noteId = encodeURIComponent(String(authoritySelectedId))
       const graph = await bgRequest<any>({
         path: `/api/v1/notes/${noteId}/neighbors?edge_types=manual,wikilink,backlink,source_membership&max_nodes=80&max_edges=200` as any,
         method: 'GET' as any
@@ -2356,7 +2413,7 @@ const NotesManagerPage: React.FC = () => {
           authorityScope={notesGraphAuthorityScope}
           isOnline={isOnline}
           initialFocusNoteId={graphInitialFocusNoteId}
-          selectedNoteId={ed.selectedId}
+          selectedNoteId={authoritySelectedId}
           hasActiveNotes={hasActiveNotes}
           isMobileViewport={isMobileViewport}
           onOpenSidebar={() => setMobileSidebarOpen(true)}

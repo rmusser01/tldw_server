@@ -70,6 +70,7 @@ import type { NoteStudioDocumentSummary } from '../notes-studio-types'
 type ConfirmDanger = (options: ConfirmDangerOptions) => Promise<boolean>
 
 export interface UseNotesEditorStateDeps {
+  authorityScope?: string | null
   isOnline: boolean
   isMobileViewport: boolean
   message: MessageInstance
@@ -102,6 +103,7 @@ const noteResourcePath = (id: string | number) =>
 
 export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   const {
+    authorityScope,
     isOnline,
     isMobileViewport,
     message,
@@ -124,6 +126,8 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     setKeywordSuggestionSelection,
     editorDisabled,
   } = deps
+  const authorityScopeRef = React.useRef(authorityScope)
+  authorityScopeRef.current = authorityScope
 
   // ---- editor state ----
   const [selectedId, setSelectedId] = React.useState<string | number | null>(null)
@@ -468,10 +472,18 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   }, [updateRecentNotes])
 
   const loadDetail = React.useCallback(async (id: string | number): Promise<boolean> => {
+    const requestAuthorityScope = authorityScope
+    if (requestAuthorityScope === null) return false
     clearAssistUndoState()
     setLoadingDetail(true)
     try {
       const d = await bgRequest<any>({ path: noteResourcePath(id) as any, method: 'GET' as any })
+      if (
+        requestAuthorityScope !== undefined &&
+        authorityScopeRef.current !== requestAuthorityScope
+      ) {
+        return false
+      }
       const loadedTitle = String(d?.title || `Note ${id}`)
       setSelectedId(id)
       setTitle(String(d?.title || ''))
@@ -514,7 +526,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       message.error('Failed to load note')
       return false
     } finally { setLoadingDetail(false) }
-  }, [applyOfflineDraftToEditor, clearAssistUndoState, clearTaskState, message, refreshTaskStateForNote, rememberRecentNote, setEditorKeywords])
+  }, [applyOfflineDraftToEditor, authorityScope, clearAssistUndoState, clearTaskState, message, refreshTaskStateForNote, rememberRecentNote, setEditorKeywords])
 
   const dismissTaskActivity = React.useCallback(async (eventId: string) => {
     const normalizedEventId = String(eventId || '').trim()

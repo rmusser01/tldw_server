@@ -20,7 +20,9 @@ const {
   mockClearSetting,
   mockGetAllNoteKeywordStats,
   mockSearchNoteKeywords,
-  mockCytoscapeFactory
+  mockCytoscapeFactory,
+  mockGetCurrentUser,
+  mockCanonicalConfig
 } = vi.hoisted(() => {
   const cyInstance: Record<string, any> = {
     on: vi.fn(),
@@ -44,7 +46,13 @@ const {
     mockClearSetting: vi.fn(),
     mockGetAllNoteKeywordStats: vi.fn(),
     mockSearchNoteKeywords: vi.fn(),
-    mockCytoscapeFactory: cytoscapeFactory
+    mockCytoscapeFactory: cytoscapeFactory,
+    mockGetCurrentUser: vi.fn(),
+    mockCanonicalConfig: {
+      serverUrl: "https://notes.example.test",
+      authMode: "single-user" as const,
+      authSource: "cookie-session" as const
+    }
   }
 })
 
@@ -87,6 +95,17 @@ vi.mock("@/hooks/useServerCapabilities", () => ({
     capabilities: { hasNotes: true },
     loading: false
   })
+}))
+
+vi.mock("@/hooks/useCanonicalConnectionConfig", () => ({
+  useCanonicalConnectionConfig: () => ({
+    config: mockCanonicalConfig,
+    loading: false
+  })
+}))
+
+vi.mock("@/services/tldw/TldwAuth", () => ({
+  tldwAuth: { getCurrentUser: mockGetCurrentUser }
 }))
 
 vi.mock("@/components/Common/confirm-danger", () => ({
@@ -220,6 +239,13 @@ const contrastRatio = (a: [number, number, number], b: [number, number, number])
 }
 
 const seedAndSaveNote = async () => {
+  await waitFor(() => {
+    expect(
+      mockBgRequest.mock.calls.some(([request]) =>
+        String(request?.path || "").startsWith("/api/v1/notes/?")
+      )
+    ).toBe(true)
+  })
   fireEvent.change(screen.getByPlaceholderText("Title"), {
     target: { value: "A11y regression note" }
   })
@@ -242,6 +268,11 @@ describe("NotesManagerPage stage 22 accessibility regression", () => {
     mockClearSetting.mockResolvedValue(undefined)
     mockGetAllNoteKeywordStats.mockResolvedValue([{ keyword: "research", noteCount: 3 }])
     mockSearchNoteKeywords.mockResolvedValue(["research"])
+    mockGetCurrentUser.mockResolvedValue({
+      id: 1,
+      username: "notes-user",
+      is_active: true
+    })
 
     mockBgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
       const path = String(request.path || "")

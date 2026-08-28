@@ -7,7 +7,7 @@ import { tldwAuth } from "@/services/tldw/TldwAuth"
 
 type NotesGraphAuthorityConfig = Pick<
   TldwConfig,
-  "serverUrl" | "authMode" | "orgId" | "apiKey" | "accessToken"
+  "serverUrl" | "authMode" | "authSource" | "orgId" | "apiKey" | "accessToken"
 >
 
 type NotesGraphAuthorityResolution = {
@@ -25,7 +25,7 @@ const normalizeServerOrigin = (serverUrl: string): string | null => {
 
 const buildBoundaryKey = (
   config: NotesGraphAuthorityConfig | null
-): { key: string; origin: string } | null => {
+): { key: string; origin: string; isCookieSession: boolean } | null => {
   if (!config) return null
   const origin = normalizeServerOrigin(config.serverUrl)
   if (!origin) return null
@@ -47,7 +47,8 @@ const buildBoundaryKey = (
       config.orgId ?? null,
       credentialBoundary
     ]),
-    origin
+    origin,
+    isCookieSession: config.authSource === "cookie-session"
   }
 }
 
@@ -107,14 +108,33 @@ export const useNotesGraphAuthorityScope = ({
       setResolution(null)
       setRevision((current) => current + 1)
     }
+    const revalidateCookieSession = () => {
+      if (!boundary?.isCookieSession) return
+      invalidate()
+    }
+    const revalidateVisibleCookieSession = () => {
+      if (document.visibilityState === "visible") revalidateCookieSession()
+    }
     window.addEventListener("tldw:config-updated", invalidate)
     window.addEventListener("tldw:auth-principal-changed", invalidate)
+    window.addEventListener("focus", revalidateCookieSession)
+    window.addEventListener("pageshow", revalidateCookieSession)
+    document.addEventListener(
+      "visibilitychange",
+      revalidateVisibleCookieSession
+    )
     return () => {
       window.removeEventListener("tldw:config-updated", invalidate)
       window.removeEventListener("tldw:auth-principal-changed", invalidate)
+      window.removeEventListener("focus", revalidateCookieSession)
+      window.removeEventListener("pageshow", revalidateCookieSession)
+      document.removeEventListener(
+        "visibilitychange",
+        revalidateVisibleCookieSession
+      )
       epochRef.current += 1
     }
-  }, [])
+  }, [boundary?.isCookieSession])
 
   if (loading || !boundary || resolution?.boundaryKey !== boundary.key) {
     return null

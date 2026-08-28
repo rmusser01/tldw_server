@@ -2,7 +2,7 @@
 import { createHash } from "node:crypto"
 
 import { act, renderHook, waitFor } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { useNotesGraphAuthorityScope } from "../hooks/useNotesGraphAuthorityScope"
 
@@ -29,6 +29,12 @@ const activeUser = (id: number) => ({
   is_active: true
 })
 
+const cookieConfig = (serverUrl = "https://notes.example.test") => ({
+  serverUrl,
+  authMode: "single-user" as const,
+  authSource: "cookie-session" as const
+})
+
 const expectedScope = (origin: string, principalId: number | string) => {
   const tuple = JSON.stringify([origin, String(principalId)])
   const digest = createHash("sha256")
@@ -49,7 +55,11 @@ const deferred = <T,>() => {
 
 describe("useNotesGraphAuthorityScope", () => {
   beforeEach(() => {
-    vi.clearAllMocks()
+    mocks.getCurrentUser.mockReset()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
   })
 
   it("stays guarded without canonical configuration or a verified active principal", async () => {
@@ -96,12 +106,14 @@ describe("useNotesGraphAuthorityScope", () => {
 
   it("becomes ready for a verified cookie session without credential material in the scope", async () => {
     mocks.getCurrentUser.mockResolvedValue(activeUser(42))
-    const cookieConfig = config(" HTTPS://Notes.Example.Test:443/api/v1/ ", {
-      apiKey: "raw-api-key",
-      accessToken: "raw-access-token"
-    })
+    const credentialFreeConfig = cookieConfig(
+      " HTTPS://Notes.Example.Test:443/api/v1/ "
+    )
     const { result } = renderHook(() =>
-      useNotesGraphAuthorityScope({ config: cookieConfig, loading: false })
+      useNotesGraphAuthorityScope({
+        config: credentialFreeConfig,
+        loading: false
+      })
     )
 
     await waitFor(() => {
@@ -110,9 +122,166 @@ describe("useNotesGraphAuthorityScope", () => {
       )
     })
     expect(result.current).toMatch(/^notes-graph:sha256:[0-9a-f]{64}$/)
-    expect(result.current).not.toContain("raw-api-key")
-    expect(result.current).not.toContain("raw-access-token")
+    expect(credentialFreeConfig).not.toHaveProperty("apiKey")
+    expect(credentialFreeConfig).not.toHaveProperty("accessToken")
   })
+
+  it("clears an expired cookie authority on focus and leaves it guarded", async () => {
+    mocks.getCurrentUser
+      .mockResolvedValueOnce(activeUser(42))
+      .mockRejectedValueOnce(new Error("Session expired"))
+    const canonicalConfig = cookieConfig()
+    const { result } = renderHook(() =>
+      useNotesGraphAuthorityScope({ config: canonicalConfig, loading: false })
+    )
+    await waitFor(() => expect(result.current).not.toBeNull())
+
+    act(() => window.dispatchEvent(new Event("focus")))
+
+    expect(result.current).toBeNull()
+    await waitFor(() => expect(mocks.getCurrentUser).toHaveBeenCalledTimes(2))
+    expect(result.current).toBeNull()
+  })
+
+  it("replaces cookie authority after an out-of-tab principal switch", async () => {
+    const nextPrincipal = deferred<ReturnType<typeof activeUser>>()
+    mocks.getCurrentUser
+      .mockResolvedValueOnce(activeUser(42))
+      .mockImplementationOnce(() => nextPrincipal.promise)
+    const canonicalConfig = cookieConfig()
+    const { result } = renderHook(() =>
+      useNotesGraphAuthorityScope({ config: canonicalConfig, loading: false })
+    )
+    await waitFor(() => {
+      expect(result.current).toBe(
+        expectedScope("https://notes.example.test", 42)
+      )
+    })
+
+    act(() => window.dispatchEvent(new Event("pageshow")))
+    expect(result.current).toBeNull()
+
+    await act(async () => {
+      nextPrincipal.resolve(activeUser(77))
+      await Promise.resolve()
+    })
+    await waitFor(() => {
+      expect(result.current).toBe(
+        expectedScope("https://notes.example.test", 77)
+      )
+    })
+  })
+
+  it("restores the same cookie scope after visible-tab revalidation", async () => {
+    const samePrincipal = deferred<ReturnType<typeof activeUser>>()
+    mocks.getCurrentUser
+      .mockResolvedValueOnce(activeUser(42))
+      .mockImplementationOnce(() => samePrincipal.promise)
+    const visibility = vi
+      .spyOn(document, "visibilityState", "get")
+      .mockReturnValue("visible")
+    const canonicalConfig = cookieConfig()
+    const { result } = renderHook(() =>
+      useNotesGraphAuthorityScope({ config: canonicalConfig, loading: false })
+    )
+    const scope = expectedScope("https://notes.example.test", 42)
+    await waitFor(() => expect(result.current).toBe(scope))
+
+    act(() => document.dispatchEvent(new Event("visibilitychange")))
+    expect(result.current).toBeNull()
+
+    await act(async () => {
+      samePrincipal.resolve(activeUser(42))
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(result.current).toBe(scope))
+    visibility.mockRestore()
+  })
+
+  it("ignores hidden visibility changes for cookie sessions", async () => {
+    mocks.getCurrentUser.mockResolvedValue(activeUser(42))
+    const visibility = vi
+      .spyOn(document, "visibilityState", "get")
+      .mockReturnValue("hidden")
+    const canonicalConfig = cookieConfig()
+    const { result } = renderHook(() =>
+      useNotesGraphAuthorityScope({ config: canonicalConfig, loading: false })
+    )
+    await waitFor(() => expect(result.current).not.toBeNull())
+
+    act(() => document.dispatchEvent(new Event("visibilitychange")))
+
+    expect(result.current).not.toBeNull()
+    expect(mocks.getCurrentUser).toHaveBeenCalledTimes(1)
+    visibility.mockRestore()
+  })
+
+  it("fences stale cookie resume completions", async () => {
+    const stale = deferred<ReturnType<typeof activeUser>>()
+    const current = deferred<ReturnType<typeof activeUser>>()
+    mocks.getCurrentUser
+      .mockResolvedValueOnce(activeUser(42))
+      .mockImplementationOnce(() => stale.promise)
+      .mockImplementationOnce(() => current.promise)
+    const canonicalConfig = cookieConfig()
+    const { result } = renderHook(() =>
+      useNotesGraphAuthorityScope({ config: canonicalConfig, loading: false })
+    )
+    await waitFor(() => expect(result.current).not.toBeNull())
+
+    act(() => window.dispatchEvent(new Event("focus")))
+    await waitFor(() => expect(mocks.getCurrentUser).toHaveBeenCalledTimes(2))
+    act(() => window.dispatchEvent(new Event("pageshow")))
+    await waitFor(() => expect(mocks.getCurrentUser).toHaveBeenCalledTimes(3))
+
+    await act(async () => {
+      stale.resolve(activeUser(77))
+      await Promise.resolve()
+    })
+    expect(result.current).toBeNull()
+
+    await act(async () => {
+      current.resolve(activeUser(88))
+      await Promise.resolve()
+    })
+    await waitFor(() => {
+      expect(result.current).toBe(
+        expectedScope("https://notes.example.test", 88)
+      )
+    })
+  })
+
+  it.each([
+    [
+      "manual single-user",
+      config("https://notes.example.test", {
+        authMode: "single-user",
+        authSource: "manual",
+        apiKey: "single-user-key"
+      })
+    ],
+    [
+      "multi-user",
+      config("https://notes.example.test", {
+        accessToken: "multi-user-token"
+      })
+    ]
+  ])(
+    "does not revalidate %s authority on ordinary focus",
+    async (_mode, canonicalConfig) => {
+      mocks.getCurrentUser.mockResolvedValue(activeUser(42))
+      const { result } = renderHook(() =>
+        useNotesGraphAuthorityScope({ config: canonicalConfig, loading: false })
+      )
+      await waitFor(() => expect(result.current).not.toBeNull())
+      const scope = result.current
+
+      act(() => window.dispatchEvent(new Event("focus")))
+
+      expect(result.current).toBe(scope)
+      expect(mocks.getCurrentUser).toHaveBeenCalledTimes(1)
+    }
+  )
 
   it.each([
     ["single-user", { authMode: "single-user", apiKey: "single-user-key" }],

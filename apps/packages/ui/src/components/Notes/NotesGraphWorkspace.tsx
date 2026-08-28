@@ -41,7 +41,23 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
   const { t } = useTranslation(["option", "common"])
   const rootRef = React.useRef<HTMLElement | null>(null)
   const canvasRef = React.useRef<NotesGraphCanvasHandle | null>(null)
-  const [mountedFocusNoteId] = React.useState(initialFocusNoteId)
+  const mountedFocusRef = React.useRef({
+    authorityScope,
+    noteId: authorityScope ? initialFocusNoteId : null
+  })
+  if (mountedFocusRef.current.authorityScope !== authorityScope) {
+    mountedFocusRef.current = {
+      authorityScope,
+      noteId: authorityScope ? initialFocusNoteId : null
+    }
+  } else if (
+    authorityScope &&
+    mountedFocusRef.current.noteId == null &&
+    initialFocusNoteId
+  ) {
+    mountedFocusRef.current.noteId = initialFocusNoteId
+  }
+  const mountedFocusNoteId = mountedFocusRef.current.noteId
   const [radius, setRadius] = React.useState<1 | 2>(1)
   const [maxNodesInput, setMaxNodesInput] = React.useState(120)
   const [selectedNodeId, setSelectedNodeId] = React.useState<string | null>(

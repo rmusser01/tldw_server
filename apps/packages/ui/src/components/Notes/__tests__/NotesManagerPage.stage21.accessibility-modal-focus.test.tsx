@@ -1,6 +1,6 @@
 import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import NotesManagerPage from "../NotesManagerPage"
 
@@ -18,7 +18,10 @@ const {
   mockGetAllNoteKeywordStats,
   mockSearchNoteKeywords,
   mockGetCurrentUser,
-  mockCytoscapeFactory
+  mockCytoscapeFactory,
+  mockAuthorityState,
+  mockCanonicalConfig,
+  mockDetailState
 } = vi.hoisted(() => {
   const cyInstance: Record<string, any> = {
     on: vi.fn(),
@@ -43,7 +46,14 @@ const {
     mockGetAllNoteKeywordStats: vi.fn(),
     mockSearchNoteKeywords: vi.fn(),
     mockGetCurrentUser: vi.fn(),
-    mockCytoscapeFactory: cytoscapeFactory
+    mockCytoscapeFactory: cytoscapeFactory,
+    mockAuthorityState: { principalId: 1 },
+    mockCanonicalConfig: {
+      serverUrl: "https://notes.example.test",
+      authMode: "single-user" as const,
+      authSource: "cookie-session" as const
+    },
+    mockDetailState: { promise: null as Promise<Record<string, unknown>> | null }
   }
 })
 
@@ -84,6 +94,13 @@ vi.mock("@/context/demo-mode", () => ({
 vi.mock("@/hooks/useServerCapabilities", () => ({
   useServerCapabilities: () => ({
     capabilities: { hasNotes: true },
+    loading: false
+  })
+}))
+
+vi.mock("@/hooks/useCanonicalConnectionConfig", () => ({
+  useCanonicalConnectionConfig: () => ({
+    config: mockCanonicalConfig,
     loading: false
   })
 }))
@@ -151,7 +168,28 @@ vi.mock("@/components/Common/MarkdownPreview", () => ({
 }))
 
 vi.mock("@/components/Notes/NotesListPanel", () => ({
-  default: () => <div data-testid="notes-list-panel" />
+  default: ({
+    notes,
+    selectedId,
+    onSelectNote
+  }: {
+    notes?: Array<{ id: string; title?: string }>
+    selectedId: string | number | null
+    onSelectNote: (id: string) => void
+  }) => (
+    <div data-testid="notes-list-panel">
+      <output data-testid="notes-list-selected-id">{selectedId ?? "none"}</output>
+      {(notes ?? []).map((note) => (
+        <button
+          key={note.id}
+          type="button"
+          data-testid={`notes-list-note-${note.id}`}
+          onClick={() => onSelectNote(note.id)}>
+          {note.title ?? note.id}
+        </button>
+      ))}
+    </div>
+  )
 }))
 
 vi.mock("cytoscape", () => ({
@@ -177,6 +215,7 @@ const renderPage = () => {
 }
 
 const seedAndSaveNote = async () => {
+  await screen.findByTestId("notes-list-note-note-a")
   fireEvent.change(screen.getByPlaceholderText("Title"), {
     target: { value: "Focus handoff note" }
   })
@@ -199,18 +238,32 @@ describe("NotesManagerPage stage 21 accessibility overlay and view focus handoff
     mockClearSetting.mockResolvedValue(undefined)
     mockGetAllNoteKeywordStats.mockResolvedValue([{ keyword: "research", noteCount: 3 }])
     mockSearchNoteKeywords.mockResolvedValue(["research"])
-    mockGetCurrentUser.mockResolvedValue({
-      id: 1,
-      username: "notes-user",
+    mockAuthorityState.principalId = 1
+    mockDetailState.promise = null
+    mockGetCurrentUser.mockImplementation(async () => ({
+      id: mockAuthorityState.principalId,
+      username: `notes-user-${mockAuthorityState.principalId}`,
       is_active: true
-    })
+    }))
 
     mockBgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
       const path = String(request.path || "")
       const method = String(request.method || "GET").toUpperCase()
 
       if (path.startsWith("/api/v1/notes/?")) {
-        return { items: [], pagination: { total_items: 0, total_pages: 1 } }
+        return mockAuthorityState.principalId === 1
+          ? {
+              items: [
+                {
+                  id: "note-a",
+                  title: "Focus handoff note",
+                  content: "Seed content",
+                  deleted: false
+                }
+              ],
+              pagination: { total_items: 1, total_pages: 1 }
+            }
+          : { items: [], pagination: { total_items: 0, total_pages: 1 } }
       }
       if (path === "/api/v1/admin/notes/title-settings" && method === "GET") {
         return {
@@ -224,6 +277,7 @@ describe("NotesManagerPage stage 21 accessibility overlay and view focus handoff
         return { id: "note-a", version: 1, last_modified: "2026-02-18T10:00:00.000Z" }
       }
       if (path === "/api/v1/notes/note-a" && method === "GET") {
+        if (mockDetailState.promise) return mockDetailState.promise
         return {
           id: "note-a",
           title: "Focus handoff note",
@@ -241,11 +295,28 @@ describe("NotesManagerPage stage 21 accessibility overlay and view focus handoff
       }
       if (path.startsWith("/api/v1/notes/graph?")) {
         return {
-          elements: {
-            nodes: [{ data: { id: "note:note-a", type: "note", label: "Focus handoff note" } }],
-            edges: []
-          },
-          truncated: false
+          nodes: [
+            {
+              id: "note:note-a",
+              type: "note",
+              label: "Focus handoff note",
+              created_at: null,
+              deleted: false,
+              degree: 0,
+              tag_count: 0,
+              primary_source_id: null
+            }
+          ],
+          edges: [],
+          truncated: false,
+          truncated_by: [],
+          has_more: false,
+          cursor: null,
+          limits: { max_nodes: 120, max_edges: 480, max_degree: 40 },
+          radius_cap_applied: false,
+          active_note_count: 1,
+          all_notes_note_cap: 100,
+          all_notes_eligible: true
         }
       }
       return {}
@@ -299,10 +370,7 @@ describe("NotesManagerPage stage 21 accessibility overlay and view focus handoff
     mockGetCurrentUser.mockReset()
     mockGetCurrentUser.mockReturnValue(new Promise(() => undefined))
     renderPage()
-    await seedAndSaveNote()
-
-    fireEvent.click(screen.getByRole("button", { name: "Split" }))
-    fireEvent.click(await screen.findByTestId("notes-open-graph-view"))
+    fireEvent.click(await screen.findByTestId("notes-view-mode-graph"))
     await screen.findByTestId("notes-graph-workspace")
 
     expect(
@@ -316,5 +384,119 @@ describe("NotesManagerPage stage 21 accessibility overlay and view focus handoff
       )
     ).toBe(false)
     expect(screen.queryByTestId("notes-graph-canvas")).not.toBeInTheDocument()
+  })
+
+  it("drops account A list, selection, and canvas evidence before empty account B can request graph data", async () => {
+    renderPage()
+    fireEvent.click(await screen.findByTestId("notes-list-note-note-a"))
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText("Title")).toHaveValue(
+        "Focus handoff note"
+      )
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Split" }))
+    fireEvent.click(await screen.findByTestId("notes-open-graph-view"))
+    await screen.findByTestId("notes-graph-canvas")
+    const boundaryCallIndex = mockBgRequest.mock.calls.length
+
+    mockAuthorityState.principalId = 2
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent("tldw:auth-principal-changed", {
+          detail: { kind: "switch" }
+        })
+      )
+    })
+
+    expect(screen.queryByTestId("notes-list-note-note-a")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("notes-graph-canvas")).not.toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByTestId("notes-list-selected-id")).toHaveTextContent(
+        "none"
+      )
+    })
+    expect(screen.getByTestId("notes-editor-empty-state")).toBeInTheDocument()
+
+    const accountBCalls = mockBgRequest.mock.calls.slice(boundaryCallIndex)
+    expect(
+      accountBCalls.some(([request]) => {
+        const path = String(request?.path || "")
+        return (
+          (path.includes("/graph?") || path.includes("/graph/suggestions")) &&
+          path.includes("note-a")
+        )
+      })
+    ).toBe(false)
+  })
+
+  it("keeps the selected editor note through same-principal cookie revalidation", async () => {
+    renderPage()
+    fireEvent.click(await screen.findByTestId("notes-list-note-note-a"))
+    const title = screen.getByPlaceholderText("Title")
+    await waitFor(() => expect(title).toHaveValue("Focus handoff note"))
+    const resume = new Promise<{
+      id: number
+      username: string
+      is_active: boolean
+    }>((resolve) => {
+      window.setTimeout(
+        () => resolve({ id: 1, username: "notes-user-1", is_active: true }),
+        20
+      )
+    })
+    mockGetCurrentUser.mockReturnValueOnce(resume)
+
+    act(() => window.dispatchEvent(new Event("focus")))
+
+    expect(title).toHaveValue("Focus handoff note")
+    await waitFor(() => {
+      expect(screen.getByTestId("notes-list-selected-id")).toHaveTextContent(
+        "note-a"
+      )
+    })
+    expect(title).toHaveValue("Focus handoff note")
+  })
+
+  it("ignores an account A detail completion after account B becomes authoritative", async () => {
+    let resolveDetail!: (value: Record<string, unknown>) => void
+    mockDetailState.promise = new Promise((resolve) => {
+      resolveDetail = resolve
+    })
+    renderPage()
+    fireEvent.click(await screen.findByTestId("notes-list-note-note-a"))
+    await waitFor(() => {
+      expect(mockBgRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ path: "/api/v1/notes/note-a" })
+      )
+    })
+
+    mockAuthorityState.principalId = 2
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent("tldw:auth-principal-changed", {
+          detail: { kind: "switch" }
+        })
+      )
+    })
+    await waitFor(() => {
+      expect(screen.queryByTestId("notes-list-note-note-a")).not.toBeInTheDocument()
+    })
+
+    await act(async () => {
+      resolveDetail({
+        id: "note-a",
+        title: "Stale account A detail",
+        content: "Must not cross the account boundary",
+        metadata: { keywords: [] },
+        version: 1
+      })
+      await Promise.resolve()
+    })
+
+    expect(screen.getByTestId("notes-list-selected-id")).toHaveTextContent(
+      "none"
+    )
+    expect(screen.getByPlaceholderText("Title")).toHaveValue("")
   })
 })

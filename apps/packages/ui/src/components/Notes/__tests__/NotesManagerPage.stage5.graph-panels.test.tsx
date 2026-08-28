@@ -5,6 +5,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { getDesignSystemState } from '@/design-system'
 import NotesManagerPage from '../NotesManagerPage'
 
+vi.mock('@/components/Notes/hooks/useNotesGraphAuthorityScope', () => ({
+  useNotesGraphAuthorityScope: () => 'test-notes-authority'
+}))
+
 const {
   mockBgRequest,
   mockMessageSuccess,

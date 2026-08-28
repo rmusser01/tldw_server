@@ -1,7 +1,7 @@
 import React from 'react'
 import type { MessageInstance } from 'antd/es/message/interface'
 import type { QueryClient } from '@tanstack/react-query'
-import { useQuery, keepPreviousData } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { bgRequest } from '@/services/background-proxy'
 import { CAPTURED_NOTE_KEYWORD } from '@/services/note-capture'
 import { getSetting, setSetting } from '@/services/settings/registry'
@@ -38,6 +38,7 @@ import type { ConfirmDangerOptions } from '@/components/Common/confirm-danger'
 type ConfirmDanger = (options: ConfirmDangerOptions) => Promise<boolean>
 
 export interface UseNotesListManagementDeps {
+  authorityScope?: string | null
   isOnline: boolean
   message: MessageInstance
   confirmDanger: ConfirmDanger
@@ -52,6 +53,7 @@ export interface UseNotesListManagementDeps {
 
 export function useNotesListManagement(deps: UseNotesListManagementDeps) {
   const {
+    authorityScope,
     isOnline,
     message,
     confirmDanger,
@@ -72,7 +74,32 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
   const [listMode, setListMode] = React.useState<'active' | 'trash'>('active')
   const [listViewMode, setListViewMode] = React.useState<NotesListViewMode>('list')
   const listQueryViewMode = listViewMode === 'graph' ? 'list' : listViewMode
-  const [total, setTotal] = React.useState(0)
+  const authorityScopeRef = React.useRef(authorityScope)
+  authorityScopeRef.current = authorityScope
+  const [totalState, setTotalState] = React.useState({
+    authorityScope,
+    value: 0
+  })
+  const setTotal = React.useCallback<React.Dispatch<React.SetStateAction<number>>>(
+    (nextValue) => {
+      const targetAuthority = authorityScope
+      setTotalState((current) => {
+        if (authorityScopeRef.current !== targetAuthority) return current
+        const currentValue =
+          current.authorityScope === targetAuthority ? current.value : 0
+        return {
+          authorityScope: targetAuthority,
+          value:
+            typeof nextValue === 'function'
+              ? nextValue(currentValue)
+              : nextValue
+        }
+      })
+    },
+    [authorityScope]
+  )
+  const total =
+    totalState.authorityScope === authorityScope ? totalState.value : 0
   const [bulkSelectedIds, setBulkSelectedIds] = React.useState<string[]>([])
   const bulkSelectionAnchorRef = React.useRef<string | null>(null)
 
@@ -280,10 +307,9 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     const pagination = res?.pagination
     setTotal(Number(pagination?.total_items || items.length || 0))
     return sortNoteRows(items, sortOption).map(mapNoteListItem)
-  }, [effectiveKeywordTokens, fetchFilteredNotesRaw, listMode, listViewMode, page, pageSize, query, selectedMoodboardId, sortOption])
+  }, [effectiveKeywordTokens, fetchFilteredNotesRaw, listMode, listViewMode, page, pageSize, query, selectedMoodboardId, setTotal, sortOption])
 
-  const { data, error, isError, isFetching, isPlaceholderData, refetch } = useQuery({
-    queryKey: [
+  const listQueryKey = [
       'notes',
       listMode,
       listQueryViewMode,
@@ -293,12 +319,33 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
       pageSize,
       sortOption,
       selectedNotebookId ?? 'none',
-      effectiveKeywordTokens.join('|')
-    ],
+      effectiveKeywordTokens.join('|'),
+      ...(authorityScope === undefined
+        ? []
+        : ['authority', authorityScope])
+    ]
+  const {
+    data: queryData,
+    error,
+    isError,
+    isFetching,
+    isPlaceholderData,
+    refetch
+  } = useQuery({
+    queryKey: listQueryKey,
     queryFn: fetchNotes,
-    placeholderData: keepPreviousData,
-    enabled: isOnline
+    placeholderData: (previousData, previousQuery) => {
+      if (authorityScope === undefined) return previousData
+      if (authorityScope === null) return undefined
+      const previousKey = previousQuery?.queryKey ?? []
+      return previousKey.at(-2) === 'authority' &&
+        previousKey.at(-1) === authorityScope
+        ? previousData
+        : undefined
+    },
+    enabled: isOnline && authorityScope !== null
   })
+  const data = authorityScope === null ? undefined : queryData
   const listErrorMessage = React.useMemo(() => {
     if (!isError) return null
     const messageText = String((error as any)?.message || error || '').trim()

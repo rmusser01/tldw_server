@@ -95,7 +95,8 @@ vi.mock("react-i18next", () => ({
     t: (
       key: string,
       options?: string | { defaultValue?: string; [key: string]: unknown }
-    ) => (typeof options === "string" ? options : options?.defaultValue ?? key)
+    ) =>
+      typeof options === "string" ? options : (options?.defaultValue ?? key)
   })
 }))
 
@@ -564,7 +565,7 @@ describe("NotesGraphToolbar controls", () => {
     fireEvent.click(screen.getByRole("button", { name: "Edge visibility" }))
     expect(
       screen.getByRole("button", { name: "Edge visibility" })
-    ).toHaveAttribute("aria-haspopup", "menu")
+    ).not.toHaveAttribute("aria-haspopup")
     expect(
       screen.getByRole("button", { name: "Edge visibility" })
     ).toHaveAttribute("aria-expanded", "true")
@@ -572,6 +573,9 @@ describe("NotesGraphToolbar controls", () => {
       screen.getByRole("button", { name: "Edge visibility" })
     ).toHaveAttribute("aria-controls", "notes-graph-edge-menu")
     expect(document.getElementById("notes-graph-edge-menu")).toBeInTheDocument()
+    expect(
+      screen.getByRole("group", { name: "Edge visibility filters" })
+    ).toHaveAttribute("id", "notes-graph-edge-menu")
     fireEvent.click(screen.getByRole("checkbox", { name: "Manual links" }))
     fireEvent.click(screen.getByRole("checkbox", { name: "Suggestions" }))
 

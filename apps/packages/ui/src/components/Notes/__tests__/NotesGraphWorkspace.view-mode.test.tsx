@@ -24,7 +24,7 @@ vi.mock("react-i18next", () => ({
       options?: string | { defaultValue?: string; [key: string]: unknown }
     ) => {
       const fallback =
-        typeof options === "string" ? options : options?.defaultValue ?? key
+        typeof options === "string" ? options : (options?.defaultValue ?? key)
       if (typeof options !== "object") return fallback
       return Object.entries(options).reduce(
         (value, [name, replacement]) =>
@@ -241,6 +241,66 @@ describe("NotesGraphWorkspace first-class view mode", () => {
     )
     expect(document.body).not.toHaveTextContent("api-key")
     expect(document.body).not.toHaveTextContent("access-token")
+  })
+
+  it("freezes initial focus per verified authority instead of component lifetime", () => {
+    const queryClient = new QueryClient()
+    const view = render(
+      <QueryClientProvider client={queryClient}>
+        <NotesGraphWorkspace
+          authorityScope="scope-a"
+          isOnline
+          initialFocusNoteId="account-a-note"
+          selectedNoteId="account-a-note"
+          hasActiveNotes
+          onSelectNote={vi.fn()}
+          onCreateNote={vi.fn()}
+        />
+      </QueryClientProvider>
+    )
+    expect(mockUseNotesGraphWorkspace).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        authorityScope: "scope-a",
+        initialFocusNoteId: "account-a-note"
+      })
+    )
+
+    view.rerender(
+      <QueryClientProvider client={queryClient}>
+        <NotesGraphWorkspace
+          authorityScope="scope-b"
+          isOnline
+          initialFocusNoteId="account-b-note"
+          selectedNoteId="account-b-note"
+          hasActiveNotes
+          onSelectNote={vi.fn()}
+          onCreateNote={vi.fn()}
+        />
+      </QueryClientProvider>
+    )
+    expect(mockUseNotesGraphWorkspace).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        authorityScope: "scope-b",
+        initialFocusNoteId: "account-b-note"
+      })
+    )
+
+    view.rerender(
+      <QueryClientProvider client={queryClient}>
+        <NotesGraphWorkspace
+          authorityScope="scope-b"
+          isOnline
+          initialFocusNoteId="later-account-b-note"
+          selectedNoteId="later-account-b-note"
+          hasActiveNotes
+          onSelectNote={vi.fn()}
+          onCreateNote={vi.fn()}
+        />
+      </QueryClientProvider>
+    )
+    expect(mockUseNotesGraphWorkspace).toHaveBeenLastCalledWith(
+      expect.objectContaining({ initialFocusNoteId: "account-b-note" })
+    )
   })
 
   it("shows the standard Notes empty state when there is no active note", () => {

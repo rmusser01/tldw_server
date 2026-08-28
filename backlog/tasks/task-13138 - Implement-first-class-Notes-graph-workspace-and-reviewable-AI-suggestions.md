@@ -4,7 +4,7 @@ title: Implement first-class Notes graph workspace and reviewable AI suggestions
 status: In Progress
 assignee: []
 created_date: 2026-08-27 03:40
-updated_date: 2026-08-28 07:46
+updated_date: 2026-08-28 08:07
 labels:
 - notes
 - knowledge-graph
@@ -79,6 +79,19 @@ modified_files:
 - apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage21.accessibility-modal-focus.test.tsx
 - apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage22.accessibility-regression.test.tsx
 - apps/packages/ui/src/components/Notes/__tests__/useNotesGraphAuthorityScope.test.tsx
+- apps/packages/ui/src/components/Notes/hooks/useNotesEditorState.tsx
+- apps/packages/ui/src/components/Notes/hooks/useNotesListManagement.tsx
+- apps/packages/ui/src/components/Notes/hooks/__tests__/useNotesListManagement.authority.test.tsx
+- apps/packages/ui/src/services/tldw/TldwAuth.ts
+- apps/packages/ui/src/services/__tests__/tldw-auth.logout.test.ts
+- apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage1.editor-reliability.test.tsx
+- apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage1.editor-reliability-followup.test.tsx
+- apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage12.recent-notes.test.tsx
+- apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage23.responsive-layout.test.tsx
+- apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage28.detail-loading-feedback.test.tsx
+- apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage46.list-reliability.test.tsx
+- apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage5.graph-panels.test.tsx
+- apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage6.manual-links.test.tsx
 ---
 
 ## Description
@@ -220,6 +233,10 @@ Task 9 exceptional Fix Round 5 completed from exact base c9f07661a41dda07364b5c4
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 Task 10 Fix Round 1/3 completed from exact base f6a964c9c4582c0ca16b2e37c3048414978751f3. Replaced chat-derived Graph authority with a Notes-owned SHA-256 scope over normalized canonical origin plus verified active principal, with cookie/single-user/multi-user coverage, synchronous config/auth invalidation, credential-safe boundaries, and epoch-fenced A-B-A/stale completions. Preserved Cytoscape pan/zoom across fresh callbacks, restricted recents/active-library state to authoritative active notes, updated Stage 22 for the first-class workspace, added 320px/200%-equivalent vertical reflow, and reused the shared 44px IconButton with complete edge disclosure semantics and semantic foreground tokens. Verification: focused fix gate 35/35; affected Task 9 62/62; affected Task 10/Notes manager gate 52 passed with the single unchanged Stage 5 presentation baseline failure; ESLint zero errors and strict new/graph files zero warnings; pinned Prettier clean for new/graph files; TypeScript exactly matches the inherited 315-line baseline with zero touched diagnostics; git diff --check clean; Bandit not applicable to TypeScript-only scope. Full evidence: .superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-10-report.md. Parent task remains In Progress for Tasks 11-12.
+
+Task 10 Fix Round 2/3 started from exact base 52ab18d83caeb8c2ee11ad760f61d9b8828f3602. Scope is limited to successful logout principal events, cookie-session resume revalidation, authority-scoped Notes list/editor evidence, authority-keyed Graph focus, and checkbox-disclosure semantics. Strict service/hook/manager RED precedes production edits; Task 11, Task 12 browser layout work, and controller progress.md remain excluded.
+
+Task 10 Fix Round 2/3 completed. Successful manual single-user, cookie-session single-user, multi-user, and hosted logout now emits the existing logout principal boundary exactly once after local clearing; failed usable clears do not emit. Cookie sessions revalidate with epoch fencing on focus/pageshow/visible visibility changes, while other auth modes remain stable. Notes list totals/placeholders, editor selection/detail completions, Graph requests, and mounted initial focus are authority scoped, preventing account A evidence from appearing or being requested under B while preserving same-principal resume state. Edge visibility now exposes checkbox-group disclosure semantics. Verification: Round 2 gate 59/59; affected Task 9/list 66/66; auth 16/16; affected managers 43 passed with only the unchanged Stage 5 presentation baseline; ESLint zero errors and strict new/graph files zero warnings; pinned Prettier clean for new/graph files; TypeScript exactly matches the inherited 315-line baseline with zero touched diagnostics; diff/scans clean; Bandit not applicable to TypeScript-only scope. Full evidence: .superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-10-report.md. Parent task remains In Progress for Tasks 11-12.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

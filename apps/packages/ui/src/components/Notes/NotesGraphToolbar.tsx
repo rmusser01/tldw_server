@@ -243,7 +243,6 @@ const NotesGraphToolbar: React.FC<NotesGraphToolbarProps> = ({
           <IconButton
             ariaLabel="Edge visibility"
             className={iconButtonClassName}
-            hasPopup="menu"
             ariaExpanded={edgeMenuOpen}
             ariaControls={EDGE_MENU_ID}
             onClick={() => setEdgeMenuOpen((open) => !open)}>
@@ -252,6 +251,8 @@ const NotesGraphToolbar: React.FC<NotesGraphToolbarProps> = ({
           {edgeMenuOpen ? (
             <div
               id={EDGE_MENU_ID}
+              role="group"
+              aria-label="Edge visibility filters"
               className="absolute right-0 top-12 z-20 min-w-[190px] border border-border bg-elevated p-3 shadow-lg">
               {EDGE_OPTIONS.map(({ type, label }) => (
                 <label
