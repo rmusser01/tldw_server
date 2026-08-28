@@ -510,6 +510,7 @@ def test_terminal_cancellation_replay_retains_source_scope_after_run_cleanup(db)
     cancellation = db.note_graph_suggestion_store.admit_run_cancellation(
         dataset_id=DATASET_ID,
         run_id=running.id,
+        expected_source_note_id=SOURCE_ID,
         expected_state="running",
         expected_revision=running.revision,
         reason="user_cancelled",
@@ -529,6 +530,7 @@ def test_terminal_cancellation_replay_retains_source_scope_after_run_cleanup(db)
     replay = db.note_graph_suggestion_store.admit_run_cancellation(
         dataset_id=DATASET_ID,
         run_id=running.id,
+        expected_source_note_id=SOURCE_ID,
         expected_state="running",
         expected_revision=running.revision,
         reason="user_cancelled",
@@ -539,6 +541,106 @@ def test_terminal_cancellation_replay_retains_source_scope_after_run_cleanup(db)
     assert replay.disposition == "terminal_replay"
     assert replay.replay_envelope == completed.replay_envelope
     assert replay.source_note_id == SOURCE_ID
+
+
+def test_cancellation_wrong_route_note_does_not_create_receipt_or_mutate_run(db) -> None:
+    running = _queue_and_run(db, _admit(db, key="cancel-wrong-route-created"))
+
+    with pytest.raises(RuntimeError, match="notes_graph_run_cancel_resource_missing"):
+        db.note_graph_suggestion_store.admit_run_cancellation(
+            dataset_id=DATASET_ID,
+            run_id=running.id,
+            expected_source_note_id=OTHER_ID,
+            expected_state="running",
+            expected_revision=running.revision,
+            reason="user_cancelled",
+            idempotency_key="cancel-wrong-route-created-key",
+            now=NOW,
+        )
+
+    unchanged = db.note_graph_suggestion_store.get_run(
+        dataset_id=DATASET_ID,
+        run_id=running.id,
+    )
+    assert (unchanged.state.value, unchanged.revision) == ("running", running.revision)
+    assert db.execute_query(
+        "SELECT COUNT(*) AS count FROM note_graph_suggestion_operation_receipts "
+        "WHERE operation_kind='run_cancel' AND resource_identity=?",
+        (running.id,),
+    ).fetchone()["count"] == 0
+
+
+def test_cancellation_wrong_route_note_rejects_in_progress_receipt_without_mutation(db) -> None:
+    running = _queue_and_run(db, _admit(db, key="cancel-wrong-route-progress"))
+    admitted = db.note_graph_suggestion_store.admit_run_cancellation(
+        dataset_id=DATASET_ID,
+        run_id=running.id,
+        expected_source_note_id=SOURCE_ID,
+        expected_state="running",
+        expected_revision=running.revision,
+        reason="user_cancelled",
+        idempotency_key="cancel-wrong-route-progress-key",
+        now=NOW,
+    )
+    assert admitted.run is not None
+
+    with pytest.raises(RuntimeError, match="notes_graph_run_cancel_resource_missing"):
+        db.note_graph_suggestion_store.admit_run_cancellation(
+            dataset_id=DATASET_ID,
+            run_id=running.id,
+            expected_source_note_id=OTHER_ID,
+            expected_state="running",
+            expected_revision=running.revision,
+            reason="user_cancelled",
+            idempotency_key="cancel-wrong-route-progress-key",
+            now=NOW,
+        )
+
+    unchanged = db.note_graph_suggestion_store.get_run(
+        dataset_id=DATASET_ID,
+        run_id=running.id,
+    )
+    assert (unchanged.state.value, unchanged.revision) == (
+        "cancelling",
+        admitted.run.revision,
+    )
+
+
+def test_cancellation_wrong_route_note_rejects_terminal_receipt_after_run_cleanup(db) -> None:
+    running = _queue_and_run(db, _admit(db, key="cancel-wrong-route-terminal"))
+    store = db.note_graph_suggestion_store
+    admitted = store.admit_run_cancellation(
+        dataset_id=DATASET_ID,
+        run_id=running.id,
+        expected_source_note_id=SOURCE_ID,
+        expected_state="running",
+        expected_revision=running.revision,
+        reason="user_cancelled",
+        idempotency_key="cancel-wrong-route-terminal-key",
+        now=NOW,
+    )
+    assert admitted.run is not None
+    store.complete_run_cancellation_receipt(
+        dataset_id=DATASET_ID,
+        run_id=running.id,
+        operation_id=admitted.operation_id,
+        expected_state="cancelling",
+        expected_revision=admitted.run.revision,
+        now=NOW,
+    )
+    db.execute_query("DELETE FROM note_graph_suggestion_runs WHERE id=?", (running.id,))
+
+    with pytest.raises(RuntimeError, match="notes_graph_run_cancel_resource_missing"):
+        store.admit_run_cancellation(
+            dataset_id=DATASET_ID,
+            run_id=running.id,
+            expected_source_note_id=OTHER_ID,
+            expected_state="running",
+            expected_revision=running.revision,
+            reason="user_cancelled",
+            idempotency_key="cancel-wrong-route-terminal-key",
+            now=NOW + timedelta(days=31),
+        )
 
 
 def test_admission_replay_ignores_capability_etag_but_preserves_admitted_revision(db) -> None:
@@ -1969,6 +2071,52 @@ def test_retention_uses_exact_horizons_and_preserves_current_review_state(db) ->
     ).fetchone()
     assert receipt is not None
     assert "source body" not in json.dumps(dict(receipt))
+
+
+def test_real_accepted_suggestion_survives_day_30_and_expires_after_day_90(db) -> None:
+    _stage_and_activate(db, key="accepted-retention-run", suggestion_id="accepted-retention")
+    store = db.note_graph_suggestion_store
+    claimed = store.claim_acceptance(
+        dataset_id=DATASET_ID,
+        suggestion_id="accepted-retention",
+        expected_revision=1,
+        expected_source_fingerprint=_fingerprint(db, SOURCE_ID),
+        expected_target_fingerprint=_fingerprint(db, TARGET_ID),
+        idempotency_key="accepted-retention-key",
+        now=NOW,
+    ).suggestion
+    assert claimed is not None
+    with db.transaction() as conn:
+        accepted = store.finalize_acceptance_in_transaction(
+            conn=conn,
+            fence=claimed,
+            accepted_resource_identity="77777777-7777-4777-8777-777777777777",
+            now=NOW,
+        ).suggestion
+    assert accepted is not None and accepted.expires_at == (NOW + timedelta(days=90)).isoformat()
+
+    day_30 = store.cleanup_retention(
+        dataset_id=DATASET_ID,
+        now=NOW + timedelta(days=30, seconds=1),
+        limit=100,
+    )
+    assert day_30["suggestions"] == 0
+    assert store.get_suggestion(
+        dataset_id=DATASET_ID,
+        suggestion_id="accepted-retention",
+    ).state.value == "accepted"
+
+    day_90 = store.cleanup_retention(
+        dataset_id=DATASET_ID,
+        now=NOW + timedelta(days=90, seconds=1),
+        limit=100,
+    )
+    assert day_90["suggestions"] == 1
+    with pytest.raises(RuntimeError, match="notes_graph_suggestion_not_found"):
+        store.get_suggestion(
+            dataset_id=DATASET_ID,
+            suggestion_id="accepted-retention",
+        )
 
 
 def test_cleanup_rejects_above_maintenance_cap_and_expires_obsolete_target_rejection(db) -> None:

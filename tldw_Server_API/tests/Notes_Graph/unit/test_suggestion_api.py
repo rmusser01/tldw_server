@@ -492,6 +492,7 @@ def test_terminal_cancellation_replay_precedes_current_run_and_source_state() ->
         @staticmethod
         def cancel(**kwargs):
             assert kwargs["expected_state"] is None
+            assert kwargs["expected_source_note_id"] == SOURCE_ID
             return terminal
 
     result = _api(
@@ -610,6 +611,7 @@ def test_cancellation_replays_owner_scoped_receipt_after_run_cleanup() -> None:
 
     assert result.cancellation.replay_envelope["run_id"] == "run-1"
     assert calls[0]["expected_state"] is None
+    assert calls[0]["expected_source_note_id"] == SOURCE_ID
 
 
 def test_cancellation_missing_run_and_receipt_remains_non_enumerating() -> None:

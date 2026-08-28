@@ -608,6 +608,7 @@ async def test_real_suggestion_paths_emit_only_the_closed_privacy_safe_contract(
         ).cancel(
             dataset_id=DATASET_ID,
             run_id=cancellation_admission.run.id,
+            expected_source_note_id=SOURCE_ID,
             expected_state="queued",
             expected_revision=cancellation_admission.run.revision,
             idempotency_key="privacy-cancel-command",

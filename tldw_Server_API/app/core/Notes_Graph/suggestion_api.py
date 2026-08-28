@@ -379,6 +379,7 @@ class NotesGraphSuggestionsAPI:
             result = self._cancellation.cancel(
                 dataset_id=self._dataset_id,
                 run_id=run_id,
+                expected_source_note_id=note_id,
                 expected_state=None,
                 expected_revision=expected_revision,
                 idempotency_key=idempotency_key,
@@ -386,8 +387,6 @@ class NotesGraphSuggestionsAPI:
             )
         except Exception as exc:
             raise self._translate(exc) from exc
-        if result.cancellation.source_note_id != note_id:
-            raise SuggestionAPIError(404, "notes_graph_suggestion_not_found")
         return result
 
     def list_suggestions(

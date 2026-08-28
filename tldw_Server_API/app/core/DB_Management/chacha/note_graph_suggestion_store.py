@@ -3297,7 +3297,7 @@ class NoteGraphSuggestionStore:
                 accepted_resource_identity,
                 self._db_datetime(now_utc),
                 self._db_datetime(now_utc),
-                self._db_datetime(now_utc + timedelta(days=30)),
+                self._db_datetime(now_utc + timedelta(days=90)),
                 self.owner_user_id,
                 current.dataset_id,
                 current.id,
@@ -3724,6 +3724,7 @@ class NoteGraphSuggestionStore:
         *,
         dataset_id: str,
         run_id: str,
+        expected_source_note_id: str | None = None,
         expected_state: str | None,
         expected_revision: int,
         reason: str,
@@ -3756,6 +3757,11 @@ class NoteGraphSuggestionStore:
                 now_utc=now_utc,
             )
             if disposition == "terminal_replay":
+                if (
+                    expected_source_note_id is not None
+                    and str(receipt["source_note_id"]) != expected_source_note_id
+                ):
+                    raise RuntimeError("notes_graph_run_cancel_resource_missing")
                 return RunCancellationResult(
                     disposition="terminal_replay",
                     operation_id=str(receipt["id"]),
@@ -3766,6 +3772,11 @@ class NoteGraphSuggestionStore:
                     source_note_id=str(receipt["source_note_id"]),
                 )
             if disposition == "in_progress":
+                if (
+                    expected_source_note_id is not None
+                    and str(receipt["source_note_id"]) != expected_source_note_id
+                ):
+                    raise RuntimeError("notes_graph_run_cancel_resource_missing")
                 run = self._load_cancellation_run(conn, dataset, run_id)
                 if run.state not in {
                     NoteGraphSuggestionRunState.CANCELLING,
@@ -3781,6 +3792,11 @@ class NoteGraphSuggestionStore:
                 )
 
             run = self._load_run(conn, dataset, run_id)
+            if (
+                expected_source_note_id is not None
+                and run.source_note_id != expected_source_note_id
+            ):
+                raise RuntimeError("notes_graph_run_cancel_resource_missing")
             current_state = run.state.value
             if current_state not in {"admitting", "queued", "running"}:
                 raise RuntimeError("notes_graph_run_conflict")

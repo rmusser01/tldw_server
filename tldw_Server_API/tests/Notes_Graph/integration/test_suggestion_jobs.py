@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+from threading import Barrier
 from types import SimpleNamespace
 
 import pytest
@@ -184,10 +186,10 @@ def test_admission_replay_recovers_job_committed_before_bind_and_before_limits(
         _admit(notes, jobs, key="resume-after-enqueue")
 
     monkeypatch.setattr(
-        SuggestionAdmissionService,
-        "_enforce_owner_limits",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("replay must recover before new-admission limits")
+        jobs,
+        "create_job",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("replay must recover before new admission")
         ),
     )
     recovered = _admit(notes, jobs, key="resume-after-enqueue")
@@ -203,6 +205,44 @@ def test_admission_enforces_owner_active_and_hourly_limits(stores) -> None:
     _admit(notes, jobs, key="active-1")
     with pytest.raises(RuntimeError, match="notes_graph_owner_active_run_conflict"):
         _admit(notes, jobs, key="active-2", model="model-b")
+
+
+def test_sqlite_concurrent_owner_admission_inserts_only_one_active_job(stores) -> None:
+    notes, jobs = stores
+    create_barrier = Barrier(2)
+
+    class RacingJobs:
+        def create_job(self, **kwargs):
+            create_barrier.wait(timeout=5)
+            return jobs.create_job(**kwargs)
+
+        def __getattr__(self, name):
+            return getattr(jobs, name)
+
+    def admit(key: str, model: str):
+        try:
+            return _admit(notes, RacingJobs(), key=key, model=model)
+        except RuntimeError as exc:
+            return exc
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(
+            executor.map(
+                lambda args: admit(*args),
+                (("concurrent-active-a", "model-a"), ("concurrent-active-b", "model-b")),
+            )
+        )
+
+    admitted = [result for result in results if not isinstance(result, Exception)]
+    rejected = [result for result in results if isinstance(result, Exception)]
+    assert len(admitted) == 1
+    assert [str(error) for error in rejected] == ["notes_graph_owner_active_run_conflict"]
+    assert jobs.count_jobs(
+        domain=JOB_DOMAIN,
+        queue=JOB_QUEUE,
+        job_type=JOB_TYPE,
+        owner_user_id="owner-1",
+    ) == 1
 
 
 def test_admission_enforces_twenty_per_owner_per_hour(stores) -> None:

@@ -7,6 +7,12 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Callable
 
+from tldw_Server_API.app.core.Jobs.manager import (
+    OWNER_SCOPE_ACTIVE_LIMIT_EXCEEDED,
+    OWNER_SCOPE_ADMISSION_LIMIT_EXCEEDED,
+    OwnerScopeAdmissionPolicy,
+)
+
 from .suggestion_observability import SuggestionEventName, record_event
 
 JOB_DOMAIN = "notes"
@@ -37,7 +43,7 @@ JOB_RESULT_KEYS = frozenset(
         "output_tokens",
     }
 )
-_ACTIVE_JOB_STATUSES = ("queued", "processing")
+_OWNER_ACTIVE_JOB_STATUSES = ("queued", "processing")
 
 
 class PublicationReceiptError(RuntimeError):
@@ -139,27 +145,6 @@ class SuggestionAdmissionService:
         )
         return queued
 
-    def _enforce_owner_limits(self, *, now: datetime) -> None:
-        for status in _ACTIVE_JOB_STATUSES:
-            if self._jobs.count_jobs(
-                domain=JOB_DOMAIN,
-                queue=JOB_QUEUE,
-                job_type=JOB_TYPE,
-                owner_user_id=self._owner_user_id,
-                status=status,
-            ):
-                raise RuntimeError("notes_graph_owner_active_run_conflict")
-        recent = self._jobs.list_jobs(
-            domain=JOB_DOMAIN,
-            queue=JOB_QUEUE,
-            job_type=JOB_TYPE,
-            owner_user_id=self._owner_user_id,
-            created_after=now - timedelta(hours=1),
-            limit=20,
-        )
-        if len(recent) >= 20:
-            raise RuntimeError("notes_graph_admission_rate_limited")
-
     def replay(
         self,
         *,
@@ -259,8 +244,28 @@ class SuggestionAdmissionService:
                 raise
 
         try:
-            self._enforce_owner_limits(now=now)
-        except RuntimeError:
+            job = self._jobs.create_job(
+                domain=JOB_DOMAIN,
+                queue=JOB_QUEUE,
+                job_type=JOB_TYPE,
+                payload=_payload(run, dataset_id),
+                owner_user_id=self._owner_user_id,
+                max_retries=0,
+                idempotency_key=run.id,
+                owner_scope_admission=OwnerScopeAdmissionPolicy(
+                    active_statuses=_OWNER_ACTIVE_JOB_STATUSES,
+                    active_limit=1,
+                    admission_limit=20,
+                    created_after=now - timedelta(hours=1),
+                ),
+            )
+        except ValueError as exc:
+            code = {
+                OWNER_SCOPE_ACTIVE_LIMIT_EXCEEDED: "notes_graph_owner_active_run_conflict",
+                OWNER_SCOPE_ADMISSION_LIMIT_EXCEEDED: "notes_graph_admission_rate_limited",
+            }.get(str(exc))
+            if code is None:
+                raise
             if admission.disposition == "created":
                 self._store.fail_admission(
                     dataset_id=dataset_id,
@@ -271,17 +276,7 @@ class SuggestionAdmissionService:
                     guidance_key="retry_generation",
                     now=now,
                 )
-            raise
-
-        job = self._jobs.create_job(
-            domain=JOB_DOMAIN,
-            queue=JOB_QUEUE,
-            job_type=JOB_TYPE,
-            payload=_payload(run, dataset_id),
-            owner_user_id=self._owner_user_id,
-            max_retries=0,
-            idempotency_key=run.id,
-        )
+            raise RuntimeError(code) from exc
         normalized_job = self._jobs.get_job_or_archived_by_uuid(
             str(job["uuid"]),
             domain=JOB_DOMAIN,
@@ -331,6 +326,7 @@ class SuggestionCancellationCoordinator:
         *,
         dataset_id: str,
         run_id: str,
+        expected_source_note_id: str,
         expected_state: str | None,
         expected_revision: int,
         idempotency_key: str,
@@ -340,6 +336,7 @@ class SuggestionCancellationCoordinator:
         admitted = self._store.admit_run_cancellation(
             dataset_id=dataset_id,
             run_id=run_id,
+            expected_source_note_id=expected_source_note_id,
             expected_state=expected_state,
             expected_revision=expected_revision,
             reason=reason,

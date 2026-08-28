@@ -80,6 +80,7 @@ def test_cancellation_admits_before_jobs_and_completes_after_acceptance() -> Non
     ).cancel(
         dataset_id="dataset-1",
         run_id="run-1",
+        expected_source_note_id="note-1",
         expected_state="running",
         expected_revision=3,
         idempotency_key="cancel-key",
@@ -122,6 +123,7 @@ def test_terminal_cancellation_replay_never_calls_jobs() -> None:
     ).cancel(
         dataset_id="dataset-1",
         run_id="run-1",
+        expected_source_note_id="note-1",
         expected_state="running",
         expected_revision=3,
         idempotency_key="cancel-key",
@@ -130,3 +132,31 @@ def test_terminal_cancellation_replay_never_calls_jobs() -> None:
 
     assert result.accepted is True
     assert result.cancellation.replay_envelope == envelope
+
+
+def test_route_note_mismatch_stops_before_jobs_lookup() -> None:
+    class Store:
+        @staticmethod
+        def admit_run_cancellation(**kwargs):
+            assert kwargs["expected_source_note_id"] == "route-note"
+            raise RuntimeError("notes_graph_run_cancel_resource_missing")
+
+    class Jobs:
+        def __getattr__(self, _name):
+            raise AssertionError("route-note mismatch must not consult Jobs")
+
+    coordinator = SuggestionCancellationCoordinator(
+        store=Store(),
+        jobs=Jobs(),
+        owner_user_id="owner-1",
+    )
+    with pytest.raises(RuntimeError, match="notes_graph_run_cancel_resource_missing"):
+        coordinator.cancel(
+            dataset_id="dataset-1",
+            run_id="run-1",
+            expected_source_note_id="route-note",
+            expected_state="running",
+            expected_revision=3,
+            idempotency_key="cancel-key",
+            now=NOW,
+        )
