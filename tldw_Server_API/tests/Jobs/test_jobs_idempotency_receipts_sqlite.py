@@ -290,6 +290,69 @@ def test_exact_replay_survives_job_archival(receipt_manager):
     assert replay.job["archived"] is True
 
 
+@pytest.mark.parametrize("compressed_field", ("payload", "result"))
+def test_archived_receipt_replay_rejects_malformed_compression_without_mutation(
+    receipt_manager,
+    compressed_field,
+):
+    command = _operation_command()
+    first = receipt_manager.admit_idempotent_operation(command)
+    _archive_job(receipt_manager, first.job["uuid"])
+    malformed = "gzip64:c2Vuc2l0aXZlLWRlc3RpbmF0aW9u"
+    with sqlite3.connect(receipt_manager.db_path) as conn:
+        if compressed_field == "payload":
+            conn.execute(
+                "UPDATE jobs_archive SET payload=NULL, payload_compressed=? "
+                "WHERE uuid=?",
+                (malformed, first.job["uuid"]),
+            )
+        else:
+            conn.execute(
+                "UPDATE jobs_archive SET result=NULL, result_compressed=? "
+                "WHERE uuid=?",
+                (malformed, first.job["uuid"]),
+            )
+        before_archive = tuple(
+            conn.execute(
+                "SELECT payload, payload_compressed, result, result_compressed, "
+                "status FROM jobs_archive WHERE uuid=?",
+                (first.job["uuid"],),
+            ).fetchone()
+        )
+    before = (
+        before_archive,
+        _receipt_rows(receipt_manager),
+        _table_count(receipt_manager, "jobs"),
+        _table_count(receipt_manager, "job_events"),
+    )
+
+    for replay in (
+        receipt_manager.replay_idempotent_operation,
+        receipt_manager.admit_idempotent_operation,
+    ):
+        with pytest.raises(contracts.IdempotentOperationUnavailableError) as exc_info:
+            replay(command)
+        assert str(exc_info.value) == "job archive projection is unavailable"
+        assert exc_info.value.__cause__ is None
+        assert "sensitive-destination" not in str(exc_info.value)
+
+    with sqlite3.connect(receipt_manager.db_path) as conn:
+        after_archive = tuple(
+            conn.execute(
+                "SELECT payload, payload_compressed, result, result_compressed, "
+                "status FROM jobs_archive WHERE uuid=?",
+                (first.job["uuid"],),
+            ).fetchone()
+        )
+    after = (
+        after_archive,
+        _receipt_rows(receipt_manager),
+        _table_count(receipt_manager, "jobs"),
+        _table_count(receipt_manager, "job_events"),
+    )
+    assert after == before
+
+
 def test_uuid_lookup_rejects_duplicate_active_and_archived_authority(receipt_manager):
     first = receipt_manager.admit_idempotent_operation(_operation_command())
     _archive_job(receipt_manager, first.job["uuid"], retain_active=True)

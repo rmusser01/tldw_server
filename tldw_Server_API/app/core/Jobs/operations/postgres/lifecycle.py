@@ -11,7 +11,10 @@ from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.core.Jobs.migrations import normalize_slides_archive_projection
+from tldw_Server_API.app.core.Jobs.migrations import (
+    SlidesArchiveNormalizationError,
+    normalize_slides_archive_projection,
+)
 from tldw_Server_API.app.core.Jobs.operations.contracts import (
     AcquireJobCommand,
     ApplyPreparedDispositionCommand,
@@ -1018,11 +1021,14 @@ def find_job_by_identity(
     if len(matches) != 1:
         return JobIdentityLookupResult.conflict()
     state, raw_row = matches[0]
-    row = (
-        normalize_slides_archive_projection(raw_row)
-        if state is JobIdentityLookupState.ARCHIVED
-        else raw_row
-    )
+    try:
+        row = (
+            normalize_slides_archive_projection(raw_row)
+            if state is JobIdentityLookupState.ARCHIVED
+            else raw_row
+        )
+    except SlidesArchiveNormalizationError:
+        return JobIdentityLookupResult.conflict()
     if not _identity_matches(
         row,
         domain=command.domain,

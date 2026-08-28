@@ -15,6 +15,7 @@ from tldw_Server_API.app.core.testing import is_truthy as _is_truthy
 from .migrations import (
     SLIDES_ARCHIVE_COMPRESSED_FIELDS,
     SLIDES_ARCHIVE_EXACT_FIELDS,
+    SlidesArchiveNormalizationError,
     normalize_slides_archive_projection,
 )
 
@@ -34,6 +35,10 @@ _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS = (
     TypeError,
     ValueError,
     UnicodeDecodeError,
+)
+_SLIDES_PG_AUDIT_EXCEPTIONS = (
+    *_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS,
+    SlidesArchiveNormalizationError,
 )
 
 POSTGRES_ARCHIVE_CURSOR_TIME_SQL = (
@@ -1363,7 +1368,7 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
             except psycopg.Error:
                 audit_cur.execute("ROLLBACK TO SAVEPOINT slides_generation_audit")
                 audit_cur.execute("RELEASE SAVEPOINT slides_generation_audit")
-            except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
+            except _SLIDES_PG_AUDIT_EXCEPTIONS:
                 audit_cur.execute("ROLLBACK TO SAVEPOINT slides_generation_audit")
                 audit_cur.execute("RELEASE SAVEPOINT slides_generation_audit")
             else:

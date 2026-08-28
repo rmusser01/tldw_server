@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from tldw_Server_API.app.core.DB_Management import sqlite_policy
+from tldw_Server_API.app.core.Jobs import migrations as jobs_migrations
 from tldw_Server_API.app.core.Jobs.migrations import (
     JOBS_SQLITE_DDL,
     ensure_jobs_tables,
@@ -269,13 +270,24 @@ def test_archive_projection_rejects_noncanonical_gzip_framing(variant) -> None:
     else:
         blob = "gzip64:!!!!"
 
-    normalized = normalize_slides_archive_projection(
-        {
-            "payload": None,
-            "result": None,
-            "payload_compressed": blob,
-            "result_compressed": None,
-        }
-    )
+    with pytest.raises(jobs_migrations.SlidesArchiveNormalizationError) as exc_info:
+        normalize_slides_archive_projection(
+            {
+                "payload": None,
+                "result": None,
+                "payload_compressed": blob,
+                "result_compressed": None,
+            }
+        )
 
-    assert normalized["payload"] != payload
+    assert exc_info.value.args == ()
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
+
+
+def test_archive_normalization_failure_contract_survives_migrations_reload() -> None:
+    normalization_error = jobs_migrations.SlidesArchiveNormalizationError
+
+    reloaded = importlib.reload(jobs_migrations)
+
+    assert reloaded.SlidesArchiveNormalizationError is normalization_error

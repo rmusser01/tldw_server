@@ -125,6 +125,58 @@ def test_postgres_uuid_lookup_and_replay_survive_archival(
     assert replay.job["archived"] is True
 
 
+@pytest.mark.parametrize("compressed_field", ("payload", "result"))
+def test_postgres_archived_receipt_replay_rejects_malformed_compression(
+    receipt_manager,
+    jobs_pg_dsn,
+    compressed_field,
+):
+    command = _operation_command()
+    first = receipt_manager.admit_idempotent_operation(command)
+    _archive_job(jobs_pg_dsn, first.job["uuid"])
+    malformed = b"sensitive-destination"
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        if compressed_field == "payload":
+            cur.execute(
+                "UPDATE jobs_archive SET payload=NULL, payload_compressed=%s "
+                "WHERE uuid=%s",
+                (malformed, first.job["uuid"]),
+            )
+        else:
+            cur.execute(
+                "UPDATE jobs_archive SET result=NULL, result_compressed=%s "
+                "WHERE uuid=%s",
+                (malformed, first.job["uuid"]),
+            )
+        cur.execute(
+            "SELECT payload, payload_compressed, result, result_compressed, "
+            "status FROM jobs_archive WHERE uuid=%s",
+            (first.job["uuid"],),
+        )
+        before_archive = tuple(cur.fetchone())
+    before = (_counts(jobs_pg_dsn), before_archive)
+
+    for replay in (
+        receipt_manager.replay_idempotent_operation,
+        receipt_manager.admit_idempotent_operation,
+    ):
+        with pytest.raises(IdempotentOperationUnavailableError) as exc_info:
+            replay(command)
+        assert str(exc_info.value) == "job archive projection is unavailable"
+        assert exc_info.value.__cause__ is None
+        assert "sensitive-destination" not in str(exc_info.value)
+
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT payload, payload_compressed, result, result_compressed, "
+            "status FROM jobs_archive WHERE uuid=%s",
+            (first.job["uuid"],),
+        )
+        after_archive = tuple(cur.fetchone())
+    after = (_counts(jobs_pg_dsn), after_archive)
+    assert after == before
+
+
 def test_postgres_uuid_lookup_rejects_duplicate_authority(
     receipt_manager,
     jobs_pg_dsn,

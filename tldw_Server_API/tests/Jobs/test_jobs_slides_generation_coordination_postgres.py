@@ -13,7 +13,10 @@ import pytest
 psycopg = pytest.importorskip("psycopg")
 
 from tldw_Server_API.app.core.Jobs import pg_migrations as jobs_pg_migrations
-from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Jobs.manager import (
+    JobManager,
+    SlidesGenerationJobsUnavailableError,
+)
 from tldw_Server_API.app.core.Jobs.migrations import SLIDES_ARCHIVE_EXACT_FIELDS
 from tldw_Server_API.app.core.Jobs.pg_migrations import (
     ensure_jobs_rls_policies_pg,
@@ -377,6 +380,80 @@ def test_postgres_audit_compares_logical_compressed_archive_projection(
 
     assert readiness["ready"] is (not divergent)
     assert readiness["diagnostic_code"] == ("ambiguous_generation_legacy_row" if divergent else None)
+
+
+@pytest.mark.pg_jobs
+@pytest.mark.parametrize("compressed_field", ("payload", "result"))
+def test_postgres_migration_audit_fails_closed_on_malformed_archive_projection(
+    jobs_pg_dsn,
+    compressed_field,
+):
+    job_uuid = str(uuid.uuid4())
+    projection = ", ".join(("id", *SLIDES_ARCHIVE_EXACT_FIELDS))
+    malformed = b"sensitive-destination"
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO jobs(uuid, domain, queue, job_type, owner_user_id, "
+            "idempotency_key, payload, result, status) VALUES "
+            "(%s, 'slides', 'default', 'presentation.generate', 'owner-1', "
+            "%s, %s::jsonb, %s::jsonb, 'completed') RETURNING id",
+            (
+                job_uuid,
+                f"malformed-{compressed_field}-audit",
+                json.dumps({"receipt_id": "receipt-1"}),
+                json.dumps({"artifact": "result"}),
+            ),
+        )
+        job_id = int(cur.fetchone()[0])
+        cur.execute(
+            f"INSERT INTO jobs_archive ({projection}) "  # nosec B608 - closed projection
+            f"SELECT {projection} FROM jobs WHERE id=%s",  # nosec B608 - closed projection
+            (job_id,),
+        )
+        if compressed_field == "payload":
+            cur.execute(
+                "UPDATE jobs_archive SET payload=NULL, payload_compressed=%s "
+                "WHERE uuid=%s",
+                (malformed, job_uuid),
+            )
+        else:
+            cur.execute(
+                "UPDATE jobs_archive SET result=NULL, result_compressed=%s "
+                "WHERE uuid=%s",
+                (malformed, job_uuid),
+            )
+        cur.execute(
+            "SELECT payload, payload_compressed, result, result_compressed, "
+            "status FROM jobs_archive WHERE uuid=%s",
+            (job_uuid,),
+        )
+        archive_before = tuple(cur.fetchone())
+        cur.execute(
+            "SELECT diagnostic_code, diagnostic_count, diagnostic_at "
+            "FROM slides_standalone_reconciliation WHERE singleton_id=1"
+        )
+        before = (archive_before, tuple(cur.fetchone()))
+
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        with pytest.raises(
+            jobs_pg_migrations.SlidesArchiveNormalizationError
+        ) as exc_info:
+            jobs_pg_migrations._audit_slides_generation_pg(cur)
+    assert exc_info.value.args == ()
+
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT payload, payload_compressed, result, result_compressed, "
+            "status FROM jobs_archive WHERE uuid=%s",
+            (job_uuid,),
+        )
+        archive_after = tuple(cur.fetchone())
+        cur.execute(
+            "SELECT diagnostic_code, diagnostic_count, diagnostic_at "
+            "FROM slides_standalone_reconciliation WHERE singleton_id=1"
+        )
+        after = (archive_after, tuple(cur.fetchone()))
+    assert after == before
 
 
 @pytest.mark.pg_jobs
@@ -971,6 +1048,79 @@ def test_postgres_archive_collision_with_different_result_stays_diagnosed(
 
 
 @pytest.mark.pg_jobs
+def test_postgres_malformed_archive_collision_uses_closed_normalization_failure(
+    jobs_pg_dsn,
+    monkeypatch,
+):
+    manager = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
+    monkeypatch.setattr(
+        manager,
+        "_slides_generation_ready_in_connection",
+        lambda _conn, **_kwargs: True,
+    )
+    job = manager.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload={"receipt_id": "receipt-1"},
+        owner_user_id="owner-1",
+        idempotency_key="malformed-collision",
+    )
+    projection = ", ".join(("id", *SLIDES_ARCHIVE_EXACT_FIELDS))
+    malformed = b"sensitive-destination"
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE jobs SET status='completed', completed_at=%s WHERE id=%s",
+            (NOW - timedelta(days=60), int(job["id"])),
+        )
+        cur.execute(
+            f"INSERT INTO jobs_archive ({projection}) "  # nosec B608 - closed projection
+            f"SELECT {projection} FROM jobs WHERE id=%s",  # nosec B608 - closed projection
+            (int(job["id"]),),
+        )
+        cur.execute(
+            "UPDATE jobs_archive SET result=NULL, result_compressed=%s WHERE uuid=%s",
+            (malformed, str(job["uuid"])),
+        )
+        cur.execute("SELECT COUNT(*) FROM jobs WHERE uuid=%s", (str(job["uuid"]),))
+        active_count = cur.fetchone()[0]
+        cur.execute(
+            "SELECT payload, payload_compressed, result, result_compressed, "
+            "status FROM jobs_archive WHERE uuid=%s",
+            (str(job["uuid"]),),
+        )
+        archive_row = tuple(cur.fetchone())
+        cur.execute("SELECT COUNT(*) FROM job_events")
+        before = (active_count, archive_row, cur.fetchone()[0])
+
+    monkeypatch.setenv("JOBS_ARCHIVE_BEFORE_DELETE", "true")
+    with pytest.raises(SlidesGenerationJobsUnavailableError) as exc_info:
+        manager.prune_jobs(
+            older_than_days=1,
+            domain="slides",
+            queue="default",
+            job_type="presentation.generate",
+        )
+    assert str(exc_info.value) == (
+        "presentation.generate archive projection is unavailable"
+    )
+    assert "sensitive-destination" not in str(exc_info.value)
+
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) FROM jobs WHERE uuid=%s", (str(job["uuid"]),))
+        active_count = cur.fetchone()[0]
+        cur.execute(
+            "SELECT payload, payload_compressed, result, result_compressed, "
+            "status FROM jobs_archive WHERE uuid=%s",
+            (str(job["uuid"]),),
+        )
+        archive_row = tuple(cur.fetchone())
+        cur.execute("SELECT COUNT(*) FROM job_events")
+        after = (active_count, archive_row, cur.fetchone()[0])
+    assert after == before
+
+
+@pytest.mark.pg_jobs
 def test_postgres_archive_preserves_terminal_error_projection(jobs_pg_dsn, monkeypatch):
     manager = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
     job = manager.create_job(
@@ -1003,6 +1153,87 @@ def test_postgres_archive_preserves_terminal_error_projection(jobs_pg_dsn, monke
     assert archived["archived"] is True
     assert archived["status"] == "failed"
     assert archived["error_code"] == "provider_failed"
+
+
+@pytest.mark.pg_jobs
+@pytest.mark.parametrize("compressed_field", ("payload", "result"))
+def test_postgres_archived_slides_lookup_and_resolve_reject_malformed_compression(
+    jobs_pg_dsn,
+    monkeypatch,
+    compressed_field,
+):
+    manager = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
+    monkeypatch.setattr(
+        manager,
+        "_slides_generation_ready_in_connection",
+        lambda _conn, **_kwargs: True,
+    )
+    job = manager.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload={"receipt_id": "receipt-1"},
+        owner_user_id="owner-1",
+        idempotency_key=f"malformed-{compressed_field}-lookup",
+    )
+    projection = ", ".join(("id", *SLIDES_ARCHIVE_EXACT_FIELDS))
+    malformed = b"sensitive-destination"
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            f"INSERT INTO jobs_archive ({projection}) "  # nosec B608 - closed projection
+            f"SELECT {projection} FROM jobs WHERE id=%s",  # nosec B608 - closed projection
+            (int(job["id"]),),
+        )
+        cur.execute("DELETE FROM jobs WHERE id=%s", (int(job["id"]),))
+        if compressed_field == "payload":
+            cur.execute(
+                "UPDATE jobs_archive SET payload=NULL, payload_compressed=%s "
+                "WHERE uuid=%s",
+                (malformed, str(job["uuid"])),
+            )
+        else:
+            cur.execute(
+                "UPDATE jobs_archive SET result=NULL, result_compressed=%s "
+                "WHERE uuid=%s",
+                (malformed, str(job["uuid"])),
+            )
+        cur.execute(
+            "SELECT payload, payload_compressed, result, result_compressed, "
+            "status FROM jobs_archive WHERE uuid=%s",
+            (str(job["uuid"]),),
+        )
+        before = tuple(cur.fetchone())
+
+    calls = (
+        lambda: manager.lookup_slides_generation_job(
+            owner_user_id="owner-1",
+            idempotency_key=f"malformed-{compressed_field}-lookup",
+            expected_job_uuid=str(job["uuid"]),
+            expected_job_id=int(job["id"]),
+        ),
+        lambda: manager.resolve_slides_generation_job(
+            job_uuid=str(job["uuid"]),
+            owner_user_id="owner-1",
+            idempotency_key=f"malformed-{compressed_field}-lookup",
+            job_id=int(job["id"]),
+        ),
+    )
+    for call in calls:
+        with pytest.raises(SlidesGenerationJobsUnavailableError) as exc_info:
+            call()
+        assert str(exc_info.value) == (
+            "presentation.generate archive projection is unavailable"
+        )
+        assert "sensitive-destination" not in str(exc_info.value)
+
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT payload, payload_compressed, result, result_compressed, "
+            "status FROM jobs_archive WHERE uuid=%s",
+            (str(job["uuid"]),),
+        )
+        after = tuple(cur.fetchone())
+    assert after == before
 
 
 @pytest.mark.pg_jobs

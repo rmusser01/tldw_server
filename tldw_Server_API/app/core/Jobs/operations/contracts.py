@@ -410,6 +410,10 @@ class IdempotentOperationUnavailableError(RuntimeError):
     """A receipt-to-Job correlation cannot be proven safe."""
 
 
+class SlidesArchiveNormalizationError(Exception):
+    """A compressed Slides archive projection is invalid."""
+
+
 class TerminalOperationResultPatchOutcome(str, Enum):
     """Closed outcomes for an exact terminal operation-result patch."""
 

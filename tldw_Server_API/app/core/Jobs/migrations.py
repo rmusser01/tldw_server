@@ -22,9 +22,16 @@ from loguru import logger
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
     configure_sqlite_connection,
 )
+from tldw_Server_API.app.core.Jobs.operations.contracts import (
+    SlidesArchiveNormalizationError,
+)
 
 _JOBS_PATH_EXCEPTIONS = (ImportError, OSError, RuntimeError, TypeError, ValueError)
 _JOBS_DB_EXCEPTIONS = (sqlite3.Error, OSError, RuntimeError, TypeError, ValueError)
+_SLIDES_AUDIT_EXCEPTIONS = (
+    *_JOBS_DB_EXCEPTIONS,
+    SlidesArchiveNormalizationError,
+)
 
 SQLITE_ARCHIVE_CURSOR_SENTINEL = "0001-01-01 00:00:00"
 _SQLITE_ARCHIVE_ISO_DATE_GLOB = (
@@ -143,7 +150,6 @@ _JOBS_ARCHIVE_BASE64_MAX_CHARS = (
     4 * ((JOBS_ARCHIVE_COMPRESSED_MAX_BYTES + 2) // 3)
 )
 _JOBS_ARCHIVE_GZIP_CHUNK_BYTES = 65_536
-_INVALID_SLIDES_ARCHIVE_BLOB = object()
 
 
 def _parse_slides_archive_json(value: Any) -> Any:
@@ -232,11 +238,12 @@ def _decode_slides_archive_blob(value: Any) -> Any:
         decoded = _bounded_gzip_decompress(compressed).decode("utf-8")
         return json.loads(decoded)
     except (binascii.Error, TypeError, ValueError, UnicodeError, zlib.error):
-        return _INVALID_SLIDES_ARCHIVE_BLOB
+        pass
+    raise SlidesArchiveNormalizationError
 
 
 def normalize_slides_archive_projection(row: Any) -> dict[str, Any]:
-    """Return one logical exactness projection, decoding archived JSON blobs."""
+    """Return one logical projection or reject an invalid compressed field."""
     normalized = dict(row)
     for field in ("payload", "result"):
         value = normalized.get(field)
@@ -1303,7 +1310,7 @@ def ensure_jobs_tables(db_path: Path | None = None) -> Path:
                 ) from poison_error
             try:
                 _audit_and_index_slides_generation(conn)
-            except _JOBS_DB_EXCEPTIONS as audit_error:
+            except _SLIDES_AUDIT_EXCEPTIONS as audit_error:
                 try:
                     conn.execute("ROLLBACK TO SAVEPOINT slides_generation_audit")
                     conn.execute("RELEASE SAVEPOINT slides_generation_audit")

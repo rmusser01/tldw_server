@@ -60,6 +60,7 @@ from .migrations import (
     SLIDES_ARCHIVE_EXACT_FIELDS,
     SQLITE_ARCHIVE_CURSOR_OUTPUT_SQL,
     SQLITE_ARCHIVE_CURSOR_TIME_SQL,
+    SlidesArchiveNormalizationError,
     _ensure_sqlite_archive_batch_read_indexes,
     ensure_jobs_tables,
     normalize_slides_archive_projection,
@@ -1795,7 +1796,12 @@ class JobManager:
 
     def _normalize_archived_job(self, row: Any) -> dict[str, Any]:
         """Decode one archived Jobs row without relying on its reusable numeric id."""
-        result = normalize_slides_archive_projection(row)
+        try:
+            result = normalize_slides_archive_projection(row)
+        except SlidesArchiveNormalizationError:
+            raise SlidesGenerationJobsUnavailableError(
+                "presentation.generate archive projection is unavailable"
+            ) from None
         result["payload"] = self._maybe_decrypt_json(self._parse_json_value(result.get("payload")))
         result["result"] = self._maybe_decrypt_json(self._parse_json_value(result.get("result")))
         result["archived"] = True
@@ -1819,7 +1825,12 @@ class JobManager:
             cursor=cursor,
         )
         for active_row, archived_rows in collision_rows:
-            active = normalize_slides_archive_projection(active_row)
+            try:
+                active = normalize_slides_archive_projection(active_row)
+            except SlidesArchiveNormalizationError:
+                raise SlidesGenerationJobsUnavailableError(
+                    "presentation.generate archive projection is unavailable"
+                ) from None
             job_uuid = str(active.get("uuid") or "").strip()
             if not archived_rows:
                 continue
@@ -9685,8 +9696,13 @@ class JobManager:
                 raise IdempotentOperationUnavailableError(
                     "receipt-backed Job has ambiguous archive authority"
                 )
-            active = normalize_slides_archive_projection(active_raw)
-            archived = normalize_slides_archive_projection(archived_rows[0])
+            try:
+                active = normalize_slides_archive_projection(active_raw)
+                archived = normalize_slides_archive_projection(archived_rows[0])
+            except SlidesArchiveNormalizationError:
+                raise IdempotentOperationUnavailableError(
+                    "job archive projection is unavailable"
+                ) from None
             if any(
                 active.get(field) != archived.get(field)
                 for field in projection_fields

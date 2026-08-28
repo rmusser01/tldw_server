@@ -12,6 +12,7 @@ from typing import Any
 
 from tldw_Server_API.app.core.Jobs.migrations import (
     SLIDES_ARCHIVE_EXACT_FIELDS,
+    SlidesArchiveNormalizationError,
     normalize_slides_archive_projection,
 )
 from tldw_Server_API.app.core.Jobs.operations.contracts import (
@@ -127,7 +128,12 @@ def get_job_or_archived_by_uuid(
         )
     if not rows:
         return None
-    job = normalize_slides_archive_projection(rows[0])
+    try:
+        job = normalize_slides_archive_projection(rows[0])
+    except SlidesArchiveNormalizationError:
+        raise IdempotentOperationUnavailableError(
+            "job archive projection is unavailable"
+        ) from None
     job["archived"] = bool(job.get("archived"))
     return job
 

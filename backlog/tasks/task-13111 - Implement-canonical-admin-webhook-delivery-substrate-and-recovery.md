@@ -4,7 +4,7 @@ title: Implement canonical admin webhook delivery substrate and recovery
 status: In Progress
 assignee: []
 created_date: '2026-08-23 03:15'
-updated_date: '2026-08-28 20:48'
+updated_date: '2026-08-28 21:35'
 labels:
   - admin
   - webhooks
@@ -103,6 +103,10 @@ Task 3 Fix Round 1/5 started at FIX_BASE 803ae280f66e990f7b4ffdf29e31cae311d648d
 2026-08-28: Started Task 3 Fix Round 3/5 at FIX_BASE 45a1fbd90d09af8d45c43b88e59ec8a335ac9c63. Scope: make every compressed-column decode failure unambiguously invalid; reject raw JSON bytes/text and noncanonical standard-base64 spelling; preserve valid bounded SQLite gzip64 and PostgreSQL gzip-byte archive lookup. Strict focused RED precedes production edits; PostgreSQL-required zero-skip final gate.
 
 2026-08-28: Task 3 Fix Round 3/5 complete at pre-commit tree. Compressed decode failures now return a private invalid sentinel instead of reinterpreting raw compressed-column data as JSON; gzip64 requires exact standard-base64 re-encoding equality. RED: 8 failed, 4 passed, 0 skipped. Focused GREEN: 14 passed, 0 skipped. Final PostgreSQL-required Task 3/lifecycle gate: 376 passed, 0 skipped, 2 warnings. Focused Ruff/Bandit and diff checks pass; full Jobs Ruff remains only three unchanged baseline I001 findings. Evidence: .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-3-report.md.
+
+2026-08-28: Started Task 3 Fix Round 4/5 at FIX_BASE 2be720aea8b39fdc99997c72a03da3814b0d7998. Scope: replace compressed archive invalid-sentinel leakage with one explicit closed normalization failure contract across JobManager Slides lookup, SQLite/PostgreSQL receipt replay, and migration collision/integrity callers. Strict focused RED precedes production edits; PostgreSQL-required zero-skip final gate.
+
+2026-08-28: Task 3 Fix Round 4/5 complete at pre-commit tree. Replaced shared Slides archive invalid-sentinel leakage with a reload-stable zero-argument normalization exception and mapped every caller to its closed lookup, replay, migration, or collision contract. RED: 17 failed/2 passed, then 1 decoder-context failure and 1 reload-stability failure. Final focused PostgreSQL-required suite: 20 passed, 0 skipped, 137 deselected. Mandatory Task 3/lifecycle gate: 377 passed, 0 skipped. Relevant Slides/idempotency regressions: 109 passed, 0 skipped. Focused Ruff and Bandit pass; diff checks clean. Full production Jobs Ruff remains only the three unchanged I001 baseline findings; known PostgreSQL Slides nullable-parameter audit issue remains unchanged. Evidence: .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-3-report.md.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

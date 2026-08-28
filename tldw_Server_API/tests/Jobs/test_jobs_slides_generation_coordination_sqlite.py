@@ -12,7 +12,10 @@ import pytest
 
 from tldw_Server_API.app.core.Jobs import manager as jobs_manager
 from tldw_Server_API.app.core.Jobs import migrations as jobs_migrations
-from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Jobs.manager import (
+    JobManager,
+    SlidesGenerationJobsUnavailableError,
+)
 from tldw_Server_API.app.core.Jobs.migrations import ensure_jobs_tables
 from tldw_Server_API.app.core.Slides import standalone_html_registry as registry_module
 
@@ -443,6 +446,62 @@ def test_sqlite_audit_compares_logical_compressed_archive_projection(
     assert readiness["diagnostic_code"] == ("ambiguous_generation_legacy_row" if divergent else None)
 
 
+@pytest.mark.parametrize("compressed_field", ("payload", "result"))
+def test_sqlite_migration_audit_fails_closed_on_malformed_archive_projection(
+    tmp_path,
+    compressed_field,
+):
+    db_path = ensure_jobs_tables(
+        tmp_path / f"slides-malformed-{compressed_field}-audit.db"
+    )
+    manager = JobManager(db_path)
+    job = manager.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload={"receipt_id": "receipt-1"},
+        owner_user_id="owner-1",
+        idempotency_key=f"malformed-{compressed_field}-audit",
+    )
+    malformed = "gzip64:c2Vuc2l0aXZlLWRlc3RpbmF0aW9u"
+    with sqlite3.connect(db_path) as conn:
+        _copy_job_to_archive(conn, job_id=int(job["id"]))
+        if compressed_field == "payload":
+            conn.execute(
+                "UPDATE jobs_archive SET payload=NULL, payload_compressed=? "
+                "WHERE uuid=?",
+                (malformed, str(job["uuid"])),
+            )
+        else:
+            conn.execute(
+                "UPDATE jobs_archive SET result=NULL, result_compressed=? "
+                "WHERE uuid=?",
+                (malformed, str(job["uuid"])),
+            )
+        before = tuple(
+            conn.execute(
+                "SELECT payload, payload_compressed, result, result_compressed, "
+                "status FROM jobs_archive WHERE uuid=?",
+                (str(job["uuid"]),),
+            ).fetchone()
+        )
+
+    ensure_jobs_tables(db_path)
+
+    readiness = manager.get_slides_generation_readiness()
+    assert readiness["ready"] is False
+    assert readiness["diagnostic_code"] == "ambiguous_generation_legacy_row"
+    with sqlite3.connect(db_path) as conn:
+        after = tuple(
+            conn.execute(
+                "SELECT payload, payload_compressed, result, result_compressed, "
+                "status FROM jobs_archive WHERE uuid=?",
+                (str(job["uuid"]),),
+            ).fetchone()
+        )
+    assert after == before
+
+
 def test_sqlite_wrong_definition_archive_indexes_fail_readiness_and_are_repaired(tmp_path):
     db_path = ensure_jobs_tables(tmp_path / "slides-index-repair.db")
     jm = JobManager(db_path)
@@ -690,6 +749,78 @@ def test_sqlite_archive_collision_with_different_terminal_result_is_unsafe(
         assert conn.execute("SELECT COUNT(*) FROM jobs_archive WHERE uuid=?", (job["uuid"],)).fetchone()[0] == 1
 
 
+def test_sqlite_malformed_archive_collision_uses_closed_normalization_failure(
+    tmp_path,
+    monkeypatch,
+):
+    db_path = ensure_jobs_tables(tmp_path / "slides-malformed-collision.db")
+    manager = JobManager(db_path)
+    job = manager.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload={"receipt_id": "receipt-1"},
+        owner_user_id="owner-1",
+        idempotency_key="malformed-collision",
+    )
+    malformed = "gzip64:c2Vuc2l0aXZlLWRlc3RpbmF0aW9u"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE jobs SET status='completed', "
+            "completed_at='2000-01-01 00:00:00' WHERE id=?",
+            (int(job["id"]),),
+        )
+        _copy_job_to_archive(conn, job_id=int(job["id"]))
+        conn.execute(
+            "UPDATE jobs_archive SET result=NULL, result_compressed=? WHERE uuid=?",
+            (malformed, str(job["uuid"])),
+        )
+        before = (
+            conn.execute(
+                "SELECT COUNT(*) FROM jobs WHERE uuid=?",
+                (str(job["uuid"]),),
+            ).fetchone()[0],
+            tuple(
+                conn.execute(
+                    "SELECT payload, payload_compressed, result, result_compressed, "
+                    "status FROM jobs_archive WHERE uuid=?",
+                    (str(job["uuid"]),),
+                ).fetchone()
+            ),
+            conn.execute("SELECT COUNT(*) FROM job_events").fetchone()[0],
+        )
+
+    monkeypatch.setenv("JOBS_ARCHIVE_BEFORE_DELETE", "true")
+    with pytest.raises(SlidesGenerationJobsUnavailableError) as exc_info:
+        manager.prune_jobs(
+            older_than_days=1,
+            domain="slides",
+            queue="default",
+            job_type="presentation.generate",
+        )
+    assert str(exc_info.value) == (
+        "presentation.generate archive projection is unavailable"
+    )
+    assert "sensitive-destination" not in str(exc_info.value)
+
+    with sqlite3.connect(db_path) as conn:
+        after = (
+            conn.execute(
+                "SELECT COUNT(*) FROM jobs WHERE uuid=?",
+                (str(job["uuid"]),),
+            ).fetchone()[0],
+            tuple(
+                conn.execute(
+                    "SELECT payload, payload_compressed, result, result_compressed, "
+                    "status FROM jobs_archive WHERE uuid=?",
+                    (str(job["uuid"]),),
+                ).fetchone()
+            ),
+            conn.execute("SELECT COUNT(*) FROM job_events").fetchone()[0],
+        )
+    assert after == before
+
+
 def test_sqlite_unsafe_archive_collision_poisons_readiness_and_preserves_active(
     tmp_path,
     monkeypatch,
@@ -898,6 +1029,80 @@ def test_sqlite_archive_preserves_terminal_error_projection(tmp_path, monkeypatc
     assert archived["archived"] is True
     assert archived["status"] == "failed"
     assert archived["error_code"] == "provider_failed"
+
+
+@pytest.mark.parametrize("compressed_field", ("payload", "result"))
+def test_sqlite_archived_slides_lookup_and_resolve_reject_malformed_compression(
+    tmp_path,
+    compressed_field,
+):
+    db_path = ensure_jobs_tables(
+        tmp_path / f"slides-malformed-{compressed_field}-lookup.db"
+    )
+    manager = JobManager(db_path)
+    job = manager.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload={"receipt_id": "receipt-1"},
+        owner_user_id="owner-1",
+        idempotency_key=f"malformed-{compressed_field}-lookup",
+    )
+    malformed = "gzip64:c2Vuc2l0aXZlLWRlc3RpbmF0aW9u"
+    with sqlite3.connect(db_path) as conn:
+        _copy_job_to_archive(conn, job_id=int(job["id"]))
+        conn.execute("DELETE FROM jobs WHERE id=?", (int(job["id"]),))
+        if compressed_field == "payload":
+            conn.execute(
+                "UPDATE jobs_archive SET payload=NULL, payload_compressed=? "
+                "WHERE uuid=?",
+                (malformed, str(job["uuid"])),
+            )
+        else:
+            conn.execute(
+                "UPDATE jobs_archive SET result=NULL, result_compressed=? "
+                "WHERE uuid=?",
+                (malformed, str(job["uuid"])),
+            )
+        before = tuple(
+            conn.execute(
+                "SELECT payload, payload_compressed, result, result_compressed, "
+                "status FROM jobs_archive WHERE uuid=?",
+                (str(job["uuid"]),),
+            ).fetchone()
+        )
+
+    calls = (
+        lambda: manager.lookup_slides_generation_job(
+            owner_user_id="owner-1",
+            idempotency_key=f"malformed-{compressed_field}-lookup",
+            expected_job_uuid=str(job["uuid"]),
+            expected_job_id=int(job["id"]),
+        ),
+        lambda: manager.resolve_slides_generation_job(
+            job_uuid=str(job["uuid"]),
+            owner_user_id="owner-1",
+            idempotency_key=f"malformed-{compressed_field}-lookup",
+            job_id=int(job["id"]),
+        ),
+    )
+    for call in calls:
+        with pytest.raises(SlidesGenerationJobsUnavailableError) as exc_info:
+            call()
+        assert str(exc_info.value) == (
+            "presentation.generate archive projection is unavailable"
+        )
+        assert "sensitive-destination" not in str(exc_info.value)
+
+    with sqlite3.connect(db_path) as conn:
+        after = tuple(
+            conn.execute(
+                "SELECT payload, payload_compressed, result, result_compressed, "
+                "status FROM jobs_archive WHERE uuid=?",
+                (str(job["uuid"]),),
+            ).fetchone()
+        )
+    assert after == before
 
 
 def test_sqlite_two_managers_create_one_generation_correlation(tmp_path):
