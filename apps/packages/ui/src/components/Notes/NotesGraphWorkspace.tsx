@@ -43,7 +43,10 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
   const { t } = useTranslation(["option", "common"])
   const rootRef = React.useRef<HTMLElement | null>(null)
   const canvasRef = React.useRef<NotesGraphCanvasHandle | null>(null)
-  const pendingCanvasFocusRef = React.useRef<string | null>(null)
+  const pendingCanvasFocusRef = React.useRef<{
+    authorityScope: string | null
+    nodeId: string
+  } | null>(null)
   const mountedFocusRef = React.useRef({
     authorityScope,
     noteId: authorityScope ? initialFocusNoteId : null
@@ -178,10 +181,10 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
       if (canvasRef.current) {
         canvasRef.current.focusNode(nodeId)
       } else {
-        pendingCanvasFocusRef.current = nodeId
+        pendingCanvasFocusRef.current = { authorityScope, nodeId }
       }
     },
-    [handleSelectNode]
+    [authorityScope, handleSelectNode]
   )
   const handleSelectSearchResult = React.useCallback(
     (nodeId: string) => {
@@ -190,10 +193,16 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
     [handleFocusNode]
   )
   React.useEffect(() => {
-    if (viewMode !== "canvas" || !pendingCanvasFocusRef.current) return
-    canvasRef.current?.focusNode(pendingCanvasFocusRef.current)
+    const pendingFocus = pendingCanvasFocusRef.current
+    if (!pendingFocus) return
+    if (pendingFocus.authorityScope !== authorityScope) {
+      pendingCanvasFocusRef.current = null
+      return
+    }
+    if (viewMode !== "canvas") return
+    canvasRef.current?.focusNode(pendingFocus.nodeId)
     pendingCanvasFocusRef.current = null
-  }, [viewMode])
+  }, [authorityScope, viewMode])
   const handleSuggestionDecision = React.useCallback(
     async (action: "accept" | "reject", suggestionId: string) => {
       const item = suggestions.suggestions?.find(

@@ -4,7 +4,7 @@ title: Implement first-class Notes graph workspace and reviewable AI suggestions
 status: In Progress
 assignee: []
 created_date: 2026-08-27 03:40
-updated_date: 2026-08-28 12:37
+updated_date: 2026-08-28 12:53
 labels:
 - notes
 - knowledge-graph
@@ -269,6 +269,8 @@ Task 11 Review Round 1/3 started from exact committed base 4ec02f478fbb78fa75d8c
 Task 11 Review Round 1/3 completed from exact base 4ec02f478fbb78fa75d8c52dce331c4de382645d. Suggestion authority now follows the currently selected loaded canonical note shown in the inspector without refocusing the graph neighborhood; tag/source/no-note selections disable the reused Task 9 controller and omit all suggestion/provisional UI. Relationships uses one combined decision-pending gate, the single live region remounts a monotonic keyed child for identical outcomes with focus recovery, and per-group list metadata remains correct across pagination. RED: 41 passed/8 expected failures; focused GREEN 49/49. Final verification: Task 11 101/101; Workspace plus Stage 21/22 31/31; Task 9 hook/client 47/47; extension-pinned Prettier, ESLint, and diff/scoped scans pass; TypeScript exactly matches the inherited 315-line baseline with zero touched diagnostics. Accidental WebUI-formatter churn was removed with the exact Task 11 extension-pinned profile. Backend unchanged and not rerun. Task 12, dependencies, lockfiles, E2E servers, and unrelated Watchlists templates remain excluded.
 Task 11 Review Round 2/3 started from exact head 3cfd30f56a88ceeca6b98a379a02e381071c69c1. Scope is limited to synchronous, concurrency-safe Notes graph selection ownership plus focused RED/GREEN regressions. Task 12, dependencies, lockfiles, E2E servers, and the two unrelated untracked Watchlists templates remain out of scope.
 Task 11 Review Round 2/3 completed. RED: NotesGraphWorkspace.view-mode 21 passed / 4 expected failures, proving stale committed A inputs after controlled B/missing and same-ID A-to-B transitions. GREEN: focused 25/25; Task 11 105/105; Workspace + Stage 21/22 35/35; Task 9 client/hook 47/47. Pinned Prettier and zero-warning ESLint pass. TypeScript remains the exact inherited 315-line baseline with zero touched diagnostics. Selection is synchronously owned by authority plus controlled identity and validated against the current loaded graph; abandoned Suspense renders do not publish ownership. Backend, Task 12, dependencies/lockfiles, E2E servers, and unrelated Watchlists templates remain untouched.
+Task 11 Review Round 3/3 started from exact head 0b3c6768011cc3a7356367c62e46d4692cd00f4a. Scope is limited to authority-owning pending Canvas focus plus same-authority delivery and A-to-B discard regressions. Task 12, dependencies, lockfiles, E2E servers, and the two unrelated untracked Watchlists templates remain out of scope.
+Task 11 Review Round 3/3 completed. RED: NotesGraphWorkspace.view-mode 25 passed / 1 expected A-to-B same-ID deferred-focus failure. GREEN: focused 26/26; Task 11 106/106; Workspace + Stage 21/22 36/36. Pinned Prettier and zero-warning ESLint pass. TypeScript remains the exact inherited 315-line baseline with zero touched diagnostics. Deferred Canvas focus now stores authorityScope plus nodeId, delivers once only for an exact authority match, and discards A-owned focus after B commits. Backend, Task 12, dependencies/lockfiles, E2E servers, and unrelated Watchlists templates remain untouched.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 

@@ -903,7 +903,7 @@ describe("NotesGraphWorkspace first-class view mode", () => {
     expect(document.querySelectorAll('[aria-live="polite"]')).toHaveLength(1)
   })
 
-  it("focuses an activated relationship when Canvas is active again", async () => {
+  it("delivers a queued same-authority relationship focus when Canvas remounts", async () => {
     const state = baseWorkspaceState()
     state.graph = {
       ...graph,
@@ -943,6 +943,58 @@ describe("NotesGraphWorkspace first-class view mode", () => {
     )
 
     await waitFor(() => expect(mockFocusNode).toHaveBeenCalledWith("note:a"))
+    expect(mockFocusNode).toHaveBeenCalledTimes(1)
+  })
+
+  it("discards authority A queued focus before Canvas remounts for authority B", () => {
+    const authorityA = workspaceStateWithCommonNote("common")
+    authorityA.graph = {
+      ...authorityA.graph,
+      edges: [
+        {
+          id: "edge:common-b",
+          source: "note:common",
+          target: "note:b",
+          type: "manual",
+          directed: true,
+          weight: null,
+          label: null
+        }
+      ]
+    }
+    const authorityB = workspaceStateWithCommonNote(null)
+    mockUseNotesGraphWorkspace.mockImplementation(({ authorityScope }) =>
+      authorityScope === "scope-b" ? authorityB : authorityA
+    )
+    const { rerenderWorkspace } = renderWorkspace({
+      authorityScope: "scope-a",
+      initialFocusNoteId: "common",
+      selectedNoteId: "common"
+    })
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "option:notesSearch.graphRelationships"
+      })
+    )
+    fireEvent.click(
+      within(screen.getByTestId("notes-graph-relationships-view")).getByRole(
+        "button",
+        { name: "Beta note" }
+      )
+    )
+    expect(mockFocusNode).not.toHaveBeenCalled()
+
+    rerenderWorkspace({
+      authorityScope: "scope-b",
+      initialFocusNoteId: "common",
+      selectedNoteId: "common"
+    })
+    fireEvent.click(
+      screen.getByRole("button", { name: "option:notesSearch.graphCanvas" })
+    )
+
+    expect(mockFocusNode).not.toHaveBeenCalled()
   })
 
   it("keeps last-good graph state visible while marking truncation, degraded refresh, and offline state", () => {
