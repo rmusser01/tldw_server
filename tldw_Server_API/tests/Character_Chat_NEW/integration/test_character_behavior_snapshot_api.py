@@ -300,6 +300,101 @@ def test_configured_defaults_and_generation_aliases_create_valid_effective_setti
 
 
 @pytest.mark.integration
+def test_api_omitted_sampling_preserves_character_generation_defaults(
+    test_client,
+    auth_headers,
+    character_db,
+):
+    character_id = character_db.add_character_card(
+        {
+            "name": "Endpoint Defaults Ari",
+            "extensions": {
+                "tldw": {
+                    "generation": {
+                        "temperature": "0.25",
+                        "topP": "0.55",
+                        "repetitionPenalty": "1.2",
+                        "stopSequences": "<ONE>; <TWO>",
+                    }
+                }
+            },
+        }
+    )
+
+    response = test_client.post(
+        "/api/v1/chats/",
+        headers=auth_headers,
+        json={
+            "character_id": character_id,
+            "provider": "local-llm",
+            "model": "local-test",
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    state = character_db.get_roleplay_resume_state(response.json()["id"])
+    assert state["effective_completion"]["sampling"] == {
+        "temperature": 0.25,
+        "top_p": 0.55,
+        "repetition_penalty": 1.2,
+        "stop": ["<ONE>", "<TWO>"],
+    }
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("extensions", "expected_preset_id", "expected_selection_source"),
+    [
+        ({}, "default", "default"),
+        ({"tldw": {"promptPreset": "st_default"}}, "st_default", "character"),
+    ],
+)
+def test_creation_materializes_effective_builtin_prompt_preset(
+    character_db,
+    extensions,
+    expected_preset_id,
+    expected_selection_source,
+):
+    from tldw_Server_API.app.core.Character_Chat.modules.character_prompt_presets import (
+        get_builtin_presets,
+    )
+
+    character_id = character_db.add_character_card(
+        {"name": "Preset Ari", "extensions": extensions}
+    )
+    conversation_id = create_character_conversation(
+        character_db,
+        conversation_data={
+            "character_id": character_id,
+            "title": "Preset snapshot",
+            "client_id": "1",
+        },
+        provider="local-llm",
+        model="local-test",
+    )
+
+    state = character_db.get_roleplay_resume_state(conversation_id)
+    materialized = state["behavior_snapshot"]["payload"]["participants"][0][
+        "prompt"
+    ]["prompt_relevant_extensions"]["prompt_preset"]
+    expected = next(
+        preset
+        for preset in get_builtin_presets()
+        if preset["preset_id"] == expected_preset_id
+    )
+    assert materialized["preset_id"] == expected_preset_id
+    assert materialized["name"] == expected["name"]
+    assert materialized["section_order"] == expected["section_order"]
+    assert materialized["section_templates"] == expected["section_templates"]
+    assert materialized["selection_source"] == expected_selection_source
+    assert materialized["source"] == {
+        "kind": "builtin_prompt_preset",
+        "id": expected_preset_id,
+        "version": 1,
+    }
+
+
+@pytest.mark.integration
 @pytest.mark.parametrize(
     ("provider", "model", "catalog_result"),
     [
@@ -430,7 +525,23 @@ def test_drift_retry_freezes_initial_provider_model_and_sampling(
 
 
 @pytest.mark.integration
-def test_credential_settings_rejection_rolls_back_creation(character_db):
+@pytest.mark.parametrize(
+    "credential_key",
+    [
+        "api.key",
+        "accessToken",
+        "authToken",
+        "bearerToken",
+        "clientSecret",
+        "privateKey",
+        "refreshToken",
+        "xApiKey",
+    ],
+)
+def test_credential_settings_rejection_rolls_back_creation(
+    character_db,
+    credential_key,
+):
     character_id = character_db.add_character_card({"name": "Credential Ari"})
 
     with pytest.raises(InputError, match="credential"):
@@ -450,7 +561,7 @@ def test_credential_settings_rejection_rolls_back_creation(character_db):
                 "stop": [],
             },
             conversation_settings={
-                "nested": {"api.key": "must-not-persist"},
+                "nested": {credential_key: "must-not-persist"},
             },
         )
 
@@ -504,7 +615,7 @@ def test_reserved_roleplay_settings_update_is_rejected(
     [
         {},
         {
-            "provider": "definitely-not-a-provider",
+            "provider": "",
             "model": "forged-model",
             "sampling": {
                 "temperature": 0.0,
@@ -564,6 +675,46 @@ def test_forged_readiness_is_invalid_on_store_and_api_reads(
 
 
 @pytest.mark.integration
+def test_stored_readiness_does_not_depend_on_current_provider_inventory(
+    test_client,
+    auth_headers,
+    character_db,
+    monkeypatch,
+):
+    character_id = character_db.add_character_card({"name": "Stable Readiness Ari"})
+    created = test_client.post(
+        "/api/v1/chats/",
+        headers=auth_headers,
+        json={
+            "character_id": character_id,
+            "provider": "local-llm",
+            "model": "local-test",
+        },
+    )
+    assert created.status_code == 201, created.text
+    conversation_id = created.json()["id"]
+
+    from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.app.core.LLM_Calls import adapter_registry
+
+    def deployment_probe(*_args, **_kwargs):
+        raise AssertionError("stored readiness must not consult live provider state")
+
+    monkeypatch.setattr(adapter_registry, "get_registry", deployment_probe)
+    monkeypatch.setattr(chat_service, "is_model_known_for_provider", deployment_probe)
+
+    state = character_db.get_roleplay_resume_state(conversation_id)
+    assert state["resume_eligible"] is True
+    assert state["effective_completion"]["model"] == "local-test"
+    response = test_client.get(
+        f"/api/v1/chats/{conversation_id}",
+        headers=auth_headers,
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["resume_eligible"] is True
+
+
+@pytest.mark.integration
 def test_source_mutation_and_deployment_default_changes_do_not_change_creation_bytes(
     test_client,
     auth_headers,
@@ -590,9 +741,32 @@ def test_source_mutation_and_deployment_default_changes_do_not_change_creation_b
     assert response.status_code == 201, response.text
     conversation_id = response.json()["id"]
     before_bytes = _snapshot_storage_bytes(character_db, conversation_id)
-    before_effective = character_db.get_roleplay_resume_state(conversation_id)["effective_completion"]
+    before_state = character_db.get_roleplay_resume_state(conversation_id)
+    before_effective = before_state["effective_completion"]
+    settings = before_state["settings"]
+    assert settings["presetScope"] == "chat"
+    assert settings["chatPresetOverrideId"] == "snapshot-cinematic"
 
-    primary = character_db.get_character_card_by_id(sources["primary_id"])
+    from tldw_Server_API.app.api.v1.endpoints.character_chat_sessions import (
+        _resolve_effective_prompt_preset,
+    )
+
+    primary_before = character_db.get_character_card_by_id(sources["primary_id"])
+    assert _resolve_effective_prompt_preset(
+        settings,
+        primary_before,
+        db=character_db,
+    ) == "snapshot-cinematic"
+    materialized_preset = before_state["behavior_snapshot"]["payload"]["participants"][
+        0
+    ]["prompt"]["prompt_relevant_extensions"]["prompt_preset"]
+    assert materialized_preset["selection_source"] == "creation_request"
+    assert materialized_preset["source"] == {
+        "kind": "prompt_preset",
+        "id": "snapshot-cinematic",
+        "version": 1,
+    }
+
     assert character_db.update_character_card(
         sources["primary_id"],
         {
@@ -600,7 +774,7 @@ def test_source_mutation_and_deployment_default_changes_do_not_change_creation_b
             "first_message": "Changed greeting.",
             "extensions": {"tldw": {"generation": {"temperature": 1.9}}},
         },
-        expected_version=primary["version"],
+        expected_version=primary_before["version"],
     )
     second = character_db.get_character_card_by_id(sources["second_id"])
     assert character_db.soft_delete_character_card(sources["second_id"], expected_version=second["version"])
@@ -618,6 +792,61 @@ def test_source_mutation_and_deployment_default_changes_do_not_change_creation_b
 
     assert _snapshot_storage_bytes(character_db, conversation_id) == before_bytes
     assert character_db.get_roleplay_resume_state(conversation_id)["effective_completion"] == before_effective
+
+
+@pytest.mark.integration
+def test_list_uses_one_bounded_resume_projection_instead_of_full_state_per_row(
+    test_client,
+    auth_headers,
+    character_db,
+):
+    character_id = character_db.add_character_card({"name": "List Projection Ari"})
+    resumable_id = create_character_conversation(
+        character_db,
+        conversation_data={
+            "character_id": character_id,
+            "title": "Resumable list item",
+            "client_id": "1",
+        },
+        provider="local-llm",
+        model="local-test",
+    )
+    legacy_id = character_db.add_conversation(
+        {
+            "character_id": character_id,
+            "title": "Legacy list item",
+            "client_id": "1",
+        }
+    )
+    store = character_db.conversation_resume_store
+    real_bulk = getattr(store, "get_roleplay_resume_summaries", lambda _ids: {})
+
+    with (
+        mock.patch.object(
+            store,
+            "get_roleplay_resume_summaries",
+            wraps=real_bulk,
+            create=True,
+        ) as bulk_read,
+        mock.patch.object(
+            store,
+            "get_roleplay_resume_state",
+            wraps=store.get_roleplay_resume_state,
+        ) as full_read,
+    ):
+        response = test_client.get(
+            "/api/v1/chats/?limit=10",
+            headers=auth_headers,
+        )
+
+    assert response.status_code == 200, response.text
+    assert bulk_read.call_count == 1
+    assert full_read.call_count == 0
+    by_id = {chat["id"]: chat for chat in response.json()["chats"]}
+    assert by_id[resumable_id]["resume_eligible"] is True
+    assert by_id[resumable_id]["behavior_snapshot"]["status"] == "valid"
+    assert by_id[legacy_id]["resume_eligible"] is False
+    assert by_id[legacy_id]["behavior_snapshot"]["status"] == "missing"
 
 
 @pytest.mark.integration

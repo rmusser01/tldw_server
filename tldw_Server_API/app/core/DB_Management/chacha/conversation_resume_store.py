@@ -77,23 +77,16 @@ def _validate_effective_completion(value: Any) -> dict[str, Any] | None:
     model_value = value.get("model")
     if not isinstance(provider_value, str) or not isinstance(model_value, str):
         return None
-
-    from tldw_Server_API.app.core.Chat.chat_service import is_model_known_for_provider
-    from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
-    from tldw_Server_API.app.core.LLM_Calls.adapter_utils import normalize_provider
-
-    registry = get_registry()
-    provider = registry.resolve_provider_name(normalize_provider(provider_value))
+    provider = provider_value.strip()
     model = model_value.strip()
     sampling = _validate_closed_sampling(value.get("sampling"))
     if (
         not provider
-        or provider_value != provider
         or not model
+        or provider_value != provider
         or model_value != model
+        or provider.casefold() != provider
         or sampling is None
-        or registry.get_adapter(provider) is None
-        or is_model_known_for_provider(provider, model) is False
     ):
         return None
     return {"provider": provider, "model": model, "sampling": sampling}
@@ -271,6 +264,91 @@ class ConversationResumeStore:
         """Read and validate a stored snapshot; absence is explicitly legacy-missing."""
         with self._db.transaction() as conn:
             return self._get_snapshot(conversation_id, conn)
+
+    def get_roleplay_resume_summaries(
+        self,
+        conversation_ids: list[str],
+    ) -> dict[str, dict[str, Any]]:
+        """Read bounded list metadata without loading or canonicalizing snapshot bodies."""
+        ordered_ids = list(dict.fromkeys(str(item) for item in conversation_ids if item))
+        if not ordered_ids:
+            return {}
+        if len(ordered_ids) > 200:
+            raise InputError("resume summary reads are limited to 200 conversations")
+
+        placeholders = ",".join("?" for _ in ordered_ids)
+        with self._db.transaction() as conn:
+            result = conn.execute(
+                f"""
+                SELECT c.id, c.history_version, cs.settings_json, cs.settings_version,
+                       bs.status AS snapshot_status, bs.schema_version, bs.digest
+                  FROM conversations c
+                  LEFT JOIN conversation_settings cs ON cs.conversation_id = c.id
+                  LEFT JOIN conversation_behavior_snapshots bs ON bs.conversation_id = c.id
+                 WHERE c.id IN ({placeholders}) AND c.deleted = FALSE
+                """,  # nosec B608 -- placeholders are generated, values stay parameterized
+                tuple(ordered_ids),
+            )
+            columns = (
+                "id",
+                "history_version",
+                "settings_json",
+                "settings_version",
+                "snapshot_status",
+                "schema_version",
+                "digest",
+            )
+            summaries: dict[str, dict[str, Any]] = {}
+            for row in result.fetchall():
+                record = self._row_to_dict(row, columns)
+                conversation_id = str(record["id"])
+                settings_json = record.get("settings_json")
+                try:
+                    settings = json.loads(settings_json) if settings_json is not None else None
+                except (TypeError, json.JSONDecodeError):
+                    settings = None
+                eligible, reason, _effective = _validate_readiness(
+                    settings,
+                    settings_present=settings_json is not None,
+                )
+
+                raw_status = str(record.get("snapshot_status") or "missing")
+                digest = record.get("digest")
+                valid_digest = (
+                    isinstance(digest, str)
+                    and digest.startswith("sha256:")
+                    and len(digest) == 71
+                    and all(char in "0123456789abcdef" for char in digest[7:])
+                )
+                snapshot_status = (
+                    "valid"
+                    if raw_status == "valid"
+                    and record.get("schema_version") == SNAPSHOT_SCHEMA_VERSION
+                    and valid_digest
+                    else "missing"
+                    if raw_status == "missing"
+                    else "invalid"
+                )
+                if snapshot_status != "valid":
+                    eligible = False
+                    reason = f"behavior_snapshot_{snapshot_status}"
+
+                summaries[conversation_id] = {
+                    "behavior_snapshot": {
+                        "status": snapshot_status,
+                        "schema_version": (
+                            record.get("schema_version")
+                            if snapshot_status == "valid"
+                            else None
+                        ),
+                        "digest": digest if snapshot_status == "valid" else None,
+                    },
+                    "resume_eligible": eligible,
+                    "resume_ineligible_reason": None if eligible else reason,
+                    "settings_version": record.get("settings_version"),
+                    "history_version": int(record["history_version"]),
+                }
+            return summaries
 
     def get_roleplay_resume_state(
         self,

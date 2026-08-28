@@ -63,6 +63,8 @@ _CREDENTIAL_KEYS = frozenset(
     }
 )
 _CREDENTIAL_SEPARATOR_RE = re.compile(r"[\W_]+")
+_LOWER_TO_UPPER_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+_ACRONYM_TO_WORD_RE = re.compile(r"(?<=[A-Z])(?=[A-Z][a-z])")
 
 
 @dataclass(frozen=True)
@@ -260,13 +262,18 @@ def _reject_credential_keys(value: Any, *, path: str) -> None:
     if not isinstance(value, dict):
         return
     for key, item in value.items():
-        normalized_key = _CREDENTIAL_SEPARATOR_RE.sub(
-            "_",
-            unicodedata.normalize("NFKC", key).casefold(),
-        ).strip("_")
-        if normalized_key in _CREDENTIAL_KEYS:
+        if is_credential_key(key):
             raise ValueError(f"{path} contains credential-like key {key!r}")
         _reject_credential_keys(item, path=f"{path}.{key}")
+
+
+def is_credential_key(key: str) -> bool:
+    """Return whether a JSON key names an explicitly classified credential."""
+    normalized = unicodedata.normalize("NFKC", key)
+    normalized = _LOWER_TO_UPPER_RE.sub("_", normalized)
+    normalized = _ACRONYM_TO_WORD_RE.sub("_", normalized)
+    normalized = _CREDENTIAL_SEPARATOR_RE.sub("_", normalized.casefold()).strip("_")
+    return normalized in _CREDENTIAL_KEYS
 
 
 __all__ = [
@@ -274,4 +281,5 @@ __all__ = [
     "DEFAULT_MAX_SNAPSHOT_BYTES",
     "SNAPSHOT_SCHEMA_VERSION",
     "build_behavior_snapshot",
+    "is_credential_key",
 ]

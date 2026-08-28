@@ -5,8 +5,6 @@ from __future__ import annotations
 import json
 import math
 import os
-import re
-import unicodedata
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -16,9 +14,15 @@ from tldw_Server_API.app.core.Character_Chat.character_behavior_snapshot import 
     DEFAULT_MAX_SNAPSHOT_BYTES,
     BehaviorSnapshotV1,
     build_behavior_snapshot,
+    is_credential_key,
 )
 from tldw_Server_API.app.core.Character_Chat.modules.character_generation_presets import (
     resolve_character_generation_settings,
+)
+from tldw_Server_API.app.core.Character_Chat.modules.character_prompt_presets import (
+    DEFAULT_PROMPT_PRESET,
+    get_builtin_presets,
+    resolve_character_prompt_preset,
 )
 from tldw_Server_API.app.core.Character_Chat.world_book_manager import WorldBookService
 from tldw_Server_API.app.core.Chat.chat_service import is_model_known_for_provider
@@ -35,27 +39,6 @@ if TYPE_CHECKING:
 
 
 _SAMPLING_FIELDS = frozenset({"temperature", "top_p", "repetition_penalty", "stop"})
-_CREDENTIAL_FIELDS = frozenset(
-    {
-        "api_key",
-        "apikey",
-        "access_token",
-        "auth_token",
-        "authorization",
-        "bearer_token",
-        "client_secret",
-        "credential",
-        "credentials",
-        "password",
-        "private_key",
-        "refresh_token",
-        "secret",
-        "x_api_key",
-    }
-)
-_CREDENTIAL_SEPARATOR_RE = re.compile(r"[\W_]+")
-
-
 class _SourceDrift(RuntimeError):
     pass
 
@@ -89,7 +72,7 @@ def _safe_json(value: Any) -> Any:
         result: dict[str, Any] = {}
         for key, item in value.items():
             key_text = str(key)
-            if _is_credential_key(key_text) or isinstance(
+            if is_credential_key(key_text) or isinstance(
                 item, (bytes, bytearray, memoryview)
             ):
                 continue
@@ -104,19 +87,11 @@ def _safe_json(value: Any) -> Any:
     return str(value)
 
 
-def _is_credential_key(key: str) -> bool:
-    normalized = _CREDENTIAL_SEPARATOR_RE.sub(
-        "_",
-        unicodedata.normalize("NFKC", key).casefold(),
-    ).strip("_")
-    return normalized in _CREDENTIAL_FIELDS
-
-
 def _reject_credential_settings(value: Any, *, path: str = "conversation_settings") -> None:
     if isinstance(value, Mapping):
         for key, item in value.items():
             key_text = str(key)
-            if _is_credential_key(key_text):
+            if is_credential_key(key_text):
                 raise InputError(f"{path} contains credential-bearing key {key_text!r}.")
             _reject_credential_settings(item, path=f"{path}.{key_text}")
     elif isinstance(value, (list, tuple)):
@@ -148,16 +123,28 @@ def _select_rows(conn: Any, query: str, params: tuple[Any, ...]) -> list[dict[st
     return [_row_dict(row, result) for row in result.fetchall()]
 
 
-def _load_preset(conn: Any, preset_id: str | None) -> dict[str, Any]:
-    normalized = str(preset_id or "default").strip() or "default"
+def _load_preset(
+    conn: Any,
+    preset_id: str,
+    *,
+    selection_source: str,
+) -> dict[str, Any]:
+    normalized = str(preset_id).strip()
     if normalized in {"default", "st_default"}:
+        builtin = next(
+            preset
+            for preset in get_builtin_presets()
+            if preset["preset_id"] == normalized
+        )
         return {
-            "preset_id": normalized,
-            "name": normalized.replace("_", " ").title(),
-            "builtin": True,
+            **_safe_json(builtin),
             "version": 1,
-            "section_order": [],
-            "section_templates": {},
+            "selection_source": selection_source,
+            "source": {
+                "kind": "builtin_prompt_preset",
+                "id": normalized,
+                "version": 1,
+            },
         }
     result = conn.execute(
         """
@@ -173,14 +160,21 @@ def _load_preset(conn: Any, preset_id: str | None) -> dict[str, Any]:
     if row is None:
         raise InputError(f"Prompt preset '{normalized}' not found.")
     record = _row_dict(row, result)
+    version = int(record.get("version") or 1)
     return {
         "preset_id": record["preset_id"],
         "name": record["name"],
         "builtin": False,
-        "version": int(record.get("version") or 1),
+        "version": version,
         "updated_at": str(record.get("last_modified") or ""),
         "section_order": _decode_json(record.get("section_order_json"), []),
         "section_templates": _decode_json(record.get("section_templates_json"), {}),
+        "selection_source": selection_source,
+        "source": {
+            "kind": "prompt_preset",
+            "id": str(record["preset_id"]),
+            "version": version,
+        },
     }
 
 
@@ -288,7 +282,7 @@ def _materialize_behavior(
     primary_greeting: Mapping[str, Any] | None,
     max_snapshot_bytes: int,
 ) -> _MaterializedBehavior:
-    preset = _load_preset(conn, prompt_preset_id)
+    requested_preset = str(prompt_preset_id or "").strip() or None
     participants: list[dict[str, Any]] = []
     primary_character: dict[str, Any] | None = None
     for index, character_id in enumerate(participant_character_ids):
@@ -304,6 +298,19 @@ def _materialize_behavior(
             character.get("alternate_greetings"), []
         )
         character["extensions"] = _decode_json(character.get("extensions"), {})
+        resolved_preset = requested_preset or resolve_character_prompt_preset(character)
+        selection_source = (
+            "creation_request"
+            if requested_preset
+            else "character"
+            if resolved_preset != DEFAULT_PROMPT_PRESET
+            else "default"
+        )
+        preset = _load_preset(
+            conn,
+            resolved_preset,
+            selection_source=selection_source,
+        )
         if primary_character is None:
             primary_character = character
         extensions = _safe_json(character.get("extensions") or {})
@@ -535,7 +542,12 @@ def create_character_conversation(
                 settings = dict(creation_settings)
                 settings["participantCharacterIds"] = ordered_ids
                 if prompt_preset_id:
-                    settings["promptPreset"] = prompt_preset_id
+                    normalized_preset = str(prompt_preset_id).strip()
+                    settings["presetScope"] = "chat"
+                    settings["chatPresetOverrideId"] = normalized_preset
+                    settings["promptPreset"] = normalized_preset
+                else:
+                    settings["presetScope"] = "character"
                 settings["roleplayResumeV1"] = {
                     "resumeEligible": effective is not None,
                     "resumeIneligibleReason": reason,

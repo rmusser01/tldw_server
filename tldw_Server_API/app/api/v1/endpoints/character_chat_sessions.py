@@ -4559,12 +4559,17 @@ async def create_chat_session(
                 memory_by_character_id=session_data.memory_by_character_id,
                 provider=session_data.provider,
                 model=session_data.model,
-                sampling={
-                    "temperature": session_data.temperature,
-                    "top_p": session_data.top_p,
-                    "repetition_penalty": session_data.repetition_penalty,
-                    "stop": session_data.stop,
-                },
+                sampling=(
+                    {
+                        "temperature": session_data.temperature,
+                        "top_p": session_data.top_p,
+                        "repetition_penalty": session_data.repetition_penalty,
+                        "stop": session_data.stop,
+                    }
+                    if session_data.model_fields_set
+                    & {"temperature", "top_p", "repetition_penalty", "stop"}
+                    else None
+                ),
                 initial_messages=initial_messages,
                 primary_greeting={
                     "content": greeting_text if valid_greeting else "",
@@ -7158,6 +7163,13 @@ async def list_chat_sessions(
             user_conversations,
             user_id_str,
         )
+        resume_summaries = db.get_roleplay_resume_summaries(
+            [
+                str(conv["id"])
+                for conv in user_conversations
+                if conv.get("id") and not conv.get("deleted")
+            ]
+        )
 
         chats: list[ChatSessionResponse] = []
         for conv in user_conversations:
@@ -7173,11 +7185,7 @@ async def list_chat_sessions(
                         persona_names=persona_names,
                     ),
                     settings=settings_payload,
-                    resume_state=(
-                        db.get_roleplay_resume_state(conv["id"])
-                        if not conv.get("deleted")
-                        else None
-                    ),
+                    resume_state=resume_summaries.get(str(conv["id"])),
                 )
             )
 

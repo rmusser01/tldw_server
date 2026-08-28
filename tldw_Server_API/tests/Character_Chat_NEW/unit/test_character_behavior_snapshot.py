@@ -334,6 +334,13 @@ def test_build_behavior_snapshot_rejects_credentials_in_extensible_maps(extensib
         "API KEY",
         "x-api-key",
         "ＡＰＩ．ＫＥＹ",
+        "accessToken",
+        "authToken",
+        "bearerToken",
+        "clientSecret",
+        "privateKey",
+        "refreshToken",
+        "xApiKey",
     ],
 )
 def test_build_behavior_snapshot_rejects_credential_key_separator_variants(

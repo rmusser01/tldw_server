@@ -42571,6 +42571,7 @@ for _conversation_store_method in (
 for _conversation_resume_store_method in (
     "put_behavior_snapshot",
     "get_conversation_behavior_snapshot",
+    "get_roleplay_resume_summaries",
     "get_roleplay_resume_state",
 ):
     setattr(
