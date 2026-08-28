@@ -239,6 +239,78 @@ describe("NotesGraphRelationshipsView", () => {
     await waitFor(() => expect(acceptButton).toHaveFocus())
   })
 
+  it("keeps provisional titles non-navigational while loaded suggestion targets remain selectable", () => {
+    const onSelectNode = vi.fn()
+    const suggestion = (id: string, title: string, targetNoteId: string) => ({
+      id,
+      kind: "related_note" as const,
+      target_title: title,
+      target_note_id: targetNoteId,
+      match_strength: "possible" as const,
+      rationale: "Possible relation",
+      evidence: []
+    })
+    render(
+      <NotesGraphRelationshipsView
+        graph={graph}
+        selectedNodeId="note:a"
+        provisionalOverlays={[
+          {
+            edge: {
+              id: "suggestion-edge:s1",
+              suggestionId: "s1",
+              source: "note:a",
+              target: "suggestion-node:s1",
+              type: "provisional_suggestion",
+              directed: false
+            },
+            node: {
+              id: "suggestion-node:s1",
+              suggestionId: "s1",
+              type: "provisional_note",
+              label: "Provisional target"
+            }
+          },
+          {
+            edge: {
+              id: "suggestion-edge:s2",
+              suggestionId: "s2",
+              source: "note:a",
+              target: "note:b",
+              type: "provisional_suggestion",
+              directed: false
+            },
+            node: null
+          }
+        ]}
+        suggestions={
+          [
+            suggestion("s1", "Provisional target", "unloaded"),
+            suggestion("s2", "Loaded suggestion target", "b")
+          ] as never
+        }
+        suggestionsAuthorized
+        isOnline
+        onSelectNode={onSelectNode}
+      />
+    )
+
+    expect(
+      screen.getByRole("heading", { name: "Provisional target", level: 3 })
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Provisional target" })
+    ).not.toBeInTheDocument()
+    fireEvent.click(screen.getByText("Provisional target"))
+    expect(onSelectNode).not.toHaveBeenCalled()
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Loaded suggestion target" })
+    )
+    expect(onSelectNode).toHaveBeenCalledTimes(1)
+    expect(onSelectNode).toHaveBeenCalledWith("note:b")
+  })
+
   it("moves focus to the next review row after a successful decision", async () => {
     const decide = vi.fn().mockResolvedValue(true)
     const item = (id: string, title: string) => ({
@@ -295,7 +367,9 @@ describe("NotesGraphRelationshipsView", () => {
       screen.getByRole("button", { name: "Accept Second target" })
     )
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Third target" })).toHaveFocus()
+      expect(
+        screen.getByRole("button", { name: "Accept Third target" })
+      ).toHaveFocus()
     )
   })
 

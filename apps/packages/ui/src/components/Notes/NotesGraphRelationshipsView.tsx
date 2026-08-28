@@ -392,7 +392,11 @@ const NotesGraphRelationshipsView: React.FC<
                             isOnline={isOnline}
                             canAccept={canAccept}
                             canReject={canReject}
-                            onSelect={() => onSelectNode(row.counterpart.id)}
+                            onSelect={
+                              row.counterpart.id.startsWith("suggestion-node:")
+                                ? undefined
+                                : () => onSelectNode(row.counterpart.id)
+                            }
                             onAccept={
                               onDecideSuggestion
                                 ? (suggestionId) => {

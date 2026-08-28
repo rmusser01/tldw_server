@@ -756,6 +756,91 @@ describe("NotesGraphWorkspace first-class view mode", () => {
     expect(state.expand).toHaveBeenCalledTimes(1)
   })
 
+  it("preserves source review controls after provisional activation while loaded relationships remain selectable", () => {
+    const state = baseWorkspaceState()
+    state.graph = {
+      ...graph,
+      edges: [
+        {
+          id: "edge:a-b",
+          source: "note:a",
+          target: "note:b",
+          type: "manual",
+          directed: false,
+          weight: null,
+          label: null
+        }
+      ]
+    }
+    mockUseNotesGraphWorkspace.mockReturnValue(state)
+    mockUseNotesGraphSuggestions.mockReturnValue({
+      provisionalBySuggestionId: {
+        s1: {
+          edge: {
+            id: "suggestion-edge:s1",
+            suggestionId: "s1",
+            source: "note:a",
+            target: "suggestion-node:s1",
+            type: "provisional_suggestion",
+            directed: false
+          },
+          node: {
+            id: "suggestion-node:s1",
+            suggestionId: "s1",
+            type: "provisional_note",
+            label: "Suggested note"
+          }
+        }
+      },
+      capabilities: { allowed_actions: ["accept", "reject"] },
+      suggestions: [
+        {
+          id: "s1",
+          kind: "related_note",
+          target_title: "Suggested note",
+          target_note_id: "unloaded",
+          match_strength: "possible",
+          rationale: "Grounded",
+          evidence: []
+        }
+      ],
+      accept: vi.fn(),
+      reject: vi.fn(),
+      mutations: {
+        acceptance: { isPending: false },
+        rejection: { isPending: false }
+      }
+    })
+    const onSelectNote = vi.fn()
+    renderWorkspace({ onSelectNote })
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "option:notesSearch.graphRelationships"
+      })
+    )
+
+    const relationships = within(
+      screen.getByTestId("notes-graph-relationships-view")
+    )
+    fireEvent.click(relationships.getByText("Suggested note"))
+
+    expect(onSelectNote).not.toHaveBeenCalled()
+    expect(
+      relationships.getByRole("button", {
+        name: "notesSearch.graphAcceptSuggestion"
+      })
+    ).toBeEnabled()
+    expect(
+      relationships.getByRole("button", {
+        name: "notesSearch.graphRejectSuggestion"
+      })
+    ).toBeEnabled()
+
+    fireEvent.click(relationships.getByRole("button", { name: "Beta note" }))
+    expect(onSelectNote).toHaveBeenCalledTimes(1)
+    expect(onSelectNote).toHaveBeenCalledWith("b")
+  })
+
   it("fails closed without suggestion authorization and keeps the loaded graph readable", () => {
     const state = baseWorkspaceState()
     state.graph = { ...graph, suggestions_authorized: false }

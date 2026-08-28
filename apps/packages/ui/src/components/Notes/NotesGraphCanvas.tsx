@@ -132,7 +132,8 @@ const NotesGraphCanvas = React.forwardRef<
           if (overlay.node) {
             elements.push({
               data: { ...overlay.node },
-              classes: "provisional"
+              classes: "provisional",
+              selectable: false
             })
           }
           elements.push({
@@ -242,9 +243,10 @@ const NotesGraphCanvas = React.forwardRef<
         autounselectify: false
       })
 
-      cy.on("tap", "node", (event) =>
+      cy.on("tap", "node", (event) => {
+        if (event.target.hasClass("provisional")) return
         onSelectNodeRef.current(event.target.id())
-      )
+      })
       cy.on("mouseover", "node", (event) =>
         event.target.addClass("graph-label-hovered")
       )

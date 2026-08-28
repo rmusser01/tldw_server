@@ -11,11 +11,13 @@ type CytoscapeTestEvent = {
   target: {
     id: () => string
     data: (key: string) => unknown
+    hasClass: (name: string) => boolean
   }
 }
 
 type CytoscapeTestElement = {
   data: Record<string, unknown>
+  selectable?: boolean
 }
 
 type CytoscapeTestStyle = {
@@ -267,7 +269,8 @@ describe("NotesGraphCanvas graph view", () => {
       cyHandlers["tap:node"]?.({
         target: {
           id: () => "note:b",
-          data: (key: string) => (key === "type" ? "note" : undefined)
+          data: (key: string) => (key === "type" ? "note" : undefined),
+          hasClass: () => false
         }
       })
     })
@@ -322,6 +325,51 @@ describe("NotesGraphCanvas graph view", () => {
       config.style.find((entry) => entry.selector === 'node[type="note"]')
         ?.style?.["background-color"]
     ).toBe("#505050")
+  })
+
+  it("keeps provisional nodes inert while authoritative nodes remain selectable", async () => {
+    const onSelectNode = vi.fn()
+    render(
+      <NotesGraphCanvas
+        graph={graph}
+        layout="grid"
+        focusNoteId="a"
+        selectedNodeId="note:a"
+        visibleEdgeTypes={new Set(["manual"])}
+        provisionalOverlays={overlays}
+        showProvisional
+        onSelectNode={onSelectNode}
+      />
+    )
+
+    await waitFor(() => expect(mockCytoscapeFactory).toHaveBeenCalled())
+    act(() => {
+      cyHandlers["tap:node"]?.({
+        target: {
+          id: () => "suggestion-node:s1",
+          data: () => undefined,
+          hasClass: (name) => name === "provisional"
+        }
+      })
+    })
+    expect(onSelectNode).not.toHaveBeenCalled()
+    expect(
+      mockCytoscapeFactory.mock.calls[0]?.[0].elements.find(
+        (element) => element.data.id === "suggestion-node:s1"
+      )
+    ).toMatchObject({ selectable: false })
+
+    act(() => {
+      cyHandlers["tap:node"]?.({
+        target: {
+          id: () => "note:b",
+          data: () => undefined,
+          hasClass: () => false
+        }
+      })
+    })
+    expect(onSelectNode).toHaveBeenCalledTimes(1)
+    expect(onSelectNode).toHaveBeenCalledWith("note:b")
   })
 
   it("re-runs a session layout without animated decorative motion", async () => {
@@ -435,7 +483,8 @@ describe("NotesGraphCanvas graph view", () => {
       cyHandlers["tap:node"]?.({
         target: {
           id: () => "note:b",
-          data: () => undefined
+          data: () => undefined,
+          hasClass: () => false
         }
       })
     })
