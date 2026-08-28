@@ -733,7 +733,10 @@ async def test_chat_settings_character_memory_merge_prefers_newer_entry(monkeypa
             r = await client.post(
                 "/api/v1/chats/",
                 headers=headers,
-                json={"character_id": int(primary_character_id)},
+                json={
+                    "character_id": int(primary_character_id),
+                    "participant_character_ids": [int(secondary_character_id)],
+                },
             )
             assert r.status_code == 201
             chat_id = r.json()["id"]

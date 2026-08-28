@@ -5,7 +5,11 @@ from fastapi import FastAPI, HTTPException
 
 from tldw_Server_API.app.api.v1.endpoints import character_chat_sessions as sessions
 from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import GreetingSelectRequest
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import ConflictError
+from tldw_Server_API.app.core.Character_Chat import character_conversation_factory
+from tldw_Server_API.app.core.DB_Management.chacha.conversation_resume_store import (
+    build_materialized_behavior_settings,
+)
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import ConflictError, InputError
 
 
 @pytest.mark.unit
@@ -472,3 +476,116 @@ async def test_select_greeting_returns_409_on_concurrent_settings_change():
         )
 
     assert exc_info.value.status_code == 409
+
+
+@pytest.mark.unit
+def test_prompt_completion_settings_inventory_classifies_every_consumed_control():
+    expected_behavior_fields = {
+        "assistantOverlay",
+        "authorNote",
+        "authorNoteEnabled",
+        "authorNoteExcludeFromPrompt",
+        "authorNoteGmOnly",
+        "authorNoteInjectionPosition",
+        "authorNotePlacement",
+        "authorNotePosition",
+        "autoSummaryEnabled",
+        "autoSummaryMessageThreshold",
+        "autoSummaryRecentWindow",
+        "autoSummaryThresholdMessages",
+        "autoSummaryWindowMessages",
+        "characterMemoryById",
+        "chatGenerationOverride",
+        "chatPresetOverrideId",
+        "conversationContext",
+        "generationOverrides",
+        "greetingEnabled",
+        "greetingScope",
+        "greetingSelectionId",
+        "memoryScope",
+        "model",
+        "participantCharacterIds",
+        "participant_character_ids",
+        "pinnedMessageIds",
+        "presetScope",
+        "promptPreset",
+        "prompt_preset",
+        "provider",
+        "summary",
+        "turnTakingMode",
+        "useCharacterDefault",
+    }
+    inventory = getattr(sessions, "PROMPT_COMPLETION_SETTING_CLASSIFICATION", {})
+    assert expected_behavior_fields <= {
+        key for key, classification in inventory.items() if classification == "behavior"
+    }
+
+
+@pytest.mark.unit
+def test_materialized_behavior_record_rejects_oversize_payload():
+    values = {
+        "base_snapshot": {
+            "schema_version": 1,
+            "digest": "sha256:" + ("0" * 64),
+        },
+        "behavior_controls": {
+            "applied_overrides": {},
+            "author_note": {
+                "enabled": True,
+                "gm_only": False,
+                "exclude_from_prompt": False,
+                "position": "before_system",
+            },
+            "auto_summary": {
+                "enabled": False,
+                "threshold_messages": 40,
+                "window_messages": 12,
+            },
+            "greeting": {
+                "enabled": True,
+                "scope": "chat",
+                "selection_id": None,
+                "use_character_default": True,
+            },
+            "memory_scope": "shared",
+            "pinned_message_ids": [],
+            "preset_scope": "character",
+            "prompt_context": {},
+            "turn_taking_mode": "single",
+        },
+        "effective_completion": {
+            "provider": "local-llm",
+            "model": "local-test",
+            "sampling": {
+                "temperature": 0.7,
+                "top_p": 1.0,
+                "repetition_penalty": 1.0,
+                "stop": [],
+            },
+        },
+        "memory": {"author_note": "x" * (1024 * 1024)},
+    }
+    with pytest.raises(InputError, match="exceeds maximum"):
+        build_materialized_behavior_settings(values)
+
+
+@pytest.mark.unit
+def test_materialized_reference_ids_are_deduplicated_and_bounded_before_lookup():
+    normalize_participants = getattr(
+        character_conversation_factory,
+        "normalize_materialized_participant_ids",
+        None,
+    )
+    normalize_world_books = getattr(
+        character_conversation_factory,
+        "normalize_materialized_world_book_ids",
+        None,
+    )
+    assert callable(normalize_participants)
+    assert callable(normalize_world_books)
+    assert normalize_participants(1, [1, "2", 2, 3, "3"]) == [1, 2, 3]
+    assert normalize_world_books([1, "1", 2, 2, 3]) == [1, 2, 3]
+    with pytest.raises(InputError, match="at most 33"):
+        normalize_participants(1, list(range(2, 35)))
+    with pytest.raises(InputError, match="at most 64"):
+        normalize_world_books(list(range(1, 66)))

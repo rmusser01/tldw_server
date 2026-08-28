@@ -4,18 +4,24 @@ API endpoints for message management within character chat sessions.
 Provides CRUD operations for messages in conversations.
 """
 
+import uuid
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any, Literal, Optional
-import uuid
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Response, status
 from loguru import logger
 from pydantic import ValidationError
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    User,
+    get_request_user,
+    require_expected_user,
+)
+
 # Database and authentication dependencies
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
-from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 
 # Schemas
 from tldw_Server_API.app.api.v1.schemas.chat_conversation_schemas import (
@@ -27,11 +33,7 @@ from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import (
     MessageResponse,
     MessageUpdate,
 )
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
-    get_request_user,
-    require_expected_user,
-    User,
-)
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 
 # Character chat helpers
 from tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade import (
@@ -42,6 +44,9 @@ from tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade import (
     remove_message_from_conversation,
     replace_placeholders,
     retrieve_message_details,
+)
+from tldw_Server_API.app.core.Character_Chat.character_conversation_factory import (
+    materialize_roleplay_behavior_settings,
 )
 
 # Rate limiting
@@ -1002,20 +1007,66 @@ async def edit_message(
 
         metadata_updated = False
         if update_data.pinned is not None:
-            metadata_updated = db.set_message_metadata_extra(
-                message_id,
-                {"pinned": bool(update_data.pinned)},
-                merge=True,
-            )
-            if not metadata_updated:
+            conversation = db.get_conversation_by_id(message["conversation_id"])
+            if not isinstance(conversation, Mapping):
                 raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="Failed to update message metadata",
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Chat session {message['conversation_id']} not found",
                 )
+            with db.transaction() as conn:
+                resume_state = db.get_roleplay_resume_state(
+                    message["conversation_id"],
+                    conn=conn,
+                    lock_for_update=True,
+                )
+                metadata_updated = db.set_message_metadata_extra(
+                    message_id,
+                    {"pinned": bool(update_data.pinned)},
+                    merge=True,
+                    conn=conn,
+                )
+                if not metadata_updated:
+                    raise InputError("Failed to update message metadata")
+                snapshot = resume_state.get("behavior_snapshot")
+                if isinstance(snapshot, Mapping) and snapshot.get("status") == "valid":
+                    chat_settings = dict(resume_state.get("settings") or {})
+                    pinned_ids = [
+                        str(item)
+                        for item in chat_settings.get("pinnedMessageIds") or []
+                        if item is not None
+                    ]
+                    if update_data.pinned and message_id not in pinned_ids:
+                        pinned_ids.append(message_id)
+                    elif not update_data.pinned:
+                        pinned_ids = [item for item in pinned_ids if item != message_id]
+                    chat_settings["pinnedMessageIds"] = pinned_ids
+                    materialized = materialize_roleplay_behavior_settings(
+                        conn,
+                        conversation=conversation,
+                        resume_state=resume_state,
+                        merged_settings=chat_settings,
+                        owner_user_id=str(current_user.id),
+                        changed_keys={"pinnedMessageIds"},
+                    )
+                    chat_settings["roleplayBehaviorV1"] = materialized
+                    chat_settings["roleplayResumeV1"] = {
+                        "resumeEligible": True,
+                        "resumeIneligibleReason": None,
+                        "effectiveCompletion": materialized["values"][
+                            "effective_completion"
+                        ],
+                    }
+                    if not db.upsert_conversation_settings(
+                        message["conversation_id"],
+                        chat_settings,
+                        conn=conn,
+                        expected_settings_version=resume_state["settings_version"] or 0,
+                    ):
+                        raise InputError("Failed to update resumable chat settings")
 
         # Update conversation metadata (last_modified/version) via DB abstraction
         conv = db.get_conversation_by_id(message["conversation_id"])
-        if conv and (content_updated or metadata_updated):
+        if conv and content_updated:
             try:
                 db.update_conversation(
                     message["conversation_id"],

@@ -20,6 +20,10 @@ if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
+class _ConversationSettingsTargetMissing(RuntimeError):
+    """Force transaction rollback when settings outlive their live conversation."""
+
+
 class ConversationStore:
     """Focused persistence seam for conversation lifecycle and settings behavior."""
 
@@ -188,7 +192,7 @@ class ConversationStore:
                             entity="conversation_settings",
                             entity_id=conversation_id,
                         )
-                transaction_conn.execute(
+                conversation_result = transaction_conn.execute(
                     """
                     UPDATE conversations
                        SET version = version + 1, last_modified = CURRENT_TIMESTAMP
@@ -196,9 +200,13 @@ class ConversationStore:
                     """,
                     (conversation_id,),
                 )
+                if conversation_result.rowcount != 1:
+                    raise _ConversationSettingsTargetMissing(conversation_id)
             return True
         except ConflictError:
             raise
+        except _ConversationSettingsTargetMissing:
+            return False
         except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
             logger.warning(f"upsert_conversation_settings failed for {conversation_id}: {exc}")
             return False

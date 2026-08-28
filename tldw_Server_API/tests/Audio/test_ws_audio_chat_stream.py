@@ -72,6 +72,7 @@ from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     ProviderCredentialRuntime as RealProviderCredentialRuntime,
     is_runtime_issued_provider_call_credentials,
 )
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import ConflictError
 
 _AUDIO_LABEL_TO_SAMPLE = {
     "abc": 100,
@@ -2953,6 +2954,263 @@ async def test_audio_chat_ws_persists_turn_when_enabled(monkeypatch: pytest.Monk
     assert persisted_db.settings
     _, settings = persisted_db.settings[0]
     assert settings.get("audio_chat_ws", {}).get("action_hint") == "demo_tool"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_audio_chat_ws_existing_session_merges_settings_with_version_cas(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    audio_payload = _pcm16_audio([_AUDIO_LABEL_TO_SAMPLE["abc"]])
+    ws = DummyWebSocket(
+        [
+            {
+                "type": "config",
+                "session_id": "resume-chat",
+                "stt": {"model": "parakeet"},
+                "llm": {"provider": "stub", "model": "stub-model"},
+                "tts": {"voice": "af_heart", "format": "pcm"},
+                "metadata": {"persist_history": True},
+            },
+            {"type": "audio", "data": audio_payload},
+            {"type": "commit"},
+            {"type": "stop"},
+        ]
+    )
+
+    class _ExistingChatDB:
+        def __init__(self) -> None:
+            self.messages: list[dict[str, Any]] = []
+            self.current = {
+                "settings": {
+                    "userSetting": "preserve-me",
+                    "roleplayResumeV1": {"resumeEligible": True},
+                    "roleplayBehaviorV1": {"schemaVersion": 1, "digest": "keep"},
+                },
+                "settings_version": 7,
+            }
+            self.upsert_calls: list[tuple[dict[str, Any], int | None]] = []
+
+        def add_message(self, msg_data: dict[str, Any]) -> str:
+            self.messages.append(dict(msg_data))
+            return "msg-id"
+
+        def get_conversation_settings(self, conversation_id: str) -> dict[str, Any]:
+            assert conversation_id == "resume-chat"
+            return {
+                "settings": dict(self.current["settings"]),
+                "settings_version": self.current["settings_version"],
+            }
+
+        def upsert_conversation_settings(
+            self,
+            conversation_id: str,
+            settings: dict[str, Any],
+            *,
+            expected_settings_version: int | None = None,
+        ) -> bool:
+            assert conversation_id == "resume-chat"
+            self.upsert_calls.append((dict(settings), expected_settings_version))
+            return True
+
+    persisted_db = _ExistingChatDB()
+
+    async def _get_tts_service():
+        return _DummyTTSService([b"tts"])
+
+    async def _get_db_for_user_id(_user_id: int, client_id: Optional[str] = None):  # noqa: ARG001
+        return persisted_db
+
+    async def _character_context(_db: Any, _character_id: Any, _loop: Any):
+        return {"id": 42, "name": "Helpful AI Assistant"}, 42
+
+    async def _conversation_context(*_args: Any, **_kwargs: Any):
+        return "resume-chat", False
+
+    monkeypatch.setattr(audio, "get_tts_service", _get_tts_service)
+    monkeypatch.setattr(audio, "get_chacha_db_for_user_id", _get_db_for_user_id, raising=False)
+    monkeypatch.setattr(audio, "get_or_create_character_context", _character_context, raising=False)
+    monkeypatch.setattr(audio, "get_or_create_conversation", _conversation_context, raising=False)
+
+    await audio.websocket_audio_chat_stream(ws, token=None)
+
+    assert len(persisted_db.upsert_calls) == 1
+    merged, expected_version = persisted_db.upsert_calls[0]
+    assert expected_version == 7
+    assert merged["userSetting"] == "preserve-me"
+    assert merged["roleplayResumeV1"] == {"resumeEligible": True}
+    assert merged["roleplayBehaviorV1"] == {"schemaVersion": 1, "digest": "keep"}
+    assert merged["audio_chat_ws"]["session_id"] == "resume-chat"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_audio_chat_ws_existing_session_conflict_does_not_blind_replace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    audio_payload = _pcm16_audio([_AUDIO_LABEL_TO_SAMPLE["abc"]])
+    ws = DummyWebSocket(
+        [
+            {
+                "type": "config",
+                "session_id": "resume-chat-conflict",
+                "stt": {"model": "parakeet"},
+                "llm": {"provider": "stub", "model": "stub-model"},
+                "tts": {"voice": "af_heart", "format": "pcm"},
+                "metadata": {"persist_history": True},
+            },
+            {"type": "audio", "data": audio_payload},
+            {"type": "commit"},
+            {"type": "stop"},
+        ]
+    )
+
+    class _ConflictingChatDB:
+        def __init__(self) -> None:
+            self.blind_writes = 0
+            self.cas_versions: list[int | None] = []
+
+        def add_message(self, _msg_data: dict[str, Any]) -> str:
+            return "msg-id"
+
+        def get_conversation_settings(self, _conversation_id: str) -> dict[str, Any]:
+            return {
+                "settings": {
+                    "userSetting": "winner",
+                    "roleplayResumeV1": {"resumeEligible": True},
+                    "roleplayBehaviorV1": {"schemaVersion": 1, "digest": "winner"},
+                },
+                "settings_version": 9,
+            }
+
+        def upsert_conversation_settings(
+            self,
+            _conversation_id: str,
+            _settings: dict[str, Any],
+            *,
+            expected_settings_version: int | None = None,
+        ) -> bool:
+            self.cas_versions.append(expected_settings_version)
+            if expected_settings_version is None:
+                self.blind_writes += 1
+            raise ConflictError("concurrent settings winner")
+
+    persisted_db = _ConflictingChatDB()
+
+    async def _get_tts_service():
+        return _DummyTTSService([b"tts"])
+
+    async def _get_db_for_user_id(_user_id: int, client_id: Optional[str] = None):  # noqa: ARG001
+        return persisted_db
+
+    async def _character_context(_db: Any, _character_id: Any, _loop: Any):
+        return {"id": 42, "name": "Helpful AI Assistant"}, 42
+
+    async def _conversation_context(*_args: Any, **_kwargs: Any):
+        return "resume-chat-conflict", False
+
+    monkeypatch.setattr(audio, "get_tts_service", _get_tts_service)
+    monkeypatch.setattr(audio, "get_chacha_db_for_user_id", _get_db_for_user_id, raising=False)
+    monkeypatch.setattr(audio, "get_or_create_character_context", _character_context, raising=False)
+    monkeypatch.setattr(audio, "get_or_create_conversation", _conversation_context, raising=False)
+
+    await audio.websocket_audio_chat_stream(ws, token=None)
+
+    assert persisted_db.cas_versions == [9]
+    assert persisted_db.blind_writes == 0
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_audio_chat_ws_existing_resumable_session_rejects_credential_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    audio_payload = _pcm16_audio([_AUDIO_LABEL_TO_SAMPLE["abc"]])
+    ws = DummyWebSocket(
+        [
+            {
+                "type": "config",
+                "session_id": "resume-chat-secret",
+                "stt": {"model": "parakeet"},
+                "llm": {"provider": "stub", "model": "stub-model"},
+                "tts": {"voice": "af_heart", "format": "pcm"},
+                "metadata": {
+                    "persist_history": True,
+                    "nested": {"apiKey": "must-not-persist"},
+                },
+            },
+            {"type": "audio", "data": audio_payload},
+            {"type": "commit"},
+            {"type": "stop"},
+        ]
+    )
+
+    class _ExistingResumableDB:
+        def __init__(self) -> None:
+            self.upsert_calls: list[dict[str, Any]] = []
+
+        def add_message(self, _msg_data: dict[str, Any]) -> str:
+            return "msg-id"
+
+        def get_conversation_settings(self, _conversation_id: str) -> dict[str, Any]:
+            return {
+                "settings": {
+                    "roleplayResumeV1": {"resumeEligible": True},
+                    "roleplayBehaviorV1": {"schemaVersion": 1, "digest": "keep"},
+                },
+                "settings_version": 4,
+            }
+
+        def upsert_conversation_settings(
+            self,
+            _conversation_id: str,
+            settings: dict[str, Any],
+            *,
+            expected_settings_version: int | None = None,
+        ) -> bool:
+            self.upsert_calls.append(dict(settings))
+            return True
+
+    persisted_db = _ExistingResumableDB()
+
+    async def _get_tts_service():
+        return _DummyTTSService([b"tts"])
+
+    async def _get_db_for_user_id(
+        _user_id: int,
+        client_id: Optional[str] = None,
+    ):  # noqa: ARG001
+        return persisted_db
+
+    async def _character_context(_db: Any, _character_id: Any, _loop: Any):
+        return {"id": 42, "name": "Helpful AI Assistant"}, 42
+
+    async def _conversation_context(*_args: Any, **_kwargs: Any):
+        return "resume-chat-secret", False
+
+    monkeypatch.setattr(audio, "get_tts_service", _get_tts_service)
+    monkeypatch.setattr(
+        audio,
+        "get_chacha_db_for_user_id",
+        _get_db_for_user_id,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        audio,
+        "get_or_create_character_context",
+        _character_context,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        audio,
+        "get_or_create_conversation",
+        _conversation_context,
+        raising=False,
+    )
+
+    await audio.websocket_audio_chat_stream(ws, token=None)
+
+    assert persisted_db.upsert_calls == []
 
 
 @pytest.mark.integration

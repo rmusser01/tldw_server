@@ -11,6 +11,7 @@ import os
 import threading
 import time
 from collections import deque
+from functools import partial
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, Callable, Optional
 from uuid import uuid4
@@ -92,11 +93,17 @@ from tldw_Server_API.app.core.Chat.streaming_utils import (
     invoke_stream_close_bounded,
     provider_stream_error_payload,
 )
+from tldw_Server_API.app.core.Character_Chat.character_conversation_factory import (
+    reject_resumable_behavior_credentials,
+)
 from tldw_Server_API.app.core.config import (
     load_comprehensive_config,
     resolve_default_transcription_model_setting,
 )
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    CharactersRAGDB,
+    ConflictError,
+)
 from tldw_Server_API.app.core.DB_Management.media_db.legacy_transcripts import (
     upsert_transcript,
 )
@@ -237,6 +244,7 @@ async def handle_unified_websocket(*args, **kwargs):
     return await _handle_unified_websocket(*args, **kwargs)
 
 _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS = (
+    ConflictError,
     asyncio.CancelledError,
     asyncio.TimeoutError,
     AssertionError,
@@ -2305,7 +2313,7 @@ async def websocket_audio_chat_stream(
                 if isinstance(character_card, dict) and character_card.get("name"):
                     character_name = str(character_card.get("name"))
 
-                persistence_session_id, _ = await _shim_get_or_create_conversation(
+                persistence_session_id, conversation_created = await _shim_get_or_create_conversation(
                     persistence_db,
                     persistence_session_id,
                     int(character_db_id),
@@ -2330,12 +2338,46 @@ async def websocket_audio_chat_stream(
                     }
                 }
                 try:
-                    await loop.run_in_executor(
-                        None,
-                        persistence_db.upsert_conversation_settings,
-                        persistence_session_id,
-                        settings_payload,
-                    )
+                    if conversation_created:
+                        await loop.run_in_executor(
+                            None,
+                            persistence_db.upsert_conversation_settings,
+                            persistence_session_id,
+                            settings_payload,
+                        )
+                    else:
+                        settings_row = await loop.run_in_executor(
+                            None,
+                            persistence_db.get_conversation_settings,
+                            persistence_session_id,
+                        )
+                        existing_settings = dict(
+                            (settings_row or {}).get("settings") or {}
+                        )
+                        if {
+                            "roleplayResumeV1",
+                            "roleplayBehaviorV1",
+                        }.intersection(existing_settings):
+                            reject_resumable_behavior_credentials(
+                                settings_payload,
+                                path="audio_chat_ws",
+                            )
+                        merged_settings = {
+                            **existing_settings,
+                            **settings_payload,
+                        }
+                        expected_version = int(
+                            (settings_row or {}).get("settings_version") or 0
+                        )
+                        await loop.run_in_executor(
+                            None,
+                            partial(
+                                persistence_db.upsert_conversation_settings,
+                                persistence_session_id,
+                                merged_settings,
+                                expected_settings_version=expected_version,
+                            ),
+                        )
                 except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as settings_exc:
                     logger.debug(f"audio.chat.stream conversation_settings upsert failed: {settings_exc}")
 

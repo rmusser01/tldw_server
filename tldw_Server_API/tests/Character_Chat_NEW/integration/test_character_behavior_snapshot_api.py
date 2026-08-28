@@ -48,7 +48,6 @@ def _create_behavior_sources(db):
             "message_example": "{{char}}: The record is intact.",
             "post_history_instructions": "Never invent prior events.",
             "extensions": {
-                "api_key": "never-store-this-credential",
                 "token": "legitimate-token-content",
                 "token_budget": 777,
                 "promptToken": "prompt-behavior-id",
@@ -234,8 +233,8 @@ def test_api_creation_captures_all_sources_and_redacts_snapshot_body(
         },
     }
     snapshot_bytes, settings_bytes = _snapshot_storage_bytes(character_db, body["id"])
-    assert "never-store-this-credential" not in snapshot_bytes
-    assert "never-store-this-credential" not in settings_bytes
+    assert "legitimate-token-content" in snapshot_bytes
+    assert "legitimate-token-content" not in settings_bytes
 
 
 @pytest.mark.integration
@@ -1568,3 +1567,775 @@ def test_history_version_advances_for_ancestor_and_branch_with_stable_tail_and_r
             )["history_version"] == 6
             raise RuntimeError("rollback history mutation")
     assert character_db.get_roleplay_resume_state(conversation_id) == branched
+
+
+@pytest.mark.integration
+def test_creation_v1_materialized_authority_binds_immutable_snapshot_and_defaults(
+    test_client,
+    auth_headers,
+    character_db,
+):
+    sources = _create_behavior_sources(character_db)
+    created = test_client.post(
+        "/api/v1/chats/",
+        headers=auth_headers,
+        json={
+            "character_id": sources["primary_id"],
+            "participant_character_ids": [sources["second_id"]],
+            "prompt_preset_id": "snapshot-cinematic",
+            "memory_by_character_id": {
+                str(sources["primary_id"]): "Creation memory",
+            },
+            "provider": "local-llm",
+            "model": "local-test",
+        },
+    )
+    assert created.status_code == 201, created.text
+    conversation_id = created.json()["id"]
+
+    state = character_db.get_roleplay_resume_state(conversation_id)
+    materialized = state["materialized_settings"]
+    assert state["settings_version"] == 1
+    assert materialized["schema_version"] == 1
+    assert materialized["values"]["base_snapshot"] == {
+        "schema_version": state["behavior_snapshot"]["schema_version"],
+        "digest": state["behavior_snapshot"]["digest"],
+    }
+    assert materialized["values"]["effective_completion"] == state[
+        "effective_completion"
+    ]
+    assert materialized["values"]["behavior_controls"]["author_note"][
+        "position"
+    ] == "before_system"
+    assert materialized["values"]["behavior_controls"]["preset_scope"] == "chat"
+
+    with character_db.transaction() as conn:
+        conn.execute(
+            "UPDATE world_book_entries SET content = ? WHERE id = ?",
+            ("Mutable source changed", sources["world_book_entry_id"]),
+        )
+    assert character_db.delete_prompt_preset("snapshot-cinematic")
+
+    provider_only = test_client.put(
+        f"/api/v1/chats/{conversation_id}/settings",
+        headers=auth_headers,
+        json={"settings": {"provider": "local-llm", "model": "local-test"}},
+    )
+    assert provider_only.status_code == 200, provider_only.text
+    after = character_db.get_roleplay_resume_state(conversation_id)
+    assert after["settings_version"] == 2
+    assert after["materialized_settings"]["values"]["base_snapshot"] == materialized[
+        "values"
+    ]["base_snapshot"]
+
+
+@pytest.mark.integration
+def test_resumable_sources_and_settings_reject_credentials_recursively_and_atomically(
+    test_client,
+    auth_headers,
+    character_db,
+):
+    secret_character_id = character_db.add_character_card(
+        {
+            "name": "Secret Source",
+            "extensions": {"nested": {"clientSecret": "must-not-materialize"}},
+        }
+    )
+    rejected_create = test_client.post(
+        "/api/v1/chats/",
+        headers=auth_headers,
+        json={
+            "character_id": secret_character_id,
+            "provider": "local-llm",
+            "model": "local-test",
+        },
+    )
+    assert rejected_create.status_code in {400, 422}, rejected_create.text
+    assert character_db.get_conversations_for_character(secret_character_id) == []
+
+    assert character_db.upsert_prompt_preset(
+        preset_id="secret-preset",
+        name="Secret preset",
+        section_order=["identity"],
+        section_templates={"identity": "safe", "clientSecret": "must-reject"},
+    )
+    preset_character_id = character_db.add_character_card({"name": "Preset Source"})
+    rejected_preset = test_client.post(
+        "/api/v1/chats/",
+        headers=auth_headers,
+        json={
+            "character_id": preset_character_id,
+            "prompt_preset_id": "secret-preset",
+            "provider": "local-llm",
+            "model": "local-test",
+        },
+    )
+    assert rejected_preset.status_code in {400, 422}, rejected_preset.text
+    assert character_db.get_conversations_for_character(preset_character_id) == []
+
+    lore_character_id = character_db.add_character_card({"name": "Lore Source"})
+    world_books = WorldBookService(character_db)
+    secret_book_id = world_books.create_world_book("Secret metadata canon")
+    world_books.add_world_book_entry(
+        secret_book_id,
+        keywords=["secret"],
+        content="Visible lore",
+        metadata={"nested": {"apiToken": "must-reject"}},
+    )
+    assert world_books.attach_to_character(secret_book_id, lore_character_id)[
+        "success"
+    ] is True
+    rejected_lore = test_client.post(
+        "/api/v1/chats/",
+        headers=auth_headers,
+        json={
+            "character_id": lore_character_id,
+            "provider": "local-llm",
+            "model": "local-test",
+        },
+    )
+    assert rejected_lore.status_code in {400, 422}, rejected_lore.text
+    assert character_db.get_conversations_for_character(lore_character_id) == []
+
+    character_id = character_db.add_character_card({"name": "Clean Source"})
+    created = test_client.post(
+        "/api/v1/chats/",
+        headers=auth_headers,
+        json={
+            "character_id": character_id,
+            "provider": "local-llm",
+            "model": "local-test",
+        },
+    )
+    assert created.status_code == 201, created.text
+    conversation_id = created.json()["id"]
+    before = character_db.get_roleplay_resume_state(conversation_id)
+
+    rejected_patch = test_client.put(
+        f"/api/v1/chats/{conversation_id}/settings",
+        headers=auth_headers,
+        json={
+            "settings": {
+                "authorNote": "safe",
+                "nested": {
+                    "apiToken": "must-not-materialize",
+                    "token": "legitimate-behavior-token",
+                },
+            }
+        },
+    )
+    assert rejected_patch.status_code in {400, 422}, rejected_patch.text
+    after = character_db.get_roleplay_resume_state(conversation_id)
+    assert after["settings_version"] == before["settings_version"] == 1
+    assert after["settings"] == before["settings"]
+
+
+@pytest.mark.integration
+def test_materialized_controls_cover_prompt_consumers_and_direct_writers(
+    test_client,
+    auth_headers,
+    character_db,
+):
+    character_id = character_db.add_character_card(
+        {
+            "name": "Control Ari",
+            "first_message": "Default greeting",
+            "alternate_greetings": ["Alternate greeting"],
+        }
+    )
+    created = test_client.post(
+        "/api/v1/chats/",
+        headers=auth_headers,
+        json={
+            "character_id": character_id,
+            "provider": "local-llm",
+            "model": "local-test",
+        },
+    )
+    assert created.status_code == 201, created.text
+    conversation_id = created.json()["id"]
+
+    patch = {
+        "turnTakingMode": "round_robin",
+        "greetingEnabled": False,
+        "greetingScope": "character",
+        "greetingSelectionId": "greeting:1:selected",
+        "useCharacterDefault": False,
+        "authorNote": "GM note",
+        "authorNoteEnabled": True,
+        "authorNoteGmOnly": True,
+        "authorNoteExcludeFromPrompt": True,
+        "authorNotePlacement": {"mode": "depth", "depth": 3},
+        "autoSummaryEnabled": True,
+        "autoSummaryMessageThreshold": 30,
+        "autoSummaryRecentWindow": 6,
+        "pinnedMessageIds": ["m-1", "m-1", "m-2"],
+        "presetScope": "character",
+    }
+    updated = test_client.put(
+        f"/api/v1/chats/{conversation_id}/settings",
+        headers=auth_headers,
+        json={"settings": patch},
+    )
+    assert updated.status_code == 200, updated.text
+    state = character_db.get_roleplay_resume_state(conversation_id)
+    controls = state["materialized_settings"]["values"]["behavior_controls"]
+    assert controls["turn_taking_mode"] == "round_robin"
+    assert controls["greeting"] == {
+        "enabled": False,
+        "scope": "character",
+        "selection_id": "greeting:1:selected",
+        "use_character_default": False,
+    }
+    assert controls["author_note"] == {
+        "enabled": True,
+        "gm_only": True,
+        "exclude_from_prompt": True,
+        "position": {"mode": "depth", "depth": 3},
+    }
+    assert controls["auto_summary"] == {
+        "enabled": True,
+        "threshold_messages": 30,
+        "window_messages": 6,
+    }
+    assert controls["pinned_message_ids"] == ["m-1", "m-2"]
+    assert controls["preset_scope"] == "character"
+
+    selected = test_client.put(
+        f"/api/v1/chats/{conversation_id}/greetings/select",
+        headers=auth_headers,
+        json={"index": 1},
+    )
+    assert selected.status_code == 200, selected.text
+    after_greeting = character_db.get_roleplay_resume_state(conversation_id)
+    assert after_greeting["settings_version"] == state["settings_version"] + 1
+    assert after_greeting["materialized_settings"]["values"]["behavior_controls"][
+        "greeting"
+    ]["selection_id"] == "greeting:1:selected"
+
+    sessions = __import__(
+        "tldw_Server_API.app.api.v1.endpoints.character_chat_sessions",
+        fromlist=["_persist_auto_summary_to_settings"],
+    )
+    sessions._persist_auto_summary_to_settings(
+        character_db,
+        conversation_id,
+        dict(after_greeting["settings"]),
+        "Frozen summary",
+        "m-1",
+        "m-2",
+        30,
+        6,
+        2,
+        expected_settings_version=after_greeting["settings_version"],
+    )
+    after_summary = character_db.get_roleplay_resume_state(conversation_id)
+    assert after_summary["settings_version"] == after_greeting["settings_version"] + 1
+    assert after_summary["materialized_settings"]["values"]["behavior_controls"][
+        "auto_summary"
+    ]["summary"]["content"] == "Frozen summary"
+
+
+@pytest.mark.integration
+def test_persona_overlay_reference_enforces_explicit_owner_atomically(
+    test_client,
+    auth_headers,
+    character_db,
+):
+    character_id = character_db.add_character_card({"name": "Owned Overlay"})
+    created = test_client.post(
+        "/api/v1/chats/",
+        headers=auth_headers,
+        json={
+            "character_id": character_id,
+            "provider": "local-llm",
+            "model": "local-test",
+        },
+    )
+    assert created.status_code == 201, created.text
+    conversation_id = created.json()["id"]
+    with character_db.transaction() as conn:
+        conn.execute(
+            """
+            INSERT INTO persona_profiles(id, user_id, name, mode, version)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            ("other-persona", "different-user", "Private Persona", "session_scoped", 1),
+        )
+    before = character_db.get_roleplay_resume_state(conversation_id)
+
+    response = test_client.put(
+        f"/api/v1/chats/{conversation_id}/settings",
+        headers=auth_headers,
+        json={
+            "settings": {
+                "assistantOverlay": {
+                    "kind": "persona",
+                    "id": "other-persona",
+                    "name": "Private Persona",
+                    "updatedAt": "2026-08-28T00:00:00Z",
+                }
+            }
+        },
+    )
+
+    assert response.status_code in {400, 404, 422}, response.text
+    after = character_db.get_roleplay_resume_state(conversation_id)
+    assert after["settings_version"] == before["settings_version"]
+    assert after["settings"] == before["settings"]
+
+
+@pytest.mark.integration
+def test_detail_settings_come_from_coherent_resume_state(
+    test_client,
+    auth_headers,
+    character_db,
+    monkeypatch,
+):
+    character_id = character_db.add_character_card({"name": "Coherent Detail"})
+    created = test_client.post(
+        "/api/v1/chats/",
+        headers=auth_headers,
+        json={
+            "character_id": character_id,
+            "provider": "local-llm",
+            "model": "local-test",
+        },
+    )
+    assert created.status_code == 201, created.text
+    conversation_id = created.json()["id"]
+
+    def fail_independent_settings_read(*_args, **_kwargs):
+        raise AssertionError("detail must use coherent resume-state settings")
+
+    monkeypatch.setattr(
+        character_db,
+        "get_conversation_settings",
+        fail_independent_settings_read,
+    )
+    response = test_client.get(
+        f"/api/v1/chats/{conversation_id}?include_settings=true",
+        headers=auth_headers,
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["settings"]["participantCharacterIds"] == [character_id]
+
+
+@pytest.mark.integration
+def test_pin_writer_rebuilds_materialized_controls_once(
+    test_client,
+    auth_headers,
+    character_db,
+):
+    character_id = character_db.add_character_card({"name": "Pinned Control"})
+    conversation_id = create_character_conversation(
+        character_db,
+        conversation_data={
+            "character_id": character_id,
+            "title": "Pinned settings",
+            "client_id": "1",
+        },
+        provider="local-llm",
+        model="local-test",
+        initial_messages=[
+            {"id": "pin-target", "sender": "user", "content": "Keep this turn"},
+        ],
+    )
+    before = character_db.get_roleplay_resume_state(conversation_id)
+
+    response = test_client.put(
+        "/api/v1/messages/pin-target",
+        params={"expected_version": 1},
+        headers=auth_headers,
+        json={"pinned": True},
+    )
+    assert response.status_code == 200, response.text
+    after = character_db.get_roleplay_resume_state(conversation_id)
+    assert after["settings_version"] == before["settings_version"] + 1
+    assert after["materialized_settings"]["values"]["behavior_controls"][
+        "pinned_message_ids"
+    ] == ["pin-target"]
+
+
+@pytest.mark.integration
+def test_oversize_materialized_mutation_rolls_back_settings_version(
+    test_client,
+    auth_headers,
+    character_db,
+):
+    character_id = character_db.add_character_card({"name": "Bounded Control"})
+    created = test_client.post(
+        "/api/v1/chats/",
+        headers=auth_headers,
+        json={
+            "character_id": character_id,
+            "provider": "local-llm",
+            "model": "local-test",
+        },
+    )
+    assert created.status_code == 201, created.text
+    conversation_id = created.json()["id"]
+    before = character_db.get_roleplay_resume_state(conversation_id)
+
+    response = test_client.put(
+        f"/api/v1/chats/{conversation_id}/settings",
+        headers=auth_headers,
+        json={
+            "settings": {
+                "autoSummaryEnabled": True,
+                "summary": {
+                    "enabled": True,
+                    "content": "x" * (1024 * 1024),
+                    "thresholdMessages": 30,
+                    "windowMessages": 6,
+                },
+            }
+        },
+    )
+    assert response.status_code in {400, 413, 422}, response.text
+    after = character_db.get_roleplay_resume_state(conversation_id)
+    assert after["settings_version"] == before["settings_version"]
+    assert after["settings"] == before["settings"]
+
+
+@pytest.mark.integration
+def test_duplicate_world_book_references_materialize_with_one_lookup(
+    test_client,
+    auth_headers,
+    character_db,
+):
+    character_id = character_db.add_character_card({"name": "Bounded Lore"})
+    world_books = WorldBookService(character_db)
+    world_book_id = world_books.create_world_book("One lookup canon")
+    created = test_client.post(
+        "/api/v1/chats/",
+        headers=auth_headers,
+        json={
+            "character_id": character_id,
+            "provider": "local-llm",
+            "model": "local-test",
+        },
+    )
+    assert created.status_code == 201, created.text
+    conversation_id = created.json()["id"]
+
+    real_materialize = (
+        character_conversation_factory._materialize_world_book_by_id
+    )
+    with mock.patch.object(
+        character_conversation_factory,
+        "_materialize_world_book_by_id",
+        wraps=real_materialize,
+    ) as materialize_book:
+        response = test_client.put(
+            f"/api/v1/chats/{conversation_id}/settings",
+            headers=auth_headers,
+            json={
+                "settings": {
+                    "conversationContext": {
+                        "world_book_ids": [
+                            world_book_id,
+                            str(world_book_id),
+                            world_book_id,
+                        ]
+                    }
+                }
+            },
+        )
+
+    assert response.status_code == 200, response.text
+    assert materialize_book.call_count == 1
+    state = character_db.get_roleplay_resume_state(conversation_id)
+    assert [
+        book["id"]
+        for book in state["materialized_settings"]["values"]["world_books"]
+    ] == [world_book_id]
+
+
+@pytest.mark.integration
+def test_participant_removal_prunes_nonparticipant_memory_authority(
+    test_client,
+    auth_headers,
+    character_db,
+):
+    sources = _create_behavior_sources(character_db)
+    created = test_client.post(
+        "/api/v1/chats/",
+        headers=auth_headers,
+        json={
+            "character_id": sources["primary_id"],
+            "participant_character_ids": [sources["second_id"]],
+            "provider": "local-llm",
+            "model": "local-test",
+        },
+    )
+    assert created.status_code == 201, created.text
+    conversation_id = created.json()["id"]
+
+    memory = test_client.put(
+        f"/api/v1/chats/{conversation_id}/settings",
+        headers=auth_headers,
+        json={
+            "settings": {
+                "characterMemoryById": {
+                    str(sources["second_id"]): {"note": "Secondary-only memory"}
+                }
+            }
+        },
+    )
+    assert memory.status_code == 200, memory.text
+    before = character_db.get_roleplay_resume_state(conversation_id)
+
+    removed = test_client.put(
+        f"/api/v1/chats/{conversation_id}/settings",
+        headers=auth_headers,
+        json={
+            "settings": {
+                "participantCharacterIds": [sources["primary_id"]],
+            }
+        },
+    )
+
+    assert removed.status_code == 200, removed.text
+    after = character_db.get_roleplay_resume_state(conversation_id)
+    assert after["settings_version"] == before["settings_version"] + 1
+    values = after["materialized_settings"]["values"]
+    assert [item["source"]["id"] for item in values["participants"]] == [
+        str(sources["primary_id"])
+    ]
+    assert values["memory"]["character_memory_by_id"] == {}
+    assert values["behavior_controls"]["applied_overrides"][
+        "characterMemoryById"
+    ] == {}
+
+
+@pytest.mark.integration
+def test_replayed_greeting_selection_reuses_frozen_content_and_rejects_malformed_id(
+    test_client,
+    auth_headers,
+    character_db,
+):
+    character_id = character_db.add_character_card(
+        {
+            "name": "Stable Greeting Ari",
+            "first_message": "Default greeting",
+            "alternate_greetings": ["Frozen alternate"],
+        }
+    )
+    created = test_client.post(
+        "/api/v1/chats/",
+        headers=auth_headers,
+        json={
+            "character_id": character_id,
+            "provider": "local-llm",
+            "model": "local-test",
+        },
+    )
+    assert created.status_code == 201, created.text
+    conversation_id = created.json()["id"]
+
+    selected = test_client.put(
+        f"/api/v1/chats/{conversation_id}/greetings/select",
+        headers=auth_headers,
+        json={"index": 1},
+    )
+    assert selected.status_code == 200, selected.text
+    frozen = character_db.get_roleplay_resume_state(conversation_id)
+    frozen_greeting = frozen["materialized_settings"]["values"]["greeting"]
+    assert frozen_greeting["content"] == "Frozen alternate"
+
+    character = character_db.get_character_card_by_id(character_id)
+    assert character_db.update_character_card(
+        character_id,
+        {"alternate_greetings": ["Mutable replacement"]},
+        expected_version=character["version"],
+    )
+    replayed = test_client.put(
+        f"/api/v1/chats/{conversation_id}/greetings/select",
+        headers=auth_headers,
+        json={"index": 1},
+    )
+    assert replayed.status_code == 200, replayed.text
+    replayed_state = character_db.get_roleplay_resume_state(conversation_id)
+    assert replayed_state["settings_version"] == frozen["settings_version"] + 1
+    assert replayed_state["materialized_settings"]["values"]["greeting"] == frozen_greeting
+
+    whitespace_replay = test_client.put(
+        f"/api/v1/chats/{conversation_id}/settings",
+        headers=auth_headers,
+        json={
+            "settings": {"greetingSelectionId": "  greeting:1:selected  "}
+        },
+    )
+    assert whitespace_replay.status_code == 200, whitespace_replay.text
+    whitespace_state = character_db.get_roleplay_resume_state(conversation_id)
+    assert whitespace_state["settings_version"] == replayed_state["settings_version"] + 1
+    whitespace_values = whitespace_state["materialized_settings"]["values"]
+    assert whitespace_values["greeting"] == frozen_greeting
+    assert whitespace_values["behavior_controls"]["greeting"][
+        "selection_id"
+    ] == "greeting:1:selected"
+
+    for malformed_selection_id in ("not-a-greeting", "greeting:1"):
+        malformed = test_client.put(
+            f"/api/v1/chats/{conversation_id}/settings",
+            headers=auth_headers,
+            json={
+                "settings": {"greetingSelectionId": malformed_selection_id}
+            },
+        )
+        assert malformed.status_code in {400, 422}, malformed.text
+        assert character_db.get_roleplay_resume_state(conversation_id)[
+            "settings_version"
+        ] == whitespace_state["settings_version"]
+
+
+@pytest.mark.integration
+def test_creation_caps_world_books_before_entry_expansion(
+    test_client,
+    auth_headers,
+    character_db,
+):
+    character_id = character_db.add_character_card({"name": "Bounded Creation Lore"})
+    world_books = WorldBookService(character_db)
+    for index in range(character_conversation_factory.MAX_MATERIALIZED_WORLD_BOOKS + 1):
+        world_book_id = world_books.create_world_book(f"Creation lore {index}")
+        assert world_books.attach_to_character(world_book_id, character_id)[
+            "success"
+        ] is True
+
+    real_select = character_conversation_factory._select_rows
+    entry_query_count = 0
+
+    def _counting_select(conn, query, params):
+        nonlocal entry_query_count
+        if "FROM world_book_entries" in query:
+            entry_query_count += 1
+        return real_select(conn, query, params)
+
+    with mock.patch.object(
+        character_conversation_factory,
+        "_select_rows",
+        side_effect=_counting_select,
+    ):
+        response = test_client.post(
+            "/api/v1/chats/",
+            headers=auth_headers,
+            json={
+                "character_id": character_id,
+                "provider": "local-llm",
+                "model": "local-test",
+            },
+        )
+
+    assert response.status_code in {400, 413, 422}, response.text
+    assert entry_query_count == 0
+
+
+@pytest.mark.integration
+def test_creation_materializes_shared_world_book_entries_once_per_snapshot_pass(
+    test_client,
+    auth_headers,
+    character_db,
+):
+    primary_id = character_db.add_character_card({"name": "Shared Lore Primary"})
+    secondary_id = character_db.add_character_card({"name": "Shared Lore Secondary"})
+    world_books = WorldBookService(character_db)
+    world_book_id = world_books.create_world_book("Shared creation lore")
+    world_books.add_world_book_entry(
+        world_book_id,
+        ["shared"],
+        "One canonical entry expansion.",
+    )
+    assert world_books.attach_to_character(world_book_id, primary_id)["success"] is True
+    assert world_books.attach_to_character(world_book_id, secondary_id)["success"] is True
+
+    real_select = character_conversation_factory._select_rows
+    entry_query_count = 0
+
+    def _counting_select(conn, query, params):
+        nonlocal entry_query_count
+        if "FROM world_book_entries" in query:
+            entry_query_count += 1
+        return real_select(conn, query, params)
+
+    with mock.patch.object(
+        character_conversation_factory,
+        "_select_rows",
+        side_effect=_counting_select,
+    ):
+        response = test_client.post(
+            "/api/v1/chats/",
+            headers=auth_headers,
+            json={
+                "character_id": primary_id,
+                "participant_character_ids": [secondary_id],
+                "provider": "local-llm",
+                "model": "local-test",
+            },
+        )
+
+    assert response.status_code == 201, response.text
+    # Creation performs one drift-check pass and one transactional persistence pass.
+    assert entry_query_count == 2
+
+
+@pytest.mark.integration
+def test_participant_mutation_caps_combined_new_world_books_before_entry_expansion(
+    test_client,
+    auth_headers,
+    character_db,
+):
+    primary_id = character_db.add_character_card({"name": "Mutation Lore Primary"})
+    second_id = character_db.add_character_card({"name": "Mutation Lore Second"})
+    third_id = character_db.add_character_card({"name": "Mutation Lore Third"})
+    world_books = WorldBookService(character_db)
+    for index in range(33):
+        world_book_id = world_books.create_world_book(f"Second lore {index}")
+        assert world_books.attach_to_character(world_book_id, second_id)["success"] is True
+    for index in range(32):
+        world_book_id = world_books.create_world_book(f"Third lore {index}")
+        assert world_books.attach_to_character(world_book_id, third_id)["success"] is True
+
+    created = test_client.post(
+        "/api/v1/chats/",
+        headers=auth_headers,
+        json={
+            "character_id": primary_id,
+            "provider": "local-llm",
+            "model": "local-test",
+        },
+    )
+    assert created.status_code == 201, created.text
+    conversation_id = created.json()["id"]
+    before = character_db.get_roleplay_resume_state(conversation_id)
+
+    real_select = character_conversation_factory._select_rows
+    entry_query_count = 0
+
+    def _counting_select(conn, query, params):
+        nonlocal entry_query_count
+        if "FROM world_book_entries" in query:
+            entry_query_count += 1
+        return real_select(conn, query, params)
+
+    with mock.patch.object(
+        character_conversation_factory,
+        "_select_rows",
+        side_effect=_counting_select,
+    ):
+        response = test_client.put(
+            f"/api/v1/chats/{conversation_id}/settings",
+            headers=auth_headers,
+            json={
+                "settings": {
+                    "participantCharacterIds": [primary_id, second_id, third_id]
+                }
+            },
+        )
+
+    assert response.status_code in {400, 413, 422}, response.text
+    assert entry_query_count == 0
+    after = character_db.get_roleplay_resume_state(conversation_id)
+    assert after["settings_version"] == before["settings_version"]
+    assert after["settings"] == before["settings"]

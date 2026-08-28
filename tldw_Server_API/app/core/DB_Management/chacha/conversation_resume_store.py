@@ -9,9 +9,11 @@ from contextlib import nullcontext
 from typing import TYPE_CHECKING, Any
 
 from tldw_Server_API.app.core.Character_Chat.character_behavior_snapshot import (
+    DEFAULT_MAX_SNAPSHOT_BYTES,
     SNAPSHOT_SCHEMA_VERSION,
     BehaviorSnapshotV1,
     build_behavior_snapshot,
+    is_credential_key,
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import BackendType, InputError
 from tldw_Server_API.app.core.DB_Management.db_errors import NotFoundError
@@ -33,11 +35,31 @@ _MATERIALIZED_SETTINGS_KEY = "roleplayBehaviorV1"
 _MATERIALIZED_VALUE_KEYS = frozenset(
     {
         "assistant_overlay",
+        "base_snapshot",
+        "behavior_controls",
         "effective_completion",
+        "greeting",
         "memory",
         "participants",
         "prompt_preset",
         "world_books",
+    }
+)
+_REQUIRED_MATERIALIZED_VALUE_KEYS = frozenset(
+    {"base_snapshot", "behavior_controls", "effective_completion"}
+)
+_BASE_SNAPSHOT_KEYS = frozenset({"schema_version", "digest"})
+_BEHAVIOR_CONTROL_KEYS = frozenset(
+    {
+        "applied_overrides",
+        "author_note",
+        "auto_summary",
+        "greeting",
+        "memory_scope",
+        "pinned_message_ids",
+        "preset_scope",
+        "prompt_context",
+        "turn_taking_mode",
     }
 )
 _READINESS_KEYS = frozenset(
@@ -67,18 +89,63 @@ def _canonical_json(value: Any) -> str:
         raise InputError("Materialized behavior settings must be finite JSON.") from exc
 
 
-def build_materialized_behavior_settings(values: dict[str, Any]) -> dict[str, Any]:
+def _reject_credentials(value: Any, *, path: str) -> None:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if is_credential_key(str(key)):
+                raise InputError(f"{path} contains credential-bearing key {key!r}.")
+            _reject_credentials(item, path=f"{path}.{key}")
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            _reject_credentials(item, path=f"{path}[{index}]")
+
+
+def _validate_materialized_authority(values: dict[str, Any]) -> None:
+    if not _REQUIRED_MATERIALIZED_VALUE_KEYS.issubset(values):
+        raise InputError("Materialized behavior settings are incomplete.")
+    base_snapshot = values.get("base_snapshot")
+    if not isinstance(base_snapshot, dict) or set(base_snapshot) != _BASE_SNAPSHOT_KEYS:
+        raise InputError("Materialized behavior settings require a base snapshot binding.")
+    digest = base_snapshot.get("digest")
+    if (
+        base_snapshot.get("schema_version") != SNAPSHOT_SCHEMA_VERSION
+        or not isinstance(digest, str)
+        or len(digest) != 71
+        or not digest.startswith("sha256:")
+        or any(character not in "0123456789abcdef" for character in digest[7:])
+    ):
+        raise InputError("Materialized behavior settings have an invalid base snapshot binding.")
+    controls = values.get("behavior_controls")
+    if not isinstance(controls, dict) or set(controls) != _BEHAVIOR_CONTROL_KEYS:
+        raise InputError("Materialized behavior settings require complete behavior controls.")
+
+
+def build_materialized_behavior_settings(
+    values: dict[str, Any],
+    *,
+    max_bytes: int = DEFAULT_MAX_SNAPSHOT_BYTES,
+) -> dict[str, Any]:
     """Build the closed, canonical behavior-settings record stored with a chat."""
     if not isinstance(values, dict) or not set(values).issubset(_MATERIALIZED_VALUE_KEYS):
         raise InputError("Materialized behavior settings contain unsupported fields.")
+    if type(max_bytes) is not int or max_bytes <= 0:
+        raise InputError("Materialized behavior settings max_bytes must be positive.")
+    _validate_materialized_authority(values)
     if _validate_effective_completion(values.get("effective_completion")) is None:
         raise InputError("Materialized behavior settings require valid effective completion.")
+    _reject_credentials(values, path="materialized_behavior")
     canonical_values = json.loads(_canonical_json(values))
     digest_payload = {
         "schemaVersion": 1,
         "values": canonical_values,
     }
-    digest = f"sha256:{hashlib.sha256(_canonical_json(digest_payload).encode('utf-8')).hexdigest()}"
+    canonical_payload = _canonical_json(digest_payload).encode("utf-8")
+    if len(canonical_payload) > max_bytes:
+        raise InputError(
+            "Materialized behavior settings size "
+            f"{len(canonical_payload)} exceeds maximum {max_bytes} bytes."
+        )
+    digest = f"sha256:{hashlib.sha256(canonical_payload).hexdigest()}"
     return {
         "schemaVersion": 1,
         "digest": digest,
@@ -97,6 +164,7 @@ def _validate_materialized_behavior_settings(value: Any) -> dict[str, Any] | Non
     if _validate_effective_completion(values.get("effective_completion")) is None:
         return None
     try:
+        _validate_materialized_authority(values)
         rebuilt = build_materialized_behavior_settings(values)
     except InputError:
         return None

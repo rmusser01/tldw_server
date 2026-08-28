@@ -15,6 +15,7 @@ from tldw_Server_API.app.core.Character_Chat.character_behavior_snapshot import 
     BehaviorSnapshotV1,
     build_behavior_snapshot,
 )
+from tldw_Server_API.app.core.Character_Chat.world_book_manager import WorldBookService
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     BackendType,
     QueryResult,
@@ -38,6 +39,39 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 )
 
 pytestmark = pytest.mark.unit
+
+
+def test_prompt_preset_and_world_book_authority_is_the_per_user_database(
+    tmp_path: Path,
+) -> None:
+    """These schemas have no owner column; isolation is the selected DB file."""
+    alice = CharactersRAGDB(db_path=str(tmp_path / "alice.sqlite"), client_id="alice")
+    bob = CharactersRAGDB(db_path=str(tmp_path / "bob.sqlite"), client_id="bob")
+    assert alice.upsert_prompt_preset(
+        preset_id="alice-only",
+        name="Alice only",
+        section_order=["identity"],
+        section_templates={"identity": "Alice"},
+    )
+    alice_books = WorldBookService(alice)
+    bob_books = WorldBookService(bob)
+    alice_book_id = alice_books.create_world_book("Alice canon")
+
+    assert alice.get_prompt_preset("alice-only") is not None
+    assert bob.get_prompt_preset("alice-only") is None
+    assert alice_books.get_world_book(world_book_id=alice_book_id) is not None
+    assert bob_books.get_world_book(world_book_id=alice_book_id) is None
+    with alice.transaction() as conn:
+        preset_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(prompt_presets)").fetchall()
+        }
+        world_book_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(world_books)").fetchall()
+        }
+    assert "user_id" not in preset_columns
+    assert "user_id" not in world_book_columns
+    alice.close_connection()
+    bob.close_connection()
 
 
 def _snapshot() -> BehaviorSnapshotV1:
@@ -1384,6 +1418,41 @@ def test_settings_upsert_expect_absent_conflicts_after_first_insert(tmp_path: Pa
     assert final["settings"] == {"writer": "winner"}
     assert final["settings_version"] == 1
     assert conversation_after_conflict["version"] == conversation_after_winner["version"]
+    db.close_connection()
+
+
+def test_sqlite_settings_upsert_rolls_back_when_live_conversation_update_misses(
+    tmp_path: Path,
+) -> None:
+    db = CharactersRAGDB(
+        db_path=str(tmp_path / "character-settings-deleted.sqlite"),
+        client_id="settings-deleted-owner",
+    )
+    conversation_id = db.add_conversation(
+        {"character_id": 1, "title": "Deleted settings target"}
+    )
+    assert conversation_id is not None
+    assert db.upsert_conversation_settings(conversation_id, {"writer": "initial"})
+    before = db.get_conversation_settings(conversation_id)
+    conversation = db.get_conversation_by_id(conversation_id)
+    assert conversation is not None
+    assert db.soft_delete_conversation(conversation_id, conversation["version"])
+
+    assert (
+        db.upsert_conversation_settings(
+            conversation_id,
+            {"writer": "must-roll-back"},
+            expected_settings_version=before["settings_version"],
+        )
+        is False
+    )
+    with db.transaction() as conn:
+        row = conn.execute(
+            "SELECT settings_json, settings_version FROM conversation_settings WHERE conversation_id = ?",
+            (conversation_id,),
+        ).fetchone()
+    assert json.loads(row[0]) == before["settings"]
+    assert row[1] == before["settings_version"]
     db.close_connection()
 
 
