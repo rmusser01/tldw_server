@@ -227,6 +227,53 @@ async def test_postgres_delivery_schema_ready_rejects_wrong_recovery_index_predi
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize(
+    ("index_name", "replacement_sql"),
+    (
+        (
+            "idx_admin_webhook_deliveries_recovery",
+            """
+            CREATE INDEX idx_admin_webhook_deliveries_recovery
+            ON admin_webhook_deliveries(
+                state DESC, enqueue_claim_expires_at, expires_at, created_at
+            )
+            WHERE state IN ('pending', 'enqueue_claimed')
+            """,
+        ),
+        (
+            "idx_admin_webhook_deliveries_disposition_recovery",
+            """
+            CREATE INDEX idx_admin_webhook_deliveries_disposition_recovery
+            ON admin_webhook_deliveries(
+                jobs_disposition_applied DESC,
+                pending_jobs_disposition_not_before_at,
+                updated_at
+            )
+            WHERE pending_jobs_disposition IS NOT NULL
+            """,
+        ),
+    ),
+)
+async def test_postgres_delivery_schema_ready_rejects_wrong_recovery_index_order(
+    test_db_pool,
+    index_name: str,
+    replacement_sql: str,
+) -> None:
+    assert await ensure_admin_webhook_canonical_tables_pg(test_db_pool)
+    repository = AdminWebhookRepository(test_db_pool)
+    assert await repository.delivery_schema_ready() is True
+
+    connection = await asyncpg.connect(test_db_pool.settings.DATABASE_URL)
+    try:
+        await connection.execute(f"DROP INDEX {index_name}")
+        await connection.execute(replacement_sql)
+    finally:
+        await connection.close()
+
+    assert await repository.delivery_schema_ready() is False
+
+
+@pytest.mark.integration
 async def test_postgres_delivery_schema_ready_rejects_decoy_named_index_on_wrong_table(
     test_db_pool,
 ) -> None:

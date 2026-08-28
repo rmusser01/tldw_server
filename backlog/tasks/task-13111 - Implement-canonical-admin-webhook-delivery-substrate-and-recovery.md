@@ -4,7 +4,7 @@ title: Implement canonical admin webhook delivery substrate and recovery
 status: In Progress
 assignee: []
 created_date: '2026-08-23 03:15'
-updated_date: '2026-08-28 16:12'
+updated_date: '2026-08-28 16:21'
 labels:
   - admin
   - webhooks
@@ -80,6 +80,8 @@ The initial draft was created from an earlier reviewed PR 1 head. Planning revie
 2026-08-28: Started Task 1 Fix Round 2. Binding readiness constraints and indexes to owning tables, correcting heartbeat NULL reason SQL semantics, adding equivalent PostgreSQL instance bounds, and re-verifying migration 095 without a new migration.
 
 2026-08-28: Task 1 Fix Round 2 complete. delivery_schema_ready now binds delivery/attempt/heartbeat checks and named indexes to their owning tables, validates PostgreSQL relation ownership, and migration 095 rejects unready heartbeat rows with NULL reason_code. Added SQLite/PostgreSQL decoy-index and wrong-table-check coverage plus PostgreSQL 129-character instance rejection. Full required suite: 112 passed, 0 skipped (PostgreSQL required); Ruff and diff checks passed. Warning triage: 2 environment/dependency configuration warnings and 20 existing deprecated shared-fixture shutdown warnings; no Task 1 warning introduced.
+
+2026-08-28: Task 1 Fix Round 3 complete. PostgreSQL delivery_schema_ready now validates per-key pg_index.indoption DESC flags for every required recovery index: both delivery recovery indexes are all ascending and heartbeat freshness is component/ready ascending plus heartbeat_at descending. Added expected-name wrong-DESC tests for both recovery indexes; full required suite 114 passed, 0 skipped with PostgreSQL required; Ruff and diff checks passed.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

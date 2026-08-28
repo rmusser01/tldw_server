@@ -151,6 +151,11 @@ _DELIVERY_SCHEMA_INDEX_TABLES = {
         "admin_webhook_runtime_heartbeats"
     ),
 }
+_DELIVERY_POSTGRES_INDEX_DESCENDING = {
+    "idx_admin_webhook_deliveries_recovery": (False, False, False, False),
+    "idx_admin_webhook_deliveries_disposition_recovery": (False, False, False),
+    "idx_admin_webhook_runtime_heartbeats_freshness": (False, False, True),
+}
 _DELIVERY_RUNTIME_REASON_VALUES = (
     "mode_off",
     "mode_migrate",
@@ -1155,15 +1160,22 @@ class AdminWebhookRepository:
                            array_agg(attribute.attname ORDER BY key_columns.ordinality)
                                FILTER (WHERE key_columns.ordinality <= index_data.indnkeyatts)
                                AS column_names,
+                           array_agg((key_columns.option_flags & 1) = 1
+                               ORDER BY key_columns.ordinality)
+                               FILTER (WHERE key_columns.ordinality <= index_data.indnkeyatts)
+                               AS descending_flags,
                            pg_get_expr(index_data.indpred, index_data.indrelid)
-                               AS predicate,
-                           pg_get_indexdef(index_data.indexrelid) AS definition
+                               AS predicate
                     FROM pg_index AS index_data
                     JOIN pg_class AS index_class ON index_class.oid = index_data.indexrelid
                     JOIN pg_class AS relation ON relation.oid = index_data.indrelid
                     JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
-                    JOIN LATERAL unnest(index_data.indkey)
-                        WITH ORDINALITY AS key_columns(attribute_number, ordinality)
+                    JOIN LATERAL unnest(
+                        index_data.indkey::smallint[],
+                        index_data.indoption::smallint[]
+                    ) WITH ORDINALITY AS key_columns(
+                        attribute_number, option_flags, ordinality
+                    )
                         ON TRUE
                     JOIN pg_attribute AS attribute
                         ON attribute.attrelid = relation.oid
@@ -1204,10 +1216,10 @@ class AdminWebhookRepository:
                     str(row["index_name"]): (
                         str(row["table_name"]),
                         tuple(str(column) for column in row["column_names"]),
+                        tuple(bool(flag) for flag in row["descending_flags"]),
                         _strip_outer_parentheses(
                             _compact_schema_sql(str(row["predicate"] or ""))
                         ),
-                        _compact_schema_sql(str(row["definition"])),
                     )
                     for row in index_rows
                 }
@@ -1291,22 +1303,20 @@ class AdminWebhookRepository:
                     index_contracts[index_name][0]
                     == _DELIVERY_SCHEMA_INDEX_TABLES[index_name]
                     and index_contracts[index_name][1] == expected_columns
+                    and index_contracts[index_name][2]
+                    == _DELIVERY_POSTGRES_INDEX_DESCENDING[index_name]
                     for index_name, expected_columns in expected_indexes.items()
                 )
-                and index_contracts["idx_admin_webhook_deliveries_recovery"][2]
+                and index_contracts["idx_admin_webhook_deliveries_recovery"][3]
                 == recovery_predicate
                 and index_contracts[
                     "idx_admin_webhook_deliveries_disposition_recovery"
-                ][2]
+                ][3]
                 == disposition_predicate
                 and index_contracts[
                     "idx_admin_webhook_runtime_heartbeats_freshness"
-                ][2]
-                == ""
-                and "heartbeat_atdesc)"
-                in index_contracts[
-                    "idx_admin_webhook_runtime_heartbeats_freshness"
                 ][3]
+                == ""
             )
 
     async def get_legacy_import_snapshot(self) -> LegacyImportDatabaseSnapshot:
