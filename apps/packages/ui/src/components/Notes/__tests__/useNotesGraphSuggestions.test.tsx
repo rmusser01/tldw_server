@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-import { NotesGraphSuggestionClientError } from "@/services/note-graph-suggestions"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, cleanup, renderHook } from "@testing-library/react"
 import React from "react"
@@ -154,12 +153,15 @@ const settleQueries = async () => {
 describe("useNotesGraphSuggestions", () => {
   beforeEach(() => {
     vi.useFakeTimers()
-    vi.clearAllMocks()
+    vi.resetAllMocks()
     mocks.createCommand.mockImplementation((input) => ({
       ...input,
       idempotencyKey: "uuid-once"
     }))
     mocks.getCapabilities.mockResolvedValue(capability())
+    mocks.getRun.mockImplementation(({ runId }) =>
+      Promise.resolve(run(runId, "queued", "2026-08-27T12:00:00Z"))
+    )
     mocks.listRuns.mockResolvedValue({ items: [], next_cursor: null })
     mocks.listSuggestions.mockResolvedValue(suggestionPage([]))
   })
@@ -198,6 +200,7 @@ describe("useNotesGraphSuggestions", () => {
     const first = renderHook(
       () =>
         useNotesGraphSuggestions({
+          authorityScope: "authority-a",
           enabled: true,
           isOnline: true,
           noteId: "source-note",
@@ -221,10 +224,12 @@ describe("useNotesGraphSuggestions", () => {
 
     expect(first.result.current.activeRun?.state).toBe("succeeded")
     expect(mocks.getRun).toHaveBeenCalledTimes(2)
+    expect(mocks.listSuggestions).toHaveBeenCalledTimes(2)
     await act(async () => {
       await vi.advanceTimersByTimeAsync(3000)
     })
     expect(mocks.getRun).toHaveBeenCalledTimes(2)
+    expect(mocks.listSuggestions).toHaveBeenCalledTimes(2)
     expect(mocks.createRun).not.toHaveBeenCalled()
 
     first.unmount()
@@ -237,6 +242,7 @@ describe("useNotesGraphSuggestions", () => {
     renderHook(
       () =>
         useNotesGraphSuggestions({
+          authorityScope: "authority-a",
           enabled: true,
           isOnline: true,
           noteId: "source-note",
@@ -249,28 +255,21 @@ describe("useNotesGraphSuggestions", () => {
     expect(mocks.createRun).not.toHaveBeenCalled()
   })
 
-  it("retains one UUID while capability 412 refreshes disclosure and retries generation", async () => {
+  it("delegates the single 412 retry to the service while retaining one command UUID", async () => {
     const nextCapability = capability(fingerprint("e"))
-    mocks.getCapabilities
-      .mockResolvedValueOnce(capability())
-      .mockResolvedValueOnce(nextCapability)
-    mocks.createRun
-      .mockRejectedValueOnce(
-        new NotesGraphSuggestionClientError(
-          412,
-          "notes_graph_capabilities_changed",
-          "Suggestion capabilities changed; refresh and retry."
-        )
-      )
-      .mockResolvedValueOnce(
-        run("run-created", "queued", "2026-08-27T12:00:00Z")
-      )
+    mocks.createRun.mockImplementationOnce(
+      async (_command, _capability, config) => {
+        config.onCapabilitiesChanged(nextCapability)
+        return run("run-created", "queued", "2026-08-27T12:00:00Z")
+      }
+    )
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
     })
     const { result } = renderHook(
       () =>
         useNotesGraphSuggestions({
+          authorityScope: "authority-a",
           enabled: true,
           isOnline: true,
           noteId: "source-note",
@@ -283,14 +282,104 @@ describe("useNotesGraphSuggestions", () => {
     await act(async () => {
       await result.current.generate()
     })
+    await settleQueries()
 
     expect(mocks.createCommand).toHaveBeenCalledTimes(1)
-    expect(mocks.createRun).toHaveBeenCalledTimes(2)
+    expect(mocks.createRun).toHaveBeenCalledTimes(1)
     expect(mocks.createRun.mock.calls[0][0].idempotencyKey).toBe("uuid-once")
-    expect(mocks.createRun.mock.calls[1][0].idempotencyKey).toBe("uuid-once")
     expect(mocks.createRun.mock.calls[0][1].etag).toBe(capability().etag)
-    expect(mocks.createRun.mock.calls[1][1].etag).toBe(nextCapability.etag)
+    expect(mocks.getCapabilities).toHaveBeenCalledTimes(1)
+    expect(result.current.capabilities?.etag).toBe(nextCapability.etag)
     expect(result.current.activeRun?.id).toBe("run-created")
+  })
+
+  it("does not coerce malformed mutation error statuses into network retries", async () => {
+    mocks.createRun.mockRejectedValue({ status: "0" })
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
+    })
+    const { result } = renderHook(
+      () =>
+        useNotesGraphSuggestions({
+          authorityScope: "authority-a",
+          enabled: true,
+          isOnline: true,
+          noteId: "source-note",
+          loadedNodeIds: new Set()
+        }),
+      { wrapper: wrapper(client) }
+    )
+    await flush()
+
+    let failurePromise: Promise<unknown>
+    act(() => {
+      failurePromise = result.current.generate().then(
+        () => null,
+        (error) => error
+      )
+    })
+    await act(async () => {
+      await vi.runAllTimersAsync()
+    })
+    const failure = await failurePromise!
+
+    expect(failure).toMatchObject({ status: "0" })
+    expect(mocks.createRun).toHaveBeenCalledTimes(1)
+  })
+
+  it("revokes service-owned retry authority on an account or server switch", async () => {
+    let generationConfig: { canRetry?: () => boolean } | undefined
+    let rejectGeneration: ((error: unknown) => void) | undefined
+    mocks.createRun.mockImplementationOnce(
+      (_command, _capability, config) =>
+        new Promise((_resolve, reject) => {
+          generationConfig = config
+          rejectGeneration = reject
+        })
+    )
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
+    })
+    const { result, rerender } = renderHook(
+      ({ authorityScope }: { authorityScope: string | null }) =>
+        useNotesGraphSuggestions({
+          authorityScope,
+          enabled: true,
+          isOnline: true,
+          noteId: "source-note",
+          loadedNodeIds: new Set()
+        }),
+      {
+        initialProps: { authorityScope: "account-a@server-a" },
+        wrapper: wrapper(client)
+      }
+    )
+    await flush()
+
+    let failurePromise: Promise<unknown>
+    act(() => {
+      failurePromise = result.current.generate().then(
+        () => null,
+        (error) => error
+      )
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(generationConfig?.canRetry?.()).toBe(true)
+
+    rerender({ authorityScope: "account-b@server-b" })
+    expect(generationConfig?.canRetry?.()).toBe(false)
+
+    rerender({ authorityScope: "account-a@server-a" })
+    expect(generationConfig?.canRetry?.()).toBe(false)
+
+    await act(async () => {
+      rejectGeneration?.({ status: 412 })
+      await vi.runAllTimersAsync()
+    })
+    expect(await failurePromise!).toMatchObject({ status: 412 })
+    expect(mocks.createRun).toHaveBeenCalledTimes(1)
   })
 
   it("cancels the adopted active run with one retained command key", async () => {
@@ -312,6 +401,7 @@ describe("useNotesGraphSuggestions", () => {
     const { result } = renderHook(
       () =>
         useNotesGraphSuggestions({
+          authorityScope: "authority-a",
           enabled: true,
           isOnline: true,
           noteId: "source-note",
@@ -340,6 +430,11 @@ describe("useNotesGraphSuggestions", () => {
       suggestionPage([
         suggestion(),
         suggestion({
+          id: "suggestion-two",
+          target_note_id: "unloaded-note",
+          target_fingerprint: fingerprint("e")
+        }),
+        suggestion({
           id: "tag-one",
           kind: "tag",
           target_note_id: null,
@@ -366,10 +461,11 @@ describe("useNotesGraphSuggestions", () => {
     const { result, rerender } = renderHook(
       ({ online, noteId }) =>
         useNotesGraphSuggestions({
+          authorityScope: "authority-a",
           enabled: true,
           isOnline: online,
           noteId,
-          loadedNodeIds: new Set(["note:source-note"])
+          loadedNodeIds: new Set(["source-note", "target-note"])
         }),
       {
         initialProps: { online: true, noteId: "source-note" },
@@ -379,19 +475,49 @@ describe("useNotesGraphSuggestions", () => {
     await flush()
 
     expect(Object.keys(result.current.provisionalBySuggestionId)).toEqual([
-      "suggestion-one"
+      "suggestion-one",
+      "suggestion-two"
     ])
     expect(
       result.current.provisionalBySuggestionId["suggestion-one"]
     ).toMatchObject({
-      edge: { suggestionId: "suggestion-one" },
-      node: { suggestionId: "suggestion-one", label: "Suggested note" }
+      edge: {
+        suggestionId: "suggestion-one",
+        source: "source-note",
+        target: "target-note"
+      },
+      node: null
     })
-    expect(result.current.suggestions).toHaveLength(2)
+    expect(
+      result.current.provisionalBySuggestionId["suggestion-two"]
+    ).toMatchObject({
+      edge: {
+        suggestionId: "suggestion-two",
+        source: "source-note",
+        target: "suggestion-node:suggestion-two"
+      },
+      node: {
+        id: "suggestion-node:suggestion-two",
+        suggestionId: "suggestion-two",
+        label: "Suggested note"
+      }
+    })
+    expect(result.current.suggestions).toHaveLength(3)
 
     await act(async () => {
       await result.current.accept(result.current.suggestions[0])
     })
+    const acceptedCache = client
+      .getQueryCache()
+      .findAll()
+      .find((query) => query.queryKey.at(-1) === "items")?.state.data as
+      | { data?: { items?: Array<{ id: string }> } }
+      | undefined
+    expect(acceptedCache?.data?.items?.map((item) => item.id)).toEqual([
+      "suggestion-two",
+      "tag-one"
+    ])
+    await settleQueries()
     expect(mocks.accept).toHaveBeenCalledWith(
       expect.objectContaining({
         suggestionId: "suggestion-one",
@@ -399,13 +525,22 @@ describe("useNotesGraphSuggestions", () => {
       })
     )
     expect(invalidate).toHaveBeenCalledWith(
-      expect.objectContaining({ queryKey: ["notes-graph-workspace"] })
-    )
-    expect(invalidate).toHaveBeenCalledWith(
       expect.objectContaining({
-        queryKey: ["notes-graph-suggestions", "source-note"]
+        queryKey: ["notes-graph-workspace", "authority-a"]
       })
     )
+    expect(result.current.suggestions.map((item) => item.id)).toEqual([
+      "suggestion-two",
+      "tag-one"
+    ])
+    expect(
+      client
+        .getMutationCache()
+        .getAll()
+        .every(
+          (mutation) => mutation.options.mutationKey?.[1] === "authority-a"
+        )
+    ).toBe(true)
 
     rerender({ online: false, noteId: "source-note" })
     await flush()
@@ -427,9 +562,326 @@ describe("useNotesGraphSuggestions", () => {
 
     const listCalls = mocks.listSuggestions.mock.calls.length
     rerender({ online: false, noteId: "other-note" })
-    await flush()
     expect(result.current.suggestions).toEqual([])
     expect(result.current.provisionalBySuggestionId).toEqual({})
+    await flush()
     expect(mocks.listSuggestions).toHaveBeenCalledTimes(listCalls)
+  })
+
+  it("exposes no suggestion, evidence, rationale, or run from another authority", async () => {
+    mocks.listRuns
+      .mockResolvedValueOnce({
+        items: [run("run-a", "running", "2026-08-27T12:00:00Z")],
+        next_cursor: null
+      })
+      .mockResolvedValueOnce({ items: [], next_cursor: null })
+    mocks.getRun.mockResolvedValue(
+      run("run-a", "running", "2026-08-27T12:00:00Z")
+    )
+    mocks.listSuggestions
+      .mockResolvedValueOnce(
+        suggestionPage([
+          suggestion({
+            rationale: "Account A rationale",
+            evidence: [{ text: "Account A evidence" }]
+          })
+        ])
+      )
+      .mockResolvedValueOnce(suggestionPage([]))
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
+    })
+    const { result, rerender } = renderHook(
+      ({ authorityScope }: { authorityScope: string | null }) =>
+        useNotesGraphSuggestions({
+          authorityScope,
+          enabled: true,
+          isOnline: true,
+          noteId: "source-note",
+          loadedNodeIds: new Set(["source-note"]),
+          pollIntervalMs: 1000
+        }),
+      {
+        initialProps: { authorityScope: "account-a@server-a" },
+        wrapper: wrapper(client)
+      }
+    )
+    await settleQueries()
+    expect(result.current.suggestions[0].rationale).toBe("Account A rationale")
+    expect(result.current.activeRun?.id).toBe("run-a")
+    const callsBeforeSwitch = {
+      capabilities: mocks.getCapabilities.mock.calls.length,
+      runs: mocks.listRuns.mock.calls.length,
+      suggestions: mocks.listSuggestions.mock.calls.length
+    }
+
+    rerender({ authorityScope: null })
+    expect(result.current.capabilities).toBeNull()
+    expect(result.current.activeRun).toBeNull()
+    expect(result.current.suggestions).toEqual([])
+    expect(result.current.provisionalBySuggestionId).toEqual({})
+    await expect(result.current.generate()).rejects.toMatchObject({
+      code: "notes_graph_invalid_request"
+    })
+    expect(mocks.getCapabilities).toHaveBeenCalledTimes(
+      callsBeforeSwitch.capabilities
+    )
+    expect(mocks.listRuns).toHaveBeenCalledTimes(callsBeforeSwitch.runs)
+    expect(mocks.listSuggestions).toHaveBeenCalledTimes(
+      callsBeforeSwitch.suggestions
+    )
+    expect(mocks.createRun).not.toHaveBeenCalled()
+
+    rerender({ authorityScope: "account-b@server-b" })
+    expect(result.current.capabilities).toBeNull()
+    expect(result.current.activeRun).toBeNull()
+    expect(result.current.suggestions).toEqual([])
+    await settleQueries()
+    expect(result.current.suggestions).toEqual([])
+    expect(
+      client
+        .getQueryCache()
+        .findAll()
+        .every((query) => query.queryKey[1] !== undefined)
+    ).toBe(true)
+    expect(
+      client
+        .getMutationCache()
+        .getAll()
+        .every((mutation) => mutation.options.mutationKey?.[1] !== undefined)
+    ).toBe(true)
+  })
+
+  it("changes note and dataset without one-frame suggestion or current-run state", async () => {
+    mocks.listRuns
+      .mockResolvedValueOnce({
+        items: [run("run-a", "queued", "2026-08-27T12:00:00Z")],
+        next_cursor: null
+      })
+      .mockResolvedValueOnce({
+        items: [run("run-b", "queued", "2026-08-27T12:00:00Z")],
+        next_cursor: null
+      })
+      .mockResolvedValueOnce({
+        items: [run("run-c", "queued", "2026-08-27T12:00:00Z")],
+        next_cursor: null
+      })
+    mocks.getRun.mockImplementation(({ runId }) =>
+      Promise.resolve(run(runId, "failed", "2026-08-27T12:00:00Z"))
+    )
+    mocks.listSuggestions
+      .mockResolvedValueOnce(
+        suggestionPage([suggestion({ id: "suggestion-a" })])
+      )
+      .mockResolvedValueOnce(
+        suggestionPage([suggestion({ id: "suggestion-b" })])
+      )
+      .mockResolvedValueOnce(
+        suggestionPage([suggestion({ id: "suggestion-c" })])
+      )
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
+    })
+    const { result, rerender } = renderHook(
+      ({ noteId, datasetId }) =>
+        useNotesGraphSuggestions({
+          authorityScope: "authority-a",
+          enabled: true,
+          isOnline: true,
+          noteId,
+          datasetId,
+          loadedNodeIds: new Set()
+        }),
+      {
+        initialProps: { noteId: "note-a", datasetId: "dataset-a" },
+        wrapper: wrapper(client)
+      }
+    )
+    await settleQueries()
+    expect(result.current.suggestions[0].id).toBe("suggestion-a")
+    expect(result.current.activeRun?.id).toBe("run-a")
+
+    rerender({ noteId: "note-b", datasetId: "dataset-a" })
+    expect(result.current.suggestions).toEqual([])
+    expect(result.current.activeRun).toBeNull()
+    await settleQueries()
+    expect(result.current.suggestions[0].id).toBe("suggestion-b")
+    expect(result.current.activeRun?.id).toBe("run-b")
+
+    rerender({ noteId: "note-c", datasetId: "dataset-b" })
+    expect(result.current.suggestions).toEqual([])
+    expect(result.current.activeRun).toBeNull()
+    await settleQueries()
+    expect(result.current.suggestions[0].id).toBe("suggestion-c")
+    expect(result.current.activeRun?.id).toBe("run-c")
+  })
+
+  it("does not adopt a late mutation result after an authority switch", async () => {
+    let resolveAccept:
+      | ((value: {
+          resource_id: string
+          state: string
+          revision: number
+        }) => void)
+      | undefined
+    mocks.listSuggestions
+      .mockResolvedValueOnce(
+        suggestionPage([suggestion({ id: "suggestion-a" })])
+      )
+      .mockResolvedValueOnce(
+        suggestionPage([suggestion({ id: "suggestion-b" })])
+      )
+    mocks.accept.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveAccept = resolve
+        })
+    )
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
+    })
+    const invalidate = vi.spyOn(client, "invalidateQueries")
+    const { result, rerender } = renderHook(
+      ({ authorityScope }) =>
+        useNotesGraphSuggestions({
+          authorityScope,
+          enabled: true,
+          isOnline: true,
+          noteId: "source-note",
+          loadedNodeIds: new Set()
+        }),
+      {
+        initialProps: { authorityScope: "authority-a" },
+        wrapper: wrapper(client)
+      }
+    )
+    await flush()
+
+    let pendingAccept: Promise<unknown>
+    act(() => {
+      pendingAccept = result.current.accept(result.current.suggestions[0])
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(mocks.accept).toHaveBeenCalledTimes(1)
+
+    rerender({ authorityScope: "authority-b" })
+    expect(result.current.suggestions).toEqual([])
+    await settleQueries()
+    expect(result.current.suggestions.map((item) => item.id)).toEqual([
+      "suggestion-b"
+    ])
+
+    await act(async () => {
+      resolveAccept?.({
+        resource_id: "suggestion-a",
+        state: "accepted",
+        revision: 3
+      })
+      await pendingAccept!
+    })
+    await settleQueries()
+
+    expect(result.current.suggestions.map((item) => item.id)).toEqual([
+      "suggestion-b"
+    ])
+    expect(invalidate).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        queryKey: ["notes-graph-workspace", "authority-b"]
+      })
+    )
+  })
+
+  it("stops run polling on error and resumes only after explicit online recovery", async () => {
+    mocks.listRuns.mockResolvedValue({
+      items: [run("run-error", "running", "2026-08-27T12:00:00Z")],
+      next_cursor: null
+    })
+    mocks.getRun.mockRejectedValueOnce(new Error("permission denied"))
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
+    })
+    const { result, rerender } = renderHook(
+      ({ online }) =>
+        useNotesGraphSuggestions({
+          authorityScope: "authority-a",
+          enabled: true,
+          isOnline: online,
+          noteId: "source-note",
+          loadedNodeIds: new Set(),
+          pollIntervalMs: 500
+        }),
+      {
+        initialProps: { online: true },
+        wrapper: wrapper(client)
+      }
+    )
+    await settleQueries()
+    expect(result.current.runQuery.isError).toBe(true)
+    expect(mocks.getRun).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000)
+    })
+    expect(mocks.getRun).toHaveBeenCalledTimes(1)
+
+    mocks.getRun.mockResolvedValueOnce(
+      run("run-error", "running", "2026-08-27T12:00:00Z", 2)
+    )
+    rerender({ online: false })
+    rerender({ online: true })
+    await settleQueries()
+    expect(mocks.getRun).toHaveBeenCalledTimes(2)
+    expect(result.current.runQuery.isError).toBe(false)
+  })
+
+  it("removes a rejected suggestion from the exact scoped cache immediately", async () => {
+    mocks.listSuggestions.mockResolvedValue(
+      suggestionPage([
+        suggestion(),
+        suggestion({ id: "suggestion-two", target_note_id: "target-two" })
+      ])
+    )
+    mocks.reject.mockResolvedValue({
+      resource_id: "suggestion-one",
+      state: "rejected",
+      revision: 3,
+      cleared_count: null
+    })
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
+    })
+    const { result } = renderHook(
+      () =>
+        useNotesGraphSuggestions({
+          authorityScope: "authority-a",
+          enabled: true,
+          isOnline: true,
+          noteId: "source-note",
+          loadedNodeIds: new Set()
+        }),
+      { wrapper: wrapper(client) }
+    )
+    await flush()
+
+    await act(async () => {
+      await result.current.reject(result.current.suggestions[0])
+    })
+    const rejectedCache = client
+      .getQueryCache()
+      .findAll()
+      .find((query) => query.queryKey.at(-1) === "items")?.state.data as
+      | { data?: { items?: Array<{ id: string }> } }
+      | undefined
+    expect(rejectedCache?.data?.items?.map((item) => item.id)).toEqual([
+      "suggestion-two"
+    ])
+    await settleQueries()
+
+    expect(result.current.suggestions.map((item) => item.id)).toEqual([
+      "suggestion-two"
+    ])
+    expect(mocks.listSuggestions).toHaveBeenCalledTimes(1)
   })
 })

@@ -1,6 +1,7 @@
 import type { ApiSendResponse } from "@/services/api-send"
 import { bgRequest } from "@/services/background-proxy"
 import { appendPathQuery, toAllowedPath } from "@/services/tldw/path-utils"
+import { z } from "zod"
 
 const FINGERPRINT = /^sha256:[0-9a-f]{64}$/
 const STRONG_ETAG = /^"(sha256:[0-9a-f]{64})"$/
@@ -69,6 +70,8 @@ const CAPABILITY_UNAVAILABLE_REASONS = new Set([
 ])
 
 const RUN_ERROR_CODES = new Set([
+  "notes_graph_admission_failed",
+  "notes_graph_capabilities_changed_before_queue",
   "notes_graph_capabilities_changed_before_provider",
   "notes_graph_fingerprint_stale",
   "notes_graph_fts_not_ready",
@@ -180,11 +183,11 @@ export type NotesGraphSuggestionCapabilities = {
   endpoint_origin_revision: string
   data_boundary: "local" | "remote" | "unknown"
   disclosure_external: boolean
-  outbound_data_categories: string[]
+  outbound_data_categories: NotesGraphOutboundDataCategory[]
   generation_available: boolean
   unavailable_reason: string | null
   limits: NotesGraphSuggestionCapabilityLimits
-  allowed_actions: string[]
+  allowed_actions: NotesGraphSuggestionAction[]
   revision: string
   etag: string
 }
@@ -193,7 +196,7 @@ export type NotesGraphSuggestionRun = {
   id: string
   provider: string
   model: string
-  state: string
+  state: NotesGraphSuggestionRunState
   revision: number
   created_at: string
   started_at: string | null
@@ -220,7 +223,7 @@ export type NotesGraphSuggestion = {
   id: string
   run_id: string
   kind: "related_note" | "tag"
-  state: string
+  state: NotesGraphSuggestionState
   revision: number
   source_note_id: string
   source_fingerprint: string
@@ -229,7 +232,7 @@ export type NotesGraphSuggestion = {
   normalized_tag: string | null
   display_tag: string | null
   existing_tag: boolean
-  match_strength: string | null
+  match_strength: NotesGraphMatchStrength | null
   rationale: string | null
   evidence: NotesGraphSuggestionEvidence[]
   updated_at: string
@@ -250,7 +253,7 @@ export type NotesGraphSuggestionPage = {
 
 export type NotesGraphSuggestionMutation = {
   resource_id: string
-  state: string
+  state: NotesGraphSuggestionMutationState
   revision: number
   cleared_count: number | null
 }
@@ -276,7 +279,7 @@ export type CreateNotesGraphSuggestionCommand =
   }
 
 export type ListNotesGraphSuggestionRunsInput = NoteScope & {
-  states?: string[]
+  states?: NotesGraphSuggestionRunState[]
   limit?: number
   cursor?: string
 }
@@ -286,7 +289,7 @@ export type GetNotesGraphSuggestionRunInput = NoteScope & {
 }
 
 export type ListNotesGraphSuggestionsInput = NoteScope & {
-  states?: string[]
+  states?: NotesGraphSuggestionState[]
   limit?: number
   cursor?: string
 }
@@ -311,53 +314,157 @@ export type ResetNotesGraphSuggestionRejectionsInput = NoteScope & {
   idempotencyKey: string
 }
 
-const record = (value: unknown): Record<string, unknown> =>
-  value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {}
+export type NotesGraphOutboundDataCategory =
+  | "selected_note_title"
+  | "selected_note_excerpts"
+  | "candidate_note_titles"
+  | "candidate_note_excerpts"
+  | "existing_tag_labels"
 
-const stringValue = (value: unknown, maximum: number, fallback = ""): string =>
-  (typeof value === "string" ? value : fallback).slice(0, maximum)
+export type NotesGraphSuggestionAction =
+  | "generate"
+  | "cancel"
+  | "accept"
+  | "reject"
+  | "reset_rejections"
 
-const optionalString = (value: unknown, maximum: number): string | null =>
-  typeof value === "string" ? value.slice(0, maximum) : null
+export type NotesGraphSuggestionRunState =
+  | "admitting"
+  | "queued"
+  | "running"
+  | "cancelling"
+  | "publishing"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "stale"
 
-const allowlistedString = (
-  value: unknown,
-  allowed: ReadonlySet<string>
-): string | null =>
-  typeof value === "string" && allowed.has(value) ? value : null
+export type NotesGraphSuggestionState =
+  | "staged"
+  | "pending"
+  | "accepting"
+  | "accepted"
+  | "rejected"
+  | "stale"
 
-const integer = (
-  value: unknown,
-  minimum: number,
-  maximum: number,
-  fallback: number
-): number => {
-  const parsed = typeof value === "number" ? value : Number(value)
-  if (!Number.isFinite(parsed)) return fallback
-  return Math.min(maximum, Math.max(minimum, Math.trunc(parsed)))
-}
+export type NotesGraphMatchStrength = "strong" | "possible"
 
-const requiredFingerprint = (value: unknown): string => {
-  if (typeof value !== "string" || !FINGERPRINT.test(value)) {
-    throw invalidResponse()
-  }
-  return value
-}
+export type NotesGraphSuggestionMutationState =
+  | "cancelling"
+  | "cancelled"
+  | "succeeded"
+  | "failed"
+  | "stale"
+  | "accepted"
+  | "rejected"
+  | "reset"
+  | "completed"
 
 const invalidResponse = (): NotesGraphSuggestionClientError =>
   new NotesGraphSuggestionClientError(502, "notes_graph_invalid_response")
 
-const normalizedId = (value: string): string => {
-  const result = String(value ?? "").trim()
-  if (!result || result.length > 512)
-    throw new NotesGraphSuggestionClientError(
-      422,
-      "notes_graph_invalid_request"
-    )
-  return result
+const invalidRequest = (): NotesGraphSuggestionClientError =>
+  new NotesGraphSuggestionClientError(422, "notes_graph_invalid_request")
+
+const truncateCodePoints = (value: string, maximum: number): string =>
+  Array.from(value).slice(0, maximum).join("")
+
+const boundedTextSchema = (maximum: number) =>
+  z.string().transform((value) => truncateCodePoints(value, maximum))
+
+const idSchema = z
+  .string()
+  .min(1)
+  .refine((value) => Array.from(value).length <= 512)
+const inputIdSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .refine((value) => Array.from(value).length <= 512)
+const fingerprintSchema = z.string().regex(FINGERPRINT)
+const cursorSchema = z.string().max(MAX_CURSOR_LENGTH)
+const safeCountSchema = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)
+const positiveRevisionSchema = z
+  .number()
+  .int()
+  .min(1)
+  .max(Number.MAX_SAFE_INTEGER)
+const nonnegativeRevisionSchema = z
+  .number()
+  .int()
+  .min(0)
+  .max(Number.MAX_SAFE_INTEGER)
+
+const edgeTypeSchema = z.enum([
+  "manual",
+  "wikilink",
+  "backlink",
+  "tag_membership",
+  "source_membership"
+])
+const runStateSchema = z.enum([
+  "admitting",
+  "queued",
+  "running",
+  "cancelling",
+  "publishing",
+  "succeeded",
+  "failed",
+  "cancelled",
+  "stale"
+])
+const suggestionStateSchema = z.enum([
+  "staged",
+  "pending",
+  "accepting",
+  "accepted",
+  "rejected",
+  "stale"
+])
+const mutationStateSchema = z.enum([
+  "cancelling",
+  "cancelled",
+  "succeeded",
+  "failed",
+  "stale",
+  "accepted",
+  "rejected",
+  "reset",
+  "completed"
+])
+const actionSchema = z.enum([
+  "generate",
+  "cancel",
+  "accept",
+  "reject",
+  "reset_rejections"
+])
+const outboundCategorySchema = z.enum([
+  "selected_note_title",
+  "selected_note_excerpts",
+  "candidate_note_titles",
+  "candidate_note_excerpts",
+  "existing_tag_labels"
+])
+
+const parseResponse = <T>(schema: z.ZodType<T>, value: unknown): T => {
+  const parsed = schema.safeParse(value)
+  if (!parsed.success) throw invalidResponse()
+  return parsed.data
 }
+
+// The package compiles without strictNullChecks, which makes Zod object outputs
+// appear optional. Runtime validation remains authoritative for these public types.
+const parseResponseAs = <T>(schema: z.ZodType, value: unknown): T =>
+  parseResponse(schema, value) as T
+
+const parseInput = <T>(schema: z.ZodType<T>, value: unknown): T => {
+  const parsed = schema.safeParse(value)
+  if (!parsed.success) throw invalidRequest()
+  return parsed.data
+}
+
+const normalizedId = (value: string): string => parseInput(inputIdSchema, value)
 
 const pathId = (value: string): string =>
   encodeURIComponent(normalizedId(value))
@@ -377,11 +484,15 @@ const queryPath = (
 }
 
 const retryAfter = (value: unknown): number | null => {
-  const parsed = typeof value === "number" ? value : Number.NaN
-  return Number.isFinite(parsed) && parsed >= 0
-    ? Math.min(Math.trunc(parsed), 3_600_000)
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? Math.min(Math.trunc(value), 3_600_000)
     : null
 }
+
+const record = (value: unknown): Record<string, unknown> =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {}
 
 const errorCode = (value: unknown): NotesGraphSuggestionErrorCode => {
   const details = record(record(value).details)
@@ -397,7 +508,13 @@ const errorCode = (value: unknown): NotesGraphSuggestionErrorCode => {
 const clientError = (value: unknown): NotesGraphSuggestionClientError => {
   if (value instanceof NotesGraphSuggestionClientError) return value
   const source = record(value)
-  const status = integer(source.status, 0, 599, 503)
+  const status =
+    typeof source.status === "number" &&
+    Number.isInteger(source.status) &&
+    source.status >= 0 &&
+    source.status <= 599
+      ? source.status
+      : 503
   const code = errorCode(value)
   return new NotesGraphSuggestionClientError(
     status,
@@ -417,195 +534,153 @@ const request = async <T>(
   }
 }
 
-const normalizeNode = (value: unknown): NotesGraphNode | null => {
-  const source = record(value)
-  const type = source.type
-  if (type !== "note" && type !== "tag" && type !== "source") return null
-  const id = stringValue(source.id, 512)
-  if (!id) return null
-  return {
-    id,
-    type,
-    label: stringValue(source.label, 512),
-    created_at: optionalString(source.created_at, 64),
-    deleted: typeof source.deleted === "boolean" ? source.deleted : null,
-    degree:
-      source.degree == null
-        ? null
-        : integer(source.degree, 0, MAX_GRAPH_EDGES, 0),
-    tag_count:
-      source.tag_count == null
-        ? null
-        : integer(source.tag_count, 0, MAX_GRAPH_NODES, 0),
-    primary_source_id: optionalString(source.primary_source_id, 512)
-  }
-}
+const graphNodeSchema = z.strictObject({
+  id: idSchema,
+  type: z.enum(["note", "tag", "source"]),
+  label: boundedTextSchema(512),
+  created_at: boundedTextSchema(64).nullable().optional(),
+  deleted: z.boolean().nullable().optional(),
+  degree: z.number().int().min(0).max(MAX_GRAPH_EDGES).nullable().optional(),
+  tag_count: z.number().int().min(0).max(MAX_GRAPH_NODES).nullable().optional(),
+  primary_source_id: idSchema.nullable().optional()
+})
 
-const EDGE_TYPES = new Set<NotesGraphEdgeType>([
-  "manual",
-  "wikilink",
-  "backlink",
-  "tag_membership",
-  "source_membership"
-])
+const graphEdgeSchema = z.strictObject({
+  id: idSchema,
+  source: idSchema,
+  target: idSchema,
+  type: edgeTypeSchema,
+  directed: z.boolean(),
+  weight: z.number().finite().min(0).nullable().optional().default(null),
+  label: boundedTextSchema(256).nullable().optional().default(null)
+})
 
-const normalizeEdge = (value: unknown): NotesGraphEdge | null => {
-  const source = record(value)
-  if (!EDGE_TYPES.has(source.type as NotesGraphEdgeType)) return null
-  const id = stringValue(source.id, 512)
-  const from = stringValue(source.source, 512)
-  const target = stringValue(source.target, 512)
-  if (!id || !from || !target) return null
-  const weight =
-    typeof source.weight === "number" && Number.isFinite(source.weight)
-      ? Math.max(0, source.weight)
-      : null
-  return {
-    id,
-    source: from,
-    target,
-    type: source.type as NotesGraphEdgeType,
-    directed: source.directed === true,
-    weight,
-    label: optionalString(source.label, 256)
-  }
-}
+const graphResponseSchema = z.strictObject({
+  nodes: z.array(graphNodeSchema).max(MAX_GRAPH_NODES),
+  edges: z.array(graphEdgeSchema).max(MAX_GRAPH_EDGES),
+  truncated: z.boolean(),
+  truncated_by: z
+    .array(boundedTextSchema(64))
+    .transform((items) => items.slice(0, 16)),
+  has_more: z.boolean(),
+  cursor: cursorSchema.nullable(),
+  limits: z.strictObject({
+    max_nodes: z.number().int().min(1).max(MAX_GRAPH_NODES),
+    max_edges: z.number().int().min(0).max(MAX_GRAPH_EDGES),
+    max_degree: z.number().int().min(1).max(MAX_GRAPH_NODES)
+  }),
+  radius_cap_applied: z.boolean(),
+  active_note_count: safeCountSchema,
+  all_notes_note_cap: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+  all_notes_eligible: z.boolean()
+})
+
+const graphInputSchema = z.strictObject({
+  centerNoteId: inputIdSchema.optional(),
+  datasetId: inputIdSchema.optional(),
+  radius: z
+    .union([z.literal(1), z.literal(2)])
+    .optional()
+    .default(1),
+  edgeTypes: z.array(edgeTypeSchema).max(5).optional().default([]),
+  maxNodes: z
+    .number()
+    .int()
+    .min(1)
+    .optional()
+    .default(120)
+    .transform((value) => Math.min(value, MAX_GRAPH_NODES)),
+  maxEdges: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .default(480)
+    .transform((value) => Math.min(value, MAX_GRAPH_EDGES)),
+  maxDegree: z
+    .number()
+    .int()
+    .min(1)
+    .optional()
+    .transform((value) =>
+      value == null ? undefined : Math.min(value, MAX_GRAPH_NODES)
+    ),
+  cursor: cursorSchema.optional()
+})
 
 const normalizeGraph = (value: unknown): NotesGraphResponse => {
-  const source = record(value)
-  const rawLimits = record(source.limits)
-  const limits = {
-    max_nodes: integer(rawLimits.max_nodes, 1, MAX_GRAPH_NODES, 1),
-    max_edges: integer(rawLimits.max_edges, 0, MAX_GRAPH_EDGES, 0),
-    max_degree: integer(rawLimits.max_degree, 1, MAX_GRAPH_NODES, 1)
-  }
+  const graph = parseResponseAs<NotesGraphResponse>(graphResponseSchema, value)
   return {
-    nodes: (Array.isArray(source.nodes) ? source.nodes : [])
-      .map(normalizeNode)
-      .filter((item): item is NotesGraphNode => item !== null)
-      .slice(0, limits.max_nodes),
-    edges: (Array.isArray(source.edges) ? source.edges : [])
-      .map(normalizeEdge)
-      .filter((item): item is NotesGraphEdge => item !== null)
-      .slice(0, limits.max_edges),
-    truncated: source.truncated === true,
-    truncated_by: (Array.isArray(source.truncated_by)
-      ? source.truncated_by
-      : []
-    )
-      .map((item) => stringValue(item, 64))
-      .filter(Boolean)
-      .slice(0, 16),
-    has_more: source.has_more === true,
-    cursor: optionalString(source.cursor, MAX_CURSOR_LENGTH),
-    limits,
-    radius_cap_applied: source.radius_cap_applied === true,
-    active_note_count: integer(
-      source.active_note_count,
-      0,
-      Number.MAX_SAFE_INTEGER,
-      0
-    ),
-    all_notes_note_cap: integer(
-      source.all_notes_note_cap,
-      1,
-      MAX_GRAPH_NODES,
-      1
-    ),
-    all_notes_eligible: source.all_notes_eligible === true
+    ...graph,
+    nodes: graph.nodes.slice(0, graph.limits.max_nodes),
+    edges: graph.edges.slice(0, graph.limits.max_edges)
   }
 }
 
 export const fetchNotesGraph = async (
   input: FetchNotesGraphInput
 ): Promise<NotesGraphResponse> => {
-  const edgeTypes = (input.edgeTypes ?? []).filter((item) =>
-    EDGE_TYPES.has(item)
-  )
+  const parsed = parseInput(graphInputSchema, input)
   const payload = await request<unknown>({
     path: queryPath("/api/v1/notes/graph", [
-      ["center_note_id", input.centerNoteId],
-      ["dataset_id", input.datasetId],
-      ["radius", input.radius ?? 1],
-      ["edge_types", edgeTypes.length ? edgeTypes.join(",") : undefined],
-      ["max_nodes", integer(input.maxNodes, 1, MAX_GRAPH_NODES, 120)],
-      ["max_edges", integer(input.maxEdges, 0, MAX_GRAPH_EDGES, 480)],
+      ["center_note_id", parsed.centerNoteId],
+      ["dataset_id", parsed.datasetId],
+      ["radius", parsed.radius],
       [
-        "max_degree",
-        input.maxDegree == null
-          ? undefined
-          : integer(input.maxDegree, 1, MAX_GRAPH_NODES, 40)
+        "edge_types",
+        parsed.edgeTypes.length ? parsed.edgeTypes.join(",") : undefined
       ],
-      ["cursor", input.cursor]
+      ["max_nodes", parsed.maxNodes],
+      ["max_edges", parsed.maxEdges],
+      ["max_degree", parsed.maxDegree],
+      ["cursor", parsed.cursor]
     ]),
     method: "GET"
   })
   return normalizeGraph(payload)
 }
 
+const capabilitySchema = z.strictObject({
+  provider: boundedTextSchema(128),
+  model: boundedTextSchema(256),
+  endpoint_origin_revision: fingerprintSchema,
+  data_boundary: z.enum(["local", "remote", "unknown"]),
+  disclosure_external: z.boolean(),
+  outbound_data_categories: z.array(outboundCategorySchema).max(5),
+  generation_available: z.boolean(),
+  unavailable_reason: z
+    .string()
+    .nullable()
+    .transform((value) =>
+      value !== null && CAPABILITY_UNAVAILABLE_REASONS.has(value) ? value : null
+    ),
+  limits: z.strictObject({
+    max_candidates: z.number().int().min(1).max(30),
+    max_relationships: z.number().int().min(1).max(5),
+    max_tags: z.number().int().min(1).max(5),
+    max_new_tags: z.number().int().min(1).max(2),
+    max_tag_catalog: z.number().int().min(1).max(100),
+    max_estimated_input_tokens: z.number().int().min(1).max(24_000),
+    max_output_tokens: z.number().int().min(1).max(2_000),
+    provider_timeout_seconds: z.number().int().min(1).max(120),
+    response_candidates: z.literal(1)
+  }),
+  allowed_actions: z.array(actionSchema).max(5),
+  revision: fingerprintSchema
+})
+
 const normalizeCapabilities = (
   payload: unknown,
   headers: Record<string, string> | undefined
 ): NotesGraphSuggestionCapabilities => {
-  const source = record(payload)
-  const revision = requiredFingerprint(source.revision)
+  const capability = parseResponseAs<
+    Omit<NotesGraphSuggestionCapabilities, "etag">
+  >(capabilitySchema, payload)
   const rawEtag = new Headers(headers).get("etag") ?? ""
   const match = rawEtag.match(STRONG_ETAG)
-  if (!match || match[1] !== revision) throw invalidResponse()
-  const rawLimits = record(source.limits)
-  const boundary = source.data_boundary
-  if (boundary !== "local" && boundary !== "remote" && boundary !== "unknown") {
-    throw invalidResponse()
-  }
+  if (!match || match[1] !== capability.revision) throw invalidResponse()
   return {
-    provider: stringValue(source.provider, 128),
-    model: stringValue(source.model, 256),
-    endpoint_origin_revision: requiredFingerprint(
-      source.endpoint_origin_revision
-    ),
-    data_boundary: boundary,
-    disclosure_external: source.disclosure_external === true,
-    outbound_data_categories: (Array.isArray(source.outbound_data_categories)
-      ? source.outbound_data_categories
-      : []
-    )
-      .map((item) => stringValue(item, 128))
-      .filter(Boolean)
-      .slice(0, 32),
-    generation_available: source.generation_available === true,
-    unavailable_reason: allowlistedString(
-      source.unavailable_reason,
-      CAPABILITY_UNAVAILABLE_REASONS
-    ),
-    limits: {
-      max_candidates: integer(rawLimits.max_candidates, 1, 30, 1),
-      max_relationships: integer(rawLimits.max_relationships, 1, 5, 1),
-      max_tags: integer(rawLimits.max_tags, 1, 5, 1),
-      max_new_tags: integer(rawLimits.max_new_tags, 1, 2, 1),
-      max_tag_catalog: integer(rawLimits.max_tag_catalog, 1, 100, 1),
-      max_estimated_input_tokens: integer(
-        rawLimits.max_estimated_input_tokens,
-        1,
-        24000,
-        1
-      ),
-      max_output_tokens: integer(rawLimits.max_output_tokens, 1, 2000, 1),
-      provider_timeout_seconds: integer(
-        rawLimits.provider_timeout_seconds,
-        1,
-        120,
-        1
-      ),
-      response_candidates: 1
-    },
-    allowed_actions: (Array.isArray(source.allowed_actions)
-      ? source.allowed_actions
-      : []
-    )
-      .map((item) => stringValue(item, 64))
-      .filter(Boolean)
-      .slice(0, 16),
-    revision,
+    ...capability,
     etag: rawEtag
   }
 }
@@ -613,13 +688,22 @@ const normalizeCapabilities = (
 export const getNotesGraphSuggestionCapabilities = async (
   input: GetNotesGraphSuggestionCapabilitiesInput
 ): Promise<NotesGraphSuggestionCapabilities> => {
+  const parsed = parseInput(
+    z.strictObject({
+      noteId: inputIdSchema,
+      datasetId: inputIdSchema.optional(),
+      provider: z.string().trim().min(1).max(128).optional(),
+      model: z.string().trim().min(1).max(256).optional()
+    }),
+    input
+  )
   const response = await request<ApiSendResponse<unknown>>({
     path: queryPath(
-      `/api/v1/notes/${pathId(input.noteId)}/graph/suggestions/capabilities`,
+      `/api/v1/notes/${pathId(parsed.noteId)}/graph/suggestions/capabilities`,
       [
-        ["provider", input.provider],
-        ["model", input.model],
-        ["dataset_id", input.datasetId]
+        ["provider", parsed.provider],
+        ["model", parsed.model],
+        ["dataset_id", parsed.datasetId]
       ]
     ),
     method: "GET",
@@ -660,60 +744,77 @@ const newIdempotencyKey = (): string => {
 
 export const createNotesGraphSuggestionCommand = (
   input: CreateNotesGraphSuggestionCommandInput
-): CreateNotesGraphSuggestionCommand => ({
-  noteId: normalizedId(input.noteId),
-  ...(input.datasetId ? { datasetId: normalizedId(input.datasetId) } : {}),
-  ...(input.provider ? { provider: input.provider.trim().slice(0, 128) } : {}),
-  ...(input.model ? { model: input.model.trim().slice(0, 256) } : {}),
-  idempotencyKey: newIdempotencyKey()
+): CreateNotesGraphSuggestionCommand => {
+  const parsed = parseInput(
+    z.strictObject({
+      noteId: inputIdSchema,
+      datasetId: inputIdSchema.optional(),
+      provider: z.string().trim().min(1).max(128).optional(),
+      model: z.string().trim().min(1).max(256).optional()
+    }),
+    input
+  )
+  return { ...parsed, idempotencyKey: newIdempotencyKey() }
+}
+
+const runSchema = z.strictObject({
+  id: idSchema,
+  provider: boundedTextSchema(128),
+  model: boundedTextSchema(256),
+  state: runStateSchema,
+  revision: positiveRevisionSchema,
+  created_at: boundedTextSchema(64),
+  started_at: boundedTextSchema(64).nullable(),
+  completed_at: boundedTextSchema(64).nullable(),
+  suggestion_count: z.number().int().min(0).max(MAX_LIST_ITEMS),
+  related_note_count: z.number().int().min(0).max(MAX_LIST_ITEMS),
+  tag_count: z.number().int().min(0).max(MAX_LIST_ITEMS),
+  invalid_item_count: z.number().int().min(0).max(1_000),
+  cancellation_available: z.boolean(),
+  error_code: z
+    .string()
+    .nullable()
+    .transform((value) =>
+      value !== null && RUN_ERROR_CODES.has(value) ? value : null
+    ),
+  guidance_key: z
+    .string()
+    .nullable()
+    .transform((value) =>
+      value !== null && RUN_GUIDANCE_KEYS.has(value) ? value : null
+    )
 })
 
-const normalizeRun = (value: unknown): NotesGraphSuggestionRun => {
-  const source = record(value)
-  const id = stringValue(source.id, 512)
-  if (!id) throw invalidResponse()
-  return {
-    id,
-    provider: stringValue(source.provider, 128),
-    model: stringValue(source.model, 256),
-    state: stringValue(source.state, 32),
-    revision: integer(source.revision, 1, Number.MAX_SAFE_INTEGER, 1),
-    created_at: stringValue(source.created_at, 64),
-    started_at: optionalString(source.started_at, 64),
-    completed_at: optionalString(source.completed_at, 64),
-    suggestion_count: integer(source.suggestion_count, 0, MAX_LIST_ITEMS, 0),
-    related_note_count: integer(
-      source.related_note_count,
-      0,
-      MAX_LIST_ITEMS,
-      0
-    ),
-    tag_count: integer(source.tag_count, 0, MAX_LIST_ITEMS, 0),
-    invalid_item_count: integer(source.invalid_item_count, 0, 1000, 0),
-    cancellation_available: source.cancellation_available === true,
-    error_code: allowlistedString(source.error_code, RUN_ERROR_CODES),
-    guidance_key: allowlistedString(source.guidance_key, RUN_GUIDANCE_KEYS)
-  }
-}
+const normalizeRun = (value: unknown): NotesGraphSuggestionRun =>
+  parseResponseAs<NotesGraphSuggestionRun>(runSchema, value)
+
+const runCommandSchema = z.strictObject({
+  noteId: inputIdSchema,
+  datasetId: inputIdSchema.optional(),
+  provider: z.string().trim().min(1).max(128).optional(),
+  model: z.string().trim().min(1).max(256).optional(),
+  idempotencyKey: inputIdSchema
+})
 
 const postRun = async (
   command: CreateNotesGraphSuggestionCommand,
   capability: NotesGraphSuggestionCapabilities
 ): Promise<NotesGraphSuggestionRun> => {
+  const parsed = parseInput(runCommandSchema, command)
   const payload = await request<unknown>({
     path: queryPath(
-      `/api/v1/notes/${pathId(command.noteId)}/graph/suggestions/runs`,
-      [["dataset_id", command.datasetId]]
+      `/api/v1/notes/${pathId(parsed.noteId)}/graph/suggestions/runs`,
+      [["dataset_id", parsed.datasetId]]
     ),
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "Idempotency-Key": normalizedId(command.idempotencyKey),
+      "Idempotency-Key": parsed.idempotencyKey,
       "If-Match": capability.etag
     },
     body: {
-      provider: command.provider ?? capability.provider,
-      model: command.model ?? capability.model
+      provider: parsed.provider ?? capability.provider,
+      model: parsed.model ?? capability.model
     }
   })
   return normalizeRun(payload)
@@ -723,6 +824,7 @@ export const createNotesGraphSuggestionRun = async (
   command: CreateNotesGraphSuggestionCommand,
   capability: NotesGraphSuggestionCapabilities,
   options?: {
+    canRetry?: () => boolean
     onCapabilitiesChanged?: (value: NotesGraphSuggestionCapabilities) => void
   }
 ): Promise<NotesGraphSuggestionRun> => {
@@ -730,13 +832,16 @@ export const createNotesGraphSuggestionRun = async (
     return await postRun(command, capability)
   } catch (error) {
     if (!isNotesGraphCapabilitiesChangedError(error)) throw error
+    if (options?.canRetry?.() === false) throw error
     const refreshed = await getNotesGraphSuggestionCapabilities({
       noteId: command.noteId,
       datasetId: command.datasetId,
       provider: command.provider,
       model: command.model
     })
+    if (options?.canRetry?.() === false) throw error
     options?.onCapabilitiesChanged?.(refreshed)
+    if (options?.canRetry?.() === false) throw error
     return await postRun(command, refreshed)
   }
 }
@@ -744,225 +849,233 @@ export const createNotesGraphSuggestionRun = async (
 export const listNotesGraphSuggestionRuns = async (
   input: ListNotesGraphSuggestionRunsInput
 ): Promise<NotesGraphSuggestionRunPage> => {
-  const payload = record(
+  const parsed = parseInput(
+    z.strictObject({
+      noteId: inputIdSchema,
+      datasetId: inputIdSchema.optional(),
+      states: z.array(runStateSchema).max(9).optional(),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .optional()
+        .default(20)
+        .transform((value) => Math.min(value, MAX_LIST_ITEMS)),
+      cursor: cursorSchema.optional()
+    }),
+    input
+  )
+  const payload = parseResponseAs<NotesGraphSuggestionRunPage>(
+    z.strictObject({
+      items: z.array(runSchema).max(MAX_LIST_ITEMS),
+      next_cursor: cursorSchema.nullable()
+    }),
     await request<unknown>({
       path: queryPath(
-        `/api/v1/notes/${pathId(input.noteId)}/graph/suggestions/runs`,
+        `/api/v1/notes/${pathId(parsed.noteId)}/graph/suggestions/runs`,
         [
-          [
-            "state",
-            input.states
-              ?.map((item) => item.trim())
-              .filter(Boolean)
-              .join(",")
-          ],
-          ["limit", integer(input.limit, 1, MAX_LIST_ITEMS, 20)],
-          ["cursor", input.cursor?.slice(0, MAX_CURSOR_LENGTH)],
-          ["dataset_id", input.datasetId]
+          ["state", parsed.states?.join(",")],
+          ["limit", parsed.limit],
+          ["cursor", parsed.cursor],
+          ["dataset_id", parsed.datasetId]
         ]
       ),
       method: "GET"
     })
   )
-  return {
-    items: (Array.isArray(payload.items) ? payload.items : [])
-      .slice(0, MAX_LIST_ITEMS)
-      .map(normalizeRun),
-    next_cursor: optionalString(payload.next_cursor, MAX_CURSOR_LENGTH)
-  }
+  return payload
 }
 
 export const getNotesGraphSuggestionRun = async (
   input: GetNotesGraphSuggestionRunInput
-): Promise<NotesGraphSuggestionRun> =>
-  normalizeRun(
+): Promise<NotesGraphSuggestionRun> => {
+  const parsed = parseInput(
+    z.strictObject({
+      noteId: inputIdSchema,
+      datasetId: inputIdSchema.optional(),
+      runId: inputIdSchema
+    }),
+    input
+  )
+  return normalizeRun(
     await request<unknown>({
       path: queryPath(
-        `/api/v1/notes/${pathId(input.noteId)}/graph/suggestions/runs/${pathId(input.runId)}`,
-        [["dataset_id", input.datasetId]]
+        `/api/v1/notes/${pathId(parsed.noteId)}/graph/suggestions/runs/${pathId(parsed.runId)}`,
+        [["dataset_id", parsed.datasetId]]
       ),
       method: "GET"
     })
   )
-
-const mutation = (value: unknown): NotesGraphSuggestionMutation => {
-  const source = record(value)
-  return {
-    resource_id: stringValue(source.resource_id, 512),
-    state: stringValue(source.state, 32),
-    revision: integer(source.revision, 0, Number.MAX_SAFE_INTEGER, 0),
-    cleared_count:
-      source.cleared_count == null
-        ? null
-        : integer(source.cleared_count, 0, Number.MAX_SAFE_INTEGER, 0)
-  }
 }
+
+const mutationSchema = z.strictObject({
+  resource_id: idSchema,
+  state: mutationStateSchema,
+  revision: nonnegativeRevisionSchema,
+  cleared_count: safeCountSchema.nullable().optional().default(null)
+})
+
+const mutation = (value: unknown): NotesGraphSuggestionMutation =>
+  parseResponseAs<NotesGraphSuggestionMutation>(mutationSchema, value)
 
 export const cancelNotesGraphSuggestionRun = async (
   input: CancelNotesGraphSuggestionRunInput
-): Promise<NotesGraphSuggestionMutation> =>
-  mutation(
+): Promise<NotesGraphSuggestionMutation> => {
+  const parsed = parseInput(
+    z.strictObject({
+      noteId: inputIdSchema,
+      datasetId: inputIdSchema.optional(),
+      runId: inputIdSchema,
+      expectedRevision: positiveRevisionSchema,
+      idempotencyKey: inputIdSchema
+    }),
+    input
+  )
+  return mutation(
     await request<unknown>({
       path: queryPath(
-        `/api/v1/notes/${pathId(input.noteId)}/graph/suggestions/runs/${pathId(input.runId)}/cancel`,
-        [["dataset_id", input.datasetId]]
+        `/api/v1/notes/${pathId(parsed.noteId)}/graph/suggestions/runs/${pathId(parsed.runId)}/cancel`,
+        [["dataset_id", parsed.datasetId]]
       ),
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Idempotency-Key": normalizedId(input.idempotencyKey)
+        "Idempotency-Key": parsed.idempotencyKey
       },
       body: {
-        expected_revision: integer(
-          input.expectedRevision,
-          1,
-          Number.MAX_SAFE_INTEGER,
-          1
-        )
+        expected_revision: parsed.expectedRevision
       }
     })
   )
-
-const normalizeEvidence = (
-  value: unknown
-): NotesGraphSuggestionEvidence | null => {
-  const source = record(value)
-  const side = source.side
-  const field = source.field
-  if (
-    (side !== "source" && side !== "target") ||
-    (field !== "title" && field !== "content")
-  ) {
-    return null
-  }
-  const start = integer(source.start_offset, 0, Number.MAX_SAFE_INTEGER, 0)
-  const end = integer(source.end_offset, 1, Number.MAX_SAFE_INTEGER, 1)
-  if (end <= start) return null
-  return {
-    side,
-    note_id: stringValue(source.note_id, 512),
-    field,
-    start_offset: start,
-    end_offset: end,
-    text: stringValue(source.text, 480)
-  }
 }
 
-const normalizeSuggestion = (value: unknown): NotesGraphSuggestion | null => {
-  const source = record(value)
-  const kind = source.kind
-  if (kind !== "related_note" && kind !== "tag") return null
-  const id = stringValue(source.id, 512)
-  if (!id) return null
-  try {
-    return {
-      id,
-      run_id: stringValue(source.run_id, 512),
-      kind,
-      state: stringValue(source.state, 32),
-      revision: integer(source.revision, 1, Number.MAX_SAFE_INTEGER, 1),
-      source_note_id: stringValue(source.source_note_id, 512),
-      source_fingerprint: requiredFingerprint(source.source_fingerprint),
-      target_note_id: optionalString(source.target_note_id, 512),
-      target_fingerprint:
-        source.target_fingerprint == null
-          ? null
-          : requiredFingerprint(source.target_fingerprint),
-      normalized_tag: optionalString(source.normalized_tag, 120),
-      display_tag: optionalString(source.display_tag, 120),
-      existing_tag: source.existing_tag === true,
-      match_strength: optionalString(source.match_strength, 32),
-      rationale: optionalString(source.rationale, 240),
-      evidence: (Array.isArray(source.evidence) ? source.evidence : [])
-        .map(normalizeEvidence)
-        .filter((item): item is NotesGraphSuggestionEvidence => item !== null)
-        .slice(0, 4),
-      updated_at: stringValue(source.updated_at, 64)
+const evidenceSchema = z
+  .strictObject({
+    side: z.enum(["source", "target"]),
+    note_id: idSchema,
+    field: z.enum(["title", "content"]),
+    start_offset: safeCountSchema,
+    end_offset: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+    text: boundedTextSchema(480)
+  })
+  .refine((value) => value.end_offset > value.start_offset)
+
+const suggestionSchema = z
+  .strictObject({
+    id: idSchema,
+    run_id: idSchema,
+    kind: z.enum(["related_note", "tag"]),
+    state: suggestionStateSchema,
+    revision: positiveRevisionSchema,
+    source_note_id: idSchema,
+    source_fingerprint: fingerprintSchema,
+    target_note_id: idSchema.nullable(),
+    target_fingerprint: fingerprintSchema.nullable(),
+    normalized_tag: boundedTextSchema(120).nullable(),
+    display_tag: boundedTextSchema(120).nullable(),
+    existing_tag: z.boolean(),
+    match_strength: z.enum(["strong", "possible"]).nullable(),
+    rationale: boundedTextSchema(240).nullable(),
+    evidence: z.array(evidenceSchema).transform((items) => items.slice(0, 6)),
+    updated_at: boundedTextSchema(64)
+  })
+  .superRefine((value, context) => {
+    if (
+      value.kind === "related_note" &&
+      (value.target_note_id === null || value.target_fingerprint === null)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "missing related note target"
+      })
     }
-  } catch {
-    return null
-  }
-}
+    if (value.kind === "tag" && value.normalized_tag === null) {
+      context.addIssue({ code: "custom", message: "missing normalized tag" })
+    }
+  })
+
+const suggestionPageSchema = z.strictObject({
+  items: z
+    .array(suggestionSchema)
+    .max(1_000)
+    .transform((items) => items.slice(0, MAX_LIST_ITEMS)),
+  next_cursor: cursorSchema.nullable(),
+  current_source_fingerprint: fingerprintSchema,
+  rejection_set_revision: nonnegativeRevisionSchema,
+  rejection_count: safeCountSchema
+})
 
 export const listNotesGraphSuggestions = async (
   input: ListNotesGraphSuggestionsInput
 ): Promise<NotesGraphSuggestionPage> => {
-  const payload = record(
+  const parsed = parseInput(
+    z.strictObject({
+      noteId: inputIdSchema,
+      datasetId: inputIdSchema.optional(),
+      states: z.array(suggestionStateSchema).max(6).optional(),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .optional()
+        .default(20)
+        .transform((value) => Math.min(value, MAX_LIST_ITEMS)),
+      cursor: cursorSchema.optional()
+    }),
+    input
+  )
+  return parseResponseAs<NotesGraphSuggestionPage>(
+    suggestionPageSchema,
     await request<unknown>({
       path: queryPath(
-        `/api/v1/notes/${pathId(input.noteId)}/graph/suggestions`,
+        `/api/v1/notes/${pathId(parsed.noteId)}/graph/suggestions`,
         [
-          [
-            "state",
-            input.states
-              ?.map((item) => item.trim())
-              .filter(Boolean)
-              .join(",")
-          ],
-          ["limit", integer(input.limit, 1, MAX_LIST_ITEMS, 20)],
-          ["cursor", input.cursor?.slice(0, MAX_CURSOR_LENGTH)],
-          ["dataset_id", input.datasetId]
+          ["state", parsed.states?.join(",")],
+          ["limit", parsed.limit],
+          ["cursor", parsed.cursor],
+          ["dataset_id", parsed.datasetId]
         ]
       ),
       method: "GET"
     })
   )
-  return {
-    items: (Array.isArray(payload.items) ? payload.items : [])
-      .map(normalizeSuggestion)
-      .filter((item): item is NotesGraphSuggestion => item !== null)
-      .slice(0, MAX_LIST_ITEMS),
-    next_cursor: optionalString(payload.next_cursor, MAX_CURSOR_LENGTH),
-    current_source_fingerprint: requiredFingerprint(
-      payload.current_source_fingerprint
-    ),
-    rejection_set_revision: integer(
-      payload.rejection_set_revision,
-      0,
-      Number.MAX_SAFE_INTEGER,
-      0
-    ),
-    rejection_count: integer(
-      payload.rejection_count,
-      0,
-      Number.MAX_SAFE_INTEGER,
-      0
-    )
-  }
 }
 
 const decide = async (
   action: "accept" | "reject",
   input: DecideNotesGraphSuggestionInput
-): Promise<NotesGraphSuggestionMutation> =>
-  mutation(
+): Promise<NotesGraphSuggestionMutation> => {
+  const parsed = parseInput(
+    z.strictObject({
+      noteId: inputIdSchema,
+      datasetId: inputIdSchema.optional(),
+      suggestionId: inputIdSchema,
+      expectedRevision: positiveRevisionSchema,
+      expectedSourceFingerprint: fingerprintSchema,
+      expectedTargetFingerprint: fingerprintSchema.nullable().optional(),
+      idempotencyKey: inputIdSchema
+    }),
+    input
+  )
+  return mutation(
     await request<unknown>({
       path: queryPath(
-        `/api/v1/notes/${pathId(input.noteId)}/graph/suggestions/${pathId(input.suggestionId)}/${action}`,
-        [["dataset_id", input.datasetId]]
+        `/api/v1/notes/${pathId(parsed.noteId)}/graph/suggestions/${pathId(parsed.suggestionId)}/${action}`,
+        [["dataset_id", parsed.datasetId]]
       ),
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Idempotency-Key": normalizedId(input.idempotencyKey)
+        "Idempotency-Key": parsed.idempotencyKey
       },
       body: {
-        expected_revision: integer(
-          input.expectedRevision,
-          1,
-          Number.MAX_SAFE_INTEGER,
-          1
-        ),
-        expected_source_fingerprint: requiredFingerprint(
-          input.expectedSourceFingerprint
-        ),
-        expected_target_fingerprint:
-          input.expectedTargetFingerprint == null
-            ? null
-            : requiredFingerprint(input.expectedTargetFingerprint)
+        expected_revision: parsed.expectedRevision,
+        expected_source_fingerprint: parsed.expectedSourceFingerprint,
+        expected_target_fingerprint: parsed.expectedTargetFingerprint ?? null
       }
     })
   )
+}
 
 export const acceptNotesGraphSuggestion = async (
   input: DecideNotesGraphSuggestionInput
@@ -974,30 +1087,36 @@ export const rejectNotesGraphSuggestion = async (
 
 export const resetNotesGraphSuggestionRejections = async (
   input: ResetNotesGraphSuggestionRejectionsInput
-): Promise<NotesGraphSuggestionMutation> =>
-  mutation(
+): Promise<NotesGraphSuggestionMutation> => {
+  const parsed = parseInput(
+    z.strictObject({
+      noteId: inputIdSchema,
+      datasetId: inputIdSchema.optional(),
+      expectedRejectionRevision: nonnegativeRevisionSchema,
+      sourceFingerprint: fingerprintSchema,
+      idempotencyKey: inputIdSchema
+    }),
+    input
+  )
+  return mutation(
     await request<unknown>({
       path: queryPath(
-        `/api/v1/notes/${pathId(input.noteId)}/graph/suggestions/rejections/reset`,
-        [["dataset_id", input.datasetId]]
+        `/api/v1/notes/${pathId(parsed.noteId)}/graph/suggestions/rejections/reset`,
+        [["dataset_id", parsed.datasetId]]
       ),
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Idempotency-Key": normalizedId(input.idempotencyKey)
+        "Idempotency-Key": parsed.idempotencyKey
       },
       body: {
-        expected_rejection_revision: integer(
-          input.expectedRejectionRevision,
-          0,
-          Number.MAX_SAFE_INTEGER,
-          0
-        ),
-        source_fingerprint: requiredFingerprint(input.sourceFingerprint),
+        expected_rejection_revision: parsed.expectedRejectionRevision,
+        source_fingerprint: parsed.sourceFingerprint,
         confirm: true
       }
     })
   )
+}
 
 export const isNotesGraphCapabilitiesChangedError = (error: unknown): boolean =>
   error instanceof NotesGraphSuggestionClientError &&

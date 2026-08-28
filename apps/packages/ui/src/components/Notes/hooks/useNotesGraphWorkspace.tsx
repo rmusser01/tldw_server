@@ -5,7 +5,7 @@ import {
   type NotesGraphResponse,
   fetchNotesGraph
 } from "@/services/note-graph-suggestions"
-import { useQuery } from "@tanstack/react-query"
+import { useInfiniteQuery } from "@tanstack/react-query"
 import * as React from "react"
 
 const DEFAULT_EDGE_TYPES: NotesGraphEdgeType[] = [
@@ -21,6 +21,7 @@ export const notesGraphWorkspaceQueryKey = ["notes-graph-workspace"] as const
 export type NotesGraphLayout = "dagre" | "circle" | "grid" | "concentric"
 
 export type UseNotesGraphWorkspaceOptions = {
+  authorityScope: string | null
   enabled: boolean
   isOnline: boolean
   initialFocusNoteId: string | null
@@ -30,149 +31,197 @@ export type UseNotesGraphWorkspaceOptions = {
   maxEdges?: number
 }
 
-const mergeById = <T extends { id: string }>(current: T[], next: T[]): T[] => {
-  const merged = new Map(current.map((item) => [item.id, item]))
-  next.forEach((item) => merged.set(item.id, item))
-  return Array.from(merged.values())
+type NavigationState = {
+  inputIdentity: string
+  focusNoteId: string | null
+  scope: "focused" | "all"
 }
 
-const mergeGraph = (
-  current: NotesGraphResponse,
-  next: NotesGraphResponse
-): NotesGraphResponse => ({
-  ...next,
-  nodes: mergeById<NotesGraphNode>(current.nodes, next.nodes),
-  edges: mergeById<NotesGraphEdge>(current.edges, next.edges),
-  truncated: current.truncated || next.truncated,
-  truncated_by: Array.from(
-    new Set([...current.truncated_by, ...next.truncated_by])
+type GraphPage = {
+  scopeIdentity: string
+  graph: NotesGraphResponse
+}
+
+const mergeById = <T extends { id: string }>(
+  pages: T[][],
+  limit: number
+): T[] => {
+  const merged = new Map<string, T>()
+  pages.forEach((items) => {
+    items.forEach((item) => merged.set(item.id, item))
+  })
+  return Array.from(merged.values()).slice(0, limit)
+}
+
+const aggregatePages = (
+  data: { pages: GraphPage[] } | undefined,
+  scopeIdentity: string
+): NotesGraphResponse | null => {
+  const pages = data?.pages.filter(
+    (page) => page.scopeIdentity === scopeIdentity
   )
-})
+  if (!pages?.length || pages.length !== data?.pages.length) return null
+  const first = pages[0].graph
+  const last = pages[pages.length - 1].graph
+  return {
+    ...first,
+    nodes: mergeById<NotesGraphNode>(
+      pages.map((page) => page.graph.nodes),
+      first.limits.max_nodes
+    ),
+    edges: mergeById<NotesGraphEdge>(
+      pages.map((page) => page.graph.edges),
+      first.limits.max_edges
+    ),
+    truncated: pages.some((page) => page.graph.truncated),
+    truncated_by: Array.from(
+      new Set(pages.flatMap((page) => page.graph.truncated_by))
+    ),
+    has_more: last.has_more,
+    cursor: last.cursor
+  }
+}
+
+const authority = (value: string | null | undefined): string | null =>
+  typeof value === "string" && value.length > 0 ? value : null
 
 export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
-  const [focusNoteId, setFocusNoteId] = React.useState(
+  const authorityScope = authority(options.authorityScope)
+  const inputIdentity = JSON.stringify([
+    authorityScope,
+    options.datasetId ?? null,
     options.initialFocusNoteId
+  ])
+  const initialNavigation = React.useMemo<NavigationState>(
+    () => ({
+      inputIdentity,
+      focusNoteId: options.initialFocusNoteId,
+      scope: "focused"
+    }),
+    [inputIdentity, options.initialFocusNoteId]
   )
-  const [scope, setScope] = React.useState<"focused" | "all">("focused")
+  const [navigation, setNavigation] =
+    React.useState<NavigationState>(initialNavigation)
+  const effectiveNavigation =
+    navigation.inputIdentity === inputIdentity ? navigation : initialNavigation
   const [layout, setLayout] = React.useState<NotesGraphLayout>("dagre")
   const [search, setSearch] = React.useState("")
   const [visibleEdgeTypes, setVisibleEdgeTypes] = React.useState(
     () => new Set<NotesGraphEdgeType>(DEFAULT_EDGE_TYPES)
   )
-  const [lastAuthoritativeGraph, setLastAuthoritativeGraph] =
-    React.useState<NotesGraphResponse | null>(null)
-  const expansionIdentity = React.useRef(0)
-
   React.useEffect(() => {
-    setFocusNoteId(options.initialFocusNoteId)
-    setScope("focused")
-    expansionIdentity.current += 1
-  }, [options.initialFocusNoteId])
-
-  React.useEffect(() => {
-    setLastAuthoritativeGraph(null)
-    setScope("focused")
-    expansionIdentity.current += 1
-  }, [options.datasetId])
+    setNavigation((current) =>
+      current.inputIdentity === inputIdentity ? current : initialNavigation
+    )
+  }, [initialNavigation, inputIdentity])
 
   const centerNoteId =
-    scope === "focused" ? focusNoteId ?? undefined : undefined
-  const enabled =
-    options.enabled &&
-    options.isOnline &&
-    (scope === "all" || Boolean(centerNoteId))
+    effectiveNavigation.scope === "focused"
+      ? effectiveNavigation.focusNoteId ?? undefined
+      : undefined
+  const radius = options.radius ?? 1
+  const maxNodes = options.maxNodes ?? 120
+  const maxEdges = options.maxEdges ?? 480
+  const scopeIdentity = JSON.stringify([
+    authorityScope,
+    options.datasetId ?? null,
+    effectiveNavigation.scope,
+    centerNoteId ?? null,
+    radius,
+    maxNodes,
+    maxEdges
+  ])
+  const enabled = Boolean(
+    authorityScope &&
+      options.enabled &&
+      options.isOnline &&
+      (effectiveNavigation.scope === "all" || centerNoteId)
+  )
 
-  const graphQuery = useQuery({
+  const graphQuery = useInfiniteQuery({
     queryKey: [
       ...notesGraphWorkspaceQueryKey,
+      authorityScope,
       options.datasetId ?? null,
-      scope,
+      effectiveNavigation.scope,
       centerNoteId ?? null,
-      options.radius ?? 1,
-      options.maxNodes ?? 120,
-      options.maxEdges ?? 480
+      radius,
+      maxNodes,
+      maxEdges
     ],
+    initialPageParam: undefined as string | undefined,
     enabled,
     retry: false,
-    queryFn: () =>
-      fetchNotesGraph({
+    refetchOnWindowFocus: false,
+    queryFn: async ({ pageParam }) => ({
+      scopeIdentity,
+      graph: await fetchNotesGraph({
         centerNoteId,
         datasetId: options.datasetId,
-        radius: options.radius ?? 1,
-        maxNodes: options.maxNodes ?? 120,
-        maxEdges: options.maxEdges ?? 480,
-        cursor: undefined
+        radius,
+        maxNodes,
+        maxEdges,
+        cursor: pageParam
       })
+    }),
+    getNextPageParam: (lastPage) =>
+      lastPage.graph.has_more ? lastPage.graph.cursor ?? undefined : undefined
   })
 
-  React.useEffect(() => {
-    if (graphQuery.data) setLastAuthoritativeGraph(graphQuery.data)
-  }, [graphQuery.data])
+  const graph = React.useMemo(
+    () => aggregatePages(graphQuery.data, scopeIdentity),
+    [graphQuery.data, scopeIdentity]
+  )
 
   const allNotes = React.useMemo(() => {
-    if (!lastAuthoritativeGraph) {
+    if (!graph) {
       return { activeNoteCount: 0, effectiveNoteCap: 0, eligible: false }
     }
     const effectiveNoteCap = Math.min(
-      lastAuthoritativeGraph.all_notes_note_cap,
-      lastAuthoritativeGraph.limits.max_nodes
+      graph.all_notes_note_cap,
+      graph.limits.max_nodes
     )
     return {
-      activeNoteCount: lastAuthoritativeGraph.active_note_count,
+      activeNoteCount: graph.active_note_count,
       effectiveNoteCap,
       eligible:
-        lastAuthoritativeGraph.all_notes_eligible &&
-        lastAuthoritativeGraph.active_note_count <= effectiveNoteCap
+        graph.all_notes_eligible && graph.active_note_count <= effectiveNoteCap
     }
-  }, [lastAuthoritativeGraph])
+  }, [graph])
 
   const searchResults = React.useMemo(() => {
     const needle = search.trim().toLocaleLowerCase()
-    if (!needle || !lastAuthoritativeGraph) return []
-    return lastAuthoritativeGraph.nodes.filter((node) =>
+    if (!needle || !graph) return []
+    return graph.nodes.filter((node) =>
       node.label.toLocaleLowerCase().includes(needle)
     )
-  }, [lastAuthoritativeGraph, search])
+  }, [graph, search])
 
   const expand = React.useCallback(async () => {
-    const current = lastAuthoritativeGraph
-    if (!options.isOnline || !current?.has_more || !current.cursor)
-      return current
-    const identity = expansionIdentity.current
-    const next = await fetchNotesGraph({
-      centerNoteId,
-      datasetId: options.datasetId,
-      radius: options.radius ?? 1,
-      maxNodes: options.maxNodes ?? 120,
-      maxEdges: options.maxEdges ?? 480,
-      cursor: current.cursor
-    })
-    if (identity !== expansionIdentity.current) return lastAuthoritativeGraph
-    const merged = mergeGraph(current, next)
-    setLastAuthoritativeGraph(merged)
-    return merged
-  }, [
-    centerNoteId,
-    lastAuthoritativeGraph,
-    options.datasetId,
-    options.isOnline,
-    options.maxEdges,
-    options.maxNodes,
-    options.radius
-  ])
+    if (!enabled || !graph?.has_more || !graph.cursor) return graph
+    const result = await graphQuery.fetchNextPage()
+    return aggregatePages(result.data, scopeIdentity)
+  }, [enabled, graph, graphQuery, scopeIdentity])
 
-  const focus = React.useCallback((noteId: string) => {
-    expansionIdentity.current += 1
-    setFocusNoteId(noteId)
-    setScope("focused")
-  }, [])
+  const focus = React.useCallback(
+    (noteId: string) => {
+      setNavigation({ inputIdentity, focusNoteId: noteId, scope: "focused" })
+    },
+    [inputIdentity]
+  )
 
   const showAllNotes = React.useCallback(() => {
     if (!allNotes.eligible) return false
-    expansionIdentity.current += 1
-    setScope("all")
+    setNavigation((current) => ({
+      inputIdentity,
+      focusNoteId:
+        current.inputIdentity === inputIdentity
+          ? current.focusNoteId
+          : options.initialFocusNoteId,
+      scope: "all"
+    }))
     return true
-  }, [allNotes.eligible])
+  }, [allNotes.eligible, inputIdentity, options.initialFocusNoteId])
 
   const toggleEdgeType = React.useCallback((edgeType: NotesGraphEdgeType) => {
     setVisibleEdgeTypes((current) => {
@@ -183,11 +232,17 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
     })
   }, [])
 
+  const refresh = React.useCallback(async () => {
+    if (!enabled) return graph
+    const result = await graphQuery.refetch({ cancelRefetch: true })
+    return aggregatePages(result.data, scopeIdentity)
+  }, [enabled, graph, graphQuery, scopeIdentity])
+
   return {
-    graph: lastAuthoritativeGraph,
+    graph,
     graphQuery,
-    focusNoteId,
-    scope,
+    focusNoteId: effectiveNavigation.focusNoteId,
+    scope: effectiveNavigation.scope,
     layout,
     setLayout,
     search,
@@ -196,17 +251,13 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
     visibleEdgeTypes,
     toggleEdgeType,
     allNotes,
-    canExpand: Boolean(
-      options.isOnline &&
-        lastAuthoritativeGraph?.has_more &&
-        lastAuthoritativeGraph.cursor
-    ),
+    canExpand: Boolean(enabled && graph?.has_more && graph.cursor),
     expand,
     focus,
     showAllNotes,
-    refresh: graphQuery.refetch,
+    refresh,
     isOffline: !options.isOnline,
-    isLoading: graphQuery.isLoading && !lastAuthoritativeGraph,
+    isLoading: Boolean(authorityScope && graphQuery.isLoading && !graph),
     error: graphQuery.error
   }
 }

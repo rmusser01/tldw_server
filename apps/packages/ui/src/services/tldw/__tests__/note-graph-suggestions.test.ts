@@ -39,7 +39,7 @@ const capabilityPayload = (revision = fingerprint("a")) => ({
   endpoint_origin_revision: fingerprint("b"),
   data_boundary: "remote",
   disclosure_external: true,
-  outbound_data_categories: ["selected_note_excerpt"],
+  outbound_data_categories: ["selected_note_excerpts"],
   generation_available: true,
   unavailable_reason: null,
   limits: {
@@ -53,7 +53,13 @@ const capabilityPayload = (revision = fingerprint("a")) => ({
     provider_timeout_seconds: 120,
     response_candidates: 1
   },
-  allowed_actions: ["generate", "accept", "reject"],
+  allowed_actions: [
+    "generate",
+    "cancel",
+    "accept",
+    "reject",
+    "reset_rejections"
+  ],
   revision
 })
 
@@ -103,7 +109,7 @@ const suggestionPayload = (id: string) => ({
 
 describe("Notes graph suggestion client", () => {
   beforeEach(() => {
-    vi.clearAllMocks()
+    vi.resetAllMocks()
   })
 
   it("uses every nested route with encoded path and query values", async () => {
@@ -129,7 +135,8 @@ describe("Notes graph suggestion client", () => {
       .mockResolvedValue({
         resource_id: "resource",
         state: "completed",
-        revision: 4
+        revision: 4,
+        cleared_count: null
       })
 
     await getNotesGraphSuggestionCapabilities({
@@ -262,6 +269,43 @@ describe("Notes graph suggestion client", () => {
     expect(postCalls[1][0].body).toEqual(postCalls[0][0].body)
   })
 
+  it("does not start service-owned 412 recovery after retry authority is revoked", async () => {
+    const revision = fingerprint("a")
+    mocks.bgRequest
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: { etag: `"${revision}"` },
+        data: capabilityPayload(revision)
+      })
+      .mockRejectedValueOnce({
+        status: 412,
+        details: {
+          detail: { error_code: "notes_graph_capabilities_changed" }
+        }
+      })
+
+    const capability = await getNotesGraphSuggestionCapabilities({
+      noteId: "note-1"
+    })
+    const command = createNotesGraphSuggestionCommand({ noteId: "note-1" })
+
+    await expect(
+      createNotesGraphSuggestionRun(command, capability, {
+        canRetry: () => false
+      })
+    ).rejects.toMatchObject({
+      status: 412,
+      code: "notes_graph_capabilities_changed"
+    })
+    expect(mocks.bgRequest).toHaveBeenCalledTimes(2)
+    expect(
+      mocks.bgRequest.mock.calls.filter(
+        ([request]) => request.method === "POST"
+      )
+    ).toHaveLength(1)
+  })
+
   it("re-resolves the configured default after a capability 412", async () => {
     const firstRevision = fingerprint("a")
     const secondRevision = fingerprint("e")
@@ -328,7 +372,7 @@ describe("Notes graph suggestion client", () => {
     })
   })
 
-  it("bounds graph and suggestion normalization to authoritative response limits", async () => {
+  it("bounds graph and suggestion normalization to authoritative response limits and six Unicode excerpts", async () => {
     mocks.bgRequest
       .mockResolvedValueOnce({
         nodes: Array.from({ length: 12 }, (_, index) => ({
@@ -354,9 +398,17 @@ describe("Notes graph suggestion client", () => {
         all_notes_eligible: false
       })
       .mockResolvedValueOnce({
-        items: Array.from({ length: 140 }, (_, index) =>
-          suggestionPayload(`suggestion-${index}`)
-        ),
+        items: Array.from({ length: 140 }, (_, index) => ({
+          ...suggestionPayload(`suggestion-${index}`),
+          evidence: Array.from({ length: 8 }, (_, evidenceIndex) => ({
+            side: evidenceIndex % 2 ? "target" : "source",
+            note_id: evidenceIndex % 2 ? "note/target" : "note/source",
+            field: "content",
+            start_offset: evidenceIndex,
+            end_offset: evidenceIndex + 1,
+            text: "😀".repeat(700)
+          }))
+        })),
         next_cursor: "next suggestion cursor",
         current_source_fingerprint: fingerprint("c"),
         rejection_set_revision: 4,
@@ -380,14 +432,188 @@ describe("Notes graph suggestion client", () => {
     expect(graph.limits).toEqual({ max_nodes: 3, max_edges: 4, max_degree: 2 })
     expect(suggestions.items).toHaveLength(100)
     expect(suggestions.items[0].rationale).toHaveLength(240)
-    expect(suggestions.items[0].evidence).toHaveLength(4)
-    expect(suggestions.items[0].evidence[0].text).toHaveLength(480)
+    expect(suggestions.items[0].evidence).toHaveLength(6)
+    expect([...suggestions.items[0].evidence[0].text]).toHaveLength(480)
+    expect(suggestions.items[0].evidence[0].text.endsWith("😀")).toBe(true)
     expect(String(mocks.bgRequest.mock.calls[0][0].path)).toContain(
       "max_nodes=2000"
     )
     expect(String(mocks.bgRequest.mock.calls[0][0].path)).toContain(
       "max_edges=8000"
     )
+  })
+
+  it("fails closed on malformed limits, counts, revisions, actions, categories, states, and mutation envelopes", async () => {
+    const invalidResponses: Array<{
+      response: unknown
+      call: () => Promise<unknown>
+    }> = [
+      {
+        response: {
+          nodes: [],
+          edges: [],
+          truncated: false,
+          truncated_by: [],
+          has_more: false,
+          cursor: null,
+          limits: { max_nodes: "120", max_edges: 480, max_degree: 40 },
+          radius_cap_applied: false,
+          active_note_count: 1,
+          all_notes_note_cap: 100,
+          all_notes_eligible: true
+        },
+        call: () => fetchNotesGraph({ centerNoteId: "note-1" })
+      },
+      {
+        response: {
+          ok: true,
+          status: 200,
+          headers: { etag: `"${fingerprint("a")}"` },
+          data: {
+            ...capabilityPayload(),
+            allowed_actions: ["generate", "exfiltrate"]
+          }
+        },
+        call: () => getNotesGraphSuggestionCapabilities({ noteId: "note-1" })
+      },
+      {
+        response: {
+          ok: true,
+          status: 200,
+          headers: { etag: `"${fingerprint("a")}"` },
+          data: {
+            ...capabilityPayload(),
+            outbound_data_categories: [
+              "selected_note_excerpts",
+              "raw_credentials"
+            ]
+          }
+        },
+        call: () => getNotesGraphSuggestionCapabilities({ noteId: "note-1" })
+      },
+      {
+        response: {
+          ok: true,
+          status: 200,
+          headers: { etag: `"${fingerprint("a")}"` },
+          data: {
+            ...capabilityPayload(),
+            endpoint_url: "https://secret.example"
+          }
+        },
+        call: () => getNotesGraphSuggestionCapabilities({ noteId: "note-1" })
+      },
+      {
+        response: {
+          items: [{ ...runPayload(), state: "job-internal" }],
+          next_cursor: null
+        },
+        call: () => listNotesGraphSuggestionRuns({ noteId: "note-1" })
+      },
+      {
+        response: {
+          items: [{ ...runPayload(), suggestion_count: "0" }],
+          next_cursor: null
+        },
+        call: () => listNotesGraphSuggestionRuns({ noteId: "note-1" })
+      },
+      {
+        response: {
+          items: [{ ...suggestionPayload("suggestion-1"), state: "hidden" }],
+          next_cursor: null,
+          current_source_fingerprint: fingerprint("c"),
+          rejection_set_revision: 0,
+          rejection_count: 0
+        },
+        call: () => listNotesGraphSuggestions({ noteId: "note-1" })
+      },
+      {
+        response: {
+          resource_id: "run-1",
+          state: "job-internal",
+          revision: "4",
+          cleared_count: null
+        },
+        call: () =>
+          cancelNotesGraphSuggestionRun({
+            noteId: "note-1",
+            runId: "run-1",
+            expectedRevision: 3,
+            idempotencyKey: "cancel-key"
+          })
+      }
+    ]
+
+    for (const invalid of invalidResponses) {
+      mocks.bgRequest.mockResolvedValueOnce(invalid.response)
+      await expect(invalid.call()).rejects.toMatchObject({
+        code: "notes_graph_invalid_response",
+        message: "The Notes graph server returned an invalid response."
+      })
+    }
+  })
+
+  it("rejects oversized graph cursors and malformed revision guards before transport", async () => {
+    const invalidCalls = [
+      () =>
+        fetchNotesGraph({ centerNoteId: "note-1", cursor: "x".repeat(4097) }),
+      () =>
+        cancelNotesGraphSuggestionRun({
+          noteId: "note-1",
+          runId: "run-1",
+          expectedRevision: 0,
+          idempotencyKey: "cancel-key"
+        }),
+      () =>
+        acceptNotesGraphSuggestion({
+          noteId: "note-1",
+          suggestionId: "suggestion-1",
+          expectedRevision: "2" as unknown as number,
+          expectedSourceFingerprint: fingerprint("c"),
+          expectedTargetFingerprint: fingerprint("d"),
+          idempotencyKey: "accept-key"
+        }),
+      () =>
+        resetNotesGraphSuggestionRejections({
+          noteId: "note-1",
+          expectedRejectionRevision: Number.NaN,
+          sourceFingerprint: fingerprint("c"),
+          idempotencyKey: "reset-key"
+        })
+    ]
+
+    for (const call of invalidCalls) {
+      await expect(call()).rejects.toMatchObject({
+        status: 422,
+        code: "notes_graph_invalid_request"
+      })
+    }
+    expect(mocks.bgRequest).not.toHaveBeenCalled()
+  })
+
+  it("preserves both public admission failure codes and rejects unsafe run states", async () => {
+    mocks.bgRequest.mockResolvedValueOnce({
+      items: [
+        {
+          ...runPayload("run-admission", "failed"),
+          error_code: "notes_graph_admission_failed",
+          guidance_key: "retry_generation"
+        },
+        {
+          ...runPayload("run-capability", "failed"),
+          error_code: "notes_graph_capabilities_changed_before_queue",
+          guidance_key: "retry_generation"
+        }
+      ],
+      next_cursor: null
+    })
+
+    const page = await listNotesGraphSuggestionRuns({ noteId: "note-1" })
+
+    expect(page.items.map((item) => item.error_code)).toEqual([
+      "notes_graph_admission_failed",
+      "notes_graph_capabilities_changed_before_queue"
+    ])
   })
 
   it("maps raw failures to the stable sanitized error contract", async () => {

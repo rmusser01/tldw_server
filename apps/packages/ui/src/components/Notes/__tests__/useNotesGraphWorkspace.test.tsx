@@ -61,7 +61,7 @@ const flush = async () => {
 describe("useNotesGraphWorkspace", () => {
   beforeEach(() => {
     vi.useFakeTimers()
-    vi.clearAllMocks()
+    vi.resetAllMocks()
   })
 
   afterEach(() => {
@@ -77,12 +77,16 @@ describe("useNotesGraphWorkspace", () => {
           has_more: true,
           cursor: "cursor one",
           truncated: true,
-          truncated_by: ["max_nodes"]
+          truncated_by: ["max_nodes"],
+          limits: { max_nodes: 4, max_edges: 2, max_degree: 40 }
         })
       )
       .mockResolvedValueOnce(
         graph({
-          nodes: [{ id: "note:c", type: "note", label: "Gamma note" }],
+          nodes: [
+            { id: "note:c", type: "note", label: "Gamma note" },
+            { id: "note:overflow", type: "note", label: "Overflow note" }
+          ],
           edges: [
             {
               id: "edge:two",
@@ -92,10 +96,20 @@ describe("useNotesGraphWorkspace", () => {
               directed: true,
               weight: 1,
               label: null
+            },
+            {
+              id: "edge:overflow",
+              source: "note:c",
+              target: "note:overflow",
+              type: "manual",
+              directed: false,
+              weight: 1,
+              label: null
             }
           ],
           cursor: null,
-          has_more: false
+          has_more: false,
+          limits: { max_nodes: 4, max_edges: 2, max_degree: 40 }
         })
       )
       .mockResolvedValueOnce(
@@ -109,6 +123,7 @@ describe("useNotesGraphWorkspace", () => {
     const { result } = renderHook(
       () =>
         useNotesGraphWorkspace({
+          authorityScope: "authority-a",
           enabled: true,
           isOnline: true,
           initialFocusNoteId: "note:a"
@@ -130,6 +145,7 @@ describe("useNotesGraphWorkspace", () => {
     await act(async () => {
       await result.current.expand()
     })
+    await flush()
 
     expect(mocks.fetchNotesGraph).toHaveBeenNthCalledWith(
       2,
@@ -140,6 +156,10 @@ describe("useNotesGraphWorkspace", () => {
       "note:b",
       "tag:research",
       "note:c"
+    ])
+    expect(result.current.graph?.edges.map((edge) => edge.id)).toEqual([
+      "edge:one",
+      "edge:two"
     ])
     expect(result.current.canExpand).toBe(false)
 
@@ -167,6 +187,7 @@ describe("useNotesGraphWorkspace", () => {
     const { result } = renderHook(
       () =>
         useNotesGraphWorkspace({
+          authorityScope: "authority-a",
           enabled: true,
           isOnline: true,
           initialFocusNoteId: "note:a"
@@ -191,6 +212,7 @@ describe("useNotesGraphWorkspace", () => {
     const first = renderHook(
       () =>
         useNotesGraphWorkspace({
+          authorityScope: "authority-a",
           enabled: true,
           isOnline: true,
           initialFocusNoteId: "note:a"
@@ -218,6 +240,7 @@ describe("useNotesGraphWorkspace", () => {
     const second = renderHook(
       () =>
         useNotesGraphWorkspace({
+          authorityScope: "authority-a",
           enabled: true,
           isOnline: true,
           initialFocusNoteId: "note:a"
@@ -245,6 +268,7 @@ describe("useNotesGraphWorkspace", () => {
     const { result } = renderHook(
       () =>
         useNotesGraphWorkspace({
+          authorityScope: "authority-a",
           enabled: true,
           isOnline: true,
           initialFocusNoteId: "note:a"
@@ -270,6 +294,7 @@ describe("useNotesGraphWorkspace", () => {
     const { result, rerender } = renderHook(
       ({ online, datasetId }) =>
         useNotesGraphWorkspace({
+          authorityScope: "authority-a",
           enabled: true,
           isOnline: online,
           initialFocusNoteId: "note:a",
@@ -299,5 +324,258 @@ describe("useNotesGraphWorkspace", () => {
     await flush()
     expect(result.current.graph).toBeNull()
     expect(mocks.fetchNotesGraph).toHaveBeenCalledTimes(2)
+  })
+
+  it("exposes no prior graph or request while authority is absent or switching", async () => {
+    let resolveAuthorityB:
+      | ((value: ReturnType<typeof graph>) => void)
+      | undefined
+    mocks.fetchNotesGraph
+      .mockResolvedValueOnce(
+        graph({ nodes: [{ id: "note:a", type: "note", label: "Account A" }] })
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveAuthorityB = resolve
+          })
+      )
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } }
+    })
+    const { result, rerender } = renderHook(
+      ({ authorityScope }: { authorityScope: string | null }) =>
+        useNotesGraphWorkspace({
+          authorityScope,
+          enabled: true,
+          isOnline: true,
+          initialFocusNoteId: "note:a"
+        }),
+      {
+        initialProps: { authorityScope: "account-a@server-a" },
+        wrapper: wrapper(client)
+      }
+    )
+    await flush()
+    expect(result.current.graph?.nodes[0].label).toBe("Account A")
+
+    rerender({ authorityScope: null })
+    expect(result.current.graph).toBeNull()
+    expect(result.current.isLoading).toBe(false)
+    expect(mocks.fetchNotesGraph).toHaveBeenCalledTimes(1)
+
+    rerender({ authorityScope: "account-b@server-b" })
+    expect(result.current.graph).toBeNull()
+    expect(mocks.fetchNotesGraph).toHaveBeenCalledTimes(2)
+
+    await act(async () => {
+      resolveAuthorityB?.(
+        graph({ nodes: [{ id: "note:b", type: "note", label: "Account B" }] })
+      )
+      await Promise.resolve()
+    })
+    await flush()
+    expect(result.current.graph?.nodes[0].label).toBe("Account B")
+    expect(
+      client
+        .getQueryCache()
+        .findAll()
+        .every((query) => query.queryKey[1] !== undefined)
+    ).toBe(true)
+  })
+
+  it("changes note, dataset, and All-notes scopes without one-frame prior state", async () => {
+    mocks.fetchNotesGraph
+      .mockResolvedValueOnce(graph())
+      .mockResolvedValueOnce(
+        graph({ nodes: [{ id: "note:b", type: "note", label: "Beta" }] })
+      )
+      .mockResolvedValueOnce(
+        graph({ nodes: [{ id: "note:all", type: "note", label: "All" }] })
+      )
+      .mockResolvedValueOnce(
+        graph({ nodes: [{ id: "note:c", type: "note", label: "Dataset B" }] })
+      )
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } }
+    })
+    const { result, rerender } = renderHook(
+      ({ noteId, datasetId }) =>
+        useNotesGraphWorkspace({
+          authorityScope: "authority-a",
+          enabled: true,
+          isOnline: true,
+          initialFocusNoteId: noteId,
+          datasetId
+        }),
+      {
+        initialProps: { noteId: "note:a", datasetId: "dataset-a" },
+        wrapper: wrapper(client)
+      }
+    )
+    await flush()
+
+    act(() => result.current.focus("note:b"))
+    expect(result.current.graph).toBeNull()
+    await flush()
+    expect(result.current.graph?.nodes[0].id).toBe("note:b")
+
+    act(() => {
+      expect(result.current.showAllNotes()).toBe(true)
+    })
+    expect(result.current.graph).toBeNull()
+    await flush()
+    expect(result.current.graph?.nodes[0].id).toBe("note:all")
+
+    rerender({ noteId: "note:c", datasetId: "dataset-b" })
+    expect(result.current.graph).toBeNull()
+    await flush()
+    expect(result.current.graph?.nodes[0].id).toBe("note:c")
+  })
+
+  it("bounds cursor pages and keeps a newer refresh ahead of stale expansion", async () => {
+    let resolveExpansion:
+      | ((value: ReturnType<typeof graph>) => void)
+      | undefined
+    mocks.fetchNotesGraph
+      .mockResolvedValueOnce(
+        graph({
+          nodes: [
+            { id: "note:a", type: "note", label: "Alpha" },
+            { id: "note:b", type: "note", label: "Beta" }
+          ],
+          edges: [],
+          has_more: true,
+          cursor: "page-2",
+          limits: { max_nodes: 3, max_edges: 1, max_degree: 40 }
+        })
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveExpansion = resolve
+          })
+      )
+      .mockResolvedValueOnce(
+        graph({
+          nodes: [{ id: "note:fresh", type: "note", label: "Fresh" }],
+          edges: [],
+          limits: { max_nodes: 3, max_edges: 1, max_degree: 40 }
+        })
+      )
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } }
+    })
+    const { result } = renderHook(
+      () =>
+        useNotesGraphWorkspace({
+          authorityScope: "authority-a",
+          enabled: true,
+          isOnline: true,
+          initialFocusNoteId: "note:a"
+        }),
+      { wrapper: wrapper(client) }
+    )
+    await flush()
+
+    let expansion: Promise<unknown>
+    act(() => {
+      expansion = result.current.expand()
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(mocks.fetchNotesGraph).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ cursor: "page-2" })
+    )
+    await act(async () => {
+      await result.current.refresh()
+    })
+    await flush()
+    expect(result.current.graph?.nodes.map((node) => node.id)).toEqual([
+      "note:fresh"
+    ])
+
+    await act(async () => {
+      resolveExpansion?.(
+        graph({
+          nodes: [
+            { id: "note:c", type: "note", label: "Gamma" },
+            { id: "note:d", type: "note", label: "Delta" }
+          ],
+          edges: [
+            {
+              id: "edge:two",
+              source: "note:a",
+              target: "note:c",
+              type: "manual",
+              directed: false,
+              weight: 1,
+              label: null
+            },
+            {
+              id: "edge:three",
+              source: "note:a",
+              target: "note:d",
+              type: "manual",
+              directed: false,
+              weight: 1,
+              label: null
+            }
+          ],
+          has_more: false,
+          cursor: null,
+          limits: { max_nodes: 3, max_edges: 1, max_degree: 40 }
+        })
+      )
+      await expansion!
+    })
+    expect(result.current.graph?.nodes.map((node) => node.id)).toEqual([
+      "note:fresh"
+    ])
+  })
+
+  it("does not perform component state updates when expansion settles after unmount", async () => {
+    let resolveExpansion:
+      | ((value: ReturnType<typeof graph>) => void)
+      | undefined
+    mocks.fetchNotesGraph
+      .mockResolvedValueOnce(graph({ has_more: true, cursor: "page-2" }))
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveExpansion = resolve
+          })
+      )
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } }
+    })
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined)
+    const hook = renderHook(
+      () =>
+        useNotesGraphWorkspace({
+          authorityScope: "authority-a",
+          enabled: true,
+          isOnline: true,
+          initialFocusNoteId: "note:a"
+        }),
+      { wrapper: wrapper(client) }
+    )
+    await flush()
+    act(() => {
+      void hook.result.current.expand()
+    })
+    hook.unmount()
+
+    await act(async () => {
+      resolveExpansion?.(graph({ has_more: false, cursor: null }))
+      await Promise.resolve()
+    })
+
+    expect(consoleError).not.toHaveBeenCalled()
+    consoleError.mockRestore()
   })
 })
