@@ -28,6 +28,9 @@ const ACTIVE_RUN_STATES = new Set<NotesGraphSuggestionRun["state"]>([
   "cancelling",
   "publishing"
 ])
+const NON_SUCCESS_TERMINAL_RUN_STATES = new Set<
+  NotesGraphSuggestionRun["state"]
+>(["failed", "cancelled", "stale"])
 const DEFAULT_POLL_INTERVAL_MS = 1500
 const SUGGESTION_LIST_STATES = ["pending", "accepting"] as const
 const SUGGESTION_LIST_LIMIT = 100
@@ -334,11 +337,15 @@ export function useNotesGraphSuggestions(
     capabilities.model === runOwner.model
       ? ownedRun
       : null
+  const resolveWithoutPublication = Boolean(
+    runQueryRaw.error ||
+      (runDetail && NON_SUCCESS_TERMINAL_RUN_STATES.has(runDetail.state))
+  )
 
   React.useEffect(() => {
-    if (!runQueryRaw.error || !runOwner) return
+    if (!resolveWithoutPublication || !runOwner) return
     resolveTrackedRun(runOwner)
-  }, [resolveTrackedRun, runOwner, runQueryRaw.error])
+  }, [resolveTrackedRun, resolveWithoutPublication, runOwner])
 
   const suggestionsKey = React.useMemo(
     () =>

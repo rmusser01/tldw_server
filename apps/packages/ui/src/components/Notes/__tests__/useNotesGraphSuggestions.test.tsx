@@ -224,7 +224,10 @@ describe("useNotesGraphSuggestions", () => {
       )
     mocks.listSuggestions.mockResolvedValue(suggestionPage())
     const client = new QueryClient({
-      defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false }
+      }
     })
 
     const first = renderHook(
@@ -282,6 +285,99 @@ describe("useNotesGraphSuggestions", () => {
     expect(mocks.createRun).not.toHaveBeenCalled()
   })
 
+  it.each(["failed", "cancelled", "stale"] as const)(
+    "resolves an exact %s owner without suggestion invalidation and adopts fresh recovery",
+    async (terminalState) => {
+      let resolveRecoveryRuns:
+        | ((page: {
+            items: ReturnType<typeof run>[]
+            next_cursor: null
+          }) => void)
+        | undefined
+      const recoveryRuns = new Promise<{
+        items: ReturnType<typeof run>[]
+        next_cursor: null
+      }>((resolve) => {
+        resolveRecoveryRuns = resolve
+      })
+      const oldRunId = `run-${terminalState}`
+      const recoveredRunId = `run-${terminalState}-recovered`
+      mocks.listRuns
+        .mockResolvedValueOnce({
+          items: [run(oldRunId, "running", "2026-08-27T12:00:00Z")],
+          next_cursor: null
+        })
+        .mockImplementationOnce(() => recoveryRuns)
+      mocks.getRun
+        .mockResolvedValueOnce(
+          run(oldRunId, terminalState, "2026-08-27T12:00:00Z", 2)
+        )
+        .mockResolvedValueOnce(
+          run(recoveredRunId, "running", "2026-08-27T13:00:00Z", 1)
+        )
+      mocks.listSuggestions.mockResolvedValue(suggestionPage())
+      const client = new QueryClient({
+        defaultOptions: {
+          queries: { retry: false },
+          mutations: { retry: false }
+        }
+      })
+      const { result } = renderHook(
+        () =>
+          useNotesGraphSuggestions({
+            authorityScope: "authority-a",
+            enabled: true,
+            isOnline: true,
+            noteId: "source-note",
+            datasetId: "dataset-a",
+            provider: "provider-one",
+            model: "model-one",
+            loadedNodeIds: new Set(),
+            pollIntervalMs: 500
+          }),
+        { wrapper: wrapper(client) }
+      )
+      await settleQueries()
+
+      expect(result.current.activeRun).toBeNull()
+      expect(mocks.getRun).toHaveBeenCalledTimes(1)
+      expect(mocks.getRun).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          noteId: "source-note",
+          datasetId: "dataset-a",
+          runId: oldRunId
+        })
+      )
+      expect(mocks.listRuns).toHaveBeenCalledTimes(2)
+      expect(mocks.listSuggestions).toHaveBeenCalledTimes(1)
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2000)
+      })
+      expect(mocks.getRun).toHaveBeenCalledTimes(1)
+
+      await act(async () => {
+        resolveRecoveryRuns?.({
+          items: [run(recoveredRunId, "running", "2026-08-27T13:00:00Z", 1)],
+          next_cursor: null
+        })
+      })
+      await settleQueries()
+
+      expect(result.current.activeRun).toMatchObject({
+        id: recoveredRunId,
+        provider: "provider-one",
+        model: "model-one",
+        state: "running"
+      })
+      expect(mocks.getRun).toHaveBeenCalledTimes(2)
+      expect(mocks.getRun).toHaveBeenLastCalledWith(
+        expect.objectContaining({ runId: recoveredRunId })
+      )
+      expect(mocks.listSuggestions).toHaveBeenCalledTimes(1)
+    }
+  )
+
   it("delegates the single 412 retry to the service while retaining one command UUID", async () => {
     const nextCapability = capability(fingerprint("e"))
     mocks.createRun.mockImplementationOnce(
@@ -291,7 +387,10 @@ describe("useNotesGraphSuggestions", () => {
       }
     )
     const client = new QueryClient({
-      defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false }
+      }
     })
     const { result } = renderHook(
       () =>
@@ -323,7 +422,10 @@ describe("useNotesGraphSuggestions", () => {
   it("does not coerce malformed mutation error statuses into network retries", async () => {
     mocks.createRun.mockRejectedValue({ status: "0" })
     const client = new QueryClient({
-      defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false }
+      }
     })
     const { result } = renderHook(
       () =>
@@ -365,7 +467,10 @@ describe("useNotesGraphSuggestions", () => {
         })
     )
     const client = new QueryClient({
-      defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false }
+      }
     })
     const { result, rerender } = renderHook(
       ({ authorityScope }: { authorityScope: string | null }) =>
@@ -496,7 +601,10 @@ describe("useNotesGraphSuggestions", () => {
       revision: 5
     })
     const client = new QueryClient({
-      defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false }
+      }
     })
     const { result } = renderHook(
       () =>
@@ -555,7 +663,10 @@ describe("useNotesGraphSuggestions", () => {
       revision: 3
     })
     const client = new QueryClient({
-      defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false }
+      }
     })
     const invalidate = vi.spyOn(client, "invalidateQueries")
     const { result, rerender } = renderHook(
@@ -675,7 +786,10 @@ describe("useNotesGraphSuggestions", () => {
       ])
     )
     const client = new QueryClient({
-      defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false }
+      }
     })
     const { result } = renderHook(
       () =>
@@ -726,7 +840,10 @@ describe("useNotesGraphSuggestions", () => {
       cleared_count: null
     })
     const client = new QueryClient({
-      defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false }
+      }
     })
     const { result, rerender } = renderHook(
       ({ provider, model }) =>
@@ -794,7 +911,10 @@ describe("useNotesGraphSuggestions", () => {
         suggestionPage([suggestion({ id: "before-publication" })])
       )
     const client = new QueryClient({
-      defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false }
+      }
     })
     const { result, rerender } = renderHook(
       ({ provider, model }) =>
@@ -872,7 +992,10 @@ describe("useNotesGraphSuggestions", () => {
         suggestionPage([suggestion({ id: "published-suggestion" })])
       )
     const client = new QueryClient({
-      defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false }
+      }
     })
     const { result, rerender } = renderHook(
       ({ provider, model }) =>
@@ -963,7 +1086,10 @@ describe("useNotesGraphSuggestions", () => {
       )
       .mockResolvedValueOnce(suggestionPage([]))
     const client = new QueryClient({
-      defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false }
+      }
     })
     const { result, rerender } = renderHook(
       ({ authorityScope }: { authorityScope: string | null }) =>
@@ -1054,7 +1180,10 @@ describe("useNotesGraphSuggestions", () => {
         suggestionPage([suggestion({ id: "suggestion-c" })])
       )
     const client = new QueryClient({
-      defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false }
+      }
     })
     const { result, rerender } = renderHook(
       ({ noteId, datasetId }) =>
@@ -1121,7 +1250,10 @@ describe("useNotesGraphSuggestions", () => {
         suggestionPage([suggestion({ id: "suggestion-b" })])
       )
     const client = new QueryClient({
-      defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false }
+      }
     })
     vi.spyOn(client, "invalidateQueries").mockImplementationOnce(
       () => reconciliation
@@ -1178,7 +1310,10 @@ describe("useNotesGraphSuggestions", () => {
         })
     )
     const client = new QueryClient({
-      defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false }
+      }
     })
     const invalidate = vi.spyOn(client, "invalidateQueries")
     const { result, rerender } = renderHook(
@@ -1255,7 +1390,10 @@ describe("useNotesGraphSuggestions", () => {
         run("run-recovered", "running", "2026-08-27T13:00:00Z", 1)
       )
     const client = new QueryClient({
-      defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false }
+      }
     })
     const { result } = renderHook(
       () =>
@@ -1310,7 +1448,10 @@ describe("useNotesGraphSuggestions", () => {
       cleared_count: null
     })
     const client = new QueryClient({
-      defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false }
+      }
     })
     const { result } = renderHook(
       () =>
