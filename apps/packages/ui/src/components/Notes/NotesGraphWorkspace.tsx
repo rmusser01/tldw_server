@@ -63,9 +63,31 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
   const mountedFocusNoteId = mountedFocusRef.current.noteId
   const [radius, setRadius] = React.useState<1 | 2>(1)
   const [maxNodesInput, setMaxNodesInput] = React.useState(120)
-  const [selectedNodeId, setSelectedNodeId] = React.useState<string | null>(
-    null
-  )
+  const normalizedSelectedId = React.useMemo(() => {
+    const normalized = normalizeGraphNoteId(selectedNoteId)
+    return normalized ? `note:${normalized}` : null
+  }, [selectedNoteId])
+  const [storedSelection, setStoredSelection] = React.useState(() => ({
+    authorityScope,
+    controlledNodeId: normalizedSelectedId,
+    nodeId: normalizedSelectedId
+  }))
+  let selection = storedSelection
+  if (storedSelection.authorityScope !== authorityScope) {
+    selection = {
+      authorityScope,
+      controlledNodeId: normalizedSelectedId,
+      nodeId: null
+    }
+    setStoredSelection(selection)
+  } else if (storedSelection.controlledNodeId !== normalizedSelectedId) {
+    selection = {
+      authorityScope,
+      controlledNodeId: normalizedSelectedId,
+      nodeId: normalizedSelectedId
+    }
+    setStoredSelection(selection)
+  }
   const [showProvisional, setShowProvisional] = React.useState(true)
   const [viewMode, setViewMode] = React.useState<"canvas" | "relationships">(
     "canvas"
@@ -101,17 +123,13 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
     () => new Set(workspace.graph?.nodes.map((node) => node.id) ?? []),
     [workspace.graph]
   )
-  const normalizedSelectedId = React.useMemo(() => {
-    const normalized = normalizeGraphNoteId(selectedNoteId)
-    return normalized ? `note:${normalized}` : null
-  }, [selectedNoteId])
-  React.useEffect(() => {
-    setSelectedNodeId(normalizedSelectedId)
-  }, [normalizedSelectedId])
-  const currentSelectedNodeId =
-    selectedNodeId ??
-    normalizedSelectedId ??
+  const selectedNodeCandidate =
+    selection.nodeId ??
     (workspace.focusNoteId ? `note:${workspace.focusNoteId}` : null)
+  const currentSelectedNodeId =
+    selectedNodeCandidate && loadedNodeIds.has(selectedNodeCandidate)
+      ? selectedNodeCandidate
+      : null
   const selectedSuggestionNoteId = React.useMemo(() => {
     const selectedNode = workspace.graph?.nodes.find(
       (node) => node.id === currentSelectedNodeId
@@ -145,10 +163,14 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
 
   const handleSelectNode = React.useCallback(
     (nodeId: string) => {
-      setSelectedNodeId(nodeId)
+      setStoredSelection({
+        authorityScope,
+        controlledNodeId: normalizedSelectedId,
+        nodeId
+      })
       if (nodeId.startsWith("note:")) onSelectNote(normalizeGraphNoteId(nodeId))
     },
-    [onSelectNote]
+    [authorityScope, normalizedSelectedId, onSelectNote]
   )
   const handleFocusNode = React.useCallback(
     (nodeId: string) => {

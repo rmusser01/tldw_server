@@ -9,6 +9,7 @@ import {
   within
 } from "@testing-library/react"
 import React from "react"
+import { createRoot } from "react-dom/client"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import NotesGraphWorkspace from "../NotesGraphWorkspace"
@@ -20,12 +21,18 @@ import {
 
 const {
   mockCanvas,
+  mockCommittedCanvas,
+  mockCommittedSuggestionInput,
   mockFocusNode,
+  mockNestedSuggestionRequest,
   mockUseNotesGraphSuggestions,
   mockUseNotesGraphWorkspace
 } = vi.hoisted(() => ({
   mockCanvas: vi.fn(),
+  mockCommittedCanvas: vi.fn(),
+  mockCommittedSuggestionInput: vi.fn(),
   mockFocusNode: vi.fn(),
+  mockNestedSuggestionRequest: vi.fn(),
   mockUseNotesGraphSuggestions: vi.fn(),
   mockUseNotesGraphWorkspace: vi.fn()
 }))
@@ -61,6 +68,9 @@ vi.mock("../NotesGraphCanvas", async () => {
   return {
     default: ReactModule.forwardRef((props: Record<string, unknown>, ref) => {
       mockCanvas(props)
+      ReactModule.useLayoutEffect(() => {
+        mockCommittedCanvas(props)
+      })
       ReactModule.useImperativeHandle(ref, () => ({
         zoomIn: vi.fn(),
         zoomOut: vi.fn(),
@@ -137,13 +147,64 @@ const baseWorkspaceState = () => ({
   error: null
 })
 
+const workspaceStateWithCommonNote = (focusNoteId: string | null) => ({
+  ...baseWorkspaceState(),
+  graph: {
+    ...graph,
+    nodes: [{ ...graph.nodes[0], id: "note:common" }, graph.nodes[1]]
+  },
+  focusNoteId
+})
+
+type SuggestionHookInput = {
+  authorityScope: string | null
+  enabled: boolean
+  noteId: string | null
+}
+
+const useTrackedSuggestionController = (options: SuggestionHookInput) => {
+  React.useLayoutEffect(() => {
+    const committedInput = {
+      authorityScope: options.authorityScope,
+      enabled: options.enabled,
+      noteId: options.noteId
+    }
+    mockCommittedSuggestionInput(committedInput)
+    if (options.enabled) mockNestedSuggestionRequest(committedInput)
+  })
+
+  const sourceNoteId = options.noteId ?? "a"
+  return {
+    provisionalBySuggestionId: {
+      s1: {
+        edge: {
+          id: "suggestion-edge:s1",
+          suggestionId: "s1",
+          source: `note:${sourceNoteId}`,
+          target: "suggestion-node:s1",
+          type: "provisional_suggestion",
+          directed: false
+        },
+        node: {
+          id: "suggestion-node:s1",
+          suggestionId: "s1",
+          type: "provisional_note",
+          label: "Suggested note"
+        }
+      }
+    }
+  }
+}
+
 const renderWorkspace = (
   props: Partial<React.ComponentProps<typeof NotesGraphWorkspace>> = {}
 ) => {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
   })
-  return render(
+  const renderCurrent = (
+    currentProps: Partial<React.ComponentProps<typeof NotesGraphWorkspace>>
+  ) => (
     <QueryClientProvider client={queryClient}>
       <NotesGraphWorkspace
         authorityScope="opaque-authority"
@@ -153,36 +214,26 @@ const renderWorkspace = (
         hasActiveNotes
         onSelectNote={vi.fn()}
         onCreateNote={vi.fn()}
-        {...props}
+        {...currentProps}
       />
     </QueryClientProvider>
   )
+  const rendered = render(renderCurrent(props))
+  return {
+    ...rendered,
+    rerenderWorkspace: (
+      nextProps: Partial<React.ComponentProps<typeof NotesGraphWorkspace>>
+    ) => rendered.rerender(renderCurrent(nextProps))
+  }
 }
 
 describe("NotesGraphWorkspace first-class view mode", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockUseNotesGraphWorkspace.mockReturnValue(baseWorkspaceState())
-    mockUseNotesGraphSuggestions.mockReturnValue({
-      provisionalBySuggestionId: {
-        s1: {
-          edge: {
-            id: "suggestion-edge:s1",
-            suggestionId: "s1",
-            source: "note:a",
-            target: "suggestion-node:s1",
-            type: "provisional_suggestion",
-            directed: false
-          },
-          node: {
-            id: "suggestion-node:s1",
-            suggestionId: "s1",
-            type: "provisional_note",
-            label: "Suggested note"
-          }
-        }
-      }
-    })
+    mockUseNotesGraphSuggestions.mockImplementation(
+      useTrackedSuggestionController
+    )
   })
 
   it("accepts graph as a Notes view and resolves selected, verified recent, then visible focus", () => {
@@ -410,6 +461,200 @@ describe("NotesGraphWorkspace first-class view mode", () => {
     expect(mockCanvas).toHaveBeenLastCalledWith(
       expect.objectContaining({ selectedNodeId: "note:b" })
     )
+  })
+
+  it.each([
+    ["b", "b", true],
+    ["missing", null, false]
+  ] as const)(
+    "fails closed in the same commit when controlled selection changes to %s",
+    (controlledNoteId, expectedSuggestionNoteId, expectedEnabled) => {
+      const state = baseWorkspaceState()
+      mockUseNotesGraphWorkspace.mockReturnValue(state)
+      const { rerenderWorkspace } = renderWorkspace({ selectedNoteId: "a" })
+
+      mockCommittedCanvas.mockClear()
+      mockCommittedSuggestionInput.mockClear()
+      rerenderWorkspace({ selectedNoteId: controlledNoteId })
+
+      expect(mockCommittedSuggestionInput).toHaveBeenCalled()
+      for (const [input] of mockCommittedSuggestionInput.mock.calls) {
+        expect(input).toEqual({
+          authorityScope: "opaque-authority",
+          enabled: expectedEnabled,
+          noteId: expectedSuggestionNoteId
+        })
+      }
+      for (const [canvasProps] of mockCommittedCanvas.mock.calls) {
+        expect(canvasProps.selectedNodeId).toBe(
+          expectedSuggestionNoteId ? `note:${expectedSuggestionNoteId}` : null
+        )
+        if (expectedEnabled) {
+          expect(canvasProps.provisionalOverlays).toEqual([
+            expect.objectContaining({
+              edge: expect.objectContaining({ source: "note:b" })
+            })
+          ])
+        } else {
+          expect(canvasProps).toEqual(
+            expect.objectContaining({
+              provisionalOverlays: [],
+              showProvisional: false
+            })
+          )
+        }
+      }
+      if (!expectedEnabled) {
+        expect(
+          screen.queryByRole("tab", { name: "Suggestions" })
+        ).not.toBeInTheDocument()
+      }
+    }
+  )
+
+  it("invalidates an unchanged controlled note across authority until current-authority focus owns selection", () => {
+    const authorityA = workspaceStateWithCommonNote("common")
+    const authorityB = workspaceStateWithCommonNote(null)
+    mockUseNotesGraphWorkspace.mockImplementation(({ authorityScope }) =>
+      authorityScope === "scope-b" ? authorityB : authorityA
+    )
+    const { rerenderWorkspace } = renderWorkspace({
+      authorityScope: "scope-a",
+      initialFocusNoteId: "common",
+      selectedNoteId: "common"
+    })
+
+    mockCommittedCanvas.mockClear()
+    mockCommittedSuggestionInput.mockClear()
+    mockNestedSuggestionRequest.mockClear()
+    rerenderWorkspace({
+      authorityScope: "scope-b",
+      initialFocusNoteId: "common",
+      selectedNoteId: "common"
+    })
+
+    expect(mockCommittedSuggestionInput).toHaveBeenCalled()
+    for (const [input] of mockCommittedSuggestionInput.mock.calls) {
+      expect(input).toEqual({
+        authorityScope: "scope-b",
+        enabled: false,
+        noteId: null
+      })
+    }
+    expect(mockNestedSuggestionRequest).not.toHaveBeenCalled()
+    expect(
+      screen.queryByRole("tab", { name: "Suggestions" })
+    ).not.toBeInTheDocument()
+    for (const [canvasProps] of mockCommittedCanvas.mock.calls) {
+      expect(canvasProps).toEqual(
+        expect.objectContaining({
+          selectedNodeId: null,
+          provisionalOverlays: [],
+          showProvisional: false
+        })
+      )
+    }
+
+    authorityB.focusNoteId = "b"
+    mockCommittedSuggestionInput.mockClear()
+    mockNestedSuggestionRequest.mockClear()
+    rerenderWorkspace({
+      authorityScope: "scope-b",
+      initialFocusNoteId: "common",
+      selectedNoteId: "common"
+    })
+
+    expect(mockCommittedSuggestionInput).toHaveBeenLastCalledWith({
+      authorityScope: "scope-b",
+      enabled: true,
+      noteId: "b"
+    })
+    expect(mockNestedSuggestionRequest).toHaveBeenLastCalledWith({
+      authorityScope: "scope-b",
+      enabled: true,
+      noteId: "b"
+    })
+  })
+
+  it("does not publish selection ownership from an abandoned authority transition", async () => {
+    const suspendedTransition = new Promise<never>(() => {})
+    let suspendedBRenderCount = 0
+    let shouldSuspendB = true
+    const authorityA = workspaceStateWithCommonNote("common")
+    const authorityB = workspaceStateWithCommonNote(null)
+    mockUseNotesGraphWorkspace.mockImplementation(({ authorityScope }) =>
+      authorityScope === "scope-b" ? authorityB : authorityA
+    )
+
+    const Suspender = ({ authorityScope }: { authorityScope: string }) => {
+      if (authorityScope === "scope-b" && shouldSuspendB) {
+        suspendedBRenderCount += 1
+        throw suspendedTransition
+      }
+      return null
+    }
+    const queryClient = new QueryClient()
+    const renderScope = (authorityScope: string) => (
+      <React.StrictMode>
+        <QueryClientProvider client={queryClient}>
+          <React.Suspense fallback={<span>Suspended</span>}>
+            <NotesGraphWorkspace
+              authorityScope={authorityScope}
+              isOnline
+              initialFocusNoteId="common"
+              selectedNoteId="common"
+              hasActiveNotes
+              onSelectNote={vi.fn()}
+              onCreateNote={vi.fn()}
+            />
+            <Suspender authorityScope={authorityScope} />
+          </React.Suspense>
+        </QueryClientProvider>
+      </React.StrictMode>
+    )
+    const container = document.createElement("div")
+    document.body.appendChild(container)
+    const root = createRoot(container)
+
+    try {
+      await act(async () => {
+        root.render(renderScope("scope-a"))
+      })
+      mockCommittedSuggestionInput.mockClear()
+
+      act(() => {
+        React.startTransition(() => {
+          root.render(renderScope("scope-b"))
+        })
+      })
+      await waitFor(() => expect(suspendedBRenderCount).toBeGreaterThan(0))
+      expect(mockCommittedSuggestionInput).not.toHaveBeenCalled()
+
+      await act(async () => {
+        root.render(renderScope("scope-a"))
+      })
+      expect(mockCommittedSuggestionInput).toHaveBeenLastCalledWith({
+        authorityScope: "scope-a",
+        enabled: true,
+        noteId: "common"
+      })
+
+      shouldSuspendB = false
+      mockCommittedSuggestionInput.mockClear()
+      await act(async () => {
+        React.startTransition(() => {
+          root.render(renderScope("scope-b"))
+        })
+      })
+      expect(mockCommittedSuggestionInput).toHaveBeenLastCalledWith({
+        authorityScope: "scope-b",
+        enabled: false,
+        noteId: null
+      })
+    } finally {
+      act(() => root.unmount())
+      container.remove()
+    }
   })
 
   it.each([
