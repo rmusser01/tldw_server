@@ -115,6 +115,8 @@ describe("NotesGraphWorkspace responsive inspector", () => {
     expect(primary).toHaveClass("min-h-[420px]", "sm:min-h-[520px]")
     expect(inspector).toHaveClass(
       "overflow-y-auto",
+      "pb-28",
+      "scroll-pb-28",
       "border-t",
       "lg:border-l",
       "lg:border-t-0"

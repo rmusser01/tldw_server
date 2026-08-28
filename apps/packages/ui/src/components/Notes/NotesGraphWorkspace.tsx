@@ -421,7 +421,7 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
             )}
           </div>
           <div
-            className="max-h-[min(420px,45vh)] min-h-[280px] flex-none overflow-y-auto border-t border-border lg:h-auto lg:max-h-none lg:min-h-0 lg:w-[360px] lg:border-l lg:border-t-0"
+            className="max-h-[min(420px,45vh)] min-h-[280px] flex-none overflow-y-auto scroll-pb-28 border-t border-border pb-28 lg:h-auto lg:max-h-none lg:min-h-0 lg:w-[360px] lg:border-l lg:border-t-0"
             data-testid="notes-graph-inspector-region">
             <NotesGraphInspector
               graph={workspace.graph}

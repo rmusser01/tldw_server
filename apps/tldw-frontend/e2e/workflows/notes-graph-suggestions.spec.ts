@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs"
 import path from "node:path"
 
-import type { Page, Route, TestInfo } from "@playwright/test"
+import type { Locator, Page, Route, TestInfo } from "@playwright/test"
 
 import { expect, test } from "../utils/fixtures"
 
@@ -19,6 +19,7 @@ const LONG_TARGET =
   "A grounded related note with a deliberately long title that must wrap without covering adjacent review controls"
 const LONG_TAG =
   "Systems Thinking Across Distributed Knowledge Workflows And Durable Evidence"
+const SCREENSHOT_TARGET = "Concise grounded review"
 const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const SUGGESTION_BASE = `/api/v1/notes/${SOURCE_NOTE_ID}/graph/suggestions`
@@ -121,6 +122,25 @@ const tagSuggestion = {
     }
   ],
   updated_at: NOW
+}
+
+const screenshotSuggestion = {
+  ...relatedSuggestion,
+  id: "screenshot-suggestion",
+  target_note_id: "screenshot-target",
+  target_title: SCREENSHOT_TARGET,
+  rationale: "Shared review boundaries and durable evidence.",
+  evidence: [
+    {
+      ...relatedSuggestion.evidence[0],
+      text: "Durable evidence supports explicit review."
+    },
+    {
+      ...relatedSuggestion.evidence[1],
+      note_id: "screenshot-target",
+      text: "Explicit review preserves durable knowledge."
+    }
+  ]
 }
 
 type TerminalState = "succeeded" | "stale" | "failed"
@@ -306,8 +326,8 @@ class NotesGraphFixture {
       created_at: NOW,
       started_at: state === "queued" ? null : NOW,
       completed_at: terminal ? NOW : null,
-      suggestion_count: state === "succeeded" ? 2 : 0,
-      related_note_count: state === "succeeded" ? 1 : 0,
+      suggestion_count: state === "succeeded" ? 3 : 0,
+      related_note_count: state === "succeeded" ? 2 : 0,
       tag_count: state === "succeeded" ? 1 : 0,
       invalid_item_count: 0,
       cancellation_available: ["queued", "running"].includes(state),
@@ -343,7 +363,8 @@ class NotesGraphFixture {
     const items = this.published
       ? [
           ...(this.accepted ? [] : [relatedSuggestion]),
-          ...(this.rejected && !this.reset ? [] : [tagSuggestion])
+          ...(this.rejected && !this.reset ? [] : [tagSuggestion]),
+          screenshotSuggestion
         ]
       : []
     return {
@@ -734,6 +755,204 @@ const assertVisualContract = async (page: Page) => {
   return { geometry: report, pixels }
 }
 
+const assertSuggestionsContentVisualContract = async (page: Page) => {
+  const suggestionsTab = page.getByRole("tab", { name: "Suggestions" })
+  await expect(suggestionsTab).toHaveAttribute("aria-selected", "true")
+  await expect(page.getByRole("tabpanel", { name: "Suggestions" })).toBeVisible()
+
+  const inspector = page.getByTestId("notes-graph-inspector-region")
+  const relatedReview = page.locator(
+    '[data-suggestion-review-row="related-suggestion"]'
+  )
+  const tagReview = page.locator('[data-suggestion-review-row="tag-suggestion"]')
+  const elements: Array<{
+    name: string
+    locator: Locator
+    container: Locator
+  }> = [
+    {
+      name: "provider",
+      locator: page.getByText(LONG_PROVIDER, { exact: true }),
+      container: inspector
+    },
+    {
+      name: "model",
+      locator: page.getByText(LONG_MODEL, { exact: true }),
+      container: inspector
+    },
+    {
+      name: "related target title",
+      locator: relatedReview.getByText(LONG_TARGET, { exact: true }),
+      container: relatedReview
+    },
+    {
+      name: "related rationale",
+      locator: relatedReview.getByText(relatedSuggestion.rationale, {
+        exact: true
+      }),
+      container: relatedReview
+    },
+    {
+      name: "related source evidence",
+      locator: relatedReview.getByText(relatedSuggestion.evidence[0].text, {
+        exact: true
+      }),
+      container: relatedReview
+    },
+    {
+      name: "related target evidence",
+      locator: relatedReview.getByText(relatedSuggestion.evidence[1].text, {
+        exact: true
+      }),
+      container: relatedReview
+    },
+    {
+      name: "related accept",
+      locator: relatedReview.getByRole("button", { name: `Accept ${LONG_TARGET}` }),
+      container: relatedReview
+    },
+    {
+      name: "related reject",
+      locator: relatedReview.getByRole("button", { name: `Reject ${LONG_TARGET}` }),
+      container: relatedReview
+    },
+    {
+      name: "tag title",
+      locator: tagReview.getByText(LONG_TAG, { exact: true }),
+      container: tagReview
+    },
+    {
+      name: "tag rationale",
+      locator: tagReview.getByText(tagSuggestion.rationale, { exact: true }),
+      container: tagReview
+    },
+    {
+      name: "tag evidence",
+      locator: tagReview.getByText(tagSuggestion.evidence[0].text, { exact: true }),
+      container: tagReview
+    },
+    {
+      name: "tag accept",
+      locator: tagReview.getByRole("button", { name: `Accept ${LONG_TAG}` }),
+      container: tagReview
+    },
+    {
+      name: "tag reject",
+      locator: tagReview.getByRole("button", { name: `Reject ${LONG_TAG}` }),
+      container: tagReview
+    }
+  ]
+  const measurements = []
+  for (const item of elements) {
+    await expect(item.locator, item.name).toBeVisible()
+    const [bounds, containerBounds, textMetrics] = await Promise.all([
+      item.locator.boundingBox(),
+      item.container.boundingBox(),
+      item.locator.evaluate((element) => {
+        const htmlElement = element as HTMLElement
+        const style = getComputedStyle(htmlElement)
+        const lineHeight =
+          Number.parseFloat(style.lineHeight) || Number.parseFloat(style.fontSize) * 1.2
+        const canvas = document.createElement("canvas")
+        const context = canvas.getContext("2d")
+        if (context) context.font = style.font
+        return {
+          clientWidth: htmlElement.clientWidth,
+          scrollWidth: htmlElement.scrollWidth,
+          lineHeight,
+          naturalTextWidth: context?.measureText(htmlElement.textContent ?? "").width ?? 0
+        }
+      })
+    ])
+    expect(bounds, item.name).not.toBeNull()
+    expect(containerBounds, item.name).not.toBeNull()
+    expect(bounds?.x ?? -1, item.name).toBeGreaterThanOrEqual(
+      (containerBounds?.x ?? 0) - 1
+    )
+    expect((bounds?.x ?? 0) + (bounds?.width ?? 0), item.name).toBeLessThanOrEqual(
+      (containerBounds?.x ?? 0) + (containerBounds?.width ?? 0) + 1
+    )
+    expect(textMetrics.scrollWidth, item.name).toBeLessThanOrEqual(
+      textMetrics.clientWidth + 1
+    )
+    if (textMetrics.naturalTextWidth > (bounds?.width ?? 0) + 1) {
+      expect(bounds?.height ?? 0, `${item.name} should wrap`).toBeGreaterThan(
+        textMetrics.lineHeight * 1.5
+      )
+    }
+    measurements.push({ name: item.name, bounds, containerBounds, textMetrics })
+  }
+
+  for (let leftIndex = 0; leftIndex < measurements.length; leftIndex += 1) {
+    const left = measurements[leftIndex]
+    if (!left.bounds) continue
+    for (
+      let rightIndex = leftIndex + 1;
+      rightIndex < measurements.length;
+      rightIndex += 1
+    ) {
+      const right = measurements[rightIndex]
+      if (!right.bounds) continue
+      const overlapWidth =
+        Math.min(left.bounds.x + left.bounds.width, right.bounds.x + right.bounds.width) -
+        Math.max(left.bounds.x, right.bounds.x)
+      const overlapHeight =
+        Math.min(left.bounds.y + left.bounds.height, right.bounds.y + right.bounds.height) -
+        Math.max(left.bounds.y, right.bounds.y)
+      expect(
+        overlapWidth > 1 && overlapHeight > 1,
+        `${left.name} overlaps ${right.name}`
+      ).toBe(false)
+    }
+  }
+
+  const scrollState = await page.evaluate(() => {
+    const region = document.querySelector<HTMLElement>(
+      '[data-testid="notes-graph-inspector-region"]'
+    )
+    return { x: scrollX, y: scrollY, inspectorTop: region?.scrollTop ?? 0 }
+  })
+  const visibleActions = []
+  try {
+    for (const item of elements.filter(
+      ({ name }) => name.endsWith("accept") || name.endsWith("reject")
+    )) {
+      await item.locator.scrollIntoViewIfNeeded()
+      const visible = await item.locator.evaluate((element) => {
+        const bounds = element.getBoundingClientRect()
+        const region = element.closest('[data-testid="notes-graph-inspector-region"]')
+        if (!region) throw new Error("Suggestion action is outside the inspector")
+        const inspectorBounds = region.getBoundingClientRect()
+        const viewport = window.visualViewport
+        const visibleTop = Math.max(inspectorBounds.top, viewport?.offsetTop ?? 0)
+        const visibleBottom = Math.min(
+          inspectorBounds.bottom,
+          viewport ? viewport.offsetTop + viewport.height : innerHeight
+        )
+        return {
+          top: bounds.top,
+          bottom: bounds.bottom,
+          visibleTop,
+          visibleBottom
+        }
+      })
+      expect(visible.top, item.name).toBeGreaterThanOrEqual(visible.visibleTop - 1)
+      expect(visible.bottom, item.name).toBeLessThanOrEqual(visible.visibleBottom + 1)
+      visibleActions.push({ name: item.name, ...visible })
+    }
+  } finally {
+    await page.evaluate((state) => {
+      const region = document.querySelector<HTMLElement>(
+        '[data-testid="notes-graph-inspector-region"]'
+      )
+      if (region) region.scrollTop = state.inspectorTop
+      window.scrollTo(state.x, state.y)
+    }, scrollState)
+  }
+
+  return { measurements, visibleActions }
+}
+
 const assertPageScaleOriginContract = async (page: Page) => {
   const report = await geometry(page)
   const viewport = report.visualViewport
@@ -765,22 +984,13 @@ const assertPageScaleOriginContract = async (page: Page) => {
       bounds.left < (viewport?.right ?? 0)
   )
   expect(visibleToolbarControls.length, JSON.stringify(report)).toBeGreaterThan(0)
-  const fullyContainedToolbarControls = visibleToolbarControls.filter(
-    (bounds) =>
-      bounds.left >= (viewport?.offsetLeft ?? 0) - 1 &&
-      bounds.right <= (viewport?.right ?? 0) + 1
-  )
-  expect(fullyContainedToolbarControls.length, JSON.stringify(report)).toBeGreaterThanOrEqual(4)
   for (const bounds of visibleToolbarControls) {
-    const visibleLeft = Math.max(bounds.left, viewport?.offsetLeft ?? 0)
-    const visibleRight = Math.min(bounds.right, viewport?.right ?? 0)
-    expect(visibleLeft, JSON.stringify(report)).toBeGreaterThanOrEqual(
-      viewport?.offsetLeft ?? 0
+    expect(bounds.left, JSON.stringify(report)).toBeGreaterThanOrEqual(
+      (viewport?.offsetLeft ?? 0) - 1
     )
-    expect(visibleRight, JSON.stringify(report)).toBeLessThanOrEqual(
-      viewport?.right ?? 0
+    expect(bounds.right, JSON.stringify(report)).toBeLessThanOrEqual(
+      (viewport?.right ?? 0) + 1
     )
-    expect(visibleRight - visibleLeft, JSON.stringify(report)).toBeGreaterThan(0)
   }
   expect(report.inspector?.left, JSON.stringify(report)).toBeGreaterThanOrEqual(
     (viewport?.right ?? 0) - 1
@@ -812,6 +1022,216 @@ const bringResponsiveInspectorIntoView = async (page: Page) => {
   expect(report.visibleOverlayCount, JSON.stringify(report)).toBe(0)
   expect(report.overlapPairs, JSON.stringify(report)).toEqual([])
   return report
+}
+
+const prepareSuggestionsScreenshot = async (page: Page) => {
+  const inspector = page.getByTestId("notes-graph-inspector-region")
+  const review = page.locator(
+    '[data-suggestion-review-row="screenshot-suggestion"]'
+  )
+  const accept = review.getByRole("button", { name: `Accept ${SCREENSHOT_TARGET}` })
+  const reject = review.getByRole("button", { name: `Reject ${SCREENSHOT_TARGET}` })
+  await expect(review).toBeVisible()
+  await expect(accept).toBeVisible()
+  await expect(reject).toBeVisible()
+  await review.evaluate((element) =>
+    element.scrollIntoView({ block: "center", inline: "nearest" })
+  )
+  await review.evaluate((element) => {
+    const inspector = element.closest<HTMLElement>(
+      '[data-testid="notes-graph-inspector-region"]'
+    )
+    if (!inspector) throw new Error("Suggestion review is outside the inspector")
+    const inspectorBounds = inspector.getBoundingClientRect()
+    const reviewBounds = element.getBoundingClientRect()
+    const scrollDelta =
+      reviewBounds.top -
+      (inspectorBounds.top + (inspectorBounds.height - reviewBounds.height) / 2)
+    if (inspector.scrollHeight > inspector.clientHeight + 1) {
+      inspector.scrollTop += scrollDelta
+      const inspectorTop = inspector.getBoundingClientRect().top
+      const topOverlap = Math.max(
+        0,
+        ...Array.from(
+          inspector.querySelectorAll<HTMLElement>(
+            '[data-suggestion-review-row] button'
+          )
+        ).map((action) => {
+          const bounds = action.getBoundingClientRect()
+          return bounds.top < inspectorTop && bounds.bottom > inspectorTop
+            ? bounds.bottom - inspectorTop
+            : 0
+        })
+      )
+      inspector.scrollTop += topOverlap > 0 ? topOverlap + 1 : 0
+    }
+  })
+
+  const [inspectorBounds, reviewBounds, acceptBounds, rejectBounds, viewport] =
+    await Promise.all([
+      inspector.boundingBox(),
+      review.boundingBox(),
+      accept.boundingBox(),
+      reject.boundingBox(),
+      page.evaluate(() => ({
+        left: window.visualViewport?.offsetLeft ?? 0,
+        right:
+          (window.visualViewport?.offsetLeft ?? 0) +
+          (window.visualViewport?.width ?? window.innerWidth),
+        top: window.visualViewport?.offsetTop ?? 0,
+        bottom:
+          (window.visualViewport?.offsetTop ?? 0) +
+          (window.visualViewport?.height ?? window.innerHeight)
+      }))
+    ])
+  expect(inspectorBounds).not.toBeNull()
+  expect(reviewBounds).not.toBeNull()
+  expect(acceptBounds).not.toBeNull()
+  expect(rejectBounds).not.toBeNull()
+
+  const contains = (
+    outer: { x: number; y: number; width: number; height: number },
+    inner: { x: number; y: number; width: number; height: number }
+  ) =>
+    inner.x >= outer.x - 1 &&
+    inner.x + inner.width <= outer.x + outer.width + 1 &&
+    inner.y >= outer.y - 1 &&
+    inner.y + inner.height <= outer.y + outer.height + 1
+  const viewportBounds = {
+    x: viewport.left,
+    y: viewport.top,
+    width: viewport.right - viewport.left,
+    height: viewport.bottom - viewport.top
+  }
+  const containmentEvidence = JSON.stringify({
+    inspectorBounds,
+    reviewBounds,
+    acceptBounds,
+    rejectBounds,
+    viewport
+  })
+  expect(
+    contains(inspectorBounds!, reviewBounds!),
+    `review inside inspector: ${containmentEvidence}`
+  ).toBe(true)
+  expect(contains(inspectorBounds!, acceptBounds!), "Accept inside inspector").toBe(
+    true
+  )
+  expect(contains(inspectorBounds!, rejectBounds!), "Reject inside inspector").toBe(
+    true
+  )
+  expect(contains(viewportBounds, reviewBounds!), "review inside visual viewport").toBe(true)
+  expect(contains(viewportBounds, acceptBounds!), "Accept inside visual viewport").toBe(true)
+  expect(contains(viewportBounds, rejectBounds!), "Reject inside visual viewport").toBe(true)
+
+  const helperControls = await page
+    .locator(
+      '[data-testid="quick-chat-helper-open-button"], [role="switch"][aria-label*="Quick Chat Helper"], nextjs-portal button, nextjs-portal [role="button"]'
+    )
+    .evaluateAll((elements) =>
+      elements.flatMap((element) => {
+        const htmlElement = element as HTMLElement
+        const style = getComputedStyle(htmlElement)
+        if (style.display === "none" || style.visibility === "hidden") return []
+        const rect = htmlElement.getBoundingClientRect()
+        if (rect.width === 0 || rect.height === 0) return []
+        const fixedAncestor = htmlElement.closest<HTMLElement>(".fixed")
+        const fixedRect = (fixedAncestor ?? htmlElement).getBoundingClientRect()
+        return [
+          {
+            name:
+              htmlElement.getAttribute("aria-label") ??
+              htmlElement.textContent?.trim() ??
+              htmlElement.tagName,
+            bounds: {
+              x: fixedRect.x,
+              y: fixedRect.y,
+              width: fixedRect.width,
+              height: fixedRect.height
+            }
+          }
+        ]
+      })
+    )
+  const intersects = (
+    left: { x: number; y: number; width: number; height: number },
+    right: { x: number; y: number; width: number; height: number }
+  ) =>
+    Math.min(left.x + left.width, right.x + right.width) -
+      Math.max(left.x, right.x) >
+      1 &&
+    Math.min(left.y + left.height, right.y + right.height) -
+      Math.max(left.y, right.y) >
+      1
+  for (const helper of helperControls) {
+    expect(intersects(reviewBounds!, helper.bounds), `${helper.name} overlaps review`).toBe(
+      false
+    )
+    expect(intersects(acceptBounds!, helper.bounds), `${helper.name} overlaps Accept`).toBe(false)
+    expect(intersects(rejectBounds!, helper.bounds), `${helper.name} overlaps Reject`).toBe(false)
+  }
+
+  const visibleSuggestionActions = await page
+    .locator('[data-suggestion-review-row] button')
+    .evaluateAll((elements) =>
+      elements.flatMap((element) => {
+        const rect = element.getBoundingClientRect()
+        const inspector = element.closest<HTMLElement>(
+          '[data-testid="notes-graph-inspector-region"]'
+        )
+        if (!inspector) return []
+        const inspectorRect = inspector.getBoundingClientRect()
+        const viewport = window.visualViewport
+        const left = viewport?.offsetLeft ?? 0
+        const right = left + (viewport?.width ?? innerWidth)
+        const top = viewport?.offsetTop ?? 0
+        const bottom = top + (viewport?.height ?? innerHeight)
+        if (
+          rect.right <= left ||
+          rect.left >= right ||
+          rect.bottom <= top ||
+          rect.top >= bottom ||
+          rect.right <= inspectorRect.left ||
+          rect.left >= inspectorRect.right ||
+          rect.bottom <= inspectorRect.top ||
+          rect.top >= inspectorRect.bottom
+        ) {
+          return []
+        }
+        return [
+          {
+            name: element.getAttribute("aria-label") ?? element.textContent?.trim() ?? "action",
+            bounds: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+          }
+        ]
+      })
+    )
+  for (const action of visibleSuggestionActions) {
+    expect(
+      contains(inspectorBounds!, action.bounds),
+      `visible ${action.name} inside inspector`
+    ).toBe(true)
+    expect(
+      contains(viewportBounds, action.bounds),
+      `visible ${action.name} inside visual viewport`
+    ).toBe(true)
+    for (const helper of helperControls) {
+      expect(
+        intersects(action.bounds, helper.bounds),
+        `${helper.name} overlaps visible ${action.name}`
+      ).toBe(false)
+    }
+  }
+
+  return {
+    viewport,
+    inspectorBounds,
+    reviewBounds,
+    acceptBounds,
+    rejectBounds,
+    helperControls,
+    visibleSuggestionActions
+  }
 }
 
 const screenshot = async (page: Page, name: string) => {
@@ -872,8 +1292,13 @@ test.describe("Notes graph suggestions", () => {
   }, testInfo) => {
     const fixture = new NotesGraphFixture()
     await installFixture(page, fixture)
+    await page.addInitScript(() => {
+      window.localStorage.setItem("ff_chatSidebar", "false")
+      window.localStorage.setItem("hideQuickChatHelper", "true")
+    })
     await page.setViewportSize({ width: 1440, height: 1000 })
     await openGraph(page)
+    await expect(page.getByTestId("chat-sidebar-edge-expand")).toHaveCount(0)
 
     await expect(page.getByRole("button", { name: "All notes" })).toBeDisabled()
     await expect(page.getByTestId("notes-graph-all-disabled-reason")).toContainText(
@@ -955,20 +1380,28 @@ test.describe("Notes graph suggestions", () => {
 
     const visualEvidence: Record<string, unknown> = {}
     await page.getByRole("button", { name: "Canvas", exact: true }).click()
+    await openSuggestions(page)
+    visualEvidence.desktopSuggestions = await assertSuggestionsContentVisualContract(page)
     visualEvidence.desktop = await assertVisualContract(page)
+    visualEvidence.desktopScreenshotTarget = await prepareSuggestionsScreenshot(page)
     visualEvidence.desktopScreenshot = await screenshot(page, "desktop")
 
     await page.getByRole("button", { name: "Collapse sidebar" }).click()
     await expect(page.getByRole("button", { name: "Expand sidebar" }).last()).toBeVisible()
     await page.setViewportSize({ width: 320, height: 900 })
     await closeMobileNotesList(page)
+    await openSuggestions(page)
     visualEvidence.mobile320 = await assertVisualContract(page)
     visualEvidence.mobile320InspectorViewport = await bringResponsiveInspectorIntoView(page)
+    visualEvidence.mobile320Suggestions = await assertSuggestionsContentVisualContract(page)
+    visualEvidence.mobile320ScreenshotTarget = await prepareSuggestionsScreenshot(page)
     visualEvidence.mobile320Screenshot = await screenshot(page, "mobile-320")
 
     await page.evaluate(() => window.scrollTo(0, 0))
     await page.setViewportSize({ width: 1440, height: 1000 })
     await closeDesktopNotesList(page)
+    await expect(page.getByTestId("notes-mobile-sidebar-backdrop")).toHaveCount(0)
+    await expect(page.getByTestId("chat-sidebar-edge-expand")).toHaveCount(0)
     const cdp = await page.context().newCDPSession(page)
     await cdp.send("Emulation.setPageScaleFactor", { pageScaleFactor: 2 })
     await expect
@@ -983,8 +1416,13 @@ test.describe("Notes graph suggestions", () => {
 
     await page.setViewportSize({ width: 720, height: 900 })
     await closeMobileNotesList(page)
+    await openSuggestions(page)
     visualEvidence.effectiveReflow720 = await assertVisualContract(page)
     visualEvidence.effectiveReflow720InspectorViewport = await bringResponsiveInspectorIntoView(page)
+    visualEvidence.effectiveReflow720Suggestions =
+      await assertSuggestionsContentVisualContract(page)
+    visualEvidence.effectiveReflow720ScreenshotTarget =
+      await prepareSuggestionsScreenshot(page)
     visualEvidence.effectiveReflow720Screenshot = await screenshot(
       page,
       "effective-reflow-720"

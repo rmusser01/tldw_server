@@ -129,7 +129,7 @@ const NotesGraphToolbar: React.FC<NotesGraphToolbarProps> = ({
             {t("option:notesSearch.graphRelationships")}
           </button>
         </div>
-        <div className="relative min-w-[180px] flex-1 sm:max-w-[280px]">
+        <div className="relative w-[180px] flex-none sm:w-[200px] 2xl:w-[280px]">
           <label className="sr-only" htmlFor="notes-graph-search">
             {t("option:notesSearch.graphSearchLoaded", {
               defaultValue: "Search loaded nodes"

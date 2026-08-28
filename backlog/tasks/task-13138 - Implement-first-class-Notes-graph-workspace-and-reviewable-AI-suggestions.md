@@ -3,24 +3,25 @@ id: TASK-13138
 title: Implement first-class Notes graph workspace and reviewable AI suggestions
 status: Done
 assignee: []
-created_date: 2026-08-27 03:40
-updated_date: 2026-08-28 17:41
+created_date: '2026-08-27 03:40'
+updated_date: '2026-08-28 19:31'
 labels:
-- notes
-- knowledge-graph
-- webui
-- browser-extension
-- llm
-- jobs
+  - notes
+  - knowledge-graph
+  - webui
+  - browser-extension
+  - llm
+  - jobs
 dependencies: []
 references:
-- TASK-13134
-- TASK-13135
-- TASK-13136
-- TASK-13137
+  - TASK-13134
+  - TASK-13135
+  - TASK-13136
+  - TASK-13137
 documentation:
-- Docs/superpowers/specs/2026-08-26-notes-second-brain-graph-suggestions-design.md
-- Docs/superpowers/plans/2026-08-26-notes-second-brain-graph-suggestions.md
+  - >-
+    Docs/superpowers/specs/2026-08-26-notes-second-brain-graph-suggestions-design.md
+  - Docs/superpowers/plans/2026-08-26-notes-second-brain-graph-suggestions.md
 priority: high
 ---
 
@@ -56,22 +57,6 @@ Add Graph as a first-class Notes view mode shared by the WebUI and browser exten
 - [x] #22 Static reset routing, loaded-graph search scope, paginated Relationships accessibility behavior, and the documented 90-day idempotency replay horizon are covered by contract tests.
 - [x] #23 All mutating suggestion routes use durable operation receipts with request fingerprints and bounded replay envelopes; reset is revision-guarded so replay cannot delete later rejections.
 <!-- AC:END -->
-
-## Final Summary
-
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented the first-class Notes Graph workspace and reviewable, source-grounded AI suggestions across the shared WebUI/browser-extension UI, nested Notes graph API, Jobs worker/maintenance lifecycle, durable owner-scoped storage, guarded accept/reject/reset decisions, accessibility, responsive behavior, and documentation. Task 12 release evidence now includes literal event/path privacy contracts, full sentinel/log/metric/telemetry-init checks, canonical shared-tag/source retrieval cases, real ordered top-30 pressure, exact WebUI/MV3 request ledgers, complete lifecycle/content/keyboard checks, and unobscured desktop/320px/page-scale-200/720px browser artifacts. Verification and all 23 acceptance-criteria mappings are recorded in .superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-12-report.md. Known inherited baselines remain documented; the human-authored PR Change summary is still required before merge. Deferred work remains TASK-13134, TASK-13135, TASK-13136, and TASK-13137.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-## Definition of Done
-<!-- DOD:BEGIN -->
-- [x] #1 Acceptance criteria completed
-- [x] #2 Tests or verification recorded
-- [x] #3 Documentation updated when relevant
-- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [x] #5 Final summary added
-- [x] #6 Known skips or blockers documented
-<!-- DOD:END -->
 
 ## Implementation Plan
 
@@ -207,4 +192,22 @@ Task 12 tracked file inventory: Docs/API/Notes_Graph_Suggestions.md; Docs/Code_D
 Task 12 Review Fix Round 1/3 started from exact base 07a8355ee8814522935ecbc79b94afc17c346673. Scope is limited to mutation-sensitive observability/privacy evaluation, explicit shared-membership and top-30 quality pressure, deterministic WebUI/extension request/lifecycle/keyboard/visual evidence hardening, local fixture simplification/setup error handling, and official Backlog marker repair. The authorized loading-key correction remains the only production change; dependencies, deferred features, and unrelated Watchlists templates remain excluded.
 
 Task 12 Review Fix Round 1/3 completed from exact base 07a8355ee8814522935ecbc79b94afc17c346673. Literal 13-event and per-path occurrence contracts, full scoped Loguru/sentinel/metric-label audits, real telemetry initializer fail-closed probes, canonical shared-tag/source memberships, 40-candidate ordered top-30 pressure, cutoff and duplicate mutation proofs, exact WebUI/MV3 request ledgers, complete lifecycle/content/keyboard checks, and unobscured desktop/320/page-scale-200/720 visual evidence now close every review finding. Final controller ruling separates page-scale origin integrity from responsive reflow and removes nondeterministic pinch-pan simulation; no new production issue was implicated. Verification: evaluation 2/2; focused frontend 142/142; WebUI 3/3; new extension cases 2/2; full extension 2/4 with two unchanged inherited selector failures; stable backend 469/470 after isolated Hypothesis timing-flake pass; Ruff clean; ESLint zero errors; Bandit zero findings; mirror/locale/artifact/diff checks clean; zero touched TypeScript diagnostics against inherited baselines. Full evidence: .superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-12-report.md. Fix commit subject: test: harden Notes graph rollout evidence (TASK-13138).
+
+Task 12 Review Fix Round 2 completed from base 3607f2b622. Suggestions visual evidence now reopens the correct tab; audits long content, complete review actions, and fixed helpers at desktop/320/720; and fully bounds all origin page-scale toolbar controls. Authorized production scope is stable toolbar search widths plus local inspector bottom scroll clearance. Verification: focused inspector TDD RED/GREEN; toolbar/workspace 36/36; focused Task 12 frontend 142/142; WebUI Chromium 3/3; extension Task 12 2/2 with unchanged inherited whole-file 2/4; ESLint zero errors; graph locale mirror 85/85; zero touched TypeScript diagnostics; diff/security/port checks clean. Full evidence and screenshot hashes are in task-12-report.md. No open Task 12 finding remains; inherited baselines and the human-authored PR Change summary requirement remain documented.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented the first-class Notes Graph workspace and reviewable, source-grounded AI suggestions across the shared WebUI/browser-extension UI, nested Notes graph API, Jobs worker/maintenance lifecycle, durable owner-scoped storage, guarded accept/reject/reset decisions, accessibility, responsive behavior, and documentation. Task 12 release evidence now includes literal event/path privacy contracts, full sentinel/log/metric/telemetry-init checks, canonical shared-tag/source retrieval cases, real ordered top-30 pressure, exact WebUI/MV3 request ledgers, complete lifecycle/content/keyboard checks, and unobscured desktop/320px/page-scale-200/720px browser artifacts. Verification and all 23 acceptance-criteria mappings are recorded in .superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-12-report.md. Known inherited baselines remain documented; the human-authored PR Change summary is still required before merge. Deferred work remains TASK-13134, TASK-13135, TASK-13136, and TASK-13137.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
+<!-- DOD:END -->
