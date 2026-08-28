@@ -76,9 +76,16 @@ for task_id in historical_ids:
     if len(by_id[task_id]) != 1:
         continue
     frontmatter = by_id[task_id][0][2]
-    text = by_id[task_id][0][3]
     if str(frontmatter.get("status")) != "Done":
         errors.append(f"{task_id}: historical record is not Done")
+
+for task_id in release_ids + historical_ids:
+    if len(by_id[task_id]) != 1:
+        continue
+    frontmatter = by_id[task_id][0][2]
+    text = by_id[task_id][0][3]
+    if str(frontmatter.get("status")) != "Done":
+        continue
     for section in ("AC", "DOD"):
         match = re.search(
             rf"<!-- {section}:BEGIN -->(.*?)<!-- {section}:END -->", text, re.S
