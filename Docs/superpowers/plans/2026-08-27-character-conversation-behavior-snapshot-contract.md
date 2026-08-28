@@ -262,7 +262,7 @@ Expected: both backend contracts pass.
 - Modify: `tldw_Server_API/app/core/DB_Management/chacha/conversation_resume_store.py`
 - Modify: `tldw_Server_API/tests/Characters/test_character_chat_lib.py`
 
-- [ ] **Step 1: Write failing creation/rollback/source-mutation tests**
+- [x] **Step 1: Write failing creation/rollback/source-mutation tests**
 
 Create a character using custom prompt/generation presets, greeting, exemplar, world
 book, memory, effective provider/model, explicit sampling values, and a second
@@ -279,7 +279,7 @@ raise and prove conversation/settings/snapshot all roll back. Exercise active Sy
 prove its server-origin mutation path is either atomic with the snapshot or yields
 `missing`/`resume_eligible=false` before any contract append can write.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```bash
 /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest -q --tb=short \
@@ -289,7 +289,7 @@ prove its server-origin mutation path is either atomic with the snapshot or yiel
 
 Expected: FAIL because creation does not capture readiness.
 
-- [ ] **Step 3: Add bounded readiness schemas**
+- [x] **Step 3: Add bounded readiness schemas**
 
 ```python
 class BehaviorSnapshotStatus(BaseModel):
@@ -308,7 +308,7 @@ and `tail`. Ordinary reads expose metadata, never snapshot body. Capability rema
 server-wide implementation claim; per-conversation readiness is authoritative for
 whether append/completion is allowed.
 
-- [ ] **Step 4: Implement one atomic creation factory**
+- [x] **Step 4: Implement one atomic creation factory**
 
 Resolve every classified source with source version/provenance, materialize the
 snapshot, then revalidate all source versions in the create transaction. Retry
@@ -324,20 +324,19 @@ before insertion instead of consulting later deployment defaults. Make the endpo
 non-character chats and intentionally unsupported/active-Sync creators remain
 explicit snapshot-missing, `resume_eligible=false` records.
 
-- [ ] **Step 5: Add invalid/legacy/size/auth/multiparticipant coverage and run GREEN**
+- [x] **Step 5: Add invalid/legacy/size/auth/multiparticipant coverage and run GREEN**
 
 ```bash
 /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest -q --tb=short \
   tldw_Server_API/tests/Character_Chat_NEW/unit/test_chat_session_create_schema.py \
   tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_behavior_snapshot_api.py \
   tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_api.py \
-  tldw_Server_API/tests/Characters/test_character_chat_lib.py \
-  -k "chat or snapshot or session or sync"
+  tldw_Server_API/tests/Characters/test_character_chat_lib.py
 ```
 
 Expected: PASS; malformed storage reads `invalid`, legacy reads `missing`, oversize rolls back, and cross-user reads reveal nothing.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/Character_Chat/character_conversation_factory.py \
