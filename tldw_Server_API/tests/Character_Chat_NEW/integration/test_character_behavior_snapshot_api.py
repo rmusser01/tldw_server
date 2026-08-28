@@ -1325,3 +1325,246 @@ def test_cross_user_detail_never_reveals_resume_metadata(test_client, auth_heade
     serialized = response.text
     assert "behavior_snapshot" not in serialized
     assert "resume_eligible" not in serialized
+
+
+@pytest.mark.integration
+def test_behavior_settings_materialize_references_and_noop_advances_version(
+    test_client,
+    auth_headers,
+    character_db,
+):
+    sources = _create_behavior_sources(character_db)
+    created = test_client.post(
+        "/api/v1/chats/",
+        headers=auth_headers,
+        json={
+            "character_id": sources["primary_id"],
+            "participant_character_ids": [sources["second_id"]],
+            "provider": "local-llm",
+            "model": "local-test",
+        },
+    )
+    assert created.status_code == 201, created.text
+    conversation_id = created.json()["id"]
+    mutation = {
+        "provider": "local-llm",
+        "model": "local-test",
+        "chatGenerationOverride": {
+            "enabled": True,
+            "temperature": 0.2,
+            "top_p": 0.6,
+            "repetition_penalty": 1.1,
+            "stop": ["<STOP>"],
+        },
+        "presetScope": "chat",
+        "chatPresetOverrideId": "snapshot-cinematic",
+        "participantCharacterIds": [
+            sources["primary_id"],
+            sources["second_id"],
+        ],
+        "characterMemoryById": {
+            str(sources["primary_id"]): {
+                "note": "Remember the materialized brass key.",
+                "updatedAt": "2026-08-28T00:00:00Z",
+            }
+        },
+        "assistantOverlay": {
+            "kind": "character",
+            "id": str(sources["primary_id"]),
+            "name": "Ari in the east vault",
+            "system_prompt_snapshot": "Speak as the east-vault archivist.",
+            "updatedAt": "2026-08-28T00:00:00Z",
+        },
+        "conversationContext": {
+            "world_book_ids": [sources["world_book_id"]],
+        },
+    }
+
+    updated = test_client.put(
+        f"/api/v1/chats/{conversation_id}/settings",
+        headers=auth_headers,
+        json={"settings": mutation},
+    )
+
+    assert updated.status_code == 200, updated.text
+    assert "roleplayResumeV1" not in updated.json()["settings"]
+    assert "roleplayBehaviorV1" not in updated.json()["settings"]
+    state = character_db.get_roleplay_resume_state(conversation_id)
+    assert state["settings_version"] == 2
+    materialized = state["materialized_settings"]
+    assert materialized["schema_version"] == 1
+    assert materialized["digest"].startswith("sha256:")
+    values = materialized["values"]
+    assert values["effective_completion"] == {
+        "provider": "local-llm",
+        "model": "local-test",
+        "sampling": {
+            "temperature": 0.2,
+            "top_p": 0.6,
+            "repetition_penalty": 1.1,
+            "stop": ["<STOP>"],
+        },
+    }
+    assert values["prompt_preset"]["preset_id"] == "snapshot-cinematic"
+    assert values["prompt_preset"]["section_templates"]["scenario"] == "Scene: {{scenario}}"
+    assert values["world_books"][0]["id"] == sources["world_book_id"]
+    assert values["world_books"][0]["entries"][0]["content"] == (
+        "The east vault flooded in 2041."
+    )
+    assert [item["source"]["id"] for item in values["participants"]] == [
+        str(sources["primary_id"]),
+        str(sources["second_id"]),
+    ]
+    assert values["memory"]["character_memory_by_id"] == {
+        str(sources["primary_id"]): "Remember the materialized brass key."
+    }
+    assert values["assistant_overlay"] == {
+        "source": {
+            "kind": "character",
+            "id": str(sources["primary_id"]),
+            "version": 1,
+        },
+        "name": "Ari in the east vault",
+        "system_prompt": "Speak as the east-vault archivist.",
+    }
+
+    character = character_db.get_character_card_by_id(sources["primary_id"])
+    assert character_db.update_character_card(
+        sources["primary_id"],
+        {"system_prompt": "Changed after settings materialization."},
+        expected_version=character["version"],
+    )
+    assert character_db.delete_prompt_preset("snapshot-cinematic")
+    with character_db.transaction() as conn:
+        conn.execute(
+            "UPDATE world_book_entries SET content = ? WHERE id = ?",
+            ("Changed after settings materialization.", sources["world_book_entry_id"]),
+        )
+    assert character_db.get_roleplay_resume_state(conversation_id)[
+        "materialized_settings"
+    ] == materialized
+
+    replay = test_client.put(
+        f"/api/v1/chats/{conversation_id}/settings",
+        headers=auth_headers,
+        json={"settings": mutation},
+    )
+    assert replay.status_code == 200, replay.text
+    replay_state = character_db.get_roleplay_resume_state(conversation_id)
+    assert replay_state["settings_version"] == 3
+    assert replay_state["materialized_settings"] == materialized
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "invalid_patch",
+    [
+        {"chatPresetOverrideId": "missing-preset", "presetScope": "chat"},
+        {"participantCharacterIds": [999_999]},
+        {"conversationContext": {"world_book_ids": [999_999]}},
+        {
+            "assistantOverlay": {
+                "kind": "character",
+                "id": "999999",
+                "name": "Unknown",
+                "updatedAt": "2026-08-28T00:00:00Z",
+            }
+        },
+        {"provider": "definitely-not-a-provider", "model": "missing-model"},
+    ],
+)
+def test_unknown_behavior_reference_rejects_without_settings_version_change(
+    test_client,
+    auth_headers,
+    character_db,
+    invalid_patch,
+):
+    character_id = character_db.add_character_card({"name": "Reference Guard Ari"})
+    created = test_client.post(
+        "/api/v1/chats/",
+        headers=auth_headers,
+        json={
+            "character_id": character_id,
+            "provider": "local-llm",
+            "model": "local-test",
+        },
+    )
+    assert created.status_code == 201, created.text
+    conversation_id = created.json()["id"]
+    before_state = character_db.get_roleplay_resume_state(conversation_id)
+    before_settings_bytes = _snapshot_storage_bytes(character_db, conversation_id)[1]
+
+    response = test_client.put(
+        f"/api/v1/chats/{conversation_id}/settings",
+        headers=auth_headers,
+        json={"settings": invalid_patch},
+    )
+
+    assert response.status_code in {400, 404, 409, 422}, response.text
+    after_state = character_db.get_roleplay_resume_state(conversation_id)
+    assert after_state["settings_version"] == before_state["settings_version"] == 1
+    assert _snapshot_storage_bytes(character_db, conversation_id)[1] == before_settings_bytes
+
+
+@pytest.mark.integration
+def test_history_version_advances_for_ancestor_and_branch_with_stable_tail_and_rollback(
+    character_db,
+):
+    character_id = character_db.add_character_card({"name": "History Fence Ari"})
+    conversation_id = create_character_conversation(
+        character_db,
+        conversation_data={
+            "character_id": character_id,
+            "title": "History fences",
+            "client_id": "1",
+        },
+        provider="local-llm",
+        model="local-test",
+        initial_messages=[
+            {"id": "history-root", "sender": "user", "content": "Root"},
+            {
+                "id": "history-tail",
+                "sender": "assistant",
+                "content": "Tail",
+                "parent_message_id": "history-root",
+            },
+        ],
+    )
+    initial = character_db.get_roleplay_resume_state(conversation_id)
+    assert initial["history_version"] == 3
+    assert initial["tail"] == {"message_id": "history-tail", "message_version": 1}
+
+    assert character_db.update_message(
+        "history-root",
+        {"content": "Edited ancestor"},
+        expected_version=1,
+    )
+    edited = character_db.get_roleplay_resume_state(conversation_id)
+    assert edited["history_version"] == 4
+    assert edited["tail"] == initial["tail"]
+
+    assert character_db.update_message(
+        "history-tail",
+        {"parent_message_id": None},
+        expected_version=1,
+    )
+    branched = character_db.get_roleplay_resume_state(conversation_id)
+    assert branched["history_version"] == 5
+    assert branched["tail"] == {
+        "message_id": "history-tail",
+        "message_version": 2,
+    }
+
+    with pytest.raises(RuntimeError, match="rollback history mutation"):
+        with character_db.transaction() as conn:
+            assert character_db.soft_delete_message(
+                "history-root",
+                expected_version=2,
+                conn=conn,
+            )
+            assert character_db.get_roleplay_resume_state(
+                conversation_id,
+                conn=conn,
+            )["history_version"] == 6
+            raise RuntimeError("rollback history mutation")
+    assert character_db.get_roleplay_resume_state(conversation_id) == branched

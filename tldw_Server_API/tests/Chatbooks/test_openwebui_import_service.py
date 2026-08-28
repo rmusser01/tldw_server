@@ -1,12 +1,16 @@
 import json
 import sqlite3
+from types import SimpleNamespace
 
 import pytest
 
-from tldw_Server_API.app.core.Chatbooks.exceptions import DatabaseError
-from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookService
 from tldw_Server_API.app.core.Chatbooks.chatbook_models import ConflictResolution
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookService
+from tldw_Server_API.app.core.Chatbooks.exceptions import DatabaseError
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    CharactersRAGDB,
+    ConflictError,
+)
 
 
 pytestmark = pytest.mark.unit
@@ -31,6 +35,73 @@ def _write_export(service: ChatbookService, payload: list[dict]) -> str:
     path = service.temp_dir / "openwebui.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
     return str(path)
+
+
+def test_openwebui_metadata_merge_uses_settings_version_cas():
+    class _StubDB:
+        def __init__(self) -> None:
+            self.expected_settings_version = None
+
+        def get_conversation_settings(self, conversation_id: str):
+            return {
+                "settings": {"roleplayBehaviorV1": {"digest": "preserved"}},
+                "settings_version": 6,
+            }
+
+        def upsert_conversation_settings(
+            self,
+            conversation_id: str,
+            settings: dict,
+            *,
+            expected_settings_version: int | None = None,
+        ) -> bool:
+            self.expected_settings_version = expected_settings_version
+            assert settings["roleplayBehaviorV1"] == {"digest": "preserved"}
+            return True
+
+    service = ChatbookService.__new__(ChatbookService)
+    service.db = _StubDB()
+    plan = SimpleNamespace(
+        source_metadata={},
+        history_current_id="message-1",
+        is_branched=False,
+    )
+
+    assert service._store_openwebui_conversation_settings(
+        "conversation-1",
+        plan,
+        "external-1",
+    )
+    assert service.db.expected_settings_version == 6
+
+
+def test_openwebui_metadata_merge_converts_cas_conflict_to_controlled_failure():
+    class _ConflictingDB:
+        def get_conversation_settings(self, conversation_id: str):
+            return {"settings": {}, "settings_version": 6}
+
+        def upsert_conversation_settings(
+            self,
+            conversation_id: str,
+            settings: dict,
+            *,
+            expected_settings_version: int | None = None,
+        ) -> bool:
+            raise ConflictError("stale settings")
+
+    service = ChatbookService.__new__(ChatbookService)
+    service.db = _ConflictingDB()
+    plan = SimpleNamespace(
+        source_metadata={},
+        history_current_id="message-1",
+        is_branched=False,
+    )
+
+    assert not service._store_openwebui_conversation_settings(
+        "conversation-1",
+        plan,
+        "external-1",
+    )
 
 
 def _branched_export() -> list[dict]:

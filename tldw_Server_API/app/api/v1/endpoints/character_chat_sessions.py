@@ -117,7 +117,15 @@ from tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade import (
     replace_placeholders,
 )
 from tldw_Server_API.app.core.Character_Chat.character_conversation_factory import (
+    _decode_json,
+    _load_preset,
+    _materialize_behavior,
+    _resolve_effective_completion,
+    _safe_json,
     create_character_conversation,
+)
+from tldw_Server_API.app.core.Character_Chat.character_behavior_snapshot import (
+    DEFAULT_MAX_SNAPSHOT_BYTES,
 )
 
 # Rate limiting
@@ -199,6 +207,10 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     InputError,
 )
+from tldw_Server_API.app.core.DB_Management.chacha.conversation_resume_store import (
+    build_materialized_behavior_settings,
+)
+from tldw_Server_API.app.core.LLM_Calls.adapter_utils import ensure_app_config
 from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
 from tldw_Server_API.app.core.Sync.v2.server_origin import (
     SyncServerOriginIdempotencyConflictError,
@@ -2920,6 +2932,386 @@ def _merge_conversation_settings(
     return merged
 
 
+_INTERNAL_CHAT_SETTINGS_KEYS = frozenset(
+    {"roleplayResumeV1", "roleplayBehaviorV1"}
+)
+_BEHAVIOR_SETTING_KEYS = frozenset(
+    {
+        "assistantOverlay",
+        "authorNote",
+        "authorNoteEnabled",
+        "authorNotePosition",
+        "characterMemoryById",
+        "chatGenerationOverride",
+        "chatPresetOverrideId",
+        "conversationContext",
+        "generationOverrides",
+        "memoryScope",
+        "model",
+        "participantCharacterIds",
+        "participant_character_ids",
+        "presetScope",
+        "promptPreset",
+        "prompt_preset",
+        "provider",
+    }
+)
+
+
+def _public_chat_settings(settings: Any) -> dict[str, Any]:
+    """Return a detached settings payload without internal resume-contract state."""
+    public = dict(settings) if isinstance(settings, Mapping) else {}
+    for key in _INTERNAL_CHAT_SETTINGS_KEYS:
+        public.pop(key, None)
+    return public
+
+
+def _result_row_dict(row: Any, result: Any) -> dict[str, Any]:
+    if isinstance(row, dict):
+        return dict(row)
+    mapping = getattr(row, "_mapping", None)
+    if mapping is not None:
+        return dict(mapping)
+    try:
+        return dict(row)
+    except (TypeError, ValueError):
+        keys = result.keys() if callable(getattr(result, "keys", None)) else []
+        return dict(zip(keys, row, strict=False))
+
+
+def _source_id(value: Any) -> str | None:
+    if not isinstance(value, Mapping):
+        return None
+    source = value.get("source")
+    if not isinstance(source, Mapping):
+        return None
+    source_id = source.get("id")
+    return str(source_id) if source_id is not None else None
+
+
+def _snapshot_participants(resume_state: Mapping[str, Any]) -> list[dict[str, Any]]:
+    snapshot = resume_state.get("behavior_snapshot")
+    payload = snapshot.get("payload") if isinstance(snapshot, Mapping) else None
+    participants = payload.get("participants") if isinstance(payload, Mapping) else None
+    return [dict(item) for item in participants or [] if isinstance(item, Mapping)]
+
+
+def _materialize_world_book(conn: Any, world_book_id: int) -> dict[str, Any]:
+    result = conn.execute(
+        "SELECT * FROM world_books WHERE id = ? AND deleted = FALSE LIMIT 1",
+        (world_book_id,),
+    )
+    row = result.fetchone()
+    if row is None:
+        raise InputError(f"World book ID {world_book_id} not found.")
+    book = _result_row_dict(row, result)
+    entries_result = conn.execute(
+        """
+        SELECT * FROM world_book_entries
+         WHERE world_book_id = ?
+         ORDER BY priority DESC, id
+        """,
+        (world_book_id,),
+    )
+    entries = [
+        _result_row_dict(entry, entries_result)
+        for entry in entries_result.fetchall()
+    ]
+    materialized = {
+        key: _safe_json(value)
+        for key, value in book.items()
+        if key not in {"client_id", "deleted"}
+    }
+    materialized["entries"] = [
+        {
+            key: _safe_json(
+                _decode_json(value, {} if key == "metadata" else [])
+                if key in {"keywords", "metadata"}
+                else value
+            )
+            for key, value in entry.items()
+            if key not in {"client_id", "deleted"}
+        }
+        for entry in entries
+    ]
+    return materialized
+
+
+def _find_materialized_preset(
+    preset_id: str,
+    *,
+    current: Any,
+    participants: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    candidates: list[Any] = [current]
+    for participant in participants:
+        prompt = participant.get("prompt")
+        extensions = (
+            prompt.get("prompt_relevant_extensions")
+            if isinstance(prompt, Mapping)
+            else None
+        )
+        if isinstance(extensions, Mapping):
+            candidates.append(extensions.get("prompt_preset"))
+    for candidate in candidates:
+        if not isinstance(candidate, Mapping):
+            continue
+        if candidate.get("preset_id") == preset_id or _source_id(candidate) == preset_id:
+            return dict(candidate)
+    return None
+
+
+def _materialize_overlay_source(
+    conn: Any,
+    overlay: Mapping[str, Any],
+    *,
+    owner_user_id: str,
+    participants: list[dict[str, Any]],
+    current_overlay: Any,
+) -> dict[str, Any]:
+    kind = str(overlay.get("kind") or "")
+    source_id = str(overlay.get("id") or "")
+    if isinstance(current_overlay, Mapping):
+        current_source = current_overlay.get("source")
+        if (
+            isinstance(current_source, Mapping)
+            and current_source.get("kind") == kind
+            and str(current_source.get("id")) == source_id
+        ):
+            return dict(current_source)
+    if kind == "character":
+        participant = next(
+            (item for item in participants if _source_id(item) == source_id),
+            None,
+        )
+        if participant is not None:
+            return dict(participant["source"])
+        try:
+            character_id = int(source_id)
+        except (TypeError, ValueError) as exc:
+            raise InputError("Assistant overlay character ID is invalid.") from exc
+        result = conn.execute(
+            "SELECT id, version FROM character_cards WHERE id = ? AND deleted = FALSE LIMIT 1",
+            (character_id,),
+        )
+    else:
+        result = conn.execute(
+            """
+            SELECT id, version FROM persona_profiles
+             WHERE id = ? AND user_id = ? AND deleted = FALSE
+             LIMIT 1
+            """,
+            (source_id, owner_user_id),
+        )
+    row = result.fetchone()
+    if row is None:
+        raise InputError(f"Assistant overlay {kind} '{source_id}' not found.")
+    source = _result_row_dict(row, result)
+    return {"kind": kind, "id": str(source["id"]), "version": int(source["version"])}
+
+
+def _materialize_roleplay_behavior_settings(
+    conn: Any,
+    *,
+    conversation: Mapping[str, Any],
+    resume_state: Mapping[str, Any],
+    merged_settings: dict[str, Any],
+    owner_user_id: str,
+) -> dict[str, Any]:
+    """Resolve classified chat behavior into an immutable, closed stored record."""
+    current_materialized = resume_state.get("materialized_settings")
+    if (
+        "roleplayBehaviorV1" in (resume_state.get("settings") or {})
+        and not isinstance(current_materialized, Mapping)
+    ):
+        raise InputError("Stored materialized behavior settings are invalid.")
+    current_values = (
+        dict(current_materialized.get("values") or {})
+        if isinstance(current_materialized, Mapping)
+        else {}
+    )
+    snapshot_participants = _snapshot_participants(resume_state)
+
+    base_effective = current_values.get("effective_completion")
+    if not isinstance(base_effective, Mapping):
+        base_effective = resume_state.get("effective_completion")
+    if not isinstance(base_effective, Mapping):
+        raise InputError("Conversation has no valid effective completion settings.")
+    sampling = dict(base_effective.get("sampling") or {})
+    overrides = merged_settings.get("chatGenerationOverride")
+    if not isinstance(overrides, Mapping):
+        overrides = merged_settings.get("generationOverrides")
+    if isinstance(overrides, Mapping):
+        if overrides.get("enabled") is False and snapshot_participants:
+            generation_defaults = snapshot_participants[0].get("generation_defaults")
+            snapshot_sampling = (
+                generation_defaults.get("sampling")
+                if isinstance(generation_defaults, Mapping)
+                else None
+            )
+            if isinstance(snapshot_sampling, Mapping):
+                sampling = dict(snapshot_sampling)
+        else:
+            for key in ("temperature", "top_p", "repetition_penalty", "stop"):
+                if key in overrides and overrides[key] is not None:
+                    sampling[key] = overrides[key]
+    requested_effective = {
+        "provider": merged_settings.get("provider") or base_effective.get("provider"),
+        "model": merged_settings.get("model") or base_effective.get("model"),
+        "sampling": sampling,
+    }
+    if requested_effective == base_effective:
+        effective = dict(base_effective)
+    else:
+        effective, _reason = _resolve_effective_completion(
+            provider=requested_effective["provider"],
+            model=requested_effective["model"],
+            sampling=requested_effective["sampling"],
+            character={},
+            app_config=ensure_app_config(),
+        )
+        if effective is None:
+            raise InputError("Provider, model, or sampling settings are invalid.")
+
+    desired_participant_ids = _normalize_participant_character_ids(
+        merged_settings,
+        conversation.get("character_id"),
+    )
+    known_participants = {
+        _source_id(item): dict(item)
+        for item in [*(current_values.get("participants") or []), *snapshot_participants]
+        if _source_id(item) is not None
+    }
+    participants: list[dict[str, Any]] = []
+    for character_id in desired_participant_ids:
+        source_id = str(character_id)
+        participant = known_participants.get(source_id)
+        if participant is None:
+            materialized = _materialize_behavior(
+                conn,
+                participant_character_ids=[character_id],
+                prompt_preset_id=None,
+                memory_by_character_id={},
+                primary_greeting=None,
+                max_snapshot_bytes=DEFAULT_MAX_SNAPSHOT_BYTES,
+            )
+            participant = dict(materialized.snapshot.payload["participants"][0])
+        participants.append(participant)
+
+    values: dict[str, Any] = {
+        **current_values,
+        "effective_completion": effective,
+        "participants": participants,
+    }
+    preset_id_raw = (
+        merged_settings.get("chatPresetOverrideId")
+        or merged_settings.get("promptPreset")
+        or merged_settings.get("prompt_preset")
+    )
+    preset_id = str(preset_id_raw).strip() if preset_id_raw else ""
+    if not preset_id and participants:
+        primary_prompt = participants[0].get("prompt")
+        extensions = (
+            primary_prompt.get("prompt_relevant_extensions")
+            if isinstance(primary_prompt, Mapping)
+            else None
+        )
+        primary_preset = extensions.get("prompt_preset") if isinstance(extensions, Mapping) else None
+        preset_id = str(primary_preset.get("preset_id") or "") if isinstance(primary_preset, Mapping) else ""
+    if preset_id:
+        preset = _find_materialized_preset(
+            preset_id,
+            current=current_values.get("prompt_preset"),
+            participants=snapshot_participants,
+        )
+        values["prompt_preset"] = preset or _safe_json(
+            _load_preset(
+                conn,
+                preset_id,
+                selection_source="settings_mutation",
+            )
+        )
+
+    conversation_context = merged_settings.get("conversationContext")
+    if isinstance(conversation_context, Mapping) and "world_book_ids" in conversation_context:
+        raw_world_book_ids = conversation_context.get("world_book_ids")
+        if not isinstance(raw_world_book_ids, list):
+            raise InputError("conversationContext.world_book_ids must be a list.")
+        reusable_books: dict[int, dict[str, Any]] = {}
+        for book in [
+            *(current_values.get("world_books") or []),
+            *(world_book for participant in snapshot_participants for world_book in participant.get("world_books", [])),
+        ]:
+            if isinstance(book, Mapping) and isinstance(book.get("id"), int):
+                reusable_books[int(book["id"])] = dict(book)
+        world_books: list[dict[str, Any]] = []
+        for raw_id in raw_world_book_ids:
+            if isinstance(raw_id, bool):
+                raise InputError("World book IDs must be positive integers.")
+            try:
+                world_book_id = int(raw_id)
+            except (TypeError, ValueError) as exc:
+                raise InputError("World book IDs must be positive integers.") from exc
+            if world_book_id <= 0:
+                raise InputError("World book IDs must be positive integers.")
+            world_books.append(
+                reusable_books.get(world_book_id)
+                or _materialize_world_book(conn, world_book_id)
+            )
+        values["world_books"] = world_books
+
+    memory_by_id = merged_settings.get("characterMemoryById")
+    memory_fields_present = any(
+        key in merged_settings
+        for key in (
+            "authorNote",
+            "authorNoteEnabled",
+            "authorNotePosition",
+            "characterMemoryById",
+            "memoryScope",
+        )
+    )
+    if memory_fields_present:
+        participant_ids = {str(item) for item in desired_participant_ids}
+        materialized_memory: dict[str, str] = {}
+        for raw_id, entry in (
+            memory_by_id.items() if isinstance(memory_by_id, Mapping) else ()
+        ):
+            character_id = str(raw_id)
+            if character_id not in participant_ids:
+                raise InputError(f"Character memory ID {character_id} is not a participant.")
+            note = entry.get("note") if isinstance(entry, Mapping) else entry
+            materialized_memory[character_id] = str(note or "")
+        values["memory"] = {
+            "character_memory_by_id": materialized_memory,
+            "author_note": str(merged_settings.get("authorNote") or ""),
+            "author_note_enabled": merged_settings.get("authorNoteEnabled") is not False,
+            "author_note_position": str(
+                merged_settings.get("authorNotePosition") or "after_system"
+            ),
+            "scope": str(merged_settings.get("memoryScope") or "shared"),
+        }
+
+    overlay = merged_settings.get("assistantOverlay")
+    if isinstance(overlay, Mapping):
+        source = _materialize_overlay_source(
+            conn,
+            overlay,
+            owner_user_id=owner_user_id,
+            participants=participants,
+            current_overlay=current_values.get("assistant_overlay"),
+        )
+        values["assistant_overlay"] = {
+            "source": source,
+            "name": str(overlay.get("name") or ""),
+            "system_prompt": str(overlay.get("system_prompt_snapshot") or ""),
+        }
+    elif "assistantOverlay" in merged_settings:
+        values["assistant_overlay"] = None
+
+    return build_materialized_behavior_settings(values)
+
+
 def _normalize_note_text(value: Any) -> str:
     if not isinstance(value, str):
         return ""
@@ -4124,6 +4516,7 @@ def _persist_auto_summary_to_settings(
     threshold: int,
     window: int,
     compressed_count: int,
+    expected_settings_version: int | None = None,
 ) -> None:
     existing_summary = settings.get("summary")
     if _summary_matches_existing(
@@ -4156,7 +4549,11 @@ def _persist_auto_summary_to_settings(
 
     try:
         merged_settings = _validate_chat_settings_payload(merged_settings)
-        db.upsert_conversation_settings(chat_id, merged_settings)
+        db.upsert_conversation_settings(
+            chat_id,
+            merged_settings,
+            expected_settings_version=expected_settings_version,
+        )
     except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as exc:
         logger.debug(
             "Non-fatal: failed to persist auto-summary settings for chat {}: {}",
@@ -4253,6 +4650,11 @@ def _apply_auto_summary_to_prompt_messages(
             threshold=threshold,
             window=window,
             compressed_count=len(compressible),
+            expected_settings_version=(
+                (settings_row or {}).get("settings_version") or 0
+            )
+            if isinstance(settings_row, Mapping)
+            else 0,
         )
 
     return summarized_messages, summary_content
@@ -4985,7 +5387,9 @@ async def get_chat_session(
         settings_payload: Optional[dict[str, Any]] = None
         if include_settings:
             settings_row = db.get_conversation_settings(chat_id)
-            settings_payload = (settings_row or {}).get("settings") or {}
+            settings_payload = _public_chat_settings(
+                (settings_row or {}).get("settings")
+            )
 
         return _convert_db_conversation_to_response(
             _attach_conversation_assistant_names(
@@ -7198,12 +7602,7 @@ async def list_chat_sessions(
             if include_settings:
                 settings_row = db.get_conversation_settings(conv['id'])
                 stored_settings = (settings_row or {}).get("settings")
-                settings_payload = (
-                    dict(stored_settings)
-                    if isinstance(stored_settings, Mapping)
-                    else {}
-                )
-                settings_payload.pop("roleplayResumeV1", None)
+                settings_payload = _public_chat_settings(stored_settings)
             chats.append(
                 _convert_db_conversation_to_list_item(
                     _attach_conversation_assistant_names_from_lookups(
@@ -7357,7 +7756,9 @@ async def get_chat_settings(
         _verify_chat_ownership(conversation, current_user.id, chat_id, scope)
 
         settings_row = db.get_conversation_settings(chat_id)
-        settings = (settings_row.get("settings") or {}) if settings_row else {}
+        settings = _public_chat_settings(
+            (settings_row.get("settings") or {}) if settings_row else {}
+        )
         # Internal bootstrap metadata alone should not count as user-visible settings.
         if settings and set(settings.keys()) <= {"greetingsChecksum"}:
             settings = {}
@@ -7433,10 +7834,13 @@ async def update_chat_settings(
         conversation = db.get_conversation_by_id(chat_id)
         _verify_chat_ownership(conversation, current_user.id, chat_id, scope)
 
-        if "roleplayResumeV1" in (payload.settings or {}):
+        reserved_keys = _INTERNAL_CHAT_SETTINGS_KEYS.intersection(
+            (payload.settings or {}).keys()
+        )
+        if reserved_keys:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="roleplayResumeV1 is reserved creation state",
+                detail=f"{sorted(reserved_keys)[0]} is reserved resume-contract state",
             )
 
         incoming_settings = _validate_chat_settings_payload(
@@ -7444,26 +7848,77 @@ async def update_chat_settings(
             owner_user_id=str(current_user.id),
         )
 
-        existing_row = db.get_conversation_settings(chat_id)
-        existing_settings = (existing_row or {}).get("settings") or {}
-        merged_settings = _merge_conversation_settings(existing_settings, incoming_settings)
-        merged_settings = _validate_chat_settings_payload(
-            merged_settings,
-            owner_user_id=str(current_user.id),
-        )
+        with db.transaction() as conn:
+            resume_state = db.get_roleplay_resume_state(
+                chat_id,
+                conn=conn,
+                lock_for_update=True,
+            )
+            existing_settings = resume_state.get("settings") or {}
+            merged_settings = _merge_conversation_settings(
+                existing_settings,
+                incoming_settings,
+            )
+            internal_settings = {
+                key: existing_settings[key]
+                for key in _INTERNAL_CHAT_SETTINGS_KEYS
+                if key in existing_settings
+            }
+            merged_settings = _validate_chat_settings_payload(
+                _public_chat_settings(merged_settings),
+                owner_user_id=str(current_user.id),
+            )
+            merged_settings.update(internal_settings)
 
-        if not db.upsert_conversation_settings(chat_id, merged_settings):
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update chat settings")
+            snapshot = resume_state.get("behavior_snapshot")
+            snapshot_valid = (
+                isinstance(snapshot, Mapping) and snapshot.get("status") == "valid"
+            )
+            if snapshot_valid and _BEHAVIOR_SETTING_KEYS.intersection(incoming_settings):
+                materialized = _materialize_roleplay_behavior_settings(
+                    conn,
+                    conversation=conversation,
+                    resume_state=resume_state,
+                    merged_settings=merged_settings,
+                    owner_user_id=str(current_user.id),
+                )
+                merged_settings["roleplayBehaviorV1"] = materialized
+                merged_settings["roleplayResumeV1"] = {
+                    "resumeEligible": True,
+                    "resumeIneligibleReason": None,
+                    "effectiveCompletion": materialized["values"][
+                        "effective_completion"
+                    ],
+                }
+
+            if not db.upsert_conversation_settings(
+                chat_id,
+                merged_settings,
+                conn=conn,
+                expected_settings_version=resume_state["settings_version"] or 0,
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to update chat settings",
+                )
 
         settings_row = db.get_conversation_settings(chat_id)
 
         return ChatSettingsResponse(
             conversation_id=chat_id,
-            settings=(settings_row or {}).get("settings") or merged_settings,
+            settings=_public_chat_settings(
+                (settings_row or {}).get("settings") or merged_settings
+            ),
             last_modified=(settings_row or {}).get("last_modified") or datetime.now(timezone.utc),
         )
     except HTTPException:
         raise
+    except ConflictError as exc:
+        logger.warning(f"Concurrent settings update for {chat_id}: {exc}")
+        raise map_db_error_to_http(exc) from exc
+    except InputError as exc:
+        logger.warning(f"Invalid behavior settings for {chat_id}: {exc}")
+        raise map_db_error_to_http(exc) from exc
     except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as exc:
         logger.error(f"Error updating chat settings for {chat_id}: {exc}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update chat settings") from exc
@@ -8386,7 +8841,15 @@ async def select_greeting(
     checksum = _compute_greetings_checksum(character)
     settings["greetingSelectionId"] = f"greeting:{body.index}:selected"
     settings["greetingsChecksum"] = checksum
-    if not db.upsert_conversation_settings(chat_id, settings):
+    try:
+        updated = db.upsert_conversation_settings(
+            chat_id,
+            settings,
+            expected_settings_version=(settings_row or {}).get("settings_version") or 0,
+        )
+    except ConflictError as exc:
+        raise map_db_error_to_http(exc) from exc
+    if not updated:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to persist greeting selection",

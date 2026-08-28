@@ -40,7 +40,11 @@ from loguru import logger
 from tldw_Server_API.app.core.config import ACTUAL_PROJECT_ROOT, load_comprehensive_config, settings as core_settings
 from tldw_Server_API.app.core.testing import is_truthy
 
-from ..DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
+from ..DB_Management.ChaChaNotes_DB import (
+    CharactersRAGDB,
+    CharactersRAGDBError,
+    ConflictError,
+)
 from ..DB_Management.db_path_utils import DatabasePaths
 from ..Notes.organization_capture import active_coordinator, capture_note_upsert, stable_note_id
 from ..Templating.template_renderer import (
@@ -4310,6 +4314,7 @@ class ChatbookService:
         """Merge OpenWebUI import metadata into conversation settings."""
         current = self.db.get_conversation_settings(conversation_id) or {}
         settings = current.get("settings") if isinstance(current, dict) else {}
+        settings_version = current.get("settings_version") if isinstance(current, dict) else None
         if not isinstance(settings, dict):
             settings = {}
         metadata = dict(chat.source_metadata)
@@ -4323,7 +4328,23 @@ class ChatbookService:
             "branched": chat.is_branched,
             "metadata": metadata,
         }
-        return bool(self.db.upsert_conversation_settings(conversation_id, merged))
+        try:
+            return bool(
+                self.db.upsert_conversation_settings(
+                    conversation_id,
+                    merged,
+                    expected_settings_version=settings_version
+                    if isinstance(settings_version, int)
+                    else 0,
+                )
+            )
+        except ConflictError as exc:
+            logger.warning(
+                "OpenWebUI conversation settings changed during import for {}: {}",
+                conversation_id,
+                exc,
+            )
+            return False
 
     def _record_openwebui_import_mapping(
         self,
@@ -4338,6 +4359,7 @@ class ChatbookService:
         """Persist hydration-scope metadata for an imported OpenWebUI conversation."""
         current = self.db.get_conversation_settings(conversation_id) or {}
         settings = current.get("settings") if isinstance(current, dict) else {}
+        settings_version = current.get("settings_version") if isinstance(current, dict) else None
         if not isinstance(settings, dict):
             settings = {}
         openwebui_import = settings.get("openwebui_import")
@@ -4359,7 +4381,23 @@ class ChatbookService:
         merged_openwebui_import["metadata"] = merged_metadata
         merged_settings = dict(settings)
         merged_settings["openwebui_import"] = merged_openwebui_import
-        return bool(self.db.upsert_conversation_settings(conversation_id, merged_settings))
+        try:
+            return bool(
+                self.db.upsert_conversation_settings(
+                    conversation_id,
+                    merged_settings,
+                    expected_settings_version=settings_version
+                    if isinstance(settings_version, int)
+                    else 0,
+                )
+            )
+        except ConflictError as exc:
+            logger.warning(
+                "OpenWebUI import mapping settings changed during import for {}: {}",
+                conversation_id,
+                exc,
+            )
+            return False
 
     def _rollback_openwebui_conversation(
         self,

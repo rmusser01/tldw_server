@@ -5,6 +5,7 @@ from fastapi import FastAPI, HTTPException
 
 from tldw_Server_API.app.api.v1.endpoints import character_chat_sessions as sessions
 from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import GreetingSelectRequest
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import ConflictError
 
 
 @pytest.mark.unit
@@ -214,6 +215,22 @@ def test_merge_conversation_settings_preserves_unknown_keys():
 
 
 @pytest.mark.unit
+def test_public_chat_settings_hides_internal_resume_contract_keys_without_mutation():
+    stored = {
+        "schemaVersion": 2,
+        "authorNote": "visible",
+        "roleplayResumeV1": {"resumeEligible": True},
+        "roleplayBehaviorV1": {"schemaVersion": 1, "values": {}},
+    }
+
+    public = sessions._public_chat_settings(stored)
+
+    assert public == {"schemaVersion": 2, "authorNote": "visible"}
+    assert "roleplayResumeV1" in stored
+    assert "roleplayBehaviorV1" in stored
+
+
+@pytest.mark.unit
 def test_merge_conversation_settings_preserves_assistant_overlay_payload():
     server = {
         "schemaVersion": 2,
@@ -250,9 +267,17 @@ def test_persist_auto_summary_settings_upsert_does_not_touch_conversation_metada
         def __init__(self) -> None:
             self.upsert_calls = 0
             self.update_conversation_calls = 0
+            self.expected_settings_version: int | None = None
 
-        def upsert_conversation_settings(self, conversation_id: str, settings: dict[str, object]) -> bool:
+        def upsert_conversation_settings(
+            self,
+            conversation_id: str,
+            settings: dict[str, object],
+            *,
+            expected_settings_version: int | None = None,
+        ) -> bool:
             self.upsert_calls += 1
+            self.expected_settings_version = expected_settings_version
             return True
 
         def update_conversation(self, conversation_id: str, update_data: dict[str, object], expected_version: int) -> bool:
@@ -272,9 +297,11 @@ def test_persist_auto_summary_settings_upsert_does_not_touch_conversation_metada
         threshold=10,
         window=20,
         compressed_count=3,
+        expected_settings_version=7,
     )
 
     assert db.upsert_calls == 1
+    assert db.expected_settings_version == 7
     assert db.update_conversation_calls == 0
 
 
@@ -368,6 +395,9 @@ def test_openapi_exposes_chat_trash_query_params_and_routes():
 @pytest.mark.asyncio
 async def test_select_greeting_returns_500_when_settings_persist_fails():
     class _StubDB:
+        def __init__(self) -> None:
+            self.expected_settings_version: int | None = None
+
         def get_conversation_by_id(self, chat_id: str) -> dict[str, object]:
             return {"id": chat_id, "client_id": "1", "character_id": 7}
 
@@ -375,10 +405,60 @@ async def test_select_greeting_returns_500_when_settings_persist_fails():
             return {"id": character_id, "name": "Test Character", "first_message": "Hello!", "alternate_greetings": ["Hi!"]}
 
         def get_conversation_settings(self, chat_id: str) -> dict[str, object]:
-            return {"settings": {}}
+            return {"settings": {}, "settings_version": 4}
 
-        def upsert_conversation_settings(self, chat_id: str, settings: dict[str, object]) -> bool:
+        def upsert_conversation_settings(
+            self,
+            chat_id: str,
+            settings: dict[str, object],
+            *,
+            expected_settings_version: int | None = None,
+        ) -> bool:
+            self.expected_settings_version = expected_settings_version
             return False
+
+    class _StubUser:
+        id = "1"
+
+    db = _StubDB()
+    with pytest.raises(HTTPException) as exc_info:
+        await sessions.select_greeting(
+            chat_id="chat-1",
+            body=GreetingSelectRequest(index=0),
+            db=db,  # type: ignore[arg-type]
+            current_user=_StubUser(),  # type: ignore[arg-type]
+        )
+
+    assert exc_info.value.status_code == 500
+    assert "Failed to persist greeting selection" in str(exc_info.value.detail)
+    assert db.expected_settings_version == 4
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_select_greeting_returns_409_on_concurrent_settings_change():
+    class _StubDB:
+        def get_conversation_by_id(self, chat_id: str) -> dict[str, object]:
+            return {"id": chat_id, "client_id": "1", "character_id": 7}
+
+        def get_character_card_by_id(self, character_id: int) -> dict[str, object]:
+            return {
+                "id": character_id,
+                "name": "Test Character",
+                "first_message": "Hello!",
+            }
+
+        def get_conversation_settings(self, chat_id: str) -> dict[str, object]:
+            return {"settings": {}, "settings_version": 4}
+
+        def upsert_conversation_settings(
+            self,
+            chat_id: str,
+            settings: dict[str, object],
+            *,
+            expected_settings_version: int | None = None,
+        ) -> bool:
+            raise ConflictError("stale settings")
 
     class _StubUser:
         id = "1"
@@ -391,5 +471,4 @@ async def test_select_greeting_returns_500_when_settings_persist_fails():
             current_user=_StubUser(),  # type: ignore[arg-type]
         )
 
-    assert exc_info.value.status_code == 500
-    assert "Failed to persist greeting selection" in str(exc_info.value.detail)
+    assert exc_info.value.status_code == 409

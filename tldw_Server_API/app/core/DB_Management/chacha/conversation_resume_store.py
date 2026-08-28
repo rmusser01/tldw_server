@@ -13,7 +13,7 @@ from tldw_Server_API.app.core.Character_Chat.character_behavior_snapshot import 
     BehaviorSnapshotV1,
     build_behavior_snapshot,
 )
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import InputError
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import BackendType, InputError
 from tldw_Server_API.app.core.DB_Management.db_errors import NotFoundError
 
 if TYPE_CHECKING:
@@ -29,6 +29,17 @@ _SNAPSHOT_COLUMNS = (
     "created_at",
 )
 _RESUME_SETTINGS_KEY = "roleplayResumeV1"
+_MATERIALIZED_SETTINGS_KEY = "roleplayBehaviorV1"
+_MATERIALIZED_VALUE_KEYS = frozenset(
+    {
+        "assistant_overlay",
+        "effective_completion",
+        "memory",
+        "participants",
+        "prompt_preset",
+        "world_books",
+    }
+)
 _READINESS_KEYS = frozenset(
     {"resumeEligible", "resumeIneligibleReason", "effectiveCompletion"}
 )
@@ -41,6 +52,61 @@ _INELIGIBLE_REASONS = frozenset(
         "invalid_effective_settings",
     }
 )
+
+
+def _canonical_json(value: Any) -> str:
+    try:
+        return json.dumps(
+            value,
+            allow_nan=False,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    except (TypeError, ValueError) as exc:
+        raise InputError("Materialized behavior settings must be finite JSON.") from exc
+
+
+def build_materialized_behavior_settings(values: dict[str, Any]) -> dict[str, Any]:
+    """Build the closed, canonical behavior-settings record stored with a chat."""
+    if not isinstance(values, dict) or not set(values).issubset(_MATERIALIZED_VALUE_KEYS):
+        raise InputError("Materialized behavior settings contain unsupported fields.")
+    if _validate_effective_completion(values.get("effective_completion")) is None:
+        raise InputError("Materialized behavior settings require valid effective completion.")
+    canonical_values = json.loads(_canonical_json(values))
+    digest_payload = {
+        "schemaVersion": 1,
+        "values": canonical_values,
+    }
+    digest = f"sha256:{hashlib.sha256(_canonical_json(digest_payload).encode('utf-8')).hexdigest()}"
+    return {
+        "schemaVersion": 1,
+        "digest": digest,
+        "values": canonical_values,
+    }
+
+
+def _validate_materialized_behavior_settings(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict) or set(value) != {"schemaVersion", "digest", "values"}:
+        return None
+    if value.get("schemaVersion") != 1 or not isinstance(value.get("digest"), str):
+        return None
+    values = value.get("values")
+    if not isinstance(values, dict) or not set(values).issubset(_MATERIALIZED_VALUE_KEYS):
+        return None
+    if _validate_effective_completion(values.get("effective_completion")) is None:
+        return None
+    try:
+        rebuilt = build_materialized_behavior_settings(values)
+    except InputError:
+        return None
+    if rebuilt != value:
+        return None
+    return {
+        "schema_version": 1,
+        "digest": rebuilt["digest"],
+        "values": rebuilt["values"],
+    }
 
 
 def _validate_closed_sampling(value: Any) -> dict[str, Any] | None:
@@ -270,15 +336,35 @@ class ConversationResumeStore:
         conversation_id: str,
         *,
         conn: Any | None = None,
+        lock_for_update: bool = False,
     ) -> dict[str, Any]:
         """Read snapshot and version fences from one caller-owned transaction."""
         transaction = nullcontext(conn) if conn is not None else self._db.transaction()
         with transaction as transaction_conn:
+            if lock_for_update and self._db.backend_type == BackendType.POSTGRESQL:
+                locked = transaction_conn.execute(
+                    """
+                    SELECT id FROM conversations
+                     WHERE id = ? AND deleted = FALSE
+                     FOR UPDATE
+                    """,
+                    (conversation_id,),
+                ).fetchone()
+                if locked is None:
+                    raise NotFoundError("Conversation not found.")
             result = transaction_conn.execute(
                 """
                 SELECT c.history_version, cs.settings_json, cs.settings_version,
                        (SELECT COUNT(*) FROM messages m
-                         WHERE m.conversation_id = c.id AND m.deleted = FALSE) AS message_count
+                         WHERE m.conversation_id = c.id AND m.deleted = FALSE) AS message_count,
+                       (SELECT m.id FROM messages m
+                         WHERE m.conversation_id = c.id AND m.deleted = FALSE
+                         ORDER BY m.timestamp DESC, m.id DESC
+                         LIMIT 1) AS tail_message_id,
+                       (SELECT m.version FROM messages m
+                         WHERE m.conversation_id = c.id AND m.deleted = FALSE
+                         ORDER BY m.timestamp DESC, m.id DESC
+                         LIMIT 1) AS tail_message_version
                   FROM conversations c
                   LEFT JOIN conversation_settings cs ON cs.conversation_id = c.id
                  WHERE c.id = ? AND c.deleted = FALSE
@@ -290,7 +376,14 @@ class ConversationResumeStore:
                 raise NotFoundError("Conversation not found.")
             record = self._row_to_dict(
                 row,
-                ("history_version", "settings_json", "settings_version", "message_count"),
+                (
+                    "history_version",
+                    "settings_json",
+                    "settings_version",
+                    "message_count",
+                    "tail_message_id",
+                    "tail_message_version",
+                ),
             )
             settings_json = record.get("settings_json")
             try:
@@ -302,10 +395,31 @@ class ConversationResumeStore:
                 settings,
                 settings_present=settings_json is not None,
             )
+            materialized_raw = (
+                settings.get(_MATERIALIZED_SETTINGS_KEY)
+                if isinstance(settings, dict)
+                else None
+            )
+            materialized_settings = _validate_materialized_behavior_settings(
+                materialized_raw
+            )
+            materialized_invalid = (
+                isinstance(settings, dict)
+                and _MATERIALIZED_SETTINGS_KEY in settings
+                and materialized_settings is None
+            )
+            if materialized_settings is not None:
+                effective_completion = materialized_settings["values"][
+                    "effective_completion"
+                ]
             snapshot_status = snapshot["status"]
             if snapshot_status != "valid":
                 resume_eligible = False
                 resume_ineligible_reason = f"behavior_snapshot_{snapshot_status}"
+                effective_completion = None
+            elif materialized_invalid:
+                resume_eligible = False
+                resume_ineligible_reason = "invalid_effective_settings"
                 effective_completion = None
             elif stored_eligible:
                 resume_eligible = True
@@ -314,31 +428,23 @@ class ConversationResumeStore:
                 resume_eligible = False
                 resume_ineligible_reason = stored_reason
 
-            tail_result = transaction_conn.execute(
-                """
-                SELECT id, version FROM messages
-                 WHERE conversation_id = ? AND deleted = FALSE
-                 ORDER BY timestamp DESC, id DESC
-                 LIMIT 1
-                """,
-                (conversation_id,),
-            )
-            tail_row = tail_result.fetchone()
-            tail = (
-                self._row_to_dict(tail_row, ("id", "version"))
-                if tail_row is not None
-                else None
-            )
+            tail_message_id = record.get("tail_message_id")
+            tail_message_version = record.get("tail_message_version")
             return {
                 "conversation_id": conversation_id,
                 "behavior_snapshot": snapshot,
                 "settings": settings,
+                "materialized_settings": materialized_settings,
                 "settings_version": record.get("settings_version"),
                 "history_version": int(record["history_version"]),
                 "message_count": int(record.get("message_count") or 0),
                 "tail": {
-                    "message_id": tail.get("id") if tail else None,
-                    "message_version": int(tail["version"]) if tail else None,
+                    "message_id": tail_message_id,
+                    "message_version": (
+                        int(tail_message_version)
+                        if tail_message_version is not None
+                        else None
+                    ),
                 },
                 "resume_eligible": resume_eligible,
                 "resume_ineligible_reason": resume_ineligible_reason,
@@ -346,4 +452,4 @@ class ConversationResumeStore:
             }
 
 
-__all__ = ["ConversationResumeStore"]
+__all__ = ["ConversationResumeStore", "build_materialized_behavior_settings"]

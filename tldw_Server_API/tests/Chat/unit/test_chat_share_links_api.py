@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.endpoints import chat as chat_router
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError
 
 
 pytestmark = pytest.mark.unit
@@ -137,6 +137,78 @@ def test_share_link_resolve_rejects_malformed_token(tmp_path):
     response = client.get("/api/v1/chat/shared/conversations/not-a-valid-token")
     assert response.status_code == 400
     assert response.json()["detail"] == "Malformed share token"
+
+
+def test_share_link_settings_write_uses_version_cas_and_surfaces_conflict():
+    class _ConflictingDB:
+        def __init__(self) -> None:
+            self.expected_settings_version: int | None = None
+
+        def get_conversation_settings(self, conversation_id: str):
+            return {
+                "settings": {"preserved": True},
+                "settings_version": 9,
+            }
+
+        def upsert_conversation_settings(
+            self,
+            conversation_id: str,
+            settings: dict,
+            *,
+            expected_settings_version: int | None = None,
+        ) -> bool:
+            self.expected_settings_version = expected_settings_version
+            raise ConflictError("stale settings")
+
+    db = _ConflictingDB()
+    settings, links, settings_version = chat_router._load_knowledge_qa_share_links(
+        db, "conversation-1"
+    )
+
+    with pytest.raises(chat_router.HTTPException) as exc_info:
+        chat_router._persist_knowledge_qa_share_links(
+            db,
+            "conversation-1",
+            settings,
+            [{"id": "share-1"}],
+            expected_settings_version=settings_version,
+        )
+
+    assert db.expected_settings_version == 9
+    assert exc_info.value.status_code == 409
+
+
+def test_share_link_settings_write_expects_absent_row_on_first_write():
+    class _EmptyDB:
+        def __init__(self) -> None:
+            self.expected_settings_version: int | None = None
+
+        def get_conversation_settings(self, conversation_id: str):
+            return None
+
+        def upsert_conversation_settings(
+            self,
+            conversation_id: str,
+            settings: dict,
+            *,
+            expected_settings_version: int | None = None,
+        ) -> bool:
+            self.expected_settings_version = expected_settings_version
+            return True
+
+    db = _EmptyDB()
+    settings, links, settings_version = chat_router._load_knowledge_qa_share_links(
+        db, "conversation-1"
+    )
+    chat_router._persist_knowledge_qa_share_links(
+        db,
+        "conversation-1",
+        settings,
+        [{"id": "share-1"}],
+        expected_settings_version=settings_version,
+    )
+
+    assert db.expected_settings_version == 0
 
 
 def test_share_link_create_requires_exact_scope_match(tmp_path):

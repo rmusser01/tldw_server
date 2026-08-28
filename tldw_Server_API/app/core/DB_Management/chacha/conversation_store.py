@@ -86,40 +86,119 @@ class ConversationStore:
             f"{self._db.backend_type.value}"
         )
 
-    def upsert_conversation_settings(self, conversation_id: str, settings: dict[str, Any]) -> bool:
-        """Upsert per-conversation settings JSON without changing the caller-visible shape."""
-        try:
-            self._ensure_conversation_settings_table()
-            payload = json.dumps(settings)
-            if self._db.backend_type == BackendType.SQLITE:
-                query = (
-                    "INSERT INTO conversation_settings(conversation_id, settings_json, last_modified) "
-                    "VALUES (?, ?, CURRENT_TIMESTAMP) "
-                    "ON CONFLICT(conversation_id) DO UPDATE SET settings_json=excluded.settings_json, "
-                    "last_modified=CURRENT_TIMESTAMP"
-                )
-                self._db.execute_query(query, (conversation_id, payload), commit=True)
-                self._db.execute_query(
-                    "UPDATE conversations SET version = version + 1, last_modified = CURRENT_TIMESTAMP "
-                    "WHERE id = ? AND deleted = 0",
-                    (conversation_id,),
-                    commit=True,
-                )
-                return True
+    def upsert_conversation_settings(
+        self,
+        conversation_id: str,
+        settings: dict[str, Any],
+        *,
+        conn: Any | None = None,
+        expected_settings_version: int | None = None,
+    ) -> bool:
+        """Upsert settings and advance both settings and conversation versions atomically.
 
-            upsert = (
-                "INSERT INTO conversation_settings(conversation_id, settings_json, last_modified) "
-                "VALUES (%s, %s, NOW()) "
-                "ON CONFLICT (conversation_id) DO UPDATE SET settings_json = EXCLUDED.settings_json, "
-                "last_modified = NOW()"
-            )
-            self._db.backend.execute(upsert, (conversation_id, payload))
-            self._db.backend.execute(
-                "UPDATE conversations SET version = version + 1, last_modified = NOW() "
-                "WHERE id = %s AND deleted = 0",
-                (conversation_id,),
-            )
+        Supplying ``expected_settings_version`` makes an existing-row replacement
+        conditional so callers that merged a prior read cannot overwrite a newer
+        settings document. Version ``0`` means the caller observed no settings row.
+        """
+        try:
+            if conn is None:
+                self._ensure_conversation_settings_table()
+            payload = json.dumps(settings)
+            transaction = nullcontext(conn) if conn is not None else self._db.transaction()
+            with transaction as transaction_conn:
+                if self._db.backend_type == BackendType.POSTGRESQL:
+                    locked = transaction_conn.execute(
+                        """
+                        SELECT id FROM conversations
+                         WHERE id = ? AND deleted = FALSE
+                         FOR UPDATE
+                        """,
+                        (conversation_id,),
+                    ).fetchone()
+                    if locked is None:
+                        return False
+                if self._db._CURRENT_SCHEMA_VERSION < 55:
+                    if expected_settings_version is not None:
+                        raise ConflictError(
+                            "Conversation settings versioning is unavailable before schema v55.",
+                            entity="conversation_settings",
+                            entity_id=conversation_id,
+                        )
+                    transaction_conn.execute(
+                        """
+                        INSERT INTO conversation_settings(
+                            conversation_id, settings_json, last_modified
+                        )
+                        VALUES (?, ?, CURRENT_TIMESTAMP)
+                        ON CONFLICT(conversation_id) DO UPDATE SET
+                            settings_json = excluded.settings_json,
+                            last_modified = CURRENT_TIMESTAMP
+                        """,
+                        (conversation_id, payload),
+                    )
+                elif expected_settings_version is None:
+                    transaction_conn.execute(
+                        """
+                        INSERT INTO conversation_settings(
+                            conversation_id, settings_json, settings_version, last_modified
+                        )
+                        VALUES (?, ?, 1, CURRENT_TIMESTAMP)
+                        ON CONFLICT(conversation_id) DO UPDATE SET
+                            settings_json = excluded.settings_json,
+                            settings_version = conversation_settings.settings_version + 1,
+                            last_modified = CURRENT_TIMESTAMP
+                        """,
+                        (conversation_id, payload),
+                    )
+                elif expected_settings_version == 0:
+                    result = transaction_conn.execute(
+                        """
+                        INSERT INTO conversation_settings(
+                            conversation_id, settings_json, settings_version, last_modified
+                        )
+                        VALUES (?, ?, 1, CURRENT_TIMESTAMP)
+                        ON CONFLICT(conversation_id) DO NOTHING
+                        """,
+                        (conversation_id, payload),
+                    )
+                    if result.rowcount != 1:
+                        raise ConflictError(
+                            "Conversation settings were created after they were read.",
+                            entity="conversation_settings",
+                            entity_id=conversation_id,
+                        )
+                else:
+                    result = transaction_conn.execute(
+                        """
+                        UPDATE conversation_settings
+                           SET settings_json = ?,
+                               settings_version = settings_version + 1,
+                               last_modified = CURRENT_TIMESTAMP
+                         WHERE conversation_id = ? AND settings_version = ?
+                        """,
+                        (
+                            payload,
+                            conversation_id,
+                            expected_settings_version,
+                        ),
+                    )
+                    if result.rowcount != 1:
+                        raise ConflictError(
+                            "Conversation settings changed after they were read.",
+                            entity="conversation_settings",
+                            entity_id=conversation_id,
+                        )
+                transaction_conn.execute(
+                    """
+                    UPDATE conversations
+                       SET version = version + 1, last_modified = CURRENT_TIMESTAMP
+                     WHERE id = ? AND deleted = FALSE
+                    """,
+                    (conversation_id,),
+                )
             return True
+        except ConflictError:
+            raise
         except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
             logger.warning(f"upsert_conversation_settings failed for {conversation_id}: {exc}")
             return False

@@ -25,6 +25,9 @@ from tldw_Server_API.app.core.DB_Management.backends.base import (
 from tldw_Server_API.app.core.DB_Management.chacha.conversation_resume_store import (
     ConversationResumeStore,
 )
+from tldw_Server_API.app.core.DB_Management.chacha.conversation_store import (
+    ConversationStore,
+)
 from tldw_Server_API.app.core.DB_Management.chacha.message_store import MessageStore
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     BackendConnectionWrapper,
@@ -1090,7 +1093,10 @@ class _PostgresStoreBackend:
 
     def __init__(self, *, message_insert_error: str | None = None) -> None:
         self.conversation_id = "postgres-store-conversation"
+        self.conversation_version = 1
         self.history_version = 1
+        self.settings_json = json.dumps({"temperature": 0.2})
+        self.settings_version = 1
         self.message_insert_error = message_insert_error
         self.messages: dict[str, dict[str, Any]] = {}
         self.images: list[tuple[str, int, bytes, str]] = []
@@ -1134,12 +1140,31 @@ class _PostgresStoreBackend:
                 [
                     {
                         "history_version": self.history_version,
-                        "settings_json": json.dumps({"temperature": 0.2}),
-                        "settings_version": 1,
+                        "settings_json": self.settings_json,
+                        "settings_version": self.settings_version,
+                        "tail_message_id": None,
+                        "tail_message_version": None,
                     }
                 ],
                 rowcount=1,
             )
+        if normalized.startswith("select id from conversations") and normalized.endswith(
+            "for update"
+        ):
+            return self._result([{"id": self.conversation_id}], rowcount=1)
+        if normalized.startswith("insert into conversation_settings"):
+            self.settings_json = str(values[1])
+            self.settings_version += 1
+            return self._result(rowcount=1)
+        if normalized.startswith("update conversation_settings"):
+            if int(values[2]) != self.settings_version:
+                return self._result(rowcount=0)
+            self.settings_json = str(values[0])
+            self.settings_version += 1
+            return self._result(rowcount=1)
+        if normalized.startswith("update conversations set version"):
+            self.conversation_version += 1
+            return self._result(rowcount=1)
         if normalized.startswith("select 1 from conversations"):
             return self._result([{"present": 1}], rowcount=1)
         if normalized.startswith("insert into messages "):
@@ -1257,9 +1282,152 @@ def test_postgres_backend_wrapper_roundtrips_resume_store_contract() -> None:
 
     assert state["history_version"] == 1
     assert state["settings_version"] == 1
+    assert state["tail"] == {"message_id": None, "message_version": None}
     assert state["behavior_snapshot"]["status"] == "valid"
     assert state["behavior_snapshot"]["canonical_json"] == snapshot.canonical_bytes.decode()
     assert state["behavior_snapshot"]["payload"] == snapshot.payload
+    assert not any(
+        statement.startswith("select id, version from messages")
+        for statement, _params in backend.executed
+    )
+
+
+def test_postgres_settings_upsert_locks_conversation_before_replacing_json() -> None:
+    backend = _PostgresStoreBackend()
+    db, wrapper = _postgres_store_db(backend)
+    store = ConversationStore(db)
+    start_index = len(backend.executed)
+
+    assert store.upsert_conversation_settings(
+        backend.conversation_id,
+        {"temperature": 0.4},
+        conn=wrapper,
+    )
+
+    statements = [statement for statement, _params in backend.executed[start_index:]]
+    assert statements[0].startswith("select id from conversations")
+    assert statements[0].endswith("for update")
+    assert backend.settings_version == 2
+
+
+def test_settings_upsert_rejects_stale_expected_version_atomically(tmp_path: Path) -> None:
+    db = CharactersRAGDB(
+        db_path=str(tmp_path / "character-settings-cas.sqlite"),
+        client_id="settings-cas-owner",
+    )
+    conversation_id = db.add_conversation(
+        {"character_id": 1, "title": "Settings CAS"}
+    )
+    assert conversation_id is not None
+    assert db.upsert_conversation_settings(conversation_id, {"writer": "initial"})
+    initial = db.get_conversation_settings(conversation_id)
+    assert initial is not None
+    assert initial["settings_version"] == 1
+
+    assert db.upsert_conversation_settings(
+        conversation_id,
+        {"writer": "winner"},
+        expected_settings_version=1,
+    )
+    winner = db.get_conversation_settings(conversation_id)
+    conversation_after_winner = db.get_conversation_by_id(conversation_id)
+    assert winner is not None
+    assert conversation_after_winner is not None
+    assert winner["settings_version"] == 2
+
+    with pytest.raises(ConflictError):
+        db.upsert_conversation_settings(
+            conversation_id,
+            {"writer": "stale"},
+            expected_settings_version=1,
+        )
+
+    final = db.get_conversation_settings(conversation_id)
+    conversation_after_conflict = db.get_conversation_by_id(conversation_id)
+    assert final is not None
+    assert conversation_after_conflict is not None
+    assert final["settings"] == {"writer": "winner"}
+    assert final["settings_version"] == 2
+    assert conversation_after_conflict["version"] == conversation_after_winner["version"]
+    db.close_connection()
+
+
+def test_settings_upsert_expect_absent_conflicts_after_first_insert(tmp_path: Path) -> None:
+    db = CharactersRAGDB(
+        db_path=str(tmp_path / "character-settings-create-cas.sqlite"),
+        client_id="settings-create-cas-owner",
+    )
+    conversation_id = db.add_conversation(
+        {"character_id": 1, "title": "Settings create CAS"}
+    )
+    assert conversation_id is not None
+
+    assert db.upsert_conversation_settings(
+        conversation_id,
+        {"writer": "winner"},
+        expected_settings_version=0,
+    )
+    conversation_after_winner = db.get_conversation_by_id(conversation_id)
+    assert conversation_after_winner is not None
+
+    with pytest.raises(ConflictError):
+        db.upsert_conversation_settings(
+            conversation_id,
+            {"writer": "stale"},
+            expected_settings_version=0,
+        )
+
+    final = db.get_conversation_settings(conversation_id)
+    conversation_after_conflict = db.get_conversation_by_id(conversation_id)
+    assert final is not None
+    assert conversation_after_conflict is not None
+    assert final["settings"] == {"writer": "winner"}
+    assert final["settings_version"] == 1
+    assert conversation_after_conflict["version"] == conversation_after_winner["version"]
+    db.close_connection()
+
+
+def test_postgres_settings_upsert_rejects_stale_expected_version_atomically() -> None:
+    backend = _PostgresStoreBackend()
+    db, wrapper = _postgres_store_db(backend)
+    store = ConversationStore(db)
+
+    assert store.upsert_conversation_settings(
+        backend.conversation_id,
+        {"writer": "winner"},
+        conn=wrapper,
+        expected_settings_version=1,
+    )
+    winner_conversation_version = backend.conversation_version
+    assert backend.settings_version == 2
+
+    with pytest.raises(ConflictError):
+        store.upsert_conversation_settings(
+            backend.conversation_id,
+            {"writer": "stale"},
+            conn=wrapper,
+            expected_settings_version=1,
+        )
+
+    assert json.loads(backend.settings_json) == {"writer": "winner"}
+    assert backend.settings_version == 2
+    assert backend.conversation_version == winner_conversation_version
+
+
+def test_postgres_resume_state_lock_precedes_settings_read() -> None:
+    backend = _PostgresStoreBackend()
+    db, wrapper = _postgres_store_db(backend)
+
+    db.conversation_resume_store.get_roleplay_resume_state(
+        backend.conversation_id,
+        conn=wrapper,
+        lock_for_update=True,
+    )
+
+    statements = [statement for statement, _params in backend.executed]
+    assert statements[0].startswith("select id from conversations")
+    assert statements[0].endswith("for update")
+    assert "select c.history_version" in statements[1]
 
 
 def test_postgres_backend_wrapper_caller_owned_message_mutations_advance_once() -> None:
