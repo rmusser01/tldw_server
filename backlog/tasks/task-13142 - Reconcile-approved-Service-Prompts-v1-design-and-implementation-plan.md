@@ -1,7 +1,8 @@
 ---
-id: TASK-13013
+id: TASK-13142
 title: Reconcile approved Service Prompts v1 design and implementation plan
 status: Done
+updated_date: '2026-08-28 05:24'
 labels:
 - service-prompts
 - planning
@@ -41,7 +42,7 @@ Port the approved four-prompt Service Prompts v1 specification onto current dev,
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Reconciled onto origin/dev 4c2ad2070e. Ported the approved specification from 1a038599753e780f32f62243871026ca9b6d2c06 and committed the reconciliation as e6665ddf89; archived superseded broad-rollout tasks and removed obsolete plans/validator without touching Research Discovery work. Wrote the current-code TDD plan at Docs/superpowers/plans/2026-07-15-user-customizable-service-prompts-v1.md. Self-review verified every Modify/Delete path exists, every Create parent exists, 100 Markdown code fences are balanced, and git diff --check passes. The independent reviewer initially found three material gaps (independent mode parameter carriers, all-four-definition runtime E2E/reset proof, and uncommitted Backlog metadata); all three were corrected, and the same reviewer then approved the complete plan with no issues or recommendations. No runtime code was changed. Bandit was not run because this task changes only planning, documentation, and Backlog records. CI shard work was deliberately omitted per the requester; the implementation plan keeps future Python tests in already-covered directories.
 
-Backlog ID reconciliation (2026-08-21): after the latest dev rebase, the branch-local planning ID TASK-12973 collided with dev's Embeddings task. With explicit requester approval for the narrow manual Backlog exception, this record's canonical ID is TASK-13013. Historical commit subjects retain TASK-12973 as immutable history.
+Backlog ID reconciliation: the branch-local planning ID TASK-12973 first moved to legacy TASK-13013 after colliding with dev Embeddings work. TASK-13013.10 later moved this completed record to canonical TASK-13142 so the public release-readiness program uniquely owns TASK-13013. Historical commit subjects retain their immutable IDs; current planning and implementation links use TASK-13142.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

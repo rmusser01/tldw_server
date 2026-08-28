@@ -4,14 +4,14 @@ title: Implement canonical admin webhook control plane and migration
 status: Done
 assignee: []
 created_date: 2026-08-21 20:41
-updated_date: 2026-08-28 00:43
+updated_date: '2026-08-28 05:23'
 labels:
 - admin
 - webhooks
 - security
 - migrations
 dependencies:
-- TASK-13013
+- TASK-13141
 references:
 - https://github.com/rmusser01/tldw_server/pull/2806
 documentation:
@@ -73,7 +73,7 @@ Detailed plan: Docs/superpowers/plans/2026-08-21-canonical-admin-webhook-control
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-2026-08-21: Created after approval of TASK-13013. Planning scope is upstream PR 1 only; delivery substrate/recovery and durable producers/final activation remain separate future tasks.
+2026-08-21: Created after approval of the webhook design now tracked as TASK-13141 (legacy TASK-13013). Planning scope is upstream PR 1 only; delivery substrate/recovery and durable producers/final activation remain separate future tasks.
 
 Planning correction: the approved design assigns final legacy-handler deletion and final canonical mount to PR 3. PR 1 therefore extracts/isolate-selects legacy routes and introduces canonical routes behind an exclusive startup selector; it does not delete compatibility behavior.
 
@@ -252,7 +252,10 @@ Final local gates: Studio navigation 16/16; CI ratchet/workflow contracts 117/11
 2026-08-27 retained-evidence remediation: Qodo's d7992aa63c finding was valid. Docs/Evidence/Admin_Webhooks_PR1_Verification.md now identifies final implementation source head 776662a9c39896eb3c44e5b54bd938776a519a89, frontend-required run 33112693381, replacement license run 33112773587, all 16 successful workflow reruns, the 0-bug source review, the resolved hosted-gate thread, and the final 35-thread/0-unresolved audit. The stale statement that hosted CI and review audit remained mandatory was replaced with the completed closure record. The document explicitly separates implementation-source proof from later administrative task/evidence commits. No runtime, test, or workflow behavior changed; git diff --check passed. TASK-13014 remains In Progress until PR #2806 is merged; implementation and retained-evidence DoD are complete, while fresh Qodo and exact-head checks remain PR integration gates.
 
 2026-08-27 completion-state correction: fresh Qodo at 1bbe946a00 correctly rejected a Done status paired with still-pending integration gates. The retained evidence is complete, but TASK-13014 remains In Progress until PR #2806 is merged. No runtime, test, workflow, or evidence content changed in this correction.
+
+2026-08-28 TASK-13013.10 identity normalization: the approved webhook design dependency is now canonical TASK-13141; legacy TASK-13013 belongs only to historical commit evidence.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
@@ -264,6 +267,7 @@ PR #2806 merged into dev on 2026-08-28 as merge commit 24f79419061ba85e9273b38a0
 
 The two unrelated untracked watchlist templates were not touched or staged.
 <!-- SECTION:FINAL_SUMMARY:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed

@@ -6,7 +6,7 @@
 
 **Updated:** 2026-07-18
 
-**Backlog:** TASK-12116
+**Backlog:** TASK-13140 (legacy ID: TASK-12116)
 
 ## Goal
 

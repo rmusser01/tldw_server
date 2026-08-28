@@ -10,7 +10,7 @@ Nothing in this document is a release blocker. Each future definition must be re
 
 - **Review date:** 2026-07-13
 - **Reviewer:** Human requester
-- **Current state:** Superseded as rollout authority by the approved incremental design; retained as a historical discovery backlog and reconciled under TASK-13013
+- **Current state:** Superseded as rollout authority by the approved incremental design; retained as a historical discovery backlog and reconciled under TASK-13142 (legacy TASK-13013)
 
 ## Governing references
 
