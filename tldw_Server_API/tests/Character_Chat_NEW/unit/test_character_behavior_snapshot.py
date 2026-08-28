@@ -384,6 +384,11 @@ def test_build_behavior_snapshot_accepts_token_as_legitimate_extension_content()
             "token_budget": 512,
             "tokenBudget": 256,
             "max_tokens": 1024,
+            "promptToken": "prompt-behavior-id",
+            "pageToken": "page-opaque-id",
+            "nextPageToken": "next-page-opaque-id",
+            "validationToken": "validation-behavior-id",
+            "undoToken": "undo-behavior-id",
             "description": "Keep token references.",
         },
     }
@@ -393,6 +398,14 @@ def test_build_behavior_snapshot_accepts_token_as_legitimate_extension_content()
     assert snapshot.payload["participants"][0]["prompt"]["prompt_relevant_extensions"][
         "token"
     ].startswith("The word token")
+    nested = snapshot.payload["participants"][0]["prompt"][
+        "prompt_relevant_extensions"
+    ]["nested"]
+    assert nested["promptToken"] == "prompt-behavior-id"
+    assert nested["pageToken"] == "page-opaque-id"
+    assert nested["nextPageToken"] == "next-page-opaque-id"
+    assert nested["validationToken"] == "validation-behavior-id"
+    assert nested["undoToken"] == "undo-behavior-id"
 
 
 @pytest.mark.unit

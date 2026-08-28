@@ -51,6 +51,11 @@ def _create_behavior_sources(db):
                 "api_key": "never-store-this-credential",
                 "token": "legitimate-token-content",
                 "token_budget": 777,
+                "promptToken": "prompt-behavior-id",
+                "pageToken": "page-opaque-id",
+                "nextPageToken": "next-page-opaque-id",
+                "validationToken": "validation-behavior-id",
+                "undoToken": "undo-behavior-id",
                 "tldw": {
                     "generation": {
                         "temperature": "0.35",
@@ -208,6 +213,11 @@ def test_api_creation_captures_all_sources_and_redacts_snapshot_body(
     ]
     assert character_extensions["token"] == "legitimate-token-content"
     assert character_extensions["token_budget"] == 777
+    assert character_extensions["promptToken"] == "prompt-behavior-id"
+    assert character_extensions["pageToken"] == "page-opaque-id"
+    assert character_extensions["nextPageToken"] == "next-page-opaque-id"
+    assert character_extensions["validationToken"] == "validation-behavior-id"
+    assert character_extensions["undoToken"] == "undo-behavior-id"
     assert primary["greeting"] == {
         "content": "The archive remembers you, {{user}}.",
         "source": "alternate",
@@ -695,6 +705,11 @@ def test_ordinary_token_settings_remain_allowed(character_db):
                 "token_budget": 512,
                 "tokenBudget": 256,
                 "max_tokens": 1024,
+                "promptToken": "prompt-behavior-id",
+                "pageToken": "page-opaque-id",
+                "nextPageToken": "next-page-opaque-id",
+                "validationToken": "validation-behavior-id",
+                "undoToken": "undo-behavior-id",
             },
         },
     )
@@ -704,6 +719,11 @@ def test_ordinary_token_settings_remain_allowed(character_db):
     assert settings["nested"]["token_budget"] == 512
     assert settings["nested"]["tokenBudget"] == 256
     assert settings["nested"]["max_tokens"] == 1024
+    assert settings["nested"]["promptToken"] == "prompt-behavior-id"
+    assert settings["nested"]["pageToken"] == "page-opaque-id"
+    assert settings["nested"]["nextPageToken"] == "next-page-opaque-id"
+    assert settings["nested"]["validationToken"] == "validation-behavior-id"
+    assert settings["nested"]["undoToken"] == "undo-behavior-id"
 
 
 @pytest.mark.integration

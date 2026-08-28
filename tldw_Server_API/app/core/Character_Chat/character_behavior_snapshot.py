@@ -54,12 +54,16 @@ _CREDENTIAL_KEYS = frozenset(
         "authorization",
         "bearer_token",
         "client_secret",
+        "csrf_token",
         "credential",
         "credentials",
+        "id_token",
+        "oauth_token",
         "password",
         "private_key",
         "refresh_token",
         "secret",
+        "session_token",
         "x_api_key",
     }
 )
@@ -280,8 +284,6 @@ def is_credential_key(key: str) -> bool:
     if normalized in _CREDENTIAL_KEYS:
         return True
     if normalized.endswith(_CREDENTIAL_SUFFIXES):
-        return True
-    if normalized != "token" and normalized.endswith("_token"):
         return True
     parts = normalized.split("_")
     if len(parts) < 2:
