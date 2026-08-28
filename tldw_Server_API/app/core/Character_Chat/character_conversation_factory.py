@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
+import random
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -44,6 +46,11 @@ if TYPE_CHECKING:
 _SAMPLING_FIELDS = frozenset({"temperature", "top_p", "repetition_penalty", "stop"})
 MAX_MATERIALIZED_PARTICIPANTS = 33
 MAX_MATERIALIZED_WORLD_BOOKS = 64
+MAX_MATERIALIZED_EXEMPLARS = 256
+MAX_MATERIALIZED_EXEMPLAR_BYTES = 256 * 1024
+MAX_MATERIALIZED_WORLD_BOOK_ENTRIES = 512
+MAX_MATERIALIZED_WORLD_BOOK_ENTRY_BYTES = 512 * 1024
+_MATERIALIZED_SOURCE_ROW_OVERHEAD_BYTES = 256
 DEFAULT_AUTO_SUMMARY_THRESHOLD_MESSAGES = 40
 DEFAULT_AUTO_SUMMARY_WINDOW_MESSAGES = 12
 _EXACT_BOOLEAN_BEHAVIOR_FIELDS = frozenset(
@@ -113,6 +120,21 @@ RESUMABLE_BEHAVIOR_SETTING_KEYS = frozenset(
     key
     for key, classification in PROMPT_COMPLETION_SETTING_CLASSIFICATION.items()
     if classification == "behavior"
+)
+_INELIGIBLE_SAFE_BEHAVIOR_KEYS = frozenset(
+    {
+        "autoSummaryEnabled",
+        "autoSummaryMessageThreshold",
+        "autoSummaryRecentWindow",
+        "autoSummaryThresholdMessages",
+        "autoSummaryWindowMessages",
+        "greetingEnabled",
+        "greetingScope",
+        "greetingSelectionId",
+        "pinnedMessageIds",
+        "summary",
+        "useCharacterDefault",
+    }
 )
 
 
@@ -548,6 +570,45 @@ def collect_character_greeting_texts(character: Mapping[str, Any]) -> list[str]:
     return greetings
 
 
+def compute_character_greetings_checksum(character: Mapping[str, Any]) -> str:
+    """Compute the persisted staleness checksum from one character source view."""
+    joined = "\n---\n".join(collect_character_greeting_texts(character))
+    return hashlib.sha256(joined.encode("utf-8")).hexdigest()[:16]
+
+
+def _select_creation_greeting(
+    character: Mapping[str, Any],
+    *,
+    strategy: str,
+    alternate_index: int | None,
+    random_value: float,
+) -> dict[str, Any]:
+    greeting_text = character.get("first_message")
+    source = "first_message"
+    source_index = 0
+    alternates = _decode_json(character.get("alternate_greetings"), [])
+    if strategy in {"alternate_random", "alternate_index"} and isinstance(
+        alternates,
+        list,
+    ) and alternates:
+        if strategy == "alternate_random":
+            selected_index = min(int(random_value * len(alternates)), len(alternates) - 1)
+            greeting_text = alternates[selected_index]
+            source_index = alternates.index(greeting_text)
+            source = "alternate"
+        elif isinstance(alternate_index, int) and alternate_index < len(alternates):
+            greeting_text = alternates[alternate_index]
+            source_index = alternate_index
+            source = "alternate"
+    if not isinstance(greeting_text, str) or not greeting_text.strip():
+        return {"content": "", "source": "none", "source_index": 0}
+    return {
+        "content": greeting_text,
+        "source": source,
+        "source_index": source_index,
+    }
+
+
 def _character_sampling(character: Mapping[str, Any]) -> dict[str, Any]:
     resolved = resolve_character_generation_settings(dict(character))
     return {
@@ -561,6 +622,69 @@ def _character_sampling(character: Mapping[str, Any]) -> dict[str, Any]:
 def _select_rows(conn: Any, query: str, params: tuple[Any, ...]) -> list[dict[str, Any]]:
     result = conn.execute(query, params)
     return [_row_dict(row, result) for row in result.fetchall()]
+
+
+def _source_byte_expression(conn: Any, columns: Sequence[str]) -> str:
+    if _is_postgres_connection(conn):
+        parts = [
+            f"octet_length(COALESCE(CAST({column} AS TEXT), ''))"
+            for column in columns
+        ]
+    else:
+        parts = [
+            f"length(CAST(COALESCE({column}, '') AS BLOB))"
+            for column in columns
+        ]
+    return " + ".join(parts)
+
+
+def _source_collection_stats(
+    conn: Any,
+    *,
+    table: str,
+    foreign_key: str,
+    source_ids: Sequence[int],
+    text_columns: Sequence[str],
+    extra_predicate: str = "",
+) -> tuple[int, int]:
+    if not source_ids:
+        return 0, 0
+    placeholders = ",".join("?" for _ in source_ids)
+    byte_expression = _source_byte_expression(conn, text_columns)
+    query = (  # noqa: S608 - identifiers are closed internal constants.
+        "SELECT COUNT(*) AS row_count, "  # nosec B608
+        f"COALESCE(SUM({byte_expression}), 0) AS byte_count "
+        f"FROM {table} WHERE {foreign_key} IN ({placeholders}) {extra_predicate}"
+    )
+    result = conn.execute(query, tuple(source_ids))
+    row = result.fetchone()
+    if row is None:
+        return 0, 0
+    record = _row_dict(row, result)
+    row_count = int(record.get("row_count") or 0)
+    source_bytes = int(record.get("byte_count") or 0)
+    return (
+        row_count,
+        source_bytes + row_count * _MATERIALIZED_SOURCE_ROW_OVERHEAD_BYTES,
+    )
+
+
+def _enforce_source_collection_budget(
+    *,
+    label: str,
+    row_count: int,
+    byte_count: int,
+    max_rows: int,
+    max_bytes: int,
+) -> None:
+    if row_count > max_rows:
+        raise InputError(
+            f"Materialized {label} exceed the total count limit of {max_rows}."
+        )
+    if byte_count > max_bytes:
+        raise InputError(
+            f"Materialized {label} exceed the total byte limit of {max_bytes}."
+        )
 
 
 def _load_preset(
@@ -691,29 +815,7 @@ def _load_world_books_for_participants(
             f"A resumable chat supports at most {MAX_MATERIALIZED_WORLD_BOOKS} world books."
         )
 
-    entries_by_book: dict[int, list[dict[str, Any]]] = {}
-    for world_book_id in unique_books:
-        entries = _select_rows(
-            conn,
-            """
-            SELECT * FROM world_book_entries
-             WHERE world_book_id = ?
-             ORDER BY priority DESC, id
-            """,
-            (world_book_id,),
-        )
-        entries_by_book[world_book_id] = [
-            {
-                key: _safe_json(
-                    _decode_json(value, {} if key == "metadata" else [])
-                    if key in {"keywords", "metadata"}
-                    else value
-                )
-                for key, value in entry.items()
-                if key not in {"client_id", "deleted"}
-            }
-            for entry in entries
-        ]
+    entries_by_book = _load_world_book_entries(conn, list(unique_books))
 
     materialized_by_character: dict[int, list[dict[str, Any]]] = {}
     for character_id, books in raw_by_character.items():
@@ -731,28 +833,218 @@ def _load_world_books_for_participants(
     return materialized_by_character
 
 
-def _load_exemplars(conn: Any, character_id: int) -> list[dict[str, Any]]:
+def _load_world_book_entries(
+    conn: Any,
+    world_book_ids: Sequence[int],
+    *,
+    existing_row_count: int = 0,
+    existing_byte_count: int = 0,
+) -> dict[int, list[dict[str, Any]]]:
+    ordered_ids = list(dict.fromkeys(int(item) for item in world_book_ids))
+    if not ordered_ids:
+        return {}
+    text_columns = ("keywords", "content", "metadata")
+    row_count, byte_count = _source_collection_stats(
+        conn,
+        table="world_book_entries",
+        foreign_key="world_book_id",
+        source_ids=ordered_ids,
+        text_columns=text_columns,
+    )
+    total_rows = existing_row_count + row_count
+    total_bytes = existing_byte_count + byte_count
+    _enforce_source_collection_budget(
+        label="world-book entries",
+        row_count=total_rows,
+        byte_count=total_bytes,
+        max_rows=MAX_MATERIALIZED_WORLD_BOOK_ENTRIES,
+        max_bytes=MAX_MATERIALIZED_WORLD_BOOK_ENTRY_BYTES,
+    )
+
+    placeholders = ",".join("?" for _ in ordered_ids)
+    byte_expression = _source_byte_expression(conn, text_columns)
+    # IDs are parameters; table names, projections, and limits are closed constants.
+    query = (  # noqa: S608 - only closed SQL and parameter placeholders vary.
+        "WITH source_stats AS ("  # nosec B608
+        "SELECT COUNT(*) AS row_count, "
+        f"COALESCE(SUM({byte_expression}), 0) "
+        f"+ COUNT(*) * {_MATERIALIZED_SOURCE_ROW_OVERHEAD_BYTES} AS byte_count "
+        "FROM world_book_entries "
+        f"WHERE world_book_id IN ({placeholders})"
+        ") "
+        "SELECT entry.id, entry.world_book_id, entry.keywords, entry.content, "
+        "entry.priority, entry.enabled, entry.case_sensitive, entry.regex_match, "
+        "entry.whole_word_match, entry.metadata, entry.created_at, "
+        "entry.last_modified FROM world_book_entries entry "
+        "CROSS JOIN source_stats stats "
+        f"WHERE entry.world_book_id IN ({placeholders}) "
+        "AND stats.row_count + ? <= ? AND stats.byte_count + ? <= ? "
+        "ORDER BY entry.world_book_id, entry.priority DESC, entry.id "
+        f"LIMIT {MAX_MATERIALIZED_WORLD_BOOK_ENTRIES + 1}"
+    )
+    entries = _select_rows(
+        conn,
+        query,
+        (
+            *ordered_ids,
+            *ordered_ids,
+            existing_row_count,
+            MAX_MATERIALIZED_WORLD_BOOK_ENTRIES,
+            existing_byte_count,
+            MAX_MATERIALIZED_WORLD_BOOK_ENTRY_BYTES,
+        ),
+    )
+    current_count, current_bytes = _source_collection_stats(
+        conn,
+        table="world_book_entries",
+        foreign_key="world_book_id",
+        source_ids=ordered_ids,
+        text_columns=text_columns,
+    )
+    _enforce_source_collection_budget(
+        label="world-book entries",
+        row_count=existing_row_count + current_count,
+        byte_count=existing_byte_count + current_bytes,
+        max_rows=MAX_MATERIALIZED_WORLD_BOOK_ENTRIES,
+        max_bytes=MAX_MATERIALIZED_WORLD_BOOK_ENTRY_BYTES,
+    )
+    if len(entries) != current_count:
+        raise _SourceDrift
+
+    entries_by_book: dict[int, list[dict[str, Any]]] = {
+        world_book_id: [] for world_book_id in ordered_ids
+    }
+    for entry in entries:
+        world_book_id = int(entry["world_book_id"])
+        entries_by_book[world_book_id].append(
+            {
+                key: _safe_json(
+                    _decode_json(value, {} if key == "metadata" else [])
+                    if key in {"keywords", "metadata"}
+                    else value
+                )
+                for key, value in entry.items()
+                if key not in {"client_id", "deleted"}
+            }
+        )
+    return entries_by_book
+
+
+def _load_exemplars_for_participants(
+    conn: Any,
+    participant_character_ids: Sequence[int],
+) -> dict[int, list[dict[str, Any]]]:
+    ordered_ids = list(
+        dict.fromkeys(int(item) for item in participant_character_ids)
+    )
+    if not ordered_ids:
+        return {}
+    text_columns = (
+        "id",
+        "text",
+        "source_type",
+        "source_url_or_id",
+        "source_date",
+        "novelty_hint",
+        "emotion",
+        "scenario",
+        "rhetorical",
+        "register",
+        "safety_allowed",
+        "safety_blocked",
+        "rights_notes",
+    )
+    row_count, byte_count = _source_collection_stats(
+        conn,
+        table="character_exemplars",
+        foreign_key="character_id",
+        source_ids=ordered_ids,
+        text_columns=text_columns,
+        extra_predicate="AND is_deleted = FALSE",
+    )
+    _enforce_source_collection_budget(
+        label="exemplars",
+        row_count=row_count,
+        byte_count=byte_count,
+        max_rows=MAX_MATERIALIZED_EXEMPLARS,
+        max_bytes=MAX_MATERIALIZED_EXEMPLAR_BYTES,
+    )
+
+    placeholders = ",".join("?" for _ in ordered_ids)
+    byte_expression = _source_byte_expression(conn, text_columns)
+    # IDs are parameters; table names, projections, and limits are closed constants.
+    query = (  # noqa: S608 - only closed SQL and parameter placeholders vary.
+        "WITH source_stats AS ("  # nosec B608
+        "SELECT COUNT(*) AS row_count, "
+        f"COALESCE(SUM({byte_expression}), 0) "
+        f"+ COUNT(*) * {_MATERIALIZED_SOURCE_ROW_OVERHEAD_BYTES} AS byte_count "
+        "FROM character_exemplars "
+        f"WHERE character_id IN ({placeholders}) AND is_deleted = FALSE"
+        ") "
+        "SELECT exemplar.id, exemplar.character_id, exemplar.text, "
+        "exemplar.source_type, exemplar.source_url_or_id, exemplar.source_date, "
+        "exemplar.novelty_hint, exemplar.emotion, exemplar.scenario, "
+        "exemplar.rhetorical, exemplar.register, exemplar.safety_allowed, "
+        "exemplar.safety_blocked, exemplar.rights_public_figure, "
+        "exemplar.rights_notes, exemplar.length_tokens, exemplar.created_at, "
+        "exemplar.updated_at FROM character_exemplars exemplar "
+        "CROSS JOIN source_stats stats "
+        f"WHERE exemplar.character_id IN ({placeholders}) "
+        "AND exemplar.is_deleted = FALSE "
+        "AND stats.row_count <= ? AND stats.byte_count <= ? "
+        "ORDER BY exemplar.character_id, exemplar.updated_at DESC, "
+        "exemplar.created_at DESC, exemplar.id "
+        f"LIMIT {MAX_MATERIALIZED_EXEMPLARS + 1}"
+    )
     rows = _select_rows(
         conn,
-        """
-        SELECT * FROM character_exemplars
-         WHERE character_id = ? AND is_deleted = FALSE
-         ORDER BY updated_at DESC, created_at DESC, id
-        """,
-        (character_id,),
+        query,
+        (
+            *ordered_ids,
+            *ordered_ids,
+            MAX_MATERIALIZED_EXEMPLARS,
+            MAX_MATERIALIZED_EXEMPLAR_BYTES,
+        ),
     )
-    return [
-        {
-            key: _safe_json(_decode_json(value, []) if key in {
-                "rhetorical",
-                "safety_allowed",
-                "safety_blocked",
-            } else value)
-            for key, value in row.items()
-            if key not in {"character_id", "is_deleted"}
-        }
-        for row in rows
-    ]
+    current_count, current_bytes = _source_collection_stats(
+        conn,
+        table="character_exemplars",
+        foreign_key="character_id",
+        source_ids=ordered_ids,
+        text_columns=text_columns,
+        extra_predicate="AND is_deleted = FALSE",
+    )
+    _enforce_source_collection_budget(
+        label="exemplars",
+        row_count=current_count,
+        byte_count=current_bytes,
+        max_rows=MAX_MATERIALIZED_EXEMPLARS,
+        max_bytes=MAX_MATERIALIZED_EXEMPLAR_BYTES,
+    )
+    if len(rows) != current_count:
+        raise _SourceDrift
+
+    by_character: dict[int, list[dict[str, Any]]] = {
+        character_id: [] for character_id in ordered_ids
+    }
+    for row in rows:
+        character_id = int(row["character_id"])
+        by_character[character_id].append(
+            {
+                key: _safe_json(
+                    _decode_json(value, [])
+                    if key in {"rhetorical", "safety_allowed", "safety_blocked"}
+                    else value
+                )
+                for key, value in row.items()
+                if key not in {"character_id", "is_deleted"}
+            }
+        )
+    return by_character
+
+
+def _load_exemplars(conn: Any, character_id: int) -> list[dict[str, Any]]:
+    return _load_exemplars_for_participants(conn, [character_id])[character_id]
 
 
 def _load_persona_memory_entries(
@@ -835,6 +1127,10 @@ def _materialize_behavior(
     primary_greeting: Mapping[str, Any] | None,
     owner_user_id: str,
     max_snapshot_bytes: int,
+    greeting_strategy: str = "default",
+    greeting_alternate_index: int | None = None,
+    greeting_random_value: float = 0.0,
+    fallback_greeting: Mapping[str, Any] | None = None,
     preexisting_world_book_ids: Sequence[int] = (),
 ) -> _MaterializedBehavior:
     requested_preset = str(prompt_preset_id or "").strip() or None
@@ -845,6 +1141,10 @@ def _materialize_behavior(
         participant_character_ids,
         owner_user_id=owner_user_id,
         preexisting_world_book_ids=preexisting_world_book_ids,
+    )
+    exemplars_by_character = _load_exemplars_for_participants(
+        conn,
+        participant_character_ids,
     )
     for index, character_id in enumerate(participant_character_ids):
         result = conn.execute(
@@ -888,6 +1188,21 @@ def _materialize_behavior(
             "id": str(character_id),
             "version": int(character.get("version") or 1),
         }
+        selected_greeting = (
+            primary_greeting
+            or _select_creation_greeting(
+                character,
+                strategy=greeting_strategy,
+                alternate_index=greeting_alternate_index,
+                random_value=greeting_random_value,
+            )
+        )
+        if (
+            index == 0
+            and not str(selected_greeting.get("content") or "").strip()
+            and fallback_greeting is not None
+        ):
+            selected_greeting = dict(fallback_greeting)
         participants.append(
             {
                 "source": source,
@@ -908,13 +1223,13 @@ def _materialize_behavior(
                 },
                 "greeting": _greeting_for(
                     character,
-                    primary_greeting if index == 0 else None,
+                    selected_greeting if index == 0 else None,
                 ),
                 "generation_defaults": {
                     "source": source,
                     "sampling": _character_sampling(character),
                 },
-                "exemplars": _load_exemplars(conn, character_id),
+                "exemplars": exemplars_by_character.get(character_id, []),
                 "world_books": world_books_by_character.get(character_id, []),
                 "default_memory": (
                     {
@@ -1057,6 +1372,98 @@ def _source_id(value: Any) -> str | None:
     return str(source["id"])
 
 
+def _materialized_world_book_entry_usage(
+    world_books: Sequence[Mapping[str, Any]],
+) -> tuple[int, int]:
+    seen_book_ids: set[int] = set()
+    row_count = 0
+    byte_count = 0
+    for book in world_books:
+        try:
+            world_book_id = int(book["id"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if world_book_id in seen_book_ids:
+            continue
+        seen_book_ids.add(world_book_id)
+        entries = book.get("entries")
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if not isinstance(entry, Mapping):
+                continue
+            row_count += 1
+            for key in ("keywords", "content", "metadata"):
+                value = entry.get(key)
+                if isinstance(value, (Mapping, list, tuple)):
+                    encoded = json.dumps(
+                        _safe_json(value),
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                else:
+                    encoded = str(value or "").encode("utf-8")
+                byte_count += len(encoded)
+            byte_count += _MATERIALIZED_SOURCE_ROW_OVERHEAD_BYTES
+    return row_count, byte_count
+
+
+def _materialize_world_books_by_id(
+    conn: Any,
+    world_book_ids: Sequence[int],
+    *,
+    owner_user_id: str,
+    participant_character_ids: Sequence[int],
+    existing_entry_count: int = 0,
+    existing_entry_bytes: int = 0,
+) -> dict[int, dict[str, Any]]:
+    """Materialize explicitly addressed books through the backend auth boundary."""
+    ordered_ids = list(dict.fromkeys(int(item) for item in world_book_ids))
+    books: dict[int, dict[str, Any]] = {}
+    for world_book_id in ordered_ids:
+        if _is_postgres_connection(conn):
+            placeholders = ",".join("?" for _ in participant_character_ids)
+            if not placeholders:
+                raise InputError(f"World book ID {world_book_id} not found.")
+            authorized = conn.execute(
+                "SELECT 1 AS authorized FROM character_world_books cwb "
+                "JOIN character_cards cc ON cc.id = cwb.character_id "
+                "WHERE cwb.world_book_id = ? "
+                f"AND cwb.character_id IN ({placeholders}) "  # nosec B608
+                "AND cc.client_id = ? AND cc.deleted = FALSE LIMIT 1",
+                (world_book_id, *participant_character_ids, owner_user_id),
+            ).fetchone()
+            if authorized is None:
+                raise InputError(f"World book ID {world_book_id} not found.")
+        result = conn.execute(
+            "SELECT * FROM world_books WHERE id = ? AND deleted = FALSE LIMIT 1",
+            (world_book_id,),
+        )
+        row = result.fetchone()
+        if row is None:
+            raise InputError(f"World book ID {world_book_id} not found.")
+        books[world_book_id] = _row_dict(row, result)
+
+    entries_by_book = _load_world_book_entries(
+        conn,
+        ordered_ids,
+        existing_row_count=existing_entry_count,
+        existing_byte_count=existing_entry_bytes,
+    )
+    return {
+        world_book_id: {
+            **{
+                key: _safe_json(value)
+                for key, value in book.items()
+                if key not in {"client_id", "deleted"}
+            },
+            "entries": entries_by_book[world_book_id],
+        }
+        for world_book_id, book in books.items()
+    }
+
+
 def _materialize_world_book_by_id(
     conn: Any,
     world_book_id: int,
@@ -1064,56 +1471,13 @@ def _materialize_world_book_by_id(
     owner_user_id: str,
     participant_character_ids: Sequence[int],
 ) -> dict[str, Any]:
-    """Materialize an explicitly addressed book through the backend auth boundary."""
-    if _is_postgres_connection(conn):
-        placeholders = ",".join("?" for _ in participant_character_ids)
-        if not placeholders:
-            raise InputError(f"World book ID {world_book_id} not found.")
-        authorized = conn.execute(
-            "SELECT 1 AS authorized FROM character_world_books cwb "
-            "JOIN character_cards cc ON cc.id = cwb.character_id "
-            "WHERE cwb.world_book_id = ? "
-            f"AND cwb.character_id IN ({placeholders}) "  # nosec B608
-            "AND cc.client_id = ? AND cc.deleted = FALSE LIMIT 1",
-            (world_book_id, *participant_character_ids, owner_user_id),
-        ).fetchone()
-        if authorized is None:
-            raise InputError(f"World book ID {world_book_id} not found.")
-    result = conn.execute(
-        "SELECT * FROM world_books WHERE id = ? AND deleted = FALSE LIMIT 1",
-        (world_book_id,),
-    )
-    row = result.fetchone()
-    if row is None:
-        raise InputError(f"World book ID {world_book_id} not found.")
-    book = _row_dict(row, result)
-    entries = _select_rows(
+    """Materialize one explicitly addressed book through the shared bounded path."""
+    return _materialize_world_books_by_id(
         conn,
-        """
-        SELECT * FROM world_book_entries
-         WHERE world_book_id = ?
-         ORDER BY priority DESC, id
-        """,
-        (world_book_id,),
-    )
-    materialized = {
-        key: _safe_json(value)
-        for key, value in book.items()
-        if key not in {"client_id", "deleted"}
-    }
-    materialized["entries"] = [
-        {
-            key: _safe_json(
-                _decode_json(value, {} if key == "metadata" else [])
-                if key in {"keywords", "metadata"}
-                else value
-            )
-            for key, value in entry.items()
-            if key not in {"client_id", "deleted"}
-        }
-        for entry in entries
-    ]
-    return materialized
+        [world_book_id],
+        owner_user_id=owner_user_id,
+        participant_character_ids=participant_character_ids,
+    )[world_book_id]
 
 
 def _find_materialized_preset(
@@ -1311,7 +1675,7 @@ def _materialize_roleplay_behavior_settings_once(
     owner_user_id: str,
     changed_keys: set[str] | frozenset[str],
     max_bytes: int = DEFAULT_MAX_SNAPSHOT_BYTES,
-) -> dict[str, Any]:
+) -> dict[str, Any] | None:
     """Rebuild the complete, immutable resumable behavior authority."""
     reject_resumable_behavior_credentials(merged_settings)
     stored_settings = resume_state.get("settings")
@@ -1335,9 +1699,31 @@ def _materialize_roleplay_behavior_settings_once(
     base_effective = current_values.get("effective_completion")
     if not isinstance(base_effective, Mapping):
         base_effective = resume_state.get("effective_completion")
-    if not isinstance(base_effective, Mapping):
-        raise InputError("Conversation has no valid effective completion settings.")
-    sampling = dict(base_effective.get("sampling") or {})
+    has_base_effective = isinstance(base_effective, Mapping)
+    behavior_changed_keys = RESUMABLE_BEHAVIOR_SETTING_KEYS.intersection(changed_keys)
+    if not has_base_effective and not {"provider", "model"}.intersection(changed_keys):
+        # An ordinary behavior writer must remain available for explicitly
+        # ineligible chats. It preserves the readiness marker and public setting;
+        # a later complete provider/model mutation can build the authority.
+        if behavior_changed_keys.issubset(_INELIGIBLE_SAFE_BEHAVIOR_KEYS):
+            return None
+        raise InputError(
+            "Conversation requires valid effective completion settings before "
+            "changing referenced behavior sources."
+        )
+
+    if has_base_effective:
+        sampling = dict(base_effective.get("sampling") or {})
+    else:
+        defaults = (
+            snapshot_participants[0].get("generation_defaults")
+            if snapshot_participants
+            else None
+        )
+        snapshot_sampling = (
+            defaults.get("sampling") if isinstance(defaults, Mapping) else None
+        )
+        sampling = dict(snapshot_sampling or {})
     overrides = merged_settings.get("chatGenerationOverride")
     if not isinstance(overrides, Mapping):
         overrides = merged_settings.get("generationOverrides")
@@ -1358,11 +1744,22 @@ def _materialize_roleplay_behavior_settings_once(
                 }
             )
     requested_effective = {
-        "provider": merged_settings.get("provider") or base_effective.get("provider"),
-        "model": merged_settings.get("model") or base_effective.get("model"),
+        "provider": merged_settings.get("provider")
+        or (base_effective.get("provider") if has_base_effective else None),
+        "model": merged_settings.get("model")
+        or (base_effective.get("model") if has_base_effective else None),
         "sampling": sampling,
     }
-    if requested_effective == dict(base_effective):
+    if not has_base_effective and (
+        not isinstance(requested_effective["provider"], str)
+        or not requested_effective["provider"].strip()
+        or not isinstance(requested_effective["model"], str)
+        or not requested_effective["model"].strip()
+    ):
+        raise InputError(
+            "Provider and model are both required to repair resumable settings."
+        )
+    if has_base_effective and requested_effective == dict(base_effective):
         effective = dict(base_effective)
     else:
         effective, _reason = _resolve_effective_completion(
@@ -1541,14 +1938,36 @@ def _materialize_roleplay_behavior_settings_once(
             ]:
                 if isinstance(book, Mapping) and isinstance(book.get("id"), int):
                     reusable_books[int(book["id"])] = dict(book)
+            retained_books: dict[int, dict[str, Any]] = {
+                int(book["id"]): dict(book)
+                for participant in participants
+                for book in participant.get("world_books", [])
+                if isinstance(book, Mapping) and isinstance(book.get("id"), int)
+            }
+            retained_books.update(
+                {
+                    book_id: reusable_books[book_id]
+                    for book_id in book_ids
+                    if book_id in reusable_books
+                }
+            )
+            existing_entry_count, existing_entry_bytes = (
+                _materialized_world_book_entry_usage(list(retained_books.values()))
+            )
+            missing_book_ids = [
+                book_id for book_id in book_ids if book_id not in reusable_books
+            ]
+            new_books = _materialize_world_books_by_id(
+                conn,
+                missing_book_ids,
+                owner_user_id=owner_user_id,
+                participant_character_ids=desired_participant_ids,
+                existing_entry_count=existing_entry_count,
+                existing_entry_bytes=existing_entry_bytes,
+            )
             values["world_books"] = [
                 reusable_books.get(book_id)
-                or _materialize_world_book_by_id(
-                    conn,
-                    book_id,
-                    owner_user_id=owner_user_id,
-                    participant_character_ids=desired_participant_ids,
-                )
+                or new_books[book_id]
                 for book_id in book_ids
             ]
         else:
@@ -1639,30 +2058,33 @@ def materialize_roleplay_behavior_settings(
     owner_user_id: str,
     changed_keys: set[str] | frozenset[str],
     max_bytes: int = DEFAULT_MAX_SNAPSHOT_BYTES,
-) -> dict[str, Any]:
+) -> dict[str, Any] | None:
     """Materialize one stable authority, retrying bounded PostgreSQL source drift."""
     attempts = 2 if _is_postgres_connection(conn) else 1
     for _attempt in range(attempts):
-        first = _materialize_roleplay_behavior_settings_once(
-            conn,
-            conversation=conversation,
-            resume_state=resume_state,
-            merged_settings=merged_settings,
-            owner_user_id=owner_user_id,
-            changed_keys=changed_keys,
-            max_bytes=max_bytes,
-        )
-        if attempts == 1:
-            return first
-        second = _materialize_roleplay_behavior_settings_once(
-            conn,
-            conversation=conversation,
-            resume_state=resume_state,
-            merged_settings=merged_settings,
-            owner_user_id=owner_user_id,
-            changed_keys=changed_keys,
-            max_bytes=max_bytes,
-        )
+        try:
+            first = _materialize_roleplay_behavior_settings_once(
+                conn,
+                conversation=conversation,
+                resume_state=resume_state,
+                merged_settings=merged_settings,
+                owner_user_id=owner_user_id,
+                changed_keys=changed_keys,
+                max_bytes=max_bytes,
+            )
+            if attempts == 1:
+                return first
+            second = _materialize_roleplay_behavior_settings_once(
+                conn,
+                conversation=conversation,
+                resume_state=resume_state,
+                merged_settings=merged_settings,
+                owner_user_id=owner_user_id,
+                changed_keys=changed_keys,
+                max_bytes=max_bytes,
+            )
+        except _SourceDrift:
+            continue
         if first == second:
             return second
     raise InputError("Behavior sources changed during settings materialization.")
@@ -1680,6 +2102,10 @@ def create_character_conversation(
     sampling: Mapping[str, Any] | None = None,
     initial_messages: Sequence[Mapping[str, Any]] = (),
     primary_greeting: Mapping[str, Any] | None = None,
+    seed_first_message: bool = False,
+    greeting_strategy: str = "default",
+    greeting_alternate_index: int | None = None,
+    fallback_greeting: Mapping[str, Any] | None = None,
     conversation_settings: Mapping[str, Any] | None = None,
     max_snapshot_bytes: int = DEFAULT_MAX_SNAPSHOT_BYTES,
 ) -> str:
@@ -1722,6 +2148,7 @@ def create_character_conversation(
     effective_identity: tuple[str, str] | None = None
     identity_resolution_complete = False
     identity_resolution_reason: str | None = None
+    greeting_random_value = random.SystemRandom().random()
 
     for attempt in range(2):
         try:
@@ -1734,6 +2161,10 @@ def create_character_conversation(
                     primary_greeting=primary_greeting,
                     owner_user_id=owner_user_id,
                     max_snapshot_bytes=max_snapshot_bytes,
+                    greeting_strategy=greeting_strategy,
+                    greeting_alternate_index=greeting_alternate_index,
+                    greeting_random_value=greeting_random_value,
+                    fallback_greeting=fallback_greeting,
                 )
                 if not identity_resolution_complete:
                     initial_effective, identity_resolution_reason = (
@@ -1759,6 +2190,10 @@ def create_character_conversation(
                     primary_greeting=primary_greeting,
                     owner_user_id=owner_user_id,
                     max_snapshot_bytes=max_snapshot_bytes,
+                    greeting_strategy=greeting_strategy,
+                    greeting_alternate_index=greeting_alternate_index,
+                    greeting_random_value=greeting_random_value,
+                    fallback_greeting=fallback_greeting,
                 )
                 if current.snapshot.canonical_bytes != first.snapshot.canonical_bytes:
                     raise _SourceDrift
@@ -1776,6 +2211,9 @@ def create_character_conversation(
 
                 settings = dict(creation_settings)
                 settings["participantCharacterIds"] = ordered_ids
+                settings["greetingsChecksum"] = compute_character_greetings_checksum(
+                    current.primary_character
+                )
                 if prompt_preset_id:
                     normalized_preset = str(prompt_preset_id).strip()
                     settings["presetScope"] = "chat"
@@ -1809,7 +2247,23 @@ def create_character_conversation(
                     settings,
                     conn=conn,
                 )
-                for initial_message in initial_messages:
+                messages_to_persist = [dict(item) for item in initial_messages]
+                accepted_participants = current.snapshot.payload["participants"]
+                accepted_greeting = accepted_participants[0]["greeting"]
+                if seed_first_message and str(
+                    accepted_greeting.get("content") or ""
+                ).strip():
+                    messages_to_persist.insert(
+                        0,
+                        {
+                            "sender": str(
+                                accepted_participants[0]["identity"].get("name")
+                                or "Assistant"
+                            ),
+                            "content": str(accepted_greeting["content"]),
+                        },
+                    )
+                for initial_message in messages_to_persist:
                     message = dict(initial_message)
                     message["conversation_id"] = conversation_id
                     db.add_message(message, conn=conn)

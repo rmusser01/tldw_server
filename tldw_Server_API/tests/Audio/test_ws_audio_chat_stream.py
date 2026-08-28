@@ -72,7 +72,10 @@ from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     ProviderCredentialRuntime as RealProviderCredentialRuntime,
     is_runtime_issued_provider_call_credentials,
 )
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import ConflictError
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    ConflictError,
+    InputError,
+)
 
 _AUDIO_LABEL_TO_SAMPLE = {
     "abc": 100,
@@ -3041,6 +3044,78 @@ async def test_audio_chat_ws_existing_session_merges_settings_with_version_cas(
     assert merged["roleplayResumeV1"] == {"resumeEligible": True}
     assert merged["roleplayBehaviorV1"] == {"schemaVersion": 1, "digest": "keep"}
     assert merged["audio_chat_ws"]["session_id"] == "resume-chat"
+
+
+def _nested_audio_metadata(depth: int) -> dict[str, Any]:
+    value: dict[str, Any] = {"leaf": "value"}
+    for _index in range(depth):
+        value = {"nested": value}
+    return value
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("conversation_created", [True, False], ids=["create", "merge"])
+@pytest.mark.parametrize(
+    ("metadata", "message"),
+    [
+        ({"payload": "x" * 200_001}, "bytes"),
+        (_nested_audio_metadata(40), "depth"),
+        ({"score": float("nan")}, "finite"),
+    ],
+    ids=["oversize", "depth", "nonfinite"],
+)
+def test_audio_settings_writer_rejects_invalid_final_object_before_upsert(
+    conversation_created: bool,
+    metadata: dict[str, Any],
+    message: str,
+) -> None:
+    class _SettingsDB:
+        def __init__(self) -> None:
+            self.current = {
+                "settings": {"userSetting": "unchanged"},
+                "settings_version": 4,
+            }
+            self.upsert_calls: list[tuple[dict[str, Any], int | None]] = []
+
+        def get_conversation_settings(self, _conversation_id: str) -> dict[str, Any]:
+            return {
+                "settings": dict(self.current["settings"]),
+                "settings_version": self.current["settings_version"],
+            }
+
+        def upsert_conversation_settings(
+            self,
+            _conversation_id: str,
+            settings: dict[str, Any],
+            *,
+            expected_settings_version: int | None = None,
+        ) -> bool:
+            self.upsert_calls.append((dict(settings), expected_settings_version))
+            self.current = {
+                "settings": dict(settings),
+                "settings_version": self.current["settings_version"] + 1,
+            }
+            return True
+
+    db = _SettingsDB()
+    before = dict(db.current)
+    settings_payload = {
+        "audio_chat_ws": {
+            "session_id": "audio-validation",
+            "metadata": metadata,
+        }
+    }
+
+    with pytest.raises(InputError, match=message):
+        audio_streaming_module._persist_audio_chat_settings(
+            db,
+            "audio-validation",
+            settings_payload,
+            conversation_created=conversation_created,
+        )
+
+    assert db.upsert_calls == []
+    assert db.current == before
 
 
 @pytest.mark.integration

@@ -124,6 +124,10 @@ from tldw_Server_API.app.core.Character_Chat.character_conversation_factory impo
     reject_resumable_behavior_credentials,
     validate_resumable_behavior_boole,
 )
+from tldw_Server_API.app.core.Character_Chat.chat_settings_validation import (
+    ChatSettingsSizeError,
+    validate_chat_settings_storage,
+)
 
 # Rate limiting
 from tldw_Server_API.app.core.Character_Chat.character_rate_limiter import (
@@ -278,7 +282,6 @@ CHARACTER_STREAM_NEXT_TIMEOUT_SECONDS = 300.0
 CHARACTER_STREAM_CLOSE_TIMEOUT_SECONDS = 5.0
 
 THROTTLE_WINDOW_SIZE = 100
-MAX_CHAT_SETTINGS_BYTES = 200_000
 MAX_AUTHOR_NOTE_CHARS = 20_000
 MAX_ASSISTANT_OVERLAY_TEXT_CHARS = MAX_AUTHOR_NOTE_CHARS
 DEFAULT_AUTO_SUMMARY_THRESHOLD_MESSAGES = 40
@@ -2024,20 +2027,18 @@ def _validate_chat_settings_payload(
     strip_invalid_deep_research: bool = False,
 ) -> dict[str, Any]:
     """Validate settings payload size, shape, and known enum fields."""
-    settings = dict(settings)
     try:
-        encoded = json.dumps(settings).encode("utf-8")
-    except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid settings payload: {exc}"
-        ) from exc
-
-    if len(encoded) > MAX_CHAT_SETTINGS_BYTES:
+        settings = validate_chat_settings_storage(settings)
+    except ChatSettingsSizeError as exc:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=f"Settings payload exceeds {MAX_CHAT_SETTINGS_BYTES} bytes"
-        )
+            detail=str(exc),
+        ) from exc
+    except InputError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
 
     try:
         validate_resumable_behavior_boole(settings)
@@ -2300,18 +2301,17 @@ def _validate_chat_settings_payload(
                 detail="Invalid summary.updatedAt. Expected ISO timestamp string"
             )
     try:
-        normalized_encoded = json.dumps(settings).encode("utf-8")
-    except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid settings payload: {exc}"
-        ) from exc
-    if len(normalized_encoded) > MAX_CHAT_SETTINGS_BYTES:
+        return validate_chat_settings_storage(settings)
+    except ChatSettingsSizeError as exc:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=f"Settings payload exceeds {MAX_CHAT_SETTINGS_BYTES} bytes"
-        )
-    return settings
+            detail=str(exc),
+        ) from exc
+    except InputError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
 
 
 def _parse_iso_timestamp(value: Any) -> Optional[float]:
@@ -4172,14 +4172,15 @@ def _persist_auto_summary_to_settings(
                         owner_user_id=str(conversation.get("client_id") or ""),
                         changed_keys={"summary"},
                     )
-                    current_settings["roleplayBehaviorV1"] = materialized
-                    current_settings["roleplayResumeV1"] = {
-                        "resumeEligible": True,
-                        "resumeIneligibleReason": None,
-                        "effectiveCompletion": materialized["values"][
-                            "effective_completion"
-                        ],
-                    }
+                    if materialized is not None:
+                        current_settings["roleplayBehaviorV1"] = materialized
+                        current_settings["roleplayResumeV1"] = {
+                            "resumeEligible": True,
+                            "resumeIneligibleReason": None,
+                            "effectiveCompletion": materialized["values"][
+                                "effective_completion"
+                            ],
+                        }
                 db.upsert_conversation_settings(
                     chat_id,
                     current_settings,
@@ -4595,28 +4596,6 @@ async def create_chat_session(
                 raise _chat_sync_http_error(sync_exc) from sync_exc
             created_id = chat_id
         elif character is not None:
-            raw_name = str(character.get("name") or "Assistant")
-            greeting_text = character.get("first_message")
-            greeting_source = "first_message"
-            greeting_source_index = 0
-            alternate_greetings = character.get("alternate_greetings")
-            if greeting_strategy in {"alternate_random", "alternate_index"} and isinstance(
-                alternate_greetings, list
-            ) and alternate_greetings:
-                if greeting_strategy == "alternate_random":
-                    greeting_text = _greeting_random.choice(alternate_greetings)
-                    greeting_source_index = alternate_greetings.index(greeting_text)
-                elif isinstance(alternate_index, int) and alternate_index < len(alternate_greetings):
-                    greeting_text = alternate_greetings[alternate_index]
-                    greeting_source_index = alternate_index
-                greeting_source = "alternate"
-            valid_greeting = isinstance(greeting_text, str) and bool(greeting_text.strip())
-            initial_messages = (
-                [{"sender": raw_name, "content": greeting_text}]
-                if seed_first_message and valid_greeting
-                else []
-            )
-            seed_status = "ok" if initial_messages else ("no_greeting" if seed_first_message else None)
             created_id = create_character_conversation(
                 db,
                 conversation_data=conv_data,
@@ -4636,16 +4615,27 @@ async def create_chat_session(
                     if field in session_data.model_fields_set
                 }
                 or None,
-                initial_messages=initial_messages,
-                primary_greeting={
-                    "content": greeting_text if valid_greeting else "",
-                    "source": greeting_source if valid_greeting else "none",
-                    "source_index": greeting_source_index,
-                },
-                conversation_settings={
-                    "greetingsChecksum": _compute_greetings_checksum(character),
-                },
+                seed_first_message=seed_first_message,
+                greeting_strategy=greeting_strategy,
+                greeting_alternate_index=alternate_index,
             )
+            if seed_first_message:
+                created_state = db.get_roleplay_resume_state(created_id)
+                snapshot_payload = (
+                    (created_state.get("behavior_snapshot") or {}).get("payload")
+                    or {}
+                )
+                snapshot_participants = snapshot_payload.get("participants") or []
+                accepted_greeting = (
+                    snapshot_participants[0].get("greeting")
+                    if snapshot_participants
+                    else {}
+                )
+                seed_status = (
+                    "ok"
+                    if str((accepted_greeting or {}).get("content") or "").strip()
+                    else "no_greeting"
+                )
             created_with_factory = True
         else:
             # Add to database
@@ -7516,14 +7506,15 @@ async def update_chat_settings(
                     owner_user_id=str(current_user.id),
                     changed_keys=set(incoming_settings),
                 )
-                merged_settings["roleplayBehaviorV1"] = materialized
-                merged_settings["roleplayResumeV1"] = {
-                    "resumeEligible": True,
-                    "resumeIneligibleReason": None,
-                    "effectiveCompletion": materialized["values"][
-                        "effective_completion"
-                    ],
-                }
+                if materialized is not None:
+                    merged_settings["roleplayBehaviorV1"] = materialized
+                    merged_settings["roleplayResumeV1"] = {
+                        "resumeEligible": True,
+                        "resumeIneligibleReason": None,
+                        "effectiveCompletion": materialized["values"][
+                            "effective_completion"
+                        ],
+                    }
 
             if not db.upsert_conversation_settings(
                 chat_id,
@@ -8494,14 +8485,15 @@ async def select_greeting(
                         owner_user_id=str(current_user.id),
                         changed_keys={"greetingSelectionId", "greetingsChecksum"},
                     )
-                    settings["roleplayBehaviorV1"] = materialized
-                    settings["roleplayResumeV1"] = {
-                        "resumeEligible": True,
-                        "resumeIneligibleReason": None,
-                        "effectiveCompletion": materialized["values"][
-                            "effective_completion"
-                        ],
-                    }
+                    if materialized is not None:
+                        settings["roleplayBehaviorV1"] = materialized
+                        settings["roleplayResumeV1"] = {
+                            "resumeEligible": True,
+                            "resumeIneligibleReason": None,
+                            "effectiveCompletion": materialized["values"][
+                                "effective_completion"
+                            ],
+                        }
                 updated = db.upsert_conversation_settings(
                     chat_id,
                     settings,

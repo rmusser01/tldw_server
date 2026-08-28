@@ -7,7 +7,6 @@ facade.
 """
 
 import base64
-import random
 import re
 import threading
 import time
@@ -765,20 +764,6 @@ def start_new_chat_session(
     logger.debug("Starting new chat session for character_id: {}, user: {}", character_id, user_name)
 
     original_first_message_content: Optional[str] = None
-    original_alternate_greetings: Optional[list[str]] = None
-
-    def _normalize_alt_greeting(value: Any) -> Optional[str]:
-        """Normalize value (Any) to UTF-8 text or None (Optional[str]); bytes/memoryview are decoded with errors replaced."""
-        if isinstance(value, str):
-            return value
-        if isinstance(value, memoryview):
-            value = value.tobytes()
-        if isinstance(value, (bytes, bytearray)):
-            try:
-                return bytes(value).decode("utf-8")
-            except _CHAR_CHAT_NONCRITICAL_EXCEPTIONS:
-                return bytes(value).decode("utf-8", errors="replace")
-        return None
 
     try:
         from tldw_Server_API.app.core.Character_Chat.character_conversation_factory import (
@@ -788,15 +773,6 @@ def start_new_chat_session(
         raw_char_data_for_first_message = db.get_character_card_by_id(character_id)
         if raw_char_data_for_first_message:
             original_first_message_content = raw_char_data_for_first_message.get("first_message")
-            ag = raw_char_data_for_first_message.get("alternate_greetings")
-            if isinstance(ag, list):
-                # Normalize bytes-like greetings to text
-                normalized: list[str] = []
-                for entry in ag:
-                    greeting = _normalize_alt_greeting(entry)
-                    if isinstance(greeting, str):
-                        normalized.append(greeting)
-                original_alternate_greetings = normalized
         else:
             logger.warning(
                 'Could not load raw character data for ID {} to get original first message.',
@@ -844,23 +820,7 @@ def start_new_chat_session(
             return restored
 
         message_to_store_in_db: Optional[str] = original_first_message_content
-
-        # Apply optional greeting strategy selection using raw (unprocessed) fields
-        selected_alt: Optional[str] = None
-        try:
-            if greeting_strategy in {"alternate_random", "alternate_index"} and original_alternate_greetings:
-                if greeting_strategy == "alternate_random":
-                    if original_alternate_greetings:
-                        # Non-security greeting selection.
-                        selected_alt = random.choice(original_alternate_greetings)  # nosec B311
-                elif greeting_strategy == "alternate_index":
-                    if isinstance(alternate_index, int) and alternate_index >= 0 and alternate_index < len(original_alternate_greetings):
-                        selected_alt = original_alternate_greetings[alternate_index]
-        except _CHAR_CHAT_NONCRITICAL_EXCEPTIONS as _sel_err:
-            logger.debug("Alternate greeting selection failed: {}", _sel_err)
-
-        if isinstance(selected_alt, str) and selected_alt.strip():
-            message_to_store_in_db = selected_alt
+        used_compatibility_fallback = False
 
         if message_to_store_in_db is None:
             fallback_processed: Optional[str] = None
@@ -889,27 +849,38 @@ def start_new_chat_session(
                         char_name,
                         conversation_id_val,
                     )
+                used_compatibility_fallback = True
 
-        selected_greeting = {
-            "content": message_to_store_in_db or "",
-            "source": "alternate" if selected_alt is not None else "first_message",
-            "source_index": (
-                alternate_index
-                if selected_alt is not None and isinstance(alternate_index, int)
-                else 0
-            ),
-        }
-        initial_messages = (
-            [{"sender": char_name, "content": message_to_store_in_db}]
-            if message_to_store_in_db
-            else []
+        fallback_greeting = (
+            {
+                "content": message_to_store_in_db or "",
+                "source": "first_message",
+                "source_index": 0,
+            }
+            if used_compatibility_fallback
+            else None
         )
         conversation_id_val = create_character_conversation(
             db,
             conversation_data=conv_payload,
-            initial_messages=initial_messages,
-            primary_greeting=selected_greeting,
+            seed_first_message=True,
+            greeting_strategy=greeting_strategy or "default",
+            greeting_alternate_index=alternate_index,
+            fallback_greeting=fallback_greeting,
         )
+
+        created_state = db.get_roleplay_resume_state(conversation_id_val)
+        snapshot_payload = (
+            (created_state.get("behavior_snapshot") or {}).get("payload") or {}
+        )
+        snapshot_participants = snapshot_payload.get("participants") or []
+        accepted_greeting = (
+            snapshot_participants[0].get("greeting")
+            if snapshot_participants
+            else {}
+        )
+        accepted_content = str((accepted_greeting or {}).get("content") or "")
+        message_to_store_in_db = accepted_content if accepted_content.strip() else None
 
         logger.info(
             "Created new conversation ID: {} for character '{}'.",
