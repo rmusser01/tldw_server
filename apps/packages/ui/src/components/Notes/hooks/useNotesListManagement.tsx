@@ -37,7 +37,10 @@ import type { ConfirmDangerOptions } from '@/components/Common/confirm-danger'
 
 type ConfirmDanger = (options: ConfirmDangerOptions) => Promise<boolean>
 type NotesAuthorityScope = string | null | undefined
-type NotesAuthorityOwner = { scope: NotesAuthorityScope }
+type NotesAuthorityOwner = {
+  scope: NotesAuthorityScope
+  generation: number
+}
 
 const applyStateAction = <T,>(
   action: React.SetStateAction<T>,
@@ -122,10 +125,14 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
   const [listViewMode, setListViewMode] = React.useState<NotesListViewMode>('list')
   const listQueryViewMode = listViewMode === 'graph' ? 'list' : listViewMode
   const authorityOwnerRef = React.useRef<NotesAuthorityOwner>({
-    scope: authorityScope
+    scope: authorityScope,
+    generation: 0
   })
   if (authorityOwnerRef.current.scope !== authorityScope) {
-    authorityOwnerRef.current = { scope: authorityScope }
+    authorityOwnerRef.current = {
+      scope: authorityScope,
+      generation: authorityOwnerRef.current.generation + 1
+    }
   }
   const authorityOwner = authorityOwnerRef.current
   const isCurrentAuthority = React.useCallback(
@@ -404,7 +411,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     effectiveKeywordTokens.join('|'),
     ...(authorityScope === undefined
       ? []
-      : ['authority', authorityScope])
+      : ['authority', authorityScope, 'generation', authorityOwner.generation])
   ]
   const {
     data: queryData,
@@ -420,8 +427,10 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
       if (authorityScope === undefined) return previousData
       if (authorityScope === null) return undefined
       const previousKey = previousQuery?.queryKey ?? []
-      return previousKey.at(-2) === 'authority' &&
-        previousKey.at(-1) === authorityScope
+      return previousKey.at(-4) === 'authority' &&
+        previousKey.at(-3) === authorityScope &&
+        previousKey.at(-2) === 'generation' &&
+        previousKey.at(-1) === authorityOwner.generation
         ? previousData
         : undefined
     },
@@ -560,7 +569,12 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
       listViewMode,
       ...(authorityScope === undefined
         ? []
-        : ["authority", authorityScope])
+        : [
+            "authority",
+            authorityScope,
+            "generation",
+            authorityOwner.generation
+          ])
     ],
     queryFn: fetchMoodboards,
     enabled:

@@ -472,6 +472,93 @@ describe("useNotesListManagement authority boundaries", () => {
     expect(result.current.total).toBe(0)
   })
 
+  it("starts a fresh browse request when the same authority returns after a guarded transition", async () => {
+    const staleAccountA = deferred<ReturnType<typeof notesResponse>>()
+    const freshAccountA = deferred<ReturnType<typeof notesResponse>>()
+    let noteListCalls = 0
+    mocks.bgRequest.mockImplementation(async (request: { path?: string }) => {
+      const path = String(request.path || "")
+      if (path.startsWith("/api/v1/notes/collections")) return { items: [] }
+      if (!path.startsWith("/api/v1/notes/?")) return {}
+      noteListCalls += 1
+      return noteListCalls === 1 ? staleAccountA.promise : freshAccountA.promise
+    })
+    const { result, rerender } = renderList("scope-a")
+    await waitFor(() => expect(noteListCalls).toBe(1))
+
+    rerender({ authorityScope: null })
+    rerender({ authorityScope: "scope-a" })
+
+    await waitFor(() => expect(noteListCalls).toBe(2))
+    await act(async () => {
+      staleAccountA.resolve(notesResponse("stale-account-a-note", 99))
+      await Promise.resolve()
+    })
+
+    expect(result.current.isFetching).toBe(true)
+    expect(result.current.rawNotes).toEqual([])
+    expect(result.current.total).toBe(0)
+
+    await act(async () => {
+      freshAccountA.resolve(notesResponse("fresh-account-a-note", 1))
+      await Promise.resolve()
+    })
+    await waitFor(() => {
+      expect(result.current.rawNotes.map((note) => note.id)).toEqual([
+        "fresh-account-a-note"
+      ])
+    })
+    expect(result.current.total).toBe(1)
+  })
+
+  it("starts fresh moodboard enumeration when the same authority returns after a guarded transition", async () => {
+    const staleAccountA = deferred<ReturnType<typeof moodboardResponse>>()
+    const freshAccountA = deferred<ReturnType<typeof moodboardResponse>>()
+    let moodboardGetCalls = 0
+    mocks.bgRequest.mockImplementation(async (request: { path?: string }) => {
+      const path = String(request.path || "")
+      if (path.startsWith("/api/v1/notes/collections")) return { items: [] }
+      if (path.startsWith("/api/v1/notes/moodboards?")) {
+        moodboardGetCalls += 1
+        return moodboardGetCalls === 1
+          ? staleAccountA.promise
+          : freshAccountA.promise
+      }
+      return { items: [], pagination: { total_items: 0 } }
+    })
+    const { result, rerender } = renderList("scope-a")
+    act(() => result.current.setListViewMode("moodboard"))
+    await waitFor(() => expect(moodboardGetCalls).toBe(1))
+
+    rerender({ authorityScope: null })
+    rerender({ authorityScope: "scope-a" })
+
+    await waitFor(() => expect(moodboardGetCalls).toBe(2))
+    await act(async () => {
+      staleAccountA.resolve(moodboardResponse(20, "Stale account A moodboard"))
+      await Promise.resolve()
+    })
+
+    expect(result.current.isMoodboardsFetching).toBe(true)
+    expect(result.current.moodboards).toEqual([])
+    expect(result.current.selectedMoodboardId).toBeNull()
+
+    await act(async () => {
+      freshAccountA.resolve(moodboardResponse(21, "Fresh account A moodboard"))
+      await Promise.resolve()
+    })
+    await waitFor(() => {
+      expect(result.current.moodboards).toEqual([
+        expect.objectContaining({
+          id: 21,
+          name: "Fresh account A moodboard"
+        })
+      ])
+    })
+    expect(result.current.selectedMoodboardId).toBe(21)
+    expect(result.current.selectedMoodboard?.id).toBe(21)
+  })
+
   it("retains pagination placeholders only within the same authority", async () => {
     const secondPage = deferred<ReturnType<typeof notesResponse>>()
     let noteListCalls = 0

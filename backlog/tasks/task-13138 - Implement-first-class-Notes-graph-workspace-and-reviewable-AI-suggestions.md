@@ -4,7 +4,7 @@ title: Implement first-class Notes graph workspace and reviewable AI suggestions
 status: In Progress
 assignee: []
 created_date: 2026-08-27 03:40
-updated_date: 2026-08-28 09:26
+updated_date: 2026-08-28 09:48
 labels:
 - notes
 - knowledge-graph
@@ -241,6 +241,8 @@ Task 10 Fix Round 2/3 completed. Successful manual single-user, cookie-session s
 Task 10 Fix Round 3/3 started from exact base 359e0c56a98365c844f5b6189bf88de6c0a4c3fe. Scope is limited to complete authority gating/keying and stale-completion fencing for all useNotesListManagement server discovery, imperative refetch, and collection mutations while preserving omitted-authority legacy behavior and same-authority placeholders. Focused TDD RED precedes production edits; Task 11, Task 12 browser layout, dependencies, Python, and controller progress.md remain excluded.
 
 Task 10 Fix Round 3/3 completed. All useNotesListManagement server discovery, imperative refetch, discovery state, and collection mutations are now identity-fenced and supplied-authority keyed/gated; explicit null makes zero Notes discovery requests and synchronously hides prior evidence. Explicit non-null authority treats server notebooks as authoritative and never reads, migrates, falls back to, or writes the global local notebook setting, while omitted authority preserves legacy local behavior. Verification: authority 9/9; affected Task 9/list 71/71; Task 10/Stage 22 31/31; organization/moodboard 10/10; affected managers 53 passed with only the unchanged Stage 5 presentation baseline; ESLint zero errors; Prettier matched the exact inherited three-file mixed-format baseline with the new test clean; TypeScript exactly 315 inherited lines with zero touched diagnostics; diff/scans clean; Bandit not applicable to TypeScript-only scope. Full evidence: .superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-10-report.md. Parent task remains In Progress for Tasks 11-12.
+
+Task 10 exceptional Fix Round 4/5 completed from exact base 7dfa8f62abc87b937e85a116105402f5747649dc. Explicitly supplied Notes authority now carries a monotonic transition generation in primary and moodboard React Query identities, preventing same-key in-flight reuse across A -> null -> A while preserving omitted-authority keys and same-generation placeholders. Deferred RED reproduced both browse and moodboard failures; final verification: authority 11/11, affected Task 9/list 73/73, Task 10/Stage 22 31/31, organization/moodboard 10/10, and affected managers 53 passed with only the unchanged Stage 5 presentation baseline. ESLint zero errors; pinned Prettier matches base; TypeScript remains exactly 315 inherited lines with zero touched diagnostics; diff/scans clean; Bandit not applicable to TypeScript-only scope. Full evidence: .superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-10-report.md. Parent task remains In Progress for Tasks 11-12.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
