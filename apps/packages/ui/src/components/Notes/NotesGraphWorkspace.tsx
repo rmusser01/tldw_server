@@ -7,6 +7,8 @@ import { NotesEditorEmptyState } from "./NotesEditorPane"
 import NotesGraphCanvas, {
   type NotesGraphCanvasHandle
 } from "./NotesGraphCanvas"
+import NotesGraphInspector from "./NotesGraphInspector"
+import NotesGraphRelationshipsView from "./NotesGraphRelationshipsView"
 import NotesGraphToolbar from "./NotesGraphToolbar"
 import { useNotesGraphSuggestions } from "./hooks/useNotesGraphSuggestions"
 import { useNotesGraphWorkspace } from "./hooks/useNotesGraphWorkspace"
@@ -41,6 +43,7 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
   const { t } = useTranslation(["option", "common"])
   const rootRef = React.useRef<HTMLElement | null>(null)
   const canvasRef = React.useRef<NotesGraphCanvasHandle | null>(null)
+  const pendingCanvasFocusRef = React.useRef<string | null>(null)
   const mountedFocusRef = React.useRef({
     authorityScope,
     noteId: authorityScope ? initialFocusNoteId : null
@@ -64,6 +67,10 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
     null
   )
   const [showProvisional, setShowProvisional] = React.useState(true)
+  const [viewMode, setViewMode] = React.useState<"canvas" | "relationships">(
+    "canvas"
+  )
+  const [announcement, setAnnouncement] = React.useState("")
   const maxNodeCap = radius === 2 ? 200 : 300
   const maxNodes = Math.min(
     Math.max(20, Number(maxNodesInput) || 120),
@@ -94,11 +101,14 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
   const suggestions = useNotesGraphSuggestions({
     authorityScope,
     enabled: Boolean(
-      hasActiveNotes && workspace.graph && workspace.focusNoteId
+      hasActiveNotes &&
+        workspace.graph?.suggestions_authorized === true &&
+        workspace.focusNoteId
     ),
     isOnline,
     noteId: workspace.focusNoteId,
-    loadedNodeIds
+    loadedNodeIds,
+    fallbackTargetLabel: t("option:notesSearch.graphSuggestedNote")
   })
   const provisionalOverlays = React.useMemo(
     () => Object.values(suggestions.provisionalBySuggestionId),
@@ -111,6 +121,11 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
   React.useEffect(() => {
     setSelectedNodeId(normalizedSelectedId)
   }, [normalizedSelectedId])
+  const currentSelectedNodeId =
+    selectedNodeId ??
+    normalizedSelectedId ??
+    (workspace.focusNoteId ? `note:${workspace.focusNoteId}` : null)
+  const suggestionsAuthorized = workspace.graph?.suggestions_authorized === true
 
   const handleSelectNode = React.useCallback(
     (nodeId: string) => {
@@ -119,12 +134,54 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
     },
     [onSelectNote]
   )
-  const handleSelectSearchResult = React.useCallback(
+  const handleFocusNode = React.useCallback(
     (nodeId: string) => {
       handleSelectNode(nodeId)
-      canvasRef.current?.focusNode(nodeId)
+      if (canvasRef.current) {
+        canvasRef.current.focusNode(nodeId)
+      } else {
+        pendingCanvasFocusRef.current = nodeId
+      }
     },
     [handleSelectNode]
+  )
+  const handleSelectSearchResult = React.useCallback(
+    (nodeId: string) => {
+      handleFocusNode(nodeId)
+    },
+    [handleFocusNode]
+  )
+  React.useEffect(() => {
+    if (viewMode !== "canvas" || !pendingCanvasFocusRef.current) return
+    canvasRef.current?.focusNode(pendingCanvasFocusRef.current)
+    pendingCanvasFocusRef.current = null
+  }, [viewMode])
+  const handleSuggestionDecision = React.useCallback(
+    async (action: "accept" | "reject", suggestionId: string) => {
+      const item = suggestions.suggestions?.find(
+        (entry) => entry.id === suggestionId
+      )
+      if (!item) {
+        setAnnouncement(t("option:notesSearch.graphSuggestionDecisionFailed"))
+        return false
+      }
+      try {
+        if (action === "accept") await suggestions.accept(item)
+        else await suggestions.reject(item)
+        setAnnouncement(
+          t(
+            action === "accept"
+              ? "option:notesSearch.graphSuggestionAccepted"
+              : "option:notesSearch.graphSuggestionRejected"
+          )
+        )
+        return true
+      } catch {
+        setAnnouncement(t("option:notesSearch.graphSuggestionDecisionFailed"))
+        return false
+      }
+    },
+    [suggestions, t]
   )
   const focusCurrent = React.useCallback(() => {
     const current = normalizeGraphNoteId(selectedNoteId)
@@ -190,6 +247,8 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
         </div>
       ) : null}
       <NotesGraphToolbar
+        viewMode={viewMode}
+        suggestionsAuthorized={suggestionsAuthorized}
         search={workspace.search}
         searchResults={workspace.searchResults}
         radius={radius}
@@ -203,6 +262,7 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
         canExpand={workspace.canExpand}
         isRefreshing={workspace.graphQuery.isFetching}
         onSearchChange={workspace.setSearch}
+        onViewModeChange={setViewMode}
         onSelectSearchResult={handleSelectSearchResult}
         onRadiusChange={setRadius}
         onMaxNodesChange={setMaxNodesInput}
@@ -268,22 +328,70 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
           })}
         </div>
       ) : workspace.graph ? (
-        <div
-          className="min-h-[420px] flex-1 sm:min-h-[520px]"
-          data-testid="notes-graph-canvas-slot">
-          <NotesGraphCanvas
-            ref={canvasRef}
-            graph={workspace.graph}
-            layout={workspace.layout}
-            focusNoteId={workspace.focusNoteId}
-            selectedNodeId={selectedNodeId ?? normalizedSelectedId}
-            visibleEdgeTypes={workspace.visibleEdgeTypes}
-            provisionalOverlays={provisionalOverlays}
-            showProvisional={showProvisional}
-            onSelectNode={handleSelectNode}
-          />
+        <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+          <div
+            className="min-h-[420px] min-w-0 flex-1 sm:min-h-[520px]"
+            data-testid="notes-graph-primary-view">
+            {viewMode === "canvas" ? (
+              <div className="h-full" data-testid="notes-graph-canvas-slot">
+                <NotesGraphCanvas
+                  ref={canvasRef}
+                  graph={workspace.graph}
+                  layout={workspace.layout}
+                  focusNoteId={workspace.focusNoteId}
+                  selectedNodeId={currentSelectedNodeId}
+                  visibleEdgeTypes={workspace.visibleEdgeTypes}
+                  provisionalOverlays={
+                    suggestionsAuthorized ? provisionalOverlays : []
+                  }
+                  showProvisional={suggestionsAuthorized && showProvisional}
+                  onSelectNode={handleSelectNode}
+                />
+              </div>
+            ) : (
+              <NotesGraphRelationshipsView
+                graph={workspace.graph}
+                selectedNodeId={currentSelectedNodeId}
+                provisionalOverlays={
+                  suggestionsAuthorized ? provisionalOverlays : []
+                }
+                suggestions={suggestions.suggestions ?? []}
+                suggestionsAuthorized={suggestionsAuthorized}
+                isOnline={isOnline}
+                canAccept={Boolean(
+                  suggestions.capabilities?.allowed_actions.includes(
+                    "accept"
+                  ) && !suggestions.mutations?.acceptance?.isPending
+                )}
+                canReject={Boolean(
+                  suggestions.capabilities?.allowed_actions.includes(
+                    "reject"
+                  ) && !suggestions.mutations?.rejection?.isPending
+                )}
+                onSelectNode={handleFocusNode}
+                onDecideSuggestion={handleSuggestionDecision}
+              />
+            )}
+          </div>
+          <div
+            className="max-h-[min(420px,45vh)] min-h-[280px] flex-none overflow-y-auto border-t border-border lg:h-auto lg:max-h-none lg:min-h-0 lg:w-[360px] lg:border-l lg:border-t-0"
+            data-testid="notes-graph-inspector-region">
+            <NotesGraphInspector
+              graph={workspace.graph}
+              selectedNodeId={currentSelectedNodeId}
+              suggestionsAuthorized={suggestionsAuthorized}
+              isOnline={isOnline}
+              controller={suggestions}
+              onSelectNode={handleFocusNode}
+              onAnnounce={setAnnouncement}
+              onDecideSuggestion={handleSuggestionDecision}
+            />
+          </div>
         </div>
       ) : null}
+      <p className="sr-only" aria-live="polite" aria-atomic="true">
+        {announcement}
+      </p>
     </section>
   )
 }

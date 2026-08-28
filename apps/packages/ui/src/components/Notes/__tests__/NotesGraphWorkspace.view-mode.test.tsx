@@ -1,21 +1,32 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { fireEvent, render, screen } from "@testing-library/react"
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within
+} from "@testing-library/react"
 import React from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import NotesGraphWorkspace from "../NotesGraphWorkspace"
 import {
-  hasNotesGraphActiveNotes,
   type NotesListViewMode,
+  hasNotesGraphActiveNotes,
   resolveNotesGraphFocusNoteId
 } from "../notes-manager-utils"
 
-const { mockCanvas, mockUseNotesGraphSuggestions, mockUseNotesGraphWorkspace } =
-  vi.hoisted(() => ({
-    mockCanvas: vi.fn(),
-    mockUseNotesGraphSuggestions: vi.fn(),
-    mockUseNotesGraphWorkspace: vi.fn()
-  }))
+const {
+  mockCanvas,
+  mockFocusNode,
+  mockUseNotesGraphSuggestions,
+  mockUseNotesGraphWorkspace
+} = vi.hoisted(() => ({
+  mockCanvas: vi.fn(),
+  mockFocusNode: vi.fn(),
+  mockUseNotesGraphSuggestions: vi.fn(),
+  mockUseNotesGraphWorkspace: vi.fn()
+}))
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -24,7 +35,7 @@ vi.mock("react-i18next", () => ({
       options?: string | { defaultValue?: string; [key: string]: unknown }
     ) => {
       const fallback =
-        typeof options === "string" ? options : (options?.defaultValue ?? key)
+        typeof options === "string" ? options : options?.defaultValue ?? key
       if (typeof options !== "object") return fallback
       return Object.entries(options).reduce(
         (value, [name, replacement]) =>
@@ -52,7 +63,7 @@ vi.mock("../NotesGraphCanvas", async () => {
         zoomIn: vi.fn(),
         zoomOut: vi.fn(),
         fit: vi.fn(),
-        focusNode: vi.fn()
+        focusNode: mockFocusNode
       }))
       return <div data-testid="notes-graph-canvas" />
     })
@@ -91,7 +102,8 @@ const graph = {
   radius_cap_applied: false,
   active_note_count: 8,
   all_notes_note_cap: 7,
-  all_notes_eligible: false
+  all_notes_eligible: false,
+  suggestions_authorized: true
 }
 
 const baseWorkspaceState = () => ({
@@ -397,6 +409,125 @@ describe("NotesGraphWorkspace first-class view mode", () => {
     expect(state.expand).toHaveBeenCalledTimes(1)
   })
 
+  it("fails closed without suggestion authorization and keeps the loaded graph readable", () => {
+    const state = baseWorkspaceState()
+    state.graph = { ...graph, suggestions_authorized: false }
+    mockUseNotesGraphWorkspace.mockReturnValue(state)
+    renderWorkspace()
+
+    expect(mockUseNotesGraphSuggestions).toHaveBeenLastCalledWith(
+      expect.objectContaining({ enabled: false })
+    )
+    expect(screen.getByTestId("notes-graph-canvas")).toBeInTheDocument()
+    expect(
+      screen.queryByRole("tab", { name: "Suggestions" })
+    ).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Edge visibility" }))
+    expect(screen.queryByText("Suggestions")).not.toBeInTheDocument()
+  })
+
+  it("catches relationship decision failures, announces once, and restores focus", async () => {
+    const accept = vi.fn().mockRejectedValue(new Error("conflict"))
+    mockUseNotesGraphSuggestions.mockReturnValue({
+      provisionalBySuggestionId: {
+        s1: {
+          edge: {
+            id: "suggestion-edge:s1",
+            suggestionId: "s1",
+            source: "note:a",
+            target: "suggestion-node:s1",
+            type: "provisional_suggestion",
+            directed: false
+          },
+          node: {
+            id: "suggestion-node:s1",
+            suggestionId: "s1",
+            type: "provisional_note",
+            label: "Suggested note"
+          }
+        }
+      },
+      capabilities: { allowed_actions: ["accept", "reject"] },
+      suggestions: [
+        {
+          id: "s1",
+          kind: "related_note",
+          target_title: "Suggested note",
+          target_note_id: "target",
+          match_strength: "possible",
+          rationale: "Grounded",
+          evidence: []
+        }
+      ],
+      accept,
+      reject: vi.fn(),
+      mutations: {
+        acceptance: { isPending: false },
+        rejection: { isPending: false }
+      }
+    })
+    renderWorkspace()
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "option:notesSearch.graphRelationships"
+      })
+    )
+    const acceptButton = screen.getByRole("button", {
+      name: "notesSearch.graphAcceptSuggestion"
+    })
+    acceptButton.focus()
+    fireEvent.click(acceptButton)
+
+    await waitFor(() => expect(accept).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(acceptButton).toHaveFocus())
+    expect(document.querySelectorAll('[aria-live="polite"]')).toHaveLength(1)
+    expect(document.querySelector('[aria-live="polite"]')).toHaveTextContent(
+      "option:notesSearch.graphSuggestionDecisionFailed"
+    )
+  })
+
+  it("focuses an activated relationship when Canvas is active again", async () => {
+    const state = baseWorkspaceState()
+    state.graph = {
+      ...graph,
+      edges: [
+        {
+          id: "edge:a-b",
+          source: "note:a",
+          target: "note:b",
+          type: "manual",
+          directed: true,
+          weight: null,
+          label: null
+        }
+      ]
+    }
+    mockUseNotesGraphWorkspace.mockReturnValue(state)
+    renderWorkspace()
+
+    fireEvent.click(screen.getByRole("button", { name: "Beta note" }))
+    expect(mockFocusNode).toHaveBeenCalledWith("note:b")
+    mockFocusNode.mockClear()
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "option:notesSearch.graphRelationships"
+      })
+    )
+    fireEvent.click(
+      within(screen.getByTestId("notes-graph-relationships-view")).getByRole(
+        "button",
+        { name: "Alpha note" }
+      )
+    )
+    expect(mockFocusNode).not.toHaveBeenCalled()
+    fireEvent.click(
+      screen.getByRole("button", { name: "option:notesSearch.graphCanvas" })
+    )
+
+    await waitFor(() => expect(mockFocusNode).toHaveBeenCalledWith("note:a"))
+  })
+
   it("keeps last-good graph state visible while marking truncation, degraded refresh, and offline state", () => {
     const state = baseWorkspaceState()
     state.graph = {
@@ -433,7 +564,7 @@ describe("NotesGraphWorkspace first-class view mode", () => {
     renderWorkspace({ isMobileViewport: true })
 
     const workspace = screen.getByTestId("notes-graph-workspace")
-    const canvasSlot = screen.getByTestId("notes-graph-canvas-slot")
+    const primaryView = screen.getByTestId("notes-graph-primary-view")
     const toolbar = screen.getByTestId("notes-graph-toolbar")
     Object.defineProperties(workspace, {
       clientWidth: { configurable: true, value: 320 },
@@ -445,6 +576,6 @@ describe("NotesGraphWorkspace first-class view mode", () => {
     expect(workspace.scrollHeight).toBeGreaterThan(workspace.clientHeight)
     expect(workspace).toHaveClass("overflow-y-auto")
     expect(toolbar.querySelector(".flex-wrap")).toBeInTheDocument()
-    expect(canvasSlot).toHaveClass("min-h-[420px]", "sm:min-h-[520px]")
+    expect(primaryView).toHaveClass("min-h-[420px]", "sm:min-h-[520px]")
   })
 })

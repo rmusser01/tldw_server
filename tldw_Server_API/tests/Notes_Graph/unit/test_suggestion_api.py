@@ -115,6 +115,25 @@ class Store:
                     content="source body",
                 ),
             ),
+            NoteGraphSuggestionEvidenceRead(
+                evidence=NoteGraphSuggestionEvidence(
+                    suggestion_id="suggestion-1",
+                    owner_user_id="owner-1",
+                    dataset_id="dataset-1",
+                    side=NoteGraphSuggestionEvidenceSide.TARGET,
+                    ordinal=1,
+                    note_id=TARGET_ID,
+                    field=NoteGraphSuggestionEvidenceField.CONTENT,
+                    content_fingerprint=TARGET_FINGERPRINT,
+                    start_offset=0,
+                    end_offset=6,
+                ),
+                excerpt_note=SuggestionEvidenceNote(
+                    note_id=TARGET_ID,
+                    title="Target",
+                    content="target body",
+                ),
+            ),
         )
 
     @staticmethod
@@ -499,6 +518,7 @@ def test_suggestion_page_cursor_is_encoded_outside_store_and_evidence_is_reconst
     assert first.current_source_fingerprint == SOURCE_FINGERPRINT
     assert first.rejection_set_revision == 7
     assert first.items[0].evidence[0].text == "source"
+    assert first.items[0].target_title == "Target"
 
     second = api.list_suggestions(
         note_id=SOURCE_ID,
@@ -520,6 +540,27 @@ def test_suggestion_page_cursor_is_encoded_outside_store_and_evidence_is_reconst
         422,
         "notes_graph_cursor_invalid",
     )
+
+
+def test_suggestion_target_title_requires_current_matching_target_evidence() -> None:
+    class StaleTargetStore(Store):
+        @staticmethod
+        def list_suggestion_evidence(**_kwargs):
+            rows = Store.list_suggestion_evidence()
+            stale_target = replace(
+                rows[1],
+                excerpt_note=replace(rows[1].excerpt_note, title="Changed target"),
+            )
+            return (rows[0], stale_target)
+
+    item = _api(store=StaleTargetStore()).list_suggestions(
+        note_id=SOURCE_ID,
+        states=None,
+        limit=1,
+        cursor=None,
+    ).items[0]
+
+    assert item.target_title is None
 
 
 def test_run_page_rejects_an_invalid_opaque_cursor_with_stable_422() -> None:

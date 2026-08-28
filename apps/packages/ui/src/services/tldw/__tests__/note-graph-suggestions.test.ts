@@ -91,6 +91,7 @@ const suggestionPayload = (id: string) => ({
   source_fingerprint: fingerprint("c"),
   target_note_id: "note/target",
   target_fingerprint: fingerprint("d"),
+  target_title: "Authoritative target",
   normalized_tag: null,
   display_tag: null,
   existing_tag: false,
@@ -410,7 +411,8 @@ describe("Notes graph suggestion client", () => {
         radius_cap_applied: false,
         active_note_count: 12,
         all_notes_note_cap: 5000,
-        all_notes_eligible: true
+        all_notes_eligible: true,
+        suggestions_authorized: true
       })
       .mockResolvedValueOnce({
         items: Array.from({ length: 100 }, (_, index) => ({
@@ -459,6 +461,7 @@ describe("Notes graph suggestion client", () => {
     const runs = await listNotesGraphSuggestionRuns({ noteId: "note/source" })
 
     expect(graph.nodes[0].label).toBe(longLabel)
+    expect(graph.suggestions_authorized).toBe(true)
     expect(graph.nodes[0].id).toBe(longId)
     expect(graph.nodes[0]).toMatchObject({ degree: 9001, tag_count: 3001 })
     expect(graph.edges[0]).toMatchObject({ weight: 1, label: longLabel })
@@ -486,6 +489,67 @@ describe("Notes graph suggestion client", () => {
     expect(String(mocks.bgRequest.mock.calls[0][0].path)).toContain(
       "max_edges=99999"
     )
+  })
+
+  it("fails closed for an older graph response and requires authoritative target_title", async () => {
+    mocks.bgRequest
+      .mockResolvedValueOnce({
+        nodes: [],
+        edges: [],
+        truncated: false,
+        truncated_by: [],
+        has_more: false,
+        cursor: null,
+        limits: { max_nodes: 1, max_edges: 0, max_degree: 1 },
+        radius_cap_applied: false,
+        active_note_count: 0,
+        all_notes_note_cap: 1,
+        all_notes_eligible: true
+      })
+      .mockResolvedValueOnce({
+        items: [
+          Object.fromEntries(
+            Object.entries(suggestionPayload("missing-title")).filter(
+              ([key]) => key !== "target_title"
+            )
+          )
+        ],
+        next_cursor: null,
+        current_source_fingerprint: fingerprint("c"),
+        rejection_set_revision: 0,
+        rejection_count: 0
+      })
+
+    const graph = await fetchNotesGraph({ centerNoteId: "note/source" })
+    expect(graph.suggestions_authorized === true).toBe(false)
+    await expect(
+      listNotesGraphSuggestions({ noteId: "note/source" })
+    ).rejects.toMatchObject({ code: "notes_graph_invalid_response" })
+  })
+
+  it("rejects a fabricated target title on a tag suggestion", async () => {
+    mocks.bgRequest.mockResolvedValueOnce({
+      items: [
+        {
+          ...suggestionPayload("tag-title"),
+          kind: "tag",
+          target_note_id: null,
+          target_fingerprint: null,
+          target_title: "model supplied title",
+          normalized_tag: "cardiology",
+          display_tag: "Cardiology",
+          evidence: []
+        }
+      ],
+      next_cursor: null,
+      current_source_fingerprint: fingerprint("c"),
+      rejection_set_revision: 0,
+      rejection_count: 0
+    })
+
+    await expect(
+      listNotesGraphSuggestions({ noteId: "note/source" })
+    ).rejects.toMatchObject({ code: "notes_graph_invalid_response" })
   })
 
   it.each([

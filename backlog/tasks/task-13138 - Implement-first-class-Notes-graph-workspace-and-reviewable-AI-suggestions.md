@@ -4,7 +4,7 @@ title: Implement first-class Notes graph workspace and reviewable AI suggestions
 status: In Progress
 assignee: []
 created_date: 2026-08-27 03:40
-updated_date: 2026-08-28 10:14
+updated_date: 2026-08-28 11:40
 labels:
 - notes
 - knowledge-graph
@@ -92,6 +92,27 @@ modified_files:
 - apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage46.list-reliability.test.tsx
 - apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage5.graph-panels.test.tsx
 - apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage6.manual-links.test.tsx
+- tldw_Server_API/app/api/v1/endpoints/notes_graph.py
+- tldw_Server_API/app/api/v1/endpoints/notes_graph_suggestions.py
+- tldw_Server_API/app/api/v1/schemas/notes_graph.py
+- tldw_Server_API/app/api/v1/schemas/notes_graph_suggestions.py
+- tldw_Server_API/app/core/Notes_Graph/formatters.py
+- tldw_Server_API/app/core/Notes_Graph/suggestion_api.py
+- tldw_Server_API/tests/AuthNZ_Unit/test_notes_graph_permissions_claims.py
+- tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_endpoints.py
+- tldw_Server_API/tests/Notes_Graph/unit/test_suggestion_api.py
+- apps/packages/ui/src/components/Notes/NotesGraphInspector.tsx
+- apps/packages/ui/src/components/Notes/NotesGraphRelationshipsView.tsx
+- apps/packages/ui/src/components/Notes/hooks/useNotesGraphSuggestions.tsx
+- apps/packages/ui/src/services/note-graph-suggestions.ts
+- apps/packages/ui/src/components/Notes/__tests__/NotesGraphInspector.suggestions.test.tsx
+- apps/packages/ui/src/components/Notes/__tests__/NotesGraphRelationshipsView.accessibility.test.tsx
+- apps/packages/ui/src/components/Notes/__tests__/NotesGraphWorkspace.axe.test.tsx
+- apps/packages/ui/src/components/Notes/__tests__/NotesGraphWorkspace.responsive.test.tsx
+- apps/packages/ui/src/components/Notes/__tests__/useNotesGraphSuggestions.test.tsx
+- apps/packages/ui/src/services/tldw/__tests__/note-graph-suggestions.test.ts
+- apps/packages/ui/src/assets/locale/en/option.json
+- apps/packages/ui/src/public/_locales/en/option.json
 ---
 
 ## Description
@@ -242,7 +263,10 @@ Task 10 Fix Round 3/3 completed. All useNotesListManagement server discovery, im
 
 Task 10 exceptional Fix Round 4/5 completed from exact base 7dfa8f62abc87b937e85a116105402f5747649dc. Explicitly supplied Notes authority now carries a monotonic transition generation in primary and moodboard React Query identities, preventing same-key in-flight reuse across A -> null -> A while preserving omitted-authority keys and same-generation placeholders. Deferred RED reproduced both browse and moodboard failures; final verification: authority 11/11, affected Task 9/list 73/73, Task 10/Stage 22 31/31, organization/moodboard 10/10, and affected managers 53 passed with only the unchanged Stage 5 presentation baseline. ESLint zero errors; pinned Prettier matches base; TypeScript remains exactly 315 inherited lines with zero touched diagnostics; diff/scans clean; Bandit not applicable to TypeScript-only scope. Full evidence: .superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-10-report.md. Parent task remains In Progress for Tasks 11-12.
 Task 10 exceptional Fix Round 5/5 completed from exact base f3c9b9422d. Replaced render-mutated Notes authority ownership with React render-state derivation plus commit-time layout-effect publication and bulk-anchor reset, so abandoned React 18 work cannot invalidate the committed account. Added a deterministic StrictMode createRoot/startTransition/Suspense regression covering visible A state, retained callbacks, in-flight completion acceptance, no A query-generation churn, and exactly one generation for a real B commit. Verification: authority 12/12; Task 9/list 74/74; Task 10/Stage 22 31/31; organization/moodboard 10/10; broad affected manager matrix 85 passed with only the unchanged Stage 5 copy assertion; ESLint zero errors; pinned Prettier baseline unchanged; TypeScript exactly 315 inherited lines with zero touched diagnostics; diff/scans clean. Bandit not applicable to TypeScript-only scope. Task 11 was not touched; parent task remains In Progress.
+Task 11 implementation started from exact base a8d81e933caa3a1b44ced25b9f313e47dda565f9. Scope is the endpoint-derived suggestions_authorized graph flag, fingerprint-safe target_title review contract, grounded Details/Suggestions inspector, one-fetch Relationships projection, responsive/accessibility/locales, and focused backend/client/UI TDD verification. Task 12, root-level permission APIs, dependencies, and lockfiles remain excluded.
+Task 11 completed locally from exact base a8d81e933caa3a1b44ced25b9f313e47dda565f9. Added request-local fail-closed suggestion authorization after shared graph-cache resolution; fingerprint-safe server-authoritative target titles; the grounded unframed Details/Suggestions inspector; one-loaded-graph Relationships projection; shared caught decision announcements/focus recovery; semantic list pagination, roving tabs, responsive layout, and canonical/public locale parity. Queued self-review fixes cover list/listitem ARIA ownership, tab Arrow/Home/End behavior, exactly one polite live region and caught failures, counterpart selection with immediate/queued canvas centering, accessible overflow-menu focus/Escape, forward focus after row removal, symmetric pagination focus, terminal-state scope reset, and no client evidence-offset use. Verification: Task 11 frontend 94/94; Stage 21/22/workspace 28/28; backend affected matrix 93 passed with one inherited delete-link copy failure; independent backend spot-check 74 passed with the same inherited failure; Ruff and Bandit clean; ESLint and pinned Prettier clean; TypeScript exact inherited 315-line baseline with zero touched diagnostics; graph locale mirror 85/85, duplicate/coverage checks clean. Existing unrelated Stage 5 and Tags-help copy assertions remain inherited. Task 12 remains pending, so parent task stays In Progress.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->

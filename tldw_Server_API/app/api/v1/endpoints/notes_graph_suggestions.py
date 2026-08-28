@@ -423,6 +423,7 @@ async def list_suggestions(
                 "source_fingerprint": item.suggestion.source_fingerprint,
                 "target_note_id": item.suggestion.target_note_id,
                 "target_fingerprint": item.suggestion.target_fingerprint,
+                "target_title": item.target_title,
                 "normalized_tag": item.suggestion.normalized_tag,
                 "display_tag": item.suggestion.display_tag,
                 "existing_tag": item.suggestion.keyword_sync_id is not None,

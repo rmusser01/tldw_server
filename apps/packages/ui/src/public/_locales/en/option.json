@@ -5986,5 +5986,260 @@
   },
   "flashcards_sourceReviewExcerptError": {
     "message": "Use 20,000 characters or fewer."
+  },
+  "notesSearch_graphViewMode": {
+    "message": "Graph view"
+  },
+  "notesSearch_graphCanvas": {
+    "message": "Canvas"
+  },
+  "notesSearch_graphRelationships": {
+    "message": "Relationships"
+  },
+  "notesSearch_graphSuggestions": {
+    "message": "Suggestions"
+  },
+  "notesSearch_graphDetails": {
+    "message": "Details"
+  },
+  "notesSearch_graphInspector": {
+    "message": "Graph inspector"
+  },
+  "notesSearch_graphInspectorTabs": {
+    "message": "Graph inspector views"
+  },
+  "notesSearch_graphGroundedSuggestions": {
+    "message": "Grounded suggestions"
+  },
+  "notesSearch_graphSuggestedNote": {
+    "message": "Suggested note"
+  },
+  "notesSearch_graphSuggestedTag": {
+    "message": "Suggested tag"
+  },
+  "notesSearch_graphStrongMatch": {
+    "message": "Strong match"
+  },
+  "notesSearch_graphPossibleMatch": {
+    "message": "Possible match"
+  },
+  "notesSearch_graphSourceEvidence": {
+    "message": "Source evidence"
+  },
+  "notesSearch_graphTargetEvidence": {
+    "message": "Target evidence"
+  },
+  "notesSearch_graphExistingTag": {
+    "message": "Use existing tag"
+  },
+  "notesSearch_graphNewTag": {
+    "message": "Create new tag"
+  },
+  "notesSearch_graphTags": {
+    "message": "Tags"
+  },
+  "notesSearch_graphSource": {
+    "message": "Source"
+  },
+  "notesSearch_graphSelectNode": {
+    "message": "Select a node to inspect its details."
+  },
+  "notesSearch_graphNoRelationships": {
+    "message": "No relationships are visible in this loaded graph."
+  },
+  "notesSearch_graphRelationshipPages": {
+    "message": "Relationship pages"
+  },
+  "notesSearch_graphPreviousPage": {
+    "message": "Previous page"
+  },
+  "notesSearch_graphNextPage": {
+    "message": "Next page"
+  },
+  "notesSearch_graphProvider": {
+    "message": "Provider"
+  },
+  "notesSearch_graphModel": {
+    "message": "Model"
+  },
+  "notesSearch_graphDataBoundary": {
+    "message": "Data boundary"
+  },
+  "notesSearch_graphOutboundData": {
+    "message": "Data sent for generation"
+  },
+  "notesSearch_graphGenerate": {
+    "message": "Generate"
+  },
+  "notesSearch_graphRegenerate": {
+    "message": "Regenerate"
+  },
+  "notesSearch_graphCancelRun": {
+    "message": "Cancel generation"
+  },
+  "notesSearch_graphSuggestionMenu": {
+    "message": "Suggestion actions"
+  },
+  "notesSearch_graphResetDismissed": {
+    "message": "Reset dismissed suggestions"
+  },
+  "notesSearch_graphResetDismissedTitle": {
+    "message": "Reset dismissed suggestions?"
+  },
+  "notesSearch_graphResetDismissedBody": {
+    "message": "Previously dismissed suggestions may be generated again."
+  },
+  "notesSearch_graphResetDismissedConfirm": {
+    "message": "Reset dismissed"
+  },
+  "notesSearch_graphCancel": {
+    "message": "Cancel"
+  },
+  "notesSearch_graphDismissedReset": {
+    "message": "Dismissed suggestions were reset."
+  },
+  "notesSearch_graphDismissedResetFailed": {
+    "message": "Dismissed suggestions could not be reset."
+  },
+  "notesSearch_graphSuggestionAccepted": {
+    "message": "Suggestion accepted."
+  },
+  "notesSearch_graphSuggestionRejected": {
+    "message": "Suggestion rejected."
+  },
+  "notesSearch_graphSuggestionDecisionFailed": {
+    "message": "The suggestion decision failed. Try again."
+  },
+  "notesSearch_graphGenerationStarted": {
+    "message": "Suggestion generation started."
+  },
+  "notesSearch_graphGenerationFailed": {
+    "message": "Suggestion generation could not start."
+  },
+  "notesSearch_graphCancellationRequested": {
+    "message": "Cancellation requested."
+  },
+  "notesSearch_graphCancellationFailed": {
+    "message": "Generation could not be cancelled."
+  },
+  "notesSearch_graphLoadingCapabilities": {
+    "message": "Loading generation details."
+  },
+  "notesSearch_graphCapabilitiesFailed": {
+    "message": "Generation details are unavailable."
+  },
+  "notesSearch_graphSuggestionOffline": {
+    "message": "Suggestion actions are unavailable while offline."
+  },
+  "notesSearch_graphLoadingSuggestions": {
+    "message": "Loading suggestions."
+  },
+  "notesSearch_graphSuggestionsFailed": {
+    "message": "Suggestions could not be loaded."
+  },
+  "notesSearch_graphNoSuggestions": {
+    "message": "No suggestions are ready for review."
+  },
+  "notesSearch_graphAcceptSuggestion": {
+    "message": "Accept {{title}}"
+  },
+  "notesSearch_graphRejectSuggestion": {
+    "message": "Reject {{title}}"
+  },
+  "notesSearch_graphNodeType_note": {
+    "message": "Note"
+  },
+  "notesSearch_graphNodeType_tag": {
+    "message": "Tag"
+  },
+  "notesSearch_graphNodeType_source": {
+    "message": "Source"
+  },
+  "notesSearch_graphRelationshipGroup_outgoing": {
+    "message": "Outgoing"
+  },
+  "notesSearch_graphRelationshipGroup_incoming": {
+    "message": "Incoming"
+  },
+  "notesSearch_graphRelationshipGroup_connected": {
+    "message": "Connected"
+  },
+  "notesSearch_graphRelationshipGroup_suggested": {
+    "message": "Suggested"
+  },
+  "notesSearch_graphBoundary_local": {
+    "message": "Local"
+  },
+  "notesSearch_graphBoundary_external": {
+    "message": "External"
+  },
+  "notesSearch_graphOutbound_selected_note_title": {
+    "message": "Selected note title"
+  },
+  "notesSearch_graphOutbound_selected_note_excerpts": {
+    "message": "Selected note excerpts"
+  },
+  "notesSearch_graphOutbound_candidate_note_titles": {
+    "message": "Candidate note titles"
+  },
+  "notesSearch_graphOutbound_candidate_note_excerpts": {
+    "message": "Candidate note excerpts"
+  },
+  "notesSearch_graphOutbound_existing_tag_labels": {
+    "message": "Existing tag labels"
+  },
+  "notesSearch_graphRunState_admitting": {
+    "message": "Admitting"
+  },
+  "notesSearch_graphRunState_queued": {
+    "message": "Queued"
+  },
+  "notesSearch_graphRunState_running": {
+    "message": "Running"
+  },
+  "notesSearch_graphRunState_cancelling": {
+    "message": "Cancelling"
+  },
+  "notesSearch_graphRunState_publishing": {
+    "message": "Publishing"
+  },
+  "notesSearch_graphRunState_succeeded": {
+    "message": "Succeeded"
+  },
+  "notesSearch_graphRunState_failed": {
+    "message": "Failed"
+  },
+  "notesSearch_graphRunState_cancelled": {
+    "message": "Cancelled"
+  },
+  "notesSearch_graphRunState_stale": {
+    "message": "Stale"
+  },
+  "notesSearch_graphUnavailable_notes_graph_fts_not_ready": {
+    "message": "Notes search is not ready."
+  },
+  "notesSearch_graphUnavailable_notes_graph_provider_call_policy_unsupported": {
+    "message": "This provider cannot safely generate suggestions."
+  },
+  "notesSearch_graphUnavailable_notes_graph_provider_disallowed": {
+    "message": "The provider or model is not allowed."
+  },
+  "notesSearch_graphUnavailable_notes_graph_provider_model_disallowed": {
+    "message": "The provider or model is unavailable."
+  },
+  "notesSearch_graphUnavailable_notes_graph_provider_not_configured": {
+    "message": "The provider is not configured."
+  },
+  "notesSearch_graphUnavailable_notes_graph_provider_retry_policy_unsupported": {
+    "message": "The provider retry policy is unsupported."
+  },
+  "notesSearch_graphUnavailable_notes_graph_provider_unavailable": {
+    "message": "The provider is unavailable."
+  },
+  "notesSearch_graphUnavailable_notes_graph_suggestions_disabled": {
+    "message": "Graph suggestions are disabled."
+  },
+  "notesSearch_graphUnavailable_notes_graph_suggestions_worker_unavailable": {
+    "message": "The suggestion worker is unavailable."
   }
 }

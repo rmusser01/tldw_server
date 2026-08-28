@@ -108,6 +108,7 @@ const suggestion = (overrides: Record<string, unknown> = {}) => ({
   source_fingerprint: fingerprint("c"),
   target_note_id: "target-note",
   target_fingerprint: fingerprint("d"),
+  target_title: "Target title",
   normalized_tag: null,
   display_tag: null,
   existing_tag: false,
@@ -189,6 +190,34 @@ describe("useNotesGraphSuggestions", () => {
     vi.useRealTimers()
   })
 
+  it("makes zero nested suggestion calls when the graph response is unauthorized", async () => {
+    const client = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false }
+      }
+    })
+    const { result } = renderHook(
+      () =>
+        useNotesGraphSuggestions({
+          authorityScope: "authority-a",
+          enabled: false,
+          isOnline: true,
+          noteId: "source-note",
+          loadedNodeIds: new Set(["note:source-note"])
+        }),
+      { wrapper: wrapper(client) }
+    )
+    await settleQueries()
+
+    expect(mocks.getCapabilities).not.toHaveBeenCalled()
+    expect(mocks.listRuns).not.toHaveBeenCalled()
+    expect(mocks.getRun).not.toHaveBeenCalled()
+    expect(mocks.listSuggestions).not.toHaveBeenCalled()
+    expect(result.current.suggestions).toEqual([])
+    expect(result.current.provisionalBySuggestionId).toEqual({})
+  })
+
   it("clears a reconciled terminal owner, fences its stale list row, and adopts fresh recovery", async () => {
     let resolveRecoveryRuns:
       | ((page: { items: ReturnType<typeof run>[]; next_cursor: null }) => void)
@@ -231,16 +260,19 @@ describe("useNotesGraphSuggestions", () => {
     })
 
     const first = renderHook(
-      () =>
+      ({ authorityScope, enabled }) =>
         useNotesGraphSuggestions({
-          authorityScope: "authority-a",
-          enabled: true,
+          authorityScope,
+          enabled,
           isOnline: true,
           noteId: "source-note",
           loadedNodeIds: new Set(["note:source-note"]),
           pollIntervalMs: 1000
         }),
-      { wrapper: wrapper(client) }
+      {
+        initialProps: { authorityScope: "authority-a", enabled: true },
+        wrapper: wrapper(client)
+      }
     )
     await settleQueries()
 
@@ -256,6 +288,10 @@ describe("useNotesGraphSuggestions", () => {
     await settleQueries()
 
     expect(first.result.current.activeRun).toBeNull()
+    expect(first.result.current.lastTerminalRun).toMatchObject({
+      id: "run-new",
+      state: "succeeded"
+    })
     expect(mocks.getRun).toHaveBeenCalledTimes(2)
     expect(mocks.listSuggestions).toHaveBeenCalledTimes(2)
     expect(mocks.listRuns).toHaveBeenCalledTimes(2)
@@ -283,6 +319,11 @@ describe("useNotesGraphSuggestions", () => {
       expect.objectContaining({ runId: "run-recovered" })
     )
     expect(mocks.createRun).not.toHaveBeenCalled()
+
+    first.rerender({ authorityScope: "authority-b", enabled: false })
+    expect(first.result.current.lastTerminalRun).toBeNull()
+    first.rerender({ authorityScope: "authority-a", enabled: false })
+    expect(first.result.current.lastTerminalRun).toBeNull()
   })
 
   it.each(["failed", "cancelled", "stale"] as const)(
@@ -340,6 +381,10 @@ describe("useNotesGraphSuggestions", () => {
       await settleQueries()
 
       expect(result.current.activeRun).toBeNull()
+      expect(result.current.lastTerminalRun).toMatchObject({
+        id: oldRunId,
+        state: terminalState
+      })
       expect(mocks.getRun).toHaveBeenCalledTimes(1)
       expect(mocks.getRun).toHaveBeenLastCalledWith(
         expect.objectContaining({
@@ -710,7 +755,7 @@ describe("useNotesGraphSuggestions", () => {
       node: {
         id: "suggestion-node:suggestion-two",
         suggestionId: "suggestion-two",
-        label: "Suggested note"
+        label: "Target title"
       }
     })
     expect(result.current.suggestions).toHaveLength(3)
@@ -726,6 +771,9 @@ describe("useNotesGraphSuggestions", () => {
         idempotencyKey: "uuid-once"
       })
     )
+    expect(
+      result.current.provisionalBySuggestionId["suggestion-two"].node
+    ).toMatchObject({ label: "Target title" })
     expect(invalidate).toHaveBeenCalledWith(
       expect.objectContaining({
         queryKey: ["notes-graph-workspace", "authority-a"]
@@ -1118,6 +1166,7 @@ describe("useNotesGraphSuggestions", () => {
     rerender({ authorityScope: null })
     expect(result.current.capabilities).toBeNull()
     expect(result.current.activeRun).toBeNull()
+    expect(result.current.lastTerminalRun).toBeNull()
     expect(result.current.suggestions).toEqual([])
     expect(result.current.provisionalBySuggestionId).toEqual({})
     await expect(result.current.generate()).rejects.toMatchObject({

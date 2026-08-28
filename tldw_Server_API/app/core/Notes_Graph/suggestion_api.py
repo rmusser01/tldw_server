@@ -50,6 +50,7 @@ class SuggestionEvidenceExcerpt:
 class SuggestionReviewItem:
     suggestion: NoteGraphSuggestion
     evidence: tuple[SuggestionEvidenceExcerpt, ...]
+    target_title: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -423,6 +424,8 @@ class NotesGraphSuggestionsAPI:
                 else ()
             )
             evidence_by_id: dict[str, list[SuggestionEvidenceExcerpt]] = {}
+            suggestions_by_id = {item.id: item for item in page.items}
+            target_title_by_id: dict[str, str] = {}
             for row in evidence_rows:
                 evidence = row.evidence
                 text = reconstruct_evidence(
@@ -438,6 +441,15 @@ class NotesGraphSuggestionsAPI:
                 )
                 if text is None:
                     continue
+                suggestion = suggestions_by_id.get(evidence.suggestion_id)
+                if (
+                    suggestion is not None
+                    and suggestion.kind.value == "related_note"
+                    and evidence.side.value == "target"
+                    and evidence.note_id == suggestion.target_note_id
+                    and evidence.content_fingerprint == suggestion.target_fingerprint
+                ):
+                    target_title_by_id[suggestion.id] = row.excerpt_note.title
                 evidence_by_id.setdefault(evidence.suggestion_id, []).append(
                     SuggestionEvidenceExcerpt(
                         side=evidence.side.value,
@@ -460,7 +472,11 @@ class NotesGraphSuggestionsAPI:
             )
             return SuggestionReviewPage(
                 items=tuple(
-                    SuggestionReviewItem(item, tuple(evidence_by_id.get(item.id, ())))
+                    SuggestionReviewItem(
+                        item,
+                        tuple(evidence_by_id.get(item.id, ())),
+                        target_title_by_id.get(item.id),
+                    )
                     for item in page.items
                 ),
                 next_cursor=next_cursor,

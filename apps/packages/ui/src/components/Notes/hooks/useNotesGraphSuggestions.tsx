@@ -48,7 +48,7 @@ export type ProvisionalNotesGraphOverlay = {
     id: string
     suggestionId: string
     type: "provisional_note"
-    label: "Suggested note"
+    label: string
   } | null
 }
 
@@ -61,6 +61,7 @@ export type UseNotesGraphSuggestionsOptions = {
   provider?: string
   model?: string
   loadedNodeIds: ReadonlySet<string>
+  fallbackTargetLabel?: string
   pollIntervalMs?: number
 }
 
@@ -180,6 +181,10 @@ export function useNotesGraphSuggestions(
     tracked: null,
     resolved: null
   })
+  const [lastTerminalRunState, setLastTerminalRunState] = React.useState<{
+    scope: string
+    run: NotesGraphSuggestionRun
+  } | null>(null)
   const trackedRun =
     runTracker.tracked?.scope === commandAuthority ? runTracker.tracked : null
   const resolvedRun =
@@ -194,6 +199,9 @@ export function useNotesGraphSuggestions(
         ? current
         : { tracked, resolved }
     })
+    setLastTerminalRunState((current) =>
+      current?.scope === commandAuthority ? current : null
+    )
   }, [commandAuthority])
   const resolveTrackedRun = React.useCallback(
     (identity: TrackedRunIdentity) => {
@@ -337,10 +345,24 @@ export function useNotesGraphSuggestions(
     capabilities.model === runOwner.model
       ? ownedRun
       : null
+  const lastTerminalRun =
+    lastTerminalRunState?.scope === commandAuthority
+      ? lastTerminalRunState.run
+      : null
   const resolveWithoutPublication = Boolean(
     runQueryRaw.error ||
       (runDetail && NON_SUCCESS_TERMINAL_RUN_STATES.has(runDetail.state))
   )
+
+  React.useEffect(() => {
+    if (
+      runDetail &&
+      !ACTIVE_RUN_STATES.has(runDetail.state) &&
+      runOwner?.scope === commandAuthority
+    ) {
+      setLastTerminalRunState({ scope: commandAuthority, run: runDetail })
+    }
+  }, [commandAuthority, runDetail, runOwner?.scope])
 
   React.useEffect(() => {
     if (!resolveWithoutPublication || !runOwner) return
@@ -549,6 +571,7 @@ export function useNotesGraphSuggestions(
           model: run.model
         }
       }))
+      setLastTerminalRunState(null)
     }
   })
 
@@ -808,12 +831,15 @@ export function useNotesGraphSuggestions(
               id: ephemeralTarget,
               suggestionId: item.id,
               type: "provisional_note",
-              label: "Suggested note"
+              label:
+                item.target_title ??
+                options.fallbackTargetLabel ??
+                "Suggested note"
             }
       }
     })
     return overlays
-  }, [options.loadedNodeIds, suggestions])
+  }, [options.fallbackTargetLabel, options.loadedNodeIds, suggestions])
 
   return {
     capabilities: capabilities ?? null,
@@ -822,6 +848,7 @@ export function useNotesGraphSuggestions(
     runQuery: runQueryRaw,
     suggestionsQuery: suggestionsQueryRaw,
     activeRun: activeRun ?? null,
+    lastTerminalRun,
     suggestions,
     provisionalBySuggestionId,
     isOffline: !options.isOnline,
@@ -934,3 +961,7 @@ export function useNotesGraphSuggestions(
     }
   }
 }
+
+export type NotesGraphSuggestionsController = ReturnType<
+  typeof useNotesGraphSuggestions
+>

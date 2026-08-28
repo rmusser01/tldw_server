@@ -110,6 +110,7 @@ class SuggestionItemResponse(_StrictModel):
     source_fingerprint: str = Field(pattern=_FINGERPRINT_PATTERN)
     target_note_id: str | None
     target_fingerprint: str | None = Field(default=None, pattern=_FINGERPRINT_PATTERN)
+    target_title: str | None
     normalized_tag: str | None
     display_tag: str | None
     existing_tag: bool

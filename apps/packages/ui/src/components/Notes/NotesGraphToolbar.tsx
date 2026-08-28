@@ -1,7 +1,10 @@
+import IconButton from "@/components/Common/IconButton"
 import type { NotesGraphEdgeType } from "@/services/note-graph-suggestions"
 import {
   Focus,
+  ListTree,
   Maximize2,
+  Network,
   Plus,
   RefreshCw,
   SlidersHorizontal,
@@ -11,13 +14,13 @@ import {
 import React from "react"
 import { useTranslation } from "react-i18next"
 
-import IconButton from "@/components/Common/IconButton"
-
 import type { NotesGraphLayout } from "./hooks/useNotesGraphWorkspace"
 
 type GraphSearchResult = { id: string; label: string }
 
 type NotesGraphToolbarProps = {
+  viewMode: "canvas" | "relationships"
+  suggestionsAuthorized: boolean
   search: string
   searchResults: GraphSearchResult[]
   radius: 1 | 2
@@ -35,6 +38,7 @@ type NotesGraphToolbarProps = {
   canExpand: boolean
   isRefreshing: boolean
   onSearchChange: (value: string) => void
+  onViewModeChange: (mode: "canvas" | "relationships") => void
   onSelectSearchResult: (nodeId: string) => void
   onRadiusChange: (radius: 1 | 2) => void
   onMaxNodesChange: (maxNodes: number) => void
@@ -64,6 +68,8 @@ const iconButtonClassName =
   "flex-none border border-border bg-surface text-text hover:bg-surface2 disabled:cursor-not-allowed disabled:opacity-50"
 
 const NotesGraphToolbar: React.FC<NotesGraphToolbarProps> = ({
+  viewMode,
+  suggestionsAuthorized,
   search,
   searchResults,
   radius,
@@ -77,6 +83,7 @@ const NotesGraphToolbar: React.FC<NotesGraphToolbarProps> = ({
   canExpand,
   isRefreshing,
   onSearchChange,
+  onViewModeChange,
   onSelectSearchResult,
   onRadiusChange,
   onMaxNodesChange,
@@ -101,6 +108,27 @@ const NotesGraphToolbar: React.FC<NotesGraphToolbarProps> = ({
       className="border-b border-border bg-surface px-3 py-2"
       data-testid="notes-graph-toolbar">
       <div className="flex flex-wrap items-end gap-2">
+        <div
+          className="inline-flex h-11 flex-none border border-border"
+          role="group"
+          aria-label={t("option:notesSearch.graphViewMode")}>
+          <button
+            type="button"
+            className={`inline-flex min-w-[112px] items-center justify-center gap-2 px-3 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus ${viewMode === "canvas" ? "bg-primary text-primary-foreground" : "bg-surface text-text"}`}
+            aria-pressed={viewMode === "canvas"}
+            onClick={() => onViewModeChange("canvas")}>
+            <Network size={16} aria-hidden="true" />
+            {t("option:notesSearch.graphCanvas")}
+          </button>
+          <button
+            type="button"
+            className={`inline-flex min-w-[132px] items-center justify-center gap-2 border-l border-border px-3 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus ${viewMode === "relationships" ? "bg-primary text-primary-foreground" : "bg-surface text-text"}`}
+            aria-pressed={viewMode === "relationships"}
+            onClick={() => onViewModeChange("relationships")}>
+            <ListTree size={16} aria-hidden="true" />
+            {t("option:notesSearch.graphRelationships")}
+          </button>
+        </div>
         <div className="relative min-w-[180px] flex-1 sm:max-w-[280px]">
           <label className="sr-only" htmlFor="notes-graph-search">
             {t("option:notesSearch.graphSearchLoaded", {
@@ -223,18 +251,21 @@ const NotesGraphToolbar: React.FC<NotesGraphToolbarProps> = ({
         <IconButton
           ariaLabel="Zoom in"
           className={iconButtonClassName}
+          disabled={viewMode !== "canvas"}
           onClick={onZoomIn}>
           <ZoomIn size={iconSize} aria-hidden="true" />
         </IconButton>
         <IconButton
           ariaLabel="Zoom out"
           className={iconButtonClassName}
+          disabled={viewMode !== "canvas"}
           onClick={onZoomOut}>
           <ZoomOut size={iconSize} aria-hidden="true" />
         </IconButton>
         <IconButton
           ariaLabel="Fit graph to view"
           className={iconButtonClassName}
+          disabled={viewMode !== "canvas"}
           onClick={onFit}>
           <Maximize2 size={iconSize} aria-hidden="true" />
         </IconButton>
@@ -266,14 +297,16 @@ const NotesGraphToolbar: React.FC<NotesGraphToolbarProps> = ({
                   {label}
                 </label>
               ))}
-              <label className="flex min-h-8 items-center gap-2 border-t border-border pt-2 text-sm text-text">
-                <input
-                  type="checkbox"
-                  checked={showProvisional}
-                  onChange={onToggleProvisional}
-                />
-                Suggestions
-              </label>
+              {suggestionsAuthorized ? (
+                <label className="flex min-h-8 items-center gap-2 border-t border-border pt-2 text-sm text-text">
+                  <input
+                    type="checkbox"
+                    checked={showProvisional}
+                    onChange={onToggleProvisional}
+                  />
+                  {t("option:notesSearch.graphSuggestions")}
+                </label>
+              ) : null}
             </div>
           ) : null}
         </div>

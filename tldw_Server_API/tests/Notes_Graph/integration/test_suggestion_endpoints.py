@@ -63,6 +63,7 @@ class FakeAPI:
         self.calls: list[tuple[str, dict[str, object]]] = []
         self.accept_permissions = (NOTES_GRAPH_WRITE,)
         self.error: SuggestionAPIError | None = None
+        self.suggestion_items: tuple[object, ...] = ()
 
     def _record(self, name: str, kwargs: dict[str, object]):
         self.calls.append((name, kwargs))
@@ -138,7 +139,7 @@ class FakeAPI:
     def list_suggestions(self, **kwargs):
         self._record("list_suggestions", kwargs)
         return SimpleNamespace(
-            items=(),
+            items=self.suggestion_items,
             next_cursor=None,
             current_source_fingerprint=FINGERPRINT,
             rejection_set_revision=0,
@@ -238,6 +239,41 @@ def test_public_request_schemas_are_bounded_and_forbid_provider_authority_fields
             source_fingerprint=FINGERPRINT,
             confirm=False,
         )
+
+
+def test_suggestion_list_serializes_the_server_authoritative_target_title() -> None:
+    fake = FakeAPI()
+    fake.suggestion_items = (
+        SimpleNamespace(
+            suggestion=SimpleNamespace(
+                id="suggestion-1",
+                run_id="run-1",
+                kind=SimpleNamespace(value="related_note"),
+                state=SimpleNamespace(value="pending"),
+                revision=1,
+                source_note_id=NOTE_ID,
+                source_fingerprint=FINGERPRINT,
+                target_note_id="00000000-0000-4000-8000-000000000002",
+                target_fingerprint=FINGERPRINT,
+                normalized_tag=None,
+                display_tag=None,
+                keyword_sync_id=None,
+                match_strength="strong",
+                rationale="Grounded",
+                updated_at=NOW,
+            ),
+            target_title="Authoritative target",
+            evidence=(),
+        ),
+    )
+
+    with TestClient(_app(fake, _base_permissions())) as client:
+        response = client.get(
+            f"/api/v1/notes/{NOTE_ID}/graph/suggestions",
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["items"][0]["target_title"] == "Authoritative target"
 
 
 def test_capability_sets_etag_and_run_admission_is_durable_202_without_jobs_internals() -> None:

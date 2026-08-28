@@ -156,6 +156,7 @@ export type NotesGraphResponse = {
   active_note_count: number
   all_notes_note_cap: number
   all_notes_eligible: boolean
+  suggestions_authorized?: boolean
 }
 
 export type FetchNotesGraphInput = {
@@ -241,6 +242,7 @@ export type NotesGraphSuggestion = {
   source_fingerprint: string
   target_note_id: string | null
   target_fingerprint: string | null
+  target_title: string | null
   normalized_tag: string | null
   display_tag: string | null
   existing_tag: boolean
@@ -571,7 +573,8 @@ const graphResponseSchema = z
     radius_cap_applied: z.boolean(),
     active_note_count: safeCountSchema,
     all_notes_note_cap: z.number().int().min(1),
-    all_notes_eligible: z.boolean()
+    all_notes_eligible: z.boolean(),
+    suggestions_authorized: z.boolean().optional()
   })
   .superRefine((value, context) => {
     if (value.nodes.length > value.limits.max_nodes) {
@@ -933,6 +936,7 @@ const suggestionSchema = z
     source_fingerprint: fingerprintSchema,
     target_note_id: idSchema.nullable(),
     target_fingerprint: fingerprintSchema.nullable(),
+    target_title: z.string().nullable(),
     normalized_tag: z.string().nullable(),
     display_tag: z.string().nullable(),
     existing_tag: z.boolean(),
@@ -953,6 +957,12 @@ const suggestionSchema = z
     }
     if (value.kind === "tag" && value.normalized_tag === null) {
       context.addIssue({ code: "custom", message: "missing normalized tag" })
+    }
+    if (value.kind === "tag" && value.target_title !== null) {
+      context.addIssue({
+        code: "custom",
+        message: "tag target title must be null"
+      })
     }
   })
 

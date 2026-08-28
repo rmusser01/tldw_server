@@ -95,8 +95,7 @@ vi.mock("react-i18next", () => ({
     t: (
       key: string,
       options?: string | { defaultValue?: string; [key: string]: unknown }
-    ) =>
-      typeof options === "string" ? options : (options?.defaultValue ?? key)
+    ) => (typeof options === "string" ? options : options?.defaultValue ?? key)
   })
 }))
 
@@ -470,6 +469,8 @@ describe("NotesGraphCanvas graph view", () => {
 
 describe("NotesGraphToolbar controls", () => {
   const toolbarProps = {
+    viewMode: "canvas" as const,
+    suggestionsAuthorized: true,
     search: "load",
     searchResults: [
       { id: "note:a", label: "Loaded alpha" },
@@ -492,6 +493,7 @@ describe("NotesGraphToolbar controls", () => {
     canExpand: true,
     isRefreshing: false,
     onSearchChange: vi.fn(),
+    onViewModeChange: vi.fn(),
     onSelectSearchResult: vi.fn(),
     onRadiusChange: vi.fn(),
     onMaxNodesChange: vi.fn(),
@@ -577,7 +579,11 @@ describe("NotesGraphToolbar controls", () => {
       screen.getByRole("group", { name: "Edge visibility filters" })
     ).toHaveAttribute("id", "notes-graph-edge-menu")
     fireEvent.click(screen.getByRole("checkbox", { name: "Manual links" }))
-    fireEvent.click(screen.getByRole("checkbox", { name: "Suggestions" }))
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: "option:notesSearch.graphSuggestions"
+      })
+    )
 
     expect(toolbarProps.onRadiusChange).toHaveBeenCalledWith(2)
     expect(toolbarProps.onMaxNodesChange).toHaveBeenCalledWith(280)
