@@ -1829,6 +1829,43 @@ def test_start_new_chat_session_decodes_alternate_greeting_bytes(db):
     assert stored_messages[0]["content"] == "Bytes hi {{user}}"
 
 
+def test_start_new_chat_session_creates_atomic_resumable_snapshot(db, monkeypatch):
+    monkeypatch.setenv("DEFAULT_LLM_PROVIDER", "local-llm")
+    monkeypatch.setenv("CHAR_CHAT_MODEL", "local-test")
+    char_id = db.add_character_card(
+        {
+            "name": "SnapshotGreeter",
+            "first_message": "Stable hello, {{user}}",
+            "system_prompt": "Keep this behavior.",
+            "extensions": {
+                "tldw": {
+                    "generation": {
+                        "temperature": 0.0,
+                        "top_p": 0.0,
+                        "repetition_penalty": 0.0,
+                        "stop": [],
+                    }
+                }
+            },
+        }
+    )
+
+    conv_id, _, _, _ = start_new_chat_session(db, char_id, "Alice")
+
+    assert conv_id is not None
+    state = db.get_roleplay_resume_state(conv_id)
+    assert state["behavior_snapshot"]["status"] == "valid"
+    assert state["resume_eligible"] is True
+    assert state["settings_version"] == 1
+    assert state["history_version"] == 2
+    assert state["effective_completion"]["sampling"] == {
+        "temperature": 0.0,
+        "top_p": 0.0,
+        "repetition_penalty": 0.0,
+        "stop": [],
+    }
+
+
 @mock.patch(f"{MODULE_PATH_PREFIX}.character_chat.time.strftime", return_value=MOCK_TIME_STRFTIME)
 @mock.patch(f"{MODULE_PATH_PREFIX}.character_db.Image", new_callable=mock.MagicMock)
 def test_full_chat_session_flow_integration(MockPILImageModule, mock_strftime, db):

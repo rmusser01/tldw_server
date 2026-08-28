@@ -22,6 +22,9 @@ from PIL import Image
 
 from tldw_Server_API.app.core.Character_Chat.constants import MAX_PERSIST_CONTENT_LENGTH
 from tldw_Server_API.app.core.Character_Chat.character_limits import check_message_limit
+from tldw_Server_API.app.core.Character_Chat.character_conversation_factory import (
+    create_character_conversation,
+)
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
@@ -820,21 +823,6 @@ def start_new_chat_session(
             "character_id": character_id,
             "title": conv_title,
         }
-        conversation_id_val = db.add_conversation(conv_payload)
-
-        if not conversation_id_val:
-            logger.error(
-                'Failed to create conversation record in DB for character {}.',
-                char_name,
-            )
-            return None, char_data, initial_ui_history, img
-
-        logger.info(
-            "Created new conversation ID: {} for character '{}'.",
-            conversation_id_val,
-            char_name,
-        )
-
         def _restore_first_message_template(text: str) -> str:
             restored = text
             user_token = str(user_name).strip() if user_name is not None else ""
@@ -900,14 +888,34 @@ def start_new_chat_session(
                         conversation_id_val,
                     )
 
+        selected_greeting = {
+            "content": message_to_store_in_db or "",
+            "source": "alternate" if selected_alt is not None else "first_message",
+            "source_index": (
+                alternate_index
+                if selected_alt is not None and isinstance(alternate_index, int)
+                else 0
+            ),
+        }
+        initial_messages = (
+            [{"sender": char_name, "content": message_to_store_in_db}]
+            if message_to_store_in_db
+            else []
+        )
+        conversation_id_val = create_character_conversation(
+            db,
+            conversation_data=conv_payload,
+            initial_messages=initial_messages,
+            primary_greeting=selected_greeting,
+        )
+
+        logger.info(
+            "Created new conversation ID: {} for character '{}'.",
+            conversation_id_val,
+            char_name,
+        )
+
         if message_to_store_in_db:
-            db.add_message(
-                {
-                    "conversation_id": conversation_id_val,
-                    "sender": char_name,
-                    "content": message_to_store_in_db,
-                }
-            )
             logger.debug(
                 "Added character's first message to new conversation {}.",
                 conversation_id_val,

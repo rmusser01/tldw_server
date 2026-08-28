@@ -27,6 +27,7 @@ _SNAPSHOT_COLUMNS = (
     "size_bytes",
     "created_at",
 )
+_RESUME_SETTINGS_KEY = "roleplayResumeV1"
 
 
 class ConversationResumeStore:
@@ -103,6 +104,34 @@ class ConversationResumeStore:
             ),
         )
 
+    def put_creation_settings(
+        self,
+        conversation_id: str,
+        settings: dict[str, Any],
+        *,
+        conn: Any,
+    ) -> None:
+        """Insert immutable version-1 creation settings in a caller transaction."""
+        try:
+            payload = json.dumps(
+                settings,
+                allow_nan=False,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        except (TypeError, ValueError) as exc:
+            raise InputError("creation settings must be finite JSON") from exc
+        conn.execute(
+            """
+            INSERT INTO conversation_settings(
+                conversation_id, settings_json, settings_version, last_modified
+            )
+            VALUES (?, ?, 1, CURRENT_TIMESTAMP)
+            """,
+            (conversation_id, payload),
+        )
+
     def _get_snapshot(self, conversation_id: str, conn: Any) -> dict[str, Any]:
         result = conn.execute(
             """
@@ -155,7 +184,9 @@ class ConversationResumeStore:
         with transaction as transaction_conn:
             result = transaction_conn.execute(
                 """
-                SELECT c.history_version, cs.settings_json, cs.settings_version
+                SELECT c.history_version, cs.settings_json, cs.settings_version,
+                       (SELECT COUNT(*) FROM messages m
+                         WHERE m.conversation_id = c.id AND m.deleted = FALSE) AS message_count
                   FROM conversations c
                   LEFT JOIN conversation_settings cs ON cs.conversation_id = c.id
                  WHERE c.id = ? AND c.deleted = FALSE
@@ -167,19 +198,64 @@ class ConversationResumeStore:
                 raise NotFoundError("Conversation not found.")
             record = self._row_to_dict(
                 row,
-                ("history_version", "settings_json", "settings_version"),
+                ("history_version", "settings_json", "settings_version", "message_count"),
             )
             settings_json = record.get("settings_json")
             try:
                 settings = json.loads(settings_json) if settings_json is not None else None
             except (TypeError, json.JSONDecodeError):
                 settings = None
+            snapshot = self._get_snapshot(conversation_id, transaction_conn)
+            readiness = settings.get(_RESUME_SETTINGS_KEY) if isinstance(settings, dict) else None
+            effective_completion = (
+                readiness.get("effectiveCompletion") if isinstance(readiness, dict) else None
+            )
+            stored_eligible = (
+                readiness.get("resumeEligible") if isinstance(readiness, dict) else False
+            )
+            stored_reason = (
+                readiness.get("resumeIneligibleReason") if isinstance(readiness, dict) else None
+            )
+            snapshot_status = snapshot["status"]
+            if snapshot_status != "valid":
+                resume_eligible = False
+                resume_ineligible_reason = f"behavior_snapshot_{snapshot_status}"
+            elif stored_eligible is True and isinstance(effective_completion, dict):
+                resume_eligible = True
+                resume_ineligible_reason = None
+            else:
+                resume_eligible = False
+                resume_ineligible_reason = stored_reason or "incomplete_creation_settings"
+
+            tail_result = transaction_conn.execute(
+                """
+                SELECT id, version FROM messages
+                 WHERE conversation_id = ? AND deleted = FALSE
+                 ORDER BY timestamp DESC, id DESC
+                 LIMIT 1
+                """,
+                (conversation_id,),
+            )
+            tail_row = tail_result.fetchone()
+            tail = (
+                self._row_to_dict(tail_row, ("id", "version"))
+                if tail_row is not None
+                else None
+            )
             return {
                 "conversation_id": conversation_id,
-                "behavior_snapshot": self._get_snapshot(conversation_id, transaction_conn),
+                "behavior_snapshot": snapshot,
                 "settings": settings,
                 "settings_version": record.get("settings_version"),
                 "history_version": int(record["history_version"]),
+                "message_count": int(record.get("message_count") or 0),
+                "tail": {
+                    "message_id": tail.get("id") if tail else None,
+                    "message_version": int(tail["version"]) if tail else None,
+                },
+                "resume_eligible": resume_eligible,
+                "resume_ineligible_reason": resume_ineligible_reason,
+                "effective_completion": effective_completion,
             }
 
 

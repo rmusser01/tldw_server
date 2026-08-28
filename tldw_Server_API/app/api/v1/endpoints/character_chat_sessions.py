@@ -115,6 +115,9 @@ from tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade import (
     post_message_to_conversation,
     replace_placeholders,
 )
+from tldw_Server_API.app.core.Character_Chat.character_conversation_factory import (
+    create_character_conversation,
+)
 
 # Rate limiting
 from tldw_Server_API.app.core.Character_Chat.character_rate_limiter import (
@@ -1756,6 +1759,7 @@ def _convert_db_conversation_to_response(
     conv_data: dict[str, Any],
     *,
     settings: Optional[dict[str, Any]] = None,
+    resume_state: Optional[dict[str, Any]] = None,
 ) -> ChatSessionResponse:
     """Convert database conversation to response model."""
     character_id = conv_data.get('character_id')
@@ -1763,6 +1767,9 @@ def _convert_db_conversation_to_response(
     assistant_id = conv_data.get('assistant_id')
     if assistant_id is None and assistant_kind == "character" and character_id is not None:
         assistant_id = str(character_id)
+    state = resume_state or {}
+    snapshot = state.get("behavior_snapshot") or {"status": "missing"}
+    tail = state.get("tail") or {"message_id": None, "message_version": None}
     return ChatSessionResponse(
         id=conv_data.get('id', ''),
         scope_type=conv_data.get("scope_type") or "global",
@@ -1782,12 +1789,24 @@ def _convert_db_conversation_to_response(
         external_ref=conv_data.get('external_ref'),
         created_at=conv_data.get('created_at', datetime.now(timezone.utc)),
         last_modified=conv_data.get('last_modified', datetime.now(timezone.utc)),
-        message_count=conv_data.get('message_count', 0),
         version=conv_data.get('version', 1),
         parent_conversation_id=conv_data.get('parent_conversation_id'),
         root_id=conv_data.get('root_id'),
         forked_from_message_id=conv_data.get('forked_from_message_id'),
         settings=settings,
+        behavior_snapshot={
+            "status": snapshot.get("status", "missing"),
+            "schema_version": snapshot.get("schema_version"),
+            "digest": snapshot.get("digest"),
+        },
+        resume_eligible=bool(state.get("resume_eligible", False)),
+        resume_ineligible_reason=state.get(
+            "resume_ineligible_reason", "behavior_snapshot_missing"
+        ),
+        settings_version=state.get("settings_version"),
+        history_version=state.get("history_version"),
+        message_count=state.get("message_count", conv_data.get('message_count', 0)),
+        tail=tail,
     )
 
 
@@ -4492,6 +4511,8 @@ async def create_chat_session(
             'workspace_id': session_data.workspace_id,
         }
 
+        created_with_factory = False
+        seed_status: Optional[str] = None
         if sync_service is not None:
             try:
                 capture_server_origin_mutation(
@@ -4507,6 +4528,54 @@ async def create_chat_session(
             except Exception as sync_exc:
                 raise _chat_sync_http_error(sync_exc) from sync_exc
             created_id = chat_id
+        elif character is not None:
+            raw_name = str(character.get("name") or "Assistant")
+            greeting_text = character.get("first_message")
+            greeting_source = "first_message"
+            greeting_source_index = 0
+            alternate_greetings = character.get("alternate_greetings")
+            if greeting_strategy in {"alternate_random", "alternate_index"} and isinstance(
+                alternate_greetings, list
+            ) and alternate_greetings:
+                if greeting_strategy == "alternate_random":
+                    greeting_text = _greeting_random.choice(alternate_greetings)
+                    greeting_source_index = alternate_greetings.index(greeting_text)
+                elif isinstance(alternate_index, int) and alternate_index < len(alternate_greetings):
+                    greeting_text = alternate_greetings[alternate_index]
+                    greeting_source_index = alternate_index
+                greeting_source = "alternate"
+            valid_greeting = isinstance(greeting_text, str) and bool(greeting_text.strip())
+            initial_messages = (
+                [{"sender": raw_name, "content": greeting_text}]
+                if seed_first_message and valid_greeting
+                else []
+            )
+            seed_status = "ok" if initial_messages else ("no_greeting" if seed_first_message else None)
+            created_id = create_character_conversation(
+                db,
+                conversation_data=conv_data,
+                participant_character_ids=session_data.participant_character_ids,
+                prompt_preset_id=session_data.prompt_preset_id,
+                memory_by_character_id=session_data.memory_by_character_id,
+                provider=session_data.provider or _get_default_provider(),
+                model=session_data.model,
+                sampling={
+                    "temperature": session_data.temperature,
+                    "top_p": session_data.top_p,
+                    "repetition_penalty": session_data.repetition_penalty,
+                    "stop": session_data.stop,
+                },
+                initial_messages=initial_messages,
+                primary_greeting={
+                    "content": greeting_text if valid_greeting else "",
+                    "source": greeting_source if valid_greeting else "none",
+                    "source_index": greeting_source_index,
+                },
+                conversation_settings={
+                    "greetingsChecksum": _compute_greetings_checksum(character),
+                },
+            )
+            created_with_factory = True
         else:
             # Add to database
             created_id = db.add_conversation(conv_data)
@@ -4525,8 +4594,12 @@ async def create_chat_session(
             )
 
         # Optionally seed the chat with a greeting (first_message or alternate)
-        seed_status: Optional[str] = None
-        if seed_first_message and character is not None and sync_service is None:
+        if (
+            seed_first_message
+            and character is not None
+            and sync_service is None
+            and not created_with_factory
+        ):
             try:
                 raw_name = character.get('name') or 'Assistant'
                 choice_text: Optional[str] = None
@@ -4564,7 +4637,7 @@ async def create_chat_session(
             seed_status = "no_greeting"
 
         # Persist a greetings checksum so staleness can be detected later.
-        if character is not None and sync_service is None:
+        if character is not None and sync_service is None and not created_with_factory:
             try:
                 checksum = _compute_greetings_checksum(character)
                 updated_settings = db.upsert_conversation_settings(
@@ -4599,7 +4672,8 @@ async def create_chat_session(
                 db,
                 created_conv,
                 str(current_user.id),
-            )
+            ),
+            resume_state=db.get_roleplay_resume_state(created_id),
         )
 
     except HTTPException:
@@ -4886,6 +4960,7 @@ async def get_chat_session(
                 str(current_user.id),
             ),
             settings=settings_payload,
+            resume_state=db.get_roleplay_resume_state(chat_id),
         )
 
     except HTTPException:
@@ -7098,6 +7173,11 @@ async def list_chat_sessions(
                         persona_names=persona_names,
                     ),
                     settings=settings_payload,
+                    resume_state=(
+                        db.get_roleplay_resume_state(conv["id"])
+                        if not conv.get("deleted")
+                        else None
+                    ),
                 )
             )
 
@@ -7203,7 +7283,8 @@ async def update_chat_session(
                 db,
                 updated_conv,
                 str(current_user.id),
-            )
+            ),
+            resume_state=db.get_roleplay_resume_state(chat_id),
         )
 
     except ConflictError as e:
@@ -7577,7 +7658,8 @@ async def restore_chat_session(
                     db,
                     conversation,
                     str(current_user.id),
-                )
+                ),
+                resume_state=db.get_roleplay_resume_state(chat_id),
             )
 
         if _active_chat_sync_service(current_user, scope) is not None:
@@ -7597,7 +7679,8 @@ async def restore_chat_session(
                 db,
                 restored,
                 str(current_user.id),
-            )
+            ),
+            resume_state=db.get_roleplay_resume_state(chat_id),
         )
 
     except ConflictError as e:
