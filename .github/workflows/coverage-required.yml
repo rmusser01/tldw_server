@@ -89,6 +89,9 @@ jobs:
     name: coverage-required
     runs-on: ubuntu-latest
     needs: [changes]
+    if: >-
+      always() && !cancelled() &&
+      needs.changes.result == 'success'
     timeout-minutes: 30
     steps:
       - name: No-op pass (coverage not required)
