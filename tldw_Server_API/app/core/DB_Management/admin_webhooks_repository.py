@@ -144,6 +144,13 @@ _DELIVERY_SCHEMA_INDEX_COLUMNS = {
         "heartbeat_at",
     ),
 }
+_DELIVERY_SCHEMA_INDEX_TABLES = {
+    "idx_admin_webhook_deliveries_recovery": "admin_webhook_deliveries",
+    "idx_admin_webhook_deliveries_disposition_recovery": "admin_webhook_deliveries",
+    "idx_admin_webhook_runtime_heartbeats_freshness": (
+        "admin_webhook_runtime_heartbeats"
+    ),
+}
 _DELIVERY_RUNTIME_REASON_VALUES = (
     "mode_off",
     "mode_migrate",
@@ -198,41 +205,60 @@ def _strip_outer_parentheses(value: str) -> str:
 
 
 def _has_required_delivery_checks(
-    definitions: Sequence[str], *, is_postgres: bool
+    definitions_by_table: Mapping[str, Sequence[str]], *, is_postgres: bool
 ) -> bool:
     """Return whether the extension's bounded values are enforced by checks."""
-    checks = tuple(_compact_schema_sql(definition) for definition in definitions)
-    all_checks = " ".join(checks)
-    structural_checks = all_checks.replace("(", "").replace(")", "")
+    compact_checks = {
+        table: " ".join(
+            _compact_schema_sql(definition)
+            for definition in definitions_by_table.get(table, ())
+        )
+        for table in _DELIVERY_SCHEMA_COLUMNS
+    }
+    structural_checks = {
+        table: checks.replace("(", "").replace(")", "")
+        for table, checks in compact_checks.items()
+    }
+    delivery_checks = compact_checks["admin_webhook_deliveries"]
+    attempt_checks = compact_checks["admin_webhook_delivery_attempts"]
+    heartbeat_checks = compact_checks["admin_webhook_runtime_heartbeats"]
+    heartbeat_structural_checks = structural_checks[
+        "admin_webhook_runtime_heartbeats"
+    ]
     token_contract = (
-        "pending_jobs_disposition_token~'^[0-9a-f]{64}$'" in all_checks
+        "pending_jobs_disposition_token~'^[0-9a-f]{64}$'" in delivery_checks
         if is_postgres
         else (
-            "length(pending_jobs_disposition_token)=64" in all_checks
-            and "pending_jobs_disposition_tokennotglob'*[^0-9a-f]*'" in all_checks
+            "length(pending_jobs_disposition_token)=64" in delivery_checks
+            and "pending_jobs_disposition_tokennotglob'*[^0-9a-f]*'"
+            in delivery_checks
         )
     )
     instance_length_contract = (
-        "char_length(instance_id)>=1" in all_checks
-        and "char_length(instance_id)<=128" in all_checks
+        "char_length(instance_id)>=1" in heartbeat_checks
+        and "char_length(instance_id)<=128" in heartbeat_checks
         if is_postgres
-        else "length(instance_id)between1and128" in all_checks
+        else "length(instance_id)between1and128" in heartbeat_checks
     )
     timeout_contract = (
-        "request_timeout_seconds>=1" in all_checks
-        and "request_timeout_seconds<=30" in all_checks
+        "request_timeout_seconds>=1" in attempt_checks
+        and "request_timeout_seconds<=30" in attempt_checks
         if is_postgres
-        else "request_timeout_secondsbetween1and30" in all_checks
+        else "request_timeout_secondsbetween1and30" in attempt_checks
     )
     ready_reason_contract = (
-        "component=anyarray['worker','reconciler','retention']" in structural_checks
-        and "readyandreason_codeisnull" in structural_checks
-        and "notreadyandreason_code=anyarray[" in structural_checks
+        "component=anyarray['worker','reconciler','retention']"
+        in heartbeat_structural_checks
+        and "readyandreason_codeisnull" in heartbeat_structural_checks
+        and "notreadyandreason_codeisnotnullandreason_code=anyarray["
+        in heartbeat_structural_checks
         if is_postgres
         else (
-            "componentin'worker','reconciler','retention'" in structural_checks
-            and "ready=1andreason_codeisnull" in structural_checks
-            and "ready=0andreason_codein" in structural_checks
+            "componentin'worker','reconciler','retention'"
+            in heartbeat_structural_checks
+            and "ready=1andreason_codeisnull" in heartbeat_structural_checks
+            and "ready=0andreason_codeisnotnullandreason_codein"
+            in heartbeat_structural_checks
         )
     )
     return (
@@ -240,8 +266,8 @@ def _has_required_delivery_checks(
         and timeout_contract
         and instance_length_contract
         and ready_reason_contract
-        and "reason_code" in all_checks
-        and all(reason in all_checks for reason in _DELIVERY_RUNTIME_REASON_VALUES)
+        and "reason_code" in heartbeat_checks
+        and all(reason in heartbeat_checks for reason in _DELIVERY_RUNTIME_REASON_VALUES)
     )
 _MIGRATION_MUTABLE_COLUMNS = frozenset(
     {
@@ -1125,6 +1151,7 @@ class AdminWebhookRepository:
                 index_rows = await unit._fetch(
                     """
                     SELECT index_class.relname AS index_name,
+                           relation.relname AS table_name,
                            array_agg(attribute.attname ORDER BY key_columns.ordinality)
                                FILTER (WHERE key_columns.ordinality <= index_data.indnkeyatts)
                                AS column_names,
@@ -1143,7 +1170,7 @@ class AdminWebhookRepository:
                        AND attribute.attnum = key_columns.attribute_number
                     WHERE namespace.nspname = current_schema()
                       AND index_class.relname = ANY(?::text[])
-                    GROUP BY index_class.relname, index_data.indexrelid,
+                    GROUP BY index_class.relname, relation.relname, index_data.indexrelid,
                              index_data.indnkeyatts,
                              index_data.indpred, index_data.indrelid
                     """,
@@ -1161,16 +1188,21 @@ class AdminWebhookRepository:
                     }
                     for table in _DELIVERY_POSTGRES_COLUMN_CONTRACT
                 }
-                constraint_definitions = [
-                    str(row["definition"])
-                    for row in constraint_rows
-                    if str(row["constraint_type"]) == "CHECK"
-                ]
+                constraint_definitions = {
+                    table: tuple(
+                        str(row["definition"])
+                        for row in constraint_rows
+                        if str(row["table_name"]) == table
+                        and str(row["constraint_type"]) == "CHECK"
+                    )
+                    for table in _DELIVERY_SCHEMA_COLUMNS
+                }
                 heartbeat_primary_key = tuple(
                     str(row["column_name"]) for row in primary_key_rows
                 )
                 index_contracts = {
                     str(row["index_name"]): (
+                        str(row["table_name"]),
                         tuple(str(column) for column in row["column_names"]),
                         _strip_outer_parentheses(
                             _compact_schema_sql(str(row["predicate"] or ""))
@@ -1201,16 +1233,22 @@ class AdminWebhookRepository:
                     }
                 index_rows = await unit._fetch(
                     """
-                    SELECT name, sql
+                    SELECT name, tbl_name, sql
                     FROM sqlite_master
                     WHERE type = 'index' AND name IN (?, ?, ?)
                     """,
                     tuple(_DELIVERY_SCHEMA_INDEXES),
                 )
                 tables = {str(row["name"]) for row in table_rows}
-                table_definitions = [str(row["sql"] or "") for row in table_rows]
-                index_definitions = {
-                    str(row["name"]): _compact_schema_sql(str(row["sql"] or ""))
+                table_definitions = {
+                    str(row["name"]): (str(row["sql"] or ""),)
+                    for row in table_rows
+                }
+                index_contracts = {
+                    str(row["name"]): (
+                        str(row["tbl_name"]),
+                        _compact_schema_sql(str(row["sql"] or "")),
+                    )
                     for row in index_rows
                 }
                 return (
@@ -1223,7 +1261,15 @@ class AdminWebhookRepository:
                     and _has_required_delivery_checks(
                         table_definitions, is_postgres=False
                     )
-                    and index_definitions == _DELIVERY_SQLITE_INDEX_DEFINITIONS
+                    and set(index_contracts) == _DELIVERY_SCHEMA_INDEXES
+                    and all(
+                        index_contracts[index_name]
+                        == (
+                            _DELIVERY_SCHEMA_INDEX_TABLES[index_name],
+                            expected_definition,
+                        )
+                        for index_name, expected_definition in _DELIVERY_SQLITE_INDEX_DEFINITIONS.items()
+                    )
                 )
 
             expected_indexes = _DELIVERY_SCHEMA_INDEX_COLUMNS
@@ -1242,23 +1288,25 @@ class AdminWebhookRepository:
                 and heartbeat_primary_key == ("component", "instance_id")
                 and set(index_contracts) == _DELIVERY_SCHEMA_INDEXES
                 and all(
-                    index_contracts[index_name][0] == expected_columns
+                    index_contracts[index_name][0]
+                    == _DELIVERY_SCHEMA_INDEX_TABLES[index_name]
+                    and index_contracts[index_name][1] == expected_columns
                     for index_name, expected_columns in expected_indexes.items()
                 )
-                and index_contracts["idx_admin_webhook_deliveries_recovery"][1]
+                and index_contracts["idx_admin_webhook_deliveries_recovery"][2]
                 == recovery_predicate
                 and index_contracts[
                     "idx_admin_webhook_deliveries_disposition_recovery"
-                ][1]
+                ][2]
                 == disposition_predicate
                 and index_contracts[
                     "idx_admin_webhook_runtime_heartbeats_freshness"
-                ][1]
+                ][2]
                 == ""
                 and "heartbeat_atdesc)"
                 in index_contracts[
                     "idx_admin_webhook_runtime_heartbeats_freshness"
-                ][2]
+                ][3]
             )
 
     async def get_legacy_import_snapshot(self) -> LegacyImportDatabaseSnapshot:

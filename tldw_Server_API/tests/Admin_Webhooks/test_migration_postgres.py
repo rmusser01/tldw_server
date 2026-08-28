@@ -227,6 +227,77 @@ async def test_postgres_delivery_schema_ready_rejects_wrong_recovery_index_predi
 
 
 @pytest.mark.integration
+async def test_postgres_delivery_schema_ready_rejects_decoy_named_index_on_wrong_table(
+    test_db_pool,
+) -> None:
+    assert await ensure_admin_webhook_canonical_tables_pg(test_db_pool)
+    repository = AdminWebhookRepository(test_db_pool)
+    assert await repository.delivery_schema_ready() is True
+
+    connection = await asyncpg.connect(test_db_pool.settings.DATABASE_URL)
+    try:
+        await connection.execute(
+            """
+            CREATE TABLE admin_webhook_delivery_recovery_decoy (
+                state TEXT NOT NULL,
+                enqueue_claim_expires_at TIMESTAMPTZ,
+                expires_at TIMESTAMPTZ NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL
+            )
+            """
+        )
+        await connection.execute("DROP INDEX idx_admin_webhook_deliveries_recovery")
+        await connection.execute(
+            """
+            CREATE INDEX idx_admin_webhook_deliveries_recovery
+            ON admin_webhook_delivery_recovery_decoy(
+                state, enqueue_claim_expires_at, expires_at, created_at
+            ) WHERE state IN ('pending', 'enqueue_claimed')
+            """
+        )
+    finally:
+        await connection.close()
+
+    assert await repository.delivery_schema_ready() is False
+
+
+@pytest.mark.integration
+async def test_postgres_delivery_schema_ready_binds_checks_to_their_owning_table(
+    test_db_pool,
+) -> None:
+    assert await ensure_admin_webhook_canonical_tables_pg(test_db_pool)
+    repository = AdminWebhookRepository(test_db_pool)
+    assert await repository.delivery_schema_ready() is True
+
+    connection = await asyncpg.connect(test_db_pool.settings.DATABASE_URL)
+    try:
+        constraint_name = await connection.fetchval(
+            """
+            SELECT constraint_name
+            FROM information_schema.check_constraints
+            WHERE check_clause LIKE '%pending_jobs_disposition_token%'
+            """
+        )
+        assert constraint_name is not None
+        await connection.execute(
+            f'ALTER TABLE admin_webhook_deliveries DROP CONSTRAINT "{constraint_name}"'
+        )
+        await connection.execute(
+            """
+            ALTER TABLE admin_webhook_runtime_heartbeats
+            ADD COLUMN pending_jobs_disposition_token TEXT CHECK (
+                pending_jobs_disposition_token IS NULL
+                OR pending_jobs_disposition_token ~ '^[0-9a-f]{64}$'
+            )
+            """
+        )
+    finally:
+        await connection.close()
+
+    assert await repository.delivery_schema_ready() is False
+
+
+@pytest.mark.integration
 async def test_postgres_delivery_schema_ready_rejects_incompatible_column_contract(
     test_db_pool,
 ) -> None:
@@ -310,6 +381,15 @@ async def test_postgres_095_enforces_delivery_and_heartbeat_boundaries(test_db_p
                   CURRENT_TIMESTAMP)
         """
     )
+    with pytest.raises(asyncpg.CheckViolationError):
+        await test_db_pool.execute(
+            """
+            INSERT INTO admin_webhook_runtime_heartbeats (
+                component, instance_id, ready, reason_code, heartbeat_at
+            ) VALUES ('worker', 'unready-with-null-reason', FALSE, NULL,
+                      CURRENT_TIMESTAMP)
+            """
+        )
     await test_db_pool.execute(
         """
         INSERT INTO admin_webhook_runtime_heartbeats (
@@ -318,6 +398,15 @@ async def test_postgres_095_enforces_delivery_and_heartbeat_boundaries(test_db_p
         """,
         "x" * 128,
     )
+    with pytest.raises(asyncpg.CheckViolationError):
+        await test_db_pool.execute(
+            """
+            INSERT INTO admin_webhook_runtime_heartbeats (
+                component, instance_id, ready, heartbeat_at
+            ) VALUES ('retention', $1, TRUE, CURRENT_TIMESTAMP)
+            """,
+            "x" * 129,
+        )
     with pytest.raises(asyncpg.CheckViolationError):
         await test_db_pool.execute(
             """

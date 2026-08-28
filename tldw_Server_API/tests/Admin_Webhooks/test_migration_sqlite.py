@@ -471,6 +471,15 @@ def test_sqlite_096_preserves_094_rows_and_enforces_new_schema_bounds() -> None:
                   '2026-07-01T00:00:00Z')
         """
     )
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            """
+            INSERT INTO admin_webhook_runtime_heartbeats (
+                component, instance_id, ready, reason_code, heartbeat_at
+            ) VALUES ('worker', 'unready-with-null-reason', 0, NULL,
+                      '2026-07-01T00:00:00Z')
+            """
+        )
     conn.execute(
         """
         INSERT INTO admin_webhook_runtime_heartbeats (
@@ -604,6 +613,92 @@ async def test_sqlite_delivery_schema_ready_rejects_wrong_recovery_index_predica
                 state, enqueue_claim_expires_at, expires_at, created_at
             )
             WHERE state = 'pending'
+            """
+        )
+
+    pool = DatabasePool(
+        Settings(AUTH_MODE="single_user", DATABASE_URL=f"sqlite:///{db_path}")
+    )
+    await pool.initialize()
+    try:
+        assert await AdminWebhookRepository(pool).delivery_schema_ready() is False
+    finally:
+        await pool.close()
+
+
+@pytest.mark.unit
+async def test_sqlite_delivery_schema_ready_rejects_decoy_named_index_on_wrong_table(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "delivery-schema-decoy-index.db"
+    apply_authnz_migrations(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(
+            """
+            DROP INDEX idx_admin_webhook_deliveries_recovery;
+            CREATE TABLE admin_webhook_delivery_recovery_decoy (
+                state TEXT NOT NULL,
+                enqueue_claim_expires_at TEXT,
+                expires_at TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX idx_admin_webhook_deliveries_recovery
+            ON admin_webhook_delivery_recovery_decoy(
+                state, enqueue_claim_expires_at, expires_at, created_at
+            ) WHERE state IN ('pending', 'enqueue_claimed');
+            """
+        )
+
+    pool = DatabasePool(
+        Settings(AUTH_MODE="single_user", DATABASE_URL=f"sqlite:///{db_path}")
+    )
+    await pool.initialize()
+    try:
+        assert await AdminWebhookRepository(pool).delivery_schema_ready() is False
+    finally:
+        await pool.close()
+
+
+@pytest.mark.unit
+async def test_sqlite_delivery_schema_ready_binds_checks_to_their_owning_table(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "delivery-schema-check-ownership.db"
+    apply_authnz_migrations(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(
+            """
+            DROP INDEX idx_admin_webhook_runtime_heartbeats_freshness;
+            DROP TABLE admin_webhook_runtime_heartbeats;
+            ALTER TABLE admin_webhook_delivery_attempts
+            ADD COLUMN component TEXT CHECK (component IN ('worker', 'reconciler', 'retention'));
+            CREATE TABLE admin_webhook_runtime_heartbeats (
+                component TEXT NOT NULL,
+                instance_id TEXT NOT NULL CHECK (length(instance_id) BETWEEN 1 AND 128),
+                ready INTEGER NOT NULL CHECK (ready IN (0, 1)),
+                reason_code TEXT CHECK (
+                    (ready = 1 AND reason_code IS NULL)
+                    OR (
+                        ready = 0
+                        AND reason_code IS NOT NULL
+                        AND reason_code IN (
+                            'mode_off', 'mode_migrate', 'schema_unready',
+                            'migration_pending', 'key_unavailable',
+                            'key_configuration_mismatch', 'jobs_unavailable',
+                            'database_unavailable', 'worker_unavailable',
+                            'reconciler_unavailable', 'retention_unavailable',
+                            'heartbeat_stale'
+                        )
+                    )
+                ),
+                heartbeat_at TEXT NOT NULL,
+                last_success_at TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (component, instance_id)
+            );
+            CREATE INDEX idx_admin_webhook_runtime_heartbeats_freshness
+            ON admin_webhook_runtime_heartbeats(component, ready, heartbeat_at DESC);
             """
         )
 

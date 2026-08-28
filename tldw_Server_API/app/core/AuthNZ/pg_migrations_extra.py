@@ -3166,7 +3166,9 @@ ADMIN_WEBHOOK_DELIVERY_RECOVERY_POSTGRES_DDL = (
         reason_code TEXT CHECK (
             (ready AND reason_code IS NULL)
             OR (
-                NOT ready AND reason_code IN (
+                NOT ready
+                AND reason_code IS NOT NULL
+                AND reason_code IN (
                     'mode_off',
                     'mode_migrate',
                     'schema_unready',

@@ -4,7 +4,7 @@ title: Implement canonical admin webhook delivery substrate and recovery
 status: In Progress
 assignee: []
 created_date: '2026-08-23 03:15'
-updated_date: '2026-08-28 15:54'
+updated_date: '2026-08-28 16:12'
 labels:
   - admin
   - webhooks
@@ -76,6 +76,10 @@ The initial draft was created from an earlier reviewed PR 1 head. Planning revie
 2026-08-28: Started Task 1 Fix Round 1. Addressing fail-closed delivery-schema structural preflight, closed heartbeat runtime-reason catalog, migration boundary coverage, required PostgreSQL verification, and warning triage.
 
 2026-08-28: Task 1 Fix Round 1 complete. Hardened delivery_schema_ready() against backend-specific column, check, primary-key, and index/predicate drift; added closed heartbeat runtime reasons and 64-lowercase-hex disposition tokens; PostgreSQL-focused suite ran required with zero skips. Focused suite: 108 passed, 18 pre-existing warnings; Ruff and git diff --check pass.
+
+2026-08-28: Started Task 1 Fix Round 2. Binding readiness constraints and indexes to owning tables, correcting heartbeat NULL reason SQL semantics, adding equivalent PostgreSQL instance bounds, and re-verifying migration 095 without a new migration.
+
+2026-08-28: Task 1 Fix Round 2 complete. delivery_schema_ready now binds delivery/attempt/heartbeat checks and named indexes to their owning tables, validates PostgreSQL relation ownership, and migration 095 rejects unready heartbeat rows with NULL reason_code. Added SQLite/PostgreSQL decoy-index and wrong-table-check coverage plus PostgreSQL 129-character instance rejection. Full required suite: 112 passed, 0 skipped (PostgreSQL required); Ruff and diff checks passed. Warning triage: 2 environment/dependency configuration warnings and 20 existing deprecated shared-fixture shutdown warnings; no Task 1 warning introduced.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

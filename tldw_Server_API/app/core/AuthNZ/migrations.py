@@ -2028,7 +2028,9 @@ def migration_096_add_admin_webhook_delivery_recovery(
             reason_code TEXT CHECK (
                 (ready = 1 AND reason_code IS NULL)
                 OR (
-                    ready = 0 AND reason_code IN (
+                    ready = 0
+                    AND reason_code IS NOT NULL
+                    AND reason_code IN (
                         'mode_off',
                         'mode_migrate',
                         'schema_unready',
