@@ -80,6 +80,22 @@ class ProtectedValue:
     ciphertext_json: str
     key_id: str
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.ciphertext_json, str):
+            raise TypeError("protected ciphertext must be text")
+        if not isinstance(self.key_id, str):
+            raise TypeError("protected key ID must be text")
+        if not 1 <= len(self.key_id) <= 128:
+            raise ValueError("protected key ID is invalid")
+        if len(self.ciphertext_json.encode("utf-8")) > 131_072:
+            raise ValueError("protected ciphertext is too large")
+        try:
+            parsed = json.loads(self.ciphertext_json)
+        except (json.JSONDecodeError, RecursionError) as exc:
+            raise ValueError("protected ciphertext is invalid") from exc
+        if not isinstance(parsed, dict):
+            raise ValueError("protected ciphertext must be a JSON object")
+
 
 @dataclass(frozen=True)
 class WebhookKeyRingLoadResult:

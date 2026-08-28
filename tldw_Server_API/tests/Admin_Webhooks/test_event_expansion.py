@@ -1,0 +1,871 @@
+from __future__ import annotations
+
+import base64
+from dataclasses import fields
+from datetime import datetime, timedelta, timezone
+from typing import Protocol
+
+import pytest
+
+from tldw_Server_API.app.core.Admin_Webhooks.crypto import (
+    EVENT_BODY_MAX_BYTES,
+    ProtectedValue,
+    WebhookKeyError,
+    WebhookKeyErrorCode,
+    WebhookKeyRing,
+)
+from tldw_Server_API.app.core.Admin_Webhooks.domain import (
+    AttemptState,
+    DeliveryKind,
+    DeliveryReasonCode,
+    DeliveryRuntimeComponent,
+    DeliveryRuntimeReasonCode,
+    DeliveryState,
+    EventSourceKind,
+    JobsDispositionKind,
+)
+from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
+    AdminWebhookRepository,
+    AttemptCompletion,
+    AttemptReservation,
+    DeliveryBundle,
+    EnqueueClaim,
+    EventCaptureResult,
+    EventInsert,
+    PendingJobsDisposition,
+    RegistrationInsert,
+    RegistrationTarget,
+    RetentionBatchResult,
+    RuntimeHeartbeatWrite,
+    StoredWebhookDelivery,
+    StoredWebhookEvent,
+    _stored_delivery_from_row,
+)
+
+NOW = datetime(2026, 8, 23, 12, 0, tzinfo=timezone.utc)
+KEY_ID = "key-2026-08"
+DISPOSITION_TOKEN = "a" * 64
+
+
+class DeliveryRepositoryFixture(Protocol):
+    repository: AdminWebhookRepository
+
+    async def execute(self, query: str, *params: object) -> None: ...
+
+    async def fetchval(self, query: str, *params: object) -> object: ...
+
+
+def key_ring() -> WebhookKeyRing:
+    encoded = base64.b64encode(b"k" * 32).decode("ascii")
+    return WebhookKeyRing({KEY_ID: encoded}, primary_id=KEY_ID)
+
+
+def event_insert(
+    event_id: str = "event-1",
+    *,
+    source_kind: EventSourceKind = EventSourceKind.COMMAND,
+    source_identity: str = "command-1",
+    event_type: str = "user.created",
+    body: bytes = b'{"id":1}',
+    created_at: datetime = NOW,
+) -> EventInsert:
+    ring = key_ring()
+    return EventInsert(
+        id=event_id,
+        event_type=event_type,
+        api_version="2026-07-01",
+        source_kind=source_kind,
+        aggregate_type="user" if source_kind is EventSourceKind.AGGREGATE else None,
+        aggregate_id=source_identity if source_kind is EventSourceKind.AGGREGATE else None,
+        aggregate_version="7" if source_kind is EventSourceKind.AGGREGATE else None,
+        source_command_id=(
+            source_identity if source_kind is EventSourceKind.COMMAND else None
+        ),
+        source_component="authnz",
+        source_request_id="request-1",
+        body=ring.encrypt_event_body(
+            event_id=event_id,
+            api_version="2026-07-01",
+            body=body,
+        ),
+        body_size_bytes=len(body),
+        created_at=created_at,
+    )
+
+
+async def seed_registration(
+    repository: AdminWebhookRepository,
+    *,
+    event_types: tuple[str, ...] = ("user.created",),
+    active: bool = True,
+    secret_rotation_required: bool = False,
+    deleted: bool = False,
+    now: datetime = NOW - timedelta(hours=1),
+) -> int:
+    async with repository.transaction() as tx:
+        webhook_id = await tx.allocate_registration_id()
+        protected = ProtectedValue(
+            ciphertext_json='{"ciphertext":"opaque"}',
+            key_id=KEY_ID,
+        )
+        created = await tx.insert_registration(
+            RegistrationInsert(
+                id=webhook_id,
+                description=f"registration-{webhook_id}",
+                target=RegistrationTarget(
+                    protected=protected,
+                    hostname="hooks.example.com",
+                    display="https://hooks.example.com",
+                ),
+                event_types=event_types,
+                active=active,
+                timeout_seconds=10,
+                secret=protected,
+                secret_rotation_required=secret_rotation_required,
+                actor_user_id=7,
+                now=now,
+            )
+        )
+        if deleted:
+            await tx.soft_delete_registration(
+                webhook_id,
+                expected_revision=created.revision,
+                actor_user_id=7,
+                at=now + timedelta(minutes=1),
+            )
+    return webhook_id
+
+
+def assert_metadata_is_sanitized(value: object) -> None:
+    names = {field.name for field in fields(value)}
+    assert not names & {
+        "body",
+        "body_ciphertext_json",
+        "target",
+        "target_url",
+        "secret",
+        "secret_ciphertext_json",
+    }
+
+
+@pytest.mark.unit
+def test_event_insert_normalizes_time_and_validates_source_shape() -> None:
+    event = event_insert(created_at=NOW.astimezone(timezone(timedelta(hours=-7))))
+    assert event.created_at == NOW
+    assert event.created_at.tzinfo is timezone.utc
+
+    with pytest.raises(ValueError, match="source identity"):
+        EventInsert(
+            **{
+                **event.__dict__,
+                "aggregate_type": "user",
+                "aggregate_id": "1",
+                "aggregate_version": "1",
+            }
+        )
+
+    with pytest.raises(ValueError, match="event ID"):
+        EventInsert(**{**event.__dict__, "id": "x" * 129})
+
+
+@pytest.mark.unit
+def test_repository_record_contracts_are_closed_and_validate_invariants() -> None:
+    event = event_insert()
+    assert isinstance(event, EventInsert)
+    assert all(
+        record.__dataclass_params__.frozen
+        for record in (
+            EventInsert,
+            StoredWebhookEvent,
+            EventCaptureResult,
+            StoredWebhookDelivery,
+            DeliveryBundle,
+            EnqueueClaim,
+            AttemptReservation,
+            AttemptCompletion,
+            PendingJobsDisposition,
+            RuntimeHeartbeatWrite,
+            RetentionBatchResult,
+        )
+    )
+
+    with pytest.raises(ValueError, match="disposition token"):
+        PendingJobsDisposition(
+            delivery_id="delivery-1",
+            jobs_job_id="job-1",
+            attempt_id="attempt-1",
+            kind=JobsDispositionKind.RETRY,
+            delay_seconds=30,
+            token="A" * 64,
+            not_before_at=NOW,
+        )
+    with pytest.raises(ValueError, match="retry disposition"):
+        PendingJobsDisposition(
+            delivery_id="delivery-1",
+            jobs_job_id="job-1",
+            attempt_id="attempt-1",
+            kind=JobsDispositionKind.RETRY,
+            delay_seconds=None,
+            token=DISPOSITION_TOKEN,
+            not_before_at=NOW,
+        )
+    with pytest.raises(ValueError, match="ready heartbeat"):
+        RuntimeHeartbeatWrite(
+            component=DeliveryRuntimeComponent.WORKER,
+            instance_id="worker-1",
+            ready=True,
+            reason_code=DeliveryRuntimeReasonCode.JOBS_UNAVAILABLE,
+            heartbeat_at=NOW,
+            last_success_at=None,
+        )
+
+
+@pytest.mark.unit
+def test_event_body_boundary_and_cross_event_identity_are_enforced() -> None:
+    ring = key_ring()
+    accepted = ring.encrypt_event_body(
+        event_id="event-max",
+        api_version="2026-07-01",
+        body=b"x" * EVENT_BODY_MAX_BYTES,
+    )
+    assert len(
+        ring.decrypt_event_body(
+            event_id="event-max",
+            api_version="2026-07-01",
+            protected=accepted,
+        )
+    ) == EVENT_BODY_MAX_BYTES
+
+    with pytest.raises(WebhookKeyError) as oversized:
+        ring.encrypt_event_body(
+            event_id="event-too-large",
+            api_version="2026-07-01",
+            body=b"x" * (EVENT_BODY_MAX_BYTES + 1),
+        )
+    assert oversized.value.code is WebhookKeyErrorCode.EVENT_BODY_TOO_LARGE
+
+    with pytest.raises(WebhookKeyError) as substitution:
+        ring.decrypt_event_body(
+            event_id="event-other",
+            api_version="2026-07-01",
+            protected=accepted,
+        )
+    assert substitution.value.code is WebhookKeyErrorCode.CONTEXT_MISMATCH
+
+
+@pytest.mark.unit
+def test_attempt_completion_rejects_nonterminal_and_incoherent_retry() -> None:
+    with pytest.raises(ValueError, match="completion state"):
+        AttemptCompletion(
+            attempt_state=AttemptState.PROCESSING,
+            delivery_state=DeliveryState.PROCESSING,
+            disposition=None,
+            status_code=None,
+            latency_ms=None,
+            reason_code=None,
+            requested_retry_delay_seconds=None,
+            finished_at=NOW,
+            completed_after_config_change=False,
+        )
+    with pytest.raises(ValueError, match="retry delay"):
+        AttemptCompletion(
+            attempt_state=AttemptState.RETRYABLE,
+            delivery_state=DeliveryState.RETRY_WAIT,
+            disposition=JobsDispositionKind.RETRY,
+            status_code=503,
+            latency_ms=1,
+            reason_code=None,
+            requested_retry_delay_seconds=None,
+            finished_at=NOW,
+            completed_after_config_change=False,
+        )
+
+
+@pytest.mark.unit
+def test_malformed_persisted_delivery_enum_fails_closed() -> None:
+    row = {
+        "id": "delivery-1",
+        "event_id": "event-1",
+        "webhook_id": 1,
+        "kind": "automatic",
+        "delivery_config_version": 1,
+        "secret_version": 1,
+        "jobs_job_id": None,
+        "enqueue_claim_token": None,
+        "enqueue_claim_expires_at": None,
+        "state": "invented-state",
+        "attempt_count": 0,
+        "current_attempt_id": None,
+        "status_code": None,
+        "latency_ms": None,
+        "reason_code": None,
+        "pending_jobs_disposition": None,
+        "pending_jobs_disposition_delay_seconds": None,
+        "pending_jobs_disposition_token": None,
+        "pending_jobs_disposition_not_before_at": None,
+        "jobs_disposition_applied": False,
+        "completed_after_config_change": False,
+        "terminal_at": None,
+        "expires_at": NOW + timedelta(hours=72),
+        "redelivery_of_id": None,
+        "created_at": NOW,
+        "updated_at": NOW,
+    }
+    with pytest.raises(ValueError, match="enum"):
+        _stored_delivery_from_row(row)
+
+
+async def exercise_capture_and_history(
+    fixture: DeliveryRepositoryFixture,
+) -> None:
+    repository = fixture.repository
+    matching = [await seed_registration(repository) for _ in range(25)]
+    await seed_registration(repository, active=False)
+    await seed_registration(repository, event_types=("user.deleted",))
+    await seed_registration(repository, secret_rotation_required=True)
+    await seed_registration(repository, deleted=True)
+
+    generated: list[str] = []
+
+    def delivery_id_factory() -> str:
+        value = f"delivery-{len(generated):03d}"
+        generated.append(value)
+        return value
+
+    event = event_insert()
+    expires_at = event.created_at + timedelta(hours=72)
+    async with repository.transaction() as tx:
+        counts = {"match": 0, "batch": 0}
+        original_fetch = tx._fetch
+        original_executemany = tx._executemany
+
+        async def counted_fetch(
+            query: str, params: tuple[object, ...] = ()
+        ) -> list[dict[str, object]]:
+            if "admin_webhook_match_subscriptions" in query:
+                counts["match"] += 1
+            return await original_fetch(query, params)
+
+        async def counted_executemany(
+            query: str, rows: tuple[tuple[object, ...], ...]
+        ) -> int:
+            if "admin_webhook_delivery_fanout" in query:
+                counts["batch"] += 1
+            return await original_executemany(query, rows)
+
+        tx._fetch = counted_fetch  # type: ignore[method-assign]
+        tx._executemany = counted_executemany  # type: ignore[method-assign]
+        captured = await tx.capture_event_and_expand(
+            event,
+            delivery_id_factory,
+            expires_at,
+        )
+
+    assert captured.inserted is True
+    assert captured.event.id == event.id
+    assert len(captured.deliveries) == 25
+    assert counts == {"match": 1, "batch": 1}
+    assert generated == [f"delivery-{index:03d}" for index in range(25)]
+    assert {item.delivery.webhook_id for item in captured.deliveries} == set(matching)
+    assert all(item.delivery.expires_at == expires_at for item in captured.deliveries)
+    assert all(item.delivery.delivery_config_version == 1 for item in captured.deliveries)
+    assert all(item.delivery.secret_version == 1 for item in captured.deliveries)
+
+    replay_factory_calls = 0
+
+    def replay_factory() -> str:
+        nonlocal replay_factory_calls
+        replay_factory_calls += 1
+        return "must-not-be-used"
+
+    replay_event = event_insert(event_id="different-id")
+    async with repository.transaction() as tx:
+        replay = await tx.capture_event_and_expand(
+            replay_event,
+            replay_factory,
+            expires_at,
+        )
+    assert replay.inserted is False
+    assert replay.event.id == event.id
+    assert [item.delivery.id for item in replay.deliveries] == [
+        item.delivery.id for item in captured.deliveries
+    ]
+    assert replay_factory_calls == 0
+
+    aggregate = event_insert(
+        event_id="aggregate-event",
+        source_kind=EventSourceKind.AGGREGATE,
+        source_identity="user-7",
+    )
+    aggregate_ids: list[str] = []
+
+    def aggregate_factory() -> str:
+        value = f"aggregate-delivery-{len(aggregate_ids):03d}"
+        aggregate_ids.append(value)
+        return value
+
+    async with repository.transaction() as tx:
+        aggregate_capture = await tx.capture_event_and_expand(
+            aggregate,
+            aggregate_factory,
+            expires_at,
+        )
+    aggregate_calls = 0
+
+    def aggregate_replay_factory() -> str:
+        nonlocal aggregate_calls
+        aggregate_calls += 1
+        return "must-not-be-used"
+
+    async with repository.transaction() as tx:
+        aggregate_replay = await tx.capture_event_and_expand(
+            event_insert(
+                event_id="other-aggregate-id",
+                source_kind=EventSourceKind.AGGREGATE,
+                source_identity="user-7",
+            ),
+            aggregate_replay_factory,
+            expires_at,
+        )
+    assert aggregate_capture.inserted is True
+    assert aggregate_replay.inserted is False
+    assert aggregate_replay.event.id == aggregate.id
+    assert aggregate_calls == 0
+
+    webhook_id = matching[0]
+    async with repository.transaction() as tx:
+        manual = await tx.insert_delivery(
+            "manual-z",
+            event_id=event.id,
+            webhook_id=webhook_id,
+            kind=DeliveryKind.MANUAL,
+            expires_at=expires_at,
+            now=NOW + timedelta(minutes=1),
+            redelivery_of_id=captured.deliveries[0].delivery.id,
+        )
+        test = await tx.insert_delivery(
+            "test-a",
+            event_id=event.id,
+            webhook_id=webhook_id,
+            kind=DeliveryKind.TEST,
+            expires_at=expires_at,
+            now=NOW + timedelta(minutes=1),
+        )
+    assert manual.delivery.kind is DeliveryKind.MANUAL
+    assert test.delivery.kind is DeliveryKind.TEST
+
+    page = await repository.list_delivery_history(webhook_id, limit=20, offset=0)
+    assert [item.id for item in page.items[:2]] == ["test-a", "manual-z"]
+    assert page.total == 4
+    assert_metadata_is_sanitized(page.items[0])
+    with pytest.raises(ValueError, match="limit"):
+        await repository.list_delivery_history(webhook_id, limit=0, offset=0)
+    with pytest.raises(ValueError, match="offset"):
+        await repository.list_delivery_history(webhook_id, limit=10, offset=-1)
+
+    other_webhook = matching[1]
+    assert (
+        await repository.get_delivery_for_registration(other_webhook, manual.delivery.id)
+        is None
+    )
+    scoped = await repository.get_delivery_for_registration(webhook_id, manual.delivery.id)
+    assert scoped is not None and scoped.id == manual.delivery.id
+
+
+async def _captured_delivery(
+    repository: AdminWebhookRepository,
+    *,
+    event_id: str,
+    command_id: str,
+) -> tuple[int, str]:
+    webhook_id = await seed_registration(repository)
+    async with repository.transaction() as tx:
+        result = await tx.capture_event_and_expand(
+            event_insert(event_id=event_id, source_identity=command_id),
+            lambda: f"delivery-{event_id}",
+            NOW + timedelta(hours=72),
+        )
+    return webhook_id, result.deliveries[0].delivery.id
+
+
+async def exercise_delivery_state_machine(
+    fixture: DeliveryRepositoryFixture,
+) -> None:
+    repository = fixture.repository
+    webhook_id, delivery_id = await _captured_delivery(
+        repository,
+        event_id="state-event",
+        command_id="state-command",
+    )
+
+    async with repository.transaction() as tx:
+        claim = await tx.claim_pending_delivery(
+            "claim-1",
+            NOW + timedelta(minutes=1),
+            NOW,
+        )
+        assert claim is not None and claim.delivery.delivery.id == delivery_id
+        assert await tx.attach_jobs_job(delivery_id, "stale", "job-1", NOW) is None
+        queued = await tx.attach_jobs_job(delivery_id, "claim-1", "job-1", NOW)
+        assert queued is not None
+        assert not await tx.release_expired_enqueue_claim(delivery_id, "claim-1", NOW)
+
+    await fixture.execute(
+        """
+        UPDATE admin_webhook_migration_state
+        SET first_canonical_activity_at = NULL,
+            first_canonical_activity_kind = NULL
+        WHERE singleton_id = 1
+        """
+    )
+
+    for number in range(1, 5):
+        started_at = NOW + timedelta(minutes=number)
+        lease_id = f"lease-{number}"
+        attempt_id = f"attempt-{number}"
+        async with repository.transaction() as tx:
+            stale = await tx.reserve_jobs_attempt(
+                delivery_id,
+                "other-job",
+                lease_id,
+                f"stale-{number}",
+                10,
+                started_at,
+                started_at + timedelta(seconds=10),
+            )
+            assert stale is None
+            reservation = await tx.reserve_jobs_attempt(
+                delivery_id,
+                "job-1",
+                lease_id,
+                attempt_id,
+                number,
+                started_at,
+                started_at + timedelta(seconds=number),
+            )
+        assert reservation is not None and reservation.reserved is True
+        assert reservation.attempt is not None
+        assert reservation.attempt.attempt_number == number
+        assert reservation.attempt.request_timeout_seconds == number
+        if number == 1:
+            migration = await repository.get_migration_state()
+            assert migration.first_canonical_activity_kind == "delivery_attempt"
+
+        completion = AttemptCompletion(
+            attempt_state=(
+                AttemptState.FAILED if number == 4 else AttemptState.RETRYABLE
+            ),
+            delivery_state=(
+                DeliveryState.DEAD if number == 4 else DeliveryState.RETRY_WAIT
+            ),
+            disposition=(
+                JobsDispositionKind.FAIL if number == 4 else JobsDispositionKind.RETRY
+            ),
+            status_code=503,
+            latency_ms=number * 10,
+            reason_code=(
+                DeliveryReasonCode.ATTEMPT_BUDGET_EXHAUSTED
+                if number == 4
+                else None
+            ),
+            requested_retry_delay_seconds=None if number == 4 else 30,
+            finished_at=started_at + timedelta(seconds=1),
+            completed_after_config_change=False,
+        )
+        disposition_token = f"{number:x}" * 64
+        async with repository.transaction() as tx:
+            assert (
+                await tx.finish_attempt_and_prepare_disposition(
+                    "stale-lease",
+                    completion,
+                    disposition_token,
+                    completion.finished_at,
+                )
+                is None
+            )
+            pending = await tx.finish_attempt_and_prepare_disposition(
+                lease_id,
+                completion,
+                disposition_token,
+                completion.finished_at,
+            )
+            assert pending is not None
+            assert not await tx.acknowledge_jobs_disposition(
+                delivery_id,
+                "f" * 64,
+                "failed" if number == 4 else "queued",
+            )
+            assert await tx.acknowledge_jobs_disposition(
+                delivery_id,
+                disposition_token,
+                "failed" if number == 4 else "queued",
+            )
+        assert (
+            await fixture.fetchval(
+                """
+                SELECT jobs_disposition_applied
+                FROM admin_webhook_delivery_attempts
+                WHERE id = ? AND delivery_id = ?
+                """,
+                attempt_id,
+                delivery_id,
+            )
+            in (1, True)
+        )
+
+    attempts = await repository.list_delivery_attempts(webhook_id, delivery_id)
+    assert [item.attempt_number for item in attempts] == [1, 2, 3, 4]
+    assert all(item.request_timeout_seconds in range(1, 5) for item in attempts)
+    assert all(item.finished_at is not None for item in attempts)
+    assert_metadata_is_sanitized(attempts[0])
+
+    async with repository.transaction() as tx:
+        fifth = await tx.reserve_jobs_attempt(
+            delivery_id,
+            "job-1",
+            "lease-5",
+            "attempt-5",
+            5,
+            NOW + timedelta(minutes=5),
+            NOW + timedelta(minutes=5, seconds=5),
+        )
+        assert fifth is not None and fifth.reserved is False
+        assert fifth.reason_code is DeliveryReasonCode.ATTEMPT_BUDGET_EXHAUSTED
+        assert not await tx.expire_delivery(delivery_id, DeliveryState.DEAD, NOW)
+
+    async with repository.transaction() as tx:
+        test_delivery = await tx.insert_delivery(
+            "test-reservation",
+            event_id="state-event",
+            webhook_id=webhook_id,
+            kind=DeliveryKind.TEST,
+            expires_at=NOW + timedelta(hours=72),
+            now=NOW + timedelta(minutes=6),
+        )
+        test_reservation = await tx.reserve_test_attempt(
+            "test-token",
+            test_delivery.delivery.id,
+            "test-attempt",
+            7,
+            NOW + timedelta(minutes=7),
+        )
+        assert test_reservation is not None and test_reservation.reserved
+        assert test_reservation.attempt is not None
+        assert test_reservation.attempt.request_timeout_seconds == 7
+        assert (
+            await tx.finish_attempt_and_prepare_disposition(
+                "test-token",
+                AttemptCompletion(
+                    attempt_state=AttemptState.SUCCEEDED,
+                    delivery_state=DeliveryState.SUCCEEDED,
+                    disposition=None,
+                    status_code=204,
+                    latency_ms=4,
+                    reason_code=None,
+                    requested_retry_delay_seconds=None,
+                    finished_at=NOW + timedelta(minutes=7, seconds=1),
+                    completed_after_config_change=False,
+                ),
+                None,
+                None,
+            )
+            is None
+        )
+
+
+async def exercise_recovery_runtime_and_retention(
+    fixture: DeliveryRepositoryFixture,
+) -> None:
+    repository = fixture.repository
+    webhook_id, delivery_id = await _captured_delivery(
+        repository,
+        event_id="recovery-event",
+        command_id="recovery-command",
+    )
+    await fixture.execute(
+        """
+        UPDATE admin_webhook_migration_state
+        SET first_canonical_activity_at = NULL,
+            first_canonical_activity_kind = NULL
+        WHERE singleton_id = 1
+        """
+    )
+    async with repository.transaction() as tx:
+        claim = await tx.claim_pending_delivery(
+            "expiring-claim",
+            NOW - timedelta(seconds=1),
+            NOW - timedelta(minutes=1),
+        )
+        assert claim is not None
+        assert not await tx.release_expired_enqueue_claim(
+            delivery_id, "wrong-token", NOW
+        )
+        assert await tx.release_expired_enqueue_claim(
+            delivery_id, "expiring-claim", NOW
+        )
+        expired_at = NOW + timedelta(hours=73)
+        assert await tx.expire_delivery(
+            delivery_id, DeliveryState.PENDING, expired_at
+        )
+        assert not await tx.expire_delivery(
+            delivery_id, DeliveryState.PENDING, expired_at
+        )
+
+        ready = await tx.upsert_runtime_heartbeat(
+            RuntimeHeartbeatWrite(
+                component=DeliveryRuntimeComponent.WORKER,
+                instance_id="worker-1",
+                ready=True,
+                reason_code=None,
+                heartbeat_at=NOW,
+                last_success_at=NOW,
+            )
+        )
+        assert ready.ready is True
+        unavailable = await tx.upsert_runtime_heartbeat(
+            RuntimeHeartbeatWrite(
+                component=DeliveryRuntimeComponent.RECONCILER,
+                instance_id="reconciler-1",
+                ready=False,
+                reason_code=DeliveryRuntimeReasonCode.JOBS_UNAVAILABLE,
+                heartbeat_at=NOW,
+                last_success_at=None,
+            )
+        )
+        assert unavailable.reason_code is DeliveryRuntimeReasonCode.JOBS_UNAVAILABLE
+
+    migration = await repository.get_migration_state()
+    assert migration.first_canonical_activity_at is None
+    assert migration.first_canonical_activity_kind is None
+
+    heartbeats = await repository.list_runtime_heartbeats()
+    assert len(heartbeats) == 2
+    assert all(item.heartbeat_at.tzinfo is timezone.utc for item in heartbeats)
+
+    result = await repository.purge_retained_rows(
+        NOW + timedelta(days=34),
+        NOW + timedelta(days=4),
+        200,
+    )
+    assert isinstance(result, RetentionBatchResult)
+    assert result.deliveries == 1
+    assert result.events == 1
+    assert await repository.get_delivery_for_registration(webhook_id, delivery_id) is None
+
+    with pytest.raises(ValueError, match="batch_size"):
+        await repository.purge_retained_rows(NOW, NOW, 201)
+
+
+async def exercise_stale_recovery_and_cancellation(
+    fixture: DeliveryRepositoryFixture,
+) -> None:
+    repository = fixture.repository
+    webhook_id, stale_delivery_id = await _captured_delivery(
+        repository,
+        event_id="stale-event",
+        command_id="stale-command",
+    )
+    async with repository.transaction() as tx:
+        claim = await tx.claim_pending_delivery(
+            "stale-claim",
+            NOW + timedelta(minutes=1),
+            NOW,
+        )
+        assert claim is not None
+        assert await tx.attach_jobs_job(
+            stale_delivery_id,
+            "stale-claim",
+            "stale-job",
+            NOW,
+        ) is not None
+        reservation = await tx.reserve_jobs_attempt(
+            stale_delivery_id,
+            "stale-job",
+            "stale-lease",
+            "stale-attempt",
+            1,
+            NOW,
+            NOW + timedelta(seconds=1),
+        )
+        assert reservation is not None and reservation.reserved
+
+    await fixture.execute(
+        """
+        UPDATE admin_webhook_delivery_attempts
+        SET request_timeout_seconds = NULL
+        WHERE id = ?
+        """,
+        "stale-attempt",
+    )
+    async with repository.transaction() as tx:
+        assert not await tx.close_stale_attempt_as_unknown(
+            stale_delivery_id,
+            "stale-attempt",
+            NOW + timedelta(seconds=29),
+        )
+        assert await tx.close_stale_attempt_as_unknown(
+            stale_delivery_id,
+            "stale-attempt",
+            NOW + timedelta(seconds=30),
+        )
+        assert await tx.expire_delivery(
+            stale_delivery_id,
+            DeliveryState.RETRY_WAIT,
+            NOW + timedelta(hours=73),
+        )
+
+    generated: list[str] = []
+
+    def delivery_factory() -> str:
+        value = f"cancel-delivery-{len(generated)}"
+        generated.append(value)
+        return value
+
+    async with repository.transaction() as tx:
+        captured = await tx.capture_event_and_expand(
+            event_insert(
+                event_id="cancel-event",
+                source_identity="cancel-command",
+            ),
+            delivery_factory,
+            NOW + timedelta(hours=72),
+        )
+    cancel_delivery = next(
+        item for item in captured.deliveries if item.delivery.webhook_id == webhook_id
+    )
+    async with repository.transaction() as tx:
+        claim = await tx.claim_pending_delivery(
+            "cancel-claim",
+            NOW + timedelta(minutes=1),
+            NOW,
+        )
+        assert claim is not None
+        assert await tx.attach_jobs_job(
+            cancel_delivery.delivery.id,
+            "cancel-claim",
+            "cancel-job",
+            NOW,
+        ) is not None
+        pending = await tx.cancel_registration_work(
+            webhook_id,
+            (2, 2),
+            DeliveryReasonCode.CANCELED_DISABLED,
+            lambda: "b" * 64,
+            NOW + timedelta(minutes=2),
+        )
+        assert len(pending) == 1
+        assert pending[0].attempt_id is None
+        assert await tx.acknowledge_jobs_disposition(
+            cancel_delivery.delivery.id,
+            "b" * 64,
+            "cancelled",
+        )
+        assert not await tx.expire_delivery(
+            cancel_delivery.delivery.id,
+            DeliveryState.CANCELED,
+            NOW + timedelta(hours=73),
+        )
+    assert await repository.list_delivery_attempts(
+        webhook_id,
+        cancel_delivery.delivery.id,
+    ) == ()

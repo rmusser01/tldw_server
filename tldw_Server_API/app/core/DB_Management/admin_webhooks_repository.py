@@ -5,7 +5,7 @@ from __future__ import annotations
 import hmac
 import json
 import re
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -17,10 +17,26 @@ from urllib.parse import urlsplit
 
 import asyncpg
 
-from tldw_Server_API.app.core.Admin_Webhooks.crypto import ProtectedValue
+from tldw_Server_API.app.core.Admin_Webhooks.crypto import (
+    EVENT_BODY_MAX_BYTES,
+    ProtectedValue,
+)
 from tldw_Server_API.app.core.Admin_Webhooks.domain import (
+    AttemptState,
+    DeliveryHistoryPage,
+    DeliveryKind,
+    DeliveryReasonCode,
+    DeliveryRuntimeComponent,
+    DeliveryRuntimeHeartbeat,
+    DeliveryRuntimeReasonCode,
+    DeliveryState,
+    EventSourceKind,
     IdempotencyScope,
+    JobsDispositionKind,
+    WebhookDelivery,
+    WebhookDeliveryAttempt,
     WebhookError,
+    WebhookEvent,
     WebhookRegistration,
     redact_target,
 )
@@ -33,7 +49,9 @@ from tldw_Server_API.app.core.AuthNZ.exceptions import (
 from tldw_Server_API.app.core.exceptions import TransactionPassthroughError
 
 _MAX_PAGE_SIZE = 500
+_MAX_RETENTION_BATCH_SIZE = 200
 _MIN_TOMBSTONE_RETENTION_DAYS = 30
+_DISPOSITION_TOKEN = re.compile(r"^[0-9a-f]{64}$")
 DATABASE_PROTECTED_TABLE_ORDER = (
     "registration_targets",
     "registration_secrets",
@@ -594,6 +612,296 @@ class MigrationState:
     updated_at: datetime
 
 
+def _bounded_text(
+    value: object,
+    *,
+    field: str,
+    maximum: int,
+    optional: bool = False,
+) -> str | None:
+    if value is None and optional:
+        return None
+    if not isinstance(value, str) or not 1 <= len(value) <= maximum:
+        raise ValueError(f"{field} is invalid")
+    return value
+
+
+@dataclass(frozen=True)
+class EventInsert:
+    """Immutable protected event write supplied by the delivery service."""
+
+    id: str
+    event_type: str
+    api_version: str
+    source_kind: EventSourceKind
+    aggregate_type: str | None
+    aggregate_id: str | None
+    aggregate_version: str | None
+    source_command_id: str | None
+    source_component: str
+    source_request_id: str | None
+    body: ProtectedValue
+    body_size_bytes: int
+    created_at: datetime
+
+    def __post_init__(self) -> None:
+        _bounded_text(self.id, field="event ID", maximum=128)
+        _bounded_text(self.event_type, field="event type", maximum=64)
+        _bounded_text(self.api_version, field="API version", maximum=32)
+        _bounded_text(self.source_component, field="source component", maximum=64)
+        _bounded_text(
+            self.source_request_id,
+            field="source request ID",
+            maximum=128,
+            optional=True,
+        )
+        if not isinstance(self.source_kind, EventSourceKind):
+            raise ValueError("event source kind is invalid")
+        if not isinstance(self.body, ProtectedValue):
+            raise TypeError("event body must be protected")
+        if (
+            isinstance(self.body_size_bytes, bool)
+            or not isinstance(self.body_size_bytes, int)
+            or not 0 <= self.body_size_bytes <= EVENT_BODY_MAX_BYTES
+        ):
+            raise ValueError("event body size is invalid")
+        aggregate = (
+            self.aggregate_type,
+            self.aggregate_id,
+            self.aggregate_version,
+        )
+        if self.source_kind is EventSourceKind.AGGREGATE:
+            if self.source_command_id is not None or any(value is None for value in aggregate):
+                raise ValueError("event source identity is invalid")
+            _bounded_text(self.aggregate_type, field="aggregate type", maximum=64)
+            _bounded_text(self.aggregate_id, field="aggregate ID", maximum=255)
+            _bounded_text(self.aggregate_version, field="aggregate version", maximum=255)
+        elif any(value is not None for value in aggregate) or self.source_command_id is None:
+            raise ValueError("event source identity is invalid")
+        else:
+            _bounded_text(self.source_command_id, field="source command ID", maximum=255)
+        object.__setattr__(
+            self,
+            "created_at",
+            _utc_datetime(self.created_at, field="created_at"),
+        )
+
+
+@dataclass(frozen=True)
+class StoredWebhookEvent:
+    """Protected event readback with exact source identity."""
+
+    event: WebhookEvent
+    aggregate_type: str | None
+    aggregate_id: str | None
+    aggregate_version: str | None
+    source_command_id: str | None
+    source_component: str
+    source_request_id: str | None
+    body: ProtectedValue
+    body_size_bytes: int
+
+    @property
+    def id(self) -> str:
+        return self.event.id
+
+
+@dataclass(frozen=True)
+class StoredWebhookDelivery:
+    """Internal delivery state including opaque recovery coordinates."""
+
+    delivery: WebhookDelivery
+    jobs_job_id: str | None
+    enqueue_claim_token: str | None
+    enqueue_claim_expires_at: datetime | None
+    current_attempt_id: str | None
+    pending_jobs_disposition: JobsDispositionKind | None
+    pending_jobs_disposition_delay_seconds: int | None
+    pending_jobs_disposition_token: str | None
+    pending_jobs_disposition_not_before_at: datetime | None
+    jobs_disposition_applied: bool
+    completed_after_config_change: bool
+
+
+@dataclass(frozen=True)
+class DeliveryBundle:
+    """Trusted execution readback containing protected registration material."""
+
+    event: StoredWebhookEvent
+    delivery: StoredWebhookDelivery
+    registration: StoredWebhookRegistration
+
+
+@dataclass(frozen=True)
+class EventCaptureResult:
+    """Atomic event-capture result, including idempotent replay evidence."""
+
+    event: StoredWebhookEvent
+    deliveries: tuple[StoredWebhookDelivery, ...]
+    inserted: bool
+
+
+@dataclass(frozen=True)
+class EnqueueClaim:
+    """One pending delivery claimed for external Jobs admission."""
+
+    delivery: StoredWebhookDelivery
+    claim_token: str
+    claimed_until: datetime
+
+
+@dataclass(frozen=True)
+class AttemptReservation:
+    """Guarded attempt reservation or closed hard-budget rejection."""
+
+    reserved: bool
+    delivery: StoredWebhookDelivery
+    attempt: WebhookDeliveryAttempt | None
+    bundle: DeliveryBundle | None
+    reason_code: DeliveryReasonCode | None = None
+
+    def __post_init__(self) -> None:
+        if self.reserved != (self.attempt is not None and self.bundle is not None):
+            raise ValueError("attempt reservation shape is invalid")
+        if self.reserved == (self.reason_code is not None):
+            raise ValueError("attempt reservation reason is invalid")
+
+
+@dataclass(frozen=True)
+class AttemptCompletion:
+    """Bounded service-owned outcome used to close one exact attempt."""
+
+    attempt_state: AttemptState
+    delivery_state: DeliveryState
+    disposition: JobsDispositionKind | None
+    status_code: int | None
+    latency_ms: int | None
+    reason_code: DeliveryReasonCode | None
+    requested_retry_delay_seconds: int | None
+    finished_at: datetime
+    completed_after_config_change: bool
+
+    def __post_init__(self) -> None:
+        if self.attempt_state not in AttemptState.terminal_states():
+            raise ValueError("attempt completion state is invalid")
+        if self.delivery_state not in {
+            DeliveryState.RETRY_WAIT,
+            *DeliveryState.terminal_states(),
+        }:
+            raise ValueError("delivery completion state is invalid")
+        if self.status_code is not None and not 100 <= self.status_code <= 599:
+            raise ValueError("attempt status code is invalid")
+        if self.latency_ms is not None and self.latency_ms < 0:
+            raise ValueError("attempt latency is invalid")
+        retry = self.attempt_state is AttemptState.RETRYABLE
+        if retry != (self.requested_retry_delay_seconds is not None):
+            raise ValueError("attempt retry delay is invalid")
+        if self.requested_retry_delay_seconds is not None and not (
+            1 <= self.requested_retry_delay_seconds <= 1_800
+        ):
+            raise ValueError("attempt retry delay is invalid")
+        expected_dispositions = {
+            (AttemptState.SUCCEEDED, DeliveryState.SUCCEEDED): JobsDispositionKind.COMPLETE,
+            (AttemptState.RETRYABLE, DeliveryState.RETRY_WAIT): JobsDispositionKind.RETRY,
+            (AttemptState.FAILED, DeliveryState.DEAD): JobsDispositionKind.FAIL,
+            (AttemptState.CANCELED, DeliveryState.CANCELED): JobsDispositionKind.CANCEL,
+            (AttemptState.SUPERSEDED, DeliveryState.SUPERSEDED): JobsDispositionKind.CANCEL,
+            (
+                AttemptState.OUTCOME_UNKNOWN,
+                DeliveryState.RETRY_WAIT,
+            ): JobsDispositionKind.DEFER,
+        }
+        expected_disposition = expected_dispositions.get(
+            (self.attempt_state, self.delivery_state)
+        )
+        if expected_disposition is None or (
+            self.disposition is not None and self.disposition is not expected_disposition
+        ):
+            raise ValueError("attempt and delivery outcomes are inconsistent")
+        object.__setattr__(
+            self,
+            "finished_at",
+            _utc_datetime(self.finished_at, field="finished_at"),
+        )
+
+
+@dataclass(frozen=True)
+class PendingJobsDisposition:
+    """Exact durable Jobs transition awaiting acknowledgement."""
+
+    delivery_id: str
+    jobs_job_id: str
+    attempt_id: str | None
+    kind: JobsDispositionKind
+    delay_seconds: int | None
+    token: str
+    not_before_at: datetime
+
+    def __post_init__(self) -> None:
+        _bounded_text(self.delivery_id, field="delivery ID", maximum=128)
+        _bounded_text(self.jobs_job_id, field="Jobs job ID", maximum=255)
+        _bounded_text(self.attempt_id, field="attempt ID", maximum=128, optional=True)
+        if _DISPOSITION_TOKEN.fullmatch(self.token) is None:
+            raise ValueError("disposition token is invalid")
+        if self.kind is JobsDispositionKind.RETRY:
+            if self.delay_seconds is None or not 1 <= self.delay_seconds <= 1_800:
+                raise ValueError("retry disposition requires a bounded delay")
+        elif self.delay_seconds is not None:
+            raise ValueError("non-retry disposition cannot carry a delay")
+        object.__setattr__(
+            self,
+            "not_before_at",
+            _utc_datetime(self.not_before_at, field="not_before_at"),
+        )
+
+
+@dataclass(frozen=True)
+class RuntimeHeartbeatWrite:
+    """Bounded runtime heartbeat upsert supplied by one component instance."""
+
+    component: DeliveryRuntimeComponent
+    instance_id: str
+    ready: bool
+    reason_code: DeliveryRuntimeReasonCode | None
+    heartbeat_at: datetime
+    last_success_at: datetime | None
+
+    def __post_init__(self) -> None:
+        _bounded_text(self.instance_id, field="runtime instance ID", maximum=128)
+        if not isinstance(self.component, DeliveryRuntimeComponent):
+            raise ValueError("runtime component is invalid")
+        if not isinstance(self.ready, bool):
+            raise ValueError("runtime readiness is invalid")
+        if self.ready and self.reason_code is not None:
+            raise ValueError("ready heartbeat cannot carry a reason")
+        if not self.ready and not isinstance(
+            self.reason_code, DeliveryRuntimeReasonCode
+        ):
+            raise ValueError("unready heartbeat requires a runtime reason")
+        object.__setattr__(
+            self,
+            "heartbeat_at",
+            _utc_datetime(self.heartbeat_at, field="heartbeat_at"),
+        )
+        if self.last_success_at is not None:
+            object.__setattr__(
+                self,
+                "last_success_at",
+                _utc_datetime(self.last_success_at, field="last_success_at"),
+            )
+
+
+@dataclass(frozen=True)
+class RetentionBatchResult:
+    """Per-table deletion counts from one bounded retention transaction."""
+
+    expired_idempotency: int = 0
+    deliveries: int = 0
+    events: int = 0
+    heartbeats: int = 0
+    registrations: int = 0
+
+
 def _utc_datetime(value: datetime, *, field: str) -> datetime:
     if not isinstance(value, datetime) or value.tzinfo is None:
         raise ValueError(f"{field} must be timezone-aware")
@@ -716,6 +1024,247 @@ def _stored_registration_from_row(
             ciphertext_json=str(row["secret_ciphertext_json"]),
             key_id=str(row["secret_key_id"]),
         ),
+    )
+
+
+_EVENT_COLUMNS = """
+    id, event_type, api_version, source_kind, aggregate_type, aggregate_id,
+    aggregate_version, source_command_id, source_component, source_request_id,
+    body_ciphertext_json, body_key_id, body_size_bytes, created_at
+"""
+_DELIVERY_COLUMNS = """
+    id, event_id, webhook_id, kind, delivery_config_version, secret_version,
+    jobs_job_id, enqueue_claim_token, enqueue_claim_expires_at, state,
+    attempt_count, current_attempt_id, status_code, latency_ms, reason_code,
+    pending_jobs_disposition, pending_jobs_disposition_delay_seconds,
+    pending_jobs_disposition_token, pending_jobs_disposition_not_before_at,
+    jobs_disposition_applied, completed_after_config_change, terminal_at,
+    expires_at, redelivery_of_id, created_at, updated_at
+"""
+_ATTEMPT_COLUMNS = """
+    id, delivery_id, attempt_number, jobs_job_id, jobs_lease_id,
+    test_attempt_token, request_timeout_seconds, started_at, finished_at, state,
+    status_code, latency_ms, reason_code, requested_retry_delay_seconds,
+    jobs_disposition_applied, created_at
+"""
+
+
+def _stored_event_from_row(row: Mapping[str, Any]) -> StoredWebhookEvent:
+    created_at = _parse_datetime(row["created_at"])
+    if created_at is None:
+        raise ValueError("persisted event timestamp is invalid")
+    try:
+        source_kind = EventSourceKind(str(row["source_kind"]))
+    except ValueError as exc:
+        raise ValueError("persisted event source kind is invalid") from exc
+    aggregate_type = str(row["aggregate_type"]) if row["aggregate_type"] is not None else None
+    aggregate_id = str(row["aggregate_id"]) if row["aggregate_id"] is not None else None
+    aggregate_version = (
+        str(row["aggregate_version"]) if row["aggregate_version"] is not None else None
+    )
+    source_command_id = (
+        str(row["source_command_id"]) if row["source_command_id"] is not None else None
+    )
+    if source_kind is EventSourceKind.AGGREGATE:
+        valid_source = (
+            source_command_id is None
+            and aggregate_type is not None
+            and aggregate_id is not None
+            and aggregate_version is not None
+        )
+    else:
+        valid_source = (
+            source_command_id is not None
+            and aggregate_type is None
+            and aggregate_id is None
+            and aggregate_version is None
+        )
+    if not valid_source:
+        raise ValueError("persisted event source identity is invalid")
+    size = int(row["body_size_bytes"])
+    if not 0 <= size <= EVENT_BODY_MAX_BYTES:
+        raise ValueError("persisted event body size is invalid")
+    return StoredWebhookEvent(
+        event=WebhookEvent(
+            id=str(row["id"]),
+            event_type=str(row["event_type"]),
+            api_version=str(row["api_version"]),
+            source_kind=source_kind,
+            created_at=created_at,
+        ),
+        aggregate_type=aggregate_type,
+        aggregate_id=aggregate_id,
+        aggregate_version=aggregate_version,
+        source_command_id=source_command_id,
+        source_component=str(row["source_component"]),
+        source_request_id=(
+            str(row["source_request_id"])
+            if row["source_request_id"] is not None
+            else None
+        ),
+        body=ProtectedValue(
+            ciphertext_json=str(row["body_ciphertext_json"]),
+            key_id=str(row["body_key_id"]),
+        ),
+        body_size_bytes=size,
+    )
+
+
+def _stored_delivery_from_row(row: Mapping[str, Any]) -> StoredWebhookDelivery:
+    required_times = {
+        name: _parse_datetime(row[name])
+        for name in ("expires_at", "created_at", "updated_at")
+    }
+    if any(value is None for value in required_times.values()):
+        raise ValueError("persisted delivery timestamp is invalid")
+    try:
+        kind = DeliveryKind(str(row["kind"]))
+        state = DeliveryState(str(row["state"]))
+        reason = (
+            DeliveryReasonCode(str(row["reason_code"]))
+            if row["reason_code"] is not None
+            else None
+        )
+        disposition = (
+            JobsDispositionKind(str(row["pending_jobs_disposition"]))
+            if row["pending_jobs_disposition"] is not None
+            else None
+        )
+    except ValueError as exc:
+        raise ValueError("persisted delivery enum is invalid") from exc
+    token = (
+        str(row["pending_jobs_disposition_token"])
+        if row["pending_jobs_disposition_token"] is not None
+        else None
+    )
+    not_before = _parse_datetime(row["pending_jobs_disposition_not_before_at"])
+    delay = (
+        int(row["pending_jobs_disposition_delay_seconds"])
+        if row["pending_jobs_disposition_delay_seconds"] is not None
+        else None
+    )
+    if disposition is None:
+        if token is not None or not_before is not None or delay is not None:
+            raise ValueError("persisted pending disposition shape is invalid")
+    else:
+        if token is None or _DISPOSITION_TOKEN.fullmatch(token) is None or not_before is None:
+            raise ValueError("persisted pending disposition shape is invalid")
+        if (disposition is JobsDispositionKind.RETRY) != (delay is not None):
+            raise ValueError("persisted pending disposition delay is invalid")
+    terminal_at = _parse_datetime(row["terminal_at"])
+    if (state in DeliveryState.terminal_states()) != (terminal_at is not None):
+        raise ValueError("persisted delivery terminal state is invalid")
+    delivery = WebhookDelivery(
+        id=str(row["id"]),
+        event_id=str(row["event_id"]),
+        webhook_id=int(row["webhook_id"]),
+        kind=kind,
+        state=state,
+        delivery_config_version=int(row["delivery_config_version"]),
+        secret_version=int(row["secret_version"]),
+        attempt_count=int(row["attempt_count"]),
+        status_code=int(row["status_code"]) if row["status_code"] is not None else None,
+        latency_ms=int(row["latency_ms"]) if row["latency_ms"] is not None else None,
+        reason_code=reason,
+        expires_at=required_times["expires_at"],  # type: ignore[arg-type]
+        created_at=required_times["created_at"],  # type: ignore[arg-type]
+        updated_at=required_times["updated_at"],  # type: ignore[arg-type]
+        terminal_at=terminal_at,
+        redelivery_of_id=(
+            str(row["redelivery_of_id"])
+            if row["redelivery_of_id"] is not None
+            else None
+        ),
+    )
+    return StoredWebhookDelivery(
+        delivery=delivery,
+        jobs_job_id=str(row["jobs_job_id"]) if row["jobs_job_id"] is not None else None,
+        enqueue_claim_token=(
+            str(row["enqueue_claim_token"])
+            if row["enqueue_claim_token"] is not None
+            else None
+        ),
+        enqueue_claim_expires_at=_parse_datetime(row["enqueue_claim_expires_at"]),
+        current_attempt_id=(
+            str(row["current_attempt_id"])
+            if row["current_attempt_id"] is not None
+            else None
+        ),
+        pending_jobs_disposition=disposition,
+        pending_jobs_disposition_delay_seconds=delay,
+        pending_jobs_disposition_token=token,
+        pending_jobs_disposition_not_before_at=not_before,
+        jobs_disposition_applied=bool(row["jobs_disposition_applied"]),
+        completed_after_config_change=bool(row["completed_after_config_change"]),
+    )
+
+
+def _attempt_from_row(row: Mapping[str, Any]) -> WebhookDeliveryAttempt:
+    started_at = _parse_datetime(row["started_at"])
+    finished_at = _parse_datetime(row["finished_at"])
+    if started_at is None:
+        raise ValueError("persisted attempt timestamp is invalid")
+    try:
+        state = AttemptState(str(row["state"]))
+        reason = (
+            DeliveryReasonCode(str(row["reason_code"]))
+            if row["reason_code"] is not None
+            else None
+        )
+    except ValueError as exc:
+        raise ValueError("persisted attempt enum is invalid") from exc
+    if (state is AttemptState.PROCESSING) != (finished_at is None):
+        raise ValueError("persisted attempt terminal state is invalid")
+    return WebhookDeliveryAttempt(
+        id=str(row["id"]),
+        delivery_id=str(row["delivery_id"]),
+        attempt_number=int(row["attempt_number"]),
+        state=state,
+        request_timeout_seconds=(
+            int(row["request_timeout_seconds"])
+            if row["request_timeout_seconds"] is not None
+            else None
+        ),
+        status_code=int(row["status_code"]) if row["status_code"] is not None else None,
+        latency_ms=int(row["latency_ms"]) if row["latency_ms"] is not None else None,
+        reason_code=reason,
+        requested_retry_delay_seconds=(
+            int(row["requested_retry_delay_seconds"])
+            if row["requested_retry_delay_seconds"] is not None
+            else None
+        ),
+        started_at=started_at,
+        finished_at=finished_at,
+    )
+
+
+def _heartbeat_from_row(row: Mapping[str, Any]) -> DeliveryRuntimeHeartbeat:
+    heartbeat_at = _parse_datetime(row["heartbeat_at"])
+    created_at = _parse_datetime(row["created_at"])
+    updated_at = _parse_datetime(row["updated_at"])
+    if heartbeat_at is None or created_at is None or updated_at is None:
+        raise ValueError("persisted runtime heartbeat timestamp is invalid")
+    try:
+        component = DeliveryRuntimeComponent(str(row["component"]))
+        reason = (
+            DeliveryRuntimeReasonCode(str(row["reason_code"]))
+            if row["reason_code"] is not None
+            else None
+        )
+    except ValueError as exc:
+        raise ValueError("persisted runtime heartbeat enum is invalid") from exc
+    ready = bool(row["ready"])
+    if ready == (reason is not None):
+        raise ValueError("persisted runtime heartbeat readiness is invalid")
+    return DeliveryRuntimeHeartbeat(
+        component=component,
+        instance_id=str(row["instance_id"]),
+        ready=ready,
+        reason_code=reason,
+        heartbeat_at=heartbeat_at,
+        last_success_at=_parse_datetime(row["last_success_at"]),
+        created_at=created_at,
+        updated_at=updated_at,
     )
 
 
@@ -939,6 +1488,24 @@ class _ConnectionAdapter:
         )
         return max(int(cursor.rowcount), 0)
 
+    async def _executemany(
+        self,
+        query: str,
+        rows: Sequence[Sequence[object]],
+    ) -> int:
+        normalized_rows = tuple(tuple(row) for row in rows)
+        if not normalized_rows:
+            return 0
+        normalized_query, _ = self._query_and_params(query, normalized_rows[0])
+        converted_rows = tuple(
+            self._query_and_params(query, row)[1] for row in normalized_rows
+        )
+        await self._connection.executemany(  # type: ignore[attr-defined]
+            normalized_query,
+            converted_rows,
+        )
+        return len(converted_rows)
+
 
 class AdminWebhookRepository:
     """Application-scoped repository that owns all canonical webhook SQL."""
@@ -1094,6 +1661,75 @@ class AdminWebhookRepository:
                 connection,
                 is_postgres=self.is_postgres,
             ).get_migration_state(lock=False)
+
+    async def list_delivery_history(
+        self,
+        webhook_id: int,
+        *,
+        limit: int,
+        offset: int = 0,
+    ) -> DeliveryHistoryPage:
+        async with self._read_connection() as connection:
+            return await AdminWebhookUnitOfWork(
+                connection,
+                is_postgres=self.is_postgres,
+            ).list_delivery_history(webhook_id, limit=limit, offset=offset)
+
+    async def get_delivery_for_registration(
+        self,
+        webhook_id: int,
+        delivery_id: str,
+    ) -> WebhookDelivery | None:
+        async with self._read_connection() as connection:
+            return await AdminWebhookUnitOfWork(
+                connection,
+                is_postgres=self.is_postgres,
+            ).get_delivery_for_registration(webhook_id, delivery_id)
+
+    async def get_delivery_bundle(self, delivery_id: str) -> DeliveryBundle | None:
+        async with self._read_connection() as connection:
+            return await AdminWebhookUnitOfWork(
+                connection,
+                is_postgres=self.is_postgres,
+            ).get_delivery_bundle(delivery_id)
+
+    async def list_delivery_attempts(
+        self,
+        webhook_id: int,
+        delivery_id: str,
+    ) -> tuple[WebhookDeliveryAttempt, ...]:
+        async with self._read_connection() as connection:
+            return await AdminWebhookUnitOfWork(
+                connection,
+                is_postgres=self.is_postgres,
+            ).list_delivery_attempts(webhook_id, delivery_id)
+
+    async def list_runtime_heartbeats(self) -> tuple[DeliveryRuntimeHeartbeat, ...]:
+        async with self._read_connection() as connection:
+            return await AdminWebhookUnitOfWork(
+                connection,
+                is_postgres=self.is_postgres,
+            ).list_runtime_heartbeats()
+
+    async def upsert_runtime_heartbeat(
+        self,
+        write: RuntimeHeartbeatWrite,
+    ) -> DeliveryRuntimeHeartbeat:
+        if not isinstance(write, RuntimeHeartbeatWrite):
+            raise TypeError("runtime heartbeat write is invalid")
+        async with self.transaction() as unit:
+            return await unit.upsert_runtime_heartbeat(write)
+
+    async def purge_retained_rows(
+        self,
+        now: datetime,
+        retention_cutoff: datetime,
+        batch_size: int,
+    ) -> RetentionBatchResult:
+        if not 1 <= batch_size <= _MAX_RETENTION_BATCH_SIZE:
+            raise ValueError("batch_size must be between 1 and 200")
+        async with self.transaction() as unit:
+            return await unit.purge_retained_rows(now, retention_cutoff, batch_size)
 
     async def delivery_schema_ready(self) -> bool:
         """Return whether the additive delivery extension is fully present."""
@@ -1362,6 +1998,1146 @@ class AdminWebhookRepository:
 
 class AdminWebhookUnitOfWork(_ConnectionAdapter):
     """Transaction-bound operations shared by both supported database backends."""
+
+    async def _event_by_source(self, event: EventInsert) -> StoredWebhookEvent | None:
+        if event.source_kind is EventSourceKind.AGGREGATE:
+            row = await self._fetchrow(
+                f"""
+                SELECT {_EVENT_COLUMNS}
+                FROM admin_webhook_events
+                WHERE event_type = ?
+                  AND aggregate_type = ?
+                  AND aggregate_id = ?
+                  AND aggregate_version = ?
+                """,
+                (
+                    event.event_type,
+                    event.aggregate_type,
+                    event.aggregate_id,
+                    event.aggregate_version,
+                ),
+            )
+        else:
+            row = await self._fetchrow(
+                f"""
+                SELECT {_EVENT_COLUMNS}
+                FROM admin_webhook_events
+                WHERE event_type = ? AND source_command_id = ?
+                """,
+                (event.event_type, event.source_command_id),
+            )
+        return _stored_event_from_row(row) if row is not None else None
+
+    async def _automatic_deliveries(
+        self,
+        event_id: str,
+    ) -> tuple[StoredWebhookDelivery, ...]:
+        rows = await self._fetch(
+            f"""
+            SELECT {_DELIVERY_COLUMNS}
+            FROM admin_webhook_deliveries
+            WHERE event_id = ? AND kind = 'automatic'
+            ORDER BY webhook_id ASC, id ASC
+            """,
+            (event_id,),
+        )
+        return tuple(_stored_delivery_from_row(row) for row in rows)
+
+    async def capture_event_and_expand(
+        self,
+        event: EventInsert,
+        delivery_id_factory: Callable[[], str],
+        expires_at: datetime,
+    ) -> EventCaptureResult:
+        """Insert one protected event and set-expand its active subscriptions."""
+        if not isinstance(event, EventInsert):
+            raise TypeError("event insert is invalid")
+        if not callable(delivery_id_factory):
+            raise TypeError("delivery ID factory is invalid")
+        expires_at = _utc_datetime(expires_at, field="expires_at")
+        if expires_at != event.created_at + timedelta(hours=72):
+            raise ValueError("automatic delivery expiry must be exactly 72 hours")
+        inserted = await self._fetchrow(
+            """
+            INSERT INTO admin_webhook_events (
+                id, event_type, api_version, source_kind, aggregate_type,
+                aggregate_id, aggregate_version, source_command_id,
+                source_component, source_request_id, body_ciphertext_json,
+                body_key_id, body_size_bytes, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT DO NOTHING
+            RETURNING id
+            """,
+            (
+                event.id,
+                event.event_type,
+                event.api_version,
+                event.source_kind.value,
+                event.aggregate_type,
+                event.aggregate_id,
+                event.aggregate_version,
+                event.source_command_id,
+                event.source_component,
+                event.source_request_id,
+                event.body.ciphertext_json,
+                event.body.key_id,
+                event.body_size_bytes,
+                event.created_at,
+            ),
+        )
+        if inserted is None:
+            existing = await self._event_by_source(event)
+            if existing is None:
+                raise ValueError("event ID conflicts with another source")
+            return EventCaptureResult(
+                event=existing,
+                deliveries=await self._automatic_deliveries(existing.id),
+                inserted=False,
+            )
+
+        if self._is_postgres:
+            registrations = await self._fetch(
+                """
+                SELECT /* admin_webhook_match_subscriptions */
+                    id, delivery_config_version, secret_version
+                FROM admin_webhook_registrations
+                WHERE active = TRUE
+                  AND deleted_at IS NULL
+                  AND secret_rotation_required = FALSE
+                  AND event_types_json::jsonb @> ?::jsonb
+                ORDER BY id ASC
+                """,
+                (_canonical_json([event.event_type]),),
+            )
+        else:
+            registrations = await self._fetch(
+                """
+                SELECT /* admin_webhook_match_subscriptions */
+                    registration.id,
+                    registration.delivery_config_version,
+                    registration.secret_version
+                FROM admin_webhook_registrations AS registration
+                WHERE registration.active = 1
+                  AND registration.deleted_at IS NULL
+                  AND registration.secret_rotation_required = 0
+                  AND EXISTS (
+                      SELECT 1
+                      FROM json_each(registration.event_types_json)
+                      WHERE json_each.value = ?
+                  )
+                ORDER BY registration.id ASC
+                """,
+                (event.event_type,),
+            )
+        delivery_rows: list[tuple[object, ...]] = []
+        for registration in registrations:
+            delivery_id = delivery_id_factory()
+            _bounded_text(delivery_id, field="delivery ID", maximum=128)
+            delivery_rows.append(
+                (
+                    delivery_id,
+                    event.id,
+                    int(registration["id"]),
+                    DeliveryKind.AUTOMATIC.value,
+                    int(registration["delivery_config_version"]),
+                    int(registration["secret_version"]),
+                    DeliveryState.PENDING.value,
+                    expires_at,
+                    event.created_at,
+                    event.created_at,
+                )
+            )
+        await self._executemany(
+            """
+            INSERT /* admin_webhook_delivery_fanout */
+            INTO admin_webhook_deliveries (
+                id, event_id, webhook_id, kind, delivery_config_version,
+                secret_version, state, expires_at, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            delivery_rows,
+        )
+        await self.mark_first_canonical_activity("event_capture", event.created_at)
+        stored_event = StoredWebhookEvent(
+            event=WebhookEvent(
+                id=event.id,
+                event_type=event.event_type,
+                api_version=event.api_version,
+                source_kind=event.source_kind,
+                created_at=event.created_at,
+            ),
+            aggregate_type=event.aggregate_type,
+            aggregate_id=event.aggregate_id,
+            aggregate_version=event.aggregate_version,
+            source_command_id=event.source_command_id,
+            source_component=event.source_component,
+            source_request_id=event.source_request_id,
+            body=event.body,
+            body_size_bytes=event.body_size_bytes,
+        )
+        return EventCaptureResult(
+            event=stored_event,
+            deliveries=await self._automatic_deliveries(event.id),
+            inserted=True,
+        )
+
+    async def insert_delivery(
+        self,
+        delivery_id: str,
+        *,
+        event_id: str,
+        webhook_id: int,
+        kind: DeliveryKind,
+        expires_at: datetime,
+        now: datetime,
+        redelivery_of_id: str | None = None,
+    ) -> StoredWebhookDelivery:
+        _bounded_text(delivery_id, field="delivery ID", maximum=128)
+        _bounded_text(event_id, field="event ID", maximum=128)
+        if kind not in {DeliveryKind.MANUAL, DeliveryKind.TEST}:
+            raise ValueError("explicit delivery kind is invalid")
+        expires_at = _utc_datetime(expires_at, field="expires_at")
+        now = _utc_datetime(now, field="now")
+        registration = await self._fetchrow(
+            """
+            SELECT delivery_config_version, secret_version
+            FROM admin_webhook_registrations
+            WHERE id = ? AND deleted_at IS NULL
+            """,
+            (webhook_id,),
+        )
+        if registration is None:
+            raise WebhookRepositoryError(WebhookRepositoryErrorCode.NOT_FOUND)
+        row = await self._fetchrow(
+            f"""
+            INSERT INTO admin_webhook_deliveries (
+                id, event_id, webhook_id, kind, delivery_config_version,
+                secret_version, state, expires_at, redelivery_of_id,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
+            RETURNING {_DELIVERY_COLUMNS}
+            """,
+            (
+                delivery_id,
+                event_id,
+                webhook_id,
+                kind.value,
+                int(registration["delivery_config_version"]),
+                int(registration["secret_version"]),
+                expires_at,
+                redelivery_of_id,
+                now,
+                now,
+            ),
+        )
+        if row is None:
+            raise RuntimeError("delivery insert returned no row")
+        return _stored_delivery_from_row(row)
+
+    async def list_delivery_history(
+        self,
+        webhook_id: int,
+        *,
+        limit: int,
+        offset: int = 0,
+    ) -> DeliveryHistoryPage:
+        if not 1 <= limit <= _MAX_PAGE_SIZE:
+            raise ValueError(f"limit must be between 1 and {_MAX_PAGE_SIZE}")
+        if not 0 <= offset <= 10_000:
+            raise ValueError("offset must be between 0 and 10000")
+        count = await self._fetchrow(
+            "SELECT COUNT(*) AS count FROM admin_webhook_deliveries WHERE webhook_id = ?",
+            (webhook_id,),
+        )
+        rows = await self._fetch(
+            f"""
+            SELECT {_DELIVERY_COLUMNS}
+            FROM admin_webhook_deliveries
+            WHERE webhook_id = ?
+            ORDER BY created_at DESC, id DESC
+            LIMIT ? OFFSET ?
+            """,
+            (webhook_id, limit, offset),
+        )
+        return DeliveryHistoryPage(
+            items=tuple(_stored_delivery_from_row(row).delivery for row in rows),
+            total=int(count["count"]) if count is not None else 0,
+            limit=limit,
+            offset=offset,
+        )
+
+    async def get_delivery_for_registration(
+        self,
+        webhook_id: int,
+        delivery_id: str,
+    ) -> WebhookDelivery | None:
+        row = await self._fetchrow(
+            f"""
+            SELECT {_DELIVERY_COLUMNS}
+            FROM admin_webhook_deliveries
+            WHERE webhook_id = ? AND id = ?
+            """,
+            (webhook_id, delivery_id),
+        )
+        return _stored_delivery_from_row(row).delivery if row is not None else None
+
+    async def get_delivery_bundle(self, delivery_id: str) -> DeliveryBundle | None:
+        delivery_row = await self._fetchrow(
+            f"SELECT {_DELIVERY_COLUMNS} FROM admin_webhook_deliveries WHERE id = ?",
+            (delivery_id,),
+        )
+        if delivery_row is None:
+            return None
+        delivery = _stored_delivery_from_row(delivery_row)
+        event_row = await self._fetchrow(
+            f"SELECT {_EVENT_COLUMNS} FROM admin_webhook_events WHERE id = ?",
+            (delivery.delivery.event_id,),
+        )
+        registration = await self.get_protected_registration(
+            delivery.delivery.webhook_id,
+            include_deleted=True,
+        )
+        if event_row is None or registration is None:
+            raise ValueError("delivery bundle references are invalid")
+        return DeliveryBundle(
+            event=_stored_event_from_row(event_row),
+            delivery=delivery,
+            registration=registration,
+        )
+
+    async def list_delivery_attempts(
+        self,
+        webhook_id: int,
+        delivery_id: str,
+    ) -> tuple[WebhookDeliveryAttempt, ...]:
+        rows = await self._fetch(
+            f"""
+            SELECT {_ATTEMPT_COLUMNS}
+            FROM admin_webhook_delivery_attempts AS attempt
+            WHERE EXISTS (
+                SELECT 1 FROM admin_webhook_deliveries AS delivery
+                WHERE delivery.id = attempt.delivery_id
+                  AND delivery.webhook_id = ?
+            )
+              AND attempt.delivery_id = ?
+            ORDER BY attempt.attempt_number ASC, attempt.id ASC
+            """,
+            (webhook_id, delivery_id),
+        )
+        return tuple(_attempt_from_row(row) for row in rows)
+
+    async def claim_pending_delivery(
+        self,
+        claim_token: str,
+        claimed_until: datetime,
+        now: datetime,
+    ) -> EnqueueClaim | None:
+        _bounded_text(claim_token, field="enqueue claim token", maximum=255)
+        claimed_until = _utc_datetime(claimed_until, field="claimed_until")
+        now = _utc_datetime(now, field="now")
+        if claimed_until <= now:
+            raise ValueError("enqueue claim expiry must follow claim time")
+        row = await self._fetchrow(
+            f"""
+            UPDATE admin_webhook_deliveries
+            SET state = 'enqueue_claimed',
+                enqueue_claim_token = ?,
+                enqueue_claim_expires_at = ?,
+                updated_at = ?
+            WHERE id = (
+                SELECT id
+                FROM admin_webhook_deliveries
+                WHERE state = 'pending' AND expires_at > ?
+                ORDER BY created_at ASC, id ASC
+                LIMIT 1
+            )
+              AND state = 'pending'
+            RETURNING {_DELIVERY_COLUMNS}
+            """,
+            (claim_token, claimed_until, now, now),
+        )
+        if row is None:
+            return None
+        return EnqueueClaim(
+            delivery=_stored_delivery_from_row(row),
+            claim_token=claim_token,
+            claimed_until=claimed_until,
+        )
+
+    async def attach_jobs_job(
+        self,
+        delivery_id: str,
+        claim_token: str,
+        jobs_job_id: str,
+        now: datetime,
+    ) -> StoredWebhookDelivery | None:
+        _bounded_text(delivery_id, field="delivery ID", maximum=128)
+        _bounded_text(claim_token, field="enqueue claim token", maximum=255)
+        _bounded_text(jobs_job_id, field="Jobs job ID", maximum=255)
+        now = _utc_datetime(now, field="now")
+        row = await self._fetchrow(
+            f"""
+            UPDATE admin_webhook_deliveries
+            SET jobs_job_id = ?, state = 'queued',
+                enqueue_claim_token = NULL,
+                enqueue_claim_expires_at = NULL,
+                updated_at = ?
+            WHERE id = ?
+              AND state = 'enqueue_claimed'
+              AND enqueue_claim_token = ?
+              AND enqueue_claim_expires_at >= ?
+              AND jobs_job_id IS NULL
+            RETURNING {_DELIVERY_COLUMNS}
+            """,
+            (jobs_job_id, now, delivery_id, claim_token, now),
+        )
+        return _stored_delivery_from_row(row) if row is not None else None
+
+    async def release_expired_enqueue_claim(
+        self,
+        delivery_id: str,
+        expected_token: str,
+        now: datetime,
+    ) -> bool:
+        now = _utc_datetime(now, field="now")
+        row = await self._fetchrow(
+            """
+            UPDATE admin_webhook_deliveries
+            SET state = 'pending', enqueue_claim_token = NULL,
+                enqueue_claim_expires_at = NULL, updated_at = ?
+            WHERE id = ?
+              AND state = 'enqueue_claimed'
+              AND enqueue_claim_token = ?
+              AND enqueue_claim_expires_at <= ?
+            RETURNING id
+            """,
+            (now, delivery_id, expected_token, now),
+        )
+        return row is not None
+
+    async def reserve_jobs_attempt(
+        self,
+        delivery_id: str,
+        jobs_job_id: str,
+        lease_id: str,
+        attempt_id: str,
+        request_timeout_seconds: int,
+        now: datetime,
+        required_horizon: datetime,
+    ) -> AttemptReservation | None:
+        for value, field, maximum in (
+            (delivery_id, "delivery ID", 128),
+            (jobs_job_id, "Jobs job ID", 255),
+            (lease_id, "Jobs lease ID", 255),
+            (attempt_id, "attempt ID", 128),
+        ):
+            _bounded_text(value, field=field, maximum=maximum)
+        if not 1 <= request_timeout_seconds <= 30:
+            raise ValueError("request timeout must be between 1 and 30")
+        now = _utc_datetime(now, field="now")
+        required_horizon = _utc_datetime(required_horizon, field="required_horizon")
+        if required_horizon < now + timedelta(seconds=request_timeout_seconds):
+            raise ValueError("required horizon is shorter than request timeout")
+        delivery_row = await self._fetchrow(
+            f"""
+            SELECT {_DELIVERY_COLUMNS}
+            FROM admin_webhook_deliveries
+            WHERE id = ? AND jobs_job_id = ?
+            """,
+            (delivery_id, jobs_job_id),
+        )
+        if delivery_row is None:
+            return None
+        delivery = _stored_delivery_from_row(delivery_row)
+        if delivery.delivery.attempt_count >= 4:
+            return AttemptReservation(
+                reserved=False,
+                delivery=delivery,
+                attempt=None,
+                bundle=None,
+                reason_code=DeliveryReasonCode.ATTEMPT_BUDGET_EXHAUSTED,
+            )
+        if delivery.delivery.expires_at <= now:
+            return None
+        if (
+            delivery.pending_jobs_disposition is not None
+            and not delivery.jobs_disposition_applied
+        ):
+            return None
+        if delivery.delivery.state not in {
+            DeliveryState.QUEUED,
+            DeliveryState.RETRY_WAIT,
+        }:
+            return None
+        attempt_number = delivery.delivery.attempt_count + 1
+        inserted = await self._fetchrow(
+            f"""
+            INSERT INTO admin_webhook_delivery_attempts (
+                id, delivery_id, attempt_number, jobs_job_id, jobs_lease_id,
+                request_timeout_seconds, started_at, state, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'processing', ?)
+            RETURNING {_ATTEMPT_COLUMNS}
+            """,
+            (
+                attempt_id,
+                delivery_id,
+                attempt_number,
+                jobs_job_id,
+                lease_id,
+                request_timeout_seconds,
+                now,
+                now,
+            ),
+        )
+        updated = await self._fetchrow(
+            f"""
+            UPDATE admin_webhook_deliveries
+            SET state = 'processing', attempt_count = ?, current_attempt_id = ?,
+                pending_jobs_disposition = NULL,
+                pending_jobs_disposition_delay_seconds = NULL,
+                pending_jobs_disposition_token = NULL,
+                pending_jobs_disposition_not_before_at = NULL,
+                jobs_disposition_applied = FALSE,
+                updated_at = ?
+            WHERE id = ? AND jobs_job_id = ?
+              AND state IN ('queued', 'retry_wait')
+              AND attempt_count = ?
+            RETURNING {_DELIVERY_COLUMNS}
+            """,
+            (
+                attempt_number,
+                attempt_id,
+                now,
+                delivery_id,
+                jobs_job_id,
+                attempt_number - 1,
+            ),
+        )
+        if inserted is None or updated is None:
+            raise ValueError("attempt reservation compare-and-set failed")
+        await self.mark_first_canonical_activity("delivery_attempt", now)
+        bundle = await self.get_delivery_bundle(delivery_id)
+        if bundle is None:
+            raise ValueError("reserved delivery bundle is unavailable")
+        return AttemptReservation(
+            reserved=True,
+            delivery=_stored_delivery_from_row(updated),
+            attempt=_attempt_from_row(inserted),
+            bundle=bundle,
+        )
+
+    async def reserve_test_attempt(
+        self,
+        test_attempt_token: str,
+        delivery_id: str,
+        attempt_id: str,
+        request_timeout_seconds: int,
+        started_at: datetime,
+    ) -> AttemptReservation | None:
+        _bounded_text(test_attempt_token, field="test attempt token", maximum=255)
+        _bounded_text(delivery_id, field="delivery ID", maximum=128)
+        _bounded_text(attempt_id, field="attempt ID", maximum=128)
+        if not 1 <= request_timeout_seconds <= 30:
+            raise ValueError("request timeout must be between 1 and 30")
+        started_at = _utc_datetime(started_at, field="started_at")
+        delivery_row = await self._fetchrow(
+            f"""
+            SELECT {_DELIVERY_COLUMNS}
+            FROM admin_webhook_deliveries
+            WHERE id = ? AND kind = 'test' AND jobs_job_id IS NULL
+            """,
+            (delivery_id,),
+        )
+        if delivery_row is None:
+            return None
+        delivery = _stored_delivery_from_row(delivery_row)
+        if delivery.delivery.attempt_count >= 4:
+            return AttemptReservation(
+                reserved=False,
+                delivery=delivery,
+                attempt=None,
+                bundle=None,
+                reason_code=DeliveryReasonCode.ATTEMPT_BUDGET_EXHAUSTED,
+            )
+        if delivery.delivery.state is not DeliveryState.PENDING:
+            return None
+        inserted = await self._fetchrow(
+            f"""
+            INSERT INTO admin_webhook_delivery_attempts (
+                id, delivery_id, attempt_number, test_attempt_token,
+                request_timeout_seconds, started_at, state, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, 'processing', ?)
+            RETURNING {_ATTEMPT_COLUMNS}
+            """,
+            (
+                attempt_id,
+                delivery_id,
+                delivery.delivery.attempt_count + 1,
+                test_attempt_token,
+                request_timeout_seconds,
+                started_at,
+                started_at,
+            ),
+        )
+        updated = await self._fetchrow(
+            f"""
+            UPDATE admin_webhook_deliveries
+            SET state = 'processing', attempt_count = attempt_count + 1,
+                current_attempt_id = ?, updated_at = ?
+            WHERE id = ? AND kind = 'test' AND state = 'pending'
+              AND attempt_count = ?
+            RETURNING {_DELIVERY_COLUMNS}
+            """,
+            (attempt_id, started_at, delivery_id, delivery.delivery.attempt_count),
+        )
+        if inserted is None or updated is None:
+            raise ValueError("test attempt reservation compare-and-set failed")
+        await self.mark_first_canonical_activity("delivery_attempt", started_at)
+        bundle = await self.get_delivery_bundle(delivery_id)
+        if bundle is None:
+            raise ValueError("reserved test delivery bundle is unavailable")
+        return AttemptReservation(
+            reserved=True,
+            delivery=_stored_delivery_from_row(updated),
+            attempt=_attempt_from_row(inserted),
+            bundle=bundle,
+        )
+
+    async def finish_attempt_and_prepare_disposition(
+        self,
+        attempt_token: str,
+        outcome: AttemptCompletion,
+        disposition_token: str | None,
+        not_before_at: datetime | None,
+    ) -> PendingJobsDisposition | None:
+        _bounded_text(attempt_token, field="attempt token", maximum=255)
+        if not isinstance(outcome, AttemptCompletion):
+            raise TypeError("attempt outcome is invalid")
+        attempt_rows = await self._fetch(
+            f"""
+            SELECT {_ATTEMPT_COLUMNS}
+            FROM admin_webhook_delivery_attempts
+            WHERE state = 'processing'
+              AND (jobs_lease_id = ? OR test_attempt_token = ?)
+            ORDER BY id ASC
+            LIMIT 2
+            """,
+            (attempt_token, attempt_token),
+        )
+        if len(attempt_rows) != 1:
+            return None
+        attempt_row = attempt_rows[0]
+        delivery_row = await self._fetchrow(
+            f"""
+            SELECT {_DELIVERY_COLUMNS}
+            FROM admin_webhook_deliveries
+            WHERE id = ? AND state = 'processing' AND current_attempt_id = ?
+            """,
+            (attempt_row["delivery_id"], attempt_row["id"]),
+        )
+        if delivery_row is None:
+            return None
+        delivery = _stored_delivery_from_row(delivery_row)
+        pending: PendingJobsDisposition | None = None
+        if delivery.jobs_job_id is None:
+            if outcome.disposition is not None or disposition_token is not None or not_before_at is not None:
+                raise ValueError("test attempt cannot prepare a Jobs disposition")
+        else:
+            if outcome.disposition is None or disposition_token is None or not_before_at is None:
+                raise ValueError("Jobs attempt disposition coordinates are required")
+            pending = PendingJobsDisposition(
+                delivery_id=delivery.delivery.id,
+                jobs_job_id=delivery.jobs_job_id,
+                attempt_id=str(attempt_row["id"]),
+                kind=outcome.disposition,
+                delay_seconds=outcome.requested_retry_delay_seconds,
+                token=disposition_token,
+                not_before_at=not_before_at,
+            )
+        attempt_updated = await self._fetchrow(
+            """
+            UPDATE admin_webhook_delivery_attempts
+            SET state = ?, status_code = ?, latency_ms = ?, reason_code = ?,
+                requested_retry_delay_seconds = ?, finished_at = ?
+            WHERE id = ? AND state = 'processing'
+              AND (jobs_lease_id = ? OR test_attempt_token = ?)
+            RETURNING id
+            """,
+            (
+                outcome.attempt_state.value,
+                outcome.status_code,
+                outcome.latency_ms,
+                outcome.reason_code.value if outcome.reason_code is not None else None,
+                outcome.requested_retry_delay_seconds,
+                outcome.finished_at,
+                attempt_row["id"],
+                attempt_token,
+                attempt_token,
+            ),
+        )
+        terminal_at = (
+            outcome.finished_at
+            if outcome.delivery_state in DeliveryState.terminal_states()
+            else None
+        )
+        delivery_updated = await self._fetchrow(
+            """
+            UPDATE admin_webhook_deliveries
+            SET state = ?, status_code = ?, latency_ms = ?, reason_code = ?,
+                pending_jobs_disposition = ?,
+                pending_jobs_disposition_delay_seconds = ?,
+                pending_jobs_disposition_token = ?,
+                pending_jobs_disposition_not_before_at = ?,
+                jobs_disposition_applied = FALSE,
+                completed_after_config_change = ?, terminal_at = ?,
+                updated_at = ?
+            WHERE id = ? AND state = 'processing' AND current_attempt_id = ?
+            RETURNING id
+            """,
+            (
+                outcome.delivery_state.value,
+                outcome.status_code,
+                outcome.latency_ms,
+                outcome.reason_code.value if outcome.reason_code is not None else None,
+                pending.kind.value if pending is not None else None,
+                pending.delay_seconds if pending is not None else None,
+                pending.token if pending is not None else None,
+                pending.not_before_at if pending is not None else None,
+                outcome.completed_after_config_change,
+                terminal_at,
+                outcome.finished_at,
+                delivery.delivery.id,
+                attempt_row["id"],
+            ),
+        )
+        if attempt_updated is None or delivery_updated is None:
+            raise ValueError("attempt completion compare-and-set failed")
+        return pending
+
+    async def acknowledge_jobs_disposition(
+        self,
+        delivery_id: str,
+        disposition_token: str,
+        jobs_state: str,
+    ) -> bool:
+        if _DISPOSITION_TOKEN.fullmatch(disposition_token) is None:
+            return False
+        expected_states = {
+            JobsDispositionKind.COMPLETE: "completed",
+            JobsDispositionKind.RETRY: "queued",
+            JobsDispositionKind.FAIL: "failed",
+            JobsDispositionKind.CANCEL: "cancelled",
+            JobsDispositionKind.DEFER: "queued",
+        }
+        row = await self._fetchrow(
+            """
+            SELECT current_attempt_id, pending_jobs_disposition
+            FROM admin_webhook_deliveries
+            WHERE id = ? AND pending_jobs_disposition_token = ?
+              AND pending_jobs_disposition IS NOT NULL
+              AND jobs_disposition_applied = FALSE
+            """,
+            (delivery_id, disposition_token),
+        )
+        if row is None:
+            return False
+        try:
+            disposition = JobsDispositionKind(str(row["pending_jobs_disposition"]))
+        except ValueError:
+            return False
+        if expected_states[disposition] != jobs_state:
+            return False
+        updated = await self._fetchrow(
+            """
+            UPDATE admin_webhook_deliveries
+            SET jobs_disposition_applied = TRUE
+            WHERE id = ? AND pending_jobs_disposition_token = ?
+              AND jobs_disposition_applied = FALSE
+            RETURNING current_attempt_id
+            """,
+            (delivery_id, disposition_token),
+        )
+        if updated is None:
+            return False
+        attempt_id = updated["current_attempt_id"]
+        if attempt_id is not None:
+            await self._execute(
+                """
+                UPDATE admin_webhook_delivery_attempts
+                SET jobs_disposition_applied = TRUE
+                WHERE id = ? AND delivery_id = ? AND state != 'processing'
+                """,
+                (attempt_id, delivery_id),
+            )
+        return True
+
+    async def close_stale_attempt_as_unknown(
+        self,
+        delivery_id: str,
+        attempt_id: str,
+        stale_before: datetime,
+    ) -> bool:
+        stale_before = _utc_datetime(stale_before, field="stale_before")
+        row = await self._fetchrow(
+            f"""
+            SELECT {_ATTEMPT_COLUMNS}
+            FROM admin_webhook_delivery_attempts AS attempt
+            WHERE attempt.id = ? AND attempt.delivery_id = ?
+              AND attempt.state = 'processing'
+              AND EXISTS (
+                  SELECT 1 FROM admin_webhook_deliveries AS delivery
+                  WHERE delivery.id = attempt.delivery_id
+                    AND delivery.state = 'processing'
+                    AND delivery.current_attempt_id = attempt.id
+              )
+            """,
+            (attempt_id, delivery_id),
+        )
+        if row is None:
+            return False
+        started_at = _parse_datetime(row["started_at"])
+        if started_at is None:
+            raise ValueError("persisted attempt timestamp is invalid")
+        timeout = (
+            int(row["request_timeout_seconds"])
+            if row["request_timeout_seconds"] is not None
+            else 30
+        )
+        if started_at + timedelta(seconds=timeout) > stale_before:
+            return False
+        attempt_updated = await self._fetchrow(
+            """
+            UPDATE admin_webhook_delivery_attempts
+            SET state = 'outcome_unknown', finished_at = ?,
+                reason_code = 'outcome_unknown'
+            WHERE id = ? AND delivery_id = ? AND state = 'processing'
+            RETURNING id
+            """,
+            (stale_before, attempt_id, delivery_id),
+        )
+        delivery_updated = await self._fetchrow(
+            """
+            UPDATE admin_webhook_deliveries
+            SET state = 'retry_wait', reason_code = 'outcome_unknown',
+                updated_at = ?
+            WHERE id = ? AND state = 'processing' AND current_attempt_id = ?
+            RETURNING id
+            """,
+            (stale_before, delivery_id, attempt_id),
+        )
+        if attempt_updated is None or delivery_updated is None:
+            raise ValueError("stale attempt compare-and-set failed")
+        return True
+
+    async def cancel_registration_work(
+        self,
+        webhook_id: int,
+        cutoff_versions: tuple[int, int],
+        reason: DeliveryReasonCode,
+        disposition_token_factory: Callable[[], str],
+        now: datetime,
+    ) -> tuple[PendingJobsDisposition, ...]:
+        if (
+            not isinstance(cutoff_versions, tuple)
+            or len(cutoff_versions) != 2
+            or any(isinstance(value, bool) or value < 1 for value in cutoff_versions)
+        ):
+            raise ValueError("delivery cutoff versions are invalid")
+        if reason not in {
+            DeliveryReasonCode.CANCELED_DELETED,
+            DeliveryReasonCode.CANCELED_DISABLED,
+            DeliveryReasonCode.CANCELED_SECRET_ROTATION,
+            DeliveryReasonCode.SUPERSEDED_CONFIG,
+        }:
+            raise ValueError("delivery cancellation reason is invalid")
+        if not callable(disposition_token_factory):
+            raise TypeError("disposition token factory is invalid")
+        now = _utc_datetime(now, field="now")
+        rows = await self._fetch(
+            f"""
+            SELECT {_DELIVERY_COLUMNS}
+            FROM admin_webhook_deliveries
+            WHERE webhook_id = ?
+              AND state NOT IN ('succeeded', 'dead', 'canceled', 'superseded')
+              AND (
+                  delivery_config_version < ? OR secret_version < ?
+              )
+            ORDER BY created_at ASC, id ASC
+            """,
+            (webhook_id, cutoff_versions[0], cutoff_versions[1]),
+        )
+        pending: list[PendingJobsDisposition] = []
+        target_state = (
+            DeliveryState.SUPERSEDED
+            if reason is DeliveryReasonCode.SUPERSEDED_CONFIG
+            else DeliveryState.CANCELED
+        )
+        for raw in rows:
+            delivery = _stored_delivery_from_row(raw)
+            disposition: PendingJobsDisposition | None = None
+            disposition_attempt_id = (
+                delivery.current_attempt_id
+                if delivery.delivery.state is DeliveryState.PROCESSING
+                else None
+            )
+            if delivery.jobs_job_id is not None:
+                disposition = PendingJobsDisposition(
+                    delivery_id=delivery.delivery.id,
+                    jobs_job_id=delivery.jobs_job_id,
+                    attempt_id=disposition_attempt_id,
+                    kind=JobsDispositionKind.CANCEL,
+                    delay_seconds=None,
+                    token=disposition_token_factory(),
+                    not_before_at=now,
+                )
+                pending.append(disposition)
+            if delivery.current_attempt_id is not None:
+                await self._execute(
+                    """
+                    UPDATE admin_webhook_delivery_attempts
+                    SET state = ?, reason_code = ?, finished_at = ?
+                    WHERE id = ? AND delivery_id = ? AND state = 'processing'
+                    """,
+                    (
+                        AttemptState.SUPERSEDED.value
+                        if target_state is DeliveryState.SUPERSEDED
+                        else AttemptState.CANCELED.value,
+                        reason.value,
+                        now,
+                        delivery.current_attempt_id,
+                        delivery.delivery.id,
+                    ),
+                )
+            updated = await self._execute(
+                """
+                UPDATE admin_webhook_deliveries
+                SET state = ?, reason_code = ?, terminal_at = ?,
+                    current_attempt_id = ?,
+                    pending_jobs_disposition = ?,
+                    pending_jobs_disposition_delay_seconds = NULL,
+                    pending_jobs_disposition_token = ?,
+                    pending_jobs_disposition_not_before_at = ?,
+                    jobs_disposition_applied = FALSE, updated_at = ?
+                WHERE id = ?
+                  AND state NOT IN ('succeeded', 'dead', 'canceled', 'superseded')
+                  AND delivery_config_version = ? AND secret_version = ?
+                """,
+                (
+                    target_state.value,
+                    reason.value,
+                    now,
+                    disposition_attempt_id,
+                    disposition.kind.value if disposition is not None else None,
+                    disposition.token if disposition is not None else None,
+                    disposition.not_before_at if disposition is not None else None,
+                    now,
+                    delivery.delivery.id,
+                    delivery.delivery.delivery_config_version,
+                    delivery.delivery.secret_version,
+                ),
+            )
+            if updated != 1:
+                raise ValueError("delivery cancellation compare-and-set failed")
+        return tuple(pending)
+
+    async def expire_delivery(
+        self,
+        delivery_id: str,
+        expected_state: DeliveryState,
+        now: datetime,
+    ) -> bool:
+        if expected_state in DeliveryState.terminal_states():
+            return False
+        now = _utc_datetime(now, field="now")
+        row = await self._fetchrow(
+            """
+            UPDATE admin_webhook_deliveries
+            SET state = 'dead', reason_code = 'delivery_expired',
+                terminal_at = ?, updated_at = ?
+            WHERE id = ? AND state = ? AND expires_at <= ?
+            RETURNING id
+            """,
+            (now, now, delivery_id, expected_state.value, now),
+        )
+        return row is not None
+
+    async def upsert_runtime_heartbeat(
+        self,
+        write: RuntimeHeartbeatWrite,
+    ) -> DeliveryRuntimeHeartbeat:
+        if not isinstance(write, RuntimeHeartbeatWrite):
+            raise TypeError("runtime heartbeat write is invalid")
+        row = await self._fetchrow(
+            """
+            INSERT INTO admin_webhook_runtime_heartbeats (
+                component, instance_id, ready, reason_code, heartbeat_at,
+                last_success_at, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(component, instance_id) DO UPDATE SET
+                ready = excluded.ready,
+                reason_code = excluded.reason_code,
+                heartbeat_at = excluded.heartbeat_at,
+                last_success_at = excluded.last_success_at,
+                updated_at = excluded.updated_at
+            RETURNING component, instance_id, ready, reason_code, heartbeat_at,
+                      last_success_at, created_at, updated_at
+            """,
+            (
+                write.component.value,
+                write.instance_id,
+                write.ready,
+                write.reason_code.value if write.reason_code is not None else None,
+                write.heartbeat_at,
+                write.last_success_at,
+                write.heartbeat_at,
+                write.heartbeat_at,
+            ),
+        )
+        if row is None:
+            raise RuntimeError("runtime heartbeat upsert returned no row")
+        return _heartbeat_from_row(row)
+
+    async def list_runtime_heartbeats(
+        self,
+    ) -> tuple[DeliveryRuntimeHeartbeat, ...]:
+        rows = await self._fetch(
+            """
+            SELECT component, instance_id, ready, reason_code, heartbeat_at,
+                   last_success_at, created_at, updated_at
+            FROM admin_webhook_runtime_heartbeats
+            ORDER BY component ASC, instance_id ASC
+            """
+        )
+        return tuple(_heartbeat_from_row(row) for row in rows)
+
+    async def _delete_by_ids(
+        self,
+        table: str,
+        ids: Sequence[object],
+    ) -> int:
+        allowed = {
+            "admin_webhook_idempotency",
+            "admin_webhook_deliveries",
+            "admin_webhook_events",
+            "admin_webhook_runtime_heartbeats",
+            "admin_webhook_registrations",
+        }
+        if table not in allowed or not ids:
+            return 0
+        placeholders = ", ".join("?" for _ in ids)
+        return await self._execute(
+            f"DELETE FROM {table} WHERE id IN ({placeholders})",  # noqa: S608
+            tuple(ids),
+        )
+
+    async def purge_retained_rows(
+        self,
+        now: datetime,
+        retention_cutoff: datetime,
+        batch_size: int,
+    ) -> RetentionBatchResult:
+        now = _utc_datetime(now, field="now")
+        retention_cutoff = _utc_datetime(retention_cutoff, field="retention_cutoff")
+        if not 1 <= batch_size <= _MAX_RETENTION_BATCH_SIZE:
+            raise ValueError("batch_size must be between 1 and 200")
+        retention_cutoff = min(
+            retention_cutoff,
+            now - timedelta(days=_MIN_TOMBSTONE_RETENTION_DAYS),
+        )
+        remaining = batch_size
+
+        idempotency_rows = await self._fetch(
+            """
+            SELECT id FROM admin_webhook_idempotency
+            WHERE expires_at <= ?
+            ORDER BY expires_at ASC, id ASC LIMIT ?
+            """,
+            (now, remaining),
+        )
+        expired_idempotency = await self._delete_by_ids(
+            "admin_webhook_idempotency",
+            [row["id"] for row in idempotency_rows],
+        )
+        remaining -= expired_idempotency
+
+        delivery_rows = await self._fetch(
+            """
+            SELECT delivery.id
+            FROM admin_webhook_deliveries AS delivery
+            WHERE delivery.state IN ('succeeded', 'dead', 'canceled', 'superseded')
+              AND delivery.terminal_at <= ?
+              AND NOT EXISTS (
+                  SELECT 1 FROM admin_webhook_deliveries AS redelivery
+                  WHERE redelivery.redelivery_of_id = delivery.id
+              )
+            ORDER BY delivery.terminal_at ASC, delivery.id ASC
+            LIMIT ?
+            """,
+            (retention_cutoff, remaining),
+        ) if remaining else []
+        deliveries = await self._delete_by_ids(
+            "admin_webhook_deliveries",
+            [row["id"] for row in delivery_rows],
+        )
+        remaining -= deliveries
+
+        event_rows = await self._fetch(
+            """
+            SELECT event.id
+            FROM admin_webhook_events AS event
+            WHERE event.created_at <= ?
+              AND NOT EXISTS (
+                  SELECT 1 FROM admin_webhook_deliveries AS delivery
+                  WHERE delivery.event_id = event.id
+              )
+            ORDER BY event.created_at ASC, event.id ASC
+            LIMIT ?
+            """,
+            (retention_cutoff, remaining),
+        ) if remaining else []
+        events = await self._delete_by_ids(
+            "admin_webhook_events",
+            [row["id"] for row in event_rows],
+        )
+        remaining -= events
+
+        heartbeat_rows = await self._fetch(
+            """
+            SELECT component, instance_id
+            FROM admin_webhook_runtime_heartbeats
+            WHERE heartbeat_at <= ?
+            ORDER BY heartbeat_at ASC, component ASC, instance_id ASC
+            LIMIT ?
+            """,
+            (retention_cutoff, remaining),
+        ) if remaining else []
+        heartbeats = 0
+        for row in heartbeat_rows:
+            heartbeats += await self._execute(
+                """
+                DELETE FROM admin_webhook_runtime_heartbeats
+                WHERE component = ? AND instance_id = ? AND heartbeat_at <= ?
+                """,
+                (row["component"], row["instance_id"], retention_cutoff),
+            )
+        remaining -= heartbeats
+
+        registration_ids = (
+            await self.find_purge_eligible_registration_ids(now=now, limit=remaining)
+            if remaining
+            else []
+        )
+        registrations = await self._delete_by_ids(
+            "admin_webhook_registrations",
+            registration_ids,
+        )
+        return RetentionBatchResult(
+            expired_idempotency=expired_idempotency,
+            deliveries=deliveries,
+            events=events,
+            heartbeats=heartbeats,
+            registrations=registrations,
+        )
 
     async def allocate_registration_id(self) -> int:
         row = await self._fetchrow(

@@ -1,0 +1,75 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+
+import pytest
+import pytest_asyncio
+
+from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
+from tldw_Server_API.app.core.AuthNZ.settings import Settings
+from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
+    AdminWebhookRepository,
+)
+from tldw_Server_API.tests.Admin_Webhooks.test_event_expansion import (
+    exercise_capture_and_history,
+    exercise_delivery_state_machine,
+    exercise_recovery_runtime_and_retention,
+    exercise_stale_recovery_and_cancellation,
+)
+
+
+@dataclass
+class SQLiteDeliveryRepositoryFixture:
+    repository: AdminWebhookRepository
+    pool: DatabasePool
+
+    async def execute(self, query: str, *params: object) -> None:
+        await self.pool.execute(query, *params)
+
+    async def fetchval(self, query: str, *params: object) -> object:
+        return await self.pool.fetchval(query, *params)
+
+
+@pytest_asyncio.fixture
+async def delivery_repo(tmp_path: Path) -> SQLiteDeliveryRepositoryFixture:
+    pool = DatabasePool(
+        Settings(
+            AUTH_MODE="single_user",
+            DATABASE_URL=f"sqlite:///{tmp_path / 'delivery.db'}",
+        )
+    )
+    await pool.initialize()
+    fixture = SQLiteDeliveryRepositoryFixture(AdminWebhookRepository(pool), pool)
+    try:
+        yield fixture
+    finally:
+        await pool.close()
+
+
+@pytest.mark.unit
+async def test_sqlite_capture_fanout_and_history_contract(
+    delivery_repo: SQLiteDeliveryRepositoryFixture,
+) -> None:
+    await exercise_capture_and_history(delivery_repo)
+
+
+@pytest.mark.unit
+async def test_sqlite_delivery_state_machine_contract(
+    delivery_repo: SQLiteDeliveryRepositoryFixture,
+) -> None:
+    await exercise_delivery_state_machine(delivery_repo)
+
+
+@pytest.mark.unit
+async def test_sqlite_recovery_runtime_and_retention_contract(
+    delivery_repo: SQLiteDeliveryRepositoryFixture,
+) -> None:
+    await exercise_recovery_runtime_and_retention(delivery_repo)
+
+
+@pytest.mark.unit
+async def test_sqlite_stale_recovery_and_cancellation_contract(
+    delivery_repo: SQLiteDeliveryRepositoryFixture,
+) -> None:
+    await exercise_stale_recovery_and_cancellation(delivery_repo)

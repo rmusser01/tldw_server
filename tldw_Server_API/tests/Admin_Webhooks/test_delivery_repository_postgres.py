@@ -1,0 +1,106 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import asyncpg
+import pytest
+import pytest_asyncio
+
+from tldw_Server_API.app.core.AuthNZ.pg_migrations_extra import (
+    ensure_admin_webhook_canonical_tables_pg,
+)
+from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
+    AdminWebhookRepository,
+)
+from tldw_Server_API.tests.Admin_Webhooks.test_event_expansion import (
+    exercise_capture_and_history,
+    exercise_delivery_state_machine,
+    exercise_recovery_runtime_and_retention,
+    exercise_stale_recovery_and_cancellation,
+)
+
+pytest_plugins = ("tldw_Server_API.tests.AuthNZ.conftest",)
+pytestmark = pytest.mark.postgres
+
+
+@dataclass
+class PostgreSQLDeliveryRepositoryFixture:
+    repository: AdminWebhookRepository
+    pool: object
+
+    async def execute(self, query: str, *params: object) -> None:
+        await self.pool.execute(query, *params)  # type: ignore[attr-defined]
+
+    async def fetchval(self, query: str, *params: object) -> object:
+        return await self.pool.fetchval(query, *params)  # type: ignore[attr-defined]
+
+
+@pytest_asyncio.fixture
+async def delivery_repo(test_db_pool) -> PostgreSQLDeliveryRepositoryFixture:
+    assert await ensure_admin_webhook_canonical_tables_pg(test_db_pool)
+    connection = await asyncpg.connect(test_db_pool.settings.DATABASE_URL)
+    try:
+        await connection.execute(
+            """
+            TRUNCATE TABLE
+                admin_webhook_delivery_attempts,
+                admin_webhook_deliveries,
+                admin_webhook_events,
+                admin_webhook_idempotency,
+                admin_webhook_runtime_heartbeats,
+                admin_webhook_registrations,
+                admin_webhook_sequences,
+                admin_webhook_migration_state
+            RESTART IDENTITY CASCADE
+            """
+        )
+    finally:
+        await connection.close()
+    await test_db_pool.execute(
+        "INSERT INTO admin_webhook_sequences (name, next_value) VALUES (?, ?)",
+        "registration",
+        1,
+    )
+    await test_db_pool.execute(
+        """
+        INSERT INTO admin_webhook_migration_state (
+            singleton_id, schema_version, state_revision, phase
+        ) VALUES (?, ?, ?, ?)
+        """,
+        1,
+        1,
+        1,
+        "migration_pending",
+    )
+    yield PostgreSQLDeliveryRepositoryFixture(
+        AdminWebhookRepository(test_db_pool),
+        test_db_pool,
+    )
+
+
+@pytest.mark.integration
+async def test_postgres_capture_fanout_and_history_contract(
+    delivery_repo: PostgreSQLDeliveryRepositoryFixture,
+) -> None:
+    await exercise_capture_and_history(delivery_repo)
+
+
+@pytest.mark.integration
+async def test_postgres_delivery_state_machine_contract(
+    delivery_repo: PostgreSQLDeliveryRepositoryFixture,
+) -> None:
+    await exercise_delivery_state_machine(delivery_repo)
+
+
+@pytest.mark.integration
+async def test_postgres_recovery_runtime_and_retention_contract(
+    delivery_repo: PostgreSQLDeliveryRepositoryFixture,
+) -> None:
+    await exercise_recovery_runtime_and_retention(delivery_repo)
+
+
+@pytest.mark.integration
+async def test_postgres_stale_recovery_and_cancellation_contract(
+    delivery_repo: PostgreSQLDeliveryRepositoryFixture,
+) -> None:
+    await exercise_stale_recovery_and_cancellation(delivery_repo)
