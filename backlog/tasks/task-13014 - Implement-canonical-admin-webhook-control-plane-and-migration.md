@@ -1,10 +1,10 @@
 ---
 id: TASK-13014
 title: Implement canonical admin webhook control plane and migration
-status: In Progress
+status: Done
 assignee: []
 created_date: 2026-08-21 20:41
-updated_date: 2026-08-27 22:56
+updated_date: 2026-08-28 00:43
 labels:
 - admin
 - webhooks
@@ -258,13 +258,11 @@ Final local gates: Studio navigation 16/16; CI ratchet/workflow contracts 117/11
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Implemented the approved PR 1 canonical outgoing-webhook control plane and migration across backend contracts, encryption, SQLite/PostgreSQL persistence, deterministic legacy import and rollback tooling, exclusive canonical/legacy routing, platform-admin API, and admin UI.
 
-Final remediation closed CI ratchet/provenance defects, frontend Studio synchronization loops, and the scheduler-sensitive ACP policies-tab test without weakening fail-closed comparison behavior.
+Final implementation source head 776662a9c39896eb3c44e5b54bd938776a519a89 passed the complete hosted frontend-required gate (run 33112693381), including all eight frontend shards, admin unit tests, real-backend E2E, and production build. The final administrative head f37d4c448ace69b56e208ca1f9bda94c571d86f3 passed every applicable exact-head check; the intentionally canceled initial license run was superseded by successful replacement run 33124696671. Qodo reported 0 bugs and 0 rule violations, and the final paginated audit covered 37 review threads with 0 unresolved.
 
-Verification is complete at exact implementation source head 776662a9c39896eb3c44e5b54bd938776a519a89. Frontend-required run 33112693381 passed all 8 shards and its aggregate, including admin unit, real-backend E2E, and production build. All 16 deliberately canceled exact-head workflows were rerun successfully; the PR reported CLEAN. A paginated audit covered 35 review threads and found zero unresolved after posting hosted evidence. Qodo reported 0 bugs at the final source head. PR: https://github.com/rmusser01/tldw_server/pull/2806.
+PR #2806 merged into dev on 2026-08-28 as merge commit 24f79419061ba85e9273b38a05431d6fd46ca40f. Git ancestry verification confirmed the reviewed administrative head is contained in the resulting origin/dev tip.
 
-The two unrelated untracked watchlist templates were not touched or staged. Merge remains a human decision and was not performed.
-
-Post-closure follow-up synchronized the designated retained evidence with the final hosted run, workflow reruns, Qodo disposition, and review-thread audit. This follow-up changes documentation/task history only.
+The two unrelated untracked watchlist templates were not touched or staged.
 <!-- SECTION:FINAL_SUMMARY:END -->
 ## Definition of Done
 <!-- DOD:BEGIN -->
