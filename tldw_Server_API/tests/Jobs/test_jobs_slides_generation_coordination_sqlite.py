@@ -447,12 +447,19 @@ def test_sqlite_audit_compares_logical_compressed_archive_projection(
 
 
 @pytest.mark.parametrize("compressed_field", ("payload", "result"))
-def test_sqlite_migration_audit_fails_closed_on_malformed_archive_projection(
+@pytest.mark.parametrize(
+    ("sidecar_kind", "primary_json_present"),
+    (("malformed", False), ("malformed", True), ("divergent", True)),
+)
+def test_sqlite_migration_audit_fails_closed_on_invalid_archive_sidecar(
     tmp_path,
     compressed_field,
+    sidecar_kind,
+    primary_json_present,
 ):
     db_path = ensure_jobs_tables(
-        tmp_path / f"slides-malformed-{compressed_field}-audit.db"
+        tmp_path
+        / f"slides-{sidecar_kind}-{compressed_field}-{primary_json_present}-audit.db"
     )
     manager = JobManager(db_path)
     job = manager.create_job(
@@ -463,20 +470,31 @@ def test_sqlite_migration_audit_fails_closed_on_malformed_archive_projection(
         owner_user_id="owner-1",
         idempotency_key=f"malformed-{compressed_field}-audit",
     )
-    malformed = "gzip64:c2Vuc2l0aXZlLWRlc3RpbmF0aW9u"
+    sidecar = "gzip64:c2Vuc2l0aXZlLWRlc3RpbmF0aW9u"
+    if sidecar_kind == "divergent":
+        divergent = {"receipt_id": "divergent-sidecar"}
+        sidecar = "gzip64:" + base64.b64encode(
+            gzip.compress(json.dumps(divergent).encode("utf-8"))
+        ).decode("ascii")
     with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE jobs SET result=? WHERE id=?",
+            ('{"artifact":"result"}', int(job["id"])),
+        )
         _copy_job_to_archive(conn, job_id=int(job["id"]))
         if compressed_field == "payload":
             conn.execute(
-                "UPDATE jobs_archive SET payload=NULL, payload_compressed=? "
+                "UPDATE jobs_archive SET payload=CASE WHEN ? THEN payload ELSE NULL END, "
+                "payload_compressed=? "
                 "WHERE uuid=?",
-                (malformed, str(job["uuid"])),
+                (primary_json_present, sidecar, str(job["uuid"])),
             )
         else:
             conn.execute(
-                "UPDATE jobs_archive SET result=NULL, result_compressed=? "
+                "UPDATE jobs_archive SET result=CASE WHEN ? THEN result ELSE NULL END, "
+                "result_compressed=? "
                 "WHERE uuid=?",
-                (malformed, str(job["uuid"])),
+                (primary_json_present, sidecar, str(job["uuid"])),
             )
         before = tuple(
             conn.execute(
@@ -749,9 +767,15 @@ def test_sqlite_archive_collision_with_different_terminal_result_is_unsafe(
         assert conn.execute("SELECT COUNT(*) FROM jobs_archive WHERE uuid=?", (job["uuid"],)).fetchone()[0] == 1
 
 
-def test_sqlite_malformed_archive_collision_uses_closed_normalization_failure(
+@pytest.mark.parametrize(
+    ("sidecar_kind", "primary_json_present"),
+    (("malformed", False), ("malformed", True), ("divergent", True)),
+)
+def test_sqlite_invalid_archive_collision_uses_closed_normalization_failure(
     tmp_path,
     monkeypatch,
+    sidecar_kind,
+    primary_json_present,
 ):
     db_path = ensure_jobs_tables(tmp_path / "slides-malformed-collision.db")
     manager = JobManager(db_path)
@@ -763,17 +787,23 @@ def test_sqlite_malformed_archive_collision_uses_closed_normalization_failure(
         owner_user_id="owner-1",
         idempotency_key="malformed-collision",
     )
-    malformed = "gzip64:c2Vuc2l0aXZlLWRlc3RpbmF0aW9u"
+    sidecar = "gzip64:c2Vuc2l0aXZlLWRlc3RpbmF0aW9u"
+    if sidecar_kind == "divergent":
+        sidecar = "gzip64:" + base64.b64encode(
+            gzip.compress(b'{"artifact":"divergent-sidecar"}')
+        ).decode("ascii")
     with sqlite3.connect(db_path) as conn:
         conn.execute(
             "UPDATE jobs SET status='completed', "
+            "result=?, "
             "completed_at='2000-01-01 00:00:00' WHERE id=?",
-            (int(job["id"]),),
+            ('{"artifact":"result"}', int(job["id"])),
         )
         _copy_job_to_archive(conn, job_id=int(job["id"]))
         conn.execute(
-            "UPDATE jobs_archive SET result=NULL, result_compressed=? WHERE uuid=?",
-            (malformed, str(job["uuid"])),
+            "UPDATE jobs_archive SET result=CASE WHEN ? THEN result ELSE NULL END, "
+            "result_compressed=? WHERE uuid=?",
+            (primary_json_present, sidecar, str(job["uuid"])),
         )
         before = (
             conn.execute(
@@ -801,6 +831,8 @@ def test_sqlite_malformed_archive_collision_uses_closed_normalization_failure(
     assert str(exc_info.value) == (
         "presentation.generate archive projection is unavailable"
     )
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
     assert "sensitive-destination" not in str(exc_info.value)
 
     with sqlite3.connect(db_path) as conn:
@@ -819,6 +851,41 @@ def test_sqlite_malformed_archive_collision_uses_closed_normalization_failure(
             conn.execute("SELECT COUNT(*) FROM job_events").fetchone()[0],
         )
     assert after == before
+
+
+def test_sqlite_active_collision_normalization_remap_has_no_exception_chain(
+    tmp_path,
+    monkeypatch,
+):
+    manager = JobManager(tmp_path / "slides-active-normalization.db")
+
+    monkeypatch.setattr(
+        jobs_manager,
+        "fetch_slides_archive_collision_rows",
+        lambda *_args, **_kwargs: [({"uuid": "active-job"}, [])],
+    )
+
+    def fail_normalization(_row):
+        raise jobs_migrations.SlidesArchiveNormalizationError
+
+    monkeypatch.setattr(
+        jobs_manager,
+        "normalize_slides_archive_projection",
+        fail_normalization,
+    )
+
+    with pytest.raises(SlidesGenerationJobsUnavailableError) as exc_info:
+        manager._idempotent_slides_archive_collisions(
+            None,
+            where_clause="",
+            params=(),
+        )
+
+    assert exc_info.value.args == (
+        "presentation.generate archive projection is unavailable",
+    )
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
 
 
 def test_sqlite_unsafe_archive_collision_poisons_readiness_and_preserves_active(
@@ -1032,12 +1099,19 @@ def test_sqlite_archive_preserves_terminal_error_projection(tmp_path, monkeypatc
 
 
 @pytest.mark.parametrize("compressed_field", ("payload", "result"))
-def test_sqlite_archived_slides_lookup_and_resolve_reject_malformed_compression(
+@pytest.mark.parametrize(
+    ("sidecar_kind", "primary_json_present"),
+    (("malformed", False), ("malformed", True), ("divergent", True)),
+)
+def test_sqlite_archived_slides_lookup_and_resolve_reject_invalid_sidecar(
     tmp_path,
     compressed_field,
+    sidecar_kind,
+    primary_json_present,
 ):
     db_path = ensure_jobs_tables(
-        tmp_path / f"slides-malformed-{compressed_field}-lookup.db"
+        tmp_path
+        / f"slides-{sidecar_kind}-{compressed_field}-{primary_json_present}-lookup.db"
     )
     manager = JobManager(db_path)
     job = manager.create_job(
@@ -1048,21 +1122,36 @@ def test_sqlite_archived_slides_lookup_and_resolve_reject_malformed_compression(
         owner_user_id="owner-1",
         idempotency_key=f"malformed-{compressed_field}-lookup",
     )
-    malformed = "gzip64:c2Vuc2l0aXZlLWRlc3RpbmF0aW9u"
+    sidecar = "gzip64:c2Vuc2l0aXZlLWRlc3RpbmF0aW9u"
+    if sidecar_kind == "divergent":
+        divergent = (
+            {"receipt_id": "divergent-sidecar"}
+            if compressed_field == "payload"
+            else {"artifact": "divergent-sidecar"}
+        )
+        sidecar = "gzip64:" + base64.b64encode(
+            gzip.compress(json.dumps(divergent).encode("utf-8"))
+        ).decode("ascii")
     with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE jobs SET result=? WHERE id=?",
+            ('{"artifact":"result"}', int(job["id"])),
+        )
         _copy_job_to_archive(conn, job_id=int(job["id"]))
         conn.execute("DELETE FROM jobs WHERE id=?", (int(job["id"]),))
         if compressed_field == "payload":
             conn.execute(
-                "UPDATE jobs_archive SET payload=NULL, payload_compressed=? "
+                "UPDATE jobs_archive SET payload=CASE WHEN ? THEN payload ELSE NULL END, "
+                "payload_compressed=? "
                 "WHERE uuid=?",
-                (malformed, str(job["uuid"])),
+                (primary_json_present, sidecar, str(job["uuid"])),
             )
         else:
             conn.execute(
-                "UPDATE jobs_archive SET result=NULL, result_compressed=? "
+                "UPDATE jobs_archive SET result=CASE WHEN ? THEN result ELSE NULL END, "
+                "result_compressed=? "
                 "WHERE uuid=?",
-                (malformed, str(job["uuid"])),
+                (primary_json_present, sidecar, str(job["uuid"])),
             )
         before = tuple(
             conn.execute(
@@ -1092,6 +1181,8 @@ def test_sqlite_archived_slides_lookup_and_resolve_reject_malformed_compression(
         assert str(exc_info.value) == (
             "presentation.generate archive projection is unavailable"
         )
+        assert exc_info.value.__cause__ is None
+        assert exc_info.value.__context__ is None
         assert "sensitive-destination" not in str(exc_info.value)
 
     with sqlite3.connect(db_path) as conn:

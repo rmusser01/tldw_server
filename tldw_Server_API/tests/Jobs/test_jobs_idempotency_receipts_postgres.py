@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import gzip
+import json
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from threading import Barrier
@@ -126,27 +128,48 @@ def test_postgres_uuid_lookup_and_replay_survive_archival(
 
 
 @pytest.mark.parametrize("compressed_field", ("payload", "result"))
-def test_postgres_archived_receipt_replay_rejects_malformed_compression(
+@pytest.mark.parametrize(
+    ("sidecar_kind", "primary_json_present"),
+    (("malformed", False), ("malformed", True), ("divergent", True)),
+)
+def test_postgres_archived_receipt_lookup_and_replay_reject_invalid_sidecar(
     receipt_manager,
     jobs_pg_dsn,
     compressed_field,
+    sidecar_kind,
+    primary_json_present,
 ):
     command = _operation_command()
     first = receipt_manager.admit_idempotent_operation(command)
     _archive_job(jobs_pg_dsn, first.job["uuid"])
-    malformed = b"sensitive-destination"
+    sidecar = b"sensitive-destination"
+    if sidecar_kind == "divergent":
+        divergent = (
+            {"schema_version": 2}
+            if compressed_field == "payload"
+            else {"status": "divergent"}
+        )
+        sidecar = gzip.compress(json.dumps(divergent).encode("utf-8"))
     with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE jobs_archive SET result=%s::jsonb WHERE uuid=%s",
+            (json.dumps({"status": "completed"}), first.job["uuid"]),
+        )
         if compressed_field == "payload":
             cur.execute(
-                "UPDATE jobs_archive SET payload=NULL, payload_compressed=%s "
+                "UPDATE jobs_archive SET "
+                "payload=CASE WHEN %s THEN payload ELSE NULL END, "
+                "payload_compressed=%s "
                 "WHERE uuid=%s",
-                (malformed, first.job["uuid"]),
+                (primary_json_present, sidecar, first.job["uuid"]),
             )
         else:
             cur.execute(
-                "UPDATE jobs_archive SET result=NULL, result_compressed=%s "
+                "UPDATE jobs_archive SET "
+                "result=CASE WHEN %s THEN result ELSE NULL END, "
+                "result_compressed=%s "
                 "WHERE uuid=%s",
-                (malformed, first.job["uuid"]),
+                (primary_json_present, sidecar, first.job["uuid"]),
             )
         cur.execute(
             "SELECT payload, payload_compressed, result, result_compressed, "
@@ -156,14 +179,17 @@ def test_postgres_archived_receipt_replay_rejects_malformed_compression(
         before_archive = tuple(cur.fetchone())
     before = (_counts(jobs_pg_dsn), before_archive)
 
-    for replay in (
-        receipt_manager.replay_idempotent_operation,
-        receipt_manager.admit_idempotent_operation,
-    ):
+    calls = (
+        lambda: receipt_manager.get_job_or_archived_by_uuid(first.job["uuid"]),
+        lambda: receipt_manager.replay_idempotent_operation(command),
+        lambda: receipt_manager.admit_idempotent_operation(command),
+    )
+    for call in calls:
         with pytest.raises(IdempotentOperationUnavailableError) as exc_info:
-            replay(command)
+            call()
         assert str(exc_info.value) == "job archive projection is unavailable"
         assert exc_info.value.__cause__ is None
+        assert exc_info.value.__context__ is None
         assert "sensitive-destination" not in str(exc_info.value)
 
     with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
@@ -174,6 +200,58 @@ def test_postgres_archived_receipt_replay_rejects_malformed_compression(
         )
         after_archive = tuple(cur.fetchone())
     after = (_counts(jobs_pg_dsn), after_archive)
+    assert after == before
+
+
+def test_postgres_receipt_backed_prune_collision_remap_has_no_chain_or_mutation(
+    receipt_manager,
+    jobs_pg_dsn,
+):
+    first = receipt_manager.admit_idempotent_operation(_operation_command())
+    _archive_job(jobs_pg_dsn, first.job["uuid"], retain_active=True)
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE jobs SET status='completed', "
+            "completed_at=NOW()-interval '40 days' WHERE uuid=%s",
+            (first.job["uuid"],),
+        )
+        cur.execute(
+            "UPDATE jobs_archive SET payload_compressed=%s WHERE uuid=%s",
+            (b"sensitive-destination", first.job["uuid"]),
+        )
+        cur.execute(
+            "SELECT status, completed_at, payload, result FROM jobs WHERE uuid=%s",
+            (first.job["uuid"],),
+        )
+        active_before = tuple(cur.fetchone())
+        cur.execute(
+            "SELECT payload, payload_compressed, result, result_compressed, status "
+            "FROM jobs_archive WHERE uuid=%s",
+            (first.job["uuid"],),
+        )
+        archive_before = tuple(cur.fetchone())
+    before = (_counts(jobs_pg_dsn), active_before, archive_before)
+
+    with pytest.raises(IdempotentOperationUnavailableError) as exc_info:
+        receipt_manager.prune_jobs(statuses=["completed"], older_than_days=30)
+
+    assert exc_info.value.args == ("job archive projection is unavailable",)
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
+
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT status, completed_at, payload, result FROM jobs WHERE uuid=%s",
+            (first.job["uuid"],),
+        )
+        active_after = tuple(cur.fetchone())
+        cur.execute(
+            "SELECT payload, payload_compressed, result, result_compressed, status "
+            "FROM jobs_archive WHERE uuid=%s",
+            (first.job["uuid"],),
+        )
+        archive_after = tuple(cur.fetchone())
+    after = (_counts(jobs_pg_dsn), active_after, archive_after)
     assert after == before
 
 

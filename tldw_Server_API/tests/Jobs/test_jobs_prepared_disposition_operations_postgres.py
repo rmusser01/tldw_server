@@ -970,9 +970,18 @@ def _replace_with_raw_compressed_archive_postgres(
     marker: dict,
     compressed_field: str,
     compressed_value: bytes,
+    retain_primary: bool = False,
 ) -> tuple:
-    payload_value = None if compressed_field == "payload" else json.dumps(payload)
-    result_value = None if compressed_field == "result" else json.dumps(marker)
+    payload_value = (
+        None
+        if compressed_field == "payload" and not retain_primary
+        else json.dumps(payload)
+    )
+    result_value = (
+        None
+        if compressed_field == "result" and not retain_primary
+        else json.dumps(marker)
+    )
     payload_compressed = compressed_value if compressed_field == "payload" else None
     result_compressed = compressed_value if compressed_field == "result" else None
     with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
@@ -1011,6 +1020,50 @@ def _postgres_archive_snapshot(jobs_pg_dsn: str, job_id: int) -> tuple:
             (job_id,),
         )
         return tuple(cur.fetchone())
+
+
+@pytest.mark.parametrize("compressed_field", ("payload", "result"))
+@pytest.mark.parametrize("sidecar_kind", ("malformed", "divergent"))
+def test_postgres_identity_lookup_rejects_invalid_sidecar_with_primary_json(
+    jobs_pg_dsn,
+    compressed_field,
+    sidecar_kind,
+) -> None:
+    manager = _manager(jobs_pg_dsn)
+    job = _canonical(manager, suffix=f"primary-{compressed_field}-{sidecar_kind}")
+    payload = job["payload"]
+    marker = _canonical_archive_marker(payload)
+    sidecar_value = b"sensitive-destination"
+    if sidecar_kind == "divergent":
+        divergent = (
+            {**payload, "delivery_id": str(uuid4())}
+            if compressed_field == "payload"
+            else {**marker, "token": _token("e")}
+        )
+        sidecar_value = gzip.compress(json.dumps(divergent).encode("utf-8"))
+    before = _replace_with_raw_compressed_archive_postgres(
+        jobs_pg_dsn,
+        job,
+        payload=payload,
+        marker=marker,
+        compressed_field=compressed_field,
+        compressed_value=sidecar_value,
+        retain_primary=True,
+    )
+
+    found = manager.find_job_by_identity(
+        FindJobByIdentityCommand(
+            domain="admin_webhooks",
+            queue="delivery",
+            job_type="admin_webhook_delivery",
+            idempotency_key=job["idempotency_key"],
+            expected_payload=payload,
+        )
+    )
+
+    assert found.state is JobIdentityLookupState.CONFLICT
+    assert found.row is None
+    assert _postgres_archive_snapshot(jobs_pg_dsn, int(job["id"])) == before
 
 
 @pytest.mark.parametrize("compressed_field", ("payload", "result"))

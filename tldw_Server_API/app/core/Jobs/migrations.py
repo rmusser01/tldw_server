@@ -169,6 +169,22 @@ def _parse_slides_archive_json(value: Any) -> Any:
     return value
 
 
+def _slides_archive_json_equal(left: Any, right: Any) -> bool:
+    """Compare decoded JSON without Python's bool/integer coercion."""
+    if type(left) is not type(right):
+        return False
+    if isinstance(left, dict):
+        return left.keys() == right.keys() and all(
+            _slides_archive_json_equal(left[key], right[key]) for key in left
+        )
+    if isinstance(left, list):
+        return len(left) == len(right) and all(
+            _slides_archive_json_equal(left_item, right_item)
+            for left_item, right_item in zip(left, right)
+        )
+    return left == right
+
+
 def _bounded_gzip_decompress(compressed: bytes) -> bytes:
     """Decode one complete gzip member without exceeding archive bounds."""
 
@@ -246,12 +262,21 @@ def normalize_slides_archive_projection(row: Any) -> dict[str, Any]:
     """Return one logical projection or reject an invalid compressed field."""
     normalized = dict(row)
     for field in ("payload", "result"):
-        value = normalized.get(field)
-        if value is None:
-            value = _decode_slides_archive_blob(normalized.get(f"{field}_compressed"))
-        else:
-            value = _parse_slides_archive_json(value)
-        normalized[field] = value
+        primary = normalized.get(field)
+        primary = (
+            None if primary is None else _parse_slides_archive_json(primary)
+        )
+        compressed = normalized.get(f"{field}_compressed")
+        if compressed is not None:
+            sidecar = _decode_slides_archive_blob(compressed)
+            if primary is not None and not _slides_archive_json_equal(
+                primary,
+                sidecar,
+            ):
+                raise SlidesArchiveNormalizationError
+            if primary is None:
+                primary = sidecar
+        normalized[field] = primary
     return normalized
 
 

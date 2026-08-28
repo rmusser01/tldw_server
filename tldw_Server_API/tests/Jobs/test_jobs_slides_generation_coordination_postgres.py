@@ -314,7 +314,7 @@ def test_postgres_audit_locks_before_scans_and_normalizes_compressed_rows():
     assert "normalize_slides_archive_projection" in source
     assert "psycopg.Error" in forward_block
     assert forward_block.count("except required_migration_exceptions") == 3
-    assert "except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS" in audit_block
+    assert "except _SLIDES_PG_AUDIT_EXCEPTIONS" in audit_block
     assert audit_block.index("_mark_slides_audit_failure_pg(audit_cur)") < audit_block.index(
         "_audit_slides_generation_pg(audit_cur)"
     )
@@ -384,13 +384,23 @@ def test_postgres_audit_compares_logical_compressed_archive_projection(
 
 @pytest.mark.pg_jobs
 @pytest.mark.parametrize("compressed_field", ("payload", "result"))
-def test_postgres_migration_audit_fails_closed_on_malformed_archive_projection(
+@pytest.mark.parametrize(
+    ("sidecar_kind", "primary_json_present"),
+    (("malformed", False), ("malformed", True), ("divergent", True)),
+)
+def test_postgres_migration_audit_fails_closed_on_invalid_archive_sidecar(
     jobs_pg_dsn,
     compressed_field,
+    sidecar_kind,
+    primary_json_present,
 ):
     job_uuid = str(uuid.uuid4())
     projection = ", ".join(("id", *SLIDES_ARCHIVE_EXACT_FIELDS))
-    malformed = b"sensitive-destination"
+    sidecar = b"sensitive-destination"
+    if sidecar_kind == "divergent":
+        sidecar = gzip.compress(
+            json.dumps({"sidecar": "divergent"}).encode("utf-8")
+        )
     with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO jobs(uuid, domain, queue, job_type, owner_user_id, "
@@ -412,15 +422,19 @@ def test_postgres_migration_audit_fails_closed_on_malformed_archive_projection(
         )
         if compressed_field == "payload":
             cur.execute(
-                "UPDATE jobs_archive SET payload=NULL, payload_compressed=%s "
+                "UPDATE jobs_archive SET "
+                "payload=CASE WHEN %s THEN payload ELSE NULL END, "
+                "payload_compressed=%s "
                 "WHERE uuid=%s",
-                (malformed, job_uuid),
+                (primary_json_present, sidecar, job_uuid),
             )
         else:
             cur.execute(
-                "UPDATE jobs_archive SET result=NULL, result_compressed=%s "
+                "UPDATE jobs_archive SET "
+                "result=CASE WHEN %s THEN result ELSE NULL END, "
+                "result_compressed=%s "
                 "WHERE uuid=%s",
-                (malformed, job_uuid),
+                (primary_json_present, sidecar, job_uuid),
             )
         cur.execute(
             "SELECT payload, payload_compressed, result, result_compressed, "
@@ -440,6 +454,8 @@ def test_postgres_migration_audit_fails_closed_on_malformed_archive_projection(
         ) as exc_info:
             jobs_pg_migrations._audit_slides_generation_pg(cur)
     assert exc_info.value.args == ()
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
 
     with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
         cur.execute(
@@ -1048,9 +1064,15 @@ def test_postgres_archive_collision_with_different_result_stays_diagnosed(
 
 
 @pytest.mark.pg_jobs
-def test_postgres_malformed_archive_collision_uses_closed_normalization_failure(
+@pytest.mark.parametrize(
+    ("sidecar_kind", "primary_json_present"),
+    (("malformed", False), ("malformed", True), ("divergent", True)),
+)
+def test_postgres_invalid_archive_collision_uses_closed_normalization_failure(
     jobs_pg_dsn,
     monkeypatch,
+    sidecar_kind,
+    primary_json_present,
 ):
     manager = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
     monkeypatch.setattr(
@@ -1067,11 +1089,18 @@ def test_postgres_malformed_archive_collision_uses_closed_normalization_failure(
         idempotency_key="malformed-collision",
     )
     projection = ", ".join(("id", *SLIDES_ARCHIVE_EXACT_FIELDS))
-    malformed = b"sensitive-destination"
+    sidecar = b"sensitive-destination"
+    if sidecar_kind == "divergent":
+        sidecar = gzip.compress(b'{"artifact":"divergent-sidecar"}')
     with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
         cur.execute(
-            "UPDATE jobs SET status='completed', completed_at=%s WHERE id=%s",
-            (NOW - timedelta(days=60), int(job["id"])),
+            "UPDATE jobs SET status='completed', result=%s::jsonb, "
+            "completed_at=%s WHERE id=%s",
+            (
+                json.dumps({"artifact": "result"}),
+                NOW - timedelta(days=60),
+                int(job["id"]),
+            ),
         )
         cur.execute(
             f"INSERT INTO jobs_archive ({projection}) "  # nosec B608 - closed projection
@@ -1079,8 +1108,10 @@ def test_postgres_malformed_archive_collision_uses_closed_normalization_failure(
             (int(job["id"]),),
         )
         cur.execute(
-            "UPDATE jobs_archive SET result=NULL, result_compressed=%s WHERE uuid=%s",
-            (malformed, str(job["uuid"])),
+            "UPDATE jobs_archive SET "
+            "result=CASE WHEN %s THEN result ELSE NULL END, "
+            "result_compressed=%s WHERE uuid=%s",
+            (primary_json_present, sidecar, str(job["uuid"])),
         )
         cur.execute("SELECT COUNT(*) FROM jobs WHERE uuid=%s", (str(job["uuid"]),))
         active_count = cur.fetchone()[0]
@@ -1104,6 +1135,8 @@ def test_postgres_malformed_archive_collision_uses_closed_normalization_failure(
     assert str(exc_info.value) == (
         "presentation.generate archive projection is unavailable"
     )
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
     assert "sensitive-destination" not in str(exc_info.value)
 
     with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
@@ -1157,10 +1190,16 @@ def test_postgres_archive_preserves_terminal_error_projection(jobs_pg_dsn, monke
 
 @pytest.mark.pg_jobs
 @pytest.mark.parametrize("compressed_field", ("payload", "result"))
-def test_postgres_archived_slides_lookup_and_resolve_reject_malformed_compression(
+@pytest.mark.parametrize(
+    ("sidecar_kind", "primary_json_present"),
+    (("malformed", False), ("malformed", True), ("divergent", True)),
+)
+def test_postgres_archived_slides_lookup_and_resolve_reject_invalid_sidecar(
     jobs_pg_dsn,
     monkeypatch,
     compressed_field,
+    sidecar_kind,
+    primary_json_present,
 ):
     manager = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
     monkeypatch.setattr(
@@ -1177,8 +1216,19 @@ def test_postgres_archived_slides_lookup_and_resolve_reject_malformed_compressio
         idempotency_key=f"malformed-{compressed_field}-lookup",
     )
     projection = ", ".join(("id", *SLIDES_ARCHIVE_EXACT_FIELDS))
-    malformed = b"sensitive-destination"
+    sidecar = b"sensitive-destination"
+    if sidecar_kind == "divergent":
+        divergent = (
+            {"receipt_id": "divergent-sidecar"}
+            if compressed_field == "payload"
+            else {"artifact": "divergent-sidecar"}
+        )
+        sidecar = gzip.compress(json.dumps(divergent).encode("utf-8"))
     with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE jobs SET result=%s::jsonb WHERE id=%s",
+            (json.dumps({"artifact": "result"}), int(job["id"])),
+        )
         cur.execute(
             f"INSERT INTO jobs_archive ({projection}) "  # nosec B608 - closed projection
             f"SELECT {projection} FROM jobs WHERE id=%s",  # nosec B608 - closed projection
@@ -1187,15 +1237,19 @@ def test_postgres_archived_slides_lookup_and_resolve_reject_malformed_compressio
         cur.execute("DELETE FROM jobs WHERE id=%s", (int(job["id"]),))
         if compressed_field == "payload":
             cur.execute(
-                "UPDATE jobs_archive SET payload=NULL, payload_compressed=%s "
+                "UPDATE jobs_archive SET "
+                "payload=CASE WHEN %s THEN payload ELSE NULL END, "
+                "payload_compressed=%s "
                 "WHERE uuid=%s",
-                (malformed, str(job["uuid"])),
+                (primary_json_present, sidecar, str(job["uuid"])),
             )
         else:
             cur.execute(
-                "UPDATE jobs_archive SET result=NULL, result_compressed=%s "
+                "UPDATE jobs_archive SET "
+                "result=CASE WHEN %s THEN result ELSE NULL END, "
+                "result_compressed=%s "
                 "WHERE uuid=%s",
-                (malformed, str(job["uuid"])),
+                (primary_json_present, sidecar, str(job["uuid"])),
             )
         cur.execute(
             "SELECT payload, payload_compressed, result, result_compressed, "
@@ -1224,6 +1278,8 @@ def test_postgres_archived_slides_lookup_and_resolve_reject_malformed_compressio
         assert str(exc_info.value) == (
             "presentation.generate archive projection is unavailable"
         )
+        assert exc_info.value.__cause__ is None
+        assert exc_info.value.__context__ is None
         assert "sensitive-destination" not in str(exc_info.value)
 
     with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:

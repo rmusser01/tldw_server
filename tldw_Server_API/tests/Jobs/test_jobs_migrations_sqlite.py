@@ -285,6 +285,76 @@ def test_archive_projection_rejects_noncanonical_gzip_framing(variant) -> None:
     assert exc_info.value.__context__ is None
 
 
+def _archive_sidecar(value, *, backend: str):
+    compressed = gzip.compress(
+        json.dumps(value, separators=(",", ":")).encode("utf-8")
+    )
+    if backend == "sqlite":
+        return "gzip64:" + base64.b64encode(compressed).decode("ascii")
+    return compressed
+
+
+@pytest.mark.parametrize("backend", ("sqlite", "postgres"))
+def test_archive_projection_rejects_malformed_sidecar_with_primary_json(
+    backend,
+) -> None:
+    malformed = "gzip64:!!!!" if backend == "sqlite" else b"sensitive-destination"
+
+    with pytest.raises(jobs_migrations.SlidesArchiveNormalizationError) as exc_info:
+        normalize_slides_archive_projection(
+            {
+                "payload": '{"schema_version":1}',
+                "result": None,
+                "payload_compressed": malformed,
+                "result_compressed": None,
+            }
+        )
+
+    assert exc_info.value.args == ()
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
+
+
+@pytest.mark.parametrize("backend", ("sqlite", "postgres"))
+def test_archive_projection_rejects_divergent_primary_and_sidecar_json(
+    backend,
+) -> None:
+    primary = {"schema_version": 1, "delivery_id": "delivery-primary"}
+    sidecar = {"schema_version": 1, "delivery_id": "delivery-sidecar"}
+
+    with pytest.raises(jobs_migrations.SlidesArchiveNormalizationError) as exc_info:
+        normalize_slides_archive_projection(
+            {
+                "payload": json.dumps(primary),
+                "result": None,
+                "payload_compressed": _archive_sidecar(sidecar, backend=backend),
+                "result_compressed": None,
+            }
+        )
+
+    assert exc_info.value.args == ()
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
+
+
+@pytest.mark.parametrize("backend", ("sqlite", "postgres"))
+def test_archive_projection_accepts_matching_primary_and_sidecar_json(
+    backend,
+) -> None:
+    payload = {"schema_version": 1, "delivery_id": "delivery-matching"}
+
+    normalized = normalize_slides_archive_projection(
+        {
+            "payload": json.dumps(payload),
+            "result": None,
+            "payload_compressed": _archive_sidecar(payload, backend=backend),
+            "result_compressed": None,
+        }
+    )
+
+    assert normalized["payload"] == payload
+
+
 def test_archive_normalization_failure_contract_survives_migrations_reload() -> None:
     normalization_error = jobs_migrations.SlidesArchiveNormalizationError
 

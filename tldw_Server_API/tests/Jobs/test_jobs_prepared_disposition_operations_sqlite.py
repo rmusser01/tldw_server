@@ -1025,9 +1025,18 @@ def _replace_with_compressed_archive_sqlite(
     marker: dict,
     compressed_field: str,
     compressed_value,
+    retain_primary: bool = False,
 ) -> tuple:
-    payload_value = None if compressed_field == "payload" else json.dumps(payload)
-    result_value = None if compressed_field == "result" else json.dumps(marker)
+    payload_value = (
+        None
+        if compressed_field == "payload" and not retain_primary
+        else json.dumps(payload)
+    )
+    result_value = (
+        None
+        if compressed_field == "result" and not retain_primary
+        else json.dumps(marker)
+    )
     payload_compressed = compressed_value if compressed_field == "payload" else None
     result_compressed = compressed_value if compressed_field == "result" else None
     conn = manager._connect()
@@ -1095,6 +1104,54 @@ def _noncanonical_gzip64(value: dict, variant: str) -> str:
     assert base64.b64decode(noncanonical, validate=True) == compressed
     assert base64.b64encode(compressed).decode("ascii") != noncanonical
     return "gzip64:" + noncanonical
+
+
+@pytest.mark.parametrize("compressed_field", ("payload", "result"))
+@pytest.mark.parametrize("sidecar_kind", ("malformed", "divergent"))
+def test_sqlite_identity_lookup_rejects_invalid_sidecar_with_primary_json(
+    tmp_path,
+    compressed_field,
+    sidecar_kind,
+) -> None:
+    manager = JobManager(
+        tmp_path / f"archive-primary-{compressed_field}-{sidecar_kind}.db"
+    )
+    job = _canonical(manager, suffix=f"primary-{compressed_field}-{sidecar_kind}")
+    payload = json.loads(job["payload"])
+    marker = _canonical_archive_marker(payload)
+    sidecar_value = "gzip64:c2Vuc2l0aXZlLWRlc3RpbmF0aW9u"
+    if sidecar_kind == "divergent":
+        divergent = (
+            {**payload, "delivery_id": str(uuid4())}
+            if compressed_field == "payload"
+            else {**marker, "token": _token("e")}
+        )
+        sidecar_value = "gzip64:" + base64.b64encode(
+            gzip.compress(json.dumps(divergent).encode("utf-8"))
+        ).decode("ascii")
+    before = _replace_with_compressed_archive_sqlite(
+        manager,
+        job,
+        payload=payload,
+        marker=marker,
+        compressed_field=compressed_field,
+        compressed_value=sidecar_value,
+        retain_primary=True,
+    )
+
+    found = manager.find_job_by_identity(
+        FindJobByIdentityCommand(
+            domain="admin_webhooks",
+            queue="delivery",
+            job_type="admin_webhook_delivery",
+            idempotency_key=job["idempotency_key"],
+            expected_payload=payload,
+        )
+    )
+
+    assert found.state is JobIdentityLookupState.CONFLICT
+    assert found.row is None
+    assert _sqlite_archive_snapshot(manager, int(job["id"])) == before
 
 
 @pytest.mark.parametrize("compressed_field", ("payload", "result"))

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import secrets
 import sqlite3
@@ -99,12 +100,13 @@ def get_job_or_archived_by_uuid(
         )
     if not rows:
         return None
-    try:
+    job = None
+    with contextlib.suppress(SlidesArchiveNormalizationError):
         job = normalize_slides_archive_projection(rows[0])
-    except SlidesArchiveNormalizationError:
+    if job is None:
         raise IdempotentOperationUnavailableError(
             "job archive projection is unavailable"
-        ) from None
+        )
     job["archived"] = bool(job.get("archived"))
     return job
 
