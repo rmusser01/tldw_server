@@ -169,6 +169,35 @@ def test_maintenance_is_provider_independent_and_claims_at_most_100_total() -> N
     assert sum(first.cleaned + second.cleaned) <= 100
 
 
+def test_maintenance_shares_run_and_acceptance_claim_budget_at_exact_cap() -> None:
+    store = _ClaimStore(70)
+    acceptance_limits: list[int] = []
+
+    def reconcile_expired(*, limit, **_kwargs):
+        acceptance_limits.append(limit)
+        return tuple(object() for _ in range(min(limit, 40)))
+
+    maintenance = SuggestionMaintenance(
+        jobs=_UnavailableJobs(),
+        scopes=(
+            MaintenanceScope(
+                store,
+                "dataset-1",
+                SimpleNamespace(reconcile_expired=reconcile_expired),
+            ),
+        ),
+    )
+
+    result = maintenance.run_pass(now=NOW)
+
+    assert result.claimed == 100
+    assert result.reconciled == 30
+    assert result.released == 70
+    assert store.claim_limits == [100]
+    assert acceptance_limits == [30]
+    assert store.cleaned == []
+
+
 @pytest.mark.asyncio
 async def test_maintenance_loop_runs_at_most_once_per_minute() -> None:
     stop = asyncio.Event()
@@ -320,37 +349,73 @@ def test_publishing_receipt_mismatch_fails_closed_immediately() -> None:
 
 
 @pytest.mark.asyncio
-async def test_scope_discovery_pages_authoritative_users_and_uses_durable_store_state() -> None:
-    offsets: list[int] = []
-    opened: list[str] = []
+@pytest.mark.parametrize("failure_point", ("open", "list", "maintenance", "close"))
+async def test_maintenance_isolates_owner_failures_and_closes_each_database_promptly(
+    monkeypatch,
+    failure_point,
+) -> None:
+    events: list[tuple[str, str, int | None]] = []
 
     class UsersRepo:
         async def list_users(self, *, offset, limit):
-            offsets.append(offset)
-            users = [{"id": value} for value in range(offset + 1, min(offset + limit, 201) + 1)]
-            return users, 201
+            assert limit == 200
+            events.append(("page", str(offset), None))
+            return ([{"id": 1}, {"id": 2}, {"id": 3}], 3)
 
-    class Store:
+    class Store(_ClaimStore):
         def __init__(self, owner):
+            super().__init__(40 if owner in {"1", "3"} else 0)
             self.owner = owner
 
         def list_maintenance_dataset_ids(self, *, limit):
-            assert limit == 100
-            return ("archived-publishing-dataset",) if self.owner == "201" else ()
+            events.append(("list", self.owner, limit))
+            if self.owner == "2" and failure_point == "list":
+                raise RuntimeError("broken owner list")
+            return (f"dataset-{self.owner}",)
 
-    async def open_database(owner):
-        opened.append(owner)
-        return SimpleNamespace(note_graph_suggestion_store=Store(owner))
+        def claim_runs_for_maintenance(self, *, limit, **kwargs):
+            events.append(("claim", self.owner, limit))
+            if self.owner == "2" and failure_point == "maintenance":
+                raise RuntimeError("broken owner maintenance")
+            return super().claim_runs_for_maintenance(limit=limit, **kwargs)
 
-    scopes, databases = await notes_graph_suggestions_maintenance._discover_scopes(
+    class Database:
+        def __init__(self, owner):
+            self.owner = owner
+            self.note_graph_suggestion_store = Store(owner)
+
+        def release_context_connection(self):
+            events.append(("close", self.owner, None))
+            if self.owner == "2" and failure_point == "close":
+                raise RuntimeError("broken owner close")
+
+    async def get_database(user_id, *, client_id):
+        owner = str(user_id)
+        assert client_id == owner
+        events.append(("open", owner, None))
+        if owner == "2" and failure_point == "open":
+            raise RuntimeError("broken owner open")
+        return Database(owner)
+
+    monkeypatch.setattr(
+        notes_graph_suggestions_maintenance,
+        "get_chacha_db_for_user_id",
+        get_database,
+    )
+    runner = notes_graph_suggestions_maintenance._MaintenanceRunner(
+        jobs=_UnavailableJobs(),
         users_repo=UsersRepo(),
-        open_database=open_database,
     )
 
-    assert offsets == [0, 200]
-    assert opened[0] == "1" and opened[-1] == "201"
-    assert [(scope.store.owner, scope.dataset_id) for scope in scopes] == [("201", "archived-publishing-dataset")]
-    assert len(databases) == 201
+    result = await runner.run_pass(now=NOW)
+
+    assert (result.claimed, result.released, result.cleaned) == (80, 80, 0)
+    assert ("claim", "1", 100) in events
+    assert ("claim", "3", 60) in events
+    assert events.index(("close", "1", None)) < events.index(("open", "2", None))
+    if failure_point != "open":
+        assert events.index(("close", "2", None)) < events.index(("open", "3", None))
+    assert events[-1] == ("close", "3", None)
 
 
 def test_maintenance_resumes_cancellation_receipt_with_guarded_jobs_command(

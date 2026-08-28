@@ -20,6 +20,16 @@ from tldw_Server_API.app.core.Notes_Graph.suggestion_maintenance import (
     run_maintenance_loop,
 )
 
+_MAINTENANCE_ERRORS = (
+    AttributeError,
+    ConnectionError,
+    OSError,
+    RuntimeError,
+    TimeoutError,
+    TypeError,
+    ValueError,
+)
+
 
 async def _open_owner_database(owner_user_id: str) -> Any:
     user_id = int(owner_user_id)
@@ -33,62 +43,62 @@ def _close_database(db: Any) -> None:
         db.close_connection()
 
 
-async def _discover_scopes(
-    *,
-    users_repo: AuthnzUsersRepo,
-    open_database: Any = _open_owner_database,
-) -> tuple[tuple[MaintenanceScope, ...], tuple[Any, ...]]:
-    """Discover durable suggestion scopes from authoritative users and owner stores."""
-
-    scopes: list[MaintenanceScope] = []
-    databases: list[Any] = []
-    offset = 0
-    page_size = 200
-    total = 1
-    try:
-        while offset < total:
-            users, total = await users_repo.list_users(offset=offset, limit=page_size)
-            if not users:
-                break
-            for user in users:
-                owner = str(user.get("id") or "")
-                if not owner:
-                    continue
-                db = await open_database(owner)
-                databases.append(db)
-                store = db.note_graph_suggestion_store
-                for dataset in store.list_maintenance_dataset_ids(limit=100):
-                    scopes.append(MaintenanceScope(store, dataset))
-            offset += page_size
-        return tuple(scopes), tuple(databases)
-    except Exception:
-        for db in databases:
-            try:
-                _close_database(db)
-            except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
-                logger.debug("Notes graph suggestions maintenance database close skipped")
-        raise
-
-
 class _MaintenanceRunner:
     def __init__(self, *, jobs: JobManager, users_repo: AuthnzUsersRepo) -> None:
         self._jobs = jobs
         self._users_repo = users_repo
 
     async def run_pass(self, *, now: datetime) -> MaintenancePassResult:
-        databases: tuple[Any, ...] = ()
+        claimed = reconciled = released = cleaned = 0
+        remaining = 100
+        offset = 0
+        page_size = 200
+        total = 1
         try:
-            scopes, databases = await _discover_scopes(users_repo=self._users_repo)
-            return SuggestionMaintenance(jobs=self._jobs, scopes=scopes).run_pass(now=now)
-        except (ConnectionError, OSError, RuntimeError, TimeoutError, TypeError, ValueError):
+            while offset < total:
+                users, total = await self._users_repo.list_users(
+                    offset=offset,
+                    limit=page_size,
+                )
+                if not users:
+                    break
+                for user in users:
+                    if remaining == 0:
+                        return MaintenancePassResult(claimed, reconciled, released, cleaned)
+                    owner = str(user.get("id") or "")
+                    if not owner:
+                        continue
+                    db = None
+                    try:
+                        db = await _open_owner_database(owner)
+                        store = db.note_graph_suggestion_store
+                        scopes = tuple(
+                            MaintenanceScope(store, dataset)
+                            for dataset in store.list_maintenance_dataset_ids(limit=100)
+                        )
+                        result = SuggestionMaintenance(
+                            jobs=self._jobs,
+                            scopes=scopes,
+                        ).run_pass(now=now, limit=remaining)
+                        claimed += result.claimed
+                        reconciled += result.reconciled
+                        released += result.released
+                        cleaned += result.cleaned
+                        remaining -= min(remaining, result.claimed + result.cleaned)
+                    except _MAINTENANCE_ERRORS:
+                        logger.warning("Notes graph suggestions owner maintenance failed safely")
+                    finally:
+                        if db is not None:
+                            try:
+                                _close_database(db)
+                            except _MAINTENANCE_ERRORS:
+                                logger.debug(
+                                    "Notes graph suggestions maintenance database close skipped"
+                                )
+                offset += page_size
+        except _MAINTENANCE_ERRORS:
             logger.warning("Notes graph suggestions maintenance pass failed safely")
-            return MaintenancePassResult(claimed=0, reconciled=0, released=0, cleaned=0)
-        finally:
-            for db in databases:
-                try:
-                    _close_database(db)
-                except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
-                    logger.debug("Notes graph suggestions maintenance database close skipped")
+        return MaintenancePassResult(claimed, reconciled, released, cleaned)
 
 
 async def run_notes_graph_suggestions_maintenance(

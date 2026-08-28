@@ -354,7 +354,7 @@ class SuggestionMaintenance:
                 reconciled += 1
                 self._record_reconciliation(run, reconciled_run)
 
-        acceptance_remaining = limit
+        acceptance_remaining = remaining
         for scope in self._scopes:
             if acceptance_remaining == 0:
                 break
