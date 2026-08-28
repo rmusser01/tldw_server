@@ -22,6 +22,7 @@ const LONG_TAG =
 const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const SUGGESTION_BASE = `/api/v1/notes/${SOURCE_NOTE_ID}/graph/suggestions`
+const MIN_HELPER_CLEARANCE = 12
 
 const note = {
   id: SOURCE_NOTE_ID,
@@ -745,21 +746,41 @@ const containsHorizontally = (outer: Rect, inner: Rect) =>
   inner.x >= outer.x - 1 &&
   inner.x + inner.width <= outer.x + outer.width + 1
 
+const containsVertically = (outer: Rect, inner: Rect) =>
+  inner.y >= outer.y - 1 &&
+  inner.y + inner.height <= outer.y + outer.height + 1
+
 const overlapsHorizontally = (left: Rect, right: Rect) =>
   Math.min(left.x + left.width, right.x + right.width) -
     Math.max(left.x, right.x) >
   1
 
 const containsRect = (outer: Rect, inner: Rect) =>
-  containsHorizontally(outer, inner) &&
-  inner.y >= outer.y - 1 &&
-  inner.y + inner.height <= outer.y + outer.height + 1
+  containsHorizontally(outer, inner) && containsVertically(outer, inner)
 
 const intersectsRect = (left: Rect, right: Rect) =>
   overlapsHorizontally(left, right) &&
   Math.min(left.y + left.height, right.y + right.height) -
     Math.max(left.y, right.y) >
     1
+
+const assertActionHelperClearance = (
+  actionName: string,
+  actionBounds: Rect,
+  helpers: HelperControl[]
+) => {
+  for (const helper of helpers) {
+    if (!overlapsHorizontally(actionBounds, helper.bounds)) continue
+    const clearance = helper.bounds.y - (actionBounds.y + actionBounds.height)
+    expect(
+      clearance,
+      `${actionName} clearance from ${helper.name}: ${JSON.stringify({
+        actionBounds,
+        helper
+      })}`
+    ).toBeGreaterThanOrEqual(MIN_HELPER_CLEARANCE)
+  }
+}
 
 const requiredBounds = async (locator: Locator, name: string) => {
   const bounds = await locator.boundingBox()
@@ -826,6 +847,7 @@ const assertSuggestionsContentVisualContract = async (page: Page) => {
     name: string
     locator: Locator
     container: Locator
+    reviewRow?: true
   }> = [
     {
       name: "provider",
@@ -840,65 +862,99 @@ const assertSuggestionsContentVisualContract = async (page: Page) => {
     {
       name: "related target title",
       locator: relatedReview.getByText(LONG_TARGET, { exact: true }),
-      container: relatedReview
+      container: relatedReview,
+      reviewRow: true
     },
     {
       name: "related rationale",
       locator: relatedReview.getByText(relatedSuggestion.rationale, {
         exact: true
       }),
-      container: relatedReview
+      container: relatedReview,
+      reviewRow: true
     },
     {
       name: "related source evidence",
       locator: relatedReview.getByText(relatedSuggestion.evidence[0].text, {
         exact: true
       }),
-      container: relatedReview
+      container: relatedReview,
+      reviewRow: true
     },
     {
       name: "related target evidence",
       locator: relatedReview.getByText(relatedSuggestion.evidence[1].text, {
         exact: true
       }),
-      container: relatedReview
+      container: relatedReview,
+      reviewRow: true
     },
     {
       name: "related accept",
       locator: relatedReview.getByRole("button", { name: `Accept ${LONG_TARGET}` }),
-      container: relatedReview
+      container: relatedReview,
+      reviewRow: true
     },
     {
       name: "related reject",
       locator: relatedReview.getByRole("button", { name: `Reject ${LONG_TARGET}` }),
-      container: relatedReview
+      container: relatedReview,
+      reviewRow: true
     },
     {
       name: "tag title",
       locator: tagReview.getByText(LONG_TAG, { exact: true }),
-      container: tagReview
+      container: tagReview,
+      reviewRow: true
     },
     {
       name: "tag rationale",
       locator: tagReview.getByText(tagSuggestion.rationale, { exact: true }),
-      container: tagReview
+      container: tagReview,
+      reviewRow: true
     },
     {
       name: "tag evidence",
       locator: tagReview.getByText(tagSuggestion.evidence[0].text, { exact: true }),
-      container: tagReview
+      container: tagReview,
+      reviewRow: true
     },
     {
       name: "tag accept",
       locator: tagReview.getByRole("button", { name: `Accept ${LONG_TAG}` }),
-      container: tagReview
+      container: tagReview,
+      reviewRow: true
     },
     {
       name: "tag reject",
       locator: tagReview.getByRole("button", { name: `Reject ${LONG_TAG}` }),
-      container: tagReview
+      container: tagReview,
+      reviewRow: true
     }
   ]
+  const reviewRows = []
+  for (const [name, locator] of [
+    ["related review row", relatedReview],
+    ["tag review row", tagReview]
+  ] as const) {
+    await expect(locator, name).toBeVisible()
+    const metrics = await locator.evaluate((element) => {
+      const row = element as HTMLElement
+      return {
+        clientWidth: row.clientWidth,
+        scrollWidth: row.scrollWidth,
+        clientHeight: row.clientHeight,
+        scrollHeight: row.scrollHeight
+      }
+    })
+    expect(metrics.scrollWidth, `${name} horizontal overflow`).toBeLessThanOrEqual(
+      metrics.clientWidth + 1
+    )
+    expect(metrics.scrollHeight, `${name} vertical overflow`).toBeLessThanOrEqual(
+      metrics.clientHeight + 1
+    )
+    reviewRows.push({ name, metrics })
+  }
   const measurements = []
   for (const item of elements) {
     await expect(item.locator, item.name).toBeVisible()
@@ -929,6 +985,15 @@ const assertSuggestionsContentVisualContract = async (page: Page) => {
     expect((bounds?.x ?? 0) + (bounds?.width ?? 0), item.name).toBeLessThanOrEqual(
       (containerBounds?.x ?? 0) + (containerBounds?.width ?? 0) + 1
     )
+    if (item.reviewRow) {
+      expect(
+        containsVertically(containerBounds!, bounds!),
+        `${item.name} vertically inside review row: ${JSON.stringify({
+          bounds,
+          containerBounds
+        })}`
+      ).toBe(true)
+    }
     expect(textMetrics.scrollWidth, item.name).toBeLessThanOrEqual(
       textMetrics.clientWidth + 1
     )
@@ -1015,7 +1080,7 @@ const assertSuggestionsContentVisualContract = async (page: Page) => {
     }, scrollState)
   }
 
-  return { measurements, visibleActions }
+  return { reviewRows, measurements, visibleActions }
 }
 
 const assertPageScaleOriginContract = async (page: Page) => {
@@ -1131,24 +1196,34 @@ const prepareSuggestionsScreenshot = async (page: Page) => {
   })
 
   const initialHelpers = await measureHelperControls(page)
-  const [initialInspectorBounds, initialRejectBounds, initialViewportBounds] =
-    await Promise.all([
+  const [
+    initialInspectorBounds,
+    initialAcceptBounds,
+    initialRejectBounds,
+    initialViewportBounds
+  ] = await Promise.all([
       requiredBounds(inspector, "suggestions inspector before helper clearance"),
+      requiredBounds(accept, "tag suggestion Accept before helper clearance"),
       requiredBounds(reject, "tag suggestion Reject before helper clearance"),
       visualViewportBounds(page)
     ])
+  const overlappingInitialHelpers = initialHelpers.controls.filter(
+    (helper) =>
+      overlapsHorizontally(initialAcceptBounds, helper.bounds) ||
+      overlapsHorizontally(initialRejectBounds, helper.bounds)
+  )
   const nearestHelperTop = Math.min(
     initialInspectorBounds.y + initialInspectorBounds.height,
     initialViewportBounds.y + initialViewportBounds.height,
-    ...initialHelpers.controls
-      .filter((helper) => overlapsHorizontally(initialRejectBounds, helper.bounds))
-      .map((helper) => helper.bounds.y)
+    ...overlappingInitialHelpers.map((helper) => helper.bounds.y)
   )
-  const helperClearance = 12
+  const lowestInitialActionBottom = Math.max(
+    initialAcceptBounds.y + initialAcceptBounds.height,
+    initialRejectBounds.y + initialRejectBounds.height
+  )
   const scrollDelta = Math.max(
     0,
-    initialRejectBounds.y + initialRejectBounds.height -
-      (nearestHelperTop - helperClearance)
+    lowestInitialActionBottom - (nearestHelperTop - MIN_HELPER_CLEARANCE)
   )
   if (scrollDelta > 0) {
     await inspector.evaluate((element, delta) => {
@@ -1198,10 +1273,6 @@ const prepareSuggestionsScreenshot = async (page: Page) => {
     `Reject inside visual viewport: ${containmentEvidence}`
   ).toBe(true)
   expect(
-    rejectBounds.y + rejectBounds.height,
-    `Reject helper clearance: ${containmentEvidence}`
-  ).toBeLessThanOrEqual(nearestHelperTop - helperClearance + 1)
-  expect(
     intersectsRect(acceptBounds, rejectBounds),
     `Accept overlaps Reject: ${containmentEvidence}`
   ).toBe(false)
@@ -1216,6 +1287,8 @@ const prepareSuggestionsScreenshot = async (page: Page) => {
       `${helper.name} overlaps Reject: ${containmentEvidence}`
     ).toBe(false)
   }
+  assertActionHelperClearance("Accept", acceptBounds, helpers.controls)
+  assertActionHelperClearance("Reject", rejectBounds, helpers.controls)
 
   const visibleSuggestionActions = await page
     .locator('[data-suggestion-review-row] button')
@@ -1275,8 +1348,11 @@ const prepareSuggestionsScreenshot = async (page: Page) => {
     reviewBounds,
     acceptBounds,
     rejectBounds,
-    helperClearance,
+    helperClearance: MIN_HELPER_CLEARANCE,
     nearestHelperTop,
+    initialAcceptBounds,
+    initialRejectBounds,
+    overlappingInitialHelpers,
     scrollDelta,
     ...helpers,
     visibleSuggestionActions

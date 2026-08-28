@@ -4,7 +4,7 @@ title: Implement first-class Notes graph workspace and reviewable AI suggestions
 status: Done
 assignee: []
 created_date: '2026-08-27 03:40'
-updated_date: '2026-08-28 20:07'
+updated_date: '2026-08-28 20:35'
 labels:
   - notes
   - knowledge-graph
@@ -200,6 +200,10 @@ Task 12 Review Fix Round 3 started from exact base 9e9082f6068f9d8afdcd6a6c1e531
 Task 12 Review Fix Round 3 paused under the three-attempt rule. The strengthened real-action oracle is mutation-sensitive: removing Notes graph inspector pb-28/scroll-pb-28 failed when related Accept at x=1077,y=938,w=335,h=62 intersected the mandatory Quick Chat switch at x=1372,y=954,w=44,h=22. After restoring clearance and centering each real action, all per-action audits passed, but the required complete real tag-row screenshot contract is geometrically unsatisfiable at 320px: inspector x=8,y=487,w=304,h=405; tag row x=8,y=491,w=304,h=397; Quick Chat switch x=252,y=854,w=44,h=22; optional Next dev control x=22,y=846,w=32,h=32. The helper-free vertical span is at most 359px versus a 397px row. No production behavior change was made; controller context is required to relax full-row/helper nonintersection or authorize a layout/shell change.
 
 Task 12 Review Fix Round 3 completed after controller feasibility ruling. The real tag row remains; the screenshot contract requires horizontal row/content containment plus both real long-label tag actions fully inside inspector/visual viewport and clear of mandatory Quick Chat and optional Next dev controls. At 320x900 Reject ends y=834, 12px above nearest helper y=846; at 720 it ends y=771. Final controlled mutation RED without pb-28/scroll-pb-28 failed on real tag Reject/Quick Chat overlap; restored focused GREEN passed 1/1. Verification: WebUI 3/3; focused workspace 45/45; Task 12 frontend 142/142; extension Task 12 2/2 with unchanged whole-file 2/4; ESLint/Ruff clean; TypeScript exact inherited baselines with zero touched diagnostics; locale/mirror pass; Bandit zero findings; four screenshots inspected and controller-approved. No production diff or open Task 12 finding remains.
+
+Task 12 Fix Round 4 started from exact base b66f352092c0dd1b417788f3cfefced796047985. Scope is test-only: prove vertical child containment and unclipped real review rows, plus action-specific 12px helper clearance derived from both tag actions. No production behavior change is authorized or expected.
+
+Task 12 Fix Round 4 completed from exact base b66f352092c0dd1b417788f3cfefced796047985 with test-only oracle hardening. Controlled mutation RED forced the real tag review row to 100px and failed on scrollHeight 340 > 100; the probe was removed. GREEN requires every real related/tag child vertically within its row, both rows free of internal clipped overflow, screenshot placement derived from both tag actions and all horizontally overlapping helpers, and independent >=12px Accept/Reject helper clearance. Final verification: WebUI 3/3; Task 12 frontend 142/142; extension Task 12 2/2 with unchanged inherited whole-file 2/4; ESLint clean; WebUI/shared TypeScript exact inherited 80/170 diagnostic baselines with zero touched matches; locale/mirror 85/85; screenshots controller-approved and byte-identical; diff/security/artifact/port checks clean. No production change or open Task 12 finding remains.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
