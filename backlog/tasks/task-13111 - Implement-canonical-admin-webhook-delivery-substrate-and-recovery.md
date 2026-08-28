@@ -4,7 +4,7 @@ title: Implement canonical admin webhook delivery substrate and recovery
 status: In Progress
 assignee: []
 created_date: 2026-08-23 03:15
-updated_date: 2026-08-28 16:56
+updated_date: 2026-08-28 17:35
 labels:
 - admin
 - webhooks
@@ -87,6 +87,8 @@ The initial draft was created from an earlier reviewed PR 1 head. Planning revie
 2026-08-28: Task 1 Fix Round 3 complete. PostgreSQL delivery_schema_ready now validates per-key pg_index.indoption DESC flags for every required recovery index: both delivery recovery indexes are all ascending and heartbeat freshness is component/ready ascending plus heartbeat_at descending. Added expected-name wrong-DESC tests for both recovery indexes; full required suite 114 passed, 0 skipped with PostgreSQL required; Ruff and diff checks passed.
 2026-08-28: Started Task 2 repository/UoW persistence and crypto-validation implementation on codex/admin-webhooks-delivery-substrate. Following strict backend-neutral contract-test RED before implementation, then required SQLite/PostgreSQL parity and static verification.
 2026-08-28: Task 2 complete. Implemented dual-backend encrypted event capture/set-based fanout, bounded history/readback, enqueue/attempt/disposition CAS, stale recovery, cancellation, expiry, runtime heartbeat, and ordered retention repositories plus bounded ProtectedValue validation. Strict RED: 3 expected collection errors, 5 warnings. Required final focused suite: 42 passed, 0 skipped, 78 pre-existing environment/dependency/shared-fixture warnings with PostgreSQL required. Crypto regression: 35 passed. Ruff and git diff --check passed. Bandit had only 22 low-confidence B608 reports from fixed module SQL fragments/allowlisted table interpolation; a scan excluding the separately triaged B608 class passed.
+2026-08-28: Started Task 2 Fix Round 1. Scope: cancellation locking/full-snapshot CAS and processing preservation; disposition scheduling invariants; canonical UUIDv4/token/runtime coordinates; atomic disposition acknowledgement; mandatory retention, attempt-budget, synchronous-test, and malformed-row contract coverage. Strict TDD RED will be recorded before production changes.
+2026-08-28: Task 2 Fix Round 1 complete. Cancellation now locks PostgreSQL pre-reservation candidates, uses SQLite write transactions, excludes processing, and applies exact state/current-attempt/Jobs/enqueue-coordinate/version CAS with rollback-visible stale-state errors. Disposition scheduling, canonical UUIDv4/token/runtime coordinates, and atomic attempt+delivery acknowledgement are fail closed. Added dual-backend race, processing-preservation, all-kind scheduling, acknowledgement, retention-order/nonterminal, fifth-attempt no-mutation, synchronous terminal-readback, and malformed-row coverage. Required five-file suite: 66 passed, 0 skipped, 118 pre-existing environment/dependency/shared-fixture warnings with PostgreSQL required. Crypto: 35 passed, 0 skipped, 2 pre-existing warnings. Ruff and diff checks pass. Raw Bandit reports 24 medium-severity/low-confidence B608 findings, all fixed column fragments or closed identifier selections/allowlists with bound caller values; excluding reviewed B608, Bandit passes.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Definition of Done
 <!-- DOD:BEGIN -->

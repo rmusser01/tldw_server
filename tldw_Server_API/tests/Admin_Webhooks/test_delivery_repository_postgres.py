@@ -13,8 +13,12 @@ from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
     AdminWebhookRepository,
 )
 from tldw_Server_API.tests.Admin_Webhooks.test_event_expansion import (
+    exercise_atomic_disposition_acknowledgement,
+    exercise_cancellation_cas_and_processing_preservation,
     exercise_capture_and_history,
     exercise_delivery_state_machine,
+    exercise_disposition_scheduling_persistence,
+    exercise_malformed_persisted_coordinates,
     exercise_recovery_runtime_and_retention,
     exercise_stale_recovery_and_cancellation,
 )
@@ -33,6 +37,9 @@ class PostgreSQLDeliveryRepositoryFixture:
 
     async def fetchval(self, query: str, *params: object) -> object:
         return await self.pool.fetchval(query, *params)  # type: ignore[attr-defined]
+
+    async def fetchrow(self, query: str, *params: object) -> object:
+        return await self.pool.fetchrow(query, *params)  # type: ignore[attr-defined]
 
 
 @pytest_asyncio.fixture
@@ -104,3 +111,31 @@ async def test_postgres_stale_recovery_and_cancellation_contract(
     delivery_repo: PostgreSQLDeliveryRepositoryFixture,
 ) -> None:
     await exercise_stale_recovery_and_cancellation(delivery_repo)
+
+
+@pytest.mark.integration
+async def test_postgres_cancellation_cas_and_processing_preservation_contract(
+    delivery_repo: PostgreSQLDeliveryRepositoryFixture,
+) -> None:
+    await exercise_cancellation_cas_and_processing_preservation(delivery_repo)
+
+
+@pytest.mark.integration
+async def test_postgres_atomic_disposition_acknowledgement_contract(
+    delivery_repo: PostgreSQLDeliveryRepositoryFixture,
+) -> None:
+    await exercise_atomic_disposition_acknowledgement(delivery_repo)
+
+
+@pytest.mark.integration
+async def test_postgres_malformed_persisted_coordinates_fail_closed(
+    delivery_repo: PostgreSQLDeliveryRepositoryFixture,
+) -> None:
+    await exercise_malformed_persisted_coordinates(delivery_repo)
+
+
+@pytest.mark.integration
+async def test_postgres_disposition_scheduling_persistence_contract(
+    delivery_repo: PostgreSQLDeliveryRepositoryFixture,
+) -> None:
+    await exercise_disposition_scheduling_persistence(delivery_repo)
