@@ -124,20 +124,24 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
   const [listMode, setListMode] = React.useState<'active' | 'trash'>('active')
   const [listViewMode, setListViewMode] = React.useState<NotesListViewMode>('list')
   const listQueryViewMode = listViewMode === 'graph' ? 'list' : listViewMode
-  const authorityOwnerRef = React.useRef<NotesAuthorityOwner>({
-    scope: authorityScope,
-    generation: 0
-  })
-  if (authorityOwnerRef.current.scope !== authorityScope) {
-    authorityOwnerRef.current = {
+  // Render-state transitions stay local to React until this tree commits.
+  const [storedAuthorityOwner, setStoredAuthorityOwner] =
+    React.useState<NotesAuthorityOwner>(() => ({
       scope: authorityScope,
-      generation: authorityOwnerRef.current.generation + 1
+      generation: 0
+    }))
+  let authorityOwner = storedAuthorityOwner
+  if (storedAuthorityOwner.scope !== authorityScope) {
+    authorityOwner = {
+      scope: authorityScope,
+      generation: storedAuthorityOwner.generation + 1
     }
+    setStoredAuthorityOwner(authorityOwner)
   }
-  const authorityOwner = authorityOwnerRef.current
+  const committedAuthorityOwnerRef = React.useRef(storedAuthorityOwner)
   const isCurrentAuthority = React.useCallback(
     (owner: NotesAuthorityOwner) =>
-      owner.scope !== null && authorityOwnerRef.current === owner,
+      owner.scope !== null && committedAuthorityOwnerRef.current === owner,
     []
   )
   const [total, setTotal] = useAuthorityOwnedState(
@@ -154,9 +158,13 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     authorityOwner: NotesAuthorityOwner
     value: string | null
   }>({ authorityOwner, value: null })
-  if (bulkSelectionAnchorRef.current.authorityOwner !== authorityOwner) {
-    bulkSelectionAnchorRef.current = { authorityOwner, value: null }
-  }
+  React.useLayoutEffect(() => {
+    // Async work and retained callbacks recognize only the committed owner.
+    committedAuthorityOwnerRef.current = authorityOwner
+    if (bulkSelectionAnchorRef.current.authorityOwner !== authorityOwner) {
+      bulkSelectionAnchorRef.current = { authorityOwner, value: null }
+    }
+  }, [authorityOwner])
 
   // ---- moodboard state ----
   const [moodboards, setMoodboards] = useAuthorityOwnedState(

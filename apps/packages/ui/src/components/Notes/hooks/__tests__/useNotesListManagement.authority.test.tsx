@@ -1,10 +1,11 @@
-import React from "react"
+import { NOTES_NOTEBOOKS_SETTING } from "@/services/settings/ui-settings"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, renderHook, waitFor } from "@testing-library/react"
 import type { MessageInstance } from "antd/es/message/interface"
+import React from "react"
+import { createRoot } from "react-dom/client"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-import { NOTES_NOTEBOOKS_SETTING } from "@/services/settings/ui-settings"
 import { useNotesListManagement } from "../useNotesListManagement"
 
 const mocks = vi.hoisted(() => ({
@@ -470,6 +471,192 @@ describe("useNotesListManagement authority boundaries", () => {
 
     expect(result.current.rawNotes).toEqual([])
     expect(result.current.total).toBe(0)
+  })
+
+  it("keeps committed authority stable when a speculative transition is abandoned", async () => {
+    const pendingSearch = deferred<ReturnType<typeof notesResponse>>()
+    const suspendedTransition = new Promise<never>(() => {})
+    const { queryClient } = createHarness()
+    let browseCalls = 0
+    let searchCalls = 0
+    let suspendedBRenderCount = 0
+    let shouldSuspendB = true
+    let committedList: ReturnType<typeof useNotesListManagement> | null = null
+
+    mocks.bgRequest.mockImplementation(async (request: { path?: string }) => {
+      const path = String(request.path || "")
+      if (path.startsWith("/api/v1/notes/collections")) return { items: [] }
+      if (path.startsWith("/api/v1/notes/search/?")) {
+        searchCalls += 1
+        return pendingSearch.promise
+      }
+      if (path.startsWith("/api/v1/notes/?")) {
+        browseCalls += 1
+        return browseCalls === 1
+          ? notesResponse("account-a-note", 1)
+          : { items: [], pagination: { total_items: 0 } }
+      }
+      return { items: [] }
+    })
+
+    const Suspender = ({ authorityScope }: { authorityScope: string }) => {
+      if (authorityScope === "scope-b" && shouldSuspendB) {
+        suspendedBRenderCount += 1
+        throw suspendedTransition
+      }
+      return null
+    }
+    const Harness = ({ authorityScope }: { authorityScope: string }) => {
+      const list = useNotesListManagement({
+        authorityScope,
+        isOnline: true,
+        message: mocks.message as unknown as MessageInstance,
+        confirmDanger: mocks.confirmDanger,
+        queryClient,
+        t: (key: string) => key,
+        keywordTokens: [],
+        setKeywordTokens: mocks.setKeywordTokens,
+        notebookKeywordTokens: []
+      })
+      React.useLayoutEffect(() => {
+        committedList = list
+      })
+      return (
+        <>
+          <output data-testid="concurrent-note-ids">
+            {list.rawNotes.map((note) => note.id).join(",")}
+          </output>
+          <output data-testid="concurrent-total">{list.total}</output>
+          <output data-testid="concurrent-bulk-selection">
+            {list.bulkSelectedIds.join(",")}
+          </output>
+          <Suspender authorityScope={authorityScope} />
+        </>
+      )
+    }
+    const renderScope = (authorityScope: string) => (
+      <React.StrictMode>
+        <QueryClientProvider client={queryClient}>
+          <React.Suspense fallback={<span>Suspended</span>}>
+            <Harness authorityScope={authorityScope} />
+          </React.Suspense>
+        </QueryClientProvider>
+      </React.StrictMode>
+    )
+    const authorityGenerations = (scope: string) =>
+      Array.from(
+        new Set(
+          queryClient
+            .getQueryCache()
+            .getAll()
+            .filter((query) => query.queryKey[0] === "notes")
+            .map((query) => {
+              const authorityIndex = query.queryKey.indexOf("authority")
+              const generationIndex = query.queryKey.indexOf("generation")
+              if (
+                authorityIndex < 0 ||
+                generationIndex < 0 ||
+                query.queryKey[authorityIndex + 1] !== scope
+              ) {
+                return null
+              }
+              return Number(query.queryKey[generationIndex + 1])
+            })
+            .filter((generation): generation is number => generation != null)
+        )
+      ).sort((left, right) => left - right)
+
+    const container = document.createElement("div")
+    document.body.appendChild(container)
+    const root = createRoot(container)
+
+    try {
+      await act(async () => {
+        root.render(renderScope("scope-a"))
+      })
+      await waitFor(() => {
+        expect(
+          container.querySelector('[data-testid="concurrent-note-ids"]')
+            ?.textContent
+        ).toBe("account-a-note")
+      })
+      expect(authorityGenerations("scope-a")).toEqual([0])
+      expect(browseCalls).toBe(1)
+
+      const retainedToggleBulkSelection =
+        committedList!.handleToggleBulkSelection
+      let pendingCompletion!: ReturnType<
+        typeof committedList.fetchFilteredNotesRaw
+      >
+      act(() => {
+        pendingCompletion = committedList!.fetchFilteredNotesRaw(
+          "pending",
+          [],
+          1,
+          20
+        )
+      })
+      await waitFor(() => expect(searchCalls).toBe(1))
+
+      act(() => {
+        React.startTransition(() => {
+          root.render(renderScope("scope-b"))
+        })
+      })
+      await waitFor(() => expect(suspendedBRenderCount).toBeGreaterThan(0))
+
+      await act(async () => {
+        root.render(renderScope("scope-a"))
+      })
+
+      expect(
+        container.querySelector('[data-testid="concurrent-note-ids"]')
+          ?.textContent
+      ).toBe("account-a-note")
+      expect(
+        container.querySelector('[data-testid="concurrent-total"]')?.textContent
+      ).toBe("1")
+      expect(authorityGenerations("scope-a")).toEqual([0])
+      expect(browseCalls).toBe(1)
+
+      act(() => {
+        retainedToggleBulkSelection("account-a-note", true, false)
+      })
+      expect(
+        container.querySelector('[data-testid="concurrent-bulk-selection"]')
+          ?.textContent
+      ).toBe("account-a-note")
+
+      let completionResult!: Awaited<typeof pendingCompletion>
+      await act(async () => {
+        pendingSearch.resolve(notesResponse("accepted-account-a-note", 5))
+        completionResult = await pendingCompletion
+      })
+      expect(completionResult.items.map((item) => item.id)).toEqual([
+        "accepted-account-a-note"
+      ])
+      expect(completionResult.total).toBe(5)
+
+      shouldSuspendB = false
+      await act(async () => {
+        React.startTransition(() => {
+          root.render(renderScope("scope-b"))
+        })
+      })
+      await waitFor(() => expect(authorityGenerations("scope-b")).toEqual([1]))
+      expect(authorityGenerations("scope-a")).toEqual([0])
+      expect(
+        container.querySelector('[data-testid="concurrent-note-ids"]')
+          ?.textContent
+      ).toBe("")
+      expect(
+        container.querySelector('[data-testid="concurrent-bulk-selection"]')
+          ?.textContent
+      ).toBe("")
+    } finally {
+      act(() => root.unmount())
+      container.remove()
+    }
   })
 
   it("starts a fresh browse request when the same authority returns after a guarded transition", async () => {
