@@ -4,7 +4,7 @@ title: Implement first-class Notes graph workspace and reviewable AI suggestions
 status: In Progress
 assignee: []
 created_date: 2026-08-27 03:40
-updated_date: 2026-08-28 08:07
+updated_date: 2026-08-28 09:26
 labels:
 - notes
 - knowledge-graph
@@ -237,6 +237,10 @@ Task 10 Fix Round 1/3 completed from exact base f6a964c9c4582c0ca16b2e37c3048414
 Task 10 Fix Round 2/3 started from exact base 52ab18d83caeb8c2ee11ad760f61d9b8828f3602. Scope is limited to successful logout principal events, cookie-session resume revalidation, authority-scoped Notes list/editor evidence, authority-keyed Graph focus, and checkbox-disclosure semantics. Strict service/hook/manager RED precedes production edits; Task 11, Task 12 browser layout work, and controller progress.md remain excluded.
 
 Task 10 Fix Round 2/3 completed. Successful manual single-user, cookie-session single-user, multi-user, and hosted logout now emits the existing logout principal boundary exactly once after local clearing; failed usable clears do not emit. Cookie sessions revalidate with epoch fencing on focus/pageshow/visible visibility changes, while other auth modes remain stable. Notes list totals/placeholders, editor selection/detail completions, Graph requests, and mounted initial focus are authority scoped, preventing account A evidence from appearing or being requested under B while preserving same-principal resume state. Edge visibility now exposes checkbox-group disclosure semantics. Verification: Round 2 gate 59/59; affected Task 9/list 66/66; auth 16/16; affected managers 43 passed with only the unchanged Stage 5 presentation baseline; ESLint zero errors and strict new/graph files zero warnings; pinned Prettier clean for new/graph files; TypeScript exactly matches the inherited 315-line baseline with zero touched diagnostics; diff/scans clean; Bandit not applicable to TypeScript-only scope. Full evidence: .superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-10-report.md. Parent task remains In Progress for Tasks 11-12.
+
+Task 10 Fix Round 3/3 started from exact base 359e0c56a98365c844f5b6189bf88de6c0a4c3fe. Scope is limited to complete authority gating/keying and stale-completion fencing for all useNotesListManagement server discovery, imperative refetch, and collection mutations while preserving omitted-authority legacy behavior and same-authority placeholders. Focused TDD RED precedes production edits; Task 11, Task 12 browser layout, dependencies, Python, and controller progress.md remain excluded.
+
+Task 10 Fix Round 3/3 completed. All useNotesListManagement server discovery, imperative refetch, discovery state, and collection mutations are now identity-fenced and supplied-authority keyed/gated; explicit null makes zero Notes discovery requests and synchronously hides prior evidence. Explicit non-null authority treats server notebooks as authoritative and never reads, migrates, falls back to, or writes the global local notebook setting, while omitted authority preserves legacy local behavior. Verification: authority 9/9; affected Task 9/list 71/71; Task 10/Stage 22 31/31; organization/moodboard 10/10; affected managers 53 passed with only the unchanged Stage 5 presentation baseline; ESLint zero errors; Prettier matched the exact inherited three-file mixed-format baseline with the new test clean; TypeScript exactly 315 inherited lines with zero touched diagnostics; diff/scans clean; Bandit not applicable to TypeScript-only scope. Full evidence: .superpowers/sdd/2026-08-26-notes-second-brain-graph-suggestions/task-10-report.md. Parent task remains In Progress for Tasks 11-12.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

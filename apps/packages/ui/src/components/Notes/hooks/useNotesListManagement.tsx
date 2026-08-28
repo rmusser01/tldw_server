@@ -36,6 +36,53 @@ import {
 import type { ConfirmDangerOptions } from '@/components/Common/confirm-danger'
 
 type ConfirmDanger = (options: ConfirmDangerOptions) => Promise<boolean>
+type NotesAuthorityScope = string | null | undefined
+type NotesAuthorityOwner = { scope: NotesAuthorityScope }
+
+const applyStateAction = <T,>(
+  action: React.SetStateAction<T>,
+  current: T
+): T =>
+  typeof action === 'function'
+    ? (action as (value: T) => T)(current)
+    : action
+
+const useAuthorityOwnedState = <T,>(
+  authorityOwner: NotesAuthorityOwner,
+  isCurrentAuthority: (owner: NotesAuthorityOwner) => boolean,
+  emptyValue: T
+): [T, React.Dispatch<React.SetStateAction<T>>] => {
+  const emptyValueRef = React.useRef(emptyValue)
+  const [state, setState] = React.useState({
+    authorityOwner,
+    value: emptyValue
+  })
+  const value =
+    authorityOwner.scope !== null && state.authorityOwner === authorityOwner
+      ? state.value
+      : emptyValueRef.current
+  const setValue = React.useCallback<
+    React.Dispatch<React.SetStateAction<T>>
+  >(
+    (nextValue) => {
+      if (!isCurrentAuthority(authorityOwner)) return
+      setState((current) => {
+        if (!isCurrentAuthority(authorityOwner)) return current
+        return {
+          authorityOwner,
+          value: applyStateAction(
+            nextValue,
+            current.authorityOwner === authorityOwner
+              ? current.value
+              : emptyValueRef.current
+          )
+        }
+      })
+    },
+    [authorityOwner, isCurrentAuthority]
+  )
+  return [value, setValue]
+}
 
 export interface UseNotesListManagementDeps {
   authorityScope?: string | null
@@ -74,53 +121,84 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
   const [listMode, setListMode] = React.useState<'active' | 'trash'>('active')
   const [listViewMode, setListViewMode] = React.useState<NotesListViewMode>('list')
   const listQueryViewMode = listViewMode === 'graph' ? 'list' : listViewMode
-  const authorityScopeRef = React.useRef(authorityScope)
-  authorityScopeRef.current = authorityScope
-  const [totalState, setTotalState] = React.useState({
-    authorityScope,
-    value: 0
+  const authorityOwnerRef = React.useRef<NotesAuthorityOwner>({
+    scope: authorityScope
   })
-  const setTotal = React.useCallback<React.Dispatch<React.SetStateAction<number>>>(
-    (nextValue) => {
-      const targetAuthority = authorityScope
-      setTotalState((current) => {
-        if (authorityScopeRef.current !== targetAuthority) return current
-        const currentValue =
-          current.authorityScope === targetAuthority ? current.value : 0
-        return {
-          authorityScope: targetAuthority,
-          value:
-            typeof nextValue === 'function'
-              ? nextValue(currentValue)
-              : nextValue
-        }
-      })
-    },
-    [authorityScope]
+  if (authorityOwnerRef.current.scope !== authorityScope) {
+    authorityOwnerRef.current = { scope: authorityScope }
+  }
+  const authorityOwner = authorityOwnerRef.current
+  const isCurrentAuthority = React.useCallback(
+    (owner: NotesAuthorityOwner) =>
+      owner.scope !== null && authorityOwnerRef.current === owner,
+    []
   )
-  const total =
-    totalState.authorityScope === authorityScope ? totalState.value : 0
-  const [bulkSelectedIds, setBulkSelectedIds] = React.useState<string[]>([])
-  const bulkSelectionAnchorRef = React.useRef<string | null>(null)
+  const [total, setTotal] = useAuthorityOwnedState(
+    authorityOwner,
+    isCurrentAuthority,
+    0
+  )
+  const [bulkSelectedIds, setBulkSelectedIds] = useAuthorityOwnedState(
+    authorityOwner,
+    isCurrentAuthority,
+    [] as string[]
+  )
+  const bulkSelectionAnchorRef = React.useRef<{
+    authorityOwner: NotesAuthorityOwner
+    value: string | null
+  }>({ authorityOwner, value: null })
+  if (bulkSelectionAnchorRef.current.authorityOwner !== authorityOwner) {
+    bulkSelectionAnchorRef.current = { authorityOwner, value: null }
+  }
 
   // ---- moodboard state ----
-  const [moodboards, setMoodboards] = React.useState<MoodboardSummary[]>([])
-  const [selectedMoodboardId, setSelectedMoodboardId] = React.useState<number | null>(null)
+  const [moodboards, setMoodboards] = useAuthorityOwnedState(
+    authorityOwner,
+    isCurrentAuthority,
+    [] as MoodboardSummary[]
+  )
+  const [selectedMoodboardId, setSelectedMoodboardId] = useAuthorityOwnedState(
+    authorityOwner,
+    isCurrentAuthority,
+    null as number | null
+  )
 
   // ---- notebook state ----
-  const [notebookOptions, setNotebookOptions] = React.useState<NotebookFilterOption[]>([])
-  const [selectedNotebookId, setSelectedNotebookId] = React.useState<number | null>(null)
+  const [notebookOptions, setNotebookOptions] = useAuthorityOwnedState(
+    authorityOwner,
+    isCurrentAuthority,
+    [] as NotebookFilterOption[]
+  )
+  const [selectedNotebookId, setSelectedNotebookId] = useAuthorityOwnedState(
+    authorityOwner,
+    isCurrentAuthority,
+    null as number | null
+  )
 
   const searchQueryTimeoutRef = React.useRef<number | null>(null)
   const pageSizeSettingHydratedRef = React.useRef(false)
-  const notebookSettingsHydratedRef = React.useRef(false)
+  const notebookSettingsHydratedRef = React.useRef<{
+    authorityOwner: NotesAuthorityOwner
+  } | null>(null)
 
   // ---- derived ----
+  const selectedNotebook = React.useMemo(
+    () =>
+      selectedNotebookId == null
+        ? null
+        : notebookOptions.find((option) => option.id === selectedNotebookId) || null,
+    [notebookOptions, selectedNotebookId]
+  )
+
   const effectiveKeywordTokens = React.useMemo(() => {
+    const effectiveNotebookKeywordTokens =
+      authorityScope === undefined
+        ? notebookKeywordTokens
+        : selectedNotebook?.keywords ?? []
     const merged = [
       ...(listViewMode === 'inbox' ? [CAPTURED_NOTE_KEYWORD] : []),
       ...keywordTokens,
-      ...notebookKeywordTokens
+      ...effectiveNotebookKeywordTokens
     ]
     const deduped: string[] = []
     for (const token of merged) {
@@ -130,15 +208,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
       deduped.push(normalized)
     }
     return deduped
-  }, [keywordTokens, listViewMode, notebookKeywordTokens])
-
-  const selectedNotebook = React.useMemo(
-    () =>
-      selectedNotebookId == null
-        ? null
-        : notebookOptions.find((option) => option.id === selectedNotebookId) || null,
-    [notebookOptions, selectedNotebookId]
-  )
+  }, [authorityScope, keywordTokens, listViewMode, notebookKeywordTokens, selectedNotebook])
 
   const clearSearchQueryTimeout = React.useCallback(() => {
     if (searchQueryTimeoutRef.current != null) {
@@ -154,6 +224,10 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     fetchPage: number,
     fetchPageSize: number
   ): Promise<{ items: any[]; total: number }> => {
+    const requestOwner = authorityOwner
+    if (!isCurrentAuthority(requestOwner)) {
+      return { items: [], total: 0 }
+    }
     const qstr = q.trim()
     if (!qstr && toks.length === 0) {
       return { items: [], total: 0 }
@@ -177,6 +251,9 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
       path: `/api/v1/notes/search/?${params.toString()}` as any,
       method: 'GET' as any
     })
+    if (!isCurrentAuthority(requestOwner)) {
+      return { items: [], total: 0 }
+    }
 
     let items: any[] = []
     let totalVal = 0
@@ -203,9 +280,11 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     }
 
     return { items: sortNoteRows(items, sortOption), total: totalVal }
-  }, [sortOption])
+  }, [authorityOwner, isCurrentAuthority, sortOption])
 
   const fetchNotes = React.useCallback(async (): Promise<NoteListItem[]> => {
+    const requestOwner = authorityOwner
+    if (!isCurrentAuthority(requestOwner)) return []
     const mapNoteListItem = (n: any): NoteListItem => {
       const links = extractBacklink(n)
       const keywords = extractKeywords(n)
@@ -244,6 +323,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
         path: `/api/v1/notes/trash?${params.toString()}` as any,
         method: 'GET' as any
       })
+      if (!isCurrentAuthority(requestOwner)) return []
       const items = Array.isArray(res?.items) ? res.items : (Array.isArray(res) ? res : [])
       const totalItems =
         Number(
@@ -269,6 +349,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
         path: `/api/v1/notes/moodboards/${selectedMoodboardId}/notes?${params.toString()}` as any,
         method: 'GET' as any
       })
+      if (!isCurrentAuthority(requestOwner)) return []
       const items = Array.isArray(res?.notes)
         ? res.notes
         : Array.isArray(res?.items)
@@ -303,34 +384,35 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
       path: browsePath,
       method: 'GET' as any
     })
+    if (!isCurrentAuthority(requestOwner)) return []
     const items = Array.isArray(res?.items) ? res.items : (Array.isArray(res) ? res : [])
     const pagination = res?.pagination
     setTotal(Number(pagination?.total_items || items.length || 0))
     return sortNoteRows(items, sortOption).map(mapNoteListItem)
-  }, [effectiveKeywordTokens, fetchFilteredNotesRaw, listMode, listViewMode, page, pageSize, query, selectedMoodboardId, setTotal, sortOption])
+  }, [authorityOwner, effectiveKeywordTokens, fetchFilteredNotesRaw, isCurrentAuthority, listMode, listViewMode, page, pageSize, query, selectedMoodboardId, setTotal, sortOption])
 
   const listQueryKey = [
-      'notes',
-      listMode,
-      listQueryViewMode,
-      selectedMoodboardId ?? 'none',
-      query,
-      page,
-      pageSize,
-      sortOption,
-      selectedNotebookId ?? 'none',
-      effectiveKeywordTokens.join('|'),
-      ...(authorityScope === undefined
-        ? []
-        : ['authority', authorityScope])
-    ]
+    'notes',
+    listMode,
+    listQueryViewMode,
+    selectedMoodboardId ?? 'none',
+    query,
+    page,
+    pageSize,
+    sortOption,
+    selectedNotebookId ?? 'none',
+    effectiveKeywordTokens.join('|'),
+    ...(authorityScope === undefined
+      ? []
+      : ['authority', authorityScope])
+  ]
   const {
     data: queryData,
     error,
     isError,
     isFetching,
     isPlaceholderData,
-    refetch
+    refetch: refetchQuery
   } = useQuery({
     queryKey: listQueryKey,
     queryFn: fetchNotes,
@@ -345,6 +427,16 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     },
     enabled: isOnline && authorityScope !== null
   })
+  const refetch = React.useCallback(
+    (options?: Parameters<typeof refetchQuery>[0]) => {
+      const requestOwner = authorityOwner
+      if (!isCurrentAuthority(requestOwner)) {
+        return Promise.resolve(undefined)
+      }
+      return refetchQuery(options)
+    },
+    [authorityOwner, isCurrentAuthority, refetchQuery]
+  )
   const data = authorityScope === null ? undefined : queryData
   const listErrorMessage = React.useMemo(() => {
     if (!isError) return null
@@ -392,16 +484,20 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
 
   // ---- moodboard fetch ----
   const fetchMoodboards = React.useCallback(async (): Promise<MoodboardSummary[]> => {
+    const requestOwner = authorityOwner
+    if (!isCurrentAuthority(requestOwner)) return []
     const pageLimit = 200
     const maxPages = 50
     const collected: any[] = []
     let offset = 0
 
     for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
+      if (!isCurrentAuthority(requestOwner)) return []
       const res = await bgRequest<any>({
         path: `/api/v1/notes/moodboards?limit=${pageLimit}&offset=${offset}` as any,
         method: "GET" as any
       })
+      if (!isCurrentAuthority(requestOwner)) return []
       const rows = Array.isArray(res?.moodboards)
         ? res.moodboards
         : Array.isArray(res?.items)
@@ -451,17 +547,37 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
         } as MoodboardSummary
       })
       .filter((item): item is MoodboardSummary => item != null)
-  }, [])
+  }, [authorityOwner, isCurrentAuthority])
 
   const {
-    data: moodboardData,
+    data: moodboardQueryData,
     isFetching: isMoodboardsFetching,
-    refetch: refetchMoodboards
+    refetch: refetchMoodboardsQuery
   } = useQuery({
-    queryKey: ["notes-moodboards", listMode, listViewMode],
+    queryKey: [
+      "notes-moodboards",
+      listMode,
+      listViewMode,
+      ...(authorityScope === undefined
+        ? []
+        : ["authority", authorityScope])
+    ],
     queryFn: fetchMoodboards,
-    enabled: isOnline && listMode === "active" && listViewMode === "moodboard"
+    enabled:
+      isOnline &&
+      authorityScope !== null &&
+      listMode === "active" &&
+      listViewMode === "moodboard"
   })
+  const moodboardData =
+    authorityScope === null ? undefined : moodboardQueryData
+  const refetchMoodboards = React.useCallback(() => {
+    const requestOwner = authorityOwner
+    if (!isCurrentAuthority(requestOwner)) {
+      return Promise.resolve(undefined)
+    }
+    return refetchMoodboardsQuery()
+  }, [authorityOwner, isCurrentAuthority, refetchMoodboardsQuery])
 
   React.useEffect(() => {
     const nextMoodboards = Array.isArray(moodboardData) ? moodboardData : []
@@ -474,7 +590,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
       if (current != null && nextMoodboards.some((item) => item.id === current)) return current
       return nextMoodboards[0].id
     })
-  }, [moodboardData])
+  }, [moodboardData, setMoodboards, setSelectedMoodboardId])
 
   const selectedMoodboard = React.useMemo(() => {
     if (selectedMoodboardId == null) return null
@@ -482,20 +598,24 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
   }, [moodboards, selectedMoodboardId])
 
   const createMoodboard = React.useCallback(async () => {
+    const requestOwner = authorityOwner
+    if (!isCurrentAuthority(requestOwner)) return
     const name = await promptModal({
       title: 'Create collection',
       placeholder: 'Collection name',
       okText: 'Create',
     })
-    if (!name) return
+    if (!name || !isCurrentAuthority(requestOwner)) return
     try {
       const created = await bgRequest<any>({
         path: "/api/v1/notes/moodboards" as any,
         method: "POST" as any,
         body: { name }
       })
+      if (!isCurrentAuthority(requestOwner)) return
       const createdId = Number(created?.id)
       await refetchMoodboards()
+      if (!isCurrentAuthority(requestOwner)) return
       if (Number.isFinite(createdId)) {
         setSelectedMoodboardId(Math.floor(createdId))
       }
@@ -503,11 +623,15 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
       setPage(1)
       message.success(`Created collection "${name}"`)
     } catch {
-      message.error("Could not create collection")
+      if (isCurrentAuthority(requestOwner)) {
+        message.error("Could not create collection")
+      }
     }
-  }, [message, refetchMoodboards])
+  }, [authorityOwner, isCurrentAuthority, message, refetchMoodboards, setSelectedMoodboardId])
 
   const renameMoodboard = React.useCallback(async () => {
+    const requestOwner = authorityOwner
+    if (!isCurrentAuthority(requestOwner)) return
     if (!selectedMoodboard) {
       message.warning("Select a collection first")
       return
@@ -518,7 +642,11 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
       placeholder: 'Collection name',
       okText: 'Rename',
     })
-    if (!nextName || nextName === selectedMoodboard.name) return
+    if (
+      !nextName ||
+      nextName === selectedMoodboard.name ||
+      !isCurrentAuthority(requestOwner)
+    ) return
     const expectedVersion = selectedMoodboard.version ?? 1
     try {
       await bgRequest({
@@ -527,14 +655,20 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
         headers: { "expected-version": String(expectedVersion) } as any,
         body: { name: nextName }
       })
+      if (!isCurrentAuthority(requestOwner)) return
       await refetchMoodboards()
+      if (!isCurrentAuthority(requestOwner)) return
       message.success(`Renamed collection to "${nextName}"`)
     } catch {
-      message.error("Could not rename collection")
+      if (isCurrentAuthority(requestOwner)) {
+        message.error("Could not rename collection")
+      }
     }
-  }, [message, refetchMoodboards, selectedMoodboard])
+  }, [authorityOwner, isCurrentAuthority, message, refetchMoodboards, selectedMoodboard])
 
   const deleteMoodboard = React.useCallback(async () => {
+    const requestOwner = authorityOwner
+    if (!isCurrentAuthority(requestOwner)) return
     if (!selectedMoodboard) {
       message.warning("Select a collection first")
       return
@@ -545,7 +679,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
       okText: "Delete",
       cancelText: "Cancel"
     })
-    if (!ok) return
+    if (!ok || !isCurrentAuthority(requestOwner)) return
     const expectedVersion = selectedMoodboard.version ?? 1
     try {
       await bgRequest({
@@ -553,20 +687,27 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
         method: "DELETE" as any,
         headers: { "expected-version": String(expectedVersion) } as any
       })
+      if (!isCurrentAuthority(requestOwner)) return
       await refetchMoodboards()
+      if (!isCurrentAuthority(requestOwner)) return
       setPage(1)
       message.success("Collection deleted")
     } catch {
-      message.error("Could not delete collection")
+      if (isCurrentAuthority(requestOwner)) {
+        message.error("Could not delete collection")
+      }
     }
-  }, [confirmDanger, message, refetchMoodboards, selectedMoodboard])
+  }, [authorityOwner, confirmDanger, isCurrentAuthority, message, refetchMoodboards, selectedMoodboard])
 
   // ---- notebook server operations ----
   const fetchServerNotebooks = React.useCallback(async (): Promise<NotebookFilterOption[]> => {
+    const requestOwner = authorityOwner
+    if (!isCurrentAuthority(requestOwner)) return []
     const merged: NotebookFilterOption[] = []
     const seenIds = new Set<number>()
     let offset = 0
     for (let pageIndex = 0; pageIndex < NOTEBOOK_COLLECTION_MAX_PAGES; pageIndex += 1) {
+      if (!isCurrentAuthority(requestOwner)) return []
       const params = new URLSearchParams()
       params.set('limit', String(NOTEBOOK_COLLECTION_PAGE_SIZE))
       params.set('offset', String(offset))
@@ -575,6 +716,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
         path: `/api/v1/notes/collections?${params.toString()}` as any,
         method: 'GET' as any
       })
+      if (!isCurrentAuthority(requestOwner)) return []
       const pageItems = normalizeNotebookCollectionsResponse(response)
       for (const notebook of pageItems) {
         if (seenIds.has(notebook.id)) continue
@@ -591,7 +733,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
       offset += NOTEBOOK_COLLECTION_PAGE_SIZE
     }
     return normalizeNotebookOptions(merged)
-  }, [])
+  }, [authorityOwner, isCurrentAuthority])
 
   const upsertNotebookOnServer = React.useCallback(
     async ({
@@ -603,6 +745,8 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
       keywords: string[]
       existingNotebookId?: number | null
     }): Promise<NotebookFilterOption | null> => {
+      const requestOwner = authorityOwner
+      if (!isCurrentAuthority(requestOwner)) return null
       const payload = {
         name: notebookName,
         parent_id: null,
@@ -611,40 +755,50 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
 
       if (existingNotebookId != null) {
         try {
+          if (!isCurrentAuthority(requestOwner)) return null
           const updated = await bgRequest<any>({
             path: `/api/v1/notes/collections/${existingNotebookId}` as any,
             method: 'PATCH' as any,
             body: payload as any
           })
+          if (!isCurrentAuthority(requestOwner)) return null
           const normalizedUpdated = normalizeNotebookCollectionFromServer(updated)
           if (normalizedUpdated) return normalizedUpdated
         } catch {
+          if (!isCurrentAuthority(requestOwner)) return null
           // Fall back to create for local IDs that do not exist server-side.
         }
       }
 
+      if (!isCurrentAuthority(requestOwner)) return null
       const created = await bgRequest<any>({
         path: '/api/v1/notes/collections' as any,
         method: 'POST' as any,
         body: payload as any
       })
+      if (!isCurrentAuthority(requestOwner)) return null
       return normalizeNotebookCollectionFromServer(created)
     },
-    []
+    [authorityOwner, isCurrentAuthority]
   )
 
   const deleteNotebookOnServer = React.useCallback(async (notebookId: number) => {
+    const requestOwner = authorityOwner
+    if (!isCurrentAuthority(requestOwner)) return
     await bgRequest<any>({
       path: `/api/v1/notes/collections/${notebookId}` as any,
       method: 'DELETE' as any
     })
-  }, [])
+  }, [authorityOwner, isCurrentAuthority])
 
   const migrateLocalNotebooksToServer = React.useCallback(
     async (localNotebooks: NotebookFilterOption[]): Promise<NotebookFilterOption[]> => {
+      const requestOwner = authorityOwner
+      if (!isCurrentAuthority(requestOwner)) return []
       const normalizedLocal = normalizeNotebookOptions(localNotebooks)
       if (normalizedLocal.length === 0) return []
       for (const notebook of normalizedLocal) {
+        if (!isCurrentAuthority(requestOwner)) return []
         try {
           await upsertNotebookOnServer({
             notebookName: notebook.name,
@@ -655,13 +809,17 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
           // Continue best-effort migration for remaining notebooks.
         }
       }
+      if (!isCurrentAuthority(requestOwner)) return []
       const fetched = await fetchServerNotebooks()
+      if (!isCurrentAuthority(requestOwner)) return []
       return fetched.length > 0 ? fetched : normalizedLocal
     },
-    [fetchServerNotebooks, upsertNotebookOnServer]
+    [authorityOwner, fetchServerNotebooks, isCurrentAuthority, upsertNotebookOnServer]
   )
 
   const createNotebookFromCurrentKeywords = React.useCallback(async () => {
+    const requestOwner = authorityOwner
+    if (!isCurrentAuthority(requestOwner)) return
     const normalizedKeywords = normalizeNotebookKeywords(keywordTokens)
     if (normalizedKeywords.length === 0) {
       message.info('Select at least one tag before saving a filter.')
@@ -677,7 +835,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
       placeholder: 'Filter name',
       okText: 'Save',
     })
-    if (rawName == null) return
+    if (rawName == null || !isCurrentAuthority(requestOwner)) return
 
     const notebookName = normalizeNotebookName(rawName)
     if (!notebookName) {
@@ -721,13 +879,18 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     setPage(1)
     message.success(`Saved filter "${notebookName}"`)
 
-    if (isOnline && selectedNotebookAfterSave) {
+    if (
+      isOnline &&
+      selectedNotebookAfterSave &&
+      isCurrentAuthority(requestOwner)
+    ) {
       try {
         const persisted = await upsertNotebookOnServer({
           notebookName: selectedNotebookAfterSave.name,
           keywords: selectedNotebookAfterSave.keywords,
           existingNotebookId: selectedNotebookAfterSave.id
         })
+        if (!isCurrentAuthority(requestOwner)) return
         if (persisted) {
           setNotebookOptions((current) =>
             normalizeNotebookOptions(
@@ -741,12 +904,16 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
           setSelectedNotebookId(persisted.id)
         }
       } catch {
-        message.warning('Saved locally, but failed to sync saved filter to server.')
+        if (isCurrentAuthority(requestOwner)) {
+          message.warning('Saved locally, but failed to sync saved filter to server.')
+        }
       }
     }
-  }, [isOnline, keywordTokens, message, notebookOptions, setKeywordTokens, upsertNotebookOnServer])
+  }, [authorityOwner, isCurrentAuthority, isOnline, keywordTokens, message, notebookOptions, setKeywordTokens, setNotebookOptions, setSelectedNotebookId, upsertNotebookOnServer])
 
   const removeSelectedNotebook = React.useCallback(async () => {
+    const requestOwner = authorityOwner
+    if (!isCurrentAuthority(requestOwner)) return
     if (selectedNotebookId == null) return
     const notebookToRemove =
       notebookOptions.find((entry) => entry.id === selectedNotebookId) || null
@@ -760,7 +927,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
       okText: 'Remove',
       cancelText: 'Cancel'
     })
-    if (!ok) return
+    if (!ok || !isCurrentAuthority(requestOwner)) return
     setNotebookOptions((current) =>
       current.filter((entry) => entry.id !== notebookToRemove.id)
     )
@@ -770,11 +937,14 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     if (isOnline) {
       try {
         await deleteNotebookOnServer(notebookToRemove.id)
+        if (!isCurrentAuthority(requestOwner)) return
       } catch {
-        message.warning('Removed locally, but failed to remove saved filter on server.')
+        if (isCurrentAuthority(requestOwner)) {
+          message.warning('Removed locally, but failed to remove saved filter on server.')
+        }
       }
     }
-  }, [confirmDanger, deleteNotebookOnServer, isOnline, message, notebookOptions, selectedNotebookId])
+  }, [authorityOwner, confirmDanger, deleteNotebookOnServer, isCurrentAuthority, isOnline, message, notebookOptions, selectedNotebookId, setNotebookOptions, setSelectedNotebookId])
 
   const handleClearFilters = React.useCallback(() => {
     setQuery('')
@@ -783,12 +953,12 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     setSelectedNotebookId(null)
     setListViewMode('list')
     setPage(1)
-  }, [setKeywordTokens, setListViewMode])
+  }, [setKeywordTokens, setListViewMode, setSelectedNotebookId])
 
   const clearBulkSelection = React.useCallback(() => {
     setBulkSelectedIds([])
-    bulkSelectionAnchorRef.current = null
-  }, [])
+    bulkSelectionAnchorRef.current.value = null
+  }, [setBulkSelectedIds])
 
   const handleToggleBulkSelection = React.useCallback(
     (id: string | number, checked: boolean, shiftKey: boolean) => {
@@ -796,7 +966,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
       const targetId = String(id)
       setBulkSelectedIds((current) => {
         const next = new Set(current)
-        const anchorId = bulkSelectionAnchorRef.current
+        const anchorId = bulkSelectionAnchorRef.current.value
         const canApplyRange =
           shiftKey &&
           !!anchorId &&
@@ -817,11 +987,11 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
           else next.delete(targetId)
         }
 
-        bulkSelectionAnchorRef.current = targetId
+        bulkSelectionAnchorRef.current.value = targetId
         return orderedVisibleNoteIds.filter((visibleId) => next.has(visibleId))
       })
     },
-    [listMode, orderedVisibleNoteIds]
+    [listMode, orderedVisibleNoteIds, setBulkSelectedIds]
   )
 
   // ---- search debounce ----
@@ -847,12 +1017,12 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
   React.useEffect(() => {
     if (listMode !== 'active') {
       setBulkSelectedIds([])
-      bulkSelectionAnchorRef.current = null
+      bulkSelectionAnchorRef.current.value = null
       return
     }
     if (orderedVisibleNoteIds.length === 0) {
       setBulkSelectedIds([])
-      bulkSelectionAnchorRef.current = null
+      bulkSelectionAnchorRef.current.value = null
       return
     }
     setBulkSelectedIds((current) => {
@@ -864,12 +1034,12 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
       return unchanged ? current : filtered
     })
     if (
-      bulkSelectionAnchorRef.current &&
-      !orderedVisibleNoteIds.includes(bulkSelectionAnchorRef.current)
+      bulkSelectionAnchorRef.current.value &&
+      !orderedVisibleNoteIds.includes(bulkSelectionAnchorRef.current.value)
     ) {
-      bulkSelectionAnchorRef.current = null
+      bulkSelectionAnchorRef.current.value = null
     }
-  }, [listMode, orderedVisibleNoteIds])
+  }, [listMode, orderedVisibleNoteIds, setBulkSelectedIds])
 
   // ---- page size persistence ----
   React.useEffect(() => {
@@ -895,10 +1065,32 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
   // ---- notebook persistence ----
   React.useEffect(() => {
     let cancelled = false
+    const requestOwner = authorityOwner
+    notebookSettingsHydratedRef.current = null
+    if (!isCurrentAuthority(requestOwner)) {
+      return () => {
+        cancelled = true
+      }
+    }
     void (async () => {
       try {
+        if (requestOwner.scope !== undefined) {
+          if (!isOnline) {
+            setNotebookOptions([])
+            return
+          }
+          try {
+            const serverNotebooks = await fetchServerNotebooks()
+            if (cancelled || !isCurrentAuthority(requestOwner)) return
+            setNotebookOptions(serverNotebooks)
+          } catch {
+            if (cancelled || !isCurrentAuthority(requestOwner)) return
+            setNotebookOptions([])
+          }
+          return
+        }
         const savedNotebooks = await getSetting(NOTES_NOTEBOOKS_SETTING)
-        if (cancelled) return
+        if (cancelled || !isCurrentAuthority(requestOwner)) return
         const localNotebooks = normalizeNotebookOptions(savedNotebooks)
         if (!isOnline) {
           setNotebookOptions(localNotebooks)
@@ -906,43 +1098,49 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
         }
         try {
           const serverNotebooks = await fetchServerNotebooks()
-          if (cancelled) return
+          if (cancelled || !isCurrentAuthority(requestOwner)) return
           if (serverNotebooks.length > 0) {
             setNotebookOptions(serverNotebooks)
             return
           }
           if (localNotebooks.length > 0) {
             const migrated = await migrateLocalNotebooksToServer(localNotebooks)
-            if (cancelled) return
+            if (cancelled || !isCurrentAuthority(requestOwner)) return
             setNotebookOptions(migrated)
             return
           }
           setNotebookOptions([])
         } catch {
-          if (cancelled) return
+          if (cancelled || !isCurrentAuthority(requestOwner)) return
           setNotebookOptions(localNotebooks)
         }
       } finally {
-        if (!cancelled) {
-          notebookSettingsHydratedRef.current = true
+        if (!cancelled && isCurrentAuthority(requestOwner)) {
+          notebookSettingsHydratedRef.current = {
+            authorityOwner: requestOwner
+          }
         }
       }
     })()
     return () => {
       cancelled = true
     }
-  }, [fetchServerNotebooks, isOnline, migrateLocalNotebooksToServer])
+  }, [authorityOwner, fetchServerNotebooks, isCurrentAuthority, isOnline, migrateLocalNotebooksToServer, setNotebookOptions])
 
   React.useEffect(() => {
-    if (!notebookSettingsHydratedRef.current) return
+    if (
+      authorityOwner.scope !== undefined ||
+      !isCurrentAuthority(authorityOwner) ||
+      notebookSettingsHydratedRef.current?.authorityOwner !== authorityOwner
+    ) return
     void setSetting(NOTES_NOTEBOOKS_SETTING, normalizeNotebookOptions(notebookOptions))
-  }, [notebookOptions])
+  }, [authorityOwner, isCurrentAuthority, notebookOptions])
 
   React.useEffect(() => {
     if (selectedNotebookId == null) return
     if (notebookOptions.some((entry) => entry.id === selectedNotebookId)) return
     setSelectedNotebookId(null)
-  }, [notebookOptions, selectedNotebookId])
+  }, [notebookOptions, selectedNotebookId, setSelectedNotebookId])
 
   // ---- cleanup ----
   React.useEffect(() => {
