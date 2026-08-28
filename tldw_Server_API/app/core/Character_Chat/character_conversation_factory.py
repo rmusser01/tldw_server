@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
+import unicodedata
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -15,8 +17,18 @@ from tldw_Server_API.app.core.Character_Chat.character_behavior_snapshot import 
     BehaviorSnapshotV1,
     build_behavior_snapshot,
 )
+from tldw_Server_API.app.core.Character_Chat.modules.character_generation_presets import (
+    resolve_character_generation_settings,
+)
 from tldw_Server_API.app.core.Character_Chat.world_book_manager import WorldBookService
+from tldw_Server_API.app.core.Chat.chat_service import is_model_known_for_provider
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import InputError
+from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
+from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
+    ensure_app_config,
+    normalize_provider,
+    resolve_provider_model,
+)
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
@@ -38,10 +50,10 @@ _CREDENTIAL_FIELDS = frozenset(
         "private_key",
         "refresh_token",
         "secret",
-        "token",
         "x_api_key",
     }
 )
+_CREDENTIAL_SEPARATOR_RE = re.compile(r"[\W_]+")
 
 
 class _SourceDrift(RuntimeError):
@@ -77,7 +89,7 @@ def _safe_json(value: Any) -> Any:
         result: dict[str, Any] = {}
         for key, item in value.items():
             key_text = str(key)
-            if key_text.lower() in _CREDENTIAL_FIELDS or isinstance(
+            if _is_credential_key(key_text) or isinstance(
                 item, (bytes, bytearray, memoryview)
             ):
                 continue
@@ -92,6 +104,26 @@ def _safe_json(value: Any) -> Any:
     return str(value)
 
 
+def _is_credential_key(key: str) -> bool:
+    normalized = _CREDENTIAL_SEPARATOR_RE.sub(
+        "_",
+        unicodedata.normalize("NFKC", key).casefold(),
+    ).strip("_")
+    return normalized in _CREDENTIAL_FIELDS
+
+
+def _reject_credential_settings(value: Any, *, path: str = "conversation_settings") -> None:
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            key_text = str(key)
+            if _is_credential_key(key_text):
+                raise InputError(f"{path} contains credential-bearing key {key_text!r}.")
+            _reject_credential_settings(item, path=f"{path}.{key_text}")
+    elif isinstance(value, (list, tuple)):
+        for index, item in enumerate(value):
+            _reject_credential_settings(item, path=f"{path}[{index}]")
+
+
 def _decode_json(value: Any, default: Any) -> Any:
     if isinstance(value, str):
         try:
@@ -101,23 +133,14 @@ def _decode_json(value: Any, default: Any) -> Any:
     return value if value is not None else default
 
 
-def _character_generation_defaults(character: Mapping[str, Any]) -> dict[str, Any]:
-    """Read only the four completion sampling fields from character extensions."""
-    extensions = _decode_json(character.get("extensions"), {})
-    tldw = extensions.get("tldw") if isinstance(extensions, dict) else None
-    generation = tldw.get("generation") if isinstance(tldw, dict) else None
-    containers = [
-        item
-        for item in (generation, extensions, character)
-        if isinstance(item, Mapping)
-    ]
-    result: dict[str, Any] = {}
-    for key in ("temperature", "top_p", "repetition_penalty", "stop"):
-        for container in containers:
-            if key in container:
-                result[key] = _safe_json(container[key])
-                break
-    return result
+def _character_sampling(character: Mapping[str, Any]) -> dict[str, Any]:
+    resolved = resolve_character_generation_settings(dict(character))
+    return {
+        "temperature": resolved.get("temperature", 0.7),
+        "top_p": resolved.get("top_p", 1.0),
+        "repetition_penalty": resolved.get("repetition_penalty", 1.0),
+        "stop": resolved.get("stop", []),
+    }
 
 
 def _select_rows(conn: Any, query: str, params: tuple[Any, ...]) -> list[dict[str, Any]]:
@@ -288,13 +311,14 @@ def _materialize_behavior(
         if isinstance(extensions, dict):
             prompt_extensions["character_extensions"] = extensions
         memory = memory_by_character_id.get(str(character_id))
+        source = {
+            "kind": "character",
+            "id": str(character_id),
+            "version": int(character.get("version") or 1),
+        }
         participants.append(
             {
-                "source": {
-                    "kind": "character",
-                    "id": str(character_id),
-                    "version": int(character.get("version") or 1),
-                },
+                "source": source,
                 "identity": {
                     "name": str(character.get("name") or "Character"),
                     "aliases": _aliases(character),
@@ -314,9 +338,10 @@ def _materialize_behavior(
                     character,
                     primary_greeting if index == 0 else None,
                 ),
-                "generation_defaults": _safe_json(
-                    _character_generation_defaults(character)
-                ),
+                "generation_defaults": {
+                    "source": source,
+                    "sampling": _character_sampling(character),
+                },
                 "exemplars": _load_exemplars(conn, character_id),
                 "world_books": _load_world_books(conn, character_id),
                 "default_memory": (
@@ -344,13 +369,7 @@ def _normalize_sampling(
     character: Mapping[str, Any],
 ) -> dict[str, Any] | None:
     if sampling is None:
-        resolved = _character_generation_defaults(character)
-        candidate: dict[str, Any] = {
-            "temperature": resolved.get("temperature", 0.7),
-            "top_p": resolved.get("top_p", 1.0),
-            "repetition_penalty": resolved.get("repetition_penalty", 1.0),
-            "stop": resolved.get("stop", []),
-        }
+        candidate = _character_sampling(character)
     else:
         if set(sampling) != _SAMPLING_FIELDS:
             return None
@@ -384,14 +403,55 @@ def _resolve_effective_completion(
     model: str | None,
     sampling: Mapping[str, Any] | None,
     character: Mapping[str, Any],
+    app_config: dict[str, Any],
 ) -> tuple[dict[str, Any] | None, str | None]:
-    resolved_provider = str(provider or os.getenv("DEFAULT_LLM_PROVIDER") or "").strip()
-    resolved_model = str(model or os.getenv("CHAR_CHAT_MODEL") or "").strip()
-    if os.getenv("PYTEST_CURRENT_TEST"):
-        resolved_provider = resolved_provider or "local-llm"
-        resolved_model = resolved_model or "local-test"
+    configured_provider = ""
+    for section_name in ("llm_api_settings", "API"):
+        section = app_config.get(section_name)
+        if isinstance(section, Mapping):
+            configured_provider = str(
+                section.get("default_api") or section.get("default_provider") or ""
+            ).strip()
+            if configured_provider:
+                break
+    if not configured_provider:
+        configured_provider = str(
+            app_config.get("default_api") or app_config.get("default_provider") or ""
+        ).strip()
+    provider_candidate = str(
+        provider
+        or configured_provider
+        or os.getenv("DEFAULT_LLM_PROVIDER")
+        or "openai"
+    ).strip()
+    registry = get_registry()
+    resolved_provider = registry.resolve_provider_name(
+        normalize_provider(provider_candidate)
+    )
+    resolved_model_value = model or (
+        resolve_provider_model(resolved_provider, app_config)
+        if resolved_provider
+        else None
+    )
+    resolved_model = (
+        resolved_model_value.strip()
+        if isinstance(resolved_model_value, str)
+        else ""
+    )
     normalized_sampling = _normalize_sampling(sampling, character)
-    if not resolved_provider or not resolved_model or normalized_sampling is None:
+    adapter = registry.get_adapter(resolved_provider) if resolved_provider else None
+    model_known = (
+        is_model_known_for_provider(resolved_provider, resolved_model)
+        if resolved_provider and resolved_model
+        else None
+    )
+    if (
+        not resolved_provider
+        or adapter is None
+        or not resolved_model
+        or model_known is False
+        or normalized_sampling is None
+    ):
         return None, "incomplete_effective_settings"
     return {
         "provider": resolved_provider,
@@ -434,6 +494,9 @@ def create_character_conversation(
     if primary_id <= 0:
         raise InputError("character_id must be a positive integer.")
 
+    creation_settings = dict(conversation_settings or {})
+    _reject_credential_settings(creation_settings)
+
     # Ensure optional world-book tables exist before opening the create transaction.
     WorldBookService(db)
     memory = dict(memory_by_character_id or {})
@@ -446,6 +509,14 @@ def create_character_conversation(
             primary_greeting=primary_greeting,
             max_snapshot_bytes=max_snapshot_bytes,
         )
+    app_config = ensure_app_config()
+    effective, reason = _resolve_effective_completion(
+        provider=provider,
+        model=model,
+        sampling=sampling,
+        character=materialized.primary_character,
+        app_config=app_config,
+    )
 
     for attempt in range(2):
         try:
@@ -461,13 +532,7 @@ def create_character_conversation(
                 if current.snapshot.canonical_bytes != materialized.snapshot.canonical_bytes:
                     raise _SourceDrift
 
-                effective, reason = _resolve_effective_completion(
-                    provider=provider,
-                    model=model,
-                    sampling=sampling,
-                    character=current.primary_character,
-                )
-                settings = dict(conversation_settings or {})
+                settings = dict(creation_settings)
                 settings["participantCharacterIds"] = ordered_ids
                 if prompt_preset_id:
                     settings["promptPreset"] = prompt_preset_id

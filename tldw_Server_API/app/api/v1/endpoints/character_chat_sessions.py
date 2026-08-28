@@ -4557,7 +4557,7 @@ async def create_chat_session(
                 participant_character_ids=session_data.participant_character_ids,
                 prompt_preset_id=session_data.prompt_preset_id,
                 memory_by_character_id=session_data.memory_by_character_id,
-                provider=session_data.provider or _get_default_provider(),
+                provider=session_data.provider,
                 model=session_data.model,
                 sampling={
                     "temperature": session_data.temperature,
@@ -7398,6 +7398,12 @@ async def update_chat_settings(
         scope = _resolve_chat_scope(scope_type, workspace_id)
         conversation = db.get_conversation_by_id(chat_id)
         _verify_chat_ownership(conversation, current_user.id, chat_id, scope)
+
+        if "roleplayResumeV1" in (payload.settings or {}):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="roleplayResumeV1 is reserved creation state",
+            )
 
         incoming_settings = _validate_chat_settings_payload(
             payload.settings or {},

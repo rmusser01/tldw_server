@@ -49,12 +49,14 @@ def _create_behavior_sources(db):
             "post_history_instructions": "Never invent prior events.",
             "extensions": {
                 "api_key": "never-store-this-credential",
+                "token": "legitimate-token-content",
+                "token_budget": 777,
                 "tldw": {
                     "generation": {
-                        "temperature": 0.35,
-                        "top_p": 0.8,
-                        "repetition_penalty": 1.15,
-                        "stop": ["<END>"],
+                        "temperature": "0.35",
+                        "topP": "0.8",
+                        "repetitionPenalty": "1.15",
+                        "stopSequences": "<END>; <DONE>",
                     }
                 }
             },
@@ -70,6 +72,16 @@ def _create_behavior_sources(db):
             "first_message": "Show me the evidence.",
             "message_example": "{{char}}: Which source proves that?",
             "post_history_instructions": "Ask for sources.",
+            "extensions": {
+                "tldw": {
+                    "generation": {
+                        "temperature": "0.45",
+                        "topP": "0.65",
+                        "repetitionPenalty": "1.05",
+                        "stopSequences": ["<BEX>"],
+                    }
+                }
+            },
         }
     )
     exemplar = db.add_character_exemplar(
@@ -135,8 +147,8 @@ def test_api_creation_captures_all_sources_and_redacts_snapshot_body(
                 str(sources["primary_id"]): "Ari remembers the brass key.",
                 str(sources["second_id"]): "Bex remembers the flooded stairs.",
             },
-            "provider": "openai",
-            "model": "gpt-snapshot",
+            "provider": "local-llm",
+            "model": "local-test",
             "temperature": 0.0,
             "top_p": 0.0,
             "repetition_penalty": 0.0,
@@ -172,14 +184,38 @@ def test_api_creation_captures_all_sources_and_redacts_snapshot_body(
     assert primary["world_books"][0]["id"] == sources["world_book_id"]
     assert primary["world_books"][0]["entries"][0]["id"] == sources["world_book_entry_id"]
     assert primary["default_memory"]["content"] == "Ari remembers the brass key."
+    assert primary["generation_defaults"] == {
+        "source": primary["source"],
+        "sampling": {
+            "temperature": 0.35,
+            "top_p": 0.8,
+            "repetition_penalty": 1.15,
+            "stop": ["<END>", "<DONE>"],
+        },
+    }
+    secondary = participants[1]
+    assert secondary["generation_defaults"] == {
+        "source": secondary["source"],
+        "sampling": {
+            "temperature": 0.45,
+            "top_p": 0.65,
+            "repetition_penalty": 1.05,
+            "stop": ["<BEX>"],
+        },
+    }
+    character_extensions = primary["prompt"]["prompt_relevant_extensions"][
+        "character_extensions"
+    ]
+    assert character_extensions["token"] == "legitimate-token-content"
+    assert character_extensions["token_budget"] == 777
     assert primary["greeting"] == {
         "content": "The archive remembers you, {{user}}.",
         "source": "alternate",
         "source_index": 0,
     }
     assert state["effective_completion"] == {
-        "provider": "openai",
-        "model": "gpt-snapshot",
+        "provider": "local-llm",
+        "model": "local-test",
         "sampling": {
             "temperature": 0.0,
             "top_p": 0.0,
@@ -190,6 +226,341 @@ def test_api_creation_captures_all_sources_and_redacts_snapshot_body(
     snapshot_bytes, settings_bytes = _snapshot_storage_bytes(character_db, body["id"])
     assert "never-store-this-credential" not in snapshot_bytes
     assert "never-store-this-credential" not in settings_bytes
+
+
+@pytest.mark.integration
+def test_configured_defaults_and_generation_aliases_create_valid_effective_settings(
+    character_db,
+    monkeypatch,
+):
+    monkeypatch.delenv("DEFAULT_LLM_PROVIDER", raising=False)
+    monkeypatch.delenv("DEFAULT_MODEL_LOCAL_LLM", raising=False)
+    monkeypatch.delenv("CHAR_CHAT_MODEL", raising=False)
+    app_config = {
+        "llm_api_settings": {"default_api": "local_llm"},
+        "local_llm": {"model": "configured-local-model"},
+    }
+    monkeypatch.setattr(
+        character_conversation_factory,
+        "ensure_app_config",
+        lambda: app_config,
+        raising=False,
+    )
+    character_id = character_db.add_character_card(
+        {
+            "name": "Configured Ari",
+            "extensions": {
+                "tldw": {
+                    "generation": {
+                        "temperature": "0.25",
+                        "topP": "0.55",
+                        "repetitionPenalty": "1.2",
+                        "stopSequences": "<ONE>; <TWO>",
+                    }
+                }
+            },
+        }
+    )
+
+    conversation_id = create_character_conversation(
+        character_db,
+        conversation_data={
+            "character_id": character_id,
+            "title": "Configured defaults",
+            "client_id": "1",
+        },
+        conversation_settings={
+            "token": "legitimate-settings-token",
+            "token_budget": 2048,
+        },
+    )
+
+    state = character_db.get_roleplay_resume_state(conversation_id)
+    expected_sampling = {
+        "temperature": 0.25,
+        "top_p": 0.55,
+        "repetition_penalty": 1.2,
+        "stop": ["<ONE>", "<TWO>"],
+    }
+    assert state["resume_eligible"] is True
+    assert state["effective_completion"] == {
+        "provider": "local-llm",
+        "model": "configured-local-model",
+        "sampling": expected_sampling,
+    }
+    assert state["settings"]["token"] == "legitimate-settings-token"
+    assert state["settings"]["token_budget"] == 2048
+    generation = state["behavior_snapshot"]["payload"]["participants"][0][
+        "generation_defaults"
+    ]
+    assert generation == {
+        "source": {"kind": "character", "id": str(character_id), "version": 1},
+        "sampling": expected_sampling,
+    }
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("provider", "model", "catalog_result"),
+    [
+        ("definitely-not-a-provider", "model", None),
+        ("local-llm", "known-invalid-model", False),
+    ],
+)
+def test_invalid_provider_or_model_is_explicitly_ineligible(
+    character_db,
+    monkeypatch,
+    provider,
+    model,
+    catalog_result,
+):
+    monkeypatch.setattr(
+        character_conversation_factory,
+        "is_model_known_for_provider",
+        lambda *_args: catalog_result,
+        raising=False,
+    )
+    character_id = character_db.add_character_card({"name": "Invalid Settings Ari"})
+
+    conversation_id = create_character_conversation(
+        character_db,
+        conversation_data={
+            "character_id": character_id,
+            "title": "Invalid settings",
+            "client_id": "1",
+        },
+        provider=provider,
+        model=model,
+        sampling={
+            "temperature": 0.0,
+            "top_p": 0.0,
+            "repetition_penalty": 0.0,
+            "stop": [],
+        },
+    )
+
+    state = character_db.get_roleplay_resume_state(conversation_id)
+    assert state["resume_eligible"] is False
+    assert state["resume_ineligible_reason"] == "incomplete_effective_settings"
+    assert state["effective_completion"] is None
+
+
+@pytest.mark.integration
+def test_drift_retry_freezes_initial_provider_model_and_sampling(
+    character_db,
+    monkeypatch,
+):
+    app_config = {
+        "llm_api_settings": {"default_api": "local-llm"},
+        "local_llm": {"model": "initial-model"},
+    }
+    monkeypatch.setattr(
+        character_conversation_factory,
+        "ensure_app_config",
+        lambda: app_config,
+        raising=False,
+    )
+    character_id = character_db.add_character_card(
+        {
+            "name": "Frozen Defaults Ari",
+            "extensions": {
+                "tldw": {
+                    "generation": {
+                        "temperature": "0.2",
+                        "topP": "0.4",
+                        "repetitionPenalty": "1.1",
+                        "stopSequences": ["<INITIAL>"],
+                    }
+                }
+            },
+        }
+    )
+    real_materialize = character_conversation_factory._materialize_behavior
+    call_count = 0
+
+    def drift_once(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        materialized = real_materialize(*args, **kwargs)
+        if call_count >= 2:
+            payload = materialized.snapshot.payload
+            payload["participants"][0]["prompt"]["description"] += " drift"
+            materialized = replace(
+                materialized,
+                snapshot=build_behavior_snapshot(
+                    payload,
+                    max_bytes=kwargs["max_snapshot_bytes"],
+                ),
+            )
+        if call_count == 2:
+            app_config["llm_api_settings"]["default_api"] = "definitely-not-a-provider"
+            app_config["local_llm"]["model"] = "changed-model"
+            monkeypatch.setenv("DEFAULT_LLM_PROVIDER", "definitely-not-a-provider")
+            monkeypatch.setenv("CHAR_CHAT_MODEL", "changed-model")
+        return materialized
+
+    monkeypatch.setattr(
+        character_conversation_factory,
+        "_materialize_behavior",
+        drift_once,
+    )
+
+    conversation_id = create_character_conversation(
+        character_db,
+        conversation_data={
+            "character_id": character_id,
+            "title": "Frozen defaults",
+            "client_id": "1",
+        },
+    )
+
+    assert call_count == 4
+    assert character_db.get_roleplay_resume_state(conversation_id)[
+        "effective_completion"
+    ] == {
+        "provider": "local-llm",
+        "model": "initial-model",
+        "sampling": {
+            "temperature": 0.2,
+            "top_p": 0.4,
+            "repetition_penalty": 1.1,
+            "stop": ["<INITIAL>"],
+        },
+    }
+
+
+@pytest.mark.integration
+def test_credential_settings_rejection_rolls_back_creation(character_db):
+    character_id = character_db.add_character_card({"name": "Credential Ari"})
+
+    with pytest.raises(InputError, match="credential"):
+        create_character_conversation(
+            character_db,
+            conversation_data={
+                "character_id": character_id,
+                "title": "Credential settings",
+                "client_id": "1",
+            },
+            provider="local-llm",
+            model="local-test",
+            sampling={
+                "temperature": 0.0,
+                "top_p": 0.0,
+                "repetition_penalty": 0.0,
+                "stop": [],
+            },
+            conversation_settings={
+                "nested": {"api.key": "must-not-persist"},
+            },
+        )
+
+    with character_db.transaction() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM conversations").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM conversation_settings").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM conversation_behavior_snapshots").fetchone()[0] == 0
+
+
+@pytest.mark.integration
+def test_reserved_roleplay_settings_update_is_rejected(
+    test_client,
+    auth_headers,
+    character_db,
+):
+    character_id = character_db.add_character_card({"name": "Reserved Ari"})
+    created = test_client.post(
+        "/api/v1/chats/",
+        headers=auth_headers,
+        json={
+            "character_id": character_id,
+            "provider": "local-llm",
+            "model": "local-test",
+        },
+    )
+    assert created.status_code == 201, created.text
+    conversation_id = created.json()["id"]
+    before = _snapshot_storage_bytes(character_db, conversation_id)[1]
+
+    response = test_client.put(
+        f"/api/v1/chats/{conversation_id}/settings",
+        headers=auth_headers,
+        json={
+            "settings": {
+                "roleplayResumeV1": {
+                    "resumeEligible": True,
+                    "resumeIneligibleReason": None,
+                    "effectiveCompletion": {},
+                }
+            }
+        },
+    )
+
+    assert response.status_code == 422
+    assert _snapshot_storage_bytes(character_db, conversation_id)[1] == before
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "forged_effective",
+    [
+        {},
+        {
+            "provider": "definitely-not-a-provider",
+            "model": "forged-model",
+            "sampling": {
+                "temperature": 0.0,
+                "top_p": 0.0,
+                "repetition_penalty": 0.0,
+                "stop": [],
+            },
+        },
+    ],
+)
+def test_forged_readiness_is_invalid_on_store_and_api_reads(
+    test_client,
+    auth_headers,
+    character_db,
+    forged_effective,
+):
+    character_id = character_db.add_character_card({"name": "Forged Ari"})
+    created = test_client.post(
+        "/api/v1/chats/",
+        headers=auth_headers,
+        json={
+            "character_id": character_id,
+            "provider": "local-llm",
+            "model": "local-test",
+        },
+    )
+    assert created.status_code == 201, created.text
+    conversation_id = created.json()["id"]
+    forged = {
+        "roleplayResumeV1": {
+            "resumeEligible": True,
+            "resumeIneligibleReason": None,
+            "effectiveCompletion": forged_effective,
+        }
+    }
+    with character_db.transaction() as conn:
+        conn.execute(
+            "UPDATE conversation_settings SET settings_json = ? WHERE conversation_id = ?",
+            (json.dumps(forged), conversation_id),
+        )
+
+    state = character_db.get_roleplay_resume_state(conversation_id)
+    assert state["resume_eligible"] is False
+    assert state["resume_ineligible_reason"] == "invalid_effective_settings"
+    assert state["effective_completion"] is None
+
+    response = test_client.get(
+        f"/api/v1/chats/{conversation_id}",
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["resume_eligible"] is False
+    assert body["resume_ineligible_reason"] == "invalid_effective_settings"
+    assert "canonical_json" not in json.dumps(body)
+    assert "payload" not in json.dumps(body)
 
 
 @pytest.mark.integration
@@ -208,8 +579,8 @@ def test_source_mutation_and_deployment_default_changes_do_not_change_creation_b
             "participant_character_ids": [sources["second_id"]],
             "prompt_preset_id": "snapshot-cinematic",
             "memory_by_character_id": {str(sources["primary_id"]): "Remember the brass key."},
-            "provider": "openai",
-            "model": "gpt-snapshot",
+            "provider": "local-llm",
+            "model": "local-test",
             "temperature": 0.0,
             "top_p": 0.0,
             "repetition_penalty": 0.0,
@@ -266,8 +637,8 @@ def test_creation_snapshot_persistence_failure_rolls_back_every_row(
             headers=auth_headers,
             json={
                 "character_id": sources["primary_id"],
-                "provider": "openai",
-                "model": "gpt-snapshot",
+                "provider": "local-llm",
+                "model": "local-test",
                 "temperature": 0.0,
                 "top_p": 0.0,
                 "repetition_penalty": 0.0,
@@ -296,8 +667,8 @@ def test_creation_oversize_snapshot_rolls_back(character_db):
                 "client_id": "test_client",
             },
             participant_character_ids=[sources["second_id"]],
-            provider="openai",
-            model="gpt-snapshot",
+            provider="local-llm",
+            model="local-test",
             sampling={
                 "temperature": 0.0,
                 "top_p": 0.0,
@@ -323,8 +694,8 @@ def test_creation_with_incomplete_settings_is_explicitly_non_resumable(
             "title": "Incomplete",
             "client_id": "test_client",
         },
-        provider="openai",
-        model="gpt-snapshot",
+        provider="local-llm",
+        model="local-test",
         sampling={"temperature": 0.0},
     )
     before = _snapshot_storage_bytes(character_db, conversation_id)
@@ -376,8 +747,8 @@ def test_creation_source_drift_exhaustion_rolls_back(character_db, monkeypatch):
                 "title": "Drifting",
                 "client_id": "test_client",
             },
-            provider="openai",
-            model="gpt-snapshot",
+            provider="local-llm",
+            model="local-test",
             sampling={
                 "temperature": 0.0,
                 "top_p": 0.0,

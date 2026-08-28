@@ -22,9 +22,6 @@ from PIL import Image
 
 from tldw_Server_API.app.core.Character_Chat.constants import MAX_PERSIST_CONTENT_LENGTH
 from tldw_Server_API.app.core.Character_Chat.character_limits import check_message_limit
-from tldw_Server_API.app.core.Character_Chat.character_conversation_factory import (
-    create_character_conversation,
-)
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
@@ -784,6 +781,10 @@ def start_new_chat_session(
         return None
 
     try:
+        from tldw_Server_API.app.core.Character_Chat.character_conversation_factory import (
+            create_character_conversation,
+        )
+
         raw_char_data_for_first_message = db.get_character_card_by_id(character_id)
         if raw_char_data_for_first_message:
             original_first_message_content = raw_char_data_for_first_message.get("first_message")

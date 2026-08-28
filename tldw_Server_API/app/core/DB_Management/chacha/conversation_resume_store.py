@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from contextlib import nullcontext
 from typing import TYPE_CHECKING, Any
 
@@ -28,6 +29,104 @@ _SNAPSHOT_COLUMNS = (
     "created_at",
 )
 _RESUME_SETTINGS_KEY = "roleplayResumeV1"
+_READINESS_KEYS = frozenset(
+    {"resumeEligible", "resumeIneligibleReason", "effectiveCompletion"}
+)
+_EFFECTIVE_KEYS = frozenset({"provider", "model", "sampling"})
+_SAMPLING_KEYS = frozenset({"temperature", "top_p", "repetition_penalty", "stop"})
+_INELIGIBLE_REASONS = frozenset(
+    {
+        "incomplete_creation_settings",
+        "incomplete_effective_settings",
+        "invalid_effective_settings",
+    }
+)
+
+
+def _validate_closed_sampling(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict) or set(value) != _SAMPLING_KEYS:
+        return None
+    normalized: dict[str, Any] = {}
+    for key, minimum, maximum in (
+        ("temperature", 0.0, 2.0),
+        ("top_p", 0.0, 1.0),
+        ("repetition_penalty", 0.0, 3.0),
+    ):
+        item = value.get(key)
+        if isinstance(item, bool) or not isinstance(item, (int, float)):
+            return None
+        item = float(item)
+        if not math.isfinite(item) or not minimum <= item <= maximum:
+            return None
+        normalized[key] = item
+    stop = value.get("stop")
+    if (
+        not isinstance(stop, list)
+        or len(stop) > 64
+        or any(not isinstance(item, str) for item in stop)
+    ):
+        return None
+    normalized["stop"] = list(stop)
+    return normalized
+
+
+def _validate_effective_completion(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict) or set(value) != _EFFECTIVE_KEYS:
+        return None
+    provider_value = value.get("provider")
+    model_value = value.get("model")
+    if not isinstance(provider_value, str) or not isinstance(model_value, str):
+        return None
+
+    from tldw_Server_API.app.core.Chat.chat_service import is_model_known_for_provider
+    from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
+    from tldw_Server_API.app.core.LLM_Calls.adapter_utils import normalize_provider
+
+    registry = get_registry()
+    provider = registry.resolve_provider_name(normalize_provider(provider_value))
+    model = model_value.strip()
+    sampling = _validate_closed_sampling(value.get("sampling"))
+    if (
+        not provider
+        or provider_value != provider
+        or not model
+        or model_value != model
+        or sampling is None
+        or registry.get_adapter(provider) is None
+        or is_model_known_for_provider(provider, model) is False
+    ):
+        return None
+    return {"provider": provider, "model": model, "sampling": sampling}
+
+
+def _validate_readiness(
+    settings: Any,
+    *,
+    settings_present: bool,
+) -> tuple[bool, str | None, dict[str, Any] | None]:
+    if not settings_present:
+        return False, "incomplete_creation_settings", None
+    if not isinstance(settings, dict):
+        return False, "invalid_effective_settings", None
+    readiness = settings.get(_RESUME_SETTINGS_KEY)
+    if readiness is None:
+        return False, "incomplete_creation_settings", None
+    if not isinstance(readiness, dict) or set(readiness) != _READINESS_KEYS:
+        return False, "invalid_effective_settings", None
+
+    eligible = readiness.get("resumeEligible")
+    reason = readiness.get("resumeIneligibleReason")
+    effective = readiness.get("effectiveCompletion")
+    if not isinstance(eligible, bool):
+        return False, "invalid_effective_settings", None
+    if eligible:
+        validated = _validate_effective_completion(effective)
+        if reason is not None or validated is None:
+            return False, "invalid_effective_settings", None
+        return True, None, validated
+    if effective is not None or reason not in _INELIGIBLE_REASONS:
+        return False, "invalid_effective_settings", None
+    return False, reason, None
 
 
 class ConversationResumeStore:
@@ -206,26 +305,21 @@ class ConversationResumeStore:
             except (TypeError, json.JSONDecodeError):
                 settings = None
             snapshot = self._get_snapshot(conversation_id, transaction_conn)
-            readiness = settings.get(_RESUME_SETTINGS_KEY) if isinstance(settings, dict) else None
-            effective_completion = (
-                readiness.get("effectiveCompletion") if isinstance(readiness, dict) else None
-            )
-            stored_eligible = (
-                readiness.get("resumeEligible") if isinstance(readiness, dict) else False
-            )
-            stored_reason = (
-                readiness.get("resumeIneligibleReason") if isinstance(readiness, dict) else None
+            stored_eligible, stored_reason, effective_completion = _validate_readiness(
+                settings,
+                settings_present=settings_json is not None,
             )
             snapshot_status = snapshot["status"]
             if snapshot_status != "valid":
                 resume_eligible = False
                 resume_ineligible_reason = f"behavior_snapshot_{snapshot_status}"
-            elif stored_eligible is True and isinstance(effective_completion, dict):
+                effective_completion = None
+            elif stored_eligible:
                 resume_eligible = True
                 resume_ineligible_reason = None
             else:
                 resume_eligible = False
-                resume_ineligible_reason = stored_reason or "incomplete_creation_settings"
+                resume_ineligible_reason = stored_reason
 
             tail_result = transaction_conn.execute(
                 """
