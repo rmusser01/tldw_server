@@ -361,6 +361,9 @@ def test_build_behavior_snapshot_rejects_credentials_in_extensible_maps(extensib
         "csrfToken",
         "idToken",
         "oauthAccessToken",
+        "hfToken",
+        "huggingfaceToken",
+        "githubToken",
     ],
 )
 def test_build_behavior_snapshot_rejects_credential_key_separator_variants(

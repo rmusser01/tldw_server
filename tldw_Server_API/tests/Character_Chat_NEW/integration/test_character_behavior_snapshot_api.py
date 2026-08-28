@@ -651,6 +651,9 @@ def test_drift_retry_freezes_initial_provider_model_and_sampling(
         "csrfToken",
         "idToken",
         "oauthAccessToken",
+        "hfToken",
+        "huggingfaceToken",
+        "githubToken",
     ],
 )
 def test_credential_settings_rejection_rolls_back_creation(
