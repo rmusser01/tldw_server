@@ -9,7 +9,12 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "test:smoke": "playwright test",
-    "test:real-backend": "playwright test tests/e2e/real-backend --workers=1",
+    "build:real-backend": "TLDW_ADMIN_E2E_REAL_BACKEND=true TEST_MODE=true NEXT_PUBLIC_API_URL=${TLDW_ADMIN_E2E_JWT_API_URL:-http://127.0.0.1:8101} ADMIN_UI_ALLOW_API_KEY_LOGIN=true NEXT_PUBLIC_ALLOW_ADMIN_API_KEY_LOGIN=true JWT_ALGORITHM=HS256 JWT_SECRET_KEY=playwright-test-secret-1234567890 NEXT_TELEMETRY_DISABLED=1 next build",
+    "test:real-backend": "bun run build:real-backend && bun run test:real-backend:jwt:run && bun run test:real-backend:single-user:run",
+    "test:real-backend:jwt": "bun run build:real-backend && bun run test:real-backend:jwt:run",
+    "test:real-backend:single-user": "bun run build:real-backend && bun run test:real-backend:single-user:run",
+    "test:real-backend:jwt:run": "playwright test tests/e2e/real-backend --workers=1 --project=chromium-real-jwt",
+    "test:real-backend:single-user:run": "playwright test tests/e2e/real-backend --workers=1 --project=chromium-real-single-user",
     "test:a11y": "vitest run app/__tests__/dashboard.a11y.test.tsx app/users/__tests__/page.test.tsx app/monitoring/__tests__/page.test.tsx app/audit/__tests__/page.test.tsx app/data-ops/__tests__/page.a11y.test.tsx app/__tests__/dark-mode-contrast.test.ts app/__tests__/icon-button-audit.test.ts",
     "analyze": "ANALYZE=true next build",
     "lint": "BROWSERSLIST_IGNORE_OLD_DATA=1 BASELINE_BROWSER_MAPPING_IGNORE_OLD_DATA=1 eslint ."

@@ -2965,7 +2965,6 @@ def _normalize_message_timestamp(value: Any) -> str | None:
     elif isinstance(value, (int, float)):
         try:
             dt = datetime.fromtimestamp(float(value), tz=timezone.utc)
-            return dt.isoformat().replace("+00:00", "Z")
         except (ValueError, OSError, OverflowError):
             return None
     elif isinstance(value, str):
@@ -2985,7 +2984,11 @@ def _normalize_message_timestamp(value: Any) -> str | None:
 
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    return (
+        dt.astimezone(timezone.utc)
+        .isoformat(timespec="milliseconds")
+        .replace("+00:00", "Z")
+    )
 
 def _persist_message_sync(
     db: CharactersRAGDB,

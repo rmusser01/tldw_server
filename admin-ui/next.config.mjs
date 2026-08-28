@@ -1,19 +1,26 @@
+import { withSentryConfig as configureSentry } from '@sentry/nextjs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 const withBundleAnalyzer =
   process.env.ANALYZE === 'true'
-    ? require('@next/bundle-analyzer')({ enabled: true })
+    ? (await import('@next/bundle-analyzer')).default({ enabled: true })
     : (config) => config;
 
-const { withSentryConfig } = process.env.NEXT_PUBLIC_SENTRY_DSN
-  ? require('@sentry/nextjs')
-  : { withSentryConfig: (config) => config };
+const withSentryConfig = process.env.NEXT_PUBLIC_SENTRY_DSN
+  ? configureSentry
+  : (config) => config;
 
 const isDev = process.env.NODE_ENV !== 'production';
+const isRealBackendE2eBuild =
+  process.env.TLDW_ADMIN_E2E_REAL_BACKEND === 'true';
+const configDirectory = dirname(fileURLToPath(import.meta.url));
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  output: 'standalone',
-  outputFileTracingRoot: `${__dirname}/..`,
+  output: isRealBackendE2eBuild ? undefined : 'standalone',
+  outputFileTracingRoot: resolve(configDirectory, '..'),
   poweredByHeader: false,
 
   async headers() {
@@ -60,7 +67,7 @@ const nextConfig = {
   },
 };
 
-module.exports = withSentryConfig(withBundleAnalyzer(nextConfig), {
+export default withSentryConfig(withBundleAnalyzer(nextConfig), {
   silent: true,
   disableLogger: true,
 });

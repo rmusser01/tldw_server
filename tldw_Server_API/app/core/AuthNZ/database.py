@@ -57,6 +57,7 @@ from tldw_Server_API.app.core.DB_Management.sql_utils import split_sql_statement
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
     configure_sqlite_connection_async,
 )
+from tldw_Server_API.app.core.exceptions import TransactionPassthroughError
 from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime, is_test_mode
 
 _AUTHNZ_DB_NONCRITICAL_EXCEPTIONS = (
@@ -80,6 +81,7 @@ _AUTHNZ_TRANSACTION_PASSTHROUGH_EXCEPTIONS = (
     UserRegistrationException,
     HTTPException,
     MandatoryAuditWriteError,
+    TransactionPassthroughError,
 )
 
 _AUTHNZ_TRANSACTION_BOUNDARY_EXCEPTIONS = (DatabaseConcurrencyConflict,)

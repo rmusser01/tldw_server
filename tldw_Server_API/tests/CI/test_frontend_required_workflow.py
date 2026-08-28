@@ -13,7 +13,7 @@ def test_frontend_required_budget_covers_broad_changed_suite() -> None:
 
 
 @pytest.mark.unit
-def test_frontend_required_bounds_pathological_impact_expansion() -> None:
+def test_frontend_required_handles_indirect_pathological_expansion() -> None:
     workflow_path = Path(".github/workflows/frontend-required.yml")
     data = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
     steps = data["jobs"]["frontend-unit-tests"]["steps"]
@@ -33,7 +33,9 @@ def test_frontend_required_bounds_pathological_impact_expansion() -> None:
         in script
     )
     assert '"${head_command[@]}"' in script
-    assert "No directly changed frontend tests were found" in script
+    assert "No directly changed frontend tests were found" not in script
+    assert "retaining the sharded dependency-impact set" in script
+    assert "USE_DIRECT_TESTS=0" in script
 
 
 def test_frontend_required_runs_family_guardrails_e2e_for_targeted_changes() -> None:

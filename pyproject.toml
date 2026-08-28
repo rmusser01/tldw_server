@@ -487,6 +487,7 @@ tldw-server = "tldw_Server_API.app.main:run_server"
 # Point tldw-evals to the richer, unified CLI
 tldw-evals = "tldw_Server_API.cli.evals_cli:main"
 tldw-setup = "tldw_Server_API.cli.wizard.cli:main"
+tldw-admin-webhooks = "tldw_Server_API.cli.admin_webhooks_cli:main"
 
 ###########################
 # Tools - Package Discovery

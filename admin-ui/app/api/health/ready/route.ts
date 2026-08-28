@@ -1,7 +1,7 @@
-import { NextResponse } from 'next/server';
-import { buildApiUrl } from '@/lib/api-config';
+import { NextResponse, type NextRequest } from 'next/server';
+import { buildApiUrlForRequest } from '@/lib/api-config';
 
-export async function GET(): Promise<NextResponse> {
+export async function GET(request: NextRequest): Promise<NextResponse> {
   const timestamp = new Date().toISOString();
 
   // Probe backend health with 2-second timeout
@@ -12,7 +12,7 @@ export async function GET(): Promise<NextResponse> {
   try {
     const controller = new AbortController();
     timeoutId = setTimeout(() => controller.abort(), 2000);
-    const response = await fetch(buildApiUrl('/health'), {
+    const response = await fetch(buildApiUrlForRequest(request, '/health'), {
       method: 'GET',
       cache: 'no-store',
       signal: controller.signal,

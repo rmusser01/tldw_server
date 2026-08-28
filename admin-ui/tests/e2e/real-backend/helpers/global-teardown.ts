@@ -1,18 +1,32 @@
-import { getProjectEnv, REAL_BACKEND_PROJECTS, shouldManageBackend } from './project-env';
+import {
+  getProjectEnv,
+  getRequestedRealBackendProjects,
+  shouldManageBackend,
+} from './project-env';
 import { stopManagedBackend } from './backend-lifecycle';
 
-const shouldManageBackends = (): boolean =>
-  process.argv.some((arg) => arg.includes('real-backend') || arg.includes('chromium-real-'));
-
 export default async function globalTeardown(): Promise<void> {
-  if (!shouldManageBackends()) {
+  const requestedRealBackendProjects = getRequestedRealBackendProjects(process.argv);
+  if (requestedRealBackendProjects.length === 0) {
     return;
   }
 
-  for (const projectName of REAL_BACKEND_PROJECTS) {
+  const cleanupErrors: unknown[] = [];
+  for (const projectName of requestedRealBackendProjects) {
     if (!shouldManageBackend(projectName)) {
       continue;
     }
-    await stopManagedBackend(getProjectEnv(projectName)).catch(() => undefined);
+    try {
+      await stopManagedBackend(getProjectEnv(projectName));
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+  }
+
+  if (cleanupErrors.length > 0) {
+    throw new AggregateError(
+      cleanupErrors,
+      `Failed to stop ${cleanupErrors.length} managed real-backend process${cleanupErrors.length === 1 ? '' : 'es'}`,
+    );
   }
 }

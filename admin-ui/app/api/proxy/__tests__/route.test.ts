@@ -11,76 +11,48 @@ const mockBuildApiUrlForRequest = vi.fn(
 
 const mockGetBackendAuthHeaders = vi.fn(() => new Headers());
 const mockAppendProxyHeaders = vi.fn((_req: unknown, headers: Headers) => {
+  const request = _req as { headers: Headers };
+  for (const name of ['if-match', 'idempotency-key']) {
+    const value = request.headers.get(name);
+    if (value) headers.set(name, value);
+  }
   // Real implementation ensures x-request-id is always set
   if (!headers.has('x-request-id')) {
     headers.set('x-request-id', 'test-request-id');
   }
 });
 const mockGetRequestBody = vi.fn(() => Promise.resolve(undefined));
-const mockBuildProxyResponse = vi.fn(async (response: Response) => {
-  // Return a lightweight object that mimics NextResponse enough for assertions
-  const body = await response.text().catch(() => '');
-  return { __proxy: true, body, status: response.status, headers: new Headers() };
-});
 
 vi.mock('@/lib/api-config', () => ({
   buildApiUrlForRequest: mockBuildApiUrlForRequest,
 }));
 
-vi.mock('@/lib/server-auth', () => ({
-  getBackendAuthHeaders: mockGetBackendAuthHeaders,
-  appendProxyHeaders: mockAppendProxyHeaders,
-  getRequestBody: mockGetRequestBody,
-  buildProxyResponse: mockBuildProxyResponse,
-}));
+vi.mock('@/lib/server-auth', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/server-auth')>();
+  return {
+    ...actual,
+    getBackendAuthHeaders: mockGetBackendAuthHeaders,
+    appendProxyHeaders: mockAppendProxyHeaders,
+    getRequestBody: mockGetRequestBody,
+  };
+});
 
 vi.mock('@/lib/logger', () => ({
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() },
 }));
 
-// We need NextResponse.json for the error branches in the route
-vi.mock('next/server', () => {
-  class MockNextRequest {
-    method: string;
-    url: string;
-    headers: Headers;
-    cookies: { get: (name: string) => { value: string } | undefined };
-    nextUrl: { pathname: string; search: string };
-
-    constructor(url: string, init?: { method?: string; headers?: HeadersInit }) {
-      this.url = url;
-      this.method = init?.method ?? 'GET';
-      this.headers = new Headers(init?.headers);
-      this.cookies = { get: () => undefined };
-      const parsed = new URL(url);
-      this.nextUrl = {
-        pathname: parsed.pathname,
-        search: parsed.search,
-      };
-    }
-  }
-
-  return {
-    NextRequest: MockNextRequest,
-    NextResponse: {
-      json: (body: unknown, init?: { status?: number }) => ({
-        __errorResponse: true,
-        body,
-        status: init?.status ?? 200,
-      }),
-    },
-  };
-});
-
-// Import NextRequest from our mock so we can construct requests
 import { NextRequest } from 'next/server';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeRequest(path: string, method = 'GET'): InstanceType<typeof NextRequest> {
-  return new NextRequest(`http://localhost:3000/api/proxy${path}`, { method });
+function makeRequest(
+  path: string,
+  method = 'GET',
+  headers?: HeadersInit,
+): InstanceType<typeof NextRequest> {
+  return new NextRequest(`http://localhost:3000/api/proxy${path}`, { method, headers });
 }
 
 function okResponse(body = '{"ok":true}'): Response {
@@ -98,6 +70,8 @@ describe('Proxy route – forward()', () => {
     originalFetch = globalThis.fetch;
     vi.clearAllMocks();
     vi.useRealTimers();
+    mockGetBackendAuthHeaders.mockReturnValue(new Headers());
+    mockGetRequestBody.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -112,10 +86,8 @@ describe('Proxy route – forward()', () => {
     const { GET } = await import('@/app/api/proxy/[...path]/route');
     const result = await GET(makeRequest('/some/path'));
 
-    // buildProxyResponse should have been called with the backend response
-    expect(mockBuildProxyResponse).toHaveBeenCalledTimes(1);
-    // The result comes from our mock buildProxyResponse
-    expect(result).toMatchObject({ __proxy: true, status: 200 });
+    expect(result.status).toBe(200);
+    await expect(result.json()).resolves.toEqual({ data: 'hello' });
   });
 
   // 2. Auth header injection
@@ -142,6 +114,91 @@ describe('Proxy route – forward()', () => {
     expect(mockAppendProxyHeaders).toHaveBeenCalledWith(req, authHeaders);
   });
 
+  it('forwards conditional command headers without allowing an authorization override', async () => {
+    const cookieAuthHeaders = new Headers({ Authorization: 'Bearer cookie-token' });
+    mockGetBackendAuthHeaders.mockReturnValue(cookieAuthHeaders);
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{"id":41}', {
+      status: 200,
+      headers: {
+        'content-type': 'application/json',
+        etag: '"admin-webhook-41-r2"',
+        'cache-control': 'no-store',
+        pragma: 'no-cache',
+        'x-request-id': 'backend-request-id',
+        'content-length': '9',
+        'set-cookie': 'backend-session=do-not-forward',
+      },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { PATCH } = await import('@/app/api/proxy/[...path]/route');
+    const result = await PATCH(makeRequest('/admin/webhooks/41', 'PATCH', {
+      authorization: 'Bearer browser-override',
+      'if-match': '"admin-webhook-41-r1"',
+      'idempotency-key': '0123456789abcdef',
+    }));
+
+    const forwarded = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
+    expect(forwarded.get('authorization')).toBe('Bearer cookie-token');
+    expect(forwarded.get('if-match')).toBe('"admin-webhook-41-r1"');
+    expect(forwarded.get('idempotency-key')).toBe('0123456789abcdef');
+    const responseHeaders = result.headers;
+    expect(responseHeaders.get('etag')).toBe('"admin-webhook-41-r2"');
+    expect(responseHeaders.get('cache-control')).toBe('no-store');
+    expect(responseHeaders.get('pragma')).toBe('no-cache');
+    expect(responseHeaders.get('x-request-id')).toBe('test-request-id');
+    expect(responseHeaders.get('content-length')).toBeNull();
+    expect(responseHeaders.get('set-cookie')).toBeNull();
+  });
+
+  it('does not reflect or log webhook request canaries from a backend 422', async () => {
+    const canaries = {
+      url: 'https://receiver.example/private/path?token=url-canary',
+      query: 'query-canary',
+      secret: 'forbidden-secret-canary',
+      etag: 'etag-canary',
+      idempotency: 'idempotency-canary',
+    };
+    mockGetRequestBody.mockResolvedValue(new TextEncoder().encode(JSON.stringify({
+      url: canaries.url,
+      secret: canaries.secret,
+    })).buffer);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      error: {
+        code: 'admin_webhook_validation_failed',
+        message: 'Webhook request validation failed',
+        request_id: 'test-request-id',
+      },
+    }), {
+      status: 422,
+      headers: {
+        'content-type': 'application/json',
+        'cache-control': 'no-store',
+        pragma: 'no-cache',
+        'x-request-id': 'test-request-id',
+      },
+    })));
+
+    const { POST } = await import('@/app/api/proxy/[...path]/route');
+    const { logger } = await import('@/lib/logger');
+    const result = await POST(makeRequest('/admin/webhooks?probe=query-canary', 'POST', {
+      'if-match': canaries.etag,
+      'idempotency-key': canaries.idempotency,
+    }));
+
+    const serialized = JSON.stringify({
+      body: await result.clone().text(),
+      headers: Object.fromEntries(result.headers.entries()),
+    });
+    for (const canary of Object.values(canaries)) {
+      expect(serialized).not.toContain(canary);
+    }
+    expect(result.headers.get('cache-control')).toBe('no-store');
+    expect(result.headers.get('pragma')).toBe('no-cache');
+    expect(result.headers.get('x-request-id')).toBe('test-request-id');
+    expect(logger.error).not.toHaveBeenCalled();
+  });
+
   // 3b. x-request-id is set on success response
   it('sets x-request-id on successful proxy response', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(okResponse()));
@@ -149,7 +206,7 @@ describe('Proxy route – forward()', () => {
     const { GET } = await import('@/app/api/proxy/[...path]/route');
     const result = await GET(makeRequest('/data'));
 
-    expect((result as unknown as { headers: Headers }).headers.get('x-request-id')).toBe('test-request-id');
+    expect(result.headers.get('x-request-id')).toBe('test-request-id');
   });
 
   // 3c. x-request-id is set on error response
@@ -159,7 +216,8 @@ describe('Proxy route – forward()', () => {
     const { POST } = await import('@/app/api/proxy/[...path]/route');
     const result = await POST(makeRequest('/data', 'POST'));
 
-    expect(result).toMatchObject({ __errorResponse: true, status: 502 });
+    expect(result.status).toBe(502);
+    await expect(result.json()).resolves.toEqual({ detail: 'Backend unavailable' });
   });
 
   // 4. Timeout returns 504
@@ -195,11 +253,8 @@ describe('Proxy route – forward()', () => {
 
     const result = await resultPromise;
 
-    expect(result).toMatchObject({
-      __errorResponse: true,
-      body: { detail: 'Backend request timed out' },
-      status: 504,
-    });
+    expect(result.status).toBe(504);
+    await expect(result.json()).resolves.toEqual({ detail: 'Backend request timed out' });
   });
 
   // 5. Network error returns 502
@@ -212,11 +267,8 @@ describe('Proxy route – forward()', () => {
     const { POST } = await import('@/app/api/proxy/[...path]/route');
     const result = await POST(makeRequest('/data', 'POST'));
 
-    expect(result).toMatchObject({
-      __errorResponse: true,
-      body: { detail: 'Backend unavailable' },
-      status: 502,
-    });
+    expect(result.status).toBe(502);
+    await expect(result.json()).resolves.toEqual({ detail: 'Backend unavailable' });
   });
 
   // 6. GET retry on network error
@@ -239,7 +291,8 @@ describe('Proxy route – forward()', () => {
     const result = await resultPromise;
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(result).toMatchObject({ __proxy: true, status: 200 });
+    expect(result.status).toBe(200);
+    await expect(result.json()).resolves.toEqual({ retried: true });
   });
 
   // 7. POST does NOT retry
@@ -254,10 +307,8 @@ describe('Proxy route – forward()', () => {
 
     // Only one call — no retry for POST
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(result).toMatchObject({
-      __errorResponse: true,
-      status: 502,
-    });
+    expect(result.status).toBe(502);
+    await expect(result.json()).resolves.toEqual({ detail: 'Backend unavailable' });
   });
 
   // 8. Request body forwarding
@@ -324,11 +375,8 @@ describe('Proxy route – forward()', () => {
 
     // Two attempts for GET
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(result).toMatchObject({
-      __errorResponse: true,
-      body: { detail: 'Backend unavailable' },
-      status: 502,
-    });
+    expect(result.status).toBe(502);
+    await expect(result.json()).resolves.toEqual({ detail: 'Backend unavailable' });
   });
 
   // 12. AbortError on GET does NOT trigger retry
@@ -342,10 +390,7 @@ describe('Proxy route – forward()', () => {
 
     // Only one call — AbortError should NOT trigger retry
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(result).toMatchObject({
-      __errorResponse: true,
-      body: { detail: 'Backend request timed out' },
-      status: 504,
-    });
+    expect(result.status).toBe(504);
+    await expect(result.json()).resolves.toEqual({ detail: 'Backend request timed out' });
   });
 });

@@ -7,8 +7,6 @@ from tldw_Server_API.app.core.exceptions import EgressPolicyError
 from tldw_Server_API.app.core.Security import egress
 from tldw_Server_API.app.core.Security.url_validation import assert_url_safe
 
-pytestmark = pytest.mark.unit
-
 
 class _CapturedLogger:
     """Capture Loguru bind/opt calls and messages for egress log assertions."""
@@ -42,6 +40,63 @@ def _always_public(host: str):
     return True, ["203.0.113.10"]
 
 
+@pytest.mark.unit
+def test_platform_webhook_policy_composes_all_global_lists(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: dict[str, object] = {}
+
+    def _capture(url: str, **kwargs: object) -> egress.URLPolicyResult:
+        observed["url"] = url
+        observed.update(kwargs)
+        return egress.URLPolicyResult(True)
+
+    monkeypatch.setenv(egress.GLOBAL_ALLOWLIST_ENV, "global.example")
+    monkeypatch.setenv(egress.ALLOWLIST_ENV, "workflow.example")
+    monkeypatch.setenv(egress.WEBHOOK_ALLOWLIST_ENV, "*.webhook.example")
+    monkeypatch.setenv(egress.GLOBAL_DENYLIST_ENV, "blocked-global.example")
+    monkeypatch.setenv(egress.DENYLIST_ENV, "blocked-workflow.example")
+    monkeypatch.setenv(egress.WEBHOOK_DENYLIST_ENV, "*.blocked-webhook.example")
+    monkeypatch.setattr(egress, "evaluate_url_policy", _capture)
+
+    result = egress.evaluate_platform_webhook_url_policy(
+        "https://receiver.example/private?token=secret"
+    )
+
+    assert result.allowed is True
+    assert observed == {
+        "url": "https://receiver.example/private?token=secret",
+        "allowlist": [
+            "global.example",
+            "workflow.example",
+            "webhook.example",
+        ],
+        "denylist": [
+            "blocked-global.example",
+            "blocked-workflow.example",
+            "blocked-webhook.example",
+        ],
+        "sensitive_observability": True,
+    }
+
+
+@pytest.mark.unit
+def test_platform_webhook_policy_preserves_deny_precedence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(egress.GLOBAL_ALLOWLIST_ENV, "receiver.example")
+    monkeypatch.setenv(egress.WEBHOOK_ALLOWLIST_ENV, "receiver.example")
+    monkeypatch.setenv(egress.WEBHOOK_DENYLIST_ENV, "receiver.example")
+    monkeypatch.setenv(egress.BLOCK_PRIVATE_ENV, "false")
+
+    result = egress.evaluate_platform_webhook_url_policy(
+        "https://receiver.example/hook"
+    )
+
+    assert result.allowed is False
+    assert result.reason_code == "host_denied"
+
+
 class TestEgressPolicy:
     @pytest.fixture(autouse=True)
     def _scoped_policy_environment(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -54,6 +109,7 @@ class TestEgressPolicy:
         monkeypatch.delenv(egress.GLOBAL_ALLOWLIST_ENV, raising=False)
         monkeypatch.delenv(egress.GLOBAL_DENYLIST_ENV, raising=False)
 
+    @pytest.mark.unit
     def test_allowlist_enforces_exact_and_subdomain_matches(self, monkeypatch):
         monkeypatch.setenv("WORKFLOWS_EGRESS_ALLOWLIST", "example.com")
         monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "false")
@@ -68,6 +124,7 @@ class TestEgressPolicy:
         assert exc.value.status_code == 400
         assert "allowlist" in exc.value.detail.lower()
 
+    @pytest.mark.unit
     def test_ipv4_mapped_ipv6_is_blocked(self, monkeypatch):
 
         monkeypatch.delenv("WORKFLOWS_EGRESS_ALLOWLIST", raising=False)
@@ -80,12 +137,14 @@ class TestEgressPolicy:
             assert_url_safe(url)
         assert "private" in exc.value.detail.lower()
 
+    @pytest.mark.unit
     def test_invalid_port_is_rejected(self):
 
         res = egress.evaluate_url_policy("http://example.com:bad/path")
         assert res.allowed is False
         assert "port" in (res.reason or "").lower()
 
+    @pytest.mark.unit
     def test_resolved_ips_override_blocks_private_targets(self, monkeypatch):
         monkeypatch.setenv("WORKFLOWS_EGRESS_PROFILE", "permissive")
         monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "true")
@@ -101,6 +160,7 @@ class TestEgressPolicy:
         assert res.allowed is False
         assert "private" in (res.reason or "").lower()
 
+    @pytest.mark.unit
     def test_evaluate_url_policy_exposes_resolved_ips(self, monkeypatch):
         monkeypatch.setenv("WORKFLOWS_EGRESS_PROFILE", "permissive")
         monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "true")
@@ -114,6 +174,7 @@ class TestEgressPolicy:
         assert res.allowed is True
         assert res.resolved_ips == ("93.184.216.34",)
 
+    @pytest.mark.unit
     def test_pinned_resolution_rejects_dns_drift(self, monkeypatch):
         monkeypatch.setenv("WORKFLOWS_EGRESS_PROFILE", "permissive")
         monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "true")
@@ -142,6 +203,7 @@ class TestEgressPolicy:
             ("https://public.example:9443", "https://public.example:9443/v1/models", "8.8.8.8"),
         ],
     )
+    @pytest.mark.unit
     def test_configured_scope_allows_approved_addresses_on_its_exact_port(
         self,
         configured_url: str,
@@ -167,6 +229,7 @@ class TestEgressPolicy:
             ("http://user:pass@llama.lan:11434/v1/models", "userinfo_not_allowed"),
         ],
     )
+    @pytest.mark.unit
     def test_configured_scope_rejects_origin_and_userinfo_mismatches(
         self,
         request_url: str,
@@ -200,6 +263,7 @@ class TestEgressPolicy:
             "::ffff:192.168.1.20",  # IPv4-mapped IPv6
         ],
     )
+    @pytest.mark.unit
     def test_configured_scope_rejects_nonordinary_special_use_addresses(
         self,
         resolved_ip: str,
@@ -226,6 +290,7 @@ class TestEgressPolicy:
             "fd00:ec2::254",
         ],
     )
+    @pytest.mark.unit
     def test_configured_scope_rejects_metadata_endpoints(self, metadata_ip: str) -> None:
         scope = egress.ConfiguredEndpointScope.from_url("http://llama.lan:11434")
 
@@ -238,6 +303,7 @@ class TestEgressPolicy:
         assert result.allowed is False
         assert result.reason_code == "address_forbidden"
 
+    @pytest.mark.unit
     def test_configured_scope_rejects_mixed_dns_answers(self) -> None:
         scope = egress.ConfiguredEndpointScope.from_url("http://llama.lan:11434")
 
@@ -251,6 +317,7 @@ class TestEgressPolicy:
         assert result.resolved_ips == ("192.168.1.20", "169.254.169.254")
         assert result.reason_code == "address_forbidden"
 
+    @pytest.mark.unit
     def test_configured_scope_global_denylist_retains_precedence(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -274,6 +341,7 @@ class TestEgressPolicy:
             ("fd12:3456::10", "fd12:3456:0:0:0:0:0:10"),
         ],
     )
+    @pytest.mark.unit
     def test_configured_scope_denylist_compares_canonical_ip_literals(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -293,6 +361,7 @@ class TestEgressPolicy:
         assert result.allowed is False
         assert result.reason_code == "host_denied"
 
+    @pytest.mark.unit
     def test_configured_scope_satisfies_strict_profile_without_global_allowlist(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -308,6 +377,7 @@ class TestEgressPolicy:
 
         assert result.allowed is True
 
+    @pytest.mark.unit
     def test_configured_scope_always_resolves_despite_private_block_relaxations(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -326,6 +396,7 @@ class TestEgressPolicy:
         assert result.allowed is False
         assert result.reason_code == "address_forbidden"
 
+    @pytest.mark.unit
     def test_configured_scope_rejects_unresolved_and_changed_dns(self) -> None:
         scope = egress.ConfiguredEndpointScope.from_url("http://llama.lan:11434")
 
@@ -355,6 +426,7 @@ class TestEgressPolicy:
             ),
         ],
     )
+    @pytest.mark.unit
     def test_configured_scope_matches_canonical_equivalent_origins(
         self,
         configured_url: str,
@@ -364,6 +436,7 @@ class TestEgressPolicy:
 
         assert scope.matches(equivalent_url) is True
 
+    @pytest.mark.unit
     def test_url_policy_result_third_positional_argument_remains_resolved_ips(self) -> None:
         result = egress.URLPolicyResult(True, None, ("192.168.1.20",))
 
@@ -378,6 +451,7 @@ class TestEgressPolicy:
             ("https://example.com:9443", "port_not_allowed"),
         ],
     )
+    @pytest.mark.unit
     def test_unscoped_policy_failures_expose_stable_reason_codes(
         self,
         url: str,
@@ -388,6 +462,7 @@ class TestEgressPolicy:
         assert result.allowed is False
         assert result.reason_code == reason_code
 
+    @pytest.mark.unit
     def test_unscoped_permissive_url_with_userinfo_keeps_legacy_behavior(self) -> None:
         result = egress.evaluate_url_policy(
             "https://legacy-user:legacy-pass@example.com/resource",
@@ -396,6 +471,7 @@ class TestEgressPolicy:
 
         assert result.allowed is True
 
+    @pytest.mark.unit
     def test_unscoped_disallowed_port_precedes_denylist_like_legacy_policy(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -410,6 +486,7 @@ class TestEgressPolicy:
         assert result.allowed is False
         assert result.reason_code == "port_not_allowed"
 
+    @pytest.mark.unit
     def test_egress_policy_error_reason_code_is_optional(self) -> None:
         legacy = EgressPolicyError("message")
         coded = EgressPolicyError("message", reason_code="dns_unresolved")
@@ -419,6 +496,7 @@ class TestEgressPolicy:
         assert str(coded) == "message"
         assert coded.reason_code == "dns_unresolved"
 
+    @pytest.mark.unit
     def test_resolve_host_ips_does_not_mutate_global_socket_timeout(self, monkeypatch):
         calls: list[object] = []
 
@@ -434,6 +512,7 @@ class TestEgressPolicy:
         assert egress._resolve_host_ips("example.com") == ["93.184.216.34"]
         assert calls == []
 
+    @pytest.mark.unit
     def test_public_resolver_forwards_timeout_and_deduplicates(self, monkeypatch):
         calls: list[tuple[str, float]] = []
 
@@ -466,6 +545,7 @@ class TestEgressPolicy:
             (egress.socket.AF_INET, egress.socket.SOCK_STREAM, 0, "", (123, 443)),
         ),
     )
+    @pytest.mark.unit
     def test_public_resolver_rejects_mixed_valid_and_malformed_answers(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -482,6 +562,7 @@ class TestEgressPolicy:
 
         assert egress.resolve_host_ips("dns.example") == ()
 
+    @pytest.mark.unit
     def test_dns_timeout_limits_outstanding_resolver_threads(
         self: "TestEgressPolicy",
         monkeypatch: pytest.MonkeyPatch,
@@ -521,6 +602,7 @@ class TestEgressPolicy:
         finally:
             release.set()
 
+    @pytest.mark.unit
     def test_dns_timeout_logs_resolver_errors(
         self: "TestEgressPolicy",
         monkeypatch: pytest.MonkeyPatch,
@@ -542,6 +624,7 @@ class TestEgressPolicy:
             for fields, _message in captured_logger.debug_logs
         )
 
+    @pytest.mark.unit
     def test_sensitive_dns_failure_redacts_structured_host(
         self: "TestEgressPolicy",
         monkeypatch: pytest.MonkeyPatch,
@@ -569,6 +652,7 @@ class TestEgressPolicy:
         )
         assert private_host not in repr(captured_logger.debug_logs)
 
+    @pytest.mark.unit
     def test_sensitive_dns_worker_contains_unexpected_exception(
         self: "TestEgressPolicy",
         monkeypatch: pytest.MonkeyPatch,
@@ -603,6 +687,7 @@ class TestEgressPolicy:
             for fields, _message in captured_logger.debug_logs
         )
 
+    @pytest.mark.unit
     def test_dns_slot_wait_rejects_nan_config(
         self: "TestEgressPolicy",
         monkeypatch: pytest.MonkeyPatch,
@@ -620,6 +705,7 @@ class TestEgressPolicy:
             for fields, _message in captured_logger.warning_logs
         )
 
+    @pytest.mark.unit
     def test_dns_timeout_budget_subtracts_slot_wait(
         self: "TestEgressPolicy",
         monkeypatch: pytest.MonkeyPatch,
@@ -649,10 +735,15 @@ class TestEgressPolicy:
             def is_alive(self) -> bool:
                 return True
 
+        class _FakeTime:
+            @staticmethod
+            def monotonic() -> float:
+                return next(times)
+
         times = iter([100.0, 100.03, 100.04, 100.05])
         monkeypatch.setattr(egress, "_DNS_RESOLVER_SLOTS", _FakeSlots(), raising=False)
         monkeypatch.setattr(egress.threading, "Thread", _FakeThread)
-        monkeypatch.setattr(egress.time, "monotonic", lambda: next(times))
+        monkeypatch.setattr(egress, "time", _FakeTime())
         monkeypatch.setattr(egress, "logger", captured_logger)
 
         assert egress._getaddrinfo_with_timeout("example.invalid", timeout_s=0.1) == []

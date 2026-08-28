@@ -1,6 +1,13 @@
 'use client';
 
-import { ApiError, requestJson, requestText } from './http';
+import {
+  ApiError,
+  WebhookContractError,
+  requestJson,
+  requestJsonWithMetadata,
+  requestText,
+} from './http';
+import type { JsonResponse } from './http';
 import { normalizeListResponse, normalizePagedResponse } from './normalize';
 import type {
   ApiKey,
@@ -55,15 +62,14 @@ import type {
   VoiceSession,
   VoiceSessionListResponse,
   WatchlistSettings,
-  WebhookCreateResponse,
-  WebhookDeliveryItem,
-  WebhookDeliveryListResponse,
-  WebhookItem,
+  WebhookCatalog,
+  WebhookCreateRequest,
+  WebhookDeleteResponse,
   WebhookListResponse,
-  AdminWebhook,
-  AdminWebhooksResponse,
-  AdminWebhookDeliveryLogResponse,
-  AdminWebhookTestResult,
+  WebhookPatchRequest,
+  WebhookRegistration,
+  WebhookSecretResponse,
+  WebhookStatus,
 } from '@/types';
 export { ApiError };
 
@@ -123,6 +129,467 @@ function buildQueryString(params?: Record<string, QueryParamValue>): string {
   });
   return query.toString();
 }
+
+const STRONG_WEBHOOK_ETAG = /^"admin-webhook-([1-9][0-9]*)-r([1-9][0-9]*)"$/;
+const GENERATED_IDEMPOTENCY_KEY = /^[0-9a-f]{32}$/;
+const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/;
+
+type StrongWebhookResponse<T> = JsonResponse<T> & { etag: string };
+
+type LegacyWebhookDto = {
+  id: string;
+  url: string;
+  events: string[];
+  enabled: boolean;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+type LegacyWebhookCreateDto = LegacyWebhookDto & {
+  secret: string;
+};
+
+type LegacyWebhookDeliveryDto = {
+  id: string;
+  webhook_id: string;
+  event_type: string;
+  status_code: number | null;
+  response_time_ms: number | null;
+  success: boolean;
+  error: string | null;
+  attempted_at: string | null;
+  payload_preview: string | null;
+};
+
+export type LegacyWebhookView = {
+  id: string;
+  targetUrl: string;
+  eventTypes: string[];
+  enabled: boolean;
+  createdAt: string | null;
+  updatedAt: string | null;
+};
+
+export type LegacyWebhookDeliveryView = {
+  id: string;
+  webhookId: string;
+  eventType: string;
+  statusCode: number | null;
+  responseTimeMs: number | null;
+  success: boolean;
+  error: string | null;
+  attemptedAt: string | null;
+  payloadPreview: string | null;
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+  value !== null && typeof value === 'object' && !Array.isArray(value)
+);
+
+const hasExactKeys = (value: Record<string, unknown>, expected: string[]): boolean => {
+  const actual = Object.keys(value).sort();
+  const sortedExpected = [...expected].sort();
+  return actual.length === sortedExpected.length
+    && actual.every((key, index) => key === sortedExpected[index]);
+};
+
+const isIntegerAtLeast = (value: unknown, minimum: number): value is number => (
+  typeof value === 'number'
+  && Number.isSafeInteger(value)
+  && value >= minimum
+);
+
+const isNullableSafeInteger = (value: unknown): value is number | null => (
+  value === null || (typeof value === 'number' && Number.isSafeInteger(value))
+);
+
+const isBoundedString = (value: unknown, minimum: number, maximum: number): value is string => (
+  typeof value === 'string' && value.length >= minimum && value.length <= maximum
+);
+
+const isIsoTimestamp = (value: unknown): value is string => (
+  isBoundedString(value, 20, 64)
+  && ISO_TIMESTAMP.test(value)
+  && Number.isFinite(Date.parse(value))
+);
+
+const requireWebhookId = (id: number): number => {
+  if (!isIntegerAtLeast(id, 1)) {
+    throw new WebhookContractError(0, 'Webhook registration ID is invalid');
+  }
+  return id;
+};
+
+const parseStrongWebhookEtag = (etag: string | null): { id: number; revision: number } | null => {
+  if (etag === null) return null;
+  const match = STRONG_WEBHOOK_ETAG.exec(etag);
+  if (!match) return null;
+  const id = Number(match[1]);
+  const revision = Number(match[2]);
+  if (!isIntegerAtLeast(id, 1) || !isIntegerAtLeast(revision, 1)) return null;
+  return { id, revision };
+};
+
+const registrationIdentity = (value: unknown): { id: number; revision: number } | null => {
+  if (!isRecord(value)) return null;
+  if (!isIntegerAtLeast(value.id, 1) || !isIntegerAtLeast(value.revision, 1)) return null;
+  return { id: value.id, revision: value.revision };
+};
+
+export const requireStrongWebhookEtag = <T>(
+  response: JsonResponse<T>,
+  registration: unknown,
+): StrongWebhookResponse<T> => {
+  const etag = parseStrongWebhookEtag(response.etag);
+  const identity = registrationIdentity(registration);
+  if (!etag || !identity || etag.id !== identity.id || etag.revision !== identity.revision) {
+    throw new WebhookContractError(
+      response.status,
+      'Webhook API returned a missing or mismatched strong ETag',
+      response.requestId,
+    );
+  }
+  return { ...response, etag: response.etag as string };
+};
+
+const requireCallerWebhookEtag = (id: number, etag: string): string => {
+  const parsed = parseStrongWebhookEtag(etag);
+  if (!parsed || parsed.id !== id) {
+    throw new WebhookContractError(0, 'Current webhook ETag is invalid');
+  }
+  return etag;
+};
+
+const requireGeneratedIdempotencyKey = (key: string): string => {
+  if (!GENERATED_IDEMPOTENCY_KEY.test(key)) {
+    throw new WebhookContractError(0, 'Webhook idempotency key is invalid');
+  }
+  return key;
+};
+
+const requireStatus = <T>(
+  response: JsonResponse<T>,
+  expected: number,
+): JsonResponse<T> => {
+  if (response.status !== expected) {
+    throw new WebhookContractError(
+      response.status,
+      'Webhook API returned an unexpected success status',
+      response.requestId,
+    );
+  }
+  return response;
+};
+
+const isWebhookStatus = (value: unknown): value is WebhookStatus => {
+  if (!isRecord(value) || !hasExactKeys(value, [
+    'mode',
+    'route_selection',
+    'schema_ready',
+    'key_state',
+    'delivery_capability_ready',
+    'limits',
+    'migration',
+  ])) return false;
+  if (!['off', 'migrate', 'on'].includes(String(value.mode))) return false;
+  if (!['canonical', 'legacy'].includes(String(value.route_selection))) return false;
+  if (typeof value.schema_ready !== 'boolean') return false;
+  if (!isBoundedString(value.key_state, 1, 128)) return false;
+  if (typeof value.delivery_capability_ready !== 'boolean') return false;
+  if (!isRecord(value.limits) || !hasExactKeys(value.limits, [
+    'registrations',
+    'active_registrations',
+    'current_registrations',
+    'current_active_registrations',
+    'registrations_over_limit',
+    'active_registrations_over_limit',
+  ])) return false;
+  if (!isIntegerAtLeast(value.limits.registrations, 1)) return false;
+  if (!isIntegerAtLeast(value.limits.active_registrations, 1)) return false;
+  if (!isIntegerAtLeast(value.limits.current_registrations, 0)) return false;
+  if (!isIntegerAtLeast(value.limits.current_active_registrations, 0)) return false;
+  if (typeof value.limits.registrations_over_limit !== 'boolean') return false;
+  if (typeof value.limits.active_registrations_over_limit !== 'boolean') return false;
+  if (!isRecord(value.migration) || !hasExactKeys(value.migration, [
+    'phase',
+    'imported_count',
+    'unresolved_count',
+    'rejected_count',
+    'secret_rotation_required_count',
+    'legacy_file_restore_permitted',
+    'rollback_window_expires_at',
+  ])) return false;
+  if (!isBoundedString(value.migration.phase, 1, 64)) return false;
+  for (const field of [
+    'imported_count',
+    'unresolved_count',
+    'rejected_count',
+    'secret_rotation_required_count',
+  ] as const) {
+    if (!isIntegerAtLeast(value.migration[field], 0)) return false;
+  }
+  if (typeof value.migration.legacy_file_restore_permitted !== 'boolean') return false;
+  const rollback = value.migration.rollback_window_expires_at;
+  return rollback === null
+    || isIsoTimestamp(rollback);
+};
+
+const getWebhookStatus = async (): Promise<WebhookStatus> => {
+  const status = await requestJson<unknown>('/admin/webhooks/status');
+  if (!isWebhookStatus(status)) {
+    throw new WebhookContractError(200, 'Webhook API returned an invalid status response');
+  }
+  return status;
+};
+
+const getCanonicalWebhooks = (
+  params: { limit?: number; offset?: number } = {},
+): Promise<WebhookListResponse> => {
+  const query = buildQueryString(params);
+  return requestJson<WebhookListResponse>(`/admin/webhooks${query ? `?${query}` : ''}`);
+};
+
+const getCanonicalWebhook = async (
+  id: number,
+): Promise<StrongWebhookResponse<WebhookRegistration>> => {
+  const webhookId = requireWebhookId(id);
+  const response = requireStatus(
+    await requestJsonWithMetadata<WebhookRegistration>(`/admin/webhooks/${webhookId}`),
+    200,
+  );
+  return requireStrongWebhookEtag(response, response.data);
+};
+
+const createCanonicalWebhook = async (
+  body: WebhookCreateRequest,
+  key: string,
+): Promise<StrongWebhookResponse<WebhookSecretResponse>> => {
+  const response = requireStatus(
+    await requestJsonWithMetadata<WebhookSecretResponse>('/admin/webhooks', {
+      method: 'POST',
+      headers: { 'Idempotency-Key': requireGeneratedIdempotencyKey(key) },
+      body: JSON.stringify(body),
+    }),
+    201,
+  );
+  return requireStrongWebhookEtag(response, response.data?.registration);
+};
+
+const updateCanonicalWebhook = async (
+  id: number,
+  body: WebhookPatchRequest,
+  etag: string,
+): Promise<StrongWebhookResponse<WebhookRegistration>> => {
+  const webhookId = requireWebhookId(id);
+  const response = requireStatus(
+    await requestJsonWithMetadata<WebhookRegistration>(`/admin/webhooks/${webhookId}`, {
+      method: 'PATCH',
+      headers: { 'If-Match': requireCallerWebhookEtag(webhookId, etag) },
+      body: JSON.stringify(body),
+    }),
+    200,
+  );
+  return requireStrongWebhookEtag(response, response.data);
+};
+
+const deleteCanonicalWebhook = async (
+  id: number,
+  etag: string,
+): Promise<WebhookDeleteResponse> => {
+  const webhookId = requireWebhookId(id);
+  const response = requireStatus(
+    await requestJsonWithMetadata<WebhookDeleteResponse>(`/admin/webhooks/${webhookId}`, {
+      method: 'DELETE',
+      headers: { 'If-Match': requireCallerWebhookEtag(webhookId, etag) },
+    }),
+    200,
+  );
+  if (response.data?.deleted !== true || response.data.id !== webhookId) {
+    throw new WebhookContractError(
+      response.status,
+      'Webhook API returned an invalid delete acknowledgement',
+      response.requestId,
+    );
+  }
+  return response.data;
+};
+
+const rotateCanonicalWebhookSecret = async (
+  id: number,
+  etag: string,
+  key: string,
+): Promise<StrongWebhookResponse<WebhookSecretResponse>> => {
+  const webhookId = requireWebhookId(id);
+  const response = requireStatus(
+    await requestJsonWithMetadata<WebhookSecretResponse>(
+      `/admin/webhooks/${webhookId}/rotate-secret`,
+      {
+        method: 'POST',
+        headers: {
+          'If-Match': requireCallerWebhookEtag(webhookId, etag),
+          'Idempotency-Key': requireGeneratedIdempotencyKey(key),
+        },
+      },
+    ),
+    200,
+  );
+  return requireStrongWebhookEtag(response, response.data?.registration);
+};
+
+export const canonicalWebhookApi = Object.freeze({
+  getWebhookStatus,
+  getWebhookCatalog: () => requestJson<WebhookCatalog>('/admin/webhooks/catalog'),
+  getWebhooks: getCanonicalWebhooks,
+  getWebhook: getCanonicalWebhook,
+  createWebhook: createCanonicalWebhook,
+  updateWebhook: updateCanonicalWebhook,
+  deleteWebhook: deleteCanonicalWebhook,
+  rotateWebhookSecret: rotateCanonicalWebhookSecret,
+});
+
+const legacyWebhookView = (value: unknown): LegacyWebhookView => {
+  if (!isRecord(value)) {
+    throw new WebhookContractError(200, 'Legacy webhook API returned an invalid registration');
+  }
+  const dto = value as Partial<LegacyWebhookDto>;
+  if (
+    !isBoundedString(dto.id, 1, 256)
+    || !isBoundedString(dto.url, 1, 2_048)
+    || !Array.isArray(dto.events)
+    || !dto.events.every((event) => isBoundedString(event, 1, 128))
+    || typeof dto.enabled !== 'boolean'
+    || (dto.created_at !== null && typeof dto.created_at !== 'string')
+    || (dto.updated_at !== null && typeof dto.updated_at !== 'string')
+  ) {
+    throw new WebhookContractError(200, 'Legacy webhook API returned an invalid registration');
+  }
+  return {
+    id: dto.id,
+    targetUrl: dto.url,
+    eventTypes: [...dto.events],
+    enabled: dto.enabled,
+    createdAt: dto.created_at,
+    updatedAt: dto.updated_at,
+  };
+};
+
+const legacyWebhookDeliveryView = (value: unknown): LegacyWebhookDeliveryView => {
+  if (!isRecord(value) || !hasExactKeys(value, [
+    'id',
+    'webhook_id',
+    'event_type',
+    'status_code',
+    'response_time_ms',
+    'success',
+    'error',
+    'attempted_at',
+    'payload_preview',
+  ])) {
+    throw new WebhookContractError(200, 'Legacy webhook API returned an invalid delivery');
+  }
+  const dto = value as Partial<LegacyWebhookDeliveryDto>;
+  if (
+    !isBoundedString(dto.id, 1, 256)
+    || !isBoundedString(dto.webhook_id, 1, 256)
+    || !isBoundedString(dto.event_type, 0, 128)
+    || !isNullableSafeInteger(dto.status_code)
+    || (dto.response_time_ms !== null && !isIntegerAtLeast(dto.response_time_ms, 0))
+    || typeof dto.success !== 'boolean'
+    || (dto.error !== null && typeof dto.error !== 'string')
+    || (dto.attempted_at !== null && typeof dto.attempted_at !== 'string')
+    || (dto.payload_preview !== null && typeof dto.payload_preview !== 'string')
+  ) {
+    throw new WebhookContractError(200, 'Legacy webhook API returned an invalid delivery');
+  }
+  return {
+    id: dto.id,
+    webhookId: dto.webhook_id,
+    eventType: dto.event_type,
+    statusCode: dto.status_code,
+    responseTimeMs: dto.response_time_ms,
+    success: dto.success,
+    error: dto.error,
+    attemptedAt: dto.attempted_at,
+    payloadPreview: dto.payload_preview,
+  };
+};
+
+export const legacyWebhookApi = Object.freeze({
+  getWebhooks: async (
+    params: { limit?: number; offset?: number } = {},
+  ): Promise<{ items: LegacyWebhookView[]; total: number }> => {
+    const query = buildQueryString(params);
+    const response = await requestJson<unknown>(`/admin/webhooks${query ? `?${query}` : ''}`);
+    if (!isRecord(response) || !Array.isArray(response.items) || !isIntegerAtLeast(response.total, 0)) {
+      throw new WebhookContractError(200, 'Legacy webhook API returned an invalid list');
+    }
+    return {
+      items: response.items.map(legacyWebhookView),
+      total: response.total,
+    };
+  },
+  createWebhook: async (body: {
+    url: string;
+    events: string[];
+    enabled?: boolean;
+  }): Promise<{ registration: LegacyWebhookView; signingSecret: string }> => {
+    const response = await requestJson<unknown>('/admin/webhooks', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    if (!isRecord(response) || !isBoundedString(response.secret, 1, 512)) {
+      throw new WebhookContractError(200, 'Legacy webhook API returned an invalid secret response');
+    }
+    return {
+      registration: legacyWebhookView(response as LegacyWebhookCreateDto),
+      signingSecret: response.secret,
+    };
+  },
+  updateWebhook: async (
+    id: string,
+    body: { url?: string; events?: string[]; enabled?: boolean },
+  ): Promise<LegacyWebhookView> => legacyWebhookView(await requestJson<unknown>(
+    `/admin/webhooks/${encodeURIComponent(id)}`,
+    { method: 'PATCH', body: JSON.stringify(body) },
+  )),
+  deleteWebhook: (id: string) => requestJson<{ message: string }>(
+    `/admin/webhooks/${encodeURIComponent(id)}`,
+    { method: 'DELETE' },
+  ),
+  testWebhook: async (id: string): Promise<LegacyWebhookDeliveryView> => legacyWebhookDeliveryView(
+    await requestJson<unknown>(`/admin/webhooks/${encodeURIComponent(id)}/test`, {
+      method: 'POST',
+    }),
+  ),
+  getWebhookDeliveries: async (
+    id: string,
+    params: { limit?: number; offset?: number } = {},
+  ): Promise<{ items: LegacyWebhookDeliveryView[]; total: number }> => {
+    const query = buildQueryString(params);
+    const response = await requestJson<unknown>(
+      `/admin/webhooks/${encodeURIComponent(id)}/deliveries${query ? `?${query}` : ''}`,
+    );
+    if (!isRecord(response) || !Array.isArray(response.items) || !isIntegerAtLeast(response.total, 0)) {
+      throw new WebhookContractError(200, 'Legacy webhook API returned an invalid delivery list');
+    }
+    return {
+      items: response.items.map(legacyWebhookDeliveryView),
+      total: response.total,
+    };
+  },
+});
+
+export type DetectedWebhookApi =
+  | { kind: 'canonical'; status: WebhookStatus; client: typeof canonicalWebhookApi }
+  | { kind: 'legacy'; status: WebhookStatus; client: typeof legacyWebhookApi };
+
+export const detectWebhookApi = async (): Promise<DetectedWebhookApi> => {
+  const status = await getWebhookStatus();
+  if (status.route_selection === 'canonical') {
+    return { kind: 'canonical', status, client: canonicalWebhookApi };
+  }
+  return { kind: 'legacy', status, client: legacyWebhookApi };
+};
 
 function requestRouterAnalytics(path: string, params?: Record<string, string>) {
   const queryParams = params ? new URLSearchParams(params).toString() : '';
@@ -1536,24 +2003,14 @@ export const api = {
       '/billing/onboarding', { method: 'POST', body: JSON.stringify(data) }),
 
   // Admin Webhooks
-  getWebhooks: (params?: Record<string, QueryParamValue>, options?: RequestInit) => {
-    const qs = buildQueryString(params);
-    return requestJson<AdminWebhooksResponse>(`/admin/webhooks${qs ? `?${qs}` : ''}`, options);
-  },
-  createWebhook: (data: { url: string; event_types?: string[]; description?: string; secret?: string; active?: boolean; retry_count?: number; timeout_seconds?: number }) =>
-    requestJson<AdminWebhook>('/admin/webhooks', { method: 'POST', body: JSON.stringify(data) }),
-  getWebhook: (id: number) =>
-    requestJson<AdminWebhook>(`/admin/webhooks/${id}`),
-  updateWebhook: (id: number, data: Partial<{ url: string; event_types: string[]; description: string; secret: string; active: boolean; retry_count: number; timeout_seconds: number }>) =>
-    requestJson<AdminWebhook>(`/admin/webhooks/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
-  deleteWebhook: (id: number) =>
-    requestJson<{ deleted: boolean; id: number }>(`/admin/webhooks/${id}`, { method: 'DELETE' }),
-  testWebhook: (id: number) =>
-    requestJson<AdminWebhookTestResult>(`/admin/webhooks/${id}/test`, { method: 'POST' }),
-  getWebhookDeliveries: (id: number, params?: Record<string, QueryParamValue>) => {
-    const qs = buildQueryString(params);
-    return requestJson<AdminWebhookDeliveryLogResponse>(`/admin/webhooks/${id}/deliveries${qs ? `?${qs}` : ''}`);
-  },
+  getWebhookStatus,
+  getWebhookCatalog: canonicalWebhookApi.getWebhookCatalog,
+  getWebhooks: getCanonicalWebhooks,
+  createWebhook: createCanonicalWebhook,
+  getWebhook: getCanonicalWebhook,
+  updateWebhook: updateCanonicalWebhook,
+  deleteWebhook: deleteCanonicalWebhook,
+  rotateWebhookSecret: rotateCanonicalWebhookSecret,
 };
 
 export default api;

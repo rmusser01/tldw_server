@@ -2551,6 +2551,632 @@ async def ensure_byok_validation_runs_table_pg(pool: DatabasePool | None = None)
         return False
 
 
+CANONICAL_ADMIN_WEBHOOK_POSTGRES_DDL = (
+    """
+    CREATE TABLE IF NOT EXISTS admin_webhook_sequences (
+        name TEXT PRIMARY KEY CHECK (char_length(name) BETWEEN 1 AND 64),
+        next_value BIGINT NOT NULL CHECK (next_value BETWEEN 1 AND 9223372036854775807)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS admin_webhook_registrations (
+        id BIGINT PRIMARY KEY CHECK (id BETWEEN 1 AND 9223372036854775807),
+        description TEXT NOT NULL DEFAULT '' CHECK (char_length(description) <= 500),
+        target_ciphertext_json TEXT NOT NULL CHECK (
+            jsonb_typeof(target_ciphertext_json::jsonb) = 'object'
+            AND octet_length(target_ciphertext_json) <= 8192
+        ),
+        target_key_id TEXT NOT NULL CHECK (char_length(target_key_id) BETWEEN 1 AND 128),
+        target_hostname TEXT NOT NULL CHECK (char_length(target_hostname) BETWEEN 1 AND 253),
+        target_display TEXT NOT NULL CHECK (octet_length(target_display) BETWEEN 1 AND 512),
+        event_types_json TEXT NOT NULL CHECK (
+            jsonb_typeof(event_types_json::jsonb) = 'array'
+            AND octet_length(event_types_json) BETWEEN 2 AND 4096
+        ),
+        active BOOLEAN NOT NULL DEFAULT FALSE,
+        timeout_seconds INTEGER NOT NULL DEFAULT 10 CHECK (timeout_seconds BETWEEN 1 AND 30),
+        delivery_config_version BIGINT NOT NULL DEFAULT 1 CHECK (delivery_config_version >= 1),
+        target_version BIGINT NOT NULL DEFAULT 1 CHECK (target_version >= 1),
+        secret_ciphertext_json TEXT NOT NULL CHECK (
+            jsonb_typeof(secret_ciphertext_json::jsonb) = 'object'
+            AND octet_length(secret_ciphertext_json) <= 8192
+        ),
+        secret_key_id TEXT NOT NULL CHECK (char_length(secret_key_id) BETWEEN 1 AND 128),
+        secret_version BIGINT NOT NULL DEFAULT 1 CHECK (secret_version >= 1),
+        secret_rotation_required BOOLEAN NOT NULL DEFAULT FALSE,
+        revision BIGINT NOT NULL DEFAULT 1 CHECK (revision >= 1),
+        created_by_user_id BIGINT NOT NULL CHECK (created_by_user_id >= 1),
+        updated_by_user_id BIGINT NOT NULL CHECK (updated_by_user_id >= 1),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        deleted_at TIMESTAMPTZ,
+        deleted_by_user_id BIGINT CHECK (deleted_by_user_id IS NULL OR deleted_by_user_id >= 1),
+        CHECK (
+            (deleted_at IS NULL AND deleted_by_user_id IS NULL)
+            OR (deleted_at IS NOT NULL AND deleted_by_user_id IS NOT NULL)
+        )
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS admin_webhook_events (
+        id TEXT PRIMARY KEY CHECK (char_length(id) BETWEEN 1 AND 128),
+        event_type TEXT NOT NULL CHECK (char_length(event_type) BETWEEN 1 AND 64),
+        api_version TEXT NOT NULL CHECK (char_length(api_version) BETWEEN 1 AND 32),
+        source_kind TEXT NOT NULL CHECK (source_kind IN ('aggregate', 'command')),
+        aggregate_type TEXT CHECK (aggregate_type IS NULL OR char_length(aggregate_type) BETWEEN 1 AND 64),
+        aggregate_id TEXT CHECK (aggregate_id IS NULL OR char_length(aggregate_id) BETWEEN 1 AND 255),
+        aggregate_version TEXT CHECK (aggregate_version IS NULL OR char_length(aggregate_version) BETWEEN 1 AND 255),
+        source_command_id TEXT CHECK (source_command_id IS NULL OR char_length(source_command_id) BETWEEN 1 AND 255),
+        source_component TEXT NOT NULL CHECK (char_length(source_component) BETWEEN 1 AND 64),
+        source_request_id TEXT CHECK (source_request_id IS NULL OR char_length(source_request_id) BETWEEN 1 AND 128),
+        body_ciphertext_json TEXT NOT NULL CHECK (
+            jsonb_typeof(body_ciphertext_json::jsonb) = 'object'
+            AND octet_length(body_ciphertext_json) <= 131072
+        ),
+        body_key_id TEXT NOT NULL CHECK (char_length(body_key_id) BETWEEN 1 AND 128),
+        body_size_bytes INTEGER NOT NULL CHECK (body_size_bytes BETWEEN 0 AND 65536),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CHECK (
+            (
+                source_kind = 'aggregate'
+                AND aggregate_type IS NOT NULL
+                AND aggregate_id IS NOT NULL
+                AND aggregate_version IS NOT NULL
+                AND source_command_id IS NULL
+            )
+            OR (
+                source_kind = 'command'
+                AND aggregate_type IS NULL
+                AND aggregate_id IS NULL
+                AND aggregate_version IS NULL
+                AND source_command_id IS NOT NULL
+            )
+        )
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS admin_webhook_deliveries (
+        id TEXT PRIMARY KEY CHECK (char_length(id) BETWEEN 1 AND 128),
+        event_id TEXT NOT NULL REFERENCES admin_webhook_events(id) ON DELETE RESTRICT,
+        webhook_id BIGINT NOT NULL REFERENCES admin_webhook_registrations(id) ON DELETE RESTRICT,
+        kind TEXT NOT NULL CHECK (kind IN ('automatic', 'manual', 'test')),
+        delivery_config_version BIGINT NOT NULL CHECK (delivery_config_version >= 1),
+        secret_version BIGINT NOT NULL CHECK (secret_version >= 1),
+        jobs_job_id TEXT CHECK (jobs_job_id IS NULL OR char_length(jobs_job_id) BETWEEN 1 AND 255),
+        enqueue_claim_token TEXT CHECK (enqueue_claim_token IS NULL OR char_length(enqueue_claim_token) BETWEEN 1 AND 255),
+        enqueue_claim_expires_at TIMESTAMPTZ,
+        state TEXT NOT NULL CHECK (
+            state IN (
+                'pending', 'enqueue_claimed', 'queued', 'processing',
+                'retry_wait', 'succeeded', 'dead', 'canceled', 'superseded'
+            )
+        ),
+        attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count BETWEEN 0 AND 4),
+        current_attempt_id TEXT CHECK (current_attempt_id IS NULL OR char_length(current_attempt_id) BETWEEN 1 AND 128),
+        status_code INTEGER CHECK (status_code IS NULL OR status_code BETWEEN 100 AND 599),
+        latency_ms BIGINT CHECK (latency_ms IS NULL OR latency_ms >= 0),
+        reason_code TEXT CHECK (reason_code IS NULL OR char_length(reason_code) BETWEEN 1 AND 128),
+        pending_jobs_disposition TEXT CHECK (
+            pending_jobs_disposition IS NULL
+            OR pending_jobs_disposition IN ('complete', 'retry', 'fail', 'cancel', 'defer')
+        ),
+        pending_jobs_disposition_delay_seconds INTEGER CHECK (
+            pending_jobs_disposition_delay_seconds IS NULL
+            OR pending_jobs_disposition_delay_seconds BETWEEN 1 AND 1800
+        ),
+        jobs_disposition_applied BOOLEAN NOT NULL DEFAULT FALSE,
+        completed_after_config_change BOOLEAN NOT NULL DEFAULT FALSE,
+        terminal_at TIMESTAMPTZ,
+        expires_at TIMESTAMPTZ NOT NULL,
+        redelivery_of_id TEXT REFERENCES admin_webhook_deliveries(id) ON DELETE RESTRICT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CHECK (
+            (enqueue_claim_token IS NULL AND enqueue_claim_expires_at IS NULL)
+            OR (enqueue_claim_token IS NOT NULL AND enqueue_claim_expires_at IS NOT NULL)
+        ),
+        CHECK (
+            (pending_jobs_disposition IS NULL AND pending_jobs_disposition_delay_seconds IS NULL)
+            OR (
+                pending_jobs_disposition = 'retry'
+                AND pending_jobs_disposition_delay_seconds IS NOT NULL
+            )
+            OR (
+                pending_jobs_disposition IN ('complete', 'fail', 'cancel', 'defer')
+                AND pending_jobs_disposition_delay_seconds IS NULL
+            )
+        ),
+        CHECK (NOT jobs_disposition_applied OR pending_jobs_disposition IS NOT NULL),
+        CHECK (
+            (
+                state IN ('succeeded', 'dead', 'canceled', 'superseded')
+                AND terminal_at IS NOT NULL
+            )
+            OR (
+                state NOT IN ('succeeded', 'dead', 'canceled', 'superseded')
+                AND terminal_at IS NULL
+            )
+        ),
+        CHECK (kind != 'automatic' OR redelivery_of_id IS NULL),
+        CHECK (redelivery_of_id IS NULL OR redelivery_of_id != id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS admin_webhook_delivery_attempts (
+        id TEXT PRIMARY KEY CHECK (char_length(id) BETWEEN 1 AND 128),
+        delivery_id TEXT NOT NULL REFERENCES admin_webhook_deliveries(id) ON DELETE CASCADE,
+        attempt_number INTEGER NOT NULL CHECK (attempt_number BETWEEN 1 AND 4),
+        jobs_job_id TEXT CHECK (jobs_job_id IS NULL OR char_length(jobs_job_id) BETWEEN 1 AND 255),
+        jobs_lease_id TEXT CHECK (jobs_lease_id IS NULL OR char_length(jobs_lease_id) BETWEEN 1 AND 255),
+        test_attempt_token TEXT CHECK (test_attempt_token IS NULL OR char_length(test_attempt_token) BETWEEN 1 AND 255),
+        started_at TIMESTAMPTZ NOT NULL,
+        finished_at TIMESTAMPTZ,
+        state TEXT NOT NULL CHECK (
+            state IN (
+                'processing', 'succeeded', 'retryable', 'failed',
+                'canceled', 'superseded', 'outcome_unknown'
+            )
+        ),
+        status_code INTEGER CHECK (status_code IS NULL OR status_code BETWEEN 100 AND 599),
+        latency_ms BIGINT CHECK (latency_ms IS NULL OR latency_ms >= 0),
+        reason_code TEXT CHECK (reason_code IS NULL OR char_length(reason_code) BETWEEN 1 AND 128),
+        requested_retry_delay_seconds INTEGER CHECK (
+            requested_retry_delay_seconds IS NULL
+            OR requested_retry_delay_seconds BETWEEN 1 AND 1800
+        ),
+        jobs_disposition_applied BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (delivery_id, attempt_number),
+        CHECK (
+            (
+                jobs_job_id IS NOT NULL
+                AND jobs_lease_id IS NOT NULL
+                AND test_attempt_token IS NULL
+            )
+            OR (
+                jobs_job_id IS NULL
+                AND jobs_lease_id IS NULL
+                AND test_attempt_token IS NOT NULL
+            )
+        ),
+        CHECK (
+            (state = 'processing' AND finished_at IS NULL)
+            OR (state != 'processing' AND finished_at IS NOT NULL)
+        ),
+        CHECK (
+            (state = 'retryable' AND requested_retry_delay_seconds IS NOT NULL)
+            OR (state != 'retryable' AND requested_retry_delay_seconds IS NULL)
+        )
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS admin_webhook_idempotency (
+        id BIGSERIAL PRIMARY KEY,
+        lookup_digest TEXT NOT NULL UNIQUE CHECK (lookup_digest ~ '^sha256:[0-9a-f]{64}$'),
+        actor_id TEXT NOT NULL CHECK (char_length(actor_id) BETWEEN 1 AND 128),
+        operation TEXT NOT NULL CHECK (char_length(operation) BETWEEN 1 AND 64),
+        route TEXT NOT NULL CHECK (char_length(route) BETWEEN 1 AND 512),
+        webhook_id BIGINT CHECK (webhook_id IS NULL OR webhook_id >= 1),
+        delivery_id TEXT CHECK (delivery_id IS NULL OR char_length(delivery_id) BETWEEN 1 AND 128),
+        request_fingerprint TEXT NOT NULL CHECK (
+            request_fingerprint ~ '^hmac-sha256:[0-9a-f]{64}$'
+        ),
+        state TEXT NOT NULL CHECK (state IN ('in_progress', 'completed')),
+        resource_id BIGINT CHECK (resource_id IS NULL OR resource_id >= 1),
+        resource_version BIGINT CHECK (resource_version IS NULL OR resource_version >= 1),
+        secret_version BIGINT CHECK (secret_version IS NULL OR secret_version >= 1),
+        replay_secret_ciphertext_json TEXT CHECK (
+            replay_secret_ciphertext_json IS NULL
+            OR (
+                jsonb_typeof(replay_secret_ciphertext_json::jsonb) = 'object'
+                AND octet_length(replay_secret_ciphertext_json) <= 8192
+            )
+        ),
+        replay_secret_key_id TEXT CHECK (
+            replay_secret_key_id IS NULL OR char_length(replay_secret_key_id) BETWEEN 1 AND 128
+        ),
+        test_delivery_id TEXT CHECK (test_delivery_id IS NULL OR char_length(test_delivery_id) BETWEEN 1 AND 128),
+        test_attempt_id TEXT CHECK (test_attempt_id IS NULL OR char_length(test_attempt_id) BETWEEN 1 AND 128),
+        response_status INTEGER CHECK (response_status IS NULL OR response_status BETWEEN 100 AND 599),
+        response_metadata_json TEXT CHECK (
+            response_metadata_json IS NULL
+            OR (
+                jsonb_typeof(response_metadata_json::jsonb) = 'object'
+                AND octet_length(response_metadata_json) <= 16384
+            )
+        ),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        expires_at TIMESTAMPTZ NOT NULL,
+        CHECK (
+            (replay_secret_ciphertext_json IS NULL AND replay_secret_key_id IS NULL)
+            OR (replay_secret_ciphertext_json IS NOT NULL AND replay_secret_key_id IS NOT NULL)
+        ),
+        CHECK (
+            (test_delivery_id IS NULL AND test_attempt_id IS NULL)
+            OR (test_delivery_id IS NOT NULL AND test_attempt_id IS NOT NULL)
+        )
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS admin_webhook_migration_state (
+        singleton_id SMALLINT PRIMARY KEY CHECK (singleton_id = 1),
+        schema_version INTEGER NOT NULL CHECK (schema_version = 1),
+        state_revision BIGINT NOT NULL DEFAULT 1 CHECK (state_revision >= 1),
+        phase TEXT NOT NULL CHECK (
+            phase IN (
+                'migration_pending', 'artifacts_pending', 'artifacts_ready',
+                'database_committed', 'complete'
+            )
+        ),
+        import_operation_id TEXT CHECK (import_operation_id IS NULL OR char_length(import_operation_id) BETWEEN 1 AND 128),
+        import_operator_id BIGINT CHECK (import_operator_id IS NULL OR import_operator_id >= 1),
+        import_started_at TIMESTAMPTZ,
+        import_approved_at TIMESTAMPTZ,
+        artifacts_ready_at TIMESTAMPTZ,
+        database_committed_at TIMESTAMPTZ,
+        fingerprint_key_id TEXT CHECK (fingerprint_key_id IS NULL OR char_length(fingerprint_key_id) BETWEEN 1 AND 128),
+        active_primary_key_id TEXT CHECK (active_primary_key_id IS NULL OR char_length(active_primary_key_id) BETWEEN 1 AND 128),
+        system_ops_webhook_fingerprint TEXT CHECK (
+            system_ops_webhook_fingerprint IS NULL
+            OR system_ops_webhook_fingerprint ~ '^hmac-sha256:[0-9a-f]{64}$'
+        ),
+        legacy_table_fingerprint TEXT CHECK (
+            legacy_table_fingerprint IS NULL
+            OR legacy_table_fingerprint ~ '^hmac-sha256:[0-9a-f]{64}$'
+        ),
+        source_mapping_json TEXT NOT NULL DEFAULT '{}' CHECK (
+            jsonb_typeof(source_mapping_json::jsonb) = 'object'
+            AND octet_length(source_mapping_json) <= 1048576
+        ),
+        redacted_report_digest TEXT CHECK (
+            redacted_report_digest IS NULL
+            OR redacted_report_digest ~ '^sha256:[0-9a-f]{64}$'
+        ),
+        protected_backup_ciphertext_digest TEXT CHECK (
+            protected_backup_ciphertext_digest IS NULL
+            OR protected_backup_ciphertext_digest ~ '^sha256:[0-9a-f]{64}$'
+        ),
+        source_rejections_json TEXT NOT NULL DEFAULT '[]' CHECK (
+            jsonb_typeof(source_rejections_json::jsonb) = 'array'
+            AND octet_length(source_rejections_json) <= 1048576
+        ),
+        completed_at TIMESTAMPTZ,
+        active_report_path TEXT CHECK (active_report_path IS NULL OR octet_length(active_report_path) BETWEEN 1 AND 4096),
+        active_backup_path TEXT CHECK (active_backup_path IS NULL OR octet_length(active_backup_path) BETWEEN 1 AND 4096),
+        active_key_path TEXT CHECK (active_key_path IS NULL OR octet_length(active_key_path) BETWEEN 1 AND 4096),
+        staging_report_path TEXT CHECK (staging_report_path IS NULL OR octet_length(staging_report_path) BETWEEN 1 AND 4096),
+        staging_backup_path TEXT CHECK (staging_backup_path IS NULL OR octet_length(staging_backup_path) BETWEEN 1 AND 4096),
+        staging_key_path TEXT CHECK (staging_key_path IS NULL OR octet_length(staging_key_path) BETWEEN 1 AND 4096),
+        report_owner_id BIGINT CHECK (report_owner_id IS NULL OR report_owner_id >= 0),
+        report_group_id BIGINT CHECK (report_group_id IS NULL OR report_group_id >= 0),
+        report_mode INTEGER CHECK (report_mode IS NULL OR report_mode = 384),
+        report_file_identity TEXT CHECK (report_file_identity IS NULL OR char_length(report_file_identity) BETWEEN 1 AND 255),
+        backup_owner_id BIGINT CHECK (backup_owner_id IS NULL OR backup_owner_id >= 0),
+        backup_group_id BIGINT CHECK (backup_group_id IS NULL OR backup_group_id >= 0),
+        backup_mode INTEGER CHECK (backup_mode IS NULL OR backup_mode = 384),
+        backup_file_identity TEXT CHECK (backup_file_identity IS NULL OR char_length(backup_file_identity) BETWEEN 1 AND 255),
+        rollback_key_owner_id BIGINT CHECK (rollback_key_owner_id IS NULL OR rollback_key_owner_id >= 0),
+        rollback_key_group_id BIGINT CHECK (rollback_key_group_id IS NULL OR rollback_key_group_id >= 0),
+        rollback_key_mode INTEGER CHECK (rollback_key_mode IS NULL OR rollback_key_mode = 384),
+        rollback_key_file_identity TEXT CHECK (rollback_key_file_identity IS NULL OR char_length(rollback_key_file_identity) BETWEEN 1 AND 255),
+        rollback_expires_at TIMESTAMPTZ,
+        rollback_retirement_phase TEXT NOT NULL DEFAULT 'not_applicable' CHECK (
+            rollback_retirement_phase IN (
+                'not_applicable', 'retained',
+                'rollback_retirement_in_progress', 'retired'
+            )
+        ),
+        rollback_retirement_operator_id BIGINT CHECK (
+            rollback_retirement_operator_id IS NULL OR rollback_retirement_operator_id >= 1
+        ),
+        rollback_retirement_started_at TIMESTAMPTZ,
+        rollback_retirement_completed_at TIMESTAMPTZ,
+        expected_ciphertext_digest TEXT CHECK (
+            expected_ciphertext_digest IS NULL
+            OR expected_ciphertext_digest ~ '^sha256:[0-9a-f]{64}$'
+        ),
+        first_canonical_activity_at TIMESTAMPTZ,
+        first_canonical_activity_kind TEXT CHECK (
+            first_canonical_activity_kind IS NULL
+            OR first_canonical_activity_kind IN (
+                'registration_mutation', 'event_capture', 'delivery_attempt'
+            )
+        ),
+        rotation_operation_id TEXT CHECK (rotation_operation_id IS NULL OR char_length(rotation_operation_id) BETWEEN 1 AND 128),
+        rotation_source_key_id TEXT CHECK (rotation_source_key_id IS NULL OR char_length(rotation_source_key_id) BETWEEN 1 AND 128),
+        rotation_target_key_id TEXT CHECK (rotation_target_key_id IS NULL OR char_length(rotation_target_key_id) BETWEEN 1 AND 128),
+        rotation_phase TEXT CHECK (
+            rotation_phase IS NULL
+            OR rotation_phase IN (
+                'rewriting', 'verifying', 'awaiting_primary_cutover', 'complete'
+            )
+        ),
+        rotation_table_cursor TEXT CHECK (rotation_table_cursor IS NULL OR char_length(rotation_table_cursor) BETWEEN 1 AND 128),
+        rotation_key_cursor TEXT CHECK (rotation_key_cursor IS NULL OR char_length(rotation_key_cursor) BETWEEN 1 AND 255),
+        rotation_processed_count BIGINT NOT NULL DEFAULT 0 CHECK (rotation_processed_count >= 0),
+        rotation_verified_count BIGINT NOT NULL DEFAULT 0 CHECK (rotation_verified_count >= 0),
+        rotation_started_at TIMESTAMPTZ,
+        rotation_completed_at TIMESTAMPTZ,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CHECK (
+            (first_canonical_activity_at IS NULL AND first_canonical_activity_kind IS NULL)
+            OR (first_canonical_activity_at IS NOT NULL AND first_canonical_activity_kind IS NOT NULL)
+        ),
+        CHECK (
+            system_ops_webhook_fingerprint IS NULL
+            OR fingerprint_key_id IS NOT NULL
+        ),
+        CHECK (legacy_table_fingerprint IS NULL OR fingerprint_key_id IS NOT NULL),
+        CHECK (
+            (
+                phase = 'migration_pending'
+                AND import_operation_id IS NULL
+                AND import_operator_id IS NULL
+                AND import_started_at IS NULL
+                AND import_approved_at IS NULL
+                AND artifacts_ready_at IS NULL
+                AND database_committed_at IS NULL
+                AND fingerprint_key_id IS NULL
+                AND active_primary_key_id IS NULL
+                AND system_ops_webhook_fingerprint IS NULL
+                AND legacy_table_fingerprint IS NULL
+                AND redacted_report_digest IS NULL
+                AND protected_backup_ciphertext_digest IS NULL
+                AND completed_at IS NULL
+                AND active_report_path IS NULL
+                AND active_backup_path IS NULL
+                AND active_key_path IS NULL
+                AND staging_report_path IS NULL
+                AND staging_backup_path IS NULL
+                AND staging_key_path IS NULL
+                AND report_owner_id IS NULL
+                AND report_group_id IS NULL
+                AND report_mode IS NULL
+                AND report_file_identity IS NULL
+                AND backup_owner_id IS NULL
+                AND backup_group_id IS NULL
+                AND backup_mode IS NULL
+                AND backup_file_identity IS NULL
+                AND rollback_key_owner_id IS NULL
+                AND rollback_key_group_id IS NULL
+                AND rollback_key_mode IS NULL
+                AND rollback_key_file_identity IS NULL
+                AND rollback_expires_at IS NULL
+                AND rollback_retirement_phase = 'not_applicable'
+                AND expected_ciphertext_digest IS NULL
+            )
+            OR (
+                phase != 'migration_pending'
+                AND import_operation_id ~ '^whmig_[0-9a-f]{32}$'
+                AND import_operator_id IS NOT NULL
+                AND import_started_at IS NOT NULL
+                AND import_approved_at IS NOT NULL
+                AND fingerprint_key_id IS NOT NULL
+                AND active_primary_key_id IS NOT NULL
+                AND system_ops_webhook_fingerprint IS NOT NULL
+                AND legacy_table_fingerprint IS NOT NULL
+                AND redacted_report_digest IS NOT NULL
+                AND active_report_path IS NOT NULL
+                AND staging_report_path IS NOT NULL
+                AND report_owner_id IS NOT NULL
+                AND report_group_id IS NOT NULL
+                AND report_mode = 384
+                AND report_file_identity IS NOT NULL
+            )
+        ),
+        CHECK (
+            (
+                active_backup_path IS NULL
+                AND active_key_path IS NULL
+                AND staging_backup_path IS NULL
+                AND staging_key_path IS NULL
+                AND backup_owner_id IS NULL
+                AND backup_group_id IS NULL
+                AND backup_mode IS NULL
+                AND backup_file_identity IS NULL
+                AND rollback_key_owner_id IS NULL
+                AND rollback_key_group_id IS NULL
+                AND rollback_key_mode IS NULL
+                AND rollback_key_file_identity IS NULL
+                AND protected_backup_ciphertext_digest IS NULL
+                AND expected_ciphertext_digest IS NULL
+            )
+            OR (
+                active_backup_path IS NOT NULL
+                AND active_key_path IS NOT NULL
+                AND staging_backup_path IS NOT NULL
+                AND staging_key_path IS NOT NULL
+                AND backup_owner_id IS NOT NULL
+                AND backup_group_id IS NOT NULL
+                AND backup_mode = 384
+                AND backup_file_identity IS NOT NULL
+                AND rollback_key_owner_id IS NOT NULL
+                AND rollback_key_group_id IS NOT NULL
+                AND rollback_key_mode = 384
+                AND rollback_key_file_identity IS NOT NULL
+            )
+        ),
+        CHECK (
+            phase != 'artifacts_ready'
+            OR (
+                active_backup_path IS NOT NULL
+                AND artifacts_ready_at IS NOT NULL
+                AND protected_backup_ciphertext_digest IS NOT NULL
+                AND expected_ciphertext_digest IS NOT NULL
+            )
+        ),
+        CHECK (
+            artifacts_ready_at IS NULL
+            OR (
+                active_backup_path IS NOT NULL
+                AND protected_backup_ciphertext_digest IS NOT NULL
+                AND expected_ciphertext_digest IS NOT NULL
+            )
+        ),
+        CHECK (
+            (
+                phase IN ('database_committed', 'complete')
+                AND database_committed_at IS NOT NULL
+            )
+            OR (
+                phase NOT IN ('database_committed', 'complete')
+                AND database_committed_at IS NULL
+            )
+        ),
+        CHECK (
+            (phase = 'complete' AND completed_at IS NOT NULL)
+            OR (phase != 'complete' AND completed_at IS NULL)
+        ),
+        CHECK (
+            phase = 'complete'
+            OR rotation_phase IS NULL
+            OR rotation_phase = 'complete'
+        ),
+        CHECK (
+            (
+                rotation_phase IS NULL
+                AND rotation_operation_id IS NULL
+                AND rotation_source_key_id IS NULL
+                AND rotation_target_key_id IS NULL
+                AND rotation_table_cursor IS NULL
+                AND rotation_key_cursor IS NULL
+                AND rotation_processed_count = 0
+                AND rotation_verified_count = 0
+                AND rotation_started_at IS NULL
+                AND rotation_completed_at IS NULL
+            )
+            OR (
+                rotation_phase IS NOT NULL
+                AND rotation_operation_id IS NOT NULL
+                AND rotation_source_key_id IS NOT NULL
+                AND rotation_target_key_id IS NOT NULL
+                AND rotation_source_key_id != rotation_target_key_id
+                AND rotation_started_at IS NOT NULL
+                AND (
+                    (rotation_phase = 'complete' AND rotation_completed_at IS NOT NULL)
+                    OR (rotation_phase != 'complete' AND rotation_completed_at IS NULL)
+                )
+            )
+        ),
+        CHECK (
+            (
+                rollback_retirement_phase IN ('not_applicable', 'retained')
+                AND rollback_retirement_operator_id IS NULL
+                AND rollback_retirement_started_at IS NULL
+                AND rollback_retirement_completed_at IS NULL
+            )
+            OR (
+                rollback_retirement_phase = 'rollback_retirement_in_progress'
+                AND
+                rollback_retirement_operator_id IS NOT NULL
+                AND rollback_retirement_started_at IS NOT NULL
+                AND rollback_retirement_completed_at IS NULL
+            )
+            OR (
+                rollback_retirement_phase = 'retired'
+                AND rollback_retirement_operator_id IS NOT NULL
+                AND rollback_retirement_started_at IS NOT NULL
+                AND rollback_retirement_completed_at IS NOT NULL
+            )
+        ),
+        CHECK (
+            active_backup_path IS NOT NULL
+            OR rollback_retirement_phase = 'not_applicable'
+        ),
+        CHECK (
+            phase != 'complete'
+            OR active_backup_path IS NULL
+            OR (
+                rollback_expires_at IS NOT NULL
+                AND rollback_retirement_phase IN (
+                    'retained', 'rollback_retirement_in_progress', 'retired'
+                )
+            )
+        )
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_admin_webhook_registrations_active
+    ON admin_webhook_registrations(active, id DESC)
+    WHERE deleted_at IS NULL
+    """,
+    """
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_admin_webhook_events_aggregate_source
+    ON admin_webhook_events(event_type, aggregate_type, aggregate_id, aggregate_version)
+    WHERE source_kind = 'aggregate'
+    """,
+    """
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_admin_webhook_events_command_source
+    ON admin_webhook_events(event_type, source_command_id)
+    WHERE source_kind = 'command'
+    """,
+    """
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_admin_webhook_deliveries_automatic
+    ON admin_webhook_deliveries(event_id, webhook_id)
+    WHERE kind = 'automatic'
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_admin_webhook_deliveries_state
+    ON admin_webhook_deliveries(state, expires_at, created_at)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_admin_webhook_deliveries_webhook
+    ON admin_webhook_deliveries(webhook_id, created_at DESC)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_admin_webhook_delivery_attempts_delivery
+    ON admin_webhook_delivery_attempts(delivery_id, attempt_number)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_admin_webhook_idempotency_expiry
+    ON admin_webhook_idempotency(expires_at)
+    """,
+)
+
+
+async def ensure_admin_webhook_canonical_tables_pg(
+    pool: DatabasePool | None = None,
+) -> bool:
+    """Ensure the canonical admin-webhook schema in one PostgreSQL transaction."""
+    try:
+        db_pool = pool or await get_db_pool()
+        if getattr(db_pool, "pool", None) is None:
+            return False
+        async with db_pool.transaction() as conn:
+            for statement in CANONICAL_ADMIN_WEBHOOK_POSTGRES_DDL:
+                await conn.execute(statement)
+            await conn.execute(
+                """
+                INSERT INTO admin_webhook_sequences (name, next_value)
+                VALUES ($1, $2)
+                ON CONFLICT (name) DO NOTHING
+                """,
+                "registration",
+                1,
+            )
+            await conn.execute(
+                """
+                INSERT INTO admin_webhook_migration_state (
+                    singleton_id, schema_version, state_revision, phase
+                ) VALUES ($1, $2, $3, $4)
+                ON CONFLICT (singleton_id) DO NOTHING
+                """,
+                1,
+                1,
+                1,
+                "migration_pending",
+            )
+        logger.info("Ensured PostgreSQL canonical admin webhook tables")
+        return True
+    except AuthNZDatabaseError as exc:
+        logger.warning(f"Failed to ensure PostgreSQL canonical admin webhook tables: {exc}")
+        return False
+    except _PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as exc:
+        logger.warning(f"Failed to ensure PostgreSQL canonical admin webhook tables: {exc}")
+        return False
+
+
 async def ensure_mcp_hub_tables_pg(pool: DatabasePool | None = None) -> bool:
     """Ensure MCP Hub management tables exist on PostgreSQL backends."""
     try:

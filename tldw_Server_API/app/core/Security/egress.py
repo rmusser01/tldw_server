@@ -860,9 +860,37 @@ def _parse_list_env(value: str | None) -> list[str]:
         if not v:
             continue
         if v.startswith("*."):
-            v = v[1:]
+            v = v[2:]
         out.append(_normalize_hostname(v))
     return out
+
+
+def evaluate_platform_webhook_url_policy(url: str) -> URLPolicyResult:
+    """Evaluate a platform webhook target with all global policy families."""
+    allowlist = list(
+        dict.fromkeys(
+            [
+                *_get_allowlist(os.getenv(GLOBAL_ALLOWLIST_ENV, "")),
+                *_get_allowlist(os.getenv(ALLOWLIST_ENV, "")),
+                *_parse_list_env(os.getenv(WEBHOOK_ALLOWLIST_ENV)),
+            ]
+        )
+    )
+    denylist = list(
+        dict.fromkeys(
+            [
+                *_get_allowlist(os.getenv(GLOBAL_DENYLIST_ENV, "")),
+                *_get_allowlist(os.getenv(DENYLIST_ENV, "")),
+                *_parse_list_env(os.getenv(WEBHOOK_DENYLIST_ENV)),
+            ]
+        )
+    )
+    return evaluate_url_policy(
+        url,
+        allowlist=allowlist,
+        denylist=denylist,
+        sensitive_observability=True,
+    )
 
 
 def is_webhook_url_allowed_for_tenant(url: str, tenant_id: str) -> bool:
