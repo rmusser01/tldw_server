@@ -140,6 +140,41 @@ def _snapshot_storage_bytes(db, conversation_id: str) -> tuple[str, str]:
     return str(snapshot[0]), str(settings[0])
 
 
+def _create_writer_identity_race_chat(db, *, with_message: bool = False):
+    stale_character_id = db.add_character_card(
+        {"name": "Stale writer character", "first_message": "Old greeting"}
+    )
+    current_character_id = db.add_character_card(
+        {"name": "Current writer character", "first_message": "Current greeting"}
+    )
+    initial_messages = (
+        [{"id": "writer-race-message", "sender": "user", "content": "Pin me"}]
+        if with_message
+        else []
+    )
+    conversation_id = create_character_conversation(
+        db,
+        conversation_data={
+            "character_id": current_character_id,
+            "title": "Writer identity race",
+            "client_id": str(db.client_id),
+        },
+        provider="local-llm",
+        model="local-test",
+        initial_messages=initial_messages,
+    )
+    current = db.get_conversation_by_id(conversation_id)
+    assert current is not None
+    stale = {
+        **current,
+        "character_id": stale_character_id,
+        "assistant_kind": "character",
+        "assistant_id": str(stale_character_id),
+        "persona_memory_mode": None,
+    }
+    return conversation_id, stale, current
+
+
 @pytest.mark.integration
 def test_api_creation_captures_all_sources_and_redacts_snapshot_body(
     test_client,
@@ -2477,6 +2512,131 @@ def test_materialized_controls_cover_prompt_consumers_and_direct_writers(
     assert after_summary["materialized_settings"]["values"]["behavior_controls"][
         "auto_summary"
     ]["summary"]["content"] == "Frozen summary"
+
+
+@pytest.mark.integration
+def test_settings_writer_uses_transactional_conversation_identity(
+    test_client,
+    auth_headers,
+    character_db,
+    monkeypatch,
+) -> None:
+    conversation_id, stale, current = _create_writer_identity_race_chat(character_db)
+    import tldw_Server_API.app.api.v1.endpoints.character_chat_sessions as sessions
+
+    seen: dict[str, object] = {}
+
+    def _capture(settings, *, resume_state, conversation):
+        seen["conversation"] = conversation
+        return settings
+
+    monkeypatch.setattr(character_db, "get_conversation_by_id", lambda *_args, **_kwargs: stale)
+    monkeypatch.setattr(sessions, "_validate_final_chat_settings_storage", _capture)
+
+    response = test_client.put(
+        f"/api/v1/chats/{conversation_id}/settings",
+        headers=auth_headers,
+        json={"settings": {"authorNote": "Coherent note"}},
+    )
+
+    assert response.status_code == 200, response.text
+    assert seen["conversation"]["character_id"] == current["character_id"]
+
+
+@pytest.mark.integration
+def test_greeting_writer_uses_transactional_conversation_identity(
+    test_client,
+    auth_headers,
+    character_db,
+    monkeypatch,
+) -> None:
+    conversation_id, stale, current = _create_writer_identity_race_chat(character_db)
+    import tldw_Server_API.app.api.v1.endpoints.character_chat_sessions as sessions
+
+    seen: dict[str, object] = {}
+
+    def _capture(settings, *, resume_state, conversation):
+        seen["conversation"] = conversation
+        return settings
+
+    monkeypatch.setattr(character_db, "get_conversation_by_id", lambda *_args, **_kwargs: stale)
+    monkeypatch.setattr(sessions, "_validate_final_chat_settings_storage", _capture)
+
+    response = test_client.put(
+        f"/api/v1/chats/{conversation_id}/greetings/select",
+        headers=auth_headers,
+        json={"index": 0},
+    )
+
+    assert response.status_code == 200, response.text
+    assert seen["conversation"]["character_id"] == current["character_id"]
+
+
+@pytest.mark.integration
+def test_auto_summary_writer_uses_transactional_conversation_identity(
+    character_db,
+    monkeypatch,
+) -> None:
+    conversation_id, stale, current = _create_writer_identity_race_chat(character_db)
+    import tldw_Server_API.app.api.v1.endpoints.character_chat_sessions as sessions
+
+    before = character_db.get_roleplay_resume_state(conversation_id)
+    seen: dict[str, object] = {}
+
+    def _capture(settings, **kwargs):
+        seen["conversation"] = kwargs.get("conversation")
+        return settings
+
+    monkeypatch.setattr(character_db, "get_conversation_by_id", lambda *_args, **_kwargs: stale)
+    monkeypatch.setattr(sessions, "validate_chat_settings_storage", _capture)
+
+    sessions._persist_auto_summary_to_settings(
+        character_db,
+        conversation_id,
+        dict(before["settings"]),
+        "Coherent summary",
+        "m-1",
+        "m-2",
+        20,
+        5,
+        2,
+        expected_settings_version=before["settings_version"],
+    )
+
+    assert seen["conversation"]["character_id"] == current["character_id"]
+
+
+@pytest.mark.integration
+def test_pin_writer_uses_transactional_conversation_identity(
+    test_client,
+    auth_headers,
+    character_db,
+    monkeypatch,
+) -> None:
+    conversation_id, stale, current = _create_writer_identity_race_chat(
+        character_db,
+        with_message=True,
+    )
+    import tldw_Server_API.app.api.v1.endpoints.character_messages as messages
+
+    seen: dict[str, object] = {}
+
+    def _capture(settings, **kwargs):
+        seen["conversation"] = kwargs.get("conversation")
+        return settings
+
+    monkeypatch.setattr(character_db, "get_conversation_by_id", lambda *_args, **_kwargs: stale)
+    monkeypatch.setattr(messages, "validate_chat_settings_storage", _capture)
+
+    response = test_client.put(
+        "/api/v1/messages/writer-race-message",
+        params={"expected_version": 1},
+        headers=auth_headers,
+        json={"pinned": True},
+    )
+
+    assert response.status_code == 200, response.text
+    assert seen["conversation"]["character_id"] == current["character_id"]
 
 
 @pytest.mark.integration

@@ -457,8 +457,12 @@ class ConversationResumeStore:
         *,
         conn: Any | None = None,
         lock_for_update: bool = False,
+        owner_client_id: str | None = None,
     ) -> dict[str, Any]:
-        """Read snapshot and version fences from one caller-owned transaction."""
+        """Read owned conversation identity, snapshot, and fences coherently."""
+        normalized_owner = (
+            str(owner_client_id).strip() if owner_client_id is not None else None
+        )
         transaction = nullcontext(conn) if conn is not None else self._db.transaction()
         with transaction as transaction_conn:
             if lock_for_update and self._db.backend_type == BackendType.POSTGRESQL:
@@ -466,15 +470,19 @@ class ConversationResumeStore:
                     """
                     SELECT id FROM conversations
                      WHERE id = ? AND deleted = FALSE
+                       AND (? IS NULL OR client_id = ?)
                      FOR UPDATE
                     """,
-                    (conversation_id,),
+                    (conversation_id, normalized_owner, normalized_owner),
                 ).fetchone()
                 if locked is None:
                     raise NotFoundError("Conversation not found.")
             result = transaction_conn.execute(
                 """
                 SELECT c.history_version, cs.settings_json, cs.settings_version,
+                       c.id AS conversation_id, c.version AS conversation_version,
+                       c.client_id, c.character_id, c.assistant_kind, c.assistant_id,
+                       c.persona_memory_mode, c.scope_type, c.workspace_id,
                        (SELECT COUNT(*) FROM messages m
                          WHERE m.conversation_id = c.id AND m.deleted = FALSE) AS message_count,
                        (SELECT m.id FROM messages m
@@ -488,8 +496,9 @@ class ConversationResumeStore:
                   FROM conversations c
                   LEFT JOIN conversation_settings cs ON cs.conversation_id = c.id
                  WHERE c.id = ? AND c.deleted = FALSE
+                   AND (? IS NULL OR c.client_id = ?)
                 """,
-                (conversation_id,),
+                (conversation_id, normalized_owner, normalized_owner),
             )
             row = result.fetchone()
             if row is None:
@@ -500,6 +509,15 @@ class ConversationResumeStore:
                     "history_version",
                     "settings_json",
                     "settings_version",
+                    "conversation_id",
+                    "conversation_version",
+                    "client_id",
+                    "character_id",
+                    "assistant_kind",
+                    "assistant_id",
+                    "persona_memory_mode",
+                    "scope_type",
+                    "workspace_id",
                     "message_count",
                     "tail_message_id",
                     "tail_message_version",
@@ -563,6 +581,17 @@ class ConversationResumeStore:
             tail_message_version = record.get("tail_message_version")
             return {
                 "conversation_id": conversation_id,
+                "conversation": {
+                    "id": record["conversation_id"],
+                    "version": int(record["conversation_version"]),
+                    "client_id": record.get("client_id"),
+                    "character_id": record.get("character_id"),
+                    "assistant_kind": record.get("assistant_kind"),
+                    "assistant_id": record.get("assistant_id"),
+                    "persona_memory_mode": record.get("persona_memory_mode"),
+                    "scope_type": record.get("scope_type"),
+                    "workspace_id": record.get("workspace_id"),
+                },
                 "behavior_snapshot": snapshot,
                 "settings": settings,
                 "materialized_settings": materialized_settings,

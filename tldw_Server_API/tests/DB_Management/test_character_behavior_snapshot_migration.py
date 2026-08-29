@@ -38,6 +38,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     InputError,
 )
+from tldw_Server_API.app.core.DB_Management.db_errors import NotFoundError
 
 pytestmark = pytest.mark.unit
 
@@ -1174,6 +1175,15 @@ class _PostgresStoreBackend:
             return self._result(
                 [
                     {
+                        "conversation_id": self.conversation_id,
+                        "conversation_version": self.conversation_version,
+                        "client_id": "postgres-store-owner",
+                        "character_id": 1,
+                        "assistant_kind": "character",
+                        "assistant_id": "1",
+                        "persona_memory_mode": None,
+                        "scope_type": "global",
+                        "workspace_id": None,
                         "history_version": self.history_version,
                         "settings_json": self.settings_json,
                         "settings_version": self.settings_version,
@@ -1498,6 +1508,91 @@ def test_postgres_resume_state_lock_precedes_settings_read() -> None:
     assert statements[0].startswith("select id from conversations")
     assert statements[0].endswith("for update")
     assert "select c.history_version" in statements[1]
+
+
+def test_resume_state_returns_authoritative_owned_conversation_identity(
+    tmp_path: Path,
+) -> None:
+    db = CharactersRAGDB(
+        db_path=str(tmp_path / "coherent-resume-state.sqlite"),
+        client_id="resume-owner",
+    )
+    conversation_id = db.add_conversation(
+        {
+            "id": "coherent-resume-state",
+            "character_id": 1,
+            "title": "Coherent resume state",
+            "scope_type": "global",
+        }
+    )
+    assert conversation_id == "coherent-resume-state"
+
+    with db.transaction() as conn:
+        state = db.get_roleplay_resume_state(
+            conversation_id,
+            conn=conn,
+            lock_for_update=True,
+            owner_client_id="resume-owner",
+        )
+
+    assert state["conversation"] == {
+        "id": conversation_id,
+        "version": 1,
+        "client_id": "resume-owner",
+        "character_id": 1,
+        "assistant_kind": "character",
+        "assistant_id": "1",
+        "persona_memory_mode": None,
+        "scope_type": "global",
+        "workspace_id": None,
+    }
+    db.close_connection()
+
+
+def test_resume_state_rejects_wrong_owner_and_deleted_conversation(
+    tmp_path: Path,
+) -> None:
+    db = CharactersRAGDB(
+        db_path=str(tmp_path / "owned-resume-state.sqlite"),
+        client_id="resume-owner",
+    )
+    conversation_id = db.add_conversation(
+        {"id": "owned-resume-state", "character_id": 1, "title": "Owned"}
+    )
+    assert conversation_id == "owned-resume-state"
+
+    with pytest.raises(NotFoundError):
+        db.get_roleplay_resume_state(
+            conversation_id,
+            owner_client_id="different-owner",
+        )
+
+    conversation = db.get_conversation_by_id(conversation_id)
+    assert conversation is not None
+    assert db.soft_delete_conversation(conversation_id, conversation["version"])
+    with pytest.raises(NotFoundError):
+        db.get_roleplay_resume_state(
+            conversation_id,
+            owner_client_id="resume-owner",
+        )
+    db.close_connection()
+
+
+def test_postgres_resume_state_owner_filter_is_applied_to_lock_and_read() -> None:
+    backend = _PostgresStoreBackend()
+    db, wrapper = _postgres_store_db(backend)
+
+    db.conversation_resume_store.get_roleplay_resume_state(
+        backend.conversation_id,
+        conn=wrapper,
+        lock_for_update=True,
+        owner_client_id="postgres-store-owner",
+    )
+
+    statements = [statement for statement, _params in backend.executed]
+    assert "client_id = %s" in statements[0]
+    assert statements[0].endswith("for update")
+    assert "c.client_id = %s" in statements[1]
 
 
 def test_postgres_backend_wrapper_caller_owned_message_mutations_advance_once() -> None:

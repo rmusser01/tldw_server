@@ -6539,7 +6539,11 @@ def _persist_knowledge_qa_share_links(
                 conversation_id,
                 conn=conn,
                 lock_for_update=True,
+                owner_client_id=str(conversation.get("client_id") or ""),
             )
+            authoritative_conversation = resume_state.get("conversation")
+            if not isinstance(authoritative_conversation, dict):
+                raise InputError("Conversation resume state is incomplete.")
             final_settings = dict(resume_state.get("settings") or {})
             final_settings[_KNOWLEDGE_QA_SHARE_LINKS_SETTINGS_KEY] = links
             snapshot = resume_state.get("behavior_snapshot")
@@ -6551,7 +6555,7 @@ def _persist_knowledge_qa_share_links(
                 reject_credentials=snapshot_valid,
                 allow_internal=True,
                 behavior_snapshot=snapshot,
-                conversation=conversation,
+                conversation=authoritative_conversation,
             )
             updated = db.upsert_conversation_settings(
                 conversation_id,

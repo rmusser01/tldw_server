@@ -4171,15 +4171,16 @@ def _persist_auto_summary_to_settings(
         if callable(getattr(db, "get_roleplay_resume_state", None)) and callable(
             getattr(db, "transaction", None)
         ):
-            conversation = db.get_conversation_by_id(chat_id)
-            if not isinstance(conversation, Mapping):
-                return
             with db.transaction() as conn:
                 resume_state = db.get_roleplay_resume_state(
                     chat_id,
                     conn=conn,
                     lock_for_update=True,
+                    owner_client_id=str(getattr(db, "client_id", "") or ""),
                 )
+                conversation = resume_state.get("conversation")
+                if not isinstance(conversation, Mapping):
+                    return
                 current_settings = dict(resume_state.get("settings") or {})
                 if _summary_matches_existing(
                     current_settings.get("summary"),
@@ -7516,7 +7517,10 @@ async def update_chat_settings(
                 chat_id,
                 conn=conn,
                 lock_for_update=True,
+                owner_client_id=str(current_user.id),
             )
+            conversation = resume_state.get("conversation")
+            _verify_chat_ownership(conversation, current_user.id, chat_id, scope)
             existing_settings = resume_state.get("settings") or {}
             merged_settings = _merge_conversation_settings(
                 existing_settings,
@@ -8543,7 +8547,10 @@ async def select_greeting(
                     chat_id,
                     conn=conn,
                     lock_for_update=True,
+                    owner_client_id=str(current_user.id),
                 )
+                conversation = resume_state.get("conversation")
+                _verify_chat_ownership(conversation, current_user.id, chat_id)
                 settings = dict(resume_state.get("settings") or {})
                 settings["greetingSelectionId"] = f"greeting:{body.index}:selected"
                 settings["greetingsChecksum"] = checksum

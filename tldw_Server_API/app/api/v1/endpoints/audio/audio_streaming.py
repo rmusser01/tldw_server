@@ -996,42 +996,69 @@ def _persist_audio_chat_settings(
         raise InputError(
             f"{sorted(reserved_keys)[0]} is reserved server-owned state."
         )
-    resume_state: dict[str, Any] | None = None
-    conversation: dict[str, Any] | None = None
     if conversation_created:
         final_settings = dict(settings_payload)
-        expected_version = None
-    else:
-        conversation = db.get_conversation_by_id(conversation_id)
-        if not isinstance(conversation, dict):
-            raise InputError("Audio conversation was not found or is not owned.")
-        if callable(getattr(db, "get_roleplay_resume_state", None)):
-            resume_state = db.get_roleplay_resume_state(conversation_id)
-            settings_row = {
-                "settings": resume_state.get("settings") or {},
-                "settings_version": resume_state.get("settings_version") or 0,
+        final_settings = validate_chat_settings_storage(
+            final_settings,
+            reject_credentials=True,
+        )
+        return bool(db.upsert_conversation_settings(conversation_id, final_settings))
+
+    if callable(getattr(db, "get_roleplay_resume_state", None)) and callable(
+        getattr(db, "transaction", None)
+    ):
+        with db.transaction() as conn:
+            resume_state = db.get_roleplay_resume_state(
+                conversation_id,
+                conn=conn,
+                lock_for_update=True,
+                owner_client_id=str(getattr(db, "client_id", "") or ""),
+            )
+            conversation = resume_state.get("conversation")
+            if not isinstance(conversation, dict):
+                raise InputError("Audio conversation resume state is incomplete.")
+            final_settings = {
+                **dict(resume_state.get("settings") or {}),
+                **settings_payload,
             }
-        else:
-            settings_row = db.get_conversation_settings(conversation_id)
-        final_settings = {
-            **dict((settings_row or {}).get("settings") or {}),
-            **settings_payload,
-        }
-        expected_version = int((settings_row or {}).get("settings_version") or 0)
+            final_settings = validate_chat_settings_storage(
+                final_settings,
+                reject_credentials=True,
+                allow_internal=True,
+                behavior_snapshot=resume_state.get("behavior_snapshot"),
+                conversation=conversation,
+            )
+            return bool(
+                db.upsert_conversation_settings(
+                    conversation_id,
+                    final_settings,
+                    conn=conn,
+                    expected_settings_version=int(
+                        resume_state.get("settings_version") or 0
+                    ),
+                )
+            )
+
+    conversation = db.get_conversation_by_id(conversation_id)
+    if not isinstance(conversation, dict):
+        raise InputError("Audio conversation was not found or is not owned.")
+    settings_row = db.get_conversation_settings(conversation_id)
+    final_settings = {
+        **dict((settings_row or {}).get("settings") or {}),
+        **settings_payload,
+    }
     final_settings = validate_chat_settings_storage(
         final_settings,
         reject_credentials=True,
-        allow_internal=not conversation_created,
-        behavior_snapshot=(resume_state or {}).get("behavior_snapshot"),
         conversation=conversation,
     )
-    if conversation_created:
-        return bool(db.upsert_conversation_settings(conversation_id, final_settings))
     return bool(
         db.upsert_conversation_settings(
             conversation_id,
             final_settings,
-            expected_settings_version=expected_version,
+            expected_settings_version=int(
+                (settings_row or {}).get("settings_version") or 0
+            ),
         )
     )
 

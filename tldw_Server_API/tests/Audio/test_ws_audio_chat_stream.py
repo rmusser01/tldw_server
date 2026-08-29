@@ -10,6 +10,7 @@ import sys
 import threading
 import time
 import types
+from contextlib import nullcontext
 from types import SimpleNamespace
 from typing import Any, AsyncIterator, Dict, Iterable, List, Optional
 
@@ -2995,6 +2996,8 @@ async def test_audio_chat_ws_existing_session_merges_settings_with_version_cas(
     existing_resume_state["settings"] = existing_settings
 
     class _ExistingChatDB:
+        client_id = "1"
+
         def __init__(self) -> None:
             self.messages: list[dict[str, Any]] = []
             self.current = {
@@ -3014,9 +3017,19 @@ async def test_audio_chat_ws_existing_session_merges_settings_with_version_cas(
                 "settings_version": self.current["settings_version"],
             }
 
-        def get_roleplay_resume_state(self, conversation_id: str) -> dict[str, Any]:
+        def transaction(self):
+            return nullcontext(object())
+
+        def get_roleplay_resume_state(
+            self,
+            conversation_id: str,
+            **_kwargs: Any,
+        ) -> dict[str, Any]:
             assert conversation_id == "resume-chat"
-            return dict(existing_resume_state)
+            return {
+                **existing_resume_state,
+                "conversation": _owned_audio_test_conversation(conversation_id),
+            }
 
         def get_conversation_by_id(self, conversation_id: str) -> dict[str, Any]:
             return _owned_audio_test_conversation(conversation_id)
@@ -3026,6 +3039,7 @@ async def test_audio_chat_ws_existing_session_merges_settings_with_version_cas(
             conversation_id: str,
             settings: dict[str, Any],
             *,
+            conn=None,
             expected_settings_version: int | None = None,
         ) -> bool:
             assert conversation_id == "resume-chat"
@@ -3169,12 +3183,30 @@ def test_audio_writer_rejects_pending_greeting_for_different_character() -> None
     }
 
     class _SettingsDB:
+        client_id = "1"
+
         def __init__(self) -> None:
             self.current = dict(resume_state)
             self.upsert_calls: list[dict[str, Any]] = []
 
-        def get_roleplay_resume_state(self, _conversation_id: str) -> dict[str, Any]:
-            return dict(self.current)
+        def transaction(self):
+            return nullcontext(object())
+
+        def get_roleplay_resume_state(
+            self,
+            _conversation_id: str,
+            *,
+            conn,
+            lock_for_update: bool,
+            owner_client_id: str | None = None,
+        ) -> dict[str, Any]:
+            assert conn is not None
+            assert lock_for_update is True
+            assert owner_client_id == "1"
+            return {
+                **self.current,
+                "conversation": _owned_audio_test_conversation("pending-audio"),
+            }
 
         def get_conversation_by_id(self, _conversation_id: str) -> dict[str, Any]:
             return _owned_audio_test_conversation("pending-audio")
@@ -3184,6 +3216,7 @@ def test_audio_writer_rejects_pending_greeting_for_different_character() -> None
             _conversation_id: str,
             updated: dict[str, Any],
             *,
+            conn=None,
             expected_settings_version: int | None = None,  # noqa: ARG002
         ) -> bool:
             self.upsert_calls.append(dict(updated))
@@ -3207,10 +3240,88 @@ def test_audio_writer_rejects_pending_greeting_for_different_character() -> None
 
 
 @pytest.mark.unit
+def test_audio_writer_uses_transactional_conversation_identity(monkeypatch) -> None:
+    stale_conversation = _owned_audio_test_conversation("racing-audio")
+    current_conversation = {
+        **stale_conversation,
+        "version": 2,
+        "character_id": 2,
+        "assistant_id": "2",
+    }
+
+    class _SettingsDB:
+        client_id = "1"
+
+        def __init__(self) -> None:
+            self.owner_client_id: str | None = None
+
+        def get_conversation_by_id(self, _conversation_id: str) -> dict[str, Any]:
+            return stale_conversation
+
+        def transaction(self):
+            return nullcontext(object())
+
+        def get_roleplay_resume_state(
+            self,
+            _conversation_id: str,
+            *,
+            conn,
+            lock_for_update: bool,
+            owner_client_id: str | None = None,
+        ) -> dict[str, Any]:
+            assert conn is not None
+            assert lock_for_update is True
+            self.owner_client_id = owner_client_id
+            return {
+                "conversation": current_conversation,
+                "settings": {"preserved": True},
+                "settings_version": 4,
+                "behavior_snapshot": {"status": "missing"},
+            }
+
+        def upsert_conversation_settings(
+            self,
+            _conversation_id: str,
+            _settings: dict[str, Any],
+            *,
+            conn,
+            expected_settings_version: int,
+        ) -> bool:
+            assert conn is not None
+            assert expected_settings_version == 4
+            return True
+
+    seen: dict[str, object] = {}
+
+    def _capture_validation(settings, **kwargs):
+        seen["conversation"] = kwargs.get("conversation")
+        return settings
+
+    monkeypatch.setattr(
+        audio_streaming_module,
+        "validate_chat_settings_storage",
+        _capture_validation,
+    )
+    db = _SettingsDB()
+
+    assert audio_streaming_module._persist_audio_chat_settings(
+        db,
+        "racing-audio",
+        {"audio_chat_ws": {"metadata": {"mode": "tiny"}}},
+        conversation_created=False,
+    )
+
+    assert seen["conversation"] == current_conversation
+    assert db.owner_client_id == "1"
+
+
+@pytest.mark.unit
 def test_audio_writer_allows_small_public_update_with_large_valid_internal_authority() -> None:
     settings, resume_state = _valid_roleplay_settings_with_blob(210_000)
 
     class _SettingsDB:
+        client_id = "1"
+
         def __init__(self) -> None:
             self.current = dict(settings)
             self.upsert_calls: list[tuple[dict[str, Any], int | None]] = []
@@ -3218,8 +3329,18 @@ def test_audio_writer_allows_small_public_update_with_large_valid_internal_autho
         def get_conversation_settings(self, _conversation_id: str) -> dict[str, Any]:
             return {"settings": dict(self.current), "settings_version": 7}
 
-        def get_roleplay_resume_state(self, _conversation_id: str) -> dict[str, Any]:
-            return dict(resume_state)
+        def transaction(self):
+            return nullcontext(object())
+
+        def get_roleplay_resume_state(
+            self,
+            conversation_id: str,
+            **_kwargs: Any,
+        ) -> dict[str, Any]:
+            return {
+                **resume_state,
+                "conversation": _owned_audio_test_conversation(conversation_id),
+            }
 
         def get_conversation_by_id(self, conversation_id: str) -> dict[str, Any]:
             return _owned_audio_test_conversation(conversation_id)
@@ -3229,6 +3350,7 @@ def test_audio_writer_allows_small_public_update_with_large_valid_internal_autho
             _conversation_id: str,
             updated: dict[str, Any],
             *,
+            conn=None,
             expected_settings_version: int | None = None,
         ) -> bool:
             self.upsert_calls.append((dict(updated), expected_settings_version))
@@ -3267,14 +3389,26 @@ def test_audio_writer_rejects_invalid_preserved_internal_authority(
     resume_state["settings"] = settings
 
     class _SettingsDB:
+        client_id = "1"
+
         def __init__(self) -> None:
             self.upsert_calls: list[dict[str, Any]] = []
 
         def get_conversation_settings(self, _conversation_id: str) -> dict[str, Any]:
             return {"settings": dict(settings), "settings_version": 7}
 
-        def get_roleplay_resume_state(self, _conversation_id: str) -> dict[str, Any]:
-            return dict(resume_state)
+        def transaction(self):
+            return nullcontext(object())
+
+        def get_roleplay_resume_state(
+            self,
+            conversation_id: str,
+            **_kwargs: Any,
+        ) -> dict[str, Any]:
+            return {
+                **resume_state,
+                "conversation": _owned_audio_test_conversation(conversation_id),
+            }
 
         def get_conversation_by_id(self, conversation_id: str) -> dict[str, Any]:
             return _owned_audio_test_conversation(conversation_id)
@@ -3284,6 +3418,7 @@ def test_audio_writer_rejects_invalid_preserved_internal_authority(
             _conversation_id: str,
             updated: dict[str, Any],
             *,
+            conn=None,
             expected_settings_version: int | None = None,  # noqa: ARG002
         ) -> bool:
             self.upsert_calls.append(dict(updated))
@@ -3414,6 +3549,8 @@ async def test_audio_chat_ws_existing_session_conflict_does_not_blind_replace(
     existing_resume_state["settings_version"] = 9
 
     class _ConflictingChatDB:
+        client_id = "1"
+
         def __init__(self) -> None:
             self.blind_writes = 0
             self.cas_versions: list[int | None] = []
@@ -3427,8 +3564,18 @@ async def test_audio_chat_ws_existing_session_conflict_does_not_blind_replace(
                 "settings_version": 9,
             }
 
-        def get_roleplay_resume_state(self, _conversation_id: str) -> dict[str, Any]:
-            return dict(existing_resume_state)
+        def transaction(self):
+            return nullcontext(object())
+
+        def get_roleplay_resume_state(
+            self,
+            conversation_id: str,
+            **_kwargs: Any,
+        ) -> dict[str, Any]:
+            return {
+                **existing_resume_state,
+                "conversation": _owned_audio_test_conversation(conversation_id),
+            }
 
         def get_conversation_by_id(self, conversation_id: str) -> dict[str, Any]:
             return _owned_audio_test_conversation(conversation_id)
@@ -3438,6 +3585,7 @@ async def test_audio_chat_ws_existing_session_conflict_does_not_blind_replace(
             _conversation_id: str,
             _settings: dict[str, Any],
             *,
+            conn=None,
             expected_settings_version: int | None = None,
         ) -> bool:
             self.cas_versions.append(expected_settings_version)
@@ -3499,6 +3647,8 @@ async def test_audio_chat_ws_existing_resumable_session_rejects_credential_metad
     existing_resume_state["settings_version"] = 4
 
     class _ExistingResumableDB:
+        client_id = "1"
+
         def __init__(self) -> None:
             self.upsert_calls: list[dict[str, Any]] = []
 
@@ -3511,8 +3661,18 @@ async def test_audio_chat_ws_existing_resumable_session_rejects_credential_metad
                 "settings_version": 4,
             }
 
-        def get_roleplay_resume_state(self, _conversation_id: str) -> dict[str, Any]:
-            return dict(existing_resume_state)
+        def transaction(self):
+            return nullcontext(object())
+
+        def get_roleplay_resume_state(
+            self,
+            conversation_id: str,
+            **_kwargs: Any,
+        ) -> dict[str, Any]:
+            return {
+                **existing_resume_state,
+                "conversation": _owned_audio_test_conversation(conversation_id),
+            }
 
         def get_conversation_by_id(self, conversation_id: str) -> dict[str, Any]:
             return _owned_audio_test_conversation(conversation_id)
@@ -3522,6 +3682,7 @@ async def test_audio_chat_ws_existing_resumable_session_rejects_credential_metad
             _conversation_id: str,
             settings: dict[str, Any],
             *,
+            conn=None,
             expected_settings_version: int | None = None,
         ) -> bool:
             self.upsert_calls.append(dict(settings))

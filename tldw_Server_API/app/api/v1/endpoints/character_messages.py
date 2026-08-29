@@ -1010,7 +1010,11 @@ async def edit_message(
                     message["conversation_id"],
                     conn=conn,
                     lock_for_update=True,
+                    owner_client_id=str(current_user.id),
                 )
+                conversation = resume_state.get("conversation")
+                if not isinstance(conversation, Mapping):
+                    raise InputError("Conversation resume state is incomplete")
             update_payload = {
                 "content": (
                     update_data.content

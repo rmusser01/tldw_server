@@ -261,9 +261,15 @@ def test_share_link_settings_write_uses_version_cas_and_surfaces_conflict():
             *,
             conn,
             lock_for_update: bool,
+            owner_client_id: str | None = None,
         ):
             assert lock_for_update is True
             return {
+                "conversation": {
+                    "id": conversation_id,
+                    "character_id": 1,
+                    "client_id": owner_client_id,
+                },
                 "settings": {"preserved": True},
                 "settings_version": 9,
                 "behavior_snapshot": {"status": "missing"},
@@ -315,9 +321,15 @@ def test_share_link_settings_write_expects_absent_row_on_first_write():
             *,
             conn,
             lock_for_update: bool,
+            owner_client_id: str | None = None,
         ):
             assert lock_for_update is True
             return {
+                "conversation": {
+                    "id": conversation_id,
+                    "character_id": 1,
+                    "client_id": owner_client_id,
+                },
                 "settings": None,
                 "settings_version": None,
                 "behavior_snapshot": {"status": "missing"},
@@ -347,6 +359,87 @@ def test_share_link_settings_write_expects_absent_row_on_first_write():
     )
 
     assert db.expected_settings_version == 0
+
+
+def test_share_link_writer_uses_transactional_conversation_identity(monkeypatch):
+    stale_conversation = {
+        "id": "conversation-1",
+        "character_id": 1,
+        "client_id": "1",
+    }
+    current_conversation = {
+        **stale_conversation,
+        "version": 2,
+        "character_id": 2,
+        "assistant_kind": "character",
+        "assistant_id": "2",
+        "persona_memory_mode": None,
+        "scope_type": "global",
+        "workspace_id": None,
+    }
+
+    class _RacingDB:
+        client_id = "1"
+
+        def __init__(self) -> None:
+            self.owner_client_id: str | None = None
+
+        def transaction(self):
+            return nullcontext(object())
+
+        def get_roleplay_resume_state(
+            self,
+            _conversation_id: str,
+            *,
+            conn,
+            lock_for_update: bool,
+            owner_client_id: str | None = None,
+        ):
+            assert conn is not None
+            assert lock_for_update is True
+            self.owner_client_id = owner_client_id
+            return {
+                "conversation": current_conversation,
+                "settings": {},
+                "settings_version": 3,
+                "behavior_snapshot": {"status": "missing"},
+            }
+
+        def upsert_conversation_settings(
+            self,
+            _conversation_id: str,
+            _settings: dict,
+            *,
+            conn,
+            expected_settings_version: int,
+        ) -> bool:
+            assert conn is not None
+            assert expected_settings_version == 3
+            return True
+
+    seen: dict[str, object] = {}
+
+    def _capture_validation(settings, **kwargs):
+        seen["conversation"] = kwargs.get("conversation")
+        return settings
+
+    monkeypatch.setattr(
+        chat_router,
+        "validate_chat_settings_storage",
+        _capture_validation,
+    )
+    db = _RacingDB()
+
+    chat_router._persist_knowledge_qa_share_links(
+        db,
+        "conversation-1",
+        [{"id": "share-1"}],
+        conversation=stale_conversation,
+        expected_settings_version=3,
+    )
+
+    assert seen["conversation"] == current_conversation
+    assert db.owner_client_id == "1"
 
 
 def test_share_link_create_requires_exact_scope_match(tmp_path):
