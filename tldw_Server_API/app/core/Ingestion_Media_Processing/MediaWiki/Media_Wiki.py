@@ -27,8 +27,7 @@ import yaml
 from loguru import logger as _base_logger
 
 from tldw_Server_API.app.core.config import settings
-from tldw_Server_API.app.core.DB_Management.media_db.api import get_media_repository
-from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database
+from tldw_Server_API.app.core.DB_Management.media_db.api import get_media_repository, managed_media_database
 
 #
 # Local Imports
@@ -602,6 +601,7 @@ def _store_mediawiki_chunks_in_vector_db(
     revision_id: Optional[int],
     api_name_vector_db: Optional[str],
     api_key_vector_db: Optional[str],
+    vector_user_id: Optional[str] = None,
 ) -> tuple[bool, str]:
     if ChromaDBManager is None or create_embeddings_batch is None:
         return False, "Embeddings dependencies unavailable."
@@ -622,10 +622,14 @@ def _store_mediawiki_chunks_in_vector_db(
         "embedding_config": embedding_config,
     }
 
-    vector_user_id = settings.get("SINGLE_USER_FIXED_ID", 1)
+    resolved_vector_user_id = (
+        str(vector_user_id).strip() if vector_user_id is not None else ""
+    )
+    if not resolved_vector_user_id:
+        resolved_vector_user_id = str(settings.get("SINGLE_USER_FIXED_ID", 1))
     try:
         manager = ChromaDBManager(
-            user_id=str(vector_user_id),
+            user_id=resolved_vector_user_id,
             user_embedding_config=user_embedding_config,
         )
     except MEDIAWIKI_EMBEDDING_EXCEPTIONS as exc:
@@ -702,6 +706,7 @@ def process_single_item(
         api_name_vector_db: Optional[str] = None,
         api_key_vector_db: Optional[str] = None,
         media_writer: Any | None = None,
+        vector_user_id: Optional[str] = None,
 ) -> dict[str, Any]:
     try:
         logging.debug(
@@ -800,6 +805,7 @@ def process_single_item(
                 revision_id=item.get("revision_id"),
                 api_name_vector_db=api_name_vector_db,
                 api_key_vector_db=api_key_vector_db,
+                vector_user_id=vector_user_id,
             )
             if success:
                 processed_data["message"] += f" {message}"
@@ -943,6 +949,8 @@ def import_mediawiki_dump(
         api_name_vector_db: Optional[str] = None,
         api_key_vector_db: Optional[str] = None,
         allowed_dir: Optional[Path] = None,
+        media_writer: Any | None = None,
+        vector_user_id: Optional[str] = None,
 ) -> Iterator[dict[str, Any]]:
     try:
         # Sanitize wiki_name and validate file_path
@@ -975,8 +983,8 @@ def import_mediawiki_dump(
                "message": f"Found {total_pages} pages to process for '{wiki_name}'."}
 
         with contextlib.ExitStack() as stack:
-            shared_media_writer = None
-            if store_to_db:
+            shared_media_writer = media_writer
+            if store_to_db and shared_media_writer is None:
                 db_instance = stack.enter_context(
                     managed_media_database(client_id="mediawiki_import")
                 )
@@ -1013,6 +1021,7 @@ def import_mediawiki_dump(
                     api_name_vector_db=api_name_vector_db,
                     api_key_vector_db=api_key_vector_db,
                     media_writer=shared_media_writer,
+                    vector_user_id=vector_user_id,
                 )
 
                 if store_to_db and processed_item_details.get("status") == "Success" and processed_item_details.get(
