@@ -4,6 +4,8 @@ import pytest
 from fastapi import Depends, FastAPI, Request
 from httpx import ASGITransport, AsyncClient
 
+from tldw_Server_API.tests.AuthNZ_SQLite._user_fixtures import create_authnz_test_user
+
 
 async def _issue_access_token(
     user_row: dict,
@@ -57,16 +59,9 @@ async def test_org_rbac_scoped_permissions_require_active_sqlite(tmp_path, monke
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))
 
-    async with pool.transaction() as conn:
-        await conn.execute(
-            """
-            INSERT INTO users (username, email, password_hash, is_active)
-            VALUES (?, ?, ?, 1)
-            """,
-            ("alice", "alice@example.com", "x"),
-        )
-
-    user_id = await pool.fetchval("SELECT id FROM users WHERE username = ?", ("alice",))
+    user_id = await create_authnz_test_user(
+        pool, username="alice", email="alice@example.com"
+    )
 
     repo = AuthnzOrgsTeamsRepo(pool)
     org = await repo.create_organization(name="Acme", owner_user_id=user_id)
@@ -135,17 +130,11 @@ async def test_org_rbac_scoped_permissions_endpoint_allows_media_read(tmp_path, 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))
 
-    async with pool.transaction() as conn:
-        await conn.execute(
-            """
-            INSERT INTO users (username, email, password_hash, is_active, role)
-            VALUES (?, ?, ?, 1, ?)
-            """,
-            ("scoped-user", "scoped@example.com", "x", "guest"),
-        )
-
-    user_id = await pool.fetchval(
-        "SELECT id FROM users WHERE username = ?", ("scoped-user",)
+    user_id = await create_authnz_test_user(
+        pool,
+        username="scoped-user",
+        email="scoped@example.com",
+        role="guest",
     )
 
     repo = AuthnzOrgsTeamsRepo(pool)
@@ -197,17 +186,8 @@ async def test_org_rbac_scoped_permissions_denylist_blocks_admin(tmp_path, monke
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))
 
-    async with pool.transaction() as conn:
-        await conn.execute(
-            """
-            INSERT INTO users (username, email, password_hash, is_active, role)
-            VALUES (?, ?, ?, 1, ?)
-            """,
-            ("deny-user", "deny@example.com", "x", "guest"),
-        )
-
-    user_id = await pool.fetchval(
-        "SELECT id FROM users WHERE username = ?", ("deny-user",)
+    user_id = await create_authnz_test_user(
+        pool, username="deny-user", email="deny@example.com", role="guest"
     )
 
     repo = AuthnzOrgsTeamsRepo(pool)
@@ -279,17 +259,11 @@ async def test_org_rbac_scoped_permissions_team_denylist_blocks_admin(tmp_path, 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))
 
-    async with pool.transaction() as conn:
-        await conn.execute(
-            """
-            INSERT INTO users (username, email, password_hash, is_active, role)
-            VALUES (?, ?, ?, 1, ?)
-            """,
-            ("deny-team-user", "deny-team@example.com", "x", "guest"),
-        )
-
-    user_id = await pool.fetchval(
-        "SELECT id FROM users WHERE username = ?", ("deny-team-user",)
+    user_id = await create_authnz_test_user(
+        pool,
+        username="deny-team-user",
+        email="deny-team@example.com",
+        role="guest",
     )
 
     repo = AuthnzOrgsTeamsRepo(pool)
@@ -365,17 +339,11 @@ async def test_org_rbac_scoped_permissions_allows_tools_execute(tmp_path, monkey
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))
 
-    async with pool.transaction() as conn:
-        await conn.execute(
-            """
-            INSERT INTO users (username, email, password_hash, is_active, role)
-            VALUES (?, ?, ?, 1, ?)
-            """,
-            ("tool-user", "tool-user@example.com", "x", "guest"),
-        )
-
-    user_id = await pool.fetchval(
-        "SELECT id FROM users WHERE username = ?", ("tool-user",)
+    user_id = await create_authnz_test_user(
+        pool,
+        username="tool-user",
+        email="tool-user@example.com",
+        role="guest",
     )
 
     repo = AuthnzOrgsTeamsRepo(pool)

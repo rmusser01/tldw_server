@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 
 import pytest
 
+from tldw_Server_API.tests.AuthNZ_SQLite._user_fixtures import set_authnz_test_user_active
+
 pytest_plugins = ("tldw_Server_API.tests._plugins.authnz_full_fixtures",)
 
 
@@ -192,13 +194,13 @@ async def test_user_provider_secrets_repo_sqlite(tmp_path, monkeypatch) -> None:
         include_revoked=True,
     )
     assert active_owner_row is not None
-    await pool.execute("UPDATE users SET is_active = 0 WHERE id = ?", (user_id,))
+    await set_authnz_test_user_active(pool, user_id, False)
     assert await repo.fetch_secret_for_active_user(
         user_id,
         "openai",
         include_revoked=True,
     ) is None
-    await pool.execute("UPDATE users SET is_active = 1 WHERE id = ?", (user_id,))
+    await set_authnz_test_user_active(pool, user_id, True)
 
     items = await repo.list_secrets_for_user(user_id)
     assert len(items) == 1
