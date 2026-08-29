@@ -1829,6 +1829,7 @@ def test_start_new_chat_session_decodes_alternate_greeting_bytes(db):
     assert stored_messages[0]["content"] == "Bytes hi {{user}}"
 
 
+@pytest.mark.integration
 def test_start_new_chat_session_creates_atomic_resumable_snapshot(db, monkeypatch):
     monkeypatch.setenv("DEFAULT_LLM_PROVIDER", "local-llm")
     monkeypatch.setenv("CHAR_CHAT_MODEL", "local-test")

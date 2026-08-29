@@ -2778,8 +2778,6 @@ def test_pin_edit_acquires_message_metadata_before_conversation_lock(
         character_db,
         with_message=True,
     )
-    import tldw_Server_API.app.api.v1.endpoints.character_messages as messages
-
     order: list[str] = []
     real_resume = character_db.get_roleplay_resume_state
 
@@ -2794,14 +2792,14 @@ def test_pin_edit_acquires_message_metadata_before_conversation_lock(
         return real_resume(*args, **kwargs)
 
     monkeypatch.setattr(
-        messages,
-        "_lock_message_for_edit",
+        character_db,
+        "lock_message_for_edit",
         record_message_lock,
         raising=False,
     )
     monkeypatch.setattr(
-        messages,
-        "_lock_message_metadata_for_edit",
+        character_db,
+        "lock_message_metadata_for_edit",
         record_metadata_lock,
         raising=False,
     )
@@ -2823,7 +2821,7 @@ def test_pin_edit_acquires_message_metadata_before_conversation_lock(
 
 
 def test_postgres_message_edit_lock_uses_for_update() -> None:
-    import tldw_Server_API.app.api.v1.endpoints.character_messages as messages
+    from tldw_Server_API.app.core.DB_Management.chacha.message_store import MessageStore
 
     class _Result:
         @staticmethod
@@ -2842,7 +2840,7 @@ def test_postgres_message_edit_lock_uses_for_update() -> None:
         backend_type = BackendType.POSTGRESQL
 
     conn = _Connection()
-    messages._lock_message_for_edit(_Database(), conn, "message-1")
+    MessageStore(_Database()).lock_message_for_edit("message-1", conn=conn)
 
     assert len(conn.calls) == 1
     assert "FOR UPDATE" in conn.calls[0][0]
@@ -2850,7 +2848,7 @@ def test_postgres_message_edit_lock_uses_for_update() -> None:
 
 
 def test_postgres_pin_edit_locks_metadata_before_conversation() -> None:
-    import tldw_Server_API.app.api.v1.endpoints.character_messages as messages
+    from tldw_Server_API.app.core.DB_Management.chacha.message_store import MessageStore
 
     class _Result:
         @staticmethod
@@ -2869,7 +2867,7 @@ def test_postgres_pin_edit_locks_metadata_before_conversation() -> None:
         backend_type = BackendType.POSTGRESQL
 
     conn = _Connection()
-    messages._lock_message_metadata_for_edit(_Database(), conn, "message-1")
+    MessageStore(_Database()).lock_message_metadata_for_edit("message-1", conn=conn)
 
     assert len(conn.calls) == 2
     assert "ON CONFLICT(message_id) DO NOTHING" in conn.calls[0][0]

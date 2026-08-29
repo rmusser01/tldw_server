@@ -113,11 +113,6 @@ def test_openwebui_metadata_merge_uses_settings_version_cas():
         def transaction(self):
             return nullcontext(self)
 
-        def execute(self, query: str, params: tuple):
-            assert "SELECT character_id" in query
-            assert params == ("conversation-1",)
-            return SimpleNamespace(fetchone=lambda: {"character_id": 1})
-
         def get_roleplay_resume_state(
             self,
             conversation_id: str,
@@ -131,6 +126,7 @@ def test_openwebui_metadata_merge_uses_settings_version_cas():
                 "settings": {"preserved": True},
                 "settings_version": 6,
                 "behavior_snapshot": {"status": "missing"},
+                "conversation": {"character_id": 1},
             }
 
         def upsert_conversation_settings(
@@ -170,10 +166,6 @@ def test_openwebui_metadata_merge_converts_cas_conflict_to_controlled_failure():
         def transaction(self):
             return nullcontext(self)
 
-        def execute(self, query: str, params: tuple):
-            assert "SELECT character_id" in query
-            return SimpleNamespace(fetchone=lambda: {"character_id": 1})
-
         def get_roleplay_resume_state(
             self,
             conversation_id: str,
@@ -185,6 +177,7 @@ def test_openwebui_metadata_merge_converts_cas_conflict_to_controlled_failure():
                 "settings": {},
                 "settings_version": 6,
                 "behavior_snapshot": {"status": "missing"},
+                "conversation": {"character_id": 1},
             }
 
         def upsert_conversation_settings(

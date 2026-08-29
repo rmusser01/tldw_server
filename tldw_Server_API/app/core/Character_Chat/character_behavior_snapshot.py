@@ -11,6 +11,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from tldw_Server_API.app.core.exceptions import BehaviorSnapshotValidationError
+
 SNAPSHOT_SCHEMA_VERSION = 1
 DEFAULT_MAX_SNAPSHOT_BYTES = 1024 * 1024
 
@@ -100,9 +102,9 @@ def build_behavior_snapshot(
 ) -> BehaviorSnapshotV1:
     """Validate, copy, and canonically encode a version-1 behavior snapshot."""
     if not isinstance(payload, Mapping):
-        raise ValueError("snapshot must be an object")
+        raise BehaviorSnapshotValidationError("snapshot must be an object")
     if type(max_bytes) is not int or max_bytes <= 0:
-        raise ValueError("max_bytes must be a positive integer")
+        raise BehaviorSnapshotValidationError("max_bytes must be a positive integer")
 
     normalized = _normalize_json(dict(payload), path="snapshot")
     _validate_snapshot(normalized)
@@ -114,7 +116,7 @@ def build_behavior_snapshot(
         separators=(",", ":"),
     ).encode("utf-8")
     if len(canonical_bytes) > max_bytes:
-        raise ValueError(
+        raise BehaviorSnapshotValidationError(
             f"behavior snapshot size {len(canonical_bytes)} exceeds maximum {max_bytes} bytes"
         )
     return BehaviorSnapshotV1(
@@ -126,16 +128,17 @@ def build_behavior_snapshot(
 
 
 def _normalize_json(value: Any, *, path: str) -> Any:
+    """Normalize JSON-compatible values into a canonical defensive copy."""
     if isinstance(value, str):
         return value.replace("\r\n", "\n").replace("\r", "\n")
     if value is None or isinstance(value, (bool, int)):
         return value
     if isinstance(value, float):
         if not math.isfinite(value):
-            raise ValueError(f"{path} floats must be finite")
+            raise BehaviorSnapshotValidationError(f"{path} floats must be finite")
         return value
     if isinstance(value, (bytes, bytearray, memoryview)):
-        raise ValueError(f"{path} must not contain binary values")
+        raise BehaviorSnapshotValidationError(f"{path} must not contain binary values")
     if isinstance(value, list):
         return [
             _normalize_json(item, path=f"{path}[{index}]")
@@ -145,34 +148,43 @@ def _normalize_json(value: Any, *, path: str) -> Any:
         normalized: dict[str, Any] = {}
         for key, item in value.items():
             if not isinstance(key, str):
-                raise ValueError(f"{path} keys must be JSON-compatible strings")
+                raise BehaviorSnapshotValidationError(
+                    f"{path} keys must be JSON-compatible strings"
+                )
             normalized_key = key.replace("\r\n", "\n").replace("\r", "\n")
             if normalized_key in normalized:
-                raise ValueError(f"{path} has duplicate keys after line-ending normalization")
+                raise BehaviorSnapshotValidationError(
+                    f"{path} has duplicate keys after line-ending normalization"
+                )
             normalized[normalized_key] = _normalize_json(
                 item,
                 path=f"{path}.{normalized_key}",
             )
         return normalized
-    raise ValueError(f"{path} must contain only JSON-compatible values")
+    raise BehaviorSnapshotValidationError(
+        f"{path} must contain only JSON-compatible values"
+    )
 
 
 def _validate_snapshot(snapshot: dict[str, Any]) -> None:
+    """Validate the closed top-level behavior snapshot contract."""
     _require_exact_keys(snapshot, _SNAPSHOT_KEYS, path="snapshot")
     if type(snapshot["schema_version"]) is not int or snapshot["schema_version"] != 1:
-        raise ValueError("snapshot.schema_version must equal 1")
+        raise BehaviorSnapshotValidationError("snapshot.schema_version must equal 1")
 
     participants = snapshot["participants"]
     if not isinstance(participants, list):
-        raise ValueError("snapshot.participants must be a list")
+        raise BehaviorSnapshotValidationError("snapshot.participants must be a list")
     if not participants:
-        raise ValueError("snapshot must contain at least one participant")
+        raise BehaviorSnapshotValidationError(
+            "snapshot must contain at least one participant"
+        )
 
     seen_sources: set[tuple[str, str]] = set()
     for index, participant in enumerate(participants):
         source_identity = _validate_participant(participant, index=index)
         if source_identity in seen_sources:
-            raise ValueError(
+            raise BehaviorSnapshotValidationError(
                 "snapshot contains duplicate participant source "
                 f"{source_identity[0]}:{source_identity[1]}"
             )
@@ -181,10 +193,13 @@ def _validate_snapshot(snapshot: dict[str, Any]) -> None:
     routing = _require_object(snapshot["routing_defaults"], path="snapshot.routing_defaults")
     _require_exact_keys(routing, _ROUTING_KEYS, path="snapshot.routing_defaults")
     if routing["turn_taking_mode"] != "single":
-        raise ValueError("snapshot.routing_defaults.turn_taking_mode must equal 'single'")
+        raise BehaviorSnapshotValidationError(
+            "snapshot.routing_defaults.turn_taking_mode must equal 'single'"
+        )
 
 
 def _validate_participant(participant: Any, *, index: int) -> tuple[str, str]:
+    """Validate one participant and return its stable source identity."""
     path = f"snapshot.participants[{index}]"
     participant = _require_object(participant, path=path)
     _require_exact_keys(participant, _PARTICIPANT_KEYS, path=path)
@@ -192,26 +207,38 @@ def _validate_participant(participant: Any, *, index: int) -> tuple[str, str]:
     source = _require_object(participant["source"], path=f"{path}.source")
     _require_exact_keys(source, _SOURCE_KEYS, path=f"{path}.source")
     if not isinstance(source["kind"], str) or source["kind"] not in _SOURCE_KINDS:
-        raise ValueError(f"{path}.source.kind must be one of {sorted(_SOURCE_KINDS)}")
+        raise BehaviorSnapshotValidationError(
+            f"{path}.source.kind must be one of {sorted(_SOURCE_KINDS)}"
+        )
     if not isinstance(source["id"], str) or not source["id"]:
-        raise ValueError(f"{path}.source.id must be a non-empty string")
+        raise BehaviorSnapshotValidationError(
+            f"{path}.source.id must be a non-empty string"
+        )
     if type(source["version"]) is not int or source["version"] < 1:
-        raise ValueError(f"{path}.source.version must be a positive integer")
+        raise BehaviorSnapshotValidationError(
+            f"{path}.source.version must be a positive integer"
+        )
 
     identity = _require_object(participant["identity"], path=f"{path}.identity")
     _require_exact_keys(identity, _IDENTITY_KEYS, path=f"{path}.identity")
     if not isinstance(identity["name"], str) or not identity["name"]:
-        raise ValueError(f"{path}.identity.name must be a non-empty string")
+        raise BehaviorSnapshotValidationError(
+            f"{path}.identity.name must be a non-empty string"
+        )
     if not isinstance(identity["aliases"], list) or not all(
         isinstance(alias, str) for alias in identity["aliases"]
     ):
-        raise ValueError(f"{path}.identity.aliases must be a list of strings")
+        raise BehaviorSnapshotValidationError(
+            f"{path}.identity.aliases must be a list of strings"
+        )
 
     prompt = _require_object(participant["prompt"], path=f"{path}.prompt")
     _require_exact_keys(prompt, _PROMPT_KEYS, path=f"{path}.prompt")
     for key in _PROMPT_TEXT_KEYS:
         if not isinstance(prompt[key], str):
-            raise ValueError(f"{path}.prompt.{key} must be a string")
+            raise BehaviorSnapshotValidationError(
+                f"{path}.prompt.{key} must be a string"
+            )
     extensions = _require_object(
         prompt["prompt_relevant_extensions"],
         path=f"{path}.prompt.prompt_relevant_extensions",
@@ -221,11 +248,17 @@ def _validate_participant(participant: Any, *, index: int) -> tuple[str, str]:
     greeting = _require_object(participant["greeting"], path=f"{path}.greeting")
     _require_exact_keys(greeting, _GREETING_KEYS, path=f"{path}.greeting")
     if not isinstance(greeting["content"], str):
-        raise ValueError(f"{path}.greeting.content must be a string")
+        raise BehaviorSnapshotValidationError(
+            f"{path}.greeting.content must be a string"
+        )
     if not isinstance(greeting["source"], str) or not greeting["source"]:
-        raise ValueError(f"{path}.greeting.source must be a non-empty string")
+        raise BehaviorSnapshotValidationError(
+            f"{path}.greeting.source must be a non-empty string"
+        )
     if type(greeting["source_index"]) is not int or greeting["source_index"] < 0:
-        raise ValueError(f"{path}.greeting.source_index must be a non-negative integer")
+        raise BehaviorSnapshotValidationError(
+            f"{path}.greeting.source_index must be a non-negative integer"
+        )
 
     generation_defaults = _require_object(
         participant["generation_defaults"],
@@ -236,7 +269,9 @@ def _validate_participant(participant: Any, *, index: int) -> tuple[str, str]:
     for field_name in ("exemplars", "world_books"):
         entries = participant[field_name]
         if not isinstance(entries, list):
-            raise ValueError(f"{path}.{field_name} must be a list")
+            raise BehaviorSnapshotValidationError(
+                f"{path}.{field_name} must be a list"
+            )
         for entry_index, entry in enumerate(entries):
             entry_path = f"{path}.{field_name}[{entry_index}]"
             entry = _require_object(entry, path=entry_path)
@@ -251,21 +286,26 @@ def _validate_participant(participant: Any, *, index: int) -> tuple[str, str]:
 
 
 def _require_object(value: Any, *, path: str) -> dict[str, Any]:
+    """Require a plain JSON object at the supplied snapshot path."""
     if not isinstance(value, dict):
-        raise ValueError(f"{path} must be an object")
+        raise BehaviorSnapshotValidationError(f"{path} must be an object")
     return value
 
 
 def _require_exact_keys(value: dict[str, Any], allowed: frozenset[str], *, path: str) -> None:
+    """Require exactly the allowed keys for one closed-schema object."""
     unexpected = sorted(value.keys() - allowed)
     if unexpected:
-        raise ValueError(f"{path} has unexpected keys: {unexpected}")
+        raise BehaviorSnapshotValidationError(
+            f"{path} has unexpected keys: {unexpected}"
+        )
     missing = sorted(allowed - value.keys())
     if missing:
-        raise ValueError(f"{path} has missing keys: {missing}")
+        raise BehaviorSnapshotValidationError(f"{path} has missing keys: {missing}")
 
 
 def _reject_credential_keys(value: Any, *, path: str) -> None:
+    """Reject credential-like keys recursively from extensible snapshot fields."""
     if isinstance(value, list):
         for index, item in enumerate(value):
             _reject_credential_keys(item, path=f"{path}[{index}]")
@@ -274,7 +314,9 @@ def _reject_credential_keys(value: Any, *, path: str) -> None:
         return
     for key, item in value.items():
         if is_credential_key(key):
-            raise ValueError(f"{path} contains credential-like key {key!r}")
+            raise BehaviorSnapshotValidationError(
+                f"{path} contains credential-like key {key!r}"
+            )
         _reject_credential_keys(item, path=f"{path}.{key}")
 
 
@@ -306,6 +348,7 @@ def is_credential_key(key: str) -> bool:
 
 __all__ = [
     "BehaviorSnapshotV1",
+    "BehaviorSnapshotValidationError",
     "DEFAULT_MAX_SNAPSHOT_BYTES",
     "SNAPSHOT_SCHEMA_VERSION",
     "build_behavior_snapshot",

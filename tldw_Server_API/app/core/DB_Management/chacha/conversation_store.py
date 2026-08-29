@@ -15,13 +15,10 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     _CHACHA_NONCRITICAL_EXCEPTIONS,
     logger,
 )
+from tldw_Server_API.app.core.exceptions import ConversationSettingsTargetMissing
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
-
-
-class _ConversationSettingsTargetMissing(RuntimeError):
-    """Force transaction rollback when settings outlive their live conversation."""
 
 
 class ConversationStore:
@@ -201,11 +198,11 @@ class ConversationStore:
                     (conversation_id,),
                 )
                 if conversation_result.rowcount != 1:
-                    raise _ConversationSettingsTargetMissing(conversation_id)
+                    raise ConversationSettingsTargetMissing(conversation_id)
             return True
         except ConflictError:
             raise
-        except _ConversationSettingsTargetMissing:
+        except ConversationSettingsTargetMissing:
             return False
         except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
             logger.warning(f"upsert_conversation_settings failed for {conversation_id}: {exc}")

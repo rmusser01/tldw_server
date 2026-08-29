@@ -4354,16 +4354,10 @@ class ChatbookService:
                 merged = merge(dict(settings) if isinstance(settings, dict) else {})
                 if merged is None:
                     return False
-                conversation_row = conn.execute(
-                    "SELECT character_id FROM conversations WHERE id = ? AND deleted = FALSE",
-                    (conversation_id,),
-                ).fetchone()
-                if conversation_row is None:
+                conversation = resume_state.get("conversation")
+                if not isinstance(conversation, dict):
                     return False
-                try:
-                    character_id = conversation_row["character_id"]
-                except (IndexError, KeyError, TypeError):
-                    character_id = conversation_row[0]
+                character_id = conversation.get("character_id")
                 snapshot = resume_state.get("behavior_snapshot")
                 snapshot_valid = (
                     isinstance(snapshot, dict) and snapshot.get("status") == "valid"

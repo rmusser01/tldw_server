@@ -75,6 +75,45 @@ class MessageStore:
                 f"Cannot mutate message history: Conversation ID '{conversation_id}' not found or deleted."
             )
 
+    def lock_message_for_edit(self, message_id: str, *, conn: Any) -> None:
+        """Lock a live PostgreSQL message before its conversation is locked."""
+        if self._db.backend_type != BackendType.POSTGRESQL:
+            return
+        row = conn.execute(
+            "SELECT id FROM messages "
+            "WHERE id = ? AND deleted = FALSE "
+            "FOR UPDATE",
+            (message_id,),
+        ).fetchone()
+        if row is None:
+            raise ConflictError(
+                f"Message ID {message_id} is no longer available for editing.",
+                entity="messages",
+                entity_id=message_id,
+            )
+
+    def lock_message_metadata_for_edit(self, message_id: str, *, conn: Any) -> None:
+        """Ensure and lock message metadata before the conversation row."""
+        if self._db.backend_type != BackendType.POSTGRESQL:
+            return
+        conn.execute(
+            "INSERT INTO message_metadata(message_id, last_modified) "
+            "VALUES (?, CURRENT_TIMESTAMP) "
+            "ON CONFLICT(message_id) DO NOTHING",
+            (message_id,),
+        )
+        row = conn.execute(
+            "SELECT message_id FROM message_metadata "
+            "WHERE message_id = ? FOR UPDATE",
+            (message_id,),
+        ).fetchone()
+        if row is None:
+            raise ConflictError(
+                f"Message metadata for {message_id} is no longer available.",
+                entity="message_metadata",
+                entity_id=message_id,
+            )
+
     def add_message(
         self,
         msg_data: dict[str, Any],

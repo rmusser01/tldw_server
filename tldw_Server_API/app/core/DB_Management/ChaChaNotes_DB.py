@@ -42620,6 +42620,8 @@ for _character_store_method in (
 
 for _message_store_method in (
     "add_message",
+    "lock_message_for_edit",
+    "lock_message_metadata_for_edit",
     "append_message_from_sync",
     "tombstone_message_from_sync",
     "get_messages_by_sync_stable_id",

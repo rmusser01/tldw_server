@@ -13,6 +13,7 @@ from tldw_Server_API.app.core.Character_Chat.character_behavior_snapshot import 
     BehaviorSnapshotV1,
     build_behavior_snapshot,
 )
+from tldw_Server_API.app.core.exceptions import BehaviorSnapshotValidationError
 
 
 def _participant(*, participant_id: str, name: str) -> dict[str, object]:
@@ -117,6 +118,12 @@ def test_build_behavior_snapshot_is_canonical_and_covers_every_participant():
         "default_memory": None,
     }
     assert snapshot.payload["routing_defaults"] == {"turn_taking_mode": "single"}
+
+
+@pytest.mark.unit
+def test_build_behavior_snapshot_uses_domain_validation_error():
+    with pytest.raises(BehaviorSnapshotValidationError, match="snapshot must be an object"):
+        build_behavior_snapshot([])
 
 
 @pytest.mark.unit

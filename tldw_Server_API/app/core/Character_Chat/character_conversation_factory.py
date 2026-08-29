@@ -38,6 +38,7 @@ from tldw_Server_API.app.core.DB_Management.chacha.conversation_resume_store imp
     build_materialized_behavior_settings,
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import BackendType, InputError
+from tldw_Server_API.app.core.exceptions import CharacterBehaviorSourceDrift
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     ensure_app_config,
@@ -159,17 +160,16 @@ _INELIGIBLE_SAFE_BEHAVIOR_KEYS = frozenset(
 )
 
 
-class _SourceDrift(RuntimeError):
-    pass
-
-
 @dataclass(frozen=True)
 class _MaterializedBehavior:
+    """Stable snapshot and primary-character source read as one unit."""
+
     snapshot: BehaviorSnapshotV1
     primary_character: dict[str, Any]
 
 
 def _row_dict(row: Any, result: Any) -> dict[str, Any]:
+    """Convert mapping and positional backend rows into dictionaries."""
     if isinstance(row, dict):
         return dict(row)
     mapping = getattr(row, "_mapping", None)
@@ -214,6 +214,7 @@ def reject_resumable_behavior_credentials(
     *,
     path: str = "conversation_settings",
 ) -> None:
+    """Reject credential-bearing keys from resumable behavior settings."""
     if isinstance(value, Mapping):
         for key, item in value.items():
             key_text = str(key)
@@ -952,7 +953,7 @@ def _load_world_book_entries(
         max_bytes=MAX_MATERIALIZED_WORLD_BOOK_ENTRY_BYTES,
     )
     if len(entries) != current_count:
-        raise _SourceDrift
+        raise CharacterBehaviorSourceDrift
 
     entries_by_book: dict[int, list[dict[str, Any]]] = {
         world_book_id: [] for world_book_id in ordered_ids
@@ -1056,7 +1057,7 @@ def _load_exemplars_for_participants(
         max_bytes=MAX_MATERIALIZED_EXEMPLAR_BYTES,
     )
     if len(rows) != current_count:
-        raise _SourceDrift
+        raise CharacterBehaviorSourceDrift
 
     by_character: dict[int, list[dict[str, Any]]] = {
         character_id: [] for character_id in ordered_ids
@@ -2306,7 +2307,7 @@ def materialize_roleplay_behavior_settings(
                 changed_keys=changed_keys,
                 max_bytes=max_bytes,
             )
-        except _SourceDrift:
+        except CharacterBehaviorSourceDrift:
             continue
         if first == second:
             return second
@@ -2419,7 +2420,7 @@ def create_character_conversation(
                     fallback_greeting=fallback_greeting,
                 )
                 if current.snapshot.canonical_bytes != first.snapshot.canonical_bytes:
-                    raise _SourceDrift
+                    raise CharacterBehaviorSourceDrift
                 if effective_identity is None:
                     effective = None
                     reason = identity_resolution_reason
@@ -2503,7 +2504,7 @@ def create_character_conversation(
                     conn=conn,
                 )
                 return conversation_id
-        except _SourceDrift:
+        except CharacterBehaviorSourceDrift:
             if attempt == 1:
                 raise InputError("Behavior sources changed during conversation creation.") from None
     raise InputError("Failed to create character conversation.")

@@ -58,7 +58,6 @@ from tldw_Server_API.app.core.Character_Chat.modules.character_prompt_presets im
 )
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
-    BackendType,
     CharactersRAGDB,
     CharactersRAGDBError,
     ConflictError,
@@ -94,55 +93,6 @@ _CHARACTER_MESSAGES_NONCRITICAL_EXCEPTIONS = (
     UnicodeDecodeError,
     ValueError,
 )
-
-
-def _lock_message_for_edit(
-    db: CharactersRAGDB,
-    conn: Any,
-    message_id: str,
-) -> None:
-    """Lock the message before its conversation on PostgreSQL."""
-    if db.backend_type != BackendType.POSTGRESQL:
-        return
-    row = conn.execute(
-        "SELECT id FROM messages "
-        "WHERE id = ? AND deleted = FALSE "
-        "FOR UPDATE",
-        (message_id,),
-    ).fetchone()
-    if row is None:
-        raise ConflictError(
-            f"Message ID {message_id} is no longer available for editing.",
-            entity="messages",
-            entity_id=message_id,
-        )
-
-
-def _lock_message_metadata_for_edit(
-    db: CharactersRAGDB,
-    conn: Any,
-    message_id: str,
-) -> None:
-    """Ensure and lock metadata before acquiring the conversation row."""
-    if db.backend_type != BackendType.POSTGRESQL:
-        return
-    conn.execute(
-        "INSERT INTO message_metadata(message_id, last_modified) "
-        "VALUES (?, CURRENT_TIMESTAMP) "
-        "ON CONFLICT(message_id) DO NOTHING",
-        (message_id,),
-    )
-    row = conn.execute(
-        "SELECT message_id FROM message_metadata "
-        "WHERE message_id = ? FOR UPDATE",
-        (message_id,),
-    ).fetchone()
-    if row is None:
-        raise ConflictError(
-            f"Message metadata for {message_id} is no longer available.",
-            entity="message_metadata",
-            entity_id=message_id,
-        )
 
 
 def _detect_image_mime_type(data: bytes) -> Optional[str]:
@@ -1055,9 +1005,9 @@ async def edit_message(
                 detail=f"Chat session {message['conversation_id']} not found",
             )
         with db.transaction() as conn:
-            _lock_message_for_edit(db, conn, message_id)
+            db.lock_message_for_edit(message_id, conn=conn)
             if metadata_updated:
-                _lock_message_metadata_for_edit(db, conn, message_id)
+                db.lock_message_metadata_for_edit(message_id, conn=conn)
             resume_state = db.get_roleplay_resume_state(
                 message["conversation_id"],
                 conn=conn,
