@@ -25,6 +25,7 @@ from tldw_Server_API.tests.Admin_Webhooks.test_event_expansion import (
     exercise_persisted_coordinate_matrix,
     exercise_recovery_runtime_and_retention,
     exercise_stale_recovery_and_cancellation,
+    exercise_task8_attempt_reservation_and_recovery_contract,
 )
 
 
@@ -142,3 +143,10 @@ async def test_sqlite_persisted_coordinate_matrix_contract(
     delivery_repo: SQLiteDeliveryRepositoryFixture,
 ) -> None:
     await exercise_persisted_coordinate_matrix(delivery_repo)
+
+
+@pytest.mark.unit
+async def test_sqlite_task8_attempt_reservation_and_recovery_contract(
+    delivery_repo: SQLiteDeliveryRepositoryFixture,
+) -> None:
+    await exercise_task8_attempt_reservation_and_recovery_contract(delivery_repo)

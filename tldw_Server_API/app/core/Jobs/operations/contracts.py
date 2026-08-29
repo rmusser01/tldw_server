@@ -69,6 +69,10 @@ ADMIN_WEBHOOK_DELIVERY_IDEMPOTENCY_PREFIX = "admin-webhook-delivery:"
 ADMIN_WEBHOOK_DELIVERY_PRIORITY = 5
 ADMIN_WEBHOOK_DELIVERY_MAX_RETRIES = 3
 ADMIN_WEBHOOK_DELIVERY_QUARANTINE_THRESHOLD = 5
+_ADMIN_WEBHOOK_MARKER_MAX_BYTES = 2_048
+_ADMIN_WEBHOOK_NO_ATTEMPT_FAIL_REASONS = frozenset(
+    {"attempt_budget_exhausted", "delivery_expired"}
+)
 
 
 def _canonical_uuid4(value: object, *, field_name: str) -> str:
@@ -267,11 +271,24 @@ def _canonical_admin_webhook_marker(
     if marker is None:
         return (archived or fingerprint is None), None
     if isinstance(marker, str):
+        if len(marker.encode("utf-8")) > _ADMIN_WEBHOOK_MARKER_MAX_BYTES:
+            return False, None
         try:
             marker = json.loads(marker)
         except (TypeError, ValueError):
             return False, None
     if not isinstance(marker, dict):
+        return False, None
+    try:
+        encoded_marker = json.dumps(
+            marker,
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    except (RecursionError, TypeError, ValueError):
+        return False, None
+    if len(encoded_marker) > _ADMIN_WEBHOOK_MARKER_MAX_BYTES:
         return False, None
     if not archived and (
         not isinstance(fingerprint, str)
@@ -291,10 +308,12 @@ def _canonical_admin_webhook_marker(
     if kind in {
         PreparedDispositionKind.COMPLETE.value,
         PreparedDispositionKind.RETRY.value,
-        PreparedDispositionKind.FAIL.value,
     }:
         expected_keys.add("attempt_id")
-    elif kind == PreparedDispositionKind.CANCEL.value:
+    elif kind in {
+        PreparedDispositionKind.FAIL.value,
+        PreparedDispositionKind.CANCEL.value,
+    }:
         if marker.get("attempt_id") is not None:
             expected_keys.add("attempt_id")
     elif kind != PreparedDispositionKind.DEFER.value:
@@ -332,6 +351,72 @@ def _canonical_admin_webhook_marker(
         )
     )
     return valid, marker if valid else None
+
+
+@dataclass(frozen=True)
+class AdminWebhookDispositionMarker:
+    """Strict bounded Jobs evidence for one applied canonical disposition."""
+
+    token: str
+    kind: PreparedDispositionKind
+    origin: PreparedDispositionOrigin
+    delivery_id: str
+    attempt_id: str | None
+    original_not_before_at: datetime | None
+    applied_at: datetime
+    fingerprint: str
+
+
+def project_admin_webhook_disposition_marker(
+    row: dict[str, Any],
+    *,
+    expected_payload: dict[str, Any],
+    archived: bool = False,
+) -> AdminWebhookDispositionMarker | None:
+    """Project one canonical marker only after complete row validation."""
+
+    if not isinstance(row, dict) or not canonical_admin_webhook_row_matches(
+        row,
+        expected_payload=expected_payload,
+        archived=archived,
+    ):
+        return None
+    try:
+        delivery_id = canonical_admin_webhook_delivery_id(expected_payload)
+    except ValueError:
+        return None
+    marker_valid, marker = _canonical_admin_webhook_marker(
+        row,
+        delivery_id=delivery_id,
+        archived=archived,
+    )
+    fingerprint = row.get("prepared_disposition_fingerprint")
+    if (
+        not marker_valid
+        or marker is None
+        or not isinstance(fingerprint, str)
+        or _OPAQUE_TOKEN_RE.fullmatch(fingerprint) is None
+    ):
+        return None
+    try:
+        kind = PreparedDispositionKind(marker["kind"])
+        origin = PreparedDispositionOrigin(marker["origin"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    applied_at = _stored_utc(marker.get("applied_at"))
+    original_not_before = _stored_utc(marker.get("original_not_before_at"))
+    if applied_at is None:
+        return None
+    return AdminWebhookDispositionMarker(
+        token=marker["token"],
+        kind=kind,
+        origin=origin,
+        delivery_id=delivery_id,
+        attempt_id=marker.get("attempt_id"),
+        original_not_before_at=original_not_before,
+        applied_at=applied_at,
+        fingerprint=fingerprint,
+    )
 
 
 def _canonical_schedule_matches(
@@ -572,9 +657,14 @@ class PreparedJobDisposition:
         if kind in {
             PreparedDispositionKind.COMPLETE,
             PreparedDispositionKind.RETRY,
-            PreparedDispositionKind.FAIL,
         } and self.attempt_id is None:
             raise ValueError(f"{kind.value} requires attempt_id")
+        if (
+            kind is PreparedDispositionKind.FAIL
+            and self.attempt_id is None
+            and self.reason_code not in _ADMIN_WEBHOOK_NO_ATTEMPT_FAIL_REASONS
+        ):
+            raise ValueError("no-attempt fail reason is invalid")
         if kind is PreparedDispositionKind.DEFER and self.attempt_id is not None:
             raise ValueError("defer cannot include attempt_id")
 
@@ -670,8 +760,8 @@ class PreparedJobDisposition:
         *,
         token: str,
         delivery_id: str,
-        attempt_id: str,
         reason_code: str,
+        attempt_id: str | None = None,
     ) -> PreparedJobDisposition:
         return cls(
             token=token,
@@ -759,6 +849,31 @@ def prepared_disposition_fingerprint(disposition: PreparedJobDisposition) -> str
         sort_keys=True,
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def admin_webhook_disposition_marker_matches(
+    marker: AdminWebhookDispositionMarker,
+    disposition: PreparedJobDisposition,
+) -> bool:
+    """Compare every public marker fact plus the complete private fingerprint."""
+
+    if not isinstance(marker, AdminWebhookDispositionMarker) or not isinstance(
+        disposition,
+        PreparedJobDisposition,
+    ):
+        return False
+    return bool(
+        marker.token == disposition.token
+        and marker.kind is disposition.kind
+        and marker.origin is disposition.origin
+        and marker.delivery_id == disposition.delivery_id
+        and marker.attempt_id == disposition.attempt_id
+        and (
+            disposition.not_before_at is None
+            or marker.original_not_before_at == disposition.not_before_at
+        )
+        and marker.fingerprint == prepared_disposition_fingerprint(disposition)
+    )
 
 
 @dataclass(frozen=True)
@@ -1388,6 +1503,7 @@ __all__ = [
     "ApplyPreparedDispositionCommand",
     "AdmissionRejectionReason",
     "AdmissionResult",
+    "AdminWebhookDispositionMarker",
     "AcquireJobCommand",
     "BatchRenewLeaseItem",
     "BatchRenewLeasesCommand",
@@ -1395,6 +1511,7 @@ __all__ = [
     "canonical_admin_webhook_delivery_id",
     "canonical_admin_webhook_idempotency_key",
     "canonical_admin_webhook_row_matches",
+    "admin_webhook_disposition_marker_matches",
     "CreateJobCommand",
     "EnsureLeaseHorizonCommand",
     "ExpiredLeasePolicy",
@@ -1410,6 +1527,7 @@ __all__ = [
     "PreparedDispositionResult",
     "PreparedJobDisposition",
     "prepared_disposition_fingerprint",
+    "project_admin_webhook_disposition_marker",
     "ReleaseJobCommand",
     "RenewLeaseCommand",
     "is_admin_webhook_delivery_queue",

@@ -164,6 +164,39 @@ class DeliveryReasonCode(str, Enum):
     OUTCOME_UNKNOWN = "outcome_unknown"
     SUPERSEDED_CONFIG = "superseded_config"
     TEST_ATTEMPT_INTERRUPTED = "test_attempt_interrupted"
+    TARGET_INVALID = "target_invalid"
+    TARGET_REJECTED = "target_rejected"
+    POLICY_ERROR = "policy_error"
+    CLOCK_ERROR = "clock_error"
+    TRANSPORT_ERROR = "transport_error"
+    HTTP_REDIRECT = "http_redirect"
+    HTTP_CLIENT_ERROR = "http_client_error"
+    HTTP_REQUEST_TIMEOUT = "http_request_timeout"
+    HTTP_RATE_LIMITED = "http_rate_limited"
+    HTTP_SERVER_ERROR = "http_server_error"
+    HTTP_STATUS_INVALID = "http_status_invalid"
+    HTTP_HOP_INVALID_REQUEST = "http_hop_invalid_request"
+    HTTP_HOP_DNS_RESOLUTION_FAILED = "http_hop_dns_resolution_failed"
+    HTTP_HOP_DNS_TIMEOUT = "http_hop_dns_timeout"
+    HTTP_HOP_DNS_ADDRESS_DENIED = "http_hop_dns_address_denied"
+    HTTP_HOP_CONNECT_TIMEOUT = "http_hop_connect_timeout"
+    HTTP_HOP_READ_TIMEOUT = "http_hop_read_timeout"
+    HTTP_HOP_WRITE_TIMEOUT = "http_hop_write_timeout"
+    HTTP_HOP_TOTAL_TIMEOUT = "http_hop_total_timeout"
+    HTTP_HOP_PEER_VERIFICATION_FAILED = "http_hop_peer_verification_failed"
+    HTTP_HOP_TLS_ERROR = "http_hop_tls_error"
+    HTTP_HOP_PROTOCOL_ERROR = "http_hop_protocol_error"
+    HTTP_HOP_RESPONSE_HEADERS_TOO_LARGE = "http_hop_response_headers_too_large"
+    HTTP_HOP_RESPONSE_TOO_LARGE = "http_hop_response_too_large"
+    HTTP_HOP_DECOMPRESSED_RESPONSE_TOO_LARGE = (
+        "http_hop_decompressed_response_too_large"
+    )
+    HTTP_HOP_PARSER_INPUT_TOO_LARGE = "http_hop_parser_input_too_large"
+    HTTP_HOP_UNSUPPORTED_CONTENT_ENCODING = (
+        "http_hop_unsupported_content_encoding"
+    )
+    HTTP_HOP_INVALID_CONTENT_ENCODING = "http_hop_invalid_content_encoding"
+    HTTP_HOP_TRANSPORT_ERROR = "http_hop_transport_error"
 
 
 class DeliveryRuntimeReasonCode(str, Enum):

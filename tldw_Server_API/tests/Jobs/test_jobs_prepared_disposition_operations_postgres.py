@@ -1375,3 +1375,24 @@ def test_postgres_slides_race_callback_validates_requested_execution_controls(
             expired_lease_policy=ExpiredLeasePolicy.REQUEUE_NO_ATTEMPT,
             quarantine_threshold=5,
         )
+
+
+def test_postgres_no_attempt_fail_persists_a_canonical_marker(jobs_pg_dsn) -> None:
+    manager = _manager(jobs_pg_dsn)
+    job = _canonical(manager, suffix="no-attempt-fail")
+    acquired = _acquire(manager, worker="expiry-worker")
+    delivery_id = job["payload"]["delivery_id"]
+    disposition = PreparedJobDisposition.fail(
+        token=_token("9"),
+        delivery_id=delivery_id,
+        attempt_id=None,
+        reason_code="delivery_expired",
+    )
+
+    result = _apply(manager, job, disposition, leased=acquired)
+    persisted = manager.get_job(int(job["id"]))
+
+    assert result.outcome is OperationOutcome.APPLIED
+    assert result.state == "failed"
+    assert "attempt_id" not in persisted["result"]
+    assert persisted["result"]["token"] == disposition.token

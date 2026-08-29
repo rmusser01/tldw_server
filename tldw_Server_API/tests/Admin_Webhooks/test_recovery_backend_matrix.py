@@ -10,6 +10,7 @@ import asyncpg
 import pytest
 
 from tldw_Server_API.app.core.Admin_Webhooks.domain import (
+    AttemptState,
     DeliveryReasonCode,
     DeliveryState,
     JobsDispositionKind,
@@ -26,8 +27,18 @@ from tldw_Server_API.app.core.AuthNZ.pg_migrations_extra import (
 from tldw_Server_API.app.core.AuthNZ.settings import Settings
 from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
     AdminWebhookRepository,
+    AttemptCompletion,
 )
 from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Jobs.operations.contracts import (
+    ApplyPreparedDispositionCommand,
+    PreparedDispositionOrigin,
+    PreparedJobDisposition,
+)
+from tldw_Server_API.app.core.Jobs.pg_migrations import (
+    ensure_job_counters_pg,
+    ensure_jobs_tables_pg,
+)
 from tldw_Server_API.tests.Admin_Webhooks.test_event_expansion import (
     NOW,
     canonical_uuid4,
@@ -36,10 +47,7 @@ from tldw_Server_API.tests.Admin_Webhooks.test_event_expansion import (
     seed_registration,
 )
 
-pytest_plugins = (
-    "tldw_Server_API.tests.AuthNZ.conftest",
-    "tldw_Server_API.tests.Jobs.conftest",
-)
+pytest_plugins = ("tldw_Server_API.tests.AuthNZ.conftest",)
 pytestmark = pytest.mark.integration
 
 BACKEND_PAIRS = (
@@ -48,6 +56,20 @@ BACKEND_PAIRS = (
     ("postgres", "sqlite"),
     ("postgres", "postgres"),
 )
+
+
+@pytest.fixture
+def matrix_jobs_pg_dsn(pg_temp_db, monkeypatch: pytest.MonkeyPatch) -> str:
+    """Initialize the isolated Jobs database without loading Jobs conftest."""
+
+    dsn = str(pg_temp_db["dsn"])
+    ensure_jobs_tables_pg(dsn)
+    ensure_job_counters_pg(dsn)
+    JobManager.set_acquire_gate(False)
+    monkeypatch.setenv("JOBS_DISABLE_LEASE_ENFORCEMENT", "true")
+    monkeypatch.setenv("JOBS_COUNTERS_ENABLED", "false")
+    monkeypatch.setenv("JOBS_EVENTS_OUTBOX", "false")
+    return dsn
 
 
 class SimulatedCrash(BaseException):
@@ -374,12 +396,12 @@ async def test_enqueue_six_crash_boundaries_converge_across_backend_matrix(
     jobs_backend: str,
     tmp_path: Path,
     test_db_pool,
-    jobs_pg_dsn: str,
+    matrix_jobs_pg_dsn: str,
 ) -> None:
     manager = _jobs_manager(
         jobs_backend,
         tmp_path=tmp_path,
-        jobs_pg_dsn=jobs_pg_dsn,
+        jobs_pg_dsn=matrix_jobs_pg_dsn,
     )
     crash_cases = (
         ("before_claim_commit", EnqueueCrashPoint.BEFORE_CLAIM_COMMIT, False),
@@ -446,12 +468,12 @@ async def test_enqueue_revalidates_terminal_work_before_admission_across_backend
     jobs_backend: str,
     tmp_path: Path,
     test_db_pool,
-    jobs_pg_dsn: str,
+    matrix_jobs_pg_dsn: str,
 ) -> None:
     manager = _jobs_manager(
         jobs_backend,
         tmp_path=tmp_path,
-        jobs_pg_dsn=jobs_pg_dsn,
+        jobs_pg_dsn=matrix_jobs_pg_dsn,
     )
     queue = CountingQueue(JobsDeliveryQueue(manager))
     clock = MutableClock(NOW)
@@ -507,12 +529,12 @@ async def test_terminal_orphan_crashes_recover_with_exact_claim_and_disposition(
     expected_status: str,
     tmp_path: Path,
     test_db_pool,
-    jobs_pg_dsn: str,
+    matrix_jobs_pg_dsn: str,
 ) -> None:
     manager = _jobs_manager(
         jobs_backend,
         tmp_path=tmp_path,
-        jobs_pg_dsn=jobs_pg_dsn,
+        jobs_pg_dsn=matrix_jobs_pg_dsn,
     )
     queue = CountingQueue(JobsDeliveryQueue(manager))
     clock = MutableClock(NOW)
@@ -605,12 +627,12 @@ async def test_enqueue_foreign_claim_cancellation_and_expiry_matrix(
     jobs_backend: str,
     tmp_path: Path,
     test_db_pool,
-    jobs_pg_dsn: str,
+    matrix_jobs_pg_dsn: str,
 ) -> None:
     manager = _jobs_manager(
         jobs_backend,
         tmp_path=tmp_path,
-        jobs_pg_dsn=jobs_pg_dsn,
+        jobs_pg_dsn=matrix_jobs_pg_dsn,
     )
     queue = CountingQueue(JobsDeliveryQueue(manager))
     clock = MutableClock(NOW)
@@ -873,3 +895,324 @@ async def test_enqueue_foreign_claim_cancellation_and_expiry_matrix(
         assert queue.admit_calls == []
         assert queue.find_calls == [after_create_id, processing_id]
         assert queue.cancel_calls == [after_create_id, processing_id]
+
+
+def _prepared_from_pending(pending) -> PreparedJobDisposition:
+    kwargs = {
+        "token": pending.token,
+        "delivery_id": pending.delivery_id,
+        "reason_code": (
+            pending.reason_code.value if pending.reason_code is not None else None
+        ),
+    }
+    if pending.kind is JobsDispositionKind.COMPLETE:
+        return PreparedJobDisposition.complete(
+            token=pending.token,
+            delivery_id=pending.delivery_id,
+            attempt_id=pending.attempt_id,
+        )
+    if pending.kind is JobsDispositionKind.RETRY:
+        return PreparedJobDisposition.retry(
+            **kwargs,
+            attempt_id=pending.attempt_id,
+            delay_seconds=pending.delay_seconds,
+            not_before_at=pending.not_before_at,
+        )
+    if pending.kind is JobsDispositionKind.FAIL:
+        return PreparedJobDisposition.fail(
+            **kwargs,
+            attempt_id=pending.attempt_id,
+        )
+    return PreparedJobDisposition.cancel(
+        **kwargs,
+        attempt_id=pending.attempt_id,
+    )
+
+
+@pytest.mark.parametrize(
+    ("auth_backend", "jobs_backend"),
+    BACKEND_PAIRS,
+    ids=("sqlite-sqlite", "sqlite-postgres", "postgres-sqlite", "postgres-postgres"),
+)
+@pytest.mark.parametrize(
+    ("kind", "attempt_state", "delivery_state", "reason", "delay", "jobs_state"),
+    (
+        (
+            JobsDispositionKind.COMPLETE,
+            AttemptState.SUCCEEDED,
+            DeliveryState.SUCCEEDED,
+            None,
+            None,
+            "completed",
+        ),
+        (
+            JobsDispositionKind.RETRY,
+            AttemptState.RETRYABLE,
+            DeliveryState.RETRY_WAIT,
+            DeliveryReasonCode.OUTCOME_UNKNOWN,
+            60,
+            "queued",
+        ),
+        (
+            JobsDispositionKind.FAIL,
+            AttemptState.FAILED,
+            DeliveryState.DEAD,
+            DeliveryReasonCode.ATTEMPT_BUDGET_EXHAUSTED,
+            None,
+            "failed",
+        ),
+        (
+            JobsDispositionKind.CANCEL,
+            AttemptState.CANCELED,
+            DeliveryState.CANCELED,
+            DeliveryReasonCode.CANCELED_DISABLED,
+            None,
+            "cancelled",
+        ),
+    ),
+)
+async def test_authnz_disposition_lost_ack_reconciles_across_backend_matrix(
+    auth_backend: str,
+    jobs_backend: str,
+    kind: JobsDispositionKind,
+    attempt_state: AttemptState,
+    delivery_state: DeliveryState,
+    reason: DeliveryReasonCode | None,
+    delay: int | None,
+    jobs_state: str,
+    tmp_path: Path,
+    test_db_pool,
+    matrix_jobs_pg_dsn: str,
+) -> None:
+    manager = _jobs_manager(
+        jobs_backend,
+        tmp_path=tmp_path,
+        jobs_pg_dsn=matrix_jobs_pg_dsn,
+    )
+    queue = CountingQueue(JobsDeliveryQueue(manager))
+    clock = MutableClock(NOW)
+    label = f"task8-{auth_backend}-{jobs_backend}-{kind.value}"
+    async with _auth_repository(
+        auth_backend,
+        tmp_path=tmp_path,
+        test_db_pool=test_db_pool,
+    ) as repository:
+        webhook_id, delivery_id = await _seed_delivery(
+            repository,
+            label,
+            now=clock(),
+        )
+        assert await _reconciler(
+            repository,
+            queue,
+            clock,
+            TokenSource(label),
+        ).reconcile_enqueue_once() == 1
+        bundle = await repository.get_delivery_bundle(delivery_id)
+        assert bundle is not None and bundle.delivery.jobs_job_id is not None
+        acquired = manager.acquire_next_job(
+            domain="admin_webhooks",
+            queue="delivery",
+            job_type="admin_webhook_delivery",
+            lease_seconds=120,
+            worker_id=f"{label}-worker",
+        )
+        assert acquired is not None
+        attempt_id = canonical_uuid4(f"{label}-attempt")
+        disposition_token = opaque_token(f"{label}-disposition")
+        async with repository.transaction() as tx:
+            reserved = await tx.reserve_jobs_attempt(
+                delivery_id,
+                bundle.delivery.jobs_job_id,
+                acquired["lease_id"],
+                attempt_id,
+                10,
+                clock(),
+                clock() + timedelta(seconds=40),
+                expected_delivery_config_version=(
+                    bundle.delivery.delivery.delivery_config_version
+                ),
+                expected_secret_version=bundle.delivery.delivery.secret_version,
+                disposition_token=opaque_token(f"{label}-unused"),
+            )
+            assert reserved is not None and reserved.reserved
+            pending = await tx.finish_attempt_and_prepare_disposition(
+                acquired["lease_id"],
+                AttemptCompletion(
+                    attempt_state=attempt_state,
+                    delivery_state=delivery_state,
+                    disposition=kind,
+                    status_code=204 if kind is JobsDispositionKind.COMPLETE else 503,
+                    latency_ms=5,
+                    reason_code=reason,
+                    requested_retry_delay_seconds=delay,
+                    finished_at=clock() + timedelta(seconds=1),
+                    completed_after_config_change=False,
+                ),
+                disposition_token,
+                clock() + timedelta(seconds=60) if delay is not None else None,
+                delivery_id=delivery_id,
+                attempt_id=attempt_id,
+                jobs_job_id=bundle.delivery.jobs_job_id,
+            )
+        assert pending is not None
+        disposition = _prepared_from_pending(pending)
+        applied = manager.apply_prepared_disposition(
+            ApplyPreparedDispositionCommand(
+                job_id=int(acquired["id"]),
+                domain="admin_webhooks",
+                queue="delivery",
+                job_type="admin_webhook_delivery",
+                expected_payload={"delivery_id": delivery_id},
+                worker_id=acquired["worker_id"],
+                lease_id=acquired["lease_id"],
+                disposition=disposition,
+            )
+        )
+        assert applied.state == jobs_state
+        stranded = await repository.get_delivery_bundle(delivery_id)
+        assert stranded is not None and not stranded.delivery.jobs_disposition_applied
+
+        repaired = await _reconciler(
+            repository,
+            queue,
+            clock,
+            TokenSource(f"{label}-repair"),
+        ).reconcile_pending_dispositions_once()
+
+        assert repaired == 1
+        recovered = await repository.get_delivery_bundle(delivery_id)
+        assert recovered is not None and recovered.delivery.jobs_disposition_applied
+        assert await repository.list_delivery_attempts(webhook_id, delivery_id)
+        assert queue.admit_calls == [delivery_id]
+
+
+@pytest.mark.parametrize(
+    ("auth_backend", "jobs_backend"),
+    BACKEND_PAIRS,
+    ids=("sqlite-sqlite", "sqlite-postgres", "postgres-sqlite", "postgres-postgres"),
+)
+@pytest.mark.parametrize("origin", ("infrastructure", "recovery"))
+async def test_no_ack_defer_marker_is_historical_across_backend_matrix(
+    auth_backend: str,
+    jobs_backend: str,
+    origin: str,
+    tmp_path: Path,
+    test_db_pool,
+    matrix_jobs_pg_dsn: str,
+) -> None:
+    manager = _jobs_manager(
+        jobs_backend,
+        tmp_path=tmp_path,
+        jobs_pg_dsn=matrix_jobs_pg_dsn,
+    )
+    queue = JobsDeliveryQueue(manager)
+    clock = MutableClock(NOW)
+    label = f"task8-{auth_backend}-{jobs_backend}-{origin}"
+    async with _auth_repository(
+        auth_backend,
+        tmp_path=tmp_path,
+        test_db_pool=test_db_pool,
+    ) as repository:
+        _, delivery_id = await _seed_delivery(repository, label, now=clock())
+        assert await _reconciler(
+            repository,
+            queue,
+            clock,
+            TokenSource(label),
+        ).reconcile_enqueue_once() == 1
+        acquired = manager.acquire_next_job(
+            domain="admin_webhooks",
+            queue="delivery",
+            job_type="admin_webhook_delivery",
+            lease_seconds=120,
+            worker_id=f"{label}-worker",
+        )
+        assert acquired is not None
+        disposition = (
+            PreparedJobDisposition.infrastructure_defer(
+                token=opaque_token(f"{label}-token"),
+                delivery_id=delivery_id,
+                reason_code="authnz_unavailable",
+            )
+            if origin == "infrastructure"
+            else PreparedJobDisposition.recovery_defer_until(
+                token=opaque_token(f"{label}-token"),
+                delivery_id=delivery_id,
+                not_before_at=clock() + timedelta(seconds=60),
+                reason_code="attempt_not_stale",
+            )
+        )
+        applied = manager.apply_prepared_disposition(
+            ApplyPreparedDispositionCommand(
+                job_id=int(acquired["id"]),
+                domain="admin_webhooks",
+                queue="delivery",
+                job_type="admin_webhook_delivery",
+                expected_payload={"delivery_id": delivery_id},
+                worker_id=acquired["worker_id"],
+                lease_id=acquired["lease_id"],
+                disposition=disposition,
+            )
+        )
+        assert applied.state == "queued"
+        persisted = manager.get_job(int(acquired["id"]))
+        assert int(persisted["retry_count"] or 0) == 0
+        assert int(persisted["failure_streak_count"] or 0) == 0
+        bundle = await repository.get_delivery_bundle(delivery_id)
+        assert bundle is not None
+        assert bundle.delivery.pending_jobs_disposition is None
+        assert await _reconciler(
+            repository,
+            queue,
+            clock,
+            TokenSource(f"{label}-repair"),
+        ).reconcile_pending_dispositions_once() == 0
+        assert manager.reschedule_jobs(
+            domain="admin_webhooks",
+            queue="delivery",
+            job_type="admin_webhook_delivery",
+            status="queued",
+            set_now=True,
+        ) == 1
+        reacquired = manager.acquire_next_job(
+            domain="admin_webhooks",
+            queue="delivery",
+            job_type="admin_webhook_delivery",
+            lease_seconds=120,
+            worker_id=f"{label}-replacement-worker",
+        )
+        assert reacquired is not None
+        record = JobsDeliveryQueue.acquired_delivery_job(reacquired)
+        assert record.marker is not None
+        assert record.marker.origin is (
+            PreparedDispositionOrigin.INFRASTRUCTURE
+            if origin == "infrastructure"
+            else PreparedDispositionOrigin.RECOVERY
+        )
+        persisted = manager.get_job(int(reacquired["id"]))
+        assert int(persisted["retry_count"] or 0) == 0
+        assert int(persisted["failure_streak_count"] or 0) == 0
+
+        bundle = await repository.get_delivery_bundle(delivery_id)
+        assert bundle is not None and bundle.delivery.jobs_job_id is not None
+        replacement_attempt_id = canonical_uuid4(f"{label}-replacement-attempt")
+        async with repository.transaction() as tx:
+            reservation = await tx.reserve_jobs_attempt(
+                delivery_id,
+                bundle.delivery.jobs_job_id,
+                reacquired["lease_id"],
+                replacement_attempt_id,
+                10,
+                clock(),
+                clock() + timedelta(seconds=40),
+                expected_delivery_config_version=(
+                    bundle.delivery.delivery.delivery_config_version
+                ),
+                expected_secret_version=bundle.delivery.delivery.secret_version,
+                disposition_token=opaque_token(f"{label}-unused-terminal"),
+            )
+        assert reservation is not None and reservation.reserved
+        assert reservation.attempt is not None
+        assert reacquired["lease_id"] != acquired["lease_id"]
+        assert reservation.attempt.id == replacement_attempt_id

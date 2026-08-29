@@ -1110,24 +1110,29 @@ async def exercise_stale_recovery_and_cancellation(
         )
         assert reservation is not None and reservation.reserved
 
-    await fixture.execute(
-        """
-        UPDATE admin_webhook_delivery_attempts
-        SET request_timeout_seconds = NULL
-        WHERE id = ?
-        """,
-        canonical_uuid4("stale-attempt"),
-    )
+    stale_at = NOW + timedelta(seconds=91)
     async with repository.transaction() as tx:
-        assert not await tx.close_stale_attempt_as_unknown(
+        assert await tx.recover_stale_attempt_and_prepare_disposition(
             stale_delivery_id,
             canonical_uuid4("stale-attempt"),
-            NOW + timedelta(seconds=29),
+            "stale-job",
+            stale_at - timedelta(microseconds=1),
+            opaque_token("stale-too-early"),
+        ) is None
+        pending = await tx.recover_stale_attempt_and_prepare_disposition(
+            stale_delivery_id,
+            canonical_uuid4("stale-attempt"),
+            "stale-job",
+            stale_at,
+            opaque_token("stale-retry"),
         )
-        assert await tx.close_stale_attempt_as_unknown(
+        assert pending is not None
+        assert pending.kind is JobsDispositionKind.RETRY
+        assert pending.not_before_at == stale_at + timedelta(seconds=60)
+        assert await tx.acknowledge_jobs_disposition(
             stale_delivery_id,
-            canonical_uuid4("stale-attempt"),
-            NOW + timedelta(seconds=30),
+            opaque_token("stale-retry"),
+            "queued",
         )
         assert await tx.expire_delivery(
             stale_delivery_id,
@@ -2207,3 +2212,145 @@ async def exercise_disposition_scheduling_persistence(
             webhook_id, delivery_id
         )
         assert stored is not None and stored.state is delivery_state
+
+
+async def exercise_task8_attempt_reservation_and_recovery_contract(
+    fixture: DeliveryRepositoryFixture,
+) -> None:
+    """Bind Task 8's final horizon, stale boundary, and pending scan semantics."""
+
+    repository = fixture.repository
+    webhook_id, horizon_delivery_id = await _captured_delivery(
+        repository,
+        event_id="task8-horizon-event",
+        command_id="task8-horizon-command",
+        isolated=True,
+    )
+    horizon_bundle = await repository.get_delivery_bundle(horizon_delivery_id)
+    assert horizon_bundle is not None
+    async with repository.transaction() as tx:
+        claim = await tx.claim_pending_delivery(
+            opaque_token("task8-horizon-claim"),
+            NOW + timedelta(minutes=1),
+            NOW,
+        )
+        assert claim is not None
+        assert await tx.attach_jobs_job(
+            horizon_delivery_id,
+            opaque_token("task8-horizon-claim"),
+            "task8-horizon-job",
+            NOW,
+        ) is not None
+    await fixture.execute(
+        "UPDATE admin_webhook_deliveries SET expires_at = ? WHERE id = ?",
+        NOW + timedelta(seconds=39),
+        horizon_delivery_id,
+    )
+    async with repository.transaction() as tx:
+        rejected = await tx.reserve_jobs_attempt(
+            horizon_delivery_id,
+            "task8-horizon-job",
+            "task8-horizon-lease",
+            canonical_uuid4("task8-horizon-attempt"),
+            10,
+            NOW,
+            NOW + timedelta(seconds=40),
+            expected_delivery_config_version=(
+                horizon_bundle.delivery.delivery.delivery_config_version
+            ),
+            expected_secret_version=horizon_bundle.delivery.delivery.secret_version,
+            disposition_token=opaque_token("task8-horizon-disposition"),
+        )
+    assert rejected is not None and not rejected.reserved
+    assert rejected.reason_code is DeliveryReasonCode.DELIVERY_EXPIRED
+    assert rejected.pending_disposition is not None
+    assert rejected.pending_disposition.kind is JobsDispositionKind.FAIL
+    assert rejected.pending_disposition.attempt_id is None
+    assert rejected.pending_disposition.reason_code is DeliveryReasonCode.DELIVERY_EXPIRED
+    assert await repository.list_delivery_attempts(
+        webhook_id,
+        horizon_delivery_id,
+    ) == ()
+
+    stale_webhook_id, stale_delivery_id = await _captured_delivery(
+        repository,
+        event_id="task8-stale-event",
+        command_id="task8-stale-command",
+        isolated=True,
+    )
+    stale_bundle = await repository.get_delivery_bundle(stale_delivery_id)
+    assert stale_bundle is not None
+    async with repository.transaction() as tx:
+        claim = await tx.claim_pending_delivery(
+            opaque_token("task8-stale-claim"),
+            NOW + timedelta(minutes=1),
+            NOW,
+        )
+        assert claim is not None
+        assert await tx.attach_jobs_job(
+            stale_delivery_id,
+            opaque_token("task8-stale-claim"),
+            "task8-stale-job",
+            NOW,
+        ) is not None
+        reservation = await tx.reserve_jobs_attempt(
+            stale_delivery_id,
+            "task8-stale-job",
+            "task8-stale-lease",
+            canonical_uuid4("task8-stale-attempt"),
+            10,
+            NOW,
+            NOW + timedelta(seconds=40),
+            expected_delivery_config_version=(
+                stale_bundle.delivery.delivery.delivery_config_version
+            ),
+            expected_secret_version=stale_bundle.delivery.delivery.secret_version,
+            disposition_token=opaque_token("unused-stale-reservation"),
+        )
+        assert reservation is not None and reservation.reserved
+
+    attempts_before = await repository.list_delivery_attempts(
+        stale_webhook_id,
+        stale_delivery_id,
+    )
+    assert len(attempts_before) == 1
+    stale_at = attempts_before[0].started_at + timedelta(seconds=100)
+    async with repository.transaction() as tx:
+        assert await tx.recover_stale_attempt_and_prepare_disposition(
+            stale_delivery_id,
+            canonical_uuid4("task8-stale-attempt"),
+            "task8-stale-job",
+            stale_at - timedelta(microseconds=1),
+            opaque_token("task8-stale-too-early"),
+        ) is None
+    assert await repository.list_delivery_attempts(
+        stale_webhook_id,
+        stale_delivery_id,
+    ) == attempts_before
+
+    async with repository.transaction() as tx:
+        recovered = await tx.recover_stale_attempt_and_prepare_disposition(
+            stale_delivery_id,
+            canonical_uuid4("task8-stale-attempt"),
+            "task8-stale-job",
+            stale_at,
+            opaque_token("task8-stale-retry"),
+        )
+    assert recovered is not None
+    assert recovered.kind is JobsDispositionKind.RETRY
+    assert recovered.attempt_id == canonical_uuid4("task8-stale-attempt")
+    assert recovered.delay_seconds == 60
+    assert recovered.not_before_at == stale_at + timedelta(seconds=60)
+    assert recovered.reason_code is DeliveryReasonCode.OUTCOME_UNKNOWN
+    attempts_after = await repository.list_delivery_attempts(
+        stale_webhook_id,
+        stale_delivery_id,
+    )
+    assert attempts_after[0].state is AttemptState.OUTCOME_UNKNOWN
+    assert attempts_after[0].finished_at == stale_at
+
+    page = await repository.list_pending_jobs_dispositions(limit=1)
+    assert len(page) == 1
+    assert page[0].delivery_id == horizon_delivery_id
+    with pytest.raises(ValueError, match="limit"):
+        await repository.list_pending_jobs_dispositions(limit=101)

@@ -994,14 +994,55 @@ git commit -m "feat(admin-webhooks): reconcile delivery enqueue"
 **Files:**
 - Create: `tldw_Server_API/app/core/Admin_Webhooks/worker.py`
 - Modify: `tldw_Server_API/app/core/Admin_Webhooks/reconciler.py`
+- Modify: `tldw_Server_API/app/core/Admin_Webhooks/domain.py`
+- Modify: `tldw_Server_API/app/core/DB_Management/admin_webhooks_repository.py`
+- Modify: `tldw_Server_API/app/core/Jobs/operations/contracts.py`
 - Create: `tldw_Server_API/tests/Admin_Webhooks/test_worker.py`
 - Modify: `tldw_Server_API/tests/Admin_Webhooks/test_recovery_backend_matrix.py`
+- Modify: `tldw_Server_API/tests/Admin_Webhooks/test_event_expansion.py`
+- Modify: `tldw_Server_API/tests/Admin_Webhooks/test_delivery_repository_sqlite.py`
+- Modify: `tldw_Server_API/tests/Admin_Webhooks/test_delivery_repository_postgres.py`
+- Modify: `tldw_Server_API/tests/Jobs/test_jobs_operation_contracts.py`
+- Modify: `tldw_Server_API/tests/Jobs/test_jobs_prepared_disposition_operations_sqlite.py`
+- Modify: `tldw_Server_API/tests/Jobs/test_jobs_prepared_disposition_operations_postgres.py`
 
 **Interfaces:**
 - Consumes: one acquired canonical Jobs row, `WorkerExecutionContext`, AuthNZ delivery bundle, webhook key ring, shared executor, repository CAS operations, and pending-disposition queue adapter.
 - Produces: `AdminWebhookPreparedHandler.__call__()` plus disposition acknowledgement/recovery that never double-finalizes or performs I/O while repair is pending.
 
-- [ ] **Step 1: Write the worker decision-table RED tests**
+**Implementation ruling:** The Task 8 file list omitted load-bearing contracts.
+Extend the existing AuthNZ repository and domain types without a schema change.
+The final pre-I/O transaction must follow the control plane's
+registration-before-delivery lock order, revalidate the exact attached Jobs ID,
+active/tombstone/config/secret snapshot, hard attempt budget, and
+`expires_at > required_horizon`, and then do exactly one of: reserve one
+append-only attempt, or atomically persist the specific no-I/O terminal state
+and one pending Jobs disposition. The current `required_horizon` argument must
+become an enforced predicate rather than validation-only evidence.
+
+Before a stale attempt's persisted `started_at + timeout_seconds + 90 seconds`,
+return only `recovery_defer_until(stale_at)` and mutate no AuthNZ row. At or
+after that boundary, one transaction conditionally marks the exact attempt
+`outcome_unknown`, consumes its slot, and persists either the next exact retry
+schedule or terminal `attempt_budget_exhausted`; it never proceeds directly to
+HTTP. A retryable real result that loses a configuration race remains
+append-only `retryable` evidence, but its delivery and pending Jobs disposition
+use the specific cancel/supersede reason and carry no retry schedule.
+
+Extend the generic prepared-disposition contract only as needed to allow an
+AuthNZ `fail` without `attempt_id` for a no-attempt terminal such as delivery
+expiry or an already-exhausted hard budget. Keep complete/retry attempt-bound,
+and keep ordinary post-attempt fail attempt-bound in canonical worker code.
+Use one strict bounded Jobs-marker projection and exact disposition fingerprint
+comparison for lost-ack recovery; do not duplicate partial/ad-hoc marker JSON
+checks in the worker and reconciler. Add a bounded ordered repository scan for
+pending dispositions so the reconciler can repair exact Jobs/AuthNZ mirrors and
+queued cancellation without admission or direct Jobs SQL. Prove these additive
+repository/domain/Jobs contracts on SQLite and required PostgreSQL before the
+worker consumes them. If wrong, the cost is localized Task 8 contract rework;
+no migration or public API change is authorized.
+
+- [x] **Step 1: Write the worker decision-table RED tests**
 
 Before any executor call, assert this order:
 
@@ -1018,11 +1059,11 @@ Before any executor call, assert this order:
 
 Key/mode/database/policy/lease-horizon infrastructure failures before reservation return timestamp-free `infrastructure_defer()`; the Jobs apply transaction computes and persists `jobs_database_now + 30 seconds`. The stale-attempt path instead carries its explicit AuthNZ-derived stale timestamp and never substitutes the infrastructure schedule. Delivery expiry before reservation returns terminal fail. A lease loss after reservation permits the real executor outcome to be attempted conditionally; stale token rejection leaves later recovery to mark `outcome_unknown`.
 
-- [ ] **Step 2: Write append-only and hard-budget tests**
+- [x] **Step 2: Write append-only and hard-budget tests**
 
 Prove sequence 1-4 across retries and lease losses; an interrupted slot becomes `outcome_unknown`; a fifth executor call is impossible; reaching four ambiguous/retryable slots commits `dead:attempt_budget_exhausted`; pending disposition replay consumes no new attempt; and replacement lease before staleness never overlaps a request.
 
-- [ ] **Step 3: Write post-attempt crash-window tests**
+- [x] **Step 3: Write post-attempt crash-window tests**
 
 For AuthNZ-origin complete/retry/fail/cancel dispositions, inject crashes:
 
@@ -1037,11 +1078,11 @@ Expected semantics are explicit: boundaries 2-3 eventually record `outcome_unkno
 
 Separately crash after Jobs applies each no-acknowledgement `infrastructure_defer` and `recovery_defer_until` but before the worker loop returns. Assert no AuthNZ acknowledgement callback is invoked, the one stored schedule/token survives, and later reacquisition treats that marker as historical evidence: it neither reapplies nor acknowledges the old defer, does not change retry/failure/quarantine counters, and continues only under the new lease. Cover every AuthNZ-origin disposition and both no-acknowledgement defer origins across all four backend pairs.
 
-- [ ] **Step 4: Write cancellation/configuration/in-flight race tests**
+- [x] **Step 4: Write cancellation/configuration/in-flight race tests**
 
 Disable, rotate, update, or delete winning before reservation sends nothing and records its specific terminal reason. Winning after reservation cannot erase the attempt. A 2xx result remains succeeded with `completed_after_config_change=true`. A terminal receiver/network classification remains `dead` with its real reason and the same flag. A retryable result is retained on the append-only attempt, but no retry is scheduled against changed/disabled/deleted configuration; the delivery terminalizes with the specific canceled/superseded lifecycle reason and `completed_after_config_change=true`. A late worker cannot overwrite a replacement attempt or recovered terminal row.
 
-- [ ] **Step 5: Run RED**
+- [x] **Step 5: Run RED**
 
 ```bash
 RUN_JOBS=1 PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
@@ -1049,11 +1090,11 @@ RUN_JOBS=1 PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
   tldw_Server_API/tests/Admin_Webhooks/test_recovery_backend_matrix.py -k 'disposition or attempt or cancellation'
 ```
 
-- [ ] **Step 6: Implement the prepared handler and bounded callbacks**
+- [x] **Step 6: Implement the prepared handler and bounded callbacks**
 
 The handler returns only `PreparedJobDisposition`. It never calls Jobs finalizers directly. `on_disposition_applied` conditionally acknowledges only an exact `origin=AUTHNZ` token; rejection leaves it pending, while infrastructure/recovery origins never invoke this callback. Before attempt reservation, the handler reconciles an acquired row's reserved-result marker with AuthNZ: an exact already-applied AuthNZ retry token is acknowledged and execution continues under that current lease; an unapplied AuthNZ token is returned once when the marker is absent or only historical no-acknowledgement evidence; a historical infrastructure/recovery defer marker is neither acknowledged nor reapplied; and a conflicting AuthNZ identity/token fails closed with timestamp-free `infrastructure_defer()`. Extend `AdminWebhookReconciler` to use known-ID and lookup-only identity reads, acknowledge exact AuthNZ lost-ack matches, cancel orphan Jobs rows without creating them, and repair Jobs terminal/AuthNZ nonterminal mirrors monotonically.
 
-- [ ] **Step 7: Run GREEN and the prepared SDK integration**
+- [x] **Step 7: Run GREEN and the prepared SDK integration**
 
 ```bash
 RUN_JOBS=1 PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
@@ -1067,7 +1108,7 @@ RUN_JOBS=1 PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
   tldw_Server_API/app/core/Admin_Webhooks/reconciler.py
 ```
 
-- [ ] **Step 8: Update the task and commit**
+- [x] **Step 8: Update the task and commit**
 
 ```bash
 backlog task edit 13111 --append-notes "Implemented lease-aware one-attempt worker and durable complete/retry/fail/cancel/defer recovery; crash and hard-attempt matrices pass without extra I/O."

@@ -1470,3 +1470,24 @@ def test_sqlite_defer_event_uses_current_reason_not_stale_error(
         conn.close()
 
     assert json.loads(event[0])["reason_code"] == reason
+
+
+def test_sqlite_no_attempt_fail_persists_a_canonical_marker(tmp_path) -> None:
+    manager = JobManager(tmp_path / "no-attempt-fail.db")
+    job = _canonical(manager, suffix="no-attempt-fail")
+    acquired = _acquire(manager, worker="expiry-worker")
+    delivery_id = json.loads(job["payload"])["delivery_id"]
+    disposition = PreparedJobDisposition.fail(
+        token=_token("9"),
+        delivery_id=delivery_id,
+        attempt_id=None,
+        reason_code="delivery_expired",
+    )
+
+    result = _apply(manager, job, disposition, leased=acquired)
+    persisted = manager.get_job(int(job["id"]))
+
+    assert result.outcome is OperationOutcome.APPLIED
+    assert result.state == "failed"
+    assert "attempt_id" not in persisted["result"]
+    assert persisted["result"]["token"] == disposition.token
