@@ -16,10 +16,13 @@ from starlette.responses import StreamingResponse
 from tldw_Server_API.app.api.v1.API_Deps.backpressure import (
     guard_backpressure_and_quota,
 )
-from tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard import guard_storage_quota
 from tldw_Server_API.app.api.v1.API_Deps.media_mediawiki_deps import (
     get_mediawiki_form_data,
 )
+from tldw_Server_API.app.api.v1.API_Deps.media_route_deps import (
+    media_create_dependencies,
+)
+from tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard import guard_storage_quota
 from tldw_Server_API.app.api.v1.schemas.media_request_models import (
     MediaWikiDumpOptionsForm,
     ProcessedMediaWikiPage,
@@ -239,7 +242,11 @@ async def _process_mediawiki_dump(
     "/mediawiki/ingest-dump",
     summary="Ingest and process a MediaWiki XML dump, storing results to database and vector store.",
     tags=["MediaWiki Processing"],
-    dependencies=[Depends(guard_backpressure_and_quota), Depends(guard_storage_quota)],
+    dependencies=[
+        *media_create_dependencies(),
+        Depends(guard_backpressure_and_quota),
+        Depends(guard_storage_quota),
+    ],
     response_class=StreamingResponse,
     responses={
         status.HTTP_200_OK: {
@@ -274,7 +281,11 @@ async def ingest_mediawiki_dump_endpoint(
     "/mediawiki/process-dump",
     summary="Process a MediaWiki XML dump and return structured content without database storage.",
     tags=["MediaWiki Processing"],
-    dependencies=[Depends(guard_backpressure_and_quota), Depends(guard_storage_quota)],
+    dependencies=[
+        *media_create_dependencies(),
+        Depends(guard_backpressure_and_quota),
+        Depends(guard_storage_quota),
+    ],
     response_class=StreamingResponse,
     responses={
         status.HTTP_200_OK: {
