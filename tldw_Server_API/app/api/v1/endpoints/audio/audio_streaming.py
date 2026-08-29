@@ -997,10 +997,14 @@ def _persist_audio_chat_settings(
             f"{sorted(reserved_keys)[0]} is reserved server-owned state."
         )
     resume_state: dict[str, Any] | None = None
+    conversation: dict[str, Any] | None = None
     if conversation_created:
         final_settings = dict(settings_payload)
         expected_version = None
     else:
+        conversation = db.get_conversation_by_id(conversation_id)
+        if not isinstance(conversation, dict):
+            raise InputError("Audio conversation was not found or is not owned.")
         if callable(getattr(db, "get_roleplay_resume_state", None)):
             resume_state = db.get_roleplay_resume_state(conversation_id)
             settings_row = {
@@ -1019,6 +1023,7 @@ def _persist_audio_chat_settings(
         reject_credentials=True,
         allow_internal=not conversation_created,
         behavior_snapshot=(resume_state or {}).get("behavior_snapshot"),
+        conversation=conversation,
     )
     if conversation_created:
         return bool(db.upsert_conversation_settings(conversation_id, final_settings))

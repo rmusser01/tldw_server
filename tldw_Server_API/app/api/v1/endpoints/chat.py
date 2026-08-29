@@ -132,6 +132,10 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import (
 from tldw_Server_API.app.core.Character_Chat.modules.character_utils import (
     map_sender_to_role,
 )
+from tldw_Server_API.app.core.Character_Chat.chat_settings_validation import (
+    ChatSettingsSizeError,
+    validate_chat_settings_storage,
+)
 from tldw_Server_API.app.core.Character_Chat.modules.persona_exemplar_embeddings import (
     score_exemplars_with_embeddings,
 )
@@ -6524,18 +6528,47 @@ def _load_knowledge_qa_share_links(
 def _persist_knowledge_qa_share_links(
     db: CharactersRAGDB,
     conversation_id: str,
-    settings_payload: dict[str, Any],
     links: list[dict[str, Any]],
     *,
+    conversation: dict[str, Any],
     expected_settings_version: int | None,
 ) -> None:
-    settings_payload[_KNOWLEDGE_QA_SHARE_LINKS_SETTINGS_KEY] = links
     try:
-        updated = db.upsert_conversation_settings(
-            conversation_id,
-            settings_payload,
-            expected_settings_version=expected_settings_version,
-        )
+        with db.transaction() as conn:
+            resume_state = db.get_roleplay_resume_state(
+                conversation_id,
+                conn=conn,
+                lock_for_update=True,
+            )
+            final_settings = dict(resume_state.get("settings") or {})
+            final_settings[_KNOWLEDGE_QA_SHARE_LINKS_SETTINGS_KEY] = links
+            snapshot = resume_state.get("behavior_snapshot")
+            snapshot_valid = (
+                isinstance(snapshot, dict) and snapshot.get("status") == "valid"
+            )
+            final_settings = validate_chat_settings_storage(
+                final_settings,
+                reject_credentials=snapshot_valid,
+                allow_internal=True,
+                behavior_snapshot=snapshot,
+                conversation=conversation,
+            )
+            updated = db.upsert_conversation_settings(
+                conversation_id,
+                final_settings,
+                conn=conn,
+                expected_settings_version=expected_settings_version,
+            )
+    except ChatSettingsSizeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=str(exc),
+        ) from exc
+    except InputError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
     except ConflictError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -7374,7 +7407,7 @@ async def create_conversation_share_link(
     ttl_seconds = max(300, min(ttl_seconds, _KNOWLEDGE_QA_SHARE_MAX_TTL_SECONDS))
     expires_at = now + timedelta(seconds=ttl_seconds)
 
-    settings_payload, existing_links, settings_version = _load_knowledge_qa_share_links(
+    _settings_payload, existing_links, settings_version = _load_knowledge_qa_share_links(
         db, conversation_id
     )
     links = _prune_knowledge_qa_share_links(existing_links)
@@ -7393,8 +7426,8 @@ async def create_conversation_share_link(
     _persist_knowledge_qa_share_links(
         db,
         conversation_id,
-        settings_payload,
         links,
+        conversation=conversation,
         expected_settings_version=settings_version,
     )
 
@@ -7449,7 +7482,7 @@ async def list_conversation_share_links(
 ):
     scope = _resolve_conversation_scope(scope_type, workspace_id)
     conversation = _verify_conversation_ownership(db, conversation_id, current_user, scope)
-    settings_payload, existing_links, settings_version = _load_knowledge_qa_share_links(
+    _settings_payload, existing_links, settings_version = _load_knowledge_qa_share_links(
         db, conversation_id
     )
     links = _prune_knowledge_qa_share_links(existing_links)
@@ -7457,8 +7490,8 @@ async def list_conversation_share_links(
         _persist_knowledge_qa_share_links(
             db,
             conversation_id,
-            settings_payload,
             links,
+            conversation=conversation,
             expected_settings_version=settings_version,
         )
 
@@ -7532,8 +7565,13 @@ async def revoke_conversation_share_link(
     current_user: User = Depends(get_request_user),
 ):
     scope = _resolve_conversation_scope(scope_type, workspace_id)
-    _verify_conversation_ownership(db, conversation_id, current_user, scope)
-    settings_payload, existing_links, settings_version = _load_knowledge_qa_share_links(
+    conversation = _verify_conversation_ownership(
+        db,
+        conversation_id,
+        current_user,
+        scope,
+    )
+    _settings_payload, existing_links, settings_version = _load_knowledge_qa_share_links(
         db, conversation_id
     )
     links = _prune_knowledge_qa_share_links(existing_links)
@@ -7554,8 +7592,8 @@ async def revoke_conversation_share_link(
     _persist_knowledge_qa_share_links(
         db,
         conversation_id,
-        settings_payload,
         links,
+        conversation=conversation,
         expected_settings_version=settings_version,
     )
     return ConversationShareLinkRevokeResponse(success=True, share_id=share_id)
