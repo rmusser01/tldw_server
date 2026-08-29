@@ -533,6 +533,14 @@ def _character_prompt_preset_is_explicit(
 
 
 def _decode_json(value: Any, default: Any) -> Any:
+    """Decode JSON text or UTF-8 bytes while preserving decoded values."""
+    if isinstance(value, memoryview):
+        value = value.tobytes()
+    if isinstance(value, (bytes, bytearray)):
+        try:
+            value = bytes(value).decode("utf-8")
+        except UnicodeDecodeError:
+            return default
     if isinstance(value, str):
         try:
             return json.loads(value)
@@ -542,7 +550,10 @@ def _decode_json(value: Any, default: Any) -> Any:
 
 
 def _normalize_greeting_values(value: Any) -> list[str]:
+    """Return non-empty greeting strings from decoded or JSON-encoded values."""
+
     def _strings(entries: Sequence[Any]) -> list[str]:
+        """Strip and retain only non-empty string entries."""
         return [
             item.strip()
             for item in entries
