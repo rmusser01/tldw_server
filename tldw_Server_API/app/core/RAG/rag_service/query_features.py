@@ -40,7 +40,8 @@ from tldw_Server_API.app.core.testing import (
 _NLTK_SYMBOLS = ("nltk", "wordnet", "stopwords", "word_tokenize")
 
 
-def _import_nltk_symbol(name: str):
+def _import_nltk_symbol(name: str) -> Any:
+    """Import one nltk symbol by name, deferring the cost until first use."""
     if name == "nltk":
         import nltk
 
@@ -60,7 +61,7 @@ def _import_nltk_symbol(name: str):
     raise AttributeError(f"unknown nltk symbol {name!r}")
 
 
-def _lazy_nltk(name: str):
+def _lazy_nltk(name: str) -> Any:
     """Return an nltk symbol, honouring a patched module global if present."""
     value = globals().get(name)
     if value is None:
@@ -69,7 +70,7 @@ def _lazy_nltk(name: str):
     return value
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> Any:
     """Resolve nltk symbols on first module-attribute access (PEP 562)."""
     if name in _NLTK_SYMBOLS:
         value = _import_nltk_symbol(name)
@@ -90,7 +91,8 @@ def _download_with_timeout(resource: str, timeout_s: int = 60) -> bool:
 
     q: queue.Queue[bool] = queue.Queue(maxsize=1)
 
-    def _runner():
+    def _runner() -> None:
+        """Download the resource on the worker thread and report the outcome."""
         ok = False
         try:
             ok = _lazy_nltk("nltk").download(resource, quiet=True)

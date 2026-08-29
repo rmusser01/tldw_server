@@ -23,6 +23,7 @@ import warnings
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
+from collections.abc import Callable
 from typing import Any, Optional
 
 from loguru import logger
@@ -246,7 +247,13 @@ class UserRateLimiter:
         configure_sqlite_connection(conn, busy_timeout_ms=_SQLITE_BUSY_TIMEOUT_MS)
         return conn
 
-    async def _run_db(self, work, *, detect_types: int = 0, timeout: float | None = None):
+    async def _run_db(
+        self,
+        work: Callable[[sqlite3.Connection], Any],
+        *,
+        detect_types: int = 0,
+        timeout: float | None = None,
+    ) -> Any:
         """Run a synchronous database callable off the event loop.
 
         These methods are awaited on the request path. Now that connections wait
@@ -259,7 +266,8 @@ class UserRateLimiter:
         closed.
         """
 
-        def _invoke():
+        def _invoke() -> Any:
+            """Open a configured connection, run the callable, always close."""
             conn = self._connect(detect_types=detect_types, timeout=timeout)
             try:
                 with conn:

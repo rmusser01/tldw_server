@@ -5,10 +5,12 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 
 def _has_traversal(p: str) -> bool:
+    """Return True when a path contains a `..` traversal segment."""
     return "/../" in p or p.endswith("/..") or p.startswith("../")
 
 
 def _is_sandbox_runs(p: str) -> bool:
+    """Return True for paths under the sandbox runs prefix."""
     return p.startswith("/api/v1/sandbox/runs/")
 
 

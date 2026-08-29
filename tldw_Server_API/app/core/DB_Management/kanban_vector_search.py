@@ -32,7 +32,7 @@ from tldw_Server_API.app.core.testing import is_test_mode
 # Importing ChromaDB_Library here loaded chromadb (~0.25 s) in every process
 # that imported Kanban_DB, which route registration does at startup.
 @lru_cache(maxsize=1)
-def _resolve_chromadb_manager():
+def _resolve_chromadb_manager() -> type | None:
     """Return the ChromaDBManager class, or None when ChromaDB is unavailable."""
     try:
         from tldw_Server_API.app.core.Embeddings.ChromaDB_Library import (

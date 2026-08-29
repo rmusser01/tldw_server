@@ -14,8 +14,12 @@ need to know whether the adapter is sync or async.
 from __future__ import annotations
 
 import inspect
+from collections.abc import Awaitable, Callable, Iterator
 from contextlib import ExitStack, contextmanager
+from typing import Any
 from unittest.mock import patch
+
+import pytest
 
 # Every adapter module that awaits the ffmpeg seam.
 FFMPEG_ADAPTER_MODULES = (
@@ -25,10 +29,11 @@ FFMPEG_ADAPTER_MODULES = (
 )
 
 
-def as_async_run(fn):
+def as_async_run(fn: Callable[..., Any]) -> Callable[..., Awaitable[Any]]:
     """Adapt a synchronous ``subprocess.run``-shaped mock to the awaited seam."""
 
-    async def _run(cmd, **kwargs):
+    async def _run(cmd: list[str], **kwargs: Any) -> Any:
+        """Call the wrapped mock, awaiting it when it returns a coroutine."""
         result = fn(cmd, **kwargs)
         if inspect.isawaitable(result):
             return await result
@@ -38,7 +43,7 @@ def as_async_run(fn):
 
 
 @contextmanager
-def patch_ffmpeg(fn):
+def patch_ffmpeg(fn: Callable[..., Any]) -> Iterator[Callable[..., Awaitable[Any]]]:
     """Patch ``run_checked_async`` in every ffmpeg adapter module.
 
     Drop-in for ``patch("subprocess.run", fn)`` in these tests.
@@ -50,7 +55,9 @@ def patch_ffmpeg(fn):
         yield runner
 
 
-def setattr_ffmpeg(monkeypatch, fn):
+def setattr_ffmpeg(
+    monkeypatch: pytest.MonkeyPatch, fn: Callable[..., Any]
+) -> Callable[..., Awaitable[Any]]:
     """monkeypatch-based equivalent of :func:`patch_ffmpeg`."""
     runner = as_async_run(fn)
     for module in FFMPEG_ADAPTER_MODULES:

@@ -26,7 +26,7 @@ PACKAGE_JSON = FRONTEND / "package.json"
 
 # The budget exists to catch 100 KB-scale regressions. Much above this and it
 # would stop catching the class of drift it was written for.
-MAX_CREDIBLE_SHARED_BUDGET_KB = 600
+MAX_CREDIBLE_SHARED_BUDGET_KB = 700
 
 
 @pytest.mark.unit

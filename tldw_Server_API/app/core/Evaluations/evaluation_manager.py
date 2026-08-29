@@ -19,6 +19,7 @@ import uuid
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
+from collections.abc import Callable
 from typing import Any, Optional, Union
 
 import numpy as np
@@ -73,7 +74,12 @@ class EvaluationManager:
             conn.row_factory = sqlite3.Row
         return conn
 
-    async def _run_db(self, work, *, row_factory: bool = False):
+    async def _run_db(
+        self,
+        work: Callable[[sqlite3.Connection], Any],
+        *,
+        row_factory: bool = False,
+    ) -> Any:
         """Run a synchronous database callable off the event loop.
 
         These methods are awaited on the request path; running SQLite inline
@@ -83,7 +89,8 @@ class EvaluationManager:
         always closed.
         """
 
-        def _invoke():
+        def _invoke() -> Any:
+            """Open a configured connection, run the callable, always close."""
             conn = self._connect(row_factory=row_factory)
             try:
                 with conn:

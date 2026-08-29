@@ -22,10 +22,15 @@ import { gzipSync } from "node:zlib"
 import fs from "node:fs"
 import path from "node:path"
 
-// Measured 436.8 KB after moving the locale bundles and the API client out of
-// the shell. The ceiling leaves modest headroom for ordinary growth while still
-// catching another 100 KB-scale regression.
-const SHARED_BUDGET_BYTES = 480 * 1024
+// Measured 558.4 KB after moving the API client out of the shell. The ceiling
+// leaves modest headroom for ordinary growth while still catching another
+// 100 KB-scale regression.
+//
+// The English locale bundles (~139 KB gzip) are still inside this number. They
+// were briefly split out, but the app awaited all of them before rendering, so
+// the bytes still transferred on first load and only the measurement moved.
+// Loading them per route would take this budget down again.
+const SHARED_BUDGET_BYTES = 600 * 1024
 
 // A route should be mostly shell plus its own code. A route far above the shell
 // is carrying something that belongs in an async chunk.

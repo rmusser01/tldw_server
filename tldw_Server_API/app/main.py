@@ -33,6 +33,7 @@ from loguru import logger
 from starlette import status as _starlette_status
 from starlette.requests import ClientDisconnect
 from starlette.responses import FileResponse
+from starlette.types import ASGIApp, Receive, Scope, Send
 from starlette.staticfiles import StaticFiles
 
 from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseError
@@ -2084,10 +2085,12 @@ class _WorkflowTemplateTraversalGuard:
     for its anyio task group regardless of how little work it does.
     """
 
-    def __init__(self, app):
+    def __init__(self, app: ASGIApp) -> None:
+        """Wrap the downstream ASGI application."""
         self.app = app
 
-    async def __call__(self, scope, receive, send):
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """Reject traversal under the templates prefix, else delegate."""
         if scope["type"] == "http":
             try:
                 p = scope.get("path") or ""
@@ -2118,10 +2121,12 @@ class _SandboxArtifactPathGuard:
     Pure ASGI for the same reason as _WorkflowTemplateTraversalGuard above.
     """
 
-    def __init__(self, app):
+    def __init__(self, app: ASGIApp) -> None:
+        """Wrap the downstream ASGI application."""
         self.app = app
 
-    async def __call__(self, scope, receive, send):
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """Reject unsafe sandbox artifact paths, else delegate."""
         if scope["type"] == "http":
             try:
                 # Inspect raw ASGI path first to avoid client/Starlette normalization

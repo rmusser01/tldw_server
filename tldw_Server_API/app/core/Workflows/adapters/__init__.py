@@ -19,6 +19,7 @@ Usage:
 """
 
 import asyncio  # Re-export for tests that patch adapters.asyncio
+from typing import Any
 
 # Re-export exceptions and internal module references for backward compatibility
 from tldw_Server_API.app.core.exceptions import AdapterError
@@ -277,8 +278,18 @@ def _load_all_categories() -> None:
 registry.set_loader(_load_all_categories)
 
 
-def __getattr__(name: str):
-    """Resolve category modules and re-exported adapters on first access."""
+def __getattr__(name: str) -> Any:
+    """Resolve category modules and re-exported adapters on first access.
+
+    Args:
+        name: Attribute requested from this package.
+
+    Returns:
+        The category module or adapter function bound to ``name``.
+
+    Raises:
+        AttributeError: If ``name`` is neither a category nor a known adapter.
+    """
     from importlib import import_module
 
     if name in _ADAPTER_CATEGORIES:
@@ -294,6 +305,7 @@ def __getattr__(name: str):
 
 
 def __dir__() -> list[str]:
+    """List the lazily resolvable names alongside the eager ones."""
     return sorted(set(globals()) | set(__all__))
 
 
