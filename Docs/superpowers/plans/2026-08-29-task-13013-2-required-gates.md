@@ -122,7 +122,7 @@
 - [x] Replace the stale pending-enforcement prose with the exact active ruleset name/ID, strict policy, integration binding, no-bypass policy, and retained frontend-license layer.
 - [x] Document that the effective approval policy remains the existing dev pull-request rule: zero required approving reviews, stale reviews dismissed, extra approval required for unattributed changes, and no ruleset bypass actors.
 - [x] Summarize the before/after and controlled proof in the evidence README without credentials or transient API tokens.
-- [ ] Mark all TASK-13013.2 acceptance criteria and Definition of Done items complete; record Bandit as not applicable because only Markdown/Backlog records changed.
+- [x] Mark all TASK-13013.2 acceptance criteria and Definition of Done items complete; record Bandit as not applicable because only Markdown/Backlog records changed.
 
 ### Task 5: Verify and publish the closeout branch
 
@@ -133,9 +133,9 @@
 - Consumes: committed documentation/evidence/task changes and the active live policy.
 - Produces: one reviewable closeout PR based on current `dev`.
 
-- [ ] Validate every evidence JSON file with `python3 -m json.tool` without installing dependencies.
-- [ ] Re-run the live normalized ruleset comparisons and effective `dev` rule assertions.
-- [ ] Run `git diff --check` and scan the changed files for credentials or private infrastructure details.
-- [ ] Commit the exact documentation, evidence, and Backlog scope.
-- [ ] Push `codex/task-13013-2-required-gates` and open a PR to `dev` with the ruleset/proof evidence.
-- [ ] Verify the PR head, base, changed paths, and hosted required-gate status; do not merge without a separate user decision.
+- [x] Validate every evidence JSON file with `python3 -m json.tool` without installing dependencies.
+- [x] Re-run the live normalized ruleset comparisons and effective `dev` rule assertions.
+- [x] Run `git diff --check` and scan the changed files for credentials or private infrastructure details.
+- [x] Commit the exact documentation, evidence, and Backlog scope.
+- [x] Push `codex/task-13013-2-required-gates` and open PR #2836 to `dev` with the ruleset/proof evidence.
+- [x] Verify PR #2836 head, base, nine changed paths, and attached hosted required-gate status; do not merge without a separate user decision.
