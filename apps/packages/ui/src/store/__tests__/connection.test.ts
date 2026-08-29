@@ -6,7 +6,7 @@ import {
   type ConnectionUxState
 } from "@/types/connection"
 
-vi.mock("@/services/tldw-server", () => ({
+vi.mock("@/services/tldw-server-url", () => ({
   getStoredTldwServerURL: vi.fn(async () => null)
 }))
 

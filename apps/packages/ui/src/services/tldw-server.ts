@@ -6,6 +6,10 @@ import {
   type BrowserSurface
 } from "@/services/tldw/browser-networking"
 import { readTldwSetting } from "@/services/tldw-settings-storage"
+import { getStoredTldwServerURL } from "@/services/tldw-server-url"
+
+// Re-exported so existing importers of this module keep working.
+export { getStoredTldwServerURL }
 
 const storage = createSafeStorage({ area: "local" })
 
@@ -50,27 +54,6 @@ const getQuickstartWebUiServerUrl = (
 // Read API key from environment variables
 export const DEFAULT_TLDW_API_KEY = import.meta?.env?.VITE_TLDW_API_KEY || ""
 
-/**
- * Read any previously stored tldw server URL from extension storage,
- * without falling back to the hard-coded default.
- *
- * This is used by connection bootstrap code to distinguish a true
- * first-run (no URL configured anywhere) from a misconfigured server.
- */
-export const getStoredTldwServerURL = async (): Promise<string | null> => {
-  try {
-    const url = await readTldwSetting<string>("tldwServerUrl")
-    if (typeof url === "string") {
-      const trimmed = url.trim()
-      if (trimmed.length > 0) {
-        return trimmed
-      }
-    }
-  } catch {
-    // Ignore storage read failures; caller will treat as "no URL".
-  }
-  return null
-}
 
 export const getTldwServerURL = async () => {
   const config = await tldwClient.getConfig()
