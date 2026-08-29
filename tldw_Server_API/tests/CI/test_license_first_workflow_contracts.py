@@ -445,6 +445,13 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                         "github.event_name != 'pull_request' && "
                         "github.event_name != 'workflow_run'"
                     )
+                elif (name, job_name) in {
+                    ("coverage-required.yml", "coverage-required"),
+                    ("e2e-required.yml", "e2e-required"),
+                }:
+                    assert _normalized(job.get("if")) == _normalized(
+                        "always() && !cancelled() && needs.changes.result == 'success'"
+                    )
                 else:
                     assert job.get("if") is None, (name, job_name)
 

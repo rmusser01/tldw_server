@@ -138,6 +138,18 @@ def test_coverage_required_is_path_conditional() -> None:
     assert "coverage-required" in jobs
 
 
+def test_conditional_required_lanes_run_after_successful_change_detection() -> None:
+    for workflow_path, job_name in (
+        (".github/workflows/coverage-required.yml", "coverage-required"),
+        (".github/workflows/e2e-required.yml", "e2e-required"),
+    ):
+        job = _load(workflow_path)["jobs"][job_name]
+        assert job["needs"] == ["changes"]
+        assert " ".join(job["if"].split()) == (
+            "always() && !cancelled() && needs.changes.result == 'success'"
+        )
+
+
 def test_coverage_required_installs_portaudio_for_pyaudio_builds() -> None:
     workflow = _load(".github/workflows/coverage-required.yml")
     steps = workflow["jobs"]["coverage-required"]["steps"]

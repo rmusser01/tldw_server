@@ -10,6 +10,8 @@ from sqlite3 import IntegrityError
 
 import pytest
 
+from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import ProfileUserWriteRejected
+
 pytest_plugins = ("tldw_Server_API.tests._plugins.authnz_full_fixtures",)
 
 
@@ -289,9 +291,9 @@ async def test_authorized_shared_fetch_rejects_null_activity_boundaries_sqlite(
     ) is not None
 
     if null_boundary in {"team_user", "org_user"}:
-        # Current SQLite schemas reject this legacy state at the storage
-        # boundary; PostgreSQL coverage below exercises the nullable-row join.
-        with pytest.raises(IntegrityError):
+        # The managed write boundary rejects this legacy state before SQLite;
+        # PostgreSQL coverage below exercises the nullable-row join directly.
+        with pytest.raises(ProfileUserWriteRejected):
             await state["pool"].execute(
                 "UPDATE users SET is_active = NULL WHERE id = ?",
                 (user_id,),

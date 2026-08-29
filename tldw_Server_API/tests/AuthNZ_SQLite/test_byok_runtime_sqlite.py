@@ -28,6 +28,7 @@ from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
     loads_envelope,
 )
 from tldw_Server_API.app.core.Metrics.metrics_manager import get_metrics_registry
+from tldw_Server_API.tests.AuthNZ_SQLite._user_fixtures import set_authnz_test_user_active
 from tldw_Server_API.tests.AuthNZ_SQLite.test_byok_endpoints_sqlite import (
     _insert_raw_shared_key,
     _setup_byok_sqlite,
@@ -292,7 +293,10 @@ async def test_byok_resolution_precedence(tmp_path, monkeypatch):
 
     # Remove the final BYOK key to prove the complete precedence chain reaches
     # the server-secret boundary without manufacturing a repository fallback.
-    await org_repo.delete_secret("org", org_id, "openai")
+    await pool.execute(
+        "DELETE FROM org_provider_secrets WHERE scope_type = ? AND scope_id = ? AND provider = ?",
+        ("org", org_id, "openai"),
+    )
     resolved = await resolve_byok_credentials(
         "openai",
         user_id=user_id,
@@ -1183,10 +1187,7 @@ async def test_inactive_user_blocks_overlapping_oauth_refresh_before_openai_adap
         await asyncio.wait_for(initial_reads_ready.wait(), timeout=5)
         await asyncio.sleep(0)
         assert not second_task.done()
-        await pool.execute(
-            "UPDATE users SET is_active = 0 WHERE id = ?",
-            (user_id,),
-        )
+        await set_authnz_test_user_active(pool, user_id, False)
     finally:
         release_refresh.set()
 
@@ -1228,10 +1229,7 @@ async def test_inactive_user_static_openai_key_fails_before_adapter_sqlite(
         "openai",
         "sk-inactive-owner-must-not-dispatch",
     )
-    await pool.execute(
-        "UPDATE users SET is_active = 0 WHERE id = ?",
-        (user_id,),
-    )
+    await set_authnz_test_user_active(pool, user_id, False)
     adapter, captured_headers = _capture_real_openai_adapter_headers(monkeypatch)
     adapter_calls = 0
 

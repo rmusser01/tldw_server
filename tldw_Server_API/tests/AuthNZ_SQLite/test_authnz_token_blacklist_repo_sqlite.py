@@ -11,6 +11,7 @@ from tldw_Server_API.app.core.AuthNZ.repos.token_blacklist_repo import (
     AuthnzTokenBlacklistRepo,
 )
 from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+from tldw_Server_API.tests.AuthNZ_SQLite._user_fixtures import create_authnz_test_user
 
 
 @pytest.mark.asyncio
@@ -29,19 +30,14 @@ async def test_authnz_token_blacklist_repo_sqlite(tmp_path, monkeypatch):
     now = datetime.now(timezone.utc).replace(microsecond=0)
     future = now + timedelta(hours=1)
 
-    # Seed a simple user row for FK safety
-    async with pool.transaction() as conn:
-        await conn.execute(
-            """
-            INSERT INTO users (username, email, password_hash, is_active, is_verified, role)
-            VALUES (?, ?, ?, 1, 1, 'user')
-            """,
-            ("blacklist-sqlite-user", "blacklist-sqlite@example.com", "hash"),
-        )
-    user_id = await pool.fetchval(
-        "SELECT id FROM users WHERE username = ?", "blacklist-sqlite-user"
+    # Seed a simple user row for FK safety through the guarded write path.
+    user_id = await create_authnz_test_user(
+        pool,
+        username="blacklist-sqlite-user",
+        email="blacklist-sqlite@example.com",
+        password_hash="hash",
+        is_verified=True,
     )
-    assert user_id is not None
 
     repo = AuthnzTokenBlacklistRepo(pool)
 
