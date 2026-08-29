@@ -1434,7 +1434,10 @@ async def exercise_enqueue_recovery_contract(
                 assert retired.pending_jobs_disposition is None
             assert retired.delivery.state is state
             assert retired.delivery.reason_code is reason
-            assert retired.enqueue_claim_token is None
+            if state is DeliveryState.CANCELED:
+                assert retired.enqueue_claim_token == takeover_token
+            else:
+                assert retired.enqueue_claim_token is None
 
     _, attach_expired_id = await _captured_delivery(
         repository,
@@ -1473,6 +1476,86 @@ async def exercise_enqueue_recovery_contract(
         assert expired is not None
         assert expired.delivery.state is DeliveryState.DEAD
         assert expired.delivery.reason_code is DeliveryReasonCode.DELIVERY_EXPIRED
+
+
+async def exercise_enqueue_terminal_orphan_recovery_contract(
+    fixture: DeliveryRepositoryFixture,
+) -> None:
+    """Bind retained terminal-orphan coordinates through exact acknowledgement."""
+
+    repository = fixture.repository
+    webhook_id, delivery_id = await _captured_delivery(
+        repository,
+        event_id="enqueue-orphan-event",
+        command_id="enqueue-orphan-command",
+        isolated=True,
+    )
+    original_claim_token = opaque_token("enqueue-orphan-claim")
+    original_disposition_token = opaque_token("enqueue-orphan-disposition")
+    async with repository.transaction() as tx:
+        claim = await tx.claim_pending_delivery(
+            original_claim_token,
+            NOW + timedelta(minutes=1),
+            NOW,
+        )
+        assert claim is not None and claim.delivery.delivery.id == delivery_id
+        pending = await tx.cancel_registration_work(
+            webhook_id,
+            (2, 2),
+            DeliveryReasonCode.CANCELED_DISABLED,
+            lambda: opaque_token("enqueue-orphan-unused"),
+            NOW + timedelta(seconds=1),
+        )
+        assert pending == ()
+        prepared = await tx.retire_terminal_enqueue_claim(
+            delivery_id,
+            original_claim_token,
+            NOW + timedelta(seconds=1),
+            jobs_job_id="42",
+            disposition_token=original_disposition_token,
+        )
+        assert prepared is not None
+        assert prepared.delivery.state is DeliveryState.CANCELED
+        assert prepared.delivery.reason_code is DeliveryReasonCode.CANCELED_DISABLED
+        assert prepared.jobs_job_id == "42"
+        assert prepared.enqueue_claim_token == original_claim_token
+        assert prepared.pending_jobs_disposition is JobsDispositionKind.CANCEL
+        assert prepared.pending_jobs_disposition_token == original_disposition_token
+        assert not prepared.jobs_disposition_applied
+
+    replacement_claim_token = opaque_token("enqueue-orphan-replacement")
+    async with repository.transaction() as tx:
+        replacement = await tx.claim_pending_delivery(
+            replacement_claim_token,
+            NOW + timedelta(minutes=3),
+            NOW + timedelta(minutes=2),
+        )
+        assert replacement is not None
+        assert replacement.delivery.delivery.id == delivery_id
+        resumed = await tx.retire_terminal_enqueue_claim(
+            delivery_id,
+            replacement_claim_token,
+            NOW + timedelta(minutes=2),
+            jobs_job_id="42",
+            disposition_token=opaque_token("enqueue-orphan-replacement-disposition"),
+        )
+        assert resumed is not None
+        assert resumed.jobs_job_id == "42"
+        assert resumed.enqueue_claim_token == replacement_claim_token
+        assert resumed.pending_jobs_disposition_token == original_disposition_token
+        assert await tx.acknowledge_terminal_enqueue_cancel(
+            delivery_id,
+            replacement_claim_token,
+            original_disposition_token,
+        )
+
+    acknowledged = await repository.get_delivery_bundle(delivery_id)
+    assert acknowledged is not None
+    assert acknowledged.delivery.jobs_job_id == "42"
+    assert acknowledged.delivery.enqueue_claim_token is None
+    assert acknowledged.delivery.enqueue_claim_expires_at is None
+    assert acknowledged.delivery.pending_jobs_disposition_token == original_disposition_token
+    assert acknowledged.delivery.jobs_disposition_applied
 
 
 async def _queue_delivery(

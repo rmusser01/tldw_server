@@ -4,7 +4,7 @@ title: Implement canonical admin webhook delivery substrate and recovery
 status: In Progress
 assignee: []
 created_date: '2026-08-23 03:15'
-updated_date: '2026-08-29 14:57'
+updated_date: '2026-08-29 15:47'
 labels:
   - admin
   - webhooks
@@ -159,6 +159,10 @@ Task 7 preflight found the approved file list omitted required AuthNZ repository
 2026-08-29: Task 7 takeover audit at base 770bbf3e887a0e35f178de30bf9be36713eea742. Re-ran the inherited focused suite with required PostgreSQL access: 63 passed, 0 skipped; sandbox-only first run had 19 PostgreSQL setup errors from denied loopback/Docker access. Audited repository CAS, six crash windows, cancellation/expiry recovery, and adapter identity contracts against the Task 7 brief and binding constraints; no test amendment or additional production correction was warranted.
 
 2026-08-29: Completed Task 7 recoverable enqueue handshake on codex/admin-webhooks-delivery-substrate. Final PostgreSQL-required verification: exact enqueue gate 20 passed/0 skipped; full Task 7 repository/reconciler suite 63 passed/0 skipped; adjacent Jobs admission/identity/prepared-disposition suite 245 passed/0 skipped. Ruff, Python 3.10 compilation, direct-Jobs-SQL scan, reviewed Bandit, and diff checks passed. Report: .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-7-report.md.
+
+2026-08-29: Task 7 independent review found two Critical recovery defects at a88afd14f06ae94aa1dda80bf762c5b1b1af0260. Fix round 1 now requires exact locked AuthNZ revalidation through Jobs admission/attach so terminal work cannot race into a new Jobs row, and requires terminal-orphan recovery to retain/reuse its Jobs ID, cancel token, and claim coordinate until observed Jobs cancellation plus atomic AuthNZ acknowledgement. Deterministic coverage is required across all four AuthNZ/Jobs backend pairs, including crashes after orphan preparation and after Jobs cancellation.
+
+2026-08-29: Task 7 Fix Round 1 complete at FIX_BASE a88afd14f06ae94aa1dda80bf762c5b1b1af0260. Locked exact owned AuthNZ claim revalidation now spans idempotent Jobs admission/attach; terminal orphans retain and reuse their Jobs ID, cancel token, and claim coordinate until observed cancellation plus atomic acknowledgement. Final PostgreSQL-required gates: Task 7 78 passed/0 skipped; exact enqueue 25 passed/8 deselected/0 skipped; adjacent Jobs 245 passed/0 skipped. Ruff, Python 3.10 compilation, reviewed Bandit, direct-Jobs-SQL scan, and diff check passed. Evidence: .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-7-report.md.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

@@ -873,16 +873,29 @@ schema change. `claim_pending_delivery()` must atomically select pending rows
 (including rows that have reached delivery expiry) or take over only expired
 enqueue claims, preserve an already-terminal state during stale-claim takeover,
 and order candidates by expiry, creation time, and ID. It must never steal an
-unexpired claim. Add exact-token compare-and-set operations that (1) release a
-nonterminal claim to `pending`, or to `dead:delivery_expired` if its delivery
-lifetime elapsed; (2) fail an owned nonterminal claim as
-`dead:jobs_identity_conflict`; and (3) retire an owned terminal/expired claim,
-clearing it and optionally attaching one Jobs ID plus one tokenized cancel
-disposition. Jobs ID and cancel token are both present or both absent. Preserve
-an existing terminal state/reason, never make it runnable, and require
-`attach_jobs_job()` to reject a delivery whose lifetime elapsed. Prove these
-repository contracts on SQLite and required PostgreSQL before the reconciler
-uses them.
+unexpired claim. After the initial claim commit, the reconciler must open a
+second AuthNZ transaction, lock and revalidate the exact owned claim, and keep
+that row lock through idempotent Jobs admission plus exact AuthNZ attach. If a
+lifecycle mutation committed first, revalidation observes terminal work and
+uses lookup-only recovery without admission; if it commits later, it waits for
+attach and then persists normal cancellation. This is one AuthNZ lock
+transaction around an idempotent Jobs call, not a distributed transaction.
+
+Add exact-token compare-and-set operations that (1) release a known-safe
+transient rejection to `pending`, or to `dead:delivery_expired` if its delivery
+lifetime elapsed and Jobs admission is known not to have created a row; (2)
+fail an owned nonterminal claim as `dead:jobs_identity_conflict`; and (3)
+recover an owned terminal/expired claim without losing the orphan-cancellation
+coordinate. Lookup-proven missing Jobs identity clears the claim immediately.
+A known canonical Jobs row is atomically attached with one tokenized cancel
+disposition while retaining a recoverable claim until Jobs cancellation is
+observed and exact AuthNZ acknowledgement atomically applies the disposition
+and clears the claim. Retries reuse the persisted Jobs ID and disposition token;
+ambiguous admission or lookup outcomes retain the claim for takeover after its
+lease expires. Preserve an existing terminal state/reason, never make it
+runnable, and require `attach_jobs_job()` to reject a delivery whose lifetime
+elapsed. Prove these repository contracts on SQLite and required PostgreSQL
+before the reconciler uses them.
 
 - [ ] **Step 1: Define a narrow queue adapter and write unit RED tests**
 
@@ -915,6 +928,15 @@ Transient Jobs database errors and typed `ADMISSION_REJECTED` outcomes clear onl
 - [ ] **Step 3: Add cancellation/expiry races**
 
 If delivery becomes canceled/superseded/dead before attach, do not mark it queued. Use lookup-only identity recovery: when no Jobs row exists, finish without creating one; when a matching queued row exists, attach identity only as needed and persist/apply tokenized cancellation; when the row is processing, leave the cancel disposition pending for the lease holder and never claim the request was unsent. If it expires before Jobs create, terminalize `dead:delivery_expired` without creating a job. If it expires after Jobs create, use the same lookup-only branch to cancel the orphan; never call admission as a cancellation probe and never make terminal AuthNZ work runnable. Reconciler heartbeat failure does not mutate delivery state.
+
+Prove the pre-admission revalidation race by terminalizing immediately after
+the initial claim commit for every AuthNZ/Jobs backend pair and asserting that
+admission is never called. Also crash after terminal-orphan preparation but
+before Jobs cancellation, and after Jobs cancellation but before AuthNZ
+acknowledgement; after claim expiry, each rerun must reuse the persisted Jobs ID
+and disposition token, avoid admission, and converge to an applied disposition
+with no enqueue claim. A processing Jobs row keeps the pending cancel and a
+recoverable claim for its lease holder or later recovery.
 
 - [ ] **Step 4: Parameterize the four-backend enqueue matrix**
 

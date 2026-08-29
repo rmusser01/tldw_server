@@ -374,30 +374,18 @@ def _reconciler(
     )
 
 
-@pytest.mark.parametrize(
-    ("failure", "expected_kind"),
-    (
-        (
-            JobsDeliveryAdmission(
-                outcome=OperationOutcome.ADMISSION_REJECTED,
-                admission_rejection_reason=AdmissionRejectionReason.POLICY_REJECTED,
-            ),
-            EnqueueFailureKind.ADMISSION_REJECTED,
-        ),
-        (sqlite3.OperationalError("database unavailable"), EnqueueFailureKind.BACKEND_UNAVAILABLE),
-    ),
-)
-async def test_transient_enqueue_failure_releases_only_owned_claim_and_retries_later(
+async def test_typed_rejection_releases_only_owned_claim_and_retries_later(
     auth_fixture: SQLiteAuthFixture,
-    failure: JobsDeliveryAdmission | BaseException,
-    expected_kind: EnqueueFailureKind,
 ) -> None:
     webhook_id, delivery_id = await _seed_automatic_delivery(
         auth_fixture.repository,
-        f"transient-{expected_kind.value}",
+        "typed-rejection",
     )
     queue = StubDeliveryQueue()
-    queue.admission = failure
+    queue.admission = JobsDeliveryAdmission(
+        outcome=OperationOutcome.ADMISSION_REJECTED,
+        admission_rejection_reason=AdmissionRejectionReason.POLICY_REJECTED,
+    )
     clock = MutableClock()
     observed: list[EnqueueFailureKind] = []
     reconciler = _reconciler(auth_fixture, queue, clock, observer=observed.append)
@@ -409,7 +397,7 @@ async def test_transient_enqueue_failure_releases_only_owned_claim_and_retries_l
     assert first.delivery.enqueue_claim_token is None
     assert first.delivery.delivery.reason_code is None
     assert await auth_fixture.repository.list_delivery_attempts(webhook_id, delivery_id) == ()
-    assert observed == [expected_kind]
+    assert observed == [EnqueueFailureKind.ADMISSION_REJECTED]
 
     queue.admission = None
     assert await reconciler.reconcile_enqueue_once() == 1
@@ -417,6 +405,67 @@ async def test_transient_enqueue_failure_releases_only_owned_claim_and_retries_l
     assert queued is not None
     assert queued.delivery.delivery.state is DeliveryState.QUEUED
     assert queued.delivery.jobs_job_id == "1"
+
+
+async def test_ambiguous_admission_failure_retains_claim_until_expiry_takeover(
+    auth_fixture: SQLiteAuthFixture,
+) -> None:
+    _, delivery_id = await _seed_automatic_delivery(
+        auth_fixture.repository,
+        "ambiguous-admission",
+    )
+    queue = StubDeliveryQueue()
+    queue.admission = sqlite3.OperationalError("database unavailable")
+    clock = MutableClock()
+    observed: list[EnqueueFailureKind] = []
+    reconciler = _reconciler(auth_fixture, queue, clock, observer=observed.append)
+
+    assert await reconciler.reconcile_enqueue_once() == 1
+    retained = await auth_fixture.repository.get_delivery_bundle(delivery_id)
+    assert retained is not None
+    assert retained.delivery.delivery.state is DeliveryState.ENQUEUE_CLAIMED
+    assert retained.delivery.enqueue_claim_token is not None
+    assert observed == [EnqueueFailureKind.BACKEND_UNAVAILABLE]
+
+    clock.advance(61)
+    queue.admission = None
+    assert await reconciler.reconcile_enqueue_once() == 1
+    queued = await auth_fixture.repository.get_delivery_bundle(delivery_id)
+    assert queued is not None
+    assert queued.delivery.delivery.state is DeliveryState.QUEUED
+    assert queued.delivery.enqueue_claim_token is None
+    assert len(queue.admit_calls) == 2
+
+
+async def test_ambiguous_terminal_lookup_retains_expired_claim_for_recovery(
+    auth_fixture: SQLiteAuthFixture,
+) -> None:
+    _, delivery_id = await _seed_automatic_delivery(
+        auth_fixture.repository,
+        "ambiguous-terminal-lookup",
+        expires_at=NOW,
+    )
+    queue = StubDeliveryQueue()
+    queue.identity = sqlite3.OperationalError("database unavailable")
+    clock = MutableClock()
+    reconciler = _reconciler(auth_fixture, queue, clock)
+
+    assert await reconciler.reconcile_enqueue_once() == 1
+    retained = await auth_fixture.repository.get_delivery_bundle(delivery_id)
+    assert retained is not None
+    assert retained.delivery.delivery.state is DeliveryState.ENQUEUE_CLAIMED
+    assert retained.delivery.enqueue_claim_token is not None
+    assert queue.admit_calls == []
+
+    clock.advance(61)
+    queue.identity = None
+    assert await reconciler.reconcile_enqueue_once() == 1
+    retired = await auth_fixture.repository.get_delivery_bundle(delivery_id)
+    assert retired is not None
+    assert retired.delivery.delivery.state is DeliveryState.DEAD
+    assert retired.delivery.delivery.reason_code is DeliveryReasonCode.DELIVERY_EXPIRED
+    assert retired.delivery.enqueue_claim_token is None
+    assert queue.admit_calls == []
 
 
 @pytest.mark.parametrize(
@@ -482,7 +531,7 @@ async def test_repeated_rejection_is_bounded_by_delivery_expiry(
     assert len(queue.admit_calls) == 1
 
 
-async def test_failure_observer_cannot_change_transient_release(
+async def test_failure_observer_cannot_change_ambiguous_claim_retention(
     auth_fixture: SQLiteAuthFixture,
 ) -> None:
     _, delivery_id = await _seed_automatic_delivery(
@@ -503,10 +552,10 @@ async def test_failure_observer_cannot_change_transient_release(
     )
 
     assert await reconciler.reconcile_enqueue_once() == 1
-    released = await auth_fixture.repository.get_delivery_bundle(delivery_id)
-    assert released is not None
-    assert released.delivery.delivery.state is DeliveryState.PENDING
-    assert released.delivery.enqueue_claim_token is None
+    retained = await auth_fixture.repository.get_delivery_bundle(delivery_id)
+    assert retained is not None
+    assert retained.delivery.delivery.state is DeliveryState.ENQUEUE_CLAIMED
+    assert retained.delivery.enqueue_claim_token is not None
 
 
 async def test_enqueue_iteration_claims_at_most_one_hundred_and_skips_test_work(

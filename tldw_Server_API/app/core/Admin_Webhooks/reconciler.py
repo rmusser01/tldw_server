@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
@@ -58,6 +58,8 @@ class EnqueueCrashPoint(str, Enum):
     BEFORE_AUTHNZ_ATTACH = "before_authnz_attach"
     BEFORE_ATTACH_COMMIT = "before_attach_commit"
     AFTER_QUEUED_COMMIT = "after_queued_commit"
+    AFTER_ORPHAN_PREPARE = "after_orphan_prepare"
+    AFTER_JOBS_CANCEL = "after_jobs_cancel"
 
 
 class JobsDeliveryConflictError(RuntimeError):
@@ -368,6 +370,7 @@ class AdminWebhookReconciler:
         claim_ttl_seconds: int,
         failure_observer: Callable[[EnqueueFailureKind], None],
         crash_hook: Callable[[EnqueueCrashPoint], None] | None = None,
+        after_claim_commit_hook: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         if (
             isinstance(claim_ttl_seconds, bool)
@@ -384,6 +387,10 @@ class AdminWebhookReconciler:
                 raise TypeError(f"{field} is invalid")
         if crash_hook is not None and not callable(crash_hook):
             raise TypeError("crash hook is invalid")
+        if after_claim_commit_hook is not None and not callable(
+            after_claim_commit_hook
+        ):
+            raise TypeError("after-claim commit hook is invalid")
         self._repository = repository
         self._queue = queue
         self._token_factory = token_factory
@@ -391,6 +398,7 @@ class AdminWebhookReconciler:
         self._claim_ttl = timedelta(seconds=claim_ttl_seconds)
         self._failure_observer = failure_observer
         self._crash_hook = crash_hook
+        self._after_claim_commit_hook = after_claim_commit_hook
 
     def _crash(self, point: EnqueueCrashPoint) -> None:
         if self._crash_hook is not None:
@@ -402,256 +410,179 @@ class AdminWebhookReconciler:
         except Exception:  # noqa: BLE001 - observation cannot affect state repair.
             return
 
-    async def _fresh_owned_delivery(
-        self,
-        delivery_id: str,
-        claim_token: str,
-    ) -> StoredWebhookDelivery | None:
-        bundle = await self._repository.get_delivery_bundle(delivery_id)
-        if bundle is None or bundle.delivery.enqueue_claim_token != claim_token:
-            return None
-        return bundle.delivery
-
-    async def _release_transient(
-        self,
-        claim: EnqueueClaim,
-        failure: EnqueueFailureKind,
-    ) -> None:
-        now = _aware_utc(self._clock(), field="clock value")
-        async with self._repository.transaction() as tx:
-            released = await tx.release_enqueue_claim(
-                claim.delivery.delivery.id,
-                claim.claim_token,
-                now,
-            )
-        self._observe(failure)
-        if released is None:
-            fresh = await self._fresh_owned_delivery(
-                claim.delivery.delivery.id,
-                claim.claim_token,
-            )
-            if fresh is not None:
-                await self._recover_terminal(fresh, claim.claim_token)
-
-    async def _fail_permanent(self, claim: EnqueueClaim) -> None:
-        now = _aware_utc(self._clock(), field="clock value")
-        async with self._repository.transaction() as tx:
-            failed = await tx.fail_enqueue_claim(
-                claim.delivery.delivery.id,
-                claim.claim_token,
-                now,
-            )
-        self._observe(EnqueueFailureKind.IDENTITY_CONFLICT)
-        if failed is None:
-            fresh = await self._fresh_owned_delivery(
-                claim.delivery.delivery.id,
-                claim.claim_token,
-            )
-            if fresh is not None:
-                await self._recover_terminal(fresh, claim.claim_token)
-
-    async def _acknowledge_cancel(
-        self,
-        delivery_id: str,
-        disposition_token: str,
-        jobs_job_id: str,
-    ) -> None:
-        try:
-            observed = self._queue.get_delivery_job(jobs_job_id)
-        except JobsDeliveryConflictError:
-            self._observe(EnqueueFailureKind.IDENTITY_CONFLICT)
-            return
-        except Exception:  # noqa: BLE001 - backend failures keep disposition pending.
-            self._observe(EnqueueFailureKind.BACKEND_UNAVAILABLE)
-            return
-        if (
-            observed is None
-            or observed.jobs_job_id != jobs_job_id
-            or observed.delivery_id != delivery_id
-            or observed.status != "cancelled"
-        ):
-            return
-        async with self._repository.transaction() as tx:
-            await tx.acknowledge_jobs_disposition(
-                delivery_id,
-                disposition_token,
-                "cancelled",
-            )
-
-    async def _recover_terminal(
+    async def _apply_terminal_cancel(
         self,
         delivery: StoredWebhookDelivery,
         claim_token: str,
     ) -> None:
-        now = _aware_utc(self._clock(), field="clock value")
-        if delivery.enqueue_claim_token != claim_token or not (
-            delivery.delivery.state in DeliveryState.terminal_states()
-            or delivery.delivery.expires_at <= now
+        """Apply and acknowledge one already-persisted terminal orphan cancel."""
+
+        jobs_job_id = delivery.jobs_job_id
+        disposition_token = delivery.pending_jobs_disposition_token
+        reason_code = delivery.delivery.reason_code
+        if (
+            jobs_job_id is None
+            or disposition_token is None
+            or reason_code is None
+            or delivery.pending_jobs_disposition is None
+            or delivery.jobs_disposition_applied
         ):
             return
-        try:
-            record = self._queue.find_delivery_job_by_identity(
-                delivery.delivery.id
-            )
-        except JobsDeliveryConflictError:
-            self._observe(EnqueueFailureKind.IDENTITY_CONFLICT)
-            if delivery.delivery.state in DeliveryState.terminal_states():
-                async with self._repository.transaction() as tx:
-                    await tx.retire_terminal_enqueue_claim(
-                        delivery.delivery.id,
-                        claim_token,
-                        now,
-                    )
-            else:
-                async with self._repository.transaction() as tx:
-                    await tx.fail_enqueue_claim(
-                        delivery.delivery.id,
-                        claim_token,
-                        now,
-                    )
-            return
-        except Exception:  # noqa: BLE001 - backend failures release only live claims.
-            self._observe(EnqueueFailureKind.BACKEND_UNAVAILABLE)
-            if delivery.delivery.state not in DeliveryState.terminal_states():
-                async with self._repository.transaction() as tx:
-                    await tx.release_enqueue_claim(
-                        delivery.delivery.id,
-                        claim_token,
-                        now,
-                    )
-            return
-
-        if record is None:
-            async with self._repository.transaction() as tx:
-                await tx.retire_terminal_enqueue_claim(
-                    delivery.delivery.id,
-                    claim_token,
-                    now,
-                )
-            return
-
-        if record.delivery_id != delivery.delivery.id:
-            self._observe(EnqueueFailureKind.IDENTITY_CONFLICT)
-            if delivery.delivery.state in DeliveryState.terminal_states():
-                async with self._repository.transaction() as tx:
-                    await tx.retire_terminal_enqueue_claim(
-                        delivery.delivery.id,
-                        claim_token,
-                        now,
-                    )
-            else:
-                async with self._repository.transaction() as tx:
-                    await tx.fail_enqueue_claim(
-                        delivery.delivery.id,
-                        claim_token,
-                        now,
-                    )
-            return
-
-        disposition_token = self._token_factory()
-        async with self._repository.transaction() as tx:
-            retired = await tx.retire_terminal_enqueue_claim(
-                delivery.delivery.id,
-                claim_token,
-                now,
-                jobs_job_id=record.jobs_job_id,
-                disposition_token=disposition_token,
-            )
-        if retired is None or retired.delivery.reason_code is None:
-            return
+        self._crash(EnqueueCrashPoint.AFTER_ORPHAN_PREPARE)
         try:
             result = self._queue.apply_queued_cancel(
-                record.jobs_job_id,
+                jobs_job_id,
                 delivery.delivery.id,
                 disposition_token,
-                retired.delivery.reason_code,
+                reason_code,
             )
         except JobsDeliveryConflictError:
             self._observe(EnqueueFailureKind.IDENTITY_CONFLICT)
             return
-        except Exception:  # noqa: BLE001 - backend failures keep disposition pending.
+        except Exception:  # noqa: BLE001 - backend failures retain the recovery coordinate.
             self._observe(EnqueueFailureKind.BACKEND_UNAVAILABLE)
             return
         if (
-            result.outcome is OperationOutcome.APPLIED
-            and result.state == "cancelled"
+            result.outcome is not OperationOutcome.APPLIED
+            or result.state != "cancelled"
         ):
-            await self._acknowledge_cancel(
+            return
+        self._crash(EnqueueCrashPoint.AFTER_JOBS_CANCEL)
+        async with self._repository.transaction() as tx:
+            await tx.acknowledge_terminal_enqueue_cancel(
                 delivery.delivery.id,
+                claim_token,
                 disposition_token,
-                record.jobs_job_id,
             )
 
     async def _process_claim(self, claim: EnqueueClaim) -> bool:
-        now = _aware_utc(self._clock(), field="clock value")
-        if (
-            claim.delivery.delivery.state in DeliveryState.terminal_states()
-            or claim.delivery.delivery.expires_at <= now
-        ):
-            await self._recover_terminal(claim.delivery, claim.claim_token)
-            return True
+        """Reread the exact claim under lock before any Jobs-side mutation."""
 
-        try:
-            admission = self._queue.admit_delivery_job(
-                claim.delivery.delivery.id,
-                claim.delivery.delivery.expires_at,
-            )
-        except JobsDeliveryConflictError:
-            await self._fail_permanent(claim)
-            return True
-        except Exception:  # noqa: BLE001 - admission backend failures are transient.
-            await self._release_transient(
-                claim,
-                EnqueueFailureKind.BACKEND_UNAVAILABLE,
-            )
-            return False
-
-        if admission.outcome is OperationOutcome.ADMISSION_REJECTED:
-            await self._release_transient(
-                claim,
-                EnqueueFailureKind.ADMISSION_REJECTED,
-            )
-            return False
-        if admission.outcome is OperationOutcome.BACKEND_ERROR:
-            await self._release_transient(
-                claim,
-                EnqueueFailureKind.BACKEND_UNAVAILABLE,
-            )
-            return False
-        if admission.outcome in {
-            OperationOutcome.BACKEND_CONFLICT,
-            OperationOutcome.BACKEND_SCHEMA_ERROR,
-        }:
-            await self._fail_permanent(claim)
-            return True
-        if (
-            admission.record is None
-            or admission.record.delivery_id != claim.delivery.delivery.id
-        ):
-            await self._fail_permanent(claim)
-            return True
-
-        self._crash(EnqueueCrashPoint.BEFORE_AUTHNZ_ATTACH)
-        attach_now = _aware_utc(self._clock(), field="clock value")
+        delivery_id = claim.delivery.delivery.id
+        terminal_cancel: StoredWebhookDelivery | None = None
+        failure: EnqueueFailureKind | None = None
+        continue_batch = True
+        queued = False
         async with self._repository.transaction() as tx:
-            attached = await tx.attach_jobs_job(
-                claim.delivery.delivery.id,
+            current = await tx.lock_owned_enqueue_claim(
+                delivery_id,
                 claim.claim_token,
-                admission.record.jobs_job_id,
-                attach_now,
             )
-            if attached is not None:
-                self._crash(EnqueueCrashPoint.BEFORE_ATTACH_COMMIT)
-        if attached is not None:
-            self._crash(EnqueueCrashPoint.AFTER_QUEUED_COMMIT)
+            if current is None:
+                return True
+            now = _aware_utc(self._clock(), field="clock value")
+            if (
+                current.enqueue_claim_expires_at is None
+                or current.enqueue_claim_expires_at <= now
+            ):
+                return True
+            terminal = (
+                current.delivery.state in DeliveryState.terminal_states()
+                or current.delivery.expires_at <= now
+            )
+            if terminal:
+                try:
+                    record = self._queue.find_delivery_job_by_identity(delivery_id)
+                except JobsDeliveryConflictError:
+                    failure = EnqueueFailureKind.IDENTITY_CONFLICT
+                except Exception:  # noqa: BLE001 - ambiguous lookup retains the claim.
+                    failure = EnqueueFailureKind.BACKEND_UNAVAILABLE
+                else:
+                    if record is None:
+                        await tx.retire_terminal_enqueue_claim(
+                            delivery_id,
+                            claim.claim_token,
+                            now,
+                        )
+                    elif record.delivery_id != delivery_id:
+                        failure = EnqueueFailureKind.IDENTITY_CONFLICT
+                    else:
+                        disposition_token = (
+                            current.pending_jobs_disposition_token
+                            if (
+                                current.pending_jobs_disposition is not None
+                                and not current.jobs_disposition_applied
+                                and current.pending_jobs_disposition_token is not None
+                            )
+                            else self._token_factory()
+                        )
+                        terminal_cancel = await tx.retire_terminal_enqueue_claim(
+                            delivery_id,
+                            claim.claim_token,
+                            now,
+                            jobs_job_id=record.jobs_job_id,
+                            disposition_token=disposition_token,
+                        )
+                continue_batch = failure is None
+            else:
+                try:
+                    admission = self._queue.admit_delivery_job(
+                        delivery_id,
+                        current.delivery.expires_at,
+                    )
+                except JobsDeliveryConflictError:
+                    await tx.fail_enqueue_claim(
+                        delivery_id,
+                        claim.claim_token,
+                        now,
+                    )
+                    failure = EnqueueFailureKind.IDENTITY_CONFLICT
+                except Exception:  # noqa: BLE001 - ambiguous admission retains the claim.
+                    failure = EnqueueFailureKind.BACKEND_UNAVAILABLE
+                    continue_batch = False
+                else:
+                    if admission.outcome is OperationOutcome.ADMISSION_REJECTED:
+                        await tx.release_enqueue_claim(
+                            delivery_id,
+                            claim.claim_token,
+                            now,
+                        )
+                        failure = EnqueueFailureKind.ADMISSION_REJECTED
+                        continue_batch = False
+                    elif admission.outcome is OperationOutcome.BACKEND_ERROR:
+                        failure = EnqueueFailureKind.BACKEND_UNAVAILABLE
+                        continue_batch = False
+                    elif admission.outcome in {
+                        OperationOutcome.BACKEND_CONFLICT,
+                        OperationOutcome.BACKEND_SCHEMA_ERROR,
+                    } or (
+                        admission.record is None
+                        or admission.record.delivery_id != delivery_id
+                    ):
+                        await tx.fail_enqueue_claim(
+                            delivery_id,
+                            claim.claim_token,
+                            now,
+                        )
+                        failure = EnqueueFailureKind.IDENTITY_CONFLICT
+                    else:
+                        self._crash(EnqueueCrashPoint.BEFORE_AUTHNZ_ATTACH)
+                        attach_now = _aware_utc(self._clock(), field="clock value")
+                        attached = await tx.attach_jobs_job(
+                            delivery_id,
+                            claim.claim_token,
+                            admission.record.jobs_job_id,
+                            attach_now,
+                        )
+                        if attached is not None:
+                            queued = True
+                            self._crash(EnqueueCrashPoint.BEFORE_ATTACH_COMMIT)
+                        elif current.delivery.expires_at <= attach_now:
+                            terminal_cancel = await tx.retire_terminal_enqueue_claim(
+                                delivery_id,
+                                claim.claim_token,
+                                attach_now,
+                                jobs_job_id=admission.record.jobs_job_id,
+                                disposition_token=self._token_factory(),
+                            )
+        if failure is not None:
+            self._observe(failure)
+            return continue_batch
+        if terminal_cancel is not None:
+            await self._apply_terminal_cancel(terminal_cancel, claim.claim_token)
             return True
-
-        fresh = await self._fresh_owned_delivery(
-            claim.delivery.delivery.id,
-            claim.claim_token,
-        )
-        if fresh is not None:
-            await self._recover_terminal(fresh, claim.claim_token)
+        if queued:
+            self._crash(EnqueueCrashPoint.AFTER_QUEUED_COMMIT)
         return True
 
     async def reconcile_enqueue_once(self) -> int:
@@ -673,6 +604,8 @@ class AdminWebhookReconciler:
                 break
             processed += 1
             self._crash(EnqueueCrashPoint.AFTER_CLAIM_COMMIT)
+            if self._after_claim_commit_hook is not None:
+                await self._after_claim_commit_hook()
             if not await self._process_claim(claim):
                 break
         await asyncio.sleep(0)

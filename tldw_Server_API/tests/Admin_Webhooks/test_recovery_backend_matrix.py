@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -88,6 +89,26 @@ class OneShotCrash:
             raise SimulatedCrash(point.value)
 
 
+class TerminalizeAfterClaim:
+    def __init__(
+        self,
+        repository: AdminWebhookRepository,
+        webhook_id: int,
+        clock: MutableClock,
+    ) -> None:
+        self.repository = repository
+        self.webhook_id = webhook_id
+        self.clock = clock
+
+    async def __call__(self) -> None:
+        await _terminalize(
+            self.repository,
+            self.webhook_id,
+            reason=DeliveryReasonCode.CANCELED_DISABLED,
+            now=self.clock(),
+        )
+
+
 class CrashAfterAdmissionManager:
     def __init__(self, manager: JobManager) -> None:
         self.manager = manager
@@ -120,6 +141,7 @@ class CountingQueue:
         self.admit_calls: list[str] = []
         self.find_calls: list[str] = []
         self.cancel_calls: list[str] = []
+        self.cancel_tokens: list[str] = []
 
     def admit_delivery_job(self, delivery_id: str, expires_at: datetime):
         self.admit_calls.append(delivery_id)
@@ -140,6 +162,7 @@ class CountingQueue:
         reason_code: DeliveryReasonCode,
     ):
         self.cancel_calls.append(delivery_id)
+        self.cancel_tokens.append(disposition_token)
         return self.queue.apply_queued_cancel(
             jobs_job_id,
             delivery_id,
@@ -151,6 +174,7 @@ class CountingQueue:
         self.admit_calls.clear()
         self.find_calls.clear()
         self.cancel_calls.clear()
+        self.cancel_tokens.clear()
 
 
 @asynccontextmanager
@@ -292,6 +316,7 @@ def _reconciler(
     tokens: TokenSource,
     *,
     crash_hook=lambda _point: None,
+    after_claim_commit_hook: Callable[[], Awaitable[None]] | None = None,
 ) -> AdminWebhookReconciler:
     return AdminWebhookReconciler(
         repository=repository,
@@ -301,6 +326,7 @@ def _reconciler(
         claim_ttl_seconds=60,
         failure_observer=lambda _failure: None,
         crash_hook=crash_hook,
+        after_claim_commit_hook=after_claim_commit_hook,
     )
 
 
@@ -408,6 +434,165 @@ async def test_enqueue_six_crash_boundaries_converge_across_backend_matrix(
                 webhook_id,
                 delivery_id,
             )
+
+
+@pytest.mark.parametrize(
+    ("auth_backend", "jobs_backend"),
+    BACKEND_PAIRS,
+    ids=("sqlite-sqlite", "sqlite-postgres", "postgres-sqlite", "postgres-postgres"),
+)
+async def test_enqueue_revalidates_terminal_work_before_admission_across_backend_matrix(
+    auth_backend: str,
+    jobs_backend: str,
+    tmp_path: Path,
+    test_db_pool,
+    jobs_pg_dsn: str,
+) -> None:
+    manager = _jobs_manager(
+        jobs_backend,
+        tmp_path=tmp_path,
+        jobs_pg_dsn=jobs_pg_dsn,
+    )
+    queue = CountingQueue(JobsDeliveryQueue(manager))
+    clock = MutableClock(NOW)
+    async with _auth_repository(
+        auth_backend,
+        tmp_path=tmp_path,
+        test_db_pool=test_db_pool,
+    ) as repository:
+        webhook_id, delivery_id = await _seed_delivery(
+            repository,
+            f"{auth_backend}-{jobs_backend}-post-claim-terminal",
+            now=clock(),
+        )
+        reconciler = _reconciler(
+            repository,
+            queue,
+            clock,
+            TokenSource(f"{auth_backend}-{jobs_backend}-post-claim-terminal"),
+            after_claim_commit_hook=TerminalizeAfterClaim(
+                repository,
+                webhook_id,
+                clock,
+            ),
+        )
+
+        assert await reconciler.reconcile_enqueue_once() == 1
+
+        terminal = await repository.get_delivery_bundle(delivery_id)
+        assert terminal is not None
+        assert terminal.delivery.delivery.state is DeliveryState.CANCELED
+        assert terminal.delivery.jobs_job_id is None
+        assert terminal.delivery.enqueue_claim_token is None
+        assert queue.admit_calls == []
+        assert queue.find_calls == [delivery_id]
+
+
+@pytest.mark.parametrize(
+    ("auth_backend", "jobs_backend"),
+    BACKEND_PAIRS,
+    ids=("sqlite-sqlite", "sqlite-postgres", "postgres-sqlite", "postgres-postgres"),
+)
+@pytest.mark.parametrize(
+    ("crash_point", "expected_status"),
+    (
+        (EnqueueCrashPoint.AFTER_ORPHAN_PREPARE, "queued"),
+        (EnqueueCrashPoint.AFTER_JOBS_CANCEL, "cancelled"),
+    ),
+)
+async def test_terminal_orphan_crashes_recover_with_exact_claim_and_disposition(
+    auth_backend: str,
+    jobs_backend: str,
+    crash_point: EnqueueCrashPoint,
+    expected_status: str,
+    tmp_path: Path,
+    test_db_pool,
+    jobs_pg_dsn: str,
+) -> None:
+    manager = _jobs_manager(
+        jobs_backend,
+        tmp_path=tmp_path,
+        jobs_pg_dsn=jobs_pg_dsn,
+    )
+    queue = CountingQueue(JobsDeliveryQueue(manager))
+    clock = MutableClock(NOW)
+    async with _auth_repository(
+        auth_backend,
+        tmp_path=tmp_path,
+        test_db_pool=test_db_pool,
+    ) as repository:
+        webhook_id, delivery_id = await _seed_delivery(
+            repository,
+            f"{auth_backend}-{jobs_backend}-{crash_point.value}",
+            now=clock(),
+        )
+        await _claim(
+            repository,
+            delivery_id,
+            token=opaque_token(f"{crash_point.value}-initial-claim"),
+            now=clock(),
+        )
+        admitted = queue.queue.admit_delivery_job(
+            delivery_id,
+            clock() + timedelta(hours=72),
+        )
+        assert admitted.record is not None
+        await _terminalize(
+            repository,
+            webhook_id,
+            reason=DeliveryReasonCode.CANCELED_SECRET_ROTATION,
+            now=clock(),
+        )
+        clock.advance(61)
+
+        with pytest.raises(SimulatedCrash):
+            await _reconciler(
+                repository,
+                queue,
+                clock,
+                TokenSource(f"{crash_point.value}-first"),
+                crash_hook=OneShotCrash(crash_point),
+            ).reconcile_enqueue_once()
+
+        stranded = await repository.get_delivery_bundle(delivery_id)
+        assert stranded is not None
+        assert stranded.delivery.delivery.state is DeliveryState.CANCELED
+        assert stranded.delivery.jobs_job_id == admitted.record.jobs_job_id
+        assert stranded.delivery.enqueue_claim_token is not None
+        assert stranded.delivery.pending_jobs_disposition is JobsDispositionKind.CANCEL
+        assert stranded.delivery.pending_jobs_disposition_token is not None
+        assert not stranded.delivery.jobs_disposition_applied
+        assert manager.get_job(int(admitted.record.jobs_job_id))["status"] == expected_status
+        disposition_token = stranded.delivery.pending_jobs_disposition_token
+        assert queue.cancel_tokens == (
+            []
+            if crash_point is EnqueueCrashPoint.AFTER_ORPHAN_PREPARE
+            else [disposition_token]
+        )
+
+        clock.advance(61)
+        assert (
+            await _reconciler(
+                repository,
+                queue,
+                clock,
+                TokenSource(f"{crash_point.value}-recovery"),
+            ).reconcile_enqueue_once()
+            == 1
+        )
+        recovered = await repository.get_delivery_bundle(delivery_id)
+        assert recovered is not None
+        assert recovered.delivery.jobs_job_id == admitted.record.jobs_job_id
+        assert recovered.delivery.enqueue_claim_token is None
+        assert recovered.delivery.pending_jobs_disposition_token == disposition_token
+        assert recovered.delivery.jobs_disposition_applied
+        assert manager.get_job(int(admitted.record.jobs_job_id))["status"] == "cancelled"
+        assert queue.admit_calls == []
+        assert queue.cancel_tokens == (
+            [disposition_token]
+            if crash_point is EnqueueCrashPoint.AFTER_ORPHAN_PREPARE
+            else [disposition_token, disposition_token]
+        )
 
 
 @pytest.mark.parametrize(
@@ -607,6 +792,7 @@ async def test_enqueue_foreign_claim_cancellation_and_expiry_matrix(
             is JobsDispositionKind.CANCEL
         )
         assert processing.delivery.jobs_disposition_applied is False
+        assert processing.delivery.enqueue_claim_token is not None
         assert manager.get_job(int(processing_job.record.jobs_job_id))["status"] == "processing"
         assert await repository.list_delivery_attempts(
             processing_webhook,
@@ -669,7 +855,7 @@ async def test_enqueue_foreign_claim_cancellation_and_expiry_matrix(
                 clock,
                 TokenSource("matrix-expiry-after-create"),
             ).reconcile_enqueue_once()
-            == 1
+            == 2
         )
         after_create = await repository.get_delivery_bundle(after_create_id)
         assert after_create is not None
@@ -685,5 +871,5 @@ async def test_enqueue_foreign_claim_cancellation_and_expiry_matrix(
             == "cancelled"
         )
         assert queue.admit_calls == []
-        assert queue.find_calls == [after_create_id]
-        assert queue.cancel_calls == [after_create_id]
+        assert queue.find_calls == [after_create_id, processing_id]
+        assert queue.cancel_calls == [after_create_id, processing_id]

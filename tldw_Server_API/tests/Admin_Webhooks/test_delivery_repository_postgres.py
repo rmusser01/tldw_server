@@ -20,6 +20,7 @@ from tldw_Server_API.tests.Admin_Webhooks.test_event_expansion import (
     exercise_delivery_state_machine,
     exercise_disposition_scheduling_persistence,
     exercise_enqueue_recovery_contract,
+    exercise_enqueue_terminal_orphan_recovery_contract,
     exercise_malformed_persisted_coordinates,
     exercise_persisted_coordinate_matrix,
     exercise_recovery_runtime_and_retention,
@@ -108,6 +109,13 @@ async def test_postgres_enqueue_recovery_contract(
     delivery_repo: PostgreSQLDeliveryRepositoryFixture,
 ) -> None:
     await exercise_enqueue_recovery_contract(delivery_repo)
+
+
+@pytest.mark.integration
+async def test_postgres_enqueue_terminal_orphan_recovery_contract(
+    delivery_repo: PostgreSQLDeliveryRepositoryFixture,
+) -> None:
+    await exercise_enqueue_terminal_orphan_recovery_contract(delivery_repo)
 
 
 @pytest.mark.integration
