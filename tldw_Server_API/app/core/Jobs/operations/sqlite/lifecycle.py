@@ -975,9 +975,10 @@ def ensure_lease_horizon(
                 leased_until=observed,
             )
         conn.execute(
-            "UPDATE jobs SET leased_until=MAX(COALESCE(leased_until,DATETIME('now')), "
-            "DATETIME('now','+' || ? || ' seconds')) WHERE id=? AND status='processing' "
-            "AND worker_id=? AND lease_id=?",
+            "UPDATE jobs SET leased_until=MAX(COALESCE(leased_until,"
+            "STRFTIME('%Y-%m-%d %H:%M:%f','now')), "
+            "STRFTIME('%Y-%m-%d %H:%M:%f','now','+' || ? || ' seconds')) "
+            "WHERE id=? AND status='processing' AND worker_id=? AND lease_id=?",
             (
                 command.minimum_seconds,
                 command.job_id,

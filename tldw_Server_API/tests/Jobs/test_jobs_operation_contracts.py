@@ -276,6 +276,189 @@ def test_non_applied_lease_horizon_cannot_expose_guarantee() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    "result_kwargs",
+    [
+        {
+            "outcome": OperationOutcome.APPLIED,
+            "ensured": True,
+            "leased_until": _aware(60),
+            "no_transition_reason": None,
+            "guaranteed_seconds": 60,
+        },
+        {
+            "outcome": OperationOutcome.NO_TRANSITION,
+            "ensured": False,
+            "leased_until": None,
+            "no_transition_reason": NoTransitionReason.MISSING,
+            "guaranteed_seconds": None,
+        },
+        {
+            "outcome": OperationOutcome.NO_TRANSITION,
+            "ensured": False,
+            "leased_until": _aware(30),
+            "no_transition_reason": NoTransitionReason.STALE_LEASE,
+            "guaranteed_seconds": None,
+        },
+        {
+            "outcome": OperationOutcome.BACKEND_CONFLICT,
+            "ensured": False,
+            "leased_until": None,
+            "no_transition_reason": None,
+            "guaranteed_seconds": None,
+        },
+        {
+            "outcome": OperationOutcome.BACKEND_CONFLICT,
+            "ensured": False,
+            "leased_until": _aware(30),
+            "no_transition_reason": None,
+            "guaranteed_seconds": None,
+        },
+    ],
+    ids=[
+        "applied",
+        "no-transition-without-deadline",
+        "no-transition-with-deadline",
+        "conflict-without-deadline",
+        "conflict-with-deadline",
+    ],
+)
+def test_lease_horizon_result_accepts_the_complete_valid_state_matrix(
+    result_kwargs,
+) -> None:
+    result = LeaseHorizonResult(**result_kwargs)
+
+    assert result.outcome is result_kwargs["outcome"]
+    assert result.ensured is result_kwargs["ensured"]
+
+
+@pytest.mark.parametrize(
+    "result_kwargs",
+    [
+        {
+            "outcome": OperationOutcome.BACKEND_ERROR,
+            "ensured": False,
+        },
+        {
+            "outcome": OperationOutcome.ADMISSION_REJECTED,
+            "ensured": False,
+        },
+        {
+            "outcome": "applied",
+            "ensured": True,
+            "leased_until": _aware(60),
+            "guaranteed_seconds": 60,
+        },
+        {
+            "outcome": OperationOutcome.APPLIED,
+            "ensured": 1,
+            "leased_until": _aware(60),
+            "guaranteed_seconds": 60,
+        },
+        {
+            "outcome": OperationOutcome.APPLIED,
+            "ensured": False,
+            "leased_until": _aware(60),
+            "guaranteed_seconds": 60,
+        },
+        {
+            "outcome": OperationOutcome.APPLIED,
+            "ensured": True,
+            "leased_until": None,
+            "guaranteed_seconds": 60,
+        },
+        {
+            "outcome": OperationOutcome.APPLIED,
+            "ensured": True,
+            "leased_until": datetime(2026, 8, 28),
+            "guaranteed_seconds": 60,
+        },
+        {
+            "outcome": OperationOutcome.APPLIED,
+            "ensured": True,
+            "leased_until": _aware(60),
+            "no_transition_reason": NoTransitionReason.STALE_LEASE,
+            "guaranteed_seconds": 60,
+        },
+        {
+            "outcome": OperationOutcome.NO_TRANSITION,
+            "ensured": 0,
+            "no_transition_reason": NoTransitionReason.MISSING,
+        },
+        {
+            "outcome": OperationOutcome.NO_TRANSITION,
+            "ensured": True,
+            "no_transition_reason": NoTransitionReason.MISSING,
+        },
+        {
+            "outcome": OperationOutcome.NO_TRANSITION,
+            "ensured": False,
+            "no_transition_reason": None,
+        },
+        {
+            "outcome": OperationOutcome.NO_TRANSITION,
+            "ensured": False,
+            "no_transition_reason": "missing",
+        },
+        {
+            "outcome": OperationOutcome.NO_TRANSITION,
+            "ensured": False,
+            "leased_until": datetime(2026, 8, 28),
+            "no_transition_reason": NoTransitionReason.MISSING,
+        },
+        {
+            "outcome": OperationOutcome.NO_TRANSITION,
+            "ensured": False,
+            "no_transition_reason": NoTransitionReason.MISSING,
+            "guaranteed_seconds": 30,
+        },
+        {
+            "outcome": OperationOutcome.BACKEND_CONFLICT,
+            "ensured": 0,
+        },
+        {
+            "outcome": OperationOutcome.BACKEND_CONFLICT,
+            "ensured": True,
+        },
+        {
+            "outcome": OperationOutcome.BACKEND_CONFLICT,
+            "ensured": False,
+            "no_transition_reason": NoTransitionReason.MISSING,
+        },
+        {
+            "outcome": OperationOutcome.BACKEND_CONFLICT,
+            "ensured": False,
+            "leased_until": datetime(2026, 8, 28),
+        },
+    ],
+    ids=[
+        "backend-error-outcome",
+        "admission-rejected-outcome",
+        "string-outcome",
+        "applied-non-bool-ensured",
+        "applied-not-ensured",
+        "applied-missing-deadline",
+        "applied-naive-deadline",
+        "applied-with-reason",
+        "no-transition-non-bool-ensured",
+        "no-transition-ensured",
+        "no-transition-missing-reason",
+        "no-transition-string-reason",
+        "no-transition-naive-deadline",
+        "no-transition-with-guarantee",
+        "conflict-non-bool-ensured",
+        "conflict-ensured",
+        "conflict-with-reason",
+        "conflict-naive-deadline",
+    ],
+)
+def test_lease_horizon_result_rejects_every_other_state_shape(
+    result_kwargs,
+) -> None:
+    with pytest.raises(ValueError):
+        LeaseHorizonResult(**result_kwargs)
+
+
 def test_create_job_execution_controls_are_default_compatible_and_validated() -> None:
     default = CreateJobCommand(
         domain="chatbooks",

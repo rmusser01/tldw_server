@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import copy
 import hmac
+import math
 import os
 import re
 import secrets
@@ -115,6 +116,22 @@ def _lease_datetime(value: object) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
+def _finite_float(value: object) -> float:
+    converted = float(value)
+    if not math.isfinite(converted):
+        raise ValueError
+    return converted
+
+
+def _exact_int_float(value: int) -> float:
+    if value > 1 << 53:
+        raise OverflowError
+    converted = _finite_float(value)
+    if int(converted) != value:
+        raise OverflowError
+    return converted
+
+
 class WorkerExecutionContext:
     """Prepared-handler access to current exact lease evidence."""
 
@@ -181,32 +198,33 @@ class WorkerExecutionContext:
                     minimum_seconds=seconds,
                 )
             )
-            if not isinstance(result, LeaseHorizonResult):
+            if type(result) is not LeaseHorizonResult:
                 raise TypeError
-            if not isinstance(result.outcome, OperationOutcome):
+            required_fields = {
+                "outcome",
+                "ensured",
+                "leased_until",
+                "no_transition_reason",
+                "guaranteed_seconds",
+            }
+            if not required_fields.issubset(vars(result)):
                 raise TypeError
-            if result.leased_until is not None:
-                if (
-                    not isinstance(result.leased_until, datetime)
-                    or result.leased_until.tzinfo is None
-                    or result.leased_until.utcoffset() is None
-                ):
-                    raise TypeError
-                self._leased_until = result.leased_until.astimezone(timezone.utc)
-
-            guaranteed_seconds = getattr(result, "guaranteed_seconds", None)
-            if result.outcome is not OperationOutcome.APPLIED:
-                if guaranteed_seconds is not None:
-                    raise TypeError
+            try:
+                validated = LeaseHorizonResult(
+                    outcome=result.outcome,
+                    ensured=result.ensured,
+                    leased_until=result.leased_until,
+                    no_transition_reason=result.no_transition_reason,
+                    guaranteed_seconds=result.guaranteed_seconds,
+                )
+            except AttributeError:
+                raise TypeError from None
+            if validated.leased_until is not None:
+                self._leased_until = validated.leased_until
+            if validated.outcome is not OperationOutcome.APPLIED:
                 self._mark_renewal_lost()
                 return None
-            if result.ensured is not True or result.leased_until is None:
-                raise TypeError
-            if type(guaranteed_seconds) is not int:
-                raise TypeError
-            if guaranteed_seconds <= 0:
-                raise ValueError
-            return guaranteed_seconds
+            return validated.guaranteed_seconds
         except Exception as exc:  # noqa: BLE001 - backend isolation boundary
             self._mark_renewal_lost()
             logger.bind(error_type=type(exc).__name__).warning(
@@ -495,6 +513,9 @@ class WorkerSDK:
                 effective_lease = max(1, min(requested_lease, lease_cap))
                 jitter = max(0, int(self.cfg.renew_jitter_seconds))
                 threshold = max(1, int(self.cfg.renew_threshold_seconds))
+                _exact_int_float(effective_lease)
+                jitter_seconds = _exact_int_float(jitter)
+                threshold_seconds = _exact_int_float(threshold)
             except Exception as exc:  # noqa: BLE001 - configuration isolation boundary
                 context._mark_renewal_lost()
                 logger.bind(error_type=type(exc).__name__).warning(
@@ -502,30 +523,72 @@ class WorkerSDK:
                 )
                 return
 
-            ensure_started = self._monotonic()
-            guaranteed_seconds = await context._ensure_lease_horizon_typed(
-                effective_lease
-            )
-            ensure_elapsed = max(0.0, self._monotonic() - ensure_started)
-            if guaranteed_seconds is None:
-                return
-            remaining_seconds = float(guaranteed_seconds) - ensure_elapsed
-            renewal_margin = min(float(threshold), remaining_seconds / 2.0)
-            base_sleep = remaining_seconds - renewal_margin
-            if base_sleep < 0.01:
-                context._mark_renewal_lost()
-                return
-            iters += 1
-            if self._max_iters and iters >= self._max_iters:
-                return
+            try:
+                ensure_started = _finite_float(self._monotonic())
+                guaranteed_seconds = await context._ensure_lease_horizon_typed(
+                    effective_lease
+                )
+                if guaranteed_seconds is None:
+                    return
+                ensure_finished = _finite_float(self._monotonic())
+                ensure_elapsed = ensure_finished - ensure_started
+                if not math.isfinite(ensure_elapsed) or ensure_elapsed < 0.0:
+                    raise ValueError
+                guarantee_seconds = _exact_int_float(guaranteed_seconds)
+                remaining_seconds = guarantee_seconds - ensure_elapsed
+                if not math.isfinite(remaining_seconds) or remaining_seconds <= 0.0:
+                    raise ValueError
+                renewal_margin = min(
+                    threshold_seconds,
+                    remaining_seconds / 2.0,
+                )
+                if (
+                    not math.isfinite(renewal_margin)
+                    or renewal_margin <= 0.0
+                    or renewal_margin >= remaining_seconds
+                ):
+                    raise ValueError
+                base_sleep = remaining_seconds - renewal_margin
+                if (
+                    not math.isfinite(base_sleep)
+                    or base_sleep < 0.01
+                    or base_sleep >= remaining_seconds
+                ):
+                    raise ValueError
+                iters += 1
+                if self._max_iters and iters >= self._max_iters:
+                    return
 
-            earlier_jitter = float(secrets.randbelow(jitter + 1)) if jitter else 0.0
-            sleep_for = max(
-                base_sleep / 2.0,
-                base_sleep - earlier_jitter,
-            )
-            await self._sleep(sleep_for)
-            if stop_requested.is_set():
+                if jitter:
+                    raw_jitter = secrets.randbelow(jitter + 1)
+                    if (
+                        type(raw_jitter) is not int
+                        or raw_jitter < 0
+                        or raw_jitter > jitter
+                    ):
+                        raise ValueError
+                    earlier_jitter = _exact_int_float(raw_jitter)
+                else:
+                    earlier_jitter = jitter_seconds
+                sleep_for = max(
+                    base_sleep / 2.0,
+                    base_sleep - earlier_jitter,
+                )
+                if (
+                    not math.isfinite(sleep_for)
+                    or sleep_for <= 0.0
+                    or sleep_for > base_sleep
+                    or sleep_for >= remaining_seconds
+                ):
+                    raise ValueError
+                await self._sleep(sleep_for)
+                if stop_requested.is_set():
+                    return
+            except Exception as exc:  # noqa: BLE001 - scheduling isolation boundary
+                context._mark_renewal_lost()
+                logger.bind(error_type=type(exc).__name__).warning(
+                    "Jobs prepared renewal scheduling failed"
+                )
                 return
 
     async def _cleanup_prepared_renewal(

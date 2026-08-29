@@ -33,16 +33,19 @@ class _IntSubclass(int):
 
 def _raw_horizon_result(
     *,
+    outcome: object = OperationOutcome.APPLIED,
+    ensured: object = True,
     guaranteed_seconds: object = _MISSING_GUARANTEE,
     leased_until: object = RENEWED_UNTIL,
+    no_transition_reason: object = None,
 ) -> LeaseHorizonResult:
     """Build malformed typed evidence without weakening production invariants."""
 
     result = object.__new__(LeaseHorizonResult)
-    object.__setattr__(result, "outcome", OperationOutcome.APPLIED)
-    object.__setattr__(result, "ensured", True)
+    object.__setattr__(result, "outcome", outcome)
+    object.__setattr__(result, "ensured", ensured)
     object.__setattr__(result, "leased_until", leased_until)
-    object.__setattr__(result, "no_transition_reason", None)
+    object.__setattr__(result, "no_transition_reason", no_transition_reason)
     if guaranteed_seconds is not _MISSING_GUARANTEE:
         object.__setattr__(result, "guaranteed_seconds", guaranteed_seconds)
     return result
@@ -885,6 +888,7 @@ async def test_elapsed_ensure_that_consumes_guarantee_fails_closed(monkeypatch):
     sdk._monotonic = ticks.__next__
     sleep_calls = []
     observed = []
+    records: list[dict[str, object]] = []
 
     async def record_sleep(seconds):
         sleep_calls.append(seconds)
@@ -898,11 +902,22 @@ async def test_elapsed_ensure_that_consumes_guarantee_fails_closed(monkeypatch):
         observed.append(context.renewal_lost)
         return _infrastructure_defer()
 
-    await _run_once(sdk, handler)
+    sink = logger.add(
+        lambda message: records.append(dict(message.record)),
+        level="WARNING",
+    )
+    try:
+        await _run_once(sdk, handler)
+    finally:
+        logger.remove(sink)
 
     assert len(manager.horizon_calls) == 1
     assert sleep_calls == []
     assert observed == [True]
+    assert len(records) == 1
+    assert records[0]["message"] == "Jobs prepared renewal scheduling failed"
+    assert records[0]["extra"]["error_type"] == "ValueError"
+    assert records[0]["exception"] is None
 
 
 @pytest.mark.asyncio
@@ -1009,19 +1024,29 @@ async def test_prepared_renewal_jitter_only_moves_deadline_earlier(monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("config_overrides", "lease_cap"),
+    ("config_overrides", "lease_cap", "expected_error_type"),
     [
-        ({"lease_seconds": "lease-config-secret"}, "3600"),
-        ({}, "lease-cap-secret"),
-        ({"renew_threshold_seconds": "threshold-config-secret"}, "3600"),
-        ({"renew_jitter_seconds": "jitter-config-secret"}, "3600"),
+        ({"lease_seconds": "lease-config-secret"}, "3600", "ValueError"),
+        ({}, "lease-cap-secret", "ValueError"),
+        (
+            {"renew_threshold_seconds": "threshold-config-secret"},
+            "3600",
+            "ValueError",
+        ),
+        (
+            {"renew_jitter_seconds": "jitter-config-secret"},
+            "3600",
+            "ValueError",
+        ),
+        ({"renew_threshold_seconds": 10**400}, "3600", "OverflowError"),
     ],
-    ids=["lease", "cap", "threshold", "jitter"],
+    ids=["lease", "cap", "threshold", "jitter", "huge-threshold"],
 )
 async def test_invalid_prepared_renewal_configuration_fails_closed(
     monkeypatch,
     config_overrides,
     lease_cap,
+    expected_error_type,
 ):
     monkeypatch.setenv("JOBS_LEASE_MAX_SECONDS", lease_cap)
     manager = PreparedManager()
@@ -1061,12 +1086,86 @@ async def test_invalid_prepared_renewal_configuration_fails_closed(
     assert len(records) == 1
     record = records[0]
     assert record["message"] == "Jobs prepared renewal configuration failed"
-    assert record["extra"]["error_type"] == "ValueError"
+    assert record["extra"]["error_type"] == expected_error_type
     assert record["exception"] is None
     rendered_record = repr(record)
     assert "config-secret" not in rendered_record
     assert "cap-secret" not in rendered_record
     assert "invalid literal" not in rendered_record
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("failure_kind", "expected_error_type"),
+    [
+        ("huge-guarantee", "OverflowError"),
+        ("nonfinite-monotonic-start", "ValueError"),
+        ("nonfinite-monotonic-finish", "ValueError"),
+        ("jitter-error", "RuntimeError"),
+    ],
+)
+async def test_prepared_renewal_arithmetic_and_jitter_fail_closed_once(
+    monkeypatch,
+    failure_kind,
+    expected_error_type,
+):
+    manager = PreparedManager()
+    sdk = _sdk(manager, renew_jitter_seconds=1)
+    sdk._max_iters = 2
+    context = worker_sdk_module.WorkerExecutionContext(
+        manager,
+        _job(),
+        worker_id="worker-1",
+    )
+    sleep_calls = []
+    records: list[dict[str, object]] = []
+
+    if failure_kind == "huge-guarantee":
+        manager.horizon_result = _raw_horizon_result(
+            guaranteed_seconds=10**400
+        )
+    elif failure_kind == "nonfinite-monotonic-start":
+        sdk._monotonic = lambda: float("nan")
+    elif failure_kind == "nonfinite-monotonic-finish":
+        ticks = iter([100.0, float("inf")])
+        sdk._monotonic = ticks.__next__
+    else:
+
+        def fail_jitter(_upper_bound):
+            raise RuntimeError("jitter-private-secret")
+
+        monkeypatch.setattr(worker_sdk_module.secrets, "randbelow", fail_jitter)
+
+    async def record_sleep(seconds):
+        sleep_calls.append(seconds)
+        await asyncio.sleep(0)
+
+    sdk._sleep = record_sleep
+    sink = logger.add(
+        lambda message: records.append(dict(message.record)),
+        level="WARNING",
+    )
+    raised = None
+    try:
+        try:
+            await sdk._auto_renew_prepared(context, asyncio.Event())
+        except Exception as exc:  # noqa: BLE001 - assertion captures boundary leakage
+            raised = type(exc)
+    finally:
+        logger.remove(sink)
+
+    assert raised is None
+    assert context.renewal_lost is True
+    assert context.snapshot().renewal_lost is True
+    assert sleep_calls == []
+    assert len(records) == 1
+    record = records[0]
+    assert record["message"] == "Jobs prepared renewal scheduling failed"
+    assert record["extra"]["error_type"] == expected_error_type
+    assert record["exception"] is None
+    rendered_record = repr(record)
+    assert "jitter-private-secret" not in rendered_record
+    assert "cannot convert" not in rendered_record
 
 
 @pytest.mark.asyncio
@@ -1115,22 +1214,206 @@ async def test_malformed_horizon_result_fails_closed_and_stays_visible(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
+    "horizon_result",
+    [
+        _raw_horizon_result(
+            outcome=OperationOutcome.NO_TRANSITION,
+            ensured=False,
+            leased_until=None,
+            no_transition_reason=NoTransitionReason.MISSING,
+            guaranteed_seconds=None,
+        ),
+        _raw_horizon_result(
+            outcome=OperationOutcome.NO_TRANSITION,
+            ensured=False,
+            leased_until=LEASED_UNTIL,
+            no_transition_reason=NoTransitionReason.STALE_LEASE,
+            guaranteed_seconds=None,
+        ),
+        _raw_horizon_result(
+            outcome=OperationOutcome.BACKEND_CONFLICT,
+            ensured=False,
+            leased_until=None,
+            no_transition_reason=None,
+            guaranteed_seconds=None,
+        ),
+        _raw_horizon_result(
+            outcome=OperationOutcome.BACKEND_CONFLICT,
+            ensured=False,
+            leased_until=LEASED_UNTIL,
+            no_transition_reason=None,
+            guaranteed_seconds=None,
+        ),
+    ],
+    ids=[
+        "no-transition-without-deadline",
+        "no-transition-with-deadline",
+        "conflict-without-deadline",
+        "conflict-with-deadline",
+    ],
+)
+async def test_private_horizon_helper_accepts_valid_non_applied_matrix_as_loss(
+    horizon_result,
+):
+    manager = PreparedManager()
+    manager.horizon_result = horizon_result
+    context = worker_sdk_module.WorkerExecutionContext(
+        manager,
+        _job(),
+        worker_id="worker-1",
+    )
+    records: list[dict[str, object]] = []
+    sink = logger.add(
+        lambda message: records.append(dict(message.record)),
+        level="WARNING",
+    )
+    try:
+        guaranteed_seconds = await context._ensure_lease_horizon_typed(30)
+    finally:
+        logger.remove(sink)
+
+    assert guaranteed_seconds is None
+    assert context.renewal_lost is True
+    assert records == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "horizon_result",
+    [
+        _raw_horizon_result(
+            outcome=OperationOutcome.BACKEND_ERROR,
+            ensured=False,
+            leased_until=None,
+            guaranteed_seconds=None,
+        ),
+        _raw_horizon_result(
+            outcome="applied",
+            ensured=True,
+            guaranteed_seconds=30,
+        ),
+        _raw_horizon_result(ensured=1, guaranteed_seconds=30),
+        _raw_horizon_result(
+            guaranteed_seconds=30,
+            no_transition_reason=NoTransitionReason.STALE_LEASE,
+        ),
+        _raw_horizon_result(
+            outcome=OperationOutcome.NO_TRANSITION,
+            ensured=True,
+            leased_until=None,
+            no_transition_reason=NoTransitionReason.MISSING,
+            guaranteed_seconds=None,
+        ),
+        _raw_horizon_result(
+            outcome=OperationOutcome.NO_TRANSITION,
+            ensured=False,
+            leased_until=None,
+            no_transition_reason=None,
+            guaranteed_seconds=None,
+        ),
+        _raw_horizon_result(
+            outcome=OperationOutcome.NO_TRANSITION,
+            ensured=False,
+            leased_until=None,
+            no_transition_reason="forged-private-secret",
+            guaranteed_seconds=None,
+        ),
+        _raw_horizon_result(
+            outcome=OperationOutcome.NO_TRANSITION,
+            ensured=False,
+            leased_until=None,
+            no_transition_reason=NoTransitionReason.MISSING,
+            guaranteed_seconds=30,
+        ),
+        _raw_horizon_result(
+            outcome=OperationOutcome.BACKEND_CONFLICT,
+            ensured=True,
+            leased_until=None,
+            guaranteed_seconds=None,
+        ),
+        _raw_horizon_result(
+            outcome=OperationOutcome.BACKEND_CONFLICT,
+            ensured=False,
+            leased_until=None,
+            no_transition_reason=NoTransitionReason.MISSING,
+            guaranteed_seconds=None,
+        ),
+        _raw_horizon_result(
+            outcome=OperationOutcome.BACKEND_CONFLICT,
+            ensured=False,
+            leased_until=None,
+            guaranteed_seconds=30,
+        ),
+        _raw_horizon_result(
+            outcome=OperationOutcome.BACKEND_CONFLICT,
+            ensured=False,
+            leased_until=datetime(2026, 8, 28),
+            guaranteed_seconds=None,
+        ),
+    ],
+    ids=[
+        "unsupported-outcome",
+        "string-outcome",
+        "non-bool-ensured",
+        "applied-with-reason",
+        "no-transition-ensured",
+        "no-transition-missing-reason",
+        "no-transition-string-reason",
+        "no-transition-with-guarantee",
+        "conflict-ensured",
+        "conflict-with-reason",
+        "conflict-with-guarantee",
+        "conflict-naive-deadline",
+    ],
+)
+async def test_private_horizon_helper_revalidates_forged_state_matrix(
+    horizon_result,
+):
+    manager = PreparedManager()
+    manager.horizon_result = horizon_result
+    context = worker_sdk_module.WorkerExecutionContext(
+        manager,
+        _job(),
+        worker_id="worker-1",
+    )
+    records: list[dict[str, object]] = []
+    sink = logger.add(
+        lambda message: records.append(dict(message.record)),
+        level="WARNING",
+    )
+    try:
+        guaranteed_seconds = await context._ensure_lease_horizon_typed(30)
+    finally:
+        logger.remove(sink)
+
+    assert guaranteed_seconds is None
+    assert context.renewal_lost is True
+    assert len(records) == 1
+    record = records[0]
+    assert record["message"] == "Jobs prepared lease horizon failed"
+    assert record["extra"]["error_type"] == "ValueError"
+    assert record["exception"] is None
+    assert "forged-private-secret" not in repr(record)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
     ("horizon_result", "expected_error_type"),
     [
         (object(), "TypeError"),
         (_raw_horizon_result(), "TypeError"),
         (_raw_horizon_result(guaranteed_seconds=0), "ValueError"),
         (_raw_horizon_result(guaranteed_seconds=-1), "ValueError"),
-        (_raw_horizon_result(guaranteed_seconds=True), "TypeError"),
-        (_raw_horizon_result(guaranteed_seconds=1.5), "TypeError"),
-        (_raw_horizon_result(guaranteed_seconds=_IntSubclass(5)), "TypeError"),
+        (_raw_horizon_result(guaranteed_seconds=True), "ValueError"),
+        (_raw_horizon_result(guaranteed_seconds=1.5), "ValueError"),
+        (_raw_horizon_result(guaranteed_seconds=_IntSubclass(5)), "ValueError"),
         (
             _raw_horizon_result(guaranteed_seconds="guarantee-private-detail"),
-            "TypeError",
+            "ValueError",
         ),
         (
             _raw_horizon_result(guaranteed_seconds=5, leased_until=None),
-            "TypeError",
+            "ValueError",
         ),
         (RuntimeError("manager-private-detail"), "RuntimeError"),
     ],

@@ -19,6 +19,9 @@ from tldw_Server_API.app.core.Jobs.operations.contracts import (
     OperationOutcome,
     PreparedJobDisposition,
 )
+from tldw_Server_API.app.core.Jobs.operations.sqlite.lifecycle import (
+    ensure_lease_horizon as sqlite_ensure_lease_horizon,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -364,6 +367,7 @@ def test_sqlite_lease_horizon_extends_never_shortens_rejects_stale_and_obeys_cap
         minimum_seconds=300,
     )
     extended = manager.ensure_lease_horizon(command)
+    remaining = _parse(extended.leased_until) - datetime.now(timezone.utc)
     shorter = manager.ensure_lease_horizon(
         EnsureLeaseHorizonCommand(**{**command.__dict__, "minimum_seconds": 30})
     )
@@ -372,14 +376,90 @@ def test_sqlite_lease_horizon_extends_never_shortens_rejects_stale_and_obeys_cap
     )
 
     assert extended.ensured is True
-    assert timedelta(seconds=175) <= _parse(extended.leased_until) - datetime.now(
-        timezone.utc
-    ) <= timedelta(seconds=181)
+    assert timedelta(seconds=179) <= remaining <= timedelta(seconds=180)
     assert extended.guaranteed_seconds == 180
     assert _parse(shorter.leased_until) == _parse(extended.leased_until)
     assert shorter.guaranteed_seconds == 30
     assert stale.no_transition_reason is NoTransitionReason.STALE_LEASE
     assert stale.guaranteed_seconds is None
+
+
+def test_sqlite_lease_horizon_uses_fractional_database_clock_and_text_order(
+    tmp_path,
+) -> None:
+    manager = JobManager(tmp_path / "fractional-horizon.db")
+    job = _canonical(manager, suffix="fractional-horizon")
+    acquired = _acquire(manager)
+    delivery_id = json.loads(job["payload"])["delivery_id"]
+    fixed_now = datetime(2026, 8, 28, 12, 0, 0, 900000, tzinfo=timezone.utc)
+
+    def shifted_database_time(value, *modifiers) -> datetime:
+        assert value == "now"
+        shifted = fixed_now
+        for modifier in modifiers:
+            amount, unit = str(modifier).split()
+            assert unit in {"second", "seconds"}
+            shifted += timedelta(seconds=int(amount))
+        return shifted
+
+    def deterministic_datetime(value, *modifiers) -> str:
+        return shifted_database_time(value, *modifiers).strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
+
+    def deterministic_strftime(format_string, value, *modifiers) -> str:
+        assert format_string == "%Y-%m-%d %H:%M:%f"
+        shifted = shifted_database_time(value, *modifiers)
+        return shifted.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+
+    command = EnsureLeaseHorizonCommand(
+        job_id=int(job["id"]),
+        domain="admin_webhooks",
+        queue="delivery",
+        job_type="admin_webhook_delivery",
+        expected_payload={"delivery_id": delivery_id},
+        worker_id=acquired["worker_id"],
+        lease_id=acquired["lease_id"],
+        minimum_seconds=1,
+    )
+    conn = manager._connect()
+    try:
+        conn.create_function("DATETIME", -1, deterministic_datetime)
+        conn.create_function("STRFTIME", -1, deterministic_strftime)
+        previous_second_resolution = "2026-08-28 12:00:01"
+        conn.execute(
+            "UPDATE jobs SET leased_until=? WHERE id=?",
+            (previous_second_resolution, job["id"]),
+        )
+        conn.commit()
+
+        extended = sqlite_ensure_lease_horizon(conn, command=command)
+        raw_extended = conn.execute(
+            "SELECT leased_until FROM jobs WHERE id=?",
+            (job["id"],),
+        ).fetchone()[0]
+
+        later_existing = "2026-08-28 12:00:02.125"
+        conn.execute(
+            "UPDATE jobs SET leased_until=? WHERE id=?",
+            (later_existing, job["id"]),
+        )
+        conn.commit()
+        preserved = sqlite_ensure_lease_horizon(conn, command=command)
+        raw_preserved = conn.execute(
+            "SELECT leased_until FROM jobs WHERE id=?",
+            (job["id"],),
+        ).fetchone()[0]
+    finally:
+        conn.close()
+
+    assert raw_extended == "2026-08-28 12:00:01.900"
+    assert raw_extended > previous_second_resolution
+    assert "T" not in raw_extended
+    assert (_parse(raw_extended) - fixed_now).total_seconds() == 1
+    assert extended.guaranteed_seconds == 1
+    assert raw_preserved == later_existing
+    assert preserved.leased_until == _parse(later_existing)
 
 
 def test_sqlite_authnz_retries_do_not_quarantine_before_row_threshold(tmp_path):

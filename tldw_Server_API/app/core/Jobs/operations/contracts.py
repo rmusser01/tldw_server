@@ -936,11 +936,21 @@ class LeaseHorizonResult:
     guaranteed_seconds: int | None = None
 
     def __post_init__(self) -> None:
+        if type(self.outcome) is not OperationOutcome or self.outcome not in {
+            OperationOutcome.APPLIED,
+            OperationOutcome.NO_TRANSITION,
+            OperationOutcome.BACKEND_CONFLICT,
+        }:
+            raise ValueError("lease horizon outcome is invalid")
+        if type(self.ensured) is not bool:
+            raise ValueError("ensured must be an exact bool")
         if self.outcome is OperationOutcome.APPLIED:
-            if not self.ensured:
+            if self.ensured is not True:
                 raise ValueError("applied lease horizon must be ensured")
             if self.leased_until is None:
                 raise ValueError("applied lease horizon requires leased_until")
+            if self.no_transition_reason is not None:
+                raise ValueError("applied lease horizon cannot include a reason")
             if (
                 type(self.guaranteed_seconds) is not int
                 or self.guaranteed_seconds <= 0
@@ -948,12 +958,24 @@ class LeaseHorizonResult:
                 raise ValueError(
                     "applied lease horizon requires positive exact-int guaranteed_seconds"
                 )
-        elif self.guaranteed_seconds is not None:
-            raise ValueError("only applied lease horizons include guaranteed_seconds")
-        if self.outcome is OperationOutcome.NO_TRANSITION and self.no_transition_reason is None:
-            raise ValueError("no-transition lease horizon requires a reason")
-        if self.outcome is not OperationOutcome.NO_TRANSITION and self.no_transition_reason is not None:
-            raise ValueError("only no-transition lease horizon includes a reason")
+        elif self.outcome is OperationOutcome.NO_TRANSITION:
+            if self.ensured is not False:
+                raise ValueError("no-transition lease horizon cannot be ensured")
+            if type(self.no_transition_reason) is not NoTransitionReason:
+                raise ValueError("no-transition lease horizon requires an exact reason")
+            if self.guaranteed_seconds is not None:
+                raise ValueError(
+                    "no-transition lease horizon cannot include guaranteed_seconds"
+                )
+        else:
+            if self.ensured is not False:
+                raise ValueError("conflicting lease horizon cannot be ensured")
+            if self.no_transition_reason is not None:
+                raise ValueError("conflicting lease horizon cannot include a reason")
+            if self.guaranteed_seconds is not None:
+                raise ValueError(
+                    "conflicting lease horizon cannot include guaranteed_seconds"
+                )
         if self.leased_until is not None:
             object.__setattr__(
                 self,

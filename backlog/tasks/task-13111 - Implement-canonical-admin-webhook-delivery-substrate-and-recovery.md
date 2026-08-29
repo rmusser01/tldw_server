@@ -4,7 +4,7 @@ title: Implement canonical admin webhook delivery substrate and recovery
 status: In Progress
 assignee: []
 created_date: '2026-08-23 03:15'
-updated_date: '2026-08-29 00:35'
+updated_date: '2026-08-29 01:07'
 labels:
   - admin
   - webhooks
@@ -129,6 +129,10 @@ Task 3 Fix Round 1/5 started at FIX_BASE 803ae280f66e990f7b4ffdf29e31cae311d648d
 2026-08-29: Started Task 4 Fix Round 3/5 at FIX_BASE 1410e75d8fd64d44ba7acc948e6f81b6d5bb483b. Scope: add authoritative post-manager-cap relative lease evidence to the Task 3 result contract and both backends; consume it with monotonic elapsed accounting in prepared WorkerSDK renewal; strengthen class-only structured diagnostics; preserve public context bool behavior, cancellation cleanup, frozen CAS facts, exactly-one apply, callbacks, and legacy run(). Strict deterministic RED precedes production edits; PostgreSQL-required zero-skip and full worker gates remain required.
 
 2026-08-29: Completed Task 4 Fix Round 3/5 at fix base 1410e75d8fd6. LeaseHorizonResult now exposes a positive exact-int manager-authoritative guaranteed_seconds only on APPLIED; SQLite/PostgreSQL return the already-capped command duration. Prepared renewal preserves the public context bool API while privately validating typed evidence, subtracting monotonic ensure elapsed time, and scheduling only from the returned safe relative remainder. Structured failure diagnostics are generic and class-only. RED: 21 failed/4 passed plus focused 2 scheduling failures, PostgreSQL 1 contract failure, and 2 exact-int failures. Final required gates: worker 102 passed; Task 3 contract/facade/SQLite/PostgreSQL 209 passed, 0 skipped with PostgreSQL required; 2 baseline warnings per suite. Ruff, Bandit, git diff --check, and Python 3.10 py_compile passed. Evidence: .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-4-report.md
+
+2026-08-29: Started Task 4 Fix Round 4/5 at exact clean FIX_BASE d8206d5f5a097145104b9667a8dd743183b4e5d3. Scope: fractional-precision SQLite lease guarantees; complete LeaseHorizonResult/helper state validation; and fail-closed renewal scheduling arithmetic, monotonic, and jitter isolation. Strict deterministic RED precedes production edits; PostgreSQL-required zero-skip and full worker gates remain required.
+
+2026-08-29: Completed Task 4 Fix Round 4/5 from d8206d5f5a. SQLite lease horizons now use fractional space-separated database timestamps; LeaseHorizonResult and forged helper evidence enforce the full closed matrix; prepared scheduling fail-closes all unsafe config, monotonic, guarantee, interval, and jitter operations with sticky loss and class-only warnings. RED: 32 failed, 28 passed, 166 deselected. Final worker gate: 123 passed. PostgreSQL-required contract/facade/SQLite/PostgreSQL gate: 233 passed, 0 skipped. Ruff passed six changed Python files; Bandit passed three production files; git diff --check and Python 3.10 py_compile passed. Restricted sandbox could not reach loopback, so the required PostgreSQL gate was rerun with host-loopback permission against the confirmed disposable container. Evidence: .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-4-report.md.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
