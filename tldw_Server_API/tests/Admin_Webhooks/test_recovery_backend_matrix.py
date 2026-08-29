@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import asyncio
+import base64
 import hashlib
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import asyncpg
 import pytest
@@ -61,6 +64,11 @@ from tldw_Server_API.app.core.Jobs.operations.contracts import (
 from tldw_Server_API.app.core.Jobs.pg_migrations import (
     ensure_job_counters_pg,
     ensure_jobs_tables_pg,
+)
+from tldw_Server_API.app.core.Jobs.worker_sdk import (
+    WorkerConfig,
+    WorkerExecutionContext,
+    WorkerSDK,
 )
 from tldw_Server_API.app.core.Security.egress import URLPolicyResult
 from tldw_Server_API.tests.Admin_Webhooks.test_event_expansion import (
@@ -246,6 +254,101 @@ class CrashAfterAdmissionManager:
 
     def apply_prepared_disposition(self, command):
         return self.manager.apply_prepared_disposition(command)
+
+
+class RecordingPreparedManager:
+    def __init__(self, manager: JobManager) -> None:
+        self.manager = manager
+        self.apply_commands: list[ApplyPreparedDispositionCommand] = []
+        self.apply_results: list[PreparedDispositionResult] = []
+        self.after_apply: Callable[[], None] | None = None
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.manager, name)
+
+    def apply_prepared_disposition(
+        self,
+        command: ApplyPreparedDispositionCommand,
+    ) -> PreparedDispositionResult:
+        result = self.manager.apply_prepared_disposition(command)
+        self.apply_commands.append(command)
+        self.apply_results.append(result)
+        if self.after_apply is not None:
+            after_apply = self.after_apply
+            self.after_apply = None
+            after_apply()
+        return result
+
+
+async def _run_prepared_once(
+    manager: RecordingPreparedManager,
+    handler: AdminWebhookPreparedHandler,
+    *,
+    worker_id: str,
+    captures: dict[str, Any],
+    on_applied: Callable[
+        [dict[str, Any], PreparedJobDisposition, PreparedDispositionResult],
+        Awaitable[None],
+    ]
+    | None,
+    stop_after_apply: bool = False,
+) -> None:
+    sdk = WorkerSDK(
+        manager,
+        WorkerConfig(
+            domain="admin_webhooks",
+            queue="delivery",
+            worker_id=worker_id,
+            lease_seconds=120,
+            renew_jitter_seconds=0,
+            renew_threshold_seconds=20,
+            backoff_base_seconds=1,
+            backoff_max_seconds=1,
+            completion_callback_timeout_seconds=5.0,
+        ),
+    )
+
+    async def one_job(
+        job: dict[str, Any],
+        context: WorkerExecutionContext,
+    ) -> PreparedJobDisposition:
+        captures["job"] = job
+        try:
+            disposition = await handler(job, context)
+            captures["disposition"] = disposition
+            return disposition
+        finally:
+            if not stop_after_apply:
+                # stop() takes effect only after this disposition and callback path.
+                sdk.stop()
+
+    async def allow_acquire() -> bool:
+        return True
+
+    if stop_after_apply:
+        assert manager.after_apply is None
+        manager.after_apply = sdk.stop
+    try:
+        await asyncio.wait_for(
+            sdk.run_prepared(
+                handler=one_job,
+                pre_acquire_guard=allow_acquire,
+                handler_error_disposition=handler.handler_error_disposition,
+                on_disposition_applied=on_applied,
+            ),
+            timeout=10.0,
+        )
+    finally:
+        manager.after_apply = None
+
+
+def _jobs_retry_evidence(row: dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        int(row.get("retry_count") or 0),
+        row.get("failure_streak_code"),
+        int(row.get("failure_streak_count") or 0),
+        row.get("quarantined_at"),
+    )
 
 
 def _no_crash(_point: EnqueueCrashPoint) -> None:
@@ -499,7 +602,11 @@ def _worker_handler(
     )
 
 
-def _matrix_result(outcome: str) -> AttemptExecutionResult:
+def _matrix_result(
+    outcome: str,
+    *,
+    retry_delay_seconds: int = 1_800,
+) -> AttemptExecutionResult:
     if outcome == "complete":
         return AttemptExecutionResult(
             outcome=AttemptOutcome.SUCCESS,
@@ -514,7 +621,7 @@ def _matrix_result(outcome: str) -> AttemptExecutionResult:
             status_code=503,
             latency_ms=5,
             reason_code=AttemptReasonCode.HTTP_SERVER_ERROR,
-            retry_delay_seconds=1_800,
+            retry_delay_seconds=retry_delay_seconds,
         )
     return AttemptExecutionResult(
         outcome=AttemptOutcome.FAILED,
@@ -1348,65 +1455,141 @@ async def test_no_ack_defer_marker_is_historical_across_backend_matrix(
     tmp_path: Path,
     test_db_pool,
     matrix_jobs_pg_dsn: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    sdk_run_calls = 0
+    original_run_prepared = WorkerSDK.run_prepared
+
+    async def tracked_run_prepared(self, **kwargs) -> None:
+        nonlocal sdk_run_calls
+        sdk_run_calls += 1
+        await original_run_prepared(self, **kwargs)
+
+    monkeypatch.setattr(WorkerSDK, "run_prepared", tracked_run_prepared)
     manager = _jobs_manager(
         jobs_backend,
         tmp_path=tmp_path,
         jobs_pg_dsn=matrix_jobs_pg_dsn,
     )
+    recording_manager = RecordingPreparedManager(manager)
     queue = JobsDeliveryQueue(manager)
-    clock = MutableClock(NOW)
+    clock = MutableClock(
+        datetime.now(timezone.utc)
+        - (timedelta(seconds=99) if origin == "recovery" else timedelta())
+    )
+    ring = key_ring()
     label = f"task8-{auth_backend}-{jobs_backend}-{origin}"
     async with _auth_repository(
         auth_backend,
         tmp_path=tmp_path,
         test_db_pool=test_db_pool,
     ) as repository:
-        _, delivery_id = await _seed_delivery(repository, label, now=clock())
+        webhook_id, delivery_id = await _seed_worker_delivery(
+            repository,
+            ring,
+            label,
+            now=clock(),
+        )
         assert await _reconciler(
             repository,
             queue,
             clock,
             TokenSource(label),
         ).reconcile_enqueue_once() == 1
-        acquired = manager.acquire_next_job(
-            domain="admin_webhooks",
-            queue="delivery",
-            job_type="admin_webhook_delivery",
-            lease_seconds=120,
-            worker_id=f"{label}-worker",
-        )
-        assert acquired is not None
-        disposition = (
-            PreparedJobDisposition.infrastructure_defer(
-                token=opaque_token(f"{label}-token"),
-                delivery_id=delivery_id,
-                reason_code="authnz_unavailable",
-            )
-            if origin == "infrastructure"
-            else PreparedJobDisposition.recovery_defer_until(
-                token=opaque_token(f"{label}-token"),
-                delivery_id=delivery_id,
-                not_before_at=clock() + timedelta(seconds=60),
-                reason_code="attempt_not_stale",
-            )
-        )
-        applied = manager.apply_prepared_disposition(
-            ApplyPreparedDispositionCommand(
-                job_id=int(acquired["id"]),
+
+        stranded_lease_id: str | None = None
+        if origin == "recovery":
+            stranded = manager.acquire_next_job(
                 domain="admin_webhooks",
                 queue="delivery",
                 job_type="admin_webhook_delivery",
-                expected_payload={"delivery_id": delivery_id},
-                worker_id=acquired["worker_id"],
-                lease_id=acquired["lease_id"],
-                disposition=disposition,
+                lease_seconds=1,
+                worker_id=f"{label}-stranded-worker",
             )
+            assert stranded is not None
+            stranded_lease_id = str(stranded["lease_id"])
+            bundle = await repository.get_delivery_bundle(delivery_id)
+            assert bundle is not None and bundle.delivery.jobs_job_id is not None
+            async with repository.transaction() as tx:
+                reservation = await tx.reserve_jobs_attempt(
+                    delivery_id,
+                    bundle.delivery.jobs_job_id,
+                    stranded_lease_id,
+                    canonical_uuid4(f"{label}-stranded-attempt"),
+                    10,
+                    clock(),
+                    clock() + timedelta(seconds=40),
+                    expected_delivery_config_version=(
+                        bundle.delivery.delivery.delivery_config_version
+                    ),
+                    expected_secret_version=bundle.delivery.delivery.secret_version,
+                    disposition_token=opaque_token(f"{label}-unused-terminal"),
+                )
+            assert reservation is not None and reservation.reserved
+            await asyncio.sleep(1.25)
+
+        initial_ring = (
+            WebhookKeyRing(
+                {"other-key": base64.b64encode(b"z" * 32).decode("ascii")},
+                primary_id="other-key",
+            )
+            if origin == "infrastructure"
+            else ring
         )
-        assert applied.state == "queued"
-        persisted = manager.get_job(int(acquired["id"]))
-        assert int(persisted["retry_count"] or 0) == 0
-        assert int(persisted["failure_streak_count"] or 0) == 0
+        initial_executor = MatrixExecutor(lambda _request: _matrix_result("complete"))
+        initial_handler = _worker_handler(
+            repository,
+            initial_ring,
+            clock,
+            initial_executor,
+            f"{label}-initial",
+        )
+        callback_tokens: list[str] = []
+
+        async def initial_callback(
+            job: dict[str, Any],
+            disposition: PreparedJobDisposition,
+            result: PreparedDispositionResult,
+        ) -> None:
+            callback_tokens.append(disposition.token)
+            await initial_handler.on_disposition_applied(job, disposition, result)
+
+        initial_capture: dict[str, Any] = {}
+        await _run_prepared_once(
+            recording_manager,
+            initial_handler,
+            worker_id=f"{label}-worker",
+            captures=initial_capture,
+            on_applied=initial_callback,
+            stop_after_apply=True,
+        )
+        assert sdk_run_calls == 1
+        assert callback_tokens == []
+        assert len(recording_manager.apply_commands) == 1
+        initial_job = initial_capture["job"]
+        disposition = initial_capture["disposition"]
+        assert disposition.origin is (
+            PreparedDispositionOrigin.INFRASTRUCTURE
+            if origin == "infrastructure"
+            else PreparedDispositionOrigin.RECOVERY
+        )
+        assert recording_manager.apply_results[0].state == "queued"
+        if stranded_lease_id is not None:
+            assert initial_job["lease_id"] != stranded_lease_id
+
+        persisted = manager.get_job(int(initial_job["id"]))
+        assert persisted is not None
+        historical_evidence = _jobs_retry_evidence(persisted)
+        historical_schedule = persisted["available_at"]
+        historical_result = persisted["result"]
+        historical_fingerprint = persisted["prepared_disposition_fingerprint"]
+        assert historical_schedule is not None
+        historical_record = queue.get_delivery_job(str(initial_job["id"]))
+        assert historical_record is not None and historical_record.marker is not None
+        historical_marker = historical_record.marker
+        assert historical_marker.token == disposition.token
+        assert historical_marker.origin is disposition.origin
+        assert historical_marker.original_not_before_at is not None
         bundle = await repository.get_delivery_bundle(delivery_id)
         assert bundle is not None
         assert bundle.delivery.pending_jobs_disposition is None
@@ -1416,54 +1599,89 @@ async def test_no_ack_defer_marker_is_historical_across_backend_matrix(
             clock,
             TokenSource(f"{label}-repair"),
         ).reconcile_pending_dispositions_once() == 0
-        assert manager.reschedule_jobs(
-            domain="admin_webhooks",
-            queue="delivery",
-            job_type="admin_webhook_delivery",
-            status="queued",
-            set_now=True,
-        ) == 1
-        reacquired = manager.acquire_next_job(
-            domain="admin_webhooks",
-            queue="delivery",
-            job_type="admin_webhook_delivery",
-            lease_seconds=120,
-            worker_id=f"{label}-replacement-worker",
-        )
-        assert reacquired is not None
-        record = JobsDeliveryQueue.acquired_delivery_job(reacquired)
-        assert record.marker is not None
-        assert record.marker.origin is (
-            PreparedDispositionOrigin.INFRASTRUCTURE
-            if origin == "infrastructure"
-            else PreparedDispositionOrigin.RECOVERY
-        )
-        persisted = manager.get_job(int(reacquired["id"]))
-        assert int(persisted["retry_count"] or 0) == 0
-        assert int(persisted["failure_streak_count"] or 0) == 0
 
-        bundle = await repository.get_delivery_bundle(delivery_id)
-        assert bundle is not None and bundle.delivery.jobs_job_id is not None
-        replacement_attempt_id = canonical_uuid4(f"{label}-replacement-attempt")
-        async with repository.transaction() as tx:
-            reservation = await tx.reserve_jobs_attempt(
-                delivery_id,
-                bundle.delivery.jobs_job_id,
-                reacquired["lease_id"],
-                replacement_attempt_id,
-                10,
-                clock(),
-                clock() + timedelta(seconds=40),
-                expected_delivery_config_version=(
-                    bundle.delivery.delivery.delivery_config_version
-                ),
-                expected_secret_version=bundle.delivery.delivery.secret_version,
-                disposition_token=opaque_token(f"{label}-unused-terminal"),
+        due_at = max(
+            historical_marker.applied_at,
+            historical_marker.original_not_before_at,
+        )
+        await asyncio.sleep(
+            max(0.0, (due_at - datetime.now(timezone.utc)).total_seconds()) + 0.1
+        )
+        if origin == "recovery":
+            clock.current = due_at + timedelta(microseconds=1)
+        due_job = manager.get_job(int(initial_job["id"]))
+        assert due_job is not None
+        assert due_job["available_at"] == historical_schedule
+        assert due_job["result"] == historical_result
+        assert (
+            due_job["prepared_disposition_fingerprint"]
+            == historical_fingerprint
+        )
+        assert _jobs_retry_evidence(due_job) == historical_evidence
+
+        recovery_executor = MatrixExecutor(lambda _request: _matrix_result("complete"))
+        recovery_handler = _worker_handler(
+            repository,
+            ring,
+            clock,
+            recovery_executor,
+            f"{label}-replacement",
+        )
+
+        async def recovery_callback(
+            job: dict[str, Any],
+            current_disposition: PreparedJobDisposition,
+            result: PreparedDispositionResult,
+        ) -> None:
+            callback_tokens.append(current_disposition.token)
+            await recovery_handler.on_disposition_applied(
+                job,
+                current_disposition,
+                result,
             )
-        assert reservation is not None and reservation.reserved
-        assert reservation.attempt is not None
-        assert reacquired["lease_id"] != acquired["lease_id"]
-        assert reservation.attempt.id == replacement_attempt_id
+
+        recovery_capture: dict[str, Any] = {}
+        await _run_prepared_once(
+            recording_manager,
+            recovery_handler,
+            worker_id=f"{label}-replacement-worker",
+            captures=recovery_capture,
+            on_applied=recovery_callback,
+        )
+
+        assert sdk_run_calls == 2
+        reacquired = recovery_capture["job"]
+        current_disposition = recovery_capture["disposition"]
+        reacquired_record = JobsDeliveryQueue.acquired_delivery_job(reacquired)
+        assert reacquired_record.marker == historical_marker
+        assert reacquired["lease_id"] != initial_job["lease_id"]
+        assert _jobs_retry_evidence(reacquired) == historical_evidence
+        assert [
+            command.disposition.token
+            for command in recording_manager.apply_commands
+        ].count(disposition.token) == 1
+        assert len(recording_manager.apply_commands) == 2
+        assert recording_manager.apply_commands[1].lease_id == reacquired["lease_id"]
+        assert callback_tokens == [current_disposition.token]
+        assert disposition.token not in callback_tokens
+
+        final_job = manager.get_job(int(initial_job["id"]))
+        assert final_job is not None
+        assert final_job["worker_id"] is None
+        assert final_job["lease_id"] is None
+        assert final_job["leased_until"] is None
+        attempts = await repository.list_delivery_attempts(webhook_id, delivery_id)
+        assert all(attempt.state is not AttemptState.PROCESSING for attempt in attempts)
+        if origin == "infrastructure":
+            assert len(initial_executor.requests) == 0
+            assert len(recovery_executor.requests) == 1
+            assert current_disposition.kind is PreparedDispositionKind.COMPLETE
+            assert final_job["status"] == "completed"
+        else:
+            assert len(initial_executor.requests) == 0
+            assert len(recovery_executor.requests) == 0
+            assert current_disposition.kind is PreparedDispositionKind.RETRY
+            assert final_job["status"] == "queued"
 
 
 @pytest.mark.parametrize(
@@ -1609,14 +1827,23 @@ async def test_worker_authnz_outcome_crash_cross_product_across_backend_matrix(
     tmp_path: Path,
     test_db_pool,
     matrix_jobs_pg_dsn: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    sdk_run_calls = 0
+    original_run_prepared = WorkerSDK.run_prepared
+
+    async def tracked_run_prepared(self, **kwargs) -> None:
+        nonlocal sdk_run_calls
+        sdk_run_calls += 1
+        await original_run_prepared(self, **kwargs)
+
+    monkeypatch.setattr(WorkerSDK, "run_prepared", tracked_run_prepared)
     manager = _jobs_manager(
         jobs_backend,
         tmp_path=tmp_path,
         jobs_pg_dsn=matrix_jobs_pg_dsn,
     )
     queue = CountingQueue(JobsDeliveryQueue(manager))
-    clock = MutableClock(datetime.now(timezone.utc))
     ring = key_ring()
     async with _auth_repository(
         auth_backend,
@@ -1625,6 +1852,7 @@ async def test_worker_authnz_outcome_crash_cross_product_across_backend_matrix(
     ) as repository:
         for outcome in ("complete", "retry", "fail", "cancel"):
             for crash_point in _WORKER_CRASH_POINTS:
+                clock = MutableClock(datetime.now(timezone.utc))
                 label = (
                     f"worker-crash-{auth_backend}-{jobs_backend}-{outcome}-"
                     f"{crash_point.value}"
@@ -1641,25 +1869,42 @@ async def test_worker_authnz_outcome_crash_cross_product_across_backend_matrix(
                     clock,
                     TokenSource(f"{label}-enqueue"),
                 ).reconcile_enqueue_once() == 1
-                acquired = manager.acquire_next_job(
-                    domain="admin_webhooks",
-                    queue="delivery",
-                    job_type="admin_webhook_delivery",
-                    lease_seconds=120,
-                    worker_id=f"{label}-worker",
-                )
-                assert acquired is not None
+                recording_manager = RecordingPreparedManager(manager)
+                callback_boundary = crash_point in {
+                    WorkerCrashPoint.AFTER_JOBS_APPLY_BEFORE_AUTHNZ_ACK,
+                    WorkerCrashPoint.AFTER_AUTHNZ_ACK_BEFORE_RETURN,
+                }
+                acquired: dict[str, Any] | None = None
+                if not callback_boundary:
+                    acquired = manager.acquire_next_job(
+                        domain="admin_webhooks",
+                        queue="delivery",
+                        job_type="admin_webhook_delivery",
+                        lease_seconds=120,
+                        worker_id=f"{label}-worker",
+                    )
+                    assert acquired is not None
 
                 async def disable_after_io(
                     current_webhook_id: int = webhook_id,
+                    current_clock: MutableClock = clock,
                 ) -> None:
                     await _disable_worker_registration(
                         repository,
                         current_webhook_id,
-                        now=clock(),
+                        now=current_clock(),
                     )
 
-                result = _matrix_result(outcome)
+                result = _matrix_result(
+                    outcome,
+                    retry_delay_seconds=(
+                        1
+                        if outcome == "retry"
+                        and crash_point
+                        is WorkerCrashPoint.AFTER_JOBS_APPLY_BEFORE_AUTHNZ_ACK
+                        else 1_800
+                    ),
+                )
                 executor = MatrixExecutor(
                     lambda _request, result=result: result,
                     before_result=disable_after_io if outcome == "cancel" else None,
@@ -1674,23 +1919,39 @@ async def test_worker_authnz_outcome_crash_cross_product_across_backend_matrix(
                 )
                 crashed = False
                 try:
-                    disposition = await crashing(
-                        acquired,
-                        MatrixWorkerContext(acquired),
-                    )
-                    applied = _apply_worker_disposition(
-                        manager,
-                        acquired,
-                        disposition,
-                    )
-                    await crashing.on_disposition_applied(
-                        acquired,
-                        disposition,
-                        applied,
-                    )
+                    if callback_boundary:
+                        capture: dict[str, Any] = {}
+                        await _run_prepared_once(
+                            recording_manager,
+                            crashing,
+                            worker_id=f"{label}-worker",
+                            captures=capture,
+                            on_applied=crashing.on_disposition_applied,
+                        )
+                    else:
+                        assert acquired is not None
+                        disposition = await crashing(
+                            acquired,
+                            MatrixWorkerContext(acquired),
+                        )
+                        applied = _apply_worker_disposition(
+                            recording_manager,
+                            acquired,
+                            disposition,
+                        )
+                        await crashing.on_disposition_applied(
+                            acquired,
+                            disposition,
+                            applied,
+                        )
                 except SimulatedCrash:
                     crashed = True
                 assert crashed, f"crash hook was not reached for {label}"
+                if callback_boundary:
+                    acquired = capture["job"]
+                    disposition = capture["disposition"]
+                    applied = recording_manager.apply_results[-1]
+                assert acquired is not None
                 if (
                     outcome == "cancel"
                     and crash_point
@@ -1709,12 +1970,22 @@ async def test_worker_authnz_outcome_crash_cross_product_across_backend_matrix(
                     executor,
                     label,
                 )
+                replacement_executor: MatrixExecutor | None = None
+                retry_boundary_five = (
+                    outcome == "retry"
+                    and crash_point
+                    is WorkerCrashPoint.AFTER_JOBS_APPLY_BEFORE_AUTHNZ_ACK
+                )
                 if crash_point is WorkerCrashPoint.BEFORE_RESERVATION_COMMIT:
                     disposition = await recovery(
                         acquired,
                         MatrixWorkerContext(acquired),
                     )
-                    applied = _apply_worker_disposition(manager, acquired, disposition)
+                    applied = _apply_worker_disposition(
+                        recording_manager,
+                        acquired,
+                        disposition,
+                    )
                     await recovery.on_disposition_applied(
                         acquired,
                         disposition,
@@ -1739,7 +2010,11 @@ async def test_worker_authnz_outcome_crash_cross_product_across_backend_matrix(
                         acquired,
                         MatrixWorkerContext(acquired),
                     )
-                    applied = _apply_worker_disposition(manager, acquired, disposition)
+                    applied = _apply_worker_disposition(
+                        recording_manager,
+                        acquired,
+                        disposition,
+                    )
                     await recovery.on_disposition_applied(
                         acquired,
                         disposition,
@@ -1750,32 +2025,184 @@ async def test_worker_authnz_outcome_crash_cross_product_across_backend_matrix(
                         acquired,
                         MatrixWorkerContext(acquired),
                     )
-                    applied = _apply_worker_disposition(manager, acquired, disposition)
+                    applied = _apply_worker_disposition(
+                        recording_manager,
+                        acquired,
+                        disposition,
+                    )
                     await recovery.on_disposition_applied(
                         acquired,
                         disposition,
                         applied,
                     )
+                elif (
+                    crash_point
+                    is WorkerCrashPoint.AFTER_JOBS_APPLY_BEFORE_AUTHNZ_ACK
+                ):
+                    stranded = await repository.get_delivery_bundle(delivery_id)
+                    assert stranded is not None
+                    assert not stranded.delivery.jobs_disposition_applied
+                    assert (
+                        stranded.delivery.pending_jobs_disposition_token
+                        == disposition.token
+                    )
+                    assert len(recording_manager.apply_commands) == 1
+                    if retry_boundary_five:
+                        old_job = manager.get_job(int(acquired["id"]))
+                        assert old_job is not None
+                        old_schedule = old_job["available_at"]
+                        old_result = old_job["result"]
+                        old_fingerprint = old_job[
+                            "prepared_disposition_fingerprint"
+                        ]
+                        old_evidence = _jobs_retry_evidence(old_job)
+                        assert old_job["status"] == "queued"
+                        assert old_job["worker_id"] is None
+                        assert old_job["lease_id"] is None
+                        assert old_job["leased_until"] is None
+                        old_record = queue.queue.get_delivery_job(
+                            str(acquired["id"])
+                        )
+                        assert old_record is not None and old_record.marker is not None
+                        old_marker = old_record.marker
+                        assert old_marker.token == disposition.token
+                        assert old_marker.kind is PreparedDispositionKind.RETRY
+                        assert old_marker.original_not_before_at is not None
+                        due_at = max(
+                            old_marker.applied_at,
+                            old_marker.original_not_before_at,
+                        )
+                        await asyncio.sleep(
+                            max(
+                                0.0,
+                                (due_at - datetime.now(timezone.utc)).total_seconds(),
+                            )
+                            + 0.1
+                        )
+                        clock.current = max(
+                            clock.current,
+                            due_at + timedelta(microseconds=1),
+                        )
+                        due_job = manager.get_job(int(acquired["id"]))
+                        assert due_job is not None
+                        assert due_job["available_at"] == old_schedule
+                        assert due_job["result"] == old_result
+                        assert (
+                            due_job["prepared_disposition_fingerprint"]
+                            == old_fingerprint
+                        )
+                        assert _jobs_retry_evidence(due_job) == old_evidence
+
+                        replacement_executor = MatrixExecutor(
+                            lambda _request: _matrix_result("complete")
+                        )
+                        replacement_handler = _worker_handler(
+                            repository,
+                            ring,
+                            clock,
+                            replacement_executor,
+                            f"{label}-replacement",
+                        )
+                        replacement_capture: dict[str, Any] = {}
+                        await _run_prepared_once(
+                            recording_manager,
+                            replacement_handler,
+                            worker_id=f"{label}-replacement-worker",
+                            captures=replacement_capture,
+                            on_applied=replacement_handler.on_disposition_applied,
+                        )
+                        reacquired = replacement_capture["job"]
+                        reacquired_record = JobsDeliveryQueue.acquired_delivery_job(
+                            reacquired
+                        )
+                        assert reacquired_record.marker == old_marker
+                        assert reacquired["lease_id"] != acquired["lease_id"]
+                        assert _jobs_retry_evidence(reacquired) == old_evidence
+                        assert [
+                            command.disposition.token
+                            for command in recording_manager.apply_commands
+                        ].count(disposition.token) == 1
+                        assert len(recording_manager.apply_commands) == 2
+                        assert (
+                            recording_manager.apply_commands[1].lease_id
+                            == reacquired["lease_id"]
+                        )
+                        recovered_job = manager.get_job(int(acquired["id"]))
+                        assert recovered_job is not None
+                        assert _jobs_retry_evidence(recovered_job) == old_evidence
+                        assert recovered_job["status"] == "completed"
+                        assert recovered_job["worker_id"] is None
+                        assert recovered_job["lease_id"] is None
+                        assert recovered_job["leased_until"] is None
+                    else:
+                        reconciler = _reconciler(
+                            repository,
+                            queue,
+                            clock,
+                            TokenSource(f"{label}-repair"),
+                        )
+                        assert (
+                            await reconciler.reconcile_pending_dispositions_once()
+                            == 1
+                        )
+                        assert (
+                            await reconciler.reconcile_pending_dispositions_once()
+                            == 0
+                        )
+                        await recovery.on_disposition_applied(
+                            acquired,
+                            disposition,
+                            applied,
+                        )
+                        assert len(recording_manager.apply_commands) == 1
                 else:
+                    durable = await repository.get_delivery_bundle(delivery_id)
+                    assert durable is not None
+                    assert durable.delivery.jobs_disposition_applied
+                    assert (
+                        durable.delivery.pending_jobs_disposition_token
+                        == disposition.token
+                    )
+                    await recovery.on_disposition_applied(
+                        acquired,
+                        disposition,
+                        applied,
+                    )
                     repaired = await _reconciler(
                         repository,
                         queue,
                         clock,
                         TokenSource(f"{label}-repair"),
                     ).reconcile_pending_dispositions_once()
-                    assert repaired == int(
-                        crash_point
-                        is WorkerCrashPoint.AFTER_JOBS_APPLY_BEFORE_AUTHNZ_ACK
-                    )
+                    assert repaired == 0
+                    assert len(recording_manager.apply_commands) == 1
 
-                expected_io = 0 if crash_point is WorkerCrashPoint.AFTER_RESERVATION_COMMIT_BEFORE_IO else 1
-                assert len(executor.requests) == expected_io
+                expected_io = (
+                    0
+                    if crash_point
+                    is WorkerCrashPoint.AFTER_RESERVATION_COMMIT_BEFORE_IO
+                    else 2
+                    if retry_boundary_five
+                    else 1
+                )
+                actual_io = len(executor.requests) + (
+                    len(replacement_executor.requests)
+                    if replacement_executor is not None
+                    else 0
+                )
+                assert actual_io == expected_io
                 attempts = await repository.list_delivery_attempts(
                     webhook_id,
                     delivery_id,
                 )
-                assert len(attempts) == 1
-                if crash_point in {
+                assert len(attempts) == (2 if retry_boundary_five else 1)
+                if retry_boundary_five:
+                    assert [attempt.state for attempt in attempts] == [
+                        AttemptState.RETRYABLE,
+                        AttemptState.SUCCEEDED,
+                    ]
+                    assert [attempt.attempt_number for attempt in attempts] == [1, 2]
+                elif crash_point in {
                     WorkerCrashPoint.AFTER_RESERVATION_COMMIT_BEFORE_IO,
                     WorkerCrashPoint.AFTER_RECEIVER_RESULT_BEFORE_OUTCOME_COMMIT,
                 }:
@@ -1789,8 +2216,14 @@ async def test_worker_authnz_outcome_crash_cross_product_across_backend_matrix(
                     }[outcome]
                 final = await repository.get_delivery_bundle(delivery_id)
                 assert final is not None and final.delivery.jobs_disposition_applied
-                if outcome == "cancel":
+                if outcome == "cancel" and not retry_boundary_five:
                     assert final.delivery.delivery.state is DeliveryState.CANCELED
+                if retry_boundary_five:
+                    assert final.delivery.delivery.state is DeliveryState.SUCCEEDED
+                    assert all(
+                        attempt.state is not AttemptState.PROCESSING
+                        for attempt in attempts
+                    )
                 expected_jobs_state = {
                     DeliveryState.SUCCEEDED: "completed",
                     DeliveryState.RETRY_WAIT: "queued",
@@ -1799,6 +2232,7 @@ async def test_worker_authnz_outcome_crash_cross_product_across_backend_matrix(
                     DeliveryState.SUPERSEDED: "cancelled",
                 }[final.delivery.delivery.state]
                 assert manager.get_job(int(acquired["id"]))["status"] == expected_jobs_state
+        assert sdk_run_calls == 9
 
 
 @pytest.mark.parametrize(

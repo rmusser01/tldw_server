@@ -4,7 +4,7 @@ title: Implement canonical admin webhook delivery substrate and recovery
 status: In Progress
 assignee: []
 created_date: '2026-08-23 03:15'
-updated_date: '2026-08-29 18:03'
+updated_date: '2026-08-29 18:51'
 labels:
   - admin
   - webhooks
@@ -171,6 +171,10 @@ Task 7 preflight found the approved file list omitted required AuthNZ repository
 Task 8 independent review found pre-stale processing mutation, historical-marker cancellation repair, optional reservation coordinates, and incomplete four-backend crash proof. Fix round 1 is in progress; attempt-four retry classification remains centralized in the shared executor and will receive an integration proof.
 
 2026-08-29: Task 8 fix round 1 complete. Processing attempts now take precedence over lifecycle/expiry/budget terminalization; exact acknowledgement releases current_attempt_id only after append-only attempt evidence is marked applied; canonical reservation coordinates are mandatory and every new terminal reservation persists its pending Jobs marker; queued cancellation monotonically replaces exact historical retry/infrastructure/recovery markers. Expanded all-six-boundary complete/retry/fail/cancel coverage, both defer origins, historical-marker cancel, hard-cap I/O, and late-writer rejection across all four AuthNZ/Jobs backend pairs, plus real-executor attempt-four proof. Final PostgreSQL worker/recovery matrix: 99 passed, 0 skipped. Delivery repositories/expansion: 48 passed, 0 skipped. Jobs contracts/prepared backends/prepared+legacy SDK: 329 passed, 0 skipped. Executor/security: 312 passed. Control plane: 49 passed. Ruff and Python 3.10 compile passed; direct Jobs SQL scan clean; reviewed Bandit found 0 High and only fixed-query low-confidence B608 reports. Evidence: .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-8-fix-1-report.md.
+
+Task 8 fix round 1 corrected all implementation defects. Scoped re-review left one test-evidence gap: all four backend pairs must exercise retry lost-ack through due-time reacquisition/current-handler acknowledgement and defer no-ack through the actual worker-loop boundary. Fix round 2 is in progress.
+
+2026-08-29: Task 8 fix round 2 complete. The four-backend matrix now drives callback crash boundaries 5 and 6 through WorkerSDK.run_prepared(), advances retry boundary 5 through its exact persisted due time, reacquires the same Jobs row under a replacement lease, and proves current-handler acknowledgement without marker replay, schedule drift, duplicate counters, excess attempts, or unresolved leases. Infrastructure and recovery no-ack defers now run through the actual prepared loop, terminate immediately after the real Jobs apply, invoke no AuthNZ callback, and later continue from the exact historical marker under a replacement lease. Final required PostgreSQL matrix: 68 passed, 0 skipped; Jobs contracts/prepared backends/prepared+legacy SDK: 329 passed, 0 skipped; focused Ruff, direct Jobs SQL scan, warning review, and diff check passed. No production code, schema, public activation, or executor ownership changed. Evidence: .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-8-fix-2-report.md.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
