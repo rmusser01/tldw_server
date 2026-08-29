@@ -4,7 +4,7 @@ title: Implement canonical admin webhook delivery substrate and recovery
 status: In Progress
 assignee: []
 created_date: '2026-08-23 03:15'
-updated_date: '2026-08-29 18:51'
+updated_date: '2026-08-29 19:59'
 labels:
   - admin
   - webhooks
@@ -175,6 +175,12 @@ Task 8 independent review found pre-stale processing mutation, historical-marker
 Task 8 fix round 1 corrected all implementation defects. Scoped re-review left one test-evidence gap: all four backend pairs must exercise retry lost-ack through due-time reacquisition/current-handler acknowledgement and defer no-ack through the actual worker-loop boundary. Fix round 2 is in progress.
 
 2026-08-29: Task 8 fix round 2 complete. The four-backend matrix now drives callback crash boundaries 5 and 6 through WorkerSDK.run_prepared(), advances retry boundary 5 through its exact persisted due time, reacquires the same Jobs row under a replacement lease, and proves current-handler acknowledgement without marker replay, schedule drift, duplicate counters, excess attempts, or unresolved leases. Infrastructure and recovery no-ack defers now run through the actual prepared loop, terminate immediately after the real Jobs apply, invoke no AuthNZ callback, and later continue from the exact historical marker under a replacement lease. Final required PostgreSQL matrix: 68 passed, 0 skipped; Jobs contracts/prepared backends/prepared+legacy SDK: 329 passed, 0 skipped; focused Ruff, direct Jobs SQL scan, warning review, and diff check passed. No production code, schema, public activation, or executor ownership changed. Evidence: .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-8-fix-2-report.md.
+
+Task 8 complete after two fix rounds: all implementation and evidence findings are closed. Final real four-backend WorkerSDK crash matrix passed 68 tests with PostgreSQL required and zero skips; Jobs/SDK regressions passed 329 tests.
+
+Task 9 started at c32e1d5153. Preflight expanded scope to exact lookup-only test replay, atomic no-fanout test start, token-bound completion/idempotency, bounded stale recovery, and SQLite plus required-PostgreSQL proof; no schema, Jobs, or public API activation.
+
+2026-08-29: Task 9 complete at pre-commit tree. Added internal persisted synchronous one-attempt tests with lookup-first exact idempotency replay, atomic no-fanout processing start, real shared-executor one-I/O ownership, token-bound terminal completion, bounded interrupted-attempt recovery, and an inactive reconciler pass. SQLite plus required PostgreSQL, executor, capture, control-plane, reconciler, and Task 8 worker/recovery gate: 256 passed, 0 skipped in 156.67s. Ruff and Python 3.10 compile passed; all 39 low-confidence B608 Bandit findings were reviewed as fixed SQL fragments with bound values; no Jobs call/SQL, route, runtime, schema, migration, producer, or legacy activation was added. Evidence: .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-9-report.md.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

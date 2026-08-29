@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hmac
 import json
+import logging
 import math
 import re
 from collections.abc import Awaitable, Callable
@@ -17,28 +18,54 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import MandatoryAuditW
 from .catalog import EVENT_API_VERSION, EVENT_CATALOG
 from .crypto import EVENT_BODY_MAX_BYTES, WebhookKeyError, WebhookKeyRing, WebhookKeyRingLoadResult
 from .domain import (
+    AttemptState,
+    DeliveryKind,
     DeliveryReasonCode,
+    DeliveryState,
     EventSourceKind,
+    IdempotencyScope,
+    ValidatedWebhookTarget,
     WebhookDelivery,
+    WebhookDeliveryAttempt,
     WebhookError,
     WebhookErrorCode,
     WebhookRegistration,
+    build_idempotency_scope,
+    canonical_request_hash,
+    idempotency_lookup_digest,
+    parse_registration_etag,
+    validate_idempotency_key,
+    validate_webhook_target,
+)
+from .executor import (
+    AttemptExecutionRequest,
+    AttemptOutcome,
+    DeliveryAttemptExecutor,
 )
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
         AdminWebhookRepository,
         EventCaptureResult,
+        EventInsert,
+        IdempotencyLookup,
         MigrationState,
         StoredWebhookEvent,
+        StoredWebhookRegistration,
     )
+
+    from .config import AdminWebhookSettings
 
 _ACTIVE_ROTATION_PHASES = frozenset(
     {"rewriting", "verifying", "awaiting_primary_cutover"}
 )
 _CATALOG_EVENTS = frozenset(item.event_type for item in EVENT_CATALOG)
 _SAFE_ID = re.compile(r"^[A-Za-z0-9._:@-]{1,128}$")
+_SIGNING_SECRET = re.compile(r"^whsec_[0-9a-f]{64}$")
 _MAX_JSON_DEPTH = 64
+_TEST_REPLAY_RETRY_SECONDS = 5
+
+logger = logging.getLogger(__name__)
 
 EventCaptureOutcome: TypeAlias = Literal["accepted", "failed"]
 
@@ -171,6 +198,129 @@ class EventCaptureAudit:
 
 
 EventCaptureAuditSink: TypeAlias = Callable[[EventCaptureAudit], Awaitable[None]]
+
+TestWebhookOutcome: TypeAlias = Literal["accepted", "succeeded", "failed"]
+
+
+@dataclass(frozen=True)
+class TestWebhookCommand:
+    """Internal inputs for one idempotent synchronous test delivery."""
+
+    actor_id: int
+    webhook_id: int
+    if_match: str = field(repr=False)
+    delivery_config_version: int
+    idempotency_key: str = field(repr=False)
+    request_id: str
+
+    def __post_init__(self) -> None:
+        for value, field_name in (
+            (self.actor_id, "actor ID"),
+            (self.webhook_id, "webhook ID"),
+            (self.delivery_config_version, "delivery config version"),
+        ):
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise ValueError(f"{field_name} is invalid")
+        if not isinstance(self.if_match, str):
+            raise ValueError("registration ETag is invalid")
+        if not isinstance(self.idempotency_key, str):
+            raise ValueError("idempotency key is invalid")
+        if not isinstance(self.request_id, str) or _SAFE_ID.fullmatch(self.request_id) is None:
+            raise ValueError("request ID is invalid")
+
+
+@dataclass(frozen=True)
+class TestWebhookResult:
+    """Stored one-attempt result projected for the future Task 10 route."""
+
+    delivery: WebhookDelivery
+    attempt: WebhookDeliveryAttempt
+    idempotent_replay: bool
+    in_progress: bool
+    retry_after_seconds: int | None
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.delivery, WebhookDelivery)
+            or not isinstance(self.attempt, WebhookDeliveryAttempt)
+            or self.delivery.kind is not DeliveryKind.TEST
+            or self.attempt.delivery_id != self.delivery.id
+            or self.attempt.attempt_number != 1
+        ):
+            raise ValueError("test result coordinates are invalid")
+        if not isinstance(self.idempotent_replay, bool) or not isinstance(
+            self.in_progress,
+            bool,
+        ):
+            raise TypeError("test replay state is invalid")
+        if self.in_progress != (
+            self.delivery.state is DeliveryState.PROCESSING
+            and self.attempt.state is AttemptState.PROCESSING
+        ):
+            raise ValueError("test processing state is invalid")
+        if self.retry_after_seconds != (
+            _TEST_REPLAY_RETRY_SECONDS if self.in_progress else None
+        ):
+            raise ValueError("test retry guidance is invalid")
+
+
+@dataclass(frozen=True)
+class TestWebhookAudit:
+    """Bounded audit projection without request or receiver secrets."""
+
+    actor_id: int
+    webhook_id: int
+    delivery_id: str
+    attempt_id: str
+    request_id: str
+    outcome: TestWebhookOutcome
+    status_code: int | None
+    reason_code: DeliveryReasonCode | None
+
+    def __post_init__(self) -> None:
+        for value, field_name in (
+            (self.actor_id, "actor ID"),
+            (self.webhook_id, "webhook ID"),
+        ):
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise ValueError(f"{field_name} is invalid")
+        _canonical_uuid4(self.delivery_id, field_name="delivery ID")
+        _canonical_uuid4(self.attempt_id, field_name="attempt ID")
+        if not isinstance(self.request_id, str) or _SAFE_ID.fullmatch(self.request_id) is None:
+            raise ValueError("request ID is invalid")
+        if self.outcome not in {"accepted", "succeeded", "failed"}:
+            raise ValueError("test audit outcome is invalid")
+        if self.status_code is not None and not 100 <= self.status_code <= 599:
+            raise ValueError("test audit status is invalid")
+        if self.reason_code is not None and not isinstance(
+            self.reason_code,
+            DeliveryReasonCode,
+        ):
+            raise TypeError("test audit reason is invalid")
+        if self.outcome in {"accepted", "succeeded"} and self.reason_code is not None:
+            raise ValueError("test audit reason does not match outcome")
+        if self.outcome == "failed" and self.reason_code is None:
+            raise ValueError("failed test audit requires a reason")
+
+
+TestWebhookAuditSink: TypeAlias = Callable[[TestWebhookAudit], Awaitable[None]]
+
+
+@dataclass(frozen=True)
+class _PreparedTest:
+    registration: StoredWebhookRegistration = field(repr=False)
+    event: EventInsert = field(repr=False)
+    target: ValidatedWebhookTarget = field(repr=False)
+    body: bytes = field(repr=False)
+    signing_secret: str = field(repr=False)
+    scope: IdempotencyScope
+    lookup_digest: str
+    request_fingerprint: str
+    expected_revision: int
+    started_at: datetime
+    delivery_id: str
+    attempt_id: str
+    test_attempt_token: str = field(repr=False)
 
 
 class _CaptureAuditUnavailable(MandatoryAuditWriteError):
@@ -375,6 +525,10 @@ class AdminWebhookDeliveryService:
         event_id_factory: Callable[[], str],
         delivery_id_factory: Callable[[], str],
         clock: Callable[[], datetime],
+        settings: AdminWebhookSettings | None = None,
+        executor: DeliveryAttemptExecutor | None = None,
+        test_attempt_id_factory: Callable[[], str] | None = None,
+        test_token_factory: Callable[[], str] | None = None,
     ) -> None:
         if not callable(event_id_factory) or not callable(delivery_id_factory):
             raise TypeError("event and delivery ID factories are required")
@@ -385,6 +539,423 @@ class AdminWebhookDeliveryService:
         self._event_id_factory = event_id_factory
         self._delivery_id_factory = delivery_id_factory
         self._clock = clock
+        self._settings = settings
+        self._executor = executor
+        self._test_attempt_id_factory = test_attempt_id_factory
+        self._test_token_factory = test_token_factory
+
+    def _require_test_dependencies(
+        self,
+    ) -> tuple[AdminWebhookSettings, DeliveryAttemptExecutor, Callable[[], str], Callable[[], str]]:
+        if (
+            self._settings is None
+            or self._executor is None
+            or self._test_attempt_id_factory is None
+            or self._test_token_factory is None
+            or not callable(self._test_attempt_id_factory)
+            or not callable(self._test_token_factory)
+        ):
+            raise WebhookError(WebhookErrorCode.TEST_DELIVERY_UNAVAILABLE)
+        return (
+            self._settings,
+            self._executor,
+            self._test_attempt_id_factory,
+            self._test_token_factory,
+        )
+
+    @staticmethod
+    def _test_result(
+        snapshot: object,
+        *,
+        replay: bool,
+    ) -> TestWebhookResult:
+        from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
+            TestAttemptSnapshot,
+        )
+
+        if not isinstance(snapshot, TestAttemptSnapshot):
+            raise WebhookError(WebhookErrorCode.TEST_DELIVERY_UNAVAILABLE)
+        processing = (
+            snapshot.delivery.delivery.state is DeliveryState.PROCESSING
+            and snapshot.attempt.state is AttemptState.PROCESSING
+        )
+        return TestWebhookResult(
+            delivery=snapshot.delivery.delivery,
+            attempt=snapshot.attempt,
+            idempotent_replay=replay,
+            in_progress=processing,
+            retry_after_seconds=(
+                _TEST_REPLAY_RETRY_SECONDS if processing else None
+            ),
+        )
+
+    async def _resolve_test_lookup(
+        self,
+        lookup: IdempotencyLookup,
+        *,
+        command: TestWebhookCommand,
+    ) -> TestWebhookResult | None:
+        from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
+            IdempotencyLookupKind,
+        )
+
+        if lookup.kind is IdempotencyLookupKind.NEW:
+            return None
+        if lookup.kind is IdempotencyLookupKind.CONFLICT:
+            raise WebhookError(WebhookErrorCode.IDEMPOTENCY_CONFLICT)
+        if lookup.kind is IdempotencyLookupKind.IN_PROGRESS and (
+            lookup.test_delivery_id is None or lookup.test_attempt_id is None
+        ):
+            raise WebhookError(WebhookErrorCode.IDEMPOTENCY_IN_PROGRESS)
+        if lookup.test_delivery_id is None or lookup.test_attempt_id is None:
+            raise WebhookError(WebhookErrorCode.TEST_DELIVERY_UNAVAILABLE)
+        snapshot = await self._repository.get_test_attempt_snapshot(
+            lookup.test_delivery_id,
+            lookup.test_attempt_id,
+        )
+        if (
+            snapshot is None
+            or snapshot.delivery.delivery.webhook_id != command.webhook_id
+        ):
+            raise WebhookError(WebhookErrorCode.TEST_DELIVERY_UNAVAILABLE)
+        return self._test_result(snapshot, replay=True)
+
+    async def _prepare_test(
+        self,
+        command: TestWebhookCommand,
+        *,
+        settings: AdminWebhookSettings,
+        test_attempt_id_factory: Callable[[], str],
+        test_token_factory: Callable[[], str],
+    ) -> tuple[_PreparedTest | None, TestWebhookResult | None]:
+        from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
+            EventInsert,
+        )
+
+        validate_idempotency_key(command.idempotency_key)
+        expected_revision = parse_registration_etag(
+            command.if_match,
+            expected_webhook_id=command.webhook_id,
+        )
+        scope = build_idempotency_scope(
+            actor_id=command.actor_id,
+            operation="test",
+            route=f"/admin/webhooks/{command.webhook_id}/test",
+            webhook_id=command.webhook_id,
+        )
+        lookup_digest = idempotency_lookup_digest(command.idempotency_key, scope)
+        request_fingerprint = canonical_request_hash(
+            command.idempotency_key,
+            scope=scope,
+            body={"delivery_config_version": command.delivery_config_version},
+            conditional_version=expected_revision,
+        )
+        started_at = _utc(self._clock(), field_name="test start time")
+        lookup = await self._repository.lookup_idempotency(
+            lookup_digest=lookup_digest,
+            scope=scope,
+            request_fingerprint=request_fingerprint,
+            now=started_at,
+        )
+        replay = await self._resolve_test_lookup(lookup, command=command)
+        if replay is not None:
+            return None, replay
+
+        state = await self._repository.get_migration_state()
+        ring = _require_writable_ring(state, self._key_ring_result)
+        registration = await self._repository.get_protected_registration(
+            command.webhook_id,
+            include_deleted=False,
+        )
+        if registration is None:
+            raise WebhookError(WebhookErrorCode.NOT_FOUND)
+        current = registration.registration
+        if (
+            current.revision != expected_revision
+            or current.delivery_config_version != command.delivery_config_version
+        ):
+            raise WebhookError(WebhookErrorCode.PRECONDITION_FAILED)
+        if current.secret_rotation_required:
+            raise WebhookError(WebhookErrorCode.SECRET_ROTATION_REQUIRED)
+        if (
+            registration.target.key_id != ring.primary_id
+            or registration.secret.key_id != ring.primary_id
+        ):
+            raise WebhookError(WebhookErrorCode.KEY_CONFIGURATION_MISMATCH)
+        target_url = ring.decrypt_text(
+            purpose="registration.target",
+            identity={
+                "registration_id": current.id,
+                "target_version": current.target_version,
+            },
+            protected=registration.target,
+        )
+        signing_secret = ring.decrypt_text(
+            purpose="registration.secret",
+            identity={
+                "registration_id": current.id,
+                "secret_version": current.secret_version,
+            },
+            protected=registration.secret,
+        )
+        target = validate_webhook_target(
+            target_url,
+            allow_http_dev=settings.allow_http_dev,
+        )
+        if (
+            target.hostname != current.target_hostname
+            or _SIGNING_SECRET.fullmatch(signing_secret) is None
+        ):
+            raise WebhookError(WebhookErrorCode.OPERATION_FAILED)
+
+        event_id = _canonical_uuid4(
+            self._event_id_factory(),
+            field_name="event ID",
+        )
+        delivery_id = _canonical_uuid4(
+            self._delivery_id_factory(),
+            field_name="delivery ID",
+        )
+        attempt_id = _canonical_uuid4(
+            test_attempt_id_factory(),
+            field_name="attempt ID",
+        )
+        test_attempt_token = test_token_factory()
+        if not isinstance(test_attempt_token, str) or re.fullmatch(
+            r"[0-9a-f]{64}",
+            test_attempt_token,
+        ) is None:
+            raise WebhookError(WebhookErrorCode.OPERATION_FAILED)
+        data = {"test": True, "webhook_id": current.id}
+        body = _canonical_event_body(
+            event_id=event_id,
+            event_type="webhook.test",
+            created_at=started_at,
+            data=data,
+        )
+        event = EventInsert(
+            id=event_id,
+            event_type="webhook.test",
+            api_version=EVENT_API_VERSION,
+            source_kind=EventSourceKind.COMMAND,
+            aggregate_type=None,
+            aggregate_id=None,
+            aggregate_version=None,
+            source_command_id=f"test:{event_id}",
+            source_component="admin_webhooks.test",
+            source_request_id=command.request_id,
+            body=ring.encrypt_event_body(
+                event_id=event_id,
+                api_version=EVENT_API_VERSION,
+                body=body,
+            ),
+            body_size_bytes=len(body),
+            created_at=started_at,
+        )
+        return (
+            _PreparedTest(
+                registration=registration,
+                event=event,
+                target=target,
+                body=body,
+                signing_secret=signing_secret,
+                scope=scope,
+                lookup_digest=lookup_digest,
+                request_fingerprint=request_fingerprint,
+                expected_revision=expected_revision,
+                started_at=started_at,
+                delivery_id=delivery_id,
+                attempt_id=attempt_id,
+                test_attempt_token=test_attempt_token,
+            ),
+            None,
+        )
+
+    @staticmethod
+    def _test_audit(
+        command: TestWebhookCommand,
+        *,
+        delivery_id: str,
+        attempt_id: str,
+        outcome: TestWebhookOutcome,
+        status_code: int | None = None,
+        reason_code: DeliveryReasonCode | None = None,
+    ) -> TestWebhookAudit:
+        return TestWebhookAudit(
+            actor_id=command.actor_id,
+            webhook_id=command.webhook_id,
+            delivery_id=delivery_id,
+            attempt_id=attempt_id,
+            request_id=command.request_id,
+            outcome=outcome,
+            status_code=status_code,
+            reason_code=reason_code,
+        )
+
+    async def test_webhook(
+        self,
+        command: TestWebhookCommand,
+        *,
+        audit_sink: TestWebhookAuditSink,
+    ) -> TestWebhookResult:
+        """Persist, execute, and close exactly one synchronous test attempt."""
+
+        from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
+            IdempotencyLookupKind,
+            TestAttemptCompletion,
+        )
+
+        if not isinstance(command, TestWebhookCommand):
+            raise TypeError("test command is required")
+        if not callable(audit_sink):
+            raise TypeError("test audit sink is required")
+        settings, executor, attempt_id_factory, token_factory = (
+            self._require_test_dependencies()
+        )
+        try:
+            prepared, replay = await self._prepare_test(
+                command,
+                settings=settings,
+                test_attempt_id_factory=attempt_id_factory,
+                test_token_factory=token_factory,
+            )
+        except Exception as exc:  # noqa: BLE001 - internal boundary is closed
+            raise _map_capture_error(exc) from None
+        if replay is not None:
+            return replay
+        if prepared is None:
+            raise WebhookError(WebhookErrorCode.TEST_DELIVERY_UNAVAILABLE)
+
+        reservation = None
+        raced_lookup = None
+        try:
+            async with self._repository.transaction() as tx:
+                claim = await tx.claim_idempotency(
+                    lookup_digest=prepared.lookup_digest,
+                    scope=prepared.scope,
+                    request_fingerprint=prepared.request_fingerprint,
+                    now=prepared.started_at,
+                    expires_at=prepared.started_at
+                    + timedelta(seconds=settings.idempotency_ttl_seconds),
+                )
+                if claim.kind is IdempotencyLookupKind.CONFLICT:
+                    raise WebhookError(WebhookErrorCode.IDEMPOTENCY_CONFLICT)
+                if claim.kind is not IdempotencyLookupKind.NEW:
+                    raced_lookup = claim
+                else:
+                    locked_state = await tx.lock_migration_state()
+                    _require_writable_ring(locked_state, self._key_ring_result)
+                    current = prepared.registration.registration
+                    reservation = await tx.start_test_attempt(
+                        prepared.event,
+                        webhook_id=command.webhook_id,
+                        delivery_id=prepared.delivery_id,
+                        attempt_id=prepared.attempt_id,
+                        test_attempt_token=prepared.test_attempt_token,
+                        request_timeout_seconds=current.timeout_seconds,
+                        expected_revision=prepared.expected_revision,
+                        expected_delivery_config_version=(
+                            command.delivery_config_version
+                        ),
+                        expected_target_version=current.target_version,
+                        expected_secret_version=current.secret_version,
+                        expected_target=prepared.registration.target,
+                        expected_secret=prepared.registration.secret,
+                        lookup_digest=prepared.lookup_digest,
+                        request_fingerprint=prepared.request_fingerprint,
+                        started_at=prepared.started_at,
+                        expires_at=prepared.started_at + timedelta(hours=72),
+                    )
+                    if reservation is None:
+                        raise WebhookError(WebhookErrorCode.PRECONDITION_FAILED)
+                    try:
+                        await audit_sink(
+                            self._test_audit(
+                                command,
+                                delivery_id=prepared.delivery_id,
+                                attempt_id=prepared.attempt_id,
+                                outcome="accepted",
+                            )
+                        )
+                    except Exception:  # noqa: BLE001 - accepted audit is mandatory
+                        raise WebhookError(WebhookErrorCode.AUDIT_UNAVAILABLE) from None
+        except Exception as exc:  # noqa: BLE001 - start failures cannot reach egress
+            raise _map_capture_error(exc) from None
+
+        if raced_lookup is not None:
+            raced_replay = await self._resolve_test_lookup(
+                raced_lookup,
+                command=command,
+            )
+            if raced_replay is None:
+                raise WebhookError(WebhookErrorCode.TEST_DELIVERY_UNAVAILABLE)
+            return raced_replay
+        if reservation is None or not reservation.start_owner:
+            raise WebhookError(WebhookErrorCode.TEST_DELIVERY_UNAVAILABLE)
+
+        execution = await executor.execute(
+            AttemptExecutionRequest(
+                target=prepared.target,
+                body=prepared.body,
+                signing_secret=prepared.signing_secret,
+                timeout_seconds=prepared.registration.registration.timeout_seconds,
+                event_type="webhook.test",
+                event_id=prepared.event.id,
+                delivery_id=prepared.delivery_id,
+                attempt_number=1,
+                secret_version=prepared.registration.registration.secret_version,
+                kind=DeliveryKind.TEST,
+            )
+        )
+        finished_at = _utc(self._clock(), field_name="test finish time")
+        if execution.outcome is AttemptOutcome.SUCCESS:
+            attempt_state = AttemptState.SUCCEEDED
+            delivery_state = DeliveryState.SUCCEEDED
+            reason_code = None
+            audit_outcome: TestWebhookOutcome = "succeeded"
+        else:
+            if execution.reason_code is None:
+                raise WebhookError(WebhookErrorCode.TEST_DELIVERY_UNAVAILABLE)
+            attempt_state = AttemptState.FAILED
+            delivery_state = DeliveryState.DEAD
+            reason_code = DeliveryReasonCode(execution.reason_code.value)
+            audit_outcome = "failed"
+        completion = TestAttemptCompletion(
+            attempt_state=attempt_state,
+            delivery_state=delivery_state,
+            status_code=execution.status_code,
+            latency_ms=execution.latency_ms,
+            reason_code=reason_code,
+            finished_at=finished_at,
+        )
+        try:
+            async with self._repository.transaction() as tx:
+                completed = await tx.finish_test_attempt(
+                    prepared.delivery_id,
+                    prepared.attempt_id,
+                    prepared.test_attempt_token,
+                    lookup_digest=prepared.lookup_digest,
+                    request_fingerprint=prepared.request_fingerprint,
+                    outcome=completion,
+                )
+        except Exception as exc:  # noqa: BLE001 - completion boundary is closed
+            raise _map_capture_error(exc) from None
+        if completed is None:
+            raise WebhookError(WebhookErrorCode.TEST_DELIVERY_UNAVAILABLE)
+        try:
+            await audit_sink(
+                self._test_audit(
+                    command,
+                    delivery_id=prepared.delivery_id,
+                    attempt_id=prepared.attempt_id,
+                    outcome=audit_outcome,
+                    status_code=execution.status_code,
+                    reason_code=reason_code,
+                )
+            )
+        except Exception:  # noqa: BLE001 - durable receiver truth wins
+            logger.warning("Admin webhook test completion audit unavailable")
+        return self._test_result(completed, replay=False)
 
     @staticmethod
     async def _emit(

@@ -8,6 +8,7 @@ import re
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
+from dataclasses import field as dataclass_field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
@@ -886,6 +887,101 @@ class AttemptCompletion:
             self,
             "finished_at",
             _utc_datetime(self.finished_at, field="finished_at"),
+        )
+
+
+@dataclass(frozen=True)
+class TestAttemptCompletion:
+    """Terminal no-Jobs outcome for one synchronous test attempt."""
+
+    attempt_state: AttemptState
+    delivery_state: DeliveryState
+    status_code: int | None
+    latency_ms: int | None
+    reason_code: DeliveryReasonCode | None
+    finished_at: datetime
+
+    def __post_init__(self) -> None:
+        allowed = {
+            (AttemptState.SUCCEEDED, DeliveryState.SUCCEEDED),
+            (AttemptState.FAILED, DeliveryState.DEAD),
+            (AttemptState.OUTCOME_UNKNOWN, DeliveryState.DEAD),
+        }
+        if (self.attempt_state, self.delivery_state) not in allowed:
+            raise ValueError("test completion shape is invalid")
+        if (self.attempt_state is AttemptState.SUCCEEDED) != (
+            self.reason_code is None
+        ):
+            raise ValueError("test completion reason is invalid")
+        if self.reason_code is not None and not isinstance(
+            self.reason_code,
+            DeliveryReasonCode,
+        ):
+            raise ValueError("test completion reason is invalid")
+        if self.status_code is not None and not 100 <= self.status_code <= 599:
+            raise ValueError("test completion status is invalid")
+        if self.latency_ms is not None and self.latency_ms < 0:
+            raise ValueError("test completion latency is invalid")
+        object.__setattr__(
+            self,
+            "finished_at",
+            _utc_datetime(self.finished_at, field="finished_at"),
+        )
+
+
+@dataclass(frozen=True)
+class TestAttemptSnapshot:
+    """Exact persisted test delivery and its sole append-only attempt."""
+
+    delivery: StoredWebhookDelivery
+    attempt: WebhookDeliveryAttempt
+
+    def __post_init__(self) -> None:
+        if (
+            self.delivery.delivery.kind is not DeliveryKind.TEST
+            or self.delivery.jobs_job_id is not None
+            or self.delivery.delivery.attempt_count != 1
+            or self.delivery.current_attempt_id != self.attempt.id
+            or self.attempt.delivery_id != self.delivery.delivery.id
+            or self.attempt.attempt_number != 1
+        ):
+            raise ValueError("persisted test attempt shape is invalid")
+
+
+@dataclass(frozen=True)
+class TestAttemptReservation:
+    """Atomic test start with explicit post-commit execution ownership."""
+
+    start_owner: bool
+    snapshot: TestAttemptSnapshot
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.start_owner, bool):
+            raise TypeError("test start ownership is invalid")
+        if self.start_owner and (
+            self.snapshot.delivery.delivery.state is not DeliveryState.PROCESSING
+            or self.snapshot.attempt.state is not AttemptState.PROCESSING
+        ):
+            raise ValueError("test start owner must hold processing state")
+
+
+@dataclass(frozen=True)
+class StaleTestAttemptCandidate:
+    """Bounded recovery coordinate for one interrupted synchronous test."""
+
+    delivery_id: str
+    attempt_id: str
+    test_attempt_token: str = dataclass_field(repr=False)
+    stale_at: datetime
+
+    def __post_init__(self) -> None:
+        _canonical_uuid4(self.delivery_id, field="delivery ID")
+        _canonical_uuid4(self.attempt_id, field="attempt ID")
+        _opaque_token(self.test_attempt_token, field="test attempt token")
+        object.__setattr__(
+            self,
+            "stale_at",
+            _utc_datetime(self.stale_at, field="stale_at"),
         )
 
 
@@ -1832,6 +1928,54 @@ class AdminWebhookRepository:
                 is_postgres=self.is_postgres,
             ).get_current_delivery_attempt(delivery_id)
 
+    async def get_test_attempt_snapshot(
+        self,
+        delivery_id: str,
+        attempt_id: str,
+    ) -> TestAttemptSnapshot | None:
+        """Load one exact persisted test result without protected material."""
+
+        async with self._read_connection() as connection:
+            return await AdminWebhookUnitOfWork(
+                connection,
+                is_postgres=self.is_postgres,
+            ).get_test_attempt_snapshot(delivery_id, attempt_id)
+
+    async def lookup_idempotency(
+        self,
+        *,
+        lookup_digest: str,
+        scope: IdempotencyScope,
+        request_fingerprint: str,
+        now: datetime,
+    ) -> IdempotencyLookup:
+        """Read exact replay evidence without claiming or expiring a row."""
+
+        async with self._read_connection() as connection:
+            return await AdminWebhookUnitOfWork(
+                connection,
+                is_postgres=self.is_postgres,
+            ).lookup_idempotency(
+                lookup_digest=lookup_digest,
+                scope=scope,
+                request_fingerprint=request_fingerprint,
+                now=now,
+            )
+
+    async def list_stale_test_attempts(
+        self,
+        *,
+        now: datetime,
+        limit: int = 100,
+    ) -> tuple[StaleTestAttemptCandidate, ...]:
+        """Return one bounded ordered page of due interrupted tests."""
+
+        async with self._read_connection() as connection:
+            return await AdminWebhookUnitOfWork(
+                connection,
+                is_postgres=self.is_postgres,
+            ).list_stale_test_attempts(now=now, limit=limit)
+
     async def list_pending_jobs_dispositions(
         self,
         *,
@@ -2496,6 +2640,102 @@ class AdminWebhookUnitOfWork(_ConnectionAdapter):
             (delivery_id, delivery_id),
         )
         return _attempt_from_row(row) if row is not None else None
+
+    async def get_test_attempt_snapshot(
+        self,
+        delivery_id: str,
+        attempt_id: str,
+        *,
+        lock: bool = False,
+    ) -> TestAttemptSnapshot | None:
+        _canonical_uuid4(delivery_id, field="delivery ID")
+        _canonical_uuid4(attempt_id, field="attempt ID")
+        lock_clause = " FOR UPDATE" if lock and self._is_postgres else ""
+        delivery_row = await self._fetchrow(
+            f"SELECT {_DELIVERY_COLUMNS} FROM admin_webhook_deliveries "
+            f"WHERE id = ? AND kind = 'test' AND jobs_job_id IS NULL{lock_clause}",  # noqa: S608
+            (delivery_id,),
+        )
+        if delivery_row is None:
+            return None
+        attempt_row = await self._fetchrow(
+            f"SELECT {_ATTEMPT_COLUMNS} FROM admin_webhook_delivery_attempts "
+            f"WHERE id = ? AND delivery_id = ? AND attempt_number = 1 "
+            f"AND jobs_job_id IS NULL AND jobs_lease_id IS NULL "
+            f"AND test_attempt_token IS NOT NULL{lock_clause}",  # noqa: S608
+            (attempt_id, delivery_id),
+        )
+        if attempt_row is None:
+            return None
+        return TestAttemptSnapshot(
+            delivery=_stored_delivery_from_row(delivery_row),
+            attempt=_attempt_from_row(attempt_row),
+        )
+
+    async def list_stale_test_attempts(
+        self,
+        *,
+        now: datetime,
+        limit: int,
+    ) -> tuple[StaleTestAttemptCandidate, ...]:
+        now = _utc_datetime(now, field="now")
+        if not 1 <= limit <= 100:
+            raise ValueError("limit must be between 1 and 100")
+        due_predicate = (
+            "attempt.started_at + "
+            "(attempt.request_timeout_seconds + 90) * INTERVAL '1 second' <= ?"
+            if self._is_postgres
+            else "julianday(attempt.started_at) + "
+            "(attempt.request_timeout_seconds + 90) / 86400.0 <= julianday(?)"
+        )
+        due_order = (
+            "attempt.started_at + "
+            "(attempt.request_timeout_seconds + 90) * INTERVAL '1 second'"
+            if self._is_postgres
+            else "julianday(attempt.started_at) + "
+            "(attempt.request_timeout_seconds + 90) / 86400.0"
+        )
+        rows = await self._fetch(
+            f"""
+            SELECT delivery.id AS delivery_id, attempt.id AS attempt_id,
+                   attempt.test_attempt_token, attempt.request_timeout_seconds,
+                   attempt.started_at
+            FROM admin_webhook_delivery_attempts AS attempt
+            JOIN admin_webhook_deliveries AS delivery
+              ON delivery.id = attempt.delivery_id
+            WHERE delivery.kind = 'test' AND delivery.jobs_job_id IS NULL
+              AND delivery.state = 'processing'
+              AND delivery.current_attempt_id = attempt.id
+              AND delivery.attempt_count = 1
+              AND attempt.attempt_number = 1
+              AND attempt.state = 'processing'
+              AND attempt.test_attempt_token IS NOT NULL
+              AND attempt.request_timeout_seconds IS NOT NULL
+              AND {due_predicate}
+            ORDER BY {due_order} ASC, delivery.id ASC, attempt.id ASC
+            LIMIT ?
+            """,  # noqa: S608 - backend date expressions are fixed literals.
+            (now, limit),
+        )
+        candidates: list[StaleTestAttemptCandidate] = []
+        for row in rows:
+            started_at = _parse_datetime(row["started_at"])
+            if started_at is None:
+                raise ValueError("persisted test start time is invalid")
+            timeout = int(row["request_timeout_seconds"])
+            if not 1 <= timeout <= 30:
+                raise ValueError("persisted test timeout is invalid")
+            stale_at = started_at + timedelta(seconds=timeout + 90)
+            if stale_at <= now:
+                candidates.append(
+                    StaleTestAttemptCandidate(
+                        delivery_id=str(row["delivery_id"]),
+                        attempt_id=str(row["attempt_id"]),
+                        test_attempt_token=str(row["test_attempt_token"]),
+                        stale_at=stale_at,
+                    )
+                )
+        return tuple(candidates)
 
     async def list_pending_jobs_dispositions(
         self,
@@ -3169,82 +3409,510 @@ class AdminWebhookUnitOfWork(_ConnectionAdapter):
             bundle=bundle,
         )
 
-    async def reserve_test_attempt(
+    async def start_test_attempt(
         self,
-        test_attempt_token: str,
+        event: EventInsert,
+        *,
+        webhook_id: int,
         delivery_id: str,
         attempt_id: str,
+        test_attempt_token: str,
         request_timeout_seconds: int,
+        expected_revision: int,
+        expected_delivery_config_version: int,
+        expected_target_version: int,
+        expected_secret_version: int,
+        expected_target: ProtectedValue,
+        expected_secret: ProtectedValue,
+        lookup_digest: str,
+        request_fingerprint: str,
         started_at: datetime,
-    ) -> AttemptReservation | None:
+        expires_at: datetime,
+    ) -> TestAttemptReservation | None:
+        """Atomically persist one no-fanout test directly in processing."""
+
+        if not isinstance(event, EventInsert):
+            raise TypeError("test event is invalid")
+        if (
+            event.event_type != "webhook.test"
+            or event.source_kind is not EventSourceKind.COMMAND
+            or event.aggregate_type is not None
+            or event.aggregate_id is not None
+            or event.aggregate_version is not None
+            or event.source_command_id is None
+        ):
+            raise ValueError("test event source is invalid")
+        if isinstance(webhook_id, bool) or not isinstance(webhook_id, int) or webhook_id < 1:
+            raise ValueError("webhook ID is invalid")
         _opaque_token(test_attempt_token, field="test attempt token")
         _canonical_uuid4(delivery_id, field="delivery ID")
         _canonical_uuid4(attempt_id, field="attempt ID")
         if not 1 <= request_timeout_seconds <= 30:
             raise ValueError("request timeout must be between 1 and 30")
+        for value, field in (
+            (expected_revision, "registration revision"),
+            (expected_delivery_config_version, "delivery config version"),
+            (expected_target_version, "target version"),
+            (expected_secret_version, "secret version"),
+        ):
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise ValueError(f"{field} is invalid")
+        if not isinstance(expected_target, ProtectedValue) or not isinstance(
+            expected_secret,
+            ProtectedValue,
+        ):
+            raise TypeError("protected registration snapshot is invalid")
+        if _LOOKUP_DIGEST.fullmatch(lookup_digest) is None:
+            raise ValueError("lookup digest is invalid")
+        if _REQUEST_FINGERPRINT.fullmatch(request_fingerprint) is None:
+            raise ValueError("request fingerprint is invalid")
         started_at = _utc_datetime(started_at, field="started_at")
-        delivery_row = await self._fetchrow(
-            f"""
-            SELECT {_DELIVERY_COLUMNS}
-            FROM admin_webhook_deliveries
-            WHERE id = ? AND kind = 'test' AND jobs_job_id IS NULL
-            """,
+        expires_at = _utc_datetime(expires_at, field="expires_at")
+        if expires_at != started_at + timedelta(hours=72):
+            raise ValueError("test delivery expiry must be exactly 72 hours")
+        if event.created_at != started_at:
+            raise ValueError("test event and attempt timestamps must match")
+        if await self._fetchrow(
+            "SELECT id FROM admin_webhook_deliveries WHERE id = ?",
             (delivery_id,),
+        ) is not None:
+            raise ValueError("test delivery supports attempt one only")
+
+        registration = await self.get_protected_registration(
+            webhook_id,
+            include_deleted=False,
+            lock=True,
         )
-        if delivery_row is None:
+        if registration is None:
             return None
-        delivery = _stored_delivery_from_row(delivery_row)
-        if delivery.delivery.attempt_count >= 4:
-            return AttemptReservation(
-                reserved=False,
-                delivery=delivery,
-                attempt=None,
-                bundle=None,
-                reason_code=DeliveryReasonCode.ATTEMPT_BUDGET_EXHAUSTED,
+        current = registration.registration
+        if (
+            current.revision != expected_revision
+            or current.delivery_config_version != expected_delivery_config_version
+            or current.target_version != expected_target_version
+            or current.secret_version != expected_secret_version
+            or current.secret_rotation_required
+            or not hmac.compare_digest(
+                registration.target.ciphertext_json,
+                expected_target.ciphertext_json,
             )
-        if delivery.delivery.state is not DeliveryState.PENDING:
+            or not hmac.compare_digest(registration.target.key_id, expected_target.key_id)
+            or not hmac.compare_digest(
+                registration.secret.ciphertext_json,
+                expected_secret.ciphertext_json,
+            )
+            or not hmac.compare_digest(registration.secret.key_id, expected_secret.key_id)
+        ):
             return None
-        inserted = await self._fetchrow(
+
+        event_inserted = await self._fetchrow(
+            """
+            INSERT INTO admin_webhook_events (
+                id, event_type, api_version, source_kind, aggregate_type,
+                aggregate_id, aggregate_version, source_command_id,
+                source_component, source_request_id, body_ciphertext_json,
+                body_key_id, body_size_bytes, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            RETURNING id
+            """,
+            (
+                event.id,
+                event.event_type,
+                event.api_version,
+                event.source_kind.value,
+                event.aggregate_type,
+                event.aggregate_id,
+                event.aggregate_version,
+                event.source_command_id,
+                event.source_component,
+                event.source_request_id,
+                event.body.ciphertext_json,
+                event.body.key_id,
+                event.body_size_bytes,
+                event.created_at,
+            ),
+        )
+        delivery_inserted = await self._fetchrow(
+            f"""
+            INSERT INTO admin_webhook_deliveries (
+                id, event_id, webhook_id, kind, delivery_config_version,
+                secret_version, state, attempt_count, current_attempt_id,
+                expires_at, created_at, updated_at
+            ) VALUES (?, ?, ?, 'test', ?, ?, 'processing', 1, ?, ?, ?, ?)
+            RETURNING {_DELIVERY_COLUMNS}
+            """,
+            (
+                delivery_id,
+                event.id,
+                webhook_id,
+                expected_delivery_config_version,
+                expected_secret_version,
+                attempt_id,
+                expires_at,
+                started_at,
+                started_at,
+            ),
+        )
+        attempt_inserted = await self._fetchrow(
             f"""
             INSERT INTO admin_webhook_delivery_attempts (
                 id, delivery_id, attempt_number, test_attempt_token,
                 request_timeout_seconds, started_at, state, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, 'processing', ?)
+            ) VALUES (?, ?, 1, ?, ?, ?, 'processing', ?)
             RETURNING {_ATTEMPT_COLUMNS}
             """,
             (
                 attempt_id,
                 delivery_id,
-                delivery.delivery.attempt_count + 1,
                 test_attempt_token,
                 request_timeout_seconds,
                 started_at,
                 started_at,
             ),
         )
-        updated = await self._fetchrow(
-            f"""
-            UPDATE admin_webhook_deliveries
-            SET state = 'processing', attempt_count = attempt_count + 1,
-                current_attempt_id = ?, updated_at = ?
-            WHERE id = ? AND kind = 'test' AND state = 'pending'
-              AND attempt_count = ?
-            RETURNING {_DELIVERY_COLUMNS}
+        metadata_json, _ = _safe_response_metadata(
+            {"result_kind": "processing", "retry_after_seconds": 5}
+        )
+        idempotency_attached = await self._fetchrow(
+            """
+            UPDATE admin_webhook_idempotency
+            SET resource_id = ?, resource_version = ?,
+                test_delivery_id = ?, test_attempt_id = ?,
+                response_status = 202, response_metadata_json = ?,
+                updated_at = ?
+            WHERE lookup_digest = ? AND request_fingerprint = ?
+              AND state = 'in_progress' AND test_delivery_id IS NULL
+              AND test_attempt_id IS NULL
+            RETURNING id
             """,
-            (attempt_id, started_at, delivery_id, delivery.delivery.attempt_count),
+            (
+                webhook_id,
+                expected_revision,
+                delivery_id,
+                attempt_id,
+                metadata_json,
+                started_at,
+                lookup_digest,
+                request_fingerprint,
+            ),
         )
-        if inserted is None or updated is None:
-            raise ValueError("test attempt reservation compare-and-set failed")
+        if (
+            event_inserted is None
+            or delivery_inserted is None
+            or attempt_inserted is None
+            or idempotency_attached is None
+        ):
+            raise ValueError("test attempt start compare-and-set failed")
+        await self.mark_first_canonical_activity("event_capture", started_at)
         await self.mark_first_canonical_activity("delivery_attempt", started_at)
-        bundle = await self.get_delivery_bundle(delivery_id)
-        if bundle is None:
-            raise ValueError("reserved test delivery bundle is unavailable")
-        return AttemptReservation(
-            reserved=True,
-            delivery=_stored_delivery_from_row(updated),
-            attempt=_attempt_from_row(inserted),
-            bundle=bundle,
+        return TestAttemptReservation(
+            start_owner=True,
+            snapshot=TestAttemptSnapshot(
+                delivery=_stored_delivery_from_row(delivery_inserted),
+                attempt=_attempt_from_row(attempt_inserted),
+            ),
         )
+
+    async def finish_test_attempt(
+        self,
+        delivery_id: str,
+        attempt_id: str,
+        test_attempt_token: str,
+        *,
+        lookup_digest: str,
+        request_fingerprint: str,
+        outcome: TestAttemptCompletion,
+    ) -> TestAttemptSnapshot | None:
+        """Close one exact test and its idempotency result atomically."""
+
+        _canonical_uuid4(delivery_id, field="delivery ID")
+        _canonical_uuid4(attempt_id, field="attempt ID")
+        _opaque_token(test_attempt_token, field="test attempt token")
+        if _LOOKUP_DIGEST.fullmatch(lookup_digest) is None:
+            raise ValueError("lookup digest is invalid")
+        if _REQUEST_FINGERPRINT.fullmatch(request_fingerprint) is None:
+            raise ValueError("request fingerprint is invalid")
+        if not isinstance(outcome, TestAttemptCompletion):
+            raise TypeError("test attempt outcome is invalid")
+        preliminary = await self._fetchrow(
+            """
+            SELECT webhook_id FROM admin_webhook_deliveries
+            WHERE id = ? AND kind = 'test' AND jobs_job_id IS NULL
+            """,
+            (delivery_id,),
+        )
+        if preliminary is None:
+            return None
+        registration = await self.get_protected_registration(
+            int(preliminary["webhook_id"]),
+            include_deleted=True,
+            lock=True,
+        )
+        snapshot = await self.get_test_attempt_snapshot(
+            delivery_id,
+            attempt_id,
+            lock=True,
+        )
+        if (
+            snapshot is None
+            or snapshot.delivery.delivery.state is not DeliveryState.PROCESSING
+            or snapshot.attempt.state is not AttemptState.PROCESSING
+        ):
+            return None
+        attempt_token_row = await self._fetchrow(
+            """
+            SELECT test_attempt_token
+            FROM admin_webhook_delivery_attempts
+            WHERE id = ? AND delivery_id = ? AND state = 'processing'
+            """,
+            (attempt_id, delivery_id),
+        )
+        if attempt_token_row is None or not hmac.compare_digest(
+            str(attempt_token_row["test_attempt_token"]),
+            test_attempt_token,
+        ):
+            return None
+        lock_clause = " FOR UPDATE" if self._is_postgres else ""
+        replay_row = await self._fetchrow(
+            "SELECT resource_id, resource_version "
+            "FROM admin_webhook_idempotency "
+            "WHERE lookup_digest = ? AND request_fingerprint = ? "
+            "AND state = 'in_progress' AND test_delivery_id = ? "
+            f"AND test_attempt_id = ?{lock_clause}",  # noqa: S608
+            (lookup_digest, request_fingerprint, delivery_id, attempt_id),
+        )
+        if replay_row is None:
+            return None
+        reviewed_revision = int(replay_row["resource_version"])
+        current = registration.registration if registration is not None else None
+        completed_after_config_change = (
+            current is None
+            or current.deleted_at is not None
+            or current.revision != reviewed_revision
+            or current.delivery_config_version
+            != snapshot.delivery.delivery.delivery_config_version
+            or current.secret_version != snapshot.delivery.delivery.secret_version
+        )
+        attempt_reason = outcome.reason_code
+        if outcome.attempt_state is AttemptState.OUTCOME_UNKNOWN:
+            attempt_reason = DeliveryReasonCode.OUTCOME_UNKNOWN
+        attempt_updated = await self._fetchrow(
+            """
+            UPDATE admin_webhook_delivery_attempts
+            SET state = ?, status_code = ?, latency_ms = ?, reason_code = ?,
+                requested_retry_delay_seconds = NULL, finished_at = ?
+            WHERE id = ? AND delivery_id = ? AND attempt_number = 1
+              AND test_attempt_token = ? AND state = 'processing'
+            RETURNING id
+            """,
+            (
+                outcome.attempt_state.value,
+                outcome.status_code,
+                outcome.latency_ms,
+                attempt_reason.value if attempt_reason is not None else None,
+                outcome.finished_at,
+                attempt_id,
+                delivery_id,
+                test_attempt_token,
+            ),
+        )
+        delivery_updated = await self._fetchrow(
+            """
+            UPDATE admin_webhook_deliveries
+            SET state = ?, status_code = ?, latency_ms = ?, reason_code = ?,
+                completed_after_config_change = ?, terminal_at = ?, updated_at = ?
+            WHERE id = ? AND kind = 'test' AND jobs_job_id IS NULL
+              AND state = 'processing' AND attempt_count = 1
+              AND current_attempt_id = ?
+            RETURNING id
+            """,
+            (
+                outcome.delivery_state.value,
+                outcome.status_code,
+                outcome.latency_ms,
+                outcome.reason_code.value if outcome.reason_code is not None else None,
+                completed_after_config_change,
+                outcome.finished_at,
+                outcome.finished_at,
+                delivery_id,
+                attempt_id,
+            ),
+        )
+        result_kind = (
+            "succeeded"
+            if outcome.delivery_state is DeliveryState.SUCCEEDED
+            else (
+                "interrupted"
+                if outcome.attempt_state is AttemptState.OUTCOME_UNKNOWN
+                else "failed"
+            )
+        )
+        metadata_json, _ = _safe_response_metadata(
+            {
+                "completed_after_config_change": completed_after_config_change,
+                "latency_ms": outcome.latency_ms,
+                "reason_code": (
+                    outcome.reason_code.value
+                    if outcome.reason_code is not None
+                    else None
+                ),
+                "result_kind": result_kind,
+                "status_code": outcome.status_code,
+            }
+        )
+        idempotency_updated = await self._fetchrow(
+            """
+            UPDATE admin_webhook_idempotency
+            SET state = 'completed', response_status = 200,
+                response_metadata_json = ?, updated_at = ?
+            WHERE lookup_digest = ? AND request_fingerprint = ?
+              AND state = 'in_progress' AND test_delivery_id = ?
+              AND test_attempt_id = ?
+            RETURNING id
+            """,
+            (
+                metadata_json,
+                outcome.finished_at,
+                lookup_digest,
+                request_fingerprint,
+                delivery_id,
+                attempt_id,
+            ),
+        )
+        if (
+            attempt_updated is None
+            or delivery_updated is None
+            or idempotency_updated is None
+        ):
+            raise ValueError("test attempt completion compare-and-set failed")
+        completed = await self.get_test_attempt_snapshot(delivery_id, attempt_id)
+        if completed is None:
+            raise ValueError("completed test attempt is unavailable")
+        return completed
+
+    async def recover_stale_test_attempt(
+        self,
+        delivery_id: str,
+        attempt_id: str,
+        test_attempt_token: str,
+        *,
+        now: datetime,
+    ) -> TestAttemptSnapshot | None:
+        """Terminalize one due interrupted test without Jobs or receiver work."""
+
+        _canonical_uuid4(delivery_id, field="delivery ID")
+        _canonical_uuid4(attempt_id, field="attempt ID")
+        _opaque_token(test_attempt_token, field="test attempt token")
+        now = _utc_datetime(now, field="now")
+        preliminary = await self._fetchrow(
+            """
+            SELECT webhook_id FROM admin_webhook_deliveries
+            WHERE id = ? AND kind = 'test' AND jobs_job_id IS NULL
+            """,
+            (delivery_id,),
+        )
+        if preliminary is None:
+            return None
+        await self.get_protected_registration(
+            int(preliminary["webhook_id"]),
+            include_deleted=True,
+            lock=True,
+        )
+        snapshot = await self.get_test_attempt_snapshot(
+            delivery_id,
+            attempt_id,
+            lock=True,
+        )
+        if (
+            snapshot is None
+            or snapshot.delivery.delivery.state is not DeliveryState.PROCESSING
+            or snapshot.attempt.state is not AttemptState.PROCESSING
+            or snapshot.attempt.request_timeout_seconds is None
+        ):
+            return None
+        token_row = await self._fetchrow(
+            """
+            SELECT test_attempt_token
+            FROM admin_webhook_delivery_attempts
+            WHERE id = ? AND delivery_id = ? AND state = 'processing'
+            """,
+            (attempt_id, delivery_id),
+        )
+        if token_row is None or not hmac.compare_digest(
+            str(token_row["test_attempt_token"]),
+            test_attempt_token,
+        ):
+            return None
+        stale_at = snapshot.attempt.started_at + timedelta(
+            seconds=snapshot.attempt.request_timeout_seconds + 90
+        )
+        if now < stale_at:
+            return None
+        lock_clause = " FOR UPDATE" if self._is_postgres else ""
+        replay_row = await self._fetchrow(
+            "SELECT id FROM admin_webhook_idempotency "
+            "WHERE state = 'in_progress' AND test_delivery_id = ? "
+            f"AND test_attempt_id = ?{lock_clause}",  # noqa: S608
+            (delivery_id, attempt_id),
+        )
+        if replay_row is None:
+            return None
+        attempt_updated = await self._fetchrow(
+            """
+            UPDATE admin_webhook_delivery_attempts
+            SET state = 'outcome_unknown', status_code = NULL,
+                latency_ms = NULL, reason_code = 'outcome_unknown',
+                requested_retry_delay_seconds = NULL, finished_at = ?
+            WHERE id = ? AND delivery_id = ? AND attempt_number = 1
+              AND test_attempt_token = ? AND state = 'processing'
+            RETURNING id
+            """,
+            (stale_at, attempt_id, delivery_id, test_attempt_token),
+        )
+        delivery_updated = await self._fetchrow(
+            """
+            UPDATE admin_webhook_deliveries
+            SET state = 'dead', status_code = NULL, latency_ms = NULL,
+                reason_code = 'test_attempt_interrupted',
+                completed_after_config_change = FALSE,
+                terminal_at = ?, updated_at = ?
+            WHERE id = ? AND kind = 'test' AND jobs_job_id IS NULL
+              AND state = 'processing' AND attempt_count = 1
+              AND current_attempt_id = ?
+            RETURNING id
+            """,
+            (stale_at, stale_at, delivery_id, attempt_id),
+        )
+        metadata_json, _ = _safe_response_metadata(
+            {
+                "completed_after_config_change": False,
+                "latency_ms": None,
+                "reason_code": DeliveryReasonCode.TEST_ATTEMPT_INTERRUPTED.value,
+                "result_kind": "interrupted",
+                "status_code": None,
+            }
+        )
+        idempotency_updated = await self._fetchrow(
+            """
+            UPDATE admin_webhook_idempotency
+            SET state = 'completed', response_status = 200,
+                response_metadata_json = ?, updated_at = ?
+            WHERE id = ? AND state = 'in_progress'
+              AND test_delivery_id = ? AND test_attempt_id = ?
+            RETURNING id
+            """,
+            (metadata_json, stale_at, replay_row["id"], delivery_id, attempt_id),
+        )
+        if (
+            attempt_updated is None
+            or delivery_updated is None
+            or idempotency_updated is None
+        ):
+            raise ValueError("stale test recovery compare-and-set failed")
+        recovered = await self.get_test_attempt_snapshot(delivery_id, attempt_id)
+        if recovered is None:
+            raise ValueError("recovered test attempt is unavailable")
+        return recovered
 
     async def finish_attempt_and_prepare_disposition(
         self,
@@ -4700,6 +5368,38 @@ class AdminWebhookUnitOfWork(_ConnectionAdapter):
             raise WebhookRepositoryError(code)
         return _registration_from_row(row)
 
+    async def lookup_idempotency(
+        self,
+        *,
+        lookup_digest: str,
+        scope: IdempotencyScope,
+        request_fingerprint: str,
+        now: datetime,
+    ) -> IdempotencyLookup:
+        """Read replay state without deleting expiry evidence or claiming."""
+
+        now = _utc_datetime(now, field="now")
+        if _LOOKUP_DIGEST.fullmatch(lookup_digest) is None:
+            raise ValueError("lookup digest is invalid")
+        if _REQUEST_FINGERPRINT.fullmatch(request_fingerprint) is None:
+            raise ValueError("request fingerprint is invalid")
+        row = await self._fetchrow(
+            "SELECT * FROM admin_webhook_idempotency WHERE lookup_digest = ?",
+            (lookup_digest,),
+        )
+        if row is None:
+            return IdempotencyLookup(kind=IdempotencyLookupKind.NEW)
+        expires_at = _parse_datetime(row["expires_at"])
+        if expires_at is None:
+            raise ValueError("persisted idempotency expiry is invalid")
+        if expires_at <= now:
+            return IdempotencyLookup(kind=IdempotencyLookupKind.NEW)
+        return await self._idempotency_lookup_from_row(
+            row,
+            scope=scope,
+            request_fingerprint=request_fingerprint,
+        )
+
     async def claim_idempotency(
         self,
         *,
@@ -4796,9 +5496,41 @@ class AdminWebhookUnitOfWork(_ConnectionAdapter):
             request_fingerprint,
         ):
             return IdempotencyLookup(kind=IdempotencyLookupKind.CONFLICT)
+        test_delivery_id = (
+            _canonical_uuid4(
+                row["test_delivery_id"],
+                field="persisted test delivery ID",
+            )
+            if row["test_delivery_id"] is not None
+            else None
+        )
+        test_attempt_id = (
+            _canonical_uuid4(
+                row["test_attempt_id"],
+                field="persisted test attempt ID",
+            )
+            if row["test_attempt_id"] is not None
+            else None
+        )
+        if (test_delivery_id is None) != (test_attempt_id is None):
+            raise ValueError("persisted test replay coordinates are invalid")
+        metadata: Mapping[str, object] | None = None
+        if row["response_metadata_json"] is not None:
+            metadata = MappingProxyType(
+                _strict_json_object(row["response_metadata_json"])
+            )
+        response_status = (
+            int(row["response_status"])
+            if row["response_status"] is not None
+            else None
+        )
         if str(row["state"]) == "in_progress":
             return IdempotencyLookup(
                 kind=IdempotencyLookupKind.IN_PROGRESS,
+                test_delivery_id=test_delivery_id,
+                test_attempt_id=test_attempt_id,
+                response_status=response_status,
+                response_metadata=metadata,
                 expires_at=_parse_datetime(row["expires_at"]),
             )
 
@@ -4808,9 +5540,6 @@ class AdminWebhookUnitOfWork(_ConnectionAdapter):
                 ciphertext_json=str(row["replay_secret_ciphertext_json"]),
                 key_id=str(row["replay_secret_key_id"]),
             )
-        metadata: Mapping[str, object] | None = None
-        if row["response_metadata_json"] is not None:
-            metadata = MappingProxyType(_strict_json_object(row["response_metadata_json"]))
         resource_id = int(row["resource_id"]) if row["resource_id"] is not None else None
         resource_version = int(row["resource_version"]) if row["resource_version"] is not None else None
         secret_version = int(row["secret_version"]) if row["secret_version"] is not None else None
@@ -4832,9 +5561,9 @@ class AdminWebhookUnitOfWork(_ConnectionAdapter):
             resource_version=resource_version,
             secret_version=secret_version,
             replay_secret=replay_secret,
-            test_delivery_id=(str(row["test_delivery_id"]) if row["test_delivery_id"] is not None else None),
-            test_attempt_id=(str(row["test_attempt_id"]) if row["test_attempt_id"] is not None else None),
-            response_status=(int(row["response_status"]) if row["response_status"] is not None else None),
+            test_delivery_id=test_delivery_id,
+            test_attempt_id=test_attempt_id,
+            response_status=response_status,
             response_metadata=metadata,
             resource_superseded=superseded,
             expires_at=_parse_datetime(row["expires_at"]),

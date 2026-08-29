@@ -24,7 +24,11 @@ from tldw_Server_API.app.core.Admin_Webhooks.domain import (
     DeliveryRuntimeReasonCode,
     DeliveryState,
     EventSourceKind,
+    IdempotencyScope,
     JobsDispositionKind,
+    build_idempotency_scope,
+    canonical_request_hash,
+    idempotency_lookup_digest,
 )
 from tldw_Server_API.app.core.AuthNZ.exceptions import TransactionError
 from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
@@ -36,6 +40,7 @@ from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
     EnqueueClaim,
     EventCaptureResult,
     EventInsert,
+    IdempotencyLookupKind,
     PendingJobsDisposition,
     RegistrationInsert,
     RegistrationTarget,
@@ -43,6 +48,8 @@ from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
     RuntimeHeartbeatWrite,
     StoredWebhookDelivery,
     StoredWebhookEvent,
+    TestAttemptCompletion,
+    TestAttemptReservation,
     WebhookRepositoryError,
     _attempt_from_row,
     _heartbeat_from_row,
@@ -167,6 +174,58 @@ async def seed_registration(
     return webhook_id
 
 
+async def mark_migration_ready(
+    repository: AdminWebhookRepository,
+    *,
+    now: datetime = NOW - timedelta(hours=2),
+) -> None:
+    digest = "sha256:" + ("a" * 64)
+    fingerprint = "hmac-sha256:" + ("b" * 64)
+    async with repository.transaction() as tx:
+        migration = await tx.lock_migration_state()
+        await tx.compare_and_set_migration_state(
+            expected_revision=migration.state_revision,
+            updates={
+                "phase": "complete",
+                "import_operation_id": "whmig_" + ("c" * 32),
+                "import_operator_id": 7,
+                "import_started_at": now,
+                "import_approved_at": now,
+                "artifacts_ready_at": now,
+                "database_committed_at": now,
+                "fingerprint_key_id": KEY_ID,
+                "completed_at": now,
+                "active_primary_key_id": KEY_ID,
+                "system_ops_webhook_fingerprint": fingerprint,
+                "legacy_table_fingerprint": fingerprint,
+                "redacted_report_digest": digest,
+                "protected_backup_ciphertext_digest": digest,
+                "active_report_path": "/srv/tldw/webhook-report.json",
+                "active_backup_path": "/srv/tldw/webhook-backup.enc",
+                "active_key_path": "/srv/tldw/webhook-backup.key",
+                "staging_report_path": "/srv/tldw/webhook-report.json.staging",
+                "staging_backup_path": "/srv/tldw/webhook-backup.enc.staging",
+                "staging_key_path": "/srv/tldw/webhook-backup.key.staging",
+                "report_owner_id": 1000,
+                "report_group_id": 1000,
+                "report_mode": 384,
+                "report_file_identity": "1048576:41",
+                "backup_owner_id": 1000,
+                "backup_group_id": 1000,
+                "backup_mode": 384,
+                "backup_file_identity": "1048576:42",
+                "rollback_key_owner_id": 1000,
+                "rollback_key_group_id": 1000,
+                "rollback_key_mode": 384,
+                "rollback_key_file_identity": "1048576:43",
+                "rollback_expires_at": now + timedelta(days=7),
+                "rollback_retirement_phase": "retained",
+                "expected_ciphertext_digest": digest,
+            },
+            at=now,
+        )
+
+
 def assert_metadata_is_sanitized(value: object) -> None:
     names = {field.name for field in fields(value)}
     assert not names & {
@@ -226,8 +285,40 @@ def test_repository_record_contracts_are_closed_and_validate_invariants() -> Non
             PendingJobsDisposition,
             RuntimeHeartbeatWrite,
             RetentionBatchResult,
+            TestAttemptCompletion,
+            TestAttemptReservation,
         )
     )
+
+
+def test_test_attempt_completion_allows_only_terminal_no_jobs_shapes() -> None:
+    succeeded = TestAttemptCompletion(
+        attempt_state=AttemptState.SUCCEEDED,
+        delivery_state=DeliveryState.SUCCEEDED,
+        status_code=204,
+        latency_ms=3,
+        reason_code=None,
+        finished_at=NOW,
+    )
+    interrupted = TestAttemptCompletion(
+        attempt_state=AttemptState.OUTCOME_UNKNOWN,
+        delivery_state=DeliveryState.DEAD,
+        status_code=None,
+        latency_ms=None,
+        reason_code=DeliveryReasonCode.TEST_ATTEMPT_INTERRUPTED,
+        finished_at=NOW,
+    )
+    assert succeeded.delivery_state is DeliveryState.SUCCEEDED
+    assert interrupted.attempt_state is AttemptState.OUTCOME_UNKNOWN
+    with pytest.raises(ValueError, match="test completion"):
+        TestAttemptCompletion(
+            attempt_state=AttemptState.RETRYABLE,
+            delivery_state=DeliveryState.RETRY_WAIT,
+            status_code=503,
+            latency_ms=3,
+            reason_code=DeliveryReasonCode.HTTP_SERVER_ERROR,
+            finished_at=NOW,
+        )
 
     with pytest.raises(ValueError, match="disposition token"):
         PendingJobsDisposition(
@@ -911,75 +1002,6 @@ async def exercise_delivery_state_machine(
         webhook_id, delivery_id
     ) == before_fifth_attempts
 
-    async with repository.transaction() as tx:
-        test_delivery = await tx.insert_delivery(
-            canonical_uuid4("test-reservation"),
-            event_id=canonical_uuid4("state-event"),
-            webhook_id=webhook_id,
-            kind=DeliveryKind.TEST,
-            expires_at=NOW + timedelta(hours=72),
-            now=NOW + timedelta(minutes=6),
-        )
-        with pytest.raises(ValueError, match="test attempt token"):
-            await tx.reserve_test_attempt(
-                "A" * 64,
-                test_delivery.delivery.id,
-                canonical_uuid4("invalid-token-attempt"),
-                7,
-                NOW + timedelta(minutes=7),
-            )
-        test_reservation = await tx.reserve_test_attempt(
-            opaque_token("test-token"),
-            test_delivery.delivery.id,
-            canonical_uuid4("test-attempt"),
-            7,
-            NOW + timedelta(minutes=7),
-        )
-        assert test_reservation is not None and test_reservation.reserved
-        assert test_reservation.attempt is not None
-        assert test_reservation.attempt.request_timeout_seconds == 7
-        assert (
-            await tx.finish_attempt_and_prepare_disposition(
-                opaque_token("test-token"),
-                AttemptCompletion(
-                    attempt_state=AttemptState.SUCCEEDED,
-                    delivery_state=DeliveryState.SUCCEEDED,
-                    disposition=None,
-                    status_code=204,
-                    latency_ms=4,
-                    reason_code=None,
-                    requested_retry_delay_seconds=None,
-                    finished_at=NOW + timedelta(minutes=7, seconds=1),
-                    completed_after_config_change=False,
-                ),
-                None,
-                None,
-            )
-            is None
-        )
-    completed_test = await repository.get_delivery_for_registration(
-        webhook_id, test_delivery.delivery.id
-    )
-    assert completed_test is not None
-    assert completed_test.state is DeliveryState.SUCCEEDED
-    test_attempts = await repository.list_delivery_attempts(
-        webhook_id, test_delivery.delivery.id
-    )
-    assert len(test_attempts) == 1
-    assert test_attempts[0].state is AttemptState.SUCCEEDED
-    assert (
-        await fixture.fetchval(
-            """
-            SELECT pending_jobs_disposition
-            FROM admin_webhook_deliveries
-            WHERE id = ?
-            """,
-            test_delivery.delivery.id,
-        )
-        is None
-    )
-
-
 async def exercise_recovery_runtime_and_retention(
     fixture: DeliveryRepositoryFixture,
 ) -> None:
@@ -1105,6 +1127,324 @@ async def exercise_recovery_runtime_and_retention(
 
     with pytest.raises(ValueError, match="batch_size"):
         await repository.purge_retained_rows(NOW, NOW, 201)
+
+
+async def exercise_task9_test_attempt_contract(
+    fixture: DeliveryRepositoryFixture,
+) -> None:
+    repository = fixture.repository
+    await mark_migration_ready(repository)
+    webhook_id = await seed_registration(repository, active=False)
+    stored = await repository.get_protected_registration(webhook_id)
+    assert stored is not None
+
+    async def start(label: str, started_at: datetime):
+        scope = build_idempotency_scope(
+            actor_id=7,
+            operation="test",
+            route=f"/admin/webhooks/{webhook_id}/test",
+            webhook_id=webhook_id,
+        )
+        key = f"0123456789abcdef{hashlib.sha256(label.encode()).hexdigest()[:16]}"
+        digest = idempotency_lookup_digest(key, scope)
+        fingerprint = canonical_request_hash(
+            key,
+            scope=scope,
+            body={"delivery_config_version": stored.registration.delivery_config_version},
+            conditional_version=stored.registration.revision,
+        )
+        event = event_insert(
+            canonical_uuid4(f"{label}-event"),
+            source_kind=EventSourceKind.COMMAND,
+            source_identity=f"test:{canonical_uuid4(f'{label}-event')}",
+            event_type="webhook.test",
+            body=b'{"task":9}',
+            created_at=started_at,
+        )
+        delivery_id = canonical_uuid4(f"{label}-delivery")
+        attempt_id = canonical_uuid4(f"{label}-attempt")
+        token = opaque_token(f"{label}-token")
+        async with repository.transaction() as tx:
+            claim = await tx.claim_idempotency(
+                lookup_digest=digest,
+                scope=scope,
+                request_fingerprint=fingerprint,
+                now=started_at,
+                expires_at=started_at + timedelta(hours=24),
+            )
+            assert claim.kind is IdempotencyLookupKind.NEW
+            await tx.lock_migration_state()
+            reservation = await tx.start_test_attempt(
+                event,
+                webhook_id=webhook_id,
+                delivery_id=delivery_id,
+                attempt_id=attempt_id,
+                test_attempt_token=token,
+                request_timeout_seconds=10,
+                expected_revision=stored.registration.revision,
+                expected_delivery_config_version=(
+                    stored.registration.delivery_config_version
+                ),
+                expected_target_version=stored.registration.target_version,
+                expected_secret_version=stored.registration.secret_version,
+                expected_target=stored.target,
+                expected_secret=stored.secret,
+                lookup_digest=digest,
+                request_fingerprint=fingerprint,
+                started_at=started_at,
+                expires_at=started_at + timedelta(hours=72),
+            )
+        return (
+            scope,
+            digest,
+            fingerprint,
+            delivery_id,
+            attempt_id,
+            token,
+            reservation,
+        )
+
+    (
+        scope,
+        digest,
+        fingerprint,
+        delivery_id,
+        attempt_id,
+        token,
+        reservation,
+    ) = await start("task9-success", NOW)
+    assert isinstance(reservation, TestAttemptReservation)
+    assert reservation.start_owner is True
+    assert reservation.snapshot.delivery.delivery.state is DeliveryState.PROCESSING
+    assert reservation.snapshot.delivery.delivery.kind is DeliveryKind.TEST
+    assert reservation.snapshot.delivery.delivery.attempt_count == 1
+    assert reservation.snapshot.delivery.jobs_job_id is None
+    assert reservation.snapshot.delivery.pending_jobs_disposition is None
+    assert reservation.snapshot.attempt.id == attempt_id
+    assert reservation.snapshot.attempt.attempt_number == 1
+    assert reservation.snapshot.attempt.state is AttemptState.PROCESSING
+    assert reservation.snapshot.attempt.request_timeout_seconds == 10
+    assert (
+        await fixture.fetchval(
+            "SELECT COUNT(*) FROM admin_webhook_deliveries WHERE event_id = ?",
+            canonical_uuid4("task9-success-event"),
+        )
+        == 1
+    )
+
+    lookup = await repository.lookup_idempotency(
+        lookup_digest=digest,
+        scope=scope,
+        request_fingerprint=fingerprint,
+        now=NOW,
+    )
+    assert lookup.kind is IdempotencyLookupKind.IN_PROGRESS
+    assert lookup.test_delivery_id == delivery_id
+    assert lookup.test_attempt_id == attempt_id
+    assert lookup.response_status == 202
+    assert lookup.response_metadata == {
+        "result_kind": "processing",
+        "retry_after_seconds": 5,
+    }
+
+    with pytest.raises(TransactionError):
+        async with repository.transaction() as tx:
+            await tx.start_test_attempt(
+                event_insert(
+                    canonical_uuid4("task9-second-event"),
+                    source_identity="test:second",
+                    event_type="webhook.test",
+                    created_at=NOW,
+                ),
+                webhook_id=webhook_id,
+                delivery_id=delivery_id,
+                attempt_id=canonical_uuid4("task9-second-attempt"),
+                test_attempt_token=opaque_token("task9-second-token"),
+                request_timeout_seconds=10,
+                expected_revision=stored.registration.revision,
+                expected_delivery_config_version=(
+                    stored.registration.delivery_config_version
+                ),
+                expected_target_version=stored.registration.target_version,
+                expected_secret_version=stored.registration.secret_version,
+                expected_target=stored.target,
+                expected_secret=stored.secret,
+                lookup_digest=digest,
+                request_fingerprint=fingerprint,
+                started_at=NOW,
+                expires_at=NOW + timedelta(hours=72),
+            )
+
+    success = TestAttemptCompletion(
+        attempt_state=AttemptState.SUCCEEDED,
+        delivery_state=DeliveryState.SUCCEEDED,
+        status_code=204,
+        latency_ms=8,
+        reason_code=None,
+        finished_at=NOW + timedelta(seconds=1),
+    )
+    async with repository.transaction() as tx:
+        assert (
+            await tx.finish_test_attempt(
+                delivery_id,
+                attempt_id,
+                opaque_token("wrong-token"),
+                lookup_digest=digest,
+                request_fingerprint=fingerprint,
+                outcome=success,
+            )
+            is None
+        )
+        completed = await tx.finish_test_attempt(
+            delivery_id,
+            attempt_id,
+            token,
+            lookup_digest=digest,
+            request_fingerprint=fingerprint,
+            outcome=success,
+        )
+    assert completed is not None
+    assert completed.delivery.delivery.state is DeliveryState.SUCCEEDED
+    assert completed.attempt.state is AttemptState.SUCCEEDED
+    terminal_lookup = await repository.lookup_idempotency(
+        lookup_digest=digest,
+        scope=scope,
+        request_fingerprint=fingerprint,
+        now=NOW + timedelta(seconds=1),
+    )
+    assert terminal_lookup.kind is IdempotencyLookupKind.REPLAY
+    assert terminal_lookup.response_metadata == {
+        "completed_after_config_change": False,
+        "latency_ms": 8,
+        "reason_code": None,
+        "result_kind": "succeeded",
+        "status_code": 204,
+    }
+
+    (
+        stale_scope,
+        stale_digest,
+        stale_fingerprint,
+        stale_delivery_id,
+        stale_attempt_id,
+        stale_token,
+        _,
+    ) = await start("task9-stale", NOW + timedelta(minutes=1))
+    stale_boundary = NOW + timedelta(minutes=1, seconds=100)
+    assert await repository.list_stale_test_attempts(
+        now=stale_boundary - timedelta(microseconds=1),
+        limit=100,
+    ) == ()
+    async with repository.transaction() as tx:
+        assert (
+            await tx.recover_stale_test_attempt(
+                stale_delivery_id,
+                stale_attempt_id,
+                stale_token,
+                now=stale_boundary - timedelta(microseconds=1),
+            )
+            is None
+        )
+    candidates = await repository.list_stale_test_attempts(
+        now=stale_boundary,
+        limit=100,
+    )
+    assert [(item.delivery_id, item.attempt_id) for item in candidates] == [
+        (stale_delivery_id, stale_attempt_id)
+    ]
+    assert stale_token not in repr(candidates[0])
+    async with repository.transaction() as tx:
+        recovered = await tx.recover_stale_test_attempt(
+            stale_delivery_id,
+            stale_attempt_id,
+            stale_token,
+            now=stale_boundary,
+        )
+        assert recovered is not None
+        assert (
+            await tx.recover_stale_test_attempt(
+                stale_delivery_id,
+                stale_attempt_id,
+                stale_token,
+                now=stale_boundary,
+            )
+            is None
+        )
+        assert (
+            await tx.finish_test_attempt(
+                stale_delivery_id,
+                stale_attempt_id,
+                stale_token,
+                lookup_digest=stale_digest,
+                request_fingerprint=stale_fingerprint,
+                outcome=success,
+            )
+            is None
+        )
+    assert recovered.delivery.delivery.state is DeliveryState.DEAD
+    assert (
+        recovered.delivery.delivery.reason_code
+        is DeliveryReasonCode.TEST_ATTEMPT_INTERRUPTED
+    )
+    assert recovered.attempt.state is AttemptState.OUTCOME_UNKNOWN
+    assert recovered.attempt.reason_code is DeliveryReasonCode.OUTCOME_UNKNOWN
+    stale_lookup = await repository.lookup_idempotency(
+        lookup_digest=stale_digest,
+        scope=stale_scope,
+        request_fingerprint=stale_fingerprint,
+        now=stale_boundary,
+    )
+    assert stale_lookup.kind is IdempotencyLookupKind.REPLAY
+    assert stale_lookup.response_metadata == {
+        "completed_after_config_change": False,
+        "latency_ms": None,
+        "reason_code": "test_attempt_interrupted",
+        "result_kind": "interrupted",
+        "status_code": None,
+    }
+    assert await repository.list_stale_test_attempts(
+        now=stale_boundary,
+        limit=100,
+    ) == ()
+
+    expired_scope = IdempotencyScope(
+        actor_id="7",
+        operation="test",
+        route="/admin/webhooks/expired/test",
+        webhook_id=webhook_id,
+    )
+    expired_key = "fedcba9876543210fedcba9876543210"
+    expired_digest = idempotency_lookup_digest(expired_key, expired_scope)
+    expired_fingerprint = canonical_request_hash(
+        expired_key,
+        scope=expired_scope,
+        body={},
+        conditional_version=stored.registration.revision,
+    )
+    async with repository.transaction() as tx:
+        await tx.claim_idempotency(
+            lookup_digest=expired_digest,
+            scope=expired_scope,
+            request_fingerprint=expired_fingerprint,
+            now=NOW - timedelta(days=2),
+            expires_at=NOW - timedelta(days=1),
+        )
+    before = await fixture.fetchval(
+        "SELECT COUNT(*) FROM admin_webhook_idempotency WHERE lookup_digest = ?",
+        expired_digest,
+    )
+    missing = await repository.lookup_idempotency(
+        lookup_digest=expired_digest,
+        scope=expired_scope,
+        request_fingerprint=expired_fingerprint,
+        now=NOW,
+    )
+    after = await fixture.fetchval(
+        "SELECT COUNT(*) FROM admin_webhook_idempotency WHERE lookup_digest = ?",
+        expired_digest,
+    )
+    assert missing.kind is IdempotencyLookupKind.NEW
+    assert before == after == 1
 
 
 async def exercise_stale_recovery_and_cancellation(
@@ -2097,14 +2437,30 @@ async def exercise_persisted_coordinate_matrix(
             expires_at=NOW + timedelta(hours=72),
             now=NOW,
         )
-        reservation = await tx.reserve_test_attempt(
-            valid_test_token,
-            test_delivery_id,
-            test_attempt_id,
-            10,
-            NOW,
-        )
-        assert reservation is not None and reservation.reserved
+    await fixture.execute(
+        """
+        INSERT INTO admin_webhook_delivery_attempts (
+            id, delivery_id, attempt_number, test_attempt_token,
+            request_timeout_seconds, started_at, state, created_at
+        ) VALUES (?, ?, 1, ?, 10, ?, 'processing', ?)
+        """,
+        test_attempt_id,
+        test_delivery_id,
+        valid_test_token,
+        NOW,
+        NOW,
+    )
+    await fixture.execute(
+        """
+        UPDATE admin_webhook_deliveries
+        SET state = 'processing', attempt_count = 1,
+            current_attempt_id = ?, updated_at = ?
+        WHERE id = ?
+        """,
+        test_attempt_id,
+        NOW,
+        test_delivery_id,
+    )
     await fixture.execute(
         "UPDATE admin_webhook_delivery_attempts SET test_attempt_token = ? WHERE id = ?",
         "A" * 64,

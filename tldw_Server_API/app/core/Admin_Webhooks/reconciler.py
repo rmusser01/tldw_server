@@ -797,3 +797,28 @@ class AdminWebhookReconciler:
             repaired += int(acknowledged)
         await asyncio.sleep(0)
         return repaired
+
+    async def recover_stale_test_attempts_once(
+        self,
+        *,
+        limit: int = _MAX_ENQUEUE_BATCH,
+    ) -> int:
+        """Terminalize one bounded page of interrupted no-Jobs tests."""
+
+        now = _aware_utc(self._clock(), field="clock value")
+        candidates = await self._repository.list_stale_test_attempts(
+            now=now,
+            limit=limit,
+        )
+        recovered = 0
+        for candidate in candidates:
+            async with self._repository.transaction() as tx:
+                result = await tx.recover_stale_test_attempt(
+                    candidate.delivery_id,
+                    candidate.attempt_id,
+                    candidate.test_attempt_token,
+                    now=now,
+                )
+            recovered += int(result is not None)
+        await asyncio.sleep(0)
+        return recovered

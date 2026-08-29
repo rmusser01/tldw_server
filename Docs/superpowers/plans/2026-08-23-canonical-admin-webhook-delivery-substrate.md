@@ -1156,11 +1156,66 @@ git commit -m "feat(admin-webhooks): recover prepared delivery outcomes"
 **Files:**
 - Modify: `tldw_Server_API/app/core/Admin_Webhooks/delivery.py`
 - Modify: `tldw_Server_API/app/core/Admin_Webhooks/reconciler.py`
+- Modify: `tldw_Server_API/app/core/DB_Management/admin_webhooks_repository.py`
 - Create: `tldw_Server_API/tests/Admin_Webhooks/test_test_delivery.py`
+- Modify: `tldw_Server_API/tests/Admin_Webhooks/test_event_expansion.py`
+- Modify: `tldw_Server_API/tests/Admin_Webhooks/test_delivery_repository_sqlite.py`
+- Modify: `tldw_Server_API/tests/Admin_Webhooks/test_delivery_repository_postgres.py`
 
 **Interfaces:**
 - Consumes: `TestWebhookCommand`, current registration ETag/config version, idempotency scope/key, generated event/delivery/attempt/token IDs, mandatory audit, key ring, repository, and shared executor.
 - Produces: `AdminWebhookDeliveryService.test_webhook()` with exactly one persisted synchronous attempt and interrupted-test recovery.
+
+**Implementation ruling:** The written file list omitted load-bearing repository
+and dual-backend proof. No schema change is required. Add a non-mutating exact
+idempotency lookup so an existing conflict, processing replay, or terminal
+replay is resolved before current registration, migration, or key preconditions.
+An in-progress lookup exposes paired test delivery/attempt coordinates only
+after the start transaction has durably attached them; a new uncommitted claim
+without coordinates is not an externally useful processing replay.
+
+For a new request, contextually decrypt and policy-check one reviewed in-memory
+target/secret snapshot before the start transaction. In that transaction claim
+idempotency, lock migration/key state, then the exact registration, and recheck
+revision, reviewed delivery-config version, tombstone, target/secret versions,
+and the same primary-key snapshot. Insert exactly one protected
+`webhook.test` command-source event without subscription fanout, one `kind=test`
+delivery, and attempt sequence one with its random test token; attach the paired
+idempotency coordinates and commit delivery/attempt directly `processing`.
+Intermediate pending state may exist only inside that transaction. Tighten the
+test reservation contract to attempt one only and return explicit start
+ownership. Only that owner may call the shared executor, exactly once.
+
+Do not use the generic token-only Jobs completion branch for a synchronous
+test. Add an exact repository operation that conditionally matches delivery ID,
+attempt ID, and test token, closes the attempt/delivery with the real receiver
+classification, and completes the same idempotency record with bounded response
+metadata in one transaction. A test retry-class result is terminal dead with
+its actual reason and no retry disposition; success is succeeded. Extend the
+closed completion shape only as required for test
+`outcome_unknown + dead + no Jobs disposition`; existing Jobs callers still
+require their exact disposition.
+
+Add a bounded ordered stale-test candidate read and exact recovery operation.
+Before persisted `started_at + request_timeout_seconds + 90 seconds`, mutate
+nothing. At or after it, atomically mark the exact attempt `outcome_unknown`,
+the delivery `dead:test_attempt_interrupted`, and the idempotency result
+terminal; the same exact token CAS rejects a late completion. Recovery performs
+no HTTP, Jobs, or retry work. Processing and terminal replays load the exact
+stored delivery/attempt by their paired idempotency coordinates without
+decryption or mutable-current-registration reconstruction.
+
+Define bounded internal test command/result/audit contracts in `delivery.py`.
+The result carries exact delivery/attempt, `idempotent_replay`, `in_progress`,
+and bounded retry guidance for Task 10. Mandatory `accepted` audit runs before
+the start commit. A correlated completion/failure audit is attempted only after
+durable completion; its failure is non-blocking and cannot roll back, rewrite,
+or hide the persisted receiver outcome. Prove start/replay/completion/stale
+contracts on SQLite and required PostgreSQL, including inactive registration,
+all key/revision/config races, exact late-writer rejection, no secret/target
+leakage, and explicit zero Jobs calls. If wrong, the cost is localized Task 9
+repository/service/reconciler rework; no migration or public API change is
+authorized.
 
 - [ ] **Step 1: Write RED tests for the transactional start boundary**
 
@@ -1183,8 +1238,11 @@ Add deterministic configuration-race tests. Rotation, configuration mutation, or
 - [ ] **Step 4: Run RED**
 
 ```bash
-RUN_JOBS=1 PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
-  tldw_Server_API/tests/Admin_Webhooks/test_test_delivery.py
+RUN_JOBS=1 TLDW_TEST_POSTGRES_REQUIRED=1 PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
+  tldw_Server_API/tests/Admin_Webhooks/test_test_delivery.py \
+  tldw_Server_API/tests/Admin_Webhooks/test_delivery_repository_sqlite.py \
+  tldw_Server_API/tests/Admin_Webhooks/test_delivery_repository_postgres.py \
+  tldw_Server_API/tests/Admin_Webhooks/test_event_expansion.py
 ```
 
 - [ ] **Step 5: Implement test start, execute, complete, and stale recovery**
@@ -1194,9 +1252,12 @@ Generate every identity before the transaction so a retried transaction reuses i
 - [ ] **Step 6: Run GREEN and no-Jobs proof**
 
 ```bash
-RUN_JOBS=1 PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
+RUN_JOBS=1 TLDW_TEST_POSTGRES_REQUIRED=1 PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
   tldw_Server_API/tests/Admin_Webhooks/test_test_delivery.py \
-  tldw_Server_API/tests/Admin_Webhooks/test_executor.py
+  tldw_Server_API/tests/Admin_Webhooks/test_executor.py \
+  tldw_Server_API/tests/Admin_Webhooks/test_delivery_repository_sqlite.py \
+  tldw_Server_API/tests/Admin_Webhooks/test_delivery_repository_postgres.py \
+  tldw_Server_API/tests/Admin_Webhooks/test_event_expansion.py
 if rg -n "create_or_get_delivery_job|create_job\(" \
   tldw_Server_API/tests/Admin_Webhooks/test_test_delivery.py | rg -v "assert_not_called|raises"; then
   printf 'review test path for an unintended Jobs create\n' >&2
@@ -1211,7 +1272,11 @@ backlog task edit 13111 --append-notes "Implemented persisted one-attempt synchr
 git add \
   tldw_Server_API/app/core/Admin_Webhooks/delivery.py \
   tldw_Server_API/app/core/Admin_Webhooks/reconciler.py \
+  tldw_Server_API/app/core/DB_Management/admin_webhooks_repository.py \
   tldw_Server_API/tests/Admin_Webhooks/test_test_delivery.py \
+  tldw_Server_API/tests/Admin_Webhooks/test_event_expansion.py \
+  tldw_Server_API/tests/Admin_Webhooks/test_delivery_repository_sqlite.py \
+  tldw_Server_API/tests/Admin_Webhooks/test_delivery_repository_postgres.py \
   "backlog/tasks/task-13111 - Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md"
 git diff --cached --check
 git commit -m "feat(admin-webhooks): persist synchronous test attempts"

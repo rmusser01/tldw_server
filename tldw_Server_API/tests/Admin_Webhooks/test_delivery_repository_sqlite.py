@@ -26,6 +26,15 @@ from tldw_Server_API.tests.Admin_Webhooks.test_event_expansion import (
     exercise_recovery_runtime_and_retention,
     exercise_stale_recovery_and_cancellation,
     exercise_task8_attempt_reservation_and_recovery_contract,
+    exercise_task9_test_attempt_contract,
+)
+from tldw_Server_API.tests.Admin_Webhooks.test_test_delivery import (
+    exercise_concurrent_exact_test_start,
+    exercise_prestart_rejections_are_no_io,
+    exercise_processing_replay_and_conflict_precede_current_state,
+    exercise_retry_class_terminalization_and_completion_audit_failure,
+    exercise_start_races_and_accepted_audit_rollback,
+    exercise_test_service_success_and_terminal_replay,
 )
 
 
@@ -150,3 +159,67 @@ async def test_sqlite_task8_attempt_reservation_and_recovery_contract(
     delivery_repo: SQLiteDeliveryRepositoryFixture,
 ) -> None:
     await exercise_task8_attempt_reservation_and_recovery_contract(delivery_repo)
+
+
+@pytest.mark.unit
+async def test_sqlite_task9_test_attempt_contract(
+    delivery_repo: SQLiteDeliveryRepositoryFixture,
+) -> None:
+    await exercise_task9_test_attempt_contract(delivery_repo)
+
+
+@pytest.mark.unit
+async def test_sqlite_task9_service_success_and_terminal_replay(
+    delivery_repo: SQLiteDeliveryRepositoryFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await exercise_test_service_success_and_terminal_replay(delivery_repo, monkeypatch)
+
+
+@pytest.mark.unit
+async def test_sqlite_task9_processing_replay_and_conflict_ordering(
+    delivery_repo: SQLiteDeliveryRepositoryFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await exercise_processing_replay_and_conflict_precede_current_state(
+        delivery_repo,
+        monkeypatch,
+    )
+
+
+@pytest.mark.unit
+async def test_sqlite_task9_retry_class_and_audit_failure_contract(
+    delivery_repo: SQLiteDeliveryRepositoryFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await exercise_retry_class_terminalization_and_completion_audit_failure(
+        delivery_repo,
+        monkeypatch,
+    )
+
+
+@pytest.mark.unit
+async def test_sqlite_task9_start_race_and_audit_rollback_contract(
+    delivery_repo: SQLiteDeliveryRepositoryFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await exercise_start_races_and_accepted_audit_rollback(
+        delivery_repo,
+        monkeypatch,
+    )
+
+
+@pytest.mark.unit
+async def test_sqlite_task9_concurrent_exact_start_contract(
+    delivery_repo: SQLiteDeliveryRepositoryFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await exercise_concurrent_exact_test_start(delivery_repo, monkeypatch)
+
+
+@pytest.mark.unit
+async def test_sqlite_task9_prestart_rejections_are_no_io(
+    delivery_repo: SQLiteDeliveryRepositoryFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await exercise_prestart_rejections_are_no_io(delivery_repo, monkeypatch)
