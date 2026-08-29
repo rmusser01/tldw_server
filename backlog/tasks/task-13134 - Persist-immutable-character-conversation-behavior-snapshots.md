@@ -1,21 +1,23 @@
 ---
 id: TASK-13134
 title: Persist immutable character-conversation behavior snapshots
-status: In Progress
+status: Done
 assignee: []
-created_date: 2026-08-28 05:06
-updated_date: 2026-08-28 08:41
+created_date: '2026-08-28 05:06'
+updated_date: '2026-08-29 04:02'
 labels:
-- character-chat
-- api
-- persistence
-- roleplay-resume
+  - character-chat
+  - api
+  - persistence
+  - roleplay-resume
 dependencies: []
 references:
-- https://github.com/rmusser01/tldw_chatbook
-- backlog/decisions/002-character-conversation-behavior-snapshot-and-fenced-completion.md
+  - 'https://github.com/rmusser01/tldw_chatbook'
+  - >-
+    backlog/decisions/002-character-conversation-behavior-snapshot-and-fenced-completion.md
 documentation:
-- Docs/superpowers/plans/2026-08-27-character-conversation-behavior-snapshot-contract.md
+  - >-
+    Docs/superpowers/plans/2026-08-27-character-conversation-behavior-snapshot-contract.md
 priority: high
 ---
 
@@ -46,6 +48,17 @@ ADR path: backlog/decisions/002-character-conversation-behavior-snapshot-and-fen
 Reason: This changes persistent schema, historical-data policy, and conversation behavior authority.
 <!-- SECTION:PLAN:END -->
 
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Stage 1 canonical snapshot checkpoint completed. TDD evidence: initial collection RED because the module was absent; fail-closed/hardening RED reached 10 failing new cases; final targeted suite passed 49 tests. Independent specification review PASS and code-quality review PASS after hardening. Targeted Ruff, Bandit, and git diff checks passed. Rebased commits: aa5722f90e and a2acc9d8c0.
+Stage 2 storage checkpoint completed. After rebasing onto `origin/dev` at 1ad2f1e5b3, preserved current-dev schema v55-v63 and allocated the next free ChaCha schema v64 from verified v63 for SQLite and PostgreSQL. Added fail-closed immutable snapshot storage, explicit legacy missing reads, settings/history fences, caller-owned transaction seams, and exactly-once prompt-history fencing including image, metadata/pin, and atomic Sync append/tombstone paths. TDD began with migration failures and successive focused RED cases for integrity/atomicity gaps; post-rebase v64 compatibility began with 9 focused failures. Final rebased migration/schema evidence: 65 passed and 3 existing live-PostgreSQL-dependent tests skipped; the current-dev v61 migration file passed 12 tests. Independent specification and quality/security reviews found no code-level blocker. Rebased commits: 08cc13f643, d5142b3b75, 6bb8adb33d, 158cc959aa, and compatibility commit 420b754d8d.
+Stage 3 creation/readiness checkpoint completed. Added one atomic resumable character-conversation factory, immutable multi-participant behavior snapshots with prompt/generation provenance, creation-time effective provider/model/per-field sampling materialization, explicit non-resumable legacy/unsupported paths, detail-only authoritative readiness and fences, reserved readiness mutation protection, and credential-safe snapshot/settings boundaries. TDD began with the absent factory and then focused RED cases for configuration, drift, rollback, aliases, tampering, auth, list/detail boundaries, and secret classification. Final pre-rebase evidence included 136 canonical-plus-creation integration passes and 267 broader passes with 3 skips; the post-rebase matrix below revalidated these paths against current dev. Rebased commits: 9b4ef46f17, 73326b2bdb, 3260ae4dc5, d6d5cc202b, 93af9114d7, 70f0d0c51e, and c17338cc1e.
+Stage 4 materialized-settings and coherent-fence checkpoint completed. Behavior settings now embed versioned canonical authority for effective provider/model/sampling, scope-correct presets, overlays, participants, greetings, world books, author notes, and owner-scoped persona memory; every successful behavior mutation advances `settings_version`, while central history mutations advance `history_version` exactly once. Resume readiness fails closed unless materialized authority matches the immutable snapshot, PostgreSQL source reads use bounded stable double-collection, and PostgreSQL preset/world-book reads require tenant proof. The atomic factory derives ownership from the scoped database and rejects conflicting caller identity. Review hardening routed settings writers through one owner-scoped transactional state loader, fenced derived summary writes against both settings and history, kept greeting materialization bound to the current primary-character identity, and made pin edits follow PostgreSQL message -> metadata -> conversation lock order. Shared metadata and RAG merges now create/lock the metadata row before reading so a stale merge cannot erase a concurrent pin. Final controller evidence after rebasing onto `origin/dev` at `1ad2f1e5b3`: the exact six-file contract matrix passed 377 tests with 13 warnings in 424.42 seconds; Bandit exited 0 across all touched production modules; compileall and `git diff --check` passed. Ruff reported no findings in the new TASK files or the final metadata store/test correction and no new findings versus the current-dev baseline in existing files. Independent final reviews returned SPEC PASS and QUALITY PASS. PostgreSQL-specific authorization, isolation, and interleaving coverage uses PostgreSQL-shaped fakes rather than a live PostgreSQL service; a full repository sweep was not run because repository policy requires targeted verification unless explicitly requested. No TASK-13135 work was introduced. Rebased commits: eb8cfaefad, 81f956be7b, 6dd7f5885a, 5f7e343687, 048ee4f250, 97f1b7267e, 0241106db6, 78e2379804, 64a044781a, 4e1cd7b8d8, 503d1a8143, d65cecce5e, and 3bac7d9aa5.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
+<!-- SECTION:NOTES:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed
@@ -56,12 +69,3 @@ Reason: This changes persistent schema, historical-data policy, and conversation
 - [x] #6 Known skips or blockers documented
 - [x] #7 ADR for behavior-snapshot storage and authority is accepted and linked.
 <!-- DOD:END -->
-
-## Implementation Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Stage 1 canonical snapshot checkpoint completed. TDD evidence: initial collection RED because the module was absent; fail-closed/hardening RED reached 10 failing new cases; final targeted suite passed 49 tests. Independent specification review PASS and code-quality review PASS after hardening. Targeted Ruff, Bandit, and git diff checks passed. Commits: 2b17ba3819 and 5bae47f9b6.
-Stage 2 storage checkpoint completed. Allocated ChaCha schema v55 from verified v54 head for SQLite and PostgreSQL; added fail-closed immutable snapshot storage, explicit legacy missing reads, settings/history fences, caller-owned transaction seams, and exactly-once prompt-history fencing including image, metadata/pin, and atomic Sync append/tombstone paths. TDD began with 9/9 migration failures and successive focused RED cases for integrity/atomicity gaps. Final evidence: required migration/PostgreSQL suite 43 passed, existing Sync tests 9 passed, writable-path message/hydration regressions 33 passed, independent specification review PASS, independent quality/security review PASS, Ruff/Bandit/diff checks passed with only documented pre-existing lint debt. Commits: c9dbdf1bde, 2788284c4a, ff4ea7ac80, c15b8c4173.
-Stage 3 creation/readiness checkpoint completed. Added one atomic resumable character-conversation factory, immutable multi-participant behavior snapshots with prompt/generation provenance, creation-time effective provider/model/per-field sampling materialization, explicit non-resumable legacy/unsupported paths, detail-only authoritative readiness and fences, reserved readiness mutation protection, and credential-safe snapshot/settings boundaries. TDD began with the absent factory and then focused RED cases for configuration, drift, rollback, aliases, tampering, auth, list/detail boundaries, and secret classification. Final evidence: independent unfiltered canonical-plus-creation integration run 136 passed; broader unfiltered Task 3 run 267 passed with 3 skips before the final alias-only delta; implementer compatibility run 191 passed with 3 skips; Ruff introduced no new findings, Bandit reported zero issues, compileall/diff checks passed, and definitive specification and quality reviews both PASS. Commits: 5619f0f4e7, bd2ac72ce8, 1e25dd5d7d, 569b11bf52, 00eb0e9833, cbf50150d0, 4c2e051e95.
-Stage 4 materialized-settings and coherent-fence checkpoint completed. Behavior settings now embed versioned canonical authority for effective provider/model/sampling, scope-correct presets, overlays, participants, greetings, world books, author notes, and owner-scoped persona memory; every successful behavior mutation advances `settings_version`, while central history mutations advance `history_version` exactly once. Resume readiness fails closed unless materialized authority matches the immutable snapshot, PostgreSQL source reads use bounded stable double-collection, and PostgreSQL preset/world-book reads require tenant proof. The atomic factory derives ownership from the scoped database and rejects conflicting caller identity. Final controller evidence: 273 targeted tests passed in 184.85 seconds; Bandit, compileall, and diff checks passed; Ruff introduced no findings beyond the documented pre-existing baseline. Definitive independent specification review PASS and quality review PASS reported no critical or important findings. PostgreSQL-specific authorization/isolation coverage uses PostgreSQL-shaped interleaving fakes rather than a live PostgreSQL service; a full repository sweep was not run because repository policy requires targeted verification unless explicitly requested. No TASK-13135 work was introduced. Commits: 384d309b07, 73f65b1986, 9b47435996, ad794f09f0.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
