@@ -3,25 +3,26 @@ id: TASK-13138
 title: Implement first-class Notes graph workspace and reviewable AI suggestions
 status: In Progress
 assignee: []
-created_date: 2026-08-27 03:40
-updated_date: 2026-08-29 22:24
+created_date: '2026-08-27 03:40'
+updated_date: '2026-08-29 22:35'
 labels:
-- notes
-- knowledge-graph
-- webui
-- browser-extension
-- llm
-- jobs
+  - notes
+  - knowledge-graph
+  - webui
+  - browser-extension
+  - llm
+  - jobs
 dependencies: []
 references:
-- TASK-13134
-- TASK-13135
-- TASK-13136
-- TASK-13137
-- https://github.com/rmusser01/tldw_server/pull/2832
+  - TASK-13134
+  - TASK-13135
+  - TASK-13136
+  - TASK-13137
+  - 'https://github.com/rmusser01/tldw_server/pull/2832'
 documentation:
-- Docs/superpowers/specs/2026-08-26-notes-second-brain-graph-suggestions-design.md
-- Docs/superpowers/plans/2026-08-26-notes-second-brain-graph-suggestions.md
+  - >-
+    Docs/superpowers/specs/2026-08-26-notes-second-brain-graph-suggestions-design.md
+  - Docs/superpowers/plans/2026-08-26-notes-second-brain-graph-suggestions.md
 priority: high
 ---
 
@@ -66,6 +67,7 @@ Execute the approved 12-task test-first plan in Docs/superpowers/plans/2026-08-2
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Deferred work is tracked separately: TASK-13134 embeddings and semantic edges; TASK-13135 automatic background organization; TASK-13136 library-wide recurring themes; TASK-13137 saved graph views/layouts. This task remains review-first and on-demand.
 
@@ -216,6 +218,10 @@ Pre-merge review remediation completed. Synchronous Notes graph endpoint, worker
 Post-rebase merge-gate remediation resumed on 2026-08-29. CI identified two blockers on rebased head ca48ef1189: the new Services/test_notes_graph_suggestions_workers.py file is absent from the CI shard manifest, and the Notes UI remediation gate reported seven failures across existing search, delete/undo, and attachment tests. Root-cause investigation and exact local reproduction are in progress before edits.
 Post-rebase CI root causes resolved locally: assigned test_notes_graph_suggestions_workers.py to both platform-services-core shard matrices; supplied the established test authority scope in the three legacy Notes fixtures whose actions were intentionally inert without principal resolution; and updated the stale graph-panel source-label expectation to the current canonical `Web source` copy. RED evidence reproduced shard guard failure, 7/32 Notes remediation failures, and the graph-panel assertion. GREEN evidence: shard guard OK with 0 newly uncovered files; exact Notes remediation gate 32/32 passed; graph-panel file 7/7 passed; ESLint 0 errors (3 unchanged no-explicit-any warnings in legacy lines); git diff check passed. Bandit is not applicable because the remediation changes only CI YAML, tests, and the Backlog record.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+PR #2832 merge-gate remediation follow-up: backend-required failed because the eight new Notes graph API paths and fourteen schemas were not reflected in the checked-in OpenAPI fingerprint. Regenerated frontend API types with the repository script; committed artifact now records 2048 paths, 3052 schemas, and sha256 7175f7d0e4413843b6f720586e6a6d7526604ad085c3fd6c972b2ef3fd2c0df9. Local make openapi-drift-check passed. Bandit is not applicable to this generated JSON/tracking-only follow-up.
+<!-- SECTION:NOTES:END -->
+
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
