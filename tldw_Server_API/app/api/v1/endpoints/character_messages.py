@@ -118,6 +118,33 @@ def _lock_message_for_edit(
         )
 
 
+def _lock_message_metadata_for_edit(
+    db: CharactersRAGDB,
+    conn: Any,
+    message_id: str,
+) -> None:
+    """Ensure and lock metadata before acquiring the conversation row."""
+    if db.backend_type != BackendType.POSTGRESQL:
+        return
+    conn.execute(
+        "INSERT INTO message_metadata(message_id, last_modified) "
+        "VALUES (?, CURRENT_TIMESTAMP) "
+        "ON CONFLICT(message_id) DO NOTHING",
+        (message_id,),
+    )
+    row = conn.execute(
+        "SELECT message_id FROM message_metadata "
+        "WHERE message_id = ? FOR UPDATE",
+        (message_id,),
+    ).fetchone()
+    if row is None:
+        raise ConflictError(
+            f"Message metadata for {message_id} is no longer available.",
+            entity="message_metadata",
+            entity_id=message_id,
+        )
+
+
 def _detect_image_mime_type(data: bytes) -> Optional[str]:
     """
     Detect image MIME type from magic bytes.
@@ -1029,6 +1056,8 @@ async def edit_message(
             )
         with db.transaction() as conn:
             _lock_message_for_edit(db, conn, message_id)
+            if metadata_updated:
+                _lock_message_metadata_for_edit(db, conn, message_id)
             resume_state = db.get_roleplay_resume_state(
                 message["conversation_id"],
                 conn=conn,

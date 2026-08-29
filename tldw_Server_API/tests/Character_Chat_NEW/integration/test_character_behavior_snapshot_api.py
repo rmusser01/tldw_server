@@ -2768,7 +2768,7 @@ def test_pin_writer_uses_transactional_conversation_identity(
 
 
 @pytest.mark.integration
-def test_message_edit_acquires_message_before_conversation_lock(
+def test_pin_edit_acquires_message_metadata_before_conversation_lock(
     test_client,
     auth_headers,
     character_db,
@@ -2786,6 +2786,9 @@ def test_message_edit_acquires_message_before_conversation_lock(
     def record_message_lock(*_args, **_kwargs):
         order.append("message")
 
+    def record_metadata_lock(*_args, **_kwargs):
+        order.append("metadata")
+
     def record_conversation_lock(*args, **kwargs):
         order.append("conversation")
         return real_resume(*args, **kwargs)
@@ -2794,6 +2797,12 @@ def test_message_edit_acquires_message_before_conversation_lock(
         messages,
         "_lock_message_for_edit",
         record_message_lock,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        messages,
+        "_lock_message_metadata_for_edit",
+        record_metadata_lock,
         raising=False,
     )
     monkeypatch.setattr(
@@ -2806,11 +2815,11 @@ def test_message_edit_acquires_message_before_conversation_lock(
         "/api/v1/messages/writer-race-message",
         params={"expected_version": 1},
         headers=auth_headers,
-        json={"content": "Updated in lock order"},
+        json={"pinned": True},
     )
 
     assert response.status_code == 200, response.text
-    assert order[:2] == ["message", "conversation"]
+    assert order[:3] == ["message", "metadata", "conversation"]
 
 
 def test_postgres_message_edit_lock_uses_for_update() -> None:
@@ -2838,6 +2847,35 @@ def test_postgres_message_edit_lock_uses_for_update() -> None:
     assert len(conn.calls) == 1
     assert "FOR UPDATE" in conn.calls[0][0]
     assert conn.calls[0][1] == ("message-1",)
+
+
+def test_postgres_pin_edit_locks_metadata_before_conversation() -> None:
+    import tldw_Server_API.app.api.v1.endpoints.character_messages as messages
+
+    class _Result:
+        @staticmethod
+        def fetchone():
+            return {"message_id": "message-1"}
+
+    class _Connection:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, tuple[str, ...]]] = []
+
+        def execute(self, query, params):
+            self.calls.append((query, params))
+            return _Result()
+
+    class _Database:
+        backend_type = BackendType.POSTGRESQL
+
+    conn = _Connection()
+    messages._lock_message_metadata_for_edit(_Database(), conn, "message-1")
+
+    assert len(conn.calls) == 2
+    assert "ON CONFLICT(message_id) DO NOTHING" in conn.calls[0][0]
+    assert "FOR UPDATE" in conn.calls[1][0]
+    assert conn.calls[0][1] == ("message-1",)
+    assert conn.calls[1][1] == ("message-1",)
 
 
 @pytest.mark.integration
