@@ -94,6 +94,7 @@ from tldw_Server_API.app.core.Chat.streaming_utils import (
     provider_stream_error_payload,
 )
 from tldw_Server_API.app.core.Character_Chat.chat_settings_validation import (
+    INTERNAL_CHAT_SETTINGS_KEYS,
     validate_chat_settings_storage,
 )
 from tldw_Server_API.app.core.config import (
@@ -103,6 +104,7 @@ from tldw_Server_API.app.core.config import (
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     ConflictError,
+    InputError,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.legacy_transcripts import (
     upsert_transcript,
@@ -989,11 +991,24 @@ def _persist_audio_chat_settings(
     conversation_created: bool,
 ) -> bool:
     """Validate and persist the final audio settings object with CAS when merging."""
+    reserved_keys = INTERNAL_CHAT_SETTINGS_KEYS.intersection(settings_payload)
+    if reserved_keys:
+        raise InputError(
+            f"{sorted(reserved_keys)[0]} is reserved server-owned state."
+        )
+    resume_state: dict[str, Any] | None = None
     if conversation_created:
         final_settings = dict(settings_payload)
         expected_version = None
     else:
-        settings_row = db.get_conversation_settings(conversation_id)
+        if callable(getattr(db, "get_roleplay_resume_state", None)):
+            resume_state = db.get_roleplay_resume_state(conversation_id)
+            settings_row = {
+                "settings": resume_state.get("settings") or {},
+                "settings_version": resume_state.get("settings_version") or 0,
+            }
+        else:
+            settings_row = db.get_conversation_settings(conversation_id)
         final_settings = {
             **dict((settings_row or {}).get("settings") or {}),
             **settings_payload,
@@ -1002,6 +1017,8 @@ def _persist_audio_chat_settings(
     final_settings = validate_chat_settings_storage(
         final_settings,
         reject_credentials=True,
+        allow_internal=not conversation_created,
+        behavior_snapshot=(resume_state or {}).get("behavior_snapshot"),
     )
     if conversation_created:
         return bool(db.upsert_conversation_settings(conversation_id, final_settings))

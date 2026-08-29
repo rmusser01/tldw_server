@@ -177,6 +177,58 @@ def _validate_materialized_behavior_settings(value: Any) -> dict[str, Any] | Non
     }
 
 
+def validate_materialized_behavior_settings(
+    value: Any,
+    *,
+    snapshot_binding: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Validate one stored materialized authority and optional snapshot binding."""
+    validated = _validate_materialized_behavior_settings(value)
+    if validated is None:
+        raise InputError("Stored roleplay materialized behavior authority is invalid.")
+    if snapshot_binding is not None:
+        base_snapshot = validated["values"]["base_snapshot"]
+        if base_snapshot != snapshot_binding:
+            raise InputError(
+                "Stored roleplay materialized behavior authority has an invalid snapshot binding."
+            )
+    return dict(value)
+
+
+def validate_roleplay_readiness_settings(
+    value: Any,
+    *,
+    materialized_behavior: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Validate the closed readiness marker against materialized authority."""
+    if not isinstance(value, dict) or set(value) != _READINESS_KEYS:
+        raise InputError("Stored roleplay resume readiness authority is invalid.")
+    eligible = value.get("resumeEligible")
+    reason = value.get("resumeIneligibleReason")
+    effective = value.get("effectiveCompletion")
+    if eligible is True:
+        validated_effective = _validate_effective_completion(effective)
+        materialized_effective = (
+            materialized_behavior.get("values", {}).get("effective_completion")
+            if isinstance(materialized_behavior, dict)
+            else None
+        )
+        if (
+            reason is not None
+            or validated_effective is None
+            or validated_effective != materialized_effective
+        ):
+            raise InputError("Stored roleplay resume readiness authority is invalid.")
+    elif eligible is False:
+        if effective is not None or reason not in _INELIGIBLE_REASONS:
+            raise InputError("Stored roleplay resume readiness authority is invalid.")
+        if materialized_behavior is not None:
+            raise InputError("Ineligible roleplay settings cannot contain behavior authority.")
+    else:
+        raise InputError("Stored roleplay resume readiness authority is invalid.")
+    return dict(value)
+
+
 def _validate_closed_sampling(value: Any) -> dict[str, Any] | None:
     if not isinstance(value, dict) or set(value) != _SAMPLING_KEYS:
         return None
@@ -531,4 +583,9 @@ class ConversationResumeStore:
             }
 
 
-__all__ = ["ConversationResumeStore", "build_materialized_behavior_settings"]
+__all__ = [
+    "ConversationResumeStore",
+    "build_materialized_behavior_settings",
+    "validate_materialized_behavior_settings",
+    "validate_roleplay_readiness_settings",
+]

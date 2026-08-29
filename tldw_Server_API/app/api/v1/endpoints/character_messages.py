@@ -47,6 +47,9 @@ from tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade import (
 from tldw_Server_API.app.core.Character_Chat.character_conversation_factory import (
     materialize_roleplay_behavior_settings,
 )
+from tldw_Server_API.app.core.Character_Chat.chat_settings_validation import (
+    validate_chat_settings_storage,
+)
 
 # Rate limiting
 from tldw_Server_API.app.core.Character_Chat.character_rate_limiter import get_character_rate_limiter
@@ -1063,6 +1066,16 @@ async def edit_message(
                                 "effective_completion"
                             ],
                         }
+                chat_settings = validate_chat_settings_storage(
+                    chat_settings,
+                    reject_credentials=(
+                        isinstance(resume_state.get("behavior_snapshot"), Mapping)
+                        and resume_state["behavior_snapshot"].get("status") == "valid"
+                    ),
+                    allow_internal=True,
+                    behavior_snapshot=resume_state.get("behavior_snapshot"),
+                    conversation=conversation,
+                )
                 if not db.upsert_conversation_settings(
                     message["conversation_id"],
                     chat_settings,

@@ -128,6 +128,7 @@ from tldw_Server_API.app.core.Character_Chat.character_conversation_factory impo
 )
 from tldw_Server_API.app.core.Character_Chat.chat_settings_validation import (
     ChatSettingsSizeError,
+    INTERNAL_CHAT_SETTINGS_KEYS,
     validate_chat_settings_storage,
 )
 
@@ -2934,9 +2935,7 @@ def _merge_conversation_settings(
     return merged
 
 
-_INTERNAL_CHAT_SETTINGS_KEYS = frozenset(
-    {"roleplayResumeV1", "roleplayBehaviorV1", PENDING_GREETING_SETTINGS_KEY}
-)
+_INTERNAL_CHAT_SETTINGS_KEYS = INTERNAL_CHAT_SETTINGS_KEYS
 _BEHAVIOR_SETTING_KEYS = frozenset(
     key
     for key, classification in PROMPT_COMPLETION_SETTING_CLASSIFICATION.items()
@@ -2950,6 +2949,34 @@ def _public_chat_settings(settings: Any) -> dict[str, Any]:
     for key in _INTERNAL_CHAT_SETTINGS_KEYS:
         public.pop(key, None)
     return public
+
+
+def _validate_final_chat_settings_storage(
+    settings: Mapping[str, Any],
+    *,
+    resume_state: Mapping[str, Any],
+    conversation: Mapping[str, Any],
+) -> dict[str, Any]:
+    snapshot = resume_state.get("behavior_snapshot")
+    snapshot_valid = isinstance(snapshot, Mapping) and snapshot.get("status") == "valid"
+    try:
+        return validate_chat_settings_storage(
+            settings,
+            reject_credentials=snapshot_valid,
+            allow_internal=True,
+            behavior_snapshot=snapshot,
+            conversation=conversation,
+        )
+    except ChatSettingsSizeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=str(exc),
+        ) from exc
+    except InputError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
 
 
 def _normalize_note_text(value: Any) -> str:
@@ -4137,7 +4164,10 @@ def _persist_auto_summary_to_settings(
     merged_settings["updatedAt"] = now_iso
 
     try:
-        merged_settings = _validate_chat_settings_payload(merged_settings)
+        # The caller-supplied summary fields are public settings. Existing
+        # roleplay authority is server-owned and is validated coherently below
+        # after locking the resume state.
+        _validate_chat_settings_payload(_public_chat_settings(merged_settings))
         if callable(getattr(db, "get_roleplay_resume_state", None)) and callable(
             getattr(db, "transaction", None)
         ):
@@ -4183,6 +4213,16 @@ def _persist_auto_summary_to_settings(
                                 "effective_completion"
                             ],
                         }
+                current_settings = validate_chat_settings_storage(
+                    current_settings,
+                    reject_credentials=(
+                        isinstance(resume_state.get("behavior_snapshot"), Mapping)
+                        and resume_state["behavior_snapshot"].get("status") == "valid"
+                    ),
+                    allow_internal=True,
+                    behavior_snapshot=resume_state.get("behavior_snapshot"),
+                    conversation=conversation,
+                )
                 db.upsert_conversation_settings(
                     chat_id,
                     current_settings,
@@ -7518,6 +7558,35 @@ async def update_chat_settings(
                             "effective_completion"
                         ],
                     }
+                elif "greetingSelectionId" in incoming_settings or (
+                    incoming_settings.get("useCharacterDefault") is True
+                ):
+                    selection_id = merged_settings.get("greetingSelectionId")
+                    if (
+                        incoming_settings.get("useCharacterDefault") is True
+                        and "greetingSelectionId" not in incoming_settings
+                    ):
+                        selection_id = None
+                        merged_settings["greetingSelectionId"] = None
+                    if isinstance(selection_id, str) and selection_id.strip():
+                        pending_greeting = build_pending_greeting_authority(
+                            conn,
+                            conversation=conversation,
+                            resume_state=resume_state,
+                            selection_id=selection_id,
+                        )
+                        merged_settings[PENDING_GREETING_SETTINGS_KEY] = pending_greeting
+                        merged_settings["greetingsChecksum"] = pending_greeting["values"][
+                            "greetings_checksum"
+                        ]
+                    else:
+                        merged_settings.pop(PENDING_GREETING_SETTINGS_KEY, None)
+
+            merged_settings = _validate_final_chat_settings_storage(
+                merged_settings,
+                resume_state=resume_state,
+                conversation=conversation,
+            )
 
             if not db.upsert_conversation_settings(
                 chat_id,
@@ -8509,6 +8578,11 @@ async def select_greeting(
                         settings["greetingsChecksum"] = pending_greeting["values"][
                             "greetings_checksum"
                         ]
+                settings = _validate_final_chat_settings_storage(
+                    settings,
+                    resume_state=resume_state,
+                    conversation=conversation,
+                )
                 updated = db.upsert_conversation_settings(
                     chat_id,
                     settings,

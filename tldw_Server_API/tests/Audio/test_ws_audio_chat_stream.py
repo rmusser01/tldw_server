@@ -72,6 +72,12 @@ from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     ProviderCredentialRuntime as RealProviderCredentialRuntime,
     is_runtime_issued_provider_call_credentials,
 )
+from tldw_Server_API.app.core.Character_Chat.character_conversation_factory import (
+    build_materialized_behavior_controls,
+)
+from tldw_Server_API.app.core.DB_Management.chacha.conversation_resume_store import (
+    build_materialized_behavior_settings,
+)
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     InputError,
@@ -2981,15 +2987,15 @@ async def test_audio_chat_ws_existing_session_merges_settings_with_version_cas(
         ]
     )
 
+    existing_settings, existing_resume_state = _valid_roleplay_settings_with_blob(16)
+    existing_settings["userSetting"] = "preserve-me"
+    existing_resume_state["settings"] = existing_settings
+
     class _ExistingChatDB:
         def __init__(self) -> None:
             self.messages: list[dict[str, Any]] = []
             self.current = {
-                "settings": {
-                    "userSetting": "preserve-me",
-                    "roleplayResumeV1": {"resumeEligible": True},
-                    "roleplayBehaviorV1": {"schemaVersion": 1, "digest": "keep"},
-                },
+                "settings": existing_settings,
                 "settings_version": 7,
             }
             self.upsert_calls: list[tuple[dict[str, Any], int | None]] = []
@@ -3004,6 +3010,10 @@ async def test_audio_chat_ws_existing_session_merges_settings_with_version_cas(
                 "settings": dict(self.current["settings"]),
                 "settings_version": self.current["settings_version"],
             }
+
+        def get_roleplay_resume_state(self, conversation_id: str) -> dict[str, Any]:
+            assert conversation_id == "resume-chat"
+            return dict(existing_resume_state)
 
         def upsert_conversation_settings(
             self,
@@ -3041,8 +3051,8 @@ async def test_audio_chat_ws_existing_session_merges_settings_with_version_cas(
     merged, expected_version = persisted_db.upsert_calls[0]
     assert expected_version == 7
     assert merged["userSetting"] == "preserve-me"
-    assert merged["roleplayResumeV1"] == {"resumeEligible": True}
-    assert merged["roleplayBehaviorV1"] == {"schemaVersion": 1, "digest": "keep"}
+    assert merged["roleplayResumeV1"] == existing_settings["roleplayResumeV1"]
+    assert merged["roleplayBehaviorV1"] == existing_settings["roleplayBehaviorV1"]
     assert merged["audio_chat_ws"]["session_id"] == "resume-chat"
 
 
@@ -3051,6 +3061,161 @@ def _nested_audio_metadata(depth: int) -> dict[str, Any]:
     for _index in range(depth):
         value = {"nested": value}
     return value
+
+
+def _valid_roleplay_settings_with_blob(blob_size: int) -> tuple[dict[str, Any], dict[str, Any]]:
+    snapshot_digest = "sha256:" + ("a" * 64)
+    effective = {
+        "provider": "local-llm",
+        "model": "local-test",
+        "sampling": {
+            "temperature": 0.7,
+            "top_p": 1.0,
+            "repetition_penalty": 1.0,
+            "stop": [],
+        },
+    }
+    behavior = build_materialized_behavior_settings(
+        {
+            "base_snapshot": {"schema_version": 1, "digest": snapshot_digest},
+            "behavior_controls": build_materialized_behavior_controls({}),
+            "effective_completion": effective,
+            "participants": [{"frozen_prompt": "x" * blob_size}],
+        }
+    )
+    settings = {
+        "userSetting": "preserve-me",
+        "roleplayResumeV1": {
+            "resumeEligible": True,
+            "resumeIneligibleReason": None,
+            "effectiveCompletion": effective,
+        },
+        "roleplayBehaviorV1": behavior,
+    }
+    resume_state = {
+        "settings": settings,
+        "settings_version": 7,
+        "behavior_snapshot": {
+            "status": "valid",
+            "schema_version": 1,
+            "digest": snapshot_digest,
+        },
+        "materialized_settings": {
+            "schema_version": 1,
+            "digest": behavior["digest"],
+            "values": behavior["values"],
+        },
+        "resume_eligible": True,
+        "resume_ineligible_reason": None,
+        "effective_completion": effective,
+    }
+    return settings, resume_state
+
+
+@pytest.mark.unit
+def test_audio_writer_allows_small_public_update_with_large_valid_internal_authority() -> None:
+    settings, resume_state = _valid_roleplay_settings_with_blob(210_000)
+
+    class _SettingsDB:
+        def __init__(self) -> None:
+            self.current = dict(settings)
+            self.upsert_calls: list[tuple[dict[str, Any], int | None]] = []
+
+        def get_conversation_settings(self, _conversation_id: str) -> dict[str, Any]:
+            return {"settings": dict(self.current), "settings_version": 7}
+
+        def get_roleplay_resume_state(self, _conversation_id: str) -> dict[str, Any]:
+            return dict(resume_state)
+
+        def upsert_conversation_settings(
+            self,
+            _conversation_id: str,
+            updated: dict[str, Any],
+            *,
+            expected_settings_version: int | None = None,
+        ) -> bool:
+            self.upsert_calls.append((dict(updated), expected_settings_version))
+            return True
+
+    db = _SettingsDB()
+    updated = audio_streaming_module._persist_audio_chat_settings(
+        db,
+        "large-resumable-audio",
+        {"audio_chat_ws": {"metadata": {"mode": "tiny"}}},
+        conversation_created=False,
+    )
+
+    assert updated is True
+    assert len(db.upsert_calls) == 1
+    persisted, expected_version = db.upsert_calls[0]
+    assert expected_version == 7
+    assert persisted["roleplayBehaviorV1"] == settings["roleplayBehaviorV1"]
+    assert persisted["audio_chat_ws"]["metadata"] == {"mode": "tiny"}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("internal_mutation", ["digest", "oversize"])
+def test_audio_writer_rejects_invalid_preserved_internal_authority(
+    internal_mutation: str,
+) -> None:
+    settings, resume_state = _valid_roleplay_settings_with_blob(16)
+    behavior = dict(settings["roleplayBehaviorV1"])
+    if internal_mutation == "digest":
+        behavior["digest"] = "sha256:" + ("0" * 64)
+    else:
+        values = dict(behavior["values"])
+        values["participants"] = [{"oversize": "x" * (1024 * 1024 + 1)}]
+        behavior["values"] = values
+    settings["roleplayBehaviorV1"] = behavior
+    resume_state["settings"] = settings
+
+    class _SettingsDB:
+        def __init__(self) -> None:
+            self.upsert_calls: list[dict[str, Any]] = []
+
+        def get_conversation_settings(self, _conversation_id: str) -> dict[str, Any]:
+            return {"settings": dict(settings), "settings_version": 7}
+
+        def get_roleplay_resume_state(self, _conversation_id: str) -> dict[str, Any]:
+            return dict(resume_state)
+
+        def upsert_conversation_settings(
+            self,
+            _conversation_id: str,
+            updated: dict[str, Any],
+            *,
+            expected_settings_version: int | None = None,  # noqa: ARG002
+        ) -> bool:
+            self.upsert_calls.append(dict(updated))
+            return True
+
+    db = _SettingsDB()
+    with pytest.raises(InputError, match="materialized|roleplay"):
+        audio_streaming_module._persist_audio_chat_settings(
+            db,
+            "invalid-resumable-audio",
+            {"audio_chat_ws": {"metadata": {"mode": "tiny"}}},
+            conversation_created=False,
+        )
+    assert db.upsert_calls == []
+
+
+@pytest.mark.unit
+def test_audio_writer_rejects_caller_replacement_of_internal_authority() -> None:
+    class _SettingsDB:
+        def get_conversation_settings(self, _conversation_id: str) -> dict[str, Any]:
+            return {"settings": {"userSetting": "preserve"}, "settings_version": 2}
+
+        def upsert_conversation_settings(self, *_args: Any, **_kwargs: Any) -> bool:
+            raise AssertionError("caller-controlled internal state must not reach upsert")
+
+    with pytest.raises(InputError, match="reserved|server-owned"):
+        audio_streaming_module._persist_audio_chat_settings(
+            _SettingsDB(),
+            "caller-internal-audio",
+            {"roleplayBehaviorV1": {"caller": "replacement"}},
+            conversation_created=False,
+        )
 
 
 @pytest.mark.unit
@@ -3140,6 +3305,11 @@ async def test_audio_chat_ws_existing_session_conflict_does_not_blind_replace(
         ]
     )
 
+    existing_settings, existing_resume_state = _valid_roleplay_settings_with_blob(16)
+    existing_settings["userSetting"] = "winner"
+    existing_resume_state["settings"] = existing_settings
+    existing_resume_state["settings_version"] = 9
+
     class _ConflictingChatDB:
         def __init__(self) -> None:
             self.blind_writes = 0
@@ -3150,13 +3320,12 @@ async def test_audio_chat_ws_existing_session_conflict_does_not_blind_replace(
 
         def get_conversation_settings(self, _conversation_id: str) -> dict[str, Any]:
             return {
-                "settings": {
-                    "userSetting": "winner",
-                    "roleplayResumeV1": {"resumeEligible": True},
-                    "roleplayBehaviorV1": {"schemaVersion": 1, "digest": "winner"},
-                },
+                "settings": existing_settings,
                 "settings_version": 9,
             }
+
+        def get_roleplay_resume_state(self, _conversation_id: str) -> dict[str, Any]:
+            return dict(existing_resume_state)
 
         def upsert_conversation_settings(
             self,
@@ -3220,6 +3389,9 @@ async def test_audio_chat_ws_existing_resumable_session_rejects_credential_metad
         ]
     )
 
+    existing_settings, existing_resume_state = _valid_roleplay_settings_with_blob(16)
+    existing_resume_state["settings_version"] = 4
+
     class _ExistingResumableDB:
         def __init__(self) -> None:
             self.upsert_calls: list[dict[str, Any]] = []
@@ -3229,12 +3401,12 @@ async def test_audio_chat_ws_existing_resumable_session_rejects_credential_metad
 
         def get_conversation_settings(self, _conversation_id: str) -> dict[str, Any]:
             return {
-                "settings": {
-                    "roleplayResumeV1": {"resumeEligible": True},
-                    "roleplayBehaviorV1": {"schemaVersion": 1, "digest": "keep"},
-                },
+                "settings": existing_settings,
                 "settings_version": 4,
             }
+
+        def get_roleplay_resume_state(self, _conversation_id: str) -> dict[str, Any]:
+            return dict(existing_resume_state)
 
         def upsert_conversation_settings(
             self,

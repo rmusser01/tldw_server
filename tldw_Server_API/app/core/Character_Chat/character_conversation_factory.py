@@ -18,6 +18,12 @@ from tldw_Server_API.app.core.Character_Chat.character_behavior_snapshot import 
     build_behavior_snapshot,
     is_credential_key,
 )
+from tldw_Server_API.app.core.Character_Chat.chat_settings_validation import (
+    PENDING_GREETING_SETTINGS_KEY,
+    build_pending_greeting_record,
+    validate_pending_greeting_record,
+    validate_chat_settings_storage,
+)
 from tldw_Server_API.app.core.Character_Chat.modules.character_generation_presets import (
     resolve_character_generation_settings,
 )
@@ -51,7 +57,6 @@ MAX_MATERIALIZED_EXEMPLAR_BYTES = 256 * 1024
 MAX_MATERIALIZED_WORLD_BOOK_ENTRIES = 512
 MAX_MATERIALIZED_WORLD_BOOK_ENTRY_BYTES = 512 * 1024
 _MATERIALIZED_SOURCE_ROW_OVERHEAD_BYTES = 256
-PENDING_GREETING_SETTINGS_KEY = "roleplayPendingGreetingV1"
 _MATERIALIZED_EXEMPLAR_TEXT_FIELDS = (
     "id",
     "text",
@@ -1759,19 +1764,6 @@ def _resolve_selected_greeting(
     return _selected_greeting_from_character(_row_dict(row, result), selection_id)
 
 
-def _pending_greeting_digest(values: Mapping[str, Any]) -> str:
-    canonical = json.dumps(
-        {"schemaVersion": 1, "values": dict(values)},
-        allow_nan=False,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    if len(canonical) > DEFAULT_MAX_SNAPSHOT_BYTES:
-        raise InputError("Pending greeting authority exceeds the size limit.")
-    return f"sha256:{hashlib.sha256(canonical).hexdigest()}"
-
-
 def build_pending_greeting_authority(
     conn: Any,
     *,
@@ -1805,11 +1797,7 @@ def build_pending_greeting_authority(
         "greetings_checksum": compute_character_greetings_checksum(character),
         "greeting": greeting,
     }
-    return {
-        "schemaVersion": 1,
-        "digest": _pending_greeting_digest(values),
-        "values": values,
-    }
+    return build_pending_greeting_record(values)
 
 
 def _validated_pending_greeting(
@@ -1821,57 +1809,13 @@ def _validated_pending_greeting(
 ) -> dict[str, Any] | None:
     if pending is None:
         return None
-    if not isinstance(pending, Mapping) or set(pending) != {
-        "schemaVersion",
-        "digest",
-        "values",
-    }:
-        raise InputError("Stored pending greeting authority is invalid.")
-    values = pending.get("values")
-    if not isinstance(values, Mapping) or set(values) != {
-        "base_snapshot",
-        "character_id",
-        "greetings_checksum",
-        "greeting",
-    }:
-        raise InputError("Stored pending greeting authority is invalid.")
-    greeting = values.get("greeting")
-    if not isinstance(greeting, Mapping) or set(greeting) != {
-        "content",
-        "selection_id",
-        "source",
-        "source_index",
-        "character_version",
-    }:
-        raise InputError("Stored pending greeting authority is invalid.")
-    if (
-        pending.get("schemaVersion") != 1
-        or not isinstance(pending.get("digest"), str)
-        or not isinstance(values.get("greetings_checksum"), str)
-        or not isinstance(greeting.get("content"), str)
-        or not isinstance(greeting.get("selection_id"), str)
-        or greeting.get("source") not in {"first_message", "alternate_greeting"}
-        or type(greeting.get("source_index")) is not int
-        or greeting["source_index"] < 0
-        or type(greeting.get("character_version")) is not int
-        or greeting["character_version"] < 1
-    ):
-        raise InputError("Stored pending greeting authority is invalid.")
-    expected_binding = {
-        "schema_version": int(snapshot["schema_version"]),
-        "digest": str(snapshot["digest"]),
-    }
-    if (
-        values.get("base_snapshot") != expected_binding
-        or values.get("character_id") != int(conversation.get("character_id"))
-        or greeting.get("selection_id") != merged_settings.get("greetingSelectionId")
-        or values.get("greetings_checksum") != merged_settings.get("greetingsChecksum")
-    ):
-        raise InputError("Stored pending greeting authority is invalid.")
-    expected_digest = _pending_greeting_digest(values)
-    if pending.get("digest") != expected_digest:
-        raise InputError("Stored pending greeting authority is invalid.")
-    return dict(greeting)
+    validated = validate_pending_greeting_record(
+        pending,
+        settings=merged_settings,
+        behavior_snapshot=snapshot,
+        conversation=conversation,
+    )
+    return dict(validated["values"]["greeting"])
 
 
 def _materialize_roleplay_behavior_settings_once(
@@ -2495,6 +2439,13 @@ def create_character_conversation(
                             settings,
                         )
                     )
+                settings = validate_chat_settings_storage(
+                    settings,
+                    reject_credentials=True,
+                    allow_internal=True,
+                    behavior_snapshot=current.snapshot,
+                    conversation=conversation_payload,
+                )
 
                 conversation_id = db.add_conversation(conversation_payload, conn=conn)
                 if not conversation_id:

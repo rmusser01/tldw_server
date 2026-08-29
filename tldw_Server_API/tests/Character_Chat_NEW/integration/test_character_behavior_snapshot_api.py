@@ -656,6 +656,137 @@ def test_incomplete_greeting_selection_freezes_text_for_later_completion_repair(
 
 
 @pytest.mark.integration
+def test_generic_settings_greeting_selection_freezes_for_later_completion_repair(
+    test_client,
+    auth_headers,
+    character_db,
+) -> None:
+    character_id = character_db.add_character_card(
+        {
+            "name": "Generic Frozen Greeting",
+            "first_message": "Generic default",
+            "alternate_greetings": ["Generic selected before repair"],
+        }
+    )
+    conversation_id = create_character_conversation(
+        character_db,
+        conversation_data={
+            "character_id": character_id,
+            "title": "Generic greeting freeze",
+            "client_id": str(character_db.client_id),
+        },
+        provider="definitely-not-a-provider",
+        model="missing-model",
+    )
+
+    selected = test_client.put(
+        f"/api/v1/chats/{conversation_id}/settings",
+        headers=auth_headers,
+        json={"settings": {"greetingSelectionId": "greeting:1:selected"}},
+    )
+    assert selected.status_code == 200, selected.text
+    selected_state = character_db.get_roleplay_resume_state(conversation_id)
+    pending = selected_state["settings"]["roleplayPendingGreetingV1"]
+    assert pending["values"]["greeting"]["content"] == (
+        "Generic selected before repair"
+    )
+    assert selected_state["settings"]["greetingsChecksum"] == pending["values"][
+        "greetings_checksum"
+    ]
+
+    assert character_db.update_character_card(
+        character_id,
+        {"alternate_greetings": ["Generic mutated after selection"]},
+        expected_version=1,
+    )
+    repaired = test_client.put(
+        f"/api/v1/chats/{conversation_id}/settings",
+        headers=auth_headers,
+        json={"settings": {"provider": "local-llm", "model": "local-test"}},
+    )
+
+    assert repaired.status_code == 200, repaired.text
+    repaired_state = character_db.get_roleplay_resume_state(conversation_id)
+    assert repaired_state["resume_eligible"] is True
+    assert repaired_state["materialized_settings"]["values"]["greeting"][
+        "content"
+    ] == "Generic selected before repair"
+    assert "roleplayPendingGreetingV1" not in repaired_state["settings"]
+
+
+@pytest.mark.integration
+def test_generic_settings_replaces_and_clears_pending_greeting_authority(
+    test_client,
+    auth_headers,
+    character_db,
+) -> None:
+    character_id = character_db.add_character_card(
+        {
+            "name": "Replace Pending Greeting",
+            "first_message": "First pending greeting",
+            "alternate_greetings": ["Second pending greeting"],
+        }
+    )
+    conversation_id = create_character_conversation(
+        character_db,
+        conversation_data={
+            "character_id": character_id,
+            "title": "Replace pending greeting",
+            "client_id": str(character_db.client_id),
+        },
+        provider="definitely-not-a-provider",
+        model="missing-model",
+    )
+
+    first = test_client.put(
+        f"/api/v1/chats/{conversation_id}/settings",
+        headers=auth_headers,
+        json={"settings": {"greetingSelectionId": "greeting:1:selected"}},
+    )
+    assert first.status_code == 200, first.text
+    first_state = character_db.get_roleplay_resume_state(conversation_id)
+    first_pending = first_state["settings"]["roleplayPendingGreetingV1"]
+
+    replacement = test_client.put(
+        f"/api/v1/chats/{conversation_id}/settings",
+        headers=auth_headers,
+        json={"settings": {"greetingSelectionId": "greeting:0:selected"}},
+    )
+    assert replacement.status_code == 200, replacement.text
+    replacement_state = character_db.get_roleplay_resume_state(conversation_id)
+    replacement_pending = replacement_state["settings"]["roleplayPendingGreetingV1"]
+    assert replacement_pending["digest"] != first_pending["digest"]
+    assert replacement_pending["values"]["greeting"]["content"] == (
+        "First pending greeting"
+    )
+
+    cleared = test_client.put(
+        f"/api/v1/chats/{conversation_id}/settings",
+        headers=auth_headers,
+        json={
+            "settings": {
+                "greetingSelectionId": None,
+                "useCharacterDefault": True,
+            }
+        },
+    )
+    assert cleared.status_code == 200, cleared.text
+    cleared_state = character_db.get_roleplay_resume_state(conversation_id)
+    assert cleared_state["settings"].get("greetingSelectionId") is None
+    assert "roleplayPendingGreetingV1" not in cleared_state["settings"]
+
+    repaired = test_client.put(
+        f"/api/v1/chats/{conversation_id}/settings",
+        headers=auth_headers,
+        json={"settings": {"provider": "local-llm", "model": "local-test"}},
+    )
+    assert repaired.status_code == 200, repaired.text
+    repaired_state = character_db.get_roleplay_resume_state(conversation_id)
+    assert repaired_state["resume_eligible"] is True
+    assert "greeting" not in repaired_state["materialized_settings"]["values"]
+
+
+@pytest.mark.integration
 def test_tampered_incomplete_greeting_freeze_fails_repair_atomically(
     test_client,
     auth_headers,
@@ -2784,6 +2915,155 @@ def test_oversize_materialized_mutation_rolls_back_settings_version(
         },
     )
     assert response.status_code in {400, 413, 422}, response.text
+    after = character_db.get_roleplay_resume_state(conversation_id)
+    assert after["settings_version"] == before["settings_version"]
+    assert after["settings"] == before["settings"]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("writer", ["settings", "pin", "greeting"])
+def test_large_valid_internal_authority_does_not_consume_public_settings_budget(
+    test_client,
+    auth_headers,
+    character_db,
+    writer: str,
+) -> None:
+    character_id = character_db.add_character_card(
+        {
+            "name": "Large Internal Authority",
+            "description": "x" * 210_000,
+            "first_message": "Large authority default",
+            "alternate_greetings": ["Large authority alternate"],
+        }
+    )
+    conversation_id = create_character_conversation(
+        character_db,
+        conversation_data={
+            "character_id": character_id,
+            "title": "Large internal authority",
+            "client_id": str(character_db.client_id),
+        },
+        provider="local-llm",
+        model="local-test",
+        initial_messages=[
+            {"id": f"large-authority-{writer}", "sender": "user", "content": "Pin"}
+        ],
+    )
+    materialized = test_client.put(
+        f"/api/v1/chats/{conversation_id}/settings",
+        headers=auth_headers,
+        json={"settings": {"turnTakingMode": "single"}},
+    )
+    assert materialized.status_code == 200, materialized.text
+    before = character_db.get_roleplay_resume_state(conversation_id)
+    assert len(
+        json.dumps(before["settings"], sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
+    ) > 200_000
+
+    if writer == "settings":
+        response = test_client.put(
+            f"/api/v1/chats/{conversation_id}/settings",
+            headers=auth_headers,
+            json={"settings": {"autoSummaryEnabled": False}},
+        )
+    elif writer == "pin":
+        response = test_client.put(
+            f"/api/v1/messages/large-authority-{writer}",
+            params={"expected_version": 1},
+            headers=auth_headers,
+            json={"pinned": True},
+        )
+    else:
+        response = test_client.put(
+            f"/api/v1/chats/{conversation_id}/greetings/select",
+            headers=auth_headers,
+            json={"index": 1},
+        )
+
+    assert response.status_code == 200, response.text
+    after = character_db.get_roleplay_resume_state(conversation_id)
+    assert after["settings_version"] == before["settings_version"] + 1
+    assert after["resume_eligible"] is True
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "internal_mutation",
+    ["behavior_digest", "behavior_oversize", "pending_digest"],
+)
+def test_generic_settings_rejects_invalid_internal_authority_atomically(
+    test_client,
+    auth_headers,
+    character_db,
+    internal_mutation: str,
+) -> None:
+    character_id = character_db.add_character_card(
+        {
+            "name": "Invalid Internal Authority",
+            "first_message": "Default internal greeting",
+            "alternate_greetings": ["Pending internal greeting"],
+        }
+    )
+    conversation_id = create_character_conversation(
+        character_db,
+        conversation_data={
+            "character_id": character_id,
+            "title": "Invalid internal authority",
+            "client_id": str(character_db.client_id),
+        },
+        provider=(
+            "definitely-not-a-provider"
+            if internal_mutation == "pending_digest"
+            else "local-llm"
+        ),
+        model="missing-model" if internal_mutation == "pending_digest" else "local-test",
+    )
+    if internal_mutation == "pending_digest":
+        selected = test_client.put(
+            f"/api/v1/chats/{conversation_id}/greetings/select",
+            headers=auth_headers,
+            json={"index": 1},
+        )
+        assert selected.status_code == 200, selected.text
+    else:
+        expanded = test_client.put(
+            f"/api/v1/chats/{conversation_id}/settings",
+            headers=auth_headers,
+            json={"settings": {"turnTakingMode": "single"}},
+        )
+        assert expanded.status_code == 200, expanded.text
+
+    state = character_db.get_roleplay_resume_state(conversation_id)
+    settings = dict(state["settings"])
+    if internal_mutation == "pending_digest":
+        pending = dict(settings["roleplayPendingGreetingV1"])
+        pending["digest"] = "sha256:" + ("0" * 64)
+        settings["roleplayPendingGreetingV1"] = pending
+    else:
+        behavior = dict(settings["roleplayBehaviorV1"])
+        if internal_mutation == "behavior_digest":
+            behavior["digest"] = "sha256:" + ("0" * 64)
+        else:
+            values = dict(behavior["values"])
+            values["participants"] = [{"oversize": "x" * (1024 * 1024 + 1)}]
+            behavior["values"] = values
+        settings["roleplayBehaviorV1"] = behavior
+    with character_db.transaction() as conn:
+        conn.execute(
+            "UPDATE conversation_settings SET settings_json = ? WHERE conversation_id = ?",
+            (json.dumps(settings), conversation_id),
+        )
+    before = character_db.get_roleplay_resume_state(conversation_id)
+
+    response = test_client.put(
+        f"/api/v1/chats/{conversation_id}/settings",
+        headers=auth_headers,
+        json={"settings": {"userSetting": "tiny public mutation"}},
+    )
+
+    assert response.status_code in {400, 409, 413, 422}, response.text
     after = character_db.get_roleplay_resume_state(conversation_id)
     assert after["settings_version"] == before["settings_version"]
     assert after["settings"] == before["settings"]
