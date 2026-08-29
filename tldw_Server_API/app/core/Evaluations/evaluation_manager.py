@@ -30,8 +30,13 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import (
     resolve_trusted_database_path,
 )
 from tldw_Server_API.app.core.DB_Management.migrations import migrate_evaluations_database
+from tldw_Server_API.app.core.DB_Management.sqlite_policy import configure_sqlite_connection
 from tldw_Server_API.app.core.Evaluations.identity import canonical_evaluations_user_scope
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
+
+
+# Evaluations SQLite connections wait this long for a lock before failing.
+_SQLITE_BUSY_TIMEOUT_MS = 10_000
 
 
 class EvaluationManager:
@@ -54,6 +59,39 @@ class EvaluationManager:
         self._session_id = uuid.uuid4().hex
         # Track evaluations created since last listing (for property tests)
         self._recent_created_ids: list[str] = []
+
+    def _connect(self, *, row_factory: bool = False) -> sqlite3.Connection:
+        """Open a policy-configured connection to the evaluations database.
+
+        Applies the shared pragma policy (WAL, ``synchronous=NORMAL``, a busy
+        timeout). Without a busy timeout SQLite fails a contended statement
+        immediately with "database is locked" rather than waiting.
+        """
+        conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
+        configure_sqlite_connection(conn, busy_timeout_ms=_SQLITE_BUSY_TIMEOUT_MS)
+        if row_factory:
+            conn.row_factory = sqlite3.Row
+        return conn
+
+    async def _run_db(self, work, *, row_factory: bool = False):
+        """Run a synchronous database callable off the event loop.
+
+        These methods are awaited on the request path; running SQLite inline
+        would stall every other request in the worker while it waits on a lock.
+        ``work`` receives an open connection; the surrounding context manager
+        commits on success and rolls back on error, and the connection is
+        always closed.
+        """
+
+        def _invoke():
+            conn = self._connect(row_factory=row_factory)
+            try:
+                with conn:
+                    return work(conn)
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_invoke)
 
     def _get_db_path(self, explicit_path: Optional[Union[str, Path]] = None) -> Path:
         """Resolve a safe evaluations database path.
@@ -281,7 +319,7 @@ class EvaluationManager:
         created_at = datetime.now(timezone.utc)
 
         # Store main evaluation record
-        with sqlite3.connect(self.db_path) as conn:
+        def _work(conn: sqlite3.Connection):
             conn.execute("""
                 INSERT INTO internal_evaluations (
                     evaluation_id, evaluation_type, created_at,
@@ -307,6 +345,8 @@ class EvaluationManager:
                     """, (evaluation_id, metric_name, score, created_at))
 
             conn.commit()
+
+        await self._run_db(_work)
 
         logger.info(f"Stored evaluation {evaluation_id} of type {evaluation_type}")
         # Track recent creations for this manager instance
@@ -343,7 +383,7 @@ class EvaluationManager:
         query = f"SELECT * {query_clauses} ORDER BY created_at DESC LIMIT ? OFFSET ?"
         params = [*filter_params, limit, offset]
 
-        with sqlite3.connect(self.db_path) as conn:
+        def _work(conn: sqlite3.Connection):
             conn.row_factory = sqlite3.Row
 
             # Get total count
@@ -388,6 +428,9 @@ class EvaluationManager:
 
             avg_cursor = conn.execute(avg_query, avg_params)
             average_scores = {row[0]: row[1] for row in avg_cursor}
+            return total_count, items, average_scores
+
+        total_count, items, average_scores = await self._run_db(_work, row_factory=True)
 
         # Calculate trends if we have enough data
         trends = None
@@ -407,7 +450,7 @@ class EvaluationManager:
         metrics_to_compare: Optional[list[str]] = None
     ) -> dict[str, Any]:
         """Compare multiple evaluations"""
-        with sqlite3.connect(self.db_path) as conn:
+        def _work(conn: sqlite3.Connection):
             conn.row_factory = sqlite3.Row
 
             # Get evaluations
@@ -452,6 +495,9 @@ class EvaluationManager:
                 if metric_name not in metric_data:
                     metric_data[metric_name] = {}
                 metric_data[metric_name][eval_id] = score
+            return evaluations, metric_data
+
+        evaluations, metric_data = await self._run_db(_work, row_factory=True)
 
         # Filter metrics if specified
         if metrics_to_compare:
@@ -760,15 +806,16 @@ class EvaluationManager:
         Returns a dict with columns from internal_evaluations or None if not found.
         """
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                conn.row_factory = sqlite3.Row
-                row = conn.execute(
+            row = await self._run_db(
+                lambda conn: conn.execute(
                     "SELECT * FROM internal_evaluations WHERE evaluation_id = ?",
                     (evaluation_id,)
-                ).fetchone()
-                if not row:
-                    return None
-                return dict(row)
+                ).fetchone(),
+                row_factory=True,
+            )
+            if not row:
+                return None
+            return dict(row)
         except Exception as e:
             logger.error(f"get_evaluation failed: {e}")
             return None
@@ -793,18 +840,16 @@ class EvaluationManager:
 
             placeholders = ",".join(["?"] * len(sliced_ids))
             sliced_ids_clause = f"({placeholders})"
-            with sqlite3.connect(self.db_path) as conn:
-                conn.row_factory = sqlite3.Row
-                list_evaluations_sql_template = (
-                    "SELECT * FROM internal_evaluations WHERE evaluation_id IN {sliced_ids_clause} "
-                    "ORDER BY created_at DESC"
-                )
-                list_evaluations_sql = list_evaluations_sql_template.format_map(locals())  # nosec B608
-                rows = conn.execute(
-                    list_evaluations_sql,
-                    sliced_ids
-                ).fetchall()
-                results = [dict(r) for r in rows]
+            # sliced_ids_clause is built solely from "?" placeholders above.
+            list_evaluations_sql = (  # nosec B608
+                f"SELECT * FROM internal_evaluations WHERE evaluation_id IN {sliced_ids_clause} "
+                "ORDER BY created_at DESC"
+            )
+            rows = await self._run_db(
+                lambda conn: conn.execute(list_evaluations_sql, sliced_ids).fetchall(),
+                row_factory=True,
+            )
+            results = [dict(r) for r in rows]
             # Clear after listing to avoid cross-example accumulation
             self._recent_created_ids.clear()
             return results
