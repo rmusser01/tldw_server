@@ -264,6 +264,7 @@ Notes:
 - `DEFAULT_LOCATION`: Optional fallback location for `/weather` when no argument is supplied.
 - `WEATHER_PROVIDER`: Weather backend (`openweather`, `noop`, `none`, `disabled`; default `openweather`).
 - `OPENWEATHER_API_KEY`: API key for the `openweather` provider.
+- `EGRESS_ALLOWLIST`: Must include `api.openweathermap.org` when the `openweather` provider is enabled; policy denial returns weather as unavailable without making the request.
 - `WEATHER_UNITS`: Unit system for weather summaries (`metric|imperial`, default `metric`).
 - `WEATHER_LANG`: OpenWeather language code for descriptions (default `en`).
 - `WEATHER_TIMEOUT_MS`: OpenWeather HTTP timeout in milliseconds (default `1500`).
