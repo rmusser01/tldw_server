@@ -1217,7 +1217,7 @@ leakage, and explicit zero Jobs calls. If wrong, the cost is localized Task 9
 repository/service/reconciler rework; no migration or public API change is
 authorized.
 
-- [ ] **Step 1: Write RED tests for the transactional start boundary**
+- [x] **Step 1: Write RED tests for the transactional start boundary**
 
 An exact idempotency replay lookup happens before current registration/key preconditions. For a new request, contextually decrypt and validate the reviewed target and secret, construct the exact deterministic event bytes plus protected persistence value, and run the first delivery-time URL/DNS policy check without receiver HTTP before opening the start transaction.
 
@@ -1225,17 +1225,17 @@ One AuthNZ transaction must then claim idempotency, recheck migration/key/rotati
 
 Missing/stale ETag, stale reviewed config, deleted registration, unavailable key, rotation, malformed idempotency, same-key/different-request, and database busy return existing closed errors and perform no I/O.
 
-- [ ] **Step 2: Write RED tests for replay and recovery**
+- [x] **Step 2: Write RED tests for replay and recovery**
 
 Processing exact replay returns 202 with original delivery ID, stable retry guidance, and no executor call. Terminal exact replay returns stored bounded result with `idempotent_replay=true` and no decrypt/I/O. A process crash after start is recovered only after `started_at + timeout + 90s`; attempt becomes `outcome_unknown`, delivery becomes `dead:test_attempt_interrupted`, idempotency completes with bounded metadata, and late completion token loses. Tests never retry or create Jobs rows.
 
-- [ ] **Step 3: Write RED tests for one executor outcome**
+- [x] **Step 3: Write RED tests for one executor outcome**
 
 Assert `X-TLDW-Webhook-Test: true`, attempt sequence 1, 2xx success, retry-class HTTP/network outcomes become terminal dead with their actual reason, no pending Jobs disposition, no second attempt, and mandatory accepted audit before start commit. Completion audit is bounded and cannot rewrite durable outcome.
 
 Add deterministic configuration-race tests. Rotation, configuration mutation, or deletion before the start commit fails its compare-and-set and sends nothing. A change after the committed reservation cannot erase the real attempt: success remains succeeded, while any failed test remains dead with its actual receiver classification; both record `completed_after_config_change=true` and neither retries.
 
-- [ ] **Step 4: Run RED**
+- [x] **Step 4: Run RED**
 
 ```bash
 RUN_JOBS=1 TLDW_TEST_POSTGRES_REQUIRED=1 PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
@@ -1245,11 +1245,11 @@ RUN_JOBS=1 TLDW_TEST_POSTGRES_REQUIRED=1 PYTHONPATH=. ../../.venv/bin/python -m 
   tldw_Server_API/tests/Admin_Webhooks/test_event_expansion.py
 ```
 
-- [ ] **Step 5: Implement test start, execute, complete, and stale recovery**
+- [x] **Step 5: Implement test start, execute, complete, and stale recovery**
 
 Generate every identity before the transaction so a retried transaction reuses it. Return replay/conflict before decrypting whenever a stored idempotency record permits it. For a new operation, hold the reviewed decrypted target/secret and exact event bytes only in `repr=False` in-memory values, run the non-I/O egress preflight, and use transaction predicates to prove the same snapshot is still current while reserving attempt one. Only the transaction result that owns the new start may call `DeliveryAttemptExecutor`, immediately after commit, exactly once with that snapshot; conditionally finish by test token and preserve post-reservation configuration races. Extend the reconciler with a separate bounded stale-test pass that uses the persisted timeout and never schedules Jobs or HTTP.
 
-- [ ] **Step 6: Run GREEN and no-Jobs proof**
+- [x] **Step 6: Run GREEN and no-Jobs proof**
 
 ```bash
 RUN_JOBS=1 TLDW_TEST_POSTGRES_REQUIRED=1 PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
@@ -1265,7 +1265,7 @@ if rg -n "create_or_get_delivery_job|create_job\(" \
 fi
 ```
 
-- [ ] **Step 7: Update the task and commit**
+- [x] **Step 7: Update the task and commit**
 
 ```bash
 backlog task edit 13111 --append-notes "Implemented persisted one-attempt synchronous tests with precondition/idempotency replay and interrupted-attempt recovery; no Jobs/retry path is reachable."
@@ -1306,6 +1306,12 @@ with `completed_after_config_change=false`; this prevents operational key
 maintenance from being mislabeled as a webhook configuration change. Start-time
 snapshot CAS remains stricter and must reject an intervening envelope/key rewrite
 before I/O.
+
+**Completion:** Task 9 is complete at `30ca1f3958525f6f4d859990288d5d0521651749`
+after one fix round and a clean independent re-review. The final required
+PostgreSQL regression gate passed 260 tests with zero skips; the independent
+reviewer reran the focused SQLite and required-PostgreSQL selections at four
+passes each, with no Critical, Important, or Minor findings.
 
 ### Task 10: Expose Manual Redelivery, Test, History, And Audit APIs
 
