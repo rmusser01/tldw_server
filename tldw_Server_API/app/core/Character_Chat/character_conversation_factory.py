@@ -1747,21 +1747,36 @@ def _selected_greeting_from_character(
     }
 
 
+def load_character_greeting_source(
+    conn: Any,
+    *,
+    character_id: int,
+    lock_for_update: bool = False,
+) -> dict[str, Any]:
+    """Load one character's greeting fields through the caller's transaction."""
+    query = (
+        "SELECT first_message, alternate_greetings, version FROM character_cards "
+        "WHERE id = ? AND deleted = FALSE LIMIT 1"
+    )
+    if lock_for_update and _is_postgres_connection(conn):
+        query += " FOR UPDATE"
+    rows = _select_rows(conn, query, (character_id,))
+    if not rows:
+        raise InputError(f"Character ID {character_id} not found.")
+    return rows[0]
+
+
 def _resolve_selected_greeting(
     conn: Any,
     *,
     character_id: int,
     selection_id: Any,
 ) -> dict[str, Any] | None:
-    result = conn.execute(
-        "SELECT first_message, alternate_greetings, version FROM character_cards "
-        "WHERE id = ? AND deleted = FALSE LIMIT 1",
-        (character_id,),
+    character = load_character_greeting_source(
+        conn,
+        character_id=character_id,
     )
-    row = result.fetchone()
-    if row is None:
-        raise InputError(f"Character ID {character_id} not found.")
-    return _selected_greeting_from_character(_row_dict(row, result), selection_id)
+    return _selected_greeting_from_character(character, selection_id)
 
 
 def build_pending_greeting_authority(
@@ -2229,9 +2244,16 @@ def _materialize_roleplay_behavior_settings_once(
     if {"greetingSelectionId", "useCharacterDefault"}.intersection(changed_keys):
         selection_id = materialization_settings.get("greetingSelectionId")
         current_greeting = current_values.get("greeting")
+        current_participants = current_values.get("participants")
+        current_primary_id = None
+        if isinstance(current_participants, list) and current_participants:
+            first_participant = current_participants[0]
+            if isinstance(first_participant, Mapping):
+                current_primary_id = _source_id(first_participant)
         if (
             isinstance(current_greeting, Mapping)
             and current_greeting.get("selection_id") == selection_id
+            and str(current_primary_id) == str(primary_character_id)
         ):
             greeting = dict(current_greeting)
         else:

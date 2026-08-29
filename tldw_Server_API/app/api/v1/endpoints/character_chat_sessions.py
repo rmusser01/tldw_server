@@ -122,6 +122,7 @@ from tldw_Server_API.app.core.Character_Chat.character_conversation_factory impo
     build_pending_greeting_authority,
     collect_character_greeting_texts,
     create_character_conversation,
+    load_character_greeting_source,
     materialize_roleplay_behavior_settings,
     reject_resumable_behavior_credentials,
     validate_resumable_behavior_boole,
@@ -207,6 +208,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     InputError,
 )
+from tldw_Server_API.app.core.DB_Management.db_errors import NotFoundError
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchSessionsDB
 from tldw_Server_API.app.core.LLM_Calls.routing import (
@@ -4122,6 +4124,26 @@ def _summary_matches_existing(
     return _safe_int(existing_summary.get("compressedCount")) == compressed_count
 
 
+def _get_completion_settings_row(
+    db: CharactersRAGDB,
+    chat_id: str,
+    *,
+    owner_user_id: str,
+) -> dict[str, Any] | None:
+    """Read settings with the history fence observed before prompt derivation."""
+    if not callable(getattr(db, "get_roleplay_resume_state", None)):
+        return db.get_conversation_settings(chat_id)
+    state = db.get_roleplay_resume_state(
+        chat_id,
+        owner_client_id=owner_user_id,
+    )
+    return {
+        "settings": dict(state.get("settings") or {}),
+        "settings_version": state.get("settings_version") or 0,
+        "history_version": state.get("history_version") or 0,
+    }
+
+
 def _persist_auto_summary_to_settings(
     db: CharactersRAGDB,
     chat_id: str,
@@ -4133,6 +4155,7 @@ def _persist_auto_summary_to_settings(
     window: int,
     compressed_count: int,
     expected_settings_version: int | None = None,
+    expected_history_version: int | None = None,
 ) -> None:
     existing_summary = settings.get("summary")
     if _summary_matches_existing(
@@ -4180,6 +4203,16 @@ def _persist_auto_summary_to_settings(
                 )
                 conversation = resume_state.get("conversation")
                 if not isinstance(conversation, Mapping):
+                    return
+                if expected_settings_version is None or expected_history_version is None:
+                    return
+                if int(resume_state.get("settings_version") or 0) != int(
+                    expected_settings_version
+                ):
+                    return
+                if int(resume_state.get("history_version") or 0) != int(
+                    expected_history_version
+                ):
                     return
                 current_settings = dict(resume_state.get("settings") or {})
                 if _summary_matches_existing(
@@ -4334,6 +4367,11 @@ def _apply_auto_summary_to_prompt_messages(
             compressed_count=len(compressible),
             expected_settings_version=(
                 (settings_row or {}).get("settings_version") or 0
+            )
+            if isinstance(settings_row, Mapping)
+            else 0,
+            expected_history_version=(
+                (settings_row or {}).get("history_version") or 0
             )
             if isinstance(settings_row, Mapping)
             else 0,
@@ -5278,7 +5316,11 @@ async def prepare_chat_completion(
         # Fields are validated by Pydantic; avoid redundant int() casting
         limit = body.limit
         offset = body.offset
-        settings_row = db.get_conversation_settings(chat_id)
+        settings_row = _get_completion_settings_row(
+            db,
+            chat_id,
+            owner_user_id=str(current_user.id),
+        )
 
         messages = db.get_messages_for_conversation(chat_id, limit=limit, offset=offset) or []
         # Filter deleted
@@ -5678,7 +5720,11 @@ async def prompt_assembly_preview(
 
         user_name = conversation.get("user_name", "User")
         include_ctx = bool(body.include_character_context)
-        settings_row = db.get_conversation_settings(chat_id)
+        settings_row = _get_completion_settings_row(
+            db,
+            chat_id,
+            owner_user_id=str(current_user.id),
+        )
         settings = _extract_settings(settings_row) if isinstance(settings_row, dict) else {}
 
         messages = db.get_messages_for_conversation(chat_id, limit=body.limit, offset=body.offset) or []
@@ -6028,7 +6074,11 @@ async def character_chat_completion(
         offset = body.offset
         stream_requested = bool(body.stream)
         save_to_db = body.save_to_db
-        settings_row = db.get_conversation_settings(chat_id)
+        settings_row = _get_completion_settings_row(
+            db,
+            chat_id,
+            owner_user_id=str(current_user.id),
+        )
         history_messages = db.get_messages_for_conversation(chat_id, limit=1000, offset=0) or []
         history_messages = [m for m in history_messages if not m.get('deleted')]
         turn_context = _resolve_chat_turn_context(
@@ -8524,20 +8574,7 @@ async def select_greeting(
     """Select a specific greeting by index and update the chat settings."""
     conversation = db.get_conversation_by_id(chat_id)
     _verify_chat_ownership(conversation, current_user.id, chat_id)
-
-    character_id = conversation.get("character_id")
-    character = db.get_character_card_by_id(character_id) if character_id else {}
-    if not character:
-        character = {}
-
-    greetings_texts = _collect_character_greeting_texts(character)
-    if body.index < 0 or body.index >= len(greetings_texts):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Greeting index {body.index} out of range (0..{len(greetings_texts) - 1})",
-        )
-
-    checksum = _compute_greetings_checksum(character)
+    selected_greeting_text = ""
     try:
         if callable(getattr(db, "get_roleplay_resume_state", None)) and callable(
             getattr(db, "transaction", None)
@@ -8551,6 +8588,25 @@ async def select_greeting(
                 )
                 conversation = resume_state.get("conversation")
                 _verify_chat_ownership(conversation, current_user.id, chat_id)
+                character_id = conversation.get("character_id")
+                if character_id is None:
+                    raise InputError("Conversation has no primary character.")
+                character = load_character_greeting_source(
+                    conn,
+                    character_id=int(character_id),
+                    lock_for_update=True,
+                )
+                greetings_texts = _collect_character_greeting_texts(character)
+                if body.index < 0 or body.index >= len(greetings_texts):
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail=(
+                            f"Greeting index {body.index} out of range "
+                            f"(0..{len(greetings_texts) - 1})"
+                        ),
+                    )
+                selected_greeting_text = greetings_texts[body.index]
+                checksum = _compute_greetings_checksum(character)
                 settings = dict(resume_state.get("settings") or {})
                 settings["greetingSelectionId"] = f"greeting:{body.index}:selected"
                 settings["greetingsChecksum"] = checksum
@@ -8567,6 +8623,11 @@ async def select_greeting(
                     if materialized is not None:
                         settings["roleplayBehaviorV1"] = materialized
                         settings.pop(PENDING_GREETING_SETTINGS_KEY, None)
+                        stored_greeting = materialized["values"].get("greeting")
+                        if isinstance(stored_greeting, Mapping):
+                            selected_greeting_text = str(
+                                stored_greeting.get("content") or selected_greeting_text
+                            )
                         settings["roleplayResumeV1"] = {
                             "resumeEligible": True,
                             "resumeIneligibleReason": None,
@@ -8582,6 +8643,11 @@ async def select_greeting(
                             selection_id=settings["greetingSelectionId"],
                         )
                         settings[PENDING_GREETING_SETTINGS_KEY] = pending_greeting
+                        pending_value = pending_greeting["values"].get("greeting")
+                        if isinstance(pending_value, Mapping):
+                            selected_greeting_text = str(
+                                pending_value.get("content") or selected_greeting_text
+                            )
                         settings["greetingsChecksum"] = pending_greeting["values"][
                             "greetings_checksum"
                         ]
@@ -8597,6 +8663,21 @@ async def select_greeting(
                     expected_settings_version=resume_state["settings_version"] or 0,
                 )
         else:
+            character_id = conversation.get("character_id")
+            character = db.get_character_card_by_id(character_id) if character_id else {}
+            if not character:
+                character = {}
+            greetings_texts = _collect_character_greeting_texts(character)
+            if body.index < 0 or body.index >= len(greetings_texts):
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=(
+                        f"Greeting index {body.index} out of range "
+                        f"(0..{len(greetings_texts) - 1})"
+                    ),
+                )
+            selected_greeting_text = greetings_texts[body.index]
+            checksum = _compute_greetings_checksum(character)
             settings_row = db.get_conversation_settings(chat_id)
             settings = dict((settings_row or {}).get("settings") or {})
             settings["greetingSelectionId"] = f"greeting:{body.index}:selected"
@@ -8613,6 +8694,8 @@ async def select_greeting(
         raise map_db_error_to_http(exc) from exc
     except InputError as exc:
         raise map_db_error_to_http(exc) from exc
+    except (CharactersRAGDBError, NotFoundError) as exc:
+        raise map_db_error_to_http(exc) from exc
     if not updated:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -8622,7 +8705,7 @@ async def select_greeting(
     return GreetingSelectResponse(
         chat_id=chat_id,
         selected_index=body.index,
-        greeting_preview=greetings_texts[body.index][:120],
+        greeting_preview=selected_greeting_text[:120],
         checksum_updated=True,
     )
 

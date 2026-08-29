@@ -63,6 +63,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     InputError,
 )
+from tldw_Server_API.app.core.DB_Management.db_errors import NotFoundError
 from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
 from tldw_Server_API.app.core.Sync.v2.server_origin import (
     SyncServerOriginIdempotencyConflictError,
@@ -1004,17 +1005,15 @@ async def edit_message(
                 detail=f"Chat session {message['conversation_id']} not found",
             )
         with db.transaction() as conn:
-            resume_state = None
-            if metadata_updated:
-                resume_state = db.get_roleplay_resume_state(
-                    message["conversation_id"],
-                    conn=conn,
-                    lock_for_update=True,
-                    owner_client_id=str(current_user.id),
-                )
-                conversation = resume_state.get("conversation")
-                if not isinstance(conversation, Mapping):
-                    raise InputError("Conversation resume state is incomplete")
+            resume_state = db.get_roleplay_resume_state(
+                message["conversation_id"],
+                conn=conn,
+                lock_for_update=True,
+                owner_client_id=str(current_user.id),
+            )
+            conversation = resume_state.get("conversation")
+            if not isinstance(conversation, Mapping):
+                raise InputError("Conversation resume state is incomplete")
             update_payload = {
                 "content": (
                     update_data.content
@@ -1030,7 +1029,7 @@ async def edit_message(
             ):
                 raise InputError("Failed to update message")
 
-            if metadata_updated and resume_state is not None:
+            if metadata_updated:
                 metadata_updated = db.set_message_metadata_extra(
                     message_id,
                     {"pinned": bool(update_data.pinned)},
@@ -1140,7 +1139,7 @@ async def edit_message(
         raise map_db_error_to_http(e) from e
     except InputError as exc:
         raise map_db_error_to_http(exc) from exc
-    except CharactersRAGDBError as exc:
+    except (CharactersRAGDBError, NotFoundError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to edit message") from exc
     except _CHARACTER_MESSAGES_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Error editing message {message_id}: {e}", exc_info=True)

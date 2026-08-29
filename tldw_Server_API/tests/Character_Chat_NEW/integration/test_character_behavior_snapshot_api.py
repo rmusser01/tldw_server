@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from dataclasses import replace
 from unittest import mock
 
@@ -2506,6 +2507,7 @@ def test_materialized_controls_cover_prompt_consumers_and_direct_writers(
         6,
         2,
         expected_settings_version=after_greeting["settings_version"],
+        expected_history_version=after_greeting["history_version"],
     )
     after_summary = character_db.get_roleplay_resume_state(conversation_id)
     assert after_summary["settings_version"] == after_greeting["settings_version"] + 1
@@ -2570,6 +2572,14 @@ def test_greeting_writer_uses_transactional_conversation_identity(
 
     assert response.status_code == 200, response.text
     assert seen["conversation"]["character_id"] == current["character_id"]
+    assert response.json()["greeting_preview"] == "Current greeting"
+    state = character_db.get_roleplay_resume_state(conversation_id)
+    assert state["materialized_settings"]["values"]["greeting"]["content"] == (
+        "Current greeting"
+    )
+    assert state["settings"]["greetingsChecksum"] == sessions._compute_greetings_checksum(
+        character_db.get_character_card_by_id(current["character_id"])
+    )
 
 
 @pytest.mark.integration
@@ -2601,9 +2611,127 @@ def test_auto_summary_writer_uses_transactional_conversation_identity(
         5,
         2,
         expected_settings_version=before["settings_version"],
+        expected_history_version=before["history_version"],
     )
 
     assert seen["conversation"]["character_id"] == current["character_id"]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("stale_fence", ["settings", "history"])
+def test_auto_summary_writer_rejects_stale_derivation_fences(
+    character_db,
+    stale_fence: str,
+) -> None:
+    character_id = character_db.add_character_card({"name": "Summary Fence"})
+    conversation_id = create_character_conversation(
+        character_db,
+        conversation_data={
+            "character_id": character_id,
+            "title": "Summary fence",
+            "client_id": str(character_db.client_id),
+        },
+        provider="local-llm",
+        model="local-test",
+        initial_messages=[
+            {"id": "summary-source-1", "sender": "user", "content": "One"},
+            {"id": "summary-source-2", "sender": "assistant", "content": "Two"},
+        ],
+    )
+    import tldw_Server_API.app.api.v1.endpoints.character_chat_sessions as sessions
+
+    derived_from = character_db.get_roleplay_resume_state(conversation_id)
+    if stale_fence == "settings":
+        changed_settings = dict(derived_from["settings"])
+        changed_settings["turnTakingMode"] = "single"
+        assert character_db.upsert_conversation_settings(
+            conversation_id,
+            changed_settings,
+            expected_settings_version=derived_from["settings_version"],
+        )
+    else:
+        assert character_db.add_message(
+            {
+                "id": "summary-concurrent-message",
+                "conversation_id": conversation_id,
+                "sender": "user",
+                "content": "Three",
+            }
+        )
+    before_write = character_db.get_roleplay_resume_state(conversation_id)
+
+    sessions._persist_auto_summary_to_settings(
+        character_db,
+        conversation_id,
+        dict(derived_from["settings"]),
+        "Stale summary",
+        "summary-source-1",
+        "summary-source-2",
+        20,
+        5,
+        2,
+        expected_settings_version=derived_from["settings_version"],
+        expected_history_version=derived_from["history_version"],
+    )
+
+    after = character_db.get_roleplay_resume_state(conversation_id)
+    assert after["settings_version"] == before_write["settings_version"]
+    assert after["history_version"] == before_write["history_version"]
+    assert "summary" not in after["settings"]
+
+
+@pytest.mark.integration
+def test_greeting_reselection_reloads_when_primary_character_changes(
+    test_client,
+    auth_headers,
+    character_db,
+) -> None:
+    old_character_id = character_db.add_character_card(
+        {"name": "Old Primary", "first_message": "Old primary greeting"}
+    )
+    new_character_id = character_db.add_character_card(
+        {"name": "New Primary", "first_message": "New primary greeting"}
+    )
+    conversation_id = create_character_conversation(
+        character_db,
+        conversation_data={
+            "character_id": old_character_id,
+            "title": "Primary identity change",
+            "client_id": str(character_db.client_id),
+        },
+        provider="local-llm",
+        model="local-test",
+        initial_messages=[],
+    )
+    first = test_client.put(
+        f"/api/v1/chats/{conversation_id}/greetings/select",
+        headers=auth_headers,
+        json={"index": 0},
+    )
+    assert first.status_code == 200, first.text
+    assert character_db.get_roleplay_resume_state(conversation_id)[
+        "materialized_settings"
+    ]["values"]["greeting"]["content"] == "Old primary greeting"
+
+    with character_db.transaction() as conn:
+        conn.execute(
+            "UPDATE conversations SET character_id = ?, assistant_id = ?, "
+            "version = version + 1 WHERE id = ?",
+            (new_character_id, str(new_character_id), conversation_id),
+        )
+
+    selected = test_client.put(
+        f"/api/v1/chats/{conversation_id}/greetings/select",
+        headers=auth_headers,
+        json={"index": 0},
+    )
+
+    assert selected.status_code == 200, selected.text
+    assert selected.json()["greeting_preview"] == "New primary greeting"
+    state = character_db.get_roleplay_resume_state(conversation_id)
+    assert state["materialized_settings"]["values"]["greeting"]["content"] == (
+        "New primary greeting"
+    )
 
 
 @pytest.mark.integration
@@ -2904,6 +3032,72 @@ def test_pin_writer_delete_race_rolls_back_all_fences(
     assert character_db.get_message_metadata("pin-race-target") is None
     assert after["history_version"] == before["history_version"]
     assert after["settings_version"] == before["settings_version"]
+
+
+@pytest.mark.integration
+def test_content_edit_rejects_conversation_deleted_before_transaction(
+    test_client,
+    auth_headers,
+    character_db,
+    monkeypatch,
+) -> None:
+    character_id = character_db.add_character_card({"name": "Deleted Edit"})
+    conversation_id = create_character_conversation(
+        character_db,
+        conversation_data={
+            "character_id": character_id,
+            "title": "Deleted before edit",
+            "client_id": str(character_db.client_id),
+        },
+        provider="local-llm",
+        model="local-test",
+        initial_messages=[
+            {"id": "deleted-conversation-edit", "sender": "user", "content": "Old"},
+        ],
+    )
+    before = character_db.get_roleplay_resume_state(conversation_id)
+    real_transaction = character_db.transaction
+    transaction_calls = 0
+
+    @contextmanager
+    def delete_before_edit_transaction():
+        nonlocal transaction_calls
+        transaction_calls += 1
+        if transaction_calls == 1:
+            with real_transaction() as delete_conn:
+                delete_conn.execute(
+                    "UPDATE conversations SET deleted = TRUE WHERE id = ?",
+                    (conversation_id,),
+                )
+        with real_transaction() as conn:
+            yield conn
+
+    monkeypatch.setattr(character_db, "transaction", delete_before_edit_transaction)
+
+    try:
+        response = test_client.put(
+            "/api/v1/messages/deleted-conversation-edit",
+            params={"expected_version": 1},
+            headers=auth_headers,
+            json={"content": "New"},
+        )
+    finally:
+        character_db.transaction = real_transaction
+        with real_transaction() as restore_conn:
+            row = restore_conn.execute(
+                "SELECT history_version FROM conversations WHERE id = ?",
+                (conversation_id,),
+            ).fetchone()
+            restore_conn.execute(
+                "UPDATE conversations SET deleted = FALSE WHERE id = ?",
+                (conversation_id,),
+            )
+
+    assert response.status_code == 404, response.text
+    message = character_db.get_message_by_id("deleted-conversation-edit")
+    assert message["content"] == "Old"
+    assert message["version"] == 1
+    assert row["history_version"] == before["history_version"]
 
 
 @pytest.mark.integration
