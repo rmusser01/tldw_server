@@ -6,8 +6,6 @@ import pytest
 from fastapi.testclient import TestClient
 from loguru import logger
 
-from tldw_Server_API.tests.AuthNZ_SQLite._user_fixtures import create_authnz_test_user
-
 
 @pytest.mark.asyncio
 async def test_admin_endpoints_basic_sqlite(tmp_path):
@@ -30,10 +28,13 @@ async def test_admin_endpoints_basic_sqlite(tmp_path):
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))
 
-    # Create a user to satisfy FK and for membership.
-    user_id = await create_authnz_test_user(
-        pool, username="adminuser", email="admin@example.com"
-    )
+    # Create a user to satisfy FK and for membership
+    async with pool.transaction() as conn:
+        await conn.execute(
+            "INSERT INTO users (username, email, password_hash, is_active) VALUES (?, ?, ?, 1)",
+            ("adminuser", "admin@example.com", "x"),
+        )
+    user_id = await pool.fetchval("SELECT id FROM users WHERE username = ?", "adminuser")
 
     # Create TestClient and override admin/principal dependencies to bypass auth
     from tldw_Server_API.app.main import app
@@ -206,10 +207,13 @@ async def test_org_member_list_pagination_filters_sqlite(tmp_path):
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))
 
-    # Seed an admin user for auth overrides.
-    admin_id = await create_authnz_test_user(
-        pool, username="rootadmin", email="rootadmin@example.com"
-    )
+    # Seed an admin user for auth overrides
+    async with pool.transaction() as conn:
+        cursor = await conn.execute(
+            "INSERT INTO users (username, email, password_hash, is_active) VALUES (?, ?, ?, 1)",
+            ("rootadmin", "rootadmin@example.com", "x"),
+        )
+        admin_id = cursor.lastrowid
 
     from tldw_Server_API.app.main import app
     from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
@@ -251,15 +255,16 @@ async def test_org_member_list_pagination_filters_sqlite(tmp_path):
     suspended_ids: set[int] = set()
     lead_invited_ids: set[int] = set()
 
-    for idx in range(total_members):
-        username = f"member{idx}"
-        user_ids.append(
-            await create_authnz_test_user(
-                pool, username=username, email=f"{username}@example.com"
-            )
-        )
-
     async with pool.transaction() as conn:
+        for idx in range(total_members):
+            username = f"member{idx}"
+            cursor = await conn.execute(
+                "INSERT INTO users (username, email, password_hash, is_active) VALUES (?, ?, ?, 1)",
+                (username, f"{username}@example.com", "x"),
+            )
+            user_id = cursor.lastrowid
+            user_ids.append(user_id)
+
         org_cursor = await conn.execute(
             "INSERT INTO organizations (name, slug, owner_user_id) VALUES (?, ?, ?)",
             ("Paginated Org", "paginated-org", admin_id),

@@ -3,8 +3,6 @@ from pathlib import Path
 
 import pytest
 
-from tldw_Server_API.tests.AuthNZ_SQLite._user_fixtures import create_authnz_test_user
-
 
 @pytest.mark.asyncio
 async def test_create_virtual_key_and_budget_checks(tmp_path):
@@ -23,10 +21,13 @@ async def test_create_virtual_key_and_budget_checks(tmp_path):
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))
 
-    # Create a dummy user for FK through the guarded write path.
-    user_id = await create_authnz_test_user(
-        pool, username="bob", email="bob@example.com"
-    )
+    # Create a dummy user for FK
+    async with pool.transaction() as conn:
+        await conn.execute(
+            "INSERT INTO users (username, email, password_hash, is_active) VALUES (?, ?, ?, 1)",
+            ("bob", "bob@example.com", "x"),
+        )
+    user_id = await pool.fetchval("SELECT id FROM users WHERE username = ?", "bob")
 
     # Create a virtual key
     from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager

@@ -10,7 +10,6 @@ from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
 from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
 from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
 from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-from tldw_Server_API.tests.AuthNZ_SQLite._user_fixtures import create_authnz_test_user
 
 
 def _base_env(tmp_path: Path, monkeypatch) -> None:
@@ -33,12 +32,15 @@ def _make_request(api_key: str) -> Request:
 
 
 async def _seed_user(pool, username: str) -> int:
-    return await create_authnz_test_user(
-        pool,
-        username=username,
-        email=f"{username}@example.com",
-        is_verified=True,
-    )
+    async with pool.transaction() as conn:
+        await conn.execute(
+            """
+            INSERT INTO users (username, email, password_hash, is_active, is_verified, role)
+            VALUES (?, ?, ?, 1, 1, 'user')
+            """,
+            (username, f"{username}@example.com", "x"),
+        )
+    return int(await pool.fetchval("SELECT id FROM users WHERE username = ?", username))
 
 
 async def _ensure_role(pool, role_name: str) -> int:

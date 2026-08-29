@@ -4,8 +4,6 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from tldw_Server_API.tests.AuthNZ_SQLite._user_fixtures import create_authnz_test_user
-
 
 @pytest.mark.asyncio
 async def test_admin_org_members_endpoints_sqlite(tmp_path):
@@ -24,16 +22,23 @@ async def test_admin_org_members_endpoints_sqlite(tmp_path):
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))
 
-    # Create users through the guarded write path.
-    admin_id = await create_authnz_test_user(
-        pool, username="admin", email="admin@example.com"
-    )
-    bob_id = await create_authnz_test_user(
-        pool, username="bob", email="bob@example.com"
-    )
-    charlie_id = await create_authnz_test_user(
-        pool, username="charlie", email="charlie@example.com"
-    )
+    # Create users
+    async with pool.transaction() as conn:
+        await conn.execute(
+            "INSERT INTO users (username, email, password_hash, is_active) VALUES (?, ?, ?, 1)",
+            ("admin", "admin@example.com", "x"),
+        )
+        await conn.execute(
+            "INSERT INTO users (username, email, password_hash, is_active) VALUES (?, ?, ?, 1)",
+            ("bob", "bob@example.com", "x"),
+        )
+        await conn.execute(
+            "INSERT INTO users (username, email, password_hash, is_active) VALUES (?, ?, ?, 1)",
+            ("charlie", "charlie@example.com", "x"),
+        )
+    admin_id = await pool.fetchval("SELECT id FROM users WHERE username = ?", "admin")
+    bob_id = await pool.fetchval("SELECT id FROM users WHERE username = ?", "bob")
+    charlie_id = await pool.fetchval("SELECT id FROM users WHERE username = ?", "charlie")
 
     # Prepare app client and override principal to simulate admin claims
     from tldw_Server_API.app.main import app

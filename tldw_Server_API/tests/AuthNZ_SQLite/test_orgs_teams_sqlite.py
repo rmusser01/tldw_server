@@ -3,8 +3,6 @@ from pathlib import Path
 
 import pytest
 
-from tldw_Server_API.tests.AuthNZ_SQLite._user_fixtures import create_authnz_test_user
-
 
 @pytest.mark.asyncio
 async def test_orgs_teams_crud_sqlite(tmp_path, authnz_schema_ready):
@@ -22,10 +20,16 @@ async def test_orgs_teams_crud_sqlite(tmp_path, authnz_schema_ready):
     # Schema ensured by authnz_schema_ready; acquire pool for ops
     pool = await get_db_pool()
 
-    # Create a dummy user for membership FKs through the guarded write path.
-    user_id = await create_authnz_test_user(
-        pool, username="alice", email="alice@example.com"
-    )
+    # Create a dummy user for membership FKs
+    async with pool.transaction() as conn:
+        await conn.execute(
+            """
+            INSERT INTO users (username, email, password_hash, is_active)
+            VALUES (?, ?, ?, 1)
+            """,
+            ("alice", "alice@example.com", "x"),
+        )
+    user_id = await pool.fetchval("SELECT id FROM users WHERE username = ?", "alice")
 
     # Use service helpers
     from tldw_Server_API.app.core.AuthNZ.orgs_teams import (

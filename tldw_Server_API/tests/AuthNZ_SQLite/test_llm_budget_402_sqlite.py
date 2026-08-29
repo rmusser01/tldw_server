@@ -5,8 +5,6 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from tldw_Server_API.tests.AuthNZ_SQLite._user_fixtures import create_authnz_test_user
-
 
 def _chat_stub_response():
     return {
@@ -65,10 +63,13 @@ async def test_llm_budget_middleware_returns_402_on_overage(tmp_path):
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))
 
-    # Create a user through the guarded write path.
-    user_id = await create_authnz_test_user(
-        pool, username="budgetuser", email="budgetuser@example.com"
-    )
+    # Create a user
+    async with pool.transaction() as conn:
+        await conn.execute(
+            "INSERT INTO users (username, email, password_hash, is_active) VALUES (?, ?, ?, 1)",
+            ("budgetuser", "budgetuser@example.com", "x"),
+        )
+    user_id = await pool.fetchval("SELECT id FROM users WHERE username = ?", "budgetuser")
 
     # Create a virtual key with small daily token budget and allow chat.completions
     from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
@@ -137,9 +138,12 @@ async def test_llm_budget_allows_under_budget_chat_sqlite(tmp_path, monkeypatch)
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))
 
-    user_id = await create_authnz_test_user(
-        pool, username="budget_ok_user", email="budget_ok@example.com"
-    )
+    async with pool.transaction() as conn:
+        await conn.execute(
+            "INSERT INTO users (username, email, password_hash, is_active) VALUES (?, ?, ?, 1)",
+            ("budget_ok_user", "budget_ok@example.com", "x"),
+        )
+    user_id = await pool.fetchval("SELECT id FROM users WHERE username = ?", "budget_ok_user")
 
     from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
     mgr = APIKeyManager()
@@ -188,9 +192,12 @@ async def test_llm_budget_middleware_blocks_disallowed_endpoint_sqlite(tmp_path)
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))
 
-    user_id = await create_authnz_test_user(
-        pool, username="endpointuser", email="endpointuser@example.com"
-    )
+    async with pool.transaction() as conn:
+        await conn.execute(
+            "INSERT INTO users (username, email, password_hash, is_active) VALUES (?, ?, ?, 1)",
+            ("endpointuser", "endpointuser@example.com", "x"),
+        )
+    user_id = await pool.fetchval("SELECT id FROM users WHERE username = ?", "endpointuser")
 
     from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
     mgr = APIKeyManager()
@@ -233,10 +240,13 @@ async def test_llm_budget_middleware_enforces_usd_budgets_sqlite(tmp_path):
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))
 
-    # Create a user through the guarded write path.
-    user_id = await create_authnz_test_user(
-        pool, username="usduser", email="usduser@example.com"
-    )
+    # Create a user
+    async with pool.transaction() as conn:
+        await conn.execute(
+            "INSERT INTO users (username, email, password_hash, is_active) VALUES (?, ?, ?, 1)",
+            ("usduser", "usduser@example.com", "x"),
+        )
+    user_id = await pool.fetchval("SELECT id FROM users WHERE username = ?", "usduser")
 
     from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
     mgr = APIKeyManager()
@@ -334,9 +344,12 @@ async def test_llm_budget_middleware_enforces_month_tokens_sqlite(tmp_path):
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))
 
-    user_id = await create_authnz_test_user(
-        pool, username="monthtok_user", email="monthtok@example.com"
-    )
+    async with pool.transaction() as conn:
+        await conn.execute(
+            "INSERT INTO users (username, email, password_hash, is_active) VALUES (?, ?, ?, 1)",
+            ("monthtok_user", "monthtok@example.com", "x"),
+        )
+    user_id = await pool.fetchval("SELECT id FROM users WHERE username = ?", "monthtok_user")
 
     from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
     mgr = APIKeyManager()
@@ -397,9 +410,12 @@ async def test_llm_budget_middleware_returns_402_on_embeddings_overage(tmp_path)
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))
 
-    user_id = await create_authnz_test_user(
-        pool, username="embeduser", email="embeduser@example.com"
-    )
+    async with pool.transaction() as conn:
+        await conn.execute(
+            "INSERT INTO users (username, email, password_hash, is_active) VALUES (?, ?, ?, 1)",
+            ("embeduser", "embeduser@example.com", "x"),
+        )
+    user_id = await pool.fetchval("SELECT id FROM users WHERE username = ?", "embeduser")
 
     from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
     mgr = APIKeyManager()

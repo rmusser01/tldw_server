@@ -4,8 +4,6 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from tldw_Server_API.tests.AuthNZ_SQLite._user_fixtures import create_authnz_test_user
-
 
 @pytest.mark.asyncio
 async def test_provider_model_allowlists_sqlite(tmp_path):
@@ -25,10 +23,13 @@ async def test_provider_model_allowlists_sqlite(tmp_path):
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))
 
-    # Create a user through the guarded write path.
-    user_id = await create_authnz_test_user(
-        pool, username="vkuser", email="vkuser@example.com"
-    )
+    # Create a user
+    async with pool.transaction() as conn:
+        await conn.execute(
+            "INSERT INTO users (username, email, password_hash, is_active) VALUES (?, ?, ?, 1)",
+            ("vkuser", "vkuser@example.com", "x"),
+        )
+    user_id = await pool.fetchval("SELECT id FROM users WHERE username = ?", "vkuser")
 
     # Create a virtual key with allowlists
     from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
@@ -87,10 +88,13 @@ async def test_missing_provider_header_allows_when_allowlist_present_sqlite(tmp_
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))
 
-    # Create a user through the guarded write path.
-    user_id = await create_authnz_test_user(
-        pool, username="vkuser2", email="vkuser2@example.com"
-    )
+    # Create a user
+    async with pool.transaction() as conn:
+        await conn.execute(
+            "INSERT INTO users (username, email, password_hash, is_active) VALUES (?, ?, ?, 1)",
+            ("vkuser2", "vkuser2@example.com", "x"),
+        )
+    user_id = await pool.fetchval("SELECT id FROM users WHERE username = ?", "vkuser2")
 
     # Create a virtual key with provider/model allowlists
     from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
@@ -137,9 +141,12 @@ async def test_non_json_body_skips_model_enforcement_sqlite(tmp_path):
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))
 
-    user_id = await create_authnz_test_user(
-        pool, username="vkuser3", email="vkuser3@example.com"
-    )
+    async with pool.transaction() as conn:
+        await conn.execute(
+            "INSERT INTO users (username, email, password_hash, is_active) VALUES (?, ?, ?, 1)",
+            ("vkuser3", "vkuser3@example.com", "x"),
+        )
+    user_id = await pool.fetchval("SELECT id FROM users WHERE username = ?", "vkuser3")
 
     from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
     mgr = APIKeyManager()
@@ -189,9 +196,12 @@ async def test_invalid_json_body_skips_model_enforcement_sqlite(tmp_path):
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))
 
-    user_id = await create_authnz_test_user(
-        pool, username="vkuser4", email="vkuser4@example.com"
-    )
+    async with pool.transaction() as conn:
+        await conn.execute(
+            "INSERT INTO users (username, email, password_hash, is_active) VALUES (?, ?, ?, 1)",
+            ("vkuser4", "vkuser4@example.com", "x"),
+        )
+    user_id = await pool.fetchval("SELECT id FROM users WHERE username = ?", "vkuser4")
 
     from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
     mgr = APIKeyManager()

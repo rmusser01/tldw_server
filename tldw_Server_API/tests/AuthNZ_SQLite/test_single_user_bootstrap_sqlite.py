@@ -10,8 +10,6 @@ from pathlib import Path
 import pytest
 from loguru import logger
 
-from tldw_Server_API.tests.AuthNZ_SQLite._user_fixtures import create_authnz_test_user
-
 
 @pytest.mark.asyncio
 async def test_single_user_bootstrap_creates_admin_user_and_primary_key(tmp_path, monkeypatch):
@@ -152,18 +150,15 @@ async def test_single_user_bootstrap_reuses_preseeded_primary_key(tmp_path, monk
     key_hash = manager.hash_api_key(key_value)
     key_prefix = (key_value[:10] + "...") if len(key_value) > 10 else key_value
 
-    # Pre-seed a primary key row for SINGLE_USER_API_KEY to simulate an existing deployment.
-    await create_authnz_test_user(
-        pool,
-        user_id=single_user_id,
-        username="single_user",
-        email="single_user@example.local",
-        password_hash="",
-        role="admin",
-        is_verified=True,
-        ignore_conflict=True,
-    )
+    # Pre-seed a primary key row for SINGLE_USER_API_KEY to simulate an existing deployment
     async with pool.transaction() as conn:  # type: ignore[attr-defined]
+        await conn.execute(
+            """
+            INSERT OR IGNORE INTO users (id, username, email, password_hash, is_active, is_verified, role)
+            VALUES (?, ?, ?, ?, 1, 1, 'admin')
+            """,
+            (single_user_id, "single_user", "single_user@example.local", ""),
+        )
         await conn.execute(
             """
             INSERT INTO api_keys (
@@ -235,13 +230,15 @@ async def test_single_user_bootstrap_fails_with_extra_active_user_sqlite(tmp_pat
     ensure_authnz_tables(Path(pool.db_path))
 
     # Pre-seed an additional active user to trigger bootstrap failure.
-    await create_authnz_test_user(
-        pool,
-        user_id=999,
-        username="extra_user",
-        email="extra@example.local",
-        password_hash="",
-        is_verified=True,
+    await pool.execute(
+        """
+        INSERT INTO users (id, username, email, password_hash, is_active, is_verified, role)
+        VALUES (?, ?, ?, ?, 1, 1, 'user')
+        """,
+        999,
+        "extra_user",
+        "extra@example.local",
+        "",
     )
 
     from tldw_Server_API.app.core.AuthNZ.initialize import bootstrap_single_user_profile
@@ -272,15 +269,15 @@ async def test_single_user_bootstrap_fails_with_multiple_primary_keys_sqlite(tmp
     single_user_id = settings.SINGLE_USER_FIXED_ID
 
     # Ensure the single-user row exists for FK constraints.
-    await create_authnz_test_user(
-        pool,
-        user_id=single_user_id,
-        username="single_user",
-        email="single_user@example.local",
-        password_hash="",
-        role="admin",
-        is_verified=True,
-        ignore_conflict=True,
+    await pool.execute(
+        """
+        INSERT OR IGNORE INTO users (id, username, email, password_hash, is_active, is_verified, role)
+        VALUES (?, ?, ?, ?, 1, 1, 'admin')
+        """,
+        single_user_id,
+        "single_user",
+        "single_user@example.local",
+        "",
     )
 
     manager = APIKeyManager()

@@ -5,7 +5,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.tests.helpers.audit_helpers import await_audit_action, flush_audit_events
-from tldw_Server_API.tests.AuthNZ_SQLite._user_fixtures import create_authnz_test_user
 
 
 @pytest.mark.real_audit
@@ -30,13 +29,18 @@ async def test_admin_org_membership_audit_events_sqlite(tmp_path, real_audit_ser
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))
 
-    # Create admin user (id should be 1 by default) and a target user.
-    admin_id = await create_authnz_test_user(
-        pool, username="single_user", email="single@example.com"
-    )
-    target_id = await create_authnz_test_user(
-        pool, username="victim", email="victim@example.com"
-    )
+    # Create admin user (id should be 1 by default) and a target user
+    async with pool.transaction() as conn:
+        await conn.execute(
+            "INSERT INTO users (username, email, password_hash, is_active) VALUES (?, ?, ?, 1)",
+            ("single_user", "single@example.com", "x"),
+        )
+        await conn.execute(
+            "INSERT INTO users (username, email, password_hash, is_active) VALUES (?, ?, ?, 1)",
+            ("victim", "victim@example.com", "x"),
+        )
+    admin_id = await pool.fetchval("SELECT id FROM users WHERE username = ?", "single_user")
+    target_id = await pool.fetchval("SELECT id FROM users WHERE username = ?", "victim")
 
     # Prepare app
     from tldw_Server_API.app.main import app
