@@ -206,6 +206,7 @@ def test_import_mediawiki_dump_uses_injected_writer_without_managed_database(
 
     fake_repo = _FakeRepo()
     checkpoint_saves: list[int] = []
+    checkpoint_scopes: list[tuple[str, str | None]] = []
     dump_path = tmp_path / "dump.xml"
     dump_path.write_text("<mediawiki />")
     items = [
@@ -238,11 +239,16 @@ def test_import_mediawiki_dump_uses_injected_writer_without_managed_database(
         "save_checkpoint",
         lambda path, page_id: checkpoint_saves.append(page_id),
     )
-    monkeypatch.setattr(
-        Media_Wiki,
-        "get_safe_checkpoint_path",
-        lambda wiki_name: tmp_path / f"{wiki_name}.json",
-    )
+    def _checkpoint_path(
+        wiki_name: str,
+        checkpoint_dir=None,
+        *,
+        identity_scope: str | None = None,
+    ):
+        checkpoint_scopes.append((wiki_name, identity_scope))
+        return tmp_path / f"{wiki_name}.json"
+
+    monkeypatch.setattr(Media_Wiki, "get_safe_checkpoint_path", _checkpoint_path)
     monkeypatch.setattr(
         Media_Wiki,
         "managed_media_database",
@@ -260,12 +266,35 @@ def test_import_mediawiki_dump_uses_injected_writer_without_managed_database(
             store_to_vector_db=False,
             allowed_dir=tmp_path,
             media_writer=fake_repo,
+            vector_user_id="request-user-42",
         )
     )
 
     assert results[-1]["type"] == "summary"
     assert fake_repo.calls[0]["title"] == "Request Page"
     assert checkpoint_saves == [125]
+    assert checkpoint_scopes == [("ExampleWiki", "request-user-42")]
+
+
+def test_checkpoint_paths_are_isolated_by_request_identity(tmp_path):
+    legacy = Media_Wiki.get_safe_checkpoint_path("Example Wiki", checkpoint_dir=tmp_path)
+    first = Media_Wiki.get_safe_checkpoint_path(
+        "Example Wiki",
+        checkpoint_dir=tmp_path,
+        identity_scope="request-user-42",
+    )
+    second = Media_Wiki.get_safe_checkpoint_path(
+        "Example Wiki",
+        checkpoint_dir=tmp_path,
+        identity_scope="request-user-99",
+    )
+
+    assert legacy.name == "Example_Wiki_import_checkpoint.json"
+    assert first != legacy
+    assert second != legacy
+    assert first != second
+    assert "request-user-42" not in first.name
+    assert "request-user-99" not in second.name
 
 
 def test_import_mediawiki_dump_sanitizes_unexpected_import_error(monkeypatch, tmp_path):

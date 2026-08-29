@@ -6,6 +6,7 @@
 import bz2
 import contextlib
 import gzip
+import hashlib
 import json
 import os
 import re
@@ -320,12 +321,18 @@ def sanitize_wiki_name(wiki_name: str) -> str:
     return safe_name
 
 
-def get_safe_checkpoint_path(wiki_name: str, checkpoint_dir: Optional[Path] = None) -> Path:
+def get_safe_checkpoint_path(
+    wiki_name: str,
+    checkpoint_dir: Optional[Path] = None,
+    *,
+    identity_scope: Optional[str] = None,
+) -> Path:
     """Generate safe checkpoint file path.
 
     Args:
         wiki_name: Wiki name for checkpoint
         checkpoint_dir: Directory for checkpoint files (default: current directory)
+        identity_scope: Optional request identity used to isolate resumable state
 
     Returns:
         Safe Path object for checkpoint file
@@ -342,7 +349,12 @@ def get_safe_checkpoint_path(wiki_name: str, checkpoint_dir: Optional[Path] = No
         base_dir.mkdir(exist_ok=True)
 
     # Construct checkpoint filename
-    checkpoint_filename = f"{safe_wiki_name}_import_checkpoint.json"
+    scope_suffix = ""
+    normalized_scope = str(identity_scope).strip() if identity_scope is not None else ""
+    if normalized_scope:
+        scope_digest = hashlib.sha256(normalized_scope.encode("utf-8")).hexdigest()[:16]
+        scope_suffix = f"_{scope_digest}"
+    checkpoint_filename = f"{safe_wiki_name}{scope_suffix}_import_checkpoint.json"
     checkpoint_path = base_dir / checkpoint_filename
 
     # Verify the path is within the expected directory using secure method
@@ -965,7 +977,17 @@ def import_mediawiki_dump(
         final_chunk_options = chunk_options_override if chunk_options_override else cfg.get('chunking', {})
 
         # Get safe checkpoint path
-        checkpoint_file = get_safe_checkpoint_path(safe_wiki_name)
+        normalized_vector_user_id = (
+            str(vector_user_id).strip() if vector_user_id is not None else ""
+        )
+        checkpoint_file = (
+            get_safe_checkpoint_path(
+                safe_wiki_name,
+                identity_scope=normalized_vector_user_id,
+            )
+            if normalized_vector_user_id
+            else get_safe_checkpoint_path(safe_wiki_name)
+        )
         last_processed_id = 0
         if store_to_db:  # Checkpoints only make sense if we are saving progress to DB
             last_processed_id = load_checkpoint(str(checkpoint_file))
