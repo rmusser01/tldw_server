@@ -151,6 +151,38 @@ _ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
     }
     for status in (401, 403, 404, 409, 412, 422, 428, 429, 500, 503)
 }
+_IDEMPOTENCY_KEY_PATTERN = r"^[A-Za-z0-9._:-]{16,255}$"
+_REQUIRED_IF_MATCH_PARAMETER = {
+    "name": "If-Match",
+    "in": "header",
+    "required": True,
+    "schema": {"type": "string"},
+}
+_REQUEST_ID_RESPONSE_HEADER = {
+    "description": "Normalized request correlation identifier",
+    "schema": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": r"^[A-Za-z0-9._:-]{1,128}$",
+    },
+}
+_NO_STORE_RESPONSE_HEADER = {
+    "description": "Disables response caching",
+    "schema": {"type": "string", "enum": ["no-store"]},
+}
+_RETRY_AFTER_RESPONSE_HEADER = {
+    "description": "Bounded retry delay in seconds",
+    "schema": {"type": "integer", "minimum": 0, "maximum": 86_400},
+}
+_DELIVERY_SUCCESS_HEADERS = {
+    "X-Request-ID": _REQUEST_ID_RESPONSE_HEADER,
+    "Cache-Control": _NO_STORE_RESPONSE_HEADER,
+}
+_TEST_PROCESSING_HEADERS = {
+    **_DELIVERY_SUCCESS_HEADERS,
+    "Retry-After": _RETRY_AFTER_RESPONSE_HEADER,
+}
 
 
 def _request_id(request: Request) -> str:
@@ -251,14 +283,6 @@ class AdminWebhookRoute(APIRoute):
                     message=message,
                     headers=_filtered_http_exception_headers(exc),
                 )
-            except Exception:  # noqa: BLE001 - matched routes stay closed
-                return _webhook_error_response(
-                    code=WebhookErrorCode.REQUEST_REJECTED.value,
-                    status_code=500,
-                    request_id=_request_id(request),
-                    message=_REQUEST_REJECTED_MESSAGE,
-                )
-
         return redacted_handler
 
 
@@ -707,6 +731,12 @@ async def create_webhook(
 @canonical_router.get(
     "/webhooks/{webhook_id}/deliveries",
     response_model=WebhookDeliveryListResponse,
+    responses={
+        200: {
+            "description": "Sanitized webhook delivery history",
+            "headers": _DELIVERY_SUCCESS_HEADERS,
+        }
+    },
 )
 async def list_webhook_deliveries(
     request: Request,
@@ -759,10 +789,16 @@ async def list_webhook_deliveries(
 @canonical_router.post(
     "/webhooks/{webhook_id}/test",
     response_model=WebhookTestResponse,
+    openapi_extra={"parameters": [_REQUIRED_IF_MATCH_PARAMETER]},
     responses={
+        200: {
+            "description": "Completed persisted webhook test",
+            "headers": _DELIVERY_SUCCESS_HEADERS,
+        },
         202: {
             "model": WebhookTestResponse,
             "description": "Exact persisted test attempt is still processing",
+            "headers": _TEST_PROCESSING_HEADERS,
         }
     },
 )
@@ -770,9 +806,20 @@ async def test_webhook_delivery(
     payload: WebhookTestRequest,
     request: Request,
     response: Response,
-    idempotency_key: Annotated[str, Header(alias="Idempotency-Key")],
+    idempotency_key: Annotated[
+        str,
+        Header(
+            alias="Idempotency-Key",
+            min_length=16,
+            max_length=255,
+            pattern=_IDEMPOTENCY_KEY_PATTERN,
+        ),
+    ],
     webhook_id: int = Path(ge=1),
-    if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+    if_match: Annotated[
+        str | None,
+        Header(alias="If-Match", include_in_schema=False),
+    ] = None,
     principal: AuthPrincipal = Depends(get_auth_principal),
     service: AdminWebhookDeliveryService = Depends(
         get_admin_webhook_delivery_service
@@ -856,12 +903,27 @@ async def test_webhook_delivery(
     "/webhooks/{webhook_id}/deliveries/{delivery_id}/redeliver",
     response_model=WebhookRedeliveryResponse,
     status_code=202,
+    openapi_extra={"parameters": [_REQUIRED_IF_MATCH_PARAMETER]},
+    responses={
+        202: {
+            "description": "Pending manual webhook redelivery",
+            "headers": _DELIVERY_SUCCESS_HEADERS,
+        }
+    },
 )
 async def redeliver_webhook_delivery(
     payload: WebhookRedeliveryRequest,
     request: Request,
     response: Response,
-    idempotency_key: Annotated[str, Header(alias="Idempotency-Key")],
+    idempotency_key: Annotated[
+        str,
+        Header(
+            alias="Idempotency-Key",
+            min_length=16,
+            max_length=255,
+            pattern=_IDEMPOTENCY_KEY_PATTERN,
+        ),
+    ],
     webhook_id: int = Path(ge=1),
     delivery_id: str = Path(
         min_length=36,
@@ -871,7 +933,10 @@ async def redeliver_webhook_delivery(
             r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
         ),
     ),
-    if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+    if_match: Annotated[
+        str | None,
+        Header(alias="If-Match", include_in_schema=False),
+    ] = None,
     principal: AuthPrincipal = Depends(get_auth_principal),
     service: AdminWebhookDeliveryService = Depends(
         get_admin_webhook_delivery_service

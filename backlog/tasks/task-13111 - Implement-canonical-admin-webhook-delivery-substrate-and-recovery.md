@@ -4,7 +4,7 @@ title: Implement canonical admin webhook delivery substrate and recovery
 status: In Progress
 assignee: []
 created_date: '2026-08-23 03:15'
-updated_date: '2026-08-29 21:53'
+updated_date: '2026-08-29 23:06'
 labels:
   - admin
   - webhooks
@@ -36,7 +36,7 @@ Implement upstream PR 2 from the approved canonical outgoing-webhook design. Del
 - [ ] #3 Enqueue, disposition, cancellation, and lost-acknowledgement recovery pass every crash point for SQLite/SQLite, SQLite/PostgreSQL, PostgreSQL/SQLite, and PostgreSQL/PostgreSQL.
 - [ ] #4 Supported Jobs contracts provide fail-closed acquisition, no-attempt deferral, exact retry delay, disposition recovery, lease-horizon enforcement, and a webhook-safe quarantine threshold.
 - [ ] #5 The webhook worker and shared attempt executor enforce signing, SSRF-safe status-only egress, retries, expiry, hard network-attempt limits, retention, metrics, and health without leaking destinations or secrets.
-- [ ] #6 Synchronous test, manual redelivery, delivery-history, audit, and operational service contracts are implemented with durable idempotency and stale-screen preconditions.
+- [x] #6 Synchronous test, manual redelivery, delivery-history, audit, and operational service contracts are implemented with durable idempotency and stale-screen preconditions.
 - [ ] #7 All PR 2 gates pass on supported backend combinations while durable domain producers, final route cutover, and canonical activation remain absent.
 <!-- AC:END -->
 
@@ -191,6 +191,10 @@ Task 9 started at c32e1d5153. Preflight expanded scope to exact lookup-only test
 2026-08-29: Started Task 10 at exact BASE db91e7fb46c7d467b61c41de6fedf26ead11a992. Preflight expanded the API-only scope to a set-based sanitized history projection (event type, attempts, completed-after-config-change), typed manual-redelivery replay coordinate in existing idempotency metadata, and a separate closed test/redelivery audit contract. Exact replay is lookup-first and keyless with one no-op audit; accepted and commit-failure audit semantics are bound. No schema, direct Jobs admission, runtime activation, producer, UI, or legacy removal is authorized. Strict TDD and required PostgreSQL zero-skip proof apply.
 
 Task 10 complete: exposed canonical persisted test, atomic manual redelivery, and key-independent sanitized history APIs with strict ETag/idempotency/audit/OpenAPI contracts. Verified 125 required SQLite/PostgreSQL tests (zero skips), 24 event-expansion regressions, OpenAPI drift, Ruff, Python 3.10, reviewed Bandit baseline, no-leak/scope scans, and diff checks; no PR 3 UI/producer, schema/migration, direct Jobs admission, legacy import, or Task 11 runtime work included.
+
+2026-08-29: Task 10 independent review at d083aaca14 found no Critical issues but 6 Important defects and one Minor evidence gap; controller verification added a seventh Important defect. Fix Round 1 is required for cross-source raw-key conflict, strict action-specific redelivery replay rows, public-only snapshot-consistent history SQL, exact required/constrained OpenAPI headers, restored global unexpected-exception ownership, and localized missing-history 404 mapping. Initial RED chronology remains report-only. Exact FIX_BASE d083aaca14dfb4c3c876070f9130b0df23a33d09; required PostgreSQL zero-skip proof remains mandatory.
+
+2026-08-29: Task 10 Fix Round 1 verified from FIX_BASE d083aaca14df. Strict RED selected 13 tests: 11 failed and 2 passed with zero skips, covering all seven accepted defects before production fixes. Final PostgreSQL-required Task 10 gate: 138 passed, 0 skipped, 222 warnings; Task 9 regressions: 18 passed, 44 deselected, 0 skipped, 21 warnings; event expansion: 24 passed, 0 skipped, 4 warnings. OpenAPI fingerprint/drift, Ruff, reviewed Bandit, Python 3.10 compilation, scope/no-leak scans, warning provenance, and diff checks passed. No schema/migration, direct Jobs admission, runtime activation, producer/UI, legacy-service import, or Task 11 work was added. Evidence: .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-10-fix-1-report.md.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

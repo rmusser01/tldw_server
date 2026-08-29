@@ -29,9 +29,13 @@ from tldw_Server_API.tests.Admin_Webhooks.test_event_expansion import (
     exercise_task9_test_attempt_contract,
 )
 from tldw_Server_API.tests.Admin_Webhooks.test_redelivery_history_api import (
+    exercise_history_loads_only_public_columns,
     exercise_history_projection_is_set_based_and_key_independent,
+    exercise_history_reads_one_consistent_snapshot,
     exercise_redelivery_concurrency_and_commit_failure,
+    exercise_redelivery_key_family_conflicts_across_sources,
     exercise_redelivery_preconditions_and_audit_rollback,
+    exercise_redelivery_replay_rows_have_exact_action_shape,
     exercise_redelivery_success_exact_replay_and_malformed_coordinate,
 )
 from tldw_Server_API.tests.Admin_Webhooks.test_test_delivery import (
@@ -261,11 +265,45 @@ async def test_sqlite_task10_history_projection_contract(
 
 
 @pytest.mark.unit
+async def test_sqlite_task10_history_loads_only_public_columns(
+    delivery_repo: SQLiteDeliveryRepositoryFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await exercise_history_loads_only_public_columns(delivery_repo, monkeypatch)
+
+
+@pytest.mark.unit
+async def test_sqlite_task10_history_uses_one_consistent_snapshot(
+    delivery_repo: SQLiteDeliveryRepositoryFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await exercise_history_reads_one_consistent_snapshot(delivery_repo, monkeypatch)
+
+
+@pytest.mark.unit
 async def test_sqlite_task10_redelivery_success_and_replay_contract(
     delivery_repo: SQLiteDeliveryRepositoryFixture,
 ) -> None:
     await exercise_redelivery_success_exact_replay_and_malformed_coordinate(
         delivery_repo
+    )
+
+
+@pytest.mark.unit
+async def test_sqlite_task10_redelivery_key_family_conflict_contract(
+    delivery_repo: SQLiteDeliveryRepositoryFixture,
+) -> None:
+    await exercise_redelivery_key_family_conflicts_across_sources(delivery_repo)
+
+
+@pytest.mark.unit
+async def test_sqlite_task10_redelivery_exact_replay_row_contract(
+    delivery_repo: SQLiteDeliveryRepositoryFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await exercise_redelivery_replay_rows_have_exact_action_shape(
+        delivery_repo,
+        monkeypatch,
     )
 
 

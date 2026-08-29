@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.endpoints.admin import admin_webhooks
@@ -213,6 +214,7 @@ class _FakeDeliveryService:
     def __init__(self) -> None:
         self.calls: list[tuple[str, object]] = []
         self.processing = False
+        self.history_error: Exception | None = None
         self.fail_test_before_audit = False
         self.fail_redelivery_before_audit = False
 
@@ -226,6 +228,8 @@ class _FakeDeliveryService:
         self.calls.append(
             ("list_delivery_history", (webhook_id, limit, offset))
         )
+        if self.history_error is not None:
+            raise self.history_error
         item = SimpleNamespace(
             delivery=_delivery(),
             event_type="webhook.test",
@@ -238,6 +242,10 @@ class _FakeDeliveryService:
         from tldw_Server_API.app.core.Admin_Webhooks import delivery as delivery_module
 
         self.calls.append(("test_webhook", command))
+        parse_registration_etag(
+            command.if_match,
+            expected_webhook_id=command.webhook_id,
+        )
         if self.fail_test_before_audit:
             raise WebhookError(WebhookErrorCode.PRECONDITION_FAILED)
         state = AttemptState.PROCESSING if self.processing else AttemptState.SUCCEEDED
@@ -270,6 +278,10 @@ class _FakeDeliveryService:
         from tldw_Server_API.app.core.Admin_Webhooks import audit as audit_module
 
         self.calls.append(("redeliver_webhook", command))
+        parse_registration_etag(
+            command.if_match,
+            expected_webhook_id=command.webhook_id,
+        )
         if self.fail_redelivery_before_audit:
             raise WebhookError(WebhookErrorCode.NOT_FOUND)
         delivery = _delivery(
@@ -835,6 +847,56 @@ def _delivery_client(
     return TestClient(app, raise_server_exceptions=False), service, mandatory_audit, read_audit
 
 
+def _unexpected_error_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[TestClient, list[Exception]]:
+    app = FastAPI()
+    observed: list[Exception] = []
+
+    @app.middleware("http")
+    async def request_id_middleware(request, call_next):
+        request.state.request_id = REQUEST_ID
+        return await call_next(request)
+
+    @app.exception_handler(Exception)
+    async def global_handler(_request, exc: Exception):
+        observed.append(exc)
+        return JSONResponse(
+            status_code=500,
+            content={"owner": "global", "request_id": REQUEST_ID},
+        )
+
+    class UnexpectedControlPlane(_FakeControlPlane):
+        async def catalog(self) -> SimpleNamespace:
+            raise RuntimeError("existing-route-programming-failure")
+
+    class UnexpectedDeliveryService(_FakeDeliveryService):
+        async def list_delivery_history(self, webhook_id: int, *, limit: int, offset: int):
+            raise RuntimeError("task10-route-programming-failure")
+
+    async def auth_dependency() -> AuthPrincipal:
+        return _principal()
+
+    monkeypatch.setattr(
+        admin_webhooks,
+        "get_admin_webhook_control_plane",
+        AsyncMock(return_value=UnexpectedControlPlane()),
+    )
+    monkeypatch.setattr(
+        admin_webhooks,
+        "_require_platform_admin",
+        lambda _principal: None,
+    )
+    monkeypatch.setattr(admin_webhooks, "_emit_admin_audit_event", AsyncMock())
+    app.dependency_overrides[admin_webhooks.get_auth_principal] = auth_dependency
+    app.dependency_overrides[
+        admin_webhooks.get_admin_webhook_delivery_service
+    ] = lambda: UnexpectedDeliveryService()
+    app.include_router(admin_webhooks.status_router, prefix="/api/v1/admin")
+    app.include_router(admin_webhooks.canonical_router, prefix="/api/v1/admin")
+    return TestClient(app, raise_server_exceptions=False), observed
+
+
 @pytest.mark.unit
 def test_delivery_history_route_is_sanitized_audited_and_never_cached(
     monkeypatch: pytest.MonkeyPatch,
@@ -864,6 +926,45 @@ def test_delivery_history_route_is_sanitized_audited_and_never_cached(
         "token",
     ):
         assert forbidden not in response.text.lower()
+
+
+@pytest.mark.unit
+def test_missing_delivery_history_is_404_with_denied_read_audit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, service, _, read_audit = _delivery_client(monkeypatch)
+    service.history_error = WebhookError(WebhookErrorCode.NOT_FOUND)
+
+    response = client.get("/api/v1/admin/webhooks/999999/deliveries")
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == WebhookErrorCode.NOT_FOUND.value
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["x-request-id"] == REQUEST_ID
+    assert read_audit.await_args.kwargs["metadata"] == {
+        "outcome": "denied",
+        "request_id": REQUEST_ID,
+        "reason_code": WebhookErrorCode.NOT_FOUND.value,
+    }
+
+
+@pytest.mark.unit
+def test_unexpected_route_errors_reach_the_global_handler(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, observed = _unexpected_error_client(monkeypatch)
+
+    existing = client.get("/api/v1/admin/webhooks/catalog")
+    task10 = client.get("/api/v1/admin/webhooks/41/deliveries")
+
+    assert existing.status_code == 500
+    assert existing.json() == {"owner": "global", "request_id": REQUEST_ID}
+    assert task10.status_code == 500
+    assert task10.json() == {"owner": "global", "request_id": REQUEST_ID}
+    assert [str(exc) for exc in observed] == [
+        "existing-route-programming-failure",
+        "task10-route-programming-failure",
+    ]
 
 
 @pytest.mark.unit
@@ -909,6 +1010,33 @@ def test_test_and_redelivery_routes_use_typed_audit_and_exact_status_headers(
     assert redelivery.headers["x-request-id"] == REQUEST_ID
     assert redelivery.json()["delivery"]["redelivery_of_id"] == SOURCE_DELIVERY_ID
     assert mandatory_audit.await_count == 3
+
+
+@pytest.mark.unit
+def test_mutation_if_match_omission_reaches_canonical_428_service_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, _, mandatory_audit, _ = _delivery_client(monkeypatch)
+    headers = {"Idempotency-Key": IDEMPOTENCY_KEY}
+
+    test_response = client.post(
+        "/api/v1/admin/webhooks/41/test",
+        headers=headers,
+        json={"delivery_config_version": 1},
+    )
+    redelivery_response = client.post(
+        f"/api/v1/admin/webhooks/41/deliveries/{SOURCE_DELIVERY_ID}/redeliver",
+        headers=headers,
+        json={
+            "delivery_config_version": 1,
+            "confirm_changed_configuration": False,
+        },
+    )
+
+    for response in (test_response, redelivery_response):
+        assert response.status_code == 428
+        assert response.json()["error"]["code"] == "precondition_required"
+    assert mandatory_audit.await_count == 2
 
 
 @pytest.mark.unit

@@ -22,6 +22,7 @@ from tldw_Server_API.app.core.Admin_Webhooks.domain import (
     EventSourceKind,
     WebhookError,
     WebhookErrorCode,
+    build_idempotency_scope,
     build_registration_etag,
 )
 from tldw_Server_API.app.core.AuthNZ.exceptions import TransactionError
@@ -46,6 +47,8 @@ class DeliveryRepositoryFixture(Protocol):
     async def execute(self, query: str, *params: object) -> None: ...
 
     async def fetchval(self, query: str, *params: object) -> object: ...
+
+    async def fetchrow(self, query: str, *params: object) -> object: ...
 
 
 def _schema(name: str) -> type:
@@ -403,6 +406,210 @@ async def exercise_history_projection_is_set_based_and_key_independent(
         )
 
 
+async def exercise_history_loads_only_public_columns(
+    fixture: DeliveryRepositoryFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository_module = importlib.import_module(
+        "tldw_Server_API.app.core.DB_Management.admin_webhooks_repository"
+    )
+    registration, _ring, source = await _seed_source_delivery(
+        fixture,
+        label="history-public-columns",
+    )
+    test_delivery_id = canonical_uuid4("history-public-test-delivery")
+    test_attempt_id = canonical_uuid4("history-public-test-attempt")
+    async with fixture.repository.transaction() as tx:
+        await tx.insert_delivery(
+            test_delivery_id,
+            event_id=source.delivery.event_id,
+            webhook_id=registration.id,
+            kind=DeliveryKind.TEST,
+            expires_at=NOW + timedelta(hours=72),
+            now=NOW,
+        )
+    await fixture.execute(
+        """
+        UPDATE admin_webhook_deliveries
+        SET enqueue_claim_token = ?, enqueue_claim_expires_at = ?
+        WHERE id = ?
+        """,
+        "not-a-recovery-token",
+        NOW + timedelta(minutes=1),
+        source.delivery.id,
+    )
+    await fixture.execute(
+        """
+        INSERT INTO admin_webhook_delivery_attempts (
+            id, delivery_id, attempt_number, jobs_job_id, jobs_lease_id,
+            test_attempt_token, request_timeout_seconds, started_at,
+            finished_at, state, status_code, latency_ms, reason_code,
+            requested_retry_delay_seconds, jobs_disposition_applied, created_at
+        ) VALUES (?, ?, 1, NULL, NULL, ?, 10, ?, NULL, 'processing',
+                  NULL, NULL, NULL, NULL, ?, ?)
+        """,
+        test_attempt_id,
+        test_delivery_id,
+        "not-a-test-token",
+        NOW,
+        False,
+        NOW,
+    )
+
+    selected_queries: list[str] = []
+    original_fetch = repository_module.AdminWebhookUnitOfWork._fetch
+
+    async def traced_fetch(self, query, params=()):
+        if "admin_webhook_deliver" in query:
+            selected_queries.append(str(query))
+        return await original_fetch(self, query, params)
+
+    def forbidden_internal_mapper(_row: object) -> object:
+        raise AssertionError("public history used an execution-grade row mapper")
+
+    monkeypatch.setattr(
+        repository_module.AdminWebhookUnitOfWork,
+        "_fetch",
+        traced_fetch,
+    )
+    monkeypatch.setattr(
+        repository_module,
+        "_stored_delivery_from_row",
+        forbidden_internal_mapper,
+    )
+    monkeypatch.setattr(
+        repository_module,
+        "_attempt_from_row",
+        forbidden_internal_mapper,
+    )
+
+    page = await fixture.repository.list_delivery_history(
+        registration.id,
+        limit=50,
+        offset=0,
+    )
+
+    assert page.total == 2
+    assert {item.delivery.id for item in page.items} == {
+        source.delivery.id,
+        test_delivery_id,
+    }
+    test_item = next(
+        item for item in page.items if item.delivery.id == test_delivery_id
+    )
+    assert [attempt.id for attempt in test_item.attempts] == [test_attempt_id]
+    assert len(selected_queries) == 2
+    selected_sql = "\n".join(selected_queries).lower()
+    for forbidden in (
+        "delivery.*",
+        "jobs_job_id",
+        "jobs_lease_id",
+        "enqueue_claim_token",
+        "enqueue_claim_expires_at",
+        "current_attempt_id",
+        "pending_jobs_disposition",
+        "pending_jobs_disposition_token",
+        "jobs_disposition_applied",
+        "test_attempt_token",
+        "idempotency",
+        "ciphertext",
+    ):
+        assert forbidden not in selected_sql
+    rendered = repr(page)
+    assert "not-a-recovery-token" not in rendered
+    assert "not-a-test-token" not in rendered
+
+
+async def exercise_history_reads_one_consistent_snapshot(
+    fixture: DeliveryRepositoryFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository_module = importlib.import_module(
+        "tldw_Server_API.app.core.DB_Management.admin_webhooks_repository"
+    )
+    registration, _ring, source = await _seed_source_delivery(
+        fixture,
+        label="history-snapshot",
+    )
+    concurrent_delivery_id = canonical_uuid4("history-snapshot-concurrent-delivery")
+    concurrent_attempt_id = canonical_uuid4("history-snapshot-concurrent-attempt")
+    page_commit_done = False
+    attempt_commit_done = False
+    original_fetch = repository_module.AdminWebhookUnitOfWork._fetch
+
+    async def commit_between_history_statements(self, query, params=()):
+        nonlocal page_commit_done, attempt_commit_done
+        if (
+            not page_commit_done
+            and "FROM admin_webhook_deliveries AS delivery" in query
+        ):
+            page_commit_done = True
+            async with fixture.repository.transaction() as tx:
+                await tx.insert_delivery(
+                    concurrent_delivery_id,
+                    event_id=source.delivery.event_id,
+                    webhook_id=registration.id,
+                    kind=DeliveryKind.MANUAL,
+                    expires_at=NOW + timedelta(hours=72),
+                    now=NOW + timedelta(minutes=1),
+                    redelivery_of_id=source.delivery.id,
+                )
+        if (
+            not attempt_commit_done
+            and "FROM admin_webhook_delivery_attempts AS attempt" in query
+        ):
+            attempt_commit_done = True
+            await fixture.execute(
+                """
+                INSERT INTO admin_webhook_delivery_attempts (
+                    id, delivery_id, attempt_number, jobs_job_id, jobs_lease_id,
+                    request_timeout_seconds, started_at, finished_at, state,
+                    status_code, latency_ms, reason_code,
+                    requested_retry_delay_seconds, jobs_disposition_applied,
+                    created_at
+                ) VALUES (?, ?, 1, ?, ?, 10, ?, NULL, 'processing',
+                          NULL, NULL, NULL, NULL, ?, ?)
+                """,
+                concurrent_attempt_id,
+                source.delivery.id,
+                "history-snapshot-job",
+                "history-snapshot-lease",
+                NOW + timedelta(minutes=2),
+                False,
+                NOW + timedelta(minutes=2),
+            )
+        return await original_fetch(self, query, params)
+
+    monkeypatch.setattr(
+        repository_module.AdminWebhookUnitOfWork,
+        "_fetch",
+        commit_between_history_statements,
+    )
+
+    page = await asyncio.wait_for(
+        fixture.repository.list_delivery_history(
+            registration.id,
+            limit=50,
+            offset=0,
+        ),
+        timeout=10,
+    )
+
+    assert page_commit_done is True
+    assert attempt_commit_done is True
+    assert page.total == 1
+    assert [item.delivery.id for item in page.items] == [source.delivery.id]
+    assert page.items[0].attempts == ()
+    assert await fixture.fetchval(
+        "SELECT COUNT(*) FROM admin_webhook_deliveries WHERE webhook_id = ?",
+        registration.id,
+    ) == 2
+    assert await fixture.fetchval(
+        "SELECT COUNT(*) FROM admin_webhook_delivery_attempts WHERE delivery_id = ?",
+        source.delivery.id,
+    ) == 1
+
+
 def _redelivery_command(
     delivery_module,
     registration,
@@ -586,6 +793,325 @@ async def exercise_redelivery_success_exact_replay_and_malformed_coordinate(
     assert await fixture.fetchval(
         "SELECT COUNT(*) FROM admin_webhook_idempotency WHERE operation = 'redeliver'"
     ) == 0
+
+
+async def exercise_redelivery_key_family_conflicts_across_sources(
+    fixture: DeliveryRepositoryFixture,
+) -> None:
+    delivery_module = importlib.import_module(
+        "tldw_Server_API.app.core.Admin_Webhooks.delivery"
+    )
+    registration, ring, source = await _seed_source_delivery(
+        fixture,
+        label="redelivery-key-family",
+    )
+    second_source_id = canonical_uuid4("redelivery-key-family-second-source")
+    async with fixture.repository.transaction() as tx:
+        second_source = await tx.insert_delivery(
+            second_source_id,
+            event_id=source.delivery.event_id,
+            webhook_id=registration.id,
+            kind=DeliveryKind.MANUAL,
+            expires_at=NOW + timedelta(hours=72),
+            now=NOW - timedelta(minutes=1),
+            redelivery_of_id=source.delivery.id,
+        )
+    available = WebhookKeyRingLoadResult(
+        ring=ring,
+        code=WebhookKeyLoadCode.AVAILABLE,
+    )
+    service = _redelivery_service(
+        delivery_module,
+        fixture,
+        available,
+        label="redelivery-key-family-first",
+    )
+    audits: list[object] = []
+
+    async def audit_sink(record: object) -> None:
+        audits.append(record)
+
+    first_command = _redelivery_command(
+        delivery_module,
+        registration,
+        source.delivery.id,
+        key="77778888999900001111222233334444",
+    )
+    first = await service.redeliver_webhook(first_command, audit_sink=audit_sink)
+    before_deliveries = await fixture.fetchval(
+        "SELECT COUNT(*) FROM admin_webhook_deliveries WHERE webhook_id = ?",
+        registration.id,
+    )
+    before_idempotency = await fixture.fetchval(
+        "SELECT COUNT(*) FROM admin_webhook_idempotency WHERE operation = 'redeliver'"
+    )
+    before_activity = await fixture.fetchrow(
+        """
+        SELECT first_canonical_activity_at, first_canonical_activity_kind
+        FROM admin_webhook_migration_state WHERE singleton_id = 1
+        """
+    )
+
+    conflicting_command = _redelivery_command(
+        delivery_module,
+        registration,
+        second_source.delivery.id,
+        key=first_command.idempotency_key,
+    )
+    with pytest.raises(WebhookError) as conflict:
+        await _redelivery_service(
+            delivery_module,
+            fixture,
+            available,
+            label="redelivery-key-family-second",
+        ).redeliver_webhook(
+            conflicting_command,
+            audit_sink=audit_sink,
+        )
+
+    assert conflict.value.code is WebhookErrorCode.IDEMPOTENCY_CONFLICT
+    assert await fixture.fetchval(
+        "SELECT COUNT(*) FROM admin_webhook_deliveries WHERE webhook_id = ?",
+        registration.id,
+    ) == before_deliveries
+    assert await fixture.fetchval(
+        "SELECT COUNT(*) FROM admin_webhook_idempotency WHERE operation = 'redeliver'"
+    ) == before_idempotency
+    after_activity = await fixture.fetchrow(
+        """
+        SELECT first_canonical_activity_at, first_canonical_activity_kind
+        FROM admin_webhook_migration_state WHERE singleton_id = 1
+        """
+    )
+    assert dict(after_activity) == dict(before_activity)  # type: ignore[arg-type]
+    assert [record.outcome for record in audits] == ["accepted", "denied"]
+    assert first.delivery.redelivery_of_id == source.delivery.id
+
+    stored = await fixture.fetchrow(
+        """
+        SELECT route, webhook_id, delivery_id
+        FROM admin_webhook_idempotency WHERE operation = 'redeliver'
+        """
+    )
+    assert stored["route"] == (
+        f"/admin/webhooks/{registration.id}/deliveries/"
+        f"{source.delivery.id}/redeliver"
+    )
+    assert stored["webhook_id"] == registration.id
+    assert stored["delivery_id"] == source.delivery.id
+
+    foreign_registration, foreign_ring, foreign_source = await _seed_source_delivery(
+        fixture,
+        label="redelivery-key-family-foreign-webhook",
+    )
+    foreign_result = await _redelivery_service(
+        delivery_module,
+        fixture,
+        WebhookKeyRingLoadResult(
+            ring=foreign_ring,
+            code=WebhookKeyLoadCode.AVAILABLE,
+        ),
+        label="redelivery-key-family-foreign",
+    ).redeliver_webhook(
+        _redelivery_command(
+            delivery_module,
+            foreign_registration,
+            foreign_source.delivery.id,
+            key=first_command.idempotency_key,
+        ),
+        audit_sink=audit_sink,
+    )
+    assert foreign_result.idempotent_replay is False
+    assert await fixture.fetchval(
+        "SELECT COUNT(*) FROM admin_webhook_idempotency WHERE operation = 'redeliver'"
+    ) == 2
+
+
+async def exercise_redelivery_replay_rows_have_exact_action_shape(
+    fixture: DeliveryRepositoryFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    delivery_module = importlib.import_module(
+        "tldw_Server_API.app.core.Admin_Webhooks.delivery"
+    )
+    repository_module = importlib.import_module(
+        "tldw_Server_API.app.core.DB_Management.admin_webhooks_repository"
+    )
+    registration, ring, source = await _seed_source_delivery(
+        fixture,
+        label="redelivery-exact-row",
+    )
+    command = _redelivery_command(
+        delivery_module,
+        registration,
+        source.delivery.id,
+        key="88889999000011112222333344445555",
+    )
+
+    async def audit_sink(_record: object) -> None:
+        return None
+
+    created = await _redelivery_service(
+        delivery_module,
+        fixture,
+        WebhookKeyRingLoadResult(
+            ring=ring,
+            code=WebhookKeyLoadCode.AVAILABLE,
+        ),
+        label="redelivery-exact-row",
+    ).redeliver_webhook(command, audit_sink=audit_sink)
+    persisted = await fixture.fetchrow(
+        """
+        SELECT lookup_digest, request_fingerprint
+        FROM admin_webhook_idempotency WHERE operation = 'redeliver'
+        """
+    )
+    scope = build_idempotency_scope(
+        actor_id=command.actor_id,
+        operation="redeliver",
+        route=(
+            f"/admin/webhooks/{command.webhook_id}/deliveries/"
+            f"{command.source_delivery_id}/redeliver"
+        ),
+        webhook_id=command.webhook_id,
+        delivery_id=command.source_delivery_id,
+    )
+    lookup_args = {
+        "lookup_digest": str(persisted["lookup_digest"]),
+        "scope": scope,
+        "request_fingerprint": str(persisted["request_fingerprint"]),
+        "now": NOW,
+    }
+    valid_metadata = json.dumps(
+        {"redelivery_delivery_id": created.delivery.id},
+        separators=(",", ":"),
+    )
+
+    await fixture.execute(
+        """
+        UPDATE admin_webhook_registrations
+        SET deleted_at = ?, deleted_by_user_id = ?, active = ?, updated_at = ?
+        WHERE id = ?
+        """,
+        NOW,
+        7,
+        False,
+        NOW,
+        registration.id,
+    )
+    registration_reads = 0
+    original_registration_row = repository_module.AdminWebhookUnitOfWork._registration_row
+
+    async def tracked_registration_row(self, *args, **kwargs):
+        nonlocal registration_reads
+        registration_reads += 1
+        return await original_registration_row(self, *args, **kwargs)
+
+    monkeypatch.setattr(
+        repository_module.AdminWebhookUnitOfWork,
+        "_registration_row",
+        tracked_registration_row,
+    )
+
+    async def reset_row(*, state: str, status: int | None, metadata: str | None) -> None:
+        await fixture.execute(
+            """
+            UPDATE admin_webhook_idempotency
+            SET state = ?, resource_id = NULL, resource_version = NULL,
+                secret_version = NULL, replay_secret_ciphertext_json = NULL,
+                replay_secret_key_id = NULL, test_delivery_id = NULL,
+                test_attempt_id = NULL, response_status = ?,
+                response_metadata_json = ?
+            WHERE operation = 'redeliver'
+            """,
+            state,
+            status,
+            metadata,
+        )
+
+    await reset_row(state="in_progress", status=None, metadata=None)
+    in_progress = await fixture.repository.lookup_idempotency(**lookup_args)
+    assert in_progress.kind is repository_module.IdempotencyLookupKind.IN_PROGRESS
+    assert in_progress.response_status is None
+    assert in_progress.response_metadata is None
+    assert in_progress.redelivery_delivery_id is None
+
+    await reset_row(state="completed", status=202, metadata=valid_metadata)
+    replay = await fixture.repository.lookup_idempotency(**lookup_args)
+    assert replay.kind is repository_module.IdempotencyLookupKind.REPLAY
+    assert replay.redelivery_delivery_id == created.delivery.id
+    assert replay.response_status == 202
+    assert dict(replay.response_metadata or {}) == {
+        "redelivery_delivery_id": created.delivery.id
+    }
+    assert registration_reads == 0
+
+    malformed_updates: tuple[tuple[str, str, tuple[object, ...]], ...] = (
+        (
+            "wrong_status",
+            "UPDATE admin_webhook_idempotency SET response_status = ? WHERE operation = 'redeliver'",
+            (200,),
+        ),
+        (
+            "extra_metadata",
+            "UPDATE admin_webhook_idempotency SET response_metadata_json = ? WHERE operation = 'redeliver'",
+            (json.dumps({"redelivery_delivery_id": created.delivery.id, "status_code": 204}),),
+        ),
+        (
+            "missing_coordinate",
+            "UPDATE admin_webhook_idempotency SET response_metadata_json = NULL WHERE operation = 'redeliver'",
+            (),
+        ),
+        (
+            "generic_resource",
+            "UPDATE admin_webhook_idempotency SET resource_id = ?, resource_version = ? WHERE operation = 'redeliver'",
+            (registration.id, 1),
+        ),
+        (
+            "generic_replay_secret",
+            """
+            UPDATE admin_webhook_idempotency
+            SET resource_id = ?, resource_version = ?, secret_version = ?,
+                replay_secret_ciphertext_json = ?, replay_secret_key_id = ?
+            WHERE operation = 'redeliver'
+            """,
+            (registration.id, 1, 1, '{"ciphertext":"canary"}', "canary-key"),
+        ),
+        (
+            "test_coordinates",
+            """
+            UPDATE admin_webhook_idempotency
+            SET test_delivery_id = ?, test_attempt_id = ?
+            WHERE operation = 'redeliver'
+            """,
+            (
+                canonical_uuid4("redelivery-row-test-delivery"),
+                canonical_uuid4("redelivery-row-test-attempt"),
+            ),
+        ),
+        (
+            "in_progress_result",
+            "UPDATE admin_webhook_idempotency SET state = 'in_progress' WHERE operation = 'redeliver'",
+            (),
+        ),
+    )
+    failures: list[str] = []
+    for name, query, params in malformed_updates:
+        await reset_row(state="completed", status=202, metadata=valid_metadata)
+        await fixture.execute(query, *params)
+        reads_before = registration_reads
+        try:
+            await fixture.repository.lookup_idempotency(**lookup_args)
+        except ValueError:
+            pass
+        except Exception as exc:  # noqa: BLE001 - aggregate exact RED evidence
+            failures.append(f"{name}:{type(exc).__name__}")
+        else:
+            failures.append(f"{name}:accepted")
+        if registration_reads != reads_before:
+            failures.append(f"{name}:registration-read")
+
+    assert failures == []
 
 
 async def exercise_redelivery_preconditions_and_audit_rollback(
@@ -860,3 +1386,35 @@ def test_redelivery_contract_is_frozen_and_hides_conditional_and_idempotency_inp
     assert IDEMPOTENCY_KEY not in repr(command)
     assert command.if_match not in repr(command)
     assert "target" not in repr(command)
+
+
+@pytest.mark.unit
+async def test_history_service_localizes_repository_not_found_mapping() -> None:
+    delivery_module = importlib.import_module(
+        "tldw_Server_API.app.core.Admin_Webhooks.delivery"
+    )
+
+    class MissingHistoryRepository:
+        async def list_delivery_history(self, webhook_id: int, *, limit: int, offset: int):
+            raise WebhookRepositoryError(WebhookRepositoryErrorCode.NOT_FOUND)
+
+    service = delivery_module.AdminWebhookDeliveryService(
+        repository=MissingHistoryRepository(),
+        key_ring_result=WebhookKeyRingLoadResult(
+            ring=None,
+            code=WebhookKeyLoadCode.KEY_UNAVAILABLE,
+        ),
+        event_id_factory=lambda: canonical_uuid4("unused-missing-history-event"),
+        delivery_id_factory=lambda: canonical_uuid4(
+            "unused-missing-history-delivery"
+        ),
+        clock=lambda: NOW,
+    )
+
+    with pytest.raises(WebhookError) as missing:
+        await service.list_delivery_history(999_999, limit=50, offset=0)
+    assert missing.value.code is WebhookErrorCode.NOT_FOUND
+    shared_mapping = delivery_module._map_capture_error(
+        WebhookRepositoryError(WebhookRepositoryErrorCode.NOT_FOUND)
+    )
+    assert shared_mapping.code is WebhookErrorCode.OPERATION_FAILED

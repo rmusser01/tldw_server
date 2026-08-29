@@ -507,8 +507,6 @@ def _map_capture_error(exc: BaseException) -> WebhookError:
     if isinstance(exc, WebhookRepositoryError):
         if exc.code is WebhookRepositoryErrorCode.DATABASE_BUSY:
             return WebhookError(WebhookErrorCode.DATABASE_BUSY)
-        if exc.code is WebhookRepositoryErrorCode.NOT_FOUND:
-            return WebhookError(WebhookErrorCode.NOT_FOUND)
         return WebhookError(WebhookErrorCode.OPERATION_FAILED)
     if isinstance(exc, WebhookKeyError):
         return WebhookError(WebhookErrorCode.KEY_UNAVAILABLE)
@@ -1083,6 +1081,16 @@ class AdminWebhookDeliveryService:
                 offset=offset,
             )
         except Exception as exc:  # noqa: BLE001 - public boundary is closed
+            from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
+                WebhookRepositoryError,
+                WebhookRepositoryErrorCode,
+            )
+
+            if (
+                isinstance(exc, WebhookRepositoryError)
+                and exc.code is WebhookRepositoryErrorCode.NOT_FOUND
+            ):
+                raise WebhookError(WebhookErrorCode.NOT_FOUND) from None
             raise _map_capture_error(exc) from None
 
     @staticmethod
@@ -1266,9 +1274,17 @@ class AdminWebhookDeliveryService:
                 webhook_id=command.webhook_id,
                 delivery_id=command.source_delivery_id,
             )
+            lookup_scope = build_idempotency_scope(
+                actor_id=command.actor_id,
+                operation="redeliver",
+                route=(
+                    f"/admin/webhooks/{command.webhook_id}/deliveries/redeliver"
+                ),
+                webhook_id=command.webhook_id,
+            )
             lookup_digest = idempotency_lookup_digest(
                 command.idempotency_key,
-                scope,
+                lookup_scope,
             )
             request_fingerprint = canonical_request_hash(
                 command.idempotency_key,

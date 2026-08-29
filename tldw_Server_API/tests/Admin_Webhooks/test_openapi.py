@@ -118,6 +118,61 @@ def test_delivery_openapi_uses_only_fixed_request_response_and_header_contracts(
 
 
 @pytest.mark.unit
+def test_delivery_openapi_declares_exact_mutation_and_success_headers() -> None:
+    paths = _openapi()["paths"]
+    test_operation = paths["/api/v1/admin/webhooks/{webhook_id}/test"]["post"]
+    redelivery_operation = paths[
+        "/api/v1/admin/webhooks/{webhook_id}/deliveries/{delivery_id}/redeliver"
+    ]["post"]
+    history_operation = paths[
+        "/api/v1/admin/webhooks/{webhook_id}/deliveries"
+    ]["get"]
+
+    for operation in (test_operation, redelivery_operation):
+        request_headers = {
+            parameter["name"]: parameter
+            for parameter in operation["parameters"]
+            if parameter["in"] == "header"
+        }
+        assert set(request_headers) == {"Idempotency-Key", "If-Match"}
+        assert request_headers["If-Match"]["required"] is True
+        assert request_headers["If-Match"]["schema"]["type"] == "string"
+        assert "anyOf" not in request_headers["If-Match"]["schema"]
+        idempotency_schema = request_headers["Idempotency-Key"]["schema"]
+        assert request_headers["Idempotency-Key"]["required"] is True
+        assert idempotency_schema["type"] == "string"
+        assert idempotency_schema["minLength"] == 16
+        assert idempotency_schema["maxLength"] == 255
+        assert idempotency_schema["pattern"] == r"^[A-Za-z0-9._:-]{16,255}$"
+
+    request_id_schema = {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": r"^[A-Za-z0-9._:-]{1,128}$",
+    }
+    cache_schema = {"type": "string", "enum": ["no-store"]}
+    retry_schema = {"type": "integer", "minimum": 0, "maximum": 86_400}
+
+    expected_headers = (
+        (history_operation, "200", False),
+        (test_operation, "200", False),
+        (test_operation, "202", True),
+        (redelivery_operation, "202", False),
+    )
+    for operation, status, has_retry_after in expected_headers:
+        response_headers = operation["responses"][status]["headers"]
+        expected_names = {"X-Request-ID", "Cache-Control"}
+        if has_retry_after:
+            expected_names.add("Retry-After")
+        assert set(response_headers) == expected_names
+        assert response_headers["X-Request-ID"]["schema"] == request_id_schema
+        assert response_headers["Cache-Control"]["schema"] == cache_schema
+        if has_retry_after:
+            assert response_headers["Retry-After"]["schema"] == retry_schema
+
+
+@pytest.mark.unit
 def test_every_canonical_operation_uses_bounded_validation_error_schema() -> None:
     spec = _openapi()
     paths = spec["paths"]

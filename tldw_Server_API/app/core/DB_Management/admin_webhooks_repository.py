@@ -47,7 +47,10 @@ from tldw_Server_API.app.core.Admin_Webhooks.domain import (
     redact_target,
 )
 from tldw_Server_API.app.core.Audit.unified_audit_service import MandatoryAuditWriteError
-from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
+from tldw_Server_API.app.core.AuthNZ.database import (
+    DatabasePool,
+    await_cancellation_safe_cleanup,
+)
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
     ConnectionPoolExhaustedError,
     DatabaseLockError,
@@ -1223,6 +1226,21 @@ _ATTEMPT_COLUMNS = """
     status_code, latency_ms, reason_code, requested_retry_delay_seconds,
     jobs_disposition_applied, created_at
 """
+_HISTORY_DELIVERY_COLUMNS = """
+    delivery.id, delivery.event_id, delivery.webhook_id, delivery.kind,
+    delivery.delivery_config_version, delivery.secret_version, delivery.state,
+    delivery.attempt_count, delivery.status_code, delivery.latency_ms,
+    delivery.reason_code, delivery.completed_after_config_change,
+    delivery.terminal_at, delivery.expires_at, delivery.redelivery_of_id,
+    delivery.created_at, delivery.updated_at
+"""
+_HISTORY_ATTEMPT_COLUMNS = """
+    attempt.id, attempt.delivery_id, attempt.attempt_number,
+    attempt.request_timeout_seconds, attempt.started_at, attempt.finished_at,
+    attempt.state, attempt.status_code, attempt.latency_ms,
+    attempt.reason_code, attempt.requested_retry_delay_seconds,
+    attempt.created_at
+"""
 
 
 def _stored_event_from_row(row: Mapping[str, Any]) -> StoredWebhookEvent:
@@ -1434,6 +1452,123 @@ def _attempt_from_row(row: Mapping[str, Any]) -> WebhookDeliveryAttempt:
     )
 
 
+def _history_delivery_from_row(
+    row: Mapping[str, Any],
+) -> tuple[WebhookDelivery, bool]:
+    """Map only the allowlisted public delivery-history columns."""
+
+    required_times = {
+        name: _parse_datetime(row[name])
+        for name in ("expires_at", "created_at", "updated_at")
+    }
+    if any(value is None for value in required_times.values()):
+        raise ValueError("persisted delivery timestamp is invalid")
+    try:
+        kind = DeliveryKind(str(row["kind"]))
+        state = DeliveryState(str(row["state"]))
+        reason = (
+            DeliveryReasonCode(str(row["reason_code"]))
+            if row["reason_code"] is not None
+            else None
+        )
+    except ValueError as exc:
+        raise ValueError("persisted delivery enum is invalid") from exc
+    terminal_at = _parse_datetime(row["terminal_at"])
+    if (state in DeliveryState.terminal_states()) != (terminal_at is not None):
+        raise ValueError("persisted delivery terminal state is invalid")
+    return (
+        WebhookDelivery(
+            id=_canonical_uuid4(row["id"], field="persisted delivery ID"),
+            event_id=_canonical_uuid4(
+                row["event_id"],
+                field="persisted event ID",
+            ),
+            webhook_id=int(row["webhook_id"]),
+            kind=kind,
+            state=state,
+            delivery_config_version=int(row["delivery_config_version"]),
+            secret_version=int(row["secret_version"]),
+            attempt_count=int(row["attempt_count"]),
+            status_code=(
+                int(row["status_code"])
+                if row["status_code"] is not None
+                else None
+            ),
+            latency_ms=(
+                int(row["latency_ms"])
+                if row["latency_ms"] is not None
+                else None
+            ),
+            reason_code=reason,
+            expires_at=required_times["expires_at"],  # type: ignore[arg-type]
+            created_at=required_times["created_at"],  # type: ignore[arg-type]
+            updated_at=required_times["updated_at"],  # type: ignore[arg-type]
+            terminal_at=terminal_at,
+            redelivery_of_id=(
+                _canonical_uuid4(
+                    row["redelivery_of_id"],
+                    field="persisted redelivery ID",
+                )
+                if row["redelivery_of_id"] is not None
+                else None
+            ),
+        ),
+        bool(row["completed_after_config_change"]),
+    )
+
+
+def _history_attempt_from_row(row: Mapping[str, Any]) -> WebhookDeliveryAttempt:
+    """Map only the allowlisted public attempt-history columns."""
+
+    started_at = _parse_datetime(row["started_at"])
+    finished_at = _parse_datetime(row["finished_at"])
+    if started_at is None:
+        raise ValueError("persisted attempt timestamp is invalid")
+    try:
+        state = AttemptState(str(row["state"]))
+        reason = (
+            DeliveryReasonCode(str(row["reason_code"]))
+            if row["reason_code"] is not None
+            else None
+        )
+    except ValueError as exc:
+        raise ValueError("persisted attempt enum is invalid") from exc
+    if (state is AttemptState.PROCESSING) != (finished_at is None):
+        raise ValueError("persisted attempt terminal state is invalid")
+    return WebhookDeliveryAttempt(
+        id=_canonical_uuid4(row["id"], field="persisted attempt ID"),
+        delivery_id=_canonical_uuid4(
+            row["delivery_id"],
+            field="persisted delivery ID",
+        ),
+        attempt_number=int(row["attempt_number"]),
+        state=state,
+        request_timeout_seconds=(
+            int(row["request_timeout_seconds"])
+            if row["request_timeout_seconds"] is not None
+            else None
+        ),
+        status_code=(
+            int(row["status_code"])
+            if row["status_code"] is not None
+            else None
+        ),
+        latency_ms=(
+            int(row["latency_ms"])
+            if row["latency_ms"] is not None
+            else None
+        ),
+        reason_code=reason,
+        requested_retry_delay_seconds=(
+            int(row["requested_retry_delay_seconds"])
+            if row["requested_retry_delay_seconds"] is not None
+            else None
+        ),
+        started_at=started_at,
+        finished_at=finished_at,
+    )
+
+
 def _heartbeat_from_row(row: Mapping[str, Any]) -> DeliveryRuntimeHeartbeat:
     heartbeat_at = _parse_datetime(row["heartbeat_at"])
     created_at = _parse_datetime(row["created_at"])
@@ -1567,6 +1702,56 @@ def _safe_response_metadata(
     if len(encoded.encode("utf-8")) > 16_384:
         raise ValueError("response metadata is too large")
     return encoded, MappingProxyType(normalized)
+
+
+def _redelivery_idempotency_lookup_from_row(
+    row: Mapping[str, Any],
+) -> IdempotencyLookup:
+    """Decode only the two persisted redelivery command states."""
+
+    forbidden_coordinates = (
+        "resource_id",
+        "resource_version",
+        "secret_version",
+        "replay_secret_ciphertext_json",
+        "replay_secret_key_id",
+        "test_delivery_id",
+        "test_attempt_id",
+    )
+    if any(row[name] is not None for name in forbidden_coordinates):
+        raise ValueError("persisted redelivery replay coordinates are invalid")
+    expires_at = _parse_datetime(row["expires_at"])
+    if expires_at is None:
+        raise ValueError("persisted idempotency expiry is invalid")
+    state = str(row["state"])
+    if state == "in_progress":
+        if (
+            row["response_status"] is not None
+            or row["response_metadata_json"] is not None
+        ):
+            raise ValueError("persisted redelivery in-progress state is invalid")
+        return IdempotencyLookup(
+            kind=IdempotencyLookupKind.IN_PROGRESS,
+            expires_at=expires_at,
+        )
+    if state != "completed" or row["response_status"] != 202:
+        raise ValueError("persisted redelivery completion state is invalid")
+    if row["response_metadata_json"] is None:
+        raise ValueError("persisted redelivery replay coordinates are invalid")
+    raw_metadata = _strict_json_object(row["response_metadata_json"])
+    if set(raw_metadata) != {"redelivery_delivery_id"}:
+        raise ValueError("persisted redelivery replay coordinates are invalid")
+    _encoded, metadata = _safe_response_metadata(raw_metadata)
+    if metadata is None:
+        raise ValueError("persisted redelivery replay coordinates are invalid")
+    redelivery_delivery_id = str(metadata["redelivery_delivery_id"])
+    return IdempotencyLookup(
+        kind=IdempotencyLookupKind.REPLAY,
+        redelivery_delivery_id=redelivery_delivery_id,
+        response_status=202,
+        response_metadata=metadata,
+        expires_at=expires_at,
+    )
 
 
 def _pending_disposition_from_delivery(
@@ -1790,6 +1975,43 @@ class AdminWebhookRepository:
                 raise WebhookRepositoryError(WebhookRepositoryErrorCode.DATABASE_BUSY) from None
             raise
 
+    @asynccontextmanager
+    async def _read_snapshot(self) -> AsyncIterator[object]:
+        """Open one backend-correct snapshot for a bounded multi-read view."""
+
+        try:
+            async with self._pool.acquire(timeout=5.0) as connection:
+                if self.is_postgres:
+                    async with connection.transaction(  # type: ignore[attr-defined]
+                        isolation="repeatable_read",
+                        readonly=True,
+                    ):
+                        yield connection
+                    return
+                await connection.execute("BEGIN")  # type: ignore[attr-defined]
+                try:
+                    yield connection
+                except BaseException:  # noqa: BLE001 - rollback covers cancellation
+                    if connection.in_transaction:  # type: ignore[attr-defined]
+                        await await_cancellation_safe_cleanup(
+                            connection.rollback()  # type: ignore[attr-defined]
+                        )
+                    raise
+                else:
+                    await await_cancellation_safe_cleanup(
+                        connection.commit()  # type: ignore[attr-defined]
+                    )
+        except TimeoutError:
+            raise WebhookRepositoryError(
+                WebhookRepositoryErrorCode.DATABASE_BUSY
+            ) from None
+        except Exception as exc:
+            if _is_database_busy(exc):
+                raise WebhookRepositoryError(
+                    WebhookRepositoryErrorCode.DATABASE_BUSY
+                ) from None
+            raise
+
     async def get_registration(
         self,
         webhook_id: int,
@@ -1888,7 +2110,7 @@ class AdminWebhookRepository:
         limit: int,
         offset: int = 0,
     ) -> DeliveryHistoryPage:
-        async with self._read_connection() as connection:
+        async with self._read_snapshot() as connection:
             return await AdminWebhookUnitOfWork(
                 connection,
                 is_postgres=self.is_postgres,
@@ -2567,8 +2789,9 @@ class AdminWebhookUnitOfWork(_ConnectionAdapter):
         if registration is None:
             raise WebhookRepositoryError(WebhookRepositoryErrorCode.NOT_FOUND)
         rows = await self._fetch(
-            """
-            SELECT delivery.*, event.event_type AS history_event_type
+            f"""
+            SELECT {_HISTORY_DELIVERY_COLUMNS},
+                   event.event_type AS history_event_type
             FROM admin_webhook_deliveries AS delivery
             JOIN admin_webhook_events AS event ON event.id = delivery.event_id
             WHERE delivery.webhook_id = ?
@@ -2577,8 +2800,8 @@ class AdminWebhookUnitOfWork(_ConnectionAdapter):
             """,
             (webhook_id, limit, offset),
         )
-        deliveries = tuple(_stored_delivery_from_row(row) for row in rows)
-        delivery_ids = tuple(item.delivery.id for item in deliveries)
+        deliveries = tuple(_history_delivery_from_row(row) for row in rows)
+        delivery_ids = tuple(item[0].id for item in deliveries)
         attempts_by_delivery: dict[str, list[WebhookDeliveryAttempt]] = {
             delivery_id: [] for delivery_id in delivery_ids
         }
@@ -2586,7 +2809,7 @@ class AdminWebhookUnitOfWork(_ConnectionAdapter):
             placeholders = ", ".join("?" for _delivery_id in delivery_ids)
             attempt_rows = await self._fetch(
                 f"""
-                SELECT {_ATTEMPT_COLUMNS}
+                SELECT {_HISTORY_ATTEMPT_COLUMNS}
                 FROM admin_webhook_delivery_attempts AS attempt
                 WHERE attempt.delivery_id IN ({placeholders})
                 ORDER BY attempt.delivery_id ASC,
@@ -2596,19 +2819,20 @@ class AdminWebhookUnitOfWork(_ConnectionAdapter):
                 delivery_ids,
             )
             for attempt_row in attempt_rows:
-                attempt = _attempt_from_row(attempt_row)
+                attempt = _history_attempt_from_row(attempt_row)
                 attempts_by_delivery[attempt.delivery_id].append(attempt)
         return DeliveryHistoryPage(
             items=tuple(
                 DeliveryHistoryItem(
-                    delivery=stored.delivery,
+                    delivery=delivery,
                     event_type=str(row["history_event_type"]),
-                    completed_after_config_change=(
-                        stored.completed_after_config_change
-                    ),
-                    attempts=tuple(attempts_by_delivery[stored.delivery.id]),
+                    completed_after_config_change=completed_after_config_change,
+                    attempts=tuple(attempts_by_delivery[delivery.id]),
                 )
-                for row, stored in zip(rows, deliveries, strict=True)
+                for row, (
+                    delivery,
+                    completed_after_config_change,
+                ) in zip(rows, deliveries, strict=True)
             ),
             total=int(registration["delivery_count"]),
             limit=limit,
@@ -5579,6 +5803,8 @@ class AdminWebhookUnitOfWork(_ConnectionAdapter):
             request_fingerprint,
         ):
             return IdempotencyLookup(kind=IdempotencyLookupKind.CONFLICT)
+        if scope.operation == "redeliver":
+            return _redelivery_idempotency_lookup_from_row(row)
         test_delivery_id = (
             _canonical_uuid4(
                 row["test_delivery_id"],
@@ -5608,10 +5834,7 @@ class AdminWebhookUnitOfWork(_ConnectionAdapter):
             and "redelivery_delivery_id" in metadata
             else None
         )
-        if scope.operation == "redeliver":
-            if test_delivery_id is not None or test_attempt_id is not None:
-                raise ValueError("persisted redelivery replay coordinates are invalid")
-        elif redelivery_delivery_id is not None:
+        if redelivery_delivery_id is not None:
             raise ValueError("persisted redelivery replay coordinates are invalid")
         response_status = (
             int(row["response_status"])

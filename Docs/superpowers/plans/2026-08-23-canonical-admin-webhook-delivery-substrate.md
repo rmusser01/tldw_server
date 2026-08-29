@@ -1571,6 +1571,68 @@ git diff --cached --check
 git commit -m "feat(admin-webhooks): expose delivery operations and history"
 ```
 
+**Review 1 and fix-round 1 ruling:** Independent review of
+`db91e7fb46c7d467b61c41de6fedf26ead11a992..d083aaca14dfb4c3c876070f9130b0df23a33d09`
+found no Critical issues, six Important implementation defects, and one Minor
+report-only RED-chronology gap. All six implementation findings are accepted;
+controller verification adds a seventh Important mapping defect. Task 10 is not
+complete at this head.
+
+1. The approved same-key/different-source conflict must coexist with a full
+   source-bound persisted scope. Derive redelivery's lookup digest from a stable
+   actor/operation/webhook key-family scope that omits only the source coordinate,
+   while storing and comparing the full canonical route plus source delivery in
+   the idempotency row and request fingerprint. Thus exact same-source replay
+   matches, a second source under the same actor/operation/webhook and raw key
+   reaches scope mismatch and returns 409, and another webhook remains a separate
+   family. Do not change generic idempotency semantics or schema.
+2. Decode redelivery idempotency rows through an exact action-specific state
+   matrix. In-progress redelivery has no response/result coordinates. Completed
+   redelivery has status 202, exactly one canonical
+   `redelivery_delivery_id` metadata key, and no generic resource/version,
+   secret/replay-secret, or test coordinates. Any other shape fails before
+   registration/key reads as delivery unavailable.
+3. History SQL and mappers select only the public delivery/history columns and
+   public attempt columns. They must never select, instantiate, validate, or
+   retain Jobs IDs/leases, enqueue claims, disposition tokens/state, test tokens,
+   idempotency material, protected values, or full internal stored-delivery
+   records. Add SQL/query and malformed-hidden-column proof, not response-only
+   no-leak assertions.
+4. Registration existence/count, delivery page, and set-based attempts must come
+   from one backend-correct read snapshot (or one equivalent statement) so a
+   concurrent commit cannot produce mismatched totals/deliveries/attempts.
+   Preserve bounded query count and avoid N+1 behavior on SQLite and PostgreSQL.
+5. OpenAPI must mark `If-Match` required while runtime omission still reaches the
+   service's canonical 428 response, constrain `Idempotency-Key` to the exact
+   16-255 safe-character contract, and document `X-Request-ID` plus
+   `Cache-Control` on all three success families and `Retry-After` on test 202
+   only. Add generated-schema assertions and refresh the fingerprint.
+6. Remove the Task 10 broad `except Exception` from `AdminWebhookRoute`; unknown
+   programming failures remain owned by the global sanitized 500 handler and its
+   telemetry. Add regression proof covering an existing route and a Task 10
+   route.
+7. Map repository `NOT_FOUND` from `list_delivery_history()` to public
+   `WebhookErrorCode.NOT_FOUND`, preserving the required 404 and best-effort
+   denied read audit. Do not broaden the shared capture-error mapping in a way
+   that changes unrelated service semantics.
+
+Write deterministic RED tests for all seven defects before production fixes,
+then rerun the complete Task 10 required-PostgreSQL zero-skip gate, focused
+SQLite/PostgreSQL race/malformed/query-shape tests, Task 9 regressions, OpenAPI
+drift, Ruff, Bandit, Python 3.10, scope/no-leak scans, and diff checks. The Minor
+chronology limitation remains explicitly documented; do not fabricate historical
+evidence or add a test-only commit solely to rewrite the initial sequence.
+
+**Fix round 1 completion:** All seven accepted defects are closed with
+deterministic pre-production RED coverage. The final required Task 10 gate
+passed 138 tests with PostgreSQL required and zero skips; Task 9 regressions
+passed 18 tests with zero skips, and event-expansion regressions passed 24.
+OpenAPI fingerprint/drift, Ruff, reviewed Bandit, Python 3.10 compilation,
+scope/no-leak scans, warning provenance, and diff checks passed. No schema,
+migration, direct Jobs admission, runtime activation, producer/UI, legacy
+service import, or Task 11 work was added. Evidence is recorded in
+`.superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-10-fix-1-report.md`.
+
 ### Task 11: Add Durable Health, Metrics, Retention, And Runtime Wiring
 
 **Files:**
