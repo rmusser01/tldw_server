@@ -4,7 +4,7 @@ title: Implement canonical admin webhook delivery substrate and recovery
 status: In Progress
 assignee: []
 created_date: '2026-08-23 03:15'
-updated_date: '2026-08-29 03:11'
+updated_date: '2026-08-29 04:08'
 labels:
   - admin
   - webhooks
@@ -143,6 +143,12 @@ Extended peer-verified HTTP hop with no-buffer status-only mode and added determ
 2026-08-28: Started Task 5 Fix Round 1/5 at exact clean FIX_BASE e348d82e21b1a99efcd48e1e7cf9af53738b8756. Scope: status-only coalesced-body discard, closed target construction/syntax, a 30-second status-only whole-hop ceiling, and exact raw Retry-After evidence. Strict focused RED precedes production fixes.
 
 2026-08-28: Task 5 Fix Round 1/5 complete at pre-commit tree. Status-only mode discards coalesced post-header bytes before httpcore retention while bounded-body mode remains unchanged; target normalization rejects double-slash paths, every raw fragment delimiter, and explicit empty ports before policy/I/O, with hop-request construction failures closed as target_invalid; status-only total timeout is capped at 30 seconds; Retry-After scheduling uses exact raw final evidence and rejects all control/non-ASCII octets. Focused RED: 5 failed/69 deselected, 5 failed/78 deselected, and 1 failed/1 passed/74 deselected. Final gates: Task 5 312 passed; adjacent egress/domain 155 passed; focused Ruff, Bandit, Python 3.10 py_compile, and git diff --check passed. Evidence: .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-5-report.md.
+
+2026-08-28: Started Task 6 synthetic capture and registration-work lifecycle at exact clean base d175dabca61d4b895ae92a03e00d42b417c64905. Strict focused RED precedes production edits; disposable PostgreSQL zero-skip and all brief verification gates are required.
+
+Added internal encrypted synthetic capture/fanout and transactional registration-work cancellation/supersession without producer or UI activation.
+
+2026-08-28: Task 6 pre-commit verification complete. Focused suite: 79 passed. Final SQLite/PostgreSQL gate: 108 passed with TLDW_TEST_POSTGRES_REQUIRED=1 and zero skips. Delivery repository regressions: 20 passed. Crypto/audit/key-rotation regressions: 82 passed. Production Ruff, Bandit, Python 3.10 py_compile, and git diff --check passed. Evidence: .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-6-report.md.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

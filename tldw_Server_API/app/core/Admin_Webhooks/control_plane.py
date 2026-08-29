@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import os
 import re
 import secrets
@@ -46,6 +48,7 @@ from .crypto import (
     load_webhook_key_ring,
 )
 from .domain import (
+    DeliveryReasonCode,
     IdempotencyScope,
     ValidatedWebhookTarget,
     WebhookError,
@@ -75,6 +78,35 @@ _FAILED_AUDIT_CODES = frozenset(
         WebhookErrorCode.DATABASE_BUSY,
     }
 )
+_CANCELLATION_TOKEN_DOMAIN = b"tldw-admin-webhook-cancel-v1\x00"
+
+
+def _random_cancellation_seed() -> bytes:
+    return secrets.token_bytes(32)
+
+
+@dataclass(frozen=True)
+class _CancellationTokenSource:
+    seed: bytes
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.seed, bytes) or len(self.seed) != 32:
+            raise ValueError("cancellation seed must be 256 bits")
+
+    def attempt_factory(self) -> Callable[[], str]:
+        ordinal = 0
+
+        def issue() -> str:
+            nonlocal ordinal
+            token = hmac.new(
+                self.seed,
+                _CANCELLATION_TOKEN_DOMAIN + ordinal.to_bytes(8, "big"),
+                hashlib.sha256,
+            ).hexdigest()
+            ordinal += 1
+            return token
+
+        return issue
 
 
 class DeliveryCapability(Protocol):
@@ -376,11 +408,18 @@ class AdminWebhookControlPlane:
         settings: AdminWebhookSettings,
         key_ring_result: WebhookKeyRingLoadResult,
         delivery_capability: DeliveryCapability,
+        cancellation_seed_factory: Callable[[], bytes] = _random_cancellation_seed,
     ) -> None:
+        if not callable(cancellation_seed_factory):
+            raise TypeError("cancellation seed factory is required")
         self._repository = repository
         self._settings = settings
         self._key_ring_result = key_ring_result
         self._delivery_capability = delivery_capability
+        self._cancellation_seed_factory = cancellation_seed_factory
+
+    def _new_cancellation_token_source(self) -> _CancellationTokenSource:
+        return _CancellationTokenSource(self._cancellation_seed_factory())
 
     async def _emit(
         self,
@@ -772,7 +811,11 @@ class AdminWebhookControlPlane:
             webhook_id=command.webhook_id,
         )
 
-        async def prepare() -> tuple[int, _NormalizedChanges]:
+        async def prepare() -> tuple[
+            int,
+            _NormalizedChanges,
+            _CancellationTokenSource,
+        ]:
             await self._require_surface_available()
             expected_revision = parse_registration_etag(
                 command.if_match,
@@ -783,15 +826,22 @@ class AdminWebhookControlPlane:
                 context.target_hostname = normalized.target.hostname
             if isinstance(normalized.event_types, tuple):
                 context.event_types = normalized.event_types
-            return expected_revision, normalized
+            return (
+                expected_revision,
+                normalized,
+                self._new_cancellation_token_source(),
+            )
 
-        expected_revision, normalized = await self._prepare_or_audit(
-            context,
-            audit_sink,
-            prepare,
+        expected_revision, normalized, cancellation_tokens = (
+            await self._prepare_or_audit(
+                context,
+                audit_sink,
+                prepare,
+            )
         )
 
         async def operation(tx: AdminWebhookUnitOfWork) -> _TransactionOutcome[MutationResult]:
+            disposition_token_factory = cancellation_tokens.attempt_factory()
             migration = await tx.lock_migration_state()
             self._require_migration_ready(migration)
             current = await tx.get_protected_registration(
@@ -881,6 +931,27 @@ class AdminWebhookControlPlane:
             )
             context.target_hostname = patched.registration.target_hostname
             context.event_types = patched.registration.event_types
+            cancellation_reason: DeliveryReasonCode | None = None
+            if current.registration.active and not patched.registration.active:
+                cancellation_reason = DeliveryReasonCode.CANCELED_DISABLED
+            elif not current.registration.active and patched.registration.active:
+                cancellation_reason = None
+            elif (
+                patched.registration.delivery_config_version
+                != current.registration.delivery_config_version
+            ):
+                cancellation_reason = DeliveryReasonCode.SUPERSEDED_CONFIG
+            if cancellation_reason is not None:
+                await tx.cancel_registration_work(
+                    command.webhook_id,
+                    (
+                        patched.registration.delivery_config_version,
+                        patched.registration.secret_version,
+                    ),
+                    cancellation_reason,
+                    disposition_token_factory,
+                    _utc(command.now),
+                )
             if patched.changed:
                 await tx.mark_first_canonical_activity(
                     "registration_mutation",
@@ -939,20 +1010,24 @@ class AdminWebhookControlPlane:
             webhook_id=command.webhook_id,
         )
 
-        async def prepare() -> int:
+        async def prepare() -> tuple[int, _CancellationTokenSource]:
             await self._require_surface_available()
-            return parse_registration_etag(
-                command.if_match,
-                expected_webhook_id=command.webhook_id,
+            return (
+                parse_registration_etag(
+                    command.if_match,
+                    expected_webhook_id=command.webhook_id,
+                ),
+                self._new_cancellation_token_source(),
             )
 
-        expected_revision = await self._prepare_or_audit(
+        expected_revision, cancellation_tokens = await self._prepare_or_audit(
             context,
             audit_sink,
             prepare,
         )
 
         async def operation(tx: AdminWebhookUnitOfWork) -> _TransactionOutcome[MutationResult]:
+            disposition_token_factory = cancellation_tokens.attempt_factory()
             migration = await tx.lock_migration_state()
             self._require_migration_ready(migration)
             current = await tx.get_protected_registration(
@@ -970,6 +1045,16 @@ class AdminWebhookControlPlane:
                 expected_revision=expected_revision,
                 actor_user_id=command.actor_id,
                 at=_utc(command.now),
+            )
+            await tx.cancel_registration_work(
+                command.webhook_id,
+                (
+                    deleted.delivery_config_version,
+                    deleted.secret_version,
+                ),
+                DeliveryReasonCode.CANCELED_DELETED,
+                disposition_token_factory,
+                _utc(command.now),
             )
             await tx.mark_first_canonical_activity(
                 "registration_mutation",
@@ -995,7 +1080,13 @@ class AdminWebhookControlPlane:
             webhook_id=command.webhook_id,
         )
 
-        async def prepare() -> tuple[int, IdempotencyScope, str, str]:
+        async def prepare() -> tuple[
+            int,
+            IdempotencyScope,
+            str,
+            str,
+            _CancellationTokenSource,
+        ]:
             await self._require_surface_available()
             validate_idempotency_key(command.idempotency_key)
             expected_revision = parse_registration_etag(
@@ -1015,13 +1106,24 @@ class AdminWebhookControlPlane:
                 body={},
                 conditional_version=expected_revision,
             )
-            return expected_revision, scope, lookup_digest, request_fingerprint
+            return (
+                expected_revision,
+                scope,
+                lookup_digest,
+                request_fingerprint,
+                self._new_cancellation_token_source(),
+            )
 
-        expected_revision, scope_object, lookup_digest, request_fingerprint = (
-            await self._prepare_or_audit(context, audit_sink, prepare)
-        )
+        (
+            expected_revision,
+            scope_object,
+            lookup_digest,
+            request_fingerprint,
+            cancellation_tokens,
+        ) = await self._prepare_or_audit(context, audit_sink, prepare)
 
         async def operation(tx: AdminWebhookUnitOfWork) -> _TransactionOutcome[SecretMutationResult]:
+            disposition_token_factory = cancellation_tokens.attempt_factory()
             claim = await tx.claim_idempotency(
                 lookup_digest=lookup_digest,
                 scope=scope_object,
@@ -1081,6 +1183,16 @@ class AdminWebhookControlPlane:
                 at=_utc(command.now),
             )
             registration = patched.registration
+            await tx.cancel_registration_work(
+                command.webhook_id,
+                (
+                    registration.delivery_config_version,
+                    registration.secret_version,
+                ),
+                DeliveryReasonCode.CANCELED_SECRET_ROTATION,
+                disposition_token_factory,
+                _utc(command.now),
+            )
             replay_secret = self._encrypt_replay_secret(
                 ring=ring,
                 lookup_digest=lookup_digest,

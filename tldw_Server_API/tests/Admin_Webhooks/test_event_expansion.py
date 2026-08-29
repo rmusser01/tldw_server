@@ -1374,22 +1374,26 @@ async def exercise_cancellation_cas_and_processing_preservation(
         pending = await tx.finish_attempt_and_prepare_disposition(
             lease_id,
             AttemptCompletion(
-                attempt_state=AttemptState.RETRYABLE,
-                delivery_state=DeliveryState.RETRY_WAIT,
-                disposition=JobsDispositionKind.RETRY,
-                status_code=503,
+                attempt_state=AttemptState.SUCCEEDED,
+                delivery_state=DeliveryState.SUCCEEDED,
+                disposition=JobsDispositionKind.COMPLETE,
+                status_code=204,
                 latency_ms=8,
                 reason_code=None,
-                requested_retry_delay_seconds=30,
+                requested_retry_delay_seconds=None,
                 finished_at=NOW + timedelta(minutes=4, seconds=1),
-                completed_after_config_change=False,
+                completed_after_config_change=True,
             ),
             opaque_token("processing-real-outcome"),
-            NOW + timedelta(minutes=4, seconds=31),
+            None,
         )
         assert pending is not None and pending.attempt_id == attempt_id
     attempts = await repository.list_delivery_attempts(webhook_id, delivery_id)
-    assert attempts[0].state is AttemptState.RETRYABLE
+    assert attempts[0].state is AttemptState.SUCCEEDED
+    completed = await repository.get_delivery_bundle(delivery_id)
+    assert completed is not None
+    assert completed.delivery.delivery.state is DeliveryState.SUCCEEDED
+    assert completed.delivery.completed_after_config_change is True
 
 
 async def exercise_atomic_disposition_acknowledgement(

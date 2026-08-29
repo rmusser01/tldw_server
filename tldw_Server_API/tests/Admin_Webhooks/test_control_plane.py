@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
+import hmac
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -34,6 +36,12 @@ from tldw_Server_API.app.core.Admin_Webhooks.crypto import (
     WebhookKeyRingLoadResult,
 )
 from tldw_Server_API.app.core.Admin_Webhooks.domain import (
+    AttemptState,
+    DeliveryKind,
+    DeliveryReasonCode,
+    DeliveryState,
+    EventSourceKind,
+    JobsDispositionKind,
     ValidatedWebhookTarget,
     WebhookError,
     WebhookErrorCode,
@@ -50,6 +58,8 @@ from tldw_Server_API.app.core.AuthNZ.settings import Settings
 from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
     AdminWebhookRepository,
     AdminWebhookUnitOfWork,
+    AttemptCompletion,
+    EventInsert,
     RegistrationInsert,
     RegistrationTarget,
 )
@@ -59,6 +69,8 @@ RAW_URL = "https://hooks.example.com/private/receive?token=url-query-canary"
 RAW_SECRET_CANARY = "whsec_" + ("a" * 64)
 IDEMPOTENCY_KEY = "0123456789abcdef0123456789abcdef"
 ROTATE_KEY = "fedcba9876543210fedcba9876543210"
+CANCELLATION_SEED = b"c" * 32
+CANCELLATION_TOKEN_DOMAIN = b"tldw-admin-webhook-cancel-v1\x00"
 
 
 @dataclass
@@ -331,6 +343,169 @@ async def _seed_registration(
                 now=NOW,
             )
         )
+
+
+def _uuid4(label: str) -> str:
+    digest = hashlib.sha256(label.encode("utf-8")).hexdigest()
+    return (
+        f"{digest[:8]}-{digest[8:12]}-4{digest[13:16]}-"
+        f"8{digest[17:20]}-{digest[20:32]}"
+    )
+
+
+def _opaque_token(label: str) -> str:
+    return hashlib.sha256(label.encode("utf-8")).hexdigest()
+
+
+def _expected_cancellation_token(ordinal: int) -> str:
+    return hmac.new(
+        CANCELLATION_SEED,
+        CANCELLATION_TOKEN_DOMAIN + ordinal.to_bytes(8, "big"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+@dataclass(frozen=True)
+class _SeededWork:
+    delivery_id: str
+    jobs_job_id: str | None = None
+    attempt_id: str | None = None
+    lease_id: str | None = None
+
+
+async def _seed_registration_work(
+    fixture: ControlPlaneFixture,
+    registration: WebhookRegistration,
+    *,
+    label: str,
+    state: DeliveryState,
+    kind: DeliveryKind = DeliveryKind.AUTOMATIC,
+    created_at: datetime,
+) -> _SeededWork:
+    event_id = _uuid4(f"{label}-event")
+    event_type = (
+        registration.event_types[0]
+        if kind is DeliveryKind.AUTOMATIC
+        else "incident.notify"
+    )
+    body = b"{}"
+    event = EventInsert(
+        id=event_id,
+        event_type=event_type,
+        api_version="2026-07-01",
+        source_kind=EventSourceKind.COMMAND,
+        aggregate_type=None,
+        aggregate_id=None,
+        aggregate_version=None,
+        source_command_id=f"{label}-command",
+        source_component="task6-tests",
+        source_request_id=f"{label}-source-request",
+        body=fixture.ring.encrypt_event_body(
+            event_id=event_id,
+            api_version="2026-07-01",
+            body=body,
+        ),
+        body_size_bytes=len(body),
+        created_at=created_at,
+    )
+    automatic_id = _uuid4(f"{label}-automatic-delivery")
+    async with fixture.repository.transaction() as tx:
+        captured = await tx.capture_event_and_expand(
+            event,
+            lambda: automatic_id,
+            created_at + timedelta(hours=72),
+        )
+        if kind is DeliveryKind.AUTOMATIC:
+            delivery_id = next(
+                item.delivery.id
+                for item in captured.deliveries
+                if item.delivery.webhook_id == registration.id
+            )
+        else:
+            inserted = await tx.insert_delivery(
+                _uuid4(f"{label}-manual-delivery"),
+                event_id=event_id,
+                webhook_id=registration.id,
+                kind=DeliveryKind.MANUAL,
+                expires_at=created_at + timedelta(hours=72),
+                now=created_at,
+            )
+            delivery_id = inserted.delivery.id
+
+    if state is DeliveryState.PENDING:
+        return _SeededWork(delivery_id)
+
+    claim_token = _opaque_token(f"{label}-claim")
+    async with fixture.repository.transaction() as tx:
+        claim = await tx.claim_pending_delivery(
+            claim_token,
+            created_at + timedelta(minutes=1),
+            created_at,
+        )
+        assert claim is not None and claim.delivery.delivery.id == delivery_id
+    if state is DeliveryState.ENQUEUE_CLAIMED:
+        return _SeededWork(delivery_id)
+
+    jobs_job_id = f"{label}-job"
+    async with fixture.repository.transaction() as tx:
+        queued = await tx.attach_jobs_job(
+            delivery_id,
+            claim_token,
+            jobs_job_id,
+            created_at,
+        )
+        assert queued is not None
+    if state is DeliveryState.QUEUED:
+        return _SeededWork(delivery_id, jobs_job_id=jobs_job_id)
+
+    attempt_id = _uuid4(f"{label}-attempt")
+    lease_id = f"{label}-lease"
+    async with fixture.repository.transaction() as tx:
+        reservation = await tx.reserve_jobs_attempt(
+            delivery_id,
+            jobs_job_id,
+            lease_id,
+            attempt_id,
+            10,
+            created_at,
+            created_at + timedelta(seconds=10),
+        )
+        assert reservation is not None and reservation.reserved
+        if state is DeliveryState.RETRY_WAIT:
+            pending = await tx.finish_attempt_and_prepare_disposition(
+                lease_id,
+                AttemptCompletion(
+                    attempt_state=AttemptState.RETRYABLE,
+                    delivery_state=DeliveryState.RETRY_WAIT,
+                    disposition=JobsDispositionKind.RETRY,
+                    status_code=503,
+                    latency_ms=4,
+                    reason_code=None,
+                    requested_retry_delay_seconds=30,
+                    finished_at=created_at + timedelta(seconds=1),
+                    completed_after_config_change=False,
+                ),
+                _opaque_token(f"{label}-retry-disposition"),
+                created_at + timedelta(seconds=31),
+            )
+            assert pending is not None
+    assert state in {DeliveryState.PROCESSING, DeliveryState.RETRY_WAIT}
+    return _SeededWork(
+        delivery_id,
+        jobs_job_id=jobs_job_id,
+        attempt_id=attempt_id,
+        lease_id=lease_id,
+    )
+
+
+def _lifecycle_service(fixture: ControlPlaneFixture) -> AdminWebhookControlPlane:
+    return AdminWebhookControlPlane(
+        repository=fixture.repository,
+        settings=_settings(),
+        key_ring_result=_available_keys(fixture.ring),
+        delivery_capability=ReadyDeliveryCapability(),
+        cancellation_seed_factory=lambda: CANCELLATION_SEED,
+    )
 
 
 @pytest.mark.unit
@@ -1272,6 +1447,347 @@ async def test_errors_and_audits_are_secret_free(plane: ControlPlaneFixture) -> 
     assert "url-query-canary" not in serialized
     assert "/private/" not in serialized
     assert IDEMPOTENCY_KEY not in serialized
+
+
+@pytest.mark.unit
+async def test_disable_cancels_every_unstarted_kind_with_precedence_and_stable_tokens(
+    plane: ControlPlaneFixture,
+) -> None:
+    registration = await _seed_registration(plane, active=True)
+    service = _lifecycle_service(plane)
+    processing = await _seed_registration_work(
+        plane,
+        registration,
+        label="disable-processing",
+        state=DeliveryState.PROCESSING,
+        created_at=NOW + timedelta(seconds=1),
+    )
+    retry_wait = await _seed_registration_work(
+        plane,
+        registration,
+        label="disable-retry",
+        state=DeliveryState.RETRY_WAIT,
+        created_at=NOW + timedelta(seconds=2),
+    )
+    queued = await _seed_registration_work(
+        plane,
+        registration,
+        label="disable-queued",
+        state=DeliveryState.QUEUED,
+        created_at=NOW + timedelta(seconds=3),
+    )
+    enqueue_claimed = await _seed_registration_work(
+        plane,
+        registration,
+        label="disable-claimed",
+        state=DeliveryState.ENQUEUE_CLAIMED,
+        created_at=NOW + timedelta(seconds=4),
+    )
+    pending = await _seed_registration_work(
+        plane,
+        registration,
+        label="disable-pending",
+        state=DeliveryState.PENDING,
+        created_at=NOW + timedelta(seconds=5),
+    )
+    manual = await _seed_registration_work(
+        plane,
+        registration,
+        label="disable-manual",
+        state=DeliveryState.PENDING,
+        kind=DeliveryKind.MANUAL,
+        created_at=NOW + timedelta(seconds=6),
+    )
+
+    patched = await service.patch(
+        _patch_command(
+            registration.id,
+            registration.revision,
+            RegistrationChanges(
+                active=False,
+                timeout_seconds=11,
+                description="Disabled and reconfigured",
+            ),
+        ),
+        audit_sink=_recording_sink([]),
+    )
+
+    assert patched.registration.active is False
+    assert patched.registration.delivery_config_version == 2
+    for work in (pending, enqueue_claimed, manual):
+        bundle = await plane.repository.get_delivery_bundle(work.delivery_id)
+        assert bundle is not None
+        assert bundle.delivery.delivery.state is DeliveryState.CANCELED
+        assert (
+            bundle.delivery.delivery.reason_code
+            is DeliveryReasonCode.CANCELED_DISABLED
+        )
+        assert bundle.delivery.pending_jobs_disposition is None
+        assert bundle.delivery.pending_jobs_disposition_token is None
+
+    tokenized = []
+    for work in (retry_wait, queued):
+        bundle = await plane.repository.get_delivery_bundle(work.delivery_id)
+        assert bundle is not None
+        assert bundle.delivery.delivery.state is DeliveryState.CANCELED
+        assert (
+            bundle.delivery.delivery.reason_code
+            is DeliveryReasonCode.CANCELED_DISABLED
+        )
+        assert (
+            bundle.delivery.pending_jobs_disposition
+            is JobsDispositionKind.CANCEL
+        )
+        tokenized.append(bundle.delivery.pending_jobs_disposition_token)
+    assert tokenized == [
+        _expected_cancellation_token(0),
+        _expected_cancellation_token(1),
+    ]
+
+    processing_bundle = await plane.repository.get_delivery_bundle(
+        processing.delivery_id
+    )
+    assert processing_bundle is not None
+    assert processing_bundle.delivery.delivery.state is DeliveryState.PROCESSING
+    assert processing_bundle.delivery.pending_jobs_disposition is None
+    assert processing.lease_id is not None
+    async with plane.repository.transaction() as tx:
+        disposition = await tx.finish_attempt_and_prepare_disposition(
+            processing.lease_id,
+            AttemptCompletion(
+                attempt_state=AttemptState.SUCCEEDED,
+                delivery_state=DeliveryState.SUCCEEDED,
+                disposition=JobsDispositionKind.COMPLETE,
+                status_code=204,
+                latency_ms=7,
+                reason_code=None,
+                requested_retry_delay_seconds=None,
+                finished_at=NOW + timedelta(minutes=2),
+                completed_after_config_change=True,
+            ),
+            _opaque_token("disable-processing-complete"),
+            None,
+        )
+    assert disposition is not None
+    completed = await plane.repository.get_delivery_bundle(processing.delivery_id)
+    assert completed is not None
+    assert completed.delivery.delivery.state is DeliveryState.SUCCEEDED
+    assert completed.delivery.completed_after_config_change is True
+
+
+@pytest.mark.parametrize(
+    "changes",
+    (
+        RegistrationChanges(url="https://hooks.example.com/reconfigured"),
+        RegistrationChanges(event_types=("user.deleted",)),
+        RegistrationChanges(timeout_seconds=11),
+    ),
+)
+@pytest.mark.unit
+async def test_effective_delivery_configuration_patch_supersedes_old_work(
+    plane: ControlPlaneFixture,
+    changes: RegistrationChanges,
+) -> None:
+    registration = await _seed_registration(plane, active=True)
+    work = await _seed_registration_work(
+        plane,
+        registration,
+        label="config-supersede",
+        state=DeliveryState.QUEUED,
+        created_at=NOW + timedelta(seconds=1),
+    )
+
+    patched = await _lifecycle_service(plane).patch(
+        _patch_command(registration.id, registration.revision, changes),
+        audit_sink=_recording_sink([]),
+    )
+
+    assert patched.registration.delivery_config_version == 2
+    bundle = await plane.repository.get_delivery_bundle(work.delivery_id)
+    assert bundle is not None
+    assert bundle.delivery.delivery.state is DeliveryState.SUPERSEDED
+    assert bundle.delivery.delivery.reason_code is DeliveryReasonCode.SUPERSEDED_CONFIG
+    assert bundle.delivery.pending_jobs_disposition is JobsDispositionKind.CANCEL
+    assert (
+        bundle.delivery.pending_jobs_disposition_token
+        == _expected_cancellation_token(0)
+    )
+
+
+@pytest.mark.unit
+async def test_description_noop_stale_and_activation_leave_existing_work_untouched(
+    plane: ControlPlaneFixture,
+) -> None:
+    active = await _seed_registration(plane, active=True)
+    active_work = await _seed_registration_work(
+        plane,
+        active,
+        label="metadata-only",
+        state=DeliveryState.PENDING,
+        created_at=NOW + timedelta(seconds=1),
+    )
+    service = _lifecycle_service(plane)
+    described = await service.patch(
+        _patch_command(
+            active.id,
+            active.revision,
+            RegistrationChanges(description="Metadata only"),
+        ),
+        audit_sink=_recording_sink([]),
+    )
+    no_op = await service.patch(
+        _patch_command(
+            active.id,
+            described.registration.revision,
+            RegistrationChanges(description="Metadata only"),
+            now=NOW + timedelta(minutes=2),
+        ),
+        audit_sink=_recording_sink([]),
+    )
+    with pytest.raises(WebhookError) as stale:
+        await service.patch(
+            _patch_command(
+                active.id,
+                active.revision,
+                RegistrationChanges(timeout_seconds=12),
+                now=NOW + timedelta(minutes=3),
+            ),
+            audit_sink=_recording_sink([]),
+        )
+    assert stale.value.code is WebhookErrorCode.PRECONDITION_FAILED
+    assert no_op.changed is False
+    unchanged = await plane.repository.get_delivery_bundle(active_work.delivery_id)
+    assert unchanged is not None
+    assert unchanged.delivery.delivery.state is DeliveryState.PENDING
+    assert unchanged.delivery.pending_jobs_disposition is None
+
+    inactive = await _seed_registration(plane, active=False)
+    inactive_work = await _seed_registration_work(
+        plane,
+        inactive,
+        label="activation-only",
+        state=DeliveryState.PENDING,
+        kind=DeliveryKind.MANUAL,
+        created_at=NOW + timedelta(seconds=2),
+    )
+    activated = await service.patch(
+        _patch_command(
+            inactive.id,
+            inactive.revision,
+            RegistrationChanges(active=True),
+            now=NOW + timedelta(minutes=4),
+        ),
+        audit_sink=_recording_sink([]),
+    )
+    assert activated.registration.active is True
+    retained = await plane.repository.get_delivery_bundle(inactive_work.delivery_id)
+    assert retained is not None
+    assert retained.delivery.delivery.state is DeliveryState.PENDING
+    assert retained.delivery.pending_jobs_disposition is None
+
+
+@pytest.mark.unit
+async def test_rotation_and_delete_cancel_old_work_but_rotation_replay_does_not_retouch_it(
+    plane: ControlPlaneFixture,
+) -> None:
+    service = _lifecycle_service(plane)
+    rotating = await _seed_registration(plane, active=False)
+    rotation_work = await _seed_registration_work(
+        plane,
+        rotating,
+        label="rotation-work",
+        state=DeliveryState.QUEUED,
+        kind=DeliveryKind.MANUAL,
+        created_at=NOW + timedelta(seconds=1),
+    )
+    rotate_command = _rotate_command(rotating.id, rotating.revision)
+
+    rotated = await service.rotate_secret(
+        rotate_command,
+        audit_sink=_recording_sink([]),
+    )
+    first_bundle = await plane.repository.get_delivery_bundle(rotation_work.delivery_id)
+    replayed = await service.rotate_secret(
+        rotate_command,
+        audit_sink=_recording_sink([]),
+    )
+    replay_bundle = await plane.repository.get_delivery_bundle(rotation_work.delivery_id)
+
+    assert rotated.replayed is False
+    assert replayed.replayed is True
+    assert first_bundle == replay_bundle
+    assert first_bundle is not None
+    assert first_bundle.delivery.delivery.state is DeliveryState.CANCELED
+    assert (
+        first_bundle.delivery.delivery.reason_code
+        is DeliveryReasonCode.CANCELED_SECRET_ROTATION
+    )
+    assert (
+        first_bundle.delivery.pending_jobs_disposition_token
+        == _expected_cancellation_token(0)
+    )
+
+    deleting = await _seed_registration(plane, active=False)
+    delete_work = await _seed_registration_work(
+        plane,
+        deleting,
+        label="delete-work",
+        state=DeliveryState.QUEUED,
+        kind=DeliveryKind.MANUAL,
+        created_at=NOW + timedelta(seconds=2),
+    )
+    deleted = await service.delete(
+        _delete_command(deleting.id, deleting.revision),
+        audit_sink=_recording_sink([]),
+    )
+    assert deleted.registration.deleted_at is not None
+    deleted_bundle = await plane.repository.get_delivery_bundle(delete_work.delivery_id)
+    assert deleted_bundle is not None
+    assert deleted_bundle.delivery.delivery.state is DeliveryState.CANCELED
+    assert (
+        deleted_bundle.delivery.delivery.reason_code
+        is DeliveryReasonCode.CANCELED_DELETED
+    )
+    assert (
+        deleted_bundle.delivery.pending_jobs_disposition_token
+        == _expected_cancellation_token(0)
+    )
+
+
+@pytest.mark.unit
+async def test_lifecycle_changes_roll_back_with_mandatory_audit_failure(
+    plane: ControlPlaneFixture,
+) -> None:
+    registration = await _seed_registration(plane, active=True)
+    work = await _seed_registration_work(
+        plane,
+        registration,
+        label="lifecycle-rollback",
+        state=DeliveryState.QUEUED,
+        created_at=NOW + timedelta(seconds=1),
+    )
+
+    async def unavailable(_record: MutationAudit) -> None:
+        raise MandatoryAuditWriteError("audit unavailable")
+
+    with pytest.raises(WebhookError) as failed:
+        await _lifecycle_service(plane).patch(
+            _patch_command(
+                registration.id,
+                registration.revision,
+                RegistrationChanges(active=False),
+            ),
+            audit_sink=unavailable,
+        )
+
+    assert failed.value.code is WebhookErrorCode.AUDIT_UNAVAILABLE
+    retained_registration = await plane.repository.get_registration(registration.id)
+    assert retained_registration == registration
+    retained_work = await plane.repository.get_delivery_bundle(work.delivery_id)
+    assert retained_work is not None
+    assert retained_work.delivery.delivery.state is DeliveryState.QUEUED
+    assert retained_work.delivery.pending_jobs_disposition is None
+    assert retained_work.delivery.pending_jobs_disposition_token is None
 
 
 @pytest.mark.unit
