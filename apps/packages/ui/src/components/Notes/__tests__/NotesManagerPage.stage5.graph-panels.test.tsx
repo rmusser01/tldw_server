@@ -327,7 +327,7 @@ describe('NotesManagerPage graph stage 1 related/backlinks panels', () => {
     expect(backlinkChip).toHaveTextContent('Backlink')
 
     const sourceChip = await screen.findByTestId('notes-source-link-source_web_media-77')
-    expect(sourceChip).toHaveTextContent('web: media-77')
+    expect(sourceChip).toHaveTextContent('Web source: media-77')
   })
 
   it('marks deleted linked-note targets as unavailable instead of opening them', async () => {

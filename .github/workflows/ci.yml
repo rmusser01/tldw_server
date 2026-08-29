@@ -1775,6 +1775,7 @@ jobs:
               tldw_Server_API/tests/Services/test_loop_*.py
               tldw_Server_API/tests/Services/test_media_*.py
               tldw_Server_API/tests/Services/test_notes_graph_projection_worker.py
+              tldw_Server_API/tests/Services/test_notes_graph_suggestions_workers.py
               tldw_Server_API/tests/Services/test_outputs_*.py
               tldw_Server_API/tests/Services/test_persona_*.py
               tldw_Server_API/tests/Services/test_placeholder_*.py
@@ -3260,6 +3261,7 @@ jobs:
               tldw_Server_API/tests/Services/test_loop_*.py
               tldw_Server_API/tests/Services/test_media_*.py
               tldw_Server_API/tests/Services/test_notes_graph_projection_worker.py
+              tldw_Server_API/tests/Services/test_notes_graph_suggestions_workers.py
               tldw_Server_API/tests/Services/test_outputs_*.py
               tldw_Server_API/tests/Services/test_persona_*.py
               tldw_Server_API/tests/Services/test_placeholder_*.py

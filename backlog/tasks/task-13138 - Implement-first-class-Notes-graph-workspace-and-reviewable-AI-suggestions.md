@@ -1,28 +1,27 @@
 ---
 id: TASK-13138
 title: Implement first-class Notes graph workspace and reviewable AI suggestions
-status: Done
+status: In Progress
 assignee: []
-created_date: '2026-08-27 03:40'
-updated_date: '2026-08-29 04:59'
+created_date: 2026-08-27 03:40
+updated_date: 2026-08-29 22:24
 labels:
-  - notes
-  - knowledge-graph
-  - webui
-  - browser-extension
-  - llm
-  - jobs
+- notes
+- knowledge-graph
+- webui
+- browser-extension
+- llm
+- jobs
 dependencies: []
 references:
-  - TASK-13134
-  - TASK-13135
-  - TASK-13136
-  - TASK-13137
-  - 'https://github.com/rmusser01/tldw_server/pull/2832'
+- TASK-13134
+- TASK-13135
+- TASK-13136
+- TASK-13137
+- https://github.com/rmusser01/tldw_server/pull/2832
 documentation:
-  - >-
-    Docs/superpowers/specs/2026-08-26-notes-second-brain-graph-suggestions-design.md
-  - Docs/superpowers/plans/2026-08-26-notes-second-brain-graph-suggestions.md
+- Docs/superpowers/specs/2026-08-26-notes-second-brain-graph-suggestions-design.md
+- Docs/superpowers/plans/2026-08-26-notes-second-brain-graph-suggestions.md
 priority: high
 ---
 
@@ -67,7 +66,6 @@ Execute the approved 12-task test-first plan in Docs/superpowers/plans/2026-08-2
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Deferred work is tracked separately: TASK-13134 embeddings and semantic edges; TASK-13135 automatic background organization; TASK-13136 library-wide recurring themes; TASK-13137 saved graph views/layouts. This task remains review-first and on-demand.
 
@@ -209,15 +207,15 @@ Final cumulative review fix wave started at b37cc2a78f. Validating six reviewer 
 Final cumulative review closure completed in commits `d0d790492b`, `6fc56d1ab0`, `288c064f0d`, and `3f98840afb`. The fixes keep unloaded provisional targets inert, isolate maintenance per owner, enforce atomic owner-scoped Jobs admission, validate cancellation note identity transactionally, retain accepted audit metadata for 90 days, and charge the shared 100-row maintenance budget monotonically at durable run and expired-acceptance claim boundaries even when later reconciliation fails. Final verification: backend Notes Graph matrix 482/483 with only the unchanged delete-link copy assertion; focused frontend 145/145; broad Notes frontend 328/397 with the same 69 failures in the same 27 unchanged files; WebUI E2E 3/3; TASK-13138 extension E2E 2/2 and whole-file inherited baseline 2/4. Complete Ruff passed; Bandit reported 0 findings and 0 errors across 87,969 lines; ESLint reported 0 errors and 349 inherited warnings; WebUI/shared TypeScript reproduced exact 80/170 diagnostic baselines with zero touched-file matches; locale duplicate/coverage and 85/85 graph mirror passed. The unchanged Tags-help copy assertion and missing glossary fixture were reproduced. `git diff --check`, dependency, skip/only, port, and tracked-status checks passed; ports 18001/18082 are stopped and the two unrelated untracked Watchlists templates remain excluded. Human-authored PR Change summary remains required before merge.
 PR opened against `dev`: https://github.com/rmusser01/tldw_server/pull/2832. The PR body includes the requester-provided human-authored Change summary and the final verified baseline-aware validation evidence.
 PR #2832 review cycle resumed. Rebasing onto current `origin/dev` produced an AuthNZ migration-number collision: upstream canonical admin webhooks retain migration 94 and Notes graph suggestion permission seeding was renumbered to 95. The focused AuthNZ migration suite passed 2/2 after both replay conflict resolutions. Evaluating all posted Qodo findings and CI before fixes.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 PR #2832 rebase/review closure: rebased all 60 feature commits onto current origin/dev and resolved the AuthNZ migration collision by preserving upstream admin-webhook migration 94 and renumbering Notes graph permission seeding to migration 95. Addressed Qodo findings by offloading synchronous run admission from the async route, adding the complete endpoint docstring, replacing the local migration-test exception sentinel, introducing a typed Sync materialization contract error, assigning exactly one unit/integration marker per PostgreSQL v64 test, and applying edge visibility filters to Relationships mode. Rejected two findings with verified evidence: note_task_scope_authority is PRIMARY KEY(owner_user_id) and ADR 039 permits at most one immutable dataset per owner, so a 101st dataset is impossible; pg_database_config depends on function-scoped pg_temp_db, which provisions and drops a unique database per test, while isolated_test_environment is AuthNZ-specific. Final local verification: 108 backend tests passed (including live PostgreSQL), 36 frontend tests passed, the additional guarded tombstone/restore contract pair passed 2/2, Ruff/ESLint/extension-pinned Prettier/git diff checks passed, Bandit reported 0 findings, and an independent pre-merge review reported no actionable findings. The project-wide TypeScript command retains diagnostics only in unchanged origin/dev Presentation Studio and skills-certification files, with zero Notes graph diagnostics.
 
 Fresh pre-merge review found two validated Important issues: synchronous Notes graph route/worker/maintenance work can block the event loop, and AuthNZ seed regression tests still assert migration 94 instead of 95. Minor toolbar i18n hardcoding also validated. Beginning test-first remediation before merge.
 
 Pre-merge review remediation completed. Synchronous Notes graph endpoint, worker, publication, and maintenance work now runs off the event loop with thread-affine Notes connection cleanup; the AuthNZ regression expectation tracks migration 95; remaining toolbar visible and assistive labels use i18n keys. Fresh verification: 134 backend tests and 121 Notes graph UI tests passed; Ruff, ESLint, extension-pinned Prettier, locale duplicate/coverage checks, Bandit (0 findings), and git diff --check passed. Shared-package TypeScript retains the unchanged 315-diagnostic baseline with zero touched-file diagnostics. An independent follow-up review found no actionable issues and returned Ready to merge.
-<!-- SECTION:NOTES:END -->
-
+Post-rebase merge-gate remediation resumed on 2026-08-29. CI identified two blockers on rebased head ca48ef1189: the new Services/test_notes_graph_suggestions_workers.py file is absent from the CI shard manifest, and the Notes UI remediation gate reported seven failures across existing search, delete/undo, and attachment tests. Root-cause investigation and exact local reproduction are in progress before edits.
+Post-rebase CI root causes resolved locally: assigned test_notes_graph_suggestions_workers.py to both platform-services-core shard matrices; supplied the established test authority scope in the three legacy Notes fixtures whose actions were intentionally inert without principal resolution; and updated the stale graph-panel source-label expectation to the current canonical `Web source` copy. RED evidence reproduced shard guard failure, 7/32 Notes remediation failures, and the graph-panel assertion. GREEN evidence: shard guard OK with 0 newly uncovered files; exact Notes remediation gate 32/32 passed; graph-panel file 7/7 passed; ESLint 0 errors (3 unchanged no-explicit-any warnings in legacy lines); git diff check passed. Bandit is not applicable because the remediation changes only CI YAML, tests, and the Backlog record.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
