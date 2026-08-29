@@ -96,6 +96,52 @@ class TestImpersonationTokenResponse:
 
 class TestCreateImpersonationToken:
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "principal",
+        [
+            pytest.param(
+                AuthPrincipal(
+                    kind="user",
+                    user_id=42,
+                    username="nested-admin",
+                    roles=["admin"],
+                    is_admin=True,
+                    impersonation=True,
+                    impersonated_by=1,
+                ),
+                id="nested-impersonation",
+            ),
+            pytest.param(
+                AuthPrincipal(
+                    kind="service",
+                    subject="service:local-admin",
+                    permissions=["*"],
+                    is_admin=True,
+                ),
+                id="service-without-user-actor",
+            ),
+        ],
+    )
+    async def test_rejects_issuer_without_unambiguous_user_actor(self, monkeypatch, principal):
+        jwt_calls, audit_calls = _install_endpoint_stubs(
+            monkeypatch,
+            target_user={
+                "id": 99,
+                "username": "targetuser",
+                "is_active": True,
+                "role": "user",
+            },
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            await create_impersonation_token(99, principal)
+
+        assert exc_info.value.status_code == 403
+        assert exc_info.value.detail == "Impersonation requires a non-impersonated user principal"
+        assert jwt_calls == []
+        assert audit_calls == []
+
+    @pytest.mark.asyncio
     async def test_success_uses_backend_agnostic_user_repository(self, monkeypatch):
         principal = _admin_principal()
         jwt_calls, audit_calls = _install_endpoint_stubs(

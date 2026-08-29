@@ -65,6 +65,13 @@ async def create_impersonation_token(
     (enforced by the parent ``/admin`` router dependency).
     """
     try:
+        actor_id = principal.user_id
+        if type(actor_id) is not int or principal.impersonation:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Impersonation requires a non-impersonated user principal",
+            )
+
         users_repo = await AuthnzUsersRepo.from_pool()
         target_user = await users_repo.get_user_by_id(user_id)
         if not target_user:
@@ -97,13 +104,13 @@ async def create_impersonation_token(
             role=target_role,
             expires_delta=timedelta(minutes=_IMPERSONATION_TTL_MINUTES),
             additional_claims={
-                "impersonated_by": principal.user_id,
+                "impersonated_by": actor_id,
                 "impersonation": True,
             },
         )
 
         await _emit_admin_account_audit_event(
-            actor_id=principal.user_id,
+            actor_id=actor_id,
             target_user_id=target_user_id,
             event_type=AuditEventType.AUTH_TOKEN_CREATED,
             category=AuditEventCategory.AUTHORIZATION,
@@ -111,7 +118,7 @@ async def create_impersonation_token(
             resource_id=str(target_user_id),
             action="admin.impersonation.token.create",
             metadata={
-                "impersonated_by": principal.user_id,
+                "impersonated_by": actor_id,
                 "impersonated_user_id": target_user_id,
                 "expires_in_minutes": _IMPERSONATION_TTL_MINUTES,
                 "impersonation": True,
@@ -121,14 +128,14 @@ async def create_impersonation_token(
 
         logger.info(
             "Impersonation token created: admin_user_id={} -> target_user_id={}",
-            principal.user_id,
+            actor_id,
             target_user_id,
         )
 
         return ImpersonationTokenResponse(
             token=token,
             impersonated_user_id=target_user_id,
-            impersonated_by=principal.user_id,
+            impersonated_by=actor_id,
         )
 
     except HTTPException:
