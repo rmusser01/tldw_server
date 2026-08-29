@@ -1623,8 +1623,9 @@ drift, Ruff, Bandit, Python 3.10, scope/no-leak scans, and diff checks. The Mino
 chronology limitation remains explicitly documented; do not fabricate historical
 evidence or add a test-only commit solely to rewrite the initial sequence.
 
-**Fix round 1 completion:** All seven accepted defects are closed with
-deterministic pre-production RED coverage. The final required Task 10 gate
+**Fix round 1 completion:** Six of the seven accepted defects were closed with
+deterministic pre-production RED coverage; independent re-review left the
+single-item public-history projection defect open. The required Task 10 gate
 passed 138 tests with PostgreSQL required and zero skips; Task 9 regressions
 passed 18 tests with zero skips, and event-expansion regressions passed 24.
 OpenAPI fingerprint/drift, Ruff, reviewed Bandit, Python 3.10 compilation,
@@ -1644,6 +1645,9 @@ PostgreSQL required and zero skips, and the complete Task 10 gate passed 144
 tests with zero skips. Ruff, Python 3.10 compilation, reviewed Bandit,
 query-shape/no-leak scans, self-review, and diff checks passed. Evidence is in
 `.superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-10-fix-2-report.md`.
+Scoped independent re-review found both remaining findings addressed with no
+new Critical, Important, or Minor breakage. Task 10 is complete at
+`928adf14edcc3db00b8b7393bad60094e4863b9d`.
 
 ### Task 11: Add Durable Health, Metrics, Retention, And Runtime Wiring
 

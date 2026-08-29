@@ -4,7 +4,7 @@ title: Implement canonical admin webhook delivery substrate and recovery
 status: In Progress
 assignee: []
 created_date: '2026-08-23 03:15'
-updated_date: '2026-08-29 23:39'
+updated_date: '2026-08-29 23:48'
 labels:
   - admin
   - webhooks
@@ -199,6 +199,8 @@ Task 10 complete: exposed canonical persisted test, atomic manual redelivery, an
 2026-08-29: Task 10 Fix Round 1 independent re-review confirmed six of seven accepted defects closed with 138 PostgreSQL-required tests passing and zero skips. One Important privacy/query-shape defect remains: get_delivery_history_item still selects and maps internal delivery/attempt execution coordinates and is used by exact redelivery replay. Fix Round 2 at 081470b7e295ec2d9bd474a24f77bb87db0ba877 will replace that path with public-only columns/mappers under one read snapshot, remove unused attempt.created_at, and add dual-backend RED proof. Task 11 remains blocked until clean re-review.
 
 2026-08-29: Task 10 Fix Round 2 verified from exact FIX_BASE 081470b7e295ec2d9bd474a24f77bb87db0ba877. Dual-backend RED: 6 failed, 60 deselected, 0 skipped, 8 warnings for single-item internal mapper/query leakage, malformed hidden-coordinate replay rejection, and mixed snapshots. Focused GREEN: 6 passed, 60 deselected, 0 skipped, 8 warnings. Complete PostgreSQL-required Task 10 gate: 144 passed, 0 skipped, 228 warnings. The single-item path now uses only public allowlists/mappers in one read snapshot, and the unused attempt.created_at projection is removed. Ruff, Python 3.10 compilation, reviewed Bandit, query-shape/no-leak scans, base-to-head self-review, and diff checks passed. No schema/migration, Jobs admission, runtime activation, producer/UI, legacy-route, or Task 11 work was added. Evidence: .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-10-fix-2-report.md.
+
+2026-08-29: Task 10 closed at 928adf14edcc3db00b8b7393bad60094e4863b9d after Fix Round 2 scoped independent re-review. Both remaining findings are addressed: the single-item replay/history path uses public-only columns and mappers under one read snapshot, and the unused attempt.created_at projection is gone. No new Critical, Important, or Minor breakage was found. Final PostgreSQL-required Task 10 gate: 144 passed, 0 skipped. Task 11 may now begin.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
