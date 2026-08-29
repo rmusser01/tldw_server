@@ -3,23 +3,22 @@ id: TASK-13111
 title: Implement canonical admin webhook delivery substrate and recovery
 status: In Progress
 assignee: []
-created_date: '2026-08-23 03:15'
-updated_date: '2026-08-29 01:39'
+created_date: 2026-08-23 03:15
+updated_date: 2026-08-29 02:40
 labels:
-  - admin
-  - webhooks
-  - jobs
-  - security
-  - recovery
+- admin
+- webhooks
+- jobs
+- security
+- recovery
 dependencies:
-  - TASK-13014
+- TASK-13014
 references:
-  - 'https://github.com/rmusser01/tldw_server/pull/2806'
-  - 'https://github.com/rmusser01/tldw_server/pull/2828'
+- https://github.com/rmusser01/tldw_server/pull/2806
+- https://github.com/rmusser01/tldw_server/pull/2828
 documentation:
-  - Docs/Design/2026-07-12-canonical-admin-outgoing-webhooks.md
-  - >-
-    Docs/superpowers/plans/2026-08-23-canonical-admin-webhook-delivery-substrate.md
+- Docs/Design/2026-07-12-canonical-admin-outgoing-webhooks.md
+- Docs/superpowers/plans/2026-08-23-canonical-admin-webhook-delivery-substrate.md
 priority: high
 ---
 
@@ -54,7 +53,6 @@ Detailed plan: Docs/superpowers/plans/2026-08-23-canonical-admin-webhook-deliver
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 The initial draft was created from an earlier reviewed PR 1 head. Planning review identified and incorporated additive schema-extension readiness while preserving canonical schema version 1, durable disposition tokens and absolute not-before timestamps, per-attempt persisted request timeout, runtime heartbeat persistence, queued cancellation without a worker lease, infrastructure-only pre-attempt deferral, and persisted Jobs expired-lease/quarantine controls. Final gate audit added Jobs migration compatibility/parity coverage, exact synchronous-test replay/preflight/reservation ordering, immutable enqueue controls, and first-canonical-activity traceability.
 
@@ -86,7 +84,6 @@ The initial draft was created from an earlier reviewed PR 1 head. Planning revie
 2026-08-28: Started Task 2 Fix Round 1. Scope: cancellation locking/full-snapshot CAS and processing preservation; disposition scheduling invariants; canonical UUIDv4/token/runtime coordinates; atomic disposition acknowledgement; mandatory retention, attempt-budget, synchronous-test, and malformed-row contract coverage. Strict TDD RED will be recorded before production changes.
 2026-08-28: Task 2 Fix Round 1 complete. Cancellation now locks PostgreSQL pre-reservation candidates, uses SQLite write transactions, excludes processing, and applies exact state/current-attempt/Jobs/enqueue-coordinate/version CAS with rollback-visible stale-state errors. Disposition scheduling, canonical UUIDv4/token/runtime coordinates, and atomic attempt+delivery acknowledgement are fail closed. Added dual-backend race, processing-preservation, all-kind scheduling, acknowledgement, retention-order/nonterminal, fifth-attempt no-mutation, synchronous terminal-readback, and malformed-row coverage. Required five-file suite: 66 passed, 0 skipped, 118 pre-existing environment/dependency/shared-fixture warnings with PostgreSQL required. Crypto: 35 passed, 0 skipped, 2 pre-existing warnings. Ruff and diff checks pass. Raw Bandit reports 24 medium-severity/low-confidence B608 findings, all fixed column fragments or closed identifier selections/allowlists with bound caller values; excluding reviewed B608, Bandit passes.
 2026-08-28: Started Task 2 Fix Round 2. Test-focused scope: prove real SQLite/PostgreSQL rollback when acknowledgement loses the delivery-marker CAS after updating the terminal attempt, and complete backend-backed malformed persisted coordinate/constraint evidence for event, delivery, attempt, redelivery, synchronous test token, and pending disposition token. Production changes only if RED exposes a defect.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 2026-08-28: Task 2 Fix Round 2 complete. Added backend-neutral real-transaction acknowledgement rollback evidence and full malformed persisted-coordinate/constraint coverage on SQLite and PostgreSQL. No production defect was exposed, so production and crypto code were unchanged. RED: 2 collection errors from missing shared contracts. Corrective subset: 5 passed, 0 skipped, 6 warnings. Full PostgreSQL-required Task 2 suite: 70 passed, 0 skipped, 122 warnings. Ruff and git diff --check passed; Bandit/crypto were not required because production did not change.
 
@@ -137,8 +134,9 @@ Task 3 Fix Round 1/5 started at FIX_BASE 803ae280f66e990f7b4ffdf29e31cae311d648d
 2026-08-29: Started Task 4 Fix Round 5/5 at exact clean FIX_BASE 4d18e790955139afb48d2041dacbe92e74c98130. Scope: use a post-lock PostgreSQL UPDATE-statement clock for lease guarantees; bind finite-backward monotonic, invalid randbelow results, and ordinary async sleep failures; and prove fractional SQLite acquisition/integrity recovery at the exact deadline. Strict deterministic RED precedes production edits; PostgreSQL-required zero-skip and all mandatory gates remain required.
 
 2026-08-29: Task 4 Fix Round 5/5 complete at pre-commit tree. PostgreSQL lease horizons now use one UPDATE-statement timestamp after row-lock waits; SQLite expired-lease recovery and integrity comparisons use fractional space-separated database time; worker scheduling edge guards are explicitly bound. RED: SQLite/worker 3 failed, 9 passed, 113 deselected; PostgreSQL 1 failed, 55 deselected. Final gates: worker 128 passed; PostgreSQL-required prepared operations 234 passed, 0 skipped; SQLite recovery 35 passed. Ruff, Bandit, git diff --check, and Python 3.10 py_compile passed. Evidence: .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-4-report.md.
-<!-- SECTION:NOTES:END -->
-
+2026-08-28: Started Task 5 status-only peer-verified egress and shared signed one-attempt executor at exact clean base fa19b8d39fbed631dc7673a45403524445112109. Strict four-file RED precedes production edits; focused security, static, Python 3.10 compilation, and diff gates are required.
+Extended peer-verified HTTP hop with no-buffer status-only mode and added deterministic signed one-attempt executor; transport/security vectors pass.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed
