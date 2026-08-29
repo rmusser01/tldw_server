@@ -1687,6 +1687,173 @@ async def test_description_noop_stale_and_activation_leave_existing_work_untouch
 
 
 @pytest.mark.unit
+async def test_activation_with_effective_delivery_config_change_supersedes_old_work(
+    plane: ControlPlaneFixture,
+) -> None:
+    registration = await _seed_registration(plane, active=False)
+    work = await _seed_registration_work(
+        plane,
+        registration,
+        label="activation-and-config",
+        state=DeliveryState.QUEUED,
+        kind=DeliveryKind.MANUAL,
+        created_at=NOW + timedelta(seconds=1),
+    )
+
+    patched = await _lifecycle_service(plane).patch(
+        _patch_command(
+            registration.id,
+            registration.revision,
+            RegistrationChanges(
+                active=True,
+                url="https://hooks.example.com/activated-and-reconfigured",
+                event_types=("user.deleted",),
+                timeout_seconds=11,
+            ),
+        ),
+        audit_sink=_recording_sink([]),
+    )
+
+    assert patched.registration.active is True
+    assert patched.registration.delivery_config_version == 2
+    assert patched.registration.secret_version == 1
+    bundle = await plane.repository.get_delivery_bundle(work.delivery_id)
+    assert bundle is not None
+    assert bundle.delivery.delivery.delivery_config_version == 1
+    assert bundle.delivery.delivery.secret_version == 1
+    assert bundle.delivery.delivery.state is DeliveryState.SUPERSEDED
+    assert bundle.delivery.delivery.reason_code is DeliveryReasonCode.SUPERSEDED_CONFIG
+    assert bundle.delivery.pending_jobs_disposition is JobsDispositionKind.CANCEL
+    assert (
+        bundle.delivery.pending_jobs_disposition_token
+        == _expected_cancellation_token(0)
+    )
+
+
+@pytest.mark.unit
+async def test_transaction_replay_resets_complete_cancellation_token_sequence(
+    plane: ControlPlaneFixture,
+) -> None:
+    registration = await _seed_registration(plane, active=True)
+    work = [
+        await _seed_registration_work(
+            plane,
+            registration,
+            label=f"transaction-replay-{ordinal}",
+            state=DeliveryState.QUEUED,
+            created_at=NOW + timedelta(seconds=ordinal),
+        )
+        for ordinal in range(1, 4)
+    ]
+    original_bundles = [
+        await plane.repository.get_delivery_bundle(item.delivery_id)
+        for item in work
+    ]
+    original_migration = await plane.repository.get_migration_state()
+
+    class RecordingUnitOfWork:
+        def __init__(
+            self,
+            wrapped: AdminWebhookUnitOfWork,
+            sequences: list[tuple[str, ...]],
+        ) -> None:
+            self.wrapped = wrapped
+            self.sequences = sequences
+
+        def __getattr__(self, name: str) -> object:
+            return getattr(self.wrapped, name)
+
+        async def cancel_registration_work(self, *args: object) -> object:
+            dispositions = await self.wrapped.cancel_registration_work(*args)
+            self.sequences.append(tuple(item.token for item in dispositions))
+            return dispositions
+
+    class ReplayOnceControlPlane(AdminWebhookControlPlane):
+        def __init__(self) -> None:
+            super().__init__(
+                repository=plane.repository,
+                settings=_settings(),
+                key_ring_result=_available_keys(plane.ring),
+                delivery_capability=ReadyDeliveryCapability(),
+                cancellation_seed_factory=lambda: CANCELLATION_SEED,
+            )
+            self.token_sequences: list[tuple[str, ...]] = []
+            self.operation_ids: list[int] = []
+            self.rolled_back_registration: WebhookRegistration | None = None
+            self.rolled_back_bundles: list[object] = []
+            self.rolled_back_activity: tuple[datetime | None, str | None] = (
+                None,
+                None,
+            )
+
+        async def _run_transactional_mutation(self, context, sink, operation):
+            self.operation_ids.append(id(operation))
+            with pytest.raises(TransactionError, match="SQLite transaction"):
+                async with self._repository.transaction() as tx:
+                    await operation(RecordingUnitOfWork(tx, self.token_sequences))
+                    raise RuntimeError("forced transaction replay")
+
+            self.rolled_back_registration = await plane.repository.get_registration(
+                registration.id
+            )
+            rolled_back_bundles = [
+                await plane.repository.get_delivery_bundle(item.delivery_id)
+                for item in work
+            ]
+            assert all(bundle is not None for bundle in rolled_back_bundles)
+            self.rolled_back_bundles = [
+                bundle for bundle in rolled_back_bundles if bundle is not None
+            ]
+            rolled_back_migration = await plane.repository.get_migration_state()
+            self.rolled_back_activity = (
+                rolled_back_migration.first_canonical_activity_at,
+                rolled_back_migration.first_canonical_activity_kind,
+            )
+
+            self.operation_ids.append(id(operation))
+            async with self._repository.transaction() as tx:
+                outcome = await operation(
+                    RecordingUnitOfWork(tx, self.token_sequences)
+                )
+                await self._emit(
+                    context,
+                    sink,
+                    outcome=outcome.audit_outcome,
+                )
+            return outcome.value
+
+    service = ReplayOnceControlPlane()
+    records: list[MutationAudit] = []
+    patched = await service.patch(
+        _patch_command(
+            registration.id,
+            registration.revision,
+            RegistrationChanges(active=False),
+        ),
+        audit_sink=_recording_sink(records),
+    )
+
+    expected_tokens = tuple(_expected_cancellation_token(index) for index in range(3))
+    assert service.operation_ids[0] == service.operation_ids[1]
+    assert service.token_sequences == [expected_tokens, expected_tokens]
+    assert service.rolled_back_registration == registration
+    assert service.rolled_back_bundles == original_bundles
+    assert service.rolled_back_activity == (
+        original_migration.first_canonical_activity_at,
+        original_migration.first_canonical_activity_kind,
+    )
+    assert [record.outcome for record in records] == ["accepted"]
+    assert patched.registration.active is False
+    final_tokens = []
+    for item in work:
+        bundle = await plane.repository.get_delivery_bundle(item.delivery_id)
+        assert bundle is not None
+        assert bundle.delivery.delivery.state is DeliveryState.CANCELED
+        final_tokens.append(bundle.delivery.pending_jobs_disposition_token)
+    assert tuple(final_tokens) == expected_tokens
+
+
+@pytest.mark.unit
 async def test_rotation_and_delete_cancel_old_work_but_rotation_replay_does_not_retouch_it(
     plane: ControlPlaneFixture,
 ) -> None:

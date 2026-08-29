@@ -1,4 +1,4 @@
-"""Public PR 1 contracts for canonical admin outgoing webhooks."""
+"""Canonical admin outgoing webhook contracts."""
 
 from .catalog import (
     EVENT_API_VERSION,
@@ -25,12 +25,6 @@ from .crypto import (
     WebhookKeyRing,
     WebhookKeyRingLoadResult,
     load_webhook_key_ring,
-)
-from .delivery import (
-    AdminWebhookDeliveryService,
-    CaptureSyntheticEventCommand,
-    EventCaptureAudit,
-    EventCaptureAuditSink,
 )
 from .domain import (
     AttemptState,
@@ -68,7 +62,6 @@ from .domain import (
 )
 
 __all__ = [
-    "AdminWebhookDeliveryService",
     "AdminWebhookMode",
     "AdminWebhookSettings",
     "AttemptState",
@@ -83,9 +76,6 @@ __all__ = [
     "EVENT_BODY_MAX_BYTES",
     "EVENT_API_VERSION",
     "EVENT_CATALOG",
-    "CaptureSyntheticEventCommand",
-    "EventCaptureAudit",
-    "EventCaptureAuditSink",
     "EventSourceKind",
     "IdempotencyClaim",
     "IdempotencyClaimState",

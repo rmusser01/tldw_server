@@ -4,7 +4,7 @@ title: Implement canonical admin webhook delivery substrate and recovery
 status: In Progress
 assignee: []
 created_date: '2026-08-23 03:15'
-updated_date: '2026-08-29 04:08'
+updated_date: '2026-08-29 04:54'
 labels:
   - admin
   - webhooks
@@ -149,6 +149,10 @@ Extended peer-verified HTTP hop with no-buffer status-only mode and added determ
 Added internal encrypted synthetic capture/fanout and transactional registration-work cancellation/supersession without producer or UI activation.
 
 2026-08-28: Task 6 pre-commit verification complete. Focused suite: 79 passed. Final SQLite/PostgreSQL gate: 108 passed with TLDW_TEST_POSTGRES_REQUIRED=1 and zero skips. Delivery repository regressions: 20 passed. Crypto/audit/key-rotation regressions: 82 passed. Production Ruff, Bandit, Python 3.10 py_compile, and git diff --check passed. Evidence: .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-6-report.md.
+
+2026-08-28: Started Task 6 Fix Round 1/5 at exact clean FIX_BASE 62d094d11adf7c646da2aa5ac9433de77a9d34d0. Scope: combined activation/config supersession, internal-only package surface, deterministic transaction-replay cancellation tokens, four synthetic-capture key gates, and exact warning provenance. Strict focused RED precedes production fixes; PostgreSQL-required zero-skip and all Task 6 gates remain required.
+
+2026-08-28: Task 6 Fix Round 1/5 verified. Combined activation plus target/events/timeout now supersedes prior work while activation-only stays untouched; synthetic capture types are module-internal; transaction replay proves identical ordinal-reset token sequences and full first-attempt rollback; four rotation/primary key gates persist nothing and audit once. PostgreSQL-required focused/final/repository gates passed 85/114/20 tests with zero skips; warning-enabled final gate traced 230 warnings exclusively to unchanged dependency/shared-fixture sources, and the command-local exact allowlist produced a pristine 114-pass run. Crypto/audit/key rotation 82 passed with unchanged 2-warning baseline; Ruff, Bandit, Python 3.10, and diff checks passed. Evidence appended to .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-6-report.md.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

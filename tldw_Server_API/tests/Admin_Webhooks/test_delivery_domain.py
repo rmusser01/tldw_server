@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import base64
 import importlib
+from collections.abc import AsyncIterator, Mapping
+from contextlib import asynccontextmanager
 from dataclasses import fields, is_dataclass, replace
 from datetime import datetime, timedelta, timezone
 from types import ModuleType
@@ -27,6 +29,7 @@ from tldw_Server_API.app.core.Admin_Webhooks.domain import (
 from tldw_Server_API.app.core.Audit.unified_audit_service import MandatoryAuditWriteError
 from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
     AdminWebhookRepository,
+    AdminWebhookUnitOfWork,
     RegistrationInsert,
     RegistrationTarget,
 )
@@ -247,6 +250,62 @@ def _recording_sink(records: list[object]):
     return sink
 
 
+class _CaptureUnitOfWorkProbe:
+    def __init__(
+        self,
+        wrapped: AdminWebhookUnitOfWork,
+        *,
+        locked_updates: Mapping[str, object] | None,
+        probe: _CaptureRepositoryProbe,
+    ) -> None:
+        self._wrapped = wrapped
+        self._locked_updates = locked_updates
+        self._probe = probe
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._wrapped, name)
+
+    async def lock_migration_state(self):
+        state = await self._wrapped.lock_migration_state()
+        if self._locked_updates is None:
+            return state
+        return await self._wrapped.compare_and_set_migration_state(
+            expected_revision=state.state_revision,
+            updates=self._locked_updates,
+            at=NOW + timedelta(minutes=1),
+        )
+
+    async def capture_event_and_expand(self, *args: object):
+        self._probe.capture_calls += 1
+        return await self._wrapped.capture_event_and_expand(*args)
+
+
+class _CaptureRepositoryProbe:
+    def __init__(
+        self,
+        wrapped: AdminWebhookRepository,
+        *,
+        locked_updates: Mapping[str, object] | None = None,
+    ) -> None:
+        self._wrapped = wrapped
+        self._locked_updates = locked_updates
+        self.transaction_calls = 0
+        self.capture_calls = 0
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._wrapped, name)
+
+    @asynccontextmanager
+    async def transaction(self) -> AsyncIterator[_CaptureUnitOfWorkProbe]:
+        self.transaction_calls += 1
+        async with self._wrapped.transaction() as tx:
+            yield _CaptureUnitOfWorkProbe(
+                tx,
+                locked_updates=self._locked_updates,
+                probe=self,
+            )
+
+
 @pytest.mark.unit
 def test_capture_command_and_audit_are_frozen_closed_internal_records() -> None:
     module = _delivery_module()
@@ -261,9 +320,15 @@ def test_capture_command_and_audit_are_frozen_closed_internal_records() -> None:
     )
 
     assert is_dataclass(module.CaptureSyntheticEventCommand)
-    assert package.CaptureSyntheticEventCommand is module.CaptureSyntheticEventCommand
-    assert package.AdminWebhookDeliveryService is module.AdminWebhookDeliveryService
-    assert package.EventCaptureAudit is module.EventCaptureAudit
+    assert package.__doc__ == "Canonical admin outgoing webhook contracts."
+    for internal_name in (
+        "AdminWebhookDeliveryService",
+        "CaptureSyntheticEventCommand",
+        "EventCaptureAudit",
+        "EventCaptureAuditSink",
+    ):
+        assert internal_name not in package.__all__
+        assert not hasattr(package, internal_name)
     assert module.CaptureSyntheticEventCommand.__dataclass_params__.frozen
     assert not hasattr(module.CaptureSyntheticEventCommand, "model_fields")
     assert {field.name for field in fields(aggregate)} == {
@@ -708,3 +773,146 @@ async def test_pretransaction_key_failures_emit_one_failed_audit(
     )
     assert records[0].fanout_count == 0
     assert records[0].reason_code is WebhookErrorCode.KEY_UNAVAILABLE
+
+
+async def _set_migration_state(
+    repository: AdminWebhookRepository,
+    updates: Mapping[str, object],
+) -> None:
+    current = await repository.get_migration_state()
+    async with repository.transaction() as tx:
+        await tx.compare_and_set_migration_state(
+            expected_revision=current.state_revision,
+            updates=updates,
+            at=NOW + timedelta(minutes=1),
+        )
+
+
+async def _assert_capture_key_gate(
+    sqlite_repo: SQLiteRepositoryFixture,
+    *,
+    reason_code: WebhookErrorCode,
+    precheck_updates: Mapping[str, object] | None = None,
+    locked_updates: Mapping[str, object] | None = None,
+) -> None:
+    await _complete_migration(sqlite_repo.repository)
+    ring = _ring()
+    webhook_id = await _seed_registration(
+        sqlite_repo.repository,
+        ring,
+        event_types=("user.created",),
+        active=True,
+    )
+    if precheck_updates is not None:
+        await _set_migration_state(sqlite_repo.repository, precheck_updates)
+    module = _delivery_module()
+    dependencies = _DeterministicDependencies(f"key-gate-{reason_code.value}")
+    repository = _CaptureRepositoryProbe(
+        sqlite_repo.repository,
+        locked_updates=locked_updates,
+    )
+    service = module.AdminWebhookDeliveryService(
+        repository=repository,
+        key_ring_result=_available(ring),
+        event_id_factory=dependencies.event_id,
+        delivery_id_factory=dependencies.delivery_id,
+        clock=dependencies.now,
+    )
+    records: list[object] = []
+
+    with pytest.raises(WebhookError) as rejected:
+        await service.capture_synthetic_event(
+            _command(module),
+            audit_sink=_recording_sink(records),
+        )
+
+    assert rejected.value.code is reason_code
+    assert len(records) == 1
+    assert records[0].outcome == "failed"
+    assert records[0].reason_code is reason_code
+    assert records[0].fanout_count == 0
+    assert not any(record.outcome == "accepted" for record in records)
+    assert repository.transaction_calls == (1 if locked_updates is not None else 0)
+    assert repository.capture_calls == 0
+    assert (
+        await sqlite_repo.repository.list_delivery_history(
+            webhook_id,
+            limit=10,
+        )
+    ).total == 0
+    retention = await sqlite_repo.repository.purge_retained_rows(
+        NOW + timedelta(days=100),
+        NOW + timedelta(days=100),
+        200,
+    )
+    assert retention.events == 0
+    assert retention.deliveries == 0
+    state = await sqlite_repo.repository.get_migration_state()
+    assert state.first_canonical_activity_at is None
+    assert state.first_canonical_activity_kind is None
+
+
+@pytest.mark.parametrize(
+    ("updates", "reason_code"),
+    (
+        (
+            {
+                "rotation_operation_id": "rotation-1",
+                "rotation_source_key_id": KEY_ID,
+                "rotation_target_key_id": "key-next",
+                "rotation_phase": "rewriting",
+                "rotation_started_at": NOW,
+            },
+            WebhookErrorCode.KEY_ROTATION_IN_PROGRESS,
+        ),
+        (
+            {"active_primary_key_id": "key-other"},
+            WebhookErrorCode.KEY_CONFIGURATION_MISMATCH,
+        ),
+    ),
+    ids=("active-rotation", "primary-mismatch"),
+)
+@pytest.mark.unit
+async def test_capture_rejects_invalid_key_state_before_transaction(
+    sqlite_repo: SQLiteRepositoryFixture,
+    updates: Mapping[str, object],
+    reason_code: WebhookErrorCode,
+) -> None:
+    await _assert_capture_key_gate(
+        sqlite_repo,
+        reason_code=reason_code,
+        precheck_updates=updates,
+    )
+
+
+@pytest.mark.parametrize(
+    ("updates", "reason_code"),
+    (
+        (
+            {
+                "rotation_operation_id": "rotation-1",
+                "rotation_source_key_id": KEY_ID,
+                "rotation_target_key_id": "key-next",
+                "rotation_phase": "rewriting",
+                "rotation_started_at": NOW,
+            },
+            WebhookErrorCode.KEY_ROTATION_IN_PROGRESS,
+        ),
+        (
+            {"active_primary_key_id": "key-other"},
+            WebhookErrorCode.KEY_CONFIGURATION_MISMATCH,
+        ),
+    ),
+    ids=("active-rotation", "primary-mismatch"),
+)
+@pytest.mark.unit
+async def test_capture_rechecks_key_state_after_lock(
+    sqlite_repo: SQLiteRepositoryFixture,
+    updates: Mapping[str, object],
+    reason_code: WebhookErrorCode,
+) -> None:
+    await _assert_capture_key_gate(
+        sqlite_repo,
+        reason_code=reason_code,
+        locked_updates=updates,
+    )

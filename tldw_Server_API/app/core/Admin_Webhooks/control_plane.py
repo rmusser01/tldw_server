@@ -931,15 +931,18 @@ class AdminWebhookControlPlane:
             )
             context.target_hostname = patched.registration.target_hostname
             context.event_types = patched.registration.event_types
+            delivery_config_changed = (
+                patched.registration.target_version
+                != current.registration.target_version
+                or patched.registration.event_types
+                != current.registration.event_types
+                or patched.registration.timeout_seconds
+                != current.registration.timeout_seconds
+            )
             cancellation_reason: DeliveryReasonCode | None = None
             if current.registration.active and not patched.registration.active:
                 cancellation_reason = DeliveryReasonCode.CANCELED_DISABLED
-            elif not current.registration.active and patched.registration.active:
-                cancellation_reason = None
-            elif (
-                patched.registration.delivery_config_version
-                != current.registration.delivery_config_version
-            ):
+            elif delivery_config_changed:
                 cancellation_reason = DeliveryReasonCode.SUPERSEDED_CONFIG
             if cancellation_reason is not None:
                 await tx.cancel_registration_work(
