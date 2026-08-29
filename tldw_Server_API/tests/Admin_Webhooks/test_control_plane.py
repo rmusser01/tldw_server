@@ -469,6 +469,9 @@ async def _seed_registration_work(
             10,
             created_at,
             created_at + timedelta(seconds=10),
+            expected_delivery_config_version=registration.delivery_config_version,
+            expected_secret_version=registration.secret_version,
+            disposition_token=_opaque_token(f"{label}-reservation"),
         )
         assert reservation is not None and reservation.reserved
         if state is DeliveryState.RETRY_WAIT:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import inspect
 from dataclasses import fields
 from datetime import datetime, timedelta, timezone
 from typing import Protocol
@@ -28,6 +29,7 @@ from tldw_Server_API.app.core.Admin_Webhooks.domain import (
 from tldw_Server_API.app.core.AuthNZ.exceptions import TransactionError
 from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
     AdminWebhookRepository,
+    AdminWebhookUnitOfWork,
     AttemptCompletion,
     AttemptReservation,
     DeliveryBundle,
@@ -51,6 +53,17 @@ from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
 NOW = datetime(2026, 8, 23, 12, 0, tzinfo=timezone.utc)
 KEY_ID = "key-2026-08"
 DISPOSITION_TOKEN = "a" * 64
+
+
+def test_canonical_jobs_reservation_coordinates_are_mandatory() -> None:
+    signature = inspect.signature(AdminWebhookUnitOfWork.reserve_jobs_attempt)
+
+    for name in (
+        "expected_delivery_config_version",
+        "expected_secret_version",
+        "disposition_token",
+    ):
+        assert signature.parameters[name].default is inspect.Parameter.empty
 
 
 def canonical_uuid4(label: str) -> str:
@@ -748,6 +761,12 @@ async def exercise_delivery_state_machine(
         WHERE singleton_id = 1
         """
     )
+    reservation_bundle = await repository.get_delivery_bundle(delivery_id)
+    assert reservation_bundle is not None
+    delivery_config_version = (
+        reservation_bundle.delivery.delivery.delivery_config_version
+    )
+    secret_version = reservation_bundle.delivery.delivery.secret_version
 
     for number in range(1, 5):
         started_at = NOW + timedelta(minutes=number)
@@ -762,6 +781,9 @@ async def exercise_delivery_state_machine(
                 10,
                 started_at,
                 started_at + timedelta(seconds=10),
+                expected_delivery_config_version=delivery_config_version,
+                expected_secret_version=secret_version,
+                disposition_token=opaque_token(f"stale-reservation-{number}"),
             )
             assert stale is None
             reservation = await tx.reserve_jobs_attempt(
@@ -772,6 +794,9 @@ async def exercise_delivery_state_machine(
                 number,
                 started_at,
                 started_at + timedelta(seconds=number),
+                expected_delivery_config_version=delivery_config_version,
+                expected_secret_version=secret_version,
+                disposition_token=opaque_token(f"reservation-{number}"),
             )
         assert reservation is not None and reservation.reserved is True
         assert reservation.attempt is not None
@@ -850,6 +875,9 @@ async def exercise_delivery_state_machine(
             )
             in (1, True)
         )
+        acknowledged_bundle = await repository.get_delivery_bundle(delivery_id)
+        assert acknowledged_bundle is not None
+        assert acknowledged_bundle.delivery.current_attempt_id is None
 
     attempts = await repository.list_delivery_attempts(webhook_id, delivery_id)
     assert [item.attempt_number for item in attempts] == [1, 2, 3, 4]
@@ -870,9 +898,11 @@ async def exercise_delivery_state_machine(
             5,
             NOW + timedelta(minutes=5),
             NOW + timedelta(minutes=5, seconds=5),
+            expected_delivery_config_version=delivery_config_version,
+            expected_secret_version=secret_version,
+            disposition_token=opaque_token("reservation-5"),
         )
-        assert fifth is not None and fifth.reserved is False
-        assert fifth.reason_code is DeliveryReasonCode.ATTEMPT_BUDGET_EXHAUSTED
+        assert fifth is None
         assert not await tx.expire_delivery(delivery_id, DeliveryState.DEAD, NOW)
     assert await repository.get_delivery_for_registration(
         webhook_id, delivery_id
@@ -1086,6 +1116,8 @@ async def exercise_stale_recovery_and_cancellation(
         event_id="stale-event",
         command_id="stale-command",
     )
+    stale_bundle = await repository.get_delivery_bundle(stale_delivery_id)
+    assert stale_bundle is not None
     async with repository.transaction() as tx:
         claim = await tx.claim_pending_delivery(
             opaque_token("stale-claim"),
@@ -1107,6 +1139,11 @@ async def exercise_stale_recovery_and_cancellation(
             1,
             NOW,
             NOW + timedelta(seconds=1),
+            expected_delivery_config_version=(
+                stale_bundle.delivery.delivery.delivery_config_version
+            ),
+            expected_secret_version=stale_bundle.delivery.delivery.secret_version,
+            disposition_token=opaque_token("stale-reservation"),
         )
         assert reservation is not None and reservation.reserved
 
@@ -1596,6 +1633,8 @@ async def _prepare_retry_disposition(
     attempt_id = canonical_uuid4(f"{label}-attempt")
     lease_id = f"{label}-lease"
     disposition_token = opaque_token(f"{label}-disposition")
+    bundle = await fixture.repository.get_delivery_bundle(delivery_id)
+    assert bundle is not None
     async with fixture.repository.transaction() as tx:
         reservation = await tx.reserve_jobs_attempt(
             delivery_id,
@@ -1605,6 +1644,11 @@ async def _prepare_retry_disposition(
             10,
             NOW + timedelta(minutes=2),
             NOW + timedelta(minutes=2, seconds=10),
+            expected_delivery_config_version=(
+                bundle.delivery.delivery.delivery_config_version
+            ),
+            expected_secret_version=bundle.delivery.delivery.secret_version,
+            disposition_token=opaque_token(f"{label}-reservation"),
         )
         assert reservation is not None and reservation.reserved
         pending = await tx.finish_attempt_and_prepare_disposition(
@@ -1717,6 +1761,8 @@ async def exercise_cancellation_cas_and_processing_preservation(
     )
     attempt_id = canonical_uuid4("processing-preservation-attempt")
     lease_id = "processing-preservation-lease"
+    processing_bundle = await repository.get_delivery_bundle(delivery_id)
+    assert processing_bundle is not None
     async with repository.transaction() as tx:
         reservation = await tx.reserve_jobs_attempt(
             delivery_id,
@@ -1726,6 +1772,13 @@ async def exercise_cancellation_cas_and_processing_preservation(
             10,
             NOW + timedelta(minutes=3),
             NOW + timedelta(minutes=3, seconds=10),
+            expected_delivery_config_version=(
+                processing_bundle.delivery.delivery.delivery_config_version
+            ),
+            expected_secret_version=(
+                processing_bundle.delivery.delivery.secret_version
+            ),
+            disposition_token=opaque_token("processing-preservation-reservation"),
         )
         assert reservation is not None and reservation.reserved
         assert await tx.cancel_registration_work(
@@ -2175,6 +2228,8 @@ async def exercise_disposition_scheduling_persistence(
         attempt_id = canonical_uuid4(f"{label}-attempt")
         lease_id = f"{label}-lease"
         disposition_token = opaque_token(f"{label}-disposition")
+        bundle = await fixture.repository.get_delivery_bundle(delivery_id)
+        assert bundle is not None
         async with fixture.repository.transaction() as tx:
             reservation = await tx.reserve_jobs_attempt(
                 delivery_id,
@@ -2184,6 +2239,11 @@ async def exercise_disposition_scheduling_persistence(
                 10,
                 NOW + timedelta(minutes=8),
                 NOW + timedelta(minutes=8, seconds=10),
+                expected_delivery_config_version=(
+                    bundle.delivery.delivery.delivery_config_version
+                ),
+                expected_secret_version=bundle.delivery.delivery.secret_version,
+                disposition_token=opaque_token(f"{label}-reservation"),
             )
             assert reservation is not None and reservation.reserved
             pending = await tx.finish_attempt_and_prepare_disposition(
@@ -2271,6 +2331,75 @@ async def exercise_task8_attempt_reservation_and_recovery_contract(
         webhook_id,
         horizon_delivery_id,
     ) == ()
+
+    processing_webhook_id, processing_delivery_id = await _captured_delivery(
+        repository,
+        event_id="task8-processing-terminal-event",
+        command_id="task8-processing-terminal-command",
+        isolated=True,
+    )
+    processing_bundle = await repository.get_delivery_bundle(processing_delivery_id)
+    assert processing_bundle is not None
+    processing_attempt_id = canonical_uuid4("task8-processing-terminal-attempt")
+    async with repository.transaction() as tx:
+        claim = await tx.claim_pending_delivery(
+            opaque_token("task8-processing-terminal-claim"),
+            NOW + timedelta(minutes=1),
+            NOW,
+        )
+        assert claim is not None
+        assert await tx.attach_jobs_job(
+            processing_delivery_id,
+            opaque_token("task8-processing-terminal-claim"),
+            "task8-processing-terminal-job",
+            NOW,
+        ) is not None
+        reservation = await tx.reserve_jobs_attempt(
+            processing_delivery_id,
+            "task8-processing-terminal-job",
+            "task8-processing-terminal-lease",
+            processing_attempt_id,
+            10,
+            NOW,
+            NOW + timedelta(seconds=40),
+            expected_delivery_config_version=(
+                processing_bundle.delivery.delivery.delivery_config_version
+            ),
+            expected_secret_version=(
+                processing_bundle.delivery.delivery.secret_version
+            ),
+            disposition_token=opaque_token("task8-processing-terminal-reservation"),
+        )
+        assert reservation is not None and reservation.reserved
+    await fixture.execute(
+        "UPDATE admin_webhook_registrations SET active = ? WHERE id = ?",
+        False,
+        processing_webhook_id,
+    )
+    processing_before = await repository.get_delivery_bundle(processing_delivery_id)
+    attempts_before = await repository.list_delivery_attempts(
+        processing_webhook_id,
+        processing_delivery_id,
+    )
+    assert processing_before is not None
+    async with repository.transaction() as tx:
+        rejected = await tx.prepare_no_attempt_terminal(
+            processing_delivery_id,
+            "task8-processing-terminal-job",
+            DeliveryReasonCode.CANCELED_DISABLED,
+            opaque_token("task8-processing-terminal-cancel"),
+            NOW + timedelta(seconds=1),
+            expected_delivery_config_version=(
+                processing_before.delivery.delivery.delivery_config_version
+            ),
+            expected_secret_version=processing_before.delivery.delivery.secret_version,
+        )
+    assert rejected is None
+    assert await repository.get_delivery_bundle(processing_delivery_id) == processing_before
+    assert await repository.list_delivery_attempts(
+        processing_webhook_id,
+        processing_delivery_id,
+    ) == attempts_before
 
     stale_webhook_id, stale_delivery_id = await _captured_delivery(
         repository,

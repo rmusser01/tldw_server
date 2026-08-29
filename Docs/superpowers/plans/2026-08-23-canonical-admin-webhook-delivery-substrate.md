@@ -1042,6 +1042,35 @@ repository/domain/Jobs contracts on SQLite and required PostgreSQL before the
 worker consumes them. If wrong, the cost is localized Task 8 contract rework;
 no migration or public API change is authorized.
 
+**Review ruling (fix round 1):** A `processing` delivery always takes the
+persisted-attempt branch before lifecycle, expiry, or budget terminalization.
+Before its exact stale boundary, return only `recovery_defer_until(stale_at)`;
+the generic no-attempt terminal helper must reject a processing delivery or any
+non-null current attempt so it cannot orphan append-only evidence. At or after
+the boundary, only the exact stale-attempt recovery transaction may close it.
+
+Canonical `reserve_jobs_attempt()` callers must supply the reviewed config and
+secret versions plus one valid disposition token. These coordinates are not
+optional compatibility defaults: a terminal reservation must always atomically
+persist its exact pending Jobs disposition. Pending cancellation recovery may
+replace a historical retry or defer marker only when the exact canonical Jobs
+row is currently queued; apply the new typed cancel monotonically, do not
+acknowledge or replay the historical marker, then acknowledge only the new
+AuthNZ cancel token.
+
+The review claim that worker code can schedule a fourth retry is not a
+production defect: the shared executor owns retry classification and converts
+every retry-class result on attempt four to terminal
+`attempt_budget_exhausted`, while reservation independently prevents a fifth
+I/O. Do not duplicate that mapping in the worker. Add a worker-plus-real-
+executor integration test that proves the terminal fourth result and no fifth
+request. Expand the real SQLite/PostgreSQL matrix to exercise all six crash
+boundaries for complete/retry/fail/cancel outcomes, both historical defer
+origins, queued cancellation over historical markers, hard-cap I/O, and exact
+late-writer rejection across all four AuthNZ/Jobs backend pairs. If this ruling
+is wrong, the cost is localized worker/reconciler/repository contract rework;
+no schema or public surface change is authorized.
+
 - [x] **Step 1: Write the worker decision-table RED tests**
 
 Before any executor call, assert this order:

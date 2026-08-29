@@ -3,22 +3,40 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import asyncpg
 import pytest
 
+from tldw_Server_API.app.core.Admin_Webhooks import domain
+from tldw_Server_API.app.core.Admin_Webhooks.config import (
+    AdminWebhookMode,
+    AdminWebhookSettings,
+    WebhookRouteSelection,
+)
+from tldw_Server_API.app.core.Admin_Webhooks.crypto import WebhookKeyRing
 from tldw_Server_API.app.core.Admin_Webhooks.domain import (
     AttemptState,
     DeliveryReasonCode,
     DeliveryState,
     JobsDispositionKind,
 )
+from tldw_Server_API.app.core.Admin_Webhooks.executor import (
+    AttemptExecutionRequest,
+    AttemptExecutionResult,
+    AttemptOutcome,
+    AttemptReasonCode,
+)
 from tldw_Server_API.app.core.Admin_Webhooks.reconciler import (
     AdminWebhookReconciler,
     EnqueueCrashPoint,
     JobsDeliveryQueue,
+)
+from tldw_Server_API.app.core.Admin_Webhooks.worker import (
+    AdminWebhookPreparedHandler,
+    WorkerCrashPoint,
 )
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
 from tldw_Server_API.app.core.AuthNZ.pg_migrations_extra import (
@@ -28,21 +46,28 @@ from tldw_Server_API.app.core.AuthNZ.settings import Settings
 from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
     AdminWebhookRepository,
     AttemptCompletion,
+    RegistrationInsert,
+    RegistrationPatch,
+    RegistrationTarget,
 )
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.operations.contracts import (
     ApplyPreparedDispositionCommand,
+    PreparedDispositionKind,
     PreparedDispositionOrigin,
+    PreparedDispositionResult,
     PreparedJobDisposition,
 )
 from tldw_Server_API.app.core.Jobs.pg_migrations import (
     ensure_job_counters_pg,
     ensure_jobs_tables_pg,
 )
+from tldw_Server_API.app.core.Security.egress import URLPolicyResult
 from tldw_Server_API.tests.Admin_Webhooks.test_event_expansion import (
     NOW,
     canonical_uuid4,
     event_insert,
+    key_ring,
     opaque_token,
     seed_registration,
 )
@@ -72,6 +97,15 @@ def matrix_jobs_pg_dsn(pg_temp_db, monkeypatch: pytest.MonkeyPatch) -> str:
     return dsn
 
 
+@pytest.fixture(autouse=True)
+def allow_matrix_worker_targets(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        domain,
+        "evaluate_platform_webhook_url_policy",
+        lambda _url: URLPolicyResult(True, resolved_ips=("93.184.216.34",)),
+    )
+
+
 class SimulatedCrash(BaseException):
     pass
 
@@ -98,6 +132,67 @@ class TokenSource:
         ).hexdigest()
         self.index += 1
         return token
+
+
+class AttemptIdSource:
+    def __init__(self, label: str) -> None:
+        self.label = label
+        self.index = 0
+
+    def __call__(self) -> str:
+        attempt_id = canonical_uuid4(f"{self.label}:{self.index}")
+        self.index += 1
+        return attempt_id
+
+
+class MatrixWorkerContext:
+    def __init__(self, acquired: dict) -> None:
+        self.acquired = acquired
+        self.ensure_calls: list[int] = []
+
+    async def ensure_lease_horizon(self, seconds: int) -> bool:
+        self.ensure_calls.append(seconds)
+        return True
+
+    def snapshot(self):
+        return SimpleNamespace(
+            worker_id=self.acquired["worker_id"],
+            lease_id=self.acquired["lease_id"],
+            leased_until=self.acquired["leased_until"],
+            renewal_lost=False,
+        )
+
+
+class MatrixExecutor:
+    def __init__(
+        self,
+        result_factory: Callable[[AttemptExecutionRequest], AttemptExecutionResult],
+        *,
+        before_result: Callable[[], Awaitable[None]] | None = None,
+    ) -> None:
+        self.result_factory = result_factory
+        self.before_result = before_result
+        self.requests: list[AttemptExecutionRequest] = []
+
+    async def execute(
+        self,
+        request: AttemptExecutionRequest,
+    ) -> AttemptExecutionResult:
+        self.requests.append(request)
+        if self.before_result is not None:
+            await self.before_result()
+        return self.result_factory(request)
+
+
+class WorkerOneShotCrash:
+    def __init__(self, point: WorkerCrashPoint) -> None:
+        self.point = point
+        self.armed = True
+
+    def __call__(self, point: WorkerCrashPoint) -> None:
+        if self.armed and point is self.point:
+            self.armed = False
+            raise SimulatedCrash(point.value)
 
 
 class OneShotCrash:
@@ -294,6 +389,159 @@ async def _seed_delivery(
         )
     assert len(captured.deliveries) == 1
     return webhook_id, delivery_id
+
+
+def _worker_settings() -> AdminWebhookSettings:
+    return AdminWebhookSettings(
+        mode=AdminWebhookMode.ON,
+        route_selection=WebhookRouteSelection.CANONICAL,
+        registration_limit=100,
+        active_limit=25,
+        allow_http_dev=False,
+        idempotency_ttl_seconds=86_400,
+        rollback_window_days=7,
+    )
+
+
+async def _seed_worker_delivery(
+    repository: AdminWebhookRepository,
+    ring: WebhookKeyRing,
+    label: str,
+    *,
+    now: datetime,
+) -> tuple[int, str]:
+    event_type = f"worker.matrix.{hashlib.sha256(label.encode('ascii')).hexdigest()[:16]}"
+    event_id = canonical_uuid4(f"{label}-event")
+    delivery_id = canonical_uuid4(f"{label}-delivery")
+    async with repository.transaction() as tx:
+        webhook_id = await tx.allocate_registration_id()
+        target = ring.encrypt_text(
+            purpose="registration.target",
+            identity={"registration_id": webhook_id, "target_version": 1},
+            plaintext="https://hooks.example.com/delivery",
+        )
+        secret = ring.encrypt_text(
+            purpose="registration.secret",
+            identity={"registration_id": webhook_id, "secret_version": 1},
+            plaintext="whsec_" + "a" * 64,
+        )
+        await tx.insert_registration(
+            RegistrationInsert(
+                id=webhook_id,
+                description=label,
+                target=RegistrationTarget(
+                    protected=target,
+                    hostname="hooks.example.com",
+                    display="https://hooks.example.com",
+                ),
+                event_types=(event_type,),
+                active=True,
+                timeout_seconds=10,
+                secret=secret,
+                secret_rotation_required=False,
+                actor_user_id=7,
+                now=now - timedelta(minutes=1),
+            )
+        )
+        captured = await tx.capture_event_and_expand(
+            event_insert(
+                event_id=event_id,
+                source_identity=f"{label}-command",
+                event_type=event_type,
+                created_at=now,
+            ),
+            lambda: delivery_id,
+            now + timedelta(hours=72),
+        )
+    assert len(captured.deliveries) == 1
+    return webhook_id, delivery_id
+
+
+async def _disable_worker_registration(
+    repository: AdminWebhookRepository,
+    webhook_id: int,
+    *,
+    now: datetime,
+) -> None:
+    current = await repository.get_protected_registration(
+        webhook_id,
+        include_deleted=True,
+    )
+    assert current is not None
+    async with repository.transaction() as tx:
+        await tx.patch_registration(
+            webhook_id,
+            expected_revision=current.registration.revision,
+            patch=RegistrationPatch(active=False),
+            actor_user_id=7,
+            at=now,
+        )
+
+
+def _worker_handler(
+    repository: AdminWebhookRepository,
+    ring: WebhookKeyRing,
+    clock: MutableClock,
+    executor: MatrixExecutor,
+    label: str,
+    *,
+    crash_hook: Callable[[WorkerCrashPoint], None] | None = None,
+) -> AdminWebhookPreparedHandler:
+    return AdminWebhookPreparedHandler(
+        repository=repository,
+        key_ring=ring,
+        settings=_worker_settings(),
+        executor=executor,
+        token_factory=TokenSource(f"{label}-disposition"),
+        attempt_id_factory=AttemptIdSource(f"{label}-attempt"),
+        clock=clock,
+        crash_hook=crash_hook,
+    )
+
+
+def _matrix_result(outcome: str) -> AttemptExecutionResult:
+    if outcome == "complete":
+        return AttemptExecutionResult(
+            outcome=AttemptOutcome.SUCCESS,
+            status_code=204,
+            latency_ms=5,
+            reason_code=None,
+            retry_delay_seconds=None,
+        )
+    if outcome in {"retry", "cancel"}:
+        return AttemptExecutionResult(
+            outcome=AttemptOutcome.RETRYABLE,
+            status_code=503,
+            latency_ms=5,
+            reason_code=AttemptReasonCode.HTTP_SERVER_ERROR,
+            retry_delay_seconds=1_800,
+        )
+    return AttemptExecutionResult(
+        outcome=AttemptOutcome.FAILED,
+        status_code=400,
+        latency_ms=5,
+        reason_code=AttemptReasonCode.HTTP_CLIENT_ERROR,
+        retry_delay_seconds=None,
+    )
+
+
+def _apply_worker_disposition(
+    manager: JobManager,
+    acquired: dict,
+    disposition: PreparedJobDisposition,
+) -> PreparedDispositionResult:
+    return manager.apply_prepared_disposition(
+        ApplyPreparedDispositionCommand(
+            job_id=int(acquired["id"]),
+            domain="admin_webhooks",
+            queue="delivery",
+            job_type="admin_webhook_delivery",
+            expected_payload=acquired["payload"],
+            worker_id=acquired["worker_id"],
+            lease_id=acquired["lease_id"],
+            disposition=disposition,
+        )
+    )
 
 
 async def _claim(
@@ -1216,3 +1464,577 @@ async def test_no_ack_defer_marker_is_historical_across_backend_matrix(
         assert reservation.attempt is not None
         assert reacquired["lease_id"] != acquired["lease_id"]
         assert reservation.attempt.id == replacement_attempt_id
+
+
+@pytest.mark.parametrize(
+    ("auth_backend", "jobs_backend"),
+    BACKEND_PAIRS,
+    ids=("sqlite-sqlite", "sqlite-postgres", "postgres-sqlite", "postgres-postgres"),
+)
+@pytest.mark.parametrize("historical_origin", ("retry", "infrastructure", "recovery"))
+async def test_queued_cancel_replaces_only_an_exact_historical_marker(
+    auth_backend: str,
+    jobs_backend: str,
+    historical_origin: str,
+    tmp_path: Path,
+    test_db_pool,
+    matrix_jobs_pg_dsn: str,
+) -> None:
+    manager = _jobs_manager(
+        jobs_backend,
+        tmp_path=tmp_path,
+        jobs_pg_dsn=matrix_jobs_pg_dsn,
+    )
+    queue = CountingQueue(JobsDeliveryQueue(manager))
+    clock = MutableClock(NOW)
+    label = f"queued-cancel-{auth_backend}-{jobs_backend}-{historical_origin}"
+    async with _auth_repository(
+        auth_backend,
+        tmp_path=tmp_path,
+        test_db_pool=test_db_pool,
+    ) as repository:
+        webhook_id, delivery_id = await _seed_delivery(
+            repository,
+            label,
+            now=clock(),
+        )
+        assert await _reconciler(
+            repository,
+            queue,
+            clock,
+            TokenSource(label),
+        ).reconcile_enqueue_once() == 1
+        bundle = await repository.get_delivery_bundle(delivery_id)
+        assert bundle is not None and bundle.delivery.jobs_job_id is not None
+        acquired = manager.acquire_next_job(
+            domain="admin_webhooks",
+            queue="delivery",
+            job_type="admin_webhook_delivery",
+            lease_seconds=120,
+            worker_id=f"{label}-worker",
+        )
+        assert acquired is not None
+        historical_token = opaque_token(f"{label}-historical")
+        if historical_origin == "retry":
+            historical = PreparedJobDisposition.retry(
+                token=historical_token,
+                delivery_id=delivery_id,
+                attempt_id=canonical_uuid4(f"{label}-historical-attempt"),
+                delay_seconds=60,
+                not_before_at=clock() + timedelta(seconds=60),
+                reason_code="http_server_error",
+            )
+        elif historical_origin == "infrastructure":
+            historical = PreparedJobDisposition.infrastructure_defer(
+                token=historical_token,
+                delivery_id=delivery_id,
+                reason_code="worker_infrastructure_unavailable",
+            )
+        else:
+            historical = PreparedJobDisposition.recovery_defer_until(
+                token=historical_token,
+                delivery_id=delivery_id,
+                not_before_at=clock() + timedelta(seconds=60),
+                reason_code="attempt_not_stale",
+            )
+        applied = manager.apply_prepared_disposition(
+            ApplyPreparedDispositionCommand(
+                job_id=int(acquired["id"]),
+                domain="admin_webhooks",
+                queue="delivery",
+                job_type="admin_webhook_delivery",
+                expected_payload={"delivery_id": delivery_id},
+                worker_id=acquired["worker_id"],
+                lease_id=acquired["lease_id"],
+                disposition=historical,
+            )
+        )
+        assert applied.state == "queued"
+        before_cancel = manager.get_job(int(acquired["id"]))
+
+        cancel_token = opaque_token(f"{label}-cancel")
+        async with repository.transaction() as tx:
+            pending = await tx.cancel_registration_work(
+                webhook_id,
+                (2, 2),
+                DeliveryReasonCode.CANCELED_DISABLED,
+                lambda: cancel_token,
+                clock(),
+            )
+        assert len(pending) == 1
+        assert pending[0].token == cancel_token
+        assert pending[0].token != historical_token
+
+        repaired = await _reconciler(
+            repository,
+            queue,
+            clock,
+            TokenSource(f"{label}-repair"),
+        ).reconcile_pending_dispositions_once()
+
+        assert repaired == 1
+        recovered = await repository.get_delivery_bundle(delivery_id)
+        assert recovered is not None
+        assert recovered.delivery.pending_jobs_disposition_token == cancel_token
+        assert recovered.delivery.jobs_disposition_applied
+        after_cancel = manager.get_job(int(acquired["id"]))
+        assert after_cancel["status"] == "cancelled"
+        assert after_cancel["retry_count"] == before_cancel["retry_count"]
+        record = queue.queue.get_delivery_job(str(acquired["id"]))
+        assert record is not None and record.marker is not None
+        assert record.marker.kind is PreparedDispositionKind.CANCEL
+        assert record.marker.origin is PreparedDispositionOrigin.AUTHNZ
+        assert record.marker.token == cancel_token
+        assert queue.cancel_tokens == [cancel_token]
+
+
+_WORKER_CRASH_POINTS = (
+    WorkerCrashPoint.BEFORE_RESERVATION_COMMIT,
+    WorkerCrashPoint.AFTER_RESERVATION_COMMIT_BEFORE_IO,
+    WorkerCrashPoint.AFTER_RECEIVER_RESULT_BEFORE_OUTCOME_COMMIT,
+    WorkerCrashPoint.AFTER_OUTCOME_COMMIT_BEFORE_JOBS_APPLY,
+    WorkerCrashPoint.AFTER_JOBS_APPLY_BEFORE_AUTHNZ_ACK,
+    WorkerCrashPoint.AFTER_AUTHNZ_ACK_BEFORE_RETURN,
+)
+
+
+@pytest.mark.parametrize(
+    ("auth_backend", "jobs_backend"),
+    BACKEND_PAIRS,
+    ids=("sqlite-sqlite", "sqlite-postgres", "postgres-sqlite", "postgres-postgres"),
+)
+async def test_worker_authnz_outcome_crash_cross_product_across_backend_matrix(
+    auth_backend: str,
+    jobs_backend: str,
+    tmp_path: Path,
+    test_db_pool,
+    matrix_jobs_pg_dsn: str,
+) -> None:
+    manager = _jobs_manager(
+        jobs_backend,
+        tmp_path=tmp_path,
+        jobs_pg_dsn=matrix_jobs_pg_dsn,
+    )
+    queue = CountingQueue(JobsDeliveryQueue(manager))
+    clock = MutableClock(datetime.now(timezone.utc))
+    ring = key_ring()
+    async with _auth_repository(
+        auth_backend,
+        tmp_path=tmp_path,
+        test_db_pool=test_db_pool,
+    ) as repository:
+        for outcome in ("complete", "retry", "fail", "cancel"):
+            for crash_point in _WORKER_CRASH_POINTS:
+                label = (
+                    f"worker-crash-{auth_backend}-{jobs_backend}-{outcome}-"
+                    f"{crash_point.value}"
+                )
+                webhook_id, delivery_id = await _seed_worker_delivery(
+                    repository,
+                    ring,
+                    label,
+                    now=clock(),
+                )
+                assert await _reconciler(
+                    repository,
+                    queue,
+                    clock,
+                    TokenSource(f"{label}-enqueue"),
+                ).reconcile_enqueue_once() == 1
+                acquired = manager.acquire_next_job(
+                    domain="admin_webhooks",
+                    queue="delivery",
+                    job_type="admin_webhook_delivery",
+                    lease_seconds=120,
+                    worker_id=f"{label}-worker",
+                )
+                assert acquired is not None
+
+                async def disable_after_io(
+                    current_webhook_id: int = webhook_id,
+                ) -> None:
+                    await _disable_worker_registration(
+                        repository,
+                        current_webhook_id,
+                        now=clock(),
+                    )
+
+                result = _matrix_result(outcome)
+                executor = MatrixExecutor(
+                    lambda _request, result=result: result,
+                    before_result=disable_after_io if outcome == "cancel" else None,
+                )
+                crashing = _worker_handler(
+                    repository,
+                    ring,
+                    clock,
+                    executor,
+                    label,
+                    crash_hook=WorkerOneShotCrash(crash_point),
+                )
+                crashed = False
+                try:
+                    disposition = await crashing(
+                        acquired,
+                        MatrixWorkerContext(acquired),
+                    )
+                    applied = _apply_worker_disposition(
+                        manager,
+                        acquired,
+                        disposition,
+                    )
+                    await crashing.on_disposition_applied(
+                        acquired,
+                        disposition,
+                        applied,
+                    )
+                except SimulatedCrash:
+                    crashed = True
+                assert crashed, f"crash hook was not reached for {label}"
+                if (
+                    outcome == "cancel"
+                    and crash_point
+                    is WorkerCrashPoint.AFTER_RESERVATION_COMMIT_BEFORE_IO
+                ):
+                    await _disable_worker_registration(
+                        repository,
+                        webhook_id,
+                        now=clock(),
+                    )
+
+                recovery = _worker_handler(
+                    repository,
+                    ring,
+                    clock,
+                    executor,
+                    label,
+                )
+                if crash_point is WorkerCrashPoint.BEFORE_RESERVATION_COMMIT:
+                    disposition = await recovery(
+                        acquired,
+                        MatrixWorkerContext(acquired),
+                    )
+                    applied = _apply_worker_disposition(manager, acquired, disposition)
+                    await recovery.on_disposition_applied(
+                        acquired,
+                        disposition,
+                        applied,
+                    )
+                elif crash_point in {
+                    WorkerCrashPoint.AFTER_RESERVATION_COMMIT_BEFORE_IO,
+                    WorkerCrashPoint.AFTER_RECEIVER_RESULT_BEFORE_OUTCOME_COMMIT,
+                }:
+                    deferred = await recovery(
+                        acquired,
+                        MatrixWorkerContext(acquired),
+                    )
+                    assert deferred.origin is PreparedDispositionOrigin.RECOVERY
+                    attempts = await repository.list_delivery_attempts(
+                        webhook_id,
+                        delivery_id,
+                    )
+                    assert len(attempts) == 1
+                    clock.current = attempts[0].started_at + timedelta(seconds=100)
+                    disposition = await recovery(
+                        acquired,
+                        MatrixWorkerContext(acquired),
+                    )
+                    applied = _apply_worker_disposition(manager, acquired, disposition)
+                    await recovery.on_disposition_applied(
+                        acquired,
+                        disposition,
+                        applied,
+                    )
+                elif crash_point is WorkerCrashPoint.AFTER_OUTCOME_COMMIT_BEFORE_JOBS_APPLY:
+                    disposition = await recovery(
+                        acquired,
+                        MatrixWorkerContext(acquired),
+                    )
+                    applied = _apply_worker_disposition(manager, acquired, disposition)
+                    await recovery.on_disposition_applied(
+                        acquired,
+                        disposition,
+                        applied,
+                    )
+                else:
+                    repaired = await _reconciler(
+                        repository,
+                        queue,
+                        clock,
+                        TokenSource(f"{label}-repair"),
+                    ).reconcile_pending_dispositions_once()
+                    assert repaired == int(
+                        crash_point
+                        is WorkerCrashPoint.AFTER_JOBS_APPLY_BEFORE_AUTHNZ_ACK
+                    )
+
+                expected_io = 0 if crash_point is WorkerCrashPoint.AFTER_RESERVATION_COMMIT_BEFORE_IO else 1
+                assert len(executor.requests) == expected_io
+                attempts = await repository.list_delivery_attempts(
+                    webhook_id,
+                    delivery_id,
+                )
+                assert len(attempts) == 1
+                if crash_point in {
+                    WorkerCrashPoint.AFTER_RESERVATION_COMMIT_BEFORE_IO,
+                    WorkerCrashPoint.AFTER_RECEIVER_RESULT_BEFORE_OUTCOME_COMMIT,
+                }:
+                    assert attempts[0].state is AttemptState.OUTCOME_UNKNOWN
+                else:
+                    assert attempts[0].state is {
+                        "complete": AttemptState.SUCCEEDED,
+                        "retry": AttemptState.RETRYABLE,
+                        "fail": AttemptState.FAILED,
+                        "cancel": AttemptState.RETRYABLE,
+                    }[outcome]
+                final = await repository.get_delivery_bundle(delivery_id)
+                assert final is not None and final.delivery.jobs_disposition_applied
+                if outcome == "cancel":
+                    assert final.delivery.delivery.state is DeliveryState.CANCELED
+                expected_jobs_state = {
+                    DeliveryState.SUCCEEDED: "completed",
+                    DeliveryState.RETRY_WAIT: "queued",
+                    DeliveryState.DEAD: "failed",
+                    DeliveryState.CANCELED: "cancelled",
+                    DeliveryState.SUPERSEDED: "cancelled",
+                }[final.delivery.delivery.state]
+                assert manager.get_job(int(acquired["id"]))["status"] == expected_jobs_state
+
+
+@pytest.mark.parametrize(
+    ("auth_backend", "jobs_backend"),
+    BACKEND_PAIRS,
+    ids=("sqlite-sqlite", "sqlite-postgres", "postgres-sqlite", "postgres-postgres"),
+)
+async def test_worker_hard_cap_is_four_receiver_calls_across_backend_matrix(
+    auth_backend: str,
+    jobs_backend: str,
+    tmp_path: Path,
+    test_db_pool,
+    matrix_jobs_pg_dsn: str,
+) -> None:
+    manager = _jobs_manager(
+        jobs_backend,
+        tmp_path=tmp_path,
+        jobs_pg_dsn=matrix_jobs_pg_dsn,
+    )
+    queue = CountingQueue(JobsDeliveryQueue(manager))
+    clock = MutableClock(datetime.now(timezone.utc))
+    ring = key_ring()
+    label = f"hard-cap-{auth_backend}-{jobs_backend}"
+
+    def classify(request: AttemptExecutionRequest) -> AttemptExecutionResult:
+        if request.attempt_number == 4:
+            return AttemptExecutionResult(
+                outcome=AttemptOutcome.FAILED,
+                status_code=503,
+                latency_ms=5,
+                reason_code=AttemptReasonCode.ATTEMPT_BUDGET_EXHAUSTED,
+                retry_delay_seconds=None,
+            )
+        return AttemptExecutionResult(
+            outcome=AttemptOutcome.RETRYABLE,
+            status_code=503,
+            latency_ms=5,
+            reason_code=AttemptReasonCode.HTTP_SERVER_ERROR,
+            retry_delay_seconds=(60, 300, 1_800)[request.attempt_number - 1],
+        )
+
+    executor = MatrixExecutor(classify)
+    async with _auth_repository(
+        auth_backend,
+        tmp_path=tmp_path,
+        test_db_pool=test_db_pool,
+    ) as repository:
+        webhook_id, delivery_id = await _seed_worker_delivery(
+            repository,
+            ring,
+            label,
+            now=clock(),
+        )
+        assert await _reconciler(
+            repository,
+            queue,
+            clock,
+            TokenSource(f"{label}-enqueue"),
+        ).reconcile_enqueue_once() == 1
+        acquired = manager.acquire_next_job(
+            domain="admin_webhooks",
+            queue="delivery",
+            job_type="admin_webhook_delivery",
+            lease_seconds=120,
+            worker_id=f"{label}-worker-1",
+        )
+        assert acquired is not None
+        handler = _worker_handler(
+            repository,
+            ring,
+            clock,
+            executor,
+            label,
+        )
+
+        for attempt_number in range(1, 5):
+            disposition = await handler(
+                acquired,
+                MatrixWorkerContext(acquired),
+            )
+            assert disposition.kind is (
+                PreparedDispositionKind.FAIL
+                if attempt_number == 4
+                else PreparedDispositionKind.RETRY
+            )
+            applied = _apply_worker_disposition(manager, acquired, disposition)
+            await handler.on_disposition_applied(acquired, disposition, applied)
+            if attempt_number < 4:
+                assert disposition.delay_seconds is not None
+                clock.advance(disposition.delay_seconds)
+                assert manager.reschedule_jobs(
+                    domain="admin_webhooks",
+                    queue="delivery",
+                    job_type="admin_webhook_delivery",
+                    status="queued",
+                    set_now=True,
+                ) == 1
+                acquired = manager.acquire_next_job(
+                    domain="admin_webhooks",
+                    queue="delivery",
+                    job_type="admin_webhook_delivery",
+                    lease_seconds=120,
+                    worker_id=f"{label}-worker-{attempt_number + 1}",
+                )
+                assert acquired is not None
+
+        assert len(executor.requests) == 4
+        assert [request.attempt_number for request in executor.requests] == [1, 2, 3, 4]
+        attempts = await repository.list_delivery_attempts(webhook_id, delivery_id)
+        assert [attempt.attempt_number for attempt in attempts] == [1, 2, 3, 4]
+        assert attempts[-1].state is AttemptState.FAILED
+        assert (
+            attempts[-1].reason_code
+            is DeliveryReasonCode.ATTEMPT_BUDGET_EXHAUSTED
+        )
+        final = await repository.get_delivery_bundle(delivery_id)
+        assert final is not None
+        assert final.delivery.delivery.state is DeliveryState.DEAD
+        assert (
+            final.delivery.delivery.reason_code
+            is DeliveryReasonCode.ATTEMPT_BUDGET_EXHAUSTED
+        )
+        assert final.delivery.jobs_disposition_applied
+        assert manager.acquire_next_job(
+            domain="admin_webhooks",
+            queue="delivery",
+            job_type="admin_webhook_delivery",
+            lease_seconds=120,
+            worker_id=f"{label}-worker-5",
+        ) is None
+        assert len(executor.requests) == 4
+
+
+@pytest.mark.parametrize(
+    ("auth_backend", "jobs_backend"),
+    BACKEND_PAIRS,
+    ids=("sqlite-sqlite", "sqlite-postgres", "postgres-sqlite", "postgres-postgres"),
+)
+async def test_exact_late_writer_cannot_replace_stale_recovery_across_backend_matrix(
+    auth_backend: str,
+    jobs_backend: str,
+    tmp_path: Path,
+    test_db_pool,
+    matrix_jobs_pg_dsn: str,
+) -> None:
+    manager = _jobs_manager(
+        jobs_backend,
+        tmp_path=tmp_path,
+        jobs_pg_dsn=matrix_jobs_pg_dsn,
+    )
+    queue = CountingQueue(JobsDeliveryQueue(manager))
+    clock = MutableClock(datetime.now(timezone.utc))
+    ring = key_ring()
+    label = f"late-writer-{auth_backend}-{jobs_backend}"
+    executor = MatrixExecutor(lambda _request: _matrix_result("complete"))
+    async with _auth_repository(
+        auth_backend,
+        tmp_path=tmp_path,
+        test_db_pool=test_db_pool,
+    ) as repository:
+        webhook_id, delivery_id = await _seed_worker_delivery(
+            repository,
+            ring,
+            label,
+            now=clock(),
+        )
+        assert await _reconciler(
+            repository,
+            queue,
+            clock,
+            TokenSource(f"{label}-enqueue"),
+        ).reconcile_enqueue_once() == 1
+        acquired = manager.acquire_next_job(
+            domain="admin_webhooks",
+            queue="delivery",
+            job_type="admin_webhook_delivery",
+            lease_seconds=120,
+            worker_id=f"{label}-worker",
+        )
+        assert acquired is not None
+        crashing = _worker_handler(
+            repository,
+            ring,
+            clock,
+            executor,
+            label,
+            crash_hook=WorkerOneShotCrash(
+                WorkerCrashPoint.AFTER_RESERVATION_COMMIT_BEFORE_IO
+            ),
+        )
+        with pytest.raises(SimulatedCrash):
+            await crashing(acquired, MatrixWorkerContext(acquired))
+        attempts = await repository.list_delivery_attempts(webhook_id, delivery_id)
+        assert len(attempts) == 1
+        attempt = attempts[0]
+        clock.current = attempt.started_at + timedelta(seconds=100)
+        recovery = _worker_handler(
+            repository,
+            ring,
+            clock,
+            executor,
+            label,
+        )
+        disposition = await recovery(acquired, MatrixWorkerContext(acquired))
+        assert disposition.kind is PreparedDispositionKind.RETRY
+        recovered_before = await repository.get_delivery_bundle(delivery_id)
+        attempts_before = await repository.list_delivery_attempts(
+            webhook_id,
+            delivery_id,
+        )
+        assert recovered_before is not None
+
+        async with repository.transaction() as tx:
+            late = await tx.finish_attempt_and_prepare_disposition(
+                acquired["lease_id"],
+                AttemptCompletion(
+                    attempt_state=AttemptState.SUCCEEDED,
+                    delivery_state=DeliveryState.SUCCEEDED,
+                    disposition=JobsDispositionKind.COMPLETE,
+                    status_code=204,
+                    latency_ms=5,
+                    reason_code=None,
+                    requested_retry_delay_seconds=None,
+                    finished_at=clock() + timedelta(seconds=1),
+                    completed_after_config_change=False,
+                ),
+                opaque_token(f"{label}-late-disposition"),
+                None,
+                delivery_id=delivery_id,
+                attempt_id=attempt.id,
+                jobs_job_id=str(acquired["id"]),
+            )
+        assert late is None
+        assert await repository.get_delivery_bundle(delivery_id) == recovered_before
+        assert await repository.list_delivery_attempts(
+            webhook_id,
+            delivery_id,
+        ) == attempts_before
+        assert executor.requests == []

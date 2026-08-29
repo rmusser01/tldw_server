@@ -11,6 +11,7 @@ import pytest
 import pytest_asyncio
 
 from tldw_Server_API.app.core.Admin_Webhooks import domain
+from tldw_Server_API.app.core.Admin_Webhooks import executor as executor_module
 from tldw_Server_API.app.core.Admin_Webhooks.config import (
     AdminWebhookMode,
     AdminWebhookSettings,
@@ -27,6 +28,7 @@ from tldw_Server_API.app.core.Admin_Webhooks.executor import (
     AttemptExecutionResult,
     AttemptOutcome,
     AttemptReasonCode,
+    DeliveryAttemptExecutor,
 )
 from tldw_Server_API.app.core.Admin_Webhooks.reconciler import JobsDeliveryQueue
 from tldw_Server_API.app.core.Admin_Webhooks.worker import (
@@ -50,6 +52,7 @@ from tldw_Server_API.app.core.Jobs.operations.contracts import (
     PreparedDispositionOrigin,
 )
 from tldw_Server_API.app.core.Security.egress import URLPolicyResult
+from tldw_Server_API.app.core.Security.http_hop import StatusOnlyHTTPHopResponse
 from tldw_Server_API.tests.Admin_Webhooks.test_event_expansion import (
     NOW,
     canonical_uuid4,
@@ -126,6 +129,32 @@ class FakeExecutor:
         return self.result
 
 
+class DeterministicExecutorClock:
+    def __init__(self, worker_clock: MutableClock) -> None:
+        self.worker_clock = worker_clock
+        self.monotonic_value = 100.0
+
+    def utc_now(self) -> datetime:
+        return self.worker_clock()
+
+    def monotonic(self) -> float:
+        self.monotonic_value += 0.001
+        return self.monotonic_value
+
+
+class RetryingStatusEgress:
+    def __init__(self) -> None:
+        self.requests: list[object] = []
+
+    async def __call__(self, request: object) -> StatusOnlyHTTPHopResponse:
+        self.requests.append(request)
+        return StatusOnlyHTTPHopResponse(
+            status_code=503,
+            latency_ms=12,
+            retry_after_seconds=None,
+        )
+
+
 class SimulatedCrash(BaseException):
     pass
 
@@ -175,10 +204,14 @@ async def worker_fixture(tmp_path: Path) -> WorkerFixture:
 
 @pytest.fixture(autouse=True)
 def allow_synthetic_worker_targets(monkeypatch: pytest.MonkeyPatch) -> None:
+    def allow(_url: str) -> URLPolicyResult:
+        return URLPolicyResult(True, resolved_ips=("93.184.216.34",))
+
+    monkeypatch.setattr(domain, "evaluate_platform_webhook_url_policy", allow)
     monkeypatch.setattr(
-        domain,
+        executor_module,
         "evaluate_platform_webhook_url_policy",
-        lambda _url: URLPolicyResult(True, resolved_ips=("93.184.216.34",)),
+        allow,
     )
 
 
@@ -485,6 +518,96 @@ async def test_pending_retry_replays_without_io_and_lost_ack_continues_current_l
 
 
 @pytest.mark.asyncio
+async def test_real_executor_attempt_four_exhausts_budget_without_fifth_request(
+    worker_fixture: WorkerFixture,
+) -> None:
+    webhook_id, delivery_id, acquired = await _seed_acquired(
+        worker_fixture,
+        "real-executor-hard-cap",
+    )
+    egress = RetryingStatusEgress()
+    executor = DeliveryAttemptExecutor(
+        egress=egress,
+        clock=DeterministicExecutorClock(worker_fixture.clock),
+    )
+    attempt_ids = iter(
+        canonical_uuid4(f"real-executor-attempt-{number}")
+        for number in range(1, 5)
+    )
+    handler = AdminWebhookPreparedHandler(
+        repository=worker_fixture.repository,
+        key_ring=worker_fixture.ring,
+        settings=_settings(),
+        executor=executor,
+        token_factory=TokenSource("real-executor-disposition"),
+        attempt_id_factory=lambda: next(attempt_ids),
+        clock=worker_fixture.clock,
+    )
+
+    for attempt_number in range(1, 5):
+        disposition = await handler(acquired, FakeContext(acquired))
+        if attempt_number < 4:
+            assert disposition.kind is PreparedDispositionKind.RETRY
+            assert disposition.delay_seconds == (60, 300, 1_800)[
+                attempt_number - 1
+            ]
+        else:
+            assert disposition.kind is PreparedDispositionKind.FAIL
+            assert (
+                disposition.reason_code
+                == DeliveryReasonCode.ATTEMPT_BUDGET_EXHAUSTED.value
+            )
+        applied = await _apply(worker_fixture, acquired, disposition)
+        assert applied.outcome is OperationOutcome.APPLIED
+        await handler.on_disposition_applied(acquired, disposition, applied)
+        if attempt_number < 4:
+            assert disposition.delay_seconds is not None
+            worker_fixture.clock.advance(disposition.delay_seconds)
+            assert worker_fixture.manager.reschedule_jobs(
+                domain="admin_webhooks",
+                queue="delivery",
+                job_type="admin_webhook_delivery",
+                status="queued",
+                set_now=True,
+            ) == 1
+            acquired = worker_fixture.manager.acquire_next_job(
+                domain="admin_webhooks",
+                queue="delivery",
+                job_type="admin_webhook_delivery",
+                lease_seconds=120,
+                worker_id=f"worker-real-executor-{attempt_number + 1}",
+            )
+            assert acquired is not None
+
+    assert len(egress.requests) == 4
+    attempts = await worker_fixture.repository.list_delivery_attempts(
+        webhook_id,
+        delivery_id,
+    )
+    assert [attempt.attempt_number for attempt in attempts] == [1, 2, 3, 4]
+    assert attempts[-1].state is AttemptState.FAILED
+    assert (
+        attempts[-1].reason_code
+        is DeliveryReasonCode.ATTEMPT_BUDGET_EXHAUSTED
+    )
+    bundle = await worker_fixture.repository.get_delivery_bundle(delivery_id)
+    assert bundle is not None
+    assert bundle.delivery.delivery.state is DeliveryState.DEAD
+    assert (
+        bundle.delivery.delivery.reason_code
+        is DeliveryReasonCode.ATTEMPT_BUDGET_EXHAUSTED
+    )
+    assert worker_fixture.manager.acquire_next_job(
+        domain="admin_webhooks",
+        queue="delivery",
+        job_type="admin_webhook_delivery",
+        lease_seconds=120,
+        worker_id="worker-real-executor-5",
+    ) is None
+    assert len(egress.requests) == 4
+
+
+@pytest.mark.asyncio
 async def test_processing_attempt_defers_until_persisted_timeout_plus_ninety(
     worker_fixture: WorkerFixture,
 ) -> None:
@@ -622,6 +745,65 @@ async def _mutate_registration(
             actor_user_id=7,
             at=fixture.clock(),
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("terminal_trigger", ("lifecycle", "expiry", "budget"))
+async def test_nonstale_processing_precedes_every_no_attempt_terminal_trigger(
+    worker_fixture: WorkerFixture,
+    terminal_trigger: str,
+) -> None:
+    webhook_id, delivery_id, acquired = await _seed_acquired(
+        worker_fixture,
+        f"processing-precedence-{terminal_trigger}",
+    )
+    initial_executor = FakeExecutor(_success())
+    crashing = _handler(
+        worker_fixture,
+        initial_executor,
+        crash_hook=OneShotCrash(WorkerCrashPoint.AFTER_RESERVATION_COMMIT_BEFORE_IO),
+    )
+    with pytest.raises(SimulatedCrash):
+        await crashing(acquired, FakeContext(acquired))
+
+    if terminal_trigger == "lifecycle":
+        await _mutate_registration(worker_fixture, webhook_id, "disable")
+    else:
+        async with worker_fixture.repository.transaction() as tx:
+            if terminal_trigger == "expiry":
+                await tx._execute(
+                    "UPDATE admin_webhook_deliveries SET expires_at = ? WHERE id = ?",
+                    (worker_fixture.clock() - timedelta(seconds=1), delivery_id),
+                )
+            else:
+                await tx._execute(
+                    "UPDATE admin_webhook_deliveries SET attempt_count = 4 WHERE id = ?",
+                    (delivery_id,),
+                )
+
+    before = await worker_fixture.repository.get_delivery_bundle(delivery_id)
+    attempts_before = await worker_fixture.repository.list_delivery_attempts(
+        webhook_id,
+        delivery_id,
+    )
+    recovery_executor = FakeExecutor(_success())
+    disposition = await _handler(worker_fixture, recovery_executor)(
+        acquired,
+        FakeContext(acquired),
+    )
+
+    assert disposition.origin is PreparedDispositionOrigin.RECOVERY
+    assert disposition.reason_code == "attempt_not_stale"
+    assert disposition.not_before_at == attempts_before[0].started_at + timedelta(
+        seconds=100
+    )
+    assert await worker_fixture.repository.get_delivery_bundle(delivery_id) == before
+    assert await worker_fixture.repository.list_delivery_attempts(
+        webhook_id,
+        delivery_id,
+    ) == attempts_before
+    assert initial_executor.requests == []
+    assert recovery_executor.requests == []
 
 
 @pytest.mark.asyncio

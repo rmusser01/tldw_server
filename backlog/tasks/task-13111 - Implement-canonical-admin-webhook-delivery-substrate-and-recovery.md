@@ -4,7 +4,7 @@ title: Implement canonical admin webhook delivery substrate and recovery
 status: In Progress
 assignee: []
 created_date: '2026-08-23 03:15'
-updated_date: '2026-08-29 17:10'
+updated_date: '2026-08-29 18:03'
 labels:
   - admin
   - webhooks
@@ -167,6 +167,10 @@ Task 7 preflight found the approved file list omitted required AuthNZ repository
 2026-08-29: Task 8 preflight found the written four-file scope omitted load-bearing AuthNZ repository/domain and Jobs disposition-marker contracts. The binding no-schema ruling now requires registration-before-delivery final reservation locking; enforced lifecycle/version/Jobs/expiry/hard-budget predicates; atomic no-I/O terminal preparation; deterministic stale-attempt retry/fail preparation; retryable-result/config-race preservation; canonical no-attempt fail for expiry/already-exhausted budget; and one bounded exact-marker pending-disposition reconciler scan. Task 8 started at clean BASE 2136b77b28a209d1a6b80b01f266e045e16d7029.
 
 2026-08-29: Task 8 complete. Implemented lease-aware one-attempt reservation and worker handling, strict bounded Jobs marker projection/fingerprint recovery, deterministic stale-attempt closure, lifecycle-aware post-attempt terminalization, and bounded lookup-only pending-disposition reconciliation. Strict RED failed on the expected missing worker/repository/marker contracts. Final required PostgreSQL worker/four-backend/prepared-disposition gate: 278 passed, 0 skipped. Repository/shared expansion gate: 47 passed, 0 skipped. Jobs operation contracts: 84 passed. WorkerSDK operation/legacy gate: 122 passed. Executor/security gate: 312 passed. Ruff and Python 3.10 compilation passed; direct Jobs SQL and legacy-import scans were clean; Bandit findings were reviewed as fixed-query/enum-string false positives. Evidence: .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-8-report.md.
+
+Task 8 independent review found pre-stale processing mutation, historical-marker cancellation repair, optional reservation coordinates, and incomplete four-backend crash proof. Fix round 1 is in progress; attempt-four retry classification remains centralized in the shared executor and will receive an integration proof.
+
+2026-08-29: Task 8 fix round 1 complete. Processing attempts now take precedence over lifecycle/expiry/budget terminalization; exact acknowledgement releases current_attempt_id only after append-only attempt evidence is marked applied; canonical reservation coordinates are mandatory and every new terminal reservation persists its pending Jobs marker; queued cancellation monotonically replaces exact historical retry/infrastructure/recovery markers. Expanded all-six-boundary complete/retry/fail/cancel coverage, both defer origins, historical-marker cancel, hard-cap I/O, and late-writer rejection across all four AuthNZ/Jobs backend pairs, plus real-executor attempt-four proof. Final PostgreSQL worker/recovery matrix: 99 passed, 0 skipped. Delivery repositories/expansion: 48 passed, 0 skipped. Jobs contracts/prepared backends/prepared+legacy SDK: 329 passed, 0 skipped. Executor/security: 312 passed. Control plane: 49 passed. Ruff and Python 3.10 compile passed; direct Jobs SQL scan clean; reviewed Bandit found 0 High and only fixed-query low-confidence B608 reports. Evidence: .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-8-fix-1-report.md.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

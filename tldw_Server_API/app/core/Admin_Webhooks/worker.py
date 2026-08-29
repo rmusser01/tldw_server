@@ -296,31 +296,6 @@ class AdminWebhookPreparedHandler:
         delivery = bundle.delivery.delivery
         registration = bundle.registration.registration
         now = _aware_utc(self._clock(), field="clock value")
-        lifecycle_reason = registration_work_lifecycle_reason(
-            delivery,
-            registration,
-        )
-        if lifecycle_reason is not None:
-            return await self._prepare_no_attempt(
-                bundle,
-                jobs_record.jobs_job_id,
-                lifecycle_reason,
-                now,
-            )
-        if delivery.expires_at <= now:
-            return await self._prepare_no_attempt(
-                bundle,
-                jobs_record.jobs_job_id,
-                DeliveryReasonCode.DELIVERY_EXPIRED,
-                now,
-            )
-        if delivery.attempt_count >= self._settings.delivery_max_attempts:
-            return await self._prepare_no_attempt(
-                bundle,
-                jobs_record.jobs_job_id,
-                DeliveryReasonCode.ATTEMPT_BUDGET_EXHAUSTED,
-                now,
-            )
         if delivery.state is DeliveryState.PROCESSING:
             attempt = await self._repository.get_current_delivery_attempt(delivery_id)
             if (
@@ -361,6 +336,31 @@ class AdminWebhookPreparedHandler:
                     reason_code="attempt_recovery_conflict",
                 )
             return _prepared_from_pending(recovered)
+        lifecycle_reason = registration_work_lifecycle_reason(
+            delivery,
+            registration,
+        )
+        if lifecycle_reason is not None:
+            return await self._prepare_no_attempt(
+                bundle,
+                jobs_record.jobs_job_id,
+                lifecycle_reason,
+                now,
+            )
+        if delivery.expires_at <= now:
+            return await self._prepare_no_attempt(
+                bundle,
+                jobs_record.jobs_job_id,
+                DeliveryReasonCode.DELIVERY_EXPIRED,
+                now,
+            )
+        if delivery.attempt_count >= self._settings.delivery_max_attempts:
+            return await self._prepare_no_attempt(
+                bundle,
+                jobs_record.jobs_job_id,
+                DeliveryReasonCode.ATTEMPT_BUDGET_EXHAUSTED,
+                now,
+            )
         if delivery.state not in {DeliveryState.QUEUED, DeliveryState.RETRY_WAIT}:
             return self._infrastructure_defer(
                 delivery_id,

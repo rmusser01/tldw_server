@@ -2871,6 +2871,13 @@ class AdminWebhookUnitOfWork(_ConnectionAdapter):
     ) -> tuple[StoredWebhookDelivery, PendingJobsDisposition]:
         if delivery.jobs_job_id is None:
             raise ValueError("Jobs delivery identity is unavailable")
+        if (
+            delivery.delivery.state is DeliveryState.PROCESSING
+            or delivery.current_attempt_id is not None
+        ):
+            raise WebhookRepositoryError(
+                WebhookRepositoryErrorCode.STALE_DELIVERY_STATE
+            )
         _opaque_token(disposition_token, field="disposition token")
         lifecycle_reasons = {
             DeliveryReasonCode.CANCELED_DELETED,
@@ -2975,7 +2982,9 @@ class AdminWebhookUnitOfWork(_ConnectionAdapter):
             return None
         delivery = _stored_delivery_from_row(raw)
         if (
-            delivery.delivery.delivery_config_version
+            delivery.delivery.state is DeliveryState.PROCESSING
+            or delivery.current_attempt_id is not None
+            or delivery.delivery.delivery_config_version
             != expected_delivery_config_version
             or delivery.delivery.secret_version != expected_secret_version
         ):
@@ -3009,9 +3018,9 @@ class AdminWebhookUnitOfWork(_ConnectionAdapter):
         now: datetime,
         required_horizon: datetime,
         *,
-        expected_delivery_config_version: int | None = None,
-        expected_secret_version: int | None = None,
-        disposition_token: str | None = None,
+        expected_delivery_config_version: int,
+        expected_secret_version: int,
+        disposition_token: str,
     ) -> AttemptReservation | None:
         _canonical_uuid4(delivery_id, field="delivery ID")
         _bounded_text(jobs_job_id, field="Jobs job ID", maximum=255)
@@ -3023,8 +3032,13 @@ class AdminWebhookUnitOfWork(_ConnectionAdapter):
         required_horizon = _utc_datetime(required_horizon, field="required_horizon")
         if required_horizon < now + timedelta(seconds=request_timeout_seconds):
             raise ValueError("required horizon is shorter than request timeout")
-        if disposition_token is not None:
-            _opaque_token(disposition_token, field="disposition token")
+        for value, field in (
+            (expected_delivery_config_version, "delivery config version"),
+            (expected_secret_version, "secret version"),
+        ):
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise ValueError(f"{field} must be a positive integer")
+        _opaque_token(disposition_token, field="disposition token")
         preliminary = await self._fetchrow(
             "SELECT webhook_id FROM admin_webhook_deliveries WHERE id = ?",
             (delivery_id,),
@@ -3047,16 +3061,16 @@ class AdminWebhookUnitOfWork(_ConnectionAdapter):
         if delivery_row is None:
             return None
         delivery = _stored_delivery_from_row(delivery_row)
-        expected_config = (
-            delivery.delivery.delivery_config_version
-            if expected_delivery_config_version is None
-            else expected_delivery_config_version
-        )
-        expected_secret = (
-            delivery.delivery.secret_version
-            if expected_secret_version is None
-            else expected_secret_version
-        )
+        if (
+            delivery.delivery.state is DeliveryState.PROCESSING
+            or delivery.current_attempt_id is not None
+        ):
+            return None
+        if delivery.delivery.state not in {
+            DeliveryState.QUEUED,
+            DeliveryState.RETRY_WAIT,
+        }:
+            return None
         lifecycle_reason = registration_work_lifecycle_reason(
             delivery.delivery,
             registration.registration,
@@ -3067,14 +3081,12 @@ class AdminWebhookUnitOfWork(_ConnectionAdapter):
         if terminal_reason is None and delivery.delivery.expires_at <= required_horizon:
             terminal_reason = DeliveryReasonCode.DELIVERY_EXPIRED
         if terminal_reason is not None:
-            pending = None
-            if disposition_token is not None:
-                delivery, pending = await self._prepare_no_attempt_terminal_locked(
-                    delivery,
-                    reason=terminal_reason,
-                    disposition_token=disposition_token,
-                    now=now,
-                )
+            delivery, pending = await self._prepare_no_attempt_terminal_locked(
+                delivery,
+                reason=terminal_reason,
+                disposition_token=disposition_token,
+                now=now,
+            )
             return AttemptReservation(
                 reserved=False,
                 delivery=delivery,
@@ -3084,16 +3096,16 @@ class AdminWebhookUnitOfWork(_ConnectionAdapter):
                 pending_disposition=pending,
             )
         if (
-            delivery.delivery.delivery_config_version != expected_config
-            or delivery.delivery.secret_version != expected_secret
-            or registration.registration.delivery_config_version != expected_config
-            or registration.registration.secret_version != expected_secret
+            delivery.delivery.delivery_config_version
+            != expected_delivery_config_version
+            or delivery.delivery.secret_version != expected_secret_version
+            or registration.registration.delivery_config_version
+            != expected_delivery_config_version
+            or registration.registration.secret_version != expected_secret_version
             or (
                 delivery.pending_jobs_disposition is not None
                 and not delivery.jobs_disposition_applied
             )
-            or delivery.delivery.state
-            not in {DeliveryState.QUEUED, DeliveryState.RETRY_WAIT}
         ):
             return None
         attempt_number = delivery.delivery.attempt_count + 1
@@ -3139,8 +3151,8 @@ class AdminWebhookUnitOfWork(_ConnectionAdapter):
                 delivery_id,
                 jobs_job_id,
                 attempt_number - 1,
-                expected_config,
-                expected_secret,
+                expected_delivery_config_version,
+                expected_secret_version,
                 required_horizon,
             ),
         )
@@ -3485,7 +3497,7 @@ class AdminWebhookUnitOfWork(_ConnectionAdapter):
         updated = await self._fetchrow(
             f"""
             UPDATE admin_webhook_deliveries
-            SET jobs_disposition_applied = TRUE
+            SET jobs_disposition_applied = TRUE, current_attempt_id = NULL
             WHERE id = ? AND pending_jobs_disposition_token = ?
               AND pending_jobs_disposition = ?
               AND jobs_disposition_applied = FALSE

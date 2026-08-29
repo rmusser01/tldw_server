@@ -33,6 +33,8 @@ from tldw_Server_API.app.core.Jobs.operations.contracts import (
     JobIdentityLookupState,
     NoTransitionReason,
     OperationOutcome,
+    PreparedDispositionKind,
+    PreparedDispositionOrigin,
     PreparedDispositionResult,
     PreparedJobDisposition,
     admin_webhook_disposition_marker_matches,
@@ -750,8 +752,25 @@ class AdminWebhookReconciler:
                 continue
             if (
                 pending.kind is not JobsDispositionKind.CANCEL
-                or record.marker is not None
                 or record.status != "queued"
+                or (
+                    record.marker is not None
+                    and not (
+                        (
+                            record.marker.kind is PreparedDispositionKind.RETRY
+                            and record.marker.origin
+                            is PreparedDispositionOrigin.AUTHNZ
+                        )
+                        or (
+                            record.marker.kind is PreparedDispositionKind.DEFER
+                            and record.marker.origin
+                            in {
+                                PreparedDispositionOrigin.INFRASTRUCTURE,
+                                PreparedDispositionOrigin.RECOVERY,
+                            }
+                        )
+                    )
+                )
             ):
                 continue
             try:
