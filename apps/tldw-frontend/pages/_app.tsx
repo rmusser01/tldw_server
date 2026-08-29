@@ -2,7 +2,7 @@ import "../styles/globals.css"
 import "@/assets/react-pdf.css"
 import { runtimeBootstrapReady } from "@web/extension/shims/runtime-bootstrap"
 // Use web-specific i18n that works with SSR/static generation
-import "@web/lib/i18n-web"
+import { i18nNamespacesReady } from "@web/lib/i18n-web"
 import type { AppProps } from "next/app"
 import dynamic from "next/dynamic"
 import { useRouter } from "next/router"
@@ -238,7 +238,15 @@ export default function App({ Component, pageProps }: AppProps) {
 
     let cancelled = false
     const refreshAuthState = async () => {
-      await runtimeBootstrapReady.catch(() => undefined)
+      // Translation namespaces load as separate chunks; wait for them here so no
+      // page renders before its namespace exists. These fetches run in parallel
+      // with the bootstrap below, so they add no round trip of their own.
+      await Promise.all([
+        Promise.resolve(runtimeBootstrapReady).catch(() => undefined),
+        // Promise.resolve() so a missing or failed i18n module degrades to
+        // untranslated keys rather than pinning the app on the loading screen.
+        Promise.resolve(i18nNamespacesReady).catch(() => undefined)
+      ])
       if (cancelled) return
 
       const envAuthed =
