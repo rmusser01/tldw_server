@@ -15,9 +15,14 @@ from tldw_Server_API.app.api.v1.schemas.admin_schemas import (
 from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditEventCategory,
     AuditEventType,
+    MandatoryAuditWriteError,
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import _guard_sql
+from tldw_Server_API.app.core.AuthNZ.transaction_hooks import (
+    begin_after_commit_scope,
+    finish_after_commit_scope,
+)
 from tldw_Server_API.app.services import (
     admin_audit_service,
     admin_sessions_mfa_service,
@@ -711,6 +716,76 @@ async def test_emit_admin_account_audit_event_does_not_raise_when_flush_fails(mo
         admin_audit_service.logger.remove(sink)
 
     assert "audit unavailable" not in output.getvalue()
+
+
+@pytest.mark.asyncio
+async def test_emit_admin_account_audit_event_raises_when_required_flush_fails(monkeypatch) -> None:
+    class _FailingAuditService:
+        async def log_event(self, **_kwargs) -> None:
+            return None
+
+        async def flush(self, *, raise_on_failure: bool) -> None:
+            assert raise_on_failure is True
+            raise RuntimeError("audit unavailable")
+
+    async def _fake_get_service(_actor_id):
+        return _FailingAuditService()
+
+    monkeypatch.setattr(
+        admin_audit_service,
+        "get_or_create_audit_service_for_user_id_optional",
+        _fake_get_service,
+    )
+
+    with pytest.raises(MandatoryAuditWriteError, match="Mandatory audit persistence unavailable"):
+        await admin_audit_service.emit_admin_account_audit_event(
+            actor_id=7,
+            target_user_id=42,
+            event_type=AuditEventType.AUTH_TOKEN_CREATED,
+            category=AuditEventCategory.AUTHORIZATION,
+            resource_type="user_impersonation",
+            resource_id="42",
+            action="admin.impersonation.token.create",
+            metadata={"reason": "support"},
+            raise_on_failure=True,
+        )
+
+
+@pytest.mark.asyncio
+async def test_required_admin_audit_is_persisted_before_return(monkeypatch) -> None:
+    flush_calls: list[bool] = []
+
+    class _AuditService:
+        async def log_event(self, **_kwargs) -> None:
+            return None
+
+        async def flush(self, *, raise_on_failure: bool) -> None:
+            flush_calls.append(raise_on_failure)
+
+    async def _fake_get_service(_actor_id):
+        return _AuditService()
+
+    monkeypatch.setattr(
+        admin_audit_service,
+        "get_or_create_audit_service_for_user_id_optional",
+        _fake_get_service,
+    )
+
+    token = begin_after_commit_scope()
+    try:
+        await admin_audit_service.emit_admin_account_audit_event(
+            actor_id=7,
+            target_user_id=42,
+            event_type=AuditEventType.AUTH_TOKEN_CREATED,
+            category=AuditEventCategory.AUTHORIZATION,
+            resource_type="user_impersonation",
+            resource_id="42",
+            action="admin.impersonation.token.create",
+            raise_on_failure=True,
+        )
+        assert flush_calls == [True]
+    finally:
+        await finish_after_commit_scope(token, committed=False)
 
 
 async def _false_async() -> bool:

@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
+from jose import jwt
 
+from tldw_Server_API.app.api.v1.endpoints.admin import admin_impersonation
 from tldw_Server_API.app.api.v1.endpoints.admin.admin_impersonation import (
     ImpersonationTokenResponse,
     create_impersonation_token,
 )
+from tldw_Server_API.app.core.Audit.unified_audit_service import MandatoryAuditWriteError
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 
 
@@ -33,6 +37,52 @@ def _admin_principal() -> AuthPrincipal:
     )
 
 
+def _install_endpoint_stubs(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    target_user: Any,
+    audit_error: Exception | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    jwt_calls: list[dict[str, Any]] = []
+    audit_calls: list[dict[str, Any]] = []
+
+    class _StubRepo:
+        async def get_user_by_id(self, _user_id: int) -> Any:
+            return target_user
+
+    async def _from_pool() -> _StubRepo:
+        return _StubRepo()
+
+    class _StubJWTService:
+        def create_access_token(self, **kwargs: Any) -> str:
+            jwt_calls.append(kwargs)
+            issued_at = datetime.now(timezone.utc)
+            payload = {
+                "sub": str(kwargs["user_id"]),
+                "username": kwargs["username"],
+                "role": kwargs["role"],
+                "type": "access",
+                "iat": int(issued_at.timestamp()),
+                "exp": int((issued_at + kwargs["expires_delta"]).timestamp()),
+                **(kwargs.get("additional_claims") or {}),
+            }
+            return jwt.encode(payload, "test-secret", algorithm="HS256")
+
+    async def _emit(**kwargs: Any) -> None:
+        audit_calls.append(kwargs)
+        if audit_error is not None:
+            raise audit_error
+
+    monkeypatch.setattr(
+        admin_impersonation,
+        "AuthnzUsersRepo",
+        SimpleNamespace(from_pool=_from_pool),
+    )
+    monkeypatch.setattr(admin_impersonation, "get_jwt_service", lambda: _StubJWTService(), raising=False)
+    monkeypatch.setattr(admin_impersonation, "_emit_admin_account_audit_event", _emit, raising=False)
+    return jwt_calls, audit_calls
+
+
 class TestImpersonationTokenResponse:
     def test_defaults(self):
         resp = ImpersonationTokenResponse(
@@ -46,143 +96,139 @@ class TestImpersonationTokenResponse:
 
 class TestCreateImpersonationToken:
     @pytest.mark.asyncio
-    async def test_success_uses_backend_agnostic_user_repository(self):
+    async def test_success_uses_backend_agnostic_user_repository(self, monkeypatch):
         principal = _admin_principal()
-        mock_pool = MagicMock()
-        mock_pool.acquire.side_effect = AssertionError("endpoint must not issue ad hoc user SQL")
-        mock_jwt_svc = MagicMock()
-        mock_jwt_svc.create_access_token.return_value = "mock.jwt.token"
+        jwt_calls, audit_calls = _install_endpoint_stubs(
+            monkeypatch,
+            target_user={
+                "id": 42,
+                "username": "targetuser",
+                "is_active": True,
+                "role": "user",
+            },
+        )
 
-        with (
-            patch(
-                "tldw_Server_API.app.core.AuthNZ.database.get_db_pool",
-                new_callable=AsyncMock,
-                return_value=mock_pool,
-            ),
-            patch(
-                "tldw_Server_API.app.core.AuthNZ.repos.users_repo.AuthnzUsersRepo.get_user_by_id",
-                new_callable=AsyncMock,
-                return_value={
-                    "id": 42,
-                    "username": "targetuser",
-                    "is_active": True,
-                    "role": "user",
-                },
-            ) as get_user,
-            patch(
-                "tldw_Server_API.app.core.AuthNZ.jwt_service.get_jwt_service",
-                return_value=mock_jwt_svc,
-            ),
-        ):
-            result = await create_impersonation_token(42, principal)
+        result = await create_impersonation_token(42, principal)
 
         assert result.impersonated_user_id == 42
-        get_user.assert_awaited_once_with(42)
-        assert mock_jwt_svc.create_access_token.call_args.kwargs["role"] == "user"
+        claims = jwt.get_unverified_claims(result.token)
+        assert int(claims["exp"]) - int(claims["iat"]) == 15 * 60
+        assert jwt_calls == [
+            {
+                "user_id": 42,
+                "username": "targetuser",
+                "role": "user",
+                "expires_delta": timedelta(minutes=15),
+                "additional_claims": {"impersonated_by": 1, "impersonation": True},
+            }
+        ]
+        assert audit_calls == [
+            {
+                "actor_id": 1,
+                "target_user_id": 42,
+                "event_type": admin_impersonation.AuditEventType.AUTH_TOKEN_CREATED,
+                "category": admin_impersonation.AuditEventCategory.AUTHORIZATION,
+                "resource_type": "user_impersonation",
+                "resource_id": "42",
+                "action": "admin.impersonation.token.create",
+                "metadata": {
+                    "impersonated_by": 1,
+                    "impersonated_user_id": 42,
+                    "expires_in_minutes": 15,
+                    "impersonation": True,
+                },
+                "raise_on_failure": True,
+            }
+        ]
 
     @pytest.mark.asyncio
-    async def test_success(self):
+    async def test_success_accepts_user_model_object(self, monkeypatch):
         principal = _admin_principal()
-        mock_pool = MagicMock()
-        mock_jwt_svc = MagicMock()
-        mock_jwt_svc.create_access_token = MagicMock(return_value="mock.jwt.token")
+        jwt_calls, _audit_calls = _install_endpoint_stubs(
+            monkeypatch,
+            target_user=SimpleNamespace(
+                id=42,
+                username="targetuser",
+                is_active=True,
+                role="researcher",
+            ),
+        )
 
-        with (
-            patch(
-                "tldw_Server_API.app.core.AuthNZ.database.get_db_pool",
-                new_callable=AsyncMock,
-                return_value=mock_pool,
-            ),
-            patch(
-                "tldw_Server_API.app.core.AuthNZ.repos.users_repo.AuthnzUsersRepo.get_user_by_id",
-                new_callable=AsyncMock,
-                return_value={
-                    "id": 42,
-                    "username": "targetuser",
-                    "is_active": True,
-                    "role": "user",
-                },
-            ),
-            patch(
-                "tldw_Server_API.app.core.AuthNZ.jwt_service.get_jwt_service",
-                return_value=mock_jwt_svc,
-            ),
-        ):
-            result = await create_impersonation_token(42, principal)
+        result = await create_impersonation_token(42, principal)
 
-        assert result.token == "mock.jwt.token"
         assert result.impersonated_user_id == 42
         assert result.impersonated_by == 1
-
-        # Verify JWT was created with impersonation claims
-        mock_jwt_svc.create_access_token.assert_called_once()
-        call_kwargs = mock_jwt_svc.create_access_token.call_args
-        additional = call_kwargs.kwargs.get("additional_claims") or call_kwargs[1].get("additional_claims")
-        assert additional["impersonated_by"] == 1
-        assert additional["impersonation"] is True
+        assert jwt_calls[0]["role"] == "researcher"
 
     @pytest.mark.asyncio
-    async def test_user_not_found(self):
+    async def test_user_not_found(self, monkeypatch):
         principal = _admin_principal()
-        mock_pool = MagicMock()
+        _install_endpoint_stubs(monkeypatch, target_user=None)
 
-        with (
-            patch(
-                "tldw_Server_API.app.core.AuthNZ.database.get_db_pool",
-                new_callable=AsyncMock,
-                return_value=mock_pool,
-            ),
-            patch(
-                "tldw_Server_API.app.core.AuthNZ.repos.users_repo.AuthnzUsersRepo.get_user_by_id",
-                new_callable=AsyncMock,
-                return_value=None,
-            ),
-        ):
-            with pytest.raises(HTTPException) as exc_info:
-                await create_impersonation_token(999, principal)
-            assert exc_info.value.status_code == 404
+        with pytest.raises(HTTPException) as exc_info:
+            await create_impersonation_token(999, principal)
+        assert exc_info.value.status_code == 404
 
     @pytest.mark.asyncio
-    async def test_inactive_user_rejected(self):
+    async def test_inactive_user_rejected(self, monkeypatch):
         principal = _admin_principal()
-        mock_pool = MagicMock()
+        _install_endpoint_stubs(
+            monkeypatch,
+            target_user={
+                "id": 42,
+                "username": "inactive",
+                "is_active": False,
+                "role": "user",
+            },
+        )
 
-        with (
-            patch(
-                "tldw_Server_API.app.core.AuthNZ.database.get_db_pool",
-                new_callable=AsyncMock,
-                return_value=mock_pool,
-            ),
-            patch(
-                "tldw_Server_API.app.core.AuthNZ.repos.users_repo.AuthnzUsersRepo.get_user_by_id",
-                new_callable=AsyncMock,
-                return_value={
-                    "id": 42,
-                    "username": "inactive",
-                    "is_active": False,
-                    "role": "user",
-                },
-            ),
-        ):
-            with pytest.raises(HTTPException) as exc_info:
-                await create_impersonation_token(42, principal)
-            assert exc_info.value.status_code == 400
+        with pytest.raises(HTTPException) as exc_info:
+            await create_impersonation_token(42, principal)
+        assert exc_info.value.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_mandatory_audit_failure_returns_sanitized_503(self, monkeypatch):
+        principal = _admin_principal()
+        _install_endpoint_stubs(
+            monkeypatch,
+            target_user={
+                "id": 42,
+                "username": "targetuser",
+                "is_active": True,
+                "role": "user",
+            },
+            audit_error=MandatoryAuditWriteError("private audit database path"),
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            await create_impersonation_token(42, principal)
+
+        assert exc_info.value.status_code == 503
+        assert exc_info.value.detail == {
+            "error": {
+                "message": "Mandatory audit persistence unavailable",
+                "type": "audit_persistence_failure",
+                "code": "audit_persistence_failure",
+            }
+        }
 
     @pytest.mark.asyncio
     async def test_sanitizes_generic_failure(self, monkeypatch: pytest.MonkeyPatch):
-        from tldw_Server_API.app.api.v1.endpoints.admin import admin_impersonation
-
         principal = _admin_principal()
         logger_stub = _LoggerStub()
         monkeypatch.setattr(admin_impersonation, "logger", logger_stub)
 
-        with patch(
-            "tldw_Server_API.app.core.AuthNZ.database.get_db_pool",
-            new_callable=AsyncMock,
-            side_effect=RuntimeError("impersonation backend exploded at /private/impersonation.db"),
-        ):
-            with pytest.raises(HTTPException) as exc_info:
-                await create_impersonation_token(42, principal)
+        async def _failing_from_pool() -> None:
+            raise RuntimeError("impersonation backend exploded at /private/impersonation.db")
+
+        monkeypatch.setattr(
+            admin_impersonation,
+            "AuthnzUsersRepo",
+            SimpleNamespace(from_pool=_failing_from_pool),
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            await create_impersonation_token(42, principal)
 
         assert exc_info.value.status_code == 500
         assert exc_info.value.detail == "Impersonation token creation failed"
