@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import gzip
 import json
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -20,6 +23,9 @@ from tldw_Server_API.app.core.Jobs.operations.contracts import (
     NoTransitionReason,
     OperationOutcome,
     PreparedJobDisposition,
+)
+from tldw_Server_API.app.core.Jobs.operations.postgres.lifecycle import (
+    ensure_lease_horizon as postgres_ensure_lease_horizon,
 )
 
 psycopg = pytest.importorskip("psycopg")
@@ -334,6 +340,87 @@ def test_postgres_trusted_queued_cancel_and_capped_lease_horizon(
     assert shorter.guaranteed_seconds == 30
     assert stale.no_transition_reason is NoTransitionReason.STALE_LEASE
     assert stale.guaranteed_seconds is None
+
+
+def test_postgres_lease_horizon_uses_update_clock_after_row_lock_wait(
+    jobs_pg_dsn,
+) -> None:
+    manager = _manager(jobs_pg_dsn)
+    job = _canonical(manager, suffix="lock-delayed-horizon")
+    acquired = _acquire(manager)
+    command = EnsureLeaseHorizonCommand(
+        job_id=int(job["id"]),
+        domain="admin_webhooks",
+        queue="delivery",
+        job_type="admin_webhook_delivery",
+        expected_payload=job["payload"],
+        worker_id=acquired["worker_id"],
+        lease_id=acquired["lease_id"],
+        minimum_seconds=1,
+    )
+    with psycopg.connect(jobs_pg_dsn) as setup, setup.cursor() as cur:
+        cur.execute(
+            "UPDATE jobs SET leased_until=clock_timestamp()-interval '10 seconds' "
+            "WHERE id=%s",
+            (job["id"],),
+        )
+
+    blocker = psycopg.connect(jobs_pg_dsn)
+    executor = ThreadPoolExecutor(max_workers=1)
+    backend_ready = threading.Event()
+    worker_pid: dict[str, int] = {}
+    future = None
+    try:
+        with blocker.cursor() as cur:
+            cur.execute("SELECT pg_backend_pid()")
+            blocker_pid = int(cur.fetchone()[0])
+            cur.execute("SELECT id FROM jobs WHERE id=%s FOR UPDATE", (job["id"],))
+
+        def ensure_after_lock() -> object:
+            with psycopg.connect(jobs_pg_dsn) as ensure_conn:
+                with ensure_conn.cursor() as cur:
+                    cur.execute("SET lock_timeout = '10s'")
+                    cur.execute("SELECT pg_backend_pid()")
+                    worker_pid["value"] = int(cur.fetchone()[0])
+                    backend_ready.set()
+                return postgres_ensure_lease_horizon(
+                    ensure_conn,
+                    manager._pg_cursor,
+                    command=command,
+                )
+
+        future = executor.submit(ensure_after_lock)
+        assert backend_ready.wait(timeout=5)
+        blocked = False
+        poll_deadline = time.monotonic() + 5
+        while time.monotonic() < poll_deadline:
+            with blocker.cursor() as cur:
+                cur.execute(
+                    "SELECT %s = ANY(pg_blocking_pids(%s))",
+                    (blocker_pid, worker_pid["value"]),
+                )
+                blocked = bool(cur.fetchone()[0])
+            if blocked:
+                break
+            time.sleep(0.01)
+        assert blocked
+
+        time.sleep(1.2)
+        with blocker.cursor() as cur:
+            cur.execute("SELECT clock_timestamp()")
+            released_at = _utc(cur.fetchone()[0])
+        blocker.commit()
+        result = future.result(timeout=10)
+    finally:
+        blocker.rollback()
+        blocker.close()
+        executor.shutdown(wait=True, cancel_futures=True)
+
+    persisted = manager.get_job(int(job["id"]))
+    assert result.outcome is OperationOutcome.APPLIED
+    assert result.guaranteed_seconds == 1
+    assert _utc(result.leased_until) >= released_at + timedelta(seconds=1)
+    assert _utc(persisted["leased_until"]) == _utc(result.leased_until)
 
 
 def test_postgres_authnz_retries_do_not_quarantine_before_row_threshold(

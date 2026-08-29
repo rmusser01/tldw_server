@@ -1099,9 +1099,14 @@ async def test_invalid_prepared_renewal_configuration_fails_closed(
     ("failure_kind", "expected_error_type"),
     [
         ("huge-guarantee", "OverflowError"),
+        ("backward-monotonic", "ValueError"),
         ("nonfinite-monotonic-start", "ValueError"),
         ("nonfinite-monotonic-finish", "ValueError"),
         ("jitter-error", "RuntimeError"),
+        ("jitter-negative", "ValueError"),
+        ("jitter-above-bound", "ValueError"),
+        ("jitter-wrong-type", "ValueError"),
+        ("sleep-error", "RuntimeError"),
     ],
 )
 async def test_prepared_renewal_arithmetic_and_jitter_fail_closed_once(
@@ -1124,20 +1129,35 @@ async def test_prepared_renewal_arithmetic_and_jitter_fail_closed_once(
         manager.horizon_result = _raw_horizon_result(
             guaranteed_seconds=10**400
         )
+    elif failure_kind == "backward-monotonic":
+        ticks = iter([100.0, 99.0])
+        sdk._monotonic = ticks.__next__
     elif failure_kind == "nonfinite-monotonic-start":
         sdk._monotonic = lambda: float("nan")
     elif failure_kind == "nonfinite-monotonic-finish":
         ticks = iter([100.0, float("inf")])
         sdk._monotonic = ticks.__next__
-    else:
+    elif failure_kind == "jitter-error":
 
         def fail_jitter(_upper_bound):
             raise RuntimeError("jitter-private-secret")
 
         monkeypatch.setattr(worker_sdk_module.secrets, "randbelow", fail_jitter)
+    elif failure_kind == "jitter-negative":
+        monkeypatch.setattr(worker_sdk_module.secrets, "randbelow", lambda _upper: -1)
+    elif failure_kind == "jitter-above-bound":
+        monkeypatch.setattr(
+            worker_sdk_module.secrets,
+            "randbelow",
+            lambda upper: upper,
+        )
+    elif failure_kind == "jitter-wrong-type":
+        monkeypatch.setattr(worker_sdk_module.secrets, "randbelow", lambda _upper: True)
 
     async def record_sleep(seconds):
         sleep_calls.append(seconds)
+        if failure_kind == "sleep-error":
+            raise RuntimeError("sleep-private-secret")
         await asyncio.sleep(0)
 
     sdk._sleep = record_sleep
@@ -1157,7 +1177,9 @@ async def test_prepared_renewal_arithmetic_and_jitter_fail_closed_once(
     assert raised is None
     assert context.renewal_lost is True
     assert context.snapshot().renewal_lost is True
-    assert sleep_calls == []
+    expected_ensure_calls = 0 if failure_kind == "nonfinite-monotonic-start" else 1
+    assert len(manager.horizon_calls) == expected_ensure_calls
+    assert len(sleep_calls) == (1 if failure_kind == "sleep-error" else 0)
     assert len(records) == 1
     record = records[0]
     assert record["message"] == "Jobs prepared renewal scheduling failed"
@@ -1165,6 +1187,7 @@ async def test_prepared_renewal_arithmetic_and_jitter_fail_closed_once(
     assert record["exception"] is None
     rendered_record = repr(record)
     assert "jitter-private-secret" not in rendered_record
+    assert "sleep-private-secret" not in rendered_record
     assert "cannot convert" not in rendered_record
 
 

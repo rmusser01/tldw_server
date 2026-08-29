@@ -963,8 +963,11 @@ def ensure_lease_horizon(
                     leased_until=observed,
                 )
             cur.execute(
-                "UPDATE jobs SET leased_until=GREATEST(COALESCE(leased_until,NOW()),"
-                "NOW()+(%s || ' seconds')::interval) WHERE id=%s AND status='processing' "
+                "WITH lease_clock AS (SELECT statement_timestamp() AS database_now) "
+                "UPDATE jobs SET leased_until=GREATEST("
+                "COALESCE(leased_until,lease_clock.database_now),"
+                "lease_clock.database_now+(%s || ' seconds')::interval) "
+                "FROM lease_clock WHERE id=%s AND status='processing' "
                 "AND worker_id=%s AND lease_id=%s RETURNING leased_until",
                 (
                     command.minimum_seconds,

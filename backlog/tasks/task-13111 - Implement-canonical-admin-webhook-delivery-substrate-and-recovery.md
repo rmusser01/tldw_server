@@ -4,7 +4,7 @@ title: Implement canonical admin webhook delivery substrate and recovery
 status: In Progress
 assignee: []
 created_date: '2026-08-23 03:15'
-updated_date: '2026-08-29 01:07'
+updated_date: '2026-08-29 01:39'
 labels:
   - admin
   - webhooks
@@ -133,6 +133,10 @@ Task 3 Fix Round 1/5 started at FIX_BASE 803ae280f66e990f7b4ffdf29e31cae311d648d
 2026-08-29: Started Task 4 Fix Round 4/5 at exact clean FIX_BASE d8206d5f5a097145104b9667a8dd743183b4e5d3. Scope: fractional-precision SQLite lease guarantees; complete LeaseHorizonResult/helper state validation; and fail-closed renewal scheduling arithmetic, monotonic, and jitter isolation. Strict deterministic RED precedes production edits; PostgreSQL-required zero-skip and full worker gates remain required.
 
 2026-08-29: Completed Task 4 Fix Round 4/5 from d8206d5f5a. SQLite lease horizons now use fractional space-separated database timestamps; LeaseHorizonResult and forged helper evidence enforce the full closed matrix; prepared scheduling fail-closes all unsafe config, monotonic, guarantee, interval, and jitter operations with sticky loss and class-only warnings. RED: 32 failed, 28 passed, 166 deselected. Final worker gate: 123 passed. PostgreSQL-required contract/facade/SQLite/PostgreSQL gate: 233 passed, 0 skipped. Ruff passed six changed Python files; Bandit passed three production files; git diff --check and Python 3.10 py_compile passed. Restricted sandbox could not reach loopback, so the required PostgreSQL gate was rerun with host-loopback permission against the confirmed disposable container. Evidence: .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-4-report.md.
+
+2026-08-29: Started Task 4 Fix Round 5/5 at exact clean FIX_BASE 4d18e790955139afb48d2041dacbe92e74c98130. Scope: use a post-lock PostgreSQL UPDATE-statement clock for lease guarantees; bind finite-backward monotonic, invalid randbelow results, and ordinary async sleep failures; and prove fractional SQLite acquisition/integrity recovery at the exact deadline. Strict deterministic RED precedes production edits; PostgreSQL-required zero-skip and all mandatory gates remain required.
+
+2026-08-29: Task 4 Fix Round 5/5 complete at pre-commit tree. PostgreSQL lease horizons now use one UPDATE-statement timestamp after row-lock waits; SQLite expired-lease recovery and integrity comparisons use fractional space-separated database time; worker scheduling edge guards are explicitly bound. RED: SQLite/worker 3 failed, 9 passed, 113 deselected; PostgreSQL 1 failed, 55 deselected. Final gates: worker 128 passed; PostgreSQL-required prepared operations 234 passed, 0 skipped; SQLite recovery 35 passed. Ruff, Bandit, git diff --check, and Python 3.10 py_compile passed. Evidence: .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-4-report.md.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

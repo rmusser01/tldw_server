@@ -5971,7 +5971,8 @@ class JobManager:
             else:
                 where = [
                     "status = 'processing'",
-                    "(leased_until IS NULL OR leased_until <= DATETIME('now'))",
+                    "(leased_until IS NULL OR leased_until <= "
+                    "STRFTIME('%Y-%m-%d %H:%M:%f','now'))",
                 ]
                 params = []
                 for column, value in (
@@ -6023,7 +6024,8 @@ class JobManager:
                                     "leased_until=NULL, worker_id=NULL, lease_id=NULL, "
                                     "completion_token=NULL, acquired_at=NULL, started_at=NULL "
                                     "WHERE id=? AND status='processing' "
-                                    "AND (leased_until IS NULL OR leased_until <= DATETIME('now')) "
+                                    "AND (leased_until IS NULL OR leased_until <= "
+                                    "STRFTIME('%Y-%m-%d %H:%M:%f','now')) "
                                     "AND expired_lease_policy='requeue_no_attempt'"
                                 ),
                                 (int(row["id"]),),
@@ -6041,7 +6043,8 @@ class JobManager:
                                     "max_retries=COALESCE(max_retries, ?), available_at=NULL, "
                                     "leased_until=NULL, worker_id=NULL, lease_id=NULL, completion_token=NULL "
                                     "WHERE id=? AND status='processing' "
-                                    "AND (leased_until IS NULL OR leased_until <= DATETIME('now')) "
+                                    "AND (leased_until IS NULL OR leased_until <= "
+                                    "STRFTIME('%Y-%m-%d %H:%M:%f','now')) "
                                     "AND COALESCE(retry_count, 0) < COALESCE(max_retries, ?)"
                                 ),
                                 (_DEFAULT_MAX_RETRIES, int(row["id"]), _DEFAULT_MAX_RETRIES),
@@ -6061,7 +6064,8 @@ class JobManager:
                                     "last_error=?, error_message=?, error_code=?, completed_at=DATETIME('now'), "
                                     "leased_until=NULL, worker_id=NULL, lease_id=NULL "
                                     "WHERE id=? AND status='processing' "
-                                    "AND (leased_until IS NULL OR leased_until <= DATETIME('now')) "
+                                    "AND (leased_until IS NULL OR leased_until <= "
+                                    "STRFTIME('%Y-%m-%d %H:%M:%f','now')) "
                                     "AND COALESCE(retry_count, 0) >= COALESCE(max_retries, ?)"
                                 ),
                                 (
@@ -12254,7 +12258,11 @@ class JobManager:
                     "status <> 'processing'",
                     "(lease_id IS NOT NULL OR worker_id IS NOT NULL OR leased_until IS NOT NULL)",
                 ]
-                where_pr = ["status = 'processing'", "(leased_until IS NULL OR leased_until <= DATETIME('now'))"]
+                where_pr = [
+                    "status = 'processing'",
+                    "(leased_until IS NULL OR leased_until <= "
+                    "STRFTIME('%Y-%m-%d %H:%M:%f','now'))",
+                ]
                 params_np: list[Any] = []
                 params_pr: list[Any] = []
                 if domain:
