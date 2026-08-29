@@ -120,7 +120,21 @@ from tldw_Server_API.app.core.Workflows.adapters._registry import (
 # access for a re-exported adapter function.
 # ---------------------------------------------------------------------------
 
-_ADAPTER_CATEGORIES: tuple[str, ...] = ("audio", "content", "control", "evaluation", "integration", "knowledge", "llm", "media", "rag", "research", "text", "utility", "video")
+_ADAPTER_CATEGORIES: tuple[str, ...] = (
+    "audio",
+    "content",
+    "control",
+    "evaluation",
+    "integration",
+    "knowledge",
+    "llm",
+    "media",
+    "rag",
+    "research",
+    "text",
+    "utility",
+    "video",
+)
 
 # Re-exported adapter function name -> category module that defines it.
 _LAZY_ADAPTER_EXPORTS: dict[str, str] = {

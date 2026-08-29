@@ -198,8 +198,11 @@ class QueryAnalyzer:
 
     def __init__(self):
         """Initialize query analyzer."""
-        # Stopwords may be unavailable if download failed; fall back gracefully
+        # Stopwords may be unavailable if download failed; fall back gracefully.
+        # _has_stopwords() runs the download path (when enabled) on first use --
+        # it used to run at import, which is what made the module expensive.
         try:
+            _has_stopwords()
             self.stop_words = set(_lazy_nltk("stopwords").words('english'))
         except LookupError:
             logger.warning("NLTK stopwords not available; using minimal fallback set")
@@ -214,6 +217,8 @@ class QueryAnalyzer:
     def _safe_word_tokenize(text: str) -> list[str]:
         """Tokenize text, falling back if punkt is unavailable."""
         try:
+            # Resolves (and downloads, when enabled) punkt on first tokenization.
+            _has_punkt()
             return cast(list[str], _lazy_nltk("word_tokenize")(text))
         except LookupError:
             import re

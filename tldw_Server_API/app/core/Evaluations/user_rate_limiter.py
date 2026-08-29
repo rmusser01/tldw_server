@@ -488,7 +488,13 @@ class UserRateLimiter:
                         max_cost_per_month=row[7]
                     )
             else:
-                # Create default configuration for new user
+                # Create default configuration for new user.
+                #
+                # The insert is idempotent because this runs in a worker thread:
+                # two first-time requests for the same user can both observe no
+                # row and both reach here, and user_id is the primary key. DO
+                # NOTHING plus a re-read makes both callers converge on whichever
+                # row actually persisted instead of one raising IntegrityError.
                 config = RateLimitConfig.for_tier(UserTier.FREE)
 
                 cursor.execute("""
@@ -497,6 +503,7 @@ class UserRateLimiter:
                         evaluations_per_day, total_tokens_per_day, burst_size,
                         max_cost_per_day, max_cost_per_month
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(user_id) DO NOTHING
                 """, (
                     user_id, config.tier.value, config.evaluations_per_minute,
                     config.batch_evaluations_per_minute, config.evaluations_per_day,
@@ -504,6 +511,26 @@ class UserRateLimiter:
                     config.max_cost_per_day, config.max_cost_per_month
                 ))
                 conn.commit()
+
+                cursor.execute("""
+                    SELECT tier, evaluations_per_minute, batch_evaluations_per_minute,
+                           evaluations_per_day, total_tokens_per_day, burst_size,
+                           max_cost_per_day, max_cost_per_month
+                    FROM user_rate_limits
+                    WHERE user_id = ?
+                """, (user_id,))
+                persisted = cursor.fetchone()
+                if persisted:
+                    config = RateLimitConfig(
+                        tier=UserTier(persisted[0]),
+                        evaluations_per_minute=persisted[1],
+                        batch_evaluations_per_minute=persisted[2],
+                        evaluations_per_day=persisted[3],
+                        total_tokens_per_day=persisted[4],
+                        burst_size=persisted[5],
+                        max_cost_per_day=persisted[6],
+                        max_cost_per_month=persisted[7],
+                    )
             return config
 
         config = await self._run_db(_load)
