@@ -279,11 +279,6 @@ async def ingest_mediawiki_dump_endpoint(
     persisting results to the primary database and vector store.
     """
     media_writer = get_media_repository(db)
-    if media_writer is None:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to initialize request-scoped media repository.",
-        )
 
     return await _process_mediawiki_dump(
         form_data=form_data,
