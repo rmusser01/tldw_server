@@ -2768,6 +2768,79 @@ def test_pin_writer_uses_transactional_conversation_identity(
 
 
 @pytest.mark.integration
+def test_message_edit_acquires_message_before_conversation_lock(
+    test_client,
+    auth_headers,
+    character_db,
+    monkeypatch,
+) -> None:
+    _conversation_id, _stale, _current = _create_writer_identity_race_chat(
+        character_db,
+        with_message=True,
+    )
+    import tldw_Server_API.app.api.v1.endpoints.character_messages as messages
+
+    order: list[str] = []
+    real_resume = character_db.get_roleplay_resume_state
+
+    def record_message_lock(*_args, **_kwargs):
+        order.append("message")
+
+    def record_conversation_lock(*args, **kwargs):
+        order.append("conversation")
+        return real_resume(*args, **kwargs)
+
+    monkeypatch.setattr(
+        messages,
+        "_lock_message_for_edit",
+        record_message_lock,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        character_db,
+        "get_roleplay_resume_state",
+        record_conversation_lock,
+    )
+
+    response = test_client.put(
+        "/api/v1/messages/writer-race-message",
+        params={"expected_version": 1},
+        headers=auth_headers,
+        json={"content": "Updated in lock order"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert order[:2] == ["message", "conversation"]
+
+
+def test_postgres_message_edit_lock_uses_for_update() -> None:
+    import tldw_Server_API.app.api.v1.endpoints.character_messages as messages
+
+    class _Result:
+        @staticmethod
+        def fetchone():
+            return {"id": "message-1"}
+
+    class _Connection:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, tuple[str, ...]]] = []
+
+        def execute(self, query, params):
+            self.calls.append((query, params))
+            return _Result()
+
+    class _Database:
+        backend_type = BackendType.POSTGRESQL
+
+    conn = _Connection()
+    messages._lock_message_for_edit(_Database(), conn, "message-1")
+
+    assert len(conn.calls) == 1
+    assert "FOR UPDATE" in conn.calls[0][0]
+    assert conn.calls[0][1] == ("message-1",)
+
+
+@pytest.mark.integration
 def test_persona_overlay_reference_enforces_explicit_owner_atomically(
     test_client,
     auth_headers,
