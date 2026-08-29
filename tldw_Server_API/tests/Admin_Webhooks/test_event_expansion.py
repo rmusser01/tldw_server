@@ -40,6 +40,7 @@ from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
     EnqueueClaim,
     EventCaptureResult,
     EventInsert,
+    IdempotencyLookup,
     IdempotencyLookupKind,
     PendingJobsDisposition,
     RegistrationInsert,
@@ -53,6 +54,7 @@ from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
     WebhookRepositoryError,
     _attempt_from_row,
     _heartbeat_from_row,
+    _safe_response_metadata,
     _stored_delivery_from_row,
     _stored_event_from_row,
 )
@@ -289,6 +291,28 @@ def test_repository_record_contracts_are_closed_and_validate_invariants() -> Non
             TestAttemptReservation,
         )
     )
+
+
+@pytest.mark.unit
+def test_redelivery_replay_metadata_has_one_typed_canonical_coordinate() -> None:
+    delivery_id = canonical_uuid4("task10-redelivery-coordinate")
+    encoded, metadata = _safe_response_metadata(
+        {"redelivery_delivery_id": delivery_id}
+    )
+
+    assert encoded == f'{{"redelivery_delivery_id":"{delivery_id}"}}'
+    assert metadata == {"redelivery_delivery_id": delivery_id}
+    assert "redelivery_delivery_id" in {
+        field.name for field in fields(IdempotencyLookup)
+    }
+
+    for value in (
+        "not-a-canonical-uuid",
+        canonical_uuid4("task10-redelivery-coordinate").upper(),
+        "00000000-0000-1000-8000-000000000001",
+    ):
+        with pytest.raises(ValueError):
+            _safe_response_metadata({"redelivery_delivery_id": value})
 
 
 def test_test_attempt_completion_allows_only_terminal_no_jobs_shapes() -> None:

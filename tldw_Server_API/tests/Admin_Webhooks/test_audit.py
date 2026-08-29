@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import asdict
+from dataclasses import asdict, fields
 
 import pytest
 
@@ -18,7 +18,10 @@ from tldw_Server_API.app.core.Admin_Webhooks.audit import (
     validate_actor_principal_id,
     validate_actor_roles,
 )
-from tldw_Server_API.app.core.Admin_Webhooks.domain import WebhookErrorCode
+from tldw_Server_API.app.core.Admin_Webhooks.domain import (
+    DeliveryReasonCode,
+    WebhookErrorCode,
+)
 from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditEventCategory,
     AuditEventType,
@@ -316,3 +319,147 @@ def test_reason_codes_are_closed_enums() -> None:
 
     assert mutation.reason_code is WebhookErrorCode.REGISTRATION_LIMIT
     assert operation.reason_code is WebhookOperationalReasonCode.DATABASE_BUSY
+
+
+def _delivery_record(**overrides: object) -> object:
+    assert hasattr(audit, "DeliveryMutationAudit"), (
+        "Task 10 delivery mutation audit type is missing"
+    )
+    values: dict[str, object] = {
+        "actor_id": 7,
+        "action": "admin_webhook.redeliver",
+        "webhook_id": 41,
+        "source_delivery_id": "fe0b30b1-6c22-4fc4-82ec-6b4e59cca319",
+        "delivery_id": "6ac1e56b-49b0-44c0-86bc-25f901bbd3d5",
+        "attempt_id": None,
+        "target_hostname": "hooks.example.com",
+        "source_config_version": 2,
+        "current_config_version": 3,
+        "redelivery_to_changed_config": True,
+        "status_code": None,
+        "outcome": "accepted",
+        "request_id": "request-0123456789",
+        "reason_code": None,
+    }
+    values.update(overrides)
+    return audit.DeliveryMutationAudit(**values)
+
+
+@pytest.mark.unit
+async def test_delivery_mutation_audit_is_separate_closed_and_persisted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert hasattr(audit, "emit_mandatory_webhook_delivery_audit"), (
+        "Task 10 delivery mutation audit emitter is missing"
+    )
+    service = RecordingAuditService()
+
+    async def create(_user_id: int) -> RecordingAuditService:
+        return service
+
+    monkeypatch.setattr(audit, "_create_isolated_audit_service", create)
+    record = _delivery_record()
+
+    await audit.emit_mandatory_webhook_delivery_audit(record)
+
+    assert {item.name for item in fields(record)} == {
+        "actor_id",
+        "action",
+        "webhook_id",
+        "source_delivery_id",
+        "delivery_id",
+        "attempt_id",
+        "target_hostname",
+        "source_config_version",
+        "current_config_version",
+        "redelivery_to_changed_config",
+        "status_code",
+        "outcome",
+        "request_id",
+        "reason_code",
+    }
+    assert {item.name for item in fields(MutationAudit)} != {
+        item.name for item in fields(record)
+    }
+    event = service.events[0]
+    assert event["resource_type"] == "admin_webhook_delivery"
+    assert event["resource_id"] == "6ac1e56b-49b0-44c0-86bc-25f901bbd3d5"
+    assert event["action"] == "admin_webhook.redeliver"
+    assert event["metadata"] == {
+        "actor_id": 7,
+        "webhook_id": 41,
+        "source_delivery_id": "fe0b30b1-6c22-4fc4-82ec-6b4e59cca319",
+        "delivery_id": "6ac1e56b-49b0-44c0-86bc-25f901bbd3d5",
+        "attempt_id": None,
+        "target_hostname": "hooks.example.com",
+        "source_config_version": 2,
+        "current_config_version": 3,
+        "redelivery_to_changed_config": True,
+        "status_code": None,
+        "outcome": "accepted",
+        "request_id": "request-0123456789",
+        "reason_code": None,
+    }
+    encoded = repr({"record": record, "event": event})
+    for forbidden in (
+        "https://",
+        "/private",
+        "?token=",
+        "whsec_",
+        "payload",
+        "headers",
+        "idempotency",
+    ):
+        assert forbidden not in encoded
+
+
+@pytest.mark.unit
+def test_delivery_mutation_audit_enforces_action_specific_matrix() -> None:
+    test_record = _delivery_record(
+        action="admin_webhook.test",
+        source_delivery_id=None,
+        attempt_id="930db1f3-2a2f-4cb9-8cd9-c346e24ecea5",
+        source_config_version=None,
+        current_config_version=None,
+        redelivery_to_changed_config=None,
+        status_code=204,
+        outcome="succeeded",
+    )
+    assert test_record.reason_code is None  # type: ignore[attr-defined]
+
+    failed_test = _delivery_record(
+        action="admin_webhook.test",
+        source_delivery_id=None,
+        delivery_id="6ac1e56b-49b0-44c0-86bc-25f901bbd3d5",
+        attempt_id="930db1f3-2a2f-4cb9-8cd9-c346e24ecea5",
+        source_config_version=None,
+        current_config_version=None,
+        redelivery_to_changed_config=None,
+        status_code=503,
+        outcome="failed",
+        reason_code=DeliveryReasonCode.HTTP_SERVER_ERROR,
+    )
+    assert failed_test.reason_code is DeliveryReasonCode.HTTP_SERVER_ERROR  # type: ignore[attr-defined]
+
+    invalid = (
+        {"action": "admin_webhook.create"},
+        {"delivery_id": "not-a-canonical-uuid"},
+        {"target_hostname": "hooks.example.com/private?token=x"},
+        {"outcome": "completed"},
+        {"outcome": "accepted", "reason_code": WebhookErrorCode.NOT_FOUND},
+        {"outcome": "failed", "reason_code": None},
+        {"action": "admin_webhook.redeliver", "attempt_id": "930db1f3-2a2f-4cb9-8cd9-c346e24ecea5"},
+        {"action": "admin_webhook.test", "source_delivery_id": "fe0b30b1-6c22-4fc4-82ec-6b4e59cca319"},
+        {
+            "action": "admin_webhook.test",
+            "source_delivery_id": None,
+            "attempt_id": None,
+            "source_config_version": None,
+            "current_config_version": None,
+            "redelivery_to_changed_config": None,
+            "outcome": "accepted",
+        },
+    )
+    for overrides in invalid:
+        with pytest.raises((TypeError, ValueError)):
+            _delivery_record(**overrides)

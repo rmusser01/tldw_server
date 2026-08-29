@@ -28,6 +28,12 @@ from tldw_Server_API.tests.Admin_Webhooks.test_event_expansion import (
     exercise_task8_attempt_reservation_and_recovery_contract,
     exercise_task9_test_attempt_contract,
 )
+from tldw_Server_API.tests.Admin_Webhooks.test_redelivery_history_api import (
+    exercise_history_projection_is_set_based_and_key_independent,
+    exercise_redelivery_concurrency_and_commit_failure,
+    exercise_redelivery_preconditions_and_audit_rollback,
+    exercise_redelivery_success_exact_replay_and_malformed_coordinate,
+)
 from tldw_Server_API.tests.Admin_Webhooks.test_test_delivery import (
     exercise_commit_failure_correlated_audit,
     exercise_concurrent_exact_test_start,
@@ -241,3 +247,37 @@ async def test_sqlite_task9_commit_failure_correlated_audit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     await exercise_commit_failure_correlated_audit(delivery_repo, monkeypatch)
+
+
+@pytest.mark.unit
+async def test_sqlite_task10_history_projection_contract(
+    delivery_repo: SQLiteDeliveryRepositoryFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await exercise_history_projection_is_set_based_and_key_independent(
+        delivery_repo,
+        monkeypatch,
+    )
+
+
+@pytest.mark.unit
+async def test_sqlite_task10_redelivery_success_and_replay_contract(
+    delivery_repo: SQLiteDeliveryRepositoryFixture,
+) -> None:
+    await exercise_redelivery_success_exact_replay_and_malformed_coordinate(
+        delivery_repo
+    )
+
+
+@pytest.mark.unit
+async def test_sqlite_task10_redelivery_preconditions_and_rollback_contract(
+    delivery_repo: SQLiteDeliveryRepositoryFixture,
+) -> None:
+    await exercise_redelivery_preconditions_and_audit_rollback(delivery_repo)
+
+
+@pytest.mark.unit
+async def test_sqlite_task10_redelivery_concurrency_and_commit_failure_contract(
+    delivery_repo: SQLiteDeliveryRepositoryFixture,
+) -> None:
+    await exercise_redelivery_concurrency_and_commit_failure(delivery_repo)

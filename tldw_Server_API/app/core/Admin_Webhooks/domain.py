@@ -282,10 +282,51 @@ class WebhookDeliveryAttempt:
 
 
 @dataclass(frozen=True)
-class DeliveryHistoryPage:
-    """Bounded page of sanitized delivery history."""
+class DeliveryHistoryItem:
+    """One sanitized delivery with its ordered append-only attempts."""
 
-    items: tuple[WebhookDelivery, ...]
+    delivery: WebhookDelivery
+    event_type: str
+    completed_after_config_change: bool
+    attempts: tuple[WebhookDeliveryAttempt, ...]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.delivery, WebhookDelivery):
+            raise TypeError("history delivery is invalid")
+        if not isinstance(self.event_type, str) or not 1 <= len(self.event_type) <= 64:
+            raise ValueError("history event type is invalid")
+        if not isinstance(self.completed_after_config_change, bool):
+            raise TypeError("history configuration-change state is invalid")
+        if not isinstance(self.attempts, tuple):
+            raise TypeError("history attempts are invalid")
+        numbers = tuple(attempt.attempt_number for attempt in self.attempts)
+        if (
+            any(
+                not isinstance(attempt, WebhookDeliveryAttempt)
+                or attempt.delivery_id != self.delivery.id
+                for attempt in self.attempts
+            )
+            or numbers != tuple(sorted(numbers))
+            or len(set(numbers)) != len(numbers)
+        ):
+            raise ValueError("history attempts are invalid")
+
+    @property
+    def id(self) -> str:
+        """Return the delivery ID for legacy internal callers."""
+        return self.delivery.id
+
+    @property
+    def kind(self) -> DeliveryKind:
+        """Return the delivery kind for legacy internal callers."""
+        return self.delivery.kind
+
+
+@dataclass(frozen=True)
+class DeliveryHistoryPage:
+    """Bounded page of sanitized delivery-history items."""
+
+    items: tuple[DeliveryHistoryItem, ...]
     total: int
     limit: int
     offset: int

@@ -4,7 +4,7 @@ title: Implement canonical admin webhook delivery substrate and recovery
 status: In Progress
 assignee: []
 created_date: '2026-08-23 03:15'
-updated_date: '2026-08-29 20:50'
+updated_date: '2026-08-29 21:53'
 labels:
   - admin
   - webhooks
@@ -187,6 +187,10 @@ Task 9 started at c32e1d5153. Preflight expanded scope to exact lookup-only test
 2026-08-29: Task 9 Fix Round 1 complete from exact FIX_BASE 71cd4495549ca844b2b4090c728d05e4774d782e. Added dual-backend post-start 204/retryable-HTTP/retryable-network coverage across semantic config, signing-secret, and deletion races; pure post-start rekey remains non-semantic while every protected pre-start/rekey/active-primary race rejects before I/O; stale recovery now commits before an independent late completion loses; accepted-audit transaction-exit failure emits a correlated bounded failed audit without masking the original error. RED on both backends: 1 failed, 3 passed, 18 deselected, zero skips. Final PostgreSQL-required regression gate: 260 passed, 0 skipped, 311 warnings in 156.65s. Ruff passed five changed Python files; Bandit found zero issues in the changed production module; Python 3.10 compile, no-Jobs/public/runtime/schema/sensitive scans, and diff check passed. Evidence: .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-9-fix-1-report.md.
 
 2026-08-29: Task 9 closed at 30ca1f3958525f6f4d859990288d5d0521651749 after one fix round and clean independent re-review. No Critical, Important, or Minor findings remained. Final PostgreSQL-required gate: 260 passed, 0 skipped; independent focused SQLite/PostgreSQL reruns: 4 passed each, 0 skipped. Re-review: .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-9-re-review-1.md.
+
+2026-08-29: Started Task 10 at exact BASE db91e7fb46c7d467b61c41de6fedf26ead11a992. Preflight expanded the API-only scope to a set-based sanitized history projection (event type, attempts, completed-after-config-change), typed manual-redelivery replay coordinate in existing idempotency metadata, and a separate closed test/redelivery audit contract. Exact replay is lookup-first and keyless with one no-op audit; accepted and commit-failure audit semantics are bound. No schema, direct Jobs admission, runtime activation, producer, UI, or legacy removal is authorized. Strict TDD and required PostgreSQL zero-skip proof apply.
+
+Task 10 complete: exposed canonical persisted test, atomic manual redelivery, and key-independent sanitized history APIs with strict ETag/idempotency/audit/OpenAPI contracts. Verified 125 required SQLite/PostgreSQL tests (zero skips), 24 event-expansion regressions, OpenAPI drift, Ruff, Python 3.10, reviewed Bandit baseline, no-leak/scope scans, and diff checks; no PR 3 UI/producer, schema/migration, direct Jobs admission, legacy import, or Task 11 runtime work included.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

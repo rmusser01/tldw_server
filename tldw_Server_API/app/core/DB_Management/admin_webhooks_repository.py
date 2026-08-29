@@ -28,6 +28,7 @@ from tldw_Server_API.app.core.Admin_Webhooks.delivery import (
 )
 from tldw_Server_API.app.core.Admin_Webhooks.domain import (
     AttemptState,
+    DeliveryHistoryItem,
     DeliveryHistoryPage,
     DeliveryKind,
     DeliveryReasonCode,
@@ -72,6 +73,7 @@ _SAFE_METADATA_KEYS = frozenset(
         "completed_after_config_change",
         "latency_ms",
         "reason_code",
+        "redelivery_delivery_id",
         "redelivery_to_changed_config",
         "result_kind",
         "retry_after_seconds",
@@ -553,6 +555,7 @@ class IdempotencyLookup:
     replay_secret: ProtectedValue | None = None
     test_delivery_id: str | None = None
     test_attempt_id: str | None = None
+    redelivery_delivery_id: str | None = None
     response_status: int | None = None
     response_metadata: Mapping[str, object] | None = None
     resource_superseded: bool = False
@@ -1547,6 +1550,8 @@ def _safe_response_metadata(
     for key, item in value.items():
         if key not in _SAFE_METADATA_KEYS:
             raise ValueError("response metadata key is not allowed")
+        if key == "redelivery_delivery_id":
+            item = _canonical_uuid4(item, field="redelivery delivery ID")
         if isinstance(item, str):
             if _SAFE_METADATA_STRING.fullmatch(item) is None:
                 raise ValueError("response metadata string is invalid")
@@ -1899,6 +1904,18 @@ class AdminWebhookRepository:
                 connection,
                 is_postgres=self.is_postgres,
             ).get_delivery_for_registration(webhook_id, delivery_id)
+
+    async def get_delivery_history_item(
+        self,
+        webhook_id: int,
+        delivery_id: str,
+    ) -> DeliveryHistoryItem | None:
+        """Load one sanitized delivery and its attempts without protected data."""
+        async with self._read_connection() as connection:
+            return await AdminWebhookUnitOfWork(
+                connection,
+                is_postgres=self.is_postgres,
+            ).get_delivery_history_item(webhook_id, delivery_id)
 
     async def get_delivery_bundle(self, delivery_id: str) -> DeliveryBundle | None:
         async with self._read_connection() as connection:
@@ -2533,27 +2550,67 @@ class AdminWebhookUnitOfWork(_ConnectionAdapter):
         limit: int,
         offset: int = 0,
     ) -> DeliveryHistoryPage:
-        if not 1 <= limit <= _MAX_PAGE_SIZE:
-            raise ValueError(f"limit must be between 1 and {_MAX_PAGE_SIZE}")
-        if not 0 <= offset <= 10_000:
-            raise ValueError("offset must be between 0 and 10000")
-        count = await self._fetchrow(
-            "SELECT COUNT(*) AS count FROM admin_webhook_deliveries WHERE webhook_id = ?",
+        if not 1 <= limit <= 100:
+            raise ValueError("limit must be between 1 and 100")
+        if not 0 <= offset <= 1_000:
+            raise ValueError("offset must be between 0 and 1000")
+        registration = await self._fetchrow(
+            """
+            SELECT registration.id AS webhook_id,
+                   (SELECT COUNT(*) FROM admin_webhook_deliveries AS counted
+                    WHERE counted.webhook_id = registration.id) AS delivery_count
+            FROM admin_webhook_registrations AS registration
+            WHERE registration.id = ?
+            """,
             (webhook_id,),
         )
+        if registration is None:
+            raise WebhookRepositoryError(WebhookRepositoryErrorCode.NOT_FOUND)
         rows = await self._fetch(
-            f"""
-            SELECT {_DELIVERY_COLUMNS}
-            FROM admin_webhook_deliveries
-            WHERE webhook_id = ?
-            ORDER BY created_at DESC, id DESC
+            """
+            SELECT delivery.*, event.event_type AS history_event_type
+            FROM admin_webhook_deliveries AS delivery
+            JOIN admin_webhook_events AS event ON event.id = delivery.event_id
+            WHERE delivery.webhook_id = ?
+            ORDER BY delivery.created_at DESC, delivery.id DESC
             LIMIT ? OFFSET ?
             """,
             (webhook_id, limit, offset),
         )
+        deliveries = tuple(_stored_delivery_from_row(row) for row in rows)
+        delivery_ids = tuple(item.delivery.id for item in deliveries)
+        attempts_by_delivery: dict[str, list[WebhookDeliveryAttempt]] = {
+            delivery_id: [] for delivery_id in delivery_ids
+        }
+        if delivery_ids:
+            placeholders = ", ".join("?" for _delivery_id in delivery_ids)
+            attempt_rows = await self._fetch(
+                f"""
+                SELECT {_ATTEMPT_COLUMNS}
+                FROM admin_webhook_delivery_attempts AS attempt
+                WHERE attempt.delivery_id IN ({placeholders})
+                ORDER BY attempt.delivery_id ASC,
+                         attempt.attempt_number ASC,
+                         attempt.id ASC
+                """,  # noqa: S608 - placeholders are generated from a bounded ID tuple
+                delivery_ids,
+            )
+            for attempt_row in attempt_rows:
+                attempt = _attempt_from_row(attempt_row)
+                attempts_by_delivery[attempt.delivery_id].append(attempt)
         return DeliveryHistoryPage(
-            items=tuple(_stored_delivery_from_row(row).delivery for row in rows),
-            total=int(count["count"]) if count is not None else 0,
+            items=tuple(
+                DeliveryHistoryItem(
+                    delivery=stored.delivery,
+                    event_type=str(row["history_event_type"]),
+                    completed_after_config_change=(
+                        stored.completed_after_config_change
+                    ),
+                    attempts=tuple(attempts_by_delivery[stored.delivery.id]),
+                )
+                for row, stored in zip(rows, deliveries, strict=True)
+            ),
+            total=int(registration["delivery_count"]),
             limit=limit,
             offset=offset,
         )
@@ -2573,6 +2630,32 @@ class AdminWebhookUnitOfWork(_ConnectionAdapter):
             (webhook_id, delivery_id),
         )
         return _stored_delivery_from_row(row).delivery if row is not None else None
+
+    async def get_delivery_history_item(
+        self,
+        webhook_id: int,
+        delivery_id: str,
+    ) -> DeliveryHistoryItem | None:
+        _canonical_uuid4(delivery_id, field="delivery ID")
+        row = await self._fetchrow(
+            """
+            SELECT delivery.*, event.event_type AS history_event_type
+            FROM admin_webhook_deliveries AS delivery
+            JOIN admin_webhook_events AS event ON event.id = delivery.event_id
+            WHERE delivery.webhook_id = ? AND delivery.id = ?
+            """,
+            (webhook_id, delivery_id),
+        )
+        if row is None:
+            return None
+        stored = _stored_delivery_from_row(row)
+        attempts = await self.list_delivery_attempts(webhook_id, delivery_id)
+        return DeliveryHistoryItem(
+            delivery=stored.delivery,
+            event_type=str(row["history_event_type"]),
+            completed_after_config_change=stored.completed_after_config_change,
+            attempts=attempts,
+        )
 
     async def get_delivery_bundle(self, delivery_id: str) -> DeliveryBundle | None:
         _canonical_uuid4(delivery_id, field="delivery ID")
@@ -5516,9 +5599,20 @@ class AdminWebhookUnitOfWork(_ConnectionAdapter):
             raise ValueError("persisted test replay coordinates are invalid")
         metadata: Mapping[str, object] | None = None
         if row["response_metadata_json"] is not None:
-            metadata = MappingProxyType(
+            _encoded, metadata = _safe_response_metadata(
                 _strict_json_object(row["response_metadata_json"])
             )
+        redelivery_delivery_id = (
+            str(metadata["redelivery_delivery_id"])
+            if metadata is not None
+            and "redelivery_delivery_id" in metadata
+            else None
+        )
+        if scope.operation == "redeliver":
+            if test_delivery_id is not None or test_attempt_id is not None:
+                raise ValueError("persisted redelivery replay coordinates are invalid")
+        elif redelivery_delivery_id is not None:
+            raise ValueError("persisted redelivery replay coordinates are invalid")
         response_status = (
             int(row["response_status"])
             if row["response_status"] is not None
@@ -5529,6 +5623,7 @@ class AdminWebhookUnitOfWork(_ConnectionAdapter):
                 kind=IdempotencyLookupKind.IN_PROGRESS,
                 test_delivery_id=test_delivery_id,
                 test_attempt_id=test_attempt_id,
+                redelivery_delivery_id=redelivery_delivery_id,
                 response_status=response_status,
                 response_metadata=metadata,
                 expires_at=_parse_datetime(row["expires_at"]),
@@ -5563,6 +5658,7 @@ class AdminWebhookUnitOfWork(_ConnectionAdapter):
             replay_secret=replay_secret,
             test_delivery_id=test_delivery_id,
             test_attempt_id=test_attempt_id,
+            redelivery_delivery_id=redelivery_delivery_id,
             response_status=response_status,
             response_metadata=metadata,
             resource_superseded=superseded,

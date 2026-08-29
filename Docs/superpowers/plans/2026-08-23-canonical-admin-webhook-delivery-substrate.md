@@ -1316,11 +1316,18 @@ passes each, with no Critical, Important, or Minor findings.
 ### Task 10: Expose Manual Redelivery, Test, History, And Audit APIs
 
 **Files:**
+- Modify: `tldw_Server_API/app/core/Admin_Webhooks/audit.py`
 - Modify: `tldw_Server_API/app/core/Admin_Webhooks/delivery.py`
+- Modify: `tldw_Server_API/app/core/Admin_Webhooks/domain.py`
+- Modify: `tldw_Server_API/app/core/DB_Management/admin_webhooks_repository.py`
 - Modify: `tldw_Server_API/app/api/v1/schemas/admin_webhooks.py`
 - Modify: `tldw_Server_API/app/api/v1/endpoints/admin/admin_webhooks.py`
 - Create: `tldw_Server_API/tests/Admin_Webhooks/test_redelivery_history_api.py`
+- Modify: `tldw_Server_API/tests/Admin_Webhooks/test_audit.py`
 - Modify: `tldw_Server_API/tests/Admin_Webhooks/test_api.py`
+- Modify: `tldw_Server_API/tests/Admin_Webhooks/test_event_expansion.py`
+- Modify: `tldw_Server_API/tests/Admin_Webhooks/test_delivery_repository_sqlite.py`
+- Modify: `tldw_Server_API/tests/Admin_Webhooks/test_delivery_repository_postgres.py`
 - Modify: `tldw_Server_API/tests/Admin_Webhooks/test_openapi.py`
 - Modify: `apps/tldw-frontend/lib/api/openapi.fingerprint.json`
 
@@ -1328,7 +1335,52 @@ passes each, with no Critical, Important, or Minor findings.
 - Consumes: current registration ETag/config version, historical delivery/event, idempotency key, platform-admin principal, mandatory mutation audit, delivery service, and read-audit adapter.
 - Produces: canonical `GET /{webhook_id}/deliveries`, `POST /{webhook_id}/test`, and `POST /{webhook_id}/deliveries/{delivery_id}/redeliver` contracts.
 
-- [ ] **Step 1: Write schema RED tests**
+**Preflight ruling:** The original file list omitted repository/domain history
+projection work and a closed audit contract required by the approved API. Add a
+dedicated sanitized history item containing `WebhookDelivery`, bounded event
+type, `completed_after_config_change`, and ordered attempts. Page deliveries
+newest-first, then load attempts for all page delivery IDs in one set-based
+query; per-delivery attempt queries are forbidden. Count, page, and attempt
+reads remain bounded and backend-neutral. They never load or decrypt event
+bodies, registration targets, or secrets, and history remains available when
+the key ring is unavailable and for a retained soft-deleted registration. A
+missing registration returns the same closed 404 without disclosing whether
+unrelated delivery IDs exist.
+
+Manual redelivery reuses the existing idempotency table without a migration.
+Add a closed `redelivery_delivery_id` response-metadata key, validate it as a
+canonical UUID when decoding, and project it through a typed replay field.
+The scoped `delivery_id` remains the source delivery ID; the paired test
+coordinate columns remain test-only. Exact replay/conflict lookup occurs before
+migration, key, current-registration, source-delivery, event-decryption, and
+policy checks. A valid replay loads the exact created manual delivery through
+the stored replay coordinate, verifies webhook/source linkage, emits one
+mandatory `no_op` audit (never a second `accepted` audit), and returns without
+decryption, first-activity rewrite, or Jobs work. Malformed or missing persisted
+replay coordinates fail closed as delivery unavailable.
+
+Do not widen `MutationAudit` with optional unrelated fields. Add a separate
+closed typed delivery-mutation audit record and mandatory emitter for exactly
+`admin_webhook.test` and `admin_webhook.redeliver`. Its action-specific field
+matrix permits only bounded actor/request/webhook IDs, canonical source/new
+delivery and test-attempt IDs when allocated, bounded target hostname when
+known, source/current config versions, changed-config boolean, bounded status,
+closed outcome, and closed domain/delivery reason. Accepted and test-completion
+records require their exact allocated coordinates; an early denial/failure may
+omit coordinates that were never allocated. Bridge Task 9's internal test audit
+through this emitter. After actor establishment, a deterministic service
+failure before any internal audit emits exactly one denied/failed record;
+framework validation/auth failures before actor establishment do not fabricate
+one. An accepted audit is pre-commit. If commit fails after accepted, attempt
+one correlated failed audit with the same coordinates and preserve the original
+error if that follow-up fails. No URL/path/query, event body, secret, receiver
+content, header map, free text, exception text, key/Jobs/test token, or
+idempotency material is accepted by the audit type or emitter.
+
+No schema/migration, direct Jobs admission, PR 3 producer/UI/legacy removal, or
+Task 11 runtime activation is authorized by this task.
+
+- [x] **Step 1: Write schema RED tests**
 
 Add strict Pydantic models:
 
@@ -1339,20 +1391,62 @@ WebhookRedeliveryRequest(delivery_config_version, confirm_changed_configuration)
 WebhookRedeliveryResponse(delivery, idempotent_replay)
 WebhookDeliveryAttemptResponse
 WebhookDeliveryResponse
+WebhookDeliveryHistoryItemResponse(delivery, attempts)
 WebhookDeliveryListResponse(items, total, limit, offset)
 ```
 
-Forbid unknown/null fields. IDs and reason codes are bounded. Delivery responses contain event ID/type but never event data/ciphertext, target URL/display path, secret/key IDs, signature, response body, ordinary response headers, Jobs lease/token, or idempotency material. Attempt responses expose only sequence/state/status/latency/reason/retry delay/timestamps.
+Request bodies use strict fields, forbid extras and explicit null, and do not
+coerce booleans/integers. Response models forbid extras and permit null only for
+semantically absent terminal/attempt evidence. IDs, event types, and reason
+codes are bounded. Delivery responses contain event ID/type, kind/state,
+delivery/secret version snapshots, attempt count, bounded outcome metadata,
+expiry/timestamps, redelivery linkage, and
+`completed_after_config_change`. History items add only ordered attempts.
+Delivery responses never contain event data/ciphertext/key IDs, target URL or
+display/path/query, secret/signature/request headers, response body or ordinary
+response headers, Jobs IDs/leases/tokens, test tokens, or idempotency material.
+Attempt responses expose only ID, sequence/state, request-timeout snapshot,
+status/latency/reason/requested retry delay, and start/finish timestamps.
 
-- [ ] **Step 2: Write manual-redelivery service RED tests**
+- [x] **Step 2: Write manual-redelivery service RED tests**
 
-Require active non-deleted current registration, available key, completed migration, strong ETag, reviewed current delivery-config version, source delivery belonging to that registration, and an existing decryptable historical event. Create a new `kind=manual` delivery with current config/secret versions, same event ID, new delivery ID, `redelivery_of_id`, pending state, 72-hour expiry, completed idempotency record, and `mark_first_canonical_activity("delivery_attempt")` in one transaction. This marker intentionally closes the structural legacy-restore window at accepted redelivery creation while retaining the schema's existing closed activity categories; it does not insert an attempt row before Jobs acquisition.
+Require active non-deleted current registration, available key, completed
+migration, strong ETag, reviewed current delivery-config version, source
+delivery belonging to that registration, and an existing decryptable historical
+event. New work claims idempotency, locks migration/key state and then the
+current registration, revalidates revision/config/activity and source ownership,
+loads the source event under the same transaction, and verifies historical event
+decryption/integrity without rewriting it. Create a new `kind=manual` delivery
+with current config/secret versions, same event ID, new delivery ID,
+`redelivery_of_id`, pending state, 72-hour expiry, typed replay coordinate,
+completed idempotency record, and
+`mark_first_canonical_activity("delivery_attempt")` in that transaction. This
+marker intentionally closes the structural legacy-restore window at accepted
+redelivery creation while retaining the schema's existing closed activity
+categories; it does not insert an attempt row before Jobs acquisition.
 
-When original and current config versions differ, `confirm_changed_configuration` must be true or return a stable conflict. Audit sets `redelivery_to_changed_config=true` and records old/current versions, IDs, actor, outcome, and request ID only. Exact replay precedes current preconditions, never creates another row, and does not rewrite the activity marker. Same key/different source/config/confirmation conflicts and rejected preconditions leave the marker unchanged.
+When original and current delivery-config versions differ,
+`confirm_changed_configuration` must be true or return
+`428 admin_webhook_redelivery_confirmation_required`. A secret-version-only
+change does not trigger this confirmation. Audit records the typed
+`redelivery_to_changed_config` fact and source/current versions. Exact replay
+follows the preflight ruling above. Same key/different source/config/
+confirmation/conditional ETag conflicts, and rejected preconditions leave the
+delivery, idempotency claim, and activity marker unchanged. Concurrency creates
+one row. An accepted-audit failure rolls back all AuthNZ writes. A commit failure
+after accepted attempts one correlated failed audit without masking the original
+failure. The service and route never call Jobs; the existing reconciler later
+admits the pending row.
 
-- [ ] **Step 3: Write route/auth/audit/error RED tests**
+- [x] **Step 3: Write route/auth/audit/error RED tests**
 
-Assert platform-admin authorization on all three routes and numeric user-backed principal for test/redelivery. History read uses bounded best-effort access audit; test/redelivery use mandatory mutation audit before start/create commit. Validate 401/403/404/409/412/422/428/503 fixed envelopes, `Cache-Control: no-store`, normalized `X-Request-ID`, no secret canaries, and no default FastAPI validation body.
+Assert platform-admin authorization on all three routes and numeric user-backed
+principal for test/redelivery. History reads retained tombstones without key
+material and use bounded best-effort access audit with result count;
+test/redelivery use the mandatory delivery-mutation audit bridge. Validate
+401/403/404/409/412/422/428/429/500/503 fixed envelopes,
+`Cache-Control: no-store`, normalized `X-Request-ID`, no secret canaries, and no
+default FastAPI validation body.
 
 Route semantics:
 
@@ -1361,23 +1455,43 @@ Route semantics:
 - accepted redelivery returns 202 and the pending/queued delivery metadata;
 - source delivery not owned by the path registration returns the same closed not-found response as a missing delivery;
 - test/redelivery require `Idempotency-Key`; both require `If-Match` and reviewed version in body.
+- test `Retry-After` is present only for an in-progress replay and is a bounded decimal value;
+- history does not require a numeric user principal, migration key, or active registration.
 
-Declare static `/catalog` and `/status`, then collection routes, then nested `/deliveries` and action routes, then `/{webhook_id}`. OpenAPI advertises only canonical error envelopes and no arbitrary payload/header inputs.
+Declare static `/catalog` and `/status`, then collection routes, then nested
+`/deliveries` and action routes, then `/{webhook_id}`. Add the existing Task 10
+error codes to the closed route map. OpenAPI advertises only canonical error
+envelopes and no arbitrary payload/header inputs. Production composition uses
+the application-scoped AuthNZ pool, environment-validated settings, loaded key
+ring, UUID/token factories, UTC clock, and the same status-only peer-verified
+`DeliveryAttemptExecutor` implementation as the worker. It remains dependency-
+overrideable in tests, imports no legacy webhook service, and starts no worker.
 
-- [ ] **Step 4: Run RED**
+- [x] **Step 4: Run RED**
 
 ```bash
-RUN_JOBS=1 PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
+RUN_JOBS=1 TLDW_TEST_POSTGRES_REQUIRED=1 PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
+  tldw_Server_API/tests/Admin_Webhooks/test_delivery_repository_sqlite.py \
+  tldw_Server_API/tests/Admin_Webhooks/test_delivery_repository_postgres.py \
+  tldw_Server_API/tests/Admin_Webhooks/test_audit.py \
   tldw_Server_API/tests/Admin_Webhooks/test_redelivery_history_api.py \
   tldw_Server_API/tests/Admin_Webhooks/test_api.py \
   tldw_Server_API/tests/Admin_Webhooks/test_openapi.py
 ```
 
-- [ ] **Step 5: Implement service commands and thin route composition**
+- [x] **Step 5: Implement service commands and thin route composition**
 
-Routes parse/sanitize, authorize, build commands/audit sinks, call the service, serialize explicit response models, and preserve ETags/no-store headers. They contain no SQL or HTTP. Use FastAPI dependency injection for service/executor fakes; production composition uses the application-scoped AuthNZ pool and key ring.
+Implement the dedicated domain history item, set-based repository history read,
+typed redelivery replay coordinate, atomic manual-redelivery command/result,
+closed delivery-mutation audit record/emitter, Task 9 test-audit bridge, and thin
+route composition. Routes parse/sanitize, authorize, build commands/audit sinks,
+call the service, serialize explicit response models, and preserve no-store/
+request-ID/Retry-After headers. They contain no SQL or outbound HTTP. Use
+FastAPI dependency injection for service/executor fakes; production composition
+uses the application-scoped AuthNZ pool and key ring. Do not add a migration or
+touch Jobs admission/runtime wiring.
 
-- [ ] **Step 6: Refresh and review OpenAPI fingerprint**
+- [x] **Step 6: Refresh and review OpenAPI fingerprint**
 
 ```bash
 make openapi-fingerprint
@@ -1385,32 +1499,71 @@ make openapi-drift-check
 git diff -- apps/tldw-frontend/lib/api/openapi.fingerprint.json
 ```
 
-Expected: only the three reviewed PR 2 route families and expanded status/delivery schemas differ. No durable producer or legacy-route removal appears.
+Expected: only the three reviewed PR 2 route families and their delivery/audit
+schemas differ. Status, durable producers, runtime activation, and legacy routes
+remain unchanged.
 
-- [ ] **Step 7: Run GREEN and leak assertions**
+- [x] **Step 7: Run GREEN and leak assertions**
 
 ```bash
-RUN_JOBS=1 PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
+RUN_JOBS=1 TLDW_TEST_POSTGRES_REQUIRED=1 PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
+  tldw_Server_API/tests/Admin_Webhooks/test_delivery_repository_sqlite.py \
+  tldw_Server_API/tests/Admin_Webhooks/test_delivery_repository_postgres.py \
+  tldw_Server_API/tests/Admin_Webhooks/test_audit.py \
   tldw_Server_API/tests/Admin_Webhooks/test_test_delivery.py \
   tldw_Server_API/tests/Admin_Webhooks/test_redelivery_history_api.py \
   tldw_Server_API/tests/Admin_Webhooks/test_api.py \
   tldw_Server_API/tests/Admin_Webhooks/test_openapi.py
 ../../.venv/bin/ruff check \
+  tldw_Server_API/app/core/Admin_Webhooks/audit.py \
   tldw_Server_API/app/core/Admin_Webhooks/delivery.py \
+  tldw_Server_API/app/core/Admin_Webhooks/domain.py \
+  tldw_Server_API/app/core/DB_Management/admin_webhooks_repository.py \
   tldw_Server_API/app/api/v1/schemas/admin_webhooks.py \
   tldw_Server_API/app/api/v1/endpoints/admin/admin_webhooks.py
+../../.venv/bin/python -m bandit -q \
+  tldw_Server_API/app/core/Admin_Webhooks/audit.py \
+  tldw_Server_API/app/core/Admin_Webhooks/delivery.py \
+  tldw_Server_API/app/core/DB_Management/admin_webhooks_repository.py \
+  tldw_Server_API/app/api/v1/endpoints/admin/admin_webhooks.py
+/Users/macbook-dev/.local/bin/python3.10 -m py_compile \
+  tldw_Server_API/app/core/Admin_Webhooks/audit.py \
+  tldw_Server_API/app/core/Admin_Webhooks/delivery.py \
+  tldw_Server_API/app/core/Admin_Webhooks/domain.py \
+  tldw_Server_API/app/core/DB_Management/admin_webhooks_repository.py \
+  tldw_Server_API/app/api/v1/schemas/admin_webhooks.py \
+  tldw_Server_API/app/api/v1/endpoints/admin/admin_webhooks.py
+if rg -n "JobManager|admit_job|create_job|jobs_webhooks_task|admin_webhook_delivery_runtime" \
+  tldw_Server_API/app/core/Admin_Webhooks/delivery.py \
+  tldw_Server_API/app/api/v1/endpoints/admin/admin_webhooks.py; then exit 1; fi
+git diff --check
 ```
 
-- [ ] **Step 8: Update the task and commit**
+The required PostgreSQL selection must run with zero skips. Add explicit
+SQLite/PostgreSQL proof for set-based history attempts, exact redelivery replay,
+concurrency, changed-config confirmation, foreign source, rollback, accepted-
+audit/commit-failure behavior, keyless replay/history, malformed replay
+coordinates, and zero direct Jobs work. Review warning provenance and run
+no-leak scans over schemas, OpenAPI, audit metadata, repr/log surfaces, and API
+responses.
+
+- [x] **Step 8: Update the task and commit**
 
 ```bash
 backlog task edit 13111 --append-notes "Exposed canonical persisted test, manual redelivery, and sanitized history APIs with ETag/idempotency/audit/OpenAPI contracts; no PR 3 UI or producer work included."
 git add \
+  tldw_Server_API/app/core/Admin_Webhooks/audit.py \
   tldw_Server_API/app/core/Admin_Webhooks/delivery.py \
+  tldw_Server_API/app/core/Admin_Webhooks/domain.py \
+  tldw_Server_API/app/core/DB_Management/admin_webhooks_repository.py \
   tldw_Server_API/app/api/v1/schemas/admin_webhooks.py \
   tldw_Server_API/app/api/v1/endpoints/admin/admin_webhooks.py \
   tldw_Server_API/tests/Admin_Webhooks/test_redelivery_history_api.py \
+  tldw_Server_API/tests/Admin_Webhooks/test_audit.py \
   tldw_Server_API/tests/Admin_Webhooks/test_api.py \
+  tldw_Server_API/tests/Admin_Webhooks/test_event_expansion.py \
+  tldw_Server_API/tests/Admin_Webhooks/test_delivery_repository_sqlite.py \
+  tldw_Server_API/tests/Admin_Webhooks/test_delivery_repository_postgres.py \
   tldw_Server_API/tests/Admin_Webhooks/test_openapi.py \
   apps/tldw-frontend/lib/api/openapi.fingerprint.json \
   "backlog/tasks/task-13111 - Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md"

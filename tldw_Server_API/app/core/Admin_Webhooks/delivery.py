@@ -6,19 +6,23 @@ import hmac
 import json
 import logging
 import math
+import os
 import re
+import secrets
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Literal, TypeAlias
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from tldw_Server_API.app.core.Audit.unified_audit_service import MandatoryAuditWriteError
 
+from .audit import DeliveryMutationAudit, DeliveryMutationAuditSink
 from .catalog import EVENT_API_VERSION, EVENT_CATALOG
 from .crypto import EVENT_BODY_MAX_BYTES, WebhookKeyError, WebhookKeyRing, WebhookKeyRingLoadResult
 from .domain import (
     AttemptState,
+    DeliveryHistoryPage,
     DeliveryKind,
     DeliveryReasonCode,
     DeliveryState,
@@ -209,7 +213,7 @@ class TestWebhookCommand:
 
     actor_id: int
     webhook_id: int
-    if_match: str = field(repr=False)
+    if_match: str | None = field(repr=False)
     delivery_config_version: int
     idempotency_key: str = field(repr=False)
     request_id: str
@@ -222,7 +226,7 @@ class TestWebhookCommand:
         ):
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
                 raise ValueError(f"{field_name} is invalid")
-        if not isinstance(self.if_match, str):
+        if self.if_match is not None and not isinstance(self.if_match, str):
             raise ValueError("registration ETag is invalid")
         if not isinstance(self.idempotency_key, str):
             raise ValueError("idempotency key is invalid")
@@ -239,6 +243,7 @@ class TestWebhookResult:
     idempotent_replay: bool
     in_progress: bool
     retry_after_seconds: int | None
+    completed_after_config_change: bool
 
     def __post_init__(self) -> None:
         if (
@@ -263,6 +268,8 @@ class TestWebhookResult:
             _TEST_REPLAY_RETRY_SECONDS if self.in_progress else None
         ):
             raise ValueError("test retry guidance is invalid")
+        if not isinstance(self.completed_after_config_change, bool):
+            raise TypeError("test configuration-change state is invalid")
 
 
 @dataclass(frozen=True)
@@ -273,6 +280,7 @@ class TestWebhookAudit:
     webhook_id: int
     delivery_id: str
     attempt_id: str
+    target_hostname: str
     request_id: str
     outcome: TestWebhookOutcome
     status_code: int | None
@@ -287,6 +295,11 @@ class TestWebhookAudit:
                 raise ValueError(f"{field_name} is invalid")
         _canonical_uuid4(self.delivery_id, field_name="delivery ID")
         _canonical_uuid4(self.attempt_id, field_name="attempt ID")
+        _bounded_text(
+            self.target_hostname,
+            field_name="target hostname",
+            maximum=253,
+        )
         if not isinstance(self.request_id, str) or _SAFE_ID.fullmatch(self.request_id) is None:
             raise ValueError("request ID is invalid")
         if self.outcome not in {"accepted", "succeeded", "failed"}:
@@ -305,6 +318,62 @@ class TestWebhookAudit:
 
 
 TestWebhookAuditSink: TypeAlias = Callable[[TestWebhookAudit], Awaitable[None]]
+
+
+@dataclass(frozen=True)
+class RedeliverWebhookCommand:
+    """Internal inputs for one idempotent manual redelivery."""
+
+    actor_id: int
+    webhook_id: int
+    source_delivery_id: str
+    if_match: str | None = field(repr=False)
+    delivery_config_version: int
+    confirm_changed_configuration: bool
+    idempotency_key: str = field(repr=False)
+    request_id: str
+
+    def __post_init__(self) -> None:
+        for value, field_name in (
+            (self.actor_id, "actor ID"),
+            (self.webhook_id, "webhook ID"),
+            (self.delivery_config_version, "delivery config version"),
+        ):
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise ValueError(f"{field_name} is invalid")
+        _canonical_uuid4(self.source_delivery_id, field_name="source delivery ID")
+        if self.if_match is not None and not isinstance(self.if_match, str):
+            raise ValueError("registration ETag is invalid")
+        if not isinstance(self.confirm_changed_configuration, bool):
+            raise TypeError("redelivery confirmation is invalid")
+        if not isinstance(self.idempotency_key, str):
+            raise ValueError("idempotency key is invalid")
+        if not isinstance(self.request_id, str) or _SAFE_ID.fullmatch(self.request_id) is None:
+            raise ValueError("request ID is invalid")
+
+
+@dataclass(frozen=True)
+class RedeliverWebhookResult:
+    """Sanitized manual delivery result without Jobs or protected material."""
+
+    delivery: WebhookDelivery
+    event_type: str
+    completed_after_config_change: bool
+    idempotent_replay: bool
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.delivery, WebhookDelivery)
+            or self.delivery.kind is not DeliveryKind.MANUAL
+            or self.delivery.redelivery_of_id is None
+        ):
+            raise ValueError("manual redelivery result is invalid")
+        _bounded_text(self.event_type, field_name="event type", maximum=64)
+        if not isinstance(self.completed_after_config_change, bool) or not isinstance(
+            self.idempotent_replay,
+            bool,
+        ):
+            raise TypeError("manual redelivery result state is invalid")
 
 
 @dataclass(frozen=True)
@@ -438,6 +507,8 @@ def _map_capture_error(exc: BaseException) -> WebhookError:
     if isinstance(exc, WebhookRepositoryError):
         if exc.code is WebhookRepositoryErrorCode.DATABASE_BUSY:
             return WebhookError(WebhookErrorCode.DATABASE_BUSY)
+        if exc.code is WebhookRepositoryErrorCode.NOT_FOUND:
+            return WebhookError(WebhookErrorCode.NOT_FOUND)
         return WebhookError(WebhookErrorCode.OPERATION_FAILED)
     if isinstance(exc, WebhookKeyError):
         return WebhookError(WebhookErrorCode.KEY_UNAVAILABLE)
@@ -564,6 +635,11 @@ class AdminWebhookDeliveryService:
             self._test_token_factory,
         )
 
+    def _require_redelivery_settings(self) -> AdminWebhookSettings:
+        if self._settings is None:
+            raise WebhookError(WebhookErrorCode.DELIVERY_UNAVAILABLE)
+        return self._settings
+
     @staticmethod
     def _test_result(
         snapshot: object,
@@ -587,6 +663,9 @@ class AdminWebhookDeliveryService:
             in_progress=processing,
             retry_after_seconds=(
                 _TEST_REPLAY_RETRY_SECONDS if processing else None
+            ),
+            completed_after_config_change=(
+                snapshot.delivery.completed_after_config_change
             ),
         )
 
@@ -778,6 +857,7 @@ class AdminWebhookDeliveryService:
         *,
         delivery_id: str,
         attempt_id: str,
+        target_hostname: str,
         outcome: TestWebhookOutcome,
         status_code: int | None = None,
         reason_code: TestWebhookReasonCode | None = None,
@@ -787,6 +867,7 @@ class AdminWebhookDeliveryService:
             webhook_id=command.webhook_id,
             delivery_id=delivery_id,
             attempt_id=attempt_id,
+            target_hostname=target_hostname,
             request_id=command.request_id,
             outcome=outcome,
             status_code=status_code,
@@ -876,6 +957,9 @@ class AdminWebhookDeliveryService:
                                 command,
                                 delivery_id=prepared.delivery_id,
                                 attempt_id=prepared.attempt_id,
+                                target_hostname=(
+                                    prepared.registration.registration.target_hostname
+                                ),
                                 outcome="accepted",
                             )
                         )
@@ -891,6 +975,9 @@ class AdminWebhookDeliveryService:
                             command,
                             delivery_id=prepared.delivery_id,
                             attempt_id=prepared.attempt_id,
+                            target_hostname=(
+                                prepared.registration.registration.target_hostname
+                            ),
                             outcome="failed",
                             reason_code=error.code,
                         )
@@ -967,6 +1054,9 @@ class AdminWebhookDeliveryService:
                     command,
                     delivery_id=prepared.delivery_id,
                     attempt_id=prepared.attempt_id,
+                    target_hostname=(
+                        prepared.registration.registration.target_hostname
+                    ),
                     outcome=audit_outcome,
                     status_code=execution.status_code,
                     reason_code=reason_code,
@@ -975,6 +1065,504 @@ class AdminWebhookDeliveryService:
         except Exception:  # noqa: BLE001 - durable receiver truth wins
             logger.warning("Admin webhook test completion audit unavailable")
         return self._test_result(completed, replay=False)
+
+    async def list_delivery_history(
+        self,
+        webhook_id: int,
+        *,
+        limit: int,
+        offset: int,
+    ) -> DeliveryHistoryPage:
+        """Return key-independent sanitized history for one retained registration."""
+        if isinstance(webhook_id, bool) or not isinstance(webhook_id, int) or webhook_id < 1:
+            raise WebhookError(WebhookErrorCode.VALIDATION_FAILED)
+        try:
+            return await self._repository.list_delivery_history(
+                webhook_id,
+                limit=limit,
+                offset=offset,
+            )
+        except Exception as exc:  # noqa: BLE001 - public boundary is closed
+            raise _map_capture_error(exc) from None
+
+    @staticmethod
+    async def _emit_delivery_mutation(
+        audit_sink: DeliveryMutationAuditSink,
+        record: DeliveryMutationAudit,
+    ) -> None:
+        try:
+            await audit_sink(record)
+        except Exception:  # noqa: BLE001 - mandatory audit failure is closed
+            raise WebhookError(WebhookErrorCode.AUDIT_UNAVAILABLE) from None
+
+    @staticmethod
+    def _redelivery_audit(
+        command: RedeliverWebhookCommand,
+        *,
+        delivery_id: str | None,
+        target_hostname: str | None,
+        source_config_version: int | None,
+        current_config_version: int | None,
+        changed_config: bool | None,
+        outcome: Literal["accepted", "no_op", "denied", "failed"],
+        reason_code: WebhookErrorCode | None = None,
+    ) -> DeliveryMutationAudit:
+        return DeliveryMutationAudit(
+            actor_id=command.actor_id,
+            action="admin_webhook.redeliver",
+            webhook_id=command.webhook_id,
+            source_delivery_id=command.source_delivery_id,
+            delivery_id=delivery_id,
+            attempt_id=None,
+            target_hostname=target_hostname,
+            source_config_version=source_config_version,
+            current_config_version=current_config_version,
+            redelivery_to_changed_config=changed_config,
+            status_code=None,
+            outcome=outcome,
+            request_id=command.request_id,
+            reason_code=reason_code,
+        )
+
+    @staticmethod
+    def _redelivery_error(exc: BaseException) -> WebhookError:
+        return _map_capture_error(exc)
+
+    async def _resolve_redelivery_lookup(
+        self,
+        lookup: IdempotencyLookup,
+        *,
+        command: RedeliverWebhookCommand,
+        audit_sink: DeliveryMutationAuditSink,
+    ) -> RedeliverWebhookResult | None:
+        from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
+            IdempotencyLookupKind,
+        )
+
+        if lookup.kind is IdempotencyLookupKind.NEW:
+            return None
+        if lookup.kind is IdempotencyLookupKind.CONFLICT:
+            raise WebhookError(WebhookErrorCode.IDEMPOTENCY_CONFLICT)
+        if lookup.kind is IdempotencyLookupKind.IN_PROGRESS:
+            raise WebhookError(WebhookErrorCode.IDEMPOTENCY_IN_PROGRESS)
+        replay_delivery_id = lookup.redelivery_delivery_id
+        if replay_delivery_id is None:
+            raise WebhookError(WebhookErrorCode.DELIVERY_UNAVAILABLE)
+        created = await self._repository.get_delivery_history_item(
+            command.webhook_id,
+            replay_delivery_id,
+        )
+        source = await self._repository.get_delivery_history_item(
+            command.webhook_id,
+            command.source_delivery_id,
+        )
+        if (
+            created is None
+            or source is None
+            or created.delivery.kind is not DeliveryKind.MANUAL
+            or created.delivery.redelivery_of_id != command.source_delivery_id
+            or created.delivery.event_id != source.delivery.event_id
+        ):
+            raise WebhookError(WebhookErrorCode.DELIVERY_UNAVAILABLE)
+        changed_config = (
+            source.delivery.delivery_config_version
+            != created.delivery.delivery_config_version
+        )
+        await self._emit_delivery_mutation(
+            audit_sink,
+            self._redelivery_audit(
+                command,
+                delivery_id=created.delivery.id,
+                target_hostname=None,
+                source_config_version=source.delivery.delivery_config_version,
+                current_config_version=created.delivery.delivery_config_version,
+                changed_config=changed_config,
+                outcome="no_op",
+            ),
+        )
+        return RedeliverWebhookResult(
+            delivery=created.delivery,
+            event_type=created.event_type,
+            completed_after_config_change=(
+                created.completed_after_config_change
+            ),
+            idempotent_replay=True,
+        )
+
+    async def _resolve_redelivery_lookup_audited(
+        self,
+        lookup: IdempotencyLookup,
+        *,
+        command: RedeliverWebhookCommand,
+        audit_sink: DeliveryMutationAuditSink,
+    ) -> RedeliverWebhookResult | None:
+        try:
+            return await self._resolve_redelivery_lookup(
+                lookup,
+                command=command,
+                audit_sink=audit_sink,
+            )
+        except ValueError:
+            resolved_error = WebhookError(WebhookErrorCode.DELIVERY_UNAVAILABLE)
+        except WebhookError as exc:
+            if exc.code is WebhookErrorCode.AUDIT_UNAVAILABLE:
+                raise
+            resolved_error = exc
+        except Exception as exc:  # noqa: BLE001 - replay reads fail closed
+            resolved_error = self._redelivery_error(exc)
+        await self._emit_delivery_mutation(
+            audit_sink,
+            self._redelivery_audit(
+                command,
+                delivery_id=None,
+                target_hostname=None,
+                source_config_version=None,
+                current_config_version=None,
+                changed_config=None,
+                outcome=(
+                    "failed"
+                    if resolved_error.code.http_status >= 500
+                    else "denied"
+                ),
+                reason_code=resolved_error.code,
+            ),
+        )
+        raise resolved_error from None
+
+    async def redeliver_webhook(
+        self,
+        command: RedeliverWebhookCommand,
+        *,
+        audit_sink: DeliveryMutationAuditSink,
+    ) -> RedeliverWebhookResult:
+        """Create one pending manual delivery without admitting Jobs work."""
+        from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
+            IdempotencyLookupKind,
+        )
+
+        if not isinstance(command, RedeliverWebhookCommand):
+            raise TypeError("redelivery command is required")
+        if not callable(audit_sink):
+            raise TypeError("redelivery audit sink is required")
+        expected_revision: int | None = None
+        lookup_digest: str | None = None
+        request_fingerprint: str | None = None
+        scope: IdempotencyScope | None = None
+        try:
+            settings = self._require_redelivery_settings()
+            observed_at = _utc(self._clock(), field_name="redelivery start time")
+            validate_idempotency_key(command.idempotency_key)
+            expected_revision = parse_registration_etag(
+                command.if_match,
+                expected_webhook_id=command.webhook_id,
+            )
+            scope = build_idempotency_scope(
+                actor_id=command.actor_id,
+                operation="redeliver",
+                route=(
+                    f"/admin/webhooks/{command.webhook_id}/deliveries/"
+                    f"{command.source_delivery_id}/redeliver"
+                ),
+                webhook_id=command.webhook_id,
+                delivery_id=command.source_delivery_id,
+            )
+            lookup_digest = idempotency_lookup_digest(
+                command.idempotency_key,
+                scope,
+            )
+            request_fingerprint = canonical_request_hash(
+                command.idempotency_key,
+                scope=scope,
+                body={
+                    "delivery_config_version": command.delivery_config_version,
+                    "confirm_changed_configuration": (
+                        command.confirm_changed_configuration
+                    ),
+                },
+                conditional_version=expected_revision,
+            )
+            lookup = await self._repository.lookup_idempotency(
+                lookup_digest=lookup_digest,
+                scope=scope,
+                request_fingerprint=request_fingerprint,
+                now=observed_at,
+            )
+        except ValueError:
+            error = WebhookError(WebhookErrorCode.DELIVERY_UNAVAILABLE)
+            await self._emit_delivery_mutation(
+                audit_sink,
+                self._redelivery_audit(
+                    command,
+                    delivery_id=None,
+                    target_hostname=None,
+                    source_config_version=None,
+                    current_config_version=None,
+                    changed_config=None,
+                    outcome="failed",
+                    reason_code=error.code,
+                ),
+            )
+            raise error from None
+        except Exception as exc:  # noqa: BLE001 - lookup boundary is closed
+            error = self._redelivery_error(exc)
+            await self._emit_delivery_mutation(
+                audit_sink,
+                self._redelivery_audit(
+                    command,
+                    delivery_id=None,
+                    target_hostname=None,
+                    source_config_version=None,
+                    current_config_version=None,
+                    changed_config=None,
+                    outcome=("failed" if error.code.http_status >= 500 else "denied"),
+                    reason_code=error.code,
+                ),
+            )
+            raise error from None
+        replay = await self._resolve_redelivery_lookup_audited(
+            lookup,
+            command=command,
+            audit_sink=audit_sink,
+        )
+        if replay is not None:
+            return replay
+        if expected_revision is None or scope is None or lookup_digest is None or request_fingerprint is None:
+            raise WebhookError(WebhookErrorCode.DELIVERY_UNAVAILABLE)
+
+        try:
+            delivery_id = _canonical_uuid4(
+                self._delivery_id_factory(),
+                field_name="delivery ID",
+            )
+        except Exception as exc:  # noqa: BLE001 - secure factory boundary is closed
+            error = (
+                WebhookError(WebhookErrorCode.DELIVERY_UNAVAILABLE)
+                if isinstance(exc, ValueError)
+                else self._redelivery_error(exc)
+            )
+            await self._emit_delivery_mutation(
+                audit_sink,
+                self._redelivery_audit(
+                    command,
+                    delivery_id=None,
+                    target_hostname=None,
+                    source_config_version=None,
+                    current_config_version=None,
+                    changed_config=None,
+                    outcome="failed",
+                    reason_code=error.code,
+                ),
+            )
+            raise error from None
+        accepted_emitted = False
+        error_audited = False
+        raced_lookup = None
+        created = None
+        event_type: str | None = None
+        target_hostname: str | None = None
+        source_config_version: int | None = None
+        current_config_version: int | None = None
+        changed_config: bool | None = None
+        try:
+            async with self._repository.transaction() as tx:
+                try:
+                    claim = await tx.claim_idempotency(
+                        lookup_digest=lookup_digest,
+                        scope=scope,
+                        request_fingerprint=request_fingerprint,
+                        now=observed_at,
+                        expires_at=observed_at
+                        + timedelta(seconds=settings.idempotency_ttl_seconds),
+                    )
+                    if claim.kind is IdempotencyLookupKind.CONFLICT:
+                        raise WebhookError(WebhookErrorCode.IDEMPOTENCY_CONFLICT)
+                    if claim.kind is not IdempotencyLookupKind.NEW:
+                        raced_lookup = claim
+                    else:
+                        locked_state = await tx.lock_migration_state()
+                        ring = _require_writable_ring(
+                            locked_state,
+                            self._key_ring_result,
+                        )
+                        current_stored = await tx.get_protected_registration(
+                            command.webhook_id,
+                            include_deleted=False,
+                            lock=True,
+                        )
+                        if current_stored is None:
+                            raise WebhookError(WebhookErrorCode.NOT_FOUND)
+                        current = current_stored.registration
+                        target_hostname = current.target_hostname
+                        current_config_version = current.delivery_config_version
+                        if not current.active:
+                            raise WebhookError(WebhookErrorCode.PRECONDITION_FAILED)
+                        if (
+                            current.revision != expected_revision
+                            or current.delivery_config_version
+                            != command.delivery_config_version
+                        ):
+                            raise WebhookError(WebhookErrorCode.PRECONDITION_FAILED)
+                        if current.secret_rotation_required:
+                            raise WebhookError(
+                                WebhookErrorCode.SECRET_ROTATION_REQUIRED
+                            )
+                        source_bundle = await tx.get_delivery_bundle(
+                            command.source_delivery_id
+                        )
+                        if (
+                            source_bundle is None
+                            or source_bundle.delivery.delivery.webhook_id
+                            != command.webhook_id
+                        ):
+                            raise WebhookError(WebhookErrorCode.NOT_FOUND)
+                        source = source_bundle.delivery.delivery
+                        source_config_version = source.delivery_config_version
+                        changed_config = (
+                            source_config_version != current_config_version
+                        )
+                        if (
+                            changed_config
+                            and not command.confirm_changed_configuration
+                        ):
+                            raise WebhookError(
+                                WebhookErrorCode.REDELIVERY_CONFIRMATION_REQUIRED
+                            )
+                        plaintext = ring.decrypt_event_body(
+                            event_id=source_bundle.event.event.id,
+                            api_version=source_bundle.event.event.api_version,
+                            protected=source_bundle.event.body,
+                        )
+                        if len(plaintext) != source_bundle.event.body_size_bytes:
+                            raise WebhookError(WebhookErrorCode.OPERATION_FAILED)
+                        try:
+                            decoded = json.loads(plaintext)
+                        except (UnicodeError, json.JSONDecodeError):
+                            raise WebhookError(WebhookErrorCode.OPERATION_FAILED) from None
+                        if not isinstance(decoded, dict) or (
+                            decoded.get("id") != source_bundle.event.event.id
+                            or decoded.get("type")
+                            != source_bundle.event.event.event_type
+                            or decoded.get("api_version")
+                            != source_bundle.event.event.api_version
+                        ):
+                            raise WebhookError(WebhookErrorCode.OPERATION_FAILED)
+                        event_type = source_bundle.event.event.event_type
+                        created = await tx.insert_delivery(
+                            delivery_id,
+                            event_id=source.event_id,
+                            webhook_id=command.webhook_id,
+                            kind=DeliveryKind.MANUAL,
+                            expires_at=observed_at + timedelta(hours=72),
+                            now=observed_at,
+                            redelivery_of_id=source.id,
+                        )
+                        await tx.complete_idempotency(
+                            lookup_digest=lookup_digest,
+                            request_fingerprint=request_fingerprint,
+                            resource_id=None,
+                            resource_version=None,
+                            response_status=202,
+                            response_metadata={
+                                "redelivery_delivery_id": delivery_id
+                            },
+                            at=observed_at,
+                        )
+                        await tx.mark_first_canonical_activity(
+                            "delivery_attempt",
+                            observed_at,
+                        )
+                        await self._emit_delivery_mutation(
+                            audit_sink,
+                            self._redelivery_audit(
+                                command,
+                                delivery_id=delivery_id,
+                                target_hostname=target_hostname,
+                                source_config_version=source_config_version,
+                                current_config_version=current_config_version,
+                                changed_config=changed_config,
+                                outcome="accepted",
+                            ),
+                        )
+                        accepted_emitted = True
+                except Exception as exc:  # noqa: BLE001 - audit before rollback
+                    error = self._redelivery_error(exc)
+                    if error.code is WebhookErrorCode.AUDIT_UNAVAILABLE:
+                        raise error from None
+                    await self._emit_delivery_mutation(
+                        audit_sink,
+                        self._redelivery_audit(
+                            command,
+                            delivery_id=(delivery_id if created is not None else None),
+                            target_hostname=target_hostname,
+                            source_config_version=source_config_version,
+                            current_config_version=current_config_version,
+                            changed_config=changed_config,
+                            outcome=(
+                                "failed"
+                                if error.code.http_status >= 500
+                                else "denied"
+                            ),
+                            reason_code=error.code,
+                        ),
+                    )
+                    error_audited = True
+                    raise error from None
+        except Exception as exc:  # noqa: BLE001 - correlate commit failure
+            error = self._redelivery_error(exc)
+            if accepted_emitted:
+                try:
+                    await self._emit_delivery_mutation(
+                        audit_sink,
+                        self._redelivery_audit(
+                            command,
+                            delivery_id=delivery_id,
+                            target_hostname=target_hostname,
+                            source_config_version=source_config_version,
+                            current_config_version=current_config_version,
+                            changed_config=changed_config,
+                            outcome="failed",
+                            reason_code=error.code,
+                        ),
+                    )
+                except WebhookError:
+                    logger.warning(
+                        "Admin webhook redelivery commit-failure audit unavailable"
+                    )
+            elif not error_audited and error.code is not WebhookErrorCode.AUDIT_UNAVAILABLE:
+                await self._emit_delivery_mutation(
+                    audit_sink,
+                    self._redelivery_audit(
+                        command,
+                        delivery_id=None,
+                        target_hostname=target_hostname,
+                        source_config_version=source_config_version,
+                        current_config_version=current_config_version,
+                        changed_config=changed_config,
+                        outcome=(
+                            "failed" if error.code.http_status >= 500 else "denied"
+                        ),
+                        reason_code=error.code,
+                    ),
+                )
+            raise error from None
+
+        if raced_lookup is not None:
+            raced = await self._resolve_redelivery_lookup_audited(
+                raced_lookup,
+                command=command,
+                audit_sink=audit_sink,
+            )
+            if raced is None:
+                raise WebhookError(WebhookErrorCode.DELIVERY_UNAVAILABLE)
+            return raced
+        if created is None or event_type is None:
+            raise WebhookError(WebhookErrorCode.DELIVERY_UNAVAILABLE)
+        return RedeliverWebhookResult(
+            delivery=created.delivery,
+            event_type=event_type,
+            completed_after_config_change=created.completed_after_config_change,
+            idempotent_replay=False,
+        )
 
     @staticmethod
     async def _emit(
@@ -1087,7 +1675,6 @@ class AdminWebhookDeliveryService:
             except _CaptureAuditUnavailable:
                 raise WebhookError(WebhookErrorCode.AUDIT_UNAVAILABLE) from None
             raise error from None
-
         accepted_emitted = False
         failed_emitted = False
         try:
@@ -1164,10 +1751,38 @@ class AdminWebhookDeliveryService:
             raise error from None
 
 
+async def get_admin_webhook_delivery_service() -> AdminWebhookDeliveryService:
+    """Compose delivery operations from application-scoped validated resources."""
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+    from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
+        AdminWebhookRepository,
+    )
+
+    from .config import AdminWebhookSettings
+    from .crypto import load_webhook_key_ring
+
+    pool = await get_db_pool()
+    settings = AdminWebhookSettings.from_environment(os.environ)
+    return AdminWebhookDeliveryService(
+        repository=AdminWebhookRepository(pool),
+        key_ring_result=load_webhook_key_ring(),
+        event_id_factory=lambda: str(uuid4()),
+        delivery_id_factory=lambda: str(uuid4()),
+        clock=lambda: datetime.now(timezone.utc),
+        settings=settings,
+        executor=DeliveryAttemptExecutor(
+            allow_http_dev=settings.allow_http_dev,
+        ),
+        test_attempt_id_factory=lambda: str(uuid4()),
+        test_token_factory=lambda: secrets.token_hex(32),
+    )
+
+
 __all__ = [
     "AdminWebhookDeliveryService",
     "CaptureSyntheticEventCommand",
     "EventCaptureAudit",
     "EventCaptureAuditSink",
+    "get_admin_webhook_delivery_service",
     "registration_work_lifecycle_reason",
 ]
