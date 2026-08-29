@@ -155,6 +155,9 @@ class WorkerExecutionContext:
     def renewal_lost(self) -> bool:
         return self._renewal_lost
 
+    def _mark_renewal_lost(self) -> None:
+        self._renewal_lost = True
+
     def snapshot(self) -> WorkerLeaseSnapshot:
         return WorkerLeaseSnapshot(
             worker_id=self._worker_id,
@@ -260,7 +263,6 @@ class WorkerSDK:
         # Allow test overrides without monkeypatching global asyncio.sleep
         # (keeps event loop behavior stable under tests)
         self._sleep = asyncio.sleep
-        self._utcnow = lambda: datetime.now(timezone.utc)
         self._detached_completion_callbacks: set[asyncio.Task[None]] = set()
         # Detect test mode for more responsive sleeps and optional iteration caps
         try:
@@ -463,36 +465,32 @@ class WorkerSDK:
         context: WorkerExecutionContext,
         stop_requested: asyncio.Event,
     ) -> None:
-        lease = int(max(1, self.cfg.lease_seconds))
-        jitter = max(0, int(self.cfg.renew_jitter_seconds))
-        threshold = max(1, int(self.cfg.renew_threshold_seconds))
         iters = 0
+        while True:
+            try:
+                requested_lease = max(1, int(self.cfg.lease_seconds))
+                lease_cap = max(
+                    1,
+                    int(os.getenv("JOBS_LEASE_MAX_SECONDS", "3600") or "3600"),
+                )
+                effective_lease = max(1, min(requested_lease, lease_cap))
+                jitter = max(0, int(self.cfg.renew_jitter_seconds))
+                threshold = max(1, int(self.cfg.renew_threshold_seconds))
+                renewal_margin = min(float(threshold), effective_lease / 2.0)
+                base_sleep = float(effective_lease) - renewal_margin
+            except Exception as exc:  # noqa: BLE001 - configuration isolation boundary
+                context._mark_renewal_lost()
+                logger.bind(error_type=type(exc).__name__).warning(
+                    "Jobs prepared renewal configuration failed"
+                )
+                return
 
-        remaining = context.snapshot().leased_until
-        seconds_remaining = (
-            None
-            if remaining is None
-            else (remaining - self._utcnow()).total_seconds()
-        )
-        if seconds_remaining is None or seconds_remaining <= threshold:
-            if not await context.ensure_lease_horizon(lease):
+            if not await context.ensure_lease_horizon(effective_lease):
                 return
             iters += 1
             if self._max_iters and iters >= self._max_iters:
                 return
 
-        while True:
-            leased_until = context.snapshot().leased_until
-            if leased_until is None:
-                context._renewal_lost = True
-                return
-            seconds_remaining = (leased_until - self._utcnow()).total_seconds()
-            if seconds_remaining <= 0:
-                context._renewal_lost = True
-                return
-
-            renewal_margin = min(float(threshold), seconds_remaining / 2.0)
-            base_sleep = seconds_remaining - renewal_margin
             earlier_jitter = float(secrets.randbelow(jitter + 1)) if jitter else 0.0
             sleep_for = max(
                 base_sleep / 2.0,
@@ -501,11 +499,24 @@ class WorkerSDK:
             await self._sleep(sleep_for)
             if stop_requested.is_set():
                 return
-            if not await context.ensure_lease_horizon(lease):
-                return
-            iters += 1
-            if self._max_iters and iters >= self._max_iters:
-                return
+
+    async def _cleanup_prepared_renewal(
+        self,
+        renew_task: asyncio.Task[None],
+        stop_requested: asyncio.Event,
+    ) -> None:
+        """Stop renewal and normalize every child outcome to normal completion."""
+
+        stop_requested.set()
+        renew_task.cancel()
+        try:
+            await renew_task
+        except asyncio.CancelledError:
+            return
+        except Exception as exc:  # noqa: BLE001 - renewal isolation boundary
+            logger.bind(error_type=type(exc).__name__).warning(
+                "Jobs prepared renewal task failed"
+            )
 
     async def _stop_prepared_renewal(
         self,
@@ -515,25 +526,15 @@ class WorkerSDK:
         """Cancel and consume renewal while preserving new outer cancellation."""
 
         outer_cancellation: asyncio.CancelledError | None = None
-        stop_requested.set()
-        renew_task.cancel()
-
-        while not renew_task.done():
+        cleanup_task = asyncio.create_task(
+            self._cleanup_prepared_renewal(renew_task, stop_requested)
+        )
+        while not cleanup_task.done():
             try:
-                await asyncio.shield(renew_task)
+                await asyncio.shield(cleanup_task)
             except asyncio.CancelledError as exc:
-                if not renew_task.cancelled():
-                    outer_cancellation = exc
-            except Exception:  # noqa: BLE001 - consumed below with class-only logging
-                break
-
-        if not renew_task.cancelled():
-            try:
-                renew_task.result()
-            except Exception as exc:  # noqa: BLE001 - renewal isolation boundary
-                logger.bind(error_type=type(exc).__name__).warning(
-                    "Jobs prepared renewal task failed"
-                )
+                outer_cancellation = exc
+        cleanup_task.result()
         if outer_cancellation is not None:
             raise outer_cancellation
 

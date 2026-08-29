@@ -4,7 +4,7 @@ title: Implement canonical admin webhook delivery substrate and recovery
 status: In Progress
 assignee: []
 created_date: '2026-08-23 03:15'
-updated_date: '2026-08-28 23:42'
+updated_date: '2026-08-29 00:04'
 labels:
   - admin
   - webhooks
@@ -121,6 +121,10 @@ Task 3 Fix Round 1/5 started at FIX_BASE 803ae280f66e990f7b4ffdf29e31cae311d648d
 2026-08-28: Started Task 4 Fix Round 1/5 at FIX_BASE 3e9a946bfa144df0eaa4236bcdb4b3cca9def179. Scope: authoritative acquired-deadline renewal scheduling, outer-cancellation-safe renewal teardown, immutable prepared CAS facts with defensive callback/factory copies, and adversarial command/horizon/guard coverage. Strict RED precedes production edits; prepared plus legacy full gate remains required.
 
 2026-08-28: Completed Task 4 Fix Round 1/5 at fix base 3e9a946b. Prepared renewal now schedules from authoritative leased_until, immediately ensures unsafe initial horizons, bounds short-lease renewal to avoid busy loops, and applies jitter earlier only. Renewal teardown preserves outer cancellation after cancellation-resistant child cleanup using a Python 3.10-compatible stop event. CAS facts are frozen before user code and factory/callback jobs are defensive copies. Added adversarial coverage for capped/missing/malformed horizons, sticky renewal loss, guard/teardown cancellation, and factory mutation. Verification: 81 passed, 2 baseline warnings; focused Ruff, Bandit, git diff --check, and Python 3.10 py_compile all passed. Report: .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-4-report.md
+
+2026-08-28: Started Task 4 Fix Round 2/5 at FIX_BASE 0780bac3950cdb50cbd0753cbc713218a9063308. Scope: deterministic RED tests and prepared-path fixes for wall-clock-independent cap-aware renewal scheduling and unambiguous shielded cleanup cancellation; frozen CAS facts, callback routing, exactly-one apply, and legacy run() remain unchanged.
+
+2026-08-28: Completed Task 4 Fix Round 2/5 at fix base 0780bac3950c. Prepared renewal now always obtains an authoritative typed relative lease guarantee before sleeping, reloads and clamps the current manager cap on every cycle, uses only positive event-loop-relative intervals with earlier-only jitter, and fails closed with sticky renewal loss plus class-only logging on invalid configuration. Teardown uses a separately shielded cleanup task so simultaneous/repeated parent cancellation is retained and re-raised after child cleanup. Frozen CAS facts, defensive job copies, exactly-one apply, callback routing, and legacy run() remain unchanged. RED: 10 failed/6 passed/35 deselected, plus a cap-reload characterization failed with [30, 30, 30]. Final gate: 90 passed/2 baseline warnings. Focused Ruff, Bandit, git diff --check, and Python 3.10 py_compile passed. Evidence: .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-4-report.md
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

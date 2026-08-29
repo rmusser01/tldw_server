@@ -158,9 +158,7 @@ def _sdk(manager: PreparedManager, **config_overrides) -> WorkerSDK:
     }
     config_values.update(config_overrides)
     manager.expected_lease_seconds = config_values["lease_seconds"]
-    sdk = WorkerSDK(manager, WorkerConfig(**config_values))
-    sdk._utcnow = lambda: NOW
-    return sdk
+    return WorkerSDK(manager, WorkerConfig(**config_values))
 
 
 async def _allow_acquire() -> bool:
@@ -697,10 +695,16 @@ async def test_callback_failure_cannot_apply_a_second_transition(callback_behavi
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "initial_horizon",
-    [None, "not-a-timestamp", NOW - timedelta(seconds=1), NOW + timedelta(seconds=2)],
-    ids=["missing", "malformed", "expired", "inside-threshold"],
+    [
+        None,
+        "not-a-timestamp",
+        NOW - timedelta(seconds=1),
+        NOW + timedelta(seconds=2),
+        NOW + timedelta(minutes=10),
+    ],
+    ids=["missing", "malformed", "expired", "inside-threshold", "apparently-safe"],
 )
-async def test_initial_unsafe_lease_evidence_ensures_before_any_sleep(
+async def test_first_renewal_ensures_before_sleep_regardless_of_absolute_evidence(
     initial_horizon,
 ):
     manager = PreparedManager()
@@ -726,9 +730,19 @@ async def test_initial_unsafe_lease_evidence_ensures_before_any_sleep(
 
 
 @pytest.mark.asyncio
-async def test_capped_acquired_lease_ensures_before_expiry_without_busy_loop():
+@pytest.mark.parametrize(
+    "worker_clock_offset",
+    [-60, 60],
+    ids=["worker-behind", "worker-ahead"],
+)
+async def test_relative_renewal_interval_ignores_worker_clock_skew(
+    monkeypatch,
+    worker_clock_offset,
+):
+    monkeypatch.setenv("JOBS_LEASE_MAX_SECONDS", "5")
     manager = PreparedManager()
-    capped_until = NOW + timedelta(seconds=5)
+    database_now = LEASED_UNTIL
+    capped_until = database_now + timedelta(seconds=5)
     manager.jobs = [_job(leased_until=capped_until)]
     manager.horizon_result = LeaseHorizonResult.applied(leased_until=capped_until)
     sdk = _sdk(
@@ -738,17 +752,53 @@ async def test_capped_acquired_lease_ensures_before_expiry_without_busy_loop():
         renew_jitter_seconds=0,
     )
     sdk._max_iters = 2
-    clock = [NOW]
-    sdk._utcnow = lambda: clock[0]
+    sdk._utcnow = lambda: database_now + timedelta(seconds=worker_clock_offset)
     sleep_calls = []
+    observed_renewal_loss = []
 
-    async def advance_clock(seconds):
+    async def record_sleep(seconds):
         sleep_calls.append(seconds)
         manager.events.append(("sleep", seconds))
-        clock[0] += timedelta(seconds=seconds)
         await asyncio.sleep(0)
 
-    sdk._sleep = advance_clock
+    sdk._sleep = record_sleep
+
+    async def handler(_job_row, context):
+        while len(manager.horizon_calls) < 2 and not context.renewal_lost:
+            await asyncio.sleep(0)
+        observed_renewal_loss.append(context.renewal_lost)
+        return _infrastructure_defer()
+
+    await _run_once(sdk, handler)
+
+    assert manager.events == [
+        ("ensure", 5),
+        ("sleep", 2.5),
+        ("ensure", 5),
+    ]
+    assert len(manager.horizon_calls) == 2
+    assert sleep_calls == [2.5]
+    assert observed_renewal_loss == [False]
+
+
+@pytest.mark.asyncio
+async def test_one_second_effective_lease_uses_positive_interval(monkeypatch):
+    monkeypatch.setenv("JOBS_LEASE_MAX_SECONDS", "1")
+    manager = PreparedManager()
+    sdk = _sdk(
+        manager,
+        lease_seconds=30,
+        renew_threshold_seconds=10,
+        renew_jitter_seconds=0,
+    )
+    sdk._max_iters = 2
+    sleep_calls = []
+
+    async def record_sleep(seconds):
+        sleep_calls.append(seconds)
+        await asyncio.sleep(0)
+
+    sdk._sleep = record_sleep
 
     async def handler(_job_row, _context):
         while len(manager.horizon_calls) < 2:
@@ -757,14 +807,45 @@ async def test_capped_acquired_lease_ensures_before_expiry_without_busy_loop():
 
     await _run_once(sdk, handler)
 
-    assert manager.events[0] == ("ensure", 30)
-    assert len(manager.horizon_calls) == 2
-    assert len(sleep_calls) == 1
-    assert 0 < sleep_calls[0] < 5
+    assert [call.minimum_seconds for call in manager.horizon_calls] == [1, 1]
+    assert sleep_calls == [0.5]
+
+
+@pytest.mark.asyncio
+async def test_prepared_renewal_reloads_current_cap_before_each_ensure(monkeypatch):
+    monkeypatch.setenv("JOBS_LEASE_MAX_SECONDS", "30")
+    manager = PreparedManager()
+    sdk = _sdk(
+        manager,
+        lease_seconds=30,
+        renew_threshold_seconds=10,
+        renew_jitter_seconds=0,
+    )
+    sdk._max_iters = 3
+    sleep_calls = []
+
+    async def record_sleep(seconds):
+        sleep_calls.append(seconds)
+        if len(sleep_calls) == 1:
+            monkeypatch.setenv("JOBS_LEASE_MAX_SECONDS", "5")
+        await asyncio.sleep(0)
+
+    sdk._sleep = record_sleep
+
+    async def handler(_job_row, _context):
+        while len(manager.horizon_calls) < 3:
+            await asyncio.sleep(0)
+        return _infrastructure_defer()
+
+    await _run_once(sdk, handler)
+
+    assert [call.minimum_seconds for call in manager.horizon_calls] == [30, 5, 5]
+    assert sleep_calls == [20.0, 2.5]
 
 
 @pytest.mark.asyncio
 async def test_prepared_renewal_jitter_only_moves_deadline_earlier(monkeypatch):
+    monkeypatch.setenv("JOBS_LEASE_MAX_SECONDS", "30")
     manager = PreparedManager()
     manager.jobs = [_job(leased_until=NOW + timedelta(seconds=30))]
     sdk = _sdk(
@@ -773,7 +854,7 @@ async def test_prepared_renewal_jitter_only_moves_deadline_earlier(monkeypatch):
         renew_threshold_seconds=10,
         renew_jitter_seconds=5,
     )
-    sdk._max_iters = 1
+    sdk._max_iters = 2
     sleep_calls = []
 
     monkeypatch.setattr(
@@ -789,13 +870,70 @@ async def test_prepared_renewal_jitter_only_moves_deadline_earlier(monkeypatch):
     sdk._sleep = record_sleep
 
     async def handler(_job_row, _context):
-        while not manager.horizon_calls:
+        while len(manager.horizon_calls) < 2:
             await asyncio.sleep(0)
         return _infrastructure_defer()
 
     await _run_once(sdk, handler)
 
+    assert manager.events == [
+        ("ensure", 30),
+        ("ensure", 30),
+    ]
     assert sleep_calls == [15.0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("config_overrides", "lease_cap"),
+    [
+        ({"lease_seconds": "lease-config-secret"}, "3600"),
+        ({}, "lease-cap-secret"),
+        ({"renew_threshold_seconds": "threshold-config-secret"}, "3600"),
+        ({"renew_jitter_seconds": "jitter-config-secret"}, "3600"),
+    ],
+    ids=["lease", "cap", "threshold", "jitter"],
+)
+async def test_invalid_prepared_renewal_configuration_fails_closed(
+    monkeypatch,
+    config_overrides,
+    lease_cap,
+):
+    monkeypatch.setenv("JOBS_LEASE_MAX_SECONDS", lease_cap)
+    manager = PreparedManager()
+    sdk = _sdk(manager, **config_overrides)
+    sdk._max_iters = 1
+    sleep_calls = []
+    logs: list[str] = []
+    context = worker_sdk_module.WorkerExecutionContext(
+        manager,
+        _job(),
+        worker_id="worker-1",
+    )
+
+    async def record_sleep(seconds):
+        sleep_calls.append(seconds)
+        await asyncio.sleep(0)
+
+    sdk._sleep = record_sleep
+    sink = logger.add(logs.append, format="{message}|{extra}", level="DEBUG")
+    raised = None
+    try:
+        try:
+            await sdk._auto_renew_prepared(context, asyncio.Event())
+        except Exception as exc:  # noqa: BLE001 - assertion captures boundary leakage
+            raised = type(exc)
+    finally:
+        logger.remove(sink)
+
+    rendered_logs = "".join(logs)
+    assert raised is None
+    assert context.renewal_lost is True
+    assert context.snapshot().renewal_lost is True
+    assert manager.horizon_calls == []
+    assert sleep_calls == []
+    assert "config-secret" not in rendered_logs
+    assert "cap-secret" not in rendered_logs
 
 
 @pytest.mark.asyncio
@@ -853,70 +991,48 @@ async def test_horizon_failure_remains_sticky_after_later_success():
         ),
         LeaseHorizonResult.applied(leased_until=RENEWED_UNTIL),
     ]
-    sdk = _sdk(manager)
+    context = worker_sdk_module.WorkerExecutionContext(
+        manager,
+        _job(),
+        worker_id="worker-1",
+    )
 
-    async def never_renew(_seconds):
-        await asyncio.Event().wait()
+    first = await context.ensure_lease_horizon(90)
+    second = await context.ensure_lease_horizon(90)
+    snapshot = context.snapshot()
 
-    sdk._sleep = never_renew
-    observed = []
-
-    async def handler(_job_row, context):
-        first = await context.ensure_lease_horizon(90)
-        second = await context.ensure_lease_horizon(90)
-        observed.append((first, second, context.snapshot()))
-        return _infrastructure_defer()
-
-    await _run_once(sdk, handler)
-
-    assert observed[0][0:2] == (False, True)
-    assert observed[0][2].leased_until == RENEWED_UNTIL
-    assert observed[0][2].renewal_lost is True
+    assert (first, second) == (False, True)
+    assert snapshot.leased_until == RENEWED_UNTIL
+    assert snapshot.renewal_lost is True
     assert len(manager.horizon_calls) == 2
 
 
 @pytest.mark.asyncio
 async def test_context_snapshot_is_read_only_and_horizon_updates_authoritative_lease():
     manager = PreparedManager()
-    sdk = _sdk(manager)
-    observed = []
-
-    async def never_renew(_seconds):
-        await asyncio.Event().wait()
-
-    sdk._sleep = never_renew
-
-    async def handler(_job_row, context):
-        initial = context.snapshot()
-        assert initial.worker_id == "worker-1"
-        assert initial.lease_id == "lease-1"
-        assert initial.leased_until == LEASED_UNTIL
-        assert initial.renewal_lost is False
-        with pytest.raises(FrozenInstanceError):
-            initial.renewal_lost = True
-        ensured = await context.ensure_lease_horizon(120)
-        observed.append((ensured, context.snapshot(), context.renewal_lost))
-        sdk.stop()
-        return _infrastructure_defer()
-
-    await sdk.run_prepared(
-        handler=handler,
-        pre_acquire_guard=_allow_acquire,
-        handler_error_disposition=_closed_error_disposition,
+    context = worker_sdk_module.WorkerExecutionContext(
+        manager,
+        _job(),
+        worker_id="worker-1",
     )
+    initial = context.snapshot()
 
-    assert observed == [
-        (
-            True,
-            worker_sdk_module.WorkerLeaseSnapshot(
-                worker_id="worker-1",
-                lease_id="lease-1",
-                leased_until=RENEWED_UNTIL,
-                renewal_lost=False,
-            ),
-            False,
-        )
-    ]
+    assert initial.worker_id == "worker-1"
+    assert initial.lease_id == "lease-1"
+    assert initial.leased_until == LEASED_UNTIL
+    assert initial.renewal_lost is False
+    with pytest.raises(FrozenInstanceError):
+        initial.renewal_lost = True
+    ensured = await context.ensure_lease_horizon(120)
+
+    assert ensured is True
+    assert context.snapshot() == worker_sdk_module.WorkerLeaseSnapshot(
+        worker_id="worker-1",
+        lease_id="lease-1",
+        leased_until=RENEWED_UNTIL,
+        renewal_lost=False,
+    )
+    assert context.renewal_lost is False
     assert len(manager.horizon_calls) == 1
     assert manager.horizon_calls[0].minimum_seconds == 120
 
@@ -1105,11 +1221,77 @@ async def test_outer_cancellation_during_resistant_renewal_cleanup_propagates():
     await asyncio.wait_for(cleanup_started.wait(), timeout=1)
     task.cancel()
     await asyncio.sleep(0)
+    task.cancel()
+    await asyncio.sleep(0)
     release_cleanup.set()
 
     with pytest.raises(asyncio.CancelledError):
         await asyncio.wait_for(task, timeout=1)
 
+    assert guard_calls == 1
+    assert len(manager.acquire_calls) == 1
+    assert len(manager.apply_calls) == 1
+    assert manager.fallback_calls == []
+
+
+@pytest.mark.asyncio
+async def test_same_turn_child_and_outer_cancellation_preserves_outer_cancel():
+    manager = PreparedManager()
+    sdk = _sdk(manager)
+    renewal_started = asyncio.Event()
+    child_cleanup_started = asyncio.Event()
+    release_child_cleanup = asyncio.Event()
+    child_cleanup_complete = asyncio.Event()
+    guard_calls = 0
+    baseline_tasks = set(asyncio.all_tasks())
+
+    async def guard() -> bool:
+        nonlocal guard_calls
+        guard_calls += 1
+        if guard_calls > 1:
+            sdk.stop()
+            return False
+        return True
+
+    async def cancellation_reraising_sleep(_seconds):
+        renewal_started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            child_cleanup_started.set()
+            await release_child_cleanup.wait()
+            child_cleanup_complete.set()
+            raise
+
+    sdk._sleep = cancellation_reraising_sleep
+
+    async def handler(_job_row, _context):
+        await renewal_started.wait()
+        return _complete()
+
+    task = asyncio.create_task(
+        sdk.run_prepared(
+            handler=handler,
+            pre_acquire_guard=guard,
+            handler_error_disposition=_closed_error_disposition,
+        )
+    )
+    await asyncio.wait_for(child_cleanup_started.wait(), timeout=1)
+    loop = asyncio.get_running_loop()
+    loop.call_soon(release_child_cleanup.set)
+    loop.call_soon(task.cancel)
+
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(task, timeout=1)
+
+    await asyncio.sleep(0)
+    leaked_tasks = [
+        pending
+        for pending in asyncio.all_tasks() - baseline_tasks
+        if not pending.done()
+    ]
+    assert child_cleanup_complete.is_set()
+    assert leaked_tasks == []
     assert guard_calls == 1
     assert len(manager.acquire_calls) == 1
     assert len(manager.apply_calls) == 1
