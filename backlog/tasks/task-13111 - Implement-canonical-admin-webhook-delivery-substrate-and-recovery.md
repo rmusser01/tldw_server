@@ -3,22 +3,23 @@ id: TASK-13111
 title: Implement canonical admin webhook delivery substrate and recovery
 status: In Progress
 assignee: []
-created_date: 2026-08-23 03:15
-updated_date: 2026-08-29 02:40
+created_date: '2026-08-23 03:15'
+updated_date: '2026-08-29 03:11'
 labels:
-- admin
-- webhooks
-- jobs
-- security
-- recovery
+  - admin
+  - webhooks
+  - jobs
+  - security
+  - recovery
 dependencies:
-- TASK-13014
+  - TASK-13014
 references:
-- https://github.com/rmusser01/tldw_server/pull/2806
-- https://github.com/rmusser01/tldw_server/pull/2828
+  - 'https://github.com/rmusser01/tldw_server/pull/2806'
+  - 'https://github.com/rmusser01/tldw_server/pull/2828'
 documentation:
-- Docs/Design/2026-07-12-canonical-admin-outgoing-webhooks.md
-- Docs/superpowers/plans/2026-08-23-canonical-admin-webhook-delivery-substrate.md
+  - Docs/Design/2026-07-12-canonical-admin-outgoing-webhooks.md
+  - >-
+    Docs/superpowers/plans/2026-08-23-canonical-admin-webhook-delivery-substrate.md
 priority: high
 ---
 
@@ -53,6 +54,7 @@ Detailed plan: Docs/superpowers/plans/2026-08-23-canonical-admin-webhook-deliver
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 The initial draft was created from an earlier reviewed PR 1 head. Planning review identified and incorporated additive schema-extension readiness while preserving canonical schema version 1, durable disposition tokens and absolute not-before timestamps, per-attempt persisted request timeout, runtime heartbeat persistence, queued cancellation without a worker lease, infrastructure-only pre-attempt deferral, and persisted Jobs expired-lease/quarantine controls. Final gate audit added Jobs migration compatibility/parity coverage, exact synchronous-test replay/preflight/reservation ordering, immutable enqueue controls, and first-canonical-activity traceability.
 
@@ -137,6 +139,12 @@ Task 3 Fix Round 1/5 started at FIX_BASE 803ae280f66e990f7b4ffdf29e31cae311d648d
 2026-08-28: Started Task 5 status-only peer-verified egress and shared signed one-attempt executor at exact clean base fa19b8d39fbed631dc7673a45403524445112109. Strict four-file RED precedes production edits; focused security, static, Python 3.10 compilation, and diff gates are required.
 Extended peer-verified HTTP hop with no-buffer status-only mode and added deterministic signed one-attempt executor; transport/security vectors pass.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+2026-08-28: Started Task 5 Fix Round 1/5 at exact clean FIX_BASE e348d82e21b1a99efcd48e1e7cf9af53738b8756. Scope: status-only coalesced-body discard, closed target construction/syntax, a 30-second status-only whole-hop ceiling, and exact raw Retry-After evidence. Strict focused RED precedes production fixes.
+
+2026-08-28: Task 5 Fix Round 1/5 complete at pre-commit tree. Status-only mode discards coalesced post-header bytes before httpcore retention while bounded-body mode remains unchanged; target normalization rejects double-slash paths, every raw fragment delimiter, and explicit empty ports before policy/I/O, with hop-request construction failures closed as target_invalid; status-only total timeout is capped at 30 seconds; Retry-After scheduling uses exact raw final evidence and rejects all control/non-ASCII octets. Focused RED: 5 failed/69 deselected, 5 failed/78 deselected, and 1 failed/1 passed/74 deselected. Final gates: Task 5 312 passed; adjacent egress/domain 155 passed; focused Ruff, Bandit, Python 3.10 py_compile, and git diff --check passed. Evidence: .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-5-report.md.
+<!-- SECTION:NOTES:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed

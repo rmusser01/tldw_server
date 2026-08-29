@@ -318,6 +318,7 @@ def _normalize_target(
         raise ValueError("target URL is invalid") from exc
     if (
         len(encoded) > _MAX_TARGET_BYTES
+        or "#" in url
         or "\\" in url
         or any(ord(character) < 32 or ord(character) == 127 for character in url)
     ):
@@ -328,7 +329,12 @@ def _normalize_target(
         port = parsed.port
     except (TypeError, UnicodeError, ValueError) as exc:
         raise ValueError("target URL is invalid") from exc
-    if not parsed.scheme or not parsed.netloc or not hostname:
+    if (
+        not parsed.scheme
+        or not parsed.netloc
+        or not hostname
+        or parsed.netloc.endswith(":")
+    ):
         raise ValueError("target URL is invalid")
     if parsed.username is not None or parsed.password is not None or parsed.fragment:
         raise ValueError("target URL is invalid")
@@ -351,6 +357,8 @@ def _normalize_target(
     except UnicodeError as exc:
         raise ValueError("target URL is invalid") from exc
     request_target = path if not query else f"{path}?{query}"
+    if request_target.startswith("//"):
+        raise ValueError("target request path is invalid")
 
     authority_host = f"[{host}]" if ":" in host else host
     default_port = 443 if scheme == "https" else 80
@@ -575,23 +583,26 @@ class DeliveryAttemptExecutor:
             headers += (("x-tldw-webhook-test", "true"),)
 
         timeout = float(request.timeout_seconds)
-        hop_request = NormalizedHTTPHopRequest(
-            scheme=target.scheme,  # type: ignore[arg-type]
-            host=target.host,
-            port=target.port,
-            method="POST",
-            target=target.request_target,
-            headers=headers,
-            body=request.body,
-            limits=HTTPHopLimits(
-                dns_timeout_seconds=min(2.0, timeout),
-                connect_timeout_seconds=min(5.0, timeout),
-                read_timeout_seconds=timeout,
-                write_timeout_seconds=min(5.0, timeout),
-                total_timeout_seconds=timeout,
-                max_request_body_bytes=_MAX_BODY_BYTES,
-            ),
-        )
+        try:
+            hop_request = NormalizedHTTPHopRequest(
+                scheme=target.scheme,  # type: ignore[arg-type]
+                host=target.host,
+                port=target.port,
+                method="POST",
+                target=target.request_target,
+                headers=headers,
+                body=request.body,
+                limits=HTTPHopLimits(
+                    dns_timeout_seconds=min(2.0, timeout),
+                    connect_timeout_seconds=min(5.0, timeout),
+                    read_timeout_seconds=timeout,
+                    write_timeout_seconds=min(5.0, timeout),
+                    total_timeout_seconds=timeout,
+                    max_request_body_bytes=_MAX_BODY_BYTES,
+                ),
+            )
+        except (HTTPHopError, TypeError, ValueError, UnicodeError):
+            return _failed_result(AttemptReasonCode.TARGET_INVALID)
         try:
             started = _clock_monotonic(self._clock)
         except ValueError:

@@ -387,6 +387,7 @@ class _PeerEvidence:
     final_http_version: bytes | None = None
     final_status: int | None = None
     final_content_lengths: tuple[bytes, ...] = ()
+    final_retry_after_values: tuple[bytes, ...] = ()
 
 
 class _ContentDecoder(Protocol):
@@ -402,9 +403,16 @@ class _ContentDecoder(Protocol):
 class _RawResponseGuard:
     """Bound plaintext response headers and wire bytes before h11 sees them."""
 
-    def __init__(self, *, evidence: _PeerEvidence, limits: HTTPHopLimits) -> None:
+    def __init__(
+        self,
+        *,
+        evidence: _PeerEvidence,
+        limits: HTTPHopLimits,
+        response_mode: Literal["bounded_body", "status_only"],
+    ) -> None:
         self._evidence = evidence
         self._limits = limits
+        self._response_mode = response_mode
         self._pending = bytearray()
         self._scan_position = 0
         self._output_position = 0
@@ -421,6 +429,8 @@ class _RawResponseGuard:
             return self._read_pending(max_bytes)
 
         if self._final_headers_seen:
+            if self._response_mode == "status_only":
+                return b""
             return await self._read_wire(stream, max_bytes, timeout)
 
         while not self._final_headers_seen:
@@ -477,6 +487,10 @@ class _RawResponseGuard:
             self._scan_position = block_end
             if self._final_headers_seen:
                 body_bytes = len(self._pending) - block_end
+                if self._response_mode == "status_only":
+                    del self._pending[block_end:]
+                    self._evidence.wire_bytes = 0
+                    return
                 if body_bytes > self._limits.max_wire_bytes:
                     raise HTTPHopError("response_too_large")
                 self._evidence.wire_bytes = body_bytes
@@ -508,15 +522,22 @@ class _RawResponseGuard:
             return
 
         content_lengths: list[bytes] = []
+        retry_after_values: list[bytes] = []
         for line in field_lines:
             if not line or line[:1] in {b" ", b"\t"}:
                 continue
             name, separator, value = line.partition(b":")
-            if separator and name.lower() == b"content-length":
+            if not separator:
+                continue
+            normalized_name = name.lower()
+            if normalized_name == b"content-length":
                 content_lengths.append(value.strip(b" \t"))
+            elif normalized_name == b"retry-after":
+                retry_after_values.append(value)
         if len(content_lengths) > 1:
             raise HTTPHopError("protocol_error")
         self._evidence.final_content_lengths = tuple(content_lengths)
+        self._evidence.final_retry_after_values = tuple(retry_after_values)
         self._evidence.final_http_version = http_version
         self._evidence.final_status = status
         self._final_headers_seen = True
@@ -901,19 +922,18 @@ def _latency_ms(clock: _Clock, started: float) -> int:
 
 
 def _retry_after_seconds(
-    response: httpcore.Response,
+    evidence: _PeerEvidence,
     *,
     clock: _Clock,
 ) -> int | None:
-    if response.status not in {429, 503}:
+    if evidence.final_status not in {429, 503}:
         return None
-    values = [value.strip(b" \t") for name, value in response.headers if name.lower() == b"retry-after"]
-    if len(values) != 1:
+    if len(evidence.final_retry_after_values) != 1:
         return None
-    try:
-        value = values[0].decode("ascii")
-    except UnicodeDecodeError:
+    raw_value = evidence.final_retry_after_values[0]
+    if any(byte < 32 or byte > 126 for byte in raw_value):
         return None
+    value = raw_value.strip(b" ").decode("ascii")
     if not value:
         return None
     if value.isdigit():
@@ -1087,7 +1107,11 @@ async def _perform_http_hop(
     selected_ip = resolved_ips[0]
     transport_headers = _transport_headers(request)
     evidence = _PeerEvidence()
-    response_guard = _RawResponseGuard(evidence=evidence, limits=request.limits)
+    response_guard = _RawResponseGuard(
+        evidence=evidence,
+        limits=request.limits,
+        response_mode=response_mode,
+    )
     tls_context = _build_tls_context() if request.scheme == "https" else None
     backend = _PinnedBackend(
         network_backend,
@@ -1142,7 +1166,7 @@ async def _perform_http_hop(
                     raise HTTPHopError("transport_error")
                 status_evidence = _StatusOnlyEvidence(
                     status_code=response.status,
-                    retry_after_seconds=_retry_after_seconds(response, clock=clock),
+                    retry_after_seconds=_retry_after_seconds(evidence, clock=clock),
                 )
             else:
                 body_permitted = _body_is_permitted(request, response.status)
@@ -1325,7 +1349,7 @@ async def _request_http_hop_status(
     try:
         evidence = await asyncio.wait_for(
             execute(),
-            timeout=request.limits.total_timeout_seconds,
+            timeout=min(request.limits.total_timeout_seconds, 30.0),
         )
     except asyncio.CancelledError:
         raise

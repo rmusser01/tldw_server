@@ -552,6 +552,95 @@ async def test_url_is_idna_and_percent_normalized_before_policy_and_egress(
     assert egress.requests[0].target == "/caf%C3%A9?q=hello%20world&next=%2F"
 
 
+@pytest.mark.unit
+async def test_double_slash_request_target_is_rejected_before_policy_or_io(
+    executor_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    policy_calls: list[str] = []
+    _allow_policy(executor_module, monkeypatch, policy_calls)
+    egress = EgressRecorder(_status(200))
+    executor = executor_module.DeliveryAttemptExecutor(
+        egress=egress,
+        clock=FakeClock(),
+        allow_http_dev=False,
+    )
+    target = ValidatedWebhookTarget(
+        url="https://receiver.example//hooks/admin",
+        hostname="receiver.example",
+        target_display="https://receiver.example",
+    )
+
+    result = await executor.execute(_command(executor_module, target=target))
+
+    assert result.outcome.value == "failed"
+    assert result.reason_code.value == "target_invalid"
+    assert policy_calls == []
+    assert egress.requests == []
+
+
+@pytest.mark.parametrize(
+    ("url", "hostname"),
+    [
+        ("https://receiver.example/hook#", "receiver.example"),
+        ("https://receiver.example:/hook", "receiver.example"),
+        ("https://[2001:4860:4860::8888]:/hook", "2001:4860:4860::8888"),
+    ],
+    ids=("empty-fragment", "empty-domain-port", "empty-ipv6-port"),
+)
+@pytest.mark.unit
+async def test_empty_fragment_or_port_syntax_is_rejected_before_policy_or_io(
+    executor_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    url: str,
+    hostname: str,
+) -> None:
+    policy_calls: list[str] = []
+    _allow_policy(executor_module, monkeypatch, policy_calls)
+    egress = EgressRecorder(_status(200))
+    executor = executor_module.DeliveryAttemptExecutor(
+        egress=egress,
+        clock=FakeClock(),
+        allow_http_dev=False,
+    )
+    target = ValidatedWebhookTarget(
+        url=url,
+        hostname=hostname,
+        target_display=f"https://{hostname}",
+    )
+
+    result = await executor.execute(_command(executor_module, target=target))
+
+    assert result.outcome.value == "failed"
+    assert result.reason_code.value == "target_invalid"
+    assert policy_calls == []
+    assert egress.requests == []
+
+
+@pytest.mark.unit
+async def test_hop_request_validation_failure_is_closed_without_egress_io(
+    executor_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def reject_hop_request(**_kwargs: object) -> None:
+        raise core_exceptions.HTTPHopError("invalid_request")
+
+    monkeypatch.setattr(
+        executor_module,
+        "NormalizedHTTPHopRequest",
+        reject_hop_request,
+    )
+    egress = EgressRecorder(_status(200))
+    executor = _executor(executor_module, monkeypatch, egress)
+
+    result = await executor.execute(_command(executor_module))
+
+    assert result.outcome.value == "failed"
+    assert result.reason_code.value == "target_invalid"
+    assert result.status_code is None
+    assert egress.requests == []
+
+
 @pytest.mark.parametrize(
     "url",
     [

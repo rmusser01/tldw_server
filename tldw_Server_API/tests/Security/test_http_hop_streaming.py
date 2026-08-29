@@ -210,6 +210,44 @@ async def test_status_only_closes_without_reading_any_response_body(
     assert active_stream.closed is True
 
 
+async def test_status_only_discards_coalesced_body_before_httpcore_retains_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    instances: list[ForwardingGuard] = []
+
+    class ForwardingGuard(http_hop._RawResponseGuard):
+        def __init__(self, **kwargs: object) -> None:
+            super().__init__(**kwargs)  # type: ignore[arg-type]
+            self.forwarded: list[bytes] = []
+            instances.append(self)
+
+        async def read(
+            self,
+            stream: httpcore.AsyncNetworkStream,
+            max_bytes: int,
+            timeout: float | None,
+        ) -> bytes:
+            data = await super().read(stream, max_bytes, timeout)
+            self.forwarded.append(data)
+            return data
+
+    monkeypatch.setattr(http_hop, "_RawResponseGuard", ForwardingGuard)
+    body_canary = b"coalesced-status-body-must-not-reach-httpcore"
+    head = _status_head(
+        200,
+        (b"Content-Length", str(len(body_canary)).encode("ascii")),
+        (b"Connection", b"close"),
+    )
+
+    response, stream = await _execute_status((head + body_canary,))
+
+    assert response.status_code == 200
+    assert len(instances) == 1
+    assert b"".join(instances[0].forwarded) == head
+    assert body_canary not in instances[0]._pending
+    assert stream.closed is True
+
+
 async def test_status_only_never_calls_bounded_body_or_header_projection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -274,6 +312,31 @@ async def test_status_only_retry_after_is_strict_bounded_and_status_scoped(
     assert stream.closed is True
 
 
+@pytest.mark.parametrize(
+    "raw_value",
+    [
+        b"\t60",
+        b"60\t",
+        b"Sun,\t23 Aug 2026 00:02:00 GMT",
+        b"\x1fSun, 23 Aug 2026 00:02:00 GMT",
+    ],
+    ids=("leading-htab", "trailing-htab", "embedded-htab", "unit-separator"),
+)
+async def test_status_only_rejects_raw_retry_after_control_octets(
+    raw_value: bytes,
+) -> None:
+    raw = _status_head(
+        503,
+        (b"Retry-After", raw_value),
+        (b"Content-Length", b"0"),
+    )
+
+    response, stream = await _execute_status((raw,))
+
+    assert response.retry_after_seconds is None
+    assert stream.closed is True
+
+
 async def test_status_only_header_limit_failure_closes_before_return() -> None:
     raw = _status_head(
         200,
@@ -304,6 +367,69 @@ async def test_status_only_total_timeout_closes_blocked_header_read() -> None:
         )
 
     assert exc.value.code == "total_timeout"
+    assert stream.closed is True
+
+
+async def test_status_only_whole_hop_timeout_is_capped_at_30_seconds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed_timeouts: list[float | None] = []
+    real_wait_for = asyncio.wait_for
+
+    async def recording_wait_for(
+        awaitable: Any,
+        timeout: float | None,
+    ) -> Any:
+        observed_timeouts.append(timeout)
+        return await real_wait_for(awaitable, timeout=timeout)
+
+    monkeypatch.setattr(http_hop.asyncio, "wait_for", recording_wait_for)
+    stream = RecordingStream(
+        server_addr=("8.8.8.8", 80),
+        response=(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",),
+    )
+
+    response, active_stream = await _execute_status(
+        (),
+        request=_request(limits=_limits(total_timeout_seconds=45.0)),
+        stream=stream,
+    )
+
+    assert response.status_code == 200
+    assert observed_timeouts[0] == 30.0
+    assert active_stream.closed is True
+
+
+async def test_bounded_body_whole_hop_preserves_configured_timeout_above_30_seconds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed_timeouts: list[float | None] = []
+    real_wait_for = asyncio.wait_for
+
+    async def recording_wait_for(
+        awaitable: Any,
+        timeout: float | None,
+    ) -> Any:
+        observed_timeouts.append(timeout)
+        return await real_wait_for(awaitable, timeout=timeout)
+
+    monkeypatch.setattr(http_hop.asyncio, "wait_for", recording_wait_for)
+    stream = RecordingStream(
+        server_addr=("8.8.8.8", 80),
+        response=(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",),
+    )
+
+    async def resolver(_host: str, _port: int, _timeout_seconds: float) -> Sequence[str]:
+        return ("8.8.8.8",)
+
+    response = await http_hop._request_http_hop(
+        _request(limits=_limits(total_timeout_seconds=45.0)),
+        resolver=resolver,
+        network_backend=RecordingBackend(stream),
+    )
+
+    assert response.body == b"ok"
+    assert observed_timeouts[0] == 45.0
     assert stream.closed is True
 
 
