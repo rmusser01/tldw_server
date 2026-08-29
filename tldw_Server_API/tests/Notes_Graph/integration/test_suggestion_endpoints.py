@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
-from threading import Event
+from threading import Event, get_ident
 from types import SimpleNamespace
 
 import pytest
@@ -132,9 +132,7 @@ class FakeAPI:
     def cancel_run(self, **kwargs):
         self._record("cancel", kwargs)
         return SimpleNamespace(
-            cancellation=SimpleNamespace(
-                replay_envelope={"run_id": "run-1", "state": "cancelling", "revision": 3}
-            ),
+            cancellation=SimpleNamespace(replay_envelope={"run_id": "run-1", "state": "cancelling", "revision": 3}),
             accepted=True,
         )
 
@@ -156,9 +154,7 @@ class FakeAPI:
 
     def reject_suggestion(self, **kwargs):
         self._record("reject", kwargs)
-        return SimpleNamespace(
-            envelope={"suggestion_id": "suggestion-1", "state": "rejected", "revision": 2}
-        )
+        return SimpleNamespace(envelope={"suggestion_id": "suggestion-1", "state": "rejected", "revision": 2})
 
     def accept_permission_requirements(self, **kwargs):
         self._record("accept_permissions", kwargs)
@@ -166,9 +162,7 @@ class FakeAPI:
 
     def accept_suggestion(self, **kwargs):
         self._record("accept", kwargs)
-        return SimpleNamespace(
-            envelope={"suggestion_id": "suggestion-1", "state": "accepted", "revision": 2}
-        )
+        return SimpleNamespace(envelope={"suggestion_id": "suggestion-1", "state": "accepted", "revision": 2})
 
 
 def _app(
@@ -243,6 +237,39 @@ def test_public_request_schemas_are_bounded_and_forbid_provider_authority_fields
         )
 
 
+@pytest.mark.asyncio
+async def test_sync_facade_releases_database_connection_on_its_worker_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    call_threads: list[int] = []
+    close_threads: list[int] = []
+    db = SimpleNamespace(release_context_connection=lambda: close_threads.append(get_ident()))
+
+    class API:
+        @staticmethod
+        def read() -> str:
+            call_threads.append(get_ident())
+            return "ok"
+
+    monkeypatch.setattr(
+        endpoint,
+        "build_notes_graph_suggestions_api",
+        lambda **_kwargs: API(),
+    )
+
+    result = await endpoint._call_api(
+        user=SimpleNamespace(id=1, id_str="1"),
+        db=db,
+        jobs=SimpleNamespace(),
+        dataset_id=None,
+        operation=lambda api: api.read(),
+    )
+
+    assert result == "ok"
+    assert call_threads == close_threads
+    assert call_threads != [get_ident()]
+
+
 def test_suggestion_list_serializes_the_server_authoritative_target_title() -> None:
     fake = FakeAPI()
     fake.suggestion_items = (
@@ -290,9 +317,7 @@ def test_capability_sets_etag_and_run_admission_is_durable_202_without_jobs_inte
             json={"provider": "openai", "model": "model-a"},
             headers={"If-Match": f'"{REVISION}"', "Idempotency-Key": "run-key"},
         )
-        detail = client.get(
-            f"/api/v1/notes/{NOTE_ID}/graph/suggestions/runs/run-1"
-        )
+        detail = client.get(f"/api/v1/notes/{NOTE_ID}/graph/suggestions/runs/run-1")
 
     assert capability.status_code == 200
     assert capability.headers["etag"] == f'"{REVISION}"'
@@ -344,6 +369,97 @@ async def test_run_admission_yields_the_event_loop_during_sync_facade_work(
     response = await task
 
     assert response.id == "run-1"
+
+
+@pytest.mark.asyncio
+async def test_run_listing_yields_the_event_loop_during_sync_facade_work(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started = Event()
+    release = Event()
+
+    class BlockingAPI(FakeAPI):
+        def list_runs(self, **kwargs):
+            started.set()
+            if not release.wait(timeout=1):
+                raise AssertionError("event loop could not release synchronous run listing")
+            return super().list_runs(**kwargs)
+
+    fake = BlockingAPI()
+    monkeypatch.setattr(
+        endpoint,
+        "build_notes_graph_suggestions_api",
+        lambda **_kwargs: fake,
+    )
+    task = asyncio.create_task(
+        endpoint.list_suggestion_runs(
+            note_id=NOTE_ID,
+            state=None,
+            limit=20,
+            cursor=None,
+            dataset_id=None,
+            user=SimpleNamespace(id=1, id_str="1"),
+            db=SimpleNamespace(),
+            jobs=SimpleNamespace(),
+            _principal=_principal(_base_permissions()),
+            _rate=None,
+            _scope=None,
+        )
+    )
+
+    assert await asyncio.to_thread(started.wait, 0.5) is True
+    release.set()
+    response = await task
+
+    assert response.items == ()
+
+
+@pytest.mark.asyncio
+async def test_suggestion_acceptance_yields_the_event_loop_during_sync_facade_work(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started = Event()
+    release = Event()
+
+    class BlockingAPI(FakeAPI):
+        def accept_suggestion(self, **kwargs):
+            started.set()
+            if not release.wait(timeout=1):
+                raise AssertionError("event loop could not release synchronous suggestion acceptance")
+            return super().accept_suggestion(**kwargs)
+
+    fake = BlockingAPI()
+    monkeypatch.setattr(
+        endpoint,
+        "build_notes_graph_suggestions_api",
+        lambda **_kwargs: fake,
+    )
+    principal = _principal((*_base_permissions(), NOTES_GRAPH_WRITE))
+    task = asyncio.create_task(
+        endpoint.accept_suggestion(
+            note_id=NOTE_ID,
+            suggestion_id="suggestion-1",
+            body=SuggestionDecisionRequest(
+                expected_revision=1,
+                expected_source_fingerprint=FINGERPRINT,
+                expected_target_fingerprint=None,
+            ),
+            dataset_id=None,
+            idempotency_key="accept-key",
+            user=SimpleNamespace(id=1, id_str="1"),
+            db=SimpleNamespace(),
+            jobs=SimpleNamespace(),
+            principal=principal,
+            _rate=None,
+            _scope=None,
+        )
+    )
+
+    assert await asyncio.to_thread(started.wait, 0.5) is True
+    release.set()
+    response = await task
+
+    assert response.resource_id == "suggestion-1"
 
 
 def test_in_progress_cancellation_returns_authoritative_cancelling_run() -> None:
@@ -470,9 +586,7 @@ def test_typed_domain_errors_map_to_stable_sanitized_http_contract(
     fake = FakeAPI()
     fake.error = SuggestionAPIError(status_code, code)
     with TestClient(_app(fake, _base_permissions())) as client:
-        response = client.get(
-            f"/api/v1/notes/{NOTE_ID}/graph/suggestions/capabilities"
-        )
+        response = client.get(f"/api/v1/notes/{NOTE_ID}/graph/suggestions/capabilities")
     assert response.status_code == status_code
     assert response.json()["detail"] == {
         "error_code": code,
@@ -484,9 +598,7 @@ def test_typed_domain_errors_map_to_stable_sanitized_http_contract(
 def test_base_suggestion_permission_is_required_by_authoritative_principal() -> None:
     fake = FakeAPI()
     with TestClient(_app(fake, (NOTES_GRAPH_READ,))) as client:
-        response = client.get(
-            f"/api/v1/notes/{NOTE_ID}/graph/suggestions/capabilities"
-        )
+        response = client.get(f"/api/v1/notes/{NOTE_ID}/graph/suggestions/capabilities")
     assert response.status_code == 403
     assert NOTES_GRAPH_SUGGEST in response.text
     assert fake.calls == []
@@ -686,9 +798,7 @@ def test_openapi_declares_bounded_headers_and_structured_suggestion_errors() -> 
 
     def string_branch(name: str) -> dict[str, object]:
         return next(
-            branch
-            for branch in parameters[name].get("anyOf", (parameters[name],))
-            if branch.get("type") == "string"
+            branch for branch in parameters[name].get("anyOf", (parameters[name],)) if branch.get("type") == "string"
         )
 
     assert string_branch("Idempotency-Key")["minLength"] == 1
@@ -700,7 +810,5 @@ def test_openapi_declares_bounded_headers_and_structured_suggestion_errors() -> 
             if "notes-graph-suggestions" not in operation.get("tags", []):
                 continue
             for status_code in ("404", "409", "412", "422", "429", "503"):
-                response_schema = operation["responses"][status_code]["content"][
-                    "application/json"
-                ]["schema"]
+                response_schema = operation["responses"][status_code]["content"]["application/json"]["schema"]
                 assert response_schema["$ref"].endswith("/SuggestionHTTPErrorResponse")

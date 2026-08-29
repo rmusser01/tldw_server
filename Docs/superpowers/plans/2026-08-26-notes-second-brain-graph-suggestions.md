@@ -812,6 +812,18 @@ git add Docs apps tldw_Server_API backlog
 git commit -m "docs: complete Notes graph suggestions rollout (TASK-13138)"
 ```
 
+## Stage 10: Pre-Merge Review Remediation
+
+**Goal**: Remove synchronous Notes graph work from the application event loop, repair the AuthNZ migration regression expectation, and route remaining toolbar copy through i18n.
+
+**Success Criteria**: Suggestion routes, worker preparation/publication, and maintenance yield while deliberately slow synchronous collaborators run; the AuthNZ seed regression suite reaches migration 95; toolbar-visible and assistive copy uses translation keys.
+
+**Tests**: Focused async responsiveness regressions, `test_rbac_seed_helper.py`, Notes Graph worker/endpoint/service suites, and toolbar i18n coverage.
+
+**Status**: Complete
+
+**Verification**: 134 affected backend tests and 121 Notes graph UI tests passed. Ruff, ESLint, extension-pinned Prettier, locale duplicate/coverage checks, Bandit with zero findings, and `git diff --check` passed. The shared-package TypeScript baseline remains unchanged with zero diagnostics in touched files. Independent follow-up review found no actionable issues.
+
 ## Final Verification Checklist
 
 - [ ] All 23 TASK-13138 acceptance criteria map to passing tests or recorded visual verification.

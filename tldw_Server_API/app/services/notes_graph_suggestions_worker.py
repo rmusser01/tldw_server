@@ -43,7 +43,8 @@ def build_worker_config(*, worker_id: str) -> WorkerConfig:
 
 
 async def _cancellation_requested(job: dict[str, Any], *, jobs: JobManager) -> bool:
-    current = jobs.get_job_or_archived_by_uuid(
+    current = await asyncio.to_thread(
+        jobs.get_job_or_archived_by_uuid,
         str(job.get("uuid") or ""),
         domain=JOB_DOMAIN,
         owner_user_id=str(job.get("owner_user_id") or ""),
@@ -82,10 +83,12 @@ async def handle_notes_graph_suggestions_job(
             store_factory=lambda _owner: db.note_graph_suggestion_store,
             resolve_capability=resolve_generation_capability,
             cancellation_requested=lambda row: _cancellation_requested(row, jobs=jobs),
+            sync_cleanup=lambda: _close_database(db),
         )
         return await worker.handle(job)
     except SuggestionWorkerCancelled:
-        jobs.finalize_cancelled(
+        await asyncio.to_thread(
+            jobs.finalize_cancelled,
             int(job["id"]),
             reason="requested",
             expected_uuid=str(job["uuid"]),
@@ -94,7 +97,7 @@ async def handle_notes_graph_suggestions_job(
         )
         raise
     finally:
-        _close_database(db)
+        await asyncio.to_thread(_close_database, db)
 
 
 async def _publish_completed(
@@ -105,24 +108,28 @@ async def _publish_completed(
 ) -> None:
     owner = str(job["owner_user_id"])
     db = await _open_owner_database(owner)
-    try:
-        dataset_id = str(job["payload"]["dataset_id"])
-        run = db.note_graph_suggestion_store.get_run(
-            dataset_id=dataset_id,
-            run_id=str(result["run_id"]),
-        )
-        SuggestionPublisher(
-            jobs=jobs,
-            store_factory=lambda _owner: db.note_graph_suggestion_store,
-        ).publish(
-            run=run,
-            job_uuid=str(job["uuid"]),
-            owner_user_id=owner,
-            dataset_id=dataset_id,
-            now=datetime.now(timezone.utc),
-        )
-    finally:
-        _close_database(db)
+    dataset_id = str(job["payload"]["dataset_id"])
+
+    def publish() -> None:
+        try:
+            run = db.note_graph_suggestion_store.get_run(
+                dataset_id=dataset_id,
+                run_id=str(result["run_id"]),
+            )
+            SuggestionPublisher(
+                jobs=jobs,
+                store_factory=lambda _owner: db.note_graph_suggestion_store,
+            ).publish(
+                run=run,
+                job_uuid=str(job["uuid"]),
+                owner_user_id=owner,
+                dataset_id=dataset_id,
+                now=datetime.now(timezone.utc),
+            )
+        finally:
+            _close_database(db)
+
+    await asyncio.to_thread(publish)
 
 
 async def run_notes_graph_suggestions_worker(

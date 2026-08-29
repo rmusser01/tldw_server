@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timedelta, timezone
+from threading import Event
 from types import SimpleNamespace
 
 import pytest
@@ -99,6 +100,53 @@ async def test_completion_callback_loads_current_run_before_publication(monkeypa
     )
     assert calls[3][1]["run"] is run
     assert calls[-1] == ("close", db)
+
+
+@pytest.mark.asyncio
+async def test_completion_callback_yields_the_event_loop_during_sync_publication(
+    monkeypatch,
+) -> None:
+    started = Event()
+    release = Event()
+    run = SimpleNamespace(id="run-1")
+
+    class Store:
+        @staticmethod
+        def get_run(**_kwargs):
+            return run
+
+    class Publisher:
+        def __init__(self, **_kwargs):
+            pass
+
+        @staticmethod
+        def publish(**_kwargs):
+            started.set()
+            if not release.wait(timeout=1):
+                raise AssertionError("event loop could not release synchronous publication")
+
+    async def open_database(_owner_user_id):
+        return SimpleNamespace(note_graph_suggestion_store=Store())
+
+    monkeypatch.setattr(notes_graph_suggestions_worker, "_open_owner_database", open_database)
+    monkeypatch.setattr(notes_graph_suggestions_worker, "_close_database", lambda _db: None)
+    monkeypatch.setattr(notes_graph_suggestions_worker, "SuggestionPublisher", Publisher)
+    task = asyncio.create_task(
+        notes_graph_suggestions_worker._publish_completed(
+            {
+                "uuid": "job-1",
+                "owner_user_id": "owner-1",
+                "lease_id": "lease-1",
+                "payload": {"dataset_id": "dataset-1"},
+            },
+            {"run_id": "run-1", "result_digest": f"sha256:{'a' * 64}"},
+            jobs=object(),
+        )
+    )
+
+    assert await asyncio.to_thread(started.wait, 0.5) is True
+    release.set()
+    await task
 
 
 def test_app_sidecar_ownership_prevents_duplicate_consumers(monkeypatch) -> None:
@@ -245,6 +293,46 @@ async def test_maintenance_loop_runs_at_most_once_per_minute() -> None:
 
     assert maintenance.calls == 2
     assert sleeps == [60.0]
+
+
+@pytest.mark.asyncio
+async def test_maintenance_yields_the_event_loop_during_sync_store_work(
+    monkeypatch,
+) -> None:
+    started = Event()
+    release = Event()
+
+    class UsersRepo:
+        @staticmethod
+        async def list_users(*, offset, limit):
+            assert (offset, limit) == (0, 200)
+            return ([{"id": 1}], 1)
+
+    class Store:
+        @staticmethod
+        def list_maintenance_dataset_ids(*, limit):
+            assert limit == 100
+            started.set()
+            if not release.wait(timeout=1):
+                raise AssertionError("event loop could not release synchronous maintenance")
+            return ()
+
+    async def open_database(_owner_user_id):
+        return SimpleNamespace(note_graph_suggestion_store=Store())
+
+    monkeypatch.setattr(notes_graph_suggestions_maintenance, "_open_owner_database", open_database)
+    monkeypatch.setattr(notes_graph_suggestions_maintenance, "_close_database", lambda _db: None)
+    runner = notes_graph_suggestions_maintenance._MaintenanceRunner(
+        jobs=_UnavailableJobs(),
+        users_repo=UsersRepo(),
+    )
+    task = asyncio.create_task(runner.run_pass(now=NOW))
+
+    assert await asyncio.to_thread(started.wait, 0.5) is True
+    release.set()
+    result = await task
+
+    assert result.claimed == 0
 
 
 @pytest.mark.parametrize(

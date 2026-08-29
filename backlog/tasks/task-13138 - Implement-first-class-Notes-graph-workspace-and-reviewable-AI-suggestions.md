@@ -4,7 +4,7 @@ title: Implement first-class Notes graph workspace and reviewable AI suggestions
 status: Done
 assignee: []
 created_date: '2026-08-27 03:40'
-updated_date: '2026-08-29 02:32'
+updated_date: '2026-08-29 04:59'
 labels:
   - notes
   - knowledge-graph
@@ -212,6 +212,10 @@ PR #2832 review cycle resumed. Rebasing onto current `origin/dev` produced an Au
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 PR #2832 rebase/review closure: rebased all 60 feature commits onto current origin/dev and resolved the AuthNZ migration collision by preserving upstream admin-webhook migration 94 and renumbering Notes graph permission seeding to migration 95. Addressed Qodo findings by offloading synchronous run admission from the async route, adding the complete endpoint docstring, replacing the local migration-test exception sentinel, introducing a typed Sync materialization contract error, assigning exactly one unit/integration marker per PostgreSQL v64 test, and applying edge visibility filters to Relationships mode. Rejected two findings with verified evidence: note_task_scope_authority is PRIMARY KEY(owner_user_id) and ADR 039 permits at most one immutable dataset per owner, so a 101st dataset is impossible; pg_database_config depends on function-scoped pg_temp_db, which provisions and drops a unique database per test, while isolated_test_environment is AuthNZ-specific. Final local verification: 108 backend tests passed (including live PostgreSQL), 36 frontend tests passed, the additional guarded tombstone/restore contract pair passed 2/2, Ruff/ESLint/extension-pinned Prettier/git diff checks passed, Bandit reported 0 findings, and an independent pre-merge review reported no actionable findings. The project-wide TypeScript command retains diagnostics only in unchanged origin/dev Presentation Studio and skills-certification files, with zero Notes graph diagnostics.
+
+Fresh pre-merge review found two validated Important issues: synchronous Notes graph route/worker/maintenance work can block the event loop, and AuthNZ seed regression tests still assert migration 94 instead of 95. Minor toolbar i18n hardcoding also validated. Beginning test-first remediation before merge.
+
+Pre-merge review remediation completed. Synchronous Notes graph endpoint, worker, publication, and maintenance work now runs off the event loop with thread-affine Notes connection cleanup; the AuthNZ regression expectation tracks migration 95; remaining toolbar visible and assistive labels use i18n keys. Fresh verification: 134 backend tests and 121 Notes graph UI tests passed; Ruff, ESLint, extension-pinned Prettier, locale duplicate/coverage checks, Bandit (0 findings), and git diff --check passed. Shared-package TypeScript retains the unchanged 315-diagnostic baseline with zero touched-file diagnostics. An independent follow-up review found no actionable issues and returned Ready to merge.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

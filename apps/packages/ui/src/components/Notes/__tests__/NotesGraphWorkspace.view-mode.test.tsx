@@ -44,7 +44,7 @@ vi.mock("react-i18next", () => ({
       options?: string | { defaultValue?: string; [key: string]: unknown }
     ) => {
       const fallback =
-        typeof options === "string" ? options : (options?.defaultValue ?? key)
+        typeof options === "string" ? options : options?.defaultValue ?? key
       if (typeof options !== "object") return fallback
       return Object.entries(options).reduce(
         (value, [name, replacement]) =>
@@ -698,7 +698,7 @@ describe("NotesGraphWorkspace first-class view mode", () => {
       fireEvent.click(screen.getByRole("button", { name: "Edge visibility" }))
       expect(
         screen.queryByRole("checkbox", {
-          name: "option:notesSearch.graphSuggestions"
+          name: "Suggestions"
         })
       ).not.toBeInTheDocument()
       expect(mockCanvas).toHaveBeenLastCalledWith(
@@ -725,7 +725,7 @@ describe("NotesGraphWorkspace first-class view mode", () => {
     fireEvent.click(screen.getByRole("button", { name: "Edge visibility" }))
     expect(
       screen.queryByRole("checkbox", {
-        name: "option:notesSearch.graphSuggestions"
+        name: "Suggestions"
       })
     ).not.toBeInTheDocument()
     expect(mockCanvas).toHaveBeenLastCalledWith(
@@ -795,7 +795,7 @@ describe("NotesGraphWorkspace first-class view mode", () => {
 
     fireEvent.click(
       screen.getByRole("button", {
-        name: "option:notesSearch.graphRelationships"
+        name: "Relationships"
       })
     )
     const relationships = within(
@@ -869,7 +869,7 @@ describe("NotesGraphWorkspace first-class view mode", () => {
     renderWorkspace({ onSelectNote })
     fireEvent.click(
       screen.getByRole("button", {
-        name: "option:notesSearch.graphRelationships"
+        name: "Relationships"
       })
     )
 
@@ -954,7 +954,7 @@ describe("NotesGraphWorkspace first-class view mode", () => {
       renderWorkspace()
       fireEvent.click(
         screen.getByRole("button", {
-          name: "option:notesSearch.graphRelationships"
+          name: "Relationships"
         })
       )
 
@@ -1014,7 +1014,7 @@ describe("NotesGraphWorkspace first-class view mode", () => {
     renderWorkspace()
     fireEvent.click(
       screen.getByRole("button", {
-        name: "option:notesSearch.graphRelationships"
+        name: "Relationships"
       })
     )
     const acceptButton = screen.getByRole("button", {
@@ -1067,7 +1067,7 @@ describe("NotesGraphWorkspace first-class view mode", () => {
 
     fireEvent.click(
       screen.getByRole("button", {
-        name: "option:notesSearch.graphRelationships"
+        name: "Relationships"
       })
     )
     fireEvent.click(
@@ -1077,9 +1077,7 @@ describe("NotesGraphWorkspace first-class view mode", () => {
       )
     )
     expect(mockFocusNode).not.toHaveBeenCalled()
-    fireEvent.click(
-      screen.getByRole("button", { name: "option:notesSearch.graphCanvas" })
-    )
+    fireEvent.click(screen.getByRole("button", { name: "Canvas" }))
 
     await waitFor(() => expect(mockFocusNode).toHaveBeenCalledWith("note:a"))
     expect(mockFocusNode).toHaveBeenCalledTimes(1)
@@ -1113,7 +1111,7 @@ describe("NotesGraphWorkspace first-class view mode", () => {
 
     fireEvent.click(
       screen.getByRole("button", {
-        name: "option:notesSearch.graphRelationships"
+        name: "Relationships"
       })
     )
     fireEvent.click(
@@ -1129,9 +1127,7 @@ describe("NotesGraphWorkspace first-class view mode", () => {
       initialFocusNoteId: "common",
       selectedNoteId: "common"
     })
-    fireEvent.click(
-      screen.getByRole("button", { name: "option:notesSearch.graphCanvas" })
-    )
+    fireEvent.click(screen.getByRole("button", { name: "Canvas" }))
 
     expect(mockFocusNode).not.toHaveBeenCalled()
   })

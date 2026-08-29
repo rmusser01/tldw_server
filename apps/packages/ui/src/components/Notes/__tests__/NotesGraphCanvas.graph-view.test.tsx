@@ -630,7 +630,7 @@ describe("NotesGraphToolbar controls", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Manual links" }))
     fireEvent.click(
       screen.getByRole("checkbox", {
-        name: "option:notesSearch.graphSuggestions"
+        name: "Suggestions"
       })
     )
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated, Any, Callable, TypeVar
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
 from starlette.concurrency import run_in_threadpool
@@ -42,10 +42,7 @@ from tldw_Server_API.app.core.Sync.v2.notes_link_coordinator import (
     resolve_notes_link_dataset_authority,
 )
 
-_SUGGESTION_ERROR_RESPONSES = {
-    code: {"model": SuggestionHTTPErrorResponse}
-    for code in (404, 409, 412, 422, 429, 503)
-}
+_SUGGESTION_ERROR_RESPONSES = {code: {"model": SuggestionHTTPErrorResponse} for code in (404, 409, 412, 422, 429, 503)}
 router = APIRouter(
     tags=["notes", "notes-graph-suggestions"],
     responses=_SUGGESTION_ERROR_RESPONSES,
@@ -91,6 +88,7 @@ IfMatchHeader = Annotated[
     str | None,
     Header(alias="If-Match", min_length=1, max_length=128),
 ]
+_T = TypeVar("_T")
 
 
 def _http_error(exc: SuggestionAPIError) -> HTTPException:
@@ -121,6 +119,26 @@ def _api(*, user: User, db: Any, jobs: Any, dataset_id: str | None) -> Any:
         dataset_id=_dataset_key(owner_user_id=owner, dataset_id=dataset_id),
         jobs=jobs,
     )
+
+
+async def _call_api(
+    *,
+    user: User,
+    db: Any,
+    jobs: Any,
+    dataset_id: str | None,
+    operation: Callable[[Any], _T],
+) -> _T:
+    def call() -> _T:
+        try:
+            return operation(_api(user=user, db=db, jobs=jobs, dataset_id=dataset_id))
+        finally:
+            release = getattr(db, "release_context_connection", None)
+            close = release if callable(release) else getattr(db, "close_connection", None)
+            if callable(close):
+                close()
+
+    return await run_in_threadpool(call)
 
 
 def _required_idempotency_key(value: str | None) -> str:
@@ -203,12 +221,7 @@ def _run_replay_response(envelope: dict[str, Any]) -> SuggestionRunResponse:
 
 
 def _mutation_response(envelope: dict[str, Any]) -> SuggestionMutationResponse:
-    resource_id = str(
-        envelope.get("suggestion_id")
-        or envelope.get("run_id")
-        or envelope.get("source_note_id")
-        or ""
-    )
+    resource_id = str(envelope.get("suggestion_id") or envelope.get("run_id") or envelope.get("source_note_id") or "")
     return SuggestionMutationResponse(
         resource_id=resource_id,
         state=str(envelope.get("state") or "completed"),
@@ -219,9 +232,7 @@ def _mutation_response(envelope: dict[str, Any]) -> SuggestionMutationResponse:
 
 def _principal_allows(principal: AuthPrincipal, permissions: tuple[str, ...]) -> bool:
     claims = set(principal.permissions)
-    return principal_has_admin_bypass_claims(principal) or all(
-        permission in claims for permission in permissions
-    )
+    return principal_has_admin_bypass_claims(principal) or all(permission in claims for permission in permissions)
 
 
 _require_suggestion_permissions = RequirePermission(NOTES_GRAPH_READ, NOTES_GRAPH_SUGGEST)
@@ -239,15 +250,19 @@ async def get_suggestion_capabilities(
     jobs: Any = Depends(try_get_job_manager),
     _principal: AuthPrincipal = Depends(_require_suggestion_permissions),
     _rate: None = Depends(_suggestion_rate_limit),
-    _scope: None = Depends(
-        TokenScopeGuard("notes", require_if_present=True, endpoint_id="notes.graph.suggest")
-    ),
+    _scope: None = Depends(TokenScopeGuard("notes", require_if_present=True, endpoint_id="notes.graph.suggest")),
 ) -> SuggestionCapabilitiesResponse:
     try:
-        capabilities = _api(user=user, db=db, jobs=jobs, dataset_id=dataset_id).get_capabilities(
-            note_id=_normalize_note_id(note_id),
-            provider=provider,
-            model=model,
+        capabilities = await _call_api(
+            user=user,
+            db=db,
+            jobs=jobs,
+            dataset_id=dataset_id,
+            operation=lambda api: api.get_capabilities(
+                note_id=_normalize_note_id(note_id),
+                provider=provider,
+                model=model,
+            ),
         )
     except SuggestionAPIError as exc:
         raise _http_error(exc) from exc
@@ -272,9 +287,7 @@ async def create_suggestion_run(
     jobs: Any = Depends(try_get_job_manager),
     _principal: AuthPrincipal = Depends(_require_suggestion_permissions),
     _rate: None = Depends(_suggestion_rate_limit),
-    _scope: None = Depends(
-        TokenScopeGuard("notes", require_if_present=True, endpoint_id="notes.graph.suggest")
-    ),
+    _scope: None = Depends(TokenScopeGuard("notes", require_if_present=True, endpoint_id="notes.graph.suggest")),
 ) -> SuggestionRunResponse:
     """Admit a source-grounded suggestion run for one note.
 
@@ -299,14 +312,18 @@ async def create_suggestion_run(
     """
 
     try:
-        admitted = await run_in_threadpool(
-            lambda: _api(user=user, db=db, jobs=jobs, dataset_id=dataset_id).admit_run(
+        admitted = await _call_api(
+            user=user,
+            db=db,
+            jobs=jobs,
+            dataset_id=dataset_id,
+            operation=lambda api: api.admit_run(
                 note_id=_normalize_note_id(note_id),
                 provider=body.provider,
                 model=body.model,
                 capability_revision=_required_if_match(if_match),
                 idempotency_key=_required_idempotency_key(idempotency_key),
-            )
+            ),
         )
     except SuggestionAPIError as exc:
         raise _http_error(exc) from exc
@@ -330,16 +347,20 @@ async def list_suggestion_runs(
     jobs: Any = Depends(try_get_job_manager),
     _principal: AuthPrincipal = Depends(_require_suggestion_permissions),
     _rate: None = Depends(_suggestion_rate_limit),
-    _scope: None = Depends(
-        TokenScopeGuard("notes", require_if_present=True, endpoint_id="notes.graph.suggest")
-    ),
+    _scope: None = Depends(TokenScopeGuard("notes", require_if_present=True, endpoint_id="notes.graph.suggest")),
 ) -> SuggestionRunListResponse:
     try:
-        page = _api(user=user, db=db, jobs=jobs, dataset_id=dataset_id).list_runs(
-            note_id=_normalize_note_id(note_id),
-            states=_states(state),
-            limit=limit,
-            cursor=cursor,
+        page = await _call_api(
+            user=user,
+            db=db,
+            jobs=jobs,
+            dataset_id=dataset_id,
+            operation=lambda api: api.list_runs(
+                note_id=_normalize_note_id(note_id),
+                states=_states(state),
+                limit=limit,
+                cursor=cursor,
+            ),
         )
     except SuggestionAPIError as exc:
         raise _http_error(exc) from exc
@@ -359,14 +380,18 @@ async def get_suggestion_run(
     jobs: Any = Depends(try_get_job_manager),
     _principal: AuthPrincipal = Depends(_require_suggestion_permissions),
     _rate: None = Depends(_suggestion_rate_limit),
-    _scope: None = Depends(
-        TokenScopeGuard("notes", require_if_present=True, endpoint_id="notes.graph.suggest")
-    ),
+    _scope: None = Depends(TokenScopeGuard("notes", require_if_present=True, endpoint_id="notes.graph.suggest")),
 ) -> SuggestionRunResponse:
     try:
-        run = _api(user=user, db=db, jobs=jobs, dataset_id=dataset_id).get_run(
-            note_id=_normalize_note_id(note_id),
-            run_id=run_id,
+        run = await _call_api(
+            user=user,
+            db=db,
+            jobs=jobs,
+            dataset_id=dataset_id,
+            operation=lambda api: api.get_run(
+                note_id=_normalize_note_id(note_id),
+                run_id=run_id,
+            ),
         )
     except SuggestionAPIError as exc:
         raise _http_error(exc) from exc
@@ -385,16 +410,20 @@ async def cancel_suggestion_run(
     jobs: Any = Depends(try_get_job_manager),
     _principal: AuthPrincipal = Depends(_require_suggestion_permissions),
     _rate: None = Depends(_suggestion_rate_limit),
-    _scope: None = Depends(
-        TokenScopeGuard("notes", require_if_present=True, endpoint_id="notes.graph.suggest")
-    ),
+    _scope: None = Depends(TokenScopeGuard("notes", require_if_present=True, endpoint_id="notes.graph.suggest")),
 ) -> SuggestionMutationResponse:
     try:
-        result = _api(user=user, db=db, jobs=jobs, dataset_id=dataset_id).cancel_run(
-            note_id=_normalize_note_id(note_id),
-            run_id=run_id,
-            expected_revision=body.expected_revision,
-            idempotency_key=_required_idempotency_key(idempotency_key),
+        result = await _call_api(
+            user=user,
+            db=db,
+            jobs=jobs,
+            dataset_id=dataset_id,
+            operation=lambda api: api.cancel_run(
+                note_id=_normalize_note_id(note_id),
+                run_id=run_id,
+                expected_revision=body.expected_revision,
+                idempotency_key=_required_idempotency_key(idempotency_key),
+            ),
         )
     except SuggestionAPIError as exc:
         raise _http_error(exc) from exc
@@ -423,16 +452,20 @@ async def list_suggestions(
     jobs: Any = Depends(try_get_job_manager),
     _principal: AuthPrincipal = Depends(_require_suggestion_permissions),
     _rate: None = Depends(_suggestion_rate_limit),
-    _scope: None = Depends(
-        TokenScopeGuard("notes", require_if_present=True, endpoint_id="notes.graph.suggest")
-    ),
+    _scope: None = Depends(TokenScopeGuard("notes", require_if_present=True, endpoint_id="notes.graph.suggest")),
 ) -> SuggestionListResponse:
     try:
-        page = _api(user=user, db=db, jobs=jobs, dataset_id=dataset_id).list_suggestions(
-            note_id=_normalize_note_id(note_id),
-            states=_states(state, default=("pending", "accepting")),
-            limit=limit,
-            cursor=cursor,
+        page = await _call_api(
+            user=user,
+            db=db,
+            jobs=jobs,
+            dataset_id=dataset_id,
+            operation=lambda api: api.list_suggestions(
+                note_id=_normalize_note_id(note_id),
+                states=_states(state, default=("pending", "accepting")),
+                limit=limit,
+                cursor=cursor,
+            ),
         )
     except SuggestionAPIError as exc:
         raise _http_error(exc) from exc
@@ -478,16 +511,20 @@ async def reset_suggestion_rejections(
     jobs: Any = Depends(try_get_job_manager),
     _principal: AuthPrincipal = Depends(_require_suggestion_permissions),
     _rate: None = Depends(_suggestion_rate_limit),
-    _scope: None = Depends(
-        TokenScopeGuard("notes", require_if_present=True, endpoint_id="notes.graph.suggest")
-    ),
+    _scope: None = Depends(TokenScopeGuard("notes", require_if_present=True, endpoint_id="notes.graph.suggest")),
 ) -> SuggestionMutationResponse:
     try:
-        result = _api(user=user, db=db, jobs=jobs, dataset_id=dataset_id).reset_rejections(
-            note_id=_normalize_note_id(note_id),
-            source_fingerprint=body.source_fingerprint,
-            expected_revision=body.expected_rejection_revision,
-            idempotency_key=_required_idempotency_key(idempotency_key),
+        result = await _call_api(
+            user=user,
+            db=db,
+            jobs=jobs,
+            dataset_id=dataset_id,
+            operation=lambda api: api.reset_rejections(
+                note_id=_normalize_note_id(note_id),
+                source_fingerprint=body.source_fingerprint,
+                expected_revision=body.expected_rejection_revision,
+                idempotency_key=_required_idempotency_key(idempotency_key),
+            ),
         )
     except SuggestionAPIError as exc:
         raise _http_error(exc) from exc
@@ -506,31 +543,38 @@ async def accept_suggestion(
     jobs: Any = Depends(try_get_job_manager),
     principal: AuthPrincipal = Depends(_require_suggestion_permissions),
     _rate: None = Depends(_suggestion_rate_limit),
-    _scope: None = Depends(
-        TokenScopeGuard("notes", require_if_present=True, endpoint_id="notes.graph.suggest")
-    ),
+    _scope: None = Depends(TokenScopeGuard("notes", require_if_present=True, endpoint_id="notes.graph.suggest")),
 ) -> SuggestionMutationResponse:
     try:
-        api = _api(user=user, db=db, jobs=jobs, dataset_id=dataset_id)
         normalized_note_id = _normalize_note_id(note_id)
         normalized_idempotency_key = _required_idempotency_key(idempotency_key)
-        required = api.accept_permission_requirements(
-            note_id=normalized_note_id,
-            suggestion_id=suggestion_id,
-            expected_revision=body.expected_revision,
-            expected_source_fingerprint=body.expected_source_fingerprint,
-            expected_target_fingerprint=body.expected_target_fingerprint,
-            idempotency_key=normalized_idempotency_key,
-        )
-        if principal is None or not _principal_allows(principal, required):
-            raise HTTPException(status_code=403, detail=f"Permission denied: missing {', '.join(required)}")
-        result = api.accept_suggestion(
-            note_id=normalized_note_id,
-            suggestion_id=suggestion_id,
-            expected_revision=body.expected_revision,
-            expected_source_fingerprint=body.expected_source_fingerprint,
-            expected_target_fingerprint=body.expected_target_fingerprint,
-            idempotency_key=normalized_idempotency_key,
+
+        def accept(api: Any) -> Any:
+            required = api.accept_permission_requirements(
+                note_id=normalized_note_id,
+                suggestion_id=suggestion_id,
+                expected_revision=body.expected_revision,
+                expected_source_fingerprint=body.expected_source_fingerprint,
+                expected_target_fingerprint=body.expected_target_fingerprint,
+                idempotency_key=normalized_idempotency_key,
+            )
+            if principal is None or not _principal_allows(principal, required):
+                raise HTTPException(status_code=403, detail=f"Permission denied: missing {', '.join(required)}")
+            return api.accept_suggestion(
+                note_id=normalized_note_id,
+                suggestion_id=suggestion_id,
+                expected_revision=body.expected_revision,
+                expected_source_fingerprint=body.expected_source_fingerprint,
+                expected_target_fingerprint=body.expected_target_fingerprint,
+                idempotency_key=normalized_idempotency_key,
+            )
+
+        result = await _call_api(
+            user=user,
+            db=db,
+            jobs=jobs,
+            dataset_id=dataset_id,
+            operation=accept,
         )
     except SuggestionAPIError as exc:
         raise _http_error(exc) from exc
@@ -549,18 +593,22 @@ async def reject_suggestion(
     jobs: Any = Depends(try_get_job_manager),
     _principal: AuthPrincipal = Depends(_require_suggestion_permissions),
     _rate: None = Depends(_suggestion_rate_limit),
-    _scope: None = Depends(
-        TokenScopeGuard("notes", require_if_present=True, endpoint_id="notes.graph.suggest")
-    ),
+    _scope: None = Depends(TokenScopeGuard("notes", require_if_present=True, endpoint_id="notes.graph.suggest")),
 ) -> SuggestionMutationResponse:
     try:
-        result = _api(user=user, db=db, jobs=jobs, dataset_id=dataset_id).reject_suggestion(
-            note_id=_normalize_note_id(note_id),
-            suggestion_id=suggestion_id,
-            expected_revision=body.expected_revision,
-            expected_source_fingerprint=body.expected_source_fingerprint,
-            expected_target_fingerprint=body.expected_target_fingerprint,
-            idempotency_key=_required_idempotency_key(idempotency_key),
+        result = await _call_api(
+            user=user,
+            db=db,
+            jobs=jobs,
+            dataset_id=dataset_id,
+            operation=lambda api: api.reject_suggestion(
+                note_id=_normalize_note_id(note_id),
+                suggestion_id=suggestion_id,
+                expected_revision=body.expected_revision,
+                expected_source_fingerprint=body.expected_source_fingerprint,
+                expected_target_fingerprint=body.expected_target_fingerprint,
+                idempotency_key=_required_idempotency_key(idempotency_key),
+            ),
         )
     except SuggestionAPIError as exc:
         raise _http_error(exc) from exc

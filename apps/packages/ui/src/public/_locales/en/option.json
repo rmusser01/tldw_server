@@ -5996,6 +5996,87 @@
   "notesSearch_graphRelationships": {
     "message": "Relationships"
   },
+  "notesSearch_graphSearchLoaded": {
+    "message": "Search loaded nodes"
+  },
+  "notesSearch_graphRadiusLabel": {
+    "message": "Radius"
+  },
+  "notesSearch_graphRadiusAria": {
+    "message": "Graph radius"
+  },
+  "notesSearch_graphMaxNodesLabel": {
+    "message": "Max nodes"
+  },
+  "notesSearch_graphMaxNodesAria": {
+    "message": "Maximum graph nodes"
+  },
+  "notesSearch_graphLayoutLabel": {
+    "message": "Layout"
+  },
+  "notesSearch_graphLayoutAria": {
+    "message": "Graph layout"
+  },
+  "notesSearch_graphLayoutOption_dagre": {
+    "message": "Dagre"
+  },
+  "notesSearch_graphLayoutOption_circle": {
+    "message": "Circle"
+  },
+  "notesSearch_graphLayoutOption_grid": {
+    "message": "Grid"
+  },
+  "notesSearch_graphLayoutOption_concentric": {
+    "message": "Concentric"
+  },
+  "notesSearch_graphScope": {
+    "message": "Graph scope"
+  },
+  "notesSearch_graphScopeFocused": {
+    "message": "Focused"
+  },
+  "notesSearch_graphScopeAll": {
+    "message": "All notes"
+  },
+  "notesSearch_graphFocusCurrent": {
+    "message": "Focus current note"
+  },
+  "notesSearch_graphExpand": {
+    "message": "Expand graph"
+  },
+  "notesSearch_graphRefresh": {
+    "message": "Refresh graph"
+  },
+  "notesSearch_graphZoomIn": {
+    "message": "Zoom in"
+  },
+  "notesSearch_graphZoomOut": {
+    "message": "Zoom out"
+  },
+  "notesSearch_graphFit": {
+    "message": "Fit graph to view"
+  },
+  "notesSearch_graphEdgeVisibility": {
+    "message": "Edge visibility"
+  },
+  "notesSearch_graphEdgeVisibilityFilters": {
+    "message": "Edge visibility filters"
+  },
+  "notesSearch_graphEdgeType_manual": {
+    "message": "Manual links"
+  },
+  "notesSearch_graphEdgeType_wikilink": {
+    "message": "Note links"
+  },
+  "notesSearch_graphEdgeType_backlink": {
+    "message": "Backlinks"
+  },
+  "notesSearch_graphEdgeType_tag_membership": {
+    "message": "Tag membership"
+  },
+  "notesSearch_graphEdgeType_source_membership": {
+    "message": "Source membership"
+  },
   "notesSearch_graphSuggestions": {
     "message": "Suggestions"
   },

@@ -55,12 +55,36 @@ type NotesGraphToolbarProps = {
   onFit: () => void
 }
 
-const EDGE_OPTIONS: Array<{ type: NotesGraphEdgeType; label: string }> = [
-  { type: "manual", label: "Manual links" },
-  { type: "wikilink", label: "Note links" },
-  { type: "backlink", label: "Backlinks" },
-  { type: "tag_membership", label: "Tag membership" },
-  { type: "source_membership", label: "Source membership" }
+const EDGE_OPTIONS: Array<{
+  type: NotesGraphEdgeType
+  labelKey: string
+  defaultLabel: string
+}> = [
+  {
+    type: "manual",
+    labelKey: "option:notesSearch.graphEdgeType.manual",
+    defaultLabel: "Manual links"
+  },
+  {
+    type: "wikilink",
+    labelKey: "option:notesSearch.graphEdgeType.wikilink",
+    defaultLabel: "Note links"
+  },
+  {
+    type: "backlink",
+    labelKey: "option:notesSearch.graphEdgeType.backlink",
+    defaultLabel: "Backlinks"
+  },
+  {
+    type: "tag_membership",
+    labelKey: "option:notesSearch.graphEdgeType.tag_membership",
+    defaultLabel: "Tag membership"
+  },
+  {
+    type: "source_membership",
+    labelKey: "option:notesSearch.graphEdgeType.source_membership",
+    defaultLabel: "Source membership"
+  }
 ]
 
 const EDGE_MENU_ID = "notes-graph-edge-menu"
@@ -111,14 +135,16 @@ const NotesGraphToolbar: React.FC<NotesGraphToolbarProps> = ({
         <div
           className="inline-flex h-11 flex-none border border-border"
           role="group"
-          aria-label={t("option:notesSearch.graphViewMode")}>
+          aria-label={t("option:notesSearch.graphViewMode", {
+            defaultValue: "Graph view"
+          })}>
           <button
             type="button"
             className={`inline-flex min-w-[112px] items-center justify-center gap-2 px-3 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus ${viewMode === "canvas" ? "bg-primary text-primary-foreground" : "bg-surface text-text"}`}
             aria-pressed={viewMode === "canvas"}
             onClick={() => onViewModeChange("canvas")}>
             <Network size={16} aria-hidden="true" />
-            {t("option:notesSearch.graphCanvas")}
+            {t("option:notesSearch.graphCanvas", { defaultValue: "Canvas" })}
           </button>
           <button
             type="button"
@@ -126,7 +152,9 @@ const NotesGraphToolbar: React.FC<NotesGraphToolbarProps> = ({
             aria-pressed={viewMode === "relationships"}
             onClick={() => onViewModeChange("relationships")}>
             <ListTree size={16} aria-hidden="true" />
-            {t("option:notesSearch.graphRelationships")}
+            {t("option:notesSearch.graphRelationships", {
+              defaultValue: "Relationships"
+            })}
           </button>
         </div>
         <div className="relative w-[180px] flex-none sm:w-[200px] 2xl:w-[280px]">
@@ -140,7 +168,9 @@ const NotesGraphToolbar: React.FC<NotesGraphToolbarProps> = ({
             type="search"
             role="searchbox"
             className="h-9 w-full border border-border bg-bg px-3 text-sm text-text outline-none placeholder:text-text-muted focus:ring-2 focus:ring-focus"
-            aria-label="Search loaded nodes"
+            aria-label={t("option:notesSearch.graphSearchLoaded", {
+              defaultValue: "Search loaded nodes"
+            })}
             placeholder={t("option:notesSearch.graphSearchLoaded", {
               defaultValue: "Search loaded nodes"
             })}
@@ -166,7 +196,9 @@ const NotesGraphToolbar: React.FC<NotesGraphToolbarProps> = ({
           {t("option:notesSearch.graphRadiusLabel", { defaultValue: "Radius" })}
           <select
             className="h-9 min-w-[76px] border border-border bg-bg px-2 text-sm text-text focus:ring-2 focus:ring-focus"
-            aria-label="Graph radius"
+            aria-label={t("option:notesSearch.graphRadiusAria", {
+              defaultValue: "Graph radius"
+            })}
             value={radius}
             onChange={(event) =>
               onRadiusChange(Number(event.target.value) as 1 | 2)
@@ -183,7 +215,9 @@ const NotesGraphToolbar: React.FC<NotesGraphToolbarProps> = ({
           <input
             type="number"
             className="h-9 w-[92px] border border-border bg-bg px-2 text-sm text-text focus:ring-2 focus:ring-focus"
-            aria-label="Maximum graph nodes"
+            aria-label={t("option:notesSearch.graphMaxNodesAria", {
+              defaultValue: "Maximum graph nodes"
+            })}
             min={20}
             max={maxNodeCap}
             value={maxNodes}
@@ -195,28 +229,50 @@ const NotesGraphToolbar: React.FC<NotesGraphToolbarProps> = ({
           {t("option:notesSearch.graphLayoutLabel", { defaultValue: "Layout" })}
           <select
             className="h-9 min-w-[112px] border border-border bg-bg px-2 text-sm text-text focus:ring-2 focus:ring-focus"
-            aria-label="Graph layout"
+            aria-label={t("option:notesSearch.graphLayoutAria", {
+              defaultValue: "Graph layout"
+            })}
             value={layout}
             onChange={(event) =>
               onLayoutChange(event.target.value as NotesGraphLayout)
             }>
-            <option value="dagre">Dagre</option>
-            <option value="circle">Circle</option>
-            <option value="grid">Grid</option>
-            <option value="concentric">Concentric</option>
+            <option value="dagre">
+              {t("option:notesSearch.graphLayoutOption.dagre", {
+                defaultValue: "Dagre"
+              })}
+            </option>
+            <option value="circle">
+              {t("option:notesSearch.graphLayoutOption.circle", {
+                defaultValue: "Circle"
+              })}
+            </option>
+            <option value="grid">
+              {t("option:notesSearch.graphLayoutOption.grid", {
+                defaultValue: "Grid"
+              })}
+            </option>
+            <option value="concentric">
+              {t("option:notesSearch.graphLayoutOption.concentric", {
+                defaultValue: "Concentric"
+              })}
+            </option>
           </select>
         </label>
 
         <div
           className="inline-flex h-9 border border-border"
           role="group"
-          aria-label="Graph scope">
+          aria-label={t("option:notesSearch.graphScope", {
+            defaultValue: "Graph scope"
+          })}>
           <button
             type="button"
             className={`px-3 text-sm ${scope === "focused" ? "bg-primary text-primary-foreground" : "bg-surface text-text"}`}
             aria-pressed={scope === "focused"}
             onClick={onShowFocused}>
-            Focused
+            {t("option:notesSearch.graphScopeFocused", {
+              defaultValue: "Focused"
+            })}
           </button>
           <button
             type="button"
@@ -224,46 +280,60 @@ const NotesGraphToolbar: React.FC<NotesGraphToolbarProps> = ({
             aria-pressed={scope === "all"}
             disabled={!allNotes.eligible}
             onClick={onShowAllNotes}>
-            All notes
+            {t("option:notesSearch.graphScopeAll", {
+              defaultValue: "All notes"
+            })}
           </button>
         </div>
 
         <IconButton
-          ariaLabel="Focus current note"
+          ariaLabel={t("option:notesSearch.graphFocusCurrent", {
+            defaultValue: "Focus current note"
+          })}
           className={iconButtonClassName}
           onClick={onFocusCurrent}>
           <Focus size={iconSize} aria-hidden="true" />
         </IconButton>
         <IconButton
-          ariaLabel="Expand graph"
+          ariaLabel={t("option:notesSearch.graphExpand", {
+            defaultValue: "Expand graph"
+          })}
           className={iconButtonClassName}
           disabled={!canExpand}
           onClick={onExpand}>
           <Plus size={iconSize} aria-hidden="true" />
         </IconButton>
         <IconButton
-          ariaLabel="Refresh graph"
+          ariaLabel={t("option:notesSearch.graphRefresh", {
+            defaultValue: "Refresh graph"
+          })}
           className={iconButtonClassName}
           disabled={isRefreshing}
           onClick={onRefresh}>
           <RefreshCw size={iconSize} aria-hidden="true" />
         </IconButton>
         <IconButton
-          ariaLabel="Zoom in"
+          ariaLabel={t("option:notesSearch.graphZoomIn", {
+            defaultValue: "Zoom in"
+          })}
           className={iconButtonClassName}
           disabled={viewMode !== "canvas"}
           onClick={onZoomIn}>
           <ZoomIn size={iconSize} aria-hidden="true" />
         </IconButton>
         <IconButton
-          ariaLabel="Zoom out"
+          ariaLabel={t("option:notesSearch.graphZoomOut", {
+            defaultValue: "Zoom out"
+          })}
           className={iconButtonClassName}
           disabled={viewMode !== "canvas"}
           onClick={onZoomOut}>
           <ZoomOut size={iconSize} aria-hidden="true" />
         </IconButton>
         <IconButton
-          ariaLabel="Fit graph to view"
+          ariaLabel={t("option:notesSearch.graphFit", {
+            defaultValue: "Fit graph to view"
+          })}
           className={iconButtonClassName}
           disabled={viewMode !== "canvas"}
           onClick={onFit}>
@@ -272,7 +342,9 @@ const NotesGraphToolbar: React.FC<NotesGraphToolbarProps> = ({
 
         <div className="relative">
           <IconButton
-            ariaLabel="Edge visibility"
+            ariaLabel={t("option:notesSearch.graphEdgeVisibility", {
+              defaultValue: "Edge visibility"
+            })}
             className={iconButtonClassName}
             ariaExpanded={edgeMenuOpen}
             ariaControls={EDGE_MENU_ID}
@@ -283,9 +355,11 @@ const NotesGraphToolbar: React.FC<NotesGraphToolbarProps> = ({
             <div
               id={EDGE_MENU_ID}
               role="group"
-              aria-label="Edge visibility filters"
+              aria-label={t("option:notesSearch.graphEdgeVisibilityFilters", {
+                defaultValue: "Edge visibility filters"
+              })}
               className="absolute right-0 top-12 z-20 min-w-[190px] border border-border bg-elevated p-3 shadow-lg">
-              {EDGE_OPTIONS.map(({ type, label }) => (
+              {EDGE_OPTIONS.map(({ type, labelKey, defaultLabel }) => (
                 <label
                   key={type}
                   className="flex min-h-8 items-center gap-2 text-sm text-text">
@@ -294,7 +368,7 @@ const NotesGraphToolbar: React.FC<NotesGraphToolbarProps> = ({
                     checked={visibleEdgeTypes.has(type)}
                     onChange={() => onToggleEdgeType(type)}
                   />
-                  {label}
+                  {t(labelKey, { defaultValue: defaultLabel })}
                 </label>
               ))}
               {suggestionsAuthorized ? (
@@ -304,7 +378,9 @@ const NotesGraphToolbar: React.FC<NotesGraphToolbarProps> = ({
                     checked={showProvisional}
                     onChange={onToggleProvisional}
                   />
-                  {t("option:notesSearch.graphSuggestions")}
+                  {t("option:notesSearch.graphSuggestions", {
+                    defaultValue: "Suggestions"
+                  })}
                 </label>
               ) : null}
             </div>

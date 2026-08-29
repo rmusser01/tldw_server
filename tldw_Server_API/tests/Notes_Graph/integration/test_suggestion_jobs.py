@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
-from threading import Barrier
+from threading import Barrier, Event, get_ident
 from types import SimpleNamespace
 
 import pytest
@@ -99,6 +100,23 @@ def _expected_run_envelope(run) -> dict[str, object]:
         "error_code": run.error_code,
         "guidance_key": run.guidance_key,
     }
+
+
+@pytest.mark.asyncio
+async def test_sync_pipeline_cleanup_runs_on_the_callback_thread() -> None:
+    callback_threads: list[int] = []
+    cleanup_threads: list[int] = []
+
+    result = await suggestion_service._invoke(
+        lambda: callback_threads.append(get_ident()) or "ok",
+        sync_cleanup=lambda: cleanup_threads.append(get_ident()),
+    )
+
+    assert result == "ok"
+    assert callback_threads == cleanup_threads
+    assert callback_threads != [get_ident()]
+
+
 def test_admission_uses_content_free_exact_job_contract_and_replays(stores) -> None:
     notes, jobs = stores
     first = _admit(notes, jobs)
@@ -132,9 +150,7 @@ def test_terminal_admission_replay_returns_the_stored_envelope_without_jobs_look
     monkeypatch.setattr(
         jobs,
         "get_job_or_archived_by_idempotency_key",
-        lambda **_kwargs: (_ for _ in ()).throw(
-            AssertionError("terminal replay must not consult Jobs")
-        ),
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("terminal replay must not consult Jobs")),
     )
 
     replay = _admit(notes, jobs, key="terminal-envelope")
@@ -188,9 +204,7 @@ def test_admission_replay_recovers_job_committed_before_bind_and_before_limits(
     monkeypatch.setattr(
         jobs,
         "create_job",
-        lambda **_kwargs: (_ for _ in ()).throw(
-            AssertionError("replay must recover before new admission")
-        ),
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("replay must recover before new admission")),
     )
     recovered = _admit(notes, jobs, key="resume-after-enqueue")
 
@@ -237,12 +251,15 @@ def test_sqlite_concurrent_owner_admission_inserts_only_one_active_job(stores) -
     rejected = [result for result in results if isinstance(result, Exception)]
     assert len(admitted) == 1
     assert [str(error) for error in rejected] == ["notes_graph_owner_active_run_conflict"]
-    assert jobs.count_jobs(
-        domain=JOB_DOMAIN,
-        queue=JOB_QUEUE,
-        job_type=JOB_TYPE,
-        owner_user_id="owner-1",
-    ) == 1
+    assert (
+        jobs.count_jobs(
+            domain=JOB_DOMAIN,
+            queue=JOB_QUEUE,
+            job_type=JOB_TYPE,
+            owner_user_id="owner-1",
+        )
+        == 1
+    )
 
 
 def test_admission_enforces_twenty_per_owner_per_hour(stores) -> None:
@@ -575,6 +592,108 @@ def test_default_worker_prepare_builds_request_and_freshness_returns_none(
         )
         is None
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("blocking_phase", ("load", "retrieve", "stage"))
+async def test_worker_yields_the_event_loop_during_sync_pipeline_work(
+    blocking_phase: str,
+) -> None:
+    started = Event()
+    release = Event()
+    run = SimpleNamespace(
+        id="run-1",
+        revision=7,
+        job_id="job-1",
+        expected_completion_token="placeholder-1",
+        state=SimpleNamespace(value="queued"),
+        source_note_id=SOURCE_ID,
+        source_fingerprint=f"sha256:{'a' * 64}",
+        provider="openai",
+        model="model-a",
+        capability_revision="cap-v1",
+        prompt_contract_version="notes-graph-suggestions-v1",
+        created_at=(NOW - timedelta(seconds=30)).isoformat(),
+    )
+
+    def block(phase: str) -> None:
+        if blocking_phase != phase:
+            return
+        started.set()
+        if not release.wait(timeout=1):
+            raise AssertionError(f"event loop could not release synchronous worker {phase}")
+
+    class Store:
+        def get_run(self, **_kwargs):
+            block("load")
+            return run
+
+        def start_run(self, **_kwargs):
+            return SimpleNamespace(
+                **{
+                    **run.__dict__,
+                    "revision": 8,
+                    "state": SimpleNamespace(value="running"),
+                    "expected_completion_token": "lease-1",
+                }
+            )
+
+        def stage_suggestions(self, **_kwargs):
+            block("stage")
+            return SimpleNamespace(state=SimpleNamespace(value="publishing"))
+
+    def retrieve(**_kwargs):
+        block("retrieve")
+        return object()
+
+    worker = SuggestionWorker(
+        store_factory=lambda _owner: Store(),
+        retrieve=retrieve,
+        prepare=lambda **_kwargs: object(),
+        resolve_capability=lambda **_kwargs: (
+            SimpleNamespace(revision="cap-v1", generation_available=True),
+            object(),
+        ),
+        generate=lambda **_kwargs: SimpleNamespace(
+            relationships=(),
+            tags=(),
+            validation_counts={},
+            input_tokens=0,
+            output_tokens=0,
+        ),
+        freshness_check=lambda **_kwargs: None,
+        cancellation_requested=lambda _job: False,
+        now=lambda: NOW,
+    )
+    task = asyncio.create_task(
+        worker.handle(
+            {
+                "uuid": "job-1",
+                "owner_user_id": "owner-1",
+                "domain": JOB_DOMAIN,
+                "queue": JOB_QUEUE,
+                "job_type": JOB_TYPE,
+                "lease_id": "lease-1",
+                "payload": {
+                    "schema_version": 1,
+                    "run_id": "run-1",
+                    "dataset_id": DATASET_ID,
+                    "source_note_id": SOURCE_ID,
+                    "source_fingerprint": f"sha256:{'a' * 64}",
+                    "provider": "openai",
+                    "model": "model-a",
+                    "capability_revision": "cap-v1",
+                    "prompt_contract_version": "notes-graph-suggestions-v1",
+                },
+            }
+        )
+    )
+
+    assert await asyncio.to_thread(started.wait, 0.5) is True
+    release.set()
+    result = await task
+
+    assert result["run_id"] == "run-1"
 
 
 @pytest.mark.asyncio

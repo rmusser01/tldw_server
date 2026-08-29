@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import inspect
 import json
@@ -213,7 +214,24 @@ def _stage_candidates(run_id: str, generated: Any) -> tuple[dict[str, Any], ...]
     return tuple(candidates)
 
 
-async def _resolve(value: Any) -> Any:
+async def _invoke(
+    callback: Callable[..., Any],
+    /,
+    *args: Any,
+    sync_cleanup: Callable[[], None] | None = None,
+    **kwargs: Any,
+) -> Any:
+    if inspect.iscoroutinefunction(callback):
+        return await callback(*args, **kwargs)
+
+    def invoke_sync() -> Any:
+        try:
+            return callback(*args, **kwargs)
+        finally:
+            if sync_cleanup is not None:
+                sync_cleanup()
+
+    value = await asyncio.to_thread(invoke_sync)
     return await value if inspect.isawaitable(value) else value
 
 
@@ -231,6 +249,7 @@ class SuggestionWorker:
         generate: Callable[..., Any] = generate_suggestions_once,
         freshness_check: Callable[..., Any] = _default_freshness_check,
         now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+        sync_cleanup: Callable[[], None] | None = None,
     ) -> None:
         self._store_factory = store_factory
         self._resolve_capability = resolve_capability
@@ -240,6 +259,7 @@ class SuggestionWorker:
         self._generate = generate
         self._freshness_check = freshness_check
         self._now = now
+        self._sync_cleanup = sync_cleanup
 
     @staticmethod
     def _validate_job(job: dict[str, Any]) -> tuple[str, dict[str, Any]]:
@@ -286,14 +306,17 @@ class SuggestionWorker:
         owner, payload = self._validate_job(job)
         lease_id = str(job.get("lease_id") or "")
         job_uuid = str(job.get("uuid") or "")
-        store = self._store_factory(owner)
-        queued = store.get_run(
+        store = await _invoke(self._store_factory, owner)
+        queued = await _invoke(
+            store.get_run,
             dataset_id=str(payload["dataset_id"]),
             run_id=str(payload["run_id"]),
+            sync_cleanup=self._sync_cleanup,
         )
         self._validate_run_binding(run=queued, payload=payload, job_uuid=job_uuid)
         started_at = self._now()
-        running = store.start_run(
+        running = await _invoke(
+            store.start_run,
             dataset_id=str(payload["dataset_id"]),
             run_id=str(payload["run_id"]),
             expected_state="queued",
@@ -301,16 +324,17 @@ class SuggestionWorker:
             expected_job_id=job_uuid,
             acquired_completion_token=lease_id,
             now=started_at,
+            sync_cleanup=self._sync_cleanup,
         )
         queued_at = job.get("created_at") or getattr(queued, "created_at", started_at)
         record_queue_latency(max(0.0, (_utc(started_at) - _utc(queued_at)).total_seconds()))
         try:
-            retrieval = await _resolve(
-                self._retrieve(
-                    store=store,
-                    dataset_id=str(payload["dataset_id"]),
-                    source_note_id=str(payload["source_note_id"]),
-                )
+            retrieval = await _invoke(
+                self._retrieve,
+                store=store,
+                dataset_id=str(payload["dataset_id"]),
+                source_note_id=str(payload["source_note_id"]),
+                sync_cleanup=self._sync_cleanup,
             )
             record_event(
                 SuggestionEventName.SHORTLIST_COMPLETED,
@@ -318,20 +342,19 @@ class SuggestionWorker:
                 job_id=job_uuid,
                 count=len(getattr(retrieval, "candidates", ())),
             )
-            prepared = await _resolve(
-                self._prepare(
-                    store=store,
-                    dataset_id=str(payload["dataset_id"]),
-                    retrieval=retrieval,
-                )
+            prepared = await _invoke(
+                self._prepare,
+                store=store,
+                dataset_id=str(payload["dataset_id"]),
+                retrieval=retrieval,
+                sync_cleanup=self._sync_cleanup,
             )
-            if await _resolve(self._cancellation_requested(job)):
+            if await _invoke(self._cancellation_requested, job):
                 raise SuggestionWorkerCancelled()
-            resolved_provider = await _resolve(
-                self._resolve_capability(
-                    provider=str(payload["provider"]),
-                    model=str(payload["model"]),
-                )
+            resolved_provider = await _invoke(
+                self._resolve_capability,
+                provider=str(payload["provider"]),
+                model=str(payload["model"]),
             )
             if isinstance(resolved_provider, tuple):
                 capabilities, provider = resolved_provider
@@ -345,7 +368,11 @@ class SuggestionWorker:
                 run_id=running.id,
                 job_id=job_uuid,
             )
-            generated = await _resolve(self._generate(prepared=prepared, provider=provider))
+            generated = await _invoke(
+                self._generate,
+                prepared=prepared,
+                provider=provider,
+            )
             record_event(
                 SuggestionEventName.PROVIDER_COMPLETED,
                 run_id=running.id,
@@ -357,15 +384,15 @@ class SuggestionWorker:
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
             )
-            if await _resolve(self._cancellation_requested(job)):
+            if await _invoke(self._cancellation_requested, job):
                 raise SuggestionWorkerCancelled()
-            await _resolve(
-                self._freshness_check(
-                    store=store,
-                    dataset_id=str(payload["dataset_id"]),
-                    running=running,
-                    generated=generated,
-                )
+            await _invoke(
+                self._freshness_check,
+                store=store,
+                dataset_id=str(payload["dataset_id"]),
+                running=running,
+                generated=generated,
+                sync_cleanup=self._sync_cleanup,
             )
             candidates = _stage_candidates(running.id, generated)
             encoded = json.dumps(
@@ -385,7 +412,8 @@ class SuggestionWorker:
                     job_id=job_uuid,
                     count=dropped,
                 )
-            store.stage_suggestions(
+            await _invoke(
+                store.stage_suggestions,
                 dataset_id=str(payload["dataset_id"]),
                 run_id=running.id,
                 expected_state="running",
@@ -396,6 +424,7 @@ class SuggestionWorker:
                 candidates=candidates,
                 invalid_item_count=dropped,
                 now=self._now(),
+                sync_cleanup=self._sync_cleanup,
             )
             evidence_count = sum(len(candidate["evidence"]) for candidate in candidates)
             record_event(

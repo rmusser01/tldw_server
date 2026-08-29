@@ -73,11 +73,6 @@ class _MaintenanceRunner:
                     db = None
                     try:
                         db = await _open_owner_database(owner)
-                        store = db.note_graph_suggestion_store
-                        scopes = tuple(
-                            MaintenanceScope(store, dataset)
-                            for dataset in store.list_maintenance_dataset_ids(limit=100)
-                        )
                         owner_claimed = 0
 
                         def account_claims(count: int) -> None:
@@ -88,14 +83,31 @@ class _MaintenanceRunner:
                             owner_claimed += count
                             remaining -= count
 
-                        result = SuggestionMaintenance(
-                            jobs=self._jobs,
-                            scopes=scopes,
-                        ).run_pass(
-                            now=now,
-                            limit=remaining,
-                            on_claimed=account_claims,
-                        )
+                        def maintain_owner(
+                            database: Any = db,
+                            owner_limit: int = remaining,
+                        ) -> MaintenancePassResult:
+                            try:
+                                store = database.note_graph_suggestion_store
+                                scopes = tuple(
+                                    MaintenanceScope(store, dataset)
+                                    for dataset in store.list_maintenance_dataset_ids(limit=100)
+                                )
+                                return SuggestionMaintenance(
+                                    jobs=self._jobs,
+                                    scopes=scopes,
+                                ).run_pass(
+                                    now=now,
+                                    limit=owner_limit,
+                                    on_claimed=account_claims,
+                                )
+                            finally:
+                                try:
+                                    _close_database(database)
+                                except _MAINTENANCE_ERRORS:
+                                    logger.debug("Notes graph suggestions maintenance database close skipped")
+
+                        result = await asyncio.to_thread(maintain_owner)
                         if result.claimed != owner_claimed:
                             raise RuntimeError("notes_graph_maintenance_budget_invalid")
                         reconciled += result.reconciled
@@ -104,14 +116,6 @@ class _MaintenanceRunner:
                         remaining -= min(remaining, result.cleaned)
                     except _MAINTENANCE_ERRORS:
                         logger.warning("Notes graph suggestions owner maintenance failed safely")
-                    finally:
-                        if db is not None:
-                            try:
-                                _close_database(db)
-                            except _MAINTENANCE_ERRORS:
-                                logger.debug(
-                                    "Notes graph suggestions maintenance database close skipped"
-                                )
                 offset += page_size
         except _MAINTENANCE_ERRORS:
             logger.warning("Notes graph suggestions maintenance pass failed safely")
@@ -124,7 +128,7 @@ async def run_notes_graph_suggestions_maintenance(
     """Run provider-independent maintenance at startup and once per minute."""
 
     stop = stop_event or asyncio.Event()
-    jobs = JobManager()
+    jobs = await asyncio.to_thread(JobManager)
     users_repo = await AuthnzUsersRepo.from_pool()
     logger.info("Notes graph suggestions maintenance starting")
     await run_maintenance_loop(
