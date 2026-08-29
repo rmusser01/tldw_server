@@ -61,6 +61,7 @@ NOTES_GRAPH_ENABLED = lambda: _env_bool("NOTES_GRAPH_ENABLED", True)  # noqa: E7
 MAX_NODES = lambda: _env_int("NOTES_GRAPH_MAX_NODES", 300)  # noqa: E731
 MAX_EDGES = lambda: _env_int("NOTES_GRAPH_MAX_EDGES", 1200)  # noqa: E731
 MAX_DEGREE = lambda: _env_int("NOTES_GRAPH_MAX_DEGREE", 40)  # noqa: E731
+ALL_NOTES_NOTE_CAP = lambda: _env_int("NOTES_GRAPH_ALL_NOTES_NOTE_CAP", 100)  # noqa: E731
 POPULAR_TAG_CUTOFF = lambda: _env_float("NOTES_GRAPH_POPULAR_TAG_CUTOFF", 0.15)  # noqa: E731
 POPULAR_TAG_ABSOLUTE_MIN = lambda: _env_int("NOTES_GRAPH_POPULAR_TAG_ABSOLUTE_MIN", 25)  # noqa: E731
 
@@ -333,6 +334,8 @@ class NoteGraphService:
 
         # 1. Resolve effective limits before any graph expansion work.
         eff_max_nodes, eff_max_edges, eff_max_degree, radius_cap_applied = self._resolve_effective_limits(req)
+        active_note_count = self._db.count_user_notes(include_deleted=False)
+        all_notes_note_cap = min(max(1, ALL_NOTES_NOTE_CAP()), eff_max_nodes)
         normalized_query = {
             "center": req.center_note_id,
             "radius": req.radius,
@@ -526,6 +529,9 @@ class NoteGraphService:
             cursor=cursor_str,
             limits=limits,
             radius_cap_applied=radius_cap_applied,
+            active_note_count=active_note_count,
+            all_notes_note_cap=all_notes_note_cap,
+            all_notes_eligible=active_note_count <= all_notes_note_cap,
         )
 
         # 13. Cache & metrics

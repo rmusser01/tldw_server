@@ -19,6 +19,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 )
 
 from .errors import SyncStoreError
+from .materializers.guarded_product_mutation import GuardedProductMutation
 from .models import SyncDataset, normalize_sync_timestamp
 from .notes_link import validate_notes_link_properties
 from .server_origin import (
@@ -155,6 +156,7 @@ class NotesLinkCoordinator:
         label: str | None,
         properties: Mapping[str, object],
         idempotency_key: str | None,
+        guarded_mutation: GuardedProductMutation | None = None,
     ) -> NotesLink:
         """Create one explicit link through canonical server-origin capture."""
 
@@ -183,6 +185,7 @@ class NotesLinkCoordinator:
             idempotency_key=normalized_key,
             request_fingerprint=fingerprint,
             edge_id=edge_id,
+            guarded_mutation=guarded_mutation,
         )
         if replay is not None:
             return replay
@@ -213,6 +216,7 @@ class NotesLinkCoordinator:
                 stable_key=f"notes-link:{edge_id}",
                 created_at_client=now,
             ),
+            guarded_mutation=guarded_mutation,
         )
 
     def update(
@@ -364,6 +368,7 @@ class NotesLinkCoordinator:
         idempotency_key: str,
         request_fingerprint: str,
         edge_id: str,
+        guarded_mutation: GuardedProductMutation | None = None,
     ) -> NotesLink | None:
         manifest = load_server_origin_mutation_batch_manifest(
             service=self.service,
@@ -392,6 +397,7 @@ class NotesLinkCoordinator:
             steps=manifest,
             source=source,
             idempotency_key=idempotency_key,
+            guarded_mutation=guarded_mutation,
         )
         return self.get(edge_id)
 
@@ -402,6 +408,7 @@ class NotesLinkCoordinator:
         idempotency_key: str,
         request_fingerprint: str,
         step: ServerOriginMutationStep,
+        guarded_mutation: GuardedProductMutation | None = None,
     ) -> NotesLink:
         bound = replace(
             step,
@@ -417,6 +424,7 @@ class NotesLinkCoordinator:
                 steps=(bound,),
                 source=source,
                 idempotency_key=idempotency_key,
+                guarded_mutation=guarded_mutation,
             )
         except (
             SyncServerOriginBatchAppendError,

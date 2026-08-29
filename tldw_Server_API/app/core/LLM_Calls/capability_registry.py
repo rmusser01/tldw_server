@@ -10,7 +10,7 @@ from __future__ import annotations
 import copy
 import math
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatBadRequestError
@@ -18,6 +18,7 @@ from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_provider_number,
     custom_openai_section_name,
 )
+from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
 
 SCHEMA_VERSION = 1
 _VALIDATION_METRICS_REGISTERED = False
@@ -40,6 +41,8 @@ class ProviderCallPolicy:
     temperature: float | None = None
     top_p: float | None = None
     privacy_safe_errors: bool = False
+    maximum_timeout_seconds: float | None = None
+    required_endpoint_scope: ConfiguredEndpointScope | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         if (
@@ -84,6 +87,17 @@ class ProviderCallPolicy:
             raise ValueError("top_p must be finite and between 0 and 1")
         if not isinstance(self.privacy_safe_errors, bool):
             raise TypeError("privacy_safe_errors must be a boolean")
+        if self.maximum_timeout_seconds is not None and (
+            isinstance(self.maximum_timeout_seconds, bool)
+            or not math.isfinite(float(self.maximum_timeout_seconds))
+            or float(self.maximum_timeout_seconds) <= 0
+        ):
+            raise ValueError("maximum_timeout_seconds must be finite and positive")
+        if self.required_endpoint_scope is not None and not isinstance(
+            self.required_endpoint_scope,
+            ConfiguredEndpointScope,
+        ):
+            raise TypeError("required_endpoint_scope must be a ConfiguredEndpointScope or None")
 
 
 _PROVIDER_CONFIG_SECTIONS: dict[str, tuple[str, ...]] = {
@@ -143,6 +157,19 @@ def _provider_config_sections(provider_key: str) -> tuple[str, ...]:
     return _PROVIDER_CONFIG_SECTIONS.get(provider_key, ())
 
 
+def _clamp_timeout(value: Any, maximum: float) -> float:
+    """Return a positive configured timeout bounded by the opt-in maximum."""
+    if isinstance(value, bool):
+        return float(maximum)
+    try:
+        configured = float(value)
+    except (TypeError, ValueError):
+        return float(maximum)
+    if not math.isfinite(configured) or configured <= 0:
+        return float(maximum)
+    return min(configured, float(maximum))
+
+
 def _copy_policy_app_config(
     provider_key: str,
     app_config: Any,
@@ -169,6 +196,10 @@ def _copy_policy_app_config(
         for key in _RESPONSE_FORMAT_CONTROL_KEYS:
             if key in copied:
                 copied[key] = None
+    if policy.maximum_timeout_seconds is not None:
+        copied["api_timeout"] = _clamp_timeout(
+            copied.get("api_timeout"), policy.maximum_timeout_seconds
+        )
 
     for section in _provider_config_sections(provider_key):
         provider_config = copied.get(section)
@@ -190,6 +221,10 @@ def _copy_policy_app_config(
             if policy.allow_response_format is False:
                 for key in _RESPONSE_FORMAT_CONTROL_KEYS:
                     provider_config[key] = None
+            if policy.maximum_timeout_seconds is not None:
+                provider_config["api_timeout"] = _clamp_timeout(
+                    provider_config.get("api_timeout"), policy.maximum_timeout_seconds
+                )
 
     # Keep an otherwise-empty explicit config truthy so adapters do not fall
     # back to mutable global chat configuration for a constrained call.

@@ -1918,6 +1918,12 @@ def _principal_has_admin_bypass_claims(principal: AuthPrincipal | None) -> bool:
     return bool(permissions & _ADMIN_BYPASS_PERMISSIONS)
 
 
+def principal_has_admin_bypass_claims(principal: AuthPrincipal | None) -> bool:
+    """Return whether verified role/permission claims authorize an admin bypass."""
+
+    return _principal_has_admin_bypass_claims(principal)
+
+
 def _principal_has_admin_claims(principal: AuthPrincipal | None) -> bool:
     if principal is None:
         return False

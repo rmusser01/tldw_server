@@ -10,7 +10,7 @@ import sqlite3
 import time
 import uuid as _uuid
 from contextvars import ContextVar
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from datetime import timezone as _tz
 from pathlib import Path
@@ -87,6 +87,9 @@ from .operations.postgres import acquire_job as _postgres_acquire_job
 from .operations.postgres import admit_idempotent_operation as _postgres_admit_idempotent_operation
 from .operations.postgres import create_job_admission as _postgres_create_job_admission
 from .operations.postgres import (
+    get_job_or_archived_by_idempotency_key as _postgres_get_job_or_archived_by_idempotency_key,
+)
+from .operations.postgres import (
     get_job_or_archived_by_uuid as _postgres_get_job_or_archived_by_uuid,
 )
 from .operations.postgres import (
@@ -99,6 +102,9 @@ from .operations.postgres import replay_idempotent_operation as _postgres_replay
 from .operations.sqlite import acquire_job as _sqlite_acquire_job
 from .operations.sqlite import admit_idempotent_operation as _sqlite_admit_idempotent_operation
 from .operations.sqlite import create_job_admission as _sqlite_create_job_admission
+from .operations.sqlite import (
+    get_job_or_archived_by_idempotency_key as _sqlite_get_job_or_archived_by_idempotency_key,
+)
 from .operations.sqlite import (
     get_job_or_archived_by_uuid as _sqlite_get_job_or_archived_by_uuid,
 )
@@ -150,6 +156,31 @@ _DEFAULT_MAX_RETRIES = 3
 _EXPIRED_RECOVERY_BATCH_DEFAULT = 100
 _EXPIRED_RECOVERY_BATCH_MAX = 1000
 _PRUNE_BATCH_SIZE = 1000
+OWNER_SCOPE_ACTIVE_LIMIT_EXCEEDED = "jobs_owner_scope_active_limit_exceeded"
+OWNER_SCOPE_ADMISSION_LIMIT_EXCEEDED = "jobs_owner_scope_admission_limit_exceeded"
+
+
+@dataclass(frozen=True, slots=True)
+class OwnerScopeAdmissionPolicy:
+    """Atomic active-work and rolling-admission limits for one owner/job scope."""
+
+    active_statuses: tuple[str, ...]
+    active_limit: int
+    admission_limit: int
+    created_after: datetime
+
+    def __post_init__(self) -> None:
+        if (
+            not self.active_statuses
+            or len(set(self.active_statuses)) != len(self.active_statuses)
+            or any(not isinstance(status, str) or not status for status in self.active_statuses)
+            or self.active_limit < 1
+            or self.admission_limit < 1
+            or not isinstance(self.created_after, datetime)
+            or self.created_after.tzinfo is None
+            or self.created_after.utcoffset() is None
+        ):
+            raise ValueError("owner scope admission policy is invalid")
 
 
 class JobPayloadDecryptionError(RuntimeError):
@@ -2922,6 +2953,66 @@ class JobManager:
             trace_id=trace_id,
         )
 
+    def _owner_scope_admission_lookup(
+        self,
+        executor: Any,
+        *,
+        command: CreateJobCommand,
+        policy: OwnerScopeAdmissionPolicy,
+    ) -> dict[str, Any] | None:
+        """Replay or enforce owner/job-scope limits in the admission transaction."""
+
+        owner_user_id = command.owner_user_id
+        if not owner_user_id:
+            raise ValueError("owner scope admission requires owner_user_id")
+        postgres = self.backend == "postgres"
+        marker = "%s" if postgres else "?"
+        scope = (command.domain, command.queue, command.job_type, owner_user_id)
+
+        def fetchone(sql: str, params: tuple[Any, ...]) -> Any:
+            cursor = executor.execute(sql, params)
+            return executor.fetchone() if postgres else cursor.fetchone()
+
+        if command.idempotency_key:
+            replay_sql = (
+                f"SELECT * FROM jobs WHERE domain = {marker} AND queue = {marker} "  # nosec B608
+                f"AND job_type = {marker} AND owner_user_id = {marker} "
+                f"AND idempotency_key = {marker}"
+            )
+            if postgres:
+                replay_sql += " FOR KEY SHARE"
+            replay = fetchone(replay_sql, (*scope, command.idempotency_key))
+            if replay is not None:
+                return dict(replay)
+
+        status_markers = ",".join(marker for _ in policy.active_statuses)
+        active_row = fetchone(
+            f"SELECT COUNT(*) AS c FROM jobs WHERE domain = {marker} "  # nosec B608
+            f"AND queue = {marker} AND job_type = {marker} "
+            f"AND owner_user_id = {marker} AND status IN ({status_markers})",
+            (*scope, *policy.active_statuses),
+        )
+        active_count = int(active_row["c"] if hasattr(active_row, "keys") else active_row[0])
+        if active_count >= policy.active_limit:
+            raise ValueError(OWNER_SCOPE_ACTIVE_LIMIT_EXCEEDED)
+
+        cutoff: datetime | str = policy.created_after
+        if not postgres:
+            cutoff = cutoff.astimezone(_tz.utc).replace(tzinfo=None)
+            cutoff = cutoff.strftime("%Y-%m-%d %H:%M:%S")
+        admission_row = fetchone(
+            f"SELECT COUNT(*) AS c FROM jobs WHERE domain = {marker} "  # nosec B608
+            f"AND queue = {marker} AND job_type = {marker} "
+            f"AND owner_user_id = {marker} AND created_at >= {marker}",
+            (*scope, cutoff),
+        )
+        admission_count = int(
+            admission_row["c"] if hasattr(admission_row, "keys") else admission_row[0]
+        )
+        if admission_count >= policy.admission_limit:
+            raise ValueError(OWNER_SCOPE_ADMISSION_LIMIT_EXCEEDED)
+        return None
+
     @staticmethod
     def _map_admission_result(result: AdmissionResult) -> dict[str, Any]:
         """Map an admission result to the public create_job return row."""
@@ -3275,6 +3366,7 @@ class JobManager:
         idempotency_key: str | None = None,
         request_id: str | None = None,
         trace_id: str | None = None,
+        owner_scope_admission: OwnerScopeAdmissionPolicy | None = None,
     ) -> dict[str, Any]:
         """Create a new job.
 
@@ -3290,6 +3382,7 @@ class JobManager:
             max_retries: Maximum automatic retries on failure.
             available_at: Optional schedule time before the job becomes acquirable.
             idempotency_key: If provided, duplicate creates return the same row.
+            owner_scope_admission: Optional transactional owner/job-scope limits.
 
         Returns:
             A dict representing the created (or existing, if idempotent) job row.
@@ -3472,6 +3565,37 @@ class JobManager:
                     request_id=request_id,
                     trace_id=trace_id,
                 )
+                advisory_xact_lock_key = None
+                pre_admission_lookup = None
+                if owner_scope_admission is not None:
+                    advisory_xact_lock_key = self._pg_advisory_key(
+                        "owner-scope-admission",
+                        str(owner_user_id),
+                        domain,
+                        queue,
+                        job_type,
+                    )
+
+                    def pre_admission_lookup(cur: Any) -> dict[str, Any] | None:
+                        return self._owner_scope_admission_lookup(
+                            cur,
+                            command=command,
+                            policy=owner_scope_admission,
+                        )
+
+                elif slides_generation:
+                    advisory_xact_lock_key = self._pg_advisory_key(
+                        *_SLIDES_GENERATION_CORRELATION_LOCK_PARTS
+                    )
+
+                    def pre_admission_lookup(cur: Any) -> dict[str, Any] | None:
+                        return self._lookup_ready_slides_generation_job_in_connection(
+                            conn,
+                            owner_user_id=str(owner_user_id),
+                            idempotency_key=str(idempotency_key),
+                            cursor=cur,
+                        )
+
                 result = _postgres_create_job_admission(
                     conn,
                     self._pg_cursor,
@@ -3481,23 +3605,8 @@ class JobManager:
                     max_queued_quota=self._quota_get("JOBS_QUOTA_MAX_QUEUED", domain, owner_user_id),
                     submits_per_minute_quota=self._quota_get("JOBS_QUOTA_SUBMITS_PER_MIN", domain, owner_user_id),
                     counters_enabled=JobManager._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", "")),
-                    advisory_xact_lock_key=(
-                        self._pg_advisory_key(
-                            *_SLIDES_GENERATION_CORRELATION_LOCK_PARTS
-                        )
-                        if slides_generation
-                        else None
-                    ),
-                    pre_admission_lookup=(
-                        lambda cur: self._lookup_ready_slides_generation_job_in_connection(
-                            conn,
-                            owner_user_id=str(owner_user_id),
-                            idempotency_key=str(idempotency_key),
-                            cursor=cur,
-                        )
-                        if slides_generation
-                        else None
-                    ),
+                    advisory_xact_lock_key=advisory_xact_lock_key,
+                    pre_admission_lookup=pre_admission_lookup,
                 )
                 d = self._map_admission_result(result)
                 if slides_generation:
@@ -3547,6 +3656,23 @@ class JobManager:
                     request_id=request_id,
                     trace_id=trace_id,
                 )
+                pre_admission_lookup = None
+                if owner_scope_admission is not None:
+                    def pre_admission_lookup(active_conn: Any) -> dict[str, Any] | None:
+                        return self._owner_scope_admission_lookup(
+                            active_conn,
+                            command=command,
+                            policy=owner_scope_admission,
+                        )
+
+                elif slides_generation:
+                    def pre_admission_lookup(active_conn: Any) -> dict[str, Any] | None:
+                        return self._lookup_ready_slides_generation_job_in_connection(
+                            active_conn,
+                            owner_user_id=str(owner_user_id),
+                            idempotency_key=str(idempotency_key),
+                        )
+
                 for attempt in range(2):
                     try:
                         result = _sqlite_create_job_admission(
@@ -3561,16 +3687,10 @@ class JobManager:
                                 owner_user_id,
                             ),
                             counters_enabled=JobManager._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", "")),
-                            begin_immediate=slides_generation,
-                            pre_admission_lookup=(
-                                lambda active_conn: self._lookup_ready_slides_generation_job_in_connection(
-                                    active_conn,
-                                    owner_user_id=str(owner_user_id),
-                                    idempotency_key=str(idempotency_key),
-                                )
-                                if slides_generation
-                                else None
+                            begin_immediate=(
+                                slides_generation or owner_scope_admission is not None
                             ),
+                            pre_admission_lookup=pre_admission_lookup,
                         )
                         d = self._map_admission_result(result)
                         if slides_generation:
@@ -3987,6 +4107,48 @@ class JobManager:
                     conn,
                     job_uuid,
                     domain=domain,
+                    owner_user_id=owner_user_id,
+                )
+            if job is None:
+                return None
+            if job.get("archived"):
+                return self._normalize_archived_job_row(job)
+            normalized = self._normalize_active_job_row(job)
+            normalized["archived"] = False
+            return normalized
+        finally:
+            conn.close()
+
+    def get_job_or_archived_by_idempotency_key(
+        self,
+        *,
+        idempotency_key: str,
+        domain: str,
+        queue: str,
+        job_type: str,
+        owner_user_id: str,
+    ) -> dict[str, Any] | None:
+        """Fetch one exact active/archive Job by its stable scoped idempotency key."""
+
+        conn = self._connect()
+        try:
+            if self.backend == "postgres":
+                with self._pg_cursor(conn) as cur:
+                    job = _postgres_get_job_or_archived_by_idempotency_key(
+                        cur,
+                        idempotency_key=idempotency_key,
+                        domain=domain,
+                        queue=queue,
+                        job_type=job_type,
+                        owner_user_id=owner_user_id,
+                    )
+            else:
+                job = _sqlite_get_job_or_archived_by_idempotency_key(
+                    conn,
+                    idempotency_key=idempotency_key,
+                    domain=domain,
+                    queue=queue,
+                    job_type=job_type,
                     owner_user_id=owner_user_id,
                 )
             if job is None:
@@ -9102,8 +9264,19 @@ class JobManager:
             params=candidate_params,
             cursor=cur,
         )
+        cur.execute(
+            "SELECT id FROM jobs WHERE id = ANY(%s) AND domain=%s AND queue=%s "
+            "AND job_type=%s AND status IN ('completed','failed','cancelled','quarantined')",
+            (candidate_ids, "notes", "graph-suggestions", "note_graph_suggestions"),
+        )
+        notes_graph_candidate_ids = {
+            int(row["id"] if isinstance(row, dict) else row[0])
+            for row in (cur.fetchall() or [])
+        }
         archive_candidate_ids = (
-            candidate_ids if archive_enabled else sorted(receipt_candidates)
+            candidate_ids
+            if archive_enabled
+            else sorted(set(receipt_candidates) | notes_graph_candidate_ids)
         )
         cur.execute(
             (
@@ -9367,6 +9540,15 @@ class JobManager:
                             "NOW() - (%s || ' days')::interval"
                         )
                         params.append(int(older_than_days))
+                        where_parts.append(
+                            "(NOT (domain=%s AND queue=%s AND job_type=%s AND status IN "
+                            "('completed','failed','cancelled','quarantined')) OR "
+                            "COALESCE(completed_at, created_at) <= "
+                            "NOW() - INTERVAL '31 days')"
+                        )
+                        params.extend(
+                            ["notes", "graph-suggestions", "note_graph_suggestions"]
+                        )
                         for column, value in (
                             ("domain", domain),
                             ("queue", queue),
@@ -9453,6 +9635,20 @@ class JobManager:
                     params.extend(
                         [prune_ref_sql, f"-{int(older_than_days)} days"]
                     )
+                    where_parts.append(
+                        "(NOT (domain=? AND queue=? AND job_type=? AND status IN "
+                        "('completed','failed','cancelled','quarantined')) OR "
+                        "julianday(COALESCE(completed_at, created_at)) "
+                        "<= julianday(?, '-31 days'))"
+                    )
+                    params.extend(
+                        [
+                            "notes",
+                            "graph-suggestions",
+                            "note_graph_suggestions",
+                            prune_ref_sql,
+                        ]
+                    )
                     if domain:
                         where_parts.append("domain = ?")
                         params.append(domain)
@@ -9509,6 +9705,14 @@ class JobManager:
                         where_clause=where_clause,
                         params=tuple(params),
                     )
+                    notes_graph_candidates = conn.execute(
+                        f"SELECT id FROM jobs{where_clause} AND domain=? AND queue=? "  # nosec B608
+                        "AND job_type=?",
+                        tuple(
+                            params
+                            + ["notes", "graph-suggestions", "note_graph_suggestions"]
+                        ),
+                    ).fetchall()
                     conn.execute(
                         (
                             "UPDATE job_dependencies SET "
@@ -9533,7 +9737,7 @@ class JobManager:
                     )
                     # Receipt-backed jobs always archive before active deletion;
                     # global archive policy still controls all other candidates.
-                    if archive_enabled or receipt_candidates:
+                    if archive_enabled or receipt_candidates or notes_graph_candidates:
                         receipt_exists_clause = (
                             " EXISTS (SELECT 1 FROM job_idempotency_receipts "
                             "AS receipt WHERE receipt.job_uuid = jobs.uuid "
@@ -9547,12 +9751,23 @@ class JobManager:
                         receipt_where_clause = (
                             where_clause + " AND" + receipt_exists_clause
                         )
-                        archive_where_clause = (
-                            where_clause
-                            if archive_enabled
-                            else receipt_where_clause
-                        )
                         archive_params = list(params)
+                        if archive_enabled:
+                            archive_where_clause = where_clause
+                        else:
+                            archive_where_clause = (
+                                where_clause
+                                + " AND ("
+                                + receipt_exists_clause
+                                + " OR (domain=? AND queue=? AND job_type=?))"
+                            )
+                            archive_params.extend(
+                                [
+                                    "notes",
+                                    "graph-suggestions",
+                                    "note_graph_suggestions",
+                                ]
+                            )
                         prompt_archive_params = tuple(
                             archive_params + ["prompt_studio", "optimization"]
                         )

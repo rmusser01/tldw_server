@@ -2557,10 +2557,52 @@ def _privacy_safe_provider_errors_enabled(request: dict[str, Any]) -> bool:
     )
 
 
+def _validate_audited_call_policy_transport(
+    registry: Any,
+    provider: str,
+    request: dict[str, Any],
+) -> ProviderCallPolicy | None:
+    """Fail closed when an opt-in strict policy lacks adapter guarantees."""
+    policy = request.get("call_policy")
+    if not isinstance(policy, ProviderCallPolicy) or (
+        policy.maximum_timeout_seconds is None
+        and policy.required_endpoint_scope is None
+    ):
+        return None
+    transport = registry.get_audited_call_policy_transport(provider)
+    if (
+        policy.maximum_timeout_seconds is None
+        or policy.required_endpoint_scope is None
+        or transport is None
+        or policy.max_transport_attempts is None
+        or policy.max_transport_attempts > transport.maximum_transport_attempts
+        or not transport.enforces_configured_endpoint_scope
+        or not transport.enforces_maximum_timeout
+    ):
+        raise ChatConfigurationError(
+            provider=provider,
+            message="LLM adapter does not support the required call policy.",
+        )
+    return policy
+
+
+async def _await_with_call_policy_deadline(
+    awaitable: Awaitable[Any],
+    policy: ProviderCallPolicy | None,
+) -> Any:
+    if policy is None:
+        return await awaitable
+    return await asyncio.wait_for(
+        awaitable,
+        timeout=policy.maximum_timeout_seconds,
+    )
+
+
 def perform_chat_api_call(**kwargs: Any) -> Any:
     """Adapter-backed replacement for chat_orchestrator.chat_api_call."""
     provider, request, internal = _build_adapter_request_from_chat_args(kwargs)
-    adapter = _get_llm_registry().get_adapter(provider)
+    registry = _get_llm_registry()
+    adapter = registry.get_adapter(provider)
     if adapter is None:
         raise ChatConfigurationError(provider=provider, message="LLM adapter unavailable.")
     _attach_internal_http_hooks(adapter, request, internal)
@@ -2569,6 +2611,7 @@ def perform_chat_api_call(**kwargs: Any) -> Any:
     privacy_safe_errors = _privacy_safe_provider_errors_enabled(request)
     try:
         with provider_error_privacy_scope(privacy_safe_errors):
+            _validate_audited_call_policy_transport(registry, provider, request)
             if request.get("stream"):
                 return _map_sync_stream_egress_errors(
                     provider,
@@ -2586,7 +2629,8 @@ def perform_chat_api_call(**kwargs: Any) -> Any:
 async def perform_chat_api_call_async(**kwargs: Any) -> Any:
     """Async adapter-backed replacement for chat_orchestrator.chat_api_call_async."""
     provider, request, internal = _build_adapter_request_from_chat_args(kwargs)
-    adapter = _get_llm_registry().get_adapter(provider)
+    registry = _get_llm_registry()
+    adapter = registry.get_adapter(provider)
     if adapter is None:
         raise ChatConfigurationError(provider=provider, message="LLM adapter unavailable.")
     _attach_internal_http_hooks(adapter, request, internal)
@@ -2596,6 +2640,9 @@ async def perform_chat_api_call_async(**kwargs: Any) -> Any:
 
     try:
         with provider_error_privacy_scope(privacy_safe_errors):
+            strict_policy = _validate_audited_call_policy_transport(
+                registry, provider, request
+            )
             if request.get("stream"):
                 try:
                     stream_iter = adapter.astream(request, **timeout_kwargs)
@@ -2611,13 +2658,19 @@ async def perform_chat_api_call_async(**kwargs: Any) -> Any:
 
             if getattr(adapter, "async_chat_is_native", None) is True:
                 try:
-                    return await adapter.achat(request, **timeout_kwargs)
+                    return await _await_with_call_policy_deadline(
+                        adapter.achat(request, **timeout_kwargs),
+                        strict_policy,
+                    )
                 except NotImplementedError:
                     pass
-            return await await_bounded_sync_call(
-                partial(adapter.chat, request, **timeout_kwargs),
-                pool=SYNC_ADAPTER_CALL_POOL,
-                exhaustion_message="Provider adapter capacity is exhausted",
+            return await _await_with_call_policy_deadline(
+                await_bounded_sync_call(
+                    partial(adapter.chat, request, **timeout_kwargs),
+                    pool=SYNC_ADAPTER_CALL_POOL,
+                    exhaustion_message="Provider adapter capacity is exhausted",
+                ),
+                strict_policy,
             )
     except EgressPolicyError as exc:
         raise _map_provider_egress_error(provider, exc) from exc

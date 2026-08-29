@@ -1938,6 +1938,45 @@ def migration_094_create_canonical_admin_webhook_tables(
     logger.info("Migration 094: Created canonical admin webhook tables")
 
 
+def migration_095_seed_notes_graph_suggestion_permissions(conn: sqlite3.Connection) -> None:
+    """Seed suggestion review permissions for Notes-writing roles only."""
+
+    logger.info("Migration 095: START seed Notes graph suggestion permissions")
+    required = ("roles", "permissions", "role_permissions")
+    if not all(_sqlite_table_exists(conn, table_name) for table_name in required):
+        logger.info("Migration 095: RBAC tables missing; skipping Notes graph suggestion seed")
+        return
+    permissions = (
+        ("notes.graph.suggest", "Generate and review Notes graph suggestions", "notes"),
+        ("notes.link_keyword", "Accept Notes keyword-link suggestions", "notes"),
+        ("keywords.create", "Create keywords while accepting suggestions", "keywords"),
+    )
+    conn.executemany(
+        "INSERT OR IGNORE INTO permissions (name, description, category) VALUES (?, ?, ?)",
+        permissions,
+    )
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO role_permissions (role_id, permission_id)
+        SELECT r.id, p.id
+        FROM roles r
+        CROSS JOIN permissions p
+        WHERE r.name IN (?, ?, ?)
+          AND p.name IN (?, ?, ?)
+        """,
+        (
+            "admin",
+            "user",
+            "moderator",
+            "notes.graph.suggest",
+            "notes.link_keyword",
+            "keywords.create",
+        ),
+    )
+    conn.commit()
+    logger.info("Migration 095: Seeded Notes graph suggestion permissions")
+
+
 def rollback_086_drop_prototype_workspace_tables(conn: sqlite3.Connection) -> None:
     """Rollback migration 086 by dropping prototype workspace metadata tables."""
     conn.execute("DROP TABLE IF EXISTS prototype_promotion_requests")
@@ -6229,6 +6268,11 @@ def get_authnz_migrations() -> list[Migration]:
             94,
             "Create canonical admin webhook tables",
             migration_094_create_canonical_admin_webhook_tables,
+        ),
+        Migration(
+            95,
+            "Seed Notes graph suggestion permissions",
+            migration_095_seed_notes_graph_suggestion_permissions,
         ),
     ]
 

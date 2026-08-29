@@ -18,6 +18,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     InputError,
 )
 
+from ..errors import SyncMaterializationContractError
 from ..models import SyncEnvelope, SyncObjectState
 from ..notes_link import (
     NotesLinkValidationError,
@@ -26,6 +27,7 @@ from ..notes_link import (
 )
 from ..store import SyncV2Store
 from .base import MaterializationResult
+from .guarded_product_mutation import GuardedProductMutation
 
 _ERROR_CODE = "notes_link_projection_failed"
 _CONFLICT_TYPE = "notes_link_product_conflict"
@@ -43,6 +45,7 @@ class NotesLinkMaterializer:
         envelope: SyncEnvelope,
         *,
         store: SyncV2Store,
+        guarded_mutation: GuardedProductMutation | None = None,
     ) -> MaterializationResult:
         """Project one accepted notes.link envelope and persist its apply state."""
 
@@ -54,15 +57,25 @@ class NotesLinkMaterializer:
                 error_code=_ERROR_CODE,
                 message="Stored notes.link envelope is missing a server cursor",
             )
+        if guarded_mutation is not None:
+            guarded_mutation.require_identity(envelope.domain, envelope.object_id)
+            if (
+                envelope.operation != "upsert"
+                or envelope.routing_metadata.get("restore_intent") is True
+            ):
+                raise SyncMaterializationContractError()
 
         current_state = store.get_object_state(
             envelope.dataset_id,
             envelope.domain,
             envelope.object_id,
         )
-        if _already_materialized(envelope, current_state):
+        already_materialized = _already_materialized(envelope, current_state)
+        if guarded_mutation is None and already_materialized:
             return _mark_applied(envelope, store)
-        state_conflict = _state_conflict(envelope, current_state)
+        state_conflict = (
+            None if already_materialized else _state_conflict(envelope, current_state)
+        )
         if state_conflict is not None:
             store.mark_envelope_apply_status(
                 envelope.server_cursor,
@@ -104,6 +117,16 @@ class NotesLinkMaterializer:
                     payload=payload,
                     expected_version=expected_version,
                     allow_deleted_endpoints=True,
+                    before=(
+                        guarded_mutation.before
+                        if guarded_mutation is not None
+                        else None
+                    ),
+                    after=(
+                        guarded_mutation.after
+                        if guarded_mutation is not None
+                        else None
+                    ),
                 )
                 deleted = False
 

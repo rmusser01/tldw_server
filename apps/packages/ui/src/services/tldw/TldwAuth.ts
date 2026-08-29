@@ -39,6 +39,15 @@ export interface UserInfo {
 const API_KEY_PROFILE_PATH = "/api/v1/users/me/profile"
 const API_KEY_VALIDATION_TIMEOUT_MS = 30000
 
+const emitLogoutPrincipalBoundary = (): void => {
+  if (typeof window === "undefined") return
+  window.dispatchEvent(
+    new CustomEvent("tldw:auth-principal-changed", {
+      detail: { kind: "logout" }
+    })
+  )
+}
+
 const buildApiKeyValidationUrl = (serverUrl: string): string => {
   const trimmed = String(serverUrl || "").trim()
   if (!trimmed) {
@@ -214,9 +223,11 @@ export class TldwAuthService {
           method: 'DELETE'
         })
         await tldwClient.clearCookieSingleUserSession()
+        emitLogoutPrincipalBoundary()
         return
       }
       await tldwClient.clearManualSingleUserCredentials()
+      emitLogoutPrincipalBoundary()
       return
     }
 
@@ -244,11 +255,7 @@ export class TldwAuthService {
     }
 
     clearStandaloneHtmlSessionRecords()
-    if (typeof window !== "undefined") {
-      window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed", {
-        detail: { kind: "logout" }
-      }))
-    }
+    emitLogoutPrincipalBoundary()
   }
 
   /**

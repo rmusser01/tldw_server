@@ -11,6 +11,9 @@ from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 from tldw_Server_API.app.core.Sync.v2.adapters import StaticSyncAdapter, SyncAdapterRegistry
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.notes_link import NotesLinkDomainAdapter
 from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
+from tldw_Server_API.app.core.Sync.v2.materializers.guarded_product_mutation import (
+    GuardedProductMutation,
+)
 from tldw_Server_API.app.core.Sync.v2.materializers.notes_link import NotesLinkMaterializer
 from tldw_Server_API.app.core.Sync.v2.models import M1_SYNC_DOMAINS, SyncEnvelopeCreate, SyncObjectState
 from tldw_Server_API.app.core.Sync.v2.notes_link_coordinator import (
@@ -208,6 +211,7 @@ def test_create_exact_replay_and_changed_request_conflict(
         properties={"kind": "reference"},
         idempotency_key="create-one",
     )
+    replay_events: list[tuple[str, str | None]] = []
     replay = coordinator.create(
         source_note_id=TARGET_ID,
         target_note_id=SOURCE_ID,
@@ -216,9 +220,16 @@ def test_create_exact_replay_and_changed_request_conflict(
         label=None,
         properties={"kind": "reference"},
         idempotency_key="create-one",
+        guarded_mutation=GuardedProductMutation(
+            expected_domain="notes.link",
+            expected_object_id=first.edge_id,
+            before=lambda _conn: replay_events.append(("before", None)),
+            after=lambda _conn, identity: replay_events.append(("after", identity)),
+        ),
     )
 
     assert replay == first
+    assert replay_events == [("before", None), ("after", first.edge_id)]
     assert first.version == 1
     assert len(store.list_current_heads(dataset_id, "notes.link", limit=10, offset=0)) == 1
 

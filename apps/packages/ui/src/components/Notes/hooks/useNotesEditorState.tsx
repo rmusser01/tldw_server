@@ -70,6 +70,7 @@ import type { NoteStudioDocumentSummary } from '../notes-studio-types'
 type ConfirmDanger = (options: ConfirmDangerOptions) => Promise<boolean>
 
 export interface UseNotesEditorStateDeps {
+  authorityScope?: string | null
   isOnline: boolean
   isMobileViewport: boolean
   message: MessageInstance
@@ -102,6 +103,7 @@ const noteResourcePath = (id: string | number) =>
 
 export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   const {
+    authorityScope,
     isOnline,
     isMobileViewport,
     message,
@@ -124,6 +126,8 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     setKeywordSuggestionSelection,
     editorDisabled,
   } = deps
+  const authorityScopeRef = React.useRef(authorityScope)
+  authorityScopeRef.current = authorityScope
 
   // ---- editor state ----
   const [selectedId, setSelectedId] = React.useState<string | number | null>(null)
@@ -162,7 +166,6 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   const [pinnedNoteIds, setPinnedNoteIds] = React.useState<string[]>([])
   const [titleSuggestStrategy, setTitleSuggestStrategy] =
     React.useState<NotesTitleSuggestStrategy>('heuristic')
-  const [graphModalOpen, setGraphModalOpen] = React.useState(false)
   const [graphMutationTick, setGraphMutationTick] = React.useState(0)
   const [manualLinkTargetId, setManualLinkTargetId] = React.useState<string | null>(null)
   const [manualLinkSaving, setManualLinkSaving] = React.useState(false)
@@ -187,7 +190,6 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   const richEditorRef = React.useRef<HTMLDivElement | null>(null)
   const attachmentInputRef = React.useRef<HTMLInputElement | null>(null)
   const markdownBeforeWysiwygRef = React.useRef<string | null>(null)
-  const graphModalReturnFocusRef = React.useRef<HTMLElement | null>(null)
   contentRef.current = content
 
   // ---- AI assist undo ----
@@ -470,10 +472,18 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   }, [updateRecentNotes])
 
   const loadDetail = React.useCallback(async (id: string | number): Promise<boolean> => {
+    const requestAuthorityScope = authorityScope
+    if (requestAuthorityScope === null) return false
     clearAssistUndoState()
     setLoadingDetail(true)
     try {
       const d = await bgRequest<any>({ path: noteResourcePath(id) as any, method: 'GET' as any })
+      if (
+        requestAuthorityScope !== undefined &&
+        authorityScopeRef.current !== requestAuthorityScope
+      ) {
+        return false
+      }
       const loadedTitle = String(d?.title || `Note ${id}`)
       setSelectedId(id)
       setTitle(String(d?.title || ''))
@@ -516,7 +526,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       message.error('Failed to load note')
       return false
     } finally { setLoadingDetail(false) }
-  }, [applyOfflineDraftToEditor, clearAssistUndoState, clearTaskState, message, refreshTaskStateForNote, rememberRecentNote, setEditorKeywords])
+  }, [applyOfflineDraftToEditor, authorityScope, clearAssistUndoState, clearTaskState, message, refreshTaskStateForNote, rememberRecentNote, setEditorKeywords])
 
   const dismissTaskActivity = React.useCallback(async (eventId: string) => {
     const normalizedEventId = String(eventId || '').trim()
@@ -1680,12 +1690,6 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     setWysiwygSessionDirty(false)
   }, [selectedId])
 
-  React.useEffect(() => {
-    if (selectedId == null) {
-      setGraphModalOpen(false)
-    }
-  }, [selectedId])
-
   // Wysiwyg sync
   React.useEffect(() => {
     if (editorInputMode !== 'wysiwyg') return
@@ -2045,7 +2049,6 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     recentNotes,
     pinnedNoteIds, pinnedNoteIdSet,
     titleSuggestStrategy, setTitleSuggestStrategy,
-    graphModalOpen, setGraphModalOpen,
     graphMutationTick, setGraphMutationTick,
     manualLinkTargetId, setManualLinkTargetId,
     manualLinkSaving, setManualLinkSaving,
@@ -2072,7 +2075,6 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     richEditorRef,
     attachmentInputRef,
     markdownBeforeWysiwygRef,
-    graphModalReturnFocusRef,
     saveNoteRef,
     // callbacks
     clearAutosaveTimeout,

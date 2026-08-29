@@ -45,6 +45,10 @@ from .errors import (
     SyncStoreError,
 )
 from .materializers import MaterializationResult, SyncMaterializer
+from .materializers.guarded_product_mutation import (
+    GuardedProductMutation,
+    has_guard_required_routing_key,
+)
 from .models import (
     DEFAULT_M1_ENCRYPTION_POLICY,
     M1_SYNC_DOMAINS,
@@ -2955,6 +2959,15 @@ class SyncV2Service:
                     )
                 )
                 continue
+            if has_guard_required_routing_key(envelope.routing_metadata):
+                rejected.append(
+                    SyncPushRejected(
+                        client_envelope_id=envelope.client_envelope_id,
+                        error_code="reserved_routing_metadata",
+                        message="Sync envelope contains reserved routing metadata",
+                    )
+                )
+                continue
             if (
                 envelope.domain in NOTES_TASK_SYNC_DOMAINS
                 and not self._notes_task_domains_ready(dataset)
@@ -4770,6 +4783,10 @@ class SyncV2Service:
             raise SyncStoreError(f"Sync {action} must not include a resolution envelope")
         resolution_device_id = resolved_by_device_id
         if resolution_envelope is not None:
+            if has_guard_required_routing_key(resolution_envelope.routing_metadata):
+                raise SyncStoreError(
+                    "Sync resolution envelope contains reserved routing metadata"
+                )
             resolution_device_id = resolved_by_device_id or resolution_envelope.device_id
             self._require_registered_device(user_id, resolution_device_id or "")
             if resolution_envelope.dataset_id != dataset.dataset_id:
@@ -7472,6 +7489,7 @@ class SyncV2Service:
         envelope: SyncEnvelope,
         *,
         store: SyncV2Store | None = None,
+        guarded_mutation: GuardedProductMutation | None = None,
     ) -> MaterializationResult:
         materializer = self.materializers.get(envelope.domain)
         if materializer is None:
@@ -7481,7 +7499,11 @@ class SyncV2Service:
         if store is None:
             try:
                 with self.store.materialization_guard([envelope]) as guarded_store:
-                    return self._materialize_envelope(envelope, store=guarded_store)
+                    return self._materialize_envelope(
+                        envelope,
+                        store=guarded_store,
+                        guarded_mutation=guarded_mutation,
+                    )
             except SyncMaterializationBusyError:
                 return MaterializationResult(
                     status="failed",
@@ -7501,7 +7523,15 @@ class SyncV2Service:
                     message=_safe_projection_error_message(exc),
                 )
         try:
-            result = materializer.apply(envelope, store=store)
+            if guarded_mutation is None:
+                result = materializer.apply(envelope, store=store)
+            else:
+                guarded_mutation.require_identity(envelope.domain, envelope.object_id)
+                result = materializer.apply(
+                    envelope,
+                    store=store,
+                    guarded_mutation=guarded_mutation,
+                )
             if result.status == "conflict":
                 self._store_materialization_conflict(
                     envelope.dataset_id,

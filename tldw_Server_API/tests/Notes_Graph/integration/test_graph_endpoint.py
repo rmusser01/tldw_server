@@ -205,6 +205,36 @@ def test_cytoscape_format(client_and_db):
     assert "edges" in data["elements"]
     assert "truncated" in data
     assert "limits" in data
+    assert data["active_note_count"] == 1
+    assert data["all_notes_note_cap"] == min(100, data["limits"]["max_nodes"])
+    assert data["all_notes_eligible"] is True
+
+
+def test_graph_read_metadata_is_owner_scoped_and_effective_cap_is_clamped(
+    client_and_db,
+    monkeypatch,
+):
+    client, db = client_and_db
+    h = _headers()
+    note_ids = [_create_note(client, f"Owner note {index}") for index in range(3)]
+    other_owner = CharactersRAGDB(f"{db.db_path_str}.owner-2", client_id="2")
+    try:
+        other_owner.add_note("Other owner private note", "private body")
+        monkeypatch.setenv("NOTES_GRAPH_ALL_NOTES_NOTE_CAP", "100")
+        response = client.get(
+            "/api/v1/notes/graph",
+            params={"center_note_id": note_ids[0], "max_nodes": 2},
+            headers=h,
+        )
+    finally:
+        other_owner.close_all_connections()
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["active_note_count"] == 3
+    assert data["all_notes_note_cap"] == 2
+    assert data["all_notes_eligible"] is False
+    assert data["limits"]["max_nodes"] == 2
 
 
 def test_seedless_small_collection(client_and_db):

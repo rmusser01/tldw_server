@@ -21,6 +21,12 @@ from .errors import (
     SyncMaterializationPredecessorError,
     SyncStoreError,
 )
+from .materializers.guarded_product_mutation import (
+    GUARD_REQUIRED_ROUTING_KEY,
+    GuardedProductMutation,
+    GuardedProductMutationIdentityError,
+    has_guard_required_routing_key,
+)
 from .models import (
     DEFAULT_M1_ENCRYPTION_POLICY,
     NOTES_ORGANIZATION_DOMAINS,
@@ -134,6 +140,8 @@ def capture_server_origin_mutation_batch(
     ]
     | None = None,
     bootstrap_step_verifier: Callable[[SyncEnvelope], bool] | None = None,
+    guarded_mutation: GuardedProductMutation | None = None,
+    guarded_mutations: Sequence[GuardedProductMutation] = (),
 ) -> ServerOriginBatchResult:
     """Preflight, atomically append, and ordered-materialize one complete plan."""
 
@@ -191,7 +199,12 @@ def capture_server_origin_mutation_batch(
     canonical_steps = tuple(
         _canonical_step(step, source=source, user_id=user_id) for step in plan
     )
-    mutation_plan_hash = _mutation_plan_hash(canonical_steps)
+    guards = _normalize_guarded_mutations(
+        guarded_mutation=guarded_mutation,
+        guarded_mutations=guarded_mutations,
+    )
+    canonical_steps = _bind_guard_requirements(canonical_steps, ())
+    guarded_canonical_steps = _bind_guard_requirements(canonical_steps, guards)
     mutation_group_id = _mutation_group_id(
         dataset.dataset_id,
         source=source,
@@ -200,12 +213,20 @@ def capture_server_origin_mutation_batch(
 
     existing = service.store.list_mutation_group(dataset.dataset_id, mutation_group_id)
     if existing:
+        expected_steps = (
+            guarded_canonical_steps
+            if any(
+                envelope.routing_metadata.get(GUARD_REQUIRED_ROUTING_KEY) is True
+                for envelope in existing
+            )
+            else canonical_steps
+        )
         try:
             _validate_stored_group(
                 existing,
                 dataset_id=dataset.dataset_id,
                 mutation_group_id=mutation_group_id,
-                expected_steps=canonical_steps,
+                expected_steps=expected_steps,
             )
         except SyncIdempotencyConflictError as exc:
             raise SyncServerOriginBatchIdempotencyConflictError(mutation_group_id) from exc
@@ -223,8 +244,11 @@ def capture_server_origin_mutation_batch(
             notes_task_activity_bootstrap=(
                 trusted_notes_task_activity_bootstrap_id is not None
             ),
+            guarded_mutations=guards,
         )
 
+    canonical_steps = guarded_canonical_steps
+    mutation_plan_hash = _mutation_plan_hash(canonical_steps)
     envelopes = _evaluate_plan(
         service=service,
         dataset=dataset,
@@ -282,6 +306,7 @@ def capture_server_origin_mutation_batch(
         notes_task_activity_bootstrap=(
             trusted_notes_task_activity_bootstrap_id is not None
         ),
+        guarded_mutations=guards,
     )
 
 
@@ -336,6 +361,7 @@ def resume_server_origin_mutation_group(
     service: SyncV2Service,
     dataset_id: str,
     mutation_group_id: str,
+    guarded_mutations: Sequence[GuardedProductMutation] = (),
 ) -> ServerOriginBatchResult:
     """Resume at the first non-applied step without skipping a blocked step."""
 
@@ -359,7 +385,13 @@ def resume_server_origin_mutation_group(
         {envelope.domain for envelope in envelopes},
         notes_task_coordinator=notes_task_coordinator,
     )
-    return _materialize_group(service=service, dataset=dataset, envelopes=envelopes)
+    guards = _normalize_guarded_mutations(guarded_mutations=guarded_mutations)
+    return _materialize_group(
+        service=service,
+        dataset=dataset,
+        envelopes=envelopes,
+        guarded_mutations=guards,
+    )
 
 
 def materialize_accepted_mutation_group(
@@ -367,6 +399,7 @@ def materialize_accepted_mutation_group(
     service: SyncV2Service,
     dataset: SyncDataset,
     envelopes: Sequence[SyncEnvelope],
+    guarded_mutations: Sequence[GuardedProductMutation] = (),
 ) -> ServerOriginBatchResult:
     """Materialize one already-validated accepted group in dependency order."""
 
@@ -377,7 +410,13 @@ def materialize_accepted_mutation_group(
         dataset_id=dataset.dataset_id,
         mutation_group_id=envelopes[0].mutation_group_id,
     )
-    return _materialize_group(service=service, dataset=dataset, envelopes=envelopes)
+    guards = _normalize_guarded_mutations(guarded_mutations=guarded_mutations)
+    return _materialize_group(
+        service=service,
+        dataset=dataset,
+        envelopes=envelopes,
+        guarded_mutations=guards,
+    )
 
 
 def _is_trusted_notes_task_coordinator_group(
@@ -672,6 +711,7 @@ def _materialize_group(
     materialize_verified_bootstrap: bool = False,
     notes_task_bootstrap: bool = False,
     notes_task_activity_bootstrap: bool = False,
+    guarded_mutations: Sequence[GuardedProductMutation] = (),
 ) -> ServerOriginBatchResult:
     group = list(envelopes)
     _validate_stored_group(
@@ -679,6 +719,7 @@ def _materialize_group(
         dataset_id=dataset.dataset_id,
         mutation_group_id=group[0].mutation_group_id or "",
     )
+    guard_by_identity = _require_group_guards(dataset, group, guarded_mutations)
     trusted_notes_task_coordinator = (
         bootstrap_id is None
         and _is_trusted_notes_task_coordinator_group(dataset, group)
@@ -708,6 +749,7 @@ def _materialize_group(
                 bootstrap_step_verifier=bootstrap_step_verifier,
                 materialize_verified_bootstrap=materialize_verified_bootstrap,
                 notes_task_bootstrap=notes_task_bootstrap,
+                guard_by_identity=guard_by_identity,
             )
     except SyncIdempotencyConflictError:
         raise
@@ -720,6 +762,141 @@ def _materialize_group(
     return result
 
 
+def _normalize_guarded_mutations(
+    *,
+    guarded_mutation: GuardedProductMutation | None = None,
+    guarded_mutations: Sequence[GuardedProductMutation] = (),
+) -> tuple[GuardedProductMutation, ...]:
+    guards = (*guarded_mutations, *((guarded_mutation,) if guarded_mutation else ()))
+    identities: set[tuple[SyncDomain, str]] = set()
+    for guard in guards:
+        if not isinstance(guard, GuardedProductMutation):
+            raise TypeError("Guarded product mutations must be process-local capabilities")
+        identity = (guard.expected_domain, guard.expected_object_id)
+        if identity in identities:
+            raise GuardedProductMutationIdentityError(
+                "Guarded product mutation identity is duplicate"
+            )
+        identities.add(identity)
+    return guards
+
+
+def _bind_guard_requirements(
+    steps: Sequence[ServerOriginMutationStep],
+    guards: Sequence[GuardedProductMutation],
+) -> tuple[ServerOriginMutationStep, ...]:
+    stripped = tuple(
+        replace(
+            step,
+            routing_metadata={
+                key: value
+                for key, value in step.routing_metadata.items()
+                if key != GUARD_REQUIRED_ROUTING_KEY
+            },
+        )
+        for step in steps
+    )
+    if not guards:
+        return stripped
+
+    eligible: dict[tuple[SyncDomain, str], list[int]] = {}
+    for index, step in enumerate(stripped):
+        if GuardedProductMutation.supports_domain(step.domain):
+            eligible.setdefault((step.domain, step.object_id), []).append(index)
+    supplied = {
+        (guard.expected_domain, guard.expected_object_id): guard for guard in guards
+    }
+    missing = set(eligible).difference(supplied)
+    if missing:
+        raise GuardedProductMutationIdentityError(
+            "Guarded product mutation plan is missing a required guard"
+        )
+    for identity in supplied:
+        if len(eligible.get(identity, ())) != 1:
+            raise GuardedProductMutationIdentityError(
+                "Guarded product mutation identity must match exactly one plan step"
+            )
+
+    bound = list(stripped)
+    for indexes in eligible.values():
+        index = indexes[0]
+        step = bound[index]
+        bound[index] = replace(
+            step,
+            routing_metadata={
+                **dict(step.routing_metadata),
+                GUARD_REQUIRED_ROUTING_KEY: True,
+            },
+        )
+    return tuple(bound)
+
+
+def _require_group_guards(
+    dataset: SyncDataset,
+    group: Sequence[SyncEnvelope],
+    guards: Sequence[GuardedProductMutation],
+) -> dict[tuple[SyncDomain, str], GuardedProductMutation]:
+    required: dict[tuple[SyncDomain, str], SyncEnvelope] = {}
+    for envelope in group:
+        marker = envelope.routing_metadata.get(GUARD_REQUIRED_ROUTING_KEY)
+        if has_guard_required_routing_key(envelope.routing_metadata) and marker is not True:
+            raise SyncIdempotencyConflictError(
+                "Sync stored mutation group has an invalid guard-required marker"
+            )
+        if marker is True:
+            if not GuardedProductMutation.supports_domain(
+                envelope.domain
+            ) or not _has_guarded_server_origin_provenance(dataset, envelope):
+                raise SyncIdempotencyConflictError(
+                    "Sync guard-required envelope failed integrity validation"
+                )
+            identity = (envelope.domain, envelope.object_id)
+            if identity in required:
+                raise GuardedProductMutationIdentityError(
+                    "Guard-required identity must match exactly one envelope"
+                )
+            required[identity] = envelope
+
+    supplied = {
+        (guard.expected_domain, guard.expected_object_id): guard for guard in guards
+    }
+    if not required:
+        for identity in supplied:
+            if sum(
+                envelope.domain == identity[0] and envelope.object_id == identity[1]
+                for envelope in group
+            ) != 1:
+                raise GuardedProductMutationIdentityError(
+                    "Fresh guarded mutation must match exactly one unmarked envelope"
+                )
+        return supplied
+    if set(required).difference(supplied):
+        raise GuardedProductMutationIdentityError(
+            "Guard-required Sync envelope requires a fresh matching guard"
+        )
+    if set(supplied).difference(required):
+        raise GuardedProductMutationIdentityError(
+            "Fresh guarded mutation does not match a guard-required envelope"
+        )
+    return supplied
+
+
+def _has_guarded_server_origin_provenance(
+    dataset: SyncDataset,
+    envelope: SyncEnvelope,
+) -> bool:
+    routing = envelope.routing_metadata
+    source = routing.get("source")
+    return (
+        envelope.device_id == SERVER_ORIGIN_DEVICE_ID
+        and routing.get("origin") == "server"
+        and routing.get("server_device_id") == SERVER_ORIGIN_DEVICE_ID
+        and routing.get("server_owner_user_id") == dataset.owner_user_id
+        and isinstance(source, str)
+        and bool(source)
+    )
+
+
 def _materialize_group_guarded(
     *,
     service: SyncV2Service,
@@ -730,11 +907,16 @@ def _materialize_group_guarded(
     bootstrap_step_verifier: Callable[[SyncEnvelope], bool] | None,
     materialize_verified_bootstrap: bool,
     notes_task_bootstrap: bool,
+    guard_by_identity: Mapping[
+        tuple[SyncDomain, str],
+        GuardedProductMutation,
+    ],
 ) -> tuple[ServerOriginBatchResult, bool | None]:
     """Project a complete group while the caller retains all object locks."""
 
     for index, envelope in enumerate(materialization_group_view(group)):
-        if envelope.apply_status in {"applied", "superseded"}:
+        envelope_guard = guard_by_identity.get((envelope.domain, envelope.object_id))
+        if envelope.apply_status in {"applied", "superseded"} and envelope_guard is None:
             continue
         if envelope.apply_status == "conflict":
             return _materialization_result(dataset, group), False
@@ -763,7 +945,11 @@ def _materialize_group_guarded(
                 envelope.mutation_group_id or "",
             )
             continue
-        materialization = service._materialize_envelope(envelope, store=store)
+        materialization = service._materialize_envelope(
+            envelope,
+            store=store,
+            guarded_mutation=envelope_guard,
+        )
         group = store.list_mutation_group(
             dataset.dataset_id,
             envelope.mutation_group_id or "",
@@ -789,7 +975,7 @@ def _materialize_group_guarded(
             return _materialization_result(dataset, group), False
         if materialization.status == "failed" or current.apply_status == "failed":
             return _materialization_result(dataset, group), True
-        if current.apply_status != "applied":
+        if current.apply_status not in {"applied", "superseded"}:
             if current.server_cursor is None:
                 raise SyncIdempotencyConflictError(
                     "Sync stored mutation group step has no server cursor"

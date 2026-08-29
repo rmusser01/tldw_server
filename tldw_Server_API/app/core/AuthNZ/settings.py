@@ -356,6 +356,9 @@ class Settings(BaseSettings):
             "moderation.review.decide",
             "moderation.review.bulk_decide",
             "moderation.audit.read",
+            "notes.graph.suggest",
+            "notes.link_keyword",
+            "keywords.create",
         ],
         description="Default permissions granted to the single-user principal in single_user mode",
     )

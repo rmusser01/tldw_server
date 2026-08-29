@@ -40,6 +40,9 @@ from tldw_Server_API.app.core.Sync.v2.materializers import (
     NotesTaskActivityMaterializer,
     NotesTaskMaterializer,
 )
+from tldw_Server_API.app.core.Sync.v2.materializers.guarded_product_mutation import (
+    GUARD_REQUIRED_ROUTING_KEY,
+)
 from tldw_Server_API.app.core.Sync.v2.models import SyncEnvelopeCreate, SyncObjectState
 from tldw_Server_API.app.core.Sync.v2.notes_task_activity_bootstrap import (
     NotesTaskActivityBootstrapper,
@@ -520,6 +523,32 @@ def test_ready_server_capture_appends_task_and_activity_as_one_group(
             ),
             created_at_client="2026-08-24T10:02:00+00:00",
             encryption_metadata={"policy": "server_trusted_v1"},
+        )
+        spoofed_task_id = "client-task-guard-marker-spoof"
+        spoofed_task = service.push(
+            user_id=OWNER_ID,
+            dataset_id=dataset.dataset_id,
+            device_id=device_id,
+            envelopes=[
+                replace(
+                    client_envelope,
+                    client_envelope_id=spoofed_task_id,
+                    routing_metadata={GUARD_REQUIRED_ROUTING_KEY: True},
+                )
+            ],
+        )
+        assert spoofed_task.accepted == []
+        assert spoofed_task.conflicts == []
+        assert [item.error_code for item in spoofed_task.rejected] == [
+            "reserved_routing_metadata"
+        ]
+        assert all(
+            envelope.client_envelope_id != spoofed_task_id
+            for envelope in sync_store.list_envelopes_after(
+                dataset.dataset_id,
+                0,
+                limit=1_000,
+            )
         )
 
         active_dataset = sync_store.get_dataset(dataset.dataset_id)

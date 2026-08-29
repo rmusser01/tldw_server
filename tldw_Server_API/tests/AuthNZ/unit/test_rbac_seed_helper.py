@@ -1,9 +1,72 @@
+import ast
 import sqlite3
 from pathlib import Path
 
 import pytest
 
 pytestmark = pytest.mark.unit
+
+
+def _is_named_call(node: ast.AST, name: str) -> bool:
+    return isinstance(node, ast.Call) and (
+        (isinstance(node.func, ast.Name) and node.func.id == name)
+        or (isinstance(node.func, ast.Attribute) and node.func.attr == name)
+    )
+
+
+def test_all_production_rbac_seed_callers_own_pool_transactions() -> None:
+    repository_root = Path(__file__).resolve().parents[4]
+    app_root = repository_root / "tldw_Server_API" / "app"
+    expected_callers = {
+        "core/AuthNZ/initialize.py": 2,
+        "core/MCP_unified/adapters/tldw_runtime.py": 1,
+    }
+    actual_callers: dict[str, int] = {}
+
+    for path in app_root.rglob("*.py"):
+        source = path.read_text(encoding="utf-8")
+        if "ensure_baseline_rbac_seed" not in source:
+            continue
+        tree = ast.parse(source)
+        seed_calls = {
+            node
+            for node in ast.walk(tree)
+            if _is_named_call(node, "ensure_baseline_rbac_seed")
+        }
+        if not seed_calls:
+            continue
+
+        relative_path = str(path.relative_to(app_root))
+        actual_callers[relative_path] = len(seed_calls)
+        transaction_owned_calls: set[ast.AST] = set()
+        for async_with in (
+            node for node in ast.walk(tree) if isinstance(node, ast.AsyncWith)
+        ):
+            if not any(
+                _is_named_call(item.context_expr, "transaction")
+                for item in async_with.items
+            ):
+                continue
+            for statement in async_with.body:
+                transaction_owned_calls.update(
+                    node
+                    for node in ast.walk(statement)
+                    if _is_named_call(node, "ensure_baseline_rbac_seed")
+                )
+
+        assert seed_calls == transaction_owned_calls, relative_path
+
+    assert actual_callers == expected_callers
+
+    helper_path = app_root / "core" / "AuthNZ" / "rbac_seed.py"
+    helper_tree = ast.parse(helper_path.read_text(encoding="utf-8"))
+    helper = next(
+        node
+        for node in ast.walk(helper_tree)
+        if isinstance(node, ast.AsyncFunctionDef)
+        and node.name == "ensure_baseline_rbac_seed"
+    )
+    assert not any(_is_named_call(node, "transaction") for node in ast.walk(helper))
 
 
 @pytest.mark.asyncio
@@ -50,7 +113,7 @@ async def test_ensure_baseline_rbac_seed_sqlite_idempotent() -> None:
 
         cur = await conn.execute("SELECT name FROM roles")
         roles = {row[0] for row in await cur.fetchall()}
-        assert {"admin", "user", "viewer"} <= roles
+        assert {"admin", "user", "moderator", "viewer"} <= roles
 
         expected_permissions = {
             "media.read",
@@ -65,12 +128,17 @@ async def test_ensure_baseline_rbac_seed_sqlite_idempotent() -> None:
             "tools.execute:*",
             "notifications.read",
             "notifications.control",
+            "notes.graph.suggest",
+            "notes.link_keyword",
+            "keywords.create",
         }
         cur = await conn.execute("SELECT name FROM permissions")
         perms = {row[0] for row in await cur.fetchall()}
         assert expected_permissions <= perms
 
-        cur = await conn.execute("SELECT id, name FROM roles WHERE name IN ('admin','user','viewer','reviewer')")
+        cur = await conn.execute(
+            "SELECT id, name FROM roles WHERE name IN ('admin','user','moderator','viewer','reviewer')"
+        )
         role_id = {row[1]: row[0] for row in await cur.fetchall()}
 
         cur = await conn.execute(
@@ -81,6 +149,7 @@ async def test_ensure_baseline_rbac_seed_sqlite_idempotent() -> None:
                 'media.read','media.create','media.delete','system.configure',
                 'users.manage_roles','sql.read','sql.target:media_db','modules.read',
                 'prompts.read','tools.execute:*','notifications.read','notifications.control'
+                ,'notes.graph.suggest','notes.link_keyword','keywords.create'
             )
             """
         )
@@ -99,6 +168,20 @@ async def test_ensure_baseline_rbac_seed_sqlite_idempotent() -> None:
         assert perm_id["prompts.read"] in user_perm_ids
         assert perm_id["notifications.read"] in user_perm_ids
         assert perm_id["notifications.control"] in user_perm_ids
+        assert perm_id["notes.graph.suggest"] in user_perm_ids
+        assert perm_id["notes.link_keyword"] in user_perm_ids
+        assert perm_id["keywords.create"] in user_perm_ids
+
+        cur = await conn.execute(
+            "SELECT permission_id FROM role_permissions WHERE role_id = ?",
+            (role_id["moderator"],),
+        )
+        moderator_perm_ids = {row[0] for row in await cur.fetchall()}
+        assert {
+            perm_id["notes.graph.suggest"],
+            perm_id["notes.link_keyword"],
+            perm_id["keywords.create"],
+        } <= moderator_perm_ids
 
         cur = await conn.execute(
             "SELECT permission_id FROM role_permissions WHERE role_id = ?",
@@ -108,6 +191,9 @@ async def test_ensure_baseline_rbac_seed_sqlite_idempotent() -> None:
         assert perm_id["media.read"] in viewer_perm_ids
         assert perm_id["notifications.read"] in viewer_perm_ids
         assert perm_id["notifications.control"] in viewer_perm_ids
+        assert perm_id["notes.graph.suggest"] not in viewer_perm_ids
+        assert perm_id["notes.link_keyword"] not in viewer_perm_ids
+        assert perm_id["keywords.create"] not in viewer_perm_ids
 
         cur = await conn.execute(
             "SELECT permission_id FROM role_permissions WHERE role_id = ?",
@@ -124,6 +210,65 @@ async def test_ensure_baseline_rbac_seed_sqlite_idempotent() -> None:
         admin_perm_ids = {row[0] for row in await cur.fetchall()}
         for name in expected_permissions:
             assert perm_id[name] in admin_perm_ids
+
+
+@pytest.mark.asyncio
+async def test_sqlite_repeated_bootstrap_preserves_revoked_notes_suggestion_grants() -> None:
+    import aiosqlite
+
+    from tldw_Server_API.app.core.AuthNZ.rbac_seed import (
+        ensure_baseline_rbac_seed,
+        ensure_sqlite_rbac_tables,
+    )
+
+    protected_permissions = (
+        "notes.graph.suggest",
+        "notes.link_keyword",
+        "keywords.create",
+    )
+    async with aiosqlite.connect(":memory:") as conn:
+        await ensure_sqlite_rbac_tables(conn)
+        await ensure_baseline_rbac_seed(conn, include_mcp_permissions=True)
+        await conn.execute(
+            """
+            DELETE FROM role_permissions
+            WHERE permission_id IN (
+                SELECT id FROM permissions WHERE name IN (?, ?, ?)
+            )
+            """,
+            protected_permissions,
+        )
+        await conn.execute(
+            """
+            DELETE FROM role_permissions
+            WHERE role_id = (SELECT id FROM roles WHERE name = 'user')
+              AND permission_id = (SELECT id FROM permissions WHERE name = 'media.read')
+            """
+        )
+
+        await ensure_baseline_rbac_seed(conn, include_mcp_permissions=True)
+
+        cur = await conn.execute(
+            """
+            SELECT r.name, p.name
+            FROM role_permissions rp
+            JOIN roles r ON r.id = rp.role_id
+            JOIN permissions p ON p.id = rp.permission_id
+            WHERE p.name IN (?, ?, ?)
+            """,
+            protected_permissions,
+        )
+        assert await cur.fetchall() == []
+        cur = await conn.execute(
+            """
+            SELECT 1
+            FROM role_permissions rp
+            JOIN roles r ON r.id = rp.role_id
+            JOIN permissions p ON p.id = rp.permission_id
+            WHERE r.name = 'user' AND p.name = 'media.read'
+            """
+        )
+        assert await cur.fetchone() is not None
 
 
 def test_migration_089_seeds_prompts_read_for_existing_admin_and_user_roles() -> None:
@@ -276,7 +421,7 @@ def _migrate_version_089_database(db_path: Path) -> None:
 
     manager = MigrationManager(db_path)
     migrations = get_authnz_migrations()
-    assert migrations[-1].version == 93
+    assert migrations[-1].version == 95
     for migration in migrations:
         manager.add_migration(migration)
 

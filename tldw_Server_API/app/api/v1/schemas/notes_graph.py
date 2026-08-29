@@ -74,6 +74,10 @@ class NoteGraphResponse(BaseModel):
     cursor: str | None = None
     limits: GraphLimits
     radius_cap_applied: bool = False
+    active_note_count: int = Field(..., ge=0)
+    all_notes_note_cap: int = Field(..., ge=1)
+    all_notes_eligible: bool
+    suggestions_authorized: bool = False
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -117,6 +121,10 @@ class NoteGraphResponse(BaseModel):
                 "has_more": False,
                 "cursor": None,
                 "limits": {"max_nodes": 300, "max_edges": 1200, "max_degree": 40},
+                "active_note_count": 2,
+                "all_notes_note_cap": 100,
+                "all_notes_eligible": True,
+                "suggestions_authorized": False,
             }
         }
     )

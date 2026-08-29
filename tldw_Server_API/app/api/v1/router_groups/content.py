@@ -584,6 +584,13 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
     # static subpaths are not shadowed by /{note_id}.
     for notes_spec in (
         ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.notes_graph_suggestions",
+            log_name="notes_graph_suggestions",
+            prefix=f"{API_V1_PREFIX}/notes",
+            tags=("notes",),
+            route_key="notes",
+        ),
+        ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.notes_graph",
             log_name="notes_graph",
             prefix=f"{API_V1_PREFIX}/notes",

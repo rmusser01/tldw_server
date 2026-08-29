@@ -10,6 +10,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     TokenScopeGuard,
     User,
     get_request_user,
+    principal_has_admin_bypass_claims,
     rbac_rate_limit,
 )
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
@@ -26,9 +27,11 @@ from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.AuthNZ.permissions import (
     NOTES_GRAPH_ADMIN,
     NOTES_GRAPH_READ,
+    NOTES_GRAPH_SUGGEST,
     NOTES_GRAPH_WRITE,
     SYSTEM_CONFIGURE,
 )
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.DB_Management.chacha.note_link_store import NotesLink
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
@@ -235,6 +238,18 @@ def _enforce_heavy_graph_permission(req: NoteGraphRequest, current_user: User) -
     )
 
 
+def _suggestions_authorized(principal: AuthPrincipal | None) -> bool:
+    """Return request-local suggestion authority from verified principal claims."""
+
+    if principal_has_admin_bypass_claims(principal):
+        return True
+    permissions = {
+        str(permission).strip()
+        for permission in (getattr(principal, "permissions", None) or ())
+    }
+    return NOTES_GRAPH_SUGGEST in permissions
+
+
 @router.get(
     "/graph",
     summary="Fetch a graph of notes and related entities",
@@ -267,7 +282,7 @@ async def get_notes_graph(
     current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     _: None = Depends(rbac_rate_limit("notes.graph.read")),
-    __: None = Depends(RequirePermission(NOTES_GRAPH_READ)),
+    principal: AuthPrincipal = Depends(RequirePermission(NOTES_GRAPH_READ)),
     ___: None = Depends(TokenScopeGuard("notes", require_if_present=True, endpoint_id="notes.graph.read")),
 ):
     """Return a bounded subgraph of notes, tags, and sources."""
@@ -305,8 +320,19 @@ async def get_notes_graph(
             allow_heavy_limits=heavy_limits_allowed,
         )
         graph = service.generate_graph(req)
+        graph = graph.model_copy(
+            update={"suggestions_authorized": _suggestions_authorized(principal)}
+        )
         if req.format == GraphFormat.cytoscape:
-            return to_cytoscape(graph)
+            formatted = to_cytoscape(graph)
+            formatted.update(
+                {
+                    "active_note_count": graph.active_note_count,
+                    "all_notes_note_cap": graph.all_notes_note_cap,
+                    "all_notes_eligible": graph.all_notes_eligible,
+                }
+            )
+            return formatted
         return graph
     except HTTPException:
         raise

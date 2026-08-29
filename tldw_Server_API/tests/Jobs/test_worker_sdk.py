@@ -49,6 +49,47 @@ class _RetryableWorkerError(RuntimeError):
     retryable = True
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("bind_completion_token", "fails"), [(False, False), (True, False), (True, True)])
+async def test_completion_token_binding_is_opt_in_for_success_and_failure(
+    tmp_path,
+    bind_completion_token,
+    fails,
+):
+    manager = JobManager(tmp_path / f"completion-token-{bind_completion_token}-{fails}.db")
+    job = manager.create_job(
+        domain="chatbooks",
+        queue="default",
+        job_type="completion-token-contract",
+        payload={},
+        owner_user_id="owner-1",
+        max_retries=0,
+    )
+    sdk = WorkerSDK(
+        manager,
+        WorkerConfig(
+            domain="chatbooks",
+            queue="default",
+            worker_id="worker-token-contract",
+            bind_completion_token=bind_completion_token,
+            retry_on_exception=False,
+        ),
+    )
+
+    async def handler(acquired):
+        sdk.stop()
+        if fails:
+            raise _TerminalWorkerError("bounded failure")
+        return {"ok": True}
+
+    await asyncio.wait_for(sdk.run(handler=handler), timeout=1)
+
+    stored = manager.get_job(int(job["id"]))
+    assert stored is not None
+    assert stored["status"] == ("failed" if fails else "completed")
+    assert bool(stored["completion_token"]) is bind_completion_token
+
+
 def _slides_jobs_key(character: str) -> str:
     return "slides:v1:" + character * 64
 

@@ -11,6 +11,9 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGD
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 from tldw_Server_API.app.core.Sync.v2.adapters import StaticSyncAdapter, SyncAdapterRegistry
 from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
+from tldw_Server_API.app.core.Sync.v2.materializers.guarded_product_mutation import (
+    GuardedProductMutation,
+)
 from tldw_Server_API.app.core.Sync.v2.materializers.notes_organization import (
     NotesOrganizationMaterializer,
 )
@@ -433,6 +436,31 @@ def test_each_domain_upserts_tombstones_restores_and_reapplies_idempotently(
                     "SELECT path FROM note_folders WHERE sync_id = ?", (FOLDER_ID,)
                 ).fetchone()["path"]
                 assert path == "Root/Work"
+
+
+def test_keyword_exact_replay_executes_guard_without_finalizing_acceptance(
+    note_db: CharactersRAGDB,
+    sync_store: SyncV2Store,
+) -> None:
+    materializer = NotesOrganizationMaterializer(note_db, "notes.keyword")
+    created = _stored_envelope(sync_store, "notes.keyword")
+    assert materializer.apply(created, store=sync_store).status == "applied"
+    events: list[tuple[str, str | None]] = []
+    guard = GuardedProductMutation(
+        expected_domain="notes.keyword",
+        expected_object_id=KEYWORD_ID,
+        before=lambda _conn: events.append(("before", None)),
+        after=None,
+    )
+
+    result = materializer.apply(
+        created,
+        store=sync_store,
+        guarded_mutation=guard,
+    )
+
+    assert result.status == "applied"
+    assert events == [("before", None)]
 
 
 @pytest.mark.parametrize("domain", NOTES_ORGANIZATION_DOMAINS)
