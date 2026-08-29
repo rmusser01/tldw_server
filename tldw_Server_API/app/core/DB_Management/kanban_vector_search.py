@@ -20,26 +20,30 @@ import hashlib
 import os
 from typing import Any
 
+from functools import lru_cache
+
 from loguru import logger
 
 from tldw_Server_API.app.core.Embeddings import redis_pipeline
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.testing import is_test_mode
 
-# Try to import ChromaDB components - graceful fallback if unavailable
-_CHROMADB_AVAILABLE = False
-_ChromaDBManager = None
-
-try:
-    from tldw_Server_API.app.core.Embeddings.ChromaDB_Library import (
-        ChromaDBManager,
-    )
-    _ChromaDBManager = ChromaDBManager
-    _CHROMADB_AVAILABLE = True
-except ImportError as e:
-    logger.warning(f"ChromaDB not available for Kanban vector search: {e}")
-except Exception as e:
-    logger.warning(f"ChromaDB initialization error for Kanban: {e}")
+# ChromaDB components are resolved on first use rather than at import time.
+# Importing ChromaDB_Library here loaded chromadb (~0.25 s) in every process
+# that imported Kanban_DB, which route registration does at startup.
+@lru_cache(maxsize=1)
+def _resolve_chromadb_manager():
+    """Return the ChromaDBManager class, or None when ChromaDB is unavailable."""
+    try:
+        from tldw_Server_API.app.core.Embeddings.ChromaDB_Library import (
+            ChromaDBManager,
+        )
+        return ChromaDBManager
+    except ImportError as e:
+        logger.warning(f"ChromaDB not available for Kanban vector search: {e}")
+    except Exception as e:
+        logger.warning(f"ChromaDB initialization error for Kanban: {e}")
+    return None
 
 
 KANBAN_COLLECTION_PREFIX = "kanban_user_"
@@ -59,7 +63,7 @@ def _is_noncritical_vector_error(exc: BaseException) -> bool:
 
 def is_vector_search_available() -> bool:
     """Check if vector search is available."""
-    return _CHROMADB_AVAILABLE
+    return _resolve_chromadb_manager() is not None
 
 
 def get_kanban_collection_name(user_id: str) -> str:
@@ -163,7 +167,8 @@ class KanbanVectorSearch:
         self._collection_name = get_kanban_collection_name(self.user_id)
         self._available = False
 
-        if not _CHROMADB_AVAILABLE:
+        chromadb_manager_cls = _resolve_chromadb_manager()
+        if chromadb_manager_cls is None:
             logger.debug(f"KanbanVectorSearch for user {self.user_id}: ChromaDB not available")
             return
 
@@ -172,7 +177,7 @@ class KanbanVectorSearch:
             return
 
         try:
-            self._manager = _ChromaDBManager(
+            self._manager = chromadb_manager_cls(
                 user_id=self.user_id,
                 user_embedding_config=embedding_config,
             )

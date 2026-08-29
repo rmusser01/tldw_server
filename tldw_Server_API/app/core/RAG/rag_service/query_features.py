@@ -11,18 +11,71 @@ import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import Enum
+from functools import lru_cache
 from typing import Any, Optional, cast
 
-import nltk
 from loguru import logger
-from nltk.corpus import stopwords, wordnet
-from nltk.tokenize import word_tokenize
+
+# nltk is imported inside the functions that use it. Importing it here pulled
+# scipy, sklearn and pandas (~1.0 s, ~1,800 modules) into every process that
+# imported the RAG package -- which route registration does at startup, whether
+# or not any query-feature code ever runs.
 
 from tldw_Server_API.app.core.testing import (
     env_flag_enabled,
     is_explicit_pytest_runtime,
     is_test_mode,
 )
+
+
+
+# --- lazy nltk access -------------------------------------------------------
+# `import nltk` at module scope cost ~1.0 s and pulled scipy, sklearn and pandas
+# into every process that imported the RAG package, which route registration
+# does at startup regardless of whether any of this runs.
+#
+# Symbols are resolved on first use. Module globals are consulted first so that
+# `monkeypatch.setattr(query_features, "wordnet", ...)` keeps working, and
+# __getattr__ below keeps `query_features.nltk` readable from outside.
+_NLTK_SYMBOLS = ("nltk", "wordnet", "stopwords", "word_tokenize")
+
+
+def _import_nltk_symbol(name: str):
+    if name == "nltk":
+        import nltk
+
+        return nltk
+    if name == "wordnet":
+        from nltk.corpus import wordnet
+
+        return wordnet
+    if name == "stopwords":
+        from nltk.corpus import stopwords
+
+        return stopwords
+    if name == "word_tokenize":
+        from nltk.tokenize import word_tokenize
+
+        return word_tokenize
+    raise AttributeError(f"unknown nltk symbol {name!r}")
+
+
+def _lazy_nltk(name: str):
+    """Return an nltk symbol, honouring a patched module global if present."""
+    value = globals().get(name)
+    if value is None:
+        value = _import_nltk_symbol(name)
+        globals()[name] = value
+    return value
+
+
+def __getattr__(name: str):
+    """Resolve nltk symbols on first module-attribute access (PEP 562)."""
+    if name in _NLTK_SYMBOLS:
+        value = _import_nltk_symbol(name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 # --- NLTK downloads guarded by timeout ---
@@ -40,7 +93,7 @@ def _download_with_timeout(resource: str, timeout_s: int = 60) -> bool:
     def _runner():
         ok = False
         try:
-            ok = nltk.download(resource, quiet=True)
+            ok = _lazy_nltk("nltk").download(resource, quiet=True)
         except Exception:  # pragma: no cover - defensive
             logger.warning("NLTK download error; continuing without resource")
             ok = False
@@ -68,7 +121,7 @@ _ALLOW_NLTK_DOWNLOADS = _FORCE_ALLOW_NLTK or not (_TEST_MODE or _DISABLE_NLTK_DO
 
 def _ensure_resource(path: str, resource_key: str) -> bool:
     try:
-        nltk.data.find(path)
+        _lazy_nltk("nltk").data.find(path)
         return True
     except LookupError:
         if _ALLOW_NLTK_DOWNLOADS:
@@ -82,9 +135,19 @@ def _ensure_resource(path: str, resource_key: str) -> bool:
             )
             return False
 
-_HAS_PUNKT = _ensure_resource('tokenizers/punkt', 'punkt')
-_HAS_WORDNET = _ensure_resource('corpora/wordnet', 'wordnet')
-_HAS_STOPWORDS = _ensure_resource('corpora/stopwords', 'stopwords')
+@lru_cache(maxsize=None)
+def _has_punkt() -> bool:
+    return _ensure_resource('tokenizers/punkt', 'punkt')
+
+
+@lru_cache(maxsize=None)
+def _has_wordnet() -> bool:
+    return _ensure_resource('corpora/wordnet', 'wordnet')
+
+
+@lru_cache(maxsize=None)
+def _has_stopwords() -> bool:
+    return _ensure_resource('corpora/stopwords', 'stopwords')
 
 
 class QueryIntent(Enum):
@@ -137,7 +200,7 @@ class QueryAnalyzer:
         """Initialize query analyzer."""
         # Stopwords may be unavailable if download failed; fall back gracefully
         try:
-            self.stop_words = set(stopwords.words('english'))
+            self.stop_words = set(_lazy_nltk("stopwords").words('english'))
         except LookupError:
             logger.warning("NLTK stopwords not available; using minimal fallback set")
             self.stop_words = {
@@ -151,7 +214,7 @@ class QueryAnalyzer:
     def _safe_word_tokenize(text: str) -> list[str]:
         """Tokenize text, falling back if punkt is unavailable."""
         try:
-            return cast(list[str], word_tokenize(text))
+            return cast(list[str], _lazy_nltk("word_tokenize")(text))
         except LookupError:
             import re
             # Simple fallback: split into words and punctuation
@@ -598,12 +661,12 @@ class QueryRewriter:
 
     def _get_synonyms(self, word: str) -> list[str]:
         """Get synonyms for a word using WordNet."""
-        if not _HAS_WORDNET:
+        if not _has_wordnet():
             return []
         synonyms = set()
 
         try:
-            synsets = wordnet.synsets(word)
+            synsets = _lazy_nltk("wordnet").synsets(word)
         except LookupError as exc:
             logger.debug(
                 "NLTK WordNet unavailable; skipping synonym expansion for '{}': {}",
@@ -847,7 +910,7 @@ class QueryRewriter:
         expanded_terms = []
         for term in analysis.key_terms[:3]:  # Limit to first 3 key terms
             try:
-                synsets = wordnet.synsets(term)
+                synsets = _lazy_nltk("wordnet").synsets(term)
                 for syn in synsets[:1]:  # First synset
                     hypernyms = syn.hypernyms()
                     for hyp in hypernyms[:1]:  # First hypernym
