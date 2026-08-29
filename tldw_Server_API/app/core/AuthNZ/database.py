@@ -9,11 +9,12 @@ import os
 import re
 import sqlite3
 import threading
+from collections import deque
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any
-from urllib.parse import unquote, urlparse
+from urllib.parse import quote, unquote, urlparse
 
 import aiosqlite
 
@@ -55,6 +56,7 @@ from tldw_Server_API.app.core.AuthNZ.sqlite_profile_version_schema import (
 )
 from tldw_Server_API.app.core.DB_Management.sql_utils import split_sql_statements
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
+    _sqlite_readonly_uri,
     configure_sqlite_connection_async,
 )
 from tldw_Server_API.app.core.exceptions import TransactionPassthroughError
@@ -855,6 +857,89 @@ def _sqlite_parameters(args: tuple[Any, ...]) -> Any | None:
     )
     return parameters if isinstance(parameters, dict) else tuple(parameters)
 
+
+_AUTHNZ_RO_MAX_IDLE_ENV = "AUTHNZ_SQLITE_READONLY_MAX_IDLE"
+_AUTHNZ_RO_DEFAULT_MAX_IDLE = 4
+
+
+def _readonly_max_idle() -> int:
+    """Idle read-only SQLite connections to keep. 0 disables pooling."""
+    raw = os.environ.get(_AUTHNZ_RO_MAX_IDLE_ENV)
+    if raw is None or not raw.strip():
+        return _AUTHNZ_RO_DEFAULT_MAX_IDLE
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        logger.warning(f"Invalid {_AUTHNZ_RO_MAX_IDLE_ENV}={raw!r}; using default")
+        return _AUTHNZ_RO_DEFAULT_MAX_IDLE
+
+
+class _ReadOnlySQLitePool:
+    """Idle-connection cache for read-only AuthNZ SQLite connections.
+
+    ``acquire()`` deliberately closes its connection on every exit -- that
+    cleanup contract is asserted by dedicated tests and is not negotiable here.
+    Opening a connection costs ~2.5-3.0 ms because aiosqlite spawns an OS thread
+    and the pragma policy is reapplied, against ~0.02 ms for a reused one, so
+    read-only callers get their own pooled path instead.
+
+    Two properties make reuse safe here where it was not for ``acquire()``:
+
+    * the connection is opened ``mode=ro``, so SQLite itself rejects writes and
+      no write transaction can ever be left behind for the next borrower;
+    * this is not a bounded pool -- ``acquire`` never waits. When nothing is
+      idle a new connection is opened, so peak concurrency and failure modes
+      match the unpooled code and no new deadlock surface is introduced.
+
+    aiosqlite resolves the target event loop per operation from the awaiting
+    future, so a cached connection is safe to use from a different loop than the
+    one that opened it.
+    """
+
+    def __init__(self, max_idle: int) -> None:
+        self._idle: deque[Any] = deque()
+        self._max_idle = max_idle
+        self._closed = False
+
+    @property
+    def enabled(self) -> bool:
+        return self._max_idle > 0 and not self._closed
+
+    async def acquire(self, factory) -> Any:
+        while self._idle:
+            conn = self._idle.popleft()
+            try:
+                await conn.execute("SELECT 1")
+                return conn
+            except Exception:
+                await self._discard(conn)
+        return await factory()
+
+    async def release(self, conn: Any, *, reusable: bool) -> None:
+        if not reusable or not self.enabled or len(self._idle) >= self._max_idle:
+            await self._discard(conn)
+            return
+        try:
+            # A deferred read transaction still pins a snapshot; clear it.
+            if conn.in_transaction:
+                await conn.rollback()
+        except Exception:
+            await self._discard(conn)
+            return
+        self._idle.append(conn)
+
+    @staticmethod
+    async def _discard(conn: Any) -> None:
+        with suppress(Exception):
+            await conn.close()
+
+    async def drain(self) -> None:
+        self._closed = True
+        while self._idle:
+            await self._discard(self._idle.popleft())
+        self._closed = False
+
+
 class DatabasePool:
     """Database connection pool manager supporting both PostgreSQL and SQLite"""
 
@@ -870,6 +955,8 @@ class DatabasePool:
         self._lock = asyncio.Lock()
         # Track the event loop this pool is attached to (Postgres only)
         self._loop: asyncio.AbstractEventLoop | None = None
+        # Opt-in pool for read-only SQLite callers; see acquire_readonly().
+        self._readonly_sqlite_pool = _ReadOnlySQLitePool(_readonly_max_idle())
 
     async def initialize(self):
         """Initialize database connection pool"""
@@ -1438,6 +1525,65 @@ class DatabasePool:
                     raise failure
                 raise failure from None
 
+    def _readonly_sqlite_supported(self) -> bool:
+        """Read-only pooling applies only to on-disk SQLite databases.
+
+        Each ``:memory:`` connection is a separate database, so a pooled one
+        would show a different (empty) dataset to the next borrower.
+        """
+        return (
+            self.pool is None
+            and bool(self._sqlite_fs_path)
+            and self._sqlite_fs_path != ":memory:"
+            and self._readonly_sqlite_pool.enabled
+        )
+
+    @asynccontextmanager
+    async def acquire_readonly(self, *, timeout: float | None = None):
+        """Acquire a pooled, read-only connection. Opt-in; reads only.
+
+        ``acquire()`` closes its connection on every exit by design, which costs
+        ~2.5-3.0 ms per call on SQLite because aiosqlite opens a fresh
+        connection and OS thread each time. Callers that only read can use this
+        instead and reuse an idle connection (~0.02 ms).
+
+        The connection is opened ``mode=ro``: any write raises
+        ``sqlite3.OperationalError`` from SQLite itself rather than relying on
+        callers to behave. That is what makes reuse safe here -- no borrower can
+        leave a write transaction behind for the next one.
+
+        Falls back to :meth:`acquire` for PostgreSQL, for in-memory SQLite, and
+        whenever pooling is disabled, so callers need no backend awareness.
+        """
+        if not self._initialized:
+            await self.initialize()
+
+        if not self._readonly_sqlite_supported():
+            async with self.acquire(timeout=timeout) as conn:
+                yield conn
+            return
+
+        readonly_uri = _sqlite_readonly_uri(Path(self._sqlite_fs_path))
+
+        async def _new_conn():
+            fresh = await aiosqlite.connect(readonly_uri, uri=True)
+            # A read-only connection cannot set journal_mode or synchronous;
+            # the database's own WAL settings already apply to readers.
+            await configure_sqlite_connection_async(
+                fresh, use_wal=False, synchronous=None
+            )
+            fresh.row_factory = aiosqlite.Row
+            return fresh
+
+        pool = self._readonly_sqlite_pool
+        conn = await pool.acquire(_new_conn)
+        ok = False
+        try:
+            yield _GuardedSQLiteConnection(conn)
+            ok = True
+        finally:
+            await pool.release(conn, reusable=ok)
+
     @asynccontextmanager
     async def acquire_statement_autocommit(self, *, timeout: float | None = None):
         """Acquire a connection whose standalone writes commit per statement.
@@ -1661,6 +1807,7 @@ class DatabasePool:
     async def close(self):
         """Close database connections"""
         cancelled = await self._close_postgres_pools()
+        await self._readonly_sqlite_pool.drain()
         self._initialized = False
         logger.info("Database pool closed")
         if cancelled:
