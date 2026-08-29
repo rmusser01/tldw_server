@@ -1192,6 +1192,289 @@ async def exercise_stale_recovery_and_cancellation(
     ) == ()
 
 
+async def exercise_enqueue_recovery_contract(
+    fixture: DeliveryRepositoryFixture,
+) -> None:
+    """Bind ordered claim acquisition and exact-token enqueue recovery."""
+
+    repository = fixture.repository
+    labels = (
+        "enqueue-expired",
+        "enqueue-created-first",
+        "enqueue-tie-a",
+        "enqueue-tie-b",
+    )
+    delivery_ids: dict[str, str] = {}
+    for label in labels:
+        _, delivery_ids[label] = await _captured_delivery(
+            repository,
+            event_id=f"{label}-event",
+            command_id=f"{label}-command",
+            isolated=True,
+        )
+
+    expiry_later = NOW + timedelta(hours=2)
+    ordering = {
+        "enqueue-expired": (NOW - timedelta(seconds=1), NOW),
+        "enqueue-created-first": (expiry_later, NOW - timedelta(minutes=2)),
+        "enqueue-tie-a": (expiry_later, NOW - timedelta(minutes=1)),
+        "enqueue-tie-b": (expiry_later, NOW - timedelta(minutes=1)),
+    }
+    for label, (expires_at, created_at) in ordering.items():
+        await fixture.execute(
+            """
+            UPDATE admin_webhook_deliveries
+            SET expires_at = ?, created_at = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            expires_at,
+            created_at,
+            created_at,
+            delivery_ids[label],
+        )
+
+    expected_order = [
+        delivery_ids["enqueue-expired"],
+        delivery_ids["enqueue-created-first"],
+        *sorted(
+            (
+                delivery_ids["enqueue-tie-a"],
+                delivery_ids["enqueue-tie-b"],
+            )
+        ),
+    ]
+    observed: list[str] = []
+    for index, expected_id in enumerate(expected_order):
+        token = opaque_token(f"ordered-claim-{index}")
+        async with repository.transaction() as tx:
+            claim = await tx.claim_pending_delivery(
+                token,
+                NOW + timedelta(minutes=1),
+                NOW,
+            )
+            assert claim is not None
+            observed.append(claim.delivery.delivery.id)
+            if expected_id == delivery_ids["enqueue-expired"]:
+                released = await tx.release_enqueue_claim(
+                    expected_id,
+                    token,
+                    NOW,
+                )
+                assert released is not None
+                assert released.delivery.state is DeliveryState.DEAD
+                assert released.delivery.reason_code is DeliveryReasonCode.DELIVERY_EXPIRED
+            else:
+                failed = await tx.fail_enqueue_claim(
+                    expected_id,
+                    token,
+                    NOW,
+                )
+                assert failed is not None
+                assert failed.delivery.state is DeliveryState.DEAD
+                assert (
+                    failed.delivery.reason_code
+                    is DeliveryReasonCode.JOBS_IDENTITY_CONFLICT
+                )
+    assert observed == expected_order
+
+    _, release_id = await _captured_delivery(
+        repository,
+        event_id="enqueue-release-event",
+        command_id="enqueue-release-command",
+        isolated=True,
+    )
+    release_token = opaque_token("enqueue-release-token")
+    async with repository.transaction() as tx:
+        claim = await tx.claim_pending_delivery(
+            release_token,
+            NOW + timedelta(minutes=1),
+            NOW,
+        )
+        assert claim is not None and claim.delivery.delivery.id == release_id
+        assert (
+            await tx.release_enqueue_claim(
+                release_id,
+                opaque_token("wrong-release-token"),
+                NOW,
+            )
+            is None
+        )
+        released = await tx.release_enqueue_claim(release_id, release_token, NOW)
+        assert released is not None
+        assert released.delivery.state is DeliveryState.PENDING
+        assert released.enqueue_claim_token is None
+
+    stale_token = opaque_token("enqueue-stale-token")
+    async with repository.transaction() as tx:
+        stale = await tx.claim_pending_delivery(
+            stale_token,
+            NOW + timedelta(minutes=1),
+            NOW,
+        )
+        assert stale is not None and stale.delivery.delivery.id == release_id
+    async with repository.transaction() as tx:
+        assert (
+            await tx.claim_pending_delivery(
+                opaque_token("must-not-steal"),
+                NOW + timedelta(minutes=1, seconds=30),
+                NOW + timedelta(seconds=30),
+            )
+            is None
+        )
+    replacement_token = opaque_token("enqueue-replacement-token")
+    async with repository.transaction() as tx:
+        replacement = await tx.claim_pending_delivery(
+            replacement_token,
+            NOW + timedelta(minutes=3),
+            NOW + timedelta(minutes=2),
+        )
+        assert replacement is not None
+        assert replacement.delivery.delivery.id == release_id
+        assert replacement.delivery.delivery.state is DeliveryState.ENQUEUE_CLAIMED
+        assert replacement.claim_token == replacement_token
+        assert (
+            await tx.fail_enqueue_claim(
+                release_id,
+                stale_token,
+                NOW + timedelta(minutes=2),
+            )
+            is None
+        )
+        failed = await tx.fail_enqueue_claim(
+            release_id,
+            replacement_token,
+            NOW + timedelta(minutes=2),
+        )
+        assert failed is not None
+
+    terminal_cases = (
+        (
+            "enqueue-terminal-canceled",
+            DeliveryReasonCode.CANCELED_DISABLED,
+            DeliveryState.CANCELED,
+        ),
+        (
+            "enqueue-terminal-superseded",
+            DeliveryReasonCode.SUPERSEDED_CONFIG,
+            DeliveryState.SUPERSEDED,
+        ),
+    )
+    for label, reason, state in terminal_cases:
+        webhook_id, delivery_id = await _captured_delivery(
+            repository,
+            event_id=f"{label}-event",
+            command_id=f"{label}-command",
+            isolated=True,
+        )
+        original_token = opaque_token(f"{label}-original")
+        async with repository.transaction() as tx:
+            claim = await tx.claim_pending_delivery(
+                original_token,
+                NOW + timedelta(minutes=1),
+                NOW,
+            )
+            assert claim is not None and claim.delivery.delivery.id == delivery_id
+            pending = await tx.cancel_registration_work(
+                webhook_id,
+                (2, 2),
+                reason,
+                lambda label=label: opaque_token(f"{label}-unused"),
+                NOW + timedelta(seconds=1),
+            )
+            assert pending == ()
+
+        takeover_token = opaque_token(f"{label}-takeover")
+        async with repository.transaction() as tx:
+            takeover = await tx.claim_pending_delivery(
+                takeover_token,
+                NOW + timedelta(minutes=3),
+                NOW + timedelta(minutes=2),
+            )
+            assert takeover is not None
+            assert takeover.delivery.delivery.id == delivery_id
+            assert takeover.delivery.delivery.state is state
+            assert takeover.delivery.delivery.reason_code is reason
+            assert (
+                await tx.retire_terminal_enqueue_claim(
+                    delivery_id,
+                    opaque_token(f"{label}-wrong"),
+                    NOW + timedelta(minutes=2),
+                )
+                is None
+            )
+            if state is DeliveryState.CANCELED:
+                with pytest.raises(ValueError, match="both present or both absent"):
+                    await tx.retire_terminal_enqueue_claim(
+                        delivery_id,
+                        takeover_token,
+                        NOW + timedelta(minutes=2),
+                        jobs_job_id="42",
+                    )
+                retired = await tx.retire_terminal_enqueue_claim(
+                    delivery_id,
+                    takeover_token,
+                    NOW + timedelta(minutes=2),
+                    jobs_job_id="42",
+                    disposition_token=opaque_token(f"{label}-cancel"),
+                )
+                assert retired is not None
+                assert retired.jobs_job_id == "42"
+                assert retired.pending_jobs_disposition is JobsDispositionKind.CANCEL
+                assert retired.pending_jobs_disposition_token == opaque_token(
+                    f"{label}-cancel"
+                )
+            else:
+                retired = await tx.retire_terminal_enqueue_claim(
+                    delivery_id,
+                    takeover_token,
+                    NOW + timedelta(minutes=2),
+                )
+                assert retired is not None
+                assert retired.jobs_job_id is None
+                assert retired.pending_jobs_disposition is None
+            assert retired.delivery.state is state
+            assert retired.delivery.reason_code is reason
+            assert retired.enqueue_claim_token is None
+
+    _, attach_expired_id = await _captured_delivery(
+        repository,
+        event_id="enqueue-attach-expired-event",
+        command_id="enqueue-attach-expired-command",
+        isolated=True,
+    )
+    attach_token = opaque_token("enqueue-attach-expired-token")
+    async with repository.transaction() as tx:
+        claim = await tx.claim_pending_delivery(
+            attach_token,
+            NOW + timedelta(minutes=1),
+            NOW,
+        )
+        assert claim is not None
+    await fixture.execute(
+        "UPDATE admin_webhook_deliveries SET expires_at = ? WHERE id = ?",
+        NOW + timedelta(seconds=30),
+        attach_expired_id,
+    )
+    async with repository.transaction() as tx:
+        assert (
+            await tx.attach_jobs_job(
+                attach_expired_id,
+                attach_token,
+                "expired-job",
+                NOW + timedelta(seconds=30),
+            )
+            is None
+        )
+        expired = await tx.release_enqueue_claim(
+            attach_expired_id,
+            attach_token,
+            NOW + timedelta(seconds=30),
+        )
+        assert expired is not None
+        assert expired.delivery.state is DeliveryState.DEAD
+        assert expired.delivery.reason_code is DeliveryReasonCode.DELIVERY_EXPIRED
+
+
 async def _queue_delivery(
     fixture: DeliveryRepositoryFixture,
     label: str,

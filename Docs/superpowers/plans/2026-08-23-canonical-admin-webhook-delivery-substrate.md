@@ -853,13 +853,36 @@ git commit -m "feat(admin-webhooks): capture synthetic events and retire stale w
 ### Task 7: Implement The Recoverable Enqueue Handshake
 
 **Files:**
+- Modify: `tldw_Server_API/app/core/DB_Management/admin_webhooks_repository.py`
 - Create: `tldw_Server_API/app/core/Admin_Webhooks/reconciler.py`
+- Modify: `tldw_Server_API/tests/Admin_Webhooks/test_event_expansion.py`
+- Modify: `tldw_Server_API/tests/Admin_Webhooks/test_delivery_repository_sqlite.py`
+- Modify: `tldw_Server_API/tests/Admin_Webhooks/test_delivery_repository_postgres.py`
 - Create: `tldw_Server_API/tests/Admin_Webhooks/test_enqueue_reconciler.py`
 - Create: `tldw_Server_API/tests/Admin_Webhooks/test_recovery_backend_matrix.py`
 
 **Interfaces:**
 - Consumes: AuthNZ repository, a narrow `JobsDeliveryQueue` adapter over typed `JobManager.admit_job()`, `find_job_by_identity()`, and known-ID reads, random claim token, injected clock, and one delivery ID.
 - Produces: `AdminWebhookReconciler.reconcile_enqueue_once()` and idempotent attach/recovery for all AuthNZ/Jobs backend combinations.
+
+**Implementation ruling:** The Task 2 repository surface cannot discover stale
+enqueue claims, release a still-live claim after a transient Jobs failure,
+terminalize a claimed identity conflict, or safely link and cancel a Jobs row
+created during a terminal lifecycle race. Extend the repository without a
+schema change. `claim_pending_delivery()` must atomically select pending rows
+(including rows that have reached delivery expiry) or take over only expired
+enqueue claims, preserve an already-terminal state during stale-claim takeover,
+and order candidates by expiry, creation time, and ID. It must never steal an
+unexpired claim. Add exact-token compare-and-set operations that (1) release a
+nonterminal claim to `pending`, or to `dead:delivery_expired` if its delivery
+lifetime elapsed; (2) fail an owned nonterminal claim as
+`dead:jobs_identity_conflict`; and (3) retire an owned terminal/expired claim,
+clearing it and optionally attaching one Jobs ID plus one tokenized cancel
+disposition. Jobs ID and cancel token are both present or both absent. Preserve
+an existing terminal state/reason, never make it runnable, and require
+`attach_jobs_job()` to reject a delivery whose lifetime elapsed. Prove these
+repository contracts on SQLite and required PostgreSQL before the reconciler
+uses them.
 
 - [ ] **Step 1: Define a narrow queue adapter and write unit RED tests**
 

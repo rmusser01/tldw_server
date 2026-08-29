@@ -2400,21 +2400,55 @@ class AdminWebhookUnitOfWork(_ConnectionAdapter):
         row = await self._fetchrow(
             f"""
             UPDATE admin_webhook_deliveries
-            SET state = 'enqueue_claimed',
+            SET state = CASE
+                    WHEN state IN ('succeeded', 'dead', 'canceled', 'superseded')
+                        THEN state
+                    ELSE 'enqueue_claimed'
+                END,
                 enqueue_claim_token = ?,
                 enqueue_claim_expires_at = ?,
                 updated_at = ?
             WHERE id = (
                 SELECT id
                 FROM admin_webhook_deliveries
-                WHERE state = 'pending' AND expires_at > ?
-                ORDER BY created_at ASC, id ASC
+                WHERE kind != 'test'
+                  AND (
+                      (
+                          state = 'pending'
+                          AND enqueue_claim_token IS NULL
+                          AND enqueue_claim_expires_at IS NULL
+                      )
+                      OR (
+                          state IN (
+                              'enqueue_claimed', 'succeeded', 'dead',
+                              'canceled', 'superseded'
+                          )
+                          AND enqueue_claim_token IS NOT NULL
+                          AND enqueue_claim_expires_at <= ?
+                      )
+                  )
+                ORDER BY expires_at ASC, created_at ASC, id ASC
                 LIMIT 1
             )
-              AND state = 'pending'
+              AND kind != 'test'
+              AND (
+                  (
+                      state = 'pending'
+                      AND enqueue_claim_token IS NULL
+                      AND enqueue_claim_expires_at IS NULL
+                  )
+                  OR (
+                      state IN (
+                          'enqueue_claimed', 'succeeded', 'dead',
+                          'canceled', 'superseded'
+                      )
+                      AND enqueue_claim_token IS NOT NULL
+                      AND enqueue_claim_expires_at <= ?
+                  )
+              )
             RETURNING {_DELIVERY_COLUMNS}
             """,
-            (claim_token, claimed_until, now, now),
+            (claim_token, claimed_until, now, now, now),
         )
         if row is None:
             return None
@@ -2445,12 +2479,161 @@ class AdminWebhookUnitOfWork(_ConnectionAdapter):
             WHERE id = ?
               AND state = 'enqueue_claimed'
               AND enqueue_claim_token = ?
-              AND enqueue_claim_expires_at >= ?
+              AND enqueue_claim_expires_at > ?
+              AND expires_at > ?
               AND jobs_job_id IS NULL
             RETURNING {_DELIVERY_COLUMNS}
             """,
-            (jobs_job_id, now, delivery_id, claim_token, now),
+            (jobs_job_id, now, delivery_id, claim_token, now, now),
         )
+        return _stored_delivery_from_row(row) if row is not None else None
+
+    async def release_enqueue_claim(
+        self,
+        delivery_id: str,
+        expected_token: str,
+        now: datetime,
+    ) -> StoredWebhookDelivery | None:
+        """Release one owned nonterminal enqueue claim without reviving expiry."""
+
+        _canonical_uuid4(delivery_id, field="delivery ID")
+        _opaque_token(expected_token, field="enqueue claim token")
+        now = _utc_datetime(now, field="now")
+        row = await self._fetchrow(
+            f"""
+            UPDATE admin_webhook_deliveries
+            SET state = CASE WHEN expires_at <= ? THEN 'dead' ELSE 'pending' END,
+                reason_code = CASE
+                    WHEN expires_at <= ? THEN 'delivery_expired'
+                    ELSE NULL
+                END,
+                terminal_at = CASE
+                    WHEN expires_at <= ? THEN ?
+                    ELSE terminal_at
+                END,
+                enqueue_claim_token = NULL,
+                enqueue_claim_expires_at = NULL,
+                updated_at = ?
+            WHERE id = ?
+              AND state = 'enqueue_claimed'
+              AND enqueue_claim_token = ?
+            RETURNING {_DELIVERY_COLUMNS}
+            """,
+            (now, now, now, now, now, delivery_id, expected_token),
+        )
+        return _stored_delivery_from_row(row) if row is not None else None
+
+    async def fail_enqueue_claim(
+        self,
+        delivery_id: str,
+        expected_token: str,
+        now: datetime,
+    ) -> StoredWebhookDelivery | None:
+        """Terminalize one owned nonterminal claim after a Jobs conflict."""
+
+        _canonical_uuid4(delivery_id, field="delivery ID")
+        _opaque_token(expected_token, field="enqueue claim token")
+        now = _utc_datetime(now, field="now")
+        row = await self._fetchrow(
+            f"""
+            UPDATE admin_webhook_deliveries
+            SET state = 'dead', reason_code = 'jobs_identity_conflict',
+                terminal_at = ?, enqueue_claim_token = NULL,
+                enqueue_claim_expires_at = NULL, updated_at = ?
+            WHERE id = ?
+              AND state = 'enqueue_claimed'
+              AND enqueue_claim_token = ?
+            RETURNING {_DELIVERY_COLUMNS}
+            """,
+            (now, now, delivery_id, expected_token),
+        )
+        return _stored_delivery_from_row(row) if row is not None else None
+
+    async def retire_terminal_enqueue_claim(
+        self,
+        delivery_id: str,
+        expected_token: str,
+        now: datetime,
+        *,
+        jobs_job_id: str | None = None,
+        disposition_token: str | None = None,
+    ) -> StoredWebhookDelivery | None:
+        """Clear an owned terminal claim and optionally persist orphan cancel work."""
+
+        _canonical_uuid4(delivery_id, field="delivery ID")
+        _opaque_token(expected_token, field="enqueue claim token")
+        now = _utc_datetime(now, field="now")
+        if (jobs_job_id is None) != (disposition_token is None):
+            raise ValueError("Jobs job ID and disposition token must be both present or both absent")
+
+        common_set = """
+            state = CASE
+                WHEN state IN ('succeeded', 'dead', 'canceled', 'superseded')
+                    THEN state
+                ELSE 'dead'
+            END,
+            reason_code = CASE
+                WHEN state IN ('succeeded', 'dead', 'canceled', 'superseded')
+                    THEN reason_code
+                ELSE 'delivery_expired'
+            END,
+            terminal_at = CASE
+                WHEN state IN ('succeeded', 'dead', 'canceled', 'superseded')
+                    THEN terminal_at
+                ELSE ?
+            END,
+            enqueue_claim_token = NULL,
+            enqueue_claim_expires_at = NULL,
+            updated_at = ?
+        """
+        if jobs_job_id is None:
+            row = await self._fetchrow(
+                f"""
+                UPDATE admin_webhook_deliveries
+                SET {common_set}
+                WHERE id = ?
+                  AND enqueue_claim_token = ?
+                  AND (
+                      state IN ('succeeded', 'dead', 'canceled', 'superseded')
+                      OR expires_at <= ?
+                  )
+                RETURNING {_DELIVERY_COLUMNS}
+                """,
+                (now, now, delivery_id, expected_token, now),
+            )
+        else:
+            _bounded_text(jobs_job_id, field="Jobs job ID", maximum=255)
+            _opaque_token(disposition_token, field="disposition token")
+            row = await self._fetchrow(
+                f"""
+                UPDATE admin_webhook_deliveries
+                SET {common_set},
+                    jobs_job_id = ?,
+                    pending_jobs_disposition = 'cancel',
+                    pending_jobs_disposition_delay_seconds = NULL,
+                    pending_jobs_disposition_token = ?,
+                    pending_jobs_disposition_not_before_at = NULL,
+                    jobs_disposition_applied = FALSE
+                WHERE id = ?
+                  AND enqueue_claim_token = ?
+                  AND (jobs_job_id IS NULL OR jobs_job_id = ?)
+                  AND (
+                      state IN ('succeeded', 'dead', 'canceled', 'superseded')
+                      OR expires_at <= ?
+                  )
+                RETURNING {_DELIVERY_COLUMNS}
+                """,
+                (
+                    now,
+                    now,
+                    jobs_job_id,
+                    disposition_token,
+                    delivery_id,
+                    expected_token,
+                    jobs_job_id,
+                    now,
+                ),
+            )
         return _stored_delivery_from_row(row) if row is not None else None
 
     async def release_expired_enqueue_claim(

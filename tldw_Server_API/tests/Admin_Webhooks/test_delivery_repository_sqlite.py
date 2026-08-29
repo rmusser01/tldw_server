@@ -19,6 +19,7 @@ from tldw_Server_API.tests.Admin_Webhooks.test_event_expansion import (
     exercise_capture_and_history,
     exercise_delivery_state_machine,
     exercise_disposition_scheduling_persistence,
+    exercise_enqueue_recovery_contract,
     exercise_malformed_persisted_coordinates,
     exercise_persisted_coordinate_matrix,
     exercise_recovery_runtime_and_retention,
@@ -70,6 +71,13 @@ async def test_sqlite_delivery_state_machine_contract(
     delivery_repo: SQLiteDeliveryRepositoryFixture,
 ) -> None:
     await exercise_delivery_state_machine(delivery_repo)
+
+
+@pytest.mark.unit
+async def test_sqlite_enqueue_recovery_contract(
+    delivery_repo: SQLiteDeliveryRepositoryFixture,
+) -> None:
+    await exercise_enqueue_recovery_contract(delivery_repo)
 
 
 @pytest.mark.unit

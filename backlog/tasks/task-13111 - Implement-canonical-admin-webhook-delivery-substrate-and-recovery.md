@@ -4,7 +4,7 @@ title: Implement canonical admin webhook delivery substrate and recovery
 status: In Progress
 assignee: []
 created_date: '2026-08-23 03:15'
-updated_date: '2026-08-29 04:54'
+updated_date: '2026-08-29 14:57'
 labels:
   - admin
   - webhooks
@@ -153,6 +153,12 @@ Added internal encrypted synthetic capture/fanout and transactional registration
 2026-08-28: Started Task 6 Fix Round 1/5 at exact clean FIX_BASE 62d094d11adf7c646da2aa5ac9433de77a9d34d0. Scope: combined activation/config supersession, internal-only package surface, deterministic transaction-replay cancellation tokens, four synthetic-capture key gates, and exact warning provenance. Strict focused RED precedes production fixes; PostgreSQL-required zero-skip and all Task 6 gates remain required.
 
 2026-08-28: Task 6 Fix Round 1/5 verified. Combined activation plus target/events/timeout now supersedes prior work while activation-only stays untouched; synthetic capture types are module-internal; transaction replay proves identical ordinal-reset token sequences and full first-attempt rollback; four rotation/primary key gates persist nothing and audit once. PostgreSQL-required focused/final/repository gates passed 85/114/20 tests with zero skips; warning-enabled final gate traced 230 warnings exclusively to unchanged dependency/shared-fixture sources, and the command-local exact allowlist produced a pristine 114-pass run. Crypto/audit/key rotation 82 passed with unchanged 2-warning baseline; Ruff, Bandit, Python 3.10, and diff checks passed. Evidence appended to .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-6-report.md.
+
+Task 7 preflight found the approved file list omitted required AuthNZ repository recovery contracts. Added a no-schema ruling for stale/expired claim acquisition, exact-token transient/conflict resolution, terminal orphan linking/cancellation, and delivery-expiry-safe attachment before implementation.
+
+2026-08-29: Task 7 takeover audit at base 770bbf3e887a0e35f178de30bf9be36713eea742. Re-ran the inherited focused suite with required PostgreSQL access: 63 passed, 0 skipped; sandbox-only first run had 19 PostgreSQL setup errors from denied loopback/Docker access. Audited repository CAS, six crash windows, cancellation/expiry recovery, and adapter identity contracts against the Task 7 brief and binding constraints; no test amendment or additional production correction was warranted.
+
+2026-08-29: Completed Task 7 recoverable enqueue handshake on codex/admin-webhooks-delivery-substrate. Final PostgreSQL-required verification: exact enqueue gate 20 passed/0 skipped; full Task 7 repository/reconciler suite 63 passed/0 skipped; adjacent Jobs admission/identity/prepared-disposition suite 245 passed/0 skipped. Ruff, Python 3.10 compilation, direct-Jobs-SQL scan, reviewed Bandit, and diff checks passed. Report: .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-7-report.md.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
