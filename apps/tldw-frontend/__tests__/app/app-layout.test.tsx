@@ -2,9 +2,7 @@ import React from "react"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
 
-vi.mock("@web/lib/i18n-web", () => ({
-  i18nNamespacesReady: Promise.resolve()
-}))
+vi.mock("@web/lib/i18n-web", () => ({}))
 
 vi.mock("wxt/browser", () => ({
   browser: {

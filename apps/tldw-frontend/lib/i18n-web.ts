@@ -13,6 +13,18 @@ import { browser } from "wxt/browser"
 
 // Static imports for English locale - these get bundled at build time
 import commonEn from "@tldw/ui/assets/locale/en/common.json"
+import sidepanelEn from "@tldw/ui/assets/locale/en/sidepanel.json"
+import settingsEn from "@tldw/ui/assets/locale/en/settings.json"
+import playgroundEn from "@tldw/ui/assets/locale/en/playground.json"
+import knowledgeEn from "@tldw/ui/assets/locale/en/knowledge.json"
+import optionEn from "@tldw/ui/assets/locale/en/option.json"
+import reviewEn from "@tldw/ui/assets/locale/en/review.json"
+import dataTablesEn from "@tldw/ui/assets/locale/en/dataTables.json"
+import collectionsEn from "@tldw/ui/assets/locale/en/collections.json"
+import evaluationsEn from "@tldw/ui/assets/locale/en/evaluations.json"
+import audiobookEn from "@tldw/ui/assets/locale/en/audiobook.json"
+import watchlistsEn from "@tldw/ui/assets/locale/en/watchlists.json"
+import workflowsEn from "@tldw/ui/assets/locale/en/workflows.json"
 
 const isMacPlatform =
   typeof navigator !== "undefined" &&
@@ -74,28 +86,26 @@ const normalizeLanguage = (lng: string): string => {
   return "en"
 }
 
-// Only `common` is bundled into the app shell. The other namespaces are ~517 KB
-// of JSON that every page was downloading regardless of what it rendered, so they
-// load as separate chunks. `_app` awaits `i18nNamespacesReady` before it renders
-// any page, so no component ever observes a half-loaded namespace.
-const LAZY_EN_NAMESPACES: Record<Exclude<Namespace, "common">, () => Promise<any>> = {
-  sidepanel: () => import("@tldw/ui/assets/locale/en/sidepanel.json"),
-  settings: () => import("@tldw/ui/assets/locale/en/settings.json"),
-  playground: () => import("@tldw/ui/assets/locale/en/playground.json"),
-  knowledge: () => import("@tldw/ui/assets/locale/en/knowledge.json"),
-  option: () => import("@tldw/ui/assets/locale/en/option.json"),
-  review: () => import("@tldw/ui/assets/locale/en/review.json"),
-  dataTables: () => import("@tldw/ui/assets/locale/en/dataTables.json"),
-  collections: () => import("@tldw/ui/assets/locale/en/collections.json"),
-  evaluations: () => import("@tldw/ui/assets/locale/en/evaluations.json"),
-  audiobook: () => import("@tldw/ui/assets/locale/en/audiobook.json"),
-  watchlists: () => import("@tldw/ui/assets/locale/en/watchlists.json"),
-  workflows: () => import("@tldw/ui/assets/locale/en/workflows.json"),
+// Pre-bundled English resources
+const englishResources: Record<Namespace, object> = {
+  common: commonEn,
+  sidepanel: sidepanelEn,
+  settings: settingsEn,
+  playground: playgroundEn,
+  knowledge: knowledgeEn,
+  option: optionEn,
+  review: reviewEn,
+  dataTables: dataTablesEn,
+  collections: collectionsEn,
+  evaluations: evaluationsEn,
+  audiobook: audiobookEn,
+  watchlists: watchlistsEn,
+  workflows: workflowsEn,
 }
 
-// Build initial resources with the always-present English namespace
+// Build initial resources with English translations
 const resources: Record<string, Record<string, object>> = {
-  en: { common: commonEn },
+  en: englishResources,
 }
 
 // Initialize i18n synchronously
@@ -120,31 +130,6 @@ i18n
       useSuspense: false,
     },
   })
-
-/**
- * Resolves once every English namespace is registered with i18next.
- *
- * `_app` awaits this before it clears its loading gate, so components can keep
- * calling `useTranslation("option")` synchronously without handling `ready`.
- * The fetches run in parallel with the auth/config bootstrap that already gates
- * the first render.
- */
-export const i18nNamespacesReady: Promise<void> = (async () => {
-  if (typeof window === "undefined") return
-  await Promise.all(
-    (Object.keys(LAZY_EN_NAMESPACES) as Array<Exclude<Namespace, "common">>).map(
-      async (ns) => {
-        try {
-          const mod = await LAZY_EN_NAMESPACES[ns]()
-          const data = "default" in mod ? mod.default : mod
-          i18n.addResourceBundle("en", ns, data, true, true)
-        } catch {
-          console.warn(`Failed to load the "${ns}" translations.`)
-        }
-      }
-    )
-  )
-})()
 
 // SSR-safe dir() function
 i18n.dir = (lng?: string): "ltr" | "rtl" => {
