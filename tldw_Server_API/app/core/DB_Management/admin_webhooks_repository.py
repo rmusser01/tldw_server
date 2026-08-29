@@ -1238,8 +1238,7 @@ _HISTORY_ATTEMPT_COLUMNS = """
     attempt.id, attempt.delivery_id, attempt.attempt_number,
     attempt.request_timeout_seconds, attempt.started_at, attempt.finished_at,
     attempt.state, attempt.status_code, attempt.latency_ms,
-    attempt.reason_code, attempt.requested_retry_delay_seconds,
-    attempt.created_at
+    attempt.reason_code, attempt.requested_retry_delay_seconds
 """
 
 
@@ -2133,7 +2132,7 @@ class AdminWebhookRepository:
         delivery_id: str,
     ) -> DeliveryHistoryItem | None:
         """Load one sanitized delivery and its attempts without protected data."""
-        async with self._read_connection() as connection:
+        async with self._read_snapshot() as connection:
             return await AdminWebhookUnitOfWork(
                 connection,
                 is_postgres=self.is_postgres,
@@ -2862,8 +2861,9 @@ class AdminWebhookUnitOfWork(_ConnectionAdapter):
     ) -> DeliveryHistoryItem | None:
         _canonical_uuid4(delivery_id, field="delivery ID")
         row = await self._fetchrow(
-            """
-            SELECT delivery.*, event.event_type AS history_event_type
+            f"""
+            SELECT {_HISTORY_DELIVERY_COLUMNS},
+                   event.event_type AS history_event_type
             FROM admin_webhook_deliveries AS delivery
             JOIN admin_webhook_events AS event ON event.id = delivery.event_id
             WHERE delivery.webhook_id = ? AND delivery.id = ?
@@ -2872,13 +2872,29 @@ class AdminWebhookUnitOfWork(_ConnectionAdapter):
         )
         if row is None:
             return None
-        stored = _stored_delivery_from_row(row)
-        attempts = await self.list_delivery_attempts(webhook_id, delivery_id)
+        delivery, completed_after_config_change = _history_delivery_from_row(row)
+        attempt_rows = await self._fetch(
+            f"""
+            SELECT {_HISTORY_ATTEMPT_COLUMNS}
+            FROM admin_webhook_delivery_attempts AS attempt
+            WHERE EXISTS (
+                SELECT 1 FROM admin_webhook_deliveries AS delivery
+                WHERE delivery.id = attempt.delivery_id
+                  AND delivery.webhook_id = ?
+            )
+              AND attempt.delivery_id = ?
+            ORDER BY attempt.attempt_number ASC, attempt.id ASC
+            """,
+            (webhook_id, delivery_id),
+        )
         return DeliveryHistoryItem(
-            delivery=stored.delivery,
+            delivery=delivery,
             event_type=str(row["history_event_type"]),
-            completed_after_config_change=stored.completed_after_config_change,
-            attempts=attempts,
+            completed_after_config_change=completed_after_config_change,
+            attempts=tuple(
+                _history_attempt_from_row(attempt_row)
+                for attempt_row in attempt_rows
+            ),
         )
 
     async def get_delivery_bundle(self, delivery_id: str) -> DeliveryBundle | None:

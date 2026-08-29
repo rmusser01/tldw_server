@@ -4,7 +4,7 @@ title: Implement canonical admin webhook delivery substrate and recovery
 status: In Progress
 assignee: []
 created_date: '2026-08-23 03:15'
-updated_date: '2026-08-29 23:06'
+updated_date: '2026-08-29 23:39'
 labels:
   - admin
   - webhooks
@@ -195,6 +195,10 @@ Task 10 complete: exposed canonical persisted test, atomic manual redelivery, an
 2026-08-29: Task 10 independent review at d083aaca14 found no Critical issues but 6 Important defects and one Minor evidence gap; controller verification added a seventh Important defect. Fix Round 1 is required for cross-source raw-key conflict, strict action-specific redelivery replay rows, public-only snapshot-consistent history SQL, exact required/constrained OpenAPI headers, restored global unexpected-exception ownership, and localized missing-history 404 mapping. Initial RED chronology remains report-only. Exact FIX_BASE d083aaca14dfb4c3c876070f9130b0df23a33d09; required PostgreSQL zero-skip proof remains mandatory.
 
 2026-08-29: Task 10 Fix Round 1 verified from FIX_BASE d083aaca14df. Strict RED selected 13 tests: 11 failed and 2 passed with zero skips, covering all seven accepted defects before production fixes. Final PostgreSQL-required Task 10 gate: 138 passed, 0 skipped, 222 warnings; Task 9 regressions: 18 passed, 44 deselected, 0 skipped, 21 warnings; event expansion: 24 passed, 0 skipped, 4 warnings. OpenAPI fingerprint/drift, Ruff, reviewed Bandit, Python 3.10 compilation, scope/no-leak scans, warning provenance, and diff checks passed. No schema/migration, direct Jobs admission, runtime activation, producer/UI, legacy-service import, or Task 11 work was added. Evidence: .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-10-fix-1-report.md.
+
+2026-08-29: Task 10 Fix Round 1 independent re-review confirmed six of seven accepted defects closed with 138 PostgreSQL-required tests passing and zero skips. One Important privacy/query-shape defect remains: get_delivery_history_item still selects and maps internal delivery/attempt execution coordinates and is used by exact redelivery replay. Fix Round 2 at 081470b7e295ec2d9bd474a24f77bb87db0ba877 will replace that path with public-only columns/mappers under one read snapshot, remove unused attempt.created_at, and add dual-backend RED proof. Task 11 remains blocked until clean re-review.
+
+2026-08-29: Task 10 Fix Round 2 verified from exact FIX_BASE 081470b7e295ec2d9bd474a24f77bb87db0ba877. Dual-backend RED: 6 failed, 60 deselected, 0 skipped, 8 warnings for single-item internal mapper/query leakage, malformed hidden-coordinate replay rejection, and mixed snapshots. Focused GREEN: 6 passed, 60 deselected, 0 skipped, 8 warnings. Complete PostgreSQL-required Task 10 gate: 144 passed, 0 skipped, 228 warnings. The single-item path now uses only public allowlists/mappers in one read snapshot, and the unused attempt.created_at projection is removed. Ruff, Python 3.10 compilation, reviewed Bandit, query-shape/no-leak scans, base-to-head self-review, and diff checks passed. No schema/migration, Jobs admission, runtime activation, producer/UI, legacy-route, or Task 11 work was added. Evidence: .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-10-fix-2-report.md.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

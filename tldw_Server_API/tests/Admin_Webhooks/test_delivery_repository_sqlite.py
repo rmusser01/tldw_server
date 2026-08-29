@@ -35,8 +35,11 @@ from tldw_Server_API.tests.Admin_Webhooks.test_redelivery_history_api import (
     exercise_redelivery_concurrency_and_commit_failure,
     exercise_redelivery_key_family_conflicts_across_sources,
     exercise_redelivery_preconditions_and_audit_rollback,
+    exercise_redelivery_replay_ignores_hidden_history_coordinates,
     exercise_redelivery_replay_rows_have_exact_action_shape,
     exercise_redelivery_success_exact_replay_and_malformed_coordinate,
+    exercise_single_history_item_loads_only_public_columns,
+    exercise_single_history_item_reads_one_consistent_snapshot,
 )
 from tldw_Server_API.tests.Admin_Webhooks.test_test_delivery import (
     exercise_commit_failure_correlated_audit,
@@ -278,6 +281,35 @@ async def test_sqlite_task10_history_uses_one_consistent_snapshot(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     await exercise_history_reads_one_consistent_snapshot(delivery_repo, monkeypatch)
+
+
+@pytest.mark.unit
+async def test_sqlite_task10_single_history_item_loads_only_public_columns(
+    delivery_repo: SQLiteDeliveryRepositoryFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await exercise_single_history_item_loads_only_public_columns(
+        delivery_repo,
+        monkeypatch,
+    )
+
+
+@pytest.mark.unit
+async def test_sqlite_task10_redelivery_replay_ignores_hidden_history_coordinates(
+    delivery_repo: SQLiteDeliveryRepositoryFixture,
+) -> None:
+    await exercise_redelivery_replay_ignores_hidden_history_coordinates(delivery_repo)
+
+
+@pytest.mark.unit
+async def test_sqlite_task10_single_history_item_uses_one_consistent_snapshot(
+    delivery_repo: SQLiteDeliveryRepositoryFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await exercise_single_history_item_reads_one_consistent_snapshot(
+        delivery_repo,
+        monkeypatch,
+    )
 
 
 @pytest.mark.unit

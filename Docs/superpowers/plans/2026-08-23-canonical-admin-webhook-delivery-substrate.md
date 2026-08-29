@@ -1633,6 +1633,18 @@ migration, direct Jobs admission, runtime activation, producer/UI, legacy
 service import, or Task 11 work was added. Evidence is recorded in
 `.superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-10-fix-1-report.md`.
 
+**Re-review 1 and fix round 2 completion:** Independent re-review found one
+remaining Important privacy/query-shape defect in the live single-item history
+path used by exact redelivery replay, plus its unused attempt `created_at`
+projection. Fix round 2 replaced the internal delivery/attempt projections and
+mappers with the public allowlists and sanitized mappers under one read
+snapshot, preserving two bounded ordered queries and ownership semantics.
+Dual-backend RED failed all six new contracts; focused GREEN passed six with
+PostgreSQL required and zero skips, and the complete Task 10 gate passed 144
+tests with zero skips. Ruff, Python 3.10 compilation, reviewed Bandit,
+query-shape/no-leak scans, self-review, and diff checks passed. Evidence is in
+`.superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-10-fix-2-report.md`.
+
 ### Task 11: Add Durable Health, Metrics, Retention, And Runtime Wiring
 
 **Files:**

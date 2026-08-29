@@ -520,6 +520,288 @@ async def exercise_history_loads_only_public_columns(
     assert "not-a-test-token" not in rendered
 
 
+async def exercise_single_history_item_loads_only_public_columns(
+    fixture: DeliveryRepositoryFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository_module = importlib.import_module(
+        "tldw_Server_API.app.core.DB_Management.admin_webhooks_repository"
+    )
+    registration, _ring, source = await _seed_source_delivery(
+        fixture,
+        label="single-history-public-columns",
+    )
+    attempt_id = canonical_uuid4("single-history-public-attempt")
+    await fixture.execute(
+        """
+        INSERT INTO admin_webhook_delivery_attempts (
+            id, delivery_id, attempt_number, jobs_job_id, jobs_lease_id,
+            request_timeout_seconds, started_at, finished_at, state,
+            status_code, latency_ms, reason_code,
+            requested_retry_delay_seconds, jobs_disposition_applied, created_at
+        ) VALUES (?, ?, 1, ?, ?, 10, ?, NULL, 'processing',
+                  NULL, NULL, NULL, NULL, ?, ?)
+        """,
+        attempt_id,
+        source.delivery.id,
+        "single-history-job",
+        "single-history-lease",
+        NOW,
+        False,
+        NOW,
+    )
+
+    selected_queries: list[str] = []
+    internal_mapper_calls: list[str] = []
+    original_fetchrow = repository_module.AdminWebhookUnitOfWork._fetchrow
+    original_fetch = repository_module.AdminWebhookUnitOfWork._fetch
+    original_delivery_mapper = repository_module._stored_delivery_from_row
+    original_attempt_mapper = repository_module._attempt_from_row
+
+    async def traced_fetchrow(self, query, params=()):
+        if "admin_webhook_deliver" in query:
+            selected_queries.append(str(query))
+        return await original_fetchrow(self, query, params)
+
+    async def traced_fetch(self, query, params=()):
+        if "admin_webhook_deliver" in query:
+            selected_queries.append(str(query))
+        return await original_fetch(self, query, params)
+
+    def traced_delivery_mapper(row):
+        internal_mapper_calls.append("delivery")
+        return original_delivery_mapper(row)
+
+    def traced_attempt_mapper(row):
+        internal_mapper_calls.append("attempt")
+        return original_attempt_mapper(row)
+
+    monkeypatch.setattr(
+        repository_module.AdminWebhookUnitOfWork,
+        "_fetchrow",
+        traced_fetchrow,
+    )
+    monkeypatch.setattr(
+        repository_module.AdminWebhookUnitOfWork,
+        "_fetch",
+        traced_fetch,
+    )
+    monkeypatch.setattr(
+        repository_module,
+        "_stored_delivery_from_row",
+        traced_delivery_mapper,
+    )
+    monkeypatch.setattr(
+        repository_module,
+        "_attempt_from_row",
+        traced_attempt_mapper,
+    )
+
+    item = await fixture.repository.get_delivery_history_item(
+        registration.id,
+        source.delivery.id,
+    )
+
+    assert item is not None
+    assert item.delivery.id == source.delivery.id
+    assert [attempt.id for attempt in item.attempts] == [attempt_id]
+    assert internal_mapper_calls == []
+    assert len(selected_queries) == 2
+    selected_sql = "\n".join(selected_queries).lower()
+    for forbidden in (
+        "delivery.*",
+        "jobs_job_id",
+        "jobs_lease_id",
+        "enqueue_claim_token",
+        "enqueue_claim_expires_at",
+        "current_attempt_id",
+        "pending_jobs_disposition",
+        "pending_jobs_disposition_token",
+        "jobs_disposition_applied",
+        "test_attempt_token",
+        "idempotency",
+        "ciphertext",
+    ):
+        assert forbidden not in selected_sql
+    attempt_query = next(
+        query
+        for query in selected_queries
+        if "FROM admin_webhook_delivery_attempts AS attempt" in query
+    )
+    assert "created_at" not in attempt_query.lower()
+
+
+async def exercise_redelivery_replay_ignores_hidden_history_coordinates(
+    fixture: DeliveryRepositoryFixture,
+) -> None:
+    delivery_module = importlib.import_module(
+        "tldw_Server_API.app.core.Admin_Webhooks.delivery"
+    )
+    registration, ring, source = await _seed_source_delivery(
+        fixture,
+        label="redelivery-hidden-history",
+    )
+    command = _redelivery_command(
+        delivery_module,
+        registration,
+        source.delivery.id,
+        key="10101010101010102020202020202020",
+    )
+    audits: list[object] = []
+
+    async def audit_sink(record: object) -> None:
+        audits.append(record)
+
+    first = await _redelivery_service(
+        delivery_module,
+        fixture,
+        WebhookKeyRingLoadResult(
+            ring=ring,
+            code=WebhookKeyLoadCode.AVAILABLE,
+        ),
+        label="redelivery-hidden-history",
+    ).redeliver_webhook(command, audit_sink=audit_sink)
+    attempt_id = canonical_uuid4("redelivery-hidden-history-attempt")
+    await fixture.execute(
+        """
+        INSERT INTO admin_webhook_delivery_attempts (
+            id, delivery_id, attempt_number, jobs_job_id, jobs_lease_id,
+            test_attempt_token, request_timeout_seconds, started_at,
+            finished_at, state, status_code, latency_ms, reason_code,
+            requested_retry_delay_seconds, jobs_disposition_applied, created_at
+        ) VALUES (?, ?, 1, NULL, NULL, ?, 10, ?, NULL, 'processing',
+                  NULL, NULL, NULL, NULL, ?, ?)
+        """,
+        attempt_id,
+        source.delivery.id,
+        "not-a-test-attempt-token",
+        NOW,
+        False,
+        NOW,
+    )
+    replay_service = _redelivery_service(
+        delivery_module,
+        fixture,
+        WebhookKeyRingLoadResult(
+            ring=None,
+            code=WebhookKeyLoadCode.KEY_UNAVAILABLE,
+        ),
+        label="redelivery-hidden-history-replay",
+    )
+
+    attempt_hidden_replay = await replay_service.redeliver_webhook(
+        command,
+        audit_sink=audit_sink,
+    )
+    assert attempt_hidden_replay.idempotent_replay is True
+    assert attempt_hidden_replay.delivery == first.delivery
+
+    await fixture.execute(
+        """
+        UPDATE admin_webhook_deliveries
+        SET enqueue_claim_token = ?, enqueue_claim_expires_at = ?
+        WHERE id = ?
+        """,
+        "not-an-enqueue-claim-token",
+        NOW + timedelta(minutes=1),
+        source.delivery.id,
+    )
+    delivery_hidden_replay = await replay_service.redeliver_webhook(
+        command,
+        audit_sink=audit_sink,
+    )
+
+    assert delivery_hidden_replay.idempotent_replay is True
+    assert delivery_hidden_replay.delivery == first.delivery
+    assert [record.outcome for record in audits] == [
+        "accepted",
+        "no_op",
+        "no_op",
+    ]
+    assert await fixture.fetchval(
+        "SELECT COUNT(*) FROM admin_webhook_deliveries WHERE kind = 'manual'"
+    ) == 1
+
+
+async def exercise_single_history_item_reads_one_consistent_snapshot(
+    fixture: DeliveryRepositoryFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository_module = importlib.import_module(
+        "tldw_Server_API.app.core.DB_Management.admin_webhooks_repository"
+    )
+    registration, _ring, source = await _seed_source_delivery(
+        fixture,
+        label="single-history-snapshot",
+    )
+    concurrent_attempt_id = canonical_uuid4("single-history-snapshot-attempt")
+    commit_done = False
+    query_count = 0
+    original_fetchrow = repository_module.AdminWebhookUnitOfWork._fetchrow
+    original_fetch = repository_module.AdminWebhookUnitOfWork._fetch
+
+    async def traced_fetchrow(self, query, params=()):
+        nonlocal query_count
+        if "FROM admin_webhook_deliveries AS delivery" in query:
+            query_count += 1
+        return await original_fetchrow(self, query, params)
+
+    async def commit_before_attempt_read(self, query, params=()):
+        nonlocal commit_done, query_count
+        if "FROM admin_webhook_delivery_attempts AS attempt" in query:
+            query_count += 1
+            if not commit_done:
+                commit_done = True
+                await fixture.execute(
+                    """
+                    INSERT INTO admin_webhook_delivery_attempts (
+                        id, delivery_id, attempt_number, jobs_job_id,
+                        jobs_lease_id, request_timeout_seconds, started_at,
+                        finished_at, state, status_code, latency_ms,
+                        reason_code, requested_retry_delay_seconds,
+                        jobs_disposition_applied, created_at
+                    ) VALUES (?, ?, 1, ?, ?, 10, ?, NULL, 'processing',
+                              NULL, NULL, NULL, NULL, ?, ?)
+                    """,
+                    concurrent_attempt_id,
+                    source.delivery.id,
+                    "single-history-snapshot-job",
+                    "single-history-snapshot-lease",
+                    NOW,
+                    False,
+                    NOW,
+                )
+        return await original_fetch(self, query, params)
+
+    monkeypatch.setattr(
+        repository_module.AdminWebhookUnitOfWork,
+        "_fetchrow",
+        traced_fetchrow,
+    )
+    monkeypatch.setattr(
+        repository_module.AdminWebhookUnitOfWork,
+        "_fetch",
+        commit_before_attempt_read,
+    )
+
+    item = await asyncio.wait_for(
+        fixture.repository.get_delivery_history_item(
+            registration.id,
+            source.delivery.id,
+        ),
+        timeout=10,
+    )
+
+    assert item is not None
+    assert commit_done is True
+    assert query_count == 2
+    assert item.attempts == ()
+    assert await fixture.fetchval(
+        "SELECT COUNT(*) FROM admin_webhook_delivery_attempts WHERE delivery_id = ?",
+        source.delivery.id,
+    ) == 1
+
+
 async def exercise_history_reads_one_consistent_snapshot(
     fixture: DeliveryRepositoryFixture,
     monkeypatch: pytest.MonkeyPatch,
