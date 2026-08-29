@@ -981,7 +981,10 @@ def ensure_lease_horizon(
                 if isinstance(changed, dict)
                 else changed[0]
             )
-            return LeaseHorizonResult.applied(leased_until=leased_until)
+            return LeaseHorizonResult.applied(
+                leased_until=leased_until,
+                guaranteed_seconds=command.minimum_seconds,
+            )
 
 
 def find_job_by_identity(

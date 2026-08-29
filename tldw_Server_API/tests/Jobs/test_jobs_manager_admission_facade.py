@@ -6,6 +6,7 @@ from uuid import uuid4
 
 import pytest
 
+from tldw_Server_API.app.core.Jobs import manager as manager_module
 from tldw_Server_API.app.core.Jobs.manager import (
     JobManager,
     SlidesGenerationJobsUnavailableError,
@@ -17,6 +18,7 @@ from tldw_Server_API.app.core.Jobs.operations.contracts import (
     EnsureLeaseHorizonCommand,
     ExpiredLeasePolicy,
     FindJobByIdentityCommand,
+    LeaseHorizonResult,
     NoTransitionReason,
     OperationOutcome,
     PreparedJobDisposition,
@@ -287,6 +289,45 @@ def test_lifecycle_facades_reject_noncanonical_facts_before_sql(
 
     with pytest.raises(ValueError, match="canonical"):
         invoke()
+
+
+def test_lease_horizon_facade_returns_backend_guarantee_after_cap(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    manager = JobManager(tmp_path / "jobs.db")
+    delivery_id = str(uuid4())
+    command = EnsureLeaseHorizonCommand(
+        job_id=1,
+        domain="admin_webhooks",
+        queue="delivery",
+        job_type="admin_webhook_delivery",
+        expected_payload={"delivery_id": delivery_id},
+        worker_id="worker",
+        lease_id="lease",
+        minimum_seconds=30,
+    )
+    captured: list[EnsureLeaseHorizonCommand] = []
+
+    class Connection:
+        def close(self) -> None:
+            pass
+
+    def ensure(_conn, *, command):
+        captured.append(command)
+        return LeaseHorizonResult.applied(
+            leased_until=datetime.now(timezone.utc),
+            guaranteed_seconds=command.minimum_seconds,
+        )
+
+    monkeypatch.setenv("JOBS_LEASE_MAX_SECONDS", "5")
+    monkeypatch.setattr(manager, "_connect", Connection)
+    monkeypatch.setattr(manager_module, "_sqlite_ensure_lease_horizon", ensure)
+
+    result = manager.ensure_lease_horizon(command)
+
+    assert captured[0].minimum_seconds == 5
+    assert result.guaranteed_seconds == 5
 
 
 def test_slides_early_replay_validates_requested_execution_controls(tmp_path) -> None:

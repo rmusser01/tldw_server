@@ -4,7 +4,7 @@ title: Implement canonical admin webhook delivery substrate and recovery
 status: In Progress
 assignee: []
 created_date: '2026-08-23 03:15'
-updated_date: '2026-08-29 00:04'
+updated_date: '2026-08-29 00:35'
 labels:
   - admin
   - webhooks
@@ -125,6 +125,10 @@ Task 3 Fix Round 1/5 started at FIX_BASE 803ae280f66e990f7b4ffdf29e31cae311d648d
 2026-08-28: Started Task 4 Fix Round 2/5 at FIX_BASE 0780bac3950cdb50cbd0753cbc713218a9063308. Scope: deterministic RED tests and prepared-path fixes for wall-clock-independent cap-aware renewal scheduling and unambiguous shielded cleanup cancellation; frozen CAS facts, callback routing, exactly-one apply, and legacy run() remain unchanged.
 
 2026-08-28: Completed Task 4 Fix Round 2/5 at fix base 0780bac3950c. Prepared renewal now always obtains an authoritative typed relative lease guarantee before sleeping, reloads and clamps the current manager cap on every cycle, uses only positive event-loop-relative intervals with earlier-only jitter, and fails closed with sticky renewal loss plus class-only logging on invalid configuration. Teardown uses a separately shielded cleanup task so simultaneous/repeated parent cancellation is retained and re-raised after child cleanup. Frozen CAS facts, defensive job copies, exactly-one apply, callback routing, and legacy run() remain unchanged. RED: 10 failed/6 passed/35 deselected, plus a cap-reload characterization failed with [30, 30, 30]. Final gate: 90 passed/2 baseline warnings. Focused Ruff, Bandit, git diff --check, and Python 3.10 py_compile passed. Evidence: .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-4-report.md
+
+2026-08-29: Started Task 4 Fix Round 3/5 at FIX_BASE 1410e75d8fd64d44ba7acc948e6f81b6d5bb483b. Scope: add authoritative post-manager-cap relative lease evidence to the Task 3 result contract and both backends; consume it with monotonic elapsed accounting in prepared WorkerSDK renewal; strengthen class-only structured diagnostics; preserve public context bool behavior, cancellation cleanup, frozen CAS facts, exactly-one apply, callbacks, and legacy run(). Strict deterministic RED precedes production edits; PostgreSQL-required zero-skip and full worker gates remain required.
+
+2026-08-29: Completed Task 4 Fix Round 3/5 at fix base 1410e75d8fd6. LeaseHorizonResult now exposes a positive exact-int manager-authoritative guaranteed_seconds only on APPLIED; SQLite/PostgreSQL return the already-capped command duration. Prepared renewal preserves the public context bool API while privately validating typed evidence, subtracting monotonic ensure elapsed time, and scheduling only from the returned safe relative remainder. Structured failure diagnostics are generic and class-only. RED: 21 failed/4 passed plus focused 2 scheduling failures, PostgreSQL 1 contract failure, and 2 exact-int failures. Final required gates: worker 102 passed; Task 3 contract/facade/SQLite/PostgreSQL 209 passed, 0 skipped with PostgreSQL required; 2 baseline warnings per suite. Ruff, Bandit, git diff --check, and Python 3.10 py_compile passed. Evidence: .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-4-report.md
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

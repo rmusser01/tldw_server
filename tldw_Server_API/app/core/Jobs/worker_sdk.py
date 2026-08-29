@@ -8,6 +8,7 @@ import os
 import re
 import secrets
 import sqlite3
+import time
 from collections.abc import Awaitable
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -166,7 +167,7 @@ class WorkerExecutionContext:
             renewal_lost=self._renewal_lost,
         )
 
-    async def ensure_lease_horizon(self, seconds: int) -> bool:
+    async def _ensure_lease_horizon_typed(self, seconds: int) -> int | None:
         try:
             result = self._jm.ensure_lease_horizon(
                 EnsureLeaseHorizonCommand(
@@ -180,24 +181,41 @@ class WorkerExecutionContext:
                     minimum_seconds=seconds,
                 )
             )
+            if not isinstance(result, LeaseHorizonResult):
+                raise TypeError
+            if not isinstance(result.outcome, OperationOutcome):
+                raise TypeError
+            if result.leased_until is not None:
+                if (
+                    not isinstance(result.leased_until, datetime)
+                    or result.leased_until.tzinfo is None
+                    or result.leased_until.utcoffset() is None
+                ):
+                    raise TypeError
+                self._leased_until = result.leased_until.astimezone(timezone.utc)
+
+            guaranteed_seconds = getattr(result, "guaranteed_seconds", None)
+            if result.outcome is not OperationOutcome.APPLIED:
+                if guaranteed_seconds is not None:
+                    raise TypeError
+                self._mark_renewal_lost()
+                return None
+            if result.ensured is not True or result.leased_until is None:
+                raise TypeError
+            if type(guaranteed_seconds) is not int:
+                raise TypeError
+            if guaranteed_seconds <= 0:
+                raise ValueError
+            return guaranteed_seconds
         except Exception as exc:  # noqa: BLE001 - backend isolation boundary
-            self._renewal_lost = True
+            self._mark_renewal_lost()
             logger.bind(error_type=type(exc).__name__).warning(
                 "Jobs prepared lease horizon failed"
             )
-            return False
+            return None
 
-        if isinstance(result, LeaseHorizonResult) and result.leased_until is not None:
-            self._leased_until = result.leased_until
-        ensured = bool(
-            isinstance(result, LeaseHorizonResult)
-            and result.outcome is OperationOutcome.APPLIED
-            and result.ensured
-            and result.leased_until is not None
-        )
-        if not ensured:
-            self._renewal_lost = True
-        return ensured
+    async def ensure_lease_horizon(self, seconds: int) -> bool:
+        return await self._ensure_lease_horizon_typed(seconds) is not None
 
 
 PreparedJobHandler = Callable[
@@ -263,6 +281,7 @@ class WorkerSDK:
         # Allow test overrides without monkeypatching global asyncio.sleep
         # (keeps event loop behavior stable under tests)
         self._sleep = asyncio.sleep
+        self._monotonic = time.monotonic
         self._detached_completion_callbacks: set[asyncio.Task[None]] = set()
         # Detect test mode for more responsive sleeps and optional iteration caps
         try:
@@ -476,8 +495,6 @@ class WorkerSDK:
                 effective_lease = max(1, min(requested_lease, lease_cap))
                 jitter = max(0, int(self.cfg.renew_jitter_seconds))
                 threshold = max(1, int(self.cfg.renew_threshold_seconds))
-                renewal_margin = min(float(threshold), effective_lease / 2.0)
-                base_sleep = float(effective_lease) - renewal_margin
             except Exception as exc:  # noqa: BLE001 - configuration isolation boundary
                 context._mark_renewal_lost()
                 logger.bind(error_type=type(exc).__name__).warning(
@@ -485,7 +502,18 @@ class WorkerSDK:
                 )
                 return
 
-            if not await context.ensure_lease_horizon(effective_lease):
+            ensure_started = self._monotonic()
+            guaranteed_seconds = await context._ensure_lease_horizon_typed(
+                effective_lease
+            )
+            ensure_elapsed = max(0.0, self._monotonic() - ensure_started)
+            if guaranteed_seconds is None:
+                return
+            remaining_seconds = float(guaranteed_seconds) - ensure_elapsed
+            renewal_margin = min(float(threshold), remaining_seconds / 2.0)
+            base_sleep = remaining_seconds - renewal_margin
+            if base_sleep < 0.01:
+                context._mark_renewal_lost()
                 return
             iters += 1
             if self._max_iters and iters >= self._max_iters:

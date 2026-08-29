@@ -933,10 +933,23 @@ class LeaseHorizonResult:
     ensured: bool
     leased_until: datetime | None = None
     no_transition_reason: NoTransitionReason | None = None
+    guaranteed_seconds: int | None = None
 
     def __post_init__(self) -> None:
-        if self.outcome is OperationOutcome.APPLIED and not self.ensured:
-            raise ValueError("applied lease horizon must be ensured")
+        if self.outcome is OperationOutcome.APPLIED:
+            if not self.ensured:
+                raise ValueError("applied lease horizon must be ensured")
+            if self.leased_until is None:
+                raise ValueError("applied lease horizon requires leased_until")
+            if (
+                type(self.guaranteed_seconds) is not int
+                or self.guaranteed_seconds <= 0
+            ):
+                raise ValueError(
+                    "applied lease horizon requires positive exact-int guaranteed_seconds"
+                )
+        elif self.guaranteed_seconds is not None:
+            raise ValueError("only applied lease horizons include guaranteed_seconds")
         if self.outcome is OperationOutcome.NO_TRANSITION and self.no_transition_reason is None:
             raise ValueError("no-transition lease horizon requires a reason")
         if self.outcome is not OperationOutcome.NO_TRANSITION and self.no_transition_reason is not None:
@@ -949,11 +962,17 @@ class LeaseHorizonResult:
             )
 
     @classmethod
-    def applied(cls, *, leased_until: datetime) -> LeaseHorizonResult:
+    def applied(
+        cls,
+        *,
+        leased_until: datetime,
+        guaranteed_seconds: int,
+    ) -> LeaseHorizonResult:
         return cls(
             outcome=OperationOutcome.APPLIED,
             ensured=True,
             leased_until=leased_until,
+            guaranteed_seconds=guaranteed_seconds,
         )
 
     @classmethod

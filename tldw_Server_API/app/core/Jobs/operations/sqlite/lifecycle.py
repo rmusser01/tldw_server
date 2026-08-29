@@ -992,7 +992,10 @@ def ensure_lease_horizon(
             ).fetchone()[0]
         )
         conn.commit()
-        return LeaseHorizonResult.applied(leased_until=leased_until)
+        return LeaseHorizonResult.applied(
+            leased_until=leased_until,
+            guaranteed_seconds=command.minimum_seconds,
+        )
     except Exception:
         conn.rollback()
         raise

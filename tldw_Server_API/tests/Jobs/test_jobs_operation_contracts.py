@@ -42,6 +42,10 @@ from tldw_Server_API.app.core.Jobs.operations.contracts import (
 pytestmark = pytest.mark.unit
 
 
+class _IntSubclass(int):
+    pass
+
+
 def _uuid() -> str:
     return str(uuid4())
 
@@ -226,16 +230,49 @@ def test_lease_horizon_and_identity_contracts_are_closed_and_frozen() -> None:
     lookup_result = JobIdentityLookupResult.found(
         JobIdentityLookupState.ACTIVE, {"id": 1, "payload": payload}
     )
-    lease_result = LeaseHorizonResult.applied(leased_until=_aware(60))
+    lease_result = LeaseHorizonResult.applied(
+        leased_until=_aware(60),
+        guaranteed_seconds=60,
+    )
     payload["delivery_id"] = _uuid()
 
     assert horizon.expected_payload != payload
     assert lookup.expected_payload != payload
     assert lookup_result.row["payload"] != payload
     assert lease_result.ensured is True
+    assert lease_result.guaranteed_seconds == 60
+    assert LeaseHorizonResult.no_transition(
+        NoTransitionReason.STALE_LEASE
+    ).guaranteed_seconds is None
     with pytest.raises(ValueError, match="minimum_seconds"):
         EnsureLeaseHorizonCommand(
             **{**horizon.__dict__, "minimum_seconds": 0}
+        )
+
+
+@pytest.mark.parametrize(
+    "guaranteed_seconds",
+    [None, 0, -1, True, 1.5, "60", _IntSubclass(60)],
+    ids=["missing", "zero", "negative", "bool", "float", "string", "subclass"],
+)
+def test_applied_lease_horizon_requires_positive_exact_int_guarantee(
+    guaranteed_seconds,
+) -> None:
+    with pytest.raises(ValueError, match="guaranteed_seconds"):
+        LeaseHorizonResult(
+            outcome=OperationOutcome.APPLIED,
+            ensured=True,
+            leased_until=_aware(60),
+            guaranteed_seconds=guaranteed_seconds,
+        )
+
+
+def test_non_applied_lease_horizon_cannot_expose_guarantee() -> None:
+    with pytest.raises(ValueError, match="guaranteed_seconds"):
+        LeaseHorizonResult(
+            outcome=OperationOutcome.BACKEND_CONFLICT,
+            ensured=False,
+            guaranteed_seconds=30,
         )
 
 

@@ -23,6 +23,29 @@ ATTEMPT_ID = "123e4567-e89b-42d3-a456-426614174000"
 LEASED_UNTIL = datetime(2026, 8, 28, 12, 0, tzinfo=timezone.utc)
 NOW = LEASED_UNTIL - timedelta(seconds=30)
 RENEWED_UNTIL = LEASED_UNTIL + timedelta(minutes=5)
+_DEFAULT_HORIZON_RESULT = object()
+_MISSING_GUARANTEE = object()
+
+
+class _IntSubclass(int):
+    pass
+
+
+def _raw_horizon_result(
+    *,
+    guaranteed_seconds: object = _MISSING_GUARANTEE,
+    leased_until: object = RENEWED_UNTIL,
+) -> LeaseHorizonResult:
+    """Build malformed typed evidence without weakening production invariants."""
+
+    result = object.__new__(LeaseHorizonResult)
+    object.__setattr__(result, "outcome", OperationOutcome.APPLIED)
+    object.__setattr__(result, "ensured", True)
+    object.__setattr__(result, "leased_until", leased_until)
+    object.__setattr__(result, "no_transition_reason", None)
+    if guaranteed_seconds is not _MISSING_GUARANTEE:
+        object.__setattr__(result, "guaranteed_seconds", guaranteed_seconds)
+    return result
 
 
 def _job(*, leased_until: object = LEASED_UNTIL) -> dict[str, object]:
@@ -73,10 +96,10 @@ class PreparedManager:
         self.events: list[tuple[str, object]] = []
         self.fallback_calls: list[str] = []
         self.apply_result: object = _applied_result()
-        self.horizon_result: object = LeaseHorizonResult.applied(
-            leased_until=RENEWED_UNTIL
-        )
+        self.horizon_result: object = _DEFAULT_HORIZON_RESULT
         self.horizon_results: list[object] = []
+        self.before_horizon_cap_read = None
+        self.after_horizon_result = None
 
     def acquire_next_job(self, **kwargs):
         assert kwargs == {
@@ -117,11 +140,24 @@ class PreparedManager:
         assert command.minimum_seconds > 0
         self.horizon_calls.append(command)
         self.events.append(("ensure", command.minimum_seconds))
+        if self.before_horizon_cap_read is not None:
+            self.before_horizon_cap_read()
+        manager_cap = max(
+            1,
+            int(worker_sdk_module.os.getenv("JOBS_LEASE_MAX_SECONDS", "3600") or "3600"),
+        )
         result = (
             self.horizon_results.pop(0)
             if self.horizon_results
             else self.horizon_result
         )
+        if result is _DEFAULT_HORIZON_RESULT:
+            result = LeaseHorizonResult.applied(
+                leased_until=RENEWED_UNTIL,
+                guaranteed_seconds=min(command.minimum_seconds, manager_cap),
+            )
+        if self.after_horizon_result is not None:
+            self.after_horizon_result()
         if isinstance(result, BaseException):
             raise result
         return result
@@ -158,7 +194,9 @@ def _sdk(manager: PreparedManager, **config_overrides) -> WorkerSDK:
     }
     config_values.update(config_overrides)
     manager.expected_lease_seconds = config_values["lease_seconds"]
-    return WorkerSDK(manager, WorkerConfig(**config_values))
+    sdk = WorkerSDK(manager, WorkerConfig(**config_values))
+    sdk._monotonic = lambda: 0.0
+    return sdk
 
 
 async def _allow_acquire() -> bool:
@@ -744,7 +782,10 @@ async def test_relative_renewal_interval_ignores_worker_clock_skew(
     database_now = LEASED_UNTIL
     capped_until = database_now + timedelta(seconds=5)
     manager.jobs = [_job(leased_until=capped_until)]
-    manager.horizon_result = LeaseHorizonResult.applied(leased_until=capped_until)
+    manager.horizon_result = LeaseHorizonResult.applied(
+        leased_until=capped_until,
+        guaranteed_seconds=5,
+    )
     sdk = _sdk(
         manager,
         lease_seconds=30,
@@ -779,6 +820,89 @@ async def test_relative_renewal_interval_ignores_worker_clock_skew(
     assert len(manager.horizon_calls) == 2
     assert sleep_calls == [2.5]
     assert observed_renewal_loss == [False]
+
+
+@pytest.mark.asyncio
+async def test_manager_cap_aba_race_schedules_from_returned_guarantee(
+    monkeypatch,
+):
+    monkeypatch.setenv("JOBS_LEASE_MAX_SECONDS", "30")
+    manager = PreparedManager()
+    manager.before_horizon_cap_read = lambda: monkeypatch.setenv(
+        "JOBS_LEASE_MAX_SECONDS", "5"
+    )
+    manager.after_horizon_result = lambda: monkeypatch.setenv(
+        "JOBS_LEASE_MAX_SECONDS", "30"
+    )
+    sdk = _sdk(
+        manager,
+        lease_seconds=30,
+        renew_threshold_seconds=10,
+        renew_jitter_seconds=0,
+    )
+    sdk._max_iters = 2
+    ticks = iter([100.0, 101.0, 200.0, 201.0])
+    sdk._monotonic = ticks.__next__
+    sleep_calls = []
+
+    async def record_sleep(seconds):
+        sleep_calls.append(seconds)
+        manager.events.append(("sleep", seconds))
+        await asyncio.sleep(0)
+
+    sdk._sleep = record_sleep
+
+    async def handler(_job_row, _context):
+        while len(manager.horizon_calls) < 2:
+            await asyncio.sleep(0)
+        return _infrastructure_defer()
+
+    await _run_once(sdk, handler)
+
+    assert [call.minimum_seconds for call in manager.horizon_calls] == [30, 30]
+    assert manager.events == [
+        ("ensure", 30),
+        ("sleep", 2.0),
+        ("ensure", 30),
+    ]
+    assert sleep_calls == [2.0]
+    assert worker_sdk_module.os.getenv("JOBS_LEASE_MAX_SECONDS") == "30"
+
+
+@pytest.mark.asyncio
+async def test_elapsed_ensure_that_consumes_guarantee_fails_closed(monkeypatch):
+    monkeypatch.setenv("JOBS_LEASE_MAX_SECONDS", "30")
+    manager = PreparedManager()
+    manager.horizon_result = _raw_horizon_result(guaranteed_seconds=5)
+    sdk = _sdk(
+        manager,
+        lease_seconds=30,
+        renew_threshold_seconds=10,
+        renew_jitter_seconds=0,
+    )
+    sdk._max_iters = 2
+    ticks = iter([100.0, 105.0])
+    sdk._monotonic = ticks.__next__
+    sleep_calls = []
+    observed = []
+
+    async def record_sleep(seconds):
+        sleep_calls.append(seconds)
+        await asyncio.sleep(0)
+
+    sdk._sleep = record_sleep
+
+    async def handler(_job_row, context):
+        while len(manager.horizon_calls) < 2 and not context.renewal_lost:
+            await asyncio.sleep(0)
+        observed.append(context.renewal_lost)
+        return _infrastructure_defer()
+
+    await _run_once(sdk, handler)
+
+    assert len(manager.horizon_calls) == 1
+    assert sleep_calls == []
+    assert observed == [True]
 
 
 @pytest.mark.asyncio
@@ -904,7 +1028,7 @@ async def test_invalid_prepared_renewal_configuration_fails_closed(
     sdk = _sdk(manager, **config_overrides)
     sdk._max_iters = 1
     sleep_calls = []
-    logs: list[str] = []
+    records: list[dict[str, object]] = []
     context = worker_sdk_module.WorkerExecutionContext(
         manager,
         _job(),
@@ -916,7 +1040,10 @@ async def test_invalid_prepared_renewal_configuration_fails_closed(
         await asyncio.sleep(0)
 
     sdk._sleep = record_sleep
-    sink = logger.add(logs.append, format="{message}|{extra}", level="DEBUG")
+    sink = logger.add(
+        lambda message: records.append(dict(message.record)),
+        level="WARNING",
+    )
     raised = None
     try:
         try:
@@ -926,14 +1053,20 @@ async def test_invalid_prepared_renewal_configuration_fails_closed(
     finally:
         logger.remove(sink)
 
-    rendered_logs = "".join(logs)
     assert raised is None
     assert context.renewal_lost is True
     assert context.snapshot().renewal_lost is True
     assert manager.horizon_calls == []
     assert sleep_calls == []
-    assert "config-secret" not in rendered_logs
-    assert "cap-secret" not in rendered_logs
+    assert len(records) == 1
+    record = records[0]
+    assert record["message"] == "Jobs prepared renewal configuration failed"
+    assert record["extra"]["error_type"] == "ValueError"
+    assert record["exception"] is None
+    rendered_record = repr(record)
+    assert "config-secret" not in rendered_record
+    assert "cap-secret" not in rendered_record
+    assert "invalid literal" not in rendered_record
 
 
 @pytest.mark.asyncio
@@ -941,9 +1074,8 @@ async def test_invalid_prepared_renewal_configuration_fails_closed(
     "malformed_result",
     [
         object(),
-        LeaseHorizonResult(
-            outcome=OperationOutcome.APPLIED,
-            ensured=True,
+        _raw_horizon_result(
+            guaranteed_seconds=90,
             leased_until=None,
         ),
     ],
@@ -982,6 +1114,73 @@ async def test_malformed_horizon_result_fails_closed_and_stays_visible(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("horizon_result", "expected_error_type"),
+    [
+        (object(), "TypeError"),
+        (_raw_horizon_result(), "TypeError"),
+        (_raw_horizon_result(guaranteed_seconds=0), "ValueError"),
+        (_raw_horizon_result(guaranteed_seconds=-1), "ValueError"),
+        (_raw_horizon_result(guaranteed_seconds=True), "TypeError"),
+        (_raw_horizon_result(guaranteed_seconds=1.5), "TypeError"),
+        (_raw_horizon_result(guaranteed_seconds=_IntSubclass(5)), "TypeError"),
+        (
+            _raw_horizon_result(guaranteed_seconds="guarantee-private-detail"),
+            "TypeError",
+        ),
+        (
+            _raw_horizon_result(guaranteed_seconds=5, leased_until=None),
+            "TypeError",
+        ),
+        (RuntimeError("manager-private-detail"), "RuntimeError"),
+    ],
+    ids=[
+        "wrong-object",
+        "missing-guarantee",
+        "zero-guarantee",
+        "negative-guarantee",
+        "bool-guarantee",
+        "float-guarantee",
+        "int-subclass-guarantee",
+        "string-guarantee",
+        "missing-deadline",
+        "manager-exception",
+    ],
+)
+async def test_private_typed_horizon_helper_logs_class_only_and_fails_closed(
+    horizon_result,
+    expected_error_type,
+):
+    manager = PreparedManager()
+    manager.horizon_result = horizon_result
+    context = worker_sdk_module.WorkerExecutionContext(
+        manager,
+        _job(),
+        worker_id="worker-1",
+    )
+    records: list[dict[str, object]] = []
+    sink = logger.add(
+        lambda message: records.append(dict(message.record)),
+        level="WARNING",
+    )
+    try:
+        guaranteed_seconds = await context._ensure_lease_horizon_typed(30)
+    finally:
+        logger.remove(sink)
+
+    assert guaranteed_seconds is None
+    assert context.renewal_lost is True
+    assert len(records) == 1
+    record = records[0]
+    assert record["message"] == "Jobs prepared lease horizon failed"
+    assert record["extra"]["error_type"] == expected_error_type
+    assert record["exception"] is None
+    rendered_record = repr(record)
+    assert "guarantee-private-detail" not in rendered_record
+    assert "manager-private-detail" not in rendered_record
+
+
+@pytest.mark.asyncio
 async def test_horizon_failure_remains_sticky_after_later_success():
     manager = PreparedManager()
     manager.horizon_results = [
@@ -989,7 +1188,10 @@ async def test_horizon_failure_remains_sticky_after_later_success():
             NoTransitionReason.STALE_LEASE,
             leased_until=LEASED_UNTIL,
         ),
-        LeaseHorizonResult.applied(leased_until=RENEWED_UNTIL),
+        LeaseHorizonResult.applied(
+            leased_until=RENEWED_UNTIL,
+            guaranteed_seconds=90,
+        ),
     ]
     context = worker_sdk_module.WorkerExecutionContext(
         manager,

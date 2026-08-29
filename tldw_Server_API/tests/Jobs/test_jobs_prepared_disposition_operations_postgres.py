@@ -329,8 +329,11 @@ def test_postgres_trusted_queued_cancel_and_capped_lease_horizon(
     assert timedelta(seconds=175) <= _utc(extended.leased_until) - datetime.now(
         timezone.utc
     ) <= timedelta(seconds=181)
+    assert extended.guaranteed_seconds == 180
     assert _utc(shorter.leased_until) == _utc(extended.leased_until)
+    assert shorter.guaranteed_seconds == 30
     assert stale.no_transition_reason is NoTransitionReason.STALE_LEASE
+    assert stale.guaranteed_seconds is None
 
 
 def test_postgres_authnz_retries_do_not_quarantine_before_row_threshold(

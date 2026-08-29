@@ -375,8 +375,11 @@ def test_sqlite_lease_horizon_extends_never_shortens_rejects_stale_and_obeys_cap
     assert timedelta(seconds=175) <= _parse(extended.leased_until) - datetime.now(
         timezone.utc
     ) <= timedelta(seconds=181)
+    assert extended.guaranteed_seconds == 180
     assert _parse(shorter.leased_until) == _parse(extended.leased_until)
+    assert shorter.guaranteed_seconds == 30
     assert stale.no_transition_reason is NoTransitionReason.STALE_LEASE
+    assert stale.guaranteed_seconds is None
 
 
 def test_sqlite_authnz_retries_do_not_quarantine_before_row_threshold(tmp_path):
