@@ -158,7 +158,7 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
   )
   const isDecisionPending = Boolean(
     suggestions.mutations?.acceptance?.isPending ||
-      suggestions.mutations?.rejection?.isPending
+    suggestions.mutations?.rejection?.isPending
   )
   const announce = React.useCallback((message: string) => {
     setAnnouncement((current) => ({ id: current.id + 1, message }))
@@ -399,6 +399,7 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
               <NotesGraphRelationshipsView
                 graph={workspace.graph}
                 selectedNodeId={currentSelectedNodeId}
+                visibleEdgeTypes={workspace.visibleEdgeTypes}
                 provisionalOverlays={
                   suggestionsAuthorized ? provisionalOverlays : []
                 }

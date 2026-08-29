@@ -44,7 +44,7 @@ vi.mock("react-i18next", () => ({
       options?: string | { defaultValue?: string; [key: string]: unknown }
     ) => {
       const fallback =
-        typeof options === "string" ? options : options?.defaultValue ?? key
+        typeof options === "string" ? options : (options?.defaultValue ?? key)
       if (typeof options !== "object") return fallback
       return Object.entries(options).reduce(
         (value, [name, replacement]) =>
@@ -754,6 +754,60 @@ describe("NotesGraphWorkspace first-class view mode", () => {
     expect(state.expand).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole("button", { name: "Expand graph" }))
     expect(state.expand).toHaveBeenCalledTimes(1)
+  })
+
+  it("applies edge visibility filters to the Relationships projection", () => {
+    const state = baseWorkspaceState()
+    state.graph = {
+      ...graph,
+      nodes: [
+        ...graph.nodes,
+        {
+          ...graph.nodes[1],
+          id: "note:hidden",
+          label: "Hidden wikilink"
+        }
+      ],
+      edges: [
+        {
+          id: "edge:manual",
+          source: "note:a",
+          target: "note:b",
+          type: "manual",
+          directed: false,
+          weight: null,
+          label: null
+        },
+        {
+          id: "edge:wikilink",
+          source: "note:a",
+          target: "note:hidden",
+          type: "wikilink",
+          directed: true,
+          weight: null,
+          label: null
+        }
+      ]
+    }
+    state.visibleEdgeTypes = new Set(["manual"])
+    mockUseNotesGraphWorkspace.mockReturnValue(state)
+    renderWorkspace()
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "option:notesSearch.graphRelationships"
+      })
+    )
+    const relationships = within(
+      screen.getByTestId("notes-graph-relationships-view")
+    )
+
+    expect(
+      relationships.getByRole("button", { name: "Beta note" })
+    ).toBeVisible()
+    expect(
+      relationships.queryByRole("button", { name: "Hidden wikilink" })
+    ).not.toBeInTheDocument()
   })
 
   it("preserves source review controls after provisional activation while loaded relationships remain selectable", () => {

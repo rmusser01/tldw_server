@@ -18,6 +18,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     InputError,
 )
 
+from ..errors import SyncMaterializationContractError
 from ..models import SyncEnvelope, SyncObjectState
 from ..notes_link import (
     NotesLinkValidationError,
@@ -62,7 +63,7 @@ class NotesLinkMaterializer:
                 envelope.operation != "upsert"
                 or envelope.routing_metadata.get("restore_intent") is True
             ):
-                raise ValueError("Guarded notes.link mutation must be a create or upsert")
+                raise SyncMaterializationContractError()
 
         current_state = store.get_object_state(
             envelope.dataset_id,

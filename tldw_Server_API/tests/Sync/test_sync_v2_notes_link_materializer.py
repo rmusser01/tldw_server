@@ -16,6 +16,7 @@ from tldw_Server_API.app.core.Sync.v2.adapters import (
     SyncAdapterContext,
 )
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.notes_link import NotesLinkDomainAdapter
+from tldw_Server_API.app.core.Sync.v2.errors import SyncMaterializationContractError
 from tldw_Server_API.app.core.Sync.v2.materializers.guarded_product_mutation import (
     GuardedProductMutation,
 )
@@ -455,6 +456,42 @@ def test_materializer_exact_replay_executes_guard_against_live_postcondition(
     assert result.status == "applied"
     assert events == [("before", None), ("after", EDGE_ID)]
     assert note_db.notes_link_store.get(EDGE_ID).version == 1
+
+
+@pytest.mark.parametrize(
+    ("operation", "restore", "suffix"),
+    (("tombstone", False, "guarded-tombstone"), ("upsert", True, "guarded-restore")),
+)
+def test_invalid_guarded_mutation_raises_a_typed_materialization_contract_error(
+    materialization_stack,
+    operation: str,
+    restore: bool,
+    suffix: str,
+) -> None:
+    note_db, sync_store = materialization_stack
+    envelope = _stored(
+        sync_store,
+        payload=_payload(),
+        operation=operation,
+        restore=restore,
+        suffix=suffix,
+    )
+    guard = GuardedProductMutation(
+        expected_domain="notes.link",
+        expected_object_id=EDGE_ID,
+        before=lambda _conn: None,
+        after=lambda _conn, _identity: None,
+    )
+
+    with pytest.raises(
+        SyncMaterializationContractError,
+        match="sync_materialization_contract_invalid",
+    ):
+        NotesLinkMaterializer(note_db).apply(
+            envelope,
+            store=sync_store,
+            guarded_mutation=guard,
+        )
 
 
 def test_materializer_returns_safe_conflict_for_divergent_product_state(

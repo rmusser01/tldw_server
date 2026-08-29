@@ -33,6 +33,15 @@ class SyncMaterializationBusyError(SyncStoreError):
         super().__init__(self.error_code)
 
 
+class SyncMaterializationContractError(SyncStoreError):
+    """Raised when guarded projection input violates its mutation contract."""
+
+    error_code = "sync_materialization_contract_invalid"
+
+    def __init__(self) -> None:
+        super().__init__(self.error_code)
+
+
 class SyncMaterializationPredecessorError(SyncStoreError):
     """Raised when an earlier accepted projection has not reached applied state."""
 
@@ -75,6 +84,7 @@ __all__ = [
     "SyncIdempotencyConflictError",
     "SyncInvalidDomainError",
     "SyncMaterializationBusyError",
+    "SyncMaterializationContractError",
     "SyncMaterializationPredecessorError",
     "SyncStoreError",
     "SyncV2Error",

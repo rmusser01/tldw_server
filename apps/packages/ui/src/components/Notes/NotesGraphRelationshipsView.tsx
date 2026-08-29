@@ -42,6 +42,7 @@ type BuildGroupsInput = {
   selectedNodeId: string | null
   provisionalOverlays: ProvisionalNotesGraphOverlay[]
   suggestions: NotesGraphSuggestion[]
+  visibleEdgeTypes?: ReadonlySet<NotesGraphEdgeType>
 }
 
 const normalizedLabel = (value: string): string =>
@@ -51,7 +52,8 @@ export const buildNotesGraphRelationshipGroups = ({
   graph,
   selectedNodeId,
   provisionalOverlays,
-  suggestions
+  suggestions,
+  visibleEdgeTypes
 }: BuildGroupsInput): NotesGraphRelationshipGroup[] => {
   if (!selectedNodeId) return []
   const nodes = new Map(graph.nodes.map((node) => [node.id, node]))
@@ -61,6 +63,7 @@ export const buildNotesGraphRelationshipGroups = ({
   }
 
   graph.edges.forEach((edge) => {
+    if (visibleEdgeTypes && !visibleEdgeTypes.has(edge.type)) return
     if (edge.source !== selectedNodeId && edge.target !== selectedNodeId) return
     const counterpartId =
       edge.source === selectedNodeId ? edge.target : edge.source
@@ -252,6 +255,7 @@ const NotesGraphRelationshipsView: React.FC<
   selectedNodeId,
   provisionalOverlays,
   suggestions,
+  visibleEdgeTypes,
   suggestionsAuthorized,
   isOnline,
   canAccept = false,
@@ -266,14 +270,16 @@ const NotesGraphRelationshipsView: React.FC<
         graph,
         selectedNodeId,
         provisionalOverlays: suggestionsAuthorized ? provisionalOverlays : [],
-        suggestions: suggestionsAuthorized ? suggestions : []
+        suggestions: suggestionsAuthorized ? suggestions : [],
+        visibleEdgeTypes
       }),
     [
       graph,
       provisionalOverlays,
       selectedNodeId,
       suggestions,
-      suggestionsAuthorized
+      suggestionsAuthorized,
+      visibleEdgeTypes
     ]
   )
   const rows = React.useMemo(
@@ -315,7 +321,7 @@ const NotesGraphRelationshipsView: React.FC<
     )
     const nextSuggestionId =
       currentIndex >= 0
-        ? reviewRows[currentIndex + 1]?.dataset.suggestionReviewRow ?? null
+        ? (reviewRows[currentIndex + 1]?.dataset.suggestionReviewRow ?? null)
         : null
     let succeeded = false
     try {

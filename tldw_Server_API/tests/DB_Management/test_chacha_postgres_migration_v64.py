@@ -16,12 +16,6 @@ from tldw_Server_API.app.core.DB_Management.backends.base import (
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
-pytestmark = pytest.mark.unit
-
-
-class _ReachedV64(Exception):
-    pass
-
 
 class _FakeTransaction:
     def __enter__(self) -> object:
@@ -72,6 +66,7 @@ def _insert_note(
     )
 
 
+@pytest.mark.unit
 def test_postgres_initializer_routes_schema_v63_through_v64(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -93,14 +88,15 @@ def test_postgres_initializer_routes_schema_v63_through_v64(
     )
 
     def _reached_v64(_conn: object) -> None:
-        raise _ReachedV64
+        raise RuntimeError("reached-v64")
 
     monkeypatch.setattr(db, "_migrate_from_v63_to_v64_postgres", _reached_v64, raising=False)
 
-    with pytest.raises(_ReachedV64):
+    with pytest.raises(RuntimeError, match="^reached-v64$"):
         db._initialize_schema_postgres()
 
 
+@pytest.mark.unit
 def test_postgres_v64_migration_versions_after_applying_ddl(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -124,6 +120,7 @@ def test_postgres_v64_migration_versions_after_applying_ddl(
     assert applied == [(CharactersRAGDB._MIGRATION_SQL_V63_TO_V64_POSTGRES, 64)]
 
 
+@pytest.mark.unit
 def test_postgres_v64_ddl_has_owner_scoped_tables_checks_indexes_and_forced_rls() -> None:
     sql = " ".join(CharactersRAGDB._MIGRATION_SQL_V63_TO_V64_POSTGRES.split())
 

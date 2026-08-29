@@ -3,25 +3,26 @@ id: TASK-13138
 title: Implement first-class Notes graph workspace and reviewable AI suggestions
 status: Done
 assignee: []
-created_date: 2026-08-27 03:40
-updated_date: 2026-08-28 23:33
+created_date: '2026-08-27 03:40'
+updated_date: '2026-08-29 02:32'
 labels:
-- notes
-- knowledge-graph
-- webui
-- browser-extension
-- llm
-- jobs
+  - notes
+  - knowledge-graph
+  - webui
+  - browser-extension
+  - llm
+  - jobs
 dependencies: []
 references:
-- TASK-13134
-- TASK-13135
-- TASK-13136
-- TASK-13137
-- https://github.com/rmusser01/tldw_server/pull/2832
+  - TASK-13134
+  - TASK-13135
+  - TASK-13136
+  - TASK-13137
+  - 'https://github.com/rmusser01/tldw_server/pull/2832'
 documentation:
-- Docs/superpowers/specs/2026-08-26-notes-second-brain-graph-suggestions-design.md
-- Docs/superpowers/plans/2026-08-26-notes-second-brain-graph-suggestions.md
+  - >-
+    Docs/superpowers/specs/2026-08-26-notes-second-brain-graph-suggestions-design.md
+  - Docs/superpowers/plans/2026-08-26-notes-second-brain-graph-suggestions.md
 priority: high
 ---
 
@@ -66,6 +67,7 @@ Execute the approved 12-task test-first plan in Docs/superpowers/plans/2026-08-2
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Deferred work is tracked separately: TASK-13134 embeddings and semantic edges; TASK-13135 automatic background organization; TASK-13136 library-wide recurring themes; TASK-13137 saved graph views/layouts. This task remains review-first and on-demand.
 
@@ -206,12 +208,20 @@ Task 12 Fix Round 4 completed from exact base b66f352092c0dd1b417788f3cfefced796
 Final cumulative review fix wave started at b37cc2a78f. Validating six reviewer findings before test-first changes: nested cancellation note identity, concurrent owner admission limits, owner-isolated maintenance, shared maintenance budget, 90-day accepted-audit retention, and provisional-target review context.
 Final cumulative review closure completed in commits `d0d790492b`, `6fc56d1ab0`, `288c064f0d`, and `3f98840afb`. The fixes keep unloaded provisional targets inert, isolate maintenance per owner, enforce atomic owner-scoped Jobs admission, validate cancellation note identity transactionally, retain accepted audit metadata for 90 days, and charge the shared 100-row maintenance budget monotonically at durable run and expired-acceptance claim boundaries even when later reconciliation fails. Final verification: backend Notes Graph matrix 482/483 with only the unchanged delete-link copy assertion; focused frontend 145/145; broad Notes frontend 328/397 with the same 69 failures in the same 27 unchanged files; WebUI E2E 3/3; TASK-13138 extension E2E 2/2 and whole-file inherited baseline 2/4. Complete Ruff passed; Bandit reported 0 findings and 0 errors across 87,969 lines; ESLint reported 0 errors and 349 inherited warnings; WebUI/shared TypeScript reproduced exact 80/170 diagnostic baselines with zero touched-file matches; locale duplicate/coverage and 85/85 graph mirror passed. The unchanged Tags-help copy assertion and missing glossary fixture were reproduced. `git diff --check`, dependency, skip/only, port, and tracked-status checks passed; ports 18001/18082 are stopped and the two unrelated untracked Watchlists templates remain excluded. Human-authored PR Change summary remains required before merge.
 PR opened against `dev`: https://github.com/rmusser01/tldw_server/pull/2832. The PR body includes the requester-provided human-authored Change summary and the final verified baseline-aware validation evidence.
+PR #2832 review cycle resumed. Rebasing onto current `origin/dev` produced an AuthNZ migration-number collision: upstream canonical admin webhooks retain migration 94 and Notes graph suggestion permission seeding was renumbered to 95. The focused AuthNZ migration suite passed 2/2 after both replay conflict resolutions. Evaluating all posted Qodo findings and CI before fixes.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+PR #2832 rebase/review closure: rebased all 60 feature commits onto current origin/dev and resolved the AuthNZ migration collision by preserving upstream admin-webhook migration 94 and renumbering Notes graph permission seeding to migration 95. Addressed Qodo findings by offloading synchronous run admission from the async route, adding the complete endpoint docstring, replacing the local migration-test exception sentinel, introducing a typed Sync materialization contract error, assigning exactly one unit/integration marker per PostgreSQL v64 test, and applying edge visibility filters to Relationships mode. Rejected two findings with verified evidence: note_task_scope_authority is PRIMARY KEY(owner_user_id) and ADR 039 permits at most one immutable dataset per owner, so a 101st dataset is impossible; pg_database_config depends on function-scoped pg_temp_db, which provisions and drops a unique database per test, while isolated_test_environment is AuthNZ-specific. Final local verification: 108 backend tests passed (including live PostgreSQL), 36 frontend tests passed, the additional guarded tombstone/restore contract pair passed 2/2, Ruff/ESLint/extension-pinned Prettier/git diff checks passed, Bandit reported 0 findings, and an independent pre-merge review reported no actionable findings. The project-wide TypeScript command retains diagnostics only in unchanged origin/dev Presentation Studio and skills-certification files, with zero Notes graph diagnostics.
+<!-- SECTION:NOTES:END -->
+
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Implemented the first-class Notes Graph workspace and reviewable, source-grounded AI suggestions across the shared WebUI/browser-extension UI, nested Notes graph API, Jobs worker and maintenance lifecycle, durable owner-scoped storage, guarded accept/reject/reset decisions, accessibility, responsive behavior, and documentation. Cumulative review additionally hardened cancellation identity, transactional admission limits, owner-isolated and monotonically budgeted maintenance, 90-day accepted-audit retention, and provisional-target interaction safety. Final verification covers 482 passing backend tests with one unchanged copy baseline, 145/145 focused frontend tests, WebUI E2E 3/3, TASK-13138 extension E2E 2/2, complete Ruff/Bandit/ESLint gates, exact inherited TypeScript baselines with zero touched diagnostics, and locale/mirror integrity. Known inherited baselines remain documented. The requester-provided human-authored Change summary is included in PR #2832: https://github.com/rmusser01/tldw_server/pull/2832. Deferred work remains TASK-13134, TASK-13135, TASK-13136, and TASK-13137.
+
+Rebased PR #2832 onto latest dev, closed every actionable Qodo review finding with regression coverage, documented two schema/fixture false positives, and completed final security/static/test verification before merge.
 <!-- SECTION:FINAL_SUMMARY:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed

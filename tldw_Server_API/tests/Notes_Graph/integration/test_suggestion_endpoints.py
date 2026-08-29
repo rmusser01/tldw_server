@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
+from threading import Event
 from types import SimpleNamespace
 
 import pytest
@@ -299,6 +301,49 @@ def test_capability_sets_etag_and_run_admission_is_durable_202_without_jobs_inte
     assert "job_id" not in admitted.json()
     assert detail.status_code == 200
     assert detail.json()["state"] == "queued"
+
+
+@pytest.mark.asyncio
+async def test_run_admission_yields_the_event_loop_during_sync_facade_work(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started = Event()
+    release = Event()
+
+    class BlockingAPI(FakeAPI):
+        def admit_run(self, **kwargs):
+            started.set()
+            if not release.wait(timeout=1):
+                raise AssertionError("event loop could not release synchronous admission")
+            return super().admit_run(**kwargs)
+
+    fake = BlockingAPI()
+    monkeypatch.setattr(
+        endpoint,
+        "build_notes_graph_suggestions_api",
+        lambda **_kwargs: fake,
+    )
+    task = asyncio.create_task(
+        endpoint.create_suggestion_run(
+            note_id=NOTE_ID,
+            body=SuggestionRunCreateRequest(provider="openai", model="model-a"),
+            dataset_id=None,
+            if_match=f'"{REVISION}"',
+            idempotency_key="run-key",
+            user=SimpleNamespace(id=1, id_str="1"),
+            db=SimpleNamespace(),
+            jobs=SimpleNamespace(),
+            _principal=_principal(_base_permissions()),
+            _rate=None,
+            _scope=None,
+        )
+    )
+
+    assert await asyncio.to_thread(started.wait, 0.5) is True
+    release.set()
+    response = await task
+
+    assert response.id == "run-1"
 
 
 def test_in_progress_cancellation_returns_authoritative_cancelling_run() -> None:

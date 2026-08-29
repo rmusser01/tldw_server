@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
+from starlette.concurrency import run_in_threadpool
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     RequirePermission,
@@ -275,13 +276,37 @@ async def create_suggestion_run(
         TokenScopeGuard("notes", require_if_present=True, endpoint_id="notes.graph.suggest")
     ),
 ) -> SuggestionRunResponse:
+    """Admit a source-grounded suggestion run for one note.
+
+    Args:
+        note_id: Source note identifier nested in the route.
+        body: Optional provider and model overrides for generation.
+        dataset_id: Optional Notes dataset scope.
+        if_match: Required capability revision from the latest capabilities response.
+        idempotency_key: Required key that makes admission retries replay-safe.
+        user: Authenticated request user supplied by FastAPI.
+        db: Per-user Notes database supplied by FastAPI.
+        jobs: Optional Jobs manager used to queue generation.
+        _principal: Result of the graph-suggestion permission guard.
+        _rate: Result of the graph-suggestion rate-limit guard.
+        _scope: Result of the Notes token-scope guard.
+
+    Returns:
+        The newly admitted run or the durable response from an exact retry.
+
+    Raises:
+        HTTPException: If headers, note scope, capabilities, or admission are invalid.
+    """
+
     try:
-        admitted = _api(user=user, db=db, jobs=jobs, dataset_id=dataset_id).admit_run(
-            note_id=_normalize_note_id(note_id),
-            provider=body.provider,
-            model=body.model,
-            capability_revision=_required_if_match(if_match),
-            idempotency_key=_required_idempotency_key(idempotency_key),
+        admitted = await run_in_threadpool(
+            lambda: _api(user=user, db=db, jobs=jobs, dataset_id=dataset_id).admit_run(
+                note_id=_normalize_note_id(note_id),
+                provider=body.provider,
+                model=body.model,
+                capability_revision=_required_if_match(if_match),
+                idempotency_key=_required_idempotency_key(idempotency_key),
+            )
         )
     except SuggestionAPIError as exc:
         raise _http_error(exc) from exc
