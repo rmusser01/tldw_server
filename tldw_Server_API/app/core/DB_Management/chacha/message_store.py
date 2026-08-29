@@ -1665,6 +1665,42 @@ class MessageStore:
         except _CHACHA_NONCRITICAL_EXCEPTIONS:
             return {}
 
+    def _get_message_metadata_for_merge(
+        self,
+        message_id: str,
+        conn: Any,
+    ) -> dict[str, Any] | None:
+        """Read metadata under the row lock used by PostgreSQL merge writers."""
+        if self._db.backend_type == BackendType.POSTGRESQL:
+            conn.execute(
+                "INSERT INTO message_metadata(message_id, last_modified) "
+                "SELECT id, CURRENT_TIMESTAMP FROM messages WHERE id = ? "
+                "ON CONFLICT(message_id) DO NOTHING",
+                (message_id,),
+            )
+            query = (
+                "SELECT tool_calls_json, extra_json, last_modified "
+                "FROM message_metadata WHERE message_id = ? FOR UPDATE"
+            )
+        else:
+            query = (
+                "SELECT tool_calls_json, extra_json, last_modified "
+                "FROM message_metadata WHERE message_id = ?"
+            )
+
+        row = conn.execute(query, (message_id,)).fetchone()
+        if row is None:
+            # SQLite merge writers retain the existing create-on-first-write
+            # behavior; the downstream message join still rejects missing IDs.
+            return {} if self._db.backend_type == BackendType.SQLITE else None
+        tool_calls = self._row_value(row, "tool_calls_json")
+        extra = self._row_value(row, "extra_json", 1)
+        return {
+            "tool_calls": self._metadata_json_value(tool_calls) if tool_calls is not None else None,
+            "extra": self._metadata_json_value(extra) if extra is not None else None,
+            "last_modified": self._row_value(row, "last_modified", 2),
+        }
+
     def set_message_metadata_extra(
         self,
         message_id: str,
@@ -1690,7 +1726,9 @@ class MessageStore:
             self._db._ensure_message_metadata_table()
             transaction = nullcontext(conn) if conn is not None else self._db.transaction()
             with transaction as transaction_conn:
-                current = self.get_message_metadata(message_id, conn=transaction_conn) or {}
+                current = self._get_message_metadata_for_merge(message_id, transaction_conn)
+                if current is None:
+                    return False
                 current_extra = current.get('extra') or {}
                 if merge and isinstance(current_extra, dict) and isinstance(extra, dict):
                     merged = dict(current_extra)
@@ -1749,27 +1787,11 @@ class MessageStore:
         Returns:
             bool: True if successful, False otherwise
         """
-        try:
-            # Get current metadata to preserve other extra fields
-            current = self.get_message_metadata(message_id) or {}
-            current_extra = current.get('extra') or {}
-
-            if merge and isinstance(current_extra, dict):
-                # Merge: preserve existing extra fields, update rag_context
-                new_extra = dict(current_extra)
-                new_extra['rag_context'] = rag_context
-            else:
-                # Replace: only keep rag_context
-                new_extra = {'rag_context': rag_context}
-
-            return self.add_message_metadata(
-                message_id,
-                tool_calls=current.get('tool_calls'),
-                extra=new_extra
-            )
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.warning(f"set_message_rag_context failed for {message_id}: {e}")
-            return False
+        return self.set_message_metadata_extra(
+            message_id,
+            {"rag_context": rag_context},
+            merge=merge,
+        )
 
     def get_message_rag_context(self, message_id: str) -> dict[str, Any] | None:
         """

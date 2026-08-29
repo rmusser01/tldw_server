@@ -1137,6 +1137,7 @@ class _PostgresStoreBackend:
         self.messages: dict[str, dict[str, Any]] = {}
         self.images: list[tuple[str, int, bytes, str]] = []
         self.metadata: dict[str, dict[str, Any]] = {}
+        self.metadata_lock_interleave: Any | None = None
         self.snapshot_row: dict[str, Any] | None = None
         self.executed: list[tuple[str, tuple[Any, ...]]] = []
 
@@ -1247,13 +1248,26 @@ class _PostgresStoreBackend:
                 rowcount=1,
             )
         if normalized.startswith("insert into message_metadata"):
-            self.metadata[str(values[0])] = {
-                "tool_calls_json": values[1],
-                "extra_json": values[2],
-                "last_modified": "2026-08-28T00:00:00Z",
-            }
+            message_id = str(values[0])
+            if "select id" in normalized:
+                if message_id in self.messages and message_id not in self.metadata:
+                    self.metadata[message_id] = {
+                        "tool_calls_json": None,
+                        "extra_json": None,
+                        "last_modified": "2026-08-28T00:00:00Z",
+                    }
+            else:
+                self.metadata[message_id] = {
+                    "tool_calls_json": values[1],
+                    "extra_json": values[2],
+                    "last_modified": "2026-08-28T00:00:00Z",
+                }
             return self._result(rowcount=1)
         if normalized.startswith("select tool_calls_json, extra_json, last_modified"):
+            if normalized.endswith("for update") and self.metadata_lock_interleave is not None:
+                interleave = self.metadata_lock_interleave
+                self.metadata_lock_interleave = None
+                interleave()
             metadata = self.metadata.get(str(values[0]))
             return self._result([dict(metadata)] if metadata else [], rowcount=1 if metadata else 0)
         if normalized.startswith("select version, deleted from messages"):
@@ -1643,6 +1657,61 @@ def test_postgres_backend_wrapper_caller_owned_message_mutations_advance_once() 
 
     assert store.soft_delete_message(message_id, 2, conn=wrapper)
     assert backend.history_version == 6
+
+
+def test_postgres_rag_merge_locks_before_read_and_preserves_interleaved_pin() -> None:
+    backend = _PostgresStoreBackend()
+    db, wrapper = _postgres_store_db(backend)
+    db.transaction = lambda: nullcontext(wrapper)
+    store = db.message_store
+    message_id = store.add_message(
+        {
+            "id": "postgres-rag-message",
+            "conversation_id": backend.conversation_id,
+            "sender": "assistant",
+            "content": "Answer",
+        },
+        conn=wrapper,
+    )
+    assert message_id == "postgres-rag-message"
+    assert store.add_message_metadata(
+        message_id,
+        extra={"trace_id": "before"},
+        conn=wrapper,
+    )
+
+    def _commit_concurrent_pin() -> None:
+        backend.metadata[message_id]["extra_json"] = json.dumps(
+            {"trace_id": "before", "pinned": True}
+        )
+
+    backend.metadata_lock_interleave = _commit_concurrent_pin
+    start_index = len(backend.executed)
+
+    assert store.set_message_rag_context(
+        message_id,
+        {"search_query": "galaxy"},
+    )
+
+    extra = json.loads(backend.metadata[message_id]["extra_json"])
+    assert extra == {
+        "trace_id": "before",
+        "pinned": True,
+        "rag_context": {"search_query": "galaxy"},
+    }
+    statements = [statement for statement, _params in backend.executed[start_index:]]
+    lock_index = next(
+        index
+        for index, statement in enumerate(statements)
+        if statement.startswith("select tool_calls_json, extra_json, last_modified")
+        and statement.endswith("for update")
+    )
+    write_index = next(
+        index
+        for index, statement in enumerate(statements)
+        if statement.startswith("insert into message_metadata") and index > lock_index
+    )
+    assert lock_index < write_index
 
 
 @pytest.mark.parametrize("caller_owned", [False, True])
