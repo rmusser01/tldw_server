@@ -29,7 +29,9 @@ from tldw_Server_API.tests.Admin_Webhooks.test_event_expansion import (
     exercise_task9_test_attempt_contract,
 )
 from tldw_Server_API.tests.Admin_Webhooks.test_test_delivery import (
+    exercise_commit_failure_correlated_audit,
     exercise_concurrent_exact_test_start,
+    exercise_post_start_semantic_and_rekey_races,
     exercise_prestart_rejections_are_no_io,
     exercise_processing_replay_and_conflict_precede_current_state,
     exercise_retry_class_terminalization_and_completion_audit_failure,
@@ -253,3 +255,19 @@ async def test_postgres_task9_prestart_rejections_are_no_io(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     await exercise_prestart_rejections_are_no_io(delivery_repo, monkeypatch)
+
+
+@pytest.mark.integration
+async def test_postgres_task9_post_start_semantic_and_rekey_races(
+    delivery_repo: PostgreSQLDeliveryRepositoryFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await exercise_post_start_semantic_and_rekey_races(delivery_repo, monkeypatch)
+
+
+@pytest.mark.integration
+async def test_postgres_task9_commit_failure_correlated_audit(
+    delivery_repo: PostgreSQLDeliveryRepositoryFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await exercise_commit_failure_correlated_audit(delivery_repo, monkeypatch)

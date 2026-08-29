@@ -5,6 +5,7 @@ import base64
 import hashlib
 import importlib
 import json
+from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import fields, is_dataclass
 from datetime import datetime, timedelta, timezone
@@ -25,6 +26,7 @@ from tldw_Server_API.app.core.Admin_Webhooks.crypto import (
 from tldw_Server_API.app.core.Admin_Webhooks.domain import (
     AttemptState,
     DeliveryKind,
+    DeliveryReasonCode,
     DeliveryState,
     WebhookError,
     WebhookErrorCode,
@@ -33,11 +35,13 @@ from tldw_Server_API.app.core.Admin_Webhooks.domain import (
 from tldw_Server_API.app.core.Admin_Webhooks.executor import (
     DeliveryAttemptExecutor,
 )
+from tldw_Server_API.app.core.AuthNZ.exceptions import TransactionError
 from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
     AdminWebhookRepository,
     RegistrationInsert,
     RegistrationTarget,
 )
+from tldw_Server_API.app.core.exceptions import HTTPHopError
 from tldw_Server_API.app.core.Security.egress import URLPolicyResult
 from tldw_Server_API.app.core.Security.http_hop import StatusOnlyHTTPHopResponse
 
@@ -563,6 +567,330 @@ async def exercise_retry_class_terminalization_and_completion_audit_failure(
     assert IDEMPOTENCY_KEY not in repr(audits)
 
 
+async def exercise_post_start_semantic_and_rekey_races(
+    fixture: TestRepositoryFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    delivery_module = importlib.import_module(
+        "tldw_Server_API.app.core.Admin_Webhooks.delivery"
+    )
+    executor_module = importlib.import_module(
+        "tldw_Server_API.app.core.Admin_Webhooks.executor"
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Admin_Webhooks.domain.evaluate_platform_webhook_url_policy",
+        lambda _url: URLPolicyResult(True, None, ("203.0.113.10",)),
+    )
+    monkeypatch.setattr(
+        executor_module,
+        "evaluate_platform_webhook_url_policy",
+        lambda _url: URLPolicyResult(True, None, ("203.0.113.10",)),
+    )
+
+    async def mutate_config(registration, _ring: WebhookKeyRing) -> None:
+        await fixture.execute(
+            """
+            UPDATE admin_webhook_registrations
+            SET revision = revision + 1,
+                delivery_config_version = delivery_config_version + 1,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            NOW + timedelta(seconds=1),
+            registration.id,
+        )
+
+    async def rotate_secret(registration, ring: WebhookKeyRing) -> None:
+        next_version = registration.secret_version + 1
+        secret = ring.encrypt_text(
+            purpose="registration.secret",
+            identity={
+                "registration_id": registration.id,
+                "secret_version": next_version,
+            },
+            plaintext="whsec_" + "2" * 64,
+        )
+        await fixture.execute(
+            """
+            UPDATE admin_webhook_registrations
+            SET revision = revision + 1, secret_version = ?,
+                secret_ciphertext_json = ?, secret_key_id = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            next_version,
+            secret.ciphertext_json,
+            secret.key_id,
+            NOW + timedelta(seconds=1),
+            registration.id,
+        )
+
+    async def delete_registration(registration, _ring: WebhookKeyRing) -> None:
+        async with fixture.repository.transaction() as tx:
+            await tx.soft_delete_registration(
+                registration.id,
+                expected_revision=registration.revision,
+                actor_user_id=7,
+                at=NOW + timedelta(seconds=1),
+            )
+
+    mutations = (
+        ("config", mutate_config),
+        ("secret", rotate_secret),
+        ("delete", delete_registration),
+    )
+    outcomes = (
+        ("success", 204, None, DeliveryState.SUCCEEDED, None),
+        (
+            "http-retry",
+            503,
+            None,
+            DeliveryState.DEAD,
+            DeliveryReasonCode.HTTP_SERVER_ERROR,
+        ),
+        (
+            "network-retry",
+            None,
+            HTTPHopError("read_timeout", retryable=True),
+            DeliveryState.DEAD,
+            DeliveryReasonCode.HTTP_HOP_READ_TIMEOUT,
+        ),
+    )
+
+    class MutatingEgress(EgressRecorder):
+        def __init__(
+            self,
+            *,
+            mutation: Callable[[object, WebhookKeyRing], Awaitable[None]],
+            registration: object,
+            ring: WebhookKeyRing,
+            status_code: int | None,
+            hop_error: HTTPHopError | None,
+        ) -> None:
+            super().__init__()
+            self._mutation = mutation
+            self._registration = registration
+            self._ring = ring
+            self._status_code = status_code
+            self._hop_error = hop_error
+
+        async def __call__(self, request: object) -> StatusOnlyHTTPHopResponse:
+            self.requests.append(request)
+            await self._mutation(self._registration, self._ring)
+            if self._hop_error is not None:
+                raise self._hop_error
+            if self._status_code is None:
+                raise AssertionError("status is required without a hop error")
+            return StatusOnlyHTTPHopResponse(
+                status_code=self._status_code,
+                latency_ms=1,
+                retry_after_seconds=(
+                    1_800 if self._status_code == 503 else None
+                ),
+            )
+
+    for mutation_label, mutation in mutations:
+        for outcome_label, status_code, hop_error, state, reason in outcomes:
+            label = f"post-start-{mutation_label}-{outcome_label}"
+            registration, ring = await seed_ready_registration(fixture)
+
+            ids = iter(
+                (
+                    canonical_uuid4(f"{label}-event"),
+                    canonical_uuid4(f"{label}-delivery"),
+                    canonical_uuid4(f"{label}-attempt"),
+                )
+            )
+            egress = MutatingEgress(
+                mutation=mutation,
+                registration=registration,
+                ring=ring,
+                status_code=status_code,
+                hop_error=hop_error,
+            )
+            service = delivery_module.AdminWebhookDeliveryService(
+                repository=fixture.repository,
+                key_ring_result=WebhookKeyRingLoadResult(
+                    ring=ring,
+                    code=WebhookKeyLoadCode.AVAILABLE,
+                ),
+                event_id_factory=ids.__next__,
+                delivery_id_factory=ids.__next__,
+                clock=iter((NOW, NOW + timedelta(seconds=2))).__next__,
+                settings=settings(),
+                executor=DeliveryAttemptExecutor(egress=egress),
+                test_attempt_id_factory=ids.__next__,
+                test_token_factory=iter((opaque_token(f"{label}-token"),)).__next__,
+            )
+            command = delivery_module.TestWebhookCommand(
+                actor_id=7,
+                webhook_id=registration.id,
+                if_match=build_registration_etag(
+                    webhook_id=registration.id,
+                    revision=registration.revision,
+                ),
+                delivery_config_version=registration.delivery_config_version,
+                idempotency_key=hashlib.sha256(label.encode()).hexdigest()[:32],
+                request_id=f"{label}-request",
+            )
+
+            result = await service.test_webhook(
+                command,
+                audit_sink=lambda _record: asyncio.sleep(0),
+            )
+
+            assert result.delivery.state is state, label
+            assert result.delivery.reason_code is reason, label
+            assert result.attempt.state is (
+                AttemptState.SUCCEEDED
+                if state is DeliveryState.SUCCEEDED
+                else AttemptState.FAILED
+            ), label
+            assert result.attempt.reason_code is reason, label
+            assert result.delivery.attempt_count == 1, label
+            assert result.attempt.requested_retry_delay_seconds is None, label
+            assert len(egress.requests) == 1, label
+            bundle = await fixture.repository.get_delivery_bundle(result.delivery.id)
+            assert bundle is not None
+            assert bundle.delivery.completed_after_config_change is True, label
+            assert bundle.delivery.jobs_job_id is None, label
+            assert bundle.delivery.pending_jobs_disposition is None, label
+            assert (
+                await fixture.fetchval(
+                    "SELECT COUNT(*) FROM admin_webhook_delivery_attempts WHERE delivery_id = ?",
+                    result.delivery.id,
+                )
+                == 1
+            ), label
+
+    registration, ring = await seed_ready_registration(fixture)
+    encoded_old = base64.b64encode(b"t" * 32).decode("ascii")
+    encoded_new = base64.b64encode(b"r" * 32).decode("ascii")
+    rekey_id = "task9-rekey"
+    rekey_ring = WebhookKeyRing(
+        {KEY_ID: encoded_old, rekey_id: encoded_new},
+        primary_id=rekey_id,
+    )
+    protected_before = await fixture.repository.get_protected_registration(
+        registration.id,
+        include_deleted=False,
+    )
+    assert protected_before is not None
+
+    class RekeyingEgress(EgressRecorder):
+        async def __call__(self, request: object) -> StatusOnlyHTTPHopResponse:
+            self.requests.append(request)
+            target = rekey_ring.encrypt_text(
+                purpose="registration.target",
+                identity={
+                    "registration_id": registration.id,
+                    "target_version": registration.target_version,
+                },
+                plaintext=TARGET_URL,
+            )
+            secret = rekey_ring.encrypt_text(
+                purpose="registration.secret",
+                identity={
+                    "registration_id": registration.id,
+                    "secret_version": registration.secret_version,
+                },
+                plaintext=SIGNING_SECRET,
+            )
+            await fixture.execute(
+                """
+                UPDATE admin_webhook_registrations
+                SET target_ciphertext_json = ?, target_key_id = ?,
+                    secret_ciphertext_json = ?, secret_key_id = ?
+                WHERE id = ?
+                """,
+                target.ciphertext_json,
+                target.key_id,
+                secret.ciphertext_json,
+                secret.key_id,
+                registration.id,
+            )
+            return StatusOnlyHTTPHopResponse(204, 1, None)
+
+    ids = iter(
+        (
+            canonical_uuid4("post-start-rekey-event"),
+            canonical_uuid4("post-start-rekey-delivery"),
+            canonical_uuid4("post-start-rekey-attempt"),
+        )
+    )
+    rekey_egress = RekeyingEgress()
+    rekey_service = delivery_module.AdminWebhookDeliveryService(
+        repository=fixture.repository,
+        key_ring_result=WebhookKeyRingLoadResult(
+            ring=ring,
+            code=WebhookKeyLoadCode.AVAILABLE,
+        ),
+        event_id_factory=lambda: next(ids),
+        delivery_id_factory=lambda: next(ids),
+        clock=iter((NOW, NOW + timedelta(seconds=2))).__next__,
+        settings=settings(),
+        executor=DeliveryAttemptExecutor(egress=rekey_egress),
+        test_attempt_id_factory=lambda: next(ids),
+        test_token_factory=lambda: opaque_token("post-start-rekey-token"),
+    )
+    rekey_result = await rekey_service.test_webhook(
+        delivery_module.TestWebhookCommand(
+            actor_id=7,
+            webhook_id=registration.id,
+            if_match=build_registration_etag(
+                webhook_id=registration.id,
+                revision=registration.revision,
+            ),
+            delivery_config_version=registration.delivery_config_version,
+            idempotency_key="8899aabbccddeeff0011223344556677",
+            request_id="post-start-rekey-request",
+        ),
+        audit_sink=lambda _record: asyncio.sleep(0),
+    )
+    protected_after = await fixture.repository.get_protected_registration(
+        registration.id,
+        include_deleted=False,
+    )
+    assert protected_after is not None
+    assert protected_after.registration.revision == registration.revision
+    assert (
+        protected_after.registration.delivery_config_version
+        == registration.delivery_config_version
+    )
+    assert protected_after.registration.target_version == registration.target_version
+    assert protected_after.registration.secret_version == registration.secret_version
+    assert protected_after.target != protected_before.target
+    assert protected_after.secret != protected_before.secret
+    assert (
+        rekey_ring.decrypt_text(
+            purpose="registration.target",
+            identity={
+                "registration_id": registration.id,
+                "target_version": registration.target_version,
+            },
+            protected=protected_after.target,
+        )
+        == TARGET_URL
+    )
+    assert (
+        rekey_ring.decrypt_text(
+            purpose="registration.secret",
+            identity={
+                "registration_id": registration.id,
+                "secret_version": registration.secret_version,
+            },
+            protected=protected_after.secret,
+        )
+        == SIGNING_SECRET
+    )
+    rekey_bundle = await fixture.repository.get_delivery_bundle(
+        rekey_result.delivery.id
+    )
+    assert rekey_bundle is not None
+    assert rekey_result.delivery.state is DeliveryState.SUCCEEDED
+    assert rekey_bundle.delivery.completed_after_config_change is False
+    assert len(rekey_egress.requests) == 1
+
+
 async def exercise_start_races_and_accepted_audit_rollback(
     fixture: TestRepositoryFixture,
     monkeypatch: pytest.MonkeyPatch,
@@ -574,6 +902,11 @@ async def exercise_start_races_and_accepted_audit_rollback(
         "tldw_Server_API.app.core.Admin_Webhooks.executor"
     )
     registration, ring = await seed_ready_registration(fixture)
+    protected = await fixture.repository.get_protected_registration(
+        registration.id,
+        include_deleted=False,
+    )
+    assert protected is not None
     monkeypatch.setattr(
         "tldw_Server_API.app.core.Admin_Webhooks.domain.evaluate_platform_webhook_url_policy",
         lambda _url: URLPolicyResult(True, None, ("203.0.113.10",)),
@@ -656,7 +989,33 @@ async def exercise_start_races_and_accepted_audit_rollback(
             )
             == 0
         )
+        assert await fixture.fetchval(
+            "SELECT COUNT(*) FROM admin_webhook_idempotency WHERE operation = 'test'"
+        ) == 0
+        assert await fixture.fetchval(
+            "SELECT COUNT(*) FROM admin_webhook_deliveries WHERE kind = 'test'"
+        ) == 0
+        assert await fixture.fetchval(
+            "SELECT COUNT(*) FROM admin_webhook_delivery_attempts"
+        ) == 0
         return failure.value.code
+
+    async def restore_protected_snapshot() -> None:
+        await fixture.execute(
+            """
+            UPDATE admin_webhook_registrations
+            SET target_version = ?, target_ciphertext_json = ?, target_key_id = ?,
+                secret_version = ?, secret_ciphertext_json = ?, secret_key_id = ?
+            WHERE id = ?
+            """,
+            protected.registration.target_version,
+            protected.target.ciphertext_json,
+            protected.target.key_id,
+            protected.registration.secret_version,
+            protected.secret.ciphertext_json,
+            protected.secret.key_id,
+            registration.id,
+        )
 
     async def mutate_config() -> None:
         await fixture.execute(
@@ -754,6 +1113,115 @@ async def exercise_start_races_and_accepted_audit_rollback(
         """
     )
 
+    async def change_target_version() -> None:
+        await fixture.execute(
+            "UPDATE admin_webhook_registrations SET target_version = target_version + 1 WHERE id = ?",
+            registration.id,
+        )
+
+    assert (
+        await run_race("target-version-race", change_target_version)
+        is WebhookErrorCode.PRECONDITION_FAILED
+    )
+    await restore_protected_snapshot()
+
+    async def change_secret_version() -> None:
+        await fixture.execute(
+            "UPDATE admin_webhook_registrations SET secret_version = secret_version + 1 WHERE id = ?",
+            registration.id,
+        )
+
+    assert (
+        await run_race("secret-version-race", change_secret_version)
+        is WebhookErrorCode.PRECONDITION_FAILED
+    )
+    await restore_protected_snapshot()
+
+    reencrypted_target = ring.encrypt_text(
+        purpose="registration.target",
+        identity={
+            "registration_id": registration.id,
+            "target_version": registration.target_version,
+        },
+        plaintext=TARGET_URL,
+    )
+
+    async def change_target_ciphertext() -> None:
+        await fixture.execute(
+            "UPDATE admin_webhook_registrations SET target_ciphertext_json = ? WHERE id = ?",
+            reencrypted_target.ciphertext_json,
+            registration.id,
+        )
+
+    assert (
+        await run_race("target-ciphertext-race", change_target_ciphertext)
+        is WebhookErrorCode.PRECONDITION_FAILED
+    )
+    await restore_protected_snapshot()
+
+    async def change_target_key_id() -> None:
+        await fixture.execute(
+            "UPDATE admin_webhook_registrations SET target_key_id = ? WHERE id = ?",
+            "task9-other-key",
+            registration.id,
+        )
+
+    assert (
+        await run_race("target-key-race", change_target_key_id)
+        is WebhookErrorCode.PRECONDITION_FAILED
+    )
+    await restore_protected_snapshot()
+
+    reencrypted_secret = ring.encrypt_text(
+        purpose="registration.secret",
+        identity={
+            "registration_id": registration.id,
+            "secret_version": registration.secret_version,
+        },
+        plaintext=SIGNING_SECRET,
+    )
+
+    async def change_secret_ciphertext() -> None:
+        await fixture.execute(
+            "UPDATE admin_webhook_registrations SET secret_ciphertext_json = ? WHERE id = ?",
+            reencrypted_secret.ciphertext_json,
+            registration.id,
+        )
+
+    assert (
+        await run_race("secret-ciphertext-race", change_secret_ciphertext)
+        is WebhookErrorCode.PRECONDITION_FAILED
+    )
+    await restore_protected_snapshot()
+
+    async def change_secret_key_id() -> None:
+        await fixture.execute(
+            "UPDATE admin_webhook_registrations SET secret_key_id = ? WHERE id = ?",
+            "task9-other-key",
+            registration.id,
+        )
+
+    assert (
+        await run_race("secret-key-race", change_secret_key_id)
+        is WebhookErrorCode.PRECONDITION_FAILED
+    )
+    await restore_protected_snapshot()
+
+    async def change_active_primary() -> None:
+        await fixture.execute(
+            "UPDATE admin_webhook_migration_state SET active_primary_key_id = ? WHERE singleton_id = 1",
+            "task9-other-key",
+        )
+
+    assert (
+        await run_race("active-primary-race", change_active_primary)
+        is WebhookErrorCode.KEY_CONFIGURATION_MISMATCH
+    )
+    await fixture.execute(
+        "UPDATE admin_webhook_migration_state SET active_primary_key_id = ? WHERE singleton_id = 1",
+        KEY_ID,
+    )
+
     current = await fixture.repository.get_registration(registration.id)
     assert current is not None
     rollback_command = delivery_module.TestWebhookCommand(
@@ -786,6 +1254,114 @@ async def exercise_start_races_and_accepted_audit_rollback(
         )
         == 0
     )
+
+
+async def exercise_commit_failure_correlated_audit(
+    fixture: TestRepositoryFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    delivery_module = importlib.import_module(
+        "tldw_Server_API.app.core.Admin_Webhooks.delivery"
+    )
+    executor_module = importlib.import_module(
+        "tldw_Server_API.app.core.Admin_Webhooks.executor"
+    )
+    registration, ring = await seed_ready_registration(fixture)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Admin_Webhooks.domain.evaluate_platform_webhook_url_policy",
+        lambda _url: URLPolicyResult(True, None, ("203.0.113.10",)),
+    )
+    monkeypatch.setattr(
+        executor_module,
+        "evaluate_platform_webhook_url_policy",
+        lambda _url: URLPolicyResult(True, None, ("203.0.113.10",)),
+    )
+
+    class CommitFailRepository:
+        def __getattr__(self, name: str):
+            return getattr(fixture.repository, name)
+
+        @asynccontextmanager
+        async def transaction(self):
+            async with fixture.repository.transaction() as tx:
+                yield tx
+                raise TransactionError("simulated test-start commit failure")
+
+    async def run_case(label: str, *, failed_audit_fails: bool) -> None:
+        ids = iter(
+            (
+                canonical_uuid4(f"{label}-event"),
+                canonical_uuid4(f"{label}-delivery"),
+                canonical_uuid4(f"{label}-attempt"),
+            )
+        )
+        egress = EgressRecorder()
+        service = delivery_module.AdminWebhookDeliveryService(
+            repository=CommitFailRepository(),
+            key_ring_result=WebhookKeyRingLoadResult(
+                ring=ring,
+                code=WebhookKeyLoadCode.AVAILABLE,
+            ),
+            event_id_factory=lambda: next(ids),
+            delivery_id_factory=lambda: next(ids),
+            clock=lambda: NOW,
+            settings=settings(),
+            executor=DeliveryAttemptExecutor(egress=egress),
+            test_attempt_id_factory=lambda: next(ids),
+            test_token_factory=lambda: opaque_token(f"{label}-token"),
+        )
+        command = delivery_module.TestWebhookCommand(
+            actor_id=7,
+            webhook_id=registration.id,
+            if_match=build_registration_etag(
+                webhook_id=registration.id,
+                revision=registration.revision,
+            ),
+            delivery_config_version=registration.delivery_config_version,
+            idempotency_key=hashlib.sha256(label.encode()).hexdigest()[:32],
+            request_id=f"{label}-request",
+        )
+        audits: list[object] = []
+
+        async def audit_sink(record: object) -> None:
+            audits.append(record)
+            if failed_audit_fails and record.outcome == "failed":  # type: ignore[attr-defined]
+                raise RuntimeError("follow-up audit unavailable")
+
+        with pytest.raises(WebhookError) as failure:
+            await service.test_webhook(command, audit_sink=audit_sink)
+        assert failure.value.code is WebhookErrorCode.OPERATION_FAILED
+        assert [record.outcome for record in audits] == [  # type: ignore[attr-defined]
+            "accepted",
+            "failed",
+        ]
+        accepted, failed = audits
+        for field_name in (
+            "actor_id",
+            "webhook_id",
+            "delivery_id",
+            "attempt_id",
+            "request_id",
+        ):
+            assert getattr(accepted, field_name) == getattr(failed, field_name)
+        assert failed.reason_code is WebhookErrorCode.OPERATION_FAILED  # type: ignore[attr-defined]
+        assert egress.requests == []
+        assert await fixture.fetchval(
+            "SELECT COUNT(*) FROM admin_webhook_idempotency WHERE operation = 'test'"
+        ) == 0
+        assert await fixture.fetchval(
+            "SELECT COUNT(*) FROM admin_webhook_events WHERE source_request_id = ?",
+            command.request_id,
+        ) == 0
+        assert await fixture.fetchval(
+            "SELECT COUNT(*) FROM admin_webhook_deliveries WHERE kind = 'test'"
+        ) == 0
+        assert await fixture.fetchval(
+            "SELECT COUNT(*) FROM admin_webhook_delivery_attempts"
+        ) == 0
+
+    await run_case("commit-failure-audit-succeeds", failed_audit_fails=False)
+    await run_case("commit-failure-audit-fails", failed_audit_fails=True)
 
 
 async def exercise_concurrent_exact_test_start(

@@ -1282,6 +1282,31 @@ git diff --cached --check
 git commit -m "feat(admin-webhooks): persist synchronous test attempts"
 ```
 
+**Review ruling (fix round 1):** The independent review correctly identified
+four evidence/behavior gaps. Expand the shared SQLite/PostgreSQL contract to
+prove post-commit 204, retryable HTTP, and retryable network outcomes across
+semantic configuration, signing-secret, and deletion races; prove every
+pre-commit target/secret version, ciphertext, key-ID, and active-primary race
+rolls back the entire start with zero receiver I/O; commit stale recovery before
+an independent late-completion transaction proves the exact token CAS loses;
+and implement the global correlated-audit protocol when transaction exit fails
+after the mandatory `accepted` audit. That last path must attempt a bounded
+`failed` audit with the same request, webhook, delivery, and attempt identity,
+roll back all AuthNZ rows, and never invoke the executor; failure of the
+follow-up audit must not mask the original commit error.
+
+The review suggestion that envelope ciphertext or key-ID rewrites alone set
+`completed_after_config_change=true` is rejected as stated. Dedicated
+encryption-at-rest rotation preserves the receiver-visible target, signing
+secret, timeout, and event configuration and does not advance their semantic
+versions. The flag remains tied to registration revision/lifecycle,
+`delivery_config_version`, and signing-secret version changes. Add an explicit
+post-start re-encryption regression proving the real receiver result is retained
+with `completed_after_config_change=false`; this prevents operational key
+maintenance from being mislabeled as a webhook configuration change. Start-time
+snapshot CAS remains stricter and must reject an intervening envelope/key rewrite
+before I/O.
+
 ### Task 10: Expose Manual Redelivery, Test, History, And Audit APIs
 
 **Files:**

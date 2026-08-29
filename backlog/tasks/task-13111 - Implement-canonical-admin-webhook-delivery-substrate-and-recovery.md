@@ -4,7 +4,7 @@ title: Implement canonical admin webhook delivery substrate and recovery
 status: In Progress
 assignee: []
 created_date: '2026-08-23 03:15'
-updated_date: '2026-08-29 19:59'
+updated_date: '2026-08-29 20:37'
 labels:
   - admin
   - webhooks
@@ -181,6 +181,10 @@ Task 8 complete after two fix rounds: all implementation and evidence findings a
 Task 9 started at c32e1d5153. Preflight expanded scope to exact lookup-only test replay, atomic no-fanout test start, token-bound completion/idempotency, bounded stale recovery, and SQLite plus required-PostgreSQL proof; no schema, Jobs, or public API activation.
 
 2026-08-29: Task 9 complete at pre-commit tree. Added internal persisted synchronous one-attempt tests with lookup-first exact idempotency replay, atomic no-fanout processing start, real shared-executor one-I/O ownership, token-bound terminal completion, bounded interrupted-attempt recovery, and an inactive reconciler pass. SQLite plus required PostgreSQL, executor, capture, control-plane, reconciler, and Task 8 worker/recovery gate: 256 passed, 0 skipped in 156.67s. Ruff and Python 3.10 compile passed; all 39 low-confidence B608 Bandit findings were reviewed as fixed SQL fragments with bound values; no Jobs call/SQL, route, runtime, schema, migration, producer, or legacy activation was added. Evidence: .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-9-report.md.
+
+2026-08-29: Task 9 independent review at 71cd449554 requires fix round 1 for post-start receiver outcome/configuration races, exact pre-start protected-snapshot/primary races, committed stale-recovery late-writer proof, and correlated failed audit after accepted-audit commit failure. Pure encryption-at-rest rekey is explicitly non-semantic for completed_after_config_change, while start CAS remains strict; dual-backend proof is required. Review: .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-9-review-1.md.
+
+2026-08-29: Task 9 Fix Round 1 complete from exact FIX_BASE 71cd4495549ca844b2b4090c728d05e4774d782e. Added dual-backend post-start 204/retryable-HTTP/retryable-network coverage across semantic config, signing-secret, and deletion races; pure post-start rekey remains non-semantic while every protected pre-start/rekey/active-primary race rejects before I/O; stale recovery now commits before an independent late completion loses; accepted-audit transaction-exit failure emits a correlated bounded failed audit without masking the original error. RED on both backends: 1 failed, 3 passed, 18 deselected, zero skips. Final PostgreSQL-required regression gate: 260 passed, 0 skipped, 311 warnings in 156.65s. Ruff passed five changed Python files; Bandit found zero issues in the changed production module; Python 3.10 compile, no-Jobs/public/runtime/schema/sensitive scans, and diff check passed. Evidence: .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-9-fix-1-report.md.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

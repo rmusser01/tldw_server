@@ -1361,6 +1361,7 @@ async def exercise_task9_test_attempt_contract(
             now=stale_boundary,
         )
         assert recovered is not None
+    async with repository.transaction() as tx:
         assert (
             await tx.recover_stale_test_attempt(
                 stale_delivery_id,
@@ -1370,6 +1371,11 @@ async def exercise_task9_test_attempt_contract(
             )
             is None
         )
+    before_late_completion = await repository.get_test_attempt_snapshot(
+        stale_delivery_id,
+        stale_attempt_id,
+    )
+    async with repository.transaction() as tx:
         assert (
             await tx.finish_test_attempt(
                 stale_delivery_id,
@@ -1381,6 +1387,11 @@ async def exercise_task9_test_attempt_contract(
             )
             is None
         )
+    after_late_completion = await repository.get_test_attempt_snapshot(
+        stale_delivery_id,
+        stale_attempt_id,
+    )
+    assert after_late_completion == before_late_completion
     assert recovered.delivery.delivery.state is DeliveryState.DEAD
     assert (
         recovered.delivery.delivery.reason_code

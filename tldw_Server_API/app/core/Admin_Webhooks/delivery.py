@@ -200,6 +200,7 @@ class EventCaptureAudit:
 EventCaptureAuditSink: TypeAlias = Callable[[EventCaptureAudit], Awaitable[None]]
 
 TestWebhookOutcome: TypeAlias = Literal["accepted", "succeeded", "failed"]
+TestWebhookReasonCode: TypeAlias = DeliveryReasonCode | WebhookErrorCode
 
 
 @dataclass(frozen=True)
@@ -275,7 +276,7 @@ class TestWebhookAudit:
     request_id: str
     outcome: TestWebhookOutcome
     status_code: int | None
-    reason_code: DeliveryReasonCode | None
+    reason_code: TestWebhookReasonCode | None
 
     def __post_init__(self) -> None:
         for value, field_name in (
@@ -294,7 +295,7 @@ class TestWebhookAudit:
             raise ValueError("test audit status is invalid")
         if self.reason_code is not None and not isinstance(
             self.reason_code,
-            DeliveryReasonCode,
+            (DeliveryReasonCode, WebhookErrorCode),
         ):
             raise TypeError("test audit reason is invalid")
         if self.outcome in {"accepted", "succeeded"} and self.reason_code is not None:
@@ -779,7 +780,7 @@ class AdminWebhookDeliveryService:
         attempt_id: str,
         outcome: TestWebhookOutcome,
         status_code: int | None = None,
-        reason_code: DeliveryReasonCode | None = None,
+        reason_code: TestWebhookReasonCode | None = None,
     ) -> TestWebhookAudit:
         return TestWebhookAudit(
             actor_id=command.actor_id,
@@ -826,6 +827,7 @@ class AdminWebhookDeliveryService:
         if prepared is None:
             raise WebhookError(WebhookErrorCode.TEST_DELIVERY_UNAVAILABLE)
 
+        accepted_emitted = False
         reservation = None
         raced_lookup = None
         try:
@@ -877,10 +879,27 @@ class AdminWebhookDeliveryService:
                                 outcome="accepted",
                             )
                         )
+                        accepted_emitted = True
                     except Exception:  # noqa: BLE001 - accepted audit is mandatory
                         raise WebhookError(WebhookErrorCode.AUDIT_UNAVAILABLE) from None
         except Exception as exc:  # noqa: BLE001 - start failures cannot reach egress
-            raise _map_capture_error(exc) from None
+            error = _map_capture_error(exc)
+            if accepted_emitted:
+                try:
+                    await audit_sink(
+                        self._test_audit(
+                            command,
+                            delivery_id=prepared.delivery_id,
+                            attempt_id=prepared.attempt_id,
+                            outcome="failed",
+                            reason_code=error.code,
+                        )
+                    )
+                except Exception:  # noqa: BLE001 - preserve the commit failure
+                    logger.warning(
+                        "Admin webhook test commit-failure audit could not be recorded"
+                    )
+            raise error from None
 
         if raced_lookup is not None:
             raced_replay = await self._resolve_test_lookup(
