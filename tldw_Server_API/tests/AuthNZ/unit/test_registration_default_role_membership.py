@@ -10,6 +10,10 @@ from types import SimpleNamespace
 import aiosqlite
 import pytest
 
+from tldw_Server_API.app.core.AuthNZ.database import _GuardedSQLiteConnection
+from tldw_Server_API.app.core.AuthNZ.sqlite_profile_version_schema import (
+    SQLITE_PROFILE_VERSION_COLUMN_SQL,
+)
 from tldw_Server_API.app.core.AuthNZ.exceptions import RegistrationError
 from tldw_Server_API.app.services.registration_service import RegistrationService
 
@@ -23,6 +27,15 @@ class _PasswordServiceStub:
 
 
 class _SQLitePool:
+    """Minimal stand-in for DatabasePool's SQLite transaction contract.
+
+    The real pool yields a _GuardedSQLiteConnection, not a bare aiosqlite
+    connection. Writes to profile-visible tables are handed to it as
+    _ProfileUserSql capability objects that only the guard knows how to unwrap,
+    so a stub that yields the raw connection fails with
+    "execute() argument 1 must be str, not _ProfileUserSql".
+    """
+
     pool = None
     backend = "sqlite"
 
@@ -30,12 +43,12 @@ class _SQLitePool:
         self.db_path = db_path
 
     @asynccontextmanager
-    async def transaction(self) -> AsyncIterator[aiosqlite.Connection]:
+    async def transaction(self) -> AsyncIterator[_GuardedSQLiteConnection]:
         conn = await aiosqlite.connect(self.db_path)
         await conn.execute("PRAGMA foreign_keys = ON")
         await conn.execute("BEGIN IMMEDIATE")
         try:
-            yield conn
+            yield _GuardedSQLiteConnection(conn)
             await conn.commit()
         except Exception:
             await conn.rollback()
@@ -59,7 +72,8 @@ def _initialize_auth_db(db_path: Path) -> None:
                 is_active INTEGER NOT NULL,
                 is_verified INTEGER NOT NULL,
                 created_by INTEGER,
-                storage_quota_mb INTEGER NOT NULL
+                storage_quota_mb INTEGER NOT NULL,
+                {profile_version_column}
             );
             CREATE TABLE roles (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -101,7 +115,7 @@ def _initialize_auth_db(db_path: Path) -> None:
                 metadata TEXT
             );
             INSERT INTO roles (name) VALUES ('user'), ('reviewer');
-            """
+            """.format(profile_version_column=SQLITE_PROFILE_VERSION_COLUMN_SQL)
         )
 
 
