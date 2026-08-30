@@ -12,9 +12,13 @@ labels:
 priority: Medium
 dependencies:
 - TASK-13138
-updated_date: 2026-08-30 01:06
+updated_date: 2026-08-30 01:37
 modified_files:
 - Docs/superpowers/specs/2026-08-29-notes-semantic-index-design.md
+- Docs/superpowers/plans/2026-08-29-notes-semantic-index-implementation-plan.md
+documentation:
+- Docs/superpowers/specs/2026-08-29-notes-semantic-index-design.md
+- Docs/superpowers/plans/2026-08-29-notes-semantic-index-implementation-plan.md
 ---
 
 ## Description
@@ -32,6 +36,12 @@ Add an opt-in, owner-scoped embedding lifecycle for Notes and expose bounded sem
 - [ ] #5 SQLite and PostgreSQL behavior, RBAC, Sync compatibility, failure recovery, performance bounds, unit/integration/property tests, documentation, and Bandit verification are covered.
 <!-- AC:END -->
 
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Approved executable plan: `Docs/superpowers/plans/2026-08-29-notes-semantic-index-implementation-plan.md`. Execute its five stages and 13 TDD tasks sequentially, preserving the documented persistence, vector-only storage, Jobs, async graph projection, DSR, and shared UI boundaries.
+<!-- SECTION:PLAN:END -->
+
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
@@ -39,6 +49,8 @@ Add an opt-in, owner-scoped embedding lifecycle for Notes and expose bounded sem
 - Design specification: `Docs/superpowers/specs/2026-08-29-notes-semantic-index-design.md`
 - 2026-08-29: Addressed all implementation-constraint review findings in the design: nested run APIs, frozen legacy defaults, field-relative code-point evidence, dedicated ChromaDB/pgvector semantic storage, fail-closed DSR erasure, bounded first-page async projection, dimension preflight and activation gates, fresh status projection, and explicit Sync/full-restore behavior.
 - Verification: `git diff --check` passed. This revision changes documentation and task metadata only, so runtime tests and Bandit are not applicable.
+- 2026-08-29: Written specification approved. Added the five-stage, 13-task TDD implementation plan at `Docs/superpowers/plans/2026-08-29-notes-semantic-index-implementation-plan.md`.
+- Plan self-review closed background credential durability, typed operator settings, execution revalidation, semantic conversion audit provenance, DSR ordering, explicit legacy defaults, and runnable frontend command issues.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
