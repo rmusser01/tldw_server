@@ -79,6 +79,9 @@ from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
     SyncNotesAttachmentBootstrapDiagnosticsResponse,
     SyncProfileBootstrapRequest,
     SyncProfileBootstrapResponse,
+    SyncPersonalContextBootstrapRequest,
+    SyncPersonalContextBootstrapResponse,
+    SyncPersonalContextLinkCompleteRequest,
     SyncProfileResponse,
     SyncPullResponse,
     SyncPushAcceptedEnvelope,
@@ -783,6 +786,70 @@ def bootstrap_sync_v2_profile(
             mode=request.mode,
         ) from exc
     return _api_bootstrap_profile_from_core(profile)
+
+
+@router.post(
+    "/personal-context/bootstrap",
+    response_model=SyncPersonalContextBootstrapResponse,
+    summary="Bootstrap canonical Personal Context for one registered device",
+)
+def bootstrap_sync_v2_personal_context(
+    request: SyncPersonalContextBootstrapRequest,
+    user: User = Depends(get_request_user),
+    service: SyncV2Service = Depends(get_sync_v2_service),
+):
+    user_id = _sync_user_id(user)
+    try:
+        snapshot = service.bootstrap_personal_context(
+            user_id=user_id,
+            device_id=request.device_id,
+            required_schema_version=request.required_schema_version,
+            required_quotas=request.required_quotas,
+            expected_purge_generation=request.expected_purge_generation,
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc, user_id=user_id, device_id=request.device_id
+        ) from exc
+    return SyncPersonalContextBootstrapResponse(
+        dataset_id=snapshot.dataset_id,
+        authority_id=snapshot.authority_id,
+        manifest=snapshot.manifest.model_dump(mode="json"),
+        scopes=[item.model_dump(mode="json") for item in snapshot.scopes],
+        records=[item.model_dump(mode="json") for item in snapshot.records],
+        proposals=[item.model_dump(mode="json") for item in snapshot.proposals],
+        purge_generation=snapshot.purge_generation,
+        schema_version=snapshot.schema_version,
+        quotas=snapshot.quotas,
+        cursor=snapshot.cursor,
+        integrity_key_id=snapshot.integrity_key.integrity_key_id,
+        key_record_id=snapshot.integrity_key.key_record_id,
+        wrapped_key_blob=snapshot.integrity_key.wrapped_key_blob,
+    )
+
+
+@router.post(
+    "/personal-context/complete",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Record one device's completed Personal Context reconciliation",
+)
+def complete_sync_v2_personal_context(
+    request: SyncPersonalContextLinkCompleteRequest,
+    user: User = Depends(get_request_user),
+    service: SyncV2Service = Depends(get_sync_v2_service),
+) -> None:
+    user_id = _sync_user_id(user)
+    try:
+        service.complete_personal_context_link(
+            user_id=user_id,
+            device_id=request.device_id,
+            dataset_id=request.dataset_id,
+            bootstrap_cursor=request.bootstrap_cursor,
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc, user_id=user_id, dataset_id=request.dataset_id, device_id=request.device_id
+        ) from exc
 
 
 @router.post(

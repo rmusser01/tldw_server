@@ -54,6 +54,16 @@ compilation, Bandit, diff hygiene, and review pass; TASK-13148 is complete.
 pass; Ruff/Bandit are unavailable in the isolated runner and PostgreSQL-only tests
 remain for controller verification.
 
+## Review round 1 progress
+
+- [x] Reserved Personal Context domains and metadata from generic dataset enrollment.
+- [x] Added per-device completion receipts and made push require the requesting
+  device's matching profile/key/purge receipt.
+- [x] Added RSA-OAEP wrapping to the production factory, server-owned authority
+  selection, and typed bootstrap/completion API routes.
+- [ ] Follow-up review remains required for the dedicated Personalization DB
+  snapshot transaction and Sync-store compare-and-set receipt persistence.
+
 ## ADR check
 
 ADR required: no (existing)

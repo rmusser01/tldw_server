@@ -63,6 +63,15 @@ Reason: ADR-002 already governs canonical server ownership, key custody, whole-o
   collection dependencies, Ruff/Bandit availability, independent review, and final
   task closure. This task remains In Progress.
 
+## Review round 1 progress
+
+- [x] Hardened factory custody with registered-device RSA-OAEP wrapping and
+  server-owned authority selection; added typed API bootstrap/completion routes.
+- [x] Reserved Personal Context enrollment metadata/domains and made completion
+  receipts device-specific so one device cannot unlock another's pushes.
+- [ ] Dedicated canonical snapshot transaction and Sync-store compare-and-set
+  receipt persistence remain under review. TASK-13148 remains In Progress.
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed

@@ -2,17 +2,23 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import base64
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from tldw_profile_core.canonical import canonical_json_bytes
 
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 from tldw_Server_API.app.core.Sync.v2.adapters import SyncAdapterRegistry
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.personal_context import (
     PersonalContextDomainAdapter,
+)
+from tldw_Server_API.app.core.Sync.v2.factory import (
+    _wrap_personal_context_integrity_key,
 )
 from tldw_Server_API.app.core.Sync.v2.materializers.personal_context import (
     PersonalContextMaterializer,
@@ -347,6 +353,72 @@ def test_personal_context_push_stays_blocked_until_narrow_completion_transition(
         envelopes=[envelope],
     )
     assert len(after.accepted) == 1
+
+    service.register_device(
+        user_id="user-a",
+        display_name="Chatbook B",
+        client_type="chatbook",
+        device_id="device-b",
+        capabilities={
+            "supported_adapter_versions": {
+                domain: [1] for domain in PERSONAL_CONTEXT_SYNC_DOMAINS
+            }
+        },
+    )
+    other_device = replace(
+        envelope,
+        client_envelope_id="device-b:record:1",
+        device_id="device-b",
+    )
+    blocked_other_device = service.push(
+        user_id="user-a",
+        dataset_id=bootstrap.dataset_id,
+        device_id="device-b",
+        envelopes=[other_device],
+    )
+    assert blocked_other_device.rejected[0].error_code == "personal_context_link_incomplete"
+
+
+def test_generic_enrollment_cannot_forge_personal_context_binding(tmp_path: Path) -> None:
+    service, _canonical = _service(tmp_path)
+
+    with pytest.raises(Exception) as exc_info:
+        service.enroll_dataset(
+            user_id="user-a",
+            domains=["personal_context.record"],
+            metadata={"personal_context": {"link_state": "complete"}},
+        )
+
+    assert "sync_reserved_dataset_enrollment" in str(exc_info.value)
+
+
+def test_factory_wraps_integrity_key_to_registered_device_public_key() -> None:
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    public_key = private_key.public_key().public_bytes(
+        serialization.Encoding.PEM,
+        serialization.PublicFormat.SubjectPublicKeyInfo,
+    ).decode("utf-8")
+    device = type(
+        "Device",
+        (),
+        {"capabilities": {"personal_context_wrapping_public_key": public_key}},
+    )()
+
+    wrapped = _wrap_personal_context_integrity_key(
+        device=device,
+        integrity_key=_INTEGRITY_KEY,
+        integrity_key_id="personal-context-integrity-v1",
+    )
+
+    ciphertext = base64.urlsafe_b64decode(wrapped.split(":", 1)[1])
+    assert private_key.decrypt(
+        ciphertext,
+        padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=b"personal-context:personal-context-integrity-v1",
+        ),
+    ) == _INTEGRITY_KEY
 
 
 def test_bootstrap_never_persists_plaintext_in_sync_metadata_or_logs(
