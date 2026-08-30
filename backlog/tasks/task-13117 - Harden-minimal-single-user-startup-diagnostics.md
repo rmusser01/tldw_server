@@ -1,7 +1,7 @@
 ---
 id: TASK-13117
 title: Harden minimal single-user startup diagnostics
-status: Done
+status: In Progress
 created_date: 2026-08-25 01:12
 labels:
 - authnz
@@ -19,9 +19,12 @@ modified_files:
 - tldw_Server_API/tests/Config/test_startup_api_key_logging.py
 - tldw_Server_API/tests/Logging/test_main_log_level.py
 - tldw_Server_API/tests/Docs/test_onboarding_guides_structure.py
+- tldw_Server_API/tests/Admin_Webhooks/test_legacy_import_postgres.py
+- tldw_Server_API/tests/Admin_Webhooks/test_migration_postgres.py
+- tldw_Server_API/tests/Admin_Webhooks/test_repository_postgres.py
 - Docs/Deployment/minimal-deploy.md
 - Docs/Published/Deployment/minimal-deploy.md
-updated_date: 2026-08-25 05:42
+updated_date: 2026-08-30 18:38
 references:
 - https://github.com/rmusser01/tldw_server/pull/2820
 ---
@@ -59,6 +62,8 @@ Create the repository-required implementation plan, then use TDD for prompt EOF 
 2026-08-24: After rebasing onto origin/dev b1d0aed671, broader relevant suite passed 113 tests. Minimal environment Uvicorn smoke returned HTTP 200. Bandit scanned initialize.py, startup_logging.py, and main.py with 0 findings. git diff --check passed.
 
 2026-08-24: Opened draft PR #2820 against dev. Merge readiness is intentionally pending the repository-required human-authored Change summary.
+2026-08-30: Reopened for requested PR #2820 rebase, Dodo review follow-up, fresh verification, and merge. Rebased cleanly onto origin/dev f676e23549.
+2026-08-30: Latest dev introduced three Admin Webhooks tests that directly registered the prohibited AuthNZ conftest plugin. Replaced those references with the canonical authnz_full_fixtures bridge. Isolation guard: 6 passed; affected Postgres suites: 24 tests collected. Relevant regression suite: 113 passed. One chained smoke immediately after pytest saw a closed SQLite connection; the failure did not reproduce in a direct launch or five consecutive standalone scrubbed smokes, so no speculative database change was made.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
