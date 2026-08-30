@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import os
 from collections.abc import Mapping
@@ -85,8 +86,25 @@ def _public_database_health(health: object) -> dict[str, Any]:
     return public_health
 
 
-def _resource_governor_policy(app: FastAPI) -> dict[str, Any] | None:
-    """Read only the sanitized Resource Governor policy metadata."""
+def _load_resource_governor_policy(policy_path: Path) -> dict[str, Any] | None:
+    """Synchronously load sanitized policy metadata for a worker thread."""
+
+    try:
+        if not policy_path.exists():
+            return None
+        with policy_path.open("r", encoding="utf-8") as policy_file:
+            policy = yaml.safe_load(policy_file) or {}
+        return {
+            "version": int(policy.get("version") or 1),
+            "store": os.getenv("RG_POLICY_STORE", "file"),
+            "policies": len((policy.get("policies") or {}).keys()),
+        }
+    except _READINESS_GUARD_EXCEPTIONS:
+        return None
+
+
+async def _resource_governor_policy(app: FastAPI) -> dict[str, Any] | None:
+    """Read sanitized Resource Governor metadata without blocking the event loop."""
 
     try:
         version = getattr(app.state, "rg_policy_version", None)
@@ -97,17 +115,8 @@ def _resource_governor_policy(app: FastAPI) -> dict[str, Any] | None:
                 "policies": getattr(app.state, "rg_policy_count", None),
             }
         policy_path = os.getenv("RG_POLICY_PATH")
-        if policy_path and Path(policy_path).exists():
-            try:
-                with Path(policy_path).open("r", encoding="utf-8") as policy_file:
-                    policy = yaml.safe_load(policy_file) or {}
-                return {
-                    "version": int(policy.get("version") or 1),
-                    "store": os.getenv("RG_POLICY_STORE", "file"),
-                    "policies": len((policy.get("policies") or {}).keys()),
-                }
-            except _READINESS_GUARD_EXCEPTIONS:
-                return None
+        if policy_path:
+            return await asyncio.to_thread(_load_resource_governor_policy, Path(policy_path))
     except _READINESS_GUARD_EXCEPTIONS:
         return None
     return None
@@ -180,7 +189,7 @@ async def collect_readiness_snapshot(app: FastAPI) -> ReadinessSnapshot:
             "provider_health": provider_health,
             "otel_available": bool(OTEL_AVAILABLE),
         }
-        resource_governor_policy = _resource_governor_policy(app)
+        resource_governor_policy = await _resource_governor_policy(app)
         if resource_governor_policy is not None:
             details["rg_policy"] = resource_governor_policy
         return ReadinessSnapshot(ready, None, details)

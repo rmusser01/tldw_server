@@ -8,7 +8,6 @@ import json
 import os
 import re
 import stat
-import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,6 +15,7 @@ from typing import Any
 from urllib.parse import unquote, urlsplit
 
 import yaml
+from loguru import logger
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_COMPOSE_FILE = REPO_ROOT / "Dockerfiles/docker-compose.production.yml"
@@ -1466,12 +1466,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.proxy_file,
         )
     if report.ok:
-        print("Production preflight passed.")
+        logger.bind(operation="production_preflight").success("Production preflight passed")
         return 0
     for issue in report.issues:
-        print(
-            f"ERROR [{issue.code}] {issue.field}: {issue.message}",
-            file=sys.stderr,
+        logger.bind(
+            operation="production_preflight",
+            issue_code=issue.code,
+            field=issue.field,
+        ).error(
+            "Production preflight failed: {}",
+            issue.message,
         )
     return 1
 

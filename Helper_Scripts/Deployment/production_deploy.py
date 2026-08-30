@@ -7,12 +7,13 @@ import hashlib
 import json
 import os
 import subprocess  # nosec B404
-import sys
 import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+
+from loguru import logger
 
 from Helper_Scripts.Deployment.production_artifacts import (
     ArtifactRecord,
@@ -58,21 +59,29 @@ replacement_started = False
 old_cleanup_started = False
 rollback_complete = False
 
-def remove_path(path):
+def remove_path(path: Path) -> None:
+    '''Remove one existing filesystem entry without following symlinks.'''
+
     if path.is_dir() and not path.is_symlink():
         shutil.rmtree(path)
     else:
         path.unlink(missing_ok=True)
 
-def apply_metadata(path, member):
+def apply_metadata(path: Path, member: tarfile.TarInfo) -> None:
+    '''Apply the safe permission and ownership metadata from one member.'''
+
     os.chmod(path, member.mode & 0o777)
     if hasattr(os, "geteuid") and os.geteuid() == 0:
         os.chown(path, member.uid, member.gid, follow_symlinks=False)
 
-def path_exists(path):
+def path_exists(path: Path) -> bool:
+    '''Return whether a path or symlink occupies the destination.'''
+
     return path.exists() or path.is_symlink()
 
-def rollback_replacement():
+def rollback_replacement() -> bool:
+    '''Restore entries moved aside by an interrupted replacement.'''
+
     if not all(path_exists(entry) for entry in moved_old):
         return False
     complete = True
@@ -184,10 +193,14 @@ replacement_started = False
 old_cleanup_started = False
 rollback_complete = False
 
-def path_exists(path):
+def path_exists(path: Path) -> bool:
+    '''Return whether a path or symlink occupies the destination.'''
+
     return path.exists() or path.is_symlink()
 
-def rollback_replacement():
+def rollback_replacement() -> bool:
+    '''Restore Redis entries moved aside by an interrupted replacement.'''
+
     if not all(path_exists(entry) for entry in moved_old):
         return False
     complete = True
@@ -889,6 +902,13 @@ def rollback(
         TLDW_ROLLBACK_IMAGE=manifest.target_image,
     )
     _render_and_validate(config, runner, env, rollback_values)
+    _run_gate(
+        runner,
+        "rollback image pull",
+        ("docker", "pull", manifest.rollback_image),
+        env=env,
+    )
+    _image_smoke(manifest.rollback_image, runner, env, "rollback image smoke")
     compose = _compose_prefix(config)
     _run_gate(
         runner,
@@ -1042,17 +1062,25 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.operation == "deploy":
             manifest = deploy(config)
             manifest_path = _snapshot_directory(config.backup_dir, manifest.created_at) / "manifest.json"
-            print(f"Production deployment completed. Manifest: {manifest_path}")
+            logger.bind(operation="deploy", manifest_path=str(manifest_path)).success(
+                "Production deployment completed"
+            )
         else:
             if not args.restore_artifacts:
                 raise DeploymentError("rollback requires --restore-artifacts")
             rollback(config, args.manifest)
-            print("Production rollback completed with verified artifacts.")
+            logger.bind(operation="rollback", manifest_path=str(args.manifest)).success(
+                "Production rollback completed with verified artifacts"
+            )
     except (DeploymentError, ValueError) as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
+        logger.bind(operation=args.operation, error_type=type(exc).__name__).error(
+            "Production deployment command failed: {}", exc
+        )
         return 1
     except OSError:
-        print("ERROR: deployment filesystem gate failed", file=sys.stderr)
+        logger.bind(operation=args.operation, error_type="OSError").error(
+            "Production deployment command failed: deployment filesystem gate failed"
+        )
         return 1
     return 0
 

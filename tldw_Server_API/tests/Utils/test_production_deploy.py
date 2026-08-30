@@ -1065,6 +1065,8 @@ def test_rollback_verifies_and_restores_all_artifacts_before_prior_image_start(
     commands = _commands(runner)
     markers = (
         "config --format json",
+        "docker pull registry/tldw:sha-7654321",
+        "--network none --entrypoint python registry/tldw:sha-7654321 -c import tldw_Server_API.app.main",
         "stop app caddy",
         "up -d --wait postgres",
         "pg_restore --clean --if-exists --no-owner",
@@ -1087,6 +1089,34 @@ def test_rollback_verifies_and_restores_all_artifacts_before_prior_image_start(
     assert manifest.artifacts[2].sha256 in next(
         " ".join(call) for call in restore_calls if "production_app-data:/data" in " ".join(call)
     )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "failed_image_gate",
+    (
+        "docker pull registry/tldw:sha-7654321",
+        "--network none --entrypoint python registry/tldw:sha-7654321 -c import tldw_Server_API.app.main",
+    ),
+)
+def test_rollback_proves_prior_image_before_quiescing_or_restoring(
+    tmp_path: Path,
+    passing_deployment_checks: None,
+    failed_image_gate: str,
+) -> None:
+    """Fail before service or data mutation when the prior image is unusable."""
+
+    config = _config(tmp_path)
+    _, manifest_path = _manifest(config.backup_dir, compose_file=config.compose_file)
+    runner = RecordingRunner(fail_when=failed_image_gate)
+
+    with pytest.raises(DeploymentError, match="gate failed"):
+        rollback(config, manifest_path, runner=runner)
+
+    commands = _commands(runner)
+    assert failed_image_gate in commands[-1]
+    assert not any("stop app caddy" in command for command in commands)
+    assert not any("pg_restore" in command for command in commands)
 
 
 def test_rollback_preflights_swapped_prior_image_values_before_restore(
@@ -1205,7 +1235,10 @@ def test_rollback_rejects_unverified_or_mismatched_state_before_start(
     assert runner.calls == []
 
 
-def test_rollback_cli_requires_explicit_restore_artifacts(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_rollback_cli_requires_explicit_restore_artifacts(
+    tmp_path: Path,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     env_file = tmp_path / "production.env"
     env_file.write_text(f"TLDW_BACKUP_DIR={tmp_path / 'backups'}\n", encoding="utf-8")
     env_file.chmod(0o600)
@@ -1220,7 +1253,7 @@ def test_rollback_cli_requires_explicit_restore_artifacts(tmp_path: Path, capsys
         )
     )
 
-    captured = capsys.readouterr()
+    captured = capfd.readouterr()
     assert result == 1
     assert "requires --restore-artifacts" in captured.err
     assert "TLDW_BACKUP_DIR" not in captured.err

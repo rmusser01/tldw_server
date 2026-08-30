@@ -7,8 +7,12 @@ from starlette.requests import Request
 
 from tldw_Server_API.app.services.readiness_service import is_loopback_peer
 
+pytestmark = pytest.mark.unit
+
 
 def _request(peer: str, headers: list[tuple[bytes, bytes]] | None = None) -> Request:
+    """Build an ASGI request with an explicit network peer."""
+
     return Request(
         {
             "type": "http",
@@ -24,6 +28,8 @@ def _request(peer: str, headers: list[tuple[bytes, bytes]] | None = None) -> Req
 
 
 def test_remote_peer_cannot_spoof_loopback_with_forwarding_headers() -> None:
+    """Ignore forwarding headers when the direct peer is not loopback."""
+
     request = _request(
         "172.30.0.2",
         [(b"x-forwarded-for", b"127.0.0.1"), (b"x-real-ip", b"127.0.0.1")],
@@ -32,12 +38,16 @@ def test_remote_peer_cannot_spoof_loopback_with_forwarding_headers() -> None:
 
 
 def test_loopback_peer_is_allowed_for_internal_probe() -> None:
+    """Admit IPv4 and IPv6 loopback peers to the internal probe."""
+
     assert is_loopback_peer(_request("127.0.0.1")) is True
     assert is_loopback_peer(_request("::1")) is True
 
 
 @pytest.mark.asyncio
 async def test_public_health_is_exact_minimal_liveness() -> None:
+    """Keep public liveness exact, cache-disabled, and detail-free."""
+
     from tldw_Server_API.app.main import app
 
     transport = httpx.ASGITransport(app=app)
@@ -71,6 +81,8 @@ async def test_internal_ready_is_loopback_only_and_detail_free(
     expected_status: int,
     expected_body: dict[str, str],
 ) -> None:
+    """Expose readiness only to loopback and never return diagnostic detail."""
+
     from tldw_Server_API.app import main
     from tldw_Server_API.app.services import readiness_service
 
@@ -78,6 +90,8 @@ async def test_internal_ready_is_loopback_only_and_detail_free(
     test_app.add_api_route("/internal/ready", main.internal_readiness_check, methods=["GET", "HEAD"])
 
     async def _readiness(_: FastAPI) -> readiness_service.ReadinessSnapshot:
+        """Return the parametrized sanitized readiness snapshot."""
+
         return readiness_service.ReadinessSnapshot(ready, reason, details)
 
     monkeypatch.setattr(readiness_service, "collect_readiness_snapshot", _readiness)

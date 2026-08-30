@@ -1162,7 +1162,7 @@ def test_run_preflight_accepts_a_complete_offline_fixture(tmp_path: Path) -> Non
 def test_cli_accepts_compose_injected_environment_without_raw_file(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
+    capfd: pytest.CaptureFixture[str],
 ) -> None:
     values = _valid_env(tmp_path)
     (tmp_path / "backups").chmod(0o500)
@@ -1181,8 +1181,10 @@ def test_cli_accepts_compose_injected_environment_without_raw_file(
         ]
     )
 
+    captured = capfd.readouterr()
     assert exit_code == 0
-    assert capsys.readouterr().out == "Production preflight passed.\n"
+    assert captured.out == ""
+    assert "Production preflight passed" in captured.err
 
 
 def test_host_preflight_remains_authoritative_for_env_permissions(

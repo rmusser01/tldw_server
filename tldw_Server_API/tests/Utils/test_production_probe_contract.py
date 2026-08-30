@@ -161,10 +161,10 @@ def test_production_alertmanager_requires_an_operator_owned_absolute_config() ->
     assert "alertmanager_webhook_only.yml" not in MONITORING_COMPOSE_FILES[1].read_text(encoding="utf-8")
 
 
+@pytest.mark.integration
 def test_production_monitoring_render_preserves_private_credential_boundary(tmp_path: Path) -> None:
     docker = shutil.which("docker")
-    if docker is None:
-        pytest.skip("docker compose is not available")
+    assert docker is not None, "docker compose is required for this integration contract"
     # The executable is locally resolved and every argv element is fixed.
     version = subprocess.run(  # nosec B603
         [docker, "compose", "version"],
@@ -172,8 +172,7 @@ def test_production_monitoring_render_preserves_private_credential_boundary(tmp_
         text=True,
         check=False,
     )
-    if version.returncode != 0:
-        pytest.skip("docker compose is not available")
+    assert version.returncode == 0, version.stderr
 
     metrics_key = tmp_path / "tldw-metrics-key"
     alertmanager_config = tmp_path / "tldw-alertmanager.yml"

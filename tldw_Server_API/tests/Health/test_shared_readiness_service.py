@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 import httpx
@@ -15,6 +17,8 @@ from tldw_Server_API.app.services.readiness_service import (
     internal_readiness_payload,
     operator_readiness_payload,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def test_internal_projection_discards_all_detail() -> None:
@@ -36,6 +40,35 @@ def test_operator_projection_keeps_only_sanitized_snapshot_detail() -> None:
         "status": "ready",
         "database": {"status": "healthy", "type": "postgresql"},
     }
+
+
+@pytest.mark.asyncio
+async def test_resource_governor_policy_file_read_runs_off_event_loop(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Load fallback policy metadata away from the request event-loop thread."""
+
+    policy_path = tmp_path / "policy.yml"
+    policy_path.write_text("version: 3\npolicies:\n  default: {}\n", encoding="utf-8")
+    monkeypatch.setenv("RG_POLICY_PATH", str(policy_path))
+    app = FastAPI()
+    event_loop_thread = threading.get_ident()
+    observed_thread: list[int] = []
+    original_loader = readiness_service._load_resource_governor_policy
+
+    def recording_loader(path: Path) -> dict[str, object] | None:
+        """Record the worker thread used by the synchronous file loader."""
+
+        observed_thread.append(threading.get_ident())
+        return original_loader(path)
+
+    monkeypatch.setattr(readiness_service, "_load_resource_governor_policy", recording_loader)
+
+    policy = await readiness_service._resource_governor_policy(app)
+
+    assert policy == {"version": 3, "store": "file", "policies": 1}
+    assert observed_thread and observed_thread[0] != event_loop_thread
 
 
 @pytest.mark.asyncio
