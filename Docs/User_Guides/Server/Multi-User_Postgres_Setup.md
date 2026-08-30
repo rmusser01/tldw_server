@@ -18,7 +18,7 @@ See `Docs/Deployment/Postgres_Migration_Guide.md` if you want to migrate content
 - Per-user content DBs stay on disk unless you migrate them separately.
 
 ## Prerequisites
-- Python 3.10+
+- Python 3.11+
 - PostgreSQL 13+ (16+ recommended)
 - tldw_server installed with Postgres extras: `pip install -e ".[multiplayer]"`
 

@@ -44,7 +44,7 @@ recommendations above.
 You need:
 
 - Git
-- Python 3.10+ if you are using `make` or manual/local Python
+- Python 3.11+ if you are using `make` or manual/local Python
 - `ffmpeg`
 - `git-lfs` if you want the recommended `supertonic` path
 
@@ -55,7 +55,7 @@ Recommended host prerequisites by OS:
 - `ffmpeg`
 - `git`
 - `git-lfs`
-- Python 3.10+
+- Python 3.11+
 
 Typical packages:
 
@@ -70,7 +70,7 @@ git lfs install
 - `ffmpeg`
 - `git`
 - `git-lfs`
-- Python 3.10+
+- Python 3.11+
 
 Typical packages:
 
@@ -83,7 +83,7 @@ git lfs install
 
 Install:
 
-- Python 3.10+
+- Python 3.11+
 - FFmpeg
 - Git
 - Git LFS

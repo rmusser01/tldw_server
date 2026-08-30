@@ -86,7 +86,7 @@ ORIGINAL_JOB_NAMES = {
     "ci.yml": (
         "http-client-patch-guard",
         "syntax-check",
-        "preflight-python-310",
+        "preflight-python-311",
         "shard-coverage",
         "quickstart-dry-run",
         "lint",
@@ -176,7 +176,7 @@ DIRECT_ADMISSION_JOBS = ALWAYS_ROLLUPS | {
     ("security-required.yml", "security-required"),
 }
 NON_ADMITTED_ROOT_JOBS = {
-    ("ci.yml", "preflight-python-310"),
+    ("ci.yml", "preflight-python-311"),
 }
 BACKEND_CHANGED_JOBS = {
     "full-suite-linux-311-smoke",

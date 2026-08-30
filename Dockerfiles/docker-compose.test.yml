@@ -14,22 +14,6 @@ services:
       - ..:/app
     command: /app/test-workflow/test-workflow.sh
 
-  test-workflow-py310:
-    build:
-      context: .
-      dockerfile: Dockerfile.Ubuntu
-      args:
-        PYTHON_VERSION: "3.10"
-    container_name: tldw-test-py310
-    environment:
-      - PYTHONPATH=/app/tldw_Server_API
-      - OPENAI_API_KEY=test-key
-      - ANTHROPIC_API_KEY=test-key
-      - STREAMS_UNIFIED=1
-    volumes:
-      - ..:/app
-    command: bash -c "cd /app && python3.10 -m venv venv && source venv/bin/activate && pip install -e '.[dev]' && pytest -v -m unit --collect-only"
-
   test-workflow-py311:
     build:
       context: .
