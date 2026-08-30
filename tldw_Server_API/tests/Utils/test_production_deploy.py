@@ -789,28 +789,36 @@ def test_app_restore_rolls_back_live_entries_when_replacement_fails(
     assert not (destination / "new-b").exists()
 
 
-def test_app_restore_cleanup_failure_rolls_back_live_data(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_app_restore_partial_cleanup_failure_keeps_verified_new_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     source = tmp_path / "app-data.tar"
     source.write_bytes(_tar_bytes(member_name="new", payload=b"new-value"))
     digest = hashlib.sha256(source.read_bytes()).hexdigest()
     destination = tmp_path / "data"
     destination.mkdir()
-    (destination / "original").write_text("keep", encoding="utf-8")
+    original = destination / "original"
+    original.mkdir()
+    (original / "deleted-during-cleanup").write_text("lost", encoding="utf-8")
+    (original / "remaining-recovery").write_text("keep", encoding="utf-8")
     real_rmtree = shutil.rmtree
 
     def fail_old_cleanup(path, *args, **kwargs):
         if Path(path).name == "old":
-            raise OSError("injected cleanup failure")
+            (Path(path) / "original" / "deleted-during-cleanup").unlink()
+            raise OSError("injected partial cleanup failure")
         return real_rmtree(path, *args, **kwargs)
 
     monkeypatch.setattr(shutil, "rmtree", fail_old_cleanup)
 
-    with pytest.raises(OSError, match="injected cleanup failure"):
+    with pytest.raises(OSError, match="injected partial cleanup failure"):
         _run_embedded_script(production_deploy._RESTORE_APP_SCRIPT, source, digest, destination)
 
-    assert (destination / "original").read_text(encoding="utf-8") == "keep"
-    assert not (destination / "new").exists()
-    assert not tuple(destination.glob(".tldw-app-restore-*"))
+    assert (destination / "new").read_bytes() == b"new-value"
+    assert not (destination / "original").exists()
+    recovery = next(destination.glob(".tldw-app-restore-*")) / "old" / "original"
+    assert (recovery / "remaining-recovery").read_text(encoding="utf-8") == "keep"
+    assert not (recovery / "deleted-during-cleanup").exists()
 
 
 def test_redis_restore_stages_one_open_source_before_atomic_replace(
@@ -901,7 +909,7 @@ def test_redis_restore_install_failure_restores_every_live_entry(
     assert not tuple(destination.glob(".tldw-redis-restore-*"))
 
 
-def test_redis_restore_cleanup_failure_restores_every_live_entry(
+def test_redis_restore_partial_cleanup_failure_keeps_verified_new_state(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     source = tmp_path / "redis.rdb"
@@ -912,22 +920,26 @@ def test_redis_restore_cleanup_failure_restores_every_live_entry(
     (destination / "dump.rdb").write_bytes(b"old-rdb")
     appendonly = destination / "appendonlydir"
     appendonly.mkdir()
+    (appendonly / "deleted-during-cleanup.aof").write_bytes(b"old-aof")
     (appendonly / "appendonly.aof.manifest").write_text("old-manifest", encoding="utf-8")
     real_rmtree = shutil.rmtree
 
     def fail_old_cleanup(path, *args, **kwargs):
         if Path(path).name == "old":
-            raise OSError("injected cleanup failure")
+            (Path(path) / "appendonlydir" / "deleted-during-cleanup.aof").unlink()
+            raise OSError("injected partial cleanup failure")
         return real_rmtree(path, *args, **kwargs)
 
     monkeypatch.setattr(shutil, "rmtree", fail_old_cleanup)
 
-    with pytest.raises(OSError, match="injected cleanup failure"):
+    with pytest.raises(OSError, match="injected partial cleanup failure"):
         _run_embedded_script(production_deploy._RESTORE_REDIS_SCRIPT, source, digest, destination)
 
-    assert (destination / "dump.rdb").read_bytes() == b"old-rdb"
-    assert (appendonly / "appendonly.aof.manifest").read_text(encoding="utf-8") == "old-manifest"
-    assert not tuple(destination.glob(".tldw-redis-restore-*"))
+    assert (destination / "dump.rdb").read_bytes() == b"verified-rdb"
+    assert not appendonly.exists()
+    recovery = next(destination.glob(".tldw-redis-restore-*")) / "old" / "appendonlydir"
+    assert (recovery / "appendonly.aof.manifest").read_text(encoding="utf-8") == "old-manifest"
+    assert not (recovery / "deleted-during-cleanup.aof").exists()
 
 
 def test_redis_restore_checksum_failure_preserves_live_data(tmp_path: Path) -> None:

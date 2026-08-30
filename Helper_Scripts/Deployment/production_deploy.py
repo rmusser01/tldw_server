@@ -55,6 +55,7 @@ old.mkdir()
 moved_old = []
 installed = []
 replacement_started = False
+old_cleanup_started = False
 rollback_complete = False
 
 def remove_path(path):
@@ -152,10 +153,11 @@ try:
         installed.append(destination)
     staged_archive.unlink()
     new.rmdir()
+    old_cleanup_started = True
     shutil.rmtree(old)
     stage.rmdir()
 except BaseException:
-    if replacement_started:
+    if replacement_started and not old_cleanup_started:
         rollback_complete = rollback_replacement()
     if not replacement_started or rollback_complete:
         try:
@@ -179,6 +181,7 @@ descriptor = -1
 moved_old = []
 installed = False
 replacement_started = False
+old_cleanup_started = False
 rollback_complete = False
 
 def path_exists(path):
@@ -232,12 +235,13 @@ try:
         moved_old.append(destination)
     os.replace(staged, data / "dump.rdb")
     installed = True
+    old_cleanup_started = True
     shutil.rmtree(old)
     stage.rmdir()
 except BaseException:
     if descriptor >= 0:
         os.close(descriptor)
-    if replacement_started:
+    if replacement_started and not old_cleanup_started:
         rollback_complete = rollback_replacement()
     if not replacement_started or rollback_complete:
         try:
