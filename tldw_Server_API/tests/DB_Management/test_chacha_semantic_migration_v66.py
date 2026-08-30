@@ -7,7 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management import ChaChaNotes_DB as chacha_db_module
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    CharactersRAGDB,
+    SchemaError,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -97,6 +101,11 @@ def test_sqlite_v65_to_v66_upgrade_preserves_semantic_rows(tmp_path: Path, monke
     monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 65)
     _initialize(db_path)
     with sqlite3.connect(db_path) as conn:
+        assert _version(conn) == 65
+        assert conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+            (_TABLE,),
+        ).fetchone() is None
         conn.execute(
             """
             INSERT INTO note_semantic_index_configs(
@@ -118,6 +127,50 @@ def test_sqlite_v65_to_v66_upgrade_preserves_semantic_rows(tmp_path: Path, monke
             "SELECT desired_state FROM note_semantic_index_configs "
             "WHERE owner_user_id='owner-a' AND dataset_id='dataset-a'"
         ).fetchone()[0] == "disabled"
+
+
+def test_sqlite_target_v65_dispatch_does_not_apply_v66(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_path = tmp_path / "semantic-target-v65.sqlite"
+    monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 65)
+
+    _initialize(db_path)
+
+    with sqlite3.connect(db_path) as conn:
+        assert _version(conn) == 65
+        assert conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+            (_TABLE,),
+        ).fetchone() is None
+
+
+def test_sqlite_v66_migration_failure_rolls_back_table_and_version(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_path = tmp_path / "semantic-v66-rollback.sqlite"
+    monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 65)
+    db = CharactersRAGDB(str(db_path), client_id="owner-a")
+    original_split = chacha_db_module.split_sql_statements
+
+    def broken_statements(script: str) -> list[str]:
+        statements = original_split(script)
+        return [statements[0], "INSERT INTO missing_v66_relation(value) VALUES (1)"]
+
+    monkeypatch.setattr(chacha_db_module, "split_sql_statements", broken_statements)
+    try:
+        with db.transaction() as conn:
+            with pytest.raises(SchemaError, match="Notes semantic v66 SQLite migration failed"):
+                db._migrate_from_v65_to_v66_sqlite(conn)
+            assert db._get_db_version(conn) == 65
+            assert conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                (_TABLE,),
+            ).fetchone() is None
+    finally:
+        db.close_all_connections()
 
 
 def test_sqlite_v66_cleanup_ledger_survives_note_and_generation_deletion(tmp_path: Path) -> None:

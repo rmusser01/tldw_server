@@ -30,6 +30,7 @@ from .semantic_embeddings import (
     ResolvedDimension,
     ResolvedSemanticConfig,
     SemanticEmbeddingBatch,
+    SemanticEmbeddingPlan,
     SemanticEmbeddingSystemError,
     plan_semantic_embedding_batches,
 )
@@ -85,6 +86,30 @@ class SemanticNoteIndexingError(SemanticIndexingError):
         if code not in self._ALLOWED_CODES:
             raise ValueError("notes_semantic_note_error_code_invalid")
         super().__init__(code)
+
+
+@dataclass(slots=True)
+class _RunBudget:
+    settings: SemanticIndexSettings
+    chunk_count: int = 0
+    provider_bytes: int = 0
+    provider_requests: int = 0
+
+    def admit(self, chunks: Sequence[SemanticChunkInput]) -> SemanticEmbeddingPlan:
+        plan = plan_semantic_embedding_batches(chunks, self.settings)
+        next_chunks = self.chunk_count + plan.input_count
+        next_bytes = self.provider_bytes + plan.total_bytes
+        next_requests = self.provider_requests + plan.request_count
+        if (
+            next_chunks > self.settings.max_chunks_per_run
+            or next_bytes > self.settings.max_provider_bytes_per_run
+            or next_requests > self.settings.max_provider_requests_per_run
+        ):
+            raise SemanticIndexingError("notes_semantic_run_limit_exceeded")
+        self.chunk_count = next_chunks
+        self.provider_bytes = next_bytes
+        self.provider_requests = next_requests
+        return plan
 
 
 class VersionedNoteReader(Protocol):
@@ -260,6 +285,7 @@ class SemanticGenerationBuilder:
                 fence.dataset_id,
                 fence.generation_id,
             )
+            run_budget = _RunBudget(self._settings)
             for _ in range(self._settings.max_retries + 1):
                 try:
                     plan = await self._read_snapshot(fence)
@@ -279,7 +305,12 @@ class SemanticGenerationBuilder:
                 )
                 if not seeded:
                     continue
-                await self._publish_claimed_notes(fence, resolved_config, plan)
+                await self._publish_claimed_notes(
+                    fence,
+                    resolved_config,
+                    plan,
+                    run_budget=run_budget,
+                )
                 integrity = await asyncio.to_thread(
                     self._store.get_generation_integrity,
                     fence.dataset_id,
@@ -426,9 +457,6 @@ class SemanticGenerationBuilder:
         refs = await self._list_refs(fence)
         seeds: list[SemanticSnapshotSeed] = []
         chunks_by_note: dict[str, tuple[SemanticChunkInput, ...]] = {}
-        chunk_count = 0
-        provider_bytes = 0
-        provider_requests = 0
         for ref in refs:
             await revalidate_execution_fence(self._revalidate, fence)
             snapshot = await self._note_reader.read_note_version(
@@ -469,18 +497,9 @@ class SemanticGenerationBuilder:
                 )
                 continue
             try:
-                embedding_plan = plan_semantic_embedding_batches(chunks, self._settings)
+                plan_semantic_embedding_batches(chunks, self._settings)
             except SemanticEmbeddingSystemError:
                 raise SemanticIndexingError("notes_semantic_run_limit_exceeded") from None
-            chunk_count += embedding_plan.input_count
-            provider_bytes += embedding_plan.total_bytes
-            provider_requests += embedding_plan.request_count
-            if (
-                chunk_count > self._settings.max_chunks_per_run
-                or provider_bytes > self._settings.max_provider_bytes_per_run
-                or provider_requests > self._settings.max_provider_requests_per_run
-            ):
-                raise SemanticIndexingError("notes_semantic_run_limit_exceeded")
             seeds.append(
                 SemanticSnapshotSeed(
                     note_id=ref.note_id,
@@ -499,13 +518,15 @@ class SemanticGenerationBuilder:
         fence: SemanticExecutionFence,
         config: ResolvedSemanticConfig,
         plan: _SnapshotPlan,
+        *,
+        run_budget: _RunBudget | None = None,
     ) -> None:
         claim_limit = min(
             256,
             self._settings.max_active_notes,
             self._settings.max_provider_batch_inputs,
         )
-        provider_requests = 0
+        budget = run_budget or _RunBudget(self._settings)
         while True:
             claims = await asyncio.to_thread(
                 self._store.claim_work_batch,
@@ -525,6 +546,12 @@ class SemanticGenerationBuilder:
                     if not chunks:
                         raise SemanticIndexingError("notes_semantic_note_claim_stale")
                     await revalidate_execution_fence(self._revalidate, fence)
+                    try:
+                        admitted = budget.admit(chunks)
+                    except SemanticEmbeddingSystemError:
+                        raise SemanticIndexingError(
+                            "notes_semantic_run_limit_exceeded"
+                        ) from None
                     try:
                         batch = await self._embedder.embed_chunks(
                             chunks,
@@ -565,18 +592,14 @@ class SemanticGenerationBuilder:
                         raise SemanticIndexingError(
                             "notes_semantic_embedding_identity_mismatch"
                         )
-                    admitted = plan_semantic_embedding_batches(chunks, self._settings)
                     if (
                         type(batch.provider_request_count) is not int
                         or batch.provider_request_count < 0
-                        or batch.provider_request_count > admitted.request_count
+                        or batch.provider_request_count != admitted.request_count
                     ):
                         raise SemanticIndexingError(
                             "notes_semantic_embedding_usage_invalid"
                         )
-                    provider_requests += batch.provider_request_count
-                    if provider_requests > self._settings.max_provider_requests_per_run:
-                        raise SemanticIndexingError("notes_semantic_run_limit_exceeded")
                     vectors = tuple(
                         SemanticVector(chunk.vector_id, tuple(vector))
                         for chunk, vector in zip(chunks, batch.vectors)

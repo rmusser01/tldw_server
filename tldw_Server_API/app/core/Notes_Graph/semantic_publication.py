@@ -366,7 +366,7 @@ class SemanticPublicationService:
         ):
             raise SemanticIndexingError("notes_semantic_note_claim_invalid")
         await revalidate_execution_fence(self._revalidate, fence)
-        await run_reconciled_transaction(
+        staged = await run_reconciled_transaction(
             self._store.stage_obsolete_vector_cleanup,
             dataset_id=fence.dataset_id,
             generation_id=fence.generation_id,
@@ -376,6 +376,8 @@ class SemanticPublicationService:
             dirty_generation=claim.dirty_generation,
             now=self._clock(),
         )
+        if staged != len(expected_ids):
+            raise SemanticIndexingError("notes_semantic_cleanup_claim_conflict")
         written = await self._vectors.upsert(
             fence.dataset_id,
             fence.generation_id,

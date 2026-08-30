@@ -9,7 +9,7 @@ import inspect
 import math
 import re
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 from urllib.parse import urlsplit
 
@@ -177,7 +177,7 @@ class NotesEmbeddingExecutionIdentity:
     model_revision: str | None = None
     endpoint_origin: str | None = None
     credential_source: CredentialScope | None = None
-    endpoint_base_url: str | None = None
+    endpoint_base_url: str | None = field(default=None, repr=False)
     provider_attempt_sequence: int = 0
     provider_input_count: int = 0
     provider_prompt_tokens: int = 0

@@ -348,6 +348,21 @@ new current Note manifest and increment the semantic index revision in one
 Notes transaction. Tombstones do the same before cleanup. Old IDs remain
 invisible once the manifest changes and are deleted asynchronously.
 
+The generation manifest hash and publication receipt become immutable when a
+generation activates: they identify the verified activation snapshot, not the
+generation's later mutable contents. Active incremental visibility is defined
+by each current Note manifest together with `semantic_index_revision`; an
+incremental Note or tombstone transaction must not rescan or rewrite the
+activation manifest. Integrity reads of an active generation return the stored
+activation hash without changing it.
+
+IDs upserted before their Note manifest publishes are recorded in the durable
+obsolete-vector ledger as `unpublished`, but they are ineligible for cleanup
+while the exact generation, Note, dirty generation, and retriable `index_note`
+work authority can still publish. Cleanup becomes eligible after that exact
+work is terminal, exhausted, superseded, or removed. Claim authorization and
+completion both recheck current-manifest visibility and work eligibility.
+
 ## Canonical Text and Chunking
 
 Only the Note title and body are included. They are normalized independently

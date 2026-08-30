@@ -551,7 +551,7 @@ async def test_snapshot_cpu_work_does_not_block_event_loop(monkeypatch: pytest.M
 
 
 @pytest.mark.asyncio
-async def test_snapshot_byte_batching_uses_one_cumulative_provider_request_budget() -> None:
+async def test_snapshot_planning_does_not_charge_provider_budget_before_work_claim() -> None:
     settings = SemanticIndexSettings(
         max_active_notes=2,
         max_chunk_code_points=4,
@@ -575,5 +575,7 @@ async def test_snapshot_byte_batching_uses_one_cumulative_provider_request_budge
         settings=settings,
     )
 
-    with pytest.raises(SemanticIndexingError, match="notes_semantic_run_limit_exceeded"):
-        await builder._read_snapshot(_fence())
+    plan = await builder._read_snapshot(_fence())
+
+    assert len(plan.seeds) == 2
+    assert sum(seed.planned_chunk_count for seed in plan.seeds) == 4
