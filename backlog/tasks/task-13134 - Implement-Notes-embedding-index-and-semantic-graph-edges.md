@@ -4,7 +4,7 @@ title: Implement Notes embedding index and semantic graph edges
 status: In Progress
 assignee: []
 created_date: 2026-08-27 02:20
-updated_date: 2026-08-30 15:23
+updated_date: 2026-08-30 15:52
 labels:
 - notes
 - notes-graph
@@ -104,6 +104,7 @@ Approved executable plan: `Docs/superpowers/plans/2026-08-29-notes-semantic-inde
 
 2026-08-30 Task 4 Fix Round 2 started from 06e2371e13: disable resolved Google query-key fallback, make resolved Google list batches one batchEmbedContents request, preserve cancellation usage accounting, pin the full run endpoint, and publish full ResolvedDimension through CAS using strict TDD.
 2026-08-30 Task 4 Fix Round 2 takeover complete: independently audited the inherited six-file diff against 06e2371e13 with no corrective source/test edits required. Fresh verification: Task 4 plus orchestrator 86 passed; settings plus native adapters 83 passed; both cancellation regressions passed in 5 fresh processes (10/10); Ruff passed on all five touched Python files; Bandit scanned 998 lines with 0 findings and 0 skipped lines; git diff --check passed. One initial unchanged Hypothesis too_slow health-check failure passed with its exact seed and on the full-suite rerun. PostgreSQL was not rerun because no lifecycle/CAS persistence files changed. Report: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-4-report.md.
+2026-08-30 Task 4 Fix Round 3 complete from 584d8f9ade: routed every attempted provider usage outcome through one cancellation-draining, single-logger finalizer that preserves truthful success/failure status without duplicate append-only billing rows; added nested Google embedContentConfig.outputDimensionality for resolved scalar/batch requests, probe omission, strict direct-call validation, and a real Notes adapter seam. Verification: focused RED 11 failed/2 passed before implementation; final Task 4 plus orchestrator 89 passed; settings plus OpenAI/Google/HuggingFace adapters 92 passed; four cancellation selectors passed in 10 fresh processes (40/40); Ruff passed all five touched Python files; Bandit scanned 1,061 lines with 0 findings and 0 skipped lines; git diff --check passed. One initial unchanged Hypothesis too_slow health-check failure passed with its exact seed and on the clean full-suite rerun. PostgreSQL was not rerun because lifecycle/CAS persistence was untouched. Report: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-4-report.md.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

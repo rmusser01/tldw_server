@@ -430,6 +430,17 @@ def _count_tokens(text: str, model: str) -> int:
     return (len(text.encode("utf-8")) + 3) // 4
 
 
+def _consume_task_cancellation(task: asyncio.Task[Any] | None) -> None:
+    if task is None:
+        return
+    cancelling = getattr(task, "cancelling", None)
+    uncancel = getattr(task, "uncancel", None)
+    if not callable(cancelling) or not callable(uncancel):
+        return
+    while cancelling() > 0:
+        uncancel()
+
+
 def _reject_token_input(tokens_input: object, model: str) -> object:
     del tokens_input, model
     raise SemanticEmbeddingSystemError("token_input_unsupported")
@@ -559,18 +570,20 @@ class NotesSemanticEmbedder:
                 _safe_revision(getattr(identity, "model_revision", None))
                 or config.model_revision
             )
-        except asyncio.CancelledError:
-            await self._record_cancelled_provider_usage(
+        except asyncio.CancelledError as cancellation:
+            await self._finalize_provider_usage(
                 runtime=runtime,
                 result=result,
                 before_sequence=before_sequence,
                 config=config,
                 user_id=user_id,
                 operation="notes_semantic_dimension_probe",
+                succeeded=False,
+                cancellation=cancellation,
             )
             raise
         except Exception:
-            await self._record_provider_usage(
+            await self._finalize_provider_usage(
                 runtime=runtime,
                 result=result,
                 before_sequence=before_sequence,
@@ -580,15 +593,16 @@ class NotesSemanticEmbedder:
                 succeeded=False,
             )
             raise
-        await self._record_provider_usage(
-            runtime=runtime,
-            result=result,
-            before_sequence=before_sequence,
-            config=config,
-            user_id=user_id,
-            operation="notes_semantic_dimension_probe",
-            succeeded=True,
-        )
+        else:
+            await self._finalize_provider_usage(
+                runtime=runtime,
+                result=result,
+                before_sequence=before_sequence,
+                config=config,
+                user_id=user_id,
+                operation="notes_semantic_dimension_probe",
+                succeeded=True,
+            )
         if self._dimension_cas is None:
             raise SemanticEmbeddingSystemError("dimension_cas_unavailable")
         resolved_dimension = ResolvedDimension(
@@ -647,18 +661,20 @@ class NotesSemanticEmbedder:
                 ):
                     raise SemanticEmbeddingSystemError("model_revision_drift")
                 model_revision = actual_revision or model_revision
-            except asyncio.CancelledError:
-                await self._record_cancelled_provider_usage(
+            except asyncio.CancelledError as cancellation:
+                await self._finalize_provider_usage(
                     runtime=runtime,
                     result=result,
                     before_sequence=before_sequence,
                     config=config,
                     user_id=user_id,
                     operation="notes_semantic_embeddings",
+                    succeeded=False,
+                    cancellation=cancellation,
                 )
                 raise
             except Exception:
-                await self._record_provider_usage(
+                await self._finalize_provider_usage(
                     runtime=runtime,
                     result=result,
                     before_sequence=before_sequence,
@@ -668,15 +684,18 @@ class NotesSemanticEmbedder:
                     succeeded=False,
                 )
                 raise
-            provider_prompt_tokens, provider_total_tokens = await self._record_provider_usage(
-                runtime=runtime,
-                result=result,
-                before_sequence=before_sequence,
-                config=config,
-                user_id=user_id,
-                operation="notes_semantic_embeddings",
-                succeeded=True,
-            )
+            else:
+                provider_prompt_tokens, provider_total_tokens = (
+                    await self._finalize_provider_usage(
+                        runtime=runtime,
+                        result=result,
+                        before_sequence=before_sequence,
+                        config=config,
+                        user_id=user_id,
+                        operation="notes_semantic_embeddings",
+                        succeeded=True,
+                    )
+                )
             vectors.extend(batch_vectors)
             prompt_tokens += provider_prompt_tokens
             total_tokens += provider_total_tokens
@@ -690,7 +709,7 @@ class NotesSemanticEmbedder:
             total_tokens=total_tokens,
         )
 
-    async def _record_cancelled_provider_usage(
+    async def _finalize_provider_usage(
         self,
         *,
         runtime: NotesEmbeddingRuntime,
@@ -699,23 +718,48 @@ class NotesSemanticEmbedder:
         config: PendingSemanticConfig | ResolvedSemanticConfig,
         user_id: str,
         operation: str,
-    ) -> None:
-        try:
-            await asyncio.shield(
-                self._record_provider_usage(
-                    runtime=runtime,
-                    result=result,
-                    before_sequence=before_sequence,
-                    config=config,
-                    user_id=user_id,
-                    operation=operation,
-                    succeeded=False,
-                )
+        succeeded: bool,
+        cancellation: asyncio.CancelledError | None = None,
+    ) -> tuple[int, int]:
+        """Own and drain exactly one append-only usage write for an attempt."""
+
+        current_task = asyncio.current_task()
+        deferred_cancellation = cancellation
+        if deferred_cancellation is not None:
+            _consume_task_cancellation(current_task)
+
+        logger_task = asyncio.create_task(
+            self._record_provider_usage(
+                runtime=runtime,
+                result=result,
+                before_sequence=before_sequence,
+                config=config,
+                user_id=user_id,
+                operation=operation,
+                succeeded=succeeded,
             )
-        except asyncio.CancelledError:
-            return
-        except Exception:  # noqa: BLE001 - cancellation must remain the visible outcome
-            return
+        )
+        while not logger_task.done():
+            try:
+                await asyncio.shield(logger_task)
+            except asyncio.CancelledError as repeated_cancellation:
+                if deferred_cancellation is None:
+                    deferred_cancellation = repeated_cancellation
+                _consume_task_cancellation(current_task)
+
+        try:
+            usage = logger_task.result()
+        except asyncio.CancelledError as logger_cancellation:
+            deferred_cancellation = deferred_cancellation or logger_cancellation
+            usage = (0, 0)
+        except Exception:  # noqa: BLE001 - visible cancellation takes precedence
+            if deferred_cancellation is None:
+                raise
+            usage = (0, 0)
+
+        if deferred_cancellation is not None:
+            raise deferred_cancellation
+        return usage
 
     async def _record_provider_usage(
         self,
