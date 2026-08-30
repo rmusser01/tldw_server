@@ -6,17 +6,19 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.chacha.note_semantic_models import (
     SemanticDimensionState,
     SemanticGenerationState,
 )
-
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 pytestmark = pytest.mark.unit
 
 NOW = datetime(2026, 8, 29, 12, 0, tzinfo=timezone.utc)
 DATASET_ID = "dataset-a"
+CONTENT_V1 = f"sha256:{'1' * 64}"
+CONTENT_V7 = f"sha256:{'7' * 64}"
+CONTENT_V8 = f"sha256:{'8' * 64}"
 
 
 @pytest.fixture
@@ -108,6 +110,220 @@ def test_switching_active_generation_increments_semantic_index_revision(db: Char
     assert db.note_semantic_store.get_generation(DATASET_ID, first.id).state is SemanticGenerationState.ACTIVE
 
 
+def test_activation_rejects_generation_from_stale_configuration(db: CharactersRAGDB) -> None:
+    config = _create_config(db)
+    enabled = db.note_semantic_store.enable_configuration(
+        dataset_id=DATASET_ID,
+        expected_configuration_revision=config.configuration_revision,
+        capability_revision="capability-v1",
+        now=NOW,
+    )
+    assert enabled is not None
+    stale = db.note_semantic_store.create_generation(
+        dataset_id=DATASET_ID,
+        configuration_revision=enabled.configuration_revision,
+        compatibility_hash="compatibility-v1",
+        dimension_state=SemanticDimensionState.RESOLVED,
+        dimensions=768,
+        root_job_id="job-stale",
+        now=NOW,
+    )
+    disabled = db.note_semantic_store.disable_configuration(
+        dataset_id=DATASET_ID,
+        expected_configuration_revision=enabled.configuration_revision,
+        now=NOW,
+    )
+    assert disabled is not None
+    reenabled = db.note_semantic_store.enable_configuration(
+        dataset_id=DATASET_ID,
+        expected_configuration_revision=disabled.configuration_revision,
+        capability_revision="capability-v1",
+        now=NOW,
+    )
+    assert reenabled is not None
+
+    assert db.note_semantic_store.activate_generation(
+        dataset_id=DATASET_ID,
+        generation_id=stale.id,
+        expected_configuration_revision=reenabled.configuration_revision,
+        publication_receipt="receipt-stale",
+        now=NOW,
+    ) is None
+    assert db.note_semantic_store.get_generation(DATASET_ID, stale.id).state is SemanticGenerationState.STAGING
+    assert db.note_semantic_store.get_configuration(DATASET_ID).active_generation_id is None
+
+
+def test_replacement_activation_retires_and_queues_old_generation_cleanup(
+    db: CharactersRAGDB,
+) -> None:
+    config = _create_config(db)
+    enabled = db.note_semantic_store.enable_configuration(
+        dataset_id=DATASET_ID,
+        expected_configuration_revision=config.configuration_revision,
+        capability_revision="capability-v1",
+        now=NOW,
+    )
+    assert enabled is not None
+    first = db.note_semantic_store.create_generation(
+        dataset_id=DATASET_ID,
+        configuration_revision=enabled.configuration_revision,
+        compatibility_hash="compatibility-v1",
+        dimension_state=SemanticDimensionState.RESOLVED,
+        dimensions=768,
+        root_job_id="job-1",
+        now=NOW,
+    )
+    active = db.note_semantic_store.activate_generation(
+        dataset_id=DATASET_ID,
+        generation_id=first.id,
+        expected_configuration_revision=enabled.configuration_revision,
+        publication_receipt="receipt-1",
+        now=NOW,
+    )
+    assert active is not None
+    replacement = db.note_semantic_store.create_generation(
+        dataset_id=DATASET_ID,
+        configuration_revision=active.configuration_revision,
+        compatibility_hash="compatibility-v2",
+        dimension_state=SemanticDimensionState.RESOLVED,
+        dimensions=768,
+        root_job_id="job-2",
+        now=NOW,
+    )
+
+    switched = db.note_semantic_store.activate_generation(
+        dataset_id=DATASET_ID,
+        generation_id=replacement.id,
+        expected_configuration_revision=active.configuration_revision,
+        publication_receipt="receipt-2",
+        now=NOW,
+    )
+
+    assert switched is not None
+    assert db.note_semantic_store.get_generation(DATASET_ID, first.id).state is SemanticGenerationState.RETIRED
+    assert db.note_semantic_store.get_generation(DATASET_ID, replacement.id).state is SemanticGenerationState.ACTIVE
+    with db.transaction() as conn:
+        cleanup = conn.execute(
+            "SELECT kind,note_id,generation_id,claim_state,attempt_count FROM note_semantic_work "
+            "WHERE owner_user_id=? AND dataset_id=? AND kind='delete_generation'",
+            ("owner-a", DATASET_ID),
+        ).fetchall()
+    assert [tuple(row) for row in cleanup] == [
+        ("delete_generation", None, first.id, "pending", 0)
+    ]
+
+
+def test_pending_dimension_resolution_updates_config_and_generation_by_cas(
+    db: CharactersRAGDB,
+) -> None:
+    config = _create_config(db)
+    enabled = db.note_semantic_store.enable_configuration(
+        dataset_id=DATASET_ID,
+        expected_configuration_revision=config.configuration_revision,
+        capability_revision="capability-v1",
+        now=NOW,
+    )
+    assert enabled is not None
+    generation = db.note_semantic_store.create_generation(
+        dataset_id=DATASET_ID,
+        configuration_revision=enabled.configuration_revision,
+        compatibility_hash=None,
+        dimension_state=SemanticDimensionState.PENDING,
+        dimensions=None,
+        root_job_id="job-probe",
+        now=NOW,
+    )
+    assert generation.compatibility_hash is None
+
+    resolved = db.note_semantic_store.resolve_generation_dimensions(
+        dataset_id=DATASET_ID,
+        generation_id=generation.id,
+        expected_configuration_revision=enabled.configuration_revision,
+        dimensions=1536,
+        compatibility_hash="compatibility-resolved",
+        now=NOW,
+    )
+
+    assert resolved is not None
+    assert resolved.dimension_state is SemanticDimensionState.RESOLVED
+    assert resolved.dimensions == 1536
+    assert resolved.compatibility_hash == "compatibility-resolved"
+    assert resolved.configuration_revision == enabled.configuration_revision + 1
+    updated_config = db.note_semantic_store.get_configuration(DATASET_ID)
+    assert updated_config.dimension_state is SemanticDimensionState.RESOLVED
+    assert updated_config.dimensions == 1536
+    assert updated_config.compatibility_hash == "compatibility-resolved"
+    assert updated_config.configuration_revision == resolved.configuration_revision
+
+
+def test_dimension_resolution_rejects_stale_config_or_generation_without_partial_update(
+    db: CharactersRAGDB,
+) -> None:
+    config = _create_config(db)
+    enabled = db.note_semantic_store.enable_configuration(
+        dataset_id=DATASET_ID,
+        expected_configuration_revision=config.configuration_revision,
+        capability_revision="capability-v1",
+        now=NOW,
+    )
+    assert enabled is not None
+    generation = db.note_semantic_store.create_generation(
+        dataset_id=DATASET_ID,
+        configuration_revision=enabled.configuration_revision,
+        compatibility_hash=None,
+        dimension_state=SemanticDimensionState.PENDING,
+        dimensions=None,
+        root_job_id="job-probe",
+        now=NOW,
+    )
+
+    assert db.note_semantic_store.resolve_generation_dimensions(
+        dataset_id=DATASET_ID,
+        generation_id=generation.id,
+        expected_configuration_revision=enabled.configuration_revision + 1,
+        dimensions=1536,
+        compatibility_hash="compatibility-resolved",
+        now=NOW,
+    ) is None
+    assert db.note_semantic_store.get_configuration(DATASET_ID).dimension_state is SemanticDimensionState.PENDING
+    assert db.note_semantic_store.get_generation(DATASET_ID, generation.id).dimension_state is SemanticDimensionState.PENDING
+
+    with db.transaction() as conn:
+        conn.execute(
+            "UPDATE note_semantic_generations SET state='failed' "
+            "WHERE owner_user_id=? AND dataset_id=? AND id=?",
+            ("owner-a", DATASET_ID, generation.id),
+        )
+    assert db.note_semantic_store.resolve_generation_dimensions(
+        dataset_id=DATASET_ID,
+        generation_id=generation.id,
+        expected_configuration_revision=enabled.configuration_revision,
+        dimensions=1536,
+        compatibility_hash="compatibility-resolved",
+        now=NOW,
+    ) is None
+    unchanged_config = db.note_semantic_store.get_configuration(DATASET_ID)
+    unchanged_generation = db.note_semantic_store.get_generation(DATASET_ID, generation.id)
+    assert unchanged_config.dimension_state is SemanticDimensionState.PENDING
+    assert unchanged_config.compatibility_hash is None
+    assert unchanged_generation.dimension_state is SemanticDimensionState.PENDING
+    assert unchanged_generation.compatibility_hash is None
+
+
+def test_pending_generation_rejects_final_compatibility_hash(db: CharactersRAGDB) -> None:
+    config = _create_config(db)
+    with pytest.raises(ValueError, match="notes_semantic_pending_compatibility_hash_invalid"):
+        db.note_semantic_store.create_generation(
+            dataset_id=DATASET_ID,
+            configuration_revision=config.configuration_revision,
+            compatibility_hash="compatibility-too-early",
+            dimension_state=SemanticDimensionState.PENDING,
+            dimensions=None,
+            root_job_id="job-probe",
+            now=NOW,
+        )
+
+
 def test_manifest_publication_cannot_clear_a_newer_dirty_generation(db: CharactersRAGDB) -> None:
     config = _create_config(db)
     db.add_note("Note A", "content", note_id="note-a")
@@ -125,7 +341,7 @@ def test_manifest_publication_cannot_clear_a_newer_dirty_generation(db: Characte
         generation_id=generation.id,
         note_id="note-a",
         content_version=7,
-        content_fingerprint="fingerprint-v7",
+        content_fingerprint=CONTENT_V7,
         now=NOW,
     )
     claimed = db.note_semantic_store.claim_dirty_note(
@@ -141,7 +357,7 @@ def test_manifest_publication_cannot_clear_a_newer_dirty_generation(db: Characte
         generation_id=generation.id,
         note_id="note-a",
         content_version=8,
-        content_fingerprint="fingerprint-v8",
+        content_fingerprint=CONTENT_V8,
         now=NOW,
     )
 
@@ -175,7 +391,7 @@ def test_tombstones_queue_coalesced_cleanup_with_bounded_retry(db: CharactersRAG
         generation_id=generation.id,
         note_id="note-a",
         content_version=1,
-        content_fingerprint="fingerprint-v1",
+        content_fingerprint=CONTENT_V1,
         now=NOW,
     )
     tombstoned = db.note_semantic_store.tombstone_note(
@@ -210,6 +426,41 @@ def test_owner_bound_store_hides_foreign_owner_rows(db: CharactersRAGDB) -> None
         assert foreign.note_semantic_store.get_configuration(DATASET_ID) is None
     finally:
         foreign.close_all_connections()
+
+
+@pytest.mark.parametrize(
+    "content_fingerprint",
+    (
+        "raw Note text must not be persisted",
+        f"sha256:{'A' * 64}",
+        "1" * 64,
+    ),
+)
+def test_store_rejects_noncanonical_content_fingerprints(
+    db: CharactersRAGDB,
+    content_fingerprint: str,
+) -> None:
+    config = _create_config(db)
+    db.add_note("Note A", "content", note_id="note-a")
+    generation = db.note_semantic_store.create_generation(
+        dataset_id=DATASET_ID,
+        configuration_revision=config.configuration_revision,
+        compatibility_hash="compatibility-v1",
+        dimension_state=SemanticDimensionState.RESOLVED,
+        dimensions=768,
+        root_job_id="job-1",
+        now=NOW,
+    )
+
+    with pytest.raises(ValueError, match="notes_semantic_content_fingerprint_invalid"):
+        db.note_semantic_store.record_note_dirty(
+            dataset_id=DATASET_ID,
+            generation_id=generation.id,
+            note_id="note-a",
+            content_version=1,
+            content_fingerprint=content_fingerprint,
+            now=NOW,
+        )
 
 
 def test_store_rejects_unsanitized_displays_and_error_codes(db: CharactersRAGDB) -> None:

@@ -7,8 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
-
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    CharactersRAGDB,
+    CharactersRAGDBError,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -20,6 +22,7 @@ _TABLES = {
     "note_semantic_chunks",
     "note_semantic_work",
 }
+_DIGEST = f"sha256:{'a' * 64}"
 
 
 def _version(conn: sqlite3.Connection) -> int:
@@ -105,6 +108,98 @@ def test_sqlite_v65_fresh_schema_has_semantic_tables_constraints_and_indexes(tmp
             )
 
 
+def test_sqlite_v65_rejects_raw_content_and_chunk_fingerprints(tmp_path: Path) -> None:
+    db_path = tmp_path / "chacha-v65-fingerprints.sqlite"
+    db = _initialize(db_path)
+    db.close_all_connections()
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute(
+            "INSERT INTO notes(id,title,content,client_id) VALUES ('note-a','title','body','owner-a')"
+        )
+        conn.execute(
+            """
+            INSERT INTO note_semantic_index_configs(
+                owner_user_id,dataset_id,desired_state,configuration_revision,
+                semantic_index_revision,metric,dimension_state,dimensions,
+                normalization_version,chunker_version,updated_at
+            ) VALUES ('owner-a','dataset-a','enabled',1,0,'cosine','resolved',768,'v1','v1',CURRENT_TIMESTAMP)
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO note_semantic_generations(
+                id,owner_user_id,dataset_id,configuration_revision,state,
+                compatibility_hash,dimension_state,dimensions,created_at
+            ) VALUES ('generation-a','owner-a','dataset-a',1,'staging',
+                      'compatibility-v1','resolved',768,CURRENT_TIMESTAMP)
+            """
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                """
+                INSERT INTO note_semantic_note_state(
+                    owner_user_id,dataset_id,generation_id,note_id,content_version,
+                    content_fingerprint,dirty_generation,state
+                ) VALUES ('owner-a','dataset-a','generation-a','note-a',1,
+                          'raw Note body',1,'pending')
+                """
+            )
+        conn.execute(
+            """
+            INSERT INTO note_semantic_note_state(
+                owner_user_id,dataset_id,generation_id,note_id,content_version,
+                content_fingerprint,dirty_generation,state
+            ) VALUES ('owner-a','dataset-a','generation-a','note-a',1,?,1,'pending')
+            """,
+            (_DIGEST,),
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                """
+                INSERT INTO note_semantic_chunks(
+                    chunk_id,owner_user_id,dataset_id,generation_id,note_id,
+                    content_version,ordinal,field,start_offset,end_offset,
+                    chunk_fingerprint,normalization_version,chunker_version
+                ) VALUES ('chunk-a','owner-a','dataset-a','generation-a','note-a',
+                          1,0,'content',0,5,'raw Note body','v1','v1')
+                """
+            )
+
+
+@pytest.mark.parametrize(
+    ("kind", "note_id", "dirty_generation"),
+    (
+        ("index_note", "note-a", 1),
+        ("delete_note_vectors", "note-a", 1),
+        ("delete_generation", None, None),
+    ),
+)
+def test_sqlite_v65_requires_generation_identity_for_all_work_kinds(
+    tmp_path: Path,
+    kind: str,
+    note_id: str | None,
+    dirty_generation: int | None,
+) -> None:
+    db_path = tmp_path / f"chacha-v65-work-{kind}.sqlite"
+    db = _initialize(db_path)
+    db.close_all_connections()
+
+    with sqlite3.connect(db_path) as conn, pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            """
+            INSERT INTO note_semantic_work(
+                id,owner_user_id,dataset_id,kind,note_id,generation_id,
+                dirty_generation,fencing_token,claim_state,attempt_count,
+                next_eligible_at,created_at,updated_at
+            ) VALUES (?,?,?,?,?,NULL,?,'fence','pending',0,
+                      CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+            """,
+            (f"work-{kind}", "owner-a", "dataset-a", kind, note_id, dirty_generation),
+        )
+
+
 def test_sqlite_v64_to_v65_upgrade_creates_semantic_schema(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -137,7 +232,7 @@ def test_sqlite_v65_rolls_back_partial_ddl_and_preserves_v64(
     monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 65)
     monkeypatch.setattr(CharactersRAGDB, "_MIGRATION_SQL_V64_TO_V65", injected_sql)
 
-    with pytest.raises(Exception):
+    with pytest.raises(CharactersRAGDBError):
         _initialize(db_path)
 
     with sqlite3.connect(db_path) as conn:
