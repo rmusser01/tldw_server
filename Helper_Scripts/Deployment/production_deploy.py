@@ -8,6 +8,7 @@ import json
 import os
 import subprocess  # nosec B404
 import sys
+import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -66,6 +67,29 @@ def apply_metadata(path, member):
     os.chmod(path, member.mode & 0o777)
     if hasattr(os, "geteuid") and os.geteuid() == 0:
         os.chown(path, member.uid, member.gid, follow_symlinks=False)
+
+def path_exists(path):
+    return path.exists() or path.is_symlink()
+
+def rollback_replacement():
+    if not all(path_exists(entry) for entry in moved_old):
+        return False
+    complete = True
+    for entry in reversed(installed):
+        try:
+            remove_path(entry)
+        except OSError:
+            complete = False
+    for entry in reversed(moved_old):
+        destination = data / entry.name
+        if path_exists(destination):
+            complete = False
+            continue
+        try:
+            os.replace(entry, destination)
+        except OSError:
+            complete = False
+    return complete
 
 try:
     digest = hashlib.sha256()
@@ -126,37 +150,63 @@ try:
         destination = data / entry.name
         os.replace(entry, destination)
         installed.append(destination)
+    staged_archive.unlink()
+    new.rmdir()
+    shutil.rmtree(old)
+    stage.rmdir()
 except BaseException:
     if replacement_started:
-        rollback_complete = True
-        for entry in reversed(installed):
-            try:
-                remove_path(entry)
-            except OSError:
-                rollback_complete = False
-        for entry in reversed(moved_old):
-            try:
-                os.replace(entry, data / entry.name)
-            except OSError:
-                rollback_complete = False
-    raise
-else:
-    rollback_complete = True
-finally:
+        rollback_complete = rollback_replacement()
     if not replacement_started or rollback_complete:
-        shutil.rmtree(stage, ignore_errors=True)
+        try:
+            shutil.rmtree(stage)
+        except OSError:
+            pass
+    raise
 """
 _RESTORE_REDIS_SCRIPT = """\
-import hashlib, os, sys, tempfile
+import hashlib, os, shutil, sys, tempfile
 from pathlib import Path
 
 source = Path(sys.argv[1])
 expected = sys.argv[2]
 data = Path(sys.argv[3])
-descriptor, staged_name = tempfile.mkstemp(prefix=".tldw-redis-restore-", dir=str(data))
-staged = Path(staged_name)
-success = False
+stage = Path(tempfile.mkdtemp(prefix=".tldw-redis-restore-", dir=str(data)))
+staged = stage / "dump.rdb"
+old = stage / "old"
+old.mkdir()
+descriptor = -1
+moved_old = []
+installed = False
+replacement_started = False
+rollback_complete = False
+
+def path_exists(path):
+    return path.exists() or path.is_symlink()
+
+def rollback_replacement():
+    if not all(path_exists(entry) for entry in moved_old):
+        return False
+    complete = True
+    installed_path = data / "dump.rdb"
+    if installed:
+        try:
+            installed_path.unlink()
+        except OSError:
+            complete = False
+    for entry in reversed(moved_old):
+        destination = data / entry.name
+        if path_exists(destination):
+            complete = False
+            continue
+        try:
+            os.replace(entry, destination)
+        except OSError:
+            complete = False
+    return complete
+
 try:
+    descriptor = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     digest = hashlib.sha256()
     with open(source, "rb") as input_stream, os.fdopen(descriptor, "wb") as output_stream:
         descriptor = -1
@@ -173,13 +223,28 @@ try:
     owner = data.stat().st_uid, data.stat().st_gid
     os.chown(staged, *owner)
     os.chmod(staged, 0o600)
+    replacement_started = True
+    for entry in sorted(data.iterdir(), key=lambda path: path.name):
+        if entry == stage:
+            continue
+        destination = old / entry.name
+        os.replace(entry, destination)
+        moved_old.append(destination)
     os.replace(staged, data / "dump.rdb")
-    success = True
-finally:
+    installed = True
+    shutil.rmtree(old)
+    stage.rmdir()
+except BaseException:
     if descriptor >= 0:
         os.close(descriptor)
-    if not success:
-        staged.unlink(missing_ok=True)
+    if replacement_started:
+        rollback_complete = rollback_replacement()
+    if not replacement_started or rollback_complete:
+        try:
+            shutil.rmtree(stage)
+        except OSError:
+            pass
+    raise
 """
 _INHERITED_ENV_NAMES = (
     "PATH",
@@ -336,26 +401,56 @@ def _run_streaming_gate(
     env: Mapping[str, str] | None,
     destination: Path,
 ) -> CommandResult:
-    """Run a command whose stdout must stream to one private artifact."""
+    """Stream to an owned partial and publish without replacing any path."""
 
-    success = False
+    try:
+        destination.lstat()
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        raise DeploymentError(f"{label} gate destination could not be inspected") from exc
+    else:
+        raise DeploymentError(f"{label} gate destination already exists")
+    try:
+        partial_dir = Path(
+            tempfile.mkdtemp(
+                prefix=f".{destination.name}.partial-",
+                dir=str(destination.parent),
+            )
+        )
+    except OSError as exc:
+        raise DeploymentError(f"{label} gate partial path could not be created") from exc
+    partial = partial_dir / "output"
+    complete = False
     try:
         try:
-            result = runner(tuple(argv), env, destination)
+            result = runner(tuple(argv), env, partial)
         except Exception as exc:
             raise DeploymentError(f"{label} gate could not execute") from exc
         if result.returncode != 0:
             raise DeploymentError(f"{label} gate failed with exit status {result.returncode}")
         try:
-            _require_nonempty_file(destination, label)
+            _require_nonempty_file(partial, label)
         except (DeploymentError, OSError) as exc:
             raise DeploymentError(f"{label} gate produced an unusable artifact") from exc
-        success = True
+        try:
+            os.link(partial, destination, follow_symlinks=False)
+        except FileExistsError as exc:
+            raise DeploymentError(f"{label} gate destination already exists") from exc
+        except OSError as exc:
+            raise DeploymentError(f"{label} gate destination could not be published") from exc
+        try:
+            partial.unlink()
+            partial_dir.rmdir()
+        except OSError as exc:
+            raise DeploymentError(f"{label} gate partial cleanup failed") from exc
+        complete = True
         return result
     finally:
-        if not success:
+        if not complete:
             try:
-                destination.unlink(missing_ok=True)
+                partial.unlink(missing_ok=True)
+                partial_dir.rmdir()
             except OSError:
                 pass
 
@@ -415,7 +510,7 @@ def _require_nonempty_file(path: Path, label: str) -> None:
     """Fail if a container did not create a usable artifact."""
 
     try:
-        valid = path.is_file() and path.stat().st_size > 0
+        valid = not path.is_symlink() and path.is_file() and path.stat().st_size > 0
     except OSError:
         valid = False
     if not valid:

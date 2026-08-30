@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -335,6 +336,55 @@ def test_default_streaming_runner_does_not_remove_preexisting_destination(
     assert destination.read_bytes() == b"existing-artifact"
 
 
+def test_streaming_gate_preserves_preexisting_destination_without_running(
+    tmp_path: Path,
+) -> None:
+    destination = tmp_path / "postgres.dump"
+    destination.write_bytes(b"existing-artifact")
+    called = False
+
+    def forbidden_runner(argv, env, output):
+        nonlocal called
+        called = True
+        raise AssertionError("runner must not execute")
+
+    with pytest.raises(DeploymentError, match="destination"):
+        production_deploy._run_streaming_gate(
+            forbidden_runner,
+            "PostgreSQL backup",
+            ("pg_dump",),
+            env=None,
+            destination=destination,
+        )
+
+    assert not called
+    assert destination.read_bytes() == b"existing-artifact"
+    assert not tuple(tmp_path.glob(".postgres.dump.partial-*"))
+
+
+def test_streaming_gate_preserves_destination_created_during_promotion(
+    tmp_path: Path,
+) -> None:
+    destination = tmp_path / "postgres.dump"
+
+    def racing_runner(argv, env, output):
+        output.write_bytes(b"candidate-artifact")
+        destination.write_bytes(b"raced-artifact")
+        return CommandResult(0, b"", b"")
+
+    with pytest.raises(DeploymentError, match="destination"):
+        production_deploy._run_streaming_gate(
+            racing_runner,
+            "PostgreSQL backup",
+            ("pg_dump",),
+            env=None,
+            destination=destination,
+        )
+
+    assert destination.read_bytes() == b"raced-artifact"
+    assert not tuple(tmp_path.glob(".postgres.dump.partial-*"))
+
+
 class RecordingRunner:
     def __init__(
         self,
@@ -505,7 +555,9 @@ def test_deploy_uses_injected_streaming_runner_for_database_and_app_data(
     runner = RecordingRunner()
     stream_runner = RecordingStreamRunner()
 
-    deploy(_config(tmp_path), runner=runner, stream_runner=stream_runner)
+    config = _config(tmp_path)
+
+    deploy(config, runner=runner, stream_runner=stream_runner)
 
     assert len(stream_runner.calls) == 2
     assert "pg_dump --format=custom" in " ".join(stream_runner.calls[0][0])
@@ -514,7 +566,39 @@ def test_deploy_uses_injected_streaming_runner_for_database_and_app_data(
     assert not any(":/backup" in argument for argument in stream_runner.calls[1][0])
     assert not any("pg_dump" in command for command in _commands(runner))
     assert not any("production_app-data:/data:ro" in command for command in _commands(runner))
-    assert all(call[2].stat().st_mode & 0o777 == 0o600 for call in stream_runner.calls)
+    artifacts = (
+        next(config.backup_dir.rglob("postgres.dump")),
+        next(config.backup_dir.rglob("app-data.tar")),
+    )
+    assert all(path.stat().st_mode & 0o777 == 0o600 for path in artifacts)
+    assert all(not call[2].exists() for call in stream_runner.calls)
+
+
+def test_deploy_preserves_postgres_destination_created_during_stream_promotion(
+    tmp_path: Path, passing_deployment_checks: None
+) -> None:
+    config = _config(tmp_path)
+
+    def racing_stream_runner(argv, env, output):
+        if "pg_dump" in argv:
+            output.write_bytes(b"candidate-postgres-dump")
+            snapshot = next(parent for parent in output.parents if parent.parent == config.backup_dir)
+            (snapshot / "postgres.dump").write_bytes(b"raced-postgres-dump")
+        else:
+            output.write_bytes(_tar_bytes())
+        return CommandResult(0, b"", b"")
+
+    with pytest.raises(DeploymentError, match="destination"):
+        deploy(
+            config,
+            runner=RecordingRunner(),
+            stream_runner=racing_stream_runner,
+        )
+
+    destination = next(config.backup_dir.rglob("postgres.dump"))
+    assert destination.read_bytes() == b"raced-postgres-dump"
+    assert not tuple(config.backup_dir.rglob(".postgres.dump.partial-*"))
+    assert not tuple(config.backup_dir.rglob("manifest.json"))
 
 
 @pytest.mark.parametrize("outcome", ("empty", "exception"))
@@ -705,6 +789,30 @@ def test_app_restore_rolls_back_live_entries_when_replacement_fails(
     assert not (destination / "new-b").exists()
 
 
+def test_app_restore_cleanup_failure_rolls_back_live_data(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    source = tmp_path / "app-data.tar"
+    source.write_bytes(_tar_bytes(member_name="new", payload=b"new-value"))
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    destination = tmp_path / "data"
+    destination.mkdir()
+    (destination / "original").write_text("keep", encoding="utf-8")
+    real_rmtree = shutil.rmtree
+
+    def fail_old_cleanup(path, *args, **kwargs):
+        if Path(path).name == "old":
+            raise OSError("injected cleanup failure")
+        return real_rmtree(path, *args, **kwargs)
+
+    monkeypatch.setattr(shutil, "rmtree", fail_old_cleanup)
+
+    with pytest.raises(OSError, match="injected cleanup failure"):
+        _run_embedded_script(production_deploy._RESTORE_APP_SCRIPT, source, digest, destination)
+
+    assert (destination / "original").read_text(encoding="utf-8") == "keep"
+    assert not (destination / "new").exists()
+    assert not tuple(destination.glob(".tldw-app-restore-*"))
+
+
 def test_redis_restore_stages_one_open_source_before_atomic_replace(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -740,6 +848,86 @@ def test_redis_restore_stages_one_open_source_before_atomic_replace(
 
     assert (destination / "dump.rdb").read_bytes() == b"verified-rdb"
     assert replacements[-1][1] == destination / "dump.rdb"
+
+
+def test_redis_restore_replaces_rdb_aof_and_other_live_entries(tmp_path: Path) -> None:
+    source = tmp_path / "redis.rdb"
+    source.write_bytes(b"verified-rdb")
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    destination = tmp_path / "redis-data"
+    destination.mkdir()
+    (destination / "dump.rdb").write_bytes(b"old-rdb")
+    appendonly = destination / "appendonlydir"
+    appendonly.mkdir()
+    (appendonly / "appendonly.aof.1.base.rdb").write_bytes(b"old-aof-base")
+    (appendonly / "appendonly.aof.manifest").write_text("old-manifest", encoding="utf-8")
+    (destination / "other.persistence").write_bytes(b"other-live-state")
+
+    _run_embedded_script(production_deploy._RESTORE_REDIS_SCRIPT, source, digest, destination)
+
+    assert (destination / "dump.rdb").read_bytes() == b"verified-rdb"
+    assert {entry.name for entry in destination.iterdir()} == {"dump.rdb"}
+
+
+def test_redis_restore_install_failure_restores_every_live_entry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "redis.rdb"
+    source.write_bytes(b"verified-rdb")
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    destination = tmp_path / "redis-data"
+    destination.mkdir()
+    (destination / "dump.rdb").write_bytes(b"old-rdb")
+    appendonly = destination / "appendonlydir"
+    appendonly.mkdir()
+    (appendonly / "appendonly.aof.1.incr.aof").write_bytes(b"old-aof")
+    (destination / "other.persistence").write_bytes(b"other-live-state")
+    real_replace = os.replace
+
+    def fail_new_rdb_install(source_path, destination_path):
+        source_entry = Path(source_path)
+        if source_entry.name == "dump.rdb" and source_entry.parent.name.startswith(".tldw-redis-restore-"):
+            raise OSError("injected install failure")
+        return real_replace(source_path, destination_path)
+
+    monkeypatch.setattr(os, "replace", fail_new_rdb_install)
+
+    with pytest.raises(OSError, match="injected install failure"):
+        _run_embedded_script(production_deploy._RESTORE_REDIS_SCRIPT, source, digest, destination)
+
+    assert (destination / "dump.rdb").read_bytes() == b"old-rdb"
+    assert (appendonly / "appendonly.aof.1.incr.aof").read_bytes() == b"old-aof"
+    assert (destination / "other.persistence").read_bytes() == b"other-live-state"
+    assert not tuple(destination.glob(".tldw-redis-restore-*"))
+
+
+def test_redis_restore_cleanup_failure_restores_every_live_entry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "redis.rdb"
+    source.write_bytes(b"verified-rdb")
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    destination = tmp_path / "redis-data"
+    destination.mkdir()
+    (destination / "dump.rdb").write_bytes(b"old-rdb")
+    appendonly = destination / "appendonlydir"
+    appendonly.mkdir()
+    (appendonly / "appendonly.aof.manifest").write_text("old-manifest", encoding="utf-8")
+    real_rmtree = shutil.rmtree
+
+    def fail_old_cleanup(path, *args, **kwargs):
+        if Path(path).name == "old":
+            raise OSError("injected cleanup failure")
+        return real_rmtree(path, *args, **kwargs)
+
+    monkeypatch.setattr(shutil, "rmtree", fail_old_cleanup)
+
+    with pytest.raises(OSError, match="injected cleanup failure"):
+        _run_embedded_script(production_deploy._RESTORE_REDIS_SCRIPT, source, digest, destination)
+
+    assert (destination / "dump.rdb").read_bytes() == b"old-rdb"
+    assert (appendonly / "appendonly.aof.manifest").read_text(encoding="utf-8") == "old-manifest"
+    assert not tuple(destination.glob(".tldw-redis-restore-*"))
 
 
 def test_redis_restore_checksum_failure_preserves_live_data(tmp_path: Path) -> None:
