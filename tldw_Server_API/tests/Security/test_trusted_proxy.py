@@ -5,6 +5,8 @@ from tldw_Server_API.app.core.Security.trusted_proxy import (
     resolve_trusted_client_ip,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.parametrize(
     ("peer", "expected"),

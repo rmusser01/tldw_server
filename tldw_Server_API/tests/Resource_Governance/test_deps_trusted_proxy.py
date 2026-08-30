@@ -5,7 +5,7 @@ from starlette.requests import Request
 
 from tldw_Server_API.app.core.Resource_Governance.deps import derive_client_ip, derive_entity_key
 
-pytestmark = pytest.mark.rate_limit
+pytestmark = [pytest.mark.unit, pytest.mark.rate_limit]
 
 
 def _build_request(headers=None, raw_headers=None, client_host="127.0.0.1", client_port=12345):

@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 from tldw_Server_API.app.core.Resource_Governance.governor import RGDecision
 from tldw_Server_API.app.core.Resource_Governance.middleware_simple import RGSimpleMiddleware
 
-pytestmark = pytest.mark.rate_limit
+pytestmark = [pytest.mark.unit, pytest.mark.rate_limit]
 
 
 class _Snap:

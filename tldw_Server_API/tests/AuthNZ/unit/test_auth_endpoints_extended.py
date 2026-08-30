@@ -9,24 +9,26 @@ from fastapi import HTTPException, Response
 from pydantic import ValidationError
 from starlette.requests import Request
 
+from tldw_Server_API.app.core.AuthNZ.lockout_tracker import (
+    build_login_client_lockout_key,
+    validate_login_client_lockout_key,
+)
 from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+
+pytestmark = pytest.mark.unit
 
 
 def test_login_client_lockout_key_has_stable_known_vector():
-    import tldw_Server_API.app.api.v1.endpoints.auth as auth
-
-    assert auth._login_client_lockout_key("203.0.113.9", " Alice@Example.COM ") == (
+    assert build_login_client_lockout_key("203.0.113.9", " Alice@Example.COM ") == (
         "login-client-v1:5573603ba3e0013f1788b2e3e4b7d67553500401252965ad3f2189a1a352b014"
     )
 
 
 def test_login_client_lockout_key_normalizes_identifier_but_preserves_aliases():
-    import tldw_Server_API.app.api.v1.endpoints.auth as auth
-
-    by_email = auth._login_client_lockout_key("2001:db8::9", " USER@example.com ")
-    assert by_email == auth._login_client_lockout_key("2001:db8::9", "user@example.com")
-    assert by_email != auth._login_client_lockout_key("2001:db8::9", "user")
-    assert auth._login_client_lockout_key(None, "user").startswith("login-client-v1:")
+    by_email = build_login_client_lockout_key("2001:db8::9", " USER@example.com ")
+    assert by_email == build_login_client_lockout_key("2001:db8::9", "user@example.com")
+    assert by_email != build_login_client_lockout_key("2001:db8::9", "user")
+    assert build_login_client_lockout_key(None, "user").startswith("login-client-v1:")
 
 
 @pytest.mark.parametrize(
@@ -36,9 +38,7 @@ def test_login_client_lockout_key_normalizes_identifier_but_preserves_aliases():
      "login-client-v1:" + "g" * 64],
 )
 def test_validated_login_client_lockout_key_rejects_noncanonical_values(value):
-    import tldw_Server_API.app.api.v1.endpoints.auth as auth
-
-    assert auth._validated_login_client_lockout_key(value) is None
+    assert validate_login_client_lockout_key(value) is None
 
 
 def test_auth_request_client_ip_uses_unknown_for_invalid_physical_peer(monkeypatch):
@@ -516,7 +516,7 @@ async def test_login_lockout_uses_trusted_forwarded_client_login_key(monkeypatch
         )
 
     assert exc.value.status_code == 429
-    assert captured["identifier"] == auth._login_client_lockout_key(
+    assert captured["identifier"] == build_login_client_lockout_key(
         "198.51.100.77", "user1"
     )
 
@@ -554,7 +554,7 @@ async def test_login_unknown_user_records_only_client_login_lockout_key(monkeypa
         "client": ("203.0.113.9", 1234), "scheme": "http", "query_string": b"",
         "server": ("testserver", 80),
     })
-    composite_key = auth._login_client_lockout_key("203.0.113.9", "alice@example.com")
+    composite_key = build_login_client_lockout_key("203.0.113.9", "alice@example.com")
 
     with pytest.raises(HTTPException) as excinfo:
         await auth.login(
@@ -622,7 +622,7 @@ async def test_login_bad_password_uses_client_and_account_lockout_buckets(
         "client": ("203.0.113.9", 1234), "scheme": "http", "query_string": b"",
         "server": ("testserver", 80),
     })
-    composite_key = auth._login_client_lockout_key("203.0.113.9", login_identifier)
+    composite_key = build_login_client_lockout_key("203.0.113.9", login_identifier)
 
     with pytest.raises(HTTPException) as excinfo:
         await auth.login(
@@ -702,7 +702,7 @@ async def test_login_success_resets_client_and_account_lockout_buckets(monkeypat
         "client": ("203.0.113.9", 1234), "scheme": "http", "query_string": b"",
         "server": ("testserver", 80),
     })
-    composite_key = auth._login_client_lockout_key("203.0.113.9", "alice")
+    composite_key = build_login_client_lockout_key("203.0.113.9", "alice")
 
     result = await auth.login(
         request=request, response=Response(),
@@ -717,7 +717,7 @@ async def test_login_success_resets_client_and_account_lockout_buckets(monkeypat
         (composite_key, "login"),
         ("stored_username", "login"),
     ]
-    assert auth._login_client_lockout_key("203.0.113.9", "alice") != auth._login_client_lockout_key(
+    assert build_login_client_lockout_key("203.0.113.9", "alice") != build_login_client_lockout_key(
         "203.0.113.9", "bob"
     )
 
@@ -1003,7 +1003,7 @@ async def test_login_returns_mfa_challenge_when_enabled(monkeypatch):
     assert cached == {
         "user_id": 5,
         "session_id": 777,
-        "login_lockout_key": auth._login_client_lockout_key("203.0.113.9", "mfa_user"),
+        "login_lockout_key": build_login_client_lockout_key("203.0.113.9", "mfa_user"),
     }
     assert "203.0.113.9" not in session_manager.stored_value
     assert "mfa_user" not in session_manager.stored_value
@@ -1018,7 +1018,8 @@ async def test_login_returns_mfa_challenge_when_enabled(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_mfa_login_completes_tokens(monkeypatch):
+@pytest.mark.parametrize("legacy_payload", [False, True])
+async def test_mfa_login_completes_tokens(monkeypatch, legacy_payload):
     monkeypatch.setenv("AUTH_MODE", "multi_user")
     monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
     reset_settings()
@@ -1111,12 +1112,14 @@ async def test_mfa_login_completes_tokens(monkeypatch):
     session_manager = _StubSessionManager()
     token = "mfa-session-token"
     cache_key = auth._mfa_login_cache_key(token)
-    original_login_lockout_key = auth._login_client_lockout_key("203.0.113.9", "mfa_user")
-    session_manager.ephemeral[cache_key] = json.dumps({
+    original_login_lockout_key = build_login_client_lockout_key("203.0.113.9", "mfa_user")
+    cached_payload = {
         "user_id": 5,
         "session_id": 55,
-        "login_lockout_key": original_login_lockout_key,
-    })
+    }
+    if not legacy_payload:
+        cached_payload["login_lockout_key"] = original_login_lockout_key
+    session_manager.ephemeral[cache_key] = json.dumps(cached_payload)
 
     scope = {
         "type": "http",
@@ -1146,10 +1149,14 @@ async def test_mfa_login_completes_tokens(monkeypatch):
     assert result.refresh_token == "REFRESH"
     assert session_manager.updated["session_id"] == 55
     assert cache_key in session_manager.deleted
-    assert reset_calls == [
-        (original_login_lockout_key, "login"),
-        ("mfa_user", "login"),
-    ]
+    assert reset_calls == (
+        [("mfa_user", "login")]
+        if legacy_payload
+        else [
+            (original_login_lockout_key, "login"),
+            ("mfa_user", "login"),
+        ]
+    )
     assert all(identifier != "198.51.100.44" for identifier, _ in reset_calls)
 
 
@@ -1157,7 +1164,6 @@ async def test_mfa_login_completes_tokens(monkeypatch):
 @pytest.mark.parametrize(
     "payload",
     [
-        {"user_id": 5, "session_id": 55},
         {"user_id": 5, "session_id": 55, "login_lockout_key": "203.0.113.9"},
         {"user_id": 5, "session_id": 55, "login_lockout_key": "login-client-v2:" + "a" * 64},
         {"user_id": 5, "session_id": 55, "login_lockout_key": "login-client-v1:" + "A" * 64},
@@ -1436,7 +1442,7 @@ async def test_mfa_login_rate_limited_returns_429(monkeypatch):
                 auth._mfa_login_cache_key("session-token"): json.dumps({
                     "user_id": 5,
                     "session_id": 55,
-                    "login_lockout_key": auth._login_client_lockout_key("203.0.113.10", "mfa_user"),
+                    "login_lockout_key": build_login_client_lockout_key("203.0.113.10", "mfa_user"),
                 })
             }
 

@@ -8,6 +8,8 @@ from tldw_Server_API.app.core.AuthNZ.ip_allowlist import (
     resolve_client_ip,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _settings(allowed):
 

@@ -5,7 +5,6 @@
 import asyncio
 import base64
 import contextlib
-import hashlib
 import json
 import os
 import re
@@ -98,6 +97,10 @@ from tldw_Server_API.app.core.AuthNZ.ip_allowlist import (
     resolve_client_ip,
 )
 from tldw_Server_API.app.core.AuthNZ.jwt_service import JWTService
+from tldw_Server_API.app.core.AuthNZ.lockout_tracker import (
+    build_login_client_lockout_key,
+    validate_login_client_lockout_key,
+)
 from tldw_Server_API.app.core.AuthNZ.orgs_teams import list_memberships_for_user
 from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
@@ -990,9 +993,6 @@ def _is_enterprise_admin_ui_mode() -> bool:
     return raw_value.strip().lower() in {"1", "true", "yes", "on"}
 
 
-_LOGIN_CLIENT_LOCKOUT_KEY_RE = re.compile(r"login-client-v1:[0-9a-f]{64}\Z")
-
-
 def _auth_request_client_ip(request: Request) -> str:
     try:
         settings = get_settings()
@@ -1002,19 +1002,6 @@ def _auth_request_client_ip(request: Request) -> str:
         return resolve_client_ip(request, settings) or "unknown"
     except _AUTH_NONCRITICAL_EXCEPTIONS:
         return "unknown"
-
-
-def _login_client_lockout_key(client_ip: str | None, login_identifier: str) -> str:
-    payload = json.dumps(
-        [client_ip or "unknown", login_identifier.strip().lower()],
-        ensure_ascii=False,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return f"login-client-v1:{hashlib.sha256(payload).hexdigest()}"
-
-
-def _validated_login_client_lockout_key(value: object) -> str | None:
-    return value if isinstance(value, str) and _LOGIN_CLIENT_LOCKOUT_KEY_RE.fullmatch(value) else None
 
 
 def _auth_hashed_entity(raw_value: str) -> str:
@@ -1583,7 +1570,7 @@ async def login(
         # Get client info and normalize the identifier as the database lookup does.
         client_ip = _auth_request_client_ip(request)
         login_identifier = form_data.username.strip().lower()
-        client_login_lockout_key = _login_client_lockout_key(client_ip, login_identifier)
+        client_login_lockout_key = build_login_client_lockout_key(client_ip, login_identifier)
         user_agent = request.headers.get("User-Agent", "Unknown")
         # PII-aware logging
         if settings.PII_REDACT_LOGS:
@@ -3504,8 +3491,15 @@ async def mfa_login(
 
         session_id = payload.get("session_id")
         user_id = payload.get("user_id")
-        login_lockout_key = _validated_login_client_lockout_key(payload.get("login_lockout_key"))
-        if not session_id or not user_id or login_lockout_key is None:
+        login_lockout_key = None
+        if "login_lockout_key" in payload:
+            login_lockout_key = validate_login_client_lockout_key(payload.get("login_lockout_key"))
+            if login_lockout_key is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="MFA session expired or invalid",
+                )
+        if not session_id or not user_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="MFA session expired or invalid",
@@ -3624,7 +3618,8 @@ async def mfa_login(
         # Reset failed login attempts on successful MFA login
         if getattr(rate_limiter, 'enabled', False):
             try:
-                await rate_limiter.reset_failed_attempts(login_lockout_key, "login")
+                if login_lockout_key is not None:
+                    await rate_limiter.reset_failed_attempts(login_lockout_key, "login")
                 await rate_limiter.reset_failed_attempts(user.get("username", ""), "login")
             except _AUTH_NONCRITICAL_EXCEPTIONS as rl_exc:
                 logger.debug(f"rate_limiter.reset_failed_attempts failed: {rl_exc}")

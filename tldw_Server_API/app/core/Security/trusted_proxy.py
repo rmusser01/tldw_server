@@ -1,3 +1,5 @@
+"""Resolve client IPs without trusting headers from untrusted network peers."""
+
 from __future__ import annotations
 
 import ipaddress
@@ -8,6 +10,7 @@ IPNetwork = ipaddress.IPv4Network | ipaddress.IPv6Network
 
 
 def _parse_ip(value: str | None) -> IPAddress | None:
+    """Parse a plain IPv4 or IPv6 address, rejecting scoped and malformed values."""
     if not isinstance(value, str):
         return None
     token = value.strip()
@@ -20,6 +23,7 @@ def _parse_ip(value: str | None) -> IPAddress | None:
 
 
 def _parse_networks(entries: Iterable[str]) -> tuple[IPNetwork, ...]:
+    """Parse valid trusted-proxy host and network entries, ignoring invalid ones."""
     networks: list[IPNetwork] = []
     for entry in entries:
         token = str(entry).strip()
@@ -33,6 +37,7 @@ def _parse_networks(entries: Iterable[str]) -> tuple[IPNetwork, ...]:
 
 
 def _address_is_trusted(address: IPAddress, networks: tuple[IPNetwork, ...]) -> bool:
+    """Return whether an address belongs to any same-family trusted network."""
     return any(address.version == network.version and address in network for network in networks)
 
 
@@ -40,6 +45,7 @@ def is_trusted_proxy_peer(
     physical_peer: str | None,
     trusted_proxy_entries: Iterable[str],
 ) -> bool:
+    """Return whether the physical network peer is configured as trusted."""
     peer = _parse_ip(physical_peer)
     return peer is not None and _address_is_trusted(peer, _parse_networks(trusted_proxy_entries))
 
@@ -51,6 +57,7 @@ def resolve_trusted_client_ip(
     forwarded_for_values: Iterable[str] = (),
     single_forwarded_value: str | None = None,
 ) -> str | None:
+    """Resolve the client address, honoring forwarding headers only from trusted peers."""
     peer = _parse_ip(physical_peer)
     if peer is None:
         return None

@@ -53,6 +53,7 @@ def _ip_in_allowlist(ip: str | None, allowlist: list[str]) -> bool:
 
 
 def _header_values(request: Any, name: str) -> tuple[str, ...]:
+    """Return every value for a request header, or an empty tuple on failure."""
     try:
         headers = request.headers
         getlist = getattr(headers, "getlist", None)
