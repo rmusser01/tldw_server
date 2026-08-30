@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -112,6 +113,19 @@ class RecordMutation:
     no_expiry: Any = _UNSET
 
 
+@dataclass(frozen=True, slots=True)
+class PersonalContextSyncSnapshot:
+    """One transactionally-read canonical snapshot authorized for Sync bootstrap."""
+
+    manifest: ProfileManifest
+    scopes: tuple[ProfileScope, ...]
+    records: tuple[ProfileRecord, ...]
+    proposals: tuple[ProfileProposal, ...]
+    integrity_key_id: str
+    integrity_key: bytes
+    cursor: str
+
+
 class PersonalContextService:
     """Own all authenticated Personal Context reads and mutations for one user."""
 
@@ -175,6 +189,48 @@ class PersonalContextService:
         if profile_id != self._profile_id():
             raise KeyError("Personal context profile not found")
         return self._repository.sync_integrity_key(profile_id)
+
+    def sync_bootstrap_snapshot(self) -> PersonalContextSyncSnapshot:
+        """Return all eligible canonical Sync heads from one repository read transaction."""
+
+        profile_id = self._profile_id()
+        manifest, scopes, records, proposals, key_id, key = self._repository.sync_bootstrap_snapshot(
+            profile_id
+        )
+        records = tuple(
+            record for record in records if record.controls.sync_mode is SyncMode.SYNCABLE
+        )
+        proposals = tuple(
+            proposal
+            for proposal in proposals
+            if proposal.proposed_record is None
+            or proposal.proposed_record.controls.sync_mode is SyncMode.SYNCABLE
+        )
+        cursor_values = [
+            f"manifest:{manifest.profile_id}:{manifest.current_version_id}",
+            f"purge:{manifest.purge_generation}",
+            *(f"scope:{item.scope_id}:{item.version_id}" for item in scopes),
+            *(f"record:{item.record_id}:{item.version_id}" for item in records),
+            *(
+                "proposal:"
+                + item.proposal_id
+                + ":"
+                + hashlib.sha256(item.model_dump_json().encode("utf-8")).hexdigest()
+                for item in proposals
+            ),
+        ]
+        cursor = "personal-context-bootstrap-v1:" + hashlib.sha256(
+            "\x1e".join(sorted(cursor_values)).encode("utf-8")
+        ).hexdigest()
+        return PersonalContextSyncSnapshot(
+            manifest=manifest,
+            scopes=scopes,
+            records=records,
+            proposals=proposals,
+            integrity_key_id=key_id,
+            integrity_key=key,
+            cursor=cursor,
+        )
 
     def sync_encryption_key(self, profile_id: str) -> tuple[bytes, int]:
         """Resolve canonical encryption custody for this user's Sync dataset."""

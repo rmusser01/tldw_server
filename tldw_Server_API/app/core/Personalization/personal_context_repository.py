@@ -629,6 +629,55 @@ class PersonalContextRepository:
         except ValidationError:
             raise ProfileIntegrityError("Canonical object validation failed") from None
 
+    def sync_bootstrap_snapshot(
+        self, profile_id: str
+    ) -> tuple[ProfileManifest, tuple[ProfileScope, ...], tuple[ProfileRecord, ...], tuple[ProfileProposal, ...], str, bytes]:
+        """Read all bounded canonical Sync heads and key identity in one transaction."""
+
+        with self._database.transaction() as connection:
+            keys = self._keys.load(profile_id, connection=connection)
+            manifest_row = self._head_row(connection, profile_id, "manifest", profile_id)
+            if manifest_row is None:
+                raise KeyError("Personal context profile not found")
+
+            def read_heads(object_type: str, model_type: type[_ModelT]) -> tuple[_ModelT, ...]:
+                rows = connection.execute(
+                    """
+                    SELECT versions.*
+                    FROM personal_context_object_heads AS heads
+                    JOIN personal_context_object_versions AS versions
+                      ON versions.profile_id = heads.profile_id
+                     AND versions.object_type = heads.object_type
+                     AND versions.object_id = heads.object_id
+                     AND versions.version_id = heads.current_version_id
+                    WHERE heads.profile_id = ? AND heads.object_type = ?
+                    ORDER BY heads.object_id
+                    LIMIT ?
+                    """,
+                    (profile_id, object_type, _MAX_LIST_ROWS + 1),
+                ).fetchall()
+                if len(rows) > _MAX_LIST_ROWS:
+                    raise ProfileQuotaExceededError("sync bootstrap head limit exceeded")
+                try:
+                    return tuple(
+                        model_type.model_validate_json(self._decrypt_row(row, keys))
+                        for row in rows
+                    )
+                except ValidationError:
+                    raise ProfileIntegrityError("Canonical object validation failed") from None
+
+            try:
+                manifest = ProfileManifest.model_validate_json(
+                    self._decrypt_row(manifest_row, keys)
+                )
+            except ValidationError:
+                raise ProfileIntegrityError("Canonical object validation failed") from None
+            scopes = read_heads("scope", ProfileScope)
+            records = read_heads("record", ProfileRecord)
+            proposals = read_heads("proposal", ProfileProposal)
+            key_id = f"personal-context-integrity-v{keys.integrity_key_version}"
+            return manifest, scopes, records, proposals, key_id, bytes(keys.integrity_key)
+
     @staticmethod
     def _validate_manifest_transition(
         current: ProfileManifest,

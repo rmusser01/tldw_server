@@ -457,8 +457,26 @@ class SyncV2ProfileManager:
                 raise PersonalContextBootstrapError(
                     "personal_context_key_custody_unavailable"
                 ) from exc
-            for _attempt in range(3):
+            snapshot = None
+            snapshot_reader = getattr(canonical_service, "sync_bootstrap_snapshot", None)
+            if callable(snapshot_reader):
                 try:
+                    snapshot = snapshot_reader()
+                    manifest = snapshot.manifest
+                    integrity_key_id = snapshot.integrity_key_id
+                    integrity_key = snapshot.integrity_key
+                    scopes = tuple(snapshot.scopes)
+                    records = tuple(snapshot.records)
+                    proposals = tuple(snapshot.proposals)
+                    cursor = snapshot.cursor
+                except Exception as exc:  # noqa: BLE001 - no canonical body in errors.
+                    raise PersonalContextBootstrapError(
+                        "personal_context_snapshot_unavailable"
+                    ) from exc
+            for _attempt in range(3) if snapshot is None else range(1):
+                try:
+                    if snapshot is not None:
+                        break
                     manifest = _get_or_create_personal_context_manifest(canonical_service)
                     integrity_key_id, integrity_key = canonical_service.sync_integrity_key(
                         manifest.profile_id
@@ -515,13 +533,14 @@ class SyncV2ProfileManager:
                 integrity_key_id=integrity_key_id,
                 integrity_key=integrity_key,
             )
-            cursor = _personal_context_bootstrap_cursor(
-                manifest=manifest,
-                scopes=scopes,
-                records=records,
-                proposals=proposals,
-                purge_generation=purge_generation,
-            )
+            if snapshot is None:
+                cursor = _personal_context_bootstrap_cursor(
+                    manifest=manifest,
+                    scopes=scopes,
+                    records=records,
+                    proposals=proposals,
+                    purge_generation=purge_generation,
+                )
             return PersonalContextBootstrap(
                 dataset_id=dataset.dataset_id,
                 authority_id=normalized_authority_id,
@@ -610,6 +629,15 @@ class SyncV2ProfileManager:
         }
         updated_state["link_receipts"] = updated_receipts
         updated_state["link_state"] = _PERSONAL_CONTEXT_LINK_COMPLETE
+        self.store.complete_personal_context_link_receipt(
+            user_id=user_id,
+            dataset_id=dataset.dataset_id,
+            device_id=device_id,
+            profile_id=str(state["profile_id"]),
+            integrity_key_id=str(state["integrity_key_id"]),
+            purge_generation=int(state["purge_generation"]),
+            bootstrap_cursor=bootstrap_cursor,
+        )
         updated_metadata["personal_context"] = updated_state
         self.store.enroll_dataset(
             SyncDatasetCreate(

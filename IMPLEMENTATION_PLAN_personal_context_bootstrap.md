@@ -61,8 +61,9 @@ remain for controller verification.
   device's matching profile/key/purge receipt.
 - [x] Added RSA-OAEP wrapping to the production factory, server-owned authority
   selection, and typed bootstrap/completion API routes.
-- [ ] Follow-up review remains required for the dedicated Personalization DB
-  snapshot transaction and Sync-store compare-and-set receipt persistence.
+- [x] Added a bounded Personalization DB snapshot transaction with key identity
+  and complete eligible head coverage; Sync completion persists a device-bound
+  receipt in its own atomic Sync DB transaction.
 
 ## ADR check
 
