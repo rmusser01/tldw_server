@@ -4,11 +4,16 @@ import asyncio
 import importlib
 import sys
 import types
+from collections.abc import Callable
 from typing import Any
 
 import pytest
 from loguru import logger
 
+from tldw_Server_API.app.core.Web_Scraping.browser_transport import (
+    BrowserTransportAttestation,
+    decide_browser_transport,
+)
 from tldw_Server_API.app.core.Web_Scraping.preflight import (
     BrowserProbeOptions,
     PreflightDeadlineExceeded,
@@ -193,6 +198,7 @@ def _probe(
     controls: PreflightRuntimeControls,
     guard: FakeProbeEgressGuard,
     launcher: FakePlaywrightLauncher,
+    transport_decision: Callable[[], object] | None = None,
     capability: bool = True,
     no_sandbox: bool = False,
 ) -> Any:
@@ -200,6 +206,14 @@ def _probe(
         controls=controls,
         egress_guard=guard,
         launcher=launcher,
+        transport_decision=transport_decision
+        or (
+            lambda: decide_browser_transport(
+                configured_mode="auto",
+                auth_mode="single_user",
+                outbound_policy_mode="compat",
+            )
+        ),
         capability_check=lambda: capability,
         no_sandbox=no_sandbox,
     )
@@ -209,10 +223,22 @@ def _probe(
 async def test_browser_routes_before_page_and_blocks_service_workers() -> None:
     controls = _controls()
     launcher = FakePlaywrightLauncher()
+    attested = decide_browser_transport(
+        configured_mode="attested_proxy",
+        auth_mode="multi_user",
+        outbound_policy_mode="strict",
+        attestation=BrowserTransportAttestation(
+            mechanism="governed_proxy",
+            routes_all_requests=True,
+            dns_pinned=True,
+            peer_verified=True,
+        ),
+    )
     probe = _probe(
         controls=controls,
         guard=FakeProbeEgressGuard([]),
         launcher=launcher,
+        transport_decision=lambda: attested,
     )
 
     async with probe.open_page(BrowserProbeOptions(user_agent="UA")):
@@ -255,6 +281,107 @@ async def test_missing_websocket_capability_is_unavailable_before_budget_or_laun
     assert raised.value.error_code == "unavailable"
     assert controls.consumed.browsers == 0
     assert launcher.events == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("decision", "expected_reason"),
+    [
+        (
+            decide_browser_transport(
+                configured_mode="disabled",
+                auth_mode="single_user",
+                outbound_policy_mode="compat",
+            ),
+            "browser_transport_disabled",
+        ),
+        (
+            decide_browser_transport(
+                configured_mode="auto",
+                auth_mode="multi_user",
+                outbound_policy_mode="strict",
+            ),
+            "browser_transport_unattested",
+        ),
+        (
+            decide_browser_transport(
+                configured_mode="bogus",
+                auth_mode="single_user",
+                outbound_policy_mode="compat",
+            ),
+            "browser_transport_config_invalid",
+        ),
+    ],
+)
+async def test_browser_transport_denial_precedes_budget_and_launch(
+    decision: object,
+    expected_reason: str,
+) -> None:
+    controls = _controls(browsers=1)
+    launcher = FakePlaywrightLauncher()
+    probe = _probe(
+        controls=controls,
+        guard=FakeProbeEgressGuard([]),
+        launcher=launcher,
+        transport_decision=lambda: decision,
+    )
+
+    with pytest.raises(ProbeUnavailable) as raised:
+        async with probe.open_page(BrowserProbeOptions()):
+            pytest.fail("page must not be created")
+
+    assert raised.value.error_code == expected_reason
+    assert raised.value.public_message == "Safe browser transport is unavailable."
+    assert controls.consumed.browsers == 0
+    assert launcher.events == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "transport_decision",
+    [
+        lambda: (_ for _ in ()).throw(RuntimeError("secret config error")),
+        lambda: object(),
+    ],
+    ids=["provider-error", "wrong-type"],
+)
+async def test_invalid_browser_transport_provider_fails_closed_before_budget(
+    transport_decision: Callable[[], object],
+) -> None:
+    controls = _controls(browsers=1)
+    launcher = FakePlaywrightLauncher()
+    probe = _probe(
+        controls=controls,
+        guard=FakeProbeEgressGuard([]),
+        launcher=launcher,
+        transport_decision=transport_decision,
+    )
+
+    with pytest.raises(ProbeUnavailable) as raised:
+        async with probe.open_page(BrowserProbeOptions()):
+            pytest.fail("page must not be created")
+
+    assert raised.value.error_code == "browser_transport_config_invalid"
+    assert controls.consumed.browsers == 0
+    assert launcher.events == []
+
+
+def test_browser_transport_capability_is_exactly_bounded() -> None:
+    controls = _controls()
+    launcher = FakePlaywrightLauncher()
+    denied = decide_browser_transport(
+        configured_mode="auto",
+        auth_mode="multi_user",
+        outbound_policy_mode="strict",
+    )
+    probe = _probe(
+        controls=controls,
+        guard=FakeProbeEgressGuard([]),
+        launcher=launcher,
+        transport_decision=lambda: denied,
+    )
+
+    assert probe.transport_capability() == denied.to_capability_metadata()
 
 
 def test_capability_check_requires_http_websocket_and_server_connect_callables() -> None:

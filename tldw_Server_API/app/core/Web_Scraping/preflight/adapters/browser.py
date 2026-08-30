@@ -13,6 +13,10 @@ from urllib.parse import urlsplit, urlunsplit
 
 from loguru import logger
 
+from tldw_Server_API.app.core.Web_Scraping.browser_transport import (
+    BrowserTransportDecision,
+    default_browser_transport_decision,
+)
 from tldw_Server_API.app.core.Web_Scraping.preflight.asyncio_compat import timeout as _asyncio_timeout
 from tldw_Server_API.app.core.Web_Scraping.preflight.context import (
     PreflightDeadlineExceeded,
@@ -363,14 +367,39 @@ class GuardedPlaywrightBrowserProbe:
         controls: PreflightRuntimeControls,
         egress_guard: ProbeEgressGuard,
         launcher: Any | None = None,
+        transport_decision: Callable[[], BrowserTransportDecision] = default_browser_transport_decision,
         capability_check: Callable[[], bool] = _playwright_has_required_routing,
         no_sandbox: bool = False,
     ) -> None:
         self._controls = controls
         self._guard = egress_guard
         self._launcher = launcher or _DefaultPlaywrightLauncher()
+        self._transport_decision = transport_decision
         self._capability_check = capability_check
         self._no_sandbox = bool(no_sandbox)
+
+    @staticmethod
+    def _invalid_transport_decision() -> BrowserTransportDecision:
+        return BrowserTransportDecision(
+            allowed=False,
+            configured_mode="disabled",
+            effective_mode="disabled",
+            dns_peer_attested=False,
+            reason="browser_transport_config_invalid",
+        )
+
+    def _resolve_transport_decision(self) -> BrowserTransportDecision:
+        try:
+            decision = self._transport_decision()
+        except Exception:  # noqa: BLE001 - provider errors must fail closed
+            return self._invalid_transport_decision()
+        if not isinstance(decision, BrowserTransportDecision):
+            return self._invalid_transport_decision()
+        return decision
+
+    def transport_capability(self) -> dict[str, str | bool]:
+        """Return the current bounded browser-transport capability snapshot."""
+        return self._resolve_transport_decision().to_capability_metadata()
 
     def _subrequest_context(self) -> RuntimeRequestContext:
         return replace(
@@ -532,6 +561,9 @@ class GuardedPlaywrightBrowserProbe:
         self,
         options: BrowserProbeOptions,
     ) -> Any:
+        decision = self._resolve_transport_decision()
+        if not decision.allowed:
+            raise ProbeUnavailable(error_code=decision.reason)
         try:
             available = bool(self._capability_check())
         except Exception:  # noqa: BLE001 - capability introspection is optional

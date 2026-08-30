@@ -17,6 +17,9 @@ _SAFE_ERROR_MESSAGES: Mapping[str, frozenset[str]] = MappingProxyType(
         "timeout": frozenset({"Probe timed out."}),
         "unavailable": frozenset({"Probe capability is unavailable."}),
         "missing_dependency": frozenset({"Probe dependency is unavailable."}),
+        "browser_transport_disabled": frozenset({"Safe browser transport is unavailable."}),
+        "browser_transport_unattested": frozenset({"Safe browser transport is unavailable."}),
+        "browser_transport_config_invalid": frozenset({"Safe browser transport is unavailable."}),
         "external_tool_disabled": frozenset({"External tool probing is disabled."}),
         "redirect_loop": frozenset({"Redirect loop detected."}),
         "invalid_redirect": frozenset({"Redirect target is invalid."}),
@@ -267,11 +270,18 @@ class ProbeUnavailable(ProbeError):
     def __init__(
         self,
         *,
-        error_code: Literal["unavailable", "missing_dependency"] = "unavailable",
+        error_code: Literal[
+            "unavailable",
+            "missing_dependency",
+            "browser_transport_disabled",
+            "browser_transport_unattested",
+            "browser_transport_config_invalid",
+        ] = "unavailable",
     ) -> None:
-        message = (
-            "Probe dependency is unavailable."
-            if error_code == "missing_dependency"
-            else "Probe capability is unavailable."
-        )
+        if error_code == "missing_dependency":
+            message = "Probe dependency is unavailable."
+        elif error_code == "unavailable":
+            message = "Probe capability is unavailable."
+        else:
+            message = "Safe browser transport is unavailable."
         super().__init__(error_code, message)
