@@ -1961,6 +1961,32 @@ allowlisting, and non-pytest AST marker review passed. No production, schema,
 OpenAPI, runtime, or public API file changed. Fix Round 2 is ready for independent
 scoped review; Task 12 remains blocked until that review is clean.
 
+#### Task 11 Fix Round 3: Make Task 12 Verification Reproducible
+
+Independent Fix Round 2 review found 0 Critical, 1 Important, and 0 Minor
+issues. The implementation and test correction are valid, and Fix Round 2's
+host-enabled, cache-cleared `1,489 passed` evidence remains authoritative. The
+single finding is documentation-only: Task 12's command blocks did not fully
+apply their own interpreter, required-PostgreSQL, timeout, deterministic-seed,
+host-network, pinned-scope, and OpenAPI preflight rules.
+
+Fix Round 3 changes only this plan, `TASK-13111`, and ignored SDD evidence. It
+makes every Task 12 command directly executable with the absolute project
+interpreter and required flags, pins committed scope to
+`1ad2f1e5b30c49ea75396e4b713496b73e875fec` through `HEAD`, checks the current
+worktree separately, and reserves observed `origin/dev` solely for recorded
+metadata. No production code, test, schema, migration, OpenAPI artifact,
+runtime behavior, or public API changes in this round.
+
+The docs-only correction is complete at the pre-commit tree. A bounded Task 12
+command audit found exactly three pytest blocks with all ten required tokens in
+each, zero relative interpreters, zero `origin/dev` diff commands, absolute
+Ruff/Bandit interpreters, two exact `CI_LOCAL_PYTHON` OpenAPI prefixes, pinned
+committed-range plus current-worktree checks, and the host-network ruling.
+`git diff --check` passed, only this plan and `TASK-13111` are tracked changes,
+and no pytest command was run. Task 12 remains blocked pending clean independent
+scoped re-review.
+
 ### Task 12: Run The Complete PR 2 Verification And Security Gates
 
 **Files:**
@@ -1977,16 +2003,20 @@ authoritative exporter changes it, and `TASK-13111`; it may not modify
 production code or tests. A genuine failure blocks Task 12 and returns to the
 owning implementation task for a RED-first fix and review cycle.
 
-Pin scope evidence to merge base
-`1ad2f1e5b30c49ea75396e4b713496b73e875fec` through the verified Task 11
-closure head, while also recording the observed `origin/dev` object at run
-time. Do not fetch, rebase, merge, push, or rewrite history during verification.
-Use `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python`, add
-`TLDW_TEST_POSTGRES_REQUIRED=1`, `-ra`, and an explicit per-test timeout to
-every pytest gate, including the nominal SQLite/security gates, so no
-PostgreSQL contract can silently skip. Large opaque commands may be split into
-named modules while preserving the exact union; record every command, count,
-warning, skip, duration, seed where relevant, and aggregate total.
+Pin every scope and diff gate to literal base
+`1ad2f1e5b30c49ea75396e4b713496b73e875fec` through `HEAD`, and check the
+current worktree separately so uncommitted scope cannot hide. Record the
+observed `origin/dev` object only as run metadata; never use it as a verification
+diff base. Do not fetch, rebase, merge, push, or rewrite history during
+verification. Every Step 1, Step 2, and Step 3 pytest command must set
+`TLDW_TEST_POSTGRES_REQUIRED=1`, `RUN_JOBS=1`, and `PYTHONPATH=.`, invoke
+`/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python`, and include
+`-q`, `--tb=short`, `-ra`, `--timeout=90`, and
+`--randomly-seed=20260829`. Large opaque commands may be split into named
+modules while preserving the exact union; record every command, count, warning,
+skip, duration, seed, and aggregate total. Localhost PostgreSQL and loopback
+gates must run with host network permission; never count a run from a restricted
+network sandbox as verification evidence.
 
 The plain host `make openapi-fingerprint` target currently selects Python 3.9
 and fails on the repository's existing `dataclass(slots=True)` usage. Record
@@ -2006,7 +2036,7 @@ test credentials, DSNs, or private connection details in the evidence file.
 - [ ] **Step 1: Run the complete SQLite/API/security matrix**
 
 ```bash
-RUN_JOBS=1 PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
+TLDW_TEST_POSTGRES_REQUIRED=1 RUN_JOBS=1 PYTHONPATH=. /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest -q --tb=short -ra --show-capture=no --timeout=90 --randomly-seed=20260829 \
   tldw_Server_API/tests/Admin_Webhooks \
   tldw_Server_API/tests/Jobs/test_jobs_operation_contracts.py \
   tldw_Server_API/tests/Jobs/test_jobs_migrations_sqlite.py \
@@ -2033,7 +2063,7 @@ Expected: all selected tests pass. Record exact count, warnings, duration, and a
 - [ ] **Step 2: Run required PostgreSQL and four-backend crash matrix with zero skips**
 
 ```bash
-RUN_JOBS=1 TLDW_TEST_POSTGRES_REQUIRED=1 PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
+TLDW_TEST_POSTGRES_REQUIRED=1 RUN_JOBS=1 PYTHONPATH=. /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest -q --tb=short -ra --show-capture=no --timeout=90 --randomly-seed=20260829 \
   tldw_Server_API/tests/Admin_Webhooks/test_migration_postgres.py \
   tldw_Server_API/tests/Admin_Webhooks/test_repository_postgres.py \
   tldw_Server_API/tests/Admin_Webhooks/test_delivery_repository_postgres.py \
@@ -2053,7 +2083,7 @@ Expected: all four AuthNZ/Jobs pairs and every enqueue/disposition/cancel crash 
 - [ ] **Step 3: Run deterministic protocol and security-focused gates separately**
 
 ```bash
-RUN_JOBS=1 PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
+TLDW_TEST_POSTGRES_REQUIRED=1 RUN_JOBS=1 PYTHONPATH=. /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest -q --tb=short -ra --show-capture=no --timeout=90 --randomly-seed=20260829 \
   tldw_Server_API/tests/Admin_Webhooks/test_executor.py \
   tldw_Server_API/tests/Admin_Webhooks/test_worker.py \
   tldw_Server_API/tests/Admin_Webhooks/test_test_delivery.py \
@@ -2068,7 +2098,7 @@ The evidence maps tests to DNS change, private/reserved ranges, redirects, proxi
 - [ ] **Step 4: Run Ruff, Bandit, diff, and sensitive-data scans**
 
 ```bash
-../../.venv/bin/python -m ruff check \
+/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m ruff check \
   tldw_Server_API/app/core/Admin_Webhooks \
   tldw_Server_API/app/core/DB_Management/admin_webhooks_repository.py \
   tldw_Server_API/app/core/AuthNZ/migrations.py \
@@ -2081,7 +2111,7 @@ The evidence maps tests to DNS change, private/reserved ranges, redirects, proxi
   tldw_Server_API/app/services/startup_optional_workers.py \
   tldw_Server_API/app/api/v1/schemas/admin_webhooks.py \
   tldw_Server_API/app/api/v1/endpoints/admin/admin_webhooks.py
-../../.venv/bin/python -m bandit -q -r \
+/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -q -r \
   tldw_Server_API/app/core/Admin_Webhooks \
   tldw_Server_API/app/core/DB_Management/admin_webhooks_repository.py \
   tldw_Server_API/app/core/AuthNZ/migrations.py \
@@ -2096,7 +2126,8 @@ The evidence maps tests to DNS change, private/reserved ranges, redirects, proxi
   tldw_Server_API/app/services/startup_optional_workers.py \
   tldw_Server_API/app/api/v1/schemas/admin_webhooks.py \
   tldw_Server_API/app/api/v1/endpoints/admin/admin_webhooks.py
-git diff --check origin/dev...
+git diff --check 1ad2f1e5b30c49ea75396e4b713496b73e875fec HEAD
+git diff --check HEAD
 if rg -n "logger\..*(url|secret|signature|payload|response|ciphertext)|labels=.*(id|host|url|email|secret|payload)" \
   tldw_Server_API/app/core/Admin_Webhooks \
   tldw_Server_API/app/services/admin_webhook_delivery_runtime.py \
@@ -2106,26 +2137,36 @@ if rg -n "logger\..*(url|secret|signature|payload|response|ciphertext)|labels=.*
 fi
 ```
 
-Expected: Ruff/Bandit/diff pass. Review every scan hit; only fixed field names in tests or explicit redaction guards may remain, and each is recorded in evidence. Do not suppress a real sensitive value.
+Expected: Ruff and both diff checks pass. Classify Bandit's reviewed baseline as
+required above and fail on any new, unreviewed, or High finding. Review every
+sensitive-data scan hit; only fixed field names in tests or explicit redaction
+guards may remain, and each is recorded in evidence. Do not suppress a real
+sensitive value.
 
 - [ ] **Step 5: Prove PR 3 exclusions and legacy isolation**
 
 ```bash
-git diff --name-only origin/dev... | rg '(^|/)(admin-ui|users|incidents|admin_system_ops_service|admin_webhooks_service|jobs_webhooks_service)' || true
+git diff --name-only 1ad2f1e5b30c49ea75396e4b713496b73e875fec HEAD | rg '(^|/)(admin-ui|users|incidents|admin_system_ops_service|admin_webhooks_service|jobs_webhooks_service)' || true
+git diff --name-only HEAD | rg '(^|/)(admin-ui|users|incidents|admin_system_ops_service|admin_webhooks_service|jobs_webhooks_service)' || true
+git ls-files --others --exclude-standard | rg '(^|/)(admin-ui|users|incidents|admin_system_ops_service|admin_webhooks_service|jobs_webhooks_service)' || true
 rg -n "services\.(admin_webhooks_service|jobs_webhooks_service)|from .*admin_webhooks_service|from .*jobs_webhooks_service" \
   tldw_Server_API/app/core/Admin_Webhooks \
   tldw_Server_API/app/services/admin_webhook_delivery_runtime.py \
   tldw_Server_API/app/api/v1/endpoints/admin/admin_webhooks.py
 ```
 
-Expected: no admin UI, user/incident producer, legacy service, or generic Jobs-webhook file is changed/imported. If the first command reports a path, inspect it and remove PR 3 scope before review. The second command returns no match.
+Expected: no admin UI, user/incident producer, legacy service, or generic
+Jobs-webhook file is changed/imported. If any committed-range, tracked-worktree,
+or untracked-worktree path scan reports a path, inspect it and remove PR 3 scope
+before review. The legacy-import scan returns no match.
 
 - [ ] **Step 6: Re-run and review OpenAPI drift**
 
 ```bash
-make openapi-fingerprint
-make openapi-drift-check
-git diff -- apps/tldw-frontend/lib/api/openapi.fingerprint.json
+CI_LOCAL_PYTHON=/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python make openapi-fingerprint
+CI_LOCAL_PYTHON=/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python make openapi-drift-check
+git diff 1ad2f1e5b30c49ea75396e4b713496b73e875fec HEAD -- apps/tldw-frontend/lib/api/openapi.fingerprint.json
+git diff HEAD -- apps/tldw-frontend/lib/api/openapi.fingerprint.json
 ```
 
 Expected: fingerprint is current and the human-reviewed delta contains only PR 2 test/redelivery/history/status contracts.

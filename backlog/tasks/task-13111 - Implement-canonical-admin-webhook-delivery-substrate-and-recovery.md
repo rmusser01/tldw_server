@@ -4,7 +4,7 @@ title: Implement canonical admin webhook delivery substrate and recovery
 status: In Progress
 assignee: []
 created_date: '2026-08-23 03:15'
-updated_date: '2026-08-30 06:38'
+updated_date: '2026-08-30 06:57'
 labels:
   - admin
   - webhooks
@@ -219,6 +219,10 @@ Task 10 complete: exposed canonical persisted test, atomic manual redelivery, an
 2026-08-29: After direct-marker GREEN (1 exact audit pass; 277 affected-module passes; zero skips), the clean serial 1,489-test Task 12 Step 1 union found a second deterministic test-only blocker at 46%: test_canonical_selection_excludes_legacy_delivery_routes still expected canonical POST /webhooks/{id}/test and GET /webhooks/{id}/deliveries to be absent. The approved Task 10 contract and live canonical router intentionally expose those routes plus manual redelivery. Focused reproduction failed 1/1 with zero skips. Task 11 Fix Round 2 is extended only to update this stale route-selection assertion/name, prove canonical PR 2 routes present and the uniquely legacy incident-notify route absent, then rerun the complete Step 1 union. Production routing remains unchanged.
 
 2026-08-29: Task 11 Fix Round 2 implementation and local verification complete from exact FIX_BASE 2e26d436d50acb6d94fd6b559c0d21d0ea015782. Strict marker RED failed 1 test with 42 violations; focused GREEN passed the exact audit (1), affected modules (277), corrected route node (1), and complete route module (10), all with zero skips. The definitive controller-owned cache-cleared, host-enabled Task 12 Step 1 union passed 1,489 tests with zero skips, 2,654 warnings, seed 20260829, in 996.39s (0:16:36). Seven-file Ruff, Python 3.10 compile, git diff --check, exact path allowlist, and supplemental AST marker review passed. No production, schema, OpenAPI, runtime, or public API file changed. Independent scoped review is unblocked; Task 12 remains blocked until that review is clean. Evidence: .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-11-fix-2-report.md.
+
+2026-08-29: Independent Fix Round 2 review found 0 Critical, 1 Important, 0 Minor. The test repair and 1,489-test evidence are valid, but Task 12 command blocks contradict their own preflight: relative interpreters and missing PostgreSQL-required/-ra/timeout flags could silently skip contracts; scope checks use mutable origin/dev; OpenAPI omits CI_LOCAL_PYTHON. Task 11 Fix Round 3 is docs-only: make every Task 12 command executable from the worktree with the absolute project interpreter, required PostgreSQL/timeout/reporting flags, pinned base 1ad2f1e5..., and authoritative OpenAPI interpreter before scoped re-review. Task 12 remains blocked.
+
+2026-08-29: Task 11 Fix Round 3 docs-only correction complete from HEAD b0d39e615f4baf4770f4d542219440b9cd7dd2d4. The independent Fix Round 2 review reported 0 Critical, 1 Important, 0 Minor; Fix Round 2's definitive host-enabled, cache-cleared 1,489-pass/zero-skip evidence remains valid. Task 12 Steps 1-3 now use the absolute project interpreter with TLDW_TEST_POSTGRES_REQUIRED=1, RUN_JOBS=1, PYTHONPATH=., -q, --tb=short, -ra, --timeout=90, and seed 20260829; localhost PostgreSQL/loopback evidence requires host network permission. Ruff/Bandit use the same interpreter, committed scope is pinned to 1ad2f1e5b30c49ea75396e4b713496b73e875fec through HEAD with separate worktree checks, PR 3 exclusions inspect committed/tracked/untracked paths, and both OpenAPI make commands set CI_LOCAL_PYTHON. Static command audit found 3 pytest blocks with 10/10 required tokens each, zero relative interpreters, zero origin/dev diff commands, and two authoritative OpenAPI prefixes. No pytest ran and no production, test, schema, migration, OpenAPI, runtime, or public API file changed. Task 12 remains blocked pending clean independent scoped re-review.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
