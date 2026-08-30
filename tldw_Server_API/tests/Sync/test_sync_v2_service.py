@@ -31,6 +31,9 @@ from tldw_Server_API.app.core.Sync.v2.blob_store import LocalSyncBlobStore
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.media import MediaMetadataAdapter
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.notes import NotesDomainAdapter
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.notes_link import NotesLinkDomainAdapter
+from tldw_Server_API.app.core.Sync.v2.domain_adapters.personal_context import (
+    PersonalContextDomainAdapter,
+)
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.source_cache import SourceCacheAdapter
 from tldw_Server_API.app.core.Sync.v2.errors import (
     SyncIdempotencyConflictError,
@@ -44,6 +47,9 @@ from tldw_Server_API.app.core.Sync.v2.materializers.guarded_product_mutation imp
 from tldw_Server_API.app.core.Sync.v2.materializers.notes_link import NotesLinkMaterializer
 from tldw_Server_API.app.core.Sync.v2.materializers.notes_organization import (
     NotesOrganizationMaterializer,
+)
+from tldw_Server_API.app.core.Sync.v2.materializers.personal_context import (
+    PersonalContextMaterializer,
 )
 from tldw_Server_API.app.core.Sync.v2.models import (
     CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_CODE,
@@ -135,15 +141,33 @@ def _workspace_registry() -> SyncAdapterRegistry:
 
 def _wire_personal_context_components(
     registry: SyncAdapterRegistry,
-) -> dict[SyncDomain, _OutcomeMaterializer]:
-    materializers: dict[SyncDomain, _OutcomeMaterializer] = {}
+    *,
+    key_custody_available: bool = True,
+) -> dict[SyncDomain, PersonalContextMaterializer]:
+    materializers: dict[SyncDomain, PersonalContextMaterializer] = {}
+
+    def integrity_key(_dataset: SyncDataset, _key_id: str) -> bytes:
+        if not key_custody_available:
+            raise KeyError("profile")
+        return b"i" * 32
+
+    def encryption_key(_dataset: SyncDataset) -> tuple[bytes, int]:
+        if not key_custody_available:
+            raise KeyError("profile")
+        return b"e" * 32, 1
+
     for domain in PERSONAL_CONTEXT_SYNC_DOMAINS:
         registry.register(
-            StaticSyncAdapter(domain=domain, supported_adapter_versions={1})
+            PersonalContextDomainAdapter(
+                domain=domain,
+                integrity_key_resolver=integrity_key,
+                encryption_key_resolver=encryption_key,
+            )
         )
-        materializer = _OutcomeMaterializer()
-        materializer.domain = domain
-        materializers[domain] = materializer
+        materializers[domain] = PersonalContextMaterializer(
+            domain=domain,
+            service_resolver=lambda _user_id: None,
+        )
     return materializers
 
 
@@ -971,6 +995,57 @@ def test_personal_context_capability_is_available_when_fully_wired(
     assert capabilities.personal_context.blockers == ()
     assert all(
         capabilities.supported_adapter_versions[domain] == [1]
+        for domain in PERSONAL_CONTEXT_SYNC_DOMAINS
+    )
+
+
+def test_bound_personal_context_capability_requires_dataset_key_custody(
+    monkeypatch: pytest.MonkeyPatch,
+    sync_store: SyncV2Store,
+    registry: SyncAdapterRegistry,
+) -> None:
+    monkeypatch.setenv(
+        "TLDW_PERSONAL_CONTEXT_MASTER_KEY",
+        "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
+    )
+    materializers = _wire_personal_context_components(
+        registry,
+        key_custody_available=False,
+    )
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=registry,
+        materializers=materializers,
+        clock=_clock,
+        settings=SyncV2Settings(server_trusted_encryption=_ready_encryption()),
+    )
+    sync_store.enroll_dataset(
+        SyncDatasetCreate(
+            dataset_id="personal-context-dataset",
+            owner_user_id="user-1",
+            encryption_policy="server_trusted_v1",
+            domains=list(PERSONAL_CONTEXT_SYNC_DOMAINS),
+            metadata={
+                "personal_context": {
+                    "profile_id": "profile-a",
+                    "integrity_key_id": "personal-context-integrity-v1",
+                    "purge_generation": 0,
+                }
+            },
+        )
+    )
+
+    capabilities = service.capabilities(
+        user_id="user-1",
+        dataset_id="personal-context-dataset",
+    )
+
+    assert capabilities.personal_context.available is False
+    assert capabilities.personal_context.blockers == (
+        "personal_context_transport_unavailable",
+    )
+    assert all(
+        capabilities.writable_adapter_versions[domain] == []
         for domain in PERSONAL_CONTEXT_SYNC_DOMAINS
     )
 

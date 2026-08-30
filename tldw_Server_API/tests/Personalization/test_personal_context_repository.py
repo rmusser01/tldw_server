@@ -393,9 +393,11 @@ def test_encryption_key_rotation_rewraps_deks_without_changing_ciphertext(
     repository.commit_record_version(record, expected_version_id=None)
     before = repository.encrypted_version_details("profile-a", "record", "record-a")
     before_keys = repository.key_material_for_test("profile-a")
+    sync_storage_before = repository.sync_encryption_key("profile-a")
 
     rotated = repository.rotate_encryption_key("profile-a")
     after = repository.encrypted_version_details("profile-a", "record", "record-a")
+    sync_storage_after = repository.sync_encryption_key("profile-a")
 
     assert rotated.key_version == before_keys.key_version + 1
     assert rotated.integrity_key == before_keys.integrity_key
@@ -403,6 +405,7 @@ def test_encryption_key_rotation_rewraps_deks_without_changing_ciphertext(
     assert after["ciphertext"] == before["ciphertext"]
     assert after["wrapped_dek"] != before["wrapped_dek"]
     assert after["key_version"] == rotated.key_version
+    assert sync_storage_after == sync_storage_before
     assert repository.get_record("profile-a", "record-a") == record
 
 

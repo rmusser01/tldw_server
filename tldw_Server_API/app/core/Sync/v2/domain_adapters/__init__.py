@@ -9,6 +9,7 @@ from .notes_link import NotesLinkDomainAdapter
 from .notes_organization import NotesOrganizationDomainAdapter
 from .notes_task import NotesTaskDomainAdapter
 from .notes_task_activity import NotesTaskActivityDomainAdapter
+from .personal_context import PersonalContextDomainAdapter
 from .source_cache import SourceCacheAdapter
 from .workspaces import WorkspacesDomainAdapter
 
@@ -20,6 +21,7 @@ __all__ = [
     "NotesLinkDomainAdapter",
     "NotesTaskDomainAdapter",
     "NotesTaskActivityDomainAdapter",
+    "PersonalContextDomainAdapter",
     "NotesOrganizationDomainAdapter",
     "SourceCacheAdapter",
     "WorkspacesDomainAdapter",

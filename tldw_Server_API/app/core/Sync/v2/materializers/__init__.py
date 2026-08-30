@@ -11,6 +11,7 @@ from .notes_link import NotesLinkMaterializer
 from .notes_organization import NotesOrganizationMaterializer
 from .notes_task import NotesTaskMaterializer
 from .notes_task_activity import NotesTaskActivityMaterializer
+from .personal_context import PersonalContextMaterializer
 from .source_cache import SourceCacheMaterializer
 
 __all__ = [
@@ -24,6 +25,7 @@ __all__ = [
     "NotesOrganizationMaterializer",
     "NotesTaskMaterializer",
     "NotesTaskActivityMaterializer",
+    "PersonalContextMaterializer",
     "SourceCacheMaterializer",
     "SyncMaterializer",
 ]

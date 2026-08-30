@@ -1932,7 +1932,7 @@ def _dataset_domains_from_row(row: dict[str, Any]) -> set[str]:
 
 
 def _envelope_fingerprint_from_create(envelope: SyncEnvelopeCreate) -> dict[str, Any]:
-    return {
+    fingerprint = {
         "dataset_id": envelope.dataset_id,
         "domain": envelope.domain,
         "object_id": envelope.object_id,
@@ -1968,6 +1968,13 @@ def _envelope_fingerprint_from_create(envelope: SyncEnvelopeCreate) -> dict[str,
             mutation_plan_hash=envelope.mutation_plan_hash,
         ),
     }
+    if envelope.domain.startswith("personal_context."):
+        fingerprint["payload_ciphertext"] = None
+        fingerprint["payload"] = {}
+        fingerprint["encryption_metadata"] = _without_personal_context_at_rest(
+            fingerprint["encryption_metadata"]
+        )
+    return fingerprint
 
 
 def _envelope_fingerprint_from_row(
@@ -2034,7 +2041,19 @@ def _envelope_fingerprint_from_row(
     }
     if not ignore_client_envelope_id:
         fingerprint["client_envelope_id"] = row["client_envelope_id"]
+    if str(row["domain"]).startswith("personal_context."):
+        fingerprint["payload_ciphertext"] = None
+        fingerprint["payload"] = {}
+        fingerprint["encryption_metadata"] = _without_personal_context_at_rest(
+            fingerprint["encryption_metadata"]
+        )
     return fingerprint
+
+
+def _without_personal_context_at_rest(value: Any) -> dict[str, Any]:
+    metadata = dict(value) if isinstance(value, dict) else {}
+    metadata.pop("personal_context_at_rest", None)
+    return metadata
 
 
 def _mutation_group_fingerprint(
