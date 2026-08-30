@@ -53,7 +53,7 @@ The checked fixture has this exact top-level shape:
 {
   "schema_version": "web-retrieval-quality-fixture-v1",
   "suite_id": "current-dev-minimal-v1",
-  "baseline_revision": "9fd2246157ce8a32ae6a6691a75efab788229f77",
+  "baseline_revision": "f676e23549ea8ed82ef53493260621a05b281863",
   "cases": []
 }
 ```
@@ -335,7 +335,7 @@ git commit -m "feat(evals): add web retrieval quality contract (TASK-13139.1)"
 
 Use only reserved `.test` URLs and short synthetic content. The extraction case must include navigation text in the HTML and omit it from the observed article text. The search case must contain at least two providers and a deliberate tie/order observation. The crawl graph must contain a cycle and stop at an explicit page limit. The provenance record must include safe source/final URLs, content fingerprint, retrieval/extraction version, selected tier, and truncation fields, with no headers, cookies, credentials, raw HTML, or query secrets.
 
-Set `baseline_revision` exactly to `9fd2246157ce8a32ae6a6691a75efab788229f77`.
+Set `baseline_revision` exactly to `f676e23549ea8ed82ef53493260621a05b281863`.
 
 - [ ] **Step 2: Add failing checked-artifact and CLI tests**
 

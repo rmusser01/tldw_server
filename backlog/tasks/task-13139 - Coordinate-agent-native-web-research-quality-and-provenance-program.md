@@ -22,7 +22,7 @@ documentation:
 - Docs/superpowers/specs/2026-08-27-agent-native-web-research-quality-provenance-roadmap.md
 - Docs/superpowers/plans/2026-08-27-web-retrieval-quality-baseline.md
 - Docs/superpowers/plans/2026-08-27-browser-transport-safety-gate.md
-updated_date: 2026-08-28 05:26
+updated_date: 2026-08-30 16:08
 ---
 
 ## Description
@@ -55,11 +55,13 @@ Coordinate a current-dev improvement program informed by the DonSeTch comparison
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created after auditing the earlier planning commit against current origin/dev. TASK-12125 is already the completed Chat Macros planning task and must not be reused. The earlier branch-local TASK-12125.* records are invalid and must not be merged. This planning slice changes Backlog records and documentation only; runtime tests and Bandit are not applicable.
 
-2026-08-27 reconciliation result: rebuilt the program with 11 focused children (TASK-13139.1 through TASK-13139.11) and subsequently rebased the planning branch onto origin/dev 9fd2246157ce8a32ae6a6691a75efab788229f77. Reused and updated TASK-12964 and TASK-13100 rather than duplicating their ownership. The roadmap removes already-delivered browser interception and HTTP-to-Playwright escalation work, places fusion in general Web_Scraping contracts, makes Media the sole durable snapshot owner, limits MCP revalidation to public credentialless process-local caching, splits crawl/resilience work, and parks PDF/comparator/fuzz work.
+2026-08-27 reconciliation result: rebuilt the program with 11 focused children (TASK-13139.1 through TASK-13139.11). Reused and updated TASK-12964 and TASK-13100 rather than duplicating their ownership. The roadmap removes already-delivered browser interception and HTTP-to-Playwright escalation work, places fusion in general Web_Scraping contracts, makes Media the sole durable snapshot owner, limits MCP revalidation to public credentialless process-local caching, splits crawl/resilience work, and parks PDF/comparator/fuzz work.
 
 Planning verification: all 12 new task IDs are unique across inspected repository worktrees and parse through Backlog CLI; the parent reports exactly 11 children with an acyclic dependency order; local documentation/code references exist; the roadmap and tasks contain no placeholders or stale pinned comparator release; git diff --check passes. Runtime tests and Bandit are not applicable because this slice changes Markdown Backlog/spec/plan records only.
 
 2026-08-27 approval checkpoint: the user approved the reconciled roadmap. Wrote only the two just-in-time Wave 0 plans: Docs/superpowers/plans/2026-08-27-web-retrieval-quality-baseline.md and Docs/superpowers/plans/2026-08-27-browser-transport-safety-gate.md. Both child tasks remain To Do; no runtime implementation has started.
+
+2026-08-30 execution checkpoint: rebased the isolated planning branch onto origin/dev f676e23549ea8ed82ef53493260621a05b281863. The only relevant-path change since the approved base was an unrelated Article_Extractor_Lib.py annotation/docstring edit, so both Wave 0 plans remain valid.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
