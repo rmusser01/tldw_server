@@ -115,16 +115,18 @@ Notes
 - When `RG_POLICY_STORE=db` is active, the loader merges the file’s `route_map` into the snapshot containing DB policies. File `route_map` takes precedence on conflicts.
 - IMPORTANT: When `RG_POLICY_STORE=db` is active, YAML `policies:` are not used at runtime. Every `policy_id` referenced by `route_map` must exist in the DB store (`rg_policies`) or ingress enforcement will fail closed for that route (because missing request limits default to deny).
 - Durable daily caps can be specified with `daily_cap` under any category and are enforced via `ResourceDailyLedger` (e.g., `tokens.daily_cap`, `workflows_runs.daily_cap`).
-- Proxy/IP scoping (env):
-  - `RG_TRUSTED_PROXIES`: comma-separated CIDRs of reverse proxies
-  - `RG_CLIENT_IP_HEADER`: trusted header name (e.g., `X-Forwarded-For` or `CF-Connecting-IP`)
+- Proxy/IP scoping (opt-in env):
+  - `RG_TRUSTED_PROXIES`: comma-separated reverse-proxy hosts/CIDRs.
+  - `RG_CLIENT_IP_HEADER`: header to use only with a valid physical peer in that list (for example, `X-Forwarded-For`). Leave either unset to use the physical peer.
+  - `X-Forwarded-For` is parsed as a complete chain from the trusted edge inward (right-to-left); a malformed chain falls back to the physical peer. Any other header must be one plain IP literal.
+  - Invalid physical peers resolve to the safe `unknown` sentinel. If AuthNZ forwarding is also enabled, use equivalent trusted-proxy sets and compatible headers so login lockouts and RG derive the same client identity.
 - Metrics cardinality (env): `RG_METRICS_ENTITY_LABEL`: `true|false` (default `false`)
 - Test mode precedence: `RG_TEST_BYPASS` overrides Resource Governor behavior when set; otherwise falls back to `TLDW_TEST_MODE`
 
 ## Simple Middleware (default‑on)
 
 - Resolution order: path-based mapping (`route_map.by_path`) first, then tag-based mapping (`route_map.by_tag`). Wildcards like `/api/v1/chat/*` match by prefix.
-- Entity derivation: prefers authenticated user (`user:{id}`), then API key id/hash (`api_key:{id|hash}`), then trusted proxy IP header via `RG_CLIENT_IP_HEADER` when `RG_TRUSTED_PROXIES` contains the peer; otherwise falls back to `request.client.host`.
+- Entity derivation: prefers authenticated user (`user:{id}`), then API key id/hash (`api_key:{id|hash}`), then the configured trusted proxy header; otherwise falls back to the physical peer or safe `unknown` sentinel.
 - Behavior: performs a pre-check/reserve for the `requests` category before calling the endpoint and commits afterwards. On denial, sets `Retry-After` and `X-RateLimit-*` headers. On success, injects accurate `X-RateLimit-*` headers using a governor `peek` when available.
 - Scope: this middleware enforces **requests only**. Categories such as `tokens`, `streams`, `jobs`, and `minutes` require explicit endpoint-level RG reserve/commit plumbing (for example chat/embeddings tokens, audio streaming concurrency).
 - Enabled automatically whenever `RG_ENABLED=1`.

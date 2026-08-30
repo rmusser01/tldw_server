@@ -256,7 +256,7 @@ Notes:
 ## Chat Commands & Weather
 - `CHAT_COMMANDS_ENABLED`: Enable slash-command preprocessing (`true|false`, default `false`).
 - `CHAT_COMMAND_INJECTION_MODE`: Slash-command injection mode (`system|preface|replace`, default `system`).
-- `CHAT_COMMANDS_REQUIRE_PERMISSIONS`: Require per-command RBAC permission checks (`true|false`, default `false`).
+- `CHAT_COMMANDS_REQUIRE_PERMISSIONS`: Deprecated compatibility flag; declared per-command permissions are enforced whenever slash commands are enabled.
 - `CHAT_COMMANDS_RATE_LIMIT_USER`: Per-user, per-command RPM limit (accepts `10` or `10/min`; default `10`).
 - `CHAT_COMMANDS_RATE_LIMIT`: Backward-compatible alias for `CHAT_COMMANDS_RATE_LIMIT_USER`.
 - `CHAT_COMMANDS_RATE_LIMIT_GLOBAL`: Global, per-command RPM limit (accepts `100` or `100/min`; default `100`).
@@ -264,6 +264,7 @@ Notes:
 - `DEFAULT_LOCATION`: Optional fallback location for `/weather` when no argument is supplied.
 - `WEATHER_PROVIDER`: Weather backend (`openweather`, `noop`, `none`, `disabled`; default `openweather`).
 - `OPENWEATHER_API_KEY`: API key for the `openweather` provider.
+- `EGRESS_ALLOWLIST`: Must include `api.openweathermap.org` when the `openweather` provider is enabled; policy denial returns weather as unavailable without making the request.
 - `WEATHER_UNITS`: Unit system for weather summaries (`metric|imperial`, default `metric`).
 - `WEATHER_LANG`: OpenWeather language code for descriptions (default `en`).
 - `WEATHER_TIMEOUT_MS`: OpenWeather HTTP timeout in milliseconds (default `1500`).
@@ -327,8 +328,9 @@ The Resource Governor (RG) is the **primary enforcement path** for all rate limi
 - `RG_REDIS_FAIL_MODE`: Behavior when Redis is unavailable (`fail_open` | `fail_closed` | `fallback_memory`). Default `fail_open`.
 
 ### Client Identity
-- `RG_TRUSTED_PROXIES`: Comma-separated list of trusted proxy IPs for `X-Forwarded-For` resolution.
-- `RG_CLIENT_IP_HEADER`: Custom header for client IP extraction (e.g., `CF-Connecting-IP`).
+- `RG_TRUSTED_PROXIES`: Comma-separated trusted-proxy host/CIDR list. This is opt-in: forwarding is used only when the physical peer is a valid IP in this list.
+- `RG_CLIENT_IP_HEADER`: Header used with `RG_TRUSTED_PROXIES`; leave either setting unset to use the physical peer. `X-Forwarded-For` is parsed as a complete chain from the trusted edge inward (right-to-left), and malformed chains fall back to the physical peer. Any other header value must contain one plain IP literal.
+- Invalid physical peers resolve to the safe `unknown` sentinel.
 
 ### Per-Module Policy Overrides
 - `RG_CHAT_POLICY_ID`: Override chat policy ID (default `chat.default`).
@@ -373,6 +375,10 @@ The following env vars are retained as **deprecated compatibility knobs** during
 
 ## AuthNZ (Authentication)
 - `AUTH_MODE`: `single_user` | `multi_user`.
+- `AUTH_TRUST_X_FORWARDED_FOR`: Opt in to trusted forwarded identity for AuthNZ (default `false`). Use with `AUTH_TRUSTED_PROXY_IPS`.
+- `AUTH_TRUSTED_PROXY_IPS`: Comma-separated trusted-proxy host/CIDR list. Forwarded identity is used only when the physical peer is a valid IP in this list.
+- When both AuthNZ and Resource Governor forwarding are enabled, configure equivalent trusted-proxy sets and compatible headers so password-login lockouts and request governance derive the same client identity. AuthNZ uses `AUTH_TRUST_X_FORWARDED_FOR=true` plus `AUTH_TRUSTED_PROXY_IPS=<proxy IP/CIDR list>`; Resource Governor uses `RG_CLIENT_IP_HEADER=X-Forwarded-For` plus `RG_TRUSTED_PROXIES=<equivalent proxy IP/CIDR list>`.
+- Rollout no longer consults legacy raw-IP password-login buckets. Account-wide lockout and Resource Governor protections remain active.
 - `DATABASE_URL`: AuthNZ database URL. For production multi-user, use Postgres (e.g., `postgresql://user:pass@host:5432/db`). SQLite supported for dev.
 - `SINGLE_USER_API_KEY`: API key for single-user mode (>=24 chars recommended in production).
 - `JWT_SECRET_KEY`: JWT signing secret (>=32 chars). Required for `multi_user` in production.

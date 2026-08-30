@@ -44,7 +44,6 @@ from tldw_Server_API.app.api.v1.API_Deps.federation_deps import (
     get_oidc_federation_service_dep,
     require_enterprise_federation,
 )
-from tldw_Server_API.app.api.v1.utils.deprecation import build_deprecation_headers
 
 #
 # Local imports
@@ -62,6 +61,7 @@ from tldw_Server_API.app.api.v1.schemas.auth_schemas import (
     SingleUserSessionResponse,
     TokenResponse,
 )
+from tldw_Server_API.app.api.v1.utils.deprecation import build_deprecation_headers
 from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditContext,
     AuditEventType,
@@ -71,6 +71,8 @@ from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager
 from tldw_Server_API.app.core.AuthNZ.auth_governor import get_auth_governor
 from tldw_Server_API.app.core.AuthNZ.csrf_protection import (
     global_settings as _csrf_globals,
+)
+from tldw_Server_API.app.core.AuthNZ.csrf_protection import (
     resolve_effective_csrf_enabled,
 )
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, is_postgres_backend
@@ -86,12 +88,19 @@ from tldw_Server_API.app.core.AuthNZ.exceptions import (
     TokenExpiredError,
     WeakPasswordError,
 )
+from tldw_Server_API.app.core.AuthNZ.federation.claim_mapping import preview_claim_mapping
+from tldw_Server_API.app.core.AuthNZ.federation.provisioning_service import FederationProvisioningService
+from tldw_Server_API.app.core.AuthNZ.federation.state_repo import FederationStateRepo
 from tldw_Server_API.app.core.AuthNZ.input_validation import get_input_validator
 from tldw_Server_API.app.core.AuthNZ.ip_allowlist import (
     is_single_user_ip_allowed,
     resolve_client_ip,
 )
 from tldw_Server_API.app.core.AuthNZ.jwt_service import JWTService
+from tldw_Server_API.app.core.AuthNZ.lockout_tracker import (
+    build_login_client_lockout_key,
+    validate_login_client_lockout_key,
+)
 from tldw_Server_API.app.core.AuthNZ.orgs_teams import list_memberships_for_user
 from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
@@ -105,34 +114,50 @@ from tldw_Server_API.app.core.AuthNZ.single_user_session import (
     validate_single_user_session,
 )
 from tldw_Server_API.app.core.AuthNZ.token_blacklist import get_token_blacklist
+from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
 from tldw_Server_API.app.core.Resource_Governance.governor import MemoryResourceGovernor, RGRequest
 from tldw_Server_API.app.core.Resource_Governance.policy_loader import default_policy_loader
 from tldw_Server_API.app.core.Resource_Governance.tenant import hash_entity
-from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
+from tldw_Server_API.app.core.testing import (
+    env_flag_enabled as _env_flag_enabled,
+)
+from tldw_Server_API.app.core.testing import (
+    is_explicit_pytest_runtime as _is_explicit_pytest_runtime,
+)
+from tldw_Server_API.app.core.testing import (
+    is_test_mode as _is_test_mode,
+)
+from tldw_Server_API.app.core.testing import (
+    is_truthy as _is_truthy,
+)
 from tldw_Server_API.app.services.auth_service import (
     apply_password_reset as _svc_apply_password_reset,
+)
+from tldw_Server_API.app.services.auth_service import (
     fetch_active_user_by_id,
-    fetch_password_reset_token_record as _svc_fetch_password_reset_token_record,
-    fetch_user_by_email_for_password_reset as _svc_fetch_user_by_email_for_password_reset,
-    fetch_user_by_email_for_verification as _svc_fetch_user_by_email_for_verification,
     fetch_user_by_login_identifier,
-    mark_user_verified as _svc_mark_user_verified,
-    store_password_reset_token as _svc_store_password_reset_token,
-    verify_user_email_once as _svc_verify_user_email_once,
     update_user_last_login,
     update_user_password_hash,
 )
-from tldw_Server_API.app.services.registration_service import RegistrationService
-from tldw_Server_API.app.core.AuthNZ.federation.claim_mapping import preview_claim_mapping
-from tldw_Server_API.app.core.AuthNZ.federation.oidc_service import OIDCFederationService
-from tldw_Server_API.app.core.AuthNZ.federation.provisioning_service import FederationProvisioningService
-from tldw_Server_API.app.core.AuthNZ.federation.state_repo import FederationStateRepo
-from tldw_Server_API.app.core.testing import (
-    env_flag_enabled as _env_flag_enabled,
-    is_explicit_pytest_runtime as _is_explicit_pytest_runtime,
-    is_test_mode as _is_test_mode,
-    is_truthy as _is_truthy,
+from tldw_Server_API.app.services.auth_service import (
+    fetch_password_reset_token_record as _svc_fetch_password_reset_token_record,
 )
+from tldw_Server_API.app.services.auth_service import (
+    fetch_user_by_email_for_password_reset as _svc_fetch_user_by_email_for_password_reset,
+)
+from tldw_Server_API.app.services.auth_service import (
+    fetch_user_by_email_for_verification as _svc_fetch_user_by_email_for_verification,
+)
+from tldw_Server_API.app.services.auth_service import (
+    mark_user_verified as _svc_mark_user_verified,
+)
+from tldw_Server_API.app.services.auth_service import (
+    store_password_reset_token as _svc_store_password_reset_token,
+)
+from tldw_Server_API.app.services.auth_service import (
+    verify_user_email_once as _svc_verify_user_email_once,
+)
+from tldw_Server_API.app.services.registration_service import RegistrationService
 
 _AUTH_NONCRITICAL_EXCEPTIONS = (
     asyncio.CancelledError,
@@ -974,13 +999,7 @@ def _auth_request_client_ip(request: Request) -> str:
     except _AUTH_NONCRITICAL_EXCEPTIONS:
         settings = None
     try:
-        resolved = resolve_client_ip(request, settings)
-        if resolved:
-            return str(resolved)
-    except _AUTH_NONCRITICAL_EXCEPTIONS:
-        pass
-    try:
-        return request.client.host if request.client else "unknown"
+        return resolve_client_ip(request, settings) or "unknown"
     except _AUTH_NONCRITICAL_EXCEPTIONS:
         return "unknown"
 
@@ -1069,9 +1088,9 @@ async def _get_auth_endpoint_rg_governor(request: Request) -> Optional[Any]:
             if loader is None:
                 loader = default_policy_loader()
                 await loader.load_once()
-                setattr(state, "rg_policy_loader", loader)
+                state.rg_policy_loader = loader
             fallback = MemoryResourceGovernor(policy_loader=loader)
-            setattr(state, "auth_endpoint_rg_governor", fallback)
+            state.auth_endpoint_rg_governor = fallback
             return fallback
         except _AUTH_NONCRITICAL_EXCEPTIONS as exc:
             logger.debug("Auth endpoint RG fallback governor init failed: {}", exc)
@@ -1548,8 +1567,10 @@ async def login(
     log_counter("auth_login_attempt")
     auth_gov = await get_auth_governor()
     try:
-        # Get client info
+        # Get client info and normalize the identifier as the database lookup does.
         client_ip = _auth_request_client_ip(request)
+        login_identifier = form_data.username.strip().lower()
+        client_login_lockout_key = build_login_client_lockout_key(client_ip, login_identifier)
         user_agent = request.headers.get("User-Agent", "Unknown")
         # PII-aware logging
         if settings.PII_REDACT_LOGS:
@@ -1557,18 +1578,18 @@ async def login(
         else:
             logger.info(f"Login attempt for user: {form_data.username} from IP: {client_ip}")
 
-        # Check if IP is locked out (only when rate limiting is enabled)
+        # Check if this client/login pair is locked out (only when rate limiting is enabled)
         is_locked = False
         lockout_expires = None
         if getattr(rate_limiter, 'enabled', False):
             is_locked, lockout_expires = await auth_gov.check_lockout(
-                client_ip,
+                client_login_lockout_key,
                 attempt_type="login",
                 rate_limiter=rate_limiter,
             )
         if is_locked:
-            logger.warning(f"Login attempt from locked IP: {client_ip}")
-            log_counter("auth_login_locked_ip")
+            logger.warning("Login attempt from locked client/login pair")
+            log_counter("auth_login_locked_client")
             retry_after_seconds = 900
             if isinstance(lockout_expires, datetime):
                 try:
@@ -1586,10 +1607,6 @@ async def login(
                 detail="Too many failed login attempts. Please try again later.",
                 headers={"Retry-After": str(retry_after_seconds)}
             )
-
-        # Sanitize input (lightweight). For login, avoid strict validation to not block
-        # legitimate existing accounts (e.g., reserved usernames like 'admin').
-        login_identifier = form_data.username.strip()
 
         # Helper to attempt audit logging without hard dependency (safe no-op in tests)
         async def _safe_audit_log_login(user_id: int, username: str, ip: str, ua: str, success: bool):
@@ -1627,10 +1644,10 @@ async def login(
             else:
                 logger.warning(f"Failed login: User not found - {login_identifier}")
 
-            # Track failed attempt by IP (only when rate limiting is enabled)
+            # Track failed attempt by client/login pair (only when rate limiting is enabled)
             if getattr(rate_limiter, 'enabled', False):
                 await auth_gov.record_auth_failure(
-                    identifier=client_ip,
+                    identifier=client_login_lockout_key,
                     attempt_type="login",
                     rate_limiter=rate_limiter,
                 )
@@ -1720,12 +1737,12 @@ async def login(
                 success=False,
             )
 
-            # Track failed attempt by IP and username
-            ip_result = {"is_locked": False, "remaining_attempts": 5}
+            # Track failed attempt by client/login pair and username
+            client_result = {"is_locked": False, "remaining_attempts": 5}
             user_result = {"is_locked": False, "remaining_attempts": 5}
             if getattr(rate_limiter, 'enabled', False):
-                ip_result = await auth_gov.record_auth_failure(
-                    identifier=client_ip,
+                client_result = await auth_gov.record_auth_failure(
+                    identifier=client_login_lockout_key,
                     attempt_type="login",
                     rate_limiter=rate_limiter,
                 )
@@ -1736,7 +1753,7 @@ async def login(
                 )
 
             # Provide informative error if locked out
-            if ip_result['is_locked'] or user_result['is_locked']:
+            if client_result['is_locked'] or user_result['is_locked']:
                 log_counter("auth_login_locked_user")
                 raise HTTPException(
                     status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -1745,7 +1762,7 @@ async def login(
                 )
 
             # Otherwise generic error
-            remaining = min(ip_result.get('remaining_attempts', 5), user_result.get('remaining_attempts', 5))
+            remaining = min(client_result.get('remaining_attempts', 5), user_result.get('remaining_attempts', 5))
             logger.info(f"Remaining login attempts: {remaining}")
 
             log_counter("auth_login_invalid_password")
@@ -1858,6 +1875,7 @@ async def login(
                 payload = {
                     "user_id": int(user["id"]),
                     "session_id": int(session_id),
+                    "login_lockout_key": client_login_lockout_key,
                 }
                 try:
                     await session_manager.store_ephemeral_value(
@@ -1923,7 +1941,7 @@ async def login(
         # Reset failed login attempts on successful login
         if getattr(rate_limiter, 'enabled', False):
             try:
-                await rate_limiter.reset_failed_attempts(client_ip, "login")
+                await rate_limiter.reset_failed_attempts(client_login_lockout_key, "login")
                 await rate_limiter.reset_failed_attempts(user['username'], "login")
             except _AUTH_NONCRITICAL_EXCEPTIONS as rl_exc:
                 # Guardrails must not break successful logins; log and continue.
@@ -2745,7 +2763,7 @@ async def verify_email(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid or expired verification token",
-            )
+            ) from None
 
         # Update user's verification status only when it is currently unverified.
         updated_rows = await _verify_user_email_once(
@@ -3473,6 +3491,14 @@ async def mfa_login(
 
         session_id = payload.get("session_id")
         user_id = payload.get("user_id")
+        login_lockout_key = None
+        if "login_lockout_key" in payload:
+            login_lockout_key = validate_login_client_lockout_key(payload.get("login_lockout_key"))
+            if login_lockout_key is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="MFA session expired or invalid",
+                )
         if not session_id or not user_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -3592,7 +3618,8 @@ async def mfa_login(
         # Reset failed login attempts on successful MFA login
         if getattr(rate_limiter, 'enabled', False):
             try:
-                await rate_limiter.reset_failed_attempts(client_ip, "login")
+                if login_lockout_key is not None:
+                    await rate_limiter.reset_failed_attempts(login_lockout_key, "login")
                 await rate_limiter.reset_failed_attempts(user.get("username", ""), "login")
             except _AUTH_NONCRITICAL_EXCEPTIONS as rl_exc:
                 logger.debug(f"rate_limiter.reset_failed_attempts failed: {rl_exc}")
