@@ -7163,7 +7163,11 @@ CREATE TABLE note_semantic_note_state(
   generation_id TEXT NOT NULL,
   note_id TEXT NOT NULL,
   content_version INTEGER NOT NULL CHECK(content_version >= 1),
-  content_fingerprint TEXT NOT NULL CHECK(length(trim(content_fingerprint)) > 0),
+  content_fingerprint TEXT NOT NULL CHECK(
+    length(content_fingerprint) = 71
+    AND substr(content_fingerprint, 1, 7) = 'sha256:'
+    AND substr(content_fingerprint, 8) NOT GLOB '*[^0-9a-f]*'
+  ),
   dirty_generation INTEGER NOT NULL CHECK(dirty_generation >= 1),
   state TEXT NOT NULL CHECK(state IN ('pending', 'indexed', 'excluded', 'failed', 'tombstoned')),
   chunk_count INTEGER NOT NULL DEFAULT 0 CHECK(chunk_count >= 0),
@@ -7186,7 +7190,11 @@ CREATE TABLE note_semantic_chunks(
   field TEXT NOT NULL CHECK(field IN ('title', 'content')),
   start_offset INTEGER NOT NULL CHECK(start_offset >= 0),
   end_offset INTEGER NOT NULL CHECK(end_offset > start_offset),
-  chunk_fingerprint TEXT NOT NULL CHECK(length(trim(chunk_fingerprint)) > 0),
+  chunk_fingerprint TEXT NOT NULL CHECK(
+    length(chunk_fingerprint) = 71
+    AND substr(chunk_fingerprint, 1, 7) = 'sha256:'
+    AND substr(chunk_fingerprint, 8) NOT GLOB '*[^0-9a-f]*'
+  ),
   normalization_version TEXT NOT NULL CHECK(length(trim(normalization_version)) > 0),
   chunker_version TEXT NOT NULL CHECK(length(trim(chunker_version)) > 0),
   UNIQUE(owner_user_id, dataset_id, chunk_id),
@@ -7213,7 +7221,11 @@ CREATE TABLE note_semantic_work(
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(owner_user_id, dataset_id, id),
   FOREIGN KEY(owner_user_id, dataset_id, generation_id) REFERENCES note_semantic_generations(owner_user_id, dataset_id, id) ON DELETE CASCADE ON UPDATE CASCADE,
-  CHECK((kind = 'delete_generation' AND generation_id IS NOT NULL AND note_id IS NULL) OR (kind IN ('index_note', 'delete_note_vectors') AND note_id IS NOT NULL)),
+  CHECK(generation_id IS NOT NULL AND (
+    (kind = 'delete_generation' AND note_id IS NULL AND dirty_generation IS NULL)
+    OR
+    (kind IN ('index_note', 'delete_note_vectors') AND note_id IS NOT NULL AND dirty_generation IS NOT NULL)
+  )),
   CHECK((claim_state = 'claimed' AND claim_token IS NOT NULL AND claimed_at IS NOT NULL) OR (claim_state != 'claimed'))
 );
 
@@ -7270,7 +7282,7 @@ CREATE TABLE IF NOT EXISTS note_semantic_generations(
 CREATE TABLE IF NOT EXISTS note_semantic_note_state(
   owner_user_id TEXT NOT NULL CHECK(char_length(btrim(owner_user_id)) > 0),
   dataset_id TEXT NOT NULL CHECK(char_length(btrim(dataset_id)) > 0), generation_id TEXT NOT NULL, note_id TEXT NOT NULL,
-  content_version INTEGER NOT NULL CHECK(content_version >= 1), content_fingerprint TEXT NOT NULL CHECK(char_length(btrim(content_fingerprint)) > 0),
+  content_version INTEGER NOT NULL CHECK(content_version >= 1), content_fingerprint TEXT NOT NULL CHECK(content_fingerprint ~ '^sha256:[0-9a-f]{64}$'),
   dirty_generation INTEGER NOT NULL CHECK(dirty_generation >= 1),
   state TEXT NOT NULL CHECK(state IN ('pending', 'indexed', 'excluded', 'failed', 'tombstoned')),
   chunk_count INTEGER NOT NULL DEFAULT 0 CHECK(chunk_count >= 0), manifest_hash TEXT, error_code TEXT, published_at TIMESTAMPTZ,
@@ -7283,7 +7295,7 @@ CREATE TABLE IF NOT EXISTS note_semantic_chunks(
   owner_user_id TEXT NOT NULL CHECK(char_length(btrim(owner_user_id)) > 0), dataset_id TEXT NOT NULL CHECK(char_length(btrim(dataset_id)) > 0),
   generation_id TEXT NOT NULL, note_id TEXT NOT NULL, content_version INTEGER NOT NULL CHECK(content_version >= 1), ordinal INTEGER NOT NULL CHECK(ordinal >= 0),
   field TEXT NOT NULL CHECK(field IN ('title', 'content')), start_offset INTEGER NOT NULL CHECK(start_offset >= 0), end_offset INTEGER NOT NULL CHECK(end_offset > start_offset),
-  chunk_fingerprint TEXT NOT NULL CHECK(char_length(btrim(chunk_fingerprint)) > 0), normalization_version TEXT NOT NULL CHECK(char_length(btrim(normalization_version)) > 0),
+  chunk_fingerprint TEXT NOT NULL CHECK(chunk_fingerprint ~ '^sha256:[0-9a-f]{64}$'), normalization_version TEXT NOT NULL CHECK(char_length(btrim(normalization_version)) > 0),
   chunker_version TEXT NOT NULL CHECK(char_length(btrim(chunker_version)) > 0),
   UNIQUE(owner_user_id, dataset_id, chunk_id), UNIQUE(owner_user_id, dataset_id, generation_id, note_id, ordinal),
   FOREIGN KEY(owner_user_id, dataset_id, generation_id, note_id) REFERENCES note_semantic_note_state(owner_user_id, dataset_id, generation_id, note_id) ON DELETE CASCADE ON UPDATE CASCADE
@@ -7298,7 +7310,11 @@ CREATE TABLE IF NOT EXISTS note_semantic_work(
   claim_token TEXT, claimed_at TIMESTAMPTZ, error_code TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(owner_user_id, dataset_id, id),
   FOREIGN KEY(owner_user_id, dataset_id, generation_id) REFERENCES note_semantic_generations(owner_user_id, dataset_id, id) ON DELETE CASCADE ON UPDATE CASCADE,
-  CHECK((kind = 'delete_generation' AND generation_id IS NOT NULL AND note_id IS NULL) OR (kind IN ('index_note', 'delete_note_vectors') AND note_id IS NOT NULL)),
+  CHECK(generation_id IS NOT NULL AND (
+    (kind = 'delete_generation' AND note_id IS NULL AND dirty_generation IS NULL)
+    OR
+    (kind IN ('index_note', 'delete_note_vectors') AND note_id IS NOT NULL AND dirty_generation IS NOT NULL)
+  )),
   CHECK((claim_state = 'claimed' AND claim_token IS NOT NULL AND claimed_at IS NOT NULL) OR (claim_state != 'claimed'))
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_note_semantic_generations_one_active ON note_semantic_generations(owner_user_id, dataset_id) WHERE state = 'active';
