@@ -3,6 +3,7 @@ from __future__ import annotations
 """Business service for Sync v2 protocol operations."""
 
 import base64
+import binascii
 import hashlib
 import hmac
 import inspect
@@ -11,9 +12,11 @@ import os
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
+from typing import Literal
 from uuid import RFC_4122, UUID, uuid4
 
 from loguru import logger
+from tldw_profile_core import SERIALIZED_SCHEMA_VERSION
 
 from tldw_Server_API.app.core.Notes.attachment_policy import (
     NoteAttachmentPolicyError,
@@ -57,6 +60,7 @@ from .models import (
     NOTES_ORGANIZATION_DOMAINS,
     NOTES_TASK_SYNC_DOMAINS,
     NOTES_TASK_SYNC_OPERATIONS,
+    PERSONAL_CONTEXT_SYNC_DOMAINS,
     SYNC_REBASE_REQUIRED_AFTER_CONFLICT_RESOLUTION,
     SYNC_V2_ENCRYPTION_POLICIES,
     SYNC_V2_KNOWN_DOMAINS,
@@ -590,6 +594,47 @@ def _atomic_negotiation_patch(
 
 
 @dataclass(frozen=True, slots=True)
+class PersonalContextSyncCapabilities:
+    """Bounded Personal Context contract advertised through Sync v2."""
+
+    available: bool = False
+    blockers: tuple[str, ...] = ("personal_context_profile_key_unavailable",)
+    authorization_policy: Literal["server_trusted_v1"] = "server_trusted_v1"
+    min_schema_version: int = 1
+    max_schema_version: int = 1
+    integrity_algorithm: Literal["hmac-sha256-v1"] = "hmac-sha256-v1"
+    integrity_key_distribution: Literal["wrapped-bootstrap-v1"] = "wrapped-bootstrap-v1"
+    privacy_cleanup_ack: Literal["personal-context-cleanup-v1"] = "personal-context-cleanup-v1"
+    purge_generation: Literal["personal-context-purge-v1"] = "personal-context-purge-v1"
+    max_record_bytes: int = 16_384
+    max_search_results: int = 20
+    max_proposals_per_turn: int = 5
+    max_proposals_per_session: int = 25
+    max_unresolved_proposals: int = 200
+
+
+def personal_context_sync_capabilities_from_env() -> PersonalContextSyncCapabilities:
+    """Return fail-closed Personal Context readiness from shared schema and key custody."""
+
+    blockers: list[str] = []
+    if SERIALIZED_SCHEMA_VERSION != 1:
+        blockers.append("personal_context_schema_unsupported")
+
+    encoded_key = os.getenv("TLDW_PERSONAL_CONTEXT_MASTER_KEY", "").strip()
+    try:
+        master_key = base64.b64decode(encoded_key, validate=True)
+    except (binascii.Error, ValueError):
+        master_key = b""
+    if len(master_key) != 32:
+        blockers.append("personal_context_profile_key_unavailable")
+
+    return PersonalContextSyncCapabilities(
+        available=not blockers,
+        blockers=tuple(blockers),
+    )
+
+
+@dataclass(frozen=True, slots=True)
 class SyncV2Settings:
     """Server settings surfaced through Sync v2 capabilities."""
 
@@ -619,6 +664,9 @@ class SyncV2Settings:
     server_trusted_encryption: SyncV2ServerTrustedEncryptionStatus = field(
         default_factory=server_trusted_encryption_status_from_env
     )
+    personal_context: PersonalContextSyncCapabilities = field(
+        default_factory=personal_context_sync_capabilities_from_env
+    )
     restore_manifest_scan_limit: int = 10_000
     restore_preview_candidate_limit: int = 50_000
     restore_preview_action_limit: int = 10_000
@@ -635,6 +683,7 @@ class SyncV2Capabilities:
     encryption: dict[str, object]
     blob_transfer: dict[str, object]
     encryption_policies: list[EncryptionPolicy]
+    personal_context: PersonalContextSyncCapabilities
     max_batch_size: int
     max_envelope_payload_bytes: int
     max_attachment_bytes: int
@@ -1120,6 +1169,16 @@ class SyncV2Service:
         except Exception:  # noqa: BLE001 - malformed product authority fails closed.
             return False
 
+    def _personal_context_domains_ready(self) -> bool:
+        """Return whether every Personal Context domain has a v1 transport path."""
+
+        return all(
+            self.adapters.has_domain(domain)
+            and self.adapters.supports_version(domain, 1)
+            and getattr(self.materializers.get(domain), "domain", None) == domain
+            for domain in PERSONAL_CONTEXT_SYNC_DOMAINS
+        )
+
     def capabilities(
         self,
         *,
@@ -1147,6 +1206,7 @@ class SyncV2Service:
                 getattr(attachment_adapter, "v2_writes_enabled", False)
             )
         notes_task_ready = self._notes_task_domains_ready(dataset)
+        personal_context_transport_ready = self._personal_context_domains_ready()
         private_dormant_domains = {
             *NOTES_MOODBOARD_STUDIO_DOMAINS,
             *NOTES_TASK_SYNC_DOMAINS,
@@ -1190,6 +1250,36 @@ class SyncV2Service:
                 "used_blob_bytes": self.settings.used_blob_bytes,
             }
         warnings = list(self.settings.server_trusted_encryption.warnings)
+        personal_context = self.settings.personal_context
+        if not personal_context_transport_ready:
+            personal_context = replace(
+                personal_context,
+                available=False,
+                blockers=tuple(
+                    dict.fromkeys(
+                        (
+                            *personal_context.blockers,
+                            "personal_context_transport_unavailable",
+                        )
+                    )
+                ),
+            )
+        if (
+            "server_trusted_v1" not in self.settings.encryption_policies
+            or not self.settings.server_trusted_encryption.ready
+        ):
+            personal_context = replace(
+                personal_context,
+                available=False,
+                blockers=tuple(
+                    dict.fromkeys(
+                        (
+                            *personal_context.blockers,
+                            "personal_context_server_trusted_unavailable",
+                        )
+                    )
+                ),
+            )
         compatibility_flags: dict[str, bool] = {}
         if "client_private_v1" in self.settings.encryption_policies:
             compatibility_flags["server_frontend_client_private_mutation"] = False
@@ -1205,6 +1295,7 @@ class SyncV2Service:
             encryption=self.settings.server_trusted_encryption.encryption,
             blob_transfer=blob_transfer,
             encryption_policies=list(self.settings.encryption_policies),
+            personal_context=personal_context,
             max_batch_size=self.settings.max_batch_size,
             max_envelope_payload_bytes=self.settings.max_envelope_payload_bytes,
             max_attachment_bytes=self.settings.max_attachment_bytes,
@@ -1218,12 +1309,14 @@ class SyncV2Service:
             ),
             supported_adapter_versions=sync_v2_server_supported_adapter_versions(
                 notes_task_sync_ready=notes_task_ready,
+                personal_context_sync_ready=personal_context_transport_ready,
             ),
             writable_adapter_versions=sync_v2_dataset_writable_adapter_versions(
                 dataset,
                 notes_attachment_sync_enabled=attachment_v2_writes_enabled,
                 supports_attachments=self.settings.supports_attachments,
                 notes_task_sync_ready=notes_task_ready,
+                personal_context_sync_ready=personal_context.available,
             ),
             quota=quota,
             supports_attachments=self.settings.supports_attachments,
@@ -8692,6 +8785,7 @@ def _evaluate_accepts_context(evaluate: Callable[..., object]) -> bool:
 
 
 __all__ = [
+    "PersonalContextSyncCapabilities",
     "SyncDatasetEnrollment",
     "SyncDiagnosticsBlobHealth",
     "SyncDiagnosticsDevice",
@@ -8719,4 +8813,5 @@ __all__ = [
     "SyncV2Capabilities",
     "SyncV2Service",
     "SyncV2Settings",
+    "personal_context_sync_capabilities_from_env",
 ]

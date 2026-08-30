@@ -18,6 +18,7 @@ from tldw_Server_API.app.core.DB_Management import Sync_DB as sync_db_module
 from tldw_Server_API.app.core.DB_Management.chacha.note_link_store import NotesLinkStore
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
+from tldw_Server_API.app.core.Sync.v2 import service as sync_v2_service_module
 from tldw_Server_API.app.core.Sync.v2.adapters import (
     AdapterAccepted,
     AdapterConflict,
@@ -49,6 +50,7 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     M1_SYNC_DOMAINS,
     NOTES_MOODBOARD_STUDIO_DOMAINS,
     NOTES_ORGANIZATION_DOMAINS,
+    PERSONAL_CONTEXT_SYNC_DOMAINS,
     SYNC_V2_SUPPORTED_DOMAINS,
     SYNC_V2_SUPPORTED_OPERATIONS,
     EncryptionPolicy,
@@ -129,6 +131,20 @@ def _workspace_registry() -> SyncAdapterRegistry:
     for domain in WORKSPACE_DOMAINS:
         registry.register(StaticSyncAdapter(domain=domain, supported_adapter_versions={1}))
     return registry
+
+
+def _wire_personal_context_components(
+    registry: SyncAdapterRegistry,
+) -> dict[SyncDomain, _OutcomeMaterializer]:
+    materializers: dict[SyncDomain, _OutcomeMaterializer] = {}
+    for domain in PERSONAL_CONTEXT_SYNC_DOMAINS:
+        registry.register(
+            StaticSyncAdapter(domain=domain, supported_adapter_versions={1})
+        )
+        materializer = _OutcomeMaterializer()
+        materializer.domain = domain
+        materializers[domain] = materializer
+    return materializers
 
 
 def _workspace_service(
@@ -842,6 +858,7 @@ def test_capabilities_returns_protocol_domains_limits_and_encryption_policies(
         "notes.folder",
         "notes.folder_link",
         "notes.link",
+        *PERSONAL_CONTEXT_SYNC_DOMAINS,
     ]
     assert {
         domain: capabilities.operations[domain]
@@ -860,6 +877,156 @@ def test_capabilities_returns_protocol_domains_limits_and_encryption_policies(
     assert capabilities.max_attachment_bytes == 4096
     assert capabilities.encryption_policies == ["server_trusted_v1"]
     assert capabilities.supports_attachments is False
+
+
+def test_personal_context_capability_fails_closed_without_profile_key(
+    monkeypatch: pytest.MonkeyPatch,
+    sync_store: SyncV2Store,
+    registry: SyncAdapterRegistry,
+) -> None:
+    monkeypatch.delenv("TLDW_PERSONAL_CONTEXT_MASTER_KEY", raising=False)
+    materializers = _wire_personal_context_components(registry)
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=registry,
+        materializers=materializers,
+        clock=_clock,
+        settings=SyncV2Settings(server_trusted_encryption=_ready_encryption()),
+    )
+    service.store.enroll_dataset(
+        SyncDatasetCreate(
+            dataset_id="personal-context-dataset",
+            owner_user_id="user-1",
+            domains=list(PERSONAL_CONTEXT_SYNC_DOMAINS),
+        )
+    )
+
+    capabilities = service.capabilities(
+        user_id="user-1",
+        dataset_id="personal-context-dataset",
+    )
+
+    assert capabilities.personal_context.available is False
+    assert capabilities.personal_context.blockers == (
+        "personal_context_profile_key_unavailable",
+    )
+    assert capabilities.personal_context.authorization_policy == "server_trusted_v1"
+    assert all(
+        capabilities.writable_adapter_versions[domain] == []
+        for domain in PERSONAL_CONTEXT_SYNC_DOMAINS
+    )
+
+
+def test_personal_context_capability_waits_for_transport_components(
+    monkeypatch: pytest.MonkeyPatch,
+    sync_store: SyncV2Store,
+    registry: SyncAdapterRegistry,
+) -> None:
+    monkeypatch.setenv(
+        "TLDW_PERSONAL_CONTEXT_MASTER_KEY",
+        "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
+    )
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=registry,
+        clock=_clock,
+        settings=SyncV2Settings(server_trusted_encryption=_ready_encryption()),
+    )
+
+    capability = service.capabilities().personal_context
+
+    assert capability.available is False
+    assert capability.blockers == ("personal_context_transport_unavailable",)
+    assert capability.min_schema_version == 1
+    assert capability.max_schema_version == 1
+    assert capability.max_record_bytes == 16_384
+    capabilities = service.capabilities()
+    assert all(
+        capabilities.supported_adapter_versions[domain] == []
+        for domain in PERSONAL_CONTEXT_SYNC_DOMAINS
+    )
+
+
+def test_personal_context_capability_is_available_when_fully_wired(
+    monkeypatch: pytest.MonkeyPatch,
+    sync_store: SyncV2Store,
+    registry: SyncAdapterRegistry,
+) -> None:
+    monkeypatch.setenv(
+        "TLDW_PERSONAL_CONTEXT_MASTER_KEY",
+        "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
+    )
+    materializers = _wire_personal_context_components(registry)
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=registry,
+        materializers=materializers,
+        clock=_clock,
+        settings=SyncV2Settings(server_trusted_encryption=_ready_encryption()),
+    )
+
+    capabilities = service.capabilities()
+
+    assert capabilities.personal_context.available is True
+    assert capabilities.personal_context.blockers == ()
+    assert all(
+        capabilities.supported_adapter_versions[domain] == [1]
+        for domain in PERSONAL_CONTEXT_SYNC_DOMAINS
+    )
+
+
+def test_personal_context_capability_requires_server_trusted_readiness(
+    monkeypatch: pytest.MonkeyPatch,
+    sync_store: SyncV2Store,
+    registry: SyncAdapterRegistry,
+) -> None:
+    monkeypatch.setenv(
+        "TLDW_PERSONAL_CONTEXT_MASTER_KEY",
+        "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
+    )
+    unavailable_encryption = server_trusted_encryption_status_from_config(
+        mode=None,
+        server_trusted_enabled=False,
+        auth_mode="multi_user",
+    )
+    materializers = _wire_personal_context_components(registry)
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=registry,
+        materializers=materializers,
+        clock=_clock,
+        settings=SyncV2Settings(server_trusted_encryption=unavailable_encryption),
+    )
+
+    capability = service.capabilities().personal_context
+
+    assert capability.available is False
+    assert capability.blockers == ("personal_context_server_trusted_unavailable",)
+
+
+def test_personal_context_capability_requires_supported_shared_schema(
+    monkeypatch: pytest.MonkeyPatch,
+    sync_store: SyncV2Store,
+    registry: SyncAdapterRegistry,
+) -> None:
+    monkeypatch.setenv(
+        "TLDW_PERSONAL_CONTEXT_MASTER_KEY",
+        "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
+    )
+    monkeypatch.setattr(sync_v2_service_module, "SERIALIZED_SCHEMA_VERSION", 2)
+    materializers = _wire_personal_context_components(registry)
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=registry,
+        materializers=materializers,
+        clock=_clock,
+        settings=SyncV2Settings(server_trusted_encryption=_ready_encryption()),
+    )
+
+    capability = service.capabilities().personal_context
+
+    assert capability.available is False
+    assert capability.blockers == ("personal_context_schema_unsupported",)
 
 
 def test_configured_moodboard_studio_domains_stay_private_in_capabilities(
