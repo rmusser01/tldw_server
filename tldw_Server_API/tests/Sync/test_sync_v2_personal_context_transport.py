@@ -145,6 +145,7 @@ def _service(tmp_path: Path) -> tuple[SyncV2Service, _RecordingService, Path]:
                     "profile_id": PROFILE_ID,
                     "integrity_key_id": INTEGRITY_KEY_ID,
                     "purge_generation": 0,
+                    "link_state": "complete",
                 }
             },
         )
