@@ -76,6 +76,56 @@ def _rendered_compose(tmp_path: Path) -> tuple[dict, dict[str, str]]:
     return _render(_real_compose(), values), values  # type: ignore[return-value]
 
 
+def _rendered_compose_json(tmp_path: Path) -> tuple[dict, dict[str, str]]:
+    """Model the long-form shapes emitted by `docker compose config --format json`."""
+
+    compose, values = _rendered_compose(tmp_path)
+    for service in compose["services"].values():
+        if "env_file" in service:
+            service.pop("env_file")
+            service["environment"] = {**values, **service.get("environment", {})}
+        if isinstance(service.get("networks"), list):
+            service["networks"] = dict.fromkeys(service["networks"])
+        if isinstance(service.get("depends_on"), dict):
+            service["depends_on"] = {
+                name: {**dependency, "required": True} for name, dependency in service["depends_on"].items()
+            }
+        if isinstance(service.get("ports"), list):
+            rendered_ports = []
+            for declaration in service["ports"]:
+                published, target = declaration.split(":")
+                rendered_ports.append(
+                    {
+                        "mode": "ingress",
+                        "target": int(target),
+                        "published": published,
+                        "protocol": "tcp",
+                    }
+                )
+            service["ports"] = rendered_ports
+        if isinstance(service.get("volumes"), list):
+            rendered_volumes = []
+            for declaration in service["volumes"]:
+                source, target, *options = declaration.split(":")
+                is_bind = source.startswith((".", "/"))
+                if is_bind and source.startswith("."):
+                    source = str((COMPOSE_PATH.parent / source).resolve())
+                mount = {
+                    "type": "bind" if is_bind else "volume",
+                    "source": source,
+                    "target": target,
+                    "bind" if is_bind else "volume": {},
+                }
+                if "ro" in options:
+                    mount["read_only"] = True
+                rendered_volumes.append(mount)
+            service["volumes"] = rendered_volumes
+    for name, network in compose["networks"].items():
+        network["name"] = f"tldw-production_{name}"
+    compose["volumes"] = {name: {"name": f"tldw-production_{name}"} for name in compose["volumes"]}
+    return compose, values
+
+
 def _write_env(path: Path, values: dict[str, str]) -> None:
     path.write_text(
         "\n".join(f"{name}={value}" for name, value in values.items()) + "\n",
@@ -189,6 +239,79 @@ def test_environment_rejects_redis_host_mismatch_after_url_decoding(tmp_path: Pa
     assert "credential_mismatch" in _codes(validate_environment(values, env_path=tmp_path / "production.env"))
 
 
+@pytest.mark.parametrize(
+    ("port", "expected_code"),
+    (("5433", "credential_mismatch"), ("not-a-port", "invalid_url"), ("99999", "invalid_url"), ("", "invalid_url")),
+)
+def test_environment_rejects_invalid_or_unexpected_database_ports(
+    tmp_path: Path,
+    port: str,
+    expected_code: str,
+) -> None:
+    values = _valid_env(tmp_path)
+    password = quote(values["POSTGRES_PASSWORD"], safe="")
+    values["DATABASE_URL"] = f"postgresql://tldw_app:{password}@postgres:{port}/tldw"
+
+    issues = validate_environment(values, env_path=tmp_path / "production.env")
+
+    assert expected_code in _codes(issues)
+    assert values["POSTGRES_PASSWORD"] not in "\n".join(issue.message for issue in issues)
+
+
+def test_environment_accepts_database_default_port(tmp_path: Path) -> None:
+    values = _valid_env(tmp_path)
+    password = quote(values["POSTGRES_PASSWORD"], safe="")
+    values["DATABASE_URL"] = f"postgresql://tldw_app:{password}@postgres/tldw"
+
+    issues = validate_environment(values, env_path=tmp_path / "production.env")
+
+    assert not {"invalid_url", "credential_mismatch"} & _codes(issues)
+
+
+@pytest.mark.parametrize(
+    ("username", "port", "expected_code"),
+    (
+        ("", "6380", "credential_mismatch"),
+        ("", "not-a-port", "invalid_url"),
+        ("", "99999", "invalid_url"),
+        ("operator", "6379", "credential_mismatch"),
+    ),
+)
+def test_environment_rejects_invalid_redis_port_or_username(
+    tmp_path: Path,
+    username: str,
+    port: str,
+    expected_code: str,
+) -> None:
+    values = _valid_env(tmp_path)
+    password = quote(values["REDIS_PASSWORD"], safe="")
+    authority = f"{username}:{password}" if username else f":{password}"
+    values["REDIS_URL"] = f"redis://{authority}@redis:{port}/0"
+
+    issues = validate_environment(values, env_path=tmp_path / "production.env")
+
+    assert expected_code in _codes(issues)
+    assert values["REDIS_PASSWORD"] not in "\n".join(issue.message for issue in issues)
+
+
+@pytest.mark.parametrize("username", ("", "default"))
+@pytest.mark.parametrize("include_port", (False, True))
+def test_environment_accepts_requirepass_redis_uri_forms(
+    tmp_path: Path,
+    username: str,
+    include_port: bool,
+) -> None:
+    values = _valid_env(tmp_path)
+    password = quote(values["REDIS_PASSWORD"], safe="")
+    authority = f"{username}:{password}" if username else f":{password}"
+    port = ":6379" if include_port else ""
+    values["REDIS_URL"] = f"redis://{authority}@redis{port}/0"
+
+    issues = validate_environment(values, env_path=tmp_path / "production.env")
+
+    assert not {"invalid_url", "credential_mismatch"} & _codes(issues)
+
+
 def test_environment_rejects_origin_with_a_path(tmp_path: Path) -> None:
     values = _valid_env(tmp_path)
     values["ALLOWED_ORIGINS"] = "https://tldw.acme.internal/application"
@@ -262,6 +385,68 @@ def test_environment_requires_origin_domain_and_contact_alignment(
     codes = _codes(validate_environment(values, env_path=tmp_path / "production.env"))
 
     assert {"sample_value", "origin_mismatch"} <= codes
+
+
+@pytest.mark.parametrize(
+    "domain",
+    (
+        "*.acme.internal",
+        "bad_name.acme.internal",
+        ".acme.internal",
+        "acme..internal",
+        "-bad.acme.internal",
+        "bad-.acme.internal",
+        "tldw",
+        "tldwé.acme.internal",
+        f"{'a' * 64}.acme.internal",
+        ".".join(["a" * 63] * 4),
+    ),
+)
+def test_environment_rejects_non_dns_public_identity(tmp_path: Path, domain: str) -> None:
+    values = _valid_env(tmp_path)
+    values["TLDW_PUBLIC_DOMAIN"] = domain
+
+    issues = validate_environment(values, env_path=tmp_path / "production.env")
+
+    assert any(issue.code == "sample_value" and issue.field == "TLDW_PUBLIC_DOMAIN" for issue in issues)
+
+
+@pytest.mark.parametrize(
+    "contact",
+    (
+        "ops",
+        "@acme.internal",
+        "ops@",
+        "ops @acme.internal",
+        "ops@bad_name.internal",
+        "ops@-bad.internal",
+        "ops@localhost",
+        "ops@tldwé.acme.internal",
+        "ops@@acme.internal",
+        ".ops@acme.internal",
+        "ops..tls@acme.internal",
+        f"{'o' * 65}@acme.internal",
+    ),
+)
+def test_environment_rejects_invalid_acme_contact(tmp_path: Path, contact: str) -> None:
+    values = _valid_env(tmp_path)
+    values["TLDW_ACME_EMAIL"] = contact
+
+    issues = validate_environment(values, env_path=tmp_path / "production.env")
+
+    assert any(issue.code == "sample_value" and issue.field == "TLDW_ACME_EMAIL" for issue in issues)
+
+
+def test_environment_accepts_bounded_dns_and_acme_email_boundaries(tmp_path: Path) -> None:
+    values = _valid_env(tmp_path)
+    domain = f"{'a' * 63}.{'b' * 63}.{'c' * 63}.{'d' * 61}"
+    values["TLDW_PUBLIC_DOMAIN"] = domain
+    values["TLDW_ACME_EMAIL"] = "ops+tls@acme.internal"
+    values["ALLOWED_ORIGINS"] = f"https://{domain}"
+
+    issues = validate_environment(values, env_path=tmp_path / "production.env")
+
+    assert not any(issue.code == "sample_value" for issue in issues)
 
 
 @pytest.mark.parametrize(
@@ -443,6 +628,40 @@ def test_static_compose_malformed_nested_shapes_fail_closed(field: str, expected
 
 
 @pytest.mark.parametrize(
+    "ports",
+    (
+        [8000],
+        ["8000"],
+        [{"target": 8000}],
+        [True],
+        ["not-a-port"],
+    ),
+)
+def test_static_compose_treats_every_ports_entry_as_publication(ports: list[object]) -> None:
+    compose = copy.deepcopy(_real_compose())
+    compose["services"]["app"]["ports"] = ports
+
+    assert "topology_ports" in _codes(validate_compose(compose))
+
+
+@pytest.mark.parametrize(
+    "ports",
+    (
+        ["nonsense:80:80", "443:443"],
+        [
+            {"target": 80, "published": 80, "protocol": "tcp", "mode": "ingress", "mystery": True},
+            {"target": 443, "published": 443, "protocol": "tcp", "mode": "ingress"},
+        ],
+    ),
+)
+def test_static_compose_rejects_unrecognized_caddy_port_syntax(ports: list[object]) -> None:
+    compose = copy.deepcopy(_real_compose())
+    compose["services"]["caddy"]["ports"] = ports
+
+    assert "topology_ports" in _codes(validate_compose(compose))
+
+
+@pytest.mark.parametrize(
     ("mutation", "expected_code"),
     (
         ("missing_path", "proxy_path"),
@@ -526,9 +745,61 @@ def test_proxy_directives_must_be_active_and_fail_closed(mutation: str, expected
     assert expected_code in _codes(validate_proxy(text))
 
 
+@pytest.mark.parametrize(
+    "extra",
+    ("/*", "/api/*", "/other", "/internal/ready", "#", "# comment"),
+)
+def test_proxy_private_matcher_must_equal_the_intended_path_set(extra: str) -> None:
+    text = PROXY_PATH.read_text(encoding="utf-8")
+    matcher = next(line for line in text.splitlines() if "@private_control path" in line)
+    text = text.replace(matcher, f"{matcher} {extra}")
+
+    assert "proxy_path" in _codes(validate_proxy(text))
+
+
+@pytest.mark.parametrize(
+    ("directive", "expected_code"),
+    (
+        ("matcher", "proxy_order"),
+        ("header", "proxy_headers"),
+        ("tls", "proxy_tls"),
+    ),
+)
+def test_proxy_security_directives_must_be_inside_their_active_blocks(
+    directive: str,
+    expected_code: str,
+) -> None:
+    text = PROXY_PATH.read_text(encoding="utf-8")
+    if directive == "matcher":
+        line = next(line for line in text.splitlines() if "@private_control path" in line)
+    elif directive == "header":
+        line = "    header_up X-Real-IP {remote_host}"
+    else:
+        line = "  tls {$TLDW_ACME_EMAIL}"
+    text = text.replace(f"{line}\n", "", 1)
+    text = f"{line}\n{text}"
+
+    assert expected_code in _codes(validate_proxy(text))
+
+
+def test_proxy_rejects_duplicate_private_matcher_directives() -> None:
+    text = PROXY_PATH.read_text(encoding="utf-8")
+    matcher = next(line for line in text.splitlines() if "@private_control path" in line)
+    text = text.replace(matcher, f"{matcher}\n{matcher}")
+
+    assert "proxy_path" in _codes(validate_proxy(text))
+
+
 def test_rendered_compose_matches_concrete_environment(tmp_path: Path) -> None:
     compose, values = _rendered_compose(tmp_path)
 
+    assert validate_rendered_compose(compose, values) == ()
+
+
+def test_rendered_compose_accepts_actual_json_shapes_and_injected_secrets(tmp_path: Path) -> None:
+    compose, values = _rendered_compose_json(tmp_path)
+
+    assert values["POSTGRES_PASSWORD"] in compose["services"]["app"]["environment"].values()
     assert validate_rendered_compose(compose, values) == ()
 
 
@@ -582,6 +853,135 @@ def test_rendered_compose_mutations_fail_closed(tmp_path: Path, mutation: str, e
     assert expected_code in _codes(validate_rendered_compose(compose, values))
 
 
+@pytest.mark.parametrize(
+    "ports",
+    (
+        [8000],
+        ["8000"],
+        [{"target": 8000}],
+        [True],
+        ["not-a-port"],
+    ),
+)
+def test_rendered_compose_treats_every_ports_entry_as_publication(
+    tmp_path: Path,
+    ports: list[object],
+) -> None:
+    compose, values = _rendered_compose(tmp_path)
+    compose["services"]["app"]["ports"] = ports
+
+    assert "rendered_ports" in _codes(validate_rendered_compose(compose, values))
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_code"),
+    (
+        ("preflight_command", "rendered_preflight"),
+        ("preflight_entrypoint", "rendered_preflight"),
+        ("preflight_restart", "rendered_preflight"),
+        ("preflight_dependency", "rendered_preflight"),
+        ("preflight_capabilities", "rendered_preflight"),
+        ("missing_mount", "rendered_mounts"),
+        ("writable_mount", "rendered_mounts"),
+        ("extra_mount", "rendered_mounts"),
+        ("docker_socket", "rendered_socket"),
+        ("app_health", "rendered_health"),
+        ("app_mode", "rendered_mode"),
+        ("setup_remote", "rendered_trust"),
+        ("forwarded_for", "rendered_trust"),
+        ("redis_command", "rendered_redis_auth"),
+        ("redis_health", "rendered_redis_auth"),
+        ("postgres_health", "rendered_postgres_auth"),
+        ("declared_volumes", "rendered_volumes"),
+    ),
+)
+def test_rendered_compose_rechecks_final_wiring(
+    tmp_path: Path,
+    mutation: str,
+    expected_code: str,
+) -> None:
+    compose, values = _rendered_compose_json(tmp_path)
+    services = compose["services"]
+    if mutation == "preflight_command":
+        services["preflight"]["command"] = ["--from-environment"]
+    elif mutation == "preflight_entrypoint":
+        services["preflight"]["entrypoint"] = ["sh"]
+    elif mutation == "preflight_restart":
+        services["preflight"]["restart"] = "unless-stopped"
+    elif mutation == "preflight_dependency":
+        services["app"]["depends_on"]["preflight"]["condition"] = "service_started"
+    elif mutation == "preflight_capabilities":
+        services["preflight"]["cap_drop"] = []
+    elif mutation == "missing_mount":
+        services["preflight"]["volumes"].pop()
+    elif mutation == "writable_mount":
+        services["preflight"]["volumes"][-1]["read_only"] = False
+    elif mutation == "extra_mount":
+        services["app"]["volumes"].append({"type": "volume", "source": "extra", "target": "/extra", "volume": {}})
+    elif mutation == "docker_socket":
+        services["preflight"]["volumes"].append(
+            {
+                "type": "bind",
+                "source": "/var/run/docker.sock",
+                "target": "/var/run/docker.sock",
+                "bind": {},
+            }
+        )
+    elif mutation == "app_health":
+        services["app"]["healthcheck"]["test"] = ["CMD", "true"]
+    elif mutation == "app_mode":
+        services["app"]["environment"]["AUTH_MODE"] = "single_user"
+    elif mutation == "setup_remote":
+        services["app"]["environment"]["TLDW_SETUP_ALLOW_REMOTE"] = "1"
+    elif mutation == "forwarded_for":
+        services["app"]["environment"]["AUTH_TRUST_X_FORWARDED_FOR"] = "false"
+    elif mutation == "redis_command":
+        services["redis"]["command"] = ["redis-server"]
+    elif mutation == "redis_health":
+        services["redis"]["healthcheck"]["test"] = ["CMD", "redis-cli", "ping"]
+    elif mutation == "postgres_health":
+        services["postgres"]["healthcheck"]["test"] = ["CMD", "true"]
+    elif mutation == "declared_volumes":
+        compose["volumes"]["extra"] = {"name": "tldw-production_extra"}
+
+    assert expected_code in _codes(validate_rendered_compose(compose, values))
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_code"),
+    (
+        ("optional_preflight", "rendered_preflight"),
+        ("malformed_extra_service", "rendered_services"),
+        ("invalid_mount_source", "rendered_mounts"),
+        ("wrong_volume_name", "rendered_volumes"),
+        ("wrong_network_name", "rendered_network"),
+        ("external_network", "rendered_network"),
+    ),
+)
+def test_rendered_compose_fail_closed_edge_shapes(
+    tmp_path: Path,
+    mutation: str,
+    expected_code: str,
+) -> None:
+    compose, values = _rendered_compose_json(tmp_path)
+    if mutation == "optional_preflight":
+        compose["services"]["app"]["depends_on"]["preflight"]["required"] = False
+    elif mutation == "malformed_extra_service":
+        compose["services"]["debug"] = "not-a-service"
+    elif mutation == "invalid_mount_source":
+        compose["services"]["preflight"]["volumes"][0]["source"] = "\0"
+    elif mutation == "wrong_volume_name":
+        compose["volumes"]["app-data"]["name"] = "shared_app_data"
+    elif mutation == "wrong_network_name":
+        compose["networks"]["edge"]["name"] = "shared_edge"
+    elif mutation == "external_network":
+        compose["networks"]["edge"]["external"] = True
+
+    issues = validate_rendered_compose(compose, values)
+
+    assert expected_code in _codes(issues)
+
+
 def test_run_preflight_accepts_a_complete_offline_fixture(tmp_path: Path) -> None:
     values = _valid_env(tmp_path)
     env_file = tmp_path / "production.env"
@@ -632,6 +1032,62 @@ def test_host_preflight_remains_authoritative_for_env_permissions(
     assert "env_permissions" in _codes(report.issues)
 
 
+@pytest.mark.parametrize("mode", (0o400, 0o640, 0o700))
+def test_host_preflight_requires_exact_env_mode_0600(tmp_path: Path, mode: int) -> None:
+    values = _valid_env(tmp_path)
+    env_file = tmp_path / "production.env"
+    _write_env(env_file, values)
+    env_file.chmod(mode)
+
+    report = run_preflight(env_file, COMPOSE_PATH, PROXY_PATH)
+
+    assert "env_permissions" in _codes(report.issues)
+
+
+def test_host_preflight_requires_env_owner_to_match_effective_uid(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    values = _valid_env(tmp_path)
+    env_file = tmp_path / "production.env"
+    _write_env(env_file, values)
+    monkeypatch.setattr(
+        "Helper_Scripts.Deployment.production_preflight.os.geteuid",
+        lambda: env_file.stat().st_uid + 1,
+    )
+
+    report = run_preflight(env_file, COMPOSE_PATH, PROXY_PATH)
+
+    assert "env_permissions" in _codes(report.issues)
+
+
+def test_host_preflight_rejects_symlinked_raw_env_file(tmp_path: Path) -> None:
+    values = _valid_env(tmp_path)
+    target = tmp_path / "target.env"
+    _write_env(target, values)
+    env_file = tmp_path / "production.env"
+    env_file.symlink_to(target)
+
+    report = run_preflight(env_file, COMPOSE_PATH, PROXY_PATH)
+
+    assert "env_permissions" in _codes(report.issues)
+
+
+def test_container_environment_mode_skips_raw_file_permissions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    values = _valid_env(tmp_path)
+    monkeypatch.setattr(
+        "Helper_Scripts.Deployment.production_preflight.os.geteuid",
+        lambda: -1,
+    )
+
+    issues = validate_environment(values, env_path=None)
+
+    assert "env_permissions" not in _codes(issues)
+
+
 def test_host_preflight_remains_authoritative_for_backup_writability(
     tmp_path: Path,
 ) -> None:
@@ -643,6 +1099,43 @@ def test_host_preflight_remains_authoritative_for_backup_writability(
     report = run_preflight(env_file, COMPOSE_PATH, PROXY_PATH)
 
     assert "backup_unwritable" in _codes(report.issues)
+
+
+def test_host_preflight_does_not_substitute_runtime_backup_directory(tmp_path: Path) -> None:
+    values = _valid_env(tmp_path)
+    configured_backup = tmp_path / "backups"
+    configured_backup.chmod(0o500)
+    substitute_backup = tmp_path / "substitute-backups"
+    substitute_backup.mkdir()
+    env_file = tmp_path / "production.env"
+    _write_env(env_file, values)
+
+    report = run_preflight(
+        env_file,
+        COMPOSE_PATH,
+        PROXY_PATH,
+        runtime_backup_dir=substitute_backup,
+    )
+
+    assert "backup_unwritable" in _codes(report.issues)
+
+
+def test_raw_environment_validation_cannot_bypass_host_backup_authority(tmp_path: Path) -> None:
+    values = _valid_env(tmp_path)
+    (tmp_path / "backups").chmod(0o500)
+    substitute_backup = tmp_path / "substitute-backups"
+    substitute_backup.mkdir()
+    env_file = tmp_path / "production.env"
+    _write_env(env_file, values)
+
+    issues = validate_environment(
+        values,
+        env_path=env_file,
+        runtime_backup_dir=substitute_backup,
+        require_backup_writable=False,
+    )
+
+    assert "backup_unwritable" in _codes(issues)
 
 
 def test_run_preflight_converts_parse_errors_to_sorted_issues(tmp_path: Path) -> None:
@@ -681,6 +1174,27 @@ def test_cli_returns_two_for_missing_or_conflicting_source_modes(
     assert main([]) == 2
     assert main(["--env-file", str(tmp_path / "production.env"), "--from-environment"]) == 2
     assert "usage:" in capsys.readouterr().err
+
+
+def test_cli_rejects_runtime_backup_directory_with_raw_env_mode(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    values = _valid_env(tmp_path)
+    env_file = tmp_path / "production.env"
+    _write_env(env_file, values)
+
+    exit_code = main(
+        [
+            "--env-file",
+            str(env_file),
+            "--runtime-backup-dir",
+            str(tmp_path / "backups"),
+        ]
+    )
+
+    assert exit_code == 2
+    assert "--runtime-backup-dir requires --from-environment" in capsys.readouterr().err
 
 
 def test_cli_prints_sorted_sanitized_errors_only_to_stderr(

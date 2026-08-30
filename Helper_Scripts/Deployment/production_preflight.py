@@ -7,6 +7,7 @@ import ipaddress
 import json
 import os
 import re
+import stat
 import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -81,6 +82,8 @@ APP_IMAGE_PATTERNS = (
 )
 
 _ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_DNS_LABEL = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$", re.ASCII)
+_EMAIL_LOCAL = re.compile(r"^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+$", re.ASCII)
 _THIRD_PARTY_VERSION = re.compile(r"(?:^|[^0-9])\d+\.\d+(?:\.\d+)?(?:[^0-9]|$)")
 _DIGEST_IMAGE = re.compile(r"^.+@sha256:[0-9a-f]{64}$")
 _SAMPLE_MARKERS = ("example.com", "example.invalid", "localhost", "change-me")
@@ -143,6 +146,16 @@ _EXPECTED_RAW_ENV_FILE = [
         "required": True,
         "format": "raw",
     }
+]
+_EXPECTED_PREFLIGHT_ENTRYPOINT = ["python", "/app/Helper_Scripts/Deployment/production_preflight.py"]
+_EXPECTED_PREFLIGHT_COMMAND = [
+    "--from-environment",
+    "--compose-file",
+    "/run/tldw/docker-compose.production.yml",
+    "--proxy-file",
+    "/run/tldw/Caddyfile",
+    "--runtime-backup-dir",
+    "/backups",
 ]
 
 
@@ -267,11 +280,16 @@ def _validate_database_url(values: Mapping[str, str]) -> list[PreflightIssue]:
         username = unquote(parsed.username or "")
         password = unquote(parsed.password or "")
         database = unquote(parsed.path.lstrip("/"))
+        hostname = parsed.hostname
+        port = parsed.port
+        if parsed.netloc.rsplit("@", 1)[-1].endswith(":"):
+            raise ValueError
     except (TypeError, ValueError):
         return [_issue("invalid_url", "DATABASE_URL", "must be a valid PostgreSQL URL")]
     expected = (
         parsed.scheme in {"postgres", "postgresql"}
-        and parsed.hostname == "postgres"
+        and hostname == "postgres"
+        and port in {None, 5432}
         and username == values.get("POSTGRES_USER")
         and password == values.get("POSTGRES_PASSWORD")
         and database == values.get("POSTGRES_DB")
@@ -295,10 +313,21 @@ def _validate_redis_url(values: Mapping[str, str]) -> list[PreflightIssue]:
         return []
     try:
         parsed = urlsplit(raw)
+        username = unquote(parsed.username or "")
         password = unquote(parsed.password or "")
+        hostname = parsed.hostname
+        port = parsed.port
+        if parsed.netloc.rsplit("@", 1)[-1].endswith(":"):
+            raise ValueError
     except (TypeError, ValueError):
         return [_issue("invalid_url", "REDIS_URL", "must be a valid Redis URL")]
-    if parsed.scheme in {"redis", "rediss"} and parsed.hostname == "redis" and password == values.get("REDIS_PASSWORD"):
+    if (
+        parsed.scheme in {"redis", "rediss"}
+        and hostname == "redis"
+        and port in {None, 6379}
+        and username in {"", "default"}
+        and password == values.get("REDIS_PASSWORD")
+    ):
         return []
     return [
         _issue(
@@ -320,17 +349,50 @@ def _parse_origins(raw: str) -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
+def _is_valid_dns_name(value: str) -> bool:
+    """Return whether a value is a bounded multi-label ASCII DNS name."""
+
+    try:
+        value.encode("ascii")
+    except UnicodeEncodeError:
+        return False
+    labels = value.split(".")
+    return (
+        1 <= len(value) <= 253
+        and len(labels) >= 2
+        and all(1 <= len(label) <= 63 and _DNS_LABEL.fullmatch(label) for label in labels)
+    )
+
+
+def _is_valid_email(value: str) -> bool:
+    """Return whether an ACME contact has a bounded local part and DNS domain."""
+
+    try:
+        value.encode("ascii")
+        local, domain = value.rsplit("@", 1)
+    except (UnicodeEncodeError, ValueError):
+        return False
+    return (
+        value.count("@") == 1
+        and 1 <= len(value) <= 254
+        and 1 <= len(local) <= 64
+        and _EMAIL_LOCAL.fullmatch(local) is not None
+        and not local.startswith(".")
+        and not local.endswith(".")
+        and ".." not in local
+        and _is_valid_dns_name(domain)
+    )
+
+
 def _validate_domain_and_origins(values: Mapping[str, str]) -> list[PreflightIssue]:
     """Validate TLS identity and HTTPS CORS origin alignment."""
 
     issues: list[PreflightIssue] = []
     domain = values.get("TLDW_PUBLIC_DOMAIN", "").strip().lower()
     contact = values.get("TLDW_ACME_EMAIL", "").strip().lower()
-    if domain and (
-        any(marker in domain for marker in _SAMPLE_MARKERS) or ":" in domain or "/" in domain or "." not in domain
-    ):
+    if domain and (any(marker in domain for marker in _SAMPLE_MARKERS) or not _is_valid_dns_name(domain)):
         issues.append(_issue("sample_value", "TLDW_PUBLIC_DOMAIN", "must be a real DNS name"))
-    if contact and ("@" not in contact or any(marker in contact for marker in _SAMPLE_MARKERS)):
+    if contact and (any(marker in contact for marker in _SAMPLE_MARKERS) or not _is_valid_email(contact)):
         issues.append(_issue("sample_value", "TLDW_ACME_EMAIL", "must be a real contact address"))
     raw_origins = values.get("ALLOWED_ORIGINS", "")
     if not raw_origins:
@@ -538,10 +600,17 @@ def validate_environment(
             issues.append(_issue("missing_required", name, "must be provided"))
     if env_path is not None and env_path.exists():
         try:
-            mode = env_path.stat().st_mode & 0o777
-        except OSError:
-            mode = 0o777
-        if not env_path.is_file() or mode & 0o077:
+            metadata = env_path.lstat()
+            effective_uid = os.geteuid()
+        except (AttributeError, OSError):
+            metadata = None
+            effective_uid = -1
+        if (
+            metadata is None
+            or not stat.S_ISREG(metadata.st_mode)
+            or stat.S_IMODE(metadata.st_mode) != 0o600
+            or metadata.st_uid != effective_uid
+        ):
             issues.append(
                 _issue(
                     "env_permissions",
@@ -559,8 +628,8 @@ def validate_environment(
     issues.extend(
         _validate_backup(
             values,
-            runtime_backup_dir,
-            require_writable=require_backup_writable,
+            runtime_backup_dir if env_path is None else None,
+            require_writable=require_backup_writable if env_path is None else True,
         )
     )
     return _sorted_issues(issues)
@@ -592,22 +661,57 @@ def _ports(service: Mapping[str, Any]) -> set[tuple[int, int]]:
     """Normalize short and rendered Compose port declarations."""
 
     result: set[tuple[int, int]] = set()
-    ports = service.get("ports", []) or []
+    if "ports" not in service:
+        return result
+    ports = service.get("ports")
     if not isinstance(ports, list):
         return {(-1, -1)}
     for port in ports:
-        if isinstance(port, str):
-            parts = port.split(":")
-            if len(parts) >= 2:
-                try:
-                    result.add((int(parts[-2]), int(parts[-1].split("/")[0])))
-                except ValueError:
-                    result.add((-1, -1))
+        normalized = (-1, -1)
+        if isinstance(port, int) and not isinstance(port, bool):
+            normalized = (-1, port) if 1 <= port <= 65535 else (-1, -1)
+        elif isinstance(port, str):
+            raw_parts = port.strip().split(":")
+            target_text, separator, protocol = raw_parts[-1].partition("/")
+            try:
+                if len(raw_parts) >= 3:
+                    host_ip = ":".join(raw_parts[:-2]).strip("[]")
+                    ipaddress.ip_address(host_ip)
+                target = int(target_text)
+                published = int(raw_parts[-2]) if len(raw_parts) >= 2 else -1
+                if not 1 <= target <= 65535 or (published != -1 and not 1 <= published <= 65535):
+                    raise ValueError
+                if separator and protocol not in {"tcp", "udp", "sctp"}:
+                    raise ValueError
+                normalized = (published, target)
+                if separator and protocol != "tcp":
+                    normalized = (-1, -1)
+            except (IndexError, ValueError):
+                normalized = (-1, -1)
         elif isinstance(port, Mapping):
             try:
-                result.add((int(port.get("published")), int(port.get("target"))))
+                allowed_keys = {"target", "published", "host_ip", "protocol", "app_protocol", "mode", "name"}
+                if not set(port) <= allowed_keys:
+                    raise ValueError
+                target = int(port["target"])
+                published_value = port.get("published")
+                published = int(published_value) if published_value is not None else -1
+                if not 1 <= target <= 65535 or (published != -1 and not 1 <= published <= 65535):
+                    raise ValueError
+                if "host_ip" in port:
+                    ipaddress.ip_address(str(port["host_ip"]))
+                if port.get("mode", "ingress") not in {"host", "ingress"}:
+                    raise ValueError
+                normalized = (published, target)
+                if port.get("protocol", "tcp") != "tcp":
+                    normalized = (-1, -1)
             except (TypeError, ValueError):
-                result.add((-1, -1))
+                normalized = (-1, -1)
+            except KeyError:
+                normalized = (-1, -1)
+        if normalized in result:
+            result.add((-1, -1))
+        result.add(normalized)
     return result
 
 
@@ -623,6 +727,65 @@ def _network_subnet(network: object) -> object:
     if not isinstance(config, list) or len(config) != 1 or not isinstance(config[0], Mapping):
         return None
     return config[0].get("subnet")
+
+
+def _rendered_mounts(service: Mapping[str, Any]) -> dict[str, tuple[str, str, bool]] | None:
+    """Normalize Compose short and JSON long mount syntax by container target."""
+
+    raw_mounts = service.get("volumes", [])
+    if not isinstance(raw_mounts, list):
+        return None
+    mounts: dict[str, tuple[str, str, bool]] = {}
+    for item in raw_mounts:
+        if isinstance(item, str):
+            parts = item.split(":")
+            if len(parts) not in {2, 3}:
+                return None
+            source, target = parts[:2]
+            read_only = len(parts) == 3 and parts[2] == "ro"
+            if len(parts) == 3 and parts[2] not in {"ro", "rw"}:
+                return None
+            mount_type = "bind" if source.startswith((".", "/")) else "volume"
+        elif isinstance(item, Mapping):
+            source = item.get("source")
+            target = item.get("target")
+            mount_type = item.get("type")
+            if not all(isinstance(value, str) and value for value in (source, target, mount_type)):
+                return None
+            if mount_type not in {"bind", "volume"}:
+                return None
+            read_only = item.get("read_only", False) is True
+        else:
+            return None
+        if target in mounts:
+            return None
+        mounts[target] = (mount_type, source, read_only)
+    return mounts
+
+
+def _rendered_mount_source_matches(target: str, source: str, values: Mapping[str, str]) -> bool:
+    """Match one resolved mount source without depending on the checkout path."""
+
+    try:
+        if target == "/run/tldw/docker-compose.production.yml":
+            return (
+                source == "./docker-compose.production.yml" or Path(source).resolve() == DEFAULT_COMPOSE_FILE.resolve()
+            )
+        if target in {"/run/tldw/Caddyfile", "/etc/caddy/Caddyfile"}:
+            return source == "./Production/Caddyfile" or Path(source).resolve() == DEFAULT_PROXY_FILE.resolve()
+    except (OSError, RuntimeError, ValueError):
+        return False
+    if target == "/backups":
+        return source == values.get("TLDW_BACKUP_DIR")
+    expected_named_sources = {
+        "/app/Databases": "app-data",
+        "/var/lib/postgresql": "postgres_data",
+        "/data": None,
+        "/config": "caddy_config",
+    }
+    if target == "/data":
+        return source in {"redis_data", "caddy_data"}
+    return source == expected_named_sources.get(target)
 
 
 def validate_compose(document: Mapping[str, Any]) -> tuple[PreflightIssue, ...]:
@@ -688,7 +851,7 @@ def validate_compose(document: Mapping[str, Any]) -> tuple[PreflightIssue, ...]:
         or preflight.get("cap_drop") != ["ALL"]
         or preflight.get("security_opt") != ["no-new-privileges:true"]
         or preflight.get("network_mode") != "none"
-        or preflight.get("entrypoint") != ["python", "/app/Helper_Scripts/Deployment/production_preflight.py"]
+        or preflight.get("entrypoint") != _EXPECTED_PREFLIGHT_ENTRYPOINT
         or preflight.get("restart") != "no"
     ):
         issues.append(
@@ -702,16 +865,7 @@ def validate_compose(document: Mapping[str, Any]) -> tuple[PreflightIssue, ...]:
     dependency = app_dependencies.get("preflight") if isinstance(app_dependencies, Mapping) else None
     if dependency != {"condition": "service_completed_successfully"}:
         issues.append(_issue("topology_preflight", "app", "must fail closed on preflight"))
-    expected_preflight_command = [
-        "--from-environment",
-        "--compose-file",
-        "/run/tldw/docker-compose.production.yml",
-        "--proxy-file",
-        "/run/tldw/Caddyfile",
-        "--runtime-backup-dir",
-        "/backups",
-    ]
-    if preflight.get("command") != expected_preflight_command:
+    if preflight.get("command") != _EXPECTED_PREFLIGHT_COMMAND:
         issues.append(
             _issue(
                 "topology_preflight",
@@ -823,13 +977,22 @@ def validate_rendered_compose(document: Mapping[str, Any], values: Mapping[str, 
             issues.append(_issue("rendered_services", name, "is missing from the rendered model"))
     if any(not isinstance(services.get(name), Mapping) for name in expected_services):
         return _sorted_issues(issues)
-    for name, service in services.items():
+    for name, service_value in services.items():
+        if not isinstance(service_value, Mapping):
+            issues.append(_issue("rendered_services", name, "must be a service mapping"))
+            continue
+        service = service_value
         declared_ports = _ports(service)
         if name == "caddy":
             if declared_ports != {(80, 80), (443, 443)}:
                 issues.append(_issue("rendered_ports", name, "must publish only ports 80 and 443"))
         elif declared_ports:
             issues.append(_issue("rendered_ports", name, "must not publish ports"))
+        if "build" in service or "container_name" in service:
+            issues.append(_issue("rendered_service", name, "must use the minimal immutable service shape"))
+        raw_mounts = service.get("volumes", [])
+        if "/var/run/docker.sock" in str(raw_mounts):
+            issues.append(_issue("rendered_socket", name, "must not mount the Docker socket"))
     if not isinstance(networks, Mapping) or set(networks) != {"edge", "backend"}:
         issues.append(_issue("rendered_network", "networks", "must contain only edge and backend"))
     else:
@@ -841,7 +1004,12 @@ def validate_rendered_compose(document: Mapping[str, Any], values: Mapping[str, 
             "backend": values.get("TLDW_BACKEND_SUBNET"),
         }
         for name, expected in expected_subnets.items():
-            if not expected or _network_subnet(networks.get(name)) != expected:
+            network = networks.get(name)
+            expected_name = f"tldw-production_{name}"
+            invalid_identity = isinstance(network, Mapping) and (
+                network.get("external") is True or ("name" in network and network.get("name") != expected_name)
+            )
+            if not expected or _network_subnet(network) != expected or invalid_identity:
                 issues.append(
                     _issue(
                         "rendered_network",
@@ -869,6 +1037,9 @@ def validate_rendered_compose(document: Mapping[str, Any], values: Mapping[str, 
         or preflight.get("cap_drop") != ["ALL"]
         or preflight.get("security_opt") != ["no-new-privileges:true"]
         or preflight.get("network_mode") != "none"
+        or preflight.get("entrypoint") != _EXPECTED_PREFLIGHT_ENTRYPOINT
+        or preflight.get("command") != _EXPECTED_PREFLIGHT_COMMAND
+        or preflight.get("restart") != "no"
     ):
         issues.append(
             _issue(
@@ -877,6 +1048,80 @@ def validate_rendered_compose(document: Mapping[str, Any], values: Mapping[str, 
                 "must retain the confined one-shot execution contract",
             )
         )
+    expected_restarts = {
+        "caddy": "unless-stopped",
+        "app": "unless-stopped",
+        "postgres": "unless-stopped",
+        "redis": "unless-stopped",
+    }
+    for name, expected in expected_restarts.items():
+        if services[name].get("restart") != expected:
+            issues.append(_issue("rendered_service", name, "must retain the production restart policy"))
+    expected_dependencies = {
+        "app": {
+            "preflight": "service_completed_successfully",
+            "postgres": "service_healthy",
+            "redis": "service_healthy",
+        },
+        "caddy": {"app": "service_healthy"},
+    }
+    for name, expected in expected_dependencies.items():
+        dependencies = services[name].get("depends_on")
+        if not isinstance(dependencies, Mapping) or set(dependencies) != set(expected):
+            issues.append(_issue("rendered_preflight", name, "must retain the production dependency contract"))
+            continue
+        for dependency_name, condition in expected.items():
+            dependency = dependencies.get(dependency_name)
+            if (
+                not isinstance(dependency, Mapping)
+                or dependency.get("condition") != condition
+                or dependency.get("required", True) is not True
+            ):
+                issues.append(_issue("rendered_preflight", name, "must retain the production dependency contract"))
+                break
+    expected_mounts = {
+        "preflight": {
+            "/run/tldw/docker-compose.production.yml": ("bind", "", True),
+            "/run/tldw/Caddyfile": ("bind", "", True),
+            "/backups": ("bind", "", True),
+        },
+        "caddy": {
+            "/etc/caddy/Caddyfile": ("bind", "", True),
+            "/data": ("volume", "caddy_data", False),
+            "/config": ("volume", "caddy_config", False),
+        },
+        "app": {"/app/Databases": ("volume", "app-data", False)},
+        "postgres": {"/var/lib/postgresql": ("volume", "postgres_data", False)},
+        "redis": {"/data": ("volume", "redis_data", False)},
+    }
+    for name, expected in expected_mounts.items():
+        mounts = _rendered_mounts(services[name])
+        invalid = mounts is None or set(mounts) != set(expected)
+        if not invalid and mounts is not None:
+            for target, (expected_type, expected_source, expected_read_only) in expected.items():
+                mount_type, source, read_only = mounts[target]
+                source_matches = (
+                    _rendered_mount_source_matches(target, source, values)
+                    if expected_type == "bind"
+                    else source == expected_source
+                )
+                if mount_type != expected_type or read_only is not expected_read_only or not source_matches:
+                    invalid = True
+                    break
+        if invalid:
+            issues.append(_issue("rendered_mounts", name, "must match the required resolved mounts"))
+    declared_volumes = document.get("volumes", {})
+    if not isinstance(declared_volumes, Mapping) or set(declared_volumes) != _EXPECTED_VOLUMES:
+        issues.append(_issue("rendered_volumes", "volumes", "must match the persistent volume boundary"))
+    else:
+        for name, volume in declared_volumes.items():
+            expected_name = f"tldw-production_{name}"
+            if volume is not None and (
+                not isinstance(volume, Mapping)
+                or volume.get("external") is True
+                or volume.get("name", expected_name) != expected_name
+            ):
+                issues.append(_issue("rendered_volumes", name, "must remain project-scoped persistent storage"))
     expected_caddy_environment = {
         "TLDW_PUBLIC_DOMAIN": values.get("TLDW_PUBLIC_DOMAIN"),
         "TLDW_ACME_EMAIL": values.get("TLDW_ACME_EMAIL"),
@@ -894,6 +1139,8 @@ def validate_rendered_compose(document: Mapping[str, Any], values: Mapping[str, 
     if not isinstance(app_environment, Mapping):
         issues.append(_issue("rendered_trust", "app", "environment must be a mapping"))
     else:
+        if app_environment.get("AUTH_MODE") != "multi_user" or app_environment.get("tldw_production") != "true":
+            issues.append(_issue("rendered_mode", "app", "must explicitly use multi-user production mode"))
         for field in TRUST_ENVIRONMENT:
             if (
                 not edge
@@ -905,6 +1152,33 @@ def validate_rendered_compose(document: Mapping[str, Any], values: Mapping[str, 
                 }
             ):
                 issues.append(_issue("rendered_trust", field, "must equal the bounded edge CIDR"))
+        fixed_security_environment = {
+            "TLDW_SETUP_ALLOW_REMOTE": "0",
+            "AUTH_TRUST_X_FORWARDED_FOR": "true",
+            "RG_CLIENT_IP_HEADER": "X-Forwarded-For",
+            "MCP_TRUST_X_FORWARDED": "true",
+        }
+        for field, expected in fixed_security_environment.items():
+            if app_environment.get(field) != expected:
+                issues.append(_issue("rendered_trust", field, "must retain the production trust boundary"))
+    app_health = _command_text(services["app"].get("healthcheck", {}))
+    if "http://localhost:8000/internal/ready" not in app_health:
+        issues.append(_issue("rendered_health", "app.healthcheck", "must use loopback internal readiness"))
+    redis_command = _command_text(services["redis"])
+    redis_health = _command_text(services["redis"].get("healthcheck", {}))
+    if "requirepass %s" not in redis_command or "$$REDIS_PASSWORD" not in redis_command:
+        issues.append(_issue("rendered_redis_auth", "redis.command", "must require the external password"))
+    if "REDISCLI_AUTH" not in redis_health or "$$REDIS_PASSWORD" not in redis_health:
+        issues.append(_issue("rendered_redis_auth", "redis.healthcheck", "must authenticate"))
+    postgres_health = _command_text(services["postgres"].get("healthcheck", {}))
+    if not all(marker in postgres_health for marker in ("pg_isready", "$$POSTGRES_USER", "$$POSTGRES_DB")):
+        issues.append(
+            _issue(
+                "rendered_postgres_auth",
+                "postgres.healthcheck",
+                "must use the external database identity",
+            )
+        )
     sensitive_values = [
         values.get(name, "") for name in ("POSTGRES_PASSWORD", "REDIS_PASSWORD", "DATABASE_URL", "REDIS_URL")
     ]
@@ -917,23 +1191,61 @@ def validate_rendered_compose(document: Mapping[str, Any], values: Mapping[str, 
     return _sorted_issues(issues)
 
 
+def _caddy_block_end(lines: Sequence[str], start: int) -> int | None:
+    """Return the closing line for one active Caddy block."""
+
+    depth = 0
+    started = False
+    for index in range(start, len(lines)):
+        active = lines[index].split("#", 1)[0]
+        active = re.sub(r"\{[^{}\s]+\}", "", active)
+        depth += active.count("{")
+        if depth:
+            started = True
+        depth -= active.count("}")
+        if started and depth == 0:
+            return index
+        if depth < 0:
+            return None
+    return None
+
+
 def validate_proxy(text: str) -> tuple[PreflightIssue, ...]:
     """Validate the production Caddy public/private route boundary."""
 
     issues: list[PreflightIssue] = []
     lines = text.splitlines()
-    matcher_index = next(
-        (index for index, line in enumerate(lines) if re.fullmatch(r"\s*@private_control\s+path(?:\s+\S+)+\s*", line)),
-        None,
+    active_indexes = [index for index, line in enumerate(lines) if line.strip() and not line.lstrip().startswith("#")]
+    site_indexes = [
+        index for index, line in enumerate(lines) if re.fullmatch(r"\s*\{\$TLDW_PUBLIC_DOMAIN\}\s*\{\s*", line)
+    ]
+    site_start = site_indexes[0] if len(site_indexes) == 1 else None
+    site_end = _caddy_block_end(lines, site_start) if site_start is not None else None
+    site_is_complete = (
+        site_start is not None
+        and site_end is not None
+        and active_indexes
+        and site_start == active_indexes[0]
+        and site_end == active_indexes[-1]
     )
-    matcher = lines[matcher_index] if matcher_index is not None else ""
-    matcher_paths = set(matcher.split()[2:]) if matcher else set()
-    for path in DENIED_PROXY_PATHS:
-        if path not in matcher_paths:
-            issues.append(_issue("proxy_path", path, "must be denied by the public proxy"))
+    if not site_is_complete:
+        issues.append(_issue("proxy_domain", "Caddyfile", "must use one active configured-domain block"))
+
+    matcher_indexes = [
+        index for index, line in enumerate(lines) if re.fullmatch(r"\s*@private_control\s+path(?:\s+\S+)+\s*", line)
+    ]
+    matcher_index = matcher_indexes[0] if len(matcher_indexes) == 1 else None
+    matcher_paths = lines[matcher_index].split()[2:] if matcher_index is not None else []
+    if (
+        len(matcher_indexes) != 1
+        or len(matcher_paths) != len(DENIED_PROXY_PATHS)
+        or set(matcher_paths) != set(DENIED_PROXY_PATHS)
+    ):
+        issues.append(_issue("proxy_path", "@private_control", "must equal the intended private path set"))
     for path in ("/health", "/metrics", "/api/v1/health"):
         if path in matcher_paths:
             issues.append(_issue("proxy_public_path", path, "must remain publicly routable"))
+
     deny_indexes = [
         index for index, line in enumerate(lines) if re.fullmatch(r"\s*respond\s+@private_control\s+404\s*", line)
     ]
@@ -943,10 +1255,15 @@ def validate_proxy(text: str) -> tuple[PreflightIssue, ...]:
     proxy_indexes = [
         index for index, line in enumerate(lines) if re.fullmatch(r"\s*reverse_proxy\s+app:8000\s*\{\s*", line)
     ]
+
+    def inside_site(index: int) -> bool:
+        return site_start is not None and site_end is not None and site_start < index < site_end
+
     if (
         matcher_index is None
         or len(deny_indexes) != 1
         or len(proxy_indexes) != 1
+        or not all(inside_site(index) for index in (matcher_index, deny_indexes[0], proxy_indexes[0]))
         or matcher_index > deny_indexes[0]
         or deny_indexes[0] > proxy_indexes[0]
     ):
@@ -954,16 +1271,21 @@ def validate_proxy(text: str) -> tuple[PreflightIssue, ...]:
     upstreams = re.findall(r"(?m)^\s*reverse_proxy\s+(\S+)", text)
     if upstreams != ["app:8000"]:
         issues.append(_issue("proxy_upstream", "Caddyfile", "must proxy only to the application"))
-    if not re.search(r"(?m)^\s*\{\$TLDW_PUBLIC_DOMAIN\}\s*\{\s*$", text):
-        issues.append(_issue("proxy_domain", "Caddyfile", "must use the configured public domain"))
-    if not re.search(r"(?m)^\s*tls\s+\{\$TLDW_ACME_EMAIL\}\s*$", text):
-        issues.append(_issue("proxy_tls", "Caddyfile", "must terminate TLS"))
+
+    tls_indexes = [
+        index for index, line in enumerate(lines) if re.fullmatch(r"\s*tls\s+\{\$TLDW_ACME_EMAIL\}\s*", line)
+    ]
+    if len(tls_indexes) != 1 or not inside_site(tls_indexes[0]):
+        issues.append(_issue("proxy_tls", "Caddyfile", "must terminate TLS inside the public site"))
+
+    proxy_end = _caddy_block_end(lines, proxy_indexes[0]) if len(proxy_indexes) == 1 else None
     for directive in (
         "header_up X-Forwarded-For {remote_host}",
         "header_up X-Real-IP {remote_host}",
         "header_up X-Forwarded-Proto https",
     ):
-        if not re.search(rf"(?m)^\s*{re.escape(directive)}\s*$", text):
+        indexes = [index for index, line in enumerate(lines) if re.fullmatch(rf"\s*{re.escape(directive)}\s*", line)]
+        if len(indexes) != 1 or proxy_end is None or not proxy_indexes[0] < indexes[0] < proxy_end:
             issues.append(_issue("proxy_headers", "Caddyfile", "must overwrite client identity headers"))
     return _sorted_issues(issues)
 
@@ -1001,6 +1323,8 @@ def run_preflight(
 ) -> PreflightReport:
     """Run host preflight, including raw-file and permission validation."""
 
+    del runtime_backup_dir  # Runtime path substitution is confined-container only.
+
     issues: list[PreflightIssue] = []
     try:
         values = load_raw_env(env_file)
@@ -1011,7 +1335,6 @@ def run_preflight(
             validate_environment(
                 values,
                 env_path=env_file,
-                runtime_backup_dir=runtime_backup_dir,
             )
         )
     issues.extend(_validate_reference_files(compose_file, proxy_file))
@@ -1055,8 +1378,11 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     """Validate CLI inputs and emit only sanitized deterministic diagnostics."""
 
+    parser = _parser()
     try:
-        args = _parser().parse_args(argv)
+        args = parser.parse_args(argv)
+        if args.runtime_backup_dir is not None and not args.from_environment:
+            parser.error("--runtime-backup-dir requires --from-environment")
     except SystemExit as exc:
         return int(exc.code)
     if args.from_environment:
@@ -1071,7 +1397,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.env_file,
             args.compose_file,
             args.proxy_file,
-            runtime_backup_dir=args.runtime_backup_dir,
         )
     if report.ok:
         print("Production preflight passed.")
