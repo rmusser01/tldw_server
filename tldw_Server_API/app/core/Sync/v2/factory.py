@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hmac
 import os
+import hashlib
 from base64 import urlsafe_b64encode
 from collections.abc import Mapping
 from functools import lru_cache
@@ -182,6 +183,7 @@ def sync_v2_service_for_user(user_id: str) -> SyncV2Service:
         notes_task_activity_bootstrapper=NotesTaskActivityBootstrapper(note_db),
         personal_context_service_resolver=_personal_context_service_for_user,
         personal_context_key_wrapper=_wrap_personal_context_integrity_key,
+        personal_context_key_fingerprint=_personal_context_wrapping_key_fingerprint,
         personal_context_authority_id=os.getenv(
             "SYNC_V2_PERSONAL_CONTEXT_AUTHORITY_ID", "tldw-server"
         ),
@@ -304,6 +306,21 @@ def _wrap_personal_context_integrity_key(
         ),
     )
     return "rsa-oaep-sha256:" + urlsafe_b64encode(ciphertext).decode("ascii")
+
+
+def _personal_context_wrapping_key_fingerprint(*, device: object) -> str:
+    """Return the SHA-256 fingerprint of the registered device wrapping key."""
+
+    capabilities = getattr(device, "capabilities", {})
+    value = capabilities.get("personal_context_wrapping_public_key") if isinstance(capabilities, Mapping) else None
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("personal_context_device_key_unavailable")
+    public_key = serialization.load_pem_public_key(value.encode("utf-8"))
+    encoded = public_key.public_bytes(
+        serialization.Encoding.DER,
+        serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _personal_context_integrity_key(dataset: object, key_id: str) -> bytes:

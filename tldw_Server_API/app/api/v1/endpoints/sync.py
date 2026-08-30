@@ -116,6 +116,7 @@ from tldw_Server_API.app.core.Sync.v2.factory import (
     sync_v2_service_for_user,
     sync_v2_storage_exists_for_user,
 )
+from tldw_Server_API.app.core.Sync.v2.profile import PersonalContextBootstrapError
 from tldw_Server_API.app.core.Sync.v2.models import (
     SyncDeviceBlobAckCreate,
     SyncDeviceBlobIdAckCreate,
@@ -192,6 +193,73 @@ def _safe_sync_v2_http_error(exc: Exception, **context: object) -> HTTPException
                 "error_code": "sync_invalid_domain",
                 "message": "Sync domain is not valid for the requested dataset.",
             },
+        )
+    if isinstance(exc, PersonalContextBootstrapError):
+        personal_context_errors = {
+            "personal_context_bootstrap_unavailable": (
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "Personal Context bootstrap is unavailable.",
+            ),
+            "personal_context_device_unavailable": (
+                status.HTTP_404_NOT_FOUND,
+                "Requested Sync device was not found or is not accessible.",
+            ),
+            "personal_context_authority_invalid": (
+                status.HTTP_400_BAD_REQUEST,
+                "Personal Context authority identifier is invalid.",
+            ),
+            "personal_context_capability_unavailable": (
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "Personal Context bootstrap capability is unavailable.",
+            ),
+            "personal_context_schema_incompatible": (
+                status.HTTP_409_CONFLICT,
+                "Personal Context schema is incompatible with this server.",
+            ),
+            "personal_context_quota_incompatible": (
+                status.HTTP_409_CONFLICT,
+                "Personal Context quotas are incompatible with this server.",
+            ),
+            "personal_context_key_custody_unavailable": (
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "Personal Context key custody is unavailable.",
+            ),
+            "personal_context_snapshot_unavailable": (
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "Personal Context bootstrap snapshot is unavailable.",
+            ),
+            "personal_context_snapshot_unstable": (
+                status.HTTP_409_CONFLICT,
+                "Personal Context changed during bootstrap; retry the request.",
+            ),
+            "personal_context_purge_generation_stale": (
+                status.HTTP_409_CONFLICT,
+                "Personal Context purge generation is stale.",
+            ),
+            "personal_context_link_unavailable": (
+                status.HTTP_409_CONFLICT,
+                "Personal Context bootstrap link is unavailable.",
+            ),
+            "personal_context_bootstrap_cursor_stale": (
+                status.HTTP_409_CONFLICT,
+                "Personal Context bootstrap cursor is stale.",
+            ),
+            "personal_context_authority_mismatch": (
+                status.HTTP_409_CONFLICT,
+                "Personal Context authority does not match the existing profile.",
+            ),
+        }
+        reason_code = exc.reason_code
+        status_code, message = personal_context_errors.get(
+            reason_code,
+            (
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+                "Personal Context bootstrap failed.",
+            ),
+        )
+        return HTTPException(
+            status_code=status_code,
+            detail={"error_code": reason_code, "message": message},
         )
     if isinstance(exc, SyncStoreError):
         lowered = str(exc).lower()

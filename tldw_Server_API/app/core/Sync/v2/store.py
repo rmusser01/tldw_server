@@ -1290,6 +1290,11 @@ class SyncV2Store:
             key_purpose=key_purpose,
         )
 
+    def revoke_key_record(self, *, user_id: str, key_record_id: str) -> SyncKeyRecord:
+        """Revoke one key record after a registered wrapping-key rotation."""
+
+        return self.db.revoke_key_record(user_id=user_id, key_record_id=key_record_id)
+
     def get_dataset_envelope_range(self, dataset_id: str) -> SyncKeyRotationEnvelopeRange:
         return self.db.get_dataset_envelope_range(dataset_id)
 

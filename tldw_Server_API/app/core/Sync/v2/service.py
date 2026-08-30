@@ -1122,6 +1122,7 @@ class SyncV2Service:
         notes_task_activity_bootstrapper: object | None = None,
         personal_context_service_resolver: Callable[[str], object] | None = None,
         personal_context_key_wrapper: Callable[..., str] | None = None,
+        personal_context_key_fingerprint: Callable[..., str] | None = None,
         personal_context_authority_id: str = "tldw-server",
     ) -> None:
         self.store = store
@@ -1139,6 +1140,7 @@ class SyncV2Service:
         self.notes_task_activity_bootstrapper = notes_task_activity_bootstrapper
         self.personal_context_service_resolver = personal_context_service_resolver
         self.personal_context_key_wrapper = personal_context_key_wrapper
+        self.personal_context_key_fingerprint = personal_context_key_fingerprint
         self.personal_context_authority_id = (
             str(personal_context_authority_id).strip() or "tldw-server"
         )

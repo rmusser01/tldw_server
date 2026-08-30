@@ -8824,6 +8824,31 @@ class SyncDatabase:
         result = self.execute(sql, tuple(params))
         return [_key_record_from_row(row) for row in result.rows]
 
+    def revoke_key_record(self, *, user_id: str, key_record_id: str) -> SyncKeyRecord:
+        """Revoke one device-wrapped key record without revoking the device."""
+
+        now = utcnow_iso()
+        with self.backend.transaction() as conn:
+            self.execute(
+                """
+                UPDATE sync_key_records
+                   SET revoked_at = COALESCE(revoked_at, ?)
+                 WHERE user_id = ? AND key_record_id = ?
+                """,
+                (now, user_id, key_record_id),
+                connection=conn,
+            )
+            row = _first(
+                self.execute(
+                    "SELECT * FROM sync_key_records WHERE user_id = ? AND key_record_id = ?",
+                    (user_id, key_record_id),
+                    connection=conn,
+                )
+            )
+            if row is None:
+                raise SyncStoreError("Sync key record was not found or is not accessible")
+        return _key_record_from_row(row)
+
     def _dataset_envelope_range(
         self,
         dataset_id: str,
