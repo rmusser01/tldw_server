@@ -459,7 +459,7 @@ async def test_verify_magic_link_rejects_admin_reauth_purpose(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_login_lockout_uses_trusted_forwarded_client_ip(monkeypatch):
+async def test_login_lockout_uses_trusted_forwarded_client_login_key(monkeypatch):
     monkeypatch.setenv("AUTH_TRUST_X_FORWARDED_FOR", "true")
     monkeypatch.setenv("AUTH_TRUSTED_PROXY_IPS", "10.0.0.0/8")
     reset_settings()
@@ -516,7 +516,210 @@ async def test_login_lockout_uses_trusted_forwarded_client_ip(monkeypatch):
         )
 
     assert exc.value.status_code == 429
-    assert captured["identifier"] == "198.51.100.77"
+    assert captured["identifier"] == auth._login_client_lockout_key(
+        "198.51.100.77", "user1"
+    )
+
+
+@pytest.mark.asyncio
+async def test_login_unknown_user_records_only_client_login_lockout_key(monkeypatch):
+    import tldw_Server_API.app.api.v1.endpoints.auth as auth
+
+    checked = []
+    recorded_unknown = []
+
+    class _StubGov:
+        async def check_lockout(self, identifier: str, *, attempt_type: str, rate_limiter):
+            checked.append((identifier, attempt_type))
+            return False, None
+
+        async def record_auth_failure(self, *, identifier: str, attempt_type: str, rate_limiter):
+            recorded_unknown.append((identifier, attempt_type))
+            return {"is_locked": False, "remaining_attempts": 5}
+
+    class _StubLimiter:
+        enabled = True
+
+    async def _fake_get_auth_governor():
+        return _StubGov()
+
+    async def _no_user(db, identifier: str):
+        assert identifier == "alice@example.com"
+        return None
+
+    monkeypatch.setattr(auth, "get_auth_governor", _fake_get_auth_governor)
+    monkeypatch.setattr(auth, "fetch_user_by_login_identifier", _no_user)
+    request = Request({
+        "type": "http", "method": "POST", "path": "/api/v1/auth/login", "headers": [],
+        "client": ("203.0.113.9", 1234), "scheme": "http", "query_string": b"",
+        "server": ("testserver", 80),
+    })
+    composite_key = auth._login_client_lockout_key("203.0.113.9", "alice@example.com")
+
+    with pytest.raises(HTTPException) as excinfo:
+        await auth.login(
+            request=request, response=Response(),
+            form_data=SimpleNamespace(username=" Alice@Example.COM ", password="wrong"),
+            db=object(), jwt_service=object(), password_service=object(), session_manager=object(),
+            rate_limiter=_StubLimiter(), settings=auth.get_settings(),
+        )
+
+    assert excinfo.value.status_code == 401
+    assert checked == [(composite_key, "login")]
+    assert recorded_unknown == [(composite_key, "login")]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("login_identifier", ["stored_username", "stored@example.com"])
+async def test_login_bad_password_uses_client_and_account_lockout_buckets(
+    monkeypatch, login_identifier
+):
+    import tldw_Server_API.app.api.v1.endpoints.auth as auth
+
+    checked = []
+    recorded_bad_password = []
+
+    class _StubGov:
+        async def check_lockout(self, identifier: str, *, attempt_type: str, rate_limiter):
+            checked.append((identifier, attempt_type))
+            return False, None
+
+        async def record_auth_failure(self, *, identifier: str, attempt_type: str, rate_limiter):
+            recorded_bad_password.append((identifier, attempt_type))
+            return {"is_locked": False, "remaining_attempts": 5}
+
+    class _StubLimiter:
+        enabled = True
+
+    class _StubPasswordService:
+        def verify_password(self, password: str, password_hash: str):
+            return False, False
+
+    class _StubAuditService:
+        async def log_login(self, **kwargs):
+            return None
+
+        async def flush(self):
+            return None
+
+    async def _fake_get_auth_governor():
+        return _StubGov()
+
+    async def _user(db, identifier: str):
+        return {
+            "id": 1, "username": "stored_username", "password_hash": "hash",
+            "role": "user", "is_active": True,
+        }
+
+    async def _fake_audit_service(user_id: int):
+        return _StubAuditService()
+
+    monkeypatch.setattr(auth, "get_auth_governor", _fake_get_auth_governor)
+    monkeypatch.setattr(auth, "fetch_user_by_login_identifier", _user)
+    monkeypatch.setattr(auth, "get_or_create_audit_service_for_user_id", _fake_audit_service)
+    request = Request({
+        "type": "http", "method": "POST", "path": "/api/v1/auth/login", "headers": [],
+        "client": ("203.0.113.9", 1234), "scheme": "http", "query_string": b"",
+        "server": ("testserver", 80),
+    })
+    composite_key = auth._login_client_lockout_key("203.0.113.9", login_identifier)
+
+    with pytest.raises(HTTPException) as excinfo:
+        await auth.login(
+            request=request, response=Response(),
+            form_data=SimpleNamespace(username=login_identifier, password="wrong"),
+            db=object(), jwt_service=object(), password_service=_StubPasswordService(),
+            session_manager=object(), rate_limiter=_StubLimiter(), settings=auth.get_settings(),
+        )
+
+    assert excinfo.value.status_code == 401
+    assert checked[0] == (composite_key, "login")
+    assert checked[1] == ("stored_username", "login")
+    assert recorded_bad_password == [
+        (composite_key, "login"),
+        ("stored_username", "login"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_login_success_resets_client_and_account_lockout_buckets(monkeypatch):
+    monkeypatch.setenv("AUTH_MODE", "single_user")
+    monkeypatch.setenv("SINGLE_USER_API_KEY", "test-api-key")
+    reset_settings()
+    import tldw_Server_API.app.api.v1.endpoints.auth as auth
+
+    checked = []
+    reset_on_success = []
+
+    class _StubGov:
+        async def check_lockout(self, identifier: str, *, attempt_type: str, rate_limiter):
+            checked.append((identifier, attempt_type))
+            return False, None
+
+    class _StubLimiter:
+        enabled = True
+
+        async def reset_failed_attempts(self, identifier: str, attempt_type: str):
+            reset_on_success.append((identifier, attempt_type))
+
+    class _StubPasswordService:
+        def verify_password(self, password: str, password_hash: str):
+            return True, False
+
+    class _StubSessionManager:
+        async def create_session(self, **kwargs):
+            return {"session_id": 1}
+
+    class _StubAuditService:
+        async def log_login(self, **kwargs):
+            return None
+
+        async def flush(self):
+            return None
+
+    async def _fake_get_auth_governor():
+        return _StubGov()
+
+    async def _user(db, identifier: str):
+        return {
+            "id": 1, "username": "stored_username", "password_hash": "hash",
+            "role": "user", "is_active": True,
+        }
+
+    async def _noop(*args, **kwargs):
+        return None
+
+    async def _fake_audit_service(user_id: int):
+        return _StubAuditService()
+
+    monkeypatch.setattr(auth, "get_auth_governor", _fake_get_auth_governor)
+    monkeypatch.setattr(auth, "fetch_user_by_login_identifier", _user)
+    monkeypatch.setattr(auth, "update_user_last_login", _noop)
+    monkeypatch.setattr(auth, "get_or_create_audit_service_for_user_id", _fake_audit_service)
+    monkeypatch.setattr(auth, "_is_mfa_backend_supported", _noop)
+    request = Request({
+        "type": "http", "method": "POST", "path": "/api/v1/auth/login", "headers": [],
+        "client": ("203.0.113.9", 1234), "scheme": "http", "query_string": b"",
+        "server": ("testserver", 80),
+    })
+    composite_key = auth._login_client_lockout_key("203.0.113.9", "alice")
+
+    result = await auth.login(
+        request=request, response=Response(),
+        form_data=SimpleNamespace(username=" Alice ", password="correct"),
+        db=object(), jwt_service=object(), password_service=_StubPasswordService(),
+        session_manager=_StubSessionManager(), rate_limiter=_StubLimiter(), settings=auth.get_settings(),
+    )
+
+    assert result.access_token == "test-api-key"
+    assert checked == [(composite_key, "login"), ("stored_username", "login")]
+    assert reset_on_success == [
+        (composite_key, "login"),
+        ("stored_username", "login"),
+    ]
+    assert auth._login_client_lockout_key("203.0.113.9", "alice") != auth._login_client_lockout_key(
+        "203.0.113.9", "bob"
+    )
 
 
 @pytest.mark.asyncio

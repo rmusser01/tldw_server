@@ -8,6 +8,7 @@ limiter dependency. The underlying database remains Postgres via the
 """
 
 from datetime import datetime, timedelta, timezone
+import re
 
 import asyncpg
 import pytest
@@ -39,8 +40,12 @@ class _StubLimiter:
         self.threshold = threshold
         self._attempts: dict[str, int] = {}
         self._locked_ids: set[str] = set()
+        self.checked_identifiers: list[str] = []
+        self.failed_identifiers: list[str] = []
+        self.reset_identifiers: list[str] = []
 
     async def check_lockout(self, identifier: str):
+        self.checked_identifiers.append(identifier)
         if identifier in self._locked_ids:
             # Provide a synthetic expiry time for HTTP 429 headers
             return True, datetime.now(timezone.utc) + timedelta(minutes=15)
@@ -49,6 +54,7 @@ class _StubLimiter:
     async def record_failed_attempt(self, *, identifier: str, attempt_type: str):
         # Track attempts per identifier; lock when threshold reached.
         _ = attempt_type
+        self.failed_identifiers.append(identifier)
         count = self._attempts.get(identifier, 0) + 1
         self._attempts[identifier] = count
         is_locked = count >= self.threshold
@@ -60,6 +66,12 @@ class _StubLimiter:
             "remaining_attempts": remaining,
             "is_locked": is_locked,
         }
+
+    async def reset_failed_attempts(self, identifier: str, attempt_type: str):
+        _ = attempt_type
+        self.reset_identifiers.append(identifier)
+        self._attempts.pop(identifier, None)
+        self._locked_ids.discard(identifier)
 
     def clear_all_locks(self) -> None:
 
@@ -198,3 +210,26 @@ class TestAuthLoginLockoutViaAuthGovernor:
         payload = success.json()
         assert payload.get("token_type") == "bearer"
         assert "access_token" in payload
+
+    def test_client_login_lockout_does_not_cross_login_identifiers(self):
+        for _ in range(3):
+            response = self.client.post(
+                "/api/v1/auth/login",
+                data={"username": self.username, "password": "WrongPassword1!"},
+            )
+        assert response.status_code == 429
+
+        other_identifier = self.client.post(
+            "/api/v1/auth/login",
+            data={"username": "other_identifier", "password": "WrongPassword1!"},
+        )
+
+        assert other_identifier.status_code == 401
+        client_identifiers = self.limiter.checked_identifiers + self.limiter.failed_identifiers
+        assert client_identifiers
+        assert all(
+            re.fullmatch(r"login-client-v1:[0-9a-f]{64}", identifier)
+            for identifier in client_identifiers
+            if identifier != self.username
+        )
+        assert "testclient" not in client_identifiers

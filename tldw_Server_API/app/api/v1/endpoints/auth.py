@@ -1559,8 +1559,10 @@ async def login(
     log_counter("auth_login_attempt")
     auth_gov = await get_auth_governor()
     try:
-        # Get client info
+        # Get client info and normalize the identifier as the database lookup does.
         client_ip = _auth_request_client_ip(request)
+        login_identifier = form_data.username.strip().lower()
+        client_login_lockout_key = _login_client_lockout_key(client_ip, login_identifier)
         user_agent = request.headers.get("User-Agent", "Unknown")
         # PII-aware logging
         if settings.PII_REDACT_LOGS:
@@ -1568,18 +1570,18 @@ async def login(
         else:
             logger.info(f"Login attempt for user: {form_data.username} from IP: {client_ip}")
 
-        # Check if IP is locked out (only when rate limiting is enabled)
+        # Check if this client/login pair is locked out (only when rate limiting is enabled)
         is_locked = False
         lockout_expires = None
         if getattr(rate_limiter, 'enabled', False):
             is_locked, lockout_expires = await auth_gov.check_lockout(
-                client_ip,
+                client_login_lockout_key,
                 attempt_type="login",
                 rate_limiter=rate_limiter,
             )
         if is_locked:
-            logger.warning(f"Login attempt from locked IP: {client_ip}")
-            log_counter("auth_login_locked_ip")
+            logger.warning("Login attempt from locked client/login pair")
+            log_counter("auth_login_locked_client")
             retry_after_seconds = 900
             if isinstance(lockout_expires, datetime):
                 try:
@@ -1597,10 +1599,6 @@ async def login(
                 detail="Too many failed login attempts. Please try again later.",
                 headers={"Retry-After": str(retry_after_seconds)}
             )
-
-        # Sanitize input (lightweight). For login, avoid strict validation to not block
-        # legitimate existing accounts (e.g., reserved usernames like 'admin').
-        login_identifier = form_data.username.strip()
 
         # Helper to attempt audit logging without hard dependency (safe no-op in tests)
         async def _safe_audit_log_login(user_id: int, username: str, ip: str, ua: str, success: bool):
@@ -1638,10 +1636,10 @@ async def login(
             else:
                 logger.warning(f"Failed login: User not found - {login_identifier}")
 
-            # Track failed attempt by IP (only when rate limiting is enabled)
+            # Track failed attempt by client/login pair (only when rate limiting is enabled)
             if getattr(rate_limiter, 'enabled', False):
                 await auth_gov.record_auth_failure(
-                    identifier=client_ip,
+                    identifier=client_login_lockout_key,
                     attempt_type="login",
                     rate_limiter=rate_limiter,
                 )
@@ -1731,12 +1729,12 @@ async def login(
                 success=False,
             )
 
-            # Track failed attempt by IP and username
-            ip_result = {"is_locked": False, "remaining_attempts": 5}
+            # Track failed attempt by client/login pair and username
+            client_result = {"is_locked": False, "remaining_attempts": 5}
             user_result = {"is_locked": False, "remaining_attempts": 5}
             if getattr(rate_limiter, 'enabled', False):
-                ip_result = await auth_gov.record_auth_failure(
-                    identifier=client_ip,
+                client_result = await auth_gov.record_auth_failure(
+                    identifier=client_login_lockout_key,
                     attempt_type="login",
                     rate_limiter=rate_limiter,
                 )
@@ -1747,7 +1745,7 @@ async def login(
                 )
 
             # Provide informative error if locked out
-            if ip_result['is_locked'] or user_result['is_locked']:
+            if client_result['is_locked'] or user_result['is_locked']:
                 log_counter("auth_login_locked_user")
                 raise HTTPException(
                     status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -1756,7 +1754,7 @@ async def login(
                 )
 
             # Otherwise generic error
-            remaining = min(ip_result.get('remaining_attempts', 5), user_result.get('remaining_attempts', 5))
+            remaining = min(client_result.get('remaining_attempts', 5), user_result.get('remaining_attempts', 5))
             logger.info(f"Remaining login attempts: {remaining}")
 
             log_counter("auth_login_invalid_password")
@@ -1934,7 +1932,7 @@ async def login(
         # Reset failed login attempts on successful login
         if getattr(rate_limiter, 'enabled', False):
             try:
-                await rate_limiter.reset_failed_attempts(client_ip, "login")
+                await rate_limiter.reset_failed_attempts(client_login_lockout_key, "login")
                 await rate_limiter.reset_failed_attempts(user['username'], "login")
             except _AUTH_NONCRITICAL_EXCEPTIONS as rl_exc:
                 # Guardrails must not break successful logins; log and continue.
