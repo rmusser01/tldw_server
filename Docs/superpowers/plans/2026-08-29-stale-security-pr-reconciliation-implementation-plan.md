@@ -384,3 +384,10 @@ decision.
 
 Comment readably on #2610, #2614, #2622, #2623, and #2625 with the replacement
 PR URL. After replacement merge, close each unmerged and finish TASK-13013.4.
+
+- [x] **Step 7: Rebase the replacement PR before final review**
+
+Fetch `origin/dev`, rebase the ten-commit branch onto
+`50816549bf203c08ca23df044a49ebea4e7298af`, and require a patch-identical
+`git range-diff`. Rerun the combined suite and static gates before updating the
+remote branch with `--force-with-lease`.

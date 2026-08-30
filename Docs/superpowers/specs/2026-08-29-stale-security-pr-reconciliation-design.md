@@ -4,6 +4,7 @@
 - **Date:** 2026-08-29
 - **Backlog:** TASK-13013.4
 - **Baseline:** `origin/dev` at `41bd5dda336c70259595ebf3ce3fb4a6a5b549db`
+- **Delivery rebase:** `origin/dev` at `50816549bf203c08ca23df044a49ebea4e7298af`
 
 ## Purpose
 
