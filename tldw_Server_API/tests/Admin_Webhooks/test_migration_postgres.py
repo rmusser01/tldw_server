@@ -10,7 +10,7 @@ from tldw_Server_API.tests.Admin_Webhooks.test_migration_sqlite import (
     EXPECTED_COLUMNS,
 )
 
-pytest_plugins = ("tldw_Server_API.tests.AuthNZ.conftest",)
+pytest_plugins = ("tldw_Server_API.tests._plugins.authnz_full_fixtures",)
 pytestmark = pytest.mark.postgres
 
 CANONICAL_TABLES = {

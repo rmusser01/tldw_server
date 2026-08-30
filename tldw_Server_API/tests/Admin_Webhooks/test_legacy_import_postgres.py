@@ -32,7 +32,7 @@ from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
     AdminWebhookRepository,
 )
 
-pytest_plugins = ("tldw_Server_API.tests.AuthNZ.conftest",)
+pytest_plugins = ("tldw_Server_API.tests._plugins.authnz_full_fixtures",)
 pytestmark = pytest.mark.postgres
 
 NOW = datetime(2026, 8, 22, 21, 0, tzinfo=timezone.utc)
