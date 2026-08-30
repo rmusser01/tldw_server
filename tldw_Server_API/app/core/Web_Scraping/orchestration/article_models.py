@@ -27,6 +27,7 @@ PUBLIC_FAILURE_CODES = frozenset(
         "provider_error",
         "fetch_error",
         "browser_error",
+        "browser_transport_unavailable",
         "response_too_large",
         "extraction_error",
     }
@@ -34,6 +35,36 @@ PUBLIC_FAILURE_CODES = frozenset(
 
 _BACKENDS = frozenset({"auto", "curl", "httpx", "playwright"})
 _TRUE_STRINGS = frozenset({"1", "true", "yes", "y", "on"})
+_BROWSER_TRANSPORT_CAPABILITY_KEYS = frozenset(
+    {
+        "name",
+        "available",
+        "configured_mode",
+        "effective_mode",
+        "dns_peer_attested",
+        "reason",
+    }
+)
+_BROWSER_TRANSPORT_CONFIGURED_MODES = frozenset(
+    {"auto", "disabled", "url_guarded", "attested_proxy"}
+)
+_BROWSER_TRANSPORT_DENIAL_REASONS = frozenset(
+    {
+        "browser_transport_disabled",
+        "browser_transport_unattested",
+        "browser_transport_config_invalid",
+    }
+)
+_INVALID_BROWSER_TRANSPORT_CAPABILITY: Mapping[str, str | bool] = MappingProxyType(
+    {
+        "name": "safe_browser_transport",
+        "available": False,
+        "configured_mode": "disabled",
+        "effective_mode": "disabled",
+        "dns_peer_attested": False,
+        "reason": "browser_transport_config_invalid",
+    }
+)
 
 
 def _freeze_value(value: Any) -> Any:
@@ -335,18 +366,55 @@ class ArticlePlan:
 class ArticleFailure(Exception):
     """A stable public failure code with an internal orchestration stage."""
 
-    def __init__(self, code: str, stage: str) -> None:
+    def __init__(
+        self,
+        code: str,
+        stage: str,
+        *,
+        capability: Mapping[str, object] | None = None,
+    ) -> None:
         super().__init__(code)
         self.code = code
         self.stage = stage
+        self.capability = _freeze_mapping(capability) if capability is not None else None
         self.retry_suppressed = False
+
+
+def _validated_browser_transport_capability(
+    value: Mapping[str, Any] | None,
+) -> dict[str, str | bool]:
+    """Return only a coherent bounded denial capability, or a safe fallback."""
+    invalid = dict(_INVALID_BROWSER_TRANSPORT_CAPABILITY)
+    if not isinstance(value, Mapping) or frozenset(value) != _BROWSER_TRANSPORT_CAPABILITY_KEYS:
+        return invalid
+    configured_mode = value.get("configured_mode")
+    reason = value.get("reason")
+    if (
+        value.get("name") != "safe_browser_transport"
+        or value.get("available") is not False
+        or type(configured_mode) is not str
+        or configured_mode not in _BROWSER_TRANSPORT_CONFIGURED_MODES
+        or value.get("effective_mode") != "disabled"
+        or value.get("dns_peer_attested") is not False
+        or type(reason) is not str
+        or reason not in _BROWSER_TRANSPORT_DENIAL_REASONS
+    ):
+        return invalid
+    return {
+        "name": "safe_browser_transport",
+        "available": False,
+        "configured_mode": configured_mode,
+        "effective_mode": "disabled",
+        "dns_peer_attested": False,
+        "reason": reason,
+    }
 
 
 def article_failure_result(failure: ArticleFailure | str) -> dict[str, Any]:
     """Return the stable sanitized article failure dictionary for public callers."""
     code = failure.code if isinstance(failure, ArticleFailure) else failure
     safe_code = code if type(code) is str and code in PUBLIC_FAILURE_CODES else "extraction_error"
-    return {
+    result: dict[str, Any] = {
         "title": "N/A",
         "author": "N/A",
         "date": "N/A",
@@ -354,6 +422,10 @@ def article_failure_result(failure: ArticleFailure | str) -> dict[str, Any]:
         "extraction_successful": False,
         "error": safe_code,
     }
+    if safe_code == "browser_transport_unavailable":
+        capability = failure.capability if isinstance(failure, ArticleFailure) else None
+        result["capability"] = _validated_browser_transport_capability(capability)
+    return result
 
 
 __all__ = [

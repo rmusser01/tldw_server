@@ -12,6 +12,10 @@ from typing import Any
 
 import pytest
 
+from tldw_Server_API.app.core.Web_Scraping.browser_transport import (
+    BrowserTransportAttestation,
+    decide_browser_transport,
+)
 from tldw_Server_API.app.core.Web_Scraping.orchestration.article_models import (
     ArticleFailure,
     ArticleLimits,
@@ -704,6 +708,7 @@ def _adapter(
     runtime: _FakeBrowserRuntime,
     guard: _FakeGuard,
     *,
+    transport_decision: Callable[[], object] | None = None,
     capability_check: Callable[[], bool] | None = None,
     cleanup_grace_s: float | None = None,
     acquisition_pool: Any | None = None,
@@ -735,6 +740,14 @@ def _adapter(
         egress_guard=guard,
         context=context,
         launcher=runtime.launcher,
+        transport_decision=transport_decision
+        or (
+            lambda: decide_browser_transport(
+                configured_mode="auto",
+                auth_mode="single_user",
+                outbound_policy_mode="compat",
+            )
+        ),
         capability_check=capability_check or (lambda: True),
         **kwargs,
     )
@@ -755,7 +768,7 @@ def _assert_limit_failure(exc: ArticleFailure, *, stage: str) -> None:
 
 
 @pytest.mark.unit
-async def test_acquire_guards_target_redirect_and_subresource_fresh_without_transport_pinning() -> None:
+async def test_attested_acquire_preserves_fresh_target_redirect_and_subresource_guards() -> None:
     urls = [
         _TARGET,
         "https://redirect.example/final",
@@ -772,7 +785,23 @@ async def test_acquire_guards_target_redirect_and_subresource_fresh_without_tran
         ]
     )
 
-    html = await _adapter(runtime, guard).acquire(_TARGET, _profile())
+    attested = decide_browser_transport(
+        configured_mode="attested_proxy",
+        auth_mode="multi_user",
+        outbound_policy_mode="strict",
+        attestation=BrowserTransportAttestation(
+            mechanism="governed_proxy",
+            routes_all_requests=True,
+            dns_pinned=True,
+            peer_verified=True,
+        ),
+    )
+
+    html = await _adapter(
+        runtime,
+        guard,
+        transport_decision=lambda: attested,
+    ).acquire(_TARGET, _profile())
 
     assert html == "<!doctype html><html><body>ok</body></html>"
     assert [url for url, _ in guard.calls] == urls
@@ -813,7 +842,23 @@ async def test_websocket_destinations_use_transport_equivalent_policy_urls_only(
     runtime = _FakeBrowserRuntime(dispatches=[("websocket", route) for route in sockets])
     guard = _FakeGuard([True, True])
 
-    await _adapter(runtime, guard).acquire(_TARGET, _profile())
+    attested = decide_browser_transport(
+        configured_mode="attested_proxy",
+        auth_mode="multi_user",
+        outbound_policy_mode="strict",
+        attestation=BrowserTransportAttestation(
+            mechanism="governed_proxy",
+            routes_all_requests=True,
+            dns_pinned=True,
+            peer_verified=True,
+        ),
+    )
+
+    await _adapter(
+        runtime,
+        guard,
+        transport_decision=lambda: attested,
+    ).acquire(_TARGET, _profile())
 
     assert [url for url, _ in guard.calls] == [
         "https://socket.example/live?channel=one",
@@ -825,6 +870,72 @@ async def test_websocket_destinations_use_transport_equivalent_policy_urls_only(
     ]
     assert [route.connect_calls for route in sockets] == [1, 1]
     assert [route.close_calls for route in sockets] == [[], []]
+
+
+@pytest.mark.unit
+async def test_transport_denial_precedes_pool_guard_and_launcher() -> None:
+    runtime = _FakeBrowserRuntime()
+    guard = _FakeGuard([])
+    pool = _pool_type()(1)
+    denied = decide_browser_transport(
+        configured_mode="auto",
+        auth_mode="multi_user",
+        outbound_policy_mode="strict",
+    )
+
+    with pytest.raises(ArticleFailure) as raised:
+        await _adapter(
+            runtime,
+            guard,
+            acquisition_pool=pool,
+            transport_decision=lambda: denied,
+        ).acquire(_TARGET, _profile())
+
+    assert raised.value.code == "browser_transport_unavailable"
+    assert raised.value.stage == "browser_transport_unattested"
+    assert dict(raised.value.capability) == denied.to_capability_metadata()
+    assert runtime.events == []
+    assert guard.calls == []
+    assert pool.active_count == 0
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "transport_decision",
+    [
+        lambda: (_ for _ in ()).throw(RuntimeError("secret config error")),
+        lambda: object(),
+    ],
+    ids=["provider-error", "wrong-type"],
+)
+async def test_invalid_transport_provider_fails_closed_before_launch(
+    transport_decision: Callable[[], object],
+) -> None:
+    runtime = _FakeBrowserRuntime()
+    guard = _FakeGuard([])
+    pool = _pool_type()(1)
+
+    with pytest.raises(ArticleFailure) as raised:
+        await _adapter(
+            runtime,
+            guard,
+            acquisition_pool=pool,
+            transport_decision=transport_decision,
+        ).acquire(_TARGET, _profile())
+
+    assert raised.value.code == "browser_transport_unavailable"
+    assert raised.value.stage == "browser_transport_config_invalid"
+    assert dict(raised.value.capability) == {
+        "name": "safe_browser_transport",
+        "available": False,
+        "configured_mode": "disabled",
+        "effective_mode": "disabled",
+        "dns_peer_attested": False,
+        "reason": "browser_transport_config_invalid",
+    }
+    assert runtime.events == []
+    assert guard.calls == []
+    assert pool.active_count == 0
 
 
 @pytest.mark.unit

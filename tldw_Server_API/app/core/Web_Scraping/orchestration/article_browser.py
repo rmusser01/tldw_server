@@ -13,6 +13,10 @@ from dataclasses import dataclass, replace
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
+from tldw_Server_API.app.core.Web_Scraping.browser_transport import (
+    BrowserTransportDecision,
+    default_browser_transport_decision,
+)
 from tldw_Server_API.app.core.Web_Scraping.runtime.browser import (
     RuntimeBrowserRoute,
     RuntimeWebSocketRoute,
@@ -673,6 +677,7 @@ class GuardedArticleBrowser:
         egress_guard: ProbeEgressGuard,
         context: RuntimeRequestContext,
         launcher: Any | None = None,
+        transport_decision: Callable[[], BrowserTransportDecision] = default_browser_transport_decision,
         capability_check: Any = _playwright_has_required_routing,
         cleanup_grace_s: float = _DEFAULT_CLEANUP_GRACE_S,
         acquisition_pool: _BrowserAcquisitionPool = _BROWSER_ACQUISITION_POOL,
@@ -683,6 +688,7 @@ class GuardedArticleBrowser:
         self._egress_guard = egress_guard
         self._context = context
         self._launcher = launcher or _DefaultPlaywrightLauncher()
+        self._transport_decision = transport_decision
         self._capability_check = capability_check
         self._cleanup_grace_s = _normalize_grace(cleanup_grace_s)
         self._acquisition_pool = acquisition_pool
@@ -693,6 +699,29 @@ class GuardedArticleBrowser:
             maximum=_MAX_CALLBACK_CAPACITY,
             label="callback",
         )
+
+    @staticmethod
+    def _invalid_transport_decision() -> BrowserTransportDecision:
+        return BrowserTransportDecision(
+            allowed=False,
+            configured_mode="disabled",
+            effective_mode="disabled",
+            dns_peer_attested=False,
+            reason="browser_transport_config_invalid",
+        )
+
+    def _resolve_transport_decision(self) -> BrowserTransportDecision:
+        try:
+            decision = self._transport_decision()
+        except Exception:  # noqa: BLE001 - provider errors must fail closed
+            return self._invalid_transport_decision()
+        if not isinstance(decision, BrowserTransportDecision):
+            return self._invalid_transport_decision()
+        return decision
+
+    def transport_capability(self) -> dict[str, str | bool]:
+        """Return the current bounded browser-transport capability snapshot."""
+        return self._resolve_transport_decision().to_capability_metadata()
 
     @staticmethod
     def _should_retry(failure: ArticleFailure) -> bool:
@@ -1034,6 +1063,13 @@ class GuardedArticleBrowser:
         attempts = profile.retries
         if attempts == 0:
             return ""
+        decision = self._resolve_transport_decision()
+        if not decision.allowed:
+            raise ArticleFailure(
+                "browser_transport_unavailable",
+                decision.reason,
+                capability=decision.to_capability_metadata(),
+            )
         for attempt in range(attempts):
             lease = self._acquisition_pool.acquire(
                 callback_capacity=self._callback_capacity,
