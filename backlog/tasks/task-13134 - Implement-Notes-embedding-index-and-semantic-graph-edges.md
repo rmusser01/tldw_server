@@ -2,17 +2,21 @@
 id: TASK-13134
 title: Implement Notes embedding index and semantic graph edges
 status: In Progress
+assignee: []
 created_date: 2026-08-27 02:20
+updated_date: 2026-08-30 06:39
 labels:
 - notes
 - notes-graph
 - embeddings
 - second-brain
 - backend
-priority: Medium
 dependencies:
 - TASK-13138
-updated_date: 2026-08-30 06:10
+documentation:
+- Docs/superpowers/specs/2026-08-29-notes-semantic-index-design.md
+- Docs/superpowers/plans/2026-08-29-notes-semantic-index-implementation-plan.md
+priority: medium
 modified_files:
 - Docs/superpowers/specs/2026-08-29-notes-semantic-index-design.md
 - Docs/superpowers/plans/2026-08-29-notes-semantic-index-implementation-plan.md
@@ -40,9 +44,11 @@ modified_files:
 - tldw_Server_API/tests/AuthNZ_Unit/test_notes_graph_semantic_permissions.py
 - tldw_Server_API/tests/AuthNZ/integration/test_notes_graph_semantic_permissions_postgres.py
 - tldw_Server_API/tests/AuthNZ_Unit/test_notes_graph_suggestion_permissions.py
-documentation:
-- Docs/superpowers/specs/2026-08-29-notes-semantic-index-design.md
-- Docs/superpowers/plans/2026-08-29-notes-semantic-index-implementation-plan.md
+- tldw_Server_API/app/core/Notes_Graph/semantic_content.py
+- tldw_Server_API/app/core/Notes_Graph/semantic_embeddings.py
+- tldw_Server_API/tests/Notes_Graph/unit/test_semantic_content.py
+- tldw_Server_API/tests/Notes_Graph/unit/test_semantic_embeddings.py
+- tldw_Server_API/tests/Embeddings_isolated/test_notes_semantic_policy.py
 ---
 
 ## Description
@@ -68,6 +74,7 @@ Approved executable plan: `Docs/superpowers/plans/2026-08-29-notes-semantic-inde
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - 2026-08-29: Senior implementation-constraint review identified required spec corrections for user-scoped run APIs, semantic opt-in compatibility, evidence offsets, vector-only backend contracts, DSR erasure, graph admission/async composition, dimension and activation rules, cache freshness, and restore semantics.
 - Design specification: `Docs/superpowers/specs/2026-08-29-notes-semantic-index-design.md`
@@ -80,13 +87,15 @@ Approved executable plan: `Docs/superpowers/plans/2026-08-29-notes-semantic-inde
 - 2026-08-29 Task 1 complete: Added ChaChaNotes v65 semantic configuration, generation, note-state, chunk-manifest, and work-ledger persistence with owner/dataset scoping, forced PostgreSQL RLS, CAS publication/dimension fences, bounded cleanup, canonical digest checks, and deterministic live PostgreSQL concurrency coverage. Independent task review clean. Range: `14b4b6464e..6639f7acb6`.
 - 2026-08-29 Task 2 complete: Canonical Note and Sync create/edit/restore/delete paths now update semantic dirty/tombstone work in the same transaction for the authoritative dataset, remain no-ops when disabled/unscoped, and retain generation cleanup identity across hard deletes. Real Notes JSON round-trip and live PostgreSQL product-lifecycle tests close restore, RLS, rollback, conflict-upsert, and cascade risks. Independent review clean. Verification: 26 tests passed; Ruff, Bandit, and diff checks clean. Range: `88d169beef..ac45d93fe3`.
 - 2026-08-29 Task 3 complete: Added deterministic compatibility/disclosure identities with separate sanitized model and revision fields, durable-credential preflight, bounded semantic operator settings, and AuthNZ migration 096 for `notes.graph.semantic.manage`. Migration/backstop behavior preserves later revocations while granting approved roles on catalog creation. Independent runtime/migration review clean. Verification: 59 tests passed; Ruff, Bandit, and diff checks clean. Range: `c90625d842..37d96af28e`.
+- 2026-08-29 Task 4 complete: Added version-bound canonical chunking and strict endpoint-neutral embedding execution; migrated NoteStore semantic fingerprints to bind `content_version`; extended typed semantic limits. Verification: Task 4 plus orchestrator 73 passed; Task 2 lifecycle 14 passed; PostgreSQL lifecycle 1 passed; Ruff, Bandit, and diff checks clean. Report: `.superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-4-report.md`.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+<!-- SECTION:NOTES:END -->
+
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+TASK-13134 remains in progress after completion of implementation Tasks 1 through 4.
 <!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed

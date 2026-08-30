@@ -13,7 +13,7 @@ from tldw_Server_API.app.core.DB_Management.chacha.note_semantic_models import (
     SemanticDimensionState,
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
-from tldw_Server_API.app.core.Notes_Graph.suggestion_content import content_fingerprint
+from tldw_Server_API.app.core.Notes_Graph.semantic_content import semantic_content_fingerprint
 
 pytestmark = [pytest.mark.integration, pytest.mark.timeout(30)]
 
@@ -244,7 +244,7 @@ def test_postgres_note_lifecycle_is_transactional_rls_scoped_and_coalesced(
                     "content",
                     0,
                     4,
-                    content_fingerprint("", "Body"),
+                    semantic_content_fingerprint("", "Body", 1),
                     "normalization-v1",
                     "chunker-v1",
                 ),

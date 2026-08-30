@@ -17,7 +17,7 @@ from tldw_Server_API.app.core.DB_Management.chacha.note_semantic_models import (
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
-from tldw_Server_API.app.core.Notes_Graph.suggestion_content import content_fingerprint
+from tldw_Server_API.app.core.Notes_Graph.semantic_content import semantic_content_fingerprint
 from tldw_Server_API.app.core.Sync.v2.adapters import StaticSyncAdapter, SyncAdapterRegistry
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.notes import NotesDomainAdapter
 from tldw_Server_API.app.core.Sync.v2.materializers.notes import NotesMaterializer
@@ -282,7 +282,7 @@ def test_notes_json_api_round_trip_omits_server_local_semantic_state(tmp_path: P
                     "content",
                     0,
                     13,
-                    content_fingerprint("", "Exported body"),
+                    semantic_content_fingerprint("", "Exported body", 1),
                     "normalization-v1",
                     "chunker-v1",
                 ),
