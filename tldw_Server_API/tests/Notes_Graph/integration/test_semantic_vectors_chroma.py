@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import importlib
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import chromadb
@@ -14,6 +17,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGD
 from tldw_Server_API.app.core.Embeddings.ChromaDB_Library import ChromaDBManager
 from tldw_Server_API.app.core.Notes_Graph.semantic_vectors import (
     SemanticVector,
+    SemanticVectorCapabilityError,
     SemanticVectorError,
     create_semantic_vector_store,
 )
@@ -235,6 +239,197 @@ async def test_chroma_internal_keyerror_cannot_confirm_generation_absence(
 
         assert exc_info.value.code == "notes_semantic_chroma_operation_failed"
         client.delete_collection.assert_not_called()
+    finally:
+        manager.close()
+        db.close_all_connections()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "listed_collections",
+    ([], ["unrelated"], [SimpleNamespace(name="unrelated")]),
+)
+async def test_chroma_legacy_valueerror_confirms_absence_from_collection_listing(
+    tmp_path: Path,
+    listed_collections: list[object],
+) -> None:
+    client = Mock()
+    client.get_collection.side_effect = ValueError("legacy missing collection")
+    client.list_collections.return_value = listed_collections
+    manager = _manager("owner-a", tmp_path, client)
+    db = CharactersRAGDB(str(tmp_path / "authority-legacy.sqlite"), client_id="owner-a")
+    generation_id = _generation(db, "dataset-a")
+    try:
+        store = await create_semantic_vector_store(
+            "chromadb",
+            authority=db.note_semantic_store,
+            chroma_manager=manager,
+        )
+
+        cleanup = await store.delete_generation("dataset-a", generation_id)
+
+        assert cleanup.confirmed_absent is True
+        client.list_collections.assert_called_once_with()
+    finally:
+        manager.close()
+        db.close_all_connections()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("listing", "code"),
+    (
+        ("target", "notes_semantic_chroma_operation_failed"),
+        ([object()], "notes_semantic_vector_backend_result_invalid"),
+        (None, "notes_semantic_vector_backend_result_invalid"),
+    ),
+)
+async def test_chroma_legacy_valueerror_fails_closed_without_proven_absence(
+    tmp_path: Path,
+    listing: object,
+    code: str,
+) -> None:
+    client = Mock()
+    client.get_collection.side_effect = ValueError("legacy ambiguous lookup")
+
+    def list_collections():
+        if listing == "target":
+            return [client.get_collection.call_args.kwargs["name"]]
+        return listing
+
+    client.list_collections.side_effect = list_collections
+    manager = _manager("owner-a", tmp_path, client)
+    db = CharactersRAGDB(str(tmp_path / "authority-legacy-fail.sqlite"), client_id="owner-a")
+    generation_id = _generation(db, "dataset-a")
+    try:
+        store = await create_semantic_vector_store(
+            "chromadb",
+            authority=db.note_semantic_store,
+            chroma_manager=manager,
+        )
+
+        with pytest.raises(SemanticVectorError) as exc_info:
+            await store.delete_generation("dataset-a", generation_id)
+
+        assert exc_info.value.code == code
+        client.delete_collection.assert_not_called()
+    finally:
+        manager.close()
+        db.close_all_connections()
+
+
+@pytest.mark.asyncio
+async def test_chroma_capability_requires_collection_listing(tmp_path: Path) -> None:
+    client = SimpleNamespace(
+        delete_collection=lambda **_kwargs: None,
+        get_collection=lambda **_kwargs: None,
+        get_or_create_collection=lambda **_kwargs: None,
+    )
+    manager = _manager("owner-a", tmp_path, client)
+    db = CharactersRAGDB(str(tmp_path / "authority-capability.sqlite"), client_id="owner-a")
+    try:
+        with pytest.raises(SemanticVectorCapabilityError) as exc_info:
+            await create_semantic_vector_store(
+                "chromadb",
+                authority=db.note_semantic_store,
+                chroma_manager=manager,
+            )
+        assert exc_info.value.code == "notes_semantic_chroma_unavailable"
+    finally:
+        manager.close()
+        db.close_all_connections()
+
+
+def test_chroma_backend_imports_without_modern_not_found_error() -> None:
+    module_name = "tldw_Server_API.app.core.Notes_Graph.semantic_vectors_chroma"
+    errors = importlib.import_module("chromadb.errors")
+    missing = object()
+    modern_not_found = getattr(errors, "NotFoundError", missing)
+    if modern_not_found is not missing:
+        delattr(errors, "NotFoundError")
+    sys.modules.pop(module_name, None)
+    try:
+        imported = importlib.import_module(module_name)
+        assert imported.ChromaSemanticVectorBackend is not None
+    finally:
+        if modern_not_found is not missing:
+            errors.NotFoundError = modern_not_found
+        sys.modules.pop(module_name, None)
+        importlib.import_module(module_name)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "result",
+    (
+        None,
+        [],
+        {},
+        {"ids": None},
+        {"ids": "opaque-vector"},
+        {"ids": object()},
+        {"ids": ["foreign-vector"]},
+        {"ids": [1]},
+    ),
+)
+async def test_chroma_delete_ids_rejects_ambiguous_cleanup_results(
+    tmp_path: Path,
+    result: object,
+) -> None:
+    collection = Mock()
+    collection.get.return_value = result
+    client = Mock()
+    client.get_collection.return_value = collection
+    manager = _manager("owner-a", tmp_path, client)
+    db = CharactersRAGDB(str(tmp_path / "authority-delete-result.sqlite"), client_id="owner-a")
+    generation_id = _generation(db, "dataset-a")
+    try:
+        store = await create_semantic_vector_store(
+            "chromadb",
+            authority=db.note_semantic_store,
+            chroma_manager=manager,
+        )
+
+        with pytest.raises(SemanticVectorError) as exc_info:
+            await store.delete_ids("dataset-a", generation_id, ("opaque-vector",))
+
+        assert exc_info.value.code == "notes_semantic_vector_backend_result_invalid"
+    finally:
+        manager.close()
+        db.close_all_connections()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("remaining_ids", "confirmed_absent"),
+    (([], True), (["opaque-vector"], False)),
+)
+async def test_chroma_delete_ids_accepts_explicit_requested_id_subset(
+    tmp_path: Path,
+    remaining_ids: list[str],
+    confirmed_absent: bool,
+) -> None:
+    collection = Mock()
+    collection.get.return_value = {"ids": remaining_ids}
+    client = Mock()
+    client.get_collection.return_value = collection
+    manager = _manager("owner-a", tmp_path, client)
+    db = CharactersRAGDB(str(tmp_path / "authority-delete-control.sqlite"), client_id="owner-a")
+    generation_id = _generation(db, "dataset-a")
+    try:
+        store = await create_semantic_vector_store(
+            "chromadb",
+            authority=db.note_semantic_store,
+            chroma_manager=manager,
+        )
+
+        cleanup = await store.delete_ids(
+            "dataset-a",
+            generation_id,
+            ("opaque-vector",),
+        )
+
+        assert cleanup.confirmed_absent is confirmed_absent
     finally:
         manager.close()
         db.close_all_connections()
