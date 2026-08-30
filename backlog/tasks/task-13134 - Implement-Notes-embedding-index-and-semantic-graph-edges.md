@@ -4,7 +4,7 @@ title: Implement Notes embedding index and semantic graph edges
 status: In Progress
 assignee: []
 created_date: 2026-08-27 02:20
-updated_date: 2026-08-30 16:18
+updated_date: 2026-08-30 16:32
 labels:
 - notes
 - notes-graph
@@ -105,13 +105,13 @@ Approved executable plan: `Docs/superpowers/plans/2026-08-29-notes-semantic-inde
 2026-08-30 Task 4 Fix Round 3 complete from 584d8f9ade: routed every attempted provider usage outcome through one cancellation-draining, single-logger finalizer that preserves truthful success/failure status without duplicate append-only billing rows; added nested Google embedContentConfig.outputDimensionality for resolved scalar/batch requests, probe omission, strict direct-call validation, and a real Notes adapter seam. Verification: focused RED 11 failed/2 passed before implementation; final Task 4 plus orchestrator 89 passed; settings plus OpenAI/Google/HuggingFace adapters 92 passed; four cancellation selectors passed in 10 fresh processes (40/40); Ruff passed all five touched Python files; Bandit scanned 1,061 lines with 0 findings and 0 skipped lines; git diff --check passed. One initial unchanged Hypothesis too_slow health-check failure passed with its exact seed and on the clean full-suite rerun. PostgreSQL was not rerun because lifecycle/CAS persistence was untouched. Report: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-4-report.md.
 2026-08-30 Task 4 Fix Round 4 started from 1b0dcc0d91: preserve original cancellation when the single append-only usage logger raises after provider cancellation or accounting-phase cancellation, retain normal logger exception visibility, and make cancellation regressions Python 3.10 compatible without weakening cross-version status/call/leak assertions.
 2026-08-30 Task 4 Fix Round 4 complete from 1b0dcc0d91: deferred ordinary shielded logger-task exceptions to the existing result-precedence block so original provider/accounting cancellation wins without retrying the append-only logger or changing truthful status; added two cancellation regressions, a visible non-cancelled logger exception control, and Python 3.10 capability guards limited to cancellation count/message details. Verification: focused RED 2 failed/1 passed; final Task 4 plus orchestrator 92 passed in 6.82s; settings plus OpenAI/Google/HuggingFace 92 passed in 5.54s; logger-exception/repeated-cancellation selectors 40/40 across 10 fresh processes (55.95s aggregate pytest runtime); Python 3.10.20 production-finalizer harness 3/3 with full pytest environment unavailable; Ruff passed both touched Python files; Bandit scanned 846 lines with 0 findings/0 skips; git diff --check passed. Report: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-4-report.md. Residual risk is limited to the absence of a full dependency-backed Python 3.10 suite and live provider calls.
+- 2026-08-30 Task 4 final: bounded review 5/5 clean after four fix rounds. Canonical chunking, durable endpoint-proven embedding execution, no-redirect OpenAI/Google/HuggingFace transports, one-request Google batches with pinned dimensions, exact endpoint/revision fencing, revision-bearing dimension CAS, cache-aware usage accounting, and cancellation-safe single-write finalization are complete. Final verification: 92 Task 4/orchestrator tests, 92 settings/adapter tests, 40/40 fresh-process cancellation checks, Python 3.10 finalizer harness 4/4, Ruff/Bandit/diff checks clean. Implementation range: `fcb7f2a207..7ad9b215b6`; independent review clean.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-TASK-13134 remains in progress after completion of implementation Tasks 1 through 4.
+TASK-13134 remains in progress after completion of implementation Tasks 1 through 4; Task 5 dedicated vector storage is next.
 <!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed
