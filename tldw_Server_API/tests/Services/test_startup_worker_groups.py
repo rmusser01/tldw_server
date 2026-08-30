@@ -136,6 +136,8 @@ def test_collect_startup_worker_specs_accepts_real_provider_graph() -> None:
         "llm_usage_aggregator",
         "loop_lag_task",
         "notes_graph_projection_maintenance_task",
+        "notes_graph_suggestions_jobs_task",
+        "notes_graph_suggestions_maintenance_task",
         "media_ingest_heavy_jobs_task",
         "media_ingest_jobs_task",
         "meetings_webhook_dlq_task",

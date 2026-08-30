@@ -134,6 +134,7 @@ def _capture_command() -> delivery.CaptureSyntheticEventCommand:
         (AdminWebhookMode.MIGRATE, WebhookErrorCode.MIGRATION_PENDING),
     ],
 )
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_delivery_surfaces_fail_closed_before_side_effects(
     mode: AdminWebhookMode,
@@ -186,6 +187,7 @@ async def test_delivery_surfaces_fail_closed_before_side_effects(
     assert capture_audits[0].event_id is None
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_direct_delivery_service_construction_fails_closed() -> None:
     repository = _RepositorySpy()
@@ -212,6 +214,7 @@ async def test_direct_delivery_service_construction_fails_closed() -> None:
         ("migrate", WebhookErrorCode.MIGRATION_PENDING),
     ],
 )
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_production_composition_denies_without_resource_initialization(
     monkeypatch: pytest.MonkeyPatch,
@@ -282,6 +285,7 @@ async def test_production_composition_denies_without_resource_initialization(
     assert audits[0].reason_code is expected_code
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_production_composition_constructs_all_resources_in_on_mode(
     monkeypatch: pytest.MonkeyPatch,

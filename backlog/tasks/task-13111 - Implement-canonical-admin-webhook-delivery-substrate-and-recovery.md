@@ -4,7 +4,7 @@ title: Implement canonical admin webhook delivery substrate and recovery
 status: In Progress
 assignee: []
 created_date: '2026-08-23 03:15'
-updated_date: '2026-08-30 20:04'
+updated_date: '2026-08-30 23:04'
 labels:
   - admin
   - webhooks
@@ -245,6 +245,10 @@ Task 10 complete: exposed canonical persisted test, atomic manual redelivery, an
 2026-08-30: Started Task 13 Final Review Fix Round 3 from exact HEAD 66e75704b651403edd80f0b6ef93ba9a616362be. Scope is limited to four controller-validated Important findings: strict terminal canonical marker/fingerprint/status/token proof; explicit primary-presence projections during bounded archive normalization; supported pre-archive_id locator ordering before transactional execution-control backfill; and transactional duplicate canonical archive identity rejection. Strict RED-first evidence, required PostgreSQL zero-skip gates, default-off/PR 3 preservation, one non-amended commit, and an ignored Fix Round 3 report are required. TASK-13111 remains In Progress.
 
 2026-08-30: Task 13 Final Review Fix Round 3 implementation and verification complete from exact base 66e75704b651403edd80f0b6ef93ba9a616362be. RED evidence: terminal proof unit 3 failed/3 passed and broad-prune additions 3 failed/5 passed on each SQLite/PostgreSQL backend; explicit presence projection failed 1 SQLite and JSONB-null conflict failed 1 PostgreSQL; pre-locator upgrades failed 1 SQLite and 1 PostgreSQL; duplicate canonical identity rollback failed 1 SQLite and 1 PostgreSQL. GREEN evidence: focused correction/Jobs union 318 passed; four-backend recovery matrix 76 passed; broad admin-webhook union 300 passed; Jobs operation/WorkerSDK compatibility 369 passed; idempotency scope/receipt compatibility 90 passed; final migration suites 67 passed. Every required PostgreSQL gate completed with zero skips. Ruff passed all 9 changed Python files; Python 3.10 compile and diff/scope/import checks exited 0; scoped Bandit scanned 4,980 lines with 0 findings and 0 High. Corrections enforce exact terminal marker/fingerprint/status/completion-token proof while preserving legal queued/processing recovery evidence, project backend-correct primary presence through the existing bounded normalizer, migrate stable archive locators before atomic control/backfill, and reject duplicate reserved canonical identities before updates. Default-off release safety, generic Jobs behavior, PR 3 exclusions, and aggregate Task 12 evidence remain preserved. TASK-13111 remains In Progress pending controller review.
+
+2026-08-30: Post-rebase Task 12 Step 1 RED at rebased HEAD 7d1fca1524: 1,521 passed, 2 failed, 0 skipped, 2,722 warnings in 977.81s. Isolated RED reproduced both failures. Root causes are integration-only test-contract drift: upstream base 52774a0 registers notes_graph_suggestions_jobs_task and notes_graph_suggestions_maintenance_task but omits them from the broad startup provider expected set; four final delivery-mode guard tests were added after the direct-marker audit and lack direct accepted unit markers. Fix scope is limited to those two test files, followed by focused GREEN, impacted modules, and a complete Step 1 rerun.
+
+2026-08-30: Post-rebase Step 1 integration Fix Round 1 focused GREEN complete. Exact failing nodes passed 2/2; impacted modules passed 92/92; Ruff, Python 3.10 compilation, and git diff --check passed. Independent spec review found 0 Critical/Important/Minor and returned SPEC COMPLIANT. Separate code-quality review found 0 Critical/Important/Minor and returned CODE QUALITY APPROVED. No production/schema/API/runtime file changed. Complete Step 1 clean-tree rerun remains required.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
