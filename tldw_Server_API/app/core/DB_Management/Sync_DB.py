@@ -34,6 +34,7 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     NOTES_LINK_DOMAINS,
     NOTES_ORGANIZATION_DOMAINS,
     NOTES_TASK_SYNC_DOMAINS,
+    PERSONAL_CONTEXT_SYNC_DOMAINS,
     SOURCE_CACHE_SYNC_DOMAINS,
     SYNC_REBASE_REQUIRED_AFTER_CONFLICT_RESOLUTION,
     SYNC_V2_INTERNAL_OPERATIONS,
@@ -3280,6 +3281,7 @@ class SyncDatabase:
                 NOTES_ORGANIZATION_DOMAINS,
                 NOTES_LINK_DOMAINS,
                 NOTES_TASK_SYNC_DOMAINS,
+                PERSONAL_CONTEXT_SYNC_DOMAINS,
             )
         elif dataset.scope_type == "workspace":
             if not dataset.workspace_id or not dataset.workspace_id.strip():
@@ -3305,6 +3307,13 @@ class SyncDatabase:
             )
             if state not in {"initializing", "ready", "failed"}:
                 raise SyncStoreError("notes_organization_sync_not_ready")
+        personal_context_domains = set(dataset.domains).intersection(
+            PERSONAL_CONTEXT_SYNC_DOMAINS
+        )
+        if personal_context_domains and personal_context_domains != set(
+            PERSONAL_CONTEXT_SYNC_DOMAINS
+        ):
+            raise SyncInvalidDomainError("personal_context_sync_domains_incomplete")
         task_domains = set(dataset.domains).intersection(NOTES_TASK_SYNC_DOMAINS)
         if task_domains and task_domains != set(NOTES_TASK_SYNC_DOMAINS):
             raise SyncInvalidDomainError("notes_task_sync_domains_incomplete")

@@ -51,6 +51,11 @@ SyncDomain = Literal[
     "notes.link",
     "notes.task",
     "notes.task_activity",
+    "personal_context.manifest",
+    "personal_context.scope",
+    "personal_context.record",
+    "personal_context.proposal",
+    "personal_context.purge",
 ]
 SyncOperation = Literal["upsert", "append", "tombstone"]
 DatasetScopeType = Literal["personal", "workspace"]
@@ -129,6 +134,16 @@ MEDIA_SYNC_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
     "media.keyword": ["upsert", "tombstone"],
     "media.keyword_link": ["upsert", "tombstone"],
 }
+PERSONAL_CONTEXT_SYNC_DOMAINS: tuple[SyncDomain, ...] = (
+    "personal_context.manifest",
+    "personal_context.scope",
+    "personal_context.record",
+    "personal_context.proposal",
+    "personal_context.purge",
+)
+PERSONAL_CONTEXT_SYNC_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
+    domain: ["upsert", "tombstone"] for domain in PERSONAL_CONTEXT_SYNC_DOMAINS
+}
 SYNC_V2_SUPPORTED_DOMAINS: list[SyncDomain] = (
     list(M1_SYNC_DOMAINS)
     + list(WORKSPACE_SYNC_DOMAINS)
@@ -136,6 +151,7 @@ SYNC_V2_SUPPORTED_DOMAINS: list[SyncDomain] = (
     + list(MEDIA_SYNC_DOMAINS)
     + list(NOTES_ORGANIZATION_DOMAINS)
     + list(NOTES_LINK_DOMAINS)
+    + list(PERSONAL_CONTEXT_SYNC_DOMAINS)
 )
 SYNC_V2_SUPPORTED_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
     **M1_SYNC_OPERATIONS,
@@ -144,6 +160,7 @@ SYNC_V2_SUPPORTED_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
     **MEDIA_SYNC_OPERATIONS,
     **NOTES_ORGANIZATION_SYNC_OPERATIONS,
     **NOTES_LINK_SYNC_OPERATIONS,
+    **PERSONAL_CONTEXT_SYNC_OPERATIONS,
 }
 SYNC_V2_KNOWN_DOMAINS: tuple[SyncDomain, ...] = (
     *SYNC_V2_SUPPORTED_DOMAINS,
@@ -300,6 +317,29 @@ def _with_transition_aliases(data: Any) -> Any:
     return normalized
 
 
+class PersonalContextSyncCapabilitiesResponse(BaseModel):
+    """Typed readiness and bounded transport contract for Personal Context."""
+
+    available: bool = False
+    blockers: list[str] = Field(
+        default_factory=lambda: ["personal_context_profile_key_unavailable"]
+    )
+    authorization_policy: Literal["server_trusted_v1"] = "server_trusted_v1"
+    min_schema_version: Literal[1] = 1
+    max_schema_version: Literal[1] = 1
+    integrity_algorithm: Literal["hmac-sha256-v1"] = "hmac-sha256-v1"
+    integrity_key_distribution: Literal["wrapped-bootstrap-v1"] = "wrapped-bootstrap-v1"
+    privacy_cleanup_ack: Literal["personal-context-cleanup-v1"] = "personal-context-cleanup-v1"
+    purge_generation: Literal["personal-context-purge-v1"] = "personal-context-purge-v1"
+    max_record_bytes: int = Field(16_384, ge=16_384)
+    max_search_results: int = Field(20, ge=20)
+    max_proposals_per_turn: int = Field(5, ge=5)
+    max_proposals_per_session: int = Field(25, ge=25)
+    max_unresolved_proposals: int = Field(200, ge=200)
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class SyncCapabilitiesResponse(BaseModel):
     """Server-supported Sync v2 M1 protocol capabilities."""
 
@@ -323,6 +363,9 @@ class SyncCapabilitiesResponse(BaseModel):
     )
     encryption: dict[str, Any] = Field(default_factory=_default_encryption)
     encryption_policies: list[EncryptionPolicy] = Field(default_factory=lambda: [DEFAULT_M1_ENCRYPTION_POLICY])
+    personal_context: PersonalContextSyncCapabilitiesResponse = Field(
+        default_factory=PersonalContextSyncCapabilitiesResponse
+    )
     blob_transfer: dict[str, Any] = Field(default_factory=_default_blob_transfer)
     quota: dict[str, Any] = Field(default_factory=dict)
     max_batch_size: int = Field(100, ge=1)
@@ -2138,6 +2181,9 @@ __all__ = [
     "M1_SYNC_OPERATIONS",
     "MEDIA_SYNC_DOMAINS",
     "MEDIA_SYNC_OPERATIONS",
+    "PERSONAL_CONTEXT_SYNC_DOMAINS",
+    "PERSONAL_CONTEXT_SYNC_OPERATIONS",
+    "PersonalContextSyncCapabilitiesResponse",
     "STRICT_ENCRYPTION_POLICIES",
     "SOURCE_CACHE_SYNC_DOMAINS",
     "SOURCE_CACHE_SYNC_OPERATIONS",

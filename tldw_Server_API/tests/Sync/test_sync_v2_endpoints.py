@@ -48,7 +48,11 @@ from tldw_Server_API.app.core.Sync.v2.models import (
 from tldw_Server_API.app.core.Sync.v2.security import (
     server_trusted_encryption_status_from_config,
 )
-from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service, SyncV2Settings
+from tldw_Server_API.app.core.Sync.v2.service import (
+    PersonalContextSyncCapabilities,
+    SyncV2Service,
+    SyncV2Settings,
+)
 from tldw_Server_API.app.core.Sync.v2.store import SyncV2Store
 
 pytestmark = pytest.mark.unit
@@ -144,6 +148,7 @@ def _build_service(
             max_chunk_bytes=8,
             user_blob_quota_bytes=256,
             server_trusted_encryption=encryption or _ready_encryption(),
+            personal_context=PersonalContextSyncCapabilities(),
             restore_manifest_scan_limit=100,
         ),
     )
@@ -184,6 +189,25 @@ def test_capabilities_endpoint_reports_supported_domains_and_encryption_posture(
     assert body["encryption"]["attestation"]["mode"] == "managed_storage"
     assert body["encryption_policies"] == ["server_trusted_v1"]
     assert body["blob_transfer"] == {"supported": False}
+    assert body["personal_context"] == {
+        "available": False,
+        "blockers": [
+            "personal_context_profile_key_unavailable",
+            "personal_context_transport_unavailable",
+        ],
+        "authorization_policy": "server_trusted_v1",
+        "min_schema_version": 1,
+        "max_schema_version": 1,
+        "integrity_algorithm": "hmac-sha256-v1",
+        "integrity_key_distribution": "wrapped-bootstrap-v1",
+        "privacy_cleanup_ack": "personal-context-cleanup-v1",
+        "purge_generation": "personal-context-purge-v1",
+        "max_record_bytes": 16_384,
+        "max_search_results": 20,
+        "max_proposals_per_turn": 5,
+        "max_proposals_per_session": 25,
+        "max_unresolved_proposals": 200,
+    }
     assert body["domain_schemas"]["notes.note"]["upsert"]["properties"] == {
         "title": {"type": "string", "max_length": 255},
         "content": {"type": "string", "max_length": 5_000_000},
