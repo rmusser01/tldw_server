@@ -9680,19 +9680,22 @@ class JobManager:
                 try:
                     payload = json.loads(payload)
                 except (TypeError, ValueError):
-                    continue
+                    raise IdempotentOperationUnavailableError(
+                        "canonical admin webhook prune evidence is invalid"
+                    ) from None
             if not isinstance(payload, dict):
-                continue
+                raise IdempotentOperationUnavailableError(
+                    "canonical admin webhook prune evidence is invalid"
+                )
             row["payload"] = payload
             if not canonical_admin_webhook_row_matches(
                 row,
                 expected_payload=payload,
             ):
-                continue
-            job_uuid = str(row.get("uuid") or "").strip()
-            if not job_uuid:
-                continue
-            candidates[int(row["id"])] = job_uuid
+                raise IdempotentOperationUnavailableError(
+                    "canonical admin webhook prune evidence is invalid"
+                )
+            candidates[int(row["id"])] = row["uuid"]
         return candidates
 
     def _exact_receipt_archive_uuids(

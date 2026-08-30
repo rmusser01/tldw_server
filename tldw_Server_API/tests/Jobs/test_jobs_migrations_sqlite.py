@@ -11,11 +11,128 @@ import pytest
 
 from tldw_Server_API.app.core.DB_Management import sqlite_policy
 from tldw_Server_API.app.core.Jobs import migrations as jobs_migrations
+from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.migrations import (
     JOBS_SQLITE_DDL,
     ensure_jobs_tables,
     normalize_slides_archive_projection,
 )
+from tldw_Server_API.app.core.Jobs.operations.contracts import (
+    FindJobByIdentityCommand,
+    JobIdentityLookupState,
+    PreparedJobDisposition,
+    admin_webhook_disposition_marker_matches,
+    project_admin_webhook_disposition_marker,
+)
+
+_LEGACY_DELIVERY_ID = "00000000-0000-4000-8000-000000000001"
+_LEGACY_ATTEMPT_ID = "00000000-0000-4000-8000-000000000002"
+_LEGACY_JOB_UUID = "00000000-0000-4000-8000-000000000003"
+_LEGACY_TOKEN = "a" * 64
+_LEGACY_APPLIED_AT = "2026-08-29T12:34:56+00:00"
+
+
+def _legacy_execution_control_ddl() -> str:
+    return JOBS_SQLITE_DDL.replace(
+        "  expired_lease_policy TEXT NOT NULL DEFAULT 'consume_retry' "
+        "CHECK (expired_lease_policy IN ('consume_retry','requeue_no_attempt')),\n",
+        "",
+    ).replace(
+        "  quarantine_threshold INTEGER CHECK "
+        "(quarantine_threshold IS NULL OR quarantine_threshold > 0),\n",
+        "",
+    ).replace(
+        "  prepared_disposition_fingerprint TEXT CHECK (\n"
+        "    prepared_disposition_fingerprint IS NULL OR (\n"
+        "      LENGTH(prepared_disposition_fingerprint) = 64 AND\n"
+        "      prepared_disposition_fingerprint NOT GLOB '*[^0-9a-f]*'\n"
+        "    )\n"
+        "  ),\n",
+        "",
+    ).replace(
+        "  no_attempt_recovery_fingerprint TEXT CHECK (\n"
+        "    no_attempt_recovery_fingerprint IS NULL OR (\n"
+        "      LENGTH(no_attempt_recovery_fingerprint) = 64 AND\n"
+        "      no_attempt_recovery_fingerprint NOT GLOB '*[^0-9a-f]*'\n"
+        "    )\n"
+        "  ),\n",
+        "",
+    )
+
+
+def _legacy_complete_marker() -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "token": _LEGACY_TOKEN,
+        "kind": "complete",
+        "origin": "authnz",
+        "delivery_id": _LEGACY_DELIVERY_ID,
+        "attempt_id": _LEGACY_ATTEMPT_ID,
+        "applied_at": _LEGACY_APPLIED_AT,
+    }
+
+
+def _insert_legacy_canonical_archive(
+    conn: sqlite3.Connection,
+    *,
+    marker: dict[str, object],
+    status: str,
+    job_uuid: str = _LEGACY_JOB_UUID,
+    completion_token: str = _LEGACY_TOKEN,
+    error_code: str | None = None,
+    failure_streak_code: str | None = None,
+    retry_count: int = 0,
+    available_at: str | None = None,
+    sidecar_only: bool = False,
+) -> None:
+    payload_json = json.dumps({"delivery_id": _LEGACY_DELIVERY_ID})
+    marker_json = json.dumps(marker)
+    payload = None if sidecar_only else payload_json
+    result = None if sidecar_only else marker_json
+    payload_sidecar = (
+        "gzip64:"
+        + base64.b64encode(gzip.compress(payload_json.encode("utf-8"))).decode(
+            "ascii"
+        )
+        if sidecar_only
+        else None
+    )
+    result_sidecar = (
+        "gzip64:"
+        + base64.b64encode(gzip.compress(marker_json.encode("utf-8"))).decode(
+            "ascii"
+        )
+        if sidecar_only
+        else None
+    )
+    conn.execute(
+        "INSERT INTO jobs_archive("
+        "id, uuid, domain, queue, job_type, owner_user_id, project_id, "
+        "batch_group, idempotency_key, payload, result, payload_compressed, "
+        "result_compressed, status, priority, "
+        "max_retries, retry_count, available_at, error_code, "
+        "failure_streak_code, completion_token, completed_at, archived_at"
+        ") VALUES(?, ?, 'admin_webhooks', 'delivery', "
+        "'admin_webhook_delivery', NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, 5, 3, "
+        "?, ?, ?, ?, ?, ?, ?)",
+        (
+            41,
+            job_uuid,
+            f"admin-webhook-delivery:{_LEGACY_DELIVERY_ID}",
+            payload,
+            result,
+            payload_sidecar,
+            result_sidecar,
+            status,
+            retry_count,
+            available_at,
+            error_code,
+            failure_streak_code,
+            completion_token,
+            _LEGACY_APPLIED_AT,
+            _LEGACY_APPLIED_AT,
+        ),
+    )
 
 
 def test_sqlite_schema_persists_owner_scoped_idempotency_receipts(tmp_path):
@@ -215,33 +332,8 @@ def test_ensure_jobs_tables_sanitizes_schema_failure_log(tmp_path, monkeypatch):
 
 def test_sqlite_forward_migration_backfills_execution_controls(tmp_path):
     db_path = tmp_path / "legacy_jobs.db"
-    legacy_ddl = JOBS_SQLITE_DDL.replace(
-        "  expired_lease_policy TEXT NOT NULL DEFAULT 'consume_retry' "
-        "CHECK (expired_lease_policy IN ('consume_retry','requeue_no_attempt')),\n",
-        "",
-    ).replace(
-        "  quarantine_threshold INTEGER CHECK "
-        "(quarantine_threshold IS NULL OR quarantine_threshold > 0),\n",
-        "",
-    ).replace(
-        "  prepared_disposition_fingerprint TEXT CHECK (\n"
-        "    prepared_disposition_fingerprint IS NULL OR (\n"
-        "      LENGTH(prepared_disposition_fingerprint) = 64 AND\n"
-        "      prepared_disposition_fingerprint NOT GLOB '*[^0-9a-f]*'\n"
-        "    )\n"
-        "  ),\n",
-        "",
-    ).replace(
-        "  no_attempt_recovery_fingerprint TEXT CHECK (\n"
-        "    no_attempt_recovery_fingerprint IS NULL OR (\n"
-        "      LENGTH(no_attempt_recovery_fingerprint) = 64 AND\n"
-        "      no_attempt_recovery_fingerprint NOT GLOB '*[^0-9a-f]*'\n"
-        "    )\n"
-        "  ),\n",
-        "",
-    )
     with sqlite3.connect(db_path) as conn:
-        conn.executescript(legacy_ddl)
+        conn.executescript(_legacy_execution_control_ddl())
         conn.execute(
             "INSERT INTO jobs(uuid, domain, queue, job_type, payload, status) "
             "VALUES('legacy', 'legacy', 'default', 'work', '{}', 'queued')"
@@ -283,6 +375,92 @@ def test_sqlite_forward_migration_backfills_execution_controls(tmp_path):
             )
 
     ensure_jobs_tables(db_path)
+
+
+def test_sqlite_upgrade_reconstructs_strict_legacy_canonical_archive(tmp_path):
+    db_path = tmp_path / "legacy_canonical_archive.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(_legacy_execution_control_ddl())
+        _insert_legacy_canonical_archive(
+            conn,
+            marker=_legacy_complete_marker(),
+            status="completed",
+            sidecar_only=True,
+        )
+
+    ensure_jobs_tables(db_path)
+
+    manager = JobManager(db_path)
+    command = FindJobByIdentityCommand(
+        domain="admin_webhooks",
+        queue="delivery",
+        job_type="admin_webhook_delivery",
+        idempotency_key=(
+            f"admin-webhook-delivery:{_LEGACY_DELIVERY_ID}"
+        ),
+        expected_payload={"delivery_id": _LEGACY_DELIVERY_ID},
+    )
+    found = manager.find_job_by_identity(command)
+
+    assert found.state is JobIdentityLookupState.ARCHIVED
+    assert found.row is not None
+    assert found.row["expired_lease_policy"] == "requeue_no_attempt"
+    assert found.row["quarantine_threshold"] == 5
+    assert found.row["no_attempt_recovery_fingerprint"] is None
+    marker = project_admin_webhook_disposition_marker(
+        found.row,
+        expected_payload=command.expected_payload,
+        archived=True,
+    )
+    disposition = PreparedJobDisposition.complete(
+        token=_LEGACY_TOKEN,
+        delivery_id=_LEGACY_DELIVERY_ID,
+        attempt_id=_LEGACY_ATTEMPT_ID,
+    )
+    assert marker is not None
+    assert admin_webhook_disposition_marker_matches(marker, disposition)
+
+
+def test_sqlite_upgrade_rolls_back_unrecoverable_canonical_archive(tmp_path):
+    db_path = tmp_path / "legacy_unrecoverable_archive.db"
+    retry_marker = {
+        **_legacy_complete_marker(),
+        "kind": "retry",
+        "original_not_before_at": "2026-08-29T12:35:56+00:00",
+    }
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(_legacy_execution_control_ddl())
+        _insert_legacy_canonical_archive(
+            conn,
+            marker=retry_marker,
+            status="quarantined",
+            completion_token=_LEGACY_TOKEN,
+            error_code="receiver_503",
+            failure_streak_code="receiver_503",
+            retry_count=5,
+            available_at="2026-08-29T12:35:56+00:00",
+        )
+
+    with pytest.raises(RuntimeError):
+        ensure_jobs_tables(db_path)
+
+    with sqlite3.connect(db_path) as conn:
+        archive_columns = {
+            row[1]
+            for row in conn.execute(
+                "PRAGMA table_info(jobs_archive)"
+            ).fetchall()
+        }
+        assert not {
+            "expired_lease_policy",
+            "quarantine_threshold",
+            "prepared_disposition_fingerprint",
+            "no_attempt_recovery_fingerprint",
+        } & archive_columns
+        assert conn.execute(
+            "SELECT COUNT(*) FROM jobs_archive WHERE uuid=?",
+            (_LEGACY_JOB_UUID,),
+        ).fetchone() == (1,)
 
 
 @pytest.mark.parametrize(

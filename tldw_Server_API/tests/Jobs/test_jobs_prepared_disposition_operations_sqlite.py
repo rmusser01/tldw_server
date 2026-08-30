@@ -14,6 +14,7 @@ from tldw_Server_API.app.core.Jobs.operations.contracts import (
     EnsureLeaseHorizonCommand,
     ExpiredLeasePolicy,
     FindJobByIdentityCommand,
+    IdempotentOperationUnavailableError,
     JobIdentityLookupState,
     NoTransitionReason,
     OperationOutcome,
@@ -183,6 +184,83 @@ def test_sqlite_prune_preserves_unacknowledged_canonical_disposition_proof(
     assert marker.token == disposition.token
     assert marker.fingerprint == found.row["prepared_disposition_fingerprint"]
     assert manager.get_job_or_archived_by_uuid(unrelated["uuid"]) is None
+
+
+@pytest.mark.parametrize(
+    "corruption",
+    ("payload", "uuid", "controls", "marker", "fingerprint"),
+)
+def test_sqlite_prune_rolls_back_malformed_reserved_canonical_evidence(
+    tmp_path,
+    monkeypatch,
+    corruption: str,
+) -> None:
+    monkeypatch.delenv("JOBS_ARCHIVE_BEFORE_DELETE", raising=False)
+    manager = JobManager(tmp_path / f"malformed-prune-{corruption}.db")
+    job = _canonical(manager, suffix=corruption)
+    acquired = _acquire(manager)
+    delivery_id = json.loads(job["payload"])["delivery_id"]
+    disposition = PreparedJobDisposition.complete(
+        token=_token("7"),
+        delivery_id=delivery_id,
+        attempt_id=str(uuid4()),
+    )
+    assert _apply(
+        manager,
+        job,
+        disposition,
+        leased=acquired,
+    ).outcome is OperationOutcome.APPLIED
+    unrelated = manager.create_job(
+        domain="other",
+        queue="default",
+        job_type="ordinary",
+        payload={"kind": "ordinary"},
+        owner_user_id=None,
+    )
+    old = (datetime.now(timezone.utc) - timedelta(days=40)).strftime(
+        "%Y-%m-%d %H:%M:%S.%f"
+    )
+    conn = manager._connect()
+    try:
+        conn.execute(
+            "UPDATE jobs SET status='completed', completed_at=? "
+            "WHERE id IN (?, ?)",
+            (old, job["id"], unrelated["id"]),
+        )
+        if corruption == "payload":
+            conn.execute("UPDATE jobs SET payload='[]' WHERE id=?", (job["id"],))
+        elif corruption == "uuid":
+            conn.execute(
+                "UPDATE jobs SET uuid='not-a-canonical-uuid' WHERE id=?",
+                (job["id"],),
+            )
+        elif corruption == "controls":
+            conn.execute(
+                "UPDATE jobs SET expired_lease_policy='consume_retry' WHERE id=?",
+                (job["id"],),
+            )
+        elif corruption == "marker":
+            conn.execute("UPDATE jobs SET result='{}' WHERE id=?", (job["id"],))
+        else:
+            conn.execute(
+                "UPDATE jobs SET prepared_disposition_fingerprint=NULL WHERE id=?",
+                (job["id"],),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    with pytest.raises(IdempotentOperationUnavailableError):
+        manager.prune_jobs(statuses=["completed"], older_than_days=30)
+
+    assert manager.get_job(int(job["id"])) is not None
+    assert manager.get_job(int(unrelated["id"])) is not None
+    conn = manager._connect()
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM jobs_archive").fetchone()[0] == 0
+    finally:
+        conn.close()
 
 
 def test_sqlite_retry_uses_exact_schedule_and_historical_replay_is_nonmutating(

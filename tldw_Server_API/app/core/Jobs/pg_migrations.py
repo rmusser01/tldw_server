@@ -21,6 +21,14 @@ from .migrations import (
     normalize_slides_archive_projection,
     slides_archive_values_equal,
 )
+from .operations.contracts import (
+    ADMIN_WEBHOOK_DELIVERY_DOMAIN,
+    ADMIN_WEBHOOK_DELIVERY_JOB_TYPE,
+    ADMIN_WEBHOOK_DELIVERY_QUARANTINE_THRESHOLD,
+    ADMIN_WEBHOOK_DELIVERY_QUEUE,
+    ExpiredLeasePolicy,
+    reconstruct_legacy_admin_webhook_archive_fingerprint,
+)
 
 _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -939,6 +947,51 @@ def _ensure_pg_dependency_snapshot_columns(cur: Any) -> None:
     )
 
 
+def _upgrade_legacy_admin_webhook_archives_pg(cur: Any) -> None:
+    """Backfill only strictly reconstructable reserved archive evidence."""
+
+    cur.execute(
+        "SELECT * FROM jobs_archive WHERE domain=%s AND queue=%s "
+        "AND job_type=%s FOR UPDATE",
+        (
+            ADMIN_WEBHOOK_DELIVERY_DOMAIN,
+            ADMIN_WEBHOOK_DELIVERY_QUEUE,
+            ADMIN_WEBHOOK_DELIVERY_JOB_TYPE,
+        ),
+    )
+    columns = tuple(
+        str(item.name if hasattr(item, "name") else item[0])
+        for item in cur.description or ()
+    )
+    for values in cur.fetchall() or ():
+        row = values if isinstance(values, dict) else dict(zip(columns, values))
+        row = normalize_slides_archive_projection(row)
+        fingerprint = reconstruct_legacy_admin_webhook_archive_fingerprint(row)
+        if fingerprint is None:
+            continue
+        cur.execute(
+            "UPDATE jobs_archive SET "
+            "expired_lease_policy=%s, quarantine_threshold=%s, "
+            "prepared_disposition_fingerprint=%s, "
+            "no_attempt_recovery_fingerprint=NULL WHERE archive_id=%s "
+            "AND expired_lease_policy=%s "
+            "AND quarantine_threshold IS NULL "
+            "AND prepared_disposition_fingerprint IS NULL "
+            "AND no_attempt_recovery_fingerprint IS NULL",
+            (
+                ExpiredLeasePolicy.REQUEUE_NO_ATTEMPT.value,
+                ADMIN_WEBHOOK_DELIVERY_QUARANTINE_THRESHOLD,
+                fingerprint,
+                row.get("archive_id"),
+                ExpiredLeasePolicy.CONSUME_RETRY.value,
+            ),
+        )
+        if cur.rowcount != 1:
+            raise RuntimeError(
+                "canonical admin webhook legacy archive upgrade lost its row"
+            )
+
+
 def _ensure_pg_execution_control_columns(cur: Any) -> None:
     """Add, backfill, and validate required per-job execution controls."""
 
@@ -977,6 +1030,7 @@ def _ensure_pg_execution_control_columns(cur: Any) -> None:
         "UPDATE jobs SET expired_lease_policy='consume_retry' "
         "WHERE expired_lease_policy IS NULL"
     )
+    _upgrade_legacy_admin_webhook_archives_pg(cur)
     cur.execute(
         "ALTER TABLE jobs ALTER COLUMN expired_lease_policy "
         "SET DEFAULT 'consume_retry'"
@@ -1451,15 +1505,22 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
             )
             conn.commit()
         # Forward-migrate older installs: add missing columns that newer code expects
+        required_migration_exceptions = (
+            psycopg.Error,
+            *_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS,
+        )
+        try:
+            with psycopg.connect(_dsn) as required_conn, required_conn.cursor() as required_cur:
+                _configure_pg_archive_migration_session(required_cur)
+                _ensure_pg_execution_control_columns(required_cur)
+        except required_migration_exceptions as exc:
+            raise RuntimeError(
+                "PostgreSQL Jobs required schema migration failed"
+            ) from exc
         with psycopg.connect(_dsn, autocommit=True) as cfix, cfix.cursor() as f:
             _configure_pg_archive_migration_session(f, local=False)
-            required_migration_exceptions = (
-                psycopg.Error,
-                *_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS,
-            )
             try:
                 _ensure_pg_dependency_snapshot_columns(f)
-                _ensure_pg_execution_control_columns(f)
             except required_migration_exceptions as exc:
                 raise RuntimeError(
                     "PostgreSQL Jobs required schema migration failed"

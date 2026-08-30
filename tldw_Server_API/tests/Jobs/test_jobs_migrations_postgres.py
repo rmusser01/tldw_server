@@ -1,3 +1,5 @@
+import gzip
+import json
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -9,6 +11,13 @@ psycopg = pytest.importorskip("psycopg")
 
 from tldw_Server_API.app.core.Jobs import pg_migrations as jobs_pg_migrations
 from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Jobs.operations.contracts import (
+    FindJobByIdentityCommand,
+    JobIdentityLookupState,
+    PreparedJobDisposition,
+    admin_webhook_disposition_marker_matches,
+    project_admin_webhook_disposition_marker,
+)
 from tldw_Server_API.app.core.Jobs.pg_migrations import (
     _configure_pg_archive_migration_session,
     _ensure_pg_archive_locators,
@@ -16,6 +25,12 @@ from tldw_Server_API.app.core.Jobs.pg_migrations import (
 )
 
 pytestmark = [pytest.mark.pg_jobs]
+
+_LEGACY_DELIVERY_ID = "00000000-0000-4000-8000-000000000001"
+_LEGACY_ATTEMPT_ID = "00000000-0000-4000-8000-000000000002"
+_LEGACY_JOB_UUID = "00000000-0000-4000-8000-000000000003"
+_LEGACY_TOKEN = "a" * 64
+_LEGACY_APPLIED_AT = "2026-08-29T12:34:56+00:00"
 
 _POSTGRES_ARCHIVE_BATCH_READ_INDEX_COLUMNS = {
     "idx_jobs_archive_lookup_id": ("id", "archive_id DESC"),
@@ -27,6 +42,104 @@ _POSTGRES_ARCHIVE_BATCH_READ_INDEX_COLUMNS = {
         "archive_id DESC",
     ),
 }
+
+
+def _drop_pg_archive_execution_controls(cur) -> None:
+    cur.execute(
+        "ALTER TABLE jobs_archive DROP COLUMN IF EXISTS expired_lease_policy"
+    )
+    cur.execute(
+        "ALTER TABLE jobs_archive DROP COLUMN IF EXISTS quarantine_threshold"
+    )
+    cur.execute(
+        "ALTER TABLE jobs_archive DROP COLUMN IF EXISTS "
+        "prepared_disposition_fingerprint"
+    )
+    cur.execute(
+        "ALTER TABLE jobs_archive DROP COLUMN IF EXISTS "
+        "no_attempt_recovery_fingerprint"
+    )
+
+
+def _legacy_complete_marker() -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "token": _LEGACY_TOKEN,
+        "kind": "complete",
+        "origin": "authnz",
+        "delivery_id": _LEGACY_DELIVERY_ID,
+        "attempt_id": _LEGACY_ATTEMPT_ID,
+        "applied_at": _LEGACY_APPLIED_AT,
+    }
+
+
+def _insert_legacy_canonical_archive_pg(
+    cur,
+    *,
+    marker: dict[str, object],
+    status: str,
+    job_uuid: str = _LEGACY_JOB_UUID,
+    completion_token: str = _LEGACY_TOKEN,
+    error_code: str | None = None,
+    failure_streak_code: str | None = None,
+    retry_count: int = 0,
+    available_at: str | None = None,
+    sidecar_only: bool = False,
+) -> None:
+    payload_json = json.dumps({"delivery_id": _LEGACY_DELIVERY_ID})
+    marker_json = json.dumps(marker)
+    payload = None if sidecar_only else payload_json
+    result = None if sidecar_only else marker_json
+    payload_sidecar = (
+        gzip.compress(payload_json.encode("utf-8")) if sidecar_only else None
+    )
+    result_sidecar = (
+        gzip.compress(marker_json.encode("utf-8")) if sidecar_only else None
+    )
+    cur.execute(
+        "INSERT INTO jobs_archive("
+        "id, uuid, domain, queue, job_type, owner_user_id, project_id, "
+        "batch_group, idempotency_key, payload, result, payload_compressed, "
+        "result_compressed, status, priority, "
+        "max_retries, retry_count, available_at, error_code, "
+        "failure_streak_code, completion_token, completed_at, archived_at"
+        ") VALUES(%s, %s, 'admin_webhooks', 'delivery', "
+        "'admin_webhook_delivery', NULL, NULL, NULL, %s, %s::jsonb, "
+        "%s::jsonb, %s, %s, %s, 5, 3, %s, %s, %s, %s, %s, %s, %s)",
+        (
+            41,
+            job_uuid,
+            f"admin-webhook-delivery:{_LEGACY_DELIVERY_ID}",
+            payload,
+            result,
+            payload_sidecar,
+            result_sidecar,
+            status,
+            retry_count,
+            available_at,
+            error_code,
+            failure_streak_code,
+            completion_token,
+            _LEGACY_APPLIED_AT,
+            _LEGACY_APPLIED_AT,
+        ),
+    )
+
+
+def test_pg_archive_upgrade_accepts_name_only_description_columns() -> None:
+    class _NameOnlyColumn:
+        name = "archive_id"
+
+    class _Cursor:
+        description = (_NameOnlyColumn(),)
+
+        def execute(self, _query, _params=None) -> None:
+            return None
+
+        def fetchall(self) -> tuple[object, ...]:
+            return ()
+
+    jobs_pg_migrations._upgrade_legacy_admin_webhook_archives_pg(_Cursor())
 
 
 def test_pg_schema_persists_owner_scoped_idempotency_receipts(jobs_pg_dsn):
@@ -219,6 +332,105 @@ def test_pg_forward_migration_backfills_execution_controls(jobs_pg_dsn):
                 )
 
     ensure_jobs_tables_pg(jobs_pg_dsn)
+
+
+def test_pg_upgrade_reconstructs_strict_legacy_canonical_archive(
+    jobs_pg_dsn,
+) -> None:
+    with psycopg.connect(jobs_pg_dsn, autocommit=True) as conn:
+        with conn.cursor() as cur:
+            _drop_pg_archive_execution_controls(cur)
+            _insert_legacy_canonical_archive_pg(
+                cur,
+                marker=_legacy_complete_marker(),
+                status="completed",
+                sidecar_only=True,
+            )
+
+    ensure_jobs_tables_pg(jobs_pg_dsn)
+
+    manager = JobManager(
+        None,
+        backend="postgres",
+        db_url=jobs_pg_dsn,
+    )
+    command = FindJobByIdentityCommand(
+        domain="admin_webhooks",
+        queue="delivery",
+        job_type="admin_webhook_delivery",
+        idempotency_key=(
+            f"admin-webhook-delivery:{_LEGACY_DELIVERY_ID}"
+        ),
+        expected_payload={"delivery_id": _LEGACY_DELIVERY_ID},
+    )
+    found = manager.find_job_by_identity(command)
+
+    assert found.state is JobIdentityLookupState.ARCHIVED
+    assert found.row is not None
+    assert found.row["expired_lease_policy"] == "requeue_no_attempt"
+    assert found.row["quarantine_threshold"] == 5
+    assert found.row["no_attempt_recovery_fingerprint"] is None
+    marker = project_admin_webhook_disposition_marker(
+        found.row,
+        expected_payload=command.expected_payload,
+        archived=True,
+    )
+    disposition = PreparedJobDisposition.complete(
+        token=_LEGACY_TOKEN,
+        delivery_id=_LEGACY_DELIVERY_ID,
+        attempt_id=_LEGACY_ATTEMPT_ID,
+    )
+    assert marker is not None
+    assert admin_webhook_disposition_marker_matches(marker, disposition)
+
+
+def test_pg_upgrade_rolls_back_unrecoverable_canonical_archive(
+    jobs_pg_dsn,
+) -> None:
+    retry_marker = {
+        **_legacy_complete_marker(),
+        "kind": "retry",
+        "original_not_before_at": "2026-08-29T12:35:56+00:00",
+    }
+    with psycopg.connect(jobs_pg_dsn, autocommit=True) as conn:
+        with conn.cursor() as cur:
+            _drop_pg_archive_execution_controls(cur)
+            _insert_legacy_canonical_archive_pg(
+                cur,
+                marker=retry_marker,
+                status="quarantined",
+                completion_token=_LEGACY_TOKEN,
+                error_code="receiver_503",
+                failure_streak_code="receiver_503",
+                retry_count=5,
+                available_at="2026-08-29T12:35:56+00:00",
+            )
+
+    with pytest.raises(RuntimeError):
+        ensure_jobs_tables_pg(jobs_pg_dsn)
+
+    with psycopg.connect(jobs_pg_dsn) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema=current_schema() "
+                "AND table_name='jobs_archive' "
+                "AND column_name = ANY(%s)",
+                (
+                    [
+                        "expired_lease_policy",
+                        "quarantine_threshold",
+                        "prepared_disposition_fingerprint",
+                        "no_attempt_recovery_fingerprint",
+                    ],
+                ),
+            )
+            assert cur.fetchall() == []
+            cur.execute(
+                "SELECT COUNT(*) FROM jobs_archive WHERE uuid=%s",
+                (_LEGACY_JOB_UUID,),
+            )
+            assert cur.fetchone() == (1,)
 
 
 def _read_pg_archive_batch_index_state(cur, index_name):
@@ -1114,6 +1326,7 @@ def test_pg_ensure_configures_timeouts_before_each_schema_phase(monkeypatch):
     class _RecordingCursor:
         def __init__(self):
             self.calls = []
+            self.description = ()
 
         def __enter__(self):
             return self
@@ -1123,6 +1336,9 @@ def test_pg_ensure_configures_timeouts_before_each_schema_phase(monkeypatch):
 
         def execute(self, query, params=None):
             self.calls.append((str(query), params))
+
+        def fetchall(self):
+            return []
 
     class _RecordingConnection:
         def __init__(self, *, autocommit):
@@ -1194,10 +1410,11 @@ def test_pg_ensure_configures_timeouts_before_each_schema_phase(monkeypatch):
     ]
     assert [connection.autocommit for connection in configured_connections] == [
         False,
+        False,
         True,
         True,
     ]
-    expected_local = (True, False, False)
+    expected_local = (True, True, False, False)
     for connection, local in zip(
         configured_connections,
         expected_local,

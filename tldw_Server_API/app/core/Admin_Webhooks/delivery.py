@@ -12,7 +12,7 @@ import secrets
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Literal, Protocol, TypeAlias
+from typing import TYPE_CHECKING, Literal, Protocol, TypeAlias, cast
 from uuid import UUID, uuid4
 
 from tldw_Server_API.app.core.Audit.unified_audit_service import MandatoryAuditWriteError
@@ -20,7 +20,13 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import MandatoryAuditW
 from .audit import DeliveryMutationAudit, DeliveryMutationAuditSink
 from .catalog import EVENT_API_VERSION, EVENT_CATALOG
 from .config import AdminWebhookMode, AdminWebhookSettings
-from .crypto import EVENT_BODY_MAX_BYTES, WebhookKeyError, WebhookKeyRing, WebhookKeyRingLoadResult
+from .crypto import (
+    EVENT_BODY_MAX_BYTES,
+    WebhookKeyError,
+    WebhookKeyLoadCode,
+    WebhookKeyRing,
+    WebhookKeyRingLoadResult,
+)
 from .domain import (
     AttemptState,
     DeliveryHistoryPage,
@@ -71,6 +77,20 @@ _TEST_REPLAY_RETRY_SECONDS = 5
 logger = logging.getLogger(__name__)
 
 EventCaptureOutcome: TypeAlias = Literal["accepted", "failed"]
+
+
+def _delivery_mode_error(
+    settings: AdminWebhookSettings | None,
+) -> WebhookErrorCode | None:
+    """Return the sole public denial for the configured delivery mode."""
+
+    if settings is None or settings.mode is AdminWebhookMode.OFF:
+        return WebhookErrorCode.DISABLED
+    if settings.mode is AdminWebhookMode.MIGRATE:
+        return WebhookErrorCode.MIGRATION_PENDING
+    if settings.mode is not AdminWebhookMode.ON:
+        return WebhookErrorCode.DISABLED
+    return None
 
 
 def _bounded_text(
@@ -632,13 +652,10 @@ class AdminWebhookDeliveryService:
 
     def _require_delivery_mode(self) -> AdminWebhookSettings:
         settings = self._settings
-        if settings is None or settings.mode is AdminWebhookMode.OFF:
-            raise WebhookError(WebhookErrorCode.DISABLED)
-        if settings.mode is AdminWebhookMode.MIGRATE:
-            raise WebhookError(WebhookErrorCode.MIGRATION_PENDING)
-        if settings.mode is not AdminWebhookMode.ON:
-            raise WebhookError(WebhookErrorCode.DISABLED)
-        return settings
+        error = _delivery_mode_error(settings)
+        if error is not None:
+            raise WebhookError(error)
+        return cast(AdminWebhookSettings, settings)
 
     def _require_test_dependencies(
         self,
@@ -1814,17 +1831,29 @@ class AdminWebhookDeliveryService:
 
 async def get_admin_webhook_delivery_service() -> AdminWebhookDeliveryService:
     """Compose delivery operations from application-scoped validated resources."""
+    settings = AdminWebhookSettings.from_environment(os.environ)
+    if _delivery_mode_error(settings) is not None:
+        return AdminWebhookDeliveryService(
+            repository=object(),
+            key_ring_result=WebhookKeyRingLoadResult(
+                ring=None,
+                code=WebhookKeyLoadCode.KEY_UNAVAILABLE,
+            ),
+            event_id_factory=lambda: str(uuid4()),
+            delivery_id_factory=lambda: str(uuid4()),
+            clock=lambda: datetime.now(timezone.utc),
+            settings=settings,
+        )
+
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
         AdminWebhookRepository,
     )
 
-    from .config import AdminWebhookSettings
     from .crypto import load_webhook_key_ring
     from .observability import AdminWebhookMetrics
 
     pool = await get_db_pool()
-    settings = AdminWebhookSettings.from_environment(os.environ)
     return AdminWebhookDeliveryService(
         repository=AdminWebhookRepository(pool),
         key_ring_result=load_webhook_key_ring(),

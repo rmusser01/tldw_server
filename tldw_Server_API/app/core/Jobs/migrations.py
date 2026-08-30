@@ -24,7 +24,13 @@ from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
     configure_sqlite_connection,
 )
 from tldw_Server_API.app.core.Jobs.operations.contracts import (
+    ADMIN_WEBHOOK_DELIVERY_DOMAIN,
+    ADMIN_WEBHOOK_DELIVERY_JOB_TYPE,
+    ADMIN_WEBHOOK_DELIVERY_QUARANTINE_THRESHOLD,
+    ADMIN_WEBHOOK_DELIVERY_QUEUE,
+    ExpiredLeasePolicy,
     SlidesArchiveNormalizationError,
+    reconstruct_legacy_admin_webhook_archive_fingerprint,
 )
 
 _JOBS_PATH_EXCEPTIONS = (ImportError, OSError, RuntimeError, TypeError, ValueError)
@@ -1259,6 +1265,47 @@ def _record_slides_audit_failure_sqlite(conn: sqlite3.Connection) -> None:
         )
 
 
+def _upgrade_legacy_admin_webhook_archives_sqlite(
+    conn: sqlite3.Connection,
+) -> None:
+    """Backfill only strictly reconstructable reserved archive evidence."""
+
+    cursor = conn.execute(
+        "SELECT * FROM jobs_archive WHERE domain=? AND queue=? AND job_type=?",
+        (
+            ADMIN_WEBHOOK_DELIVERY_DOMAIN,
+            ADMIN_WEBHOOK_DELIVERY_QUEUE,
+            ADMIN_WEBHOOK_DELIVERY_JOB_TYPE,
+        ),
+    )
+    columns = tuple(str(item[0]) for item in cursor.description or ())
+    for values in cursor.fetchall():
+        row = normalize_slides_archive_projection(dict(zip(columns, values)))
+        fingerprint = reconstruct_legacy_admin_webhook_archive_fingerprint(row)
+        if fingerprint is None:
+            continue
+        updated = conn.execute(
+            "UPDATE jobs_archive SET expired_lease_policy=?, "
+            "quarantine_threshold=?, prepared_disposition_fingerprint=?, "
+            "no_attempt_recovery_fingerprint=NULL WHERE archive_id=? "
+            "AND expired_lease_policy=? "
+            "AND quarantine_threshold IS NULL "
+            "AND prepared_disposition_fingerprint IS NULL "
+            "AND no_attempt_recovery_fingerprint IS NULL",
+            (
+                ExpiredLeasePolicy.REQUEUE_NO_ATTEMPT.value,
+                ADMIN_WEBHOOK_DELIVERY_QUARANTINE_THRESHOLD,
+                fingerprint,
+                row.get("archive_id"),
+                ExpiredLeasePolicy.CONSUME_RETRY.value,
+            ),
+        )
+        if updated.rowcount != 1:
+            raise RuntimeError(
+                "canonical admin webhook legacy archive upgrade lost its row"
+            )
+
+
 def ensure_jobs_tables(db_path: Path | None = None) -> Path:
     """Ensure the jobs table exists in the given SQLite database.
 
@@ -1396,6 +1443,7 @@ def ensure_jobs_tables(db_path: Path | None = None) -> Path:
             ):
                 with contextlib.suppress(_JOBS_DB_EXCEPTIONS):
                     conn.execute(f"ALTER TABLE jobs_archive ADD COLUMN {column_sql}")  # nosec B608
+            _upgrade_legacy_admin_webhook_archives_sqlite(conn)
             _ensure_sqlite_dependency_snapshot_columns(conn)
             try:
                 _record_slides_audit_failure_sqlite(conn)

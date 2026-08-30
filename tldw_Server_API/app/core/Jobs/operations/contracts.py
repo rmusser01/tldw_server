@@ -138,6 +138,7 @@ def canonical_admin_webhook_row_matches(
         return False
     try:
         delivery_id = canonical_admin_webhook_delivery_id(expected_payload)
+        _canonical_uuid4(row.get("uuid"), field_name="job_uuid")
     except ValueError:
         return False
     if (
@@ -255,6 +256,7 @@ def _canonical_admin_webhook_marker(
     row: dict[str, Any],
     *,
     delivery_id: str,
+    require_fingerprint: bool = True,
 ) -> tuple[bool, dict[str, Any] | None]:
     """Validate the strict public disposition marker without exposing facts."""
 
@@ -282,10 +284,12 @@ def _canonical_admin_webhook_marker(
         return False, None
     if len(encoded_marker) > _ADMIN_WEBHOOK_MARKER_MAX_BYTES:
         return False, None
-    if (
+    if require_fingerprint and (
         not isinstance(fingerprint, str)
         or _OPAQUE_TOKEN_RE.fullmatch(fingerprint) is None
     ):
+        return False, None
+    if not require_fingerprint and fingerprint is not None:
         return False, None
     kind = marker.get("kind")
     origin = marker.get("origin")
@@ -840,6 +844,107 @@ def prepared_disposition_fingerprint(disposition: PreparedJobDisposition) -> str
         sort_keys=True,
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def reconstruct_legacy_admin_webhook_archive_fingerprint(
+    row: dict[str, Any],
+) -> str | None:
+    """Return a safe legacy fingerprint upgrade or reject reserved evidence."""
+
+    error = RuntimeError(
+        "canonical admin webhook legacy archive cannot be reconstructed"
+    )
+    if not isinstance(row, dict):
+        raise error
+    try:
+        _canonical_uuid4(row.get("uuid"), field_name="job_uuid")
+        payload = row.get("payload")
+        if isinstance(payload, str):
+            if len(payload.encode("utf-8")) > _ADMIN_WEBHOOK_MARKER_MAX_BYTES:
+                raise ValueError
+            payload = json.loads(payload)
+        delivery_id = canonical_admin_webhook_delivery_id(payload)
+    except (RecursionError, TypeError, ValueError):
+        raise error from None
+    normalized = {**row, "payload": payload}
+    if canonical_admin_webhook_row_matches(
+        normalized,
+        expected_payload=payload,
+        archived=True,
+    ):
+        return None
+    if (
+        normalized.get("expired_lease_policy")
+        != ExpiredLeasePolicy.CONSUME_RETRY.value
+        or normalized.get("quarantine_threshold") is not None
+        or normalized.get("prepared_disposition_fingerprint") is not None
+        or normalized.get("no_attempt_recovery_fingerprint") is not None
+    ):
+        raise error
+    marker_valid, marker = _canonical_admin_webhook_marker(
+        normalized,
+        delivery_id=delivery_id,
+        require_fingerprint=False,
+    )
+    if (
+        not marker_valid
+        or marker is None
+        or normalized.get("completion_token") != marker.get("token")
+    ):
+        raise error
+    try:
+        kind = PreparedDispositionKind(marker["kind"])
+        if kind is PreparedDispositionKind.COMPLETE:
+            if normalized.get("status") != "completed":
+                raise ValueError
+            disposition = PreparedJobDisposition.complete(
+                token=marker["token"],
+                delivery_id=delivery_id,
+                attempt_id=marker["attempt_id"],
+            )
+        elif kind is PreparedDispositionKind.FAIL:
+            reason = normalized.get("error_code")
+            if (
+                normalized.get("status") != "failed"
+                or reason != normalized.get("error_message")
+                or reason != normalized.get("last_error")
+            ):
+                raise ValueError
+            disposition = PreparedJobDisposition.fail(
+                token=marker["token"],
+                delivery_id=delivery_id,
+                attempt_id=marker.get("attempt_id"),
+                reason_code=reason,
+            )
+        elif kind is PreparedDispositionKind.CANCEL:
+            if normalized.get("status") != "cancelled":
+                raise ValueError
+            disposition = PreparedJobDisposition.cancel(
+                token=marker["token"],
+                delivery_id=delivery_id,
+                attempt_id=marker.get("attempt_id"),
+                reason_code=normalized.get("cancellation_reason"),
+            )
+        else:
+            raise ValueError
+    except (KeyError, TypeError, ValueError):
+        raise error from None
+
+    fingerprint = prepared_disposition_fingerprint(disposition)
+    upgraded = {
+        **normalized,
+        "expired_lease_policy": ExpiredLeasePolicy.REQUEUE_NO_ATTEMPT.value,
+        "quarantine_threshold": ADMIN_WEBHOOK_DELIVERY_QUARANTINE_THRESHOLD,
+        "prepared_disposition_fingerprint": fingerprint,
+        "no_attempt_recovery_fingerprint": None,
+    }
+    if not canonical_admin_webhook_row_matches(
+        upgraded,
+        expected_payload=payload,
+        archived=True,
+    ):
+        raise error
+    return fingerprint
 
 
 def admin_webhook_disposition_marker_matches(
@@ -1519,6 +1624,7 @@ __all__ = [
     "PreparedJobDisposition",
     "prepared_disposition_fingerprint",
     "project_admin_webhook_disposition_marker",
+    "reconstruct_legacy_admin_webhook_archive_fingerprint",
     "ReleaseJobCommand",
     "RenewLeaseCommand",
     "is_admin_webhook_delivery_queue",

@@ -19,6 +19,7 @@ from tldw_Server_API.app.core.Jobs.operations.contracts import (
     EnsureLeaseHorizonCommand,
     ExpiredLeasePolicy,
     FindJobByIdentityCommand,
+    IdempotentOperationUnavailableError,
     JobIdentityLookupState,
     NoTransitionReason,
     OperationOutcome,
@@ -180,6 +181,80 @@ def test_postgres_prune_preserves_unacknowledged_canonical_disposition_proof(
     assert marker.token == disposition.token
     assert marker.fingerprint == found.row["prepared_disposition_fingerprint"]
     assert manager.get_job_or_archived_by_uuid(unrelated["uuid"]) is None
+
+
+@pytest.mark.parametrize(
+    "corruption",
+    ("payload", "uuid", "controls", "marker", "fingerprint"),
+)
+def test_postgres_prune_rolls_back_malformed_reserved_canonical_evidence(
+    jobs_pg_dsn,
+    monkeypatch,
+    corruption: str,
+) -> None:
+    monkeypatch.delenv("JOBS_ARCHIVE_BEFORE_DELETE", raising=False)
+    manager = _manager(jobs_pg_dsn)
+    job = _canonical(manager, suffix=corruption)
+    acquired = _acquire(manager)
+    delivery_id = job["payload"]["delivery_id"]
+    disposition = PreparedJobDisposition.complete(
+        token=_token("7"),
+        delivery_id=delivery_id,
+        attempt_id=str(uuid4()),
+    )
+    assert _apply(
+        manager,
+        job,
+        disposition,
+        leased=acquired,
+    ).outcome is OperationOutcome.APPLIED
+    unrelated = manager.create_job(
+        domain="other",
+        queue="default",
+        job_type="ordinary",
+        payload={"kind": "ordinary"},
+        owner_user_id=None,
+    )
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE jobs SET status='completed', "
+            "completed_at=NOW() - INTERVAL '40 days' WHERE id = ANY(%s)",
+            ([int(job["id"]), int(unrelated["id"])],),
+        )
+        if corruption == "payload":
+            cur.execute(
+                "UPDATE jobs SET payload='[]'::jsonb WHERE id=%s",
+                (job["id"],),
+            )
+        elif corruption == "uuid":
+            cur.execute(
+                "UPDATE jobs SET uuid='not-a-canonical-uuid' WHERE id=%s",
+                (job["id"],),
+            )
+        elif corruption == "controls":
+            cur.execute(
+                "UPDATE jobs SET expired_lease_policy='consume_retry' WHERE id=%s",
+                (job["id"],),
+            )
+        elif corruption == "marker":
+            cur.execute(
+                "UPDATE jobs SET result='{}'::jsonb WHERE id=%s",
+                (job["id"],),
+            )
+        else:
+            cur.execute(
+                "UPDATE jobs SET prepared_disposition_fingerprint=NULL WHERE id=%s",
+                (job["id"],),
+            )
+
+    with pytest.raises(IdempotentOperationUnavailableError):
+        manager.prune_jobs(statuses=["completed"], older_than_days=30)
+
+    assert manager.get_job(int(job["id"])) is not None
+    assert manager.get_job(int(unrelated["id"])) is not None
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) FROM jobs_archive")
+        assert cur.fetchone() == (0,)
 
 
 def test_postgres_retry_exact_schedule_and_historical_replay_after_reacquire(

@@ -205,32 +205,78 @@ async def test_direct_delivery_service_construction_fails_closed() -> None:
     assert repository.calls == []
 
 
+@pytest.mark.parametrize(
+    ("mode", "expected_code"),
+    [
+        ("off", WebhookErrorCode.DISABLED),
+        ("migrate", WebhookErrorCode.MIGRATION_PENDING),
+    ],
+)
 @pytest.mark.asyncio
-async def test_production_composition_uses_environment_mode_guard(
+async def test_production_composition_denies_without_resource_initialization(
     monkeypatch: pytest.MonkeyPatch,
+    mode: str,
+    expected_code: WebhookErrorCode,
 ) -> None:
-    class _PoolSpy:
-        def __init__(self) -> None:
-            self.calls: list[str] = []
-
-        def __getattr__(self, name: str):
-            self.calls.append(name)
-            raise AssertionError(f"database pool escaped mode guard: {name}")
-
-    pool = _PoolSpy()
-
-    async def _get_pool() -> _PoolSpy:
-        return pool
-
+    from tldw_Server_API.app.core.Admin_Webhooks import crypto, observability
     from tldw_Server_API.app.core.AuthNZ import database
+    from tldw_Server_API.app.core.DB_Management import (
+        admin_webhooks_repository,
+    )
 
-    monkeypatch.setenv("TLDW_ADMIN_WEBHOOKS_MODE", "off")
+    resource_calls = dict.fromkeys(
+        ("pool", "repository", "key_ring", "executor", "metrics"), 0
+    )
+
+    def _unexpected_resource(name: str):
+        def _raise(*_args: object, **_kwargs: object) -> None:
+            resource_calls[name] += 1
+            raise AssertionError(f"{name} initialized while delivery mode is {mode}")
+
+        return _raise
+
+    async def _unexpected_pool() -> None:
+        resource_calls["pool"] += 1
+        raise AssertionError(f"pool initialized while delivery mode is {mode}")
+
+    monkeypatch.setenv("TLDW_ADMIN_WEBHOOKS_MODE", mode)
     monkeypatch.setenv("TLDW_ADMIN_WEBHOOKS_LEGACY_COMPAT", "false")
-    monkeypatch.setattr(database, "get_db_pool", _get_pool)
+    monkeypatch.setattr(database, "get_db_pool", _unexpected_pool)
+    monkeypatch.setattr(
+        admin_webhooks_repository,
+        "AdminWebhookRepository",
+        _unexpected_resource("repository"),
+    )
+    monkeypatch.setattr(
+        crypto,
+        "load_webhook_key_ring",
+        _unexpected_resource("key_ring"),
+    )
+    monkeypatch.setattr(
+        delivery,
+        "DeliveryAttemptExecutor",
+        _unexpected_resource("executor"),
+    )
+    monkeypatch.setattr(
+        observability,
+        "AdminWebhookMetrics",
+        _unexpected_resource("metrics"),
+    )
 
     service = await delivery.get_admin_webhook_delivery_service()
-    with pytest.raises(WebhookError) as exc_info:
-        await service.list_delivery_history(11, limit=50, offset=0)
+    audits: list[object] = []
 
-    assert exc_info.value.code is WebhookErrorCode.DISABLED
-    assert pool.calls == []
+    async def _record(record: object) -> None:
+        audits.append(record)
+
+    with pytest.raises(WebhookError) as exc_info:
+        await service.redeliver_webhook(
+            _redelivery_command(),
+            audit_sink=_record,
+        )
+
+    assert exc_info.value.code is expected_code
+    assert resource_calls == dict.fromkeys(resource_calls, 0)
+    assert len(audits) == 1
+    assert audits[0].outcome == "denied"
+    assert audits[0].reason_code is expected_code

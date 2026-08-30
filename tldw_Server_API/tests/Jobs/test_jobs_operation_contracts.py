@@ -160,6 +160,7 @@ def test_admin_webhook_marker_projection_is_strict_bounded_and_fingerprint_exact
         "applied_at": _aware().isoformat(),
     }
     row = {
+        "uuid": _uuid(),
         "domain": "admin_webhooks",
         "queue": "delivery",
         "job_type": "admin_webhook_delivery",
