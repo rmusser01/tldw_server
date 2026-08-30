@@ -55,8 +55,17 @@ async def test_each_readiness_route_uses_the_shared_snapshot_once(
     app.add_api_route("/internal/ready", main.internal_readiness_check, methods=["GET"])
     app.include_router(health.router, prefix="/api/v1")
     app.dependency_overrides[auth_deps.get_auth_principal] = lambda: AuthPrincipal(
-        kind="user", user_id=1, api_key_id=None, subject="test", token_type="access", jti=None,
-        roles=["admin"], permissions=[], is_admin=True, org_ids=[], team_ids=[],
+        kind="user",
+        user_id=1,
+        api_key_id=None,
+        subject="test",
+        token_type="access",
+        jti=None,
+        roles=["admin"],
+        permissions=[],
+        is_admin=True,
+        org_ids=[],
+        team_ids=[],
     )
     snapshot = ReadinessSnapshot(True, None, {"database": {"status": "healthy", "type": "sqlite"}})
     collect = AsyncMock(return_value=snapshot)

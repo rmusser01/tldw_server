@@ -11,9 +11,7 @@ def _capture_health_logs() -> Iterator[list[str]]:
 
     messages: list[str] = []
     sink_id = health_mod.logger.add(
-        lambda message: messages.append(str(message))
-        if message.record["name"] == health_mod.__name__
-        else None,
+        lambda message: messages.append(str(message)) if message.record["name"] == health_mod.__name__ else None,
         level="DEBUG",
     )
     try:
@@ -64,10 +62,13 @@ def _get_client(monkeypatch, env: dict):
 
 def test_security_critical_when_high_risk_meets_threshold(monkeypatch):
     # Configure thresholds
-    client = _get_client(monkeypatch, {
-        "AUDIT_SEC_CRITICAL_HIGH_RISK_MIN": 3,
-        "AUDIT_SEC_ELEVATED_FAILURE_MIN": 10,
-    })
+    client = _get_client(
+        monkeypatch,
+        {
+            "AUDIT_SEC_CRITICAL_HIGH_RISK_MIN": 3,
+            "AUDIT_SEC_ELEVATED_FAILURE_MIN": 10,
+        },
+    )
     _monkeypatch_audit_summary(monkeypatch, high_risk=3, failures=0)
 
     r = client.get("/api/v1/health/security")
@@ -78,10 +79,13 @@ def test_security_critical_when_high_risk_meets_threshold(monkeypatch):
 
 
 def test_security_elevated_when_failures_meet_threshold(monkeypatch):
-    client = _get_client(monkeypatch, {
-        "AUDIT_SEC_CRITICAL_HIGH_RISK_MIN": 5,
-        "AUDIT_SEC_ELEVATED_FAILURE_MIN": 7,
-    })
+    client = _get_client(
+        monkeypatch,
+        {
+            "AUDIT_SEC_CRITICAL_HIGH_RISK_MIN": 5,
+            "AUDIT_SEC_ELEVATED_FAILURE_MIN": 7,
+        },
+    )
     _monkeypatch_audit_summary(monkeypatch, high_risk=0, failures=7)
 
     r = client.get("/api/v1/health/security")
@@ -91,10 +95,13 @@ def test_security_elevated_when_failures_meet_threshold(monkeypatch):
 
 
 def test_security_low_when_some_failures_below_threshold(monkeypatch):
-    client = _get_client(monkeypatch, {
-        "AUDIT_SEC_CRITICAL_HIGH_RISK_MIN": 2,
-        "AUDIT_SEC_ELEVATED_FAILURE_MIN": 10,
-    })
+    client = _get_client(
+        monkeypatch,
+        {
+            "AUDIT_SEC_CRITICAL_HIGH_RISK_MIN": 2,
+            "AUDIT_SEC_ELEVATED_FAILURE_MIN": 10,
+        },
+    )
     _monkeypatch_audit_summary(monkeypatch, high_risk=0, failures=1)
 
     r = client.get("/api/v1/health/security")

@@ -64,10 +64,11 @@ or its restore-backed rollback.
 - Reverse proxy (Caddy): `Dockerfiles/docker-compose.proxy.yml`
   - `docker compose -f Dockerfiles/docker-compose.yml -f Dockerfiles/docker-compose.proxy.yml up -d --build`
   - Exposes 80/443 via Caddy; unpublish app port on host.
+  - Sample: `Helper_Scripts/Samples/Caddy/Caddyfile.compose`.
 
 - Reverse proxy (Nginx): `Dockerfiles/docker-compose.proxy-nginx.yml`
   - `docker compose -f Dockerfiles/docker-compose.yml -f Dockerfiles/docker-compose.proxy-nginx.yml up -d --build`
-  - Mount `Samples/Nginx/nginx.conf` and your certs.
+  - Mount `Helper_Scripts/Samples/Nginx/nginx.conf` and your certs.
 
 - Postgres (basic standalone): `Dockerfiles/docker-compose.postgres.yml`
   - Start standalone Postgres for advanced/custom stacks.

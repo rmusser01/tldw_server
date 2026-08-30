@@ -1205,8 +1205,7 @@ def test_lifespan_startup_delegates_evaluations_warmup(
     assert recorded_calls[0]["logger"] is main_module.logger
     assert recorded_calls[0]["startup_guard_exceptions"] == main_module._STARTUP_GUARD_EXCEPTIONS
     assert recorded_calls[0]["test_mode"] == (
-        bool(getattr(main_module, "_TEST_MODE", False))
-        or main_module._runtime_test_mode_active()
+        bool(getattr(main_module, "_TEST_MODE", False)) or main_module._runtime_test_mode_active()
     )
 
 

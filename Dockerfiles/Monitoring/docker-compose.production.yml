@@ -24,6 +24,9 @@ services:
       retries: 3
     depends_on:
       - alertmanager
+    networks:
+      - edge
+      - monitoring
 
   alertmanager:
     image: ${ALERTMANAGER_IMAGE:?Set an exact Alertmanager image}
@@ -39,6 +42,8 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+    networks:
+      - monitoring
 
   grafana:
     image: ${GRAFANA_IMAGE:?Set an exact Grafana image}
@@ -54,11 +59,14 @@ services:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ../../Docs/Monitoring/Grafana_Dashboards:/var/lib/grafana/dashboards:ro
     restart: unless-stopped
+    networks:
+      - monitoring
 
 networks:
-  default:
+  edge:
     external: true
     name: tldw-production_edge
+  monitoring: {}
 
 volumes:
   grafana_data:

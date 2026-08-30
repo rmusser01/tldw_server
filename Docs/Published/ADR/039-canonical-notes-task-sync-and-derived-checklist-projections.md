@@ -7,6 +7,8 @@
 **Related task:** TASK-13006
 **Related spec/plan:** `Docs/superpowers/specs/2026-08-13-notes-task-activity-sync-design.md`
 **Depends on:** ADR-031, ADR-034, ADR-037, and ADR-038
+**Proposed amendment:** ADR-040 evolves the scope-authority row for independent
+Notes graph binding when TASK-13007 is implemented.
 
 ## Decision
 
@@ -67,6 +69,29 @@ rekey, including when the graph is empty; replay to the same dataset is idempote
 and a different target is rejected. Compatibility callers resolve this indexed
 product-owned row, never accept a client dataset selector, and all shared task-store
 writes must match the recorded authority.
+
+### Prospective ADR-040 amendment
+
+ADR-040 preserves this relation as the sole immutable owner-to-default-personal-
+dataset authority but adds one-way `task_graph_bound`, `moodboard_graph_bound`, and
+`studio_graph_bound` state. Existing rows migrate with `task_graph_bound=true`.
+The migration first verifies that the complete task graph matches the authority
+dataset and aborts on inconsistency. After that migration, row presence alone no
+longer proves that the task graph is bound: task compatibility reads and writes
+resolve the authority dataset only when
+`task_graph_bound=true`, otherwise they retain the private local-unbound behavior
+defined here. Task binding changes its flag from false to true in the same
+transaction as complete task-graph verification/rekey. Moodboard and Studio bind
+their own graphs and flags independently against the same immutable dataset.
+
+The additive migration defaults `task_graph_bound=true` so an older task binder's
+owner/dataset-only insert still records the task rekey it performed. New binders
+write all flags explicitly, and ADR-040 activation excludes row-presence-era task
+servers before a moodboard/Studio-first authority insert can occur.
+
+This amendment becomes effective only with TASK-13007.1's schema and task-caller
+changes. Until then, schema-v60's original row-presence semantics above remain the
+implemented contract.
 
 Because the product migration cannot read the separate Sync database, preserved
 inactive rows use a private owner-scoped local-unbound dataset sentinel. Explicit

@@ -6,7 +6,7 @@ Audience: DevOps/SREs and self-hosters deploying tldw_server for the first time
 This guide walks you through a secure, production-ready first deployment of tldw_server. It covers Docker Compose (recommended) and a bare-metal alternative, plus the initial setup wizard, TLS, CORS, and basic verification.
 
 Related documents
-- Production-safe reference deployment: `Docs/Deployment/Production_Reference_Deployment.md`
+- [Production-safe reference deployment](Production_Reference_Deployment.md)
 - Reverse proxy examples (Nginx/Traefik): `Docs/Deployment/Reverse_Proxy_Examples.md`
 - Postgres migration: `Docs/Deployment/Postgres_Migration_Guide.md`
 - Sidecar workers (systemd/launchd): `Docs/Deployment/Sidecar_Workers.md`
@@ -92,13 +92,9 @@ See `Env_Vars.md` for the complete list and `Docs/AuthNZ/AUTHNZ_DATABASE_CONFIG.
 
 ## 6) Verify and smoke test
 
-Public liveness and private readiness
-```bash
-curl --fail --silent https://your.domain.example/health
-docker compose --env-file /absolute/path/production.env \
-  -f Dockerfiles/docker-compose.production.yml exec -T app \
-  python -c "import urllib.request; print(urllib.request.urlopen('http://localhost:8000/internal/ready').read().decode())"
-```
+Use the [production reference verification
+steps](Production_Reference_Deployment.md#5-verify-public-and-operator-surfaces)
+for public liveness and private readiness checks.
 
 Public `/health` returns only `{"status":"ok"}`. Detailed health, readiness,
 and metrics require an authenticated operator; the proxy returns 404 for

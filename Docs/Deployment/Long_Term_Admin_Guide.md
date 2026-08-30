@@ -6,7 +6,7 @@ Audience: Operators and administrators running tldw_server in production
 This guide covers day-2 operations: upgrades, backups, monitoring, capacity and cost management, security operations, and troubleshooting. Pair this with the Production Hardening checklist and Metrics Cheatsheet.
 
 Related documents
-- Production reference deployment: `Docs/Deployment/Production_Reference_Deployment.md`
+- [Production reference deployment](Production_Reference_Deployment.md)
 - First-time production setup: `Docs/Deployment/First_Time_Production_Setup.md`
 - Production hardening checklist: `Docs/Published/User_Guides/Server/Production_Hardening_Checklist.md`
 - Reverse proxy examples: `Docs/Deployment/Reverse_Proxy_Examples.md`

@@ -206,12 +206,14 @@ docker compose -f Dockerfiles/Monitoring/docker-compose.production.yml \
 ```
 
 `Dockerfiles/Monitoring/docker-compose.production.yml` mounts the API-key file
-read only at `/run/secrets/tldw_metrics_api_key` and joins the existing
-`tldw-production_edge` network. Prometheus uses the key as a Bearer credential
-for `/api/v1/metrics/text`. Prometheus, Alertmanager, and Grafana publish only
-on host loopback; use an authenticated SSH tunnel for remote operator access.
-The legacy `docker-compose.monitoring.yml` is a non-production customization
-overlay and is not compatible with the standalone production boundary.
+read only at `/run/secrets/tldw_metrics_api_key`. Only Prometheus joins the
+existing `tldw-production_edge` network to scrape `app:8000`; Alertmanager and
+Grafana remain on the companion's separate monitoring network. Prometheus uses
+the key as a Bearer credential for `/api/v1/metrics/text`. All three services
+publish only on host loopback; use an authenticated SSH tunnel for remote
+operator access. The legacy `docker-compose.monitoring.yml` is a non-production
+customization overlay and is not compatible with the standalone production
+boundary.
 
 Rotate the API key and file together, then reload Prometheus. Stop monitoring
 without removing its Grafana data by omitting `-v`:
@@ -252,9 +254,11 @@ and document retention and deletion policy.
 
 Known follow-up boundaries are explicit:
 
-- `TASK-13013.7` owns broader release/distribution provenance work.
-- `TASK-13013.9` owns the remaining end-to-end release-candidate evidence.
-- `TASK-13144` owns expanded backup automation and disaster-recovery maturity.
+- `TASK-13013.7` owns broader image provenance, digest, attestation, and SBOM
+  enforcement.
+- `TASK-13013.9` owns long-duration capacity, restore-time, and soak evidence.
+- `TASK-13144` owns the global client-identity middleware and physical-peer
+  normalization across trusted proxy consumers.
 
 Those follow-ups do not relax this profile's fail-closed preflight, private
 stateful services, authenticated operator surfaces, or restore-backed rollback.

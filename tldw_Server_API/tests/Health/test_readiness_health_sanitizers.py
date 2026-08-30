@@ -12,9 +12,7 @@ from tldw_Server_API.app.api.v1.endpoints import health as health_mod
 def _capture_health_logs() -> Iterator[list[str]]:
     messages: list[str] = []
     sink_id = health_mod.logger.add(
-        lambda message: messages.append(str(message))
-        if message.record["name"] == health_mod.__name__
-        else None,
+        lambda message: messages.append(str(message)) if message.record["name"] == health_mod.__name__ else None,
         level="DEBUG",
     )
     try:

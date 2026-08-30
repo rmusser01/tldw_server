@@ -175,11 +175,7 @@ async def api_health():
         body["auth_mode"] = getattr(_s, "AUTH_MODE", "single_user")
         # In test environments, optionally expose a test API key only with explicit opt-in
         # This prevents accidental leakage of SINGLE_USER_API_KEY unless HEALTH_EXPOSE_TEST_API_KEY=true
-        if (
-            is_test_mode()
-            and body["auth_mode"] == "single_user"
-            and env_flag_enabled("HEALTH_EXPOSE_TEST_API_KEY")
-        ):
+        if is_test_mode() and body["auth_mode"] == "single_user" and env_flag_enabled("HEALTH_EXPOSE_TEST_API_KEY"):
             _key = getattr(_s, "SINGLE_USER_API_KEY", None)
             if _key:
                 body.setdefault("test_api_key", _key)

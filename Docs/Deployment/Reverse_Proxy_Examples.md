@@ -3,7 +3,7 @@
 This guide shows example configurations for running tldw_server behind a reverse proxy with TLS and WebSocket support.
 
 These are custom, non-production examples. The reviewed production boundary is
-`Docs/Deployment/Production_Reference_Deployment.md` with
+the [production reference deployment](Production_Reference_Deployment.md) with
 `Dockerfiles/Production/Caddyfile`; do not treat a legacy overlay or copied
 snippet as a substitute for that standalone reference.
 

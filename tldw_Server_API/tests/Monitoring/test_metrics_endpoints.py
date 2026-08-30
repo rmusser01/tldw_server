@@ -14,7 +14,6 @@ pytestmark = pytest.mark.monitoring
 
 def _make_test_app() -> FastAPI:
 
-
     a = FastAPI()
 
     # Root Prometheus metrics endpoint (mirror main.py behavior)
@@ -42,19 +41,20 @@ def client():
 
 def test_prometheus_metrics_contains_http_and_chunking_fields(client):
 
-
     # Make a simple request to ensure HTTP middleware increments counters
     r = client.get("/favicon.ico")
     assert r.status_code in (200, 404)
 
     # Ensure chunking metric is registered, then manually observe one
     reg = get_metrics_registry()
-    reg.register_metric(MetricDefinition(
-        name='chunk_time_seconds',
-        type=MetricType.HISTOGRAM,
-        description='Chunking operation duration in seconds',
-        labels=['method', 'unit']
-    ))
+    reg.register_metric(
+        MetricDefinition(
+            name="chunk_time_seconds",
+            type=MetricType.HISTOGRAM,
+            description="Chunking operation duration in seconds",
+            labels=["method", "unit"],
+        )
+    )
     reg.observe("chunk_time_seconds", 0.0123, labels={"method": "words", "unit": "seconds"})
 
     resp = client.get("/metrics")
@@ -70,7 +70,6 @@ def test_prometheus_metrics_contains_http_and_chunking_fields(client):
 
 
 def test_chat_metrics_json_shape_basic(client):
-
 
     resp = client.get("/api/v1/metrics/chat")
     assert resp.status_code == 200
@@ -98,10 +97,13 @@ def test_http_metrics_records_http_exception_status():
         resp = client.get("/boom")
         assert resp.status_code == 404
 
-    assert reg.get_cumulative_counter(
-        "http_requests_total",
-        {"method": "GET", "endpoint": "/boom", "status": "404"},
-    ) == 1
+    assert (
+        reg.get_cumulative_counter(
+            "http_requests_total",
+            {"method": "GET", "endpoint": "/boom", "status": "404"},
+        )
+        == 1
+    )
 
 
 def test_http_metrics_labels_never_capture_standalone_source_body():

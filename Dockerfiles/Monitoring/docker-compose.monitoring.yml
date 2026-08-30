@@ -17,7 +17,7 @@ services:
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
     ports:
-      - '9090:9090'
+      - '127.0.0.1:9090:9090'
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/healthy"]
@@ -35,7 +35,7 @@ services:
     command:
       - '--config.file=/etc/alertmanager/alertmanager.yml'
     ports:
-      - '9093:9093'
+      - '127.0.0.1:9093:9093'
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:9093/-/healthy"]
@@ -50,7 +50,7 @@ services:
       - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:?Set GRAFANA_ADMIN_USER before starting Grafana}
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?Set GRAFANA_ADMIN_PASSWORD before starting Grafana}
     ports:
-      - '${GRAFANA_PORT:-3002}:3000'
+      - '127.0.0.1:${GRAFANA_PORT:-3002}:3000'
     depends_on:
       - prometheus
     volumes:

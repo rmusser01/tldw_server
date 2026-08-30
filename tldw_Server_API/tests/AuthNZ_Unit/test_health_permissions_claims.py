@@ -67,7 +67,9 @@ def test_detailed_health_requires_system_logs(path: str, principal: AuthPrincipa
 
 
 @pytest.mark.parametrize("path", DETAILED_HEALTH_PATHS)
-@pytest.mark.parametrize("principal", (_principal(permissions=[SYSTEM_LOGS]), _principal(permissions=[], is_admin=True)))
+@pytest.mark.parametrize(
+    "principal", (_principal(permissions=[SYSTEM_LOGS]), _principal(permissions=[], is_admin=True))
+)
 def test_detailed_health_allows_permission_or_admin_bypass(path: str, principal: AuthPrincipal) -> None:
     with TestClient(_app(principal)) as client:
         response = client.get(path)

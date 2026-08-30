@@ -20,6 +20,7 @@ try:
 except ImportError:  # pragma: no cover - redis is an optional deployment dependency
     RedisError = None
 
+
 async def _set_no_store_header(response: Response) -> None:
     """Prevent caching for dictionary-based diagnostic responses."""
     response.headers["Cache-Control"] = "no-store"
@@ -138,9 +139,7 @@ async def build_prometheus_metrics_response() -> Response:
         from prometheus_client import REGISTRY as PC_REGISTRY
         from prometheus_client import generate_latest as pc_generate_latest
 
-        prometheus_text = (
-            prometheus_text + "\n" + pc_generate_latest(PC_REGISTRY).decode("utf-8")
-        ).strip() + "\n"
+        prometheus_text = (prometheus_text + "\n" + pc_generate_latest(PC_REGISTRY).decode("utf-8")).strip() + "\n"
     except _METRICS_NONCRITICAL_EXCEPTIONS:
         logger.debug("metrics: failed to augment with prometheus_client registry")
 
@@ -181,9 +180,7 @@ async def get_prometheus_metrics() -> Response:
     return await build_prometheus_metrics_response()
 
 
-@router.get("/metrics/json",
-            summary="Get metrics in JSON format",
-            response_model=dict[str, Any])
+@router.get("/metrics/json", summary="Get metrics in JSON format", response_model=dict[str, Any])
 async def get_json_metrics() -> dict[str, Any]:
     """
     Get all metrics in JSON format.
@@ -201,19 +198,16 @@ async def get_json_metrics() -> dict[str, Any]:
         return {
             "metrics": all_metrics,
             "active_operations": active_operations,
-            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         }
     except _METRICS_NONCRITICAL_EXCEPTIONS as e:
         logger.error("Error getting metrics")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve metrics"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to retrieve metrics"
         ) from e
 
 
-@router.get("/metrics/health",
-            summary="Health check with metrics",
-            response_model=dict[str, Any])
+@router.get("/metrics/health", summary="Health check with metrics", response_model=dict[str, Any])
 async def health_check_with_metrics() -> dict[str, Any]:
     """
     Health check endpoint with basic metrics.
@@ -238,7 +232,7 @@ async def health_check_with_metrics() -> dict[str, Any]:
             "active_requests": active["active_requests"],
             "active_streams": active["active_streams"],
             "active_transactions": active["active_transactions"],
-            "message": "Service is operational"
+            "message": "Service is operational",
         }
     except _METRICS_NONCRITICAL_EXCEPTIONS:
         logger.error("Metrics Health check failed")
@@ -247,13 +241,11 @@ async def health_check_with_metrics() -> dict[str, Any]:
             "message": "Metrics Health check failed: ERROR - SEE LOGS",
             "active_requests": -1,
             "active_streams": -1,
-            "active_transactions": -1
+            "active_transactions": -1,
         }
 
 
-@router.get("/metrics/chat",
-            summary="Get chat-specific metrics",
-            response_model=dict[str, Any])
+@router.get("/metrics/chat", summary="Get chat-specific metrics", response_model=dict[str, Any])
 async def get_chat_metrics_endpoint() -> dict[str, Any]:
     """
     Get detailed chat-specific metrics.
@@ -274,13 +266,12 @@ async def get_chat_metrics_endpoint() -> dict[str, Any]:
         return {
             "active_operations": active,
             "metrics": chat_stats,
-            "token_costs": collector.token_costs  # Model pricing info
+            "token_costs": collector.token_costs,  # Model pricing info
         }
     except _METRICS_NONCRITICAL_EXCEPTIONS as e:
         logger.error("Error getting chat metrics")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve chat metrics"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to retrieve chat metrics"
         ) from e
 
 
@@ -313,13 +304,7 @@ async def reset_metrics() -> dict[str, str]:
 
         logger.info("Metrics reset by admin")
 
-        return {
-            "status": "success",
-            "message": "Registry metrics have been reset"
-        }
+        return {"status": "success", "message": "Registry metrics have been reset"}
     except _METRICS_NONCRITICAL_EXCEPTIONS as e:
         logger.error("Error resetting metrics")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to reset metrics"
-        ) from e
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to reset metrics") from e
