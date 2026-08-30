@@ -528,6 +528,96 @@ async def test_real_google_batch_result_count_is_validated_by_notes_executor(
 
 
 @pytest.mark.asyncio
+async def test_pinned_google_dimension_is_transmitted_and_validated(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import tldw_Server_API.app.core.LLM_Calls.providers.google_embeddings_adapter as module
+    from tldw_Server_API.app.core.LLM_Calls.providers.google_embeddings_adapter import (
+        GoogleEmbeddingsAdapter,
+    )
+
+    payloads: list[dict[str, object]] = []
+
+    class Response:
+        status_code = 200
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {"embeddings": [{"values": [1.0, 2.0, 3.0]}]}
+
+    class Client:
+        def __enter__(self) -> Client:
+            return self
+
+        def __exit__(self, *_args: object) -> bool:
+            return False
+
+        def post(self, _url: str, **kwargs: object) -> Response:
+            payloads.append(kwargs["json"])
+            return Response()
+
+    monkeypatch.setattr(module, "create_client", lambda **_kwargs: Client())
+
+    async def resolver(provider: str, **kwargs: object) -> ResolvedByokCredentials:
+        del provider, kwargs
+        return _credentials(
+            provider="google",
+            base_url="https://embeddings.example/v1",
+        )
+
+    async def record_usage(**kwargs: object) -> None:
+        del kwargs
+
+    settings = SemanticIndexSettings(max_chunk_code_points=4)
+    config = ResolvedSemanticConfig(
+        provider="google",
+        model="text-embedding-004",
+        model_revision=None,
+        endpoint_origin="https://embeddings.example",
+        credential_source="server_default",
+        dimensions=2,
+    )
+    runtime = build_notes_semantic_orchestrator(
+        config,
+        user_id="7",
+        settings=settings,
+        credential_resolver=resolver,
+        adapter_registry=ProviderRegistry("google", GoogleEmbeddingsAdapter()),
+    )
+    embedder = NotesSemanticEmbedder(
+        orchestrator_factory=lambda run_config, user_id: runtime,
+        usage_logger=record_usage,
+        settings=settings,
+    )
+    chunks = build_semantic_chunks(
+        generation_id="generation-1",
+        note_id="note-1",
+        title="",
+        content="abcd",
+        content_version=1,
+        settings=settings,
+    )
+
+    with pytest.raises(SemanticEmbeddingSystemError, match="dimension_mismatch"):
+        await embedder.embed_chunks(chunks, config, user_id="7")
+
+    assert payloads == [
+        {
+            "requests": [
+                {
+                    "model": "models/text-embedding-004",
+                    "content": {"parts": [{"text": "abcd"}]},
+                    "embedContentConfig": {"outputDimensionality": 2},
+                }
+            ]
+        }
+    ]
+    assert "outputDimensionality" not in payloads[0]["requests"][0]
+
+
+@pytest.mark.asyncio
 async def test_cancelled_real_google_batch_records_failure_without_later_post(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

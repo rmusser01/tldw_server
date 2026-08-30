@@ -99,8 +99,12 @@ class GoogleEmbeddingsAdapter(EmbeddingsProvider):
             raise ValueError("Embeddings: 'input' and 'model' are required")
 
         credentials_resolved = request.get("credentials_resolved") is True
+        dimensions = request.get("dimensions")
+        if credentials_resolved and dimensions is not None and (
+            type(dimensions) is not int or dimensions <= 0
+        ):
+            raise ValueError("Embeddings: 'dimensions' must be a positive integer")
         if credentials_resolved or self._use_native_http():
-            # Use single embedContent for 1 input; loop for multiple
             base = resolve_runtime_embedding_base_url(request, provider=self.name) or self._base_url()
             try:
                 model_path = encode_google_model_path(model)
@@ -134,6 +138,15 @@ class GoogleEmbeddingsAdapter(EmbeddingsProvider):
                                     {
                                         "model": model_resource,
                                         "content": {"parts": [{"text": text}]},
+                                        **(
+                                            {
+                                                "embedContentConfig": {
+                                                    "outputDimensionality": dimensions
+                                                }
+                                            }
+                                            if dimensions is not None
+                                            else {}
+                                        ),
                                     }
                                     for text in inputs
                                 ]
@@ -179,7 +192,18 @@ class GoogleEmbeddingsAdapter(EmbeddingsProvider):
                         return {"data": out, "object": "list", "model": model}
                     else:
                         url = f"{base}/models/{model_path}:embedContent"
-                        payload = {"content": {"parts": [{"text": inputs}]}}
+                        payload = {
+                            "content": {"parts": [{"text": inputs}]},
+                            **(
+                                {
+                                    "embedContentConfig": {
+                                        "outputDimensionality": dimensions
+                                    }
+                                }
+                                if credentials_resolved and dimensions is not None
+                                else {}
+                            ),
+                        }
                         resp = self._post_embedding(
                             client,
                             url=url,
