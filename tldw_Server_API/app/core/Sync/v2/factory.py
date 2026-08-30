@@ -176,6 +176,7 @@ def sync_v2_service_for_user(user_id: str) -> SyncV2Service:
         notes_attachment_bootstrapper=NotesAttachmentBootstrapper(note_db),
         notes_task_bootstrapper=NotesTaskBootstrapper(note_db),
         notes_task_activity_bootstrapper=NotesTaskActivityBootstrapper(note_db),
+        personal_context_service_resolver=_personal_context_service_for_user,
     )
 
 

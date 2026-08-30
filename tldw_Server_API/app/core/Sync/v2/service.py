@@ -143,6 +143,7 @@ from .notes_task_readiness import (
     redact_notes_task_server_metadata,
 )
 from .profile import (
+    PersonalContextBootstrap,
     SyncNotesAttachmentBootstrapDiagnostics,
     SyncProfileStatus,
     SyncRecoveryActionDescriptor,
@@ -1119,6 +1120,8 @@ class SyncV2Service:
         notes_attachment_bootstrapper: object | None = None,
         notes_task_bootstrapper: object | None = None,
         notes_task_activity_bootstrapper: object | None = None,
+        personal_context_service_resolver: Callable[[str], object] | None = None,
+        personal_context_key_wrapper: Callable[..., str] | None = None,
     ) -> None:
         self.store = store
         self.adapters = adapters
@@ -1133,6 +1136,8 @@ class SyncV2Service:
         self.notes_attachment_bootstrapper = notes_attachment_bootstrapper
         self.notes_task_bootstrapper = notes_task_bootstrapper
         self.notes_task_activity_bootstrapper = notes_task_activity_bootstrapper
+        self.personal_context_service_resolver = personal_context_service_resolver
+        self.personal_context_key_wrapper = personal_context_key_wrapper
 
     def _notes_task_domains_ready(self, dataset: SyncDataset | None) -> bool:
         """Return the single service-level task/activity activation predicate."""
@@ -2325,6 +2330,44 @@ class SyncV2Service:
             requested_domains=requested_domains,
         )
 
+    def bootstrap_personal_context(
+        self,
+        *,
+        user_id: str,
+        device_id: str,
+        authority_id: str,
+        required_schema_version: int | None = None,
+        required_quotas: Mapping[str, int] | None = None,
+        expected_purge_generation: int | None = None,
+    ) -> PersonalContextBootstrap:
+        """Return an authenticated device's canonical first-link snapshot."""
+
+        return self._profile_manager().bootstrap_personal_context(
+            user_id=user_id,
+            device_id=device_id,
+            authority_id=authority_id,
+            required_schema_version=required_schema_version,
+            required_quotas=required_quotas,
+            expected_purge_generation=expected_purge_generation,
+        )
+
+    def complete_personal_context_link(
+        self,
+        *,
+        user_id: str,
+        device_id: str,
+        dataset_id: str,
+        bootstrap_cursor: str,
+    ) -> None:
+        """Open the narrow post-review Personal Context push transition."""
+
+        self._profile_manager().complete_personal_context_link(
+            user_id=user_id,
+            device_id=device_id,
+            dataset_id=dataset_id,
+            bootstrap_cursor=bootstrap_cursor,
+        )
+
     def profile_status(
         self,
         *,
@@ -3063,6 +3106,18 @@ class SyncV2Service:
                         client_envelope_id=envelope.client_envelope_id,
                         error_code="domain_not_enrolled",
                         message=f"Sync domain is not enrolled for this dataset: {envelope.domain}",
+                    )
+                )
+                continue
+            if (
+                envelope.domain in PERSONAL_CONTEXT_SYNC_DOMAINS
+                and not _personal_context_link_is_complete(dataset)
+            ):
+                rejected.append(
+                    SyncPushRejected(
+                        client_envelope_id=envelope.client_envelope_id,
+                        error_code="personal_context_link_incomplete",
+                        message="Personal Context reconciliation is not complete",
                     )
                 )
                 continue
@@ -8253,6 +8308,14 @@ class SyncV2Service:
             notes_attachment_bootstrapper=self.notes_attachment_bootstrapper,
         )
 
+    def _personal_context_service_for_user(self, user_id: str) -> object:
+        """Resolve the canonical Personal Context service after Sync auth checks."""
+
+        resolver = self.personal_context_service_resolver
+        if resolver is not None:
+            return resolver(user_id)
+        raise SyncStoreError("personal_context_key_custody_unavailable")
+
     def _update_cursors(
         self,
         dataset_id: str,
@@ -8889,6 +8952,13 @@ def _device_requested_domains(device: SyncDevice) -> list[SyncDomain]:
         requested = [item for item in requested if item in supported]
     known = set(SYNC_V2_KNOWN_DOMAINS)
     return [item for item in requested if item in known]
+
+
+def _personal_context_link_is_complete(dataset: SyncDataset) -> bool:
+    """Return whether reviewed first-link reconciliation admitted profile writes."""
+
+    state = dataset.metadata.get("personal_context")
+    return isinstance(state, Mapping) and state.get("link_state") == "complete"
 
 
 def _call_adapter_evaluate(
