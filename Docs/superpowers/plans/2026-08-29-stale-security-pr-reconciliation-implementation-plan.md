@@ -374,13 +374,13 @@ unchanged baseline lines, while every other touched Python file passed.
 Record exact commands/results, touched files, known skips, and the replacement
 strategy using `backlog task edit`. Commit the spec, plan, and task file.
 
-- [ ] **Step 5: Push and open one replacement PR**
+- [x] **Step 5: Push and open one replacement PR**
 
 The PR body maps each stale PR to its replacement commit and states that the
 stale PR will be closed only after merge. Do not merge without a separate user
 decision.
 
-- [ ] **Step 6: Record supersession on stale PRs**
+- [x] **Step 6: Record supersession on stale PRs**
 
 Comment readably on #2610, #2614, #2622, #2623, and #2625 with the replacement
 PR URL. After replacement merge, close each unmerged and finish TASK-13013.4.
