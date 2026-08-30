@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
+from collections.abc import Callable
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -523,25 +524,129 @@ def test_postgres_semantic_store_activation_identity_mismatch_has_no_side_effect
         db.close_all_connections()
 
 
-@pytest.mark.integration
-@pytest.mark.timeout(30)
-def test_postgres_create_generation_fences_concurrent_configuration_revision(
-    pg_database_config: DatabaseConfig,
+def _join_started_workers(workers: list[tuple[threading.Thread, str]]) -> None:
+    for thread, _pid_key in workers:
+        if thread.ident is not None:
+            thread.join(timeout=2)
+
+
+def _worker_cleanup_state(
+    workers: list[tuple[threading.Thread, str]],
+    results: dict[str, object],
+) -> list[dict[str, object]]:
+    return [
+        {
+            "name": thread.name,
+            "daemon": thread.daemon,
+            "started": thread.ident is not None,
+            "alive": thread.is_alive(),
+            "pid": results.get(pid_key),
+        }
+        for thread, pid_key in workers
+    ]
+
+
+def _signal_live_worker_backends(
+    observer_backend: object | None,
+    workers: list[tuple[threading.Thread, str]],
+    results: dict[str, object],
+    statement: str,
+    signal_name: str,
+    cleanup_actions: list[str],
 ) -> None:
-    backend = DatabaseBackendFactory.create_backend(pg_database_config)
-    observer_backend = DatabaseBackendFactory.create_backend(pg_database_config)
-    db = CharactersRAGDB(":memory:", client_id="owner-a", backend=backend)
-    resolved_config, old_generation = _create_resolved_store_generation(db)
-    with db.transaction() as conn:
-        conn.execute(
-            "SELECT set_config('app.current_dataset_id', ?, true)",
-            ("dataset-a",),
+    for thread, pid_key in workers:
+        if not thread.is_alive():
+            continue
+        pid = results.get(pid_key)
+        if observer_backend is None or not isinstance(pid, int):
+            cleanup_actions.append(
+                f"{signal_name}:{thread.name}:unavailable:pid={pid!r}:observer={observer_backend is not None}"
+            )
+            continue
+        try:
+            row = observer_backend.execute(statement, (pid,)).rows[0]  # type: ignore[attr-defined]
+            cleanup_actions.append(f"{signal_name}:{thread.name}:pid={pid}:sent={bool(row['sent'])}")
+        except Exception as exc:  # noqa: BLE001 - include cleanup failures in test output
+            cleanup_actions.append(f"{signal_name}:{thread.name}:pid={pid}:error={exc!r}")
+
+
+def _stop_postgres_race_workers(
+    *,
+    observer_backend: object | None,
+    workers: list[tuple[threading.Thread, str]],
+    results: dict[str, object],
+    release_generation_commit: threading.Event,
+) -> None:
+    cleanup_actions: list[str] = []
+    release_generation_commit.set()
+    _join_started_workers(workers)
+
+    if any(thread.is_alive() for thread, _pid_key in workers):
+        _signal_live_worker_backends(
+            observer_backend,
+            workers,
+            results,
+            "SELECT pg_cancel_backend(%s) AS sent",
+            "cancel",
+            cleanup_actions,
         )
-        conn.execute(
-            "UPDATE note_semantic_generations SET state='failed' "
-            "WHERE owner_user_id=? AND dataset_id=? AND id=?",
-            ("owner-a", "dataset-a", old_generation.id),
+        _join_started_workers(workers)
+
+    if any(thread.is_alive() for thread, _pid_key in workers):
+        _signal_live_worker_backends(
+            observer_backend,
+            workers,
+            results,
+            "SELECT pg_terminate_backend(%s) AS sent",
+            "terminate",
+            cleanup_actions,
         )
+        _join_started_workers(workers)
+
+    state = _worker_cleanup_state(workers, results)
+    if any(worker["daemon"] or worker["alive"] for worker in state):
+        raise AssertionError(
+            "PostgreSQL race cleanup could not stop both non-daemon workers before pool close; "
+            f"state={state!r}, actions={cleanup_actions!r}, "
+            f"generation_error={results.get('generation_error')!r}, "
+            f"configuration_error={results.get('configuration_error')!r}"
+        )
+
+
+def _live_postgres_backend_pids(
+    pg_database_config: DatabaseConfig,
+    pids: set[int],
+) -> set[int]:
+    if not pids:
+        return set()
+    verifier_backend = None
+    try:
+        verifier_backend = DatabaseBackendFactory.create_backend(pg_database_config)
+        deadline = time.monotonic() + 2
+        while True:
+            rows = verifier_backend.execute(
+                "SELECT pid FROM pg_stat_activity WHERE datname=current_database() AND pid=ANY(%s)",
+                (sorted(pids),),
+            ).rows
+            live_pids = {int(row["pid"]) for row in rows}
+            if not live_pids or time.monotonic() >= deadline:
+                return live_pids
+            time.sleep(0.02)
+    finally:
+        if verifier_backend is not None:
+            verifier_backend.get_pool().close_all()
+
+
+def _exercise_postgres_generation_configuration_race(
+    pg_database_config: DatabaseConfig,
+    *,
+    captured_pids: dict[str, int],
+    after_lock_wait: Callable[[], None] | None = None,
+) -> None:
+    backend = None
+    observer_backend = None
+    db = None
+    workers: list[tuple[threading.Thread, str]] = []
 
     generation_inserted = threading.Event()
     release_generation_commit = threading.Event()
@@ -549,101 +654,126 @@ def test_postgres_create_generation_fences_concurrent_configuration_revision(
     configuration_update_finished = threading.Event()
     results: dict[str, object] = {}
 
-    def create_generation() -> None:
-        try:
-            with db.transaction() as conn:
-                results["generation_pid"] = int(
-                    conn.execute("SELECT pg_backend_pid() AS pid").fetchone()["pid"]
-                )
-                results["generation"] = db.note_semantic_store.create_generation(
-                    dataset_id="dataset-a",
-                    configuration_revision=resolved_config.configuration_revision,
-                    compatibility_hash="compatibility-v1",
-                    dimension_state=SemanticDimensionState.RESOLVED,
-                    dimensions=768,
-                    root_job_id="job-racing-create",
-                    now=_NOW,
-                )
-                generation_inserted.set()
-                assert release_generation_commit.wait(timeout=10)
-        except Exception as exc:  # noqa: BLE001 - surface thread failures in the test
-            results["generation_error"] = exc
-            generation_inserted.set()
-        finally:
-            db.close_connection()
-
-    def update_configuration() -> None:
-        try:
-            with db.transaction() as conn:
-                results["configuration_pid"] = int(
-                    conn.execute("SELECT pg_backend_pid() AS pid").fetchone()["pid"]
-                )
-                configuration_connection_ready.set()
-                results["disabled"] = db.note_semantic_store.disable_configuration(
-                    dataset_id="dataset-a",
-                    expected_configuration_revision=resolved_config.configuration_revision,
-                    now=_NOW,
-                )
-        except Exception as exc:  # noqa: BLE001 - surface thread failures in the test
-            results["configuration_error"] = exc
-            configuration_connection_ready.set()
-        finally:
-            configuration_update_finished.set()
-            db.close_connection()
-
-    generation_thread = threading.Thread(target=create_generation)
-    configuration_thread = threading.Thread(target=update_configuration)
     try:
-        try:
-            generation_thread.start()
-            assert generation_inserted.wait(timeout=10)
-            assert "generation_error" not in results
-            configuration_thread.start()
-            assert configuration_connection_ready.wait(timeout=10)
-            assert "configuration_error" not in results
-            generation_pid = int(results["generation_pid"])
-            configuration_pid = int(results["configuration_pid"])
-            deadline = time.monotonic() + 10
-            lock_wait = None
-            last_activity = None
-            while time.monotonic() < deadline:
-                rows = observer_backend.execute(
-                    "SELECT state,wait_event_type,wait_event,pg_blocking_pids(pid) AS blocking_pids "
-                    "FROM pg_stat_activity WHERE datname=current_database() AND pid=%s",
-                    (configuration_pid,),
-                ).rows
-                if rows:
-                    last_activity = dict(rows[0])
-                    blocking_pids = {
-                        int(pid) for pid in (last_activity["blocking_pids"] or [])
-                    }
-                    if (
-                        last_activity["state"] == "active"
-                        and last_activity["wait_event_type"] == "Lock"
-                        and generation_pid in blocking_pids
-                    ):
-                        lock_wait = last_activity
-                        break
-                if configuration_update_finished.wait(timeout=0.02):
-                    break
-            assert lock_wait is not None, (
-                f"configuration backend {configuration_pid} never reached an active Lock wait "
-                f"blocked by generation backend {generation_pid}; "
-                f"update_finished={configuration_update_finished.is_set()}, "
-                f"last_activity={last_activity!r}"
+        backend = DatabaseBackendFactory.create_backend(pg_database_config)
+        observer_backend = DatabaseBackendFactory.create_backend(pg_database_config)
+        db = CharactersRAGDB(":memory:", client_id="owner-a", backend=backend)
+        resolved_config, old_generation = _create_resolved_store_generation(db)
+        with db.transaction() as conn:
+            conn.execute(
+                "SELECT set_config('app.current_dataset_id', ?, true)",
+                ("dataset-a",),
             )
-        finally:
-            release_generation_commit.set()
-            configuration_update_finished.wait(timeout=10)
-            generation_thread.join(timeout=10)
-            if configuration_thread.ident is not None:
-                configuration_thread.join(timeout=10)
-    except Exception:
-        db.close_all_connections()
-        observer_backend.get_pool().close_all()
-        raise
+            conn.execute(
+                "UPDATE note_semantic_generations SET state='failed' "
+                "WHERE owner_user_id=? AND dataset_id=? AND id=?",
+                ("owner-a", "dataset-a", old_generation.id),
+            )
 
-    try:
+        def create_generation() -> None:
+            try:
+                with db.transaction() as conn:
+                    results["generation_pid"] = int(
+                        conn.execute("SELECT pg_backend_pid() AS pid").fetchone()["pid"]
+                    )
+                    results["generation"] = db.note_semantic_store.create_generation(
+                        dataset_id="dataset-a",
+                        configuration_revision=resolved_config.configuration_revision,
+                        compatibility_hash="compatibility-v1",
+                        dimension_state=SemanticDimensionState.RESOLVED,
+                        dimensions=768,
+                        root_job_id="job-racing-create",
+                        now=_NOW,
+                    )
+                    generation_inserted.set()
+                    assert release_generation_commit.wait(timeout=10)
+            except Exception as exc:  # noqa: BLE001 - surface thread failures in the test
+                results["generation_error"] = exc
+                generation_inserted.set()
+            finally:
+                db.close_connection()
+
+        def update_configuration() -> None:
+            try:
+                with db.transaction() as conn:
+                    results["configuration_pid"] = int(
+                        conn.execute("SELECT pg_backend_pid() AS pid").fetchone()["pid"]
+                    )
+                    configuration_connection_ready.set()
+                    results["disabled"] = db.note_semantic_store.disable_configuration(
+                        dataset_id="dataset-a",
+                        expected_configuration_revision=resolved_config.configuration_revision,
+                        now=_NOW,
+                    )
+            except Exception as exc:  # noqa: BLE001 - surface thread failures in the test
+                results["configuration_error"] = exc
+                configuration_connection_ready.set()
+            finally:
+                configuration_update_finished.set()
+                db.close_connection()
+
+        generation_thread = threading.Thread(
+            target=create_generation,
+            name="semantic-generation-creator",
+            daemon=False,
+        )
+        configuration_thread = threading.Thread(
+            target=update_configuration,
+            name="semantic-configuration-updater",
+            daemon=False,
+        )
+        workers = [
+            (generation_thread, "generation_pid"),
+            (configuration_thread, "configuration_pid"),
+        ]
+        generation_thread.start()
+        assert generation_inserted.wait(timeout=10)
+        assert "generation_error" not in results
+        configuration_thread.start()
+        assert configuration_connection_ready.wait(timeout=10)
+        assert "configuration_error" not in results
+        generation_pid = int(results["generation_pid"])
+        configuration_pid = int(results["configuration_pid"])
+        captured_pids.update(
+            generation=generation_pid,
+            configuration=configuration_pid,
+        )
+        deadline = time.monotonic() + 10
+        lock_wait = None
+        last_activity = None
+        while time.monotonic() < deadline:
+            rows = observer_backend.execute(
+                "SELECT state,wait_event_type,wait_event,pg_blocking_pids(pid) AS blocking_pids "
+                "FROM pg_stat_activity WHERE datname=current_database() AND pid=%s",
+                (configuration_pid,),
+            ).rows
+            if rows:
+                last_activity = dict(rows[0])
+                blocking_pids = {int(pid) for pid in (last_activity["blocking_pids"] or [])}
+                if (
+                    last_activity["state"] == "active"
+                    and last_activity["wait_event_type"] == "Lock"
+                    and generation_pid in blocking_pids
+                ):
+                    lock_wait = last_activity
+                    break
+            if configuration_update_finished.wait(timeout=0.02):
+                break
+        assert lock_wait is not None, (
+            f"configuration backend {configuration_pid} never reached an active Lock wait "
+            f"blocked by generation backend {generation_pid}; "
+            f"update_finished={configuration_update_finished.is_set()}, "
+            f"last_activity={last_activity!r}"
+        )
+        if after_lock_wait is not None:
+            after_lock_wait()
+
+        _stop_postgres_race_workers(
+            observer_backend=observer_backend,
+            workers=workers,
+            results=results,
+            release_generation_commit=release_generation_commit,
+        )
         assert lock_wait["wait_event_type"] == "Lock"
         assert configuration_update_finished.is_set()
         assert not generation_thread.is_alive()
@@ -696,8 +826,74 @@ def test_postgres_create_generation_fences_concurrent_configuration_revision(
         )
         assert replacement.state is SemanticGenerationState.STAGING
     finally:
-        db.close_all_connections()
-        observer_backend.get_pool().close_all()
+        cleanup_errors: list[BaseException] = []
+        try:
+            _stop_postgres_race_workers(
+                observer_backend=observer_backend,
+                workers=workers,
+                results=results,
+                release_generation_commit=release_generation_commit,
+            )
+        except BaseException as exc:  # noqa: BLE001 - cleanup must supersede the primary failure
+            cleanup_errors.append(exc)
+
+        if not any(thread.is_alive() for thread, _pid_key in workers):
+            try:
+                if db is not None:
+                    db.close_all_connections()
+                elif backend is not None:
+                    backend.get_pool().close_all()
+            except BaseException as exc:  # noqa: BLE001 - include pool cleanup state
+                cleanup_errors.append(exc)
+            try:
+                if observer_backend is not None:
+                    observer_backend.get_pool().close_all()
+            except BaseException as exc:  # noqa: BLE001 - include pool cleanup state
+                cleanup_errors.append(exc)
+
+        if cleanup_errors:
+            raise AssertionError(
+                "PostgreSQL race cleanup failed; "
+                f"state={_worker_cleanup_state(workers, results)!r}, "
+                f"errors={[repr(error) for error in cleanup_errors]!r}"
+            ) from cleanup_errors[0]
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(30)
+def test_postgres_create_generation_fences_concurrent_configuration_revision(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    worker_pids: dict[str, int] = {}
+
+    _exercise_postgres_generation_configuration_race(
+        pg_database_config,
+        captured_pids=worker_pids,
+    )
+
+    assert set(worker_pids) == {"generation", "configuration"}
+    assert _live_postgres_backend_pids(pg_database_config, set(worker_pids.values())) == set()
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(30)
+def test_postgres_generation_race_cleanup_preserves_injected_failure(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    worker_pids: dict[str, int] = {}
+
+    def fail_after_lock_wait() -> None:
+        raise AssertionError("injected-race-assertion")
+
+    with pytest.raises(AssertionError, match="^injected-race-assertion$"):
+        _exercise_postgres_generation_configuration_race(
+            pg_database_config,
+            captured_pids=worker_pids,
+            after_lock_wait=fail_after_lock_wait,
+        )
+
+    assert set(worker_pids) == {"generation", "configuration"}
+    assert _live_postgres_backend_pids(pg_database_config, set(worker_pids.values())) == set()
 
 
 @pytest.mark.integration
