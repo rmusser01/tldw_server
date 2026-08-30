@@ -5,6 +5,7 @@
 import asyncio
 import base64
 import contextlib
+import hashlib
 import json
 import os
 import re
@@ -968,21 +969,31 @@ def _is_enterprise_admin_ui_mode() -> bool:
     return raw_value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+_LOGIN_CLIENT_LOCKOUT_KEY_RE = re.compile(r"login-client-v1:[0-9a-f]{64}\Z")
+
+
 def _auth_request_client_ip(request: Request) -> str:
     try:
         settings = get_settings()
     except _AUTH_NONCRITICAL_EXCEPTIONS:
         settings = None
     try:
-        resolved = resolve_client_ip(request, settings)
-        if resolved:
-            return str(resolved)
-    except _AUTH_NONCRITICAL_EXCEPTIONS:
-        pass
-    try:
-        return request.client.host if request.client else "unknown"
+        return resolve_client_ip(request, settings) or "unknown"
     except _AUTH_NONCRITICAL_EXCEPTIONS:
         return "unknown"
+
+
+def _login_client_lockout_key(client_ip: str | None, login_identifier: str) -> str:
+    payload = json.dumps(
+        [client_ip or "unknown", login_identifier.strip().lower()],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return f"login-client-v1:{hashlib.sha256(payload).hexdigest()}"
+
+
+def _validated_login_client_lockout_key(value: object) -> str | None:
+    return value if isinstance(value, str) and _LOGIN_CLIENT_LOCKOUT_KEY_RE.fullmatch(value) else None
 
 
 def _auth_hashed_entity(raw_value: str) -> str:

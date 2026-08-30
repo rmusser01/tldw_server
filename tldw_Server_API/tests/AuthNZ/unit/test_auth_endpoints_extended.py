@@ -12,6 +12,56 @@ from starlette.requests import Request
 from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
 
+def test_login_client_lockout_key_has_stable_known_vector():
+    import tldw_Server_API.app.api.v1.endpoints.auth as auth
+
+    assert auth._login_client_lockout_key("203.0.113.9", " Alice@Example.COM ") == (
+        "login-client-v1:5573603ba3e0013f1788b2e3e4b7d67553500401252965ad3f2189a1a352b014"
+    )
+
+
+def test_login_client_lockout_key_normalizes_identifier_but_preserves_aliases():
+    import tldw_Server_API.app.api.v1.endpoints.auth as auth
+
+    by_email = auth._login_client_lockout_key("2001:db8::9", " USER@example.com ")
+    assert by_email == auth._login_client_lockout_key("2001:db8::9", "user@example.com")
+    assert by_email != auth._login_client_lockout_key("2001:db8::9", "user")
+    assert auth._login_client_lockout_key(None, "user").startswith("login-client-v1:")
+
+
+@pytest.mark.parametrize(
+    "value",
+    [None, "", "login-client-v1:", "login-client-v1:" + "A" * 64,
+     "login-client-v2:" + "a" * 64, "login-client-v1:" + "a" * 63,
+     "login-client-v1:" + "g" * 64],
+)
+def test_validated_login_client_lockout_key_rejects_noncanonical_values(value):
+    import tldw_Server_API.app.api.v1.endpoints.auth as auth
+
+    assert auth._validated_login_client_lockout_key(value) is None
+
+
+def test_auth_request_client_ip_uses_unknown_for_invalid_physical_peer(monkeypatch):
+    monkeypatch.setenv("AUTH_TRUST_X_FORWARDED_FOR", "true")
+    monkeypatch.setenv("AUTH_TRUSTED_PROXY_IPS", "10.0.0.0/8")
+    reset_settings()
+
+    import tldw_Server_API.app.api.v1.endpoints.auth as auth
+
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/api/v1/auth/login",
+        "headers": [(b"x-forwarded-for", b"198.51.100.77, 10.1.2.3")],
+        "client": ("testclient", 1234),
+        "scheme": "http",
+        "query_string": b"",
+        "server": ("testserver", 80),
+    }
+
+    assert auth._auth_request_client_ip(Request(scope)) == "unknown"
+
+
 @pytest.mark.asyncio
 async def test_is_mfa_backend_supported_prefers_mfa_service_capability(monkeypatch):
     reset_settings()
