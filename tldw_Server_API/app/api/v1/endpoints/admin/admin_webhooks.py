@@ -25,6 +25,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
 from tldw_Server_API.app.api.v1.schemas.admin_webhooks import (
     AdminWebhookRegistrationResponse,
     AdminWebhookStatusResponse,
+    DeliveryCapabilityStatusResponse,
     WebhookCatalogItemResponse,
     WebhookCatalogResponse,
     WebhookCreateRequest,
@@ -507,6 +508,9 @@ def _status_response(status: WebhookStatus) -> AdminWebhookStatusResponse:
             "schema_ready": status.schema_ready,
             "key_state": status.key_state,
             "delivery_capability_ready": status.delivery_capability_ready,
+            "delivery": DeliveryCapabilityStatusResponse.model_validate(
+                status.delivery
+            ),
             "limits": WebhookLimitsResponse.model_validate(status.limits),
             "migration": WebhookMigrationStatusResponse(
                 phase=status.migration.phase,

@@ -12,6 +12,7 @@ from typing import Any, Protocol
 
 from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
     AdminWebhookRepository,
+    DeliveryExpiryBatchResult,
     EnqueueClaim,
     PendingJobsDisposition,
     StoredWebhookDelivery,
@@ -55,6 +56,14 @@ class EnqueueFailureKind(str, Enum):
     ADMISSION_REJECTED = "admission_rejected"
     BACKEND_UNAVAILABLE = "backend_unavailable"
     IDENTITY_CONFLICT = "identity_conflict"
+
+
+class EnqueueSuccessKind(str, Enum):
+    """Closed post-commit enqueue and disposition observations."""
+
+    CLAIMED = "claimed"
+    QUEUED = "queued"
+    DISPOSITION_RECOVERED = "disposition_recovered"
 
 
 class EnqueueCrashPoint(str, Enum):
@@ -469,6 +478,7 @@ class AdminWebhookReconciler:
         clock: Callable[[], datetime],
         claim_ttl_seconds: int,
         failure_observer: Callable[[EnqueueFailureKind], None],
+        success_observer: Callable[[EnqueueSuccessKind], None] | None = None,
         crash_hook: Callable[[EnqueueCrashPoint], None] | None = None,
         after_claim_commit_hook: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
@@ -491,12 +501,15 @@ class AdminWebhookReconciler:
             after_claim_commit_hook
         ):
             raise TypeError("after-claim commit hook is invalid")
+        if success_observer is not None and not callable(success_observer):
+            raise TypeError("success observer is invalid")
         self._repository = repository
         self._queue = queue
         self._token_factory = token_factory
         self._clock = clock
         self._claim_ttl = timedelta(seconds=claim_ttl_seconds)
         self._failure_observer = failure_observer
+        self._success_observer = success_observer
         self._crash_hook = crash_hook
         self._after_claim_commit_hook = after_claim_commit_hook
 
@@ -507,6 +520,14 @@ class AdminWebhookReconciler:
     def _observe(self, failure: EnqueueFailureKind) -> None:
         try:
             self._failure_observer(failure)
+        except Exception:  # noqa: BLE001 - observation cannot affect state repair.
+            return
+
+    def _observe_success(self, success: EnqueueSuccessKind) -> None:
+        if self._success_observer is None:
+            return
+        try:
+            self._success_observer(success)
         except Exception:  # noqa: BLE001 - observation cannot affect state repair.
             return
 
@@ -682,6 +703,7 @@ class AdminWebhookReconciler:
             await self._apply_terminal_cancel(terminal_cancel, claim.claim_token)
             return True
         if queued:
+            self._observe_success(EnqueueSuccessKind.QUEUED)
             self._crash(EnqueueCrashPoint.AFTER_QUEUED_COMMIT)
         return True
 
@@ -703,6 +725,7 @@ class AdminWebhookReconciler:
             if claim is None:
                 break
             processed += 1
+            self._observe_success(EnqueueSuccessKind.CLAIMED)
             self._crash(EnqueueCrashPoint.AFTER_CLAIM_COMMIT)
             if self._after_claim_commit_hook is not None:
                 await self._after_claim_commit_hook()
@@ -749,6 +772,10 @@ class AdminWebhookReconciler:
                         record.status,
                     )
                 repaired += int(acknowledged)
+                if acknowledged:
+                    self._observe_success(
+                        EnqueueSuccessKind.DISPOSITION_RECOVERED
+                    )
                 continue
             if (
                 pending.kind is not JobsDispositionKind.CANCEL
@@ -795,8 +822,27 @@ class AdminWebhookReconciler:
                     result.state or "",
                 )
             repaired += int(acknowledged)
+            if acknowledged:
+                self._observe_success(EnqueueSuccessKind.DISPOSITION_RECOVERED)
         await asyncio.sleep(0)
         return repaired
+
+    async def reconcile_expired_once(
+        self,
+        *,
+        limit: int = _MAX_ENQUEUE_BATCH,
+    ) -> DeliveryExpiryBatchResult:
+        """Terminalize one bounded ordered page of expired deliveries."""
+
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
+            raise ValueError("expiry reconciliation limit must be between 1 and 100")
+        result = await self._repository.expire_due_deliveries(
+            now=_aware_utc(self._clock(), field="clock value"),
+            batch_size=limit,
+            token_factory=self._token_factory,
+        )
+        await asyncio.sleep(0)
+        return result
 
     async def recover_stale_test_attempts_once(
         self,

@@ -20,6 +20,7 @@ from tldw_Server_API.app.core.Admin_Webhooks.config import (
 from tldw_Server_API.app.core.Admin_Webhooks.crypto import WebhookKeyRing
 from tldw_Server_API.app.core.Admin_Webhooks.domain import (
     AttemptState,
+    DeliveryKind,
     DeliveryReasonCode,
     DeliveryState,
     EventSourceKind,
@@ -419,6 +420,54 @@ async def test_handler_orders_horizon_reservation_execution_and_acknowledgement(
     assert bundle is not None
     assert bundle.delivery.delivery.state is DeliveryState.SUCCEEDED
     assert bundle.delivery.jobs_disposition_applied is True
+
+
+@pytest.mark.asyncio
+async def test_worker_observes_closed_executor_outcome_only_after_commit(
+    worker_fixture: WorkerFixture,
+) -> None:
+    _, delivery_id, acquired = await _seed_acquired(worker_fixture, "metrics")
+    executor = FakeExecutor(
+        AttemptExecutionResult(
+            outcome=AttemptOutcome.FAILED,
+            status_code=None,
+            latency_ms=5,
+            reason_code=AttemptReasonCode.HTTP_HOP_DNS_ADDRESS_DENIED,
+            retry_delay_seconds=None,
+        )
+    )
+    observations: list[dict[str, object]] = []
+
+    class Metrics:
+        def attempt_committed(self, **values: object) -> None:
+            observations.append(values)
+
+    handler = AdminWebhookPreparedHandler(
+        repository=worker_fixture.repository,
+        key_ring=worker_fixture.ring,
+        settings=_settings(),
+        executor=executor,
+        token_factory=TokenSource("worker-metrics"),
+        attempt_id_factory=lambda: canonical_uuid4("worker-metrics-attempt"),
+        clock=worker_fixture.clock,
+        metrics=Metrics(),
+    )
+
+    disposition = await handler(acquired, FakeContext(acquired))
+
+    bundle = await worker_fixture.repository.get_delivery_bundle(delivery_id)
+    assert bundle is not None
+    assert bundle.delivery.delivery.state is DeliveryState.DEAD
+    assert observations == [
+        {
+            "state": DeliveryState.DEAD,
+            "kind": DeliveryKind.AUTOMATIC,
+            "reason_code": DeliveryReasonCode.HTTP_HOP_DNS_ADDRESS_DENIED,
+            "status_code": None,
+            "latency_ms": 5,
+        }
+    ]
+    assert disposition.kind is PreparedDispositionKind.FAIL
 
 
 @pytest.mark.asyncio

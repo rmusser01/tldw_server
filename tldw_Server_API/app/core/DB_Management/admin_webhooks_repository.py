@@ -28,6 +28,9 @@ from tldw_Server_API.app.core.Admin_Webhooks.delivery import (
 )
 from tldw_Server_API.app.core.Admin_Webhooks.domain import (
     AttemptState,
+    DeliveryBacklogCounts,
+    DeliveryComponentStatus,
+    DeliveryHealthSnapshot,
     DeliveryHistoryItem,
     DeliveryHistoryPage,
     DeliveryKind,
@@ -1079,6 +1082,24 @@ class RetentionBatchResult:
     events: int = 0
     heartbeats: int = 0
     registrations: int = 0
+
+
+@dataclass(frozen=True)
+class DeliveryExpiryBatchResult:
+    """Bounded expiry writes and exact Jobs dispositions to recover."""
+
+    expired: int
+    pending_dispositions: tuple[PendingJobsDisposition, ...]
+
+    def __post_init__(self) -> None:
+        if (
+            isinstance(self.expired, bool)
+            or not isinstance(self.expired, int)
+            or self.expired < 0
+        ):
+            raise ValueError("expired delivery count is invalid")
+        if self.expired < len(self.pending_dispositions):
+            raise ValueError("expiry dispositions exceed expired deliveries")
 
 
 def _utc_datetime(value: datetime, *, field: str) -> datetime:
@@ -2243,6 +2264,172 @@ class AdminWebhookRepository:
         async with self.transaction() as unit:
             return await unit.upsert_runtime_heartbeat(write)
 
+    async def get_delivery_health_snapshot(
+        self,
+        *,
+        now: datetime,
+        heartbeat_freshness_seconds: int,
+        key_available: bool,
+        expected_primary_key_id: str | None,
+    ) -> DeliveryHealthSnapshot:
+        """Read all sanitized delivery readiness facts from one snapshot."""
+
+        now = _utc_datetime(now, field="now")
+        if not 1 <= heartbeat_freshness_seconds <= 3_600:
+            raise ValueError("heartbeat freshness must be between 1 and 3600 seconds")
+        if not isinstance(key_available, bool):
+            raise TypeError("key availability is invalid")
+        if expected_primary_key_id is not None:
+            _bounded_text(
+                expected_primary_key_id,
+                field="expected primary key ID",
+                maximum=255,
+            )
+        stale_before = now - timedelta(seconds=heartbeat_freshness_seconds)
+        unavailable_reasons = {
+            DeliveryRuntimeComponent.WORKER: (
+                DeliveryRuntimeReasonCode.WORKER_UNAVAILABLE
+            ),
+            DeliveryRuntimeComponent.RECONCILER: (
+                DeliveryRuntimeReasonCode.RECONCILER_UNAVAILABLE
+            ),
+            DeliveryRuntimeComponent.RETENTION: (
+                DeliveryRuntimeReasonCode.RETENTION_UNAVAILABLE
+            ),
+        }
+
+        async with self._read_snapshot() as connection:
+            unit = AdminWebhookUnitOfWork(connection, is_postgres=self.is_postgres)
+            delivery_schema_ready = await self.delivery_schema_ready(
+                _connection=connection
+            )
+            migration = await unit.get_migration_state(lock=False)
+            backlog_rows = await unit._fetch(
+                """
+                SELECT state, COUNT(*) AS total, MIN(created_at) AS oldest_created_at
+                FROM admin_webhook_deliveries
+                WHERE state IN (
+                    'pending', 'enqueue_claimed', 'queued', 'processing', 'retry_wait'
+                )
+                GROUP BY state
+                """
+            )
+
+            async def component_status(
+                component: DeliveryRuntimeComponent,
+            ) -> DeliveryComponentStatus:
+                ready_row = await unit._fetchrow(
+                    """
+                    SELECT ready, reason_code, heartbeat_at
+                    FROM admin_webhook_runtime_heartbeats
+                    WHERE component = ? AND ready = TRUE AND heartbeat_at >= ?
+                    ORDER BY heartbeat_at DESC, instance_id ASC
+                    LIMIT 1
+                    """,
+                    (component.value, stale_before),
+                )
+                row = ready_row
+                if row is None:
+                    row = await unit._fetchrow(
+                        """
+                        SELECT ready, reason_code, heartbeat_at
+                        FROM admin_webhook_runtime_heartbeats
+                        WHERE component = ?
+                        ORDER BY heartbeat_at DESC, instance_id ASC
+                        LIMIT 1
+                        """,
+                        (component.value,),
+                    )
+                if row is None:
+                    return DeliveryComponentStatus(
+                        component=component,
+                        ready=False,
+                        reason_code=unavailable_reasons[component],
+                        heartbeat_age_seconds=None,
+                    )
+                heartbeat_at = _parse_datetime(row["heartbeat_at"])
+                if heartbeat_at is None:
+                    raise ValueError("persisted runtime heartbeat time is invalid")
+                age_seconds = max(int((now - heartbeat_at).total_seconds()), 0)
+                if heartbeat_at < stale_before:
+                    return DeliveryComponentStatus(
+                        component=component,
+                        ready=False,
+                        reason_code=DeliveryRuntimeReasonCode.HEARTBEAT_STALE,
+                        heartbeat_age_seconds=age_seconds,
+                    )
+                ready = bool(row["ready"])
+                reason = (
+                    None
+                    if ready
+                    else DeliveryRuntimeReasonCode(str(row["reason_code"]))
+                )
+                return DeliveryComponentStatus(
+                    component=component,
+                    ready=ready,
+                    reason_code=reason,
+                    heartbeat_age_seconds=age_seconds,
+                )
+
+            worker = await component_status(DeliveryRuntimeComponent.WORKER)
+            reconciler = await component_status(
+                DeliveryRuntimeComponent.RECONCILER
+            )
+            retention = await component_status(DeliveryRuntimeComponent.RETENTION)
+
+        counts = {state.value: 0 for state in DeliveryState}
+        oldest_values: list[datetime] = []
+        for row in backlog_rows:
+            counts[str(row["state"])] = int(row["total"])
+            oldest = _parse_datetime(row["oldest_created_at"])
+            if oldest is not None:
+                oldest_values.append(oldest)
+        return DeliveryHealthSnapshot(
+            canonical_schema_version=migration.schema_version,
+            delivery_schema_ready=delivery_schema_ready,
+            migration_complete=(
+                migration.phase == "complete" and migration.completed_at is not None
+            ),
+            key_ready=key_available,
+            key_primary_match=(
+                key_available
+                and migration.active_primary_key_id == expected_primary_key_id
+            ),
+            worker=worker,
+            reconciler=reconciler,
+            retention=retention,
+            backlog=DeliveryBacklogCounts(
+                pending=counts[DeliveryState.PENDING.value],
+                enqueue_claimed=counts[DeliveryState.ENQUEUE_CLAIMED.value],
+                queued=counts[DeliveryState.QUEUED.value],
+                processing=counts[DeliveryState.PROCESSING.value],
+                retry_wait=counts[DeliveryState.RETRY_WAIT.value],
+            ),
+            oldest_nonterminal_created_at=(
+                min(oldest_values) if oldest_values else None
+            ),
+        )
+
+    async def expire_due_deliveries(
+        self,
+        *,
+        now: datetime,
+        batch_size: int,
+        token_factory: Callable[[], str],
+    ) -> DeliveryExpiryBatchResult:
+        """Terminalize one bounded due page without touching the Jobs database."""
+
+        if not 1 <= batch_size <= _MAX_RETENTION_BATCH_SIZE:
+            raise ValueError("batch_size must be between 1 and 200")
+        if not callable(token_factory):
+            raise TypeError("token factory is invalid")
+        async with self.transaction() as unit:
+            return await unit.expire_due_deliveries(
+                now=now,
+                batch_size=batch_size,
+                token_factory=token_factory,
+            )
+
     async def purge_retained_rows(
         self,
         now: datetime,
@@ -2254,9 +2441,17 @@ class AdminWebhookRepository:
         async with self.transaction() as unit:
             return await unit.purge_retained_rows(now, retention_cutoff, batch_size)
 
-    async def delivery_schema_ready(self) -> bool:
+    async def delivery_schema_ready(
+        self,
+        *,
+        _connection: object | None = None,
+    ) -> bool:
         """Return whether the additive delivery extension is fully present."""
-        async with self._read_connection() as connection:
+        if _connection is None:
+            async with self._read_connection() as connection:
+                return await self.delivery_schema_ready(_connection=connection)
+        connection = _connection
+        if connection is not None:
             unit = AdminWebhookUnitOfWork(connection, is_postgres=self.is_postgres)
             if self.is_postgres:
                 table_rows = await unit._fetch(
@@ -2477,6 +2672,7 @@ class AdminWebhookRepository:
                 ][3]
                 == ""
             )
+        raise RuntimeError("delivery schema connection is unavailable")
 
     async def get_legacy_import_snapshot(self) -> LegacyImportDatabaseSnapshot:
         """Read legacy rows and canonical ID-allocation state without mutation."""
@@ -4747,6 +4943,102 @@ class AdminWebhookUnitOfWork(_ConnectionAdapter):
                 pending.append(disposition)
         return tuple(pending)
 
+    async def expire_due_deliveries(
+        self,
+        *,
+        now: datetime,
+        batch_size: int,
+        token_factory: Callable[[], str],
+    ) -> DeliveryExpiryBatchResult:
+        """Expire one ordered page and persist exact cancellation recovery."""
+
+        now = _utc_datetime(now, field="now")
+        if not 1 <= batch_size <= _MAX_RETENTION_BATCH_SIZE:
+            raise ValueError("batch_size must be between 1 and 200")
+        lock_clause = " FOR UPDATE SKIP LOCKED" if self._is_postgres else ""
+        rows = await self._fetch(
+            f"""
+            SELECT id, state, jobs_job_id
+            FROM admin_webhook_deliveries
+            WHERE expires_at <= ?
+              AND state IN ('pending', 'enqueue_claimed', 'queued', 'retry_wait')
+              AND current_attempt_id IS NULL
+              AND pending_jobs_disposition IS NULL
+            ORDER BY expires_at ASC, created_at ASC, id ASC
+            LIMIT ?{lock_clause}
+            """,  # noqa: S608 - lock clause is a fixed backend literal.
+            (now, batch_size),
+        )
+        pending: list[PendingJobsDisposition] = []
+        for row in rows:
+            delivery_id = _canonical_uuid4(row["id"], field="delivery ID")
+            state = DeliveryState(str(row["state"]))
+            jobs_job_id = (
+                str(row["jobs_job_id"])
+                if row["jobs_job_id"] is not None
+                else None
+            )
+            disposition_token: str | None = None
+            if jobs_job_id is not None:
+                disposition_token = token_factory()
+                _opaque_token(disposition_token, field="disposition token")
+            updated = await self._fetchrow(
+                """
+                UPDATE admin_webhook_deliveries
+                SET state = 'dead', reason_code = 'delivery_expired',
+                    terminal_at = ?, current_attempt_id = NULL,
+                    enqueue_claim_token = NULL,
+                    enqueue_claim_expires_at = NULL,
+                    pending_jobs_disposition = ?,
+                    pending_jobs_disposition_delay_seconds = NULL,
+                    pending_jobs_disposition_token = ?,
+                    pending_jobs_disposition_not_before_at = NULL,
+                    jobs_disposition_applied = CASE
+                        WHEN jobs_job_id IS NULL THEN jobs_disposition_applied
+                        ELSE FALSE
+                    END,
+                    updated_at = ?
+                WHERE id = ? AND state = ? AND expires_at <= ?
+                  AND current_attempt_id IS NULL
+                  AND pending_jobs_disposition IS NULL
+                RETURNING id
+                """,
+                (
+                    now,
+                    (
+                        JobsDispositionKind.CANCEL.value
+                        if jobs_job_id is not None
+                        else None
+                    ),
+                    disposition_token,
+                    now,
+                    delivery_id,
+                    state.value,
+                    now,
+                ),
+            )
+            if updated is None:
+                raise WebhookRepositoryError(
+                    WebhookRepositoryErrorCode.STALE_DELIVERY_STATE
+                )
+            if jobs_job_id is not None and disposition_token is not None:
+                pending.append(
+                    PendingJobsDisposition(
+                        delivery_id=delivery_id,
+                        jobs_job_id=jobs_job_id,
+                        attempt_id=None,
+                        kind=JobsDispositionKind.CANCEL,
+                        delay_seconds=None,
+                        token=disposition_token,
+                        not_before_at=None,
+                        reason_code=DeliveryReasonCode.DELIVERY_EXPIRED,
+                    )
+                )
+        return DeliveryExpiryBatchResult(
+            expired=len(rows),
+            pending_dispositions=tuple(pending),
+        )
+
     async def expire_delivery(
         self,
         delivery_id: str,
@@ -4854,26 +5146,16 @@ class AdminWebhookUnitOfWork(_ConnectionAdapter):
         )
         remaining = batch_size
 
-        idempotency_rows = await self._fetch(
-            """
-            SELECT id FROM admin_webhook_idempotency
-            WHERE expires_at <= ?
-            ORDER BY expires_at ASC, id ASC LIMIT ?
-            """,
-            (now, remaining),
-        )
-        expired_idempotency = await self._delete_by_ids(
-            "admin_webhook_idempotency",
-            [row["id"] for row in idempotency_rows],
-        )
-        remaining -= expired_idempotency
-
         delivery_rows = await self._fetch(
             """
             SELECT delivery.id
             FROM admin_webhook_deliveries AS delivery
             WHERE delivery.state IN ('succeeded', 'dead', 'canceled', 'superseded')
               AND delivery.terminal_at <= ?
+              AND (
+                  delivery.pending_jobs_disposition IS NULL
+                  OR delivery.jobs_disposition_applied = TRUE
+              )
               AND NOT EXISTS (
                   SELECT 1 FROM admin_webhook_deliveries AS redelivery
                   WHERE redelivery.redelivery_of_id = delivery.id
@@ -4908,6 +5190,20 @@ class AdminWebhookUnitOfWork(_ConnectionAdapter):
             [row["id"] for row in event_rows],
         )
         remaining -= events
+
+        idempotency_rows = await self._fetch(
+            """
+            SELECT id FROM admin_webhook_idempotency
+            WHERE expires_at <= ?
+            ORDER BY expires_at ASC, id ASC LIMIT ?
+            """,
+            (now, remaining),
+        ) if remaining else []
+        expired_idempotency = await self._delete_by_ids(
+            "admin_webhook_idempotency",
+            [row["id"] for row in idempotency_rows],
+        )
+        remaining -= expired_idempotency
 
         heartbeat_rows = await self._fetch(
             """

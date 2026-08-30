@@ -20,7 +20,12 @@ from tldw_Server_API.app.core.Admin_Webhooks.control_plane import (
 )
 from tldw_Server_API.app.core.Admin_Webhooks.domain import (
     AttemptState,
+    DeliveryBacklogCounts,
+    DeliveryCapabilityStatus,
+    DeliveryComponentStatus,
     DeliveryKind,
+    DeliveryRuntimeComponent,
+    DeliveryRuntimeReasonCode,
     DeliveryState,
     WebhookDelivery,
     WebhookDeliveryAttempt,
@@ -64,12 +69,51 @@ def _registration(*, revision: int = 1) -> WebhookRegistration:
 
 
 def _status(*, route_selection: str = "canonical") -> WebhookStatus:
+    worker = DeliveryComponentStatus(
+        component=DeliveryRuntimeComponent.WORKER,
+        ready=False,
+        reason_code=DeliveryRuntimeReasonCode.WORKER_UNAVAILABLE,
+        heartbeat_age_seconds=17,
+    )
+    reconciler = DeliveryComponentStatus(
+        component=DeliveryRuntimeComponent.RECONCILER,
+        ready=True,
+        reason_code=None,
+        heartbeat_age_seconds=2,
+    )
+    retention = DeliveryComponentStatus(
+        component=DeliveryRuntimeComponent.RETENTION,
+        ready=False,
+        reason_code=DeliveryRuntimeReasonCode.HEARTBEAT_STALE,
+        heartbeat_age_seconds=31,
+    )
+    delivery = DeliveryCapabilityStatus(
+        canonical_schema_version=1,
+        schema_ready=True,
+        delivery_schema_ready=True,
+        migration_complete=True,
+        key_ready=True,
+        key_primary_match=True,
+        jobs_database_ready=True,
+        queue_ready=True,
+        job_type_ready=True,
+        jobs_backend="sqlite",
+        worker=worker,
+        reconciler=reconciler,
+        retention=retention,
+        backlog=DeliveryBacklogCounts(pending=2, queued=1),
+        oldest_nonterminal_age_seconds=19,
+        acquisition_ready=True,
+        acquisition_reason_code=None,
+        delivery_capability_ready=False,
+    )
     return WebhookStatus(
         mode="on",
         route_selection=route_selection,
         schema_ready=True,
         key_state="available",
         delivery_capability_ready=False,
+        delivery=delivery,
         limits=WebhookLimits(
             registrations=100,
             active_registrations=25,
@@ -376,6 +420,62 @@ def _client(
     app.include_router(admin_webhooks.status_router, prefix="/api/v1/admin")
     app.include_router(admin_webhooks.canonical_router, prefix="/api/v1/admin")
     return TestClient(app, raise_server_exceptions=False), service, mandatory_audit, read_audit
+
+
+@pytest.mark.unit
+def test_status_exposes_only_sanitized_delivery_capability(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, _, _, _ = _client(monkeypatch)
+
+    response = client.get("/api/v1/admin/webhooks/status")
+
+    assert response.status_code == 200
+    delivery = response.json()["delivery"]
+    assert delivery == {
+        "canonical_schema_version": 1,
+        "schema_ready": True,
+        "delivery_schema_ready": True,
+        "migration_complete": True,
+        "key_ready": True,
+        "key_primary_match": True,
+        "jobs_database_ready": True,
+        "queue_ready": True,
+        "job_type_ready": True,
+        "jobs_backend": "sqlite",
+        "worker": {
+            "component": "worker",
+            "ready": False,
+            "reason_code": "worker_unavailable",
+            "heartbeat_age_seconds": 17,
+        },
+        "reconciler": {
+            "component": "reconciler",
+            "ready": True,
+            "reason_code": None,
+            "heartbeat_age_seconds": 2,
+        },
+        "retention": {
+            "component": "retention",
+            "ready": False,
+            "reason_code": "heartbeat_stale",
+            "heartbeat_age_seconds": 31,
+        },
+        "backlog": {
+            "pending": 2,
+            "enqueue_claimed": 0,
+            "queued": 1,
+            "processing": 0,
+            "retry_wait": 0,
+        },
+        "oldest_nonterminal_age_seconds": 19,
+        "acquisition_ready": True,
+        "acquisition_reason_code": None,
+        "delivery_capability_ready": False,
+    }
+    encoded = str(delivery).lower()
+    for forbidden in ("instance_id", "url", "hostname", "secret", "payload"):
+        assert forbidden not in encoded
 
 
 @pytest.mark.unit

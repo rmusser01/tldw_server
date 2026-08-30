@@ -347,17 +347,84 @@ class DeliveryRuntimeHeartbeat:
 
 
 @dataclass(frozen=True)
-class DeliveryHealthSnapshot:
-    """Sanitized delivery capability inputs consumed by status surfaces."""
+class DeliveryComponentStatus:
+    """Sanitized readiness for one runtime component."""
 
+    component: DeliveryRuntimeComponent
+    ready: bool
+    reason_code: DeliveryRuntimeReasonCode | None
+    heartbeat_age_seconds: int | None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.component, DeliveryRuntimeComponent):
+            raise TypeError("delivery component is invalid")
+        if not isinstance(self.ready, bool):
+            raise TypeError("delivery component readiness is invalid")
+        if self.ready == (self.reason_code is not None):
+            raise ValueError("delivery component reason is invalid")
+        if self.heartbeat_age_seconds is not None and (
+            isinstance(self.heartbeat_age_seconds, bool)
+            or not isinstance(self.heartbeat_age_seconds, int)
+            or self.heartbeat_age_seconds < 0
+        ):
+            raise ValueError("delivery component heartbeat age is invalid")
+
+
+@dataclass(frozen=True)
+class DeliveryBacklogCounts:
+    """Closed nonterminal delivery counts from one read snapshot."""
+
+    pending: int = 0
+    enqueue_claimed: int = 0
+    queued: int = 0
+    processing: int = 0
+    retry_wait: int = 0
+
+    def __post_init__(self) -> None:
+        if any(
+            isinstance(value, bool) or not isinstance(value, int) or value < 0
+            for value in self.__dict__.values()
+        ):
+            raise ValueError("delivery backlog count is invalid")
+
+
+@dataclass(frozen=True)
+class DeliveryHealthSnapshot:
+    """Sanitized AuthNZ delivery facts from one bounded read snapshot."""
+
+    canonical_schema_version: int
+    delivery_schema_ready: bool
+    migration_complete: bool
+    key_ready: bool
+    key_primary_match: bool
+    worker: DeliveryComponentStatus
+    reconciler: DeliveryComponentStatus
+    retention: DeliveryComponentStatus
+    backlog: DeliveryBacklogCounts
+    oldest_nonterminal_created_at: datetime | None
+
+
+@dataclass(frozen=True)
+class DeliveryCapabilityStatus:
+    """Closed public delivery capability without instance or secret identity."""
+
+    canonical_schema_version: int
     schema_ready: bool
     delivery_schema_ready: bool
     migration_complete: bool
     key_ready: bool
-    jobs_ready: bool
-    worker_ready: bool
-    reconciler_ready: bool
-    retention_ready: bool
+    key_primary_match: bool
+    jobs_database_ready: bool
+    queue_ready: bool
+    job_type_ready: bool
+    jobs_backend: str
+    worker: DeliveryComponentStatus
+    reconciler: DeliveryComponentStatus
+    retention: DeliveryComponentStatus
+    backlog: DeliveryBacklogCounts
+    oldest_nonterminal_age_seconds: int | None
+    acquisition_ready: bool
+    acquisition_reason_code: DeliveryRuntimeReasonCode | None
     delivery_capability_ready: bool
 
 
@@ -412,13 +479,14 @@ class WebhookMigrationSummary:
 
 @dataclass(frozen=True)
 class WebhookStatus:
-    """Sanitized PR 1 status projection."""
+    """Sanitized canonical control-plane and delivery status projection."""
 
     mode: str
     route_selection: str
     schema_ready: bool
     key_state: str
     delivery_capability_ready: bool
+    delivery: DeliveryCapabilityStatus
     limits: WebhookLimits
     migration: WebhookMigrationSummary
 

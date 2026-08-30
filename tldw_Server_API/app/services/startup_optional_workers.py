@@ -65,6 +65,12 @@ def provide_optional_worker_specs(
 
     return (
         _optional_stop_event_worker_spec(
+            name="admin_webhook_delivery_runtime_task",
+            worker_service=_run_admin_webhook_delivery_runtime_service,
+            category="jobs",
+            enabled=_admin_webhook_delivery_runtime_enabled,
+        ),
+        _optional_stop_event_worker_spec(
             name="jobs_metrics_reconcile_task",
             worker_service=_run_jobs_metrics_reconcile_service,
             category="jobs",
@@ -155,12 +161,33 @@ def _env_enabled_predicate(
 def _jobs_webhooks_worker_enabled(
     _context: WorkerLifecycleContext | None,
 ) -> bool:
+    if _admin_webhook_delivery_runtime_enabled(_context):
+        return False
     enabled = _env_flag_enabled("JOBS_WEBHOOKS_ENABLED")
     has_url = bool(os.getenv("JOBS_WEBHOOKS_URL"))
     outbox_enabled = _env_flag_enabled("JOBS_EVENTS_OUTBOX")
     if enabled and has_url and not outbox_enabled:
         logger.warning("Jobs webhooks require JOBS_EVENTS_OUTBOX=true; refusing to start")
     return enabled and has_url and outbox_enabled
+
+
+def _admin_webhook_delivery_runtime_enabled(
+    _context: WorkerLifecycleContext | None,
+) -> bool:
+    try:
+        from tldw_Server_API.app.core.Admin_Webhooks.config import (
+            AdminWebhookMode,
+            AdminWebhookSettings,
+            WebhookRouteSelection,
+        )
+
+        settings = AdminWebhookSettings.from_environment(os.environ)
+    except (TypeError, ValueError):
+        return False
+    return (
+        settings.mode is AdminWebhookMode.ON
+        and settings.route_selection is WebhookRouteSelection.CANONICAL
+    )
 
 
 async def start_optional_workers(
@@ -593,6 +620,14 @@ def _run_jobs_webhooks_worker_service(stop_event: Any) -> Any:
     )
 
     return _run_jobs_webhooks(stop_event)
+
+
+def _run_admin_webhook_delivery_runtime_service(stop_event: Any) -> Any:
+    from tldw_Server_API.app.services.admin_webhook_delivery_runtime import (
+        run_admin_webhook_delivery_runtime,
+    )
+
+    return run_admin_webhook_delivery_runtime(stop_event)
 
 
 def _run_meetings_webhook_dlq_worker_service(stop_event: Any) -> Any:

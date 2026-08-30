@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import os
@@ -38,7 +39,7 @@ from .catalog import (
     WebhookCatalogItem,
     normalize_subscriptions,
 )
-from .config import AdminWebhookMode, AdminWebhookSettings
+from .config import AdminWebhookMode, AdminWebhookSettings, WebhookRouteSelection
 from .crypto import (
     ProtectedValue,
     WebhookKeyError,
@@ -48,7 +49,12 @@ from .crypto import (
     load_webhook_key_ring,
 )
 from .domain import (
+    DeliveryBacklogCounts,
+    DeliveryCapabilityStatus,
+    DeliveryComponentStatus,
     DeliveryReasonCode,
+    DeliveryRuntimeComponent,
+    DeliveryRuntimeReasonCode,
     IdempotencyScope,
     ValidatedWebhookTarget,
     WebhookError,
@@ -76,6 +82,14 @@ _FAILED_AUDIT_CODES = frozenset(
         WebhookErrorCode.KEY_CONFIGURATION_MISMATCH,
         WebhookErrorCode.KEY_ROTATION_IN_PROGRESS,
         WebhookErrorCode.DATABASE_BUSY,
+    }
+)
+_ADMISSION_DENIAL_CODES = frozenset(
+    {
+        WebhookErrorCode.REGISTRATION_LIMIT,
+        WebhookErrorCode.ACTIVE_LIMIT,
+        WebhookErrorCode.DELIVERY_UNAVAILABLE,
+        WebhookErrorCode.SECRET_ROTATION_REQUIRED,
     }
 )
 _CANCELLATION_TOKEN_DOMAIN = b"tldw-admin-webhook-cancel-v1\x00"
@@ -110,17 +124,61 @@ class _CancellationTokenSource:
 
 
 class DeliveryCapability(Protocol):
-    """Synchronous readiness boundary supplied by the later data plane."""
+    """Current sanitized delivery readiness supplied by the data plane."""
 
-    def is_ready(self) -> bool:
+    async def status(self, now: datetime) -> DeliveryCapabilityStatus:
         """Return whether a registration may currently be activated."""
 
 
-class UnavailableDeliveryCapability:
-    """PR 1 default that prevents activation before delivery exists."""
+class _ControlMetrics(Protocol):
+    def registration_counts(self, *, total: int, active: int) -> None: ...
 
-    def is_ready(self) -> bool:
-        return False
+    def admission_denied(self, reason: WebhookErrorCode) -> None: ...
+
+
+class UnavailableDeliveryCapability:
+    """Fixed fail-closed capability for off, migrate, and isolated tests."""
+
+    async def status(self, now: datetime) -> DeliveryCapabilityStatus:
+        _utc(now)
+        components = {
+            DeliveryRuntimeComponent.WORKER: DeliveryRuntimeReasonCode.WORKER_UNAVAILABLE,
+            DeliveryRuntimeComponent.RECONCILER: (
+                DeliveryRuntimeReasonCode.RECONCILER_UNAVAILABLE
+            ),
+            DeliveryRuntimeComponent.RETENTION: (
+                DeliveryRuntimeReasonCode.RETENTION_UNAVAILABLE
+            ),
+        }
+        statuses = {
+            component: DeliveryComponentStatus(
+                component=component,
+                ready=False,
+                reason_code=reason,
+                heartbeat_age_seconds=None,
+            )
+            for component, reason in components.items()
+        }
+        return DeliveryCapabilityStatus(
+            canonical_schema_version=0,
+            schema_ready=False,
+            delivery_schema_ready=False,
+            migration_complete=False,
+            key_ready=False,
+            key_primary_match=False,
+            jobs_database_ready=False,
+            queue_ready=False,
+            job_type_ready=False,
+            jobs_backend="unavailable",
+            worker=statuses[DeliveryRuntimeComponent.WORKER],
+            reconciler=statuses[DeliveryRuntimeComponent.RECONCILER],
+            retention=statuses[DeliveryRuntimeComponent.RETENTION],
+            backlog=DeliveryBacklogCounts(),
+            oldest_nonterminal_age_seconds=None,
+            acquisition_ready=False,
+            acquisition_reason_code=DeliveryRuntimeReasonCode.SCHEMA_UNREADY,
+            delivery_capability_ready=False,
+        )
 
 
 class _Omitted:
@@ -409,6 +467,7 @@ class AdminWebhookControlPlane:
         key_ring_result: WebhookKeyRingLoadResult,
         delivery_capability: DeliveryCapability,
         cancellation_seed_factory: Callable[[], bytes] = _random_cancellation_seed,
+        metrics: _ControlMetrics | None = None,
     ) -> None:
         if not callable(cancellation_seed_factory):
             raise TypeError("cancellation seed factory is required")
@@ -417,6 +476,7 @@ class AdminWebhookControlPlane:
         self._key_ring_result = key_ring_result
         self._delivery_capability = delivery_capability
         self._cancellation_seed_factory = cancellation_seed_factory
+        self._metrics = metrics
 
     def _new_cancellation_token_source(self) -> _CancellationTokenSource:
         return _CancellationTokenSource(self._cancellation_seed_factory())
@@ -493,7 +553,15 @@ class AdminWebhookControlPlane:
                     sink,
                     outcome=outcome.audit_outcome,
                 )
-            return outcome.value
+            value = outcome.value
+            if self._metrics is not None:
+                try:
+                    total = await self._repository.count_registrations()
+                    active = await self._repository.count_active_registrations()
+                    self._metrics.registration_counts(total=total, active=active)
+                except Exception:  # noqa: BLE001 - metrics are fail-open
+                    pass
+            return value
         except _AuditSinkUnavailable:
             raise WebhookError(WebhookErrorCode.AUDIT_UNAVAILABLE) from None
         except Exception as exc:
@@ -502,6 +570,14 @@ class AdminWebhookControlPlane:
             if context.emitted:
                 mapped = _map_exception(exc)
                 if mapped is not None:
+                    if (
+                        self._metrics is not None
+                        and mapped.code in _ADMISSION_DENIAL_CODES
+                    ):
+                        try:
+                            self._metrics.admission_denied(mapped.code)
+                        except Exception:  # noqa: BLE001 - metrics are fail-open
+                            pass
                     raise mapped from None
                 raise
             await self._raise_after_audit(context, sink, exc)
@@ -839,6 +915,14 @@ class AdminWebhookControlPlane:
                 prepare,
             )
         )
+        delivery_status: DeliveryCapabilityStatus | None = None
+        if normalized.active is True:
+            try:
+                delivery_status = await self._delivery_capability.status(
+                    _utc(command.now)
+                )
+            except Exception:  # noqa: BLE001 - activation fails closed
+                delivery_status = None
 
         async def operation(tx: AdminWebhookUnitOfWork) -> _TransactionOutcome[MutationResult]:
             disposition_token_factory = cancellation_tokens.attempt_factory()
@@ -887,11 +971,10 @@ class AdminWebhookControlPlane:
                 if current.registration.secret_rotation_required:
                     raise WebhookError(WebhookErrorCode.SECRET_ROTATION_REQUIRED)
                 self._require_registration_decryptable(current, ring)
-                try:
-                    delivery_ready = self._delivery_capability.is_ready()
-                except Exception:  # noqa: BLE001 - capability implementations are injected
-                    delivery_ready = False
-                if not delivery_ready:
+                if (
+                    delivery_status is None
+                    or not delivery_status.delivery_capability_ready
+                ):
                     raise WebhookError(WebhookErrorCode.DELIVERY_UNAVAILABLE)
                 await tx.enforce_active_registration_limit(limit=self._settings.active_limit)
 
@@ -1299,9 +1382,9 @@ class AdminWebhookControlPlane:
                 raise mapped from None
             raise
         try:
-            delivery_ready = bool(self._delivery_capability.is_ready())
+            delivery = await self._delivery_capability.status(observed_at)
         except Exception:  # noqa: BLE001 - status degrades on capability failure
-            delivery_ready = False
+            delivery = await UnavailableDeliveryCapability().status(observed_at)
         key_state = self._status_key_state(migration)
         imported_ids = _migration_registration_ids(migration.source_mapping)
         rollback_permitted = bool(
@@ -1317,7 +1400,8 @@ class AdminWebhookControlPlane:
             route_selection=self._settings.route_selection.value,
             schema_ready=migration.schema_version >= 1,
             key_state=key_state,
-            delivery_capability_ready=delivery_ready,
+            delivery_capability_ready=delivery.delivery_capability_ready,
+            delivery=delivery,
             limits=WebhookLimits(
                 registrations=self._settings.registration_limit,
                 active_registrations=self._settings.active_limit,
@@ -1354,9 +1438,41 @@ class AdminWebhookControlPlane:
 async def get_admin_webhook_control_plane() -> AdminWebhookControlPlane:
     """Build a stateless service around the application-scoped AuthNZ pool."""
     pool = await get_db_pool()
+    repository = AdminWebhookRepository(pool)
+    settings = AdminWebhookSettings.from_environment(os.environ)
+    key_ring_result = load_webhook_key_ring()
+    from .observability import AdminWebhookMetrics
+
+    metrics = AdminWebhookMetrics()
+    delivery_capability: DeliveryCapability = UnavailableDeliveryCapability()
+    if (
+        settings.mode is AdminWebhookMode.ON
+        and settings.route_selection is WebhookRouteSelection.CANONICAL
+    ):
+        try:
+            from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+            from .observability import (
+                AdminWebhookDeliveryCapability,
+                JobManagerJobsCapabilityProbe,
+            )
+
+            manager = await asyncio.to_thread(JobManager)
+            delivery_capability = AdminWebhookDeliveryCapability(
+                repository=repository,
+                key_ring_result=key_ring_result,
+                jobs_probe=JobManagerJobsCapabilityProbe(manager),
+                heartbeat_freshness_seconds=(
+                    settings.delivery_heartbeat_freshness_seconds
+                ),
+                metrics=metrics,
+            )
+        except Exception:  # noqa: BLE001 - status remains available and fail-closed
+            delivery_capability = UnavailableDeliveryCapability()
     return AdminWebhookControlPlane(
-        repository=AdminWebhookRepository(pool),
-        settings=AdminWebhookSettings.from_environment(os.environ),
-        key_ring_result=load_webhook_key_ring(),
-        delivery_capability=UnavailableDeliveryCapability(),
+        repository=repository,
+        settings=settings,
+        key_ring_result=key_ring_result,
+        delivery_capability=delivery_capability,
+        metrics=metrics,
     )

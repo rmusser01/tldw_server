@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 
+from tldw_Server_API.app.core.Admin_Webhooks import reconciler as reconciler_module
 from tldw_Server_API.app.core.Admin_Webhooks.domain import (
     DeliveryKind,
     DeliveryReasonCode,
@@ -45,6 +46,39 @@ from tldw_Server_API.tests.Admin_Webhooks.test_event_expansion import (
 )
 
 pytestmark = pytest.mark.unit
+
+
+async def test_expiry_is_one_bounded_reconciler_operation() -> None:
+    calls: list[dict[str, object]] = []
+    expected = object()
+
+    class Repository:
+        async def expire_due_deliveries(self, **kwargs: object) -> object:
+            calls.append(kwargs)
+            return expected
+
+    def token_factory() -> str:
+        return opaque_token("expiry-token")
+
+    reconciler = AdminWebhookReconciler(
+        repository=Repository(),  # type: ignore[arg-type]
+        queue=object(),  # type: ignore[arg-type]
+        token_factory=token_factory,
+        clock=lambda: NOW,
+        claim_ttl_seconds=30,
+        failure_observer=lambda _failure: None,
+    )
+
+    result = await reconciler.reconcile_expired_once(limit=17)
+
+    assert result is expected
+    assert calls == [
+        {
+            "now": NOW,
+            "batch_size": 17,
+            "token_factory": token_factory,
+        }
+    ]
 
 
 def _canonical_jobs_row(
@@ -363,7 +397,11 @@ def _reconciler(
     clock: MutableClock,
     *,
     observer=lambda _failure: None,
+    success_observer=None,
 ) -> AdminWebhookReconciler:
+    kwargs = {}
+    if success_observer is not None:
+        kwargs["success_observer"] = success_observer
     return AdminWebhookReconciler(
         repository=fixture.repository,
         queue=queue,
@@ -371,7 +409,34 @@ def _reconciler(
         clock=clock,
         claim_ttl_seconds=60,
         failure_observer=observer,
+        **kwargs,
     )
+
+
+async def test_enqueue_success_observer_runs_for_committed_claim_and_queue(
+    auth_fixture: SQLiteAuthFixture,
+) -> None:
+    _, delivery_id = await _seed_automatic_delivery(
+        auth_fixture.repository,
+        "success-observer",
+    )
+    observed: list[object] = []
+    reconciler = _reconciler(
+        auth_fixture,
+        StubDeliveryQueue(),
+        MutableClock(),
+        success_observer=observed.append,
+    )
+
+    assert await reconciler.reconcile_enqueue_once() == 1
+    stored = await auth_fixture.repository.get_delivery_bundle(delivery_id)
+
+    assert stored is not None
+    assert stored.delivery.delivery.state is DeliveryState.QUEUED
+    assert observed == [
+        reconciler_module.EnqueueSuccessKind.CLAIMED,
+        reconciler_module.EnqueueSuccessKind.QUEUED,
+    ]
 
 
 async def test_typed_rejection_releases_only_owned_claim_and_retries_later(

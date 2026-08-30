@@ -43,6 +43,36 @@ def test_openapi_exposes_reviewed_control_plane_and_delivery_operations() -> Non
 
 
 @pytest.mark.unit
+def test_status_openapi_has_closed_sanitized_delivery_capability() -> None:
+    spec = _openapi()
+    schemas = spec["components"]["schemas"]
+    status = schemas["AdminWebhookStatusResponse"]
+
+    assert status["properties"]["delivery"] == {
+        "$ref": "#/components/schemas/DeliveryCapabilityStatusResponse"
+    }
+    for name in (
+        "AdminWebhookStatusResponse",
+        "DeliveryCapabilityStatusResponse",
+        "DeliveryComponentStatusResponse",
+        "DeliveryBacklogCountsResponse",
+    ):
+        assert schemas[name]["additionalProperties"] is False
+    encoded = json.dumps(
+        {
+            name: schemas[name]
+            for name in schemas
+            if name.startswith("DeliveryCapability")
+            or name.startswith("DeliveryComponent")
+            or name.startswith("DeliveryBacklog")
+        },
+        sort_keys=True,
+    ).lower()
+    for forbidden in ("instance_id", "url", "hostname", "secret", "payload"):
+        assert forbidden not in encoded
+
+
+@pytest.mark.unit
 def test_delivery_openapi_uses_only_fixed_request_response_and_header_contracts() -> None:
     spec = _openapi()
     paths = spec["paths"]

@@ -1126,9 +1126,9 @@ async def exercise_recovery_runtime_and_retention(
     fourth = await repository.purge_retained_rows(purge_now, cutoff, 1)
     fifth = await repository.purge_retained_rows(purge_now, cutoff, 1)
     assert isinstance(first, RetentionBatchResult)
-    assert first.expired_idempotency == 1
-    assert second.deliveries == 1
-    assert third.events == 1
+    assert first.deliveries == 1
+    assert second.events == 1
+    assert third.expired_idempotency == 1
     assert fourth.heartbeats == 1
     assert fifth.heartbeats == 1
     assert sum(first.__dict__.values()) == 1
@@ -1151,6 +1151,247 @@ async def exercise_recovery_runtime_and_retention(
 
     with pytest.raises(ValueError, match="batch_size"):
         await repository.purge_retained_rows(NOW, NOW, 201)
+
+
+async def exercise_task11_health_and_expiry_contract(
+    fixture: DeliveryRepositoryFixture,
+) -> None:
+    repository = fixture.repository
+    attached_webhook_id, attached_delivery_id = await _captured_delivery(
+        repository,
+        event_id="task11-attached-expiry",
+        command_id="task11-attached-expiry-command",
+        isolated=True,
+    )
+    unattached_webhook_id, unattached_delivery_id = await _captured_delivery(
+        repository,
+        event_id="task11-unattached-expiry",
+        command_id="task11-unattached-expiry-command",
+        isolated=True,
+    )
+    processing_webhook_id, processing_delivery_id = await _captured_delivery(
+        repository,
+        event_id="task11-processing-expiry",
+        command_id="task11-processing-expiry-command",
+        isolated=True,
+    )
+    webhook_by_delivery = {
+        attached_delivery_id: attached_webhook_id,
+        unattached_delivery_id: unattached_webhook_id,
+        processing_delivery_id: processing_webhook_id,
+    }
+    await mark_migration_ready(repository, now=NOW - timedelta(hours=1))
+
+    async with repository.transaction() as tx:
+        claim = await tx.claim_pending_delivery(
+            opaque_token("task11-attached-claim"),
+            NOW + timedelta(minutes=1),
+            NOW,
+        )
+        assert claim is not None
+        attached_delivery_id = claim.delivery.delivery.id
+        attached_webhook_id = webhook_by_delivery.pop(attached_delivery_id)
+        unattached_delivery_id, processing_delivery_id = tuple(webhook_by_delivery)
+        unattached_webhook_id = webhook_by_delivery[unattached_delivery_id]
+        processing_webhook_id = webhook_by_delivery[processing_delivery_id]
+        attached = await tx.attach_jobs_job(
+            attached_delivery_id,
+            opaque_token("task11-attached-claim"),
+            "task11-jobs-row",
+            NOW,
+        )
+        assert attached is not None
+        await tx._execute(
+            """
+            UPDATE admin_webhook_deliveries
+            SET state = 'processing', created_at = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (NOW - timedelta(seconds=9), NOW, processing_delivery_id),
+        )
+
+    heartbeats = (
+        RuntimeHeartbeatWrite(
+            component=DeliveryRuntimeComponent.WORKER,
+            instance_id=canonical_uuid4("task11-worker-stale-ready"),
+            ready=True,
+            reason_code=None,
+            heartbeat_at=NOW - timedelta(seconds=40),
+            last_success_at=NOW - timedelta(seconds=40),
+        ),
+        RuntimeHeartbeatWrite(
+            component=DeliveryRuntimeComponent.WORKER,
+            instance_id=canonical_uuid4("task11-worker-newer-unready"),
+            ready=False,
+            reason_code=DeliveryRuntimeReasonCode.JOBS_UNAVAILABLE,
+            heartbeat_at=NOW - timedelta(seconds=1),
+            last_success_at=None,
+        ),
+        RuntimeHeartbeatWrite(
+            component=DeliveryRuntimeComponent.WORKER,
+            instance_id=canonical_uuid4("task11-worker-fresh-ready"),
+            ready=True,
+            reason_code=None,
+            heartbeat_at=NOW - timedelta(seconds=2),
+            last_success_at=NOW - timedelta(seconds=2),
+        ),
+        RuntimeHeartbeatWrite(
+            component=DeliveryRuntimeComponent.RECONCILER,
+            instance_id=canonical_uuid4("task11-reconciler-stale"),
+            ready=True,
+            reason_code=None,
+            heartbeat_at=NOW - timedelta(seconds=31),
+            last_success_at=NOW - timedelta(seconds=31),
+        ),
+        RuntimeHeartbeatWrite(
+            component=DeliveryRuntimeComponent.RETENTION,
+            instance_id=canonical_uuid4("task11-retention-unready"),
+            ready=False,
+            reason_code=DeliveryRuntimeReasonCode.RETENTION_UNAVAILABLE,
+            heartbeat_at=NOW - timedelta(seconds=3),
+            last_success_at=None,
+        ),
+    )
+    for heartbeat in heartbeats:
+        await repository.upsert_runtime_heartbeat(heartbeat)
+
+    snapshot = await repository.get_delivery_health_snapshot(
+        now=NOW,
+        heartbeat_freshness_seconds=30,
+        key_available=True,
+        expected_primary_key_id=KEY_ID,
+    )
+
+    assert snapshot.canonical_schema_version == 1
+    assert snapshot.delivery_schema_ready is True
+    assert snapshot.migration_complete is True
+    assert snapshot.key_ready is True
+    assert snapshot.key_primary_match is True
+    assert snapshot.worker.ready is True
+    assert snapshot.worker.heartbeat_age_seconds == 2
+    assert snapshot.reconciler.ready is False
+    assert snapshot.reconciler.reason_code is DeliveryRuntimeReasonCode.HEARTBEAT_STALE
+    assert snapshot.retention.reason_code is DeliveryRuntimeReasonCode.RETENTION_UNAVAILABLE
+    assert snapshot.backlog.pending == 1
+    assert snapshot.backlog.queued == 1
+    assert snapshot.backlog.processing == 1
+    assert snapshot.oldest_nonterminal_created_at == NOW - timedelta(seconds=9)
+    assert "instance" not in repr(snapshot).lower()
+
+    tokens: list[str] = []
+
+    def token_factory() -> str:
+        token = opaque_token(f"task11-expiry-{len(tokens)}")
+        tokens.append(token)
+        return token
+
+    result = await repository.expire_due_deliveries(
+        now=NOW + timedelta(hours=73),
+        batch_size=100,
+        token_factory=token_factory,
+    )
+
+    assert result.expired == 2
+    assert len(result.pending_dispositions) == 1
+    pending = result.pending_dispositions[0]
+    assert pending.delivery_id == attached_delivery_id
+    assert pending.kind is JobsDispositionKind.CANCEL
+    assert pending.reason_code is DeliveryReasonCode.DELIVERY_EXPIRED
+    assert pending.token == tokens[0]
+    assert pending.attempt_id is None
+
+    attached_bundle = await repository.get_delivery_bundle(attached_delivery_id)
+    unattached_bundle = await repository.get_delivery_bundle(unattached_delivery_id)
+    processing_bundle = await repository.get_delivery_bundle(processing_delivery_id)
+    assert attached_bundle is not None
+    assert attached_bundle.delivery.delivery.state is DeliveryState.DEAD
+    assert attached_bundle.delivery.pending_jobs_disposition is JobsDispositionKind.CANCEL
+    assert attached_bundle.delivery.jobs_disposition_applied is False
+    assert unattached_bundle is not None
+    assert unattached_bundle.delivery.delivery.state is DeliveryState.DEAD
+    assert unattached_bundle.delivery.pending_jobs_disposition is None
+    assert processing_bundle is not None
+    assert processing_bundle.delivery.delivery.state is DeliveryState.PROCESSING
+    assert tokens == [pending.token]
+    assert attached_webhook_id > 0
+    assert unattached_webhook_id > 0
+    assert processing_webhook_id > 0
+
+    terminal_at = NOW + timedelta(hours=73)
+    before_boundary = terminal_at + timedelta(days=30) - timedelta(minutes=1)
+    early_retention = await repository.purge_retained_rows(
+        before_boundary,
+        before_boundary,
+        200,
+    )
+    assert early_retention.deliveries == 0
+    assert await repository.get_delivery_bundle(attached_delivery_id) is not None
+    assert await repository.get_delivery_bundle(unattached_delivery_id) is not None
+
+    exact_boundary = terminal_at + timedelta(days=30)
+    boundary_retention = await repository.purge_retained_rows(
+        exact_boundary,
+        exact_boundary,
+        200,
+    )
+    assert boundary_retention.deliveries == 1
+    assert await repository.get_delivery_bundle(attached_delivery_id) is not None
+    assert await repository.get_delivery_bundle(unattached_delivery_id) is None
+
+    async with repository.transaction() as tx:
+        assert await tx.acknowledge_jobs_disposition(
+            attached_delivery_id,
+            pending.token,
+            "cancelled",
+        )
+    after_ack_retention = await repository.purge_retained_rows(
+        exact_boundary,
+        exact_boundary,
+        200,
+    )
+    assert after_ack_retention.deliveries == 1
+    assert await repository.get_delivery_bundle(attached_delivery_id) is None
+
+    _, rollback_delivery_id = await _captured_delivery(
+        repository,
+        event_id="task11-expiry-token-rollback",
+        command_id="task11-expiry-token-rollback-command",
+        isolated=True,
+    )
+    rollback_claim_token = opaque_token("task11-expiry-rollback-claim")
+    rollback_claim = None
+    rollback_attached = None
+    async with repository.transaction() as tx:
+        rollback_claim = await tx.claim_pending_delivery(
+            rollback_claim_token,
+            NOW + timedelta(minutes=1),
+            NOW,
+        )
+        if rollback_claim is not None:
+            rollback_attached = await tx.attach_jobs_job(
+                rollback_delivery_id,
+                rollback_claim_token,
+                "task11-expiry-rollback-job",
+                NOW,
+            )
+    assert rollback_claim is not None
+    assert rollback_claim.delivery.delivery.id == rollback_delivery_id
+    assert rollback_attached is not None
+
+    def failing_token_factory() -> str:
+        raise RuntimeError("synthetic token failure")
+
+    with pytest.raises(TransactionError, match="transaction"):
+        await repository.expire_due_deliveries(
+            now=exact_boundary + timedelta(hours=73),
+            batch_size=1,
+            token_factory=failing_token_factory,
+        )
+    rollback_bundle = await repository.get_delivery_bundle(rollback_delivery_id)
+    assert rollback_bundle is not None
+    assert rollback_bundle.delivery.delivery.state is DeliveryState.QUEUED
+    assert rollback_bundle.delivery.pending_jobs_disposition is None
+    assert rollback_bundle.delivery.pending_jobs_disposition_token is None
 
 
 async def exercise_task9_test_attempt_contract(

@@ -37,8 +37,13 @@ from tldw_Server_API.app.core.Admin_Webhooks.crypto import (
 )
 from tldw_Server_API.app.core.Admin_Webhooks.domain import (
     AttemptState,
+    DeliveryBacklogCounts,
+    DeliveryCapabilityStatus,
+    DeliveryComponentStatus,
     DeliveryKind,
     DeliveryReasonCode,
+    DeliveryRuntimeComponent,
+    DeliveryRuntimeReasonCode,
     DeliveryState,
     EventSourceKind,
     JobsDispositionKind,
@@ -82,9 +87,110 @@ class ControlPlaneFixture:
     database_path: Path
 
 
+def _delivery_status(*, ready: bool) -> DeliveryCapabilityStatus:
+    component_status = {
+        component: DeliveryComponentStatus(
+            component=component,
+            ready=ready,
+            reason_code=(
+                None
+                if ready
+                else DeliveryRuntimeReasonCode.WORKER_UNAVAILABLE
+            ),
+            heartbeat_age_seconds=1 if ready else None,
+        )
+        for component in DeliveryRuntimeComponent
+    }
+    return DeliveryCapabilityStatus(
+        canonical_schema_version=1,
+        schema_ready=True,
+        delivery_schema_ready=True,
+        migration_complete=True,
+        key_ready=True,
+        key_primary_match=True,
+        jobs_database_ready=True,
+        queue_ready=True,
+        job_type_ready=True,
+        jobs_backend="sqlite",
+        worker=component_status[DeliveryRuntimeComponent.WORKER],
+        reconciler=component_status[DeliveryRuntimeComponent.RECONCILER],
+        retention=component_status[DeliveryRuntimeComponent.RETENTION],
+        backlog=DeliveryBacklogCounts(),
+        oldest_nonterminal_age_seconds=None,
+        acquisition_ready=ready,
+        acquisition_reason_code=(
+            None if ready else DeliveryRuntimeReasonCode.WORKER_UNAVAILABLE
+        ),
+        delivery_capability_ready=ready,
+    )
+
+
 class ReadyDeliveryCapability:
-    def is_ready(self) -> bool:
-        return True
+    async def status(self, now: datetime) -> DeliveryCapabilityStatus:
+        assert now.tzinfo is not None
+        return _delivery_status(ready=True)
+
+
+@pytest.mark.unit
+async def test_registration_metrics_use_post_commit_current_counts(
+    plane: ControlPlaneFixture,
+) -> None:
+    observations: list[tuple[int, int]] = []
+
+    class Metrics:
+        def registration_counts(self, *, total: int, active: int) -> None:
+            observations.append((total, active))
+
+    service = AdminWebhookControlPlane(
+        repository=plane.repository,
+        settings=_settings(),
+        key_ring_result=WebhookKeyRingLoadResult(
+            ring=plane.ring,
+            code=WebhookKeyLoadCode.AVAILABLE,
+        ),
+        delivery_capability=ReadyDeliveryCapability(),
+        metrics=Metrics(),
+    )
+
+    await service.create(_create_command(), audit_sink=_recording_sink([]))
+
+    assert observations == [(1, 0)]
+
+
+@pytest.mark.unit
+async def test_admission_denial_metric_is_emitted_after_limit_rollback(
+    plane: ControlPlaneFixture,
+) -> None:
+    denials: list[WebhookErrorCode] = []
+
+    class Metrics:
+        def registration_counts(self, *, total: int, active: int) -> None:
+            del total, active
+
+        def admission_denied(self, reason: WebhookErrorCode) -> None:
+            denials.append(reason)
+
+    service = AdminWebhookControlPlane(
+        repository=plane.repository,
+        settings=_settings(registration_limit=1),
+        key_ring_result=WebhookKeyRingLoadResult(
+            ring=plane.ring,
+            code=WebhookKeyLoadCode.AVAILABLE,
+        ),
+        delivery_capability=ReadyDeliveryCapability(),
+        metrics=Metrics(),
+    )
+    await service.create(_create_command(), audit_sink=_recording_sink([]))
+
+    with pytest.raises(WebhookError) as failed:
+        await service.create(
+            _create_command(key=ROTATE_KEY),
+            audit_sink=_recording_sink([]),
+        )
+
+    assert failed.value.code is WebhookErrorCode.REGISTRATION_LIMIT
+    assert denials == [WebhookErrorCode.REGISTRATION_LIMIT]
+    assert await plane.repository.count_registrations() == 1
 
 
 @pytest.fixture(autouse=True)
@@ -1210,6 +1316,9 @@ async def test_list_get_and_status_do_not_require_decryption(
     status = await service.status(now=NOW + timedelta(days=1))
     assert status.key_state == "admin_webhook_key_unavailable"
     assert status.delivery_capability_ready is False
+    assert status.delivery.delivery_capability_ready is False
+    assert status.delivery.worker.reason_code is DeliveryRuntimeReasonCode.WORKER_UNAVAILABLE
+    assert status.delivery.oldest_nonterminal_age_seconds is None
     assert status.limits.current_registrations == 1
     assert status.limits.current_active_registrations == 0
     assert status.migration.secret_rotation_required_count == 1
@@ -1961,5 +2070,10 @@ async def test_lifecycle_changes_roll_back_with_mandatory_audit_failure(
 
 
 @pytest.mark.unit
-def test_unavailable_delivery_capability_is_fail_closed() -> None:
-    assert UnavailableDeliveryCapability().is_ready() is False
+async def test_unavailable_delivery_capability_is_fail_closed() -> None:
+    status = await UnavailableDeliveryCapability().status(NOW)
+
+    assert status.acquisition_ready is False
+    assert status.delivery_capability_ready is False
+    assert status.jobs_backend == "unavailable"
+    assert status.worker.reason_code is DeliveryRuntimeReasonCode.WORKER_UNAVAILABLE

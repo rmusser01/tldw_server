@@ -1669,27 +1669,85 @@ new Critical, Important, or Minor breakage. Task 10 is complete at
 - Consumes: repository health queries/heartbeats, Jobs preflight, key/migration/mode state, worker/reconciler iterations, metrics registry, and stop event.
 - Produces: durable `DeliveryCapabilityStatus`, sanitized status API expansion, bounded retention, low-cardinality metrics, and one supervised optional runtime.
 
-- [ ] **Step 1: Write observability/health RED tests**
+**Preflight ruling:** The local file list omits load-bearing domain, repository,
+metrics-integration, backend-contract, and OpenAPI work. Task 11 may also modify
+`domain.py`, `admin_webhooks_repository.py`, `delivery.py`, `worker.py`, their
+focused tests and SQLite/PostgreSQL wrappers, `test_openapi.py`, and the frontend
+OpenAPI fingerprint. It may not add a schema/migration, change Jobs core SQL or
+WorkerSDK contracts, enable deployment configuration, connect PR 3 producers or
+UI, import either legacy webhook service, or perform direct Jobs SQL.
+
+Add one closed `DeliveryCapabilityStatus` projection with exact canonical
+schema version/readiness, delivery-extension readiness, migration/key/Jobs and
+fixed queue/type readiness, per-component heartbeat readiness/reason/age,
+closed nonterminal backlog counts, oldest nonterminal age, retention status,
+and the final activation capability boolean. No instance ID or sensitive field
+is public. AuthNZ health facts come from one bounded backend-correct read
+snapshot. A component is ready when any fresh ready instance exists; otherwise
+use the freshest bounded row to report its closed unready reason, a stale row
+reports `heartbeat_stale`, and no row reports the component-specific unavailable
+reason. Retention readiness is visible but is not an acquisition prerequisite.
+
+Avoid the startup fixed point where worker readiness requires its own heartbeat.
+The capability has a foundational/acquisition preflight that checks current
+schema, migration, key, Jobs access, exact canonical queue/type registration,
+and fresh reconciler evidence, but not worker or retention heartbeat. The
+worker pre-acquire guard uses that result and writes its own ready/unready
+heartbeat. Full activation/API readiness additionally requires a fresh ready
+worker heartbeat. Reconciler and retention loops continue independently when
+their own required dependencies permit recovery.
+
+Metrics are real integrations, not definitions alone. Use a typed, fail-open
+adapter with a fixed `admin_webhooks_` metric-name and label-schema registry;
+callers cannot supply arbitrary names or label keys/values. Counter observations
+happen only after the corresponding durable commit, gauges use one current
+health snapshot, and metric failures never alter durable control flow. Add
+observer seams only where needed in control plane, delivery service, reconciler,
+and worker; derive SSRF-denial metrics from the worker's closed executor outcome
+rather than adding transport leakage. Labels remain limited to the global
+closed state/kind/event-type/reason/status-class/component/backend catalog.
+
+The Task 11 retention order supersedes Task 2's provisional order: eligible
+terminal deliveries, newly orphaned events, expired idempotency, stale runtime
+heartbeats, then eligible tombstones, with one total 1-200 row budget and
+deterministic continuation. Repeated partial batches must drain every finite
+eligible category. Runtime expiry uses a separate bounded reconciler operation:
+exclude live processing/current-attempt rows; terminalize due unattached work
+atomically; and for attached Jobs work persist one exact cancel disposition
+token before the existing lookup/apply/ack repair path. It never mutates Jobs
+inside AuthNZ SQL and never sends HTTP.
+
+The canonical lifecycle spec is named exactly
+`admin_webhook_delivery_runtime_task` and calls only the new runtime. It is
+enabled only for validated `mode=on` plus canonical route selection. The
+isolated `jobs_webhooks_task` implementation is not imported, called, or used as
+an alias by canonical code; preserve its PR 2 off/compatibility behavior, but it
+must not be simultaneously enabled as the canonical admin-webhook runtime.
+Refresh and review the OpenAPI fingerprint for the bounded status expansion.
+All new repository contracts run on SQLite and required PostgreSQL with zero
+skips.
+
+- [x] **Step 1: Write observability/health RED tests**
 
 Health aggregates canonical schema version, explicit migration-095 delivery-extension readiness, migration completion, key availability/primary match, Jobs database access, exact queue/type registration, freshest ready worker heartbeat, freshest ready reconciler heartbeat, retention heartbeat, backlog counts by state, and oldest pending age. Heartbeats are fresh only within configured freshness; stale/unready rows report stable reason codes. Multiple instances choose the freshest ready evidence without deleting another live instance.
 
 `delivery_capability_ready` requires canonical schema version 1, successful `delivery_schema_ready()` extension preflight, completed migration, key match, Jobs preflight, and fresh worker/reconciler heartbeats. Retention staleness degrades status but does not by itself permit acquisition. Activating a registration requires capability ready; metadata read/disable/delete/history remain available in degraded states under existing key rules.
 
-- [ ] **Step 2: Write metrics RED tests**
+- [x] **Step 2: Write metrics RED tests**
 
 Register/increment only the approved families: registrations/admission denials, events/fanout, enqueue claim/recovery/failure, delivery state/reason/status class, attempts/latency/retries/expiry, backlog/oldest age, heartbeat age/readiness, retention deletion counts, key/migration errors, and SSRF denials. Assert label schemas are closed and no ID, hostname, URL, email, narrative, payload, secret, signature, exception string, or response content is accepted as a label.
 
-- [ ] **Step 3: Write retention RED tests**
+- [x] **Step 3: Write retention RED tests**
 
 At 29d23h59m terminal metadata remains. At 30d, a bounded batch removes terminal deliveries only when eligible, then orphan events, expired idempotency, stale heartbeat instances, and eligible tombstones. Nonterminal pending/claimed/queued/processing/retry rows never delete; terminal time, not creation/expiry, starts retention. A partial batch resumes without starvation. Failed retention writes publish an unready heartbeat/reason and leave rows intact.
 
-- [ ] **Step 4: Write runtime/startup RED tests**
+- [x] **Step 4: Write runtime/startup RED tests**
 
 `run_admin_webhook_delivery_runtime(stop_event)` supervises three independent loops: prepared Jobs worker, reconciler (enqueue/disposition/stale/expiry), and retention. Each writes its own heartbeat and isolates bounded failures without silently marking itself ready. Stop cancels/awaits every child and flushes a final unready heartbeat where possible.
 
 `provide_optional_worker_specs()` registers exactly one `admin_webhook_delivery_runtime_task` only when validated canonical route selection is canonical and mode is `on`; default off, migrate, legacy compatibility, and invalid settings do not start it. Startup never starts or aliases legacy `jobs_webhooks_task`. A key/JOBS preflight failure may start the runtime for observable recovery but the worker pre-acquire guard stays closed and heartbeat reports the reason.
 
-- [ ] **Step 5: Run RED**
+- [x] **Step 5: Run RED**
 
 ```bash
 RUN_JOBS=1 PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
@@ -1699,19 +1757,19 @@ RUN_JOBS=1 PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
   tldw_Server_API/tests/Services/test_startup_optional_workers.py
 ```
 
-- [ ] **Step 6: Implement observability and real delivery capability composition**
+- [x] **Step 6: Implement observability and real delivery capability composition**
 
 Use the repository metrics registry through a narrow adapter that validates names/labels before forwarding. `AdminWebhookDeliveryCapability.status(now)` is async and returns one sanitized snapshot; update activation and status paths to await it. `UnavailableDeliveryCapability` remains for off/migrate/test construction and returns fixed unavailable facts.
 
-- [ ] **Step 7: Implement bounded loops and startup spec**
+- [x] **Step 7: Implement bounded loops and startup spec**
 
 The runtime builds separate repository handles as required by pool/thread safety, one `JobManager` adapter, one shared executor, and unique random instance IDs. Worker acquisition preflight calls current health dependencies each cycle. Reconciler and retention iterations are bounded and sleep interruptibly. Do not add ad hoc startup tasks outside the declarative lifecycle worker catalog.
 
-- [ ] **Step 8: Write the PR 2 delivery runbook**
+- [x] **Step 8: Write the PR 2 delivery runbook**
 
 Document default-off status, exact environment/cadence bounds, mode/key/Jobs preflight, worker/reconciler/retention heartbeat interpretation, queue/domain/type, backlog and oldest-age triage, dead reason codes, attempt ambiguity/at-least-once semantics, test behavior, manual changed-config redelivery, disabling and in-flight limits, 72-hour expiry, 30-day retention, retry schedule, receiver deduplication/signature vector, no-buffer SSRF controls, forward-fix procedure, and explicit statement that user/incident producers and operational UI activation wait for PR 3.
 
-- [ ] **Step 9: Run GREEN and shutdown/status regressions**
+- [x] **Step 9: Run GREEN and shutdown/status regressions**
 
 ```bash
 RUN_JOBS=1 PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
@@ -1726,7 +1784,7 @@ RUN_JOBS=1 PYTHONPATH=. ../../.venv/bin/python -m pytest -q --tb=short \
   tldw_Server_API/app/services/startup_optional_workers.py
 ```
 
-- [ ] **Step 10: Update the task and commit**
+- [x] **Step 10: Update the task and commit**
 
 ```bash
 backlog task edit 13111 --append-notes "Added durable worker/reconciler/retention health, bounded metrics/retention, mode-gated lifecycle runtime, and PR 2 operations runbook."
@@ -1747,6 +1805,21 @@ git add \
 git diff --cached --check
 git commit -m "feat(admin-webhooks): operate delivery runtime safely"
 ```
+
+Task 11 implemented the typed async delivery capability/status projection, one
+backend-correct bounded health snapshot, fixed fail-open metrics adapter,
+deterministic bounded retention and expiry recovery, and three independently
+supervised runtime loops behind the exact canonical startup gate. The sanitized
+status API and reviewed OpenAPI fingerprint were updated, and the PR 2 delivery
+runbook was added. Strict RED evidence covered the health/acquisition fixed
+point, retention order/fairness, startup gating, closed metric labels, and each
+added integration boundary. Final focused Task 11 verification passed 137
+tests; the broader relevant regression gate passed 313 tests; the four-backend
+recovery matrix passed 68 tests; and the complete SQLite and required
+PostgreSQL repository contracts passed 34 tests each, all with zero skips.
+Ruff, Python 3.10 compilation, OpenAPI drift, reviewed Bandit, shutdown/status,
+scope/security scans, and diff checks passed. Evidence and warning triage are in
+`.superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-11-report.md`.
 
 ### Task 12: Run The Complete PR 2 Verification And Security Gates
 

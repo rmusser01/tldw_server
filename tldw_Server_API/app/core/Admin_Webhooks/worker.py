@@ -29,6 +29,7 @@ from .crypto import WebhookKeyRing
 from .delivery import registration_work_lifecycle_reason
 from .domain import (
     AttemptState,
+    DeliveryKind,
     DeliveryReasonCode,
     DeliveryState,
     JobsDispositionKind,
@@ -77,6 +78,18 @@ class _Executor(Protocol):
     ) -> AttemptExecutionResult: ...
 
 
+class _Metrics(Protocol):
+    def attempt_committed(
+        self,
+        *,
+        state: DeliveryState,
+        kind: DeliveryKind,
+        reason_code: DeliveryReasonCode | None,
+        status_code: int | None,
+        latency_ms: int | None,
+    ) -> None: ...
+
+
 def _aware_utc(value: datetime, *, field: str) -> datetime:
     if (
         not isinstance(value, datetime)
@@ -119,6 +132,7 @@ class AdminWebhookPreparedHandler:
         attempt_id_factory: Callable[[], str],
         clock: Callable[[], datetime],
         crash_hook: Callable[[WorkerCrashPoint], None] | None = None,
+        metrics: _Metrics | None = None,
     ) -> None:
         if not isinstance(repository, AdminWebhookRepository):
             raise TypeError("repository is invalid")
@@ -145,6 +159,7 @@ class AdminWebhookPreparedHandler:
         self._attempt_id_factory = attempt_id_factory
         self._clock = clock
         self._crash_hook = crash_hook
+        self._metrics = metrics
 
     def _crash(self, point: WorkerCrashPoint) -> None:
         if self._crash_hook is not None:
@@ -509,6 +524,17 @@ class AdminWebhookPreparedHandler:
                 not_before_at=stale_at,
                 reason_code="attempt_result_conflict",
             )
+        if self._metrics is not None:
+            try:
+                self._metrics.attempt_committed(
+                    state=completion.delivery_state,
+                    kind=delivery.kind,
+                    reason_code=completion.reason_code,
+                    status_code=completion.status_code,
+                    latency_ms=completion.latency_ms,
+                )
+            except Exception:  # noqa: BLE001 - metrics cannot alter durable flow
+                pass
         self._crash(WorkerCrashPoint.AFTER_OUTCOME_COMMIT_BEFORE_JOBS_APPLY)
         return _prepared_from_pending(pending)
 

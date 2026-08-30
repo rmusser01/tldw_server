@@ -27,6 +27,7 @@ from tldw_Server_API.tests.Admin_Webhooks.test_event_expansion import (
     exercise_stale_recovery_and_cancellation,
     exercise_task8_attempt_reservation_and_recovery_contract,
     exercise_task9_test_attempt_contract,
+    exercise_task11_health_and_expiry_contract,
 )
 from tldw_Server_API.tests.Admin_Webhooks.test_redelivery_history_api import (
     exercise_history_loads_only_public_columns,
@@ -118,6 +119,13 @@ async def test_sqlite_recovery_runtime_and_retention_contract(
     delivery_repo: SQLiteDeliveryRepositoryFixture,
 ) -> None:
     await exercise_recovery_runtime_and_retention(delivery_repo)
+
+
+@pytest.mark.unit
+async def test_sqlite_task11_health_and_expiry_contract(
+    delivery_repo: SQLiteDeliveryRepositoryFixture,
+) -> None:
+    await exercise_task11_health_and_expiry_contract(delivery_repo)
 
 
 @pytest.mark.unit

@@ -517,6 +517,42 @@ async def test_sqlite_synthetic_capture_replay_and_fanout(
     await _exercise_capture_and_replay(sqlite_repo)
 
 
+@pytest.mark.unit
+async def test_capture_metrics_emit_once_only_after_new_durable_commit(
+    sqlite_repo: SQLiteRepositoryFixture,
+) -> None:
+    await _complete_migration(sqlite_repo.repository)
+    module = _delivery_module()
+    ring = _ring()
+    dependencies = _DeterministicDependencies("metrics")
+    observations: list[tuple[str, int]] = []
+
+    class Metrics:
+        def events_committed(self, *, event_type: str, fanout_count: int) -> None:
+            observations.append((event_type, fanout_count))
+
+    service = module.AdminWebhookDeliveryService(
+        repository=sqlite_repo.repository,
+        key_ring_result=_available(ring),
+        event_id_factory=dependencies.event_id,
+        delivery_id_factory=dependencies.delivery_id,
+        clock=dependencies.now,
+        metrics=Metrics(),
+    )
+    await _seed_registration(
+        sqlite_repo.repository,
+        ring,
+        event_types=("user.created",),
+        active=True,
+    )
+    command = _command(module)
+
+    await service.capture_synthetic_event(command, audit_sink=_recording_sink([]))
+    await service.capture_synthetic_event(command, audit_sink=_recording_sink([]))
+
+    assert observations == [("user.created", 1)]
+
+
 @pytest.mark.integration
 @pytest.mark.postgres
 async def test_postgres_synthetic_capture_replay_and_fanout(

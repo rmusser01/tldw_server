@@ -353,6 +353,80 @@ class WebhookMigrationStatusResponse(BaseModel):
     rollback_window_expires_at: datetime | None = None
 
 
+class DeliveryComponentStatusResponse(BaseModel):
+    """Sanitized readiness for one fixed delivery runtime component."""
+
+    model_config = ConfigDict(extra="forbid", from_attributes=True)
+
+    component: Literal["worker", "reconciler", "retention"]
+    ready: bool
+    reason_code: Literal[
+        "mode_off",
+        "mode_migrate",
+        "schema_unready",
+        "migration_pending",
+        "key_unavailable",
+        "key_configuration_mismatch",
+        "jobs_unavailable",
+        "database_unavailable",
+        "worker_unavailable",
+        "reconciler_unavailable",
+        "retention_unavailable",
+        "heartbeat_stale",
+    ] | None = None
+    heartbeat_age_seconds: int | None = Field(default=None, ge=0)
+
+
+class DeliveryBacklogCountsResponse(BaseModel):
+    """Closed nonterminal delivery counts from one current snapshot."""
+
+    model_config = ConfigDict(extra="forbid", from_attributes=True)
+
+    pending: int = Field(ge=0)
+    enqueue_claimed: int = Field(ge=0)
+    queued: int = Field(ge=0)
+    processing: int = Field(ge=0)
+    retry_wait: int = Field(ge=0)
+
+
+class DeliveryCapabilityStatusResponse(BaseModel):
+    """Sanitized delivery acquisition and activation readiness."""
+
+    model_config = ConfigDict(extra="forbid", from_attributes=True)
+
+    canonical_schema_version: int = Field(ge=0)
+    schema_ready: bool
+    delivery_schema_ready: bool
+    migration_complete: bool
+    key_ready: bool
+    key_primary_match: bool
+    jobs_database_ready: bool
+    queue_ready: bool
+    job_type_ready: bool
+    jobs_backend: Literal["sqlite", "postgres", "unavailable"]
+    worker: DeliveryComponentStatusResponse
+    reconciler: DeliveryComponentStatusResponse
+    retention: DeliveryComponentStatusResponse
+    backlog: DeliveryBacklogCountsResponse
+    oldest_nonterminal_age_seconds: int | None = Field(default=None, ge=0)
+    acquisition_ready: bool
+    acquisition_reason_code: Literal[
+        "mode_off",
+        "mode_migrate",
+        "schema_unready",
+        "migration_pending",
+        "key_unavailable",
+        "key_configuration_mismatch",
+        "jobs_unavailable",
+        "database_unavailable",
+        "worker_unavailable",
+        "reconciler_unavailable",
+        "retention_unavailable",
+        "heartbeat_stale",
+    ] | None = None
+    delivery_capability_ready: bool
+
+
 class AdminWebhookStatusResponse(BaseModel):
     """Explicit canonical-mode readiness without artifact or credential data."""
 
@@ -363,6 +437,7 @@ class AdminWebhookStatusResponse(BaseModel):
     schema_ready: bool
     key_state: str = Field(min_length=1, max_length=128)
     delivery_capability_ready: bool
+    delivery: DeliveryCapabilityStatusResponse
     limits: WebhookLimitsResponse
     migration: WebhookMigrationStatusResponse
 

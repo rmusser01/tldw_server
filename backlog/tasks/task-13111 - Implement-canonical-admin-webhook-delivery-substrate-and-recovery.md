@@ -4,7 +4,7 @@ title: Implement canonical admin webhook delivery substrate and recovery
 status: In Progress
 assignee: []
 created_date: '2026-08-23 03:15'
-updated_date: '2026-08-29 23:48'
+updated_date: '2026-08-30 01:52'
 labels:
   - admin
   - webhooks
@@ -201,6 +201,10 @@ Task 10 complete: exposed canonical persisted test, atomic manual redelivery, an
 2026-08-29: Task 10 Fix Round 2 verified from exact FIX_BASE 081470b7e295ec2d9bd474a24f77bb87db0ba877. Dual-backend RED: 6 failed, 60 deselected, 0 skipped, 8 warnings for single-item internal mapper/query leakage, malformed hidden-coordinate replay rejection, and mixed snapshots. Focused GREEN: 6 passed, 60 deselected, 0 skipped, 8 warnings. Complete PostgreSQL-required Task 10 gate: 144 passed, 0 skipped, 228 warnings. The single-item path now uses only public allowlists/mappers in one read snapshot, and the unused attempt.created_at projection is removed. Ruff, Python 3.10 compilation, reviewed Bandit, query-shape/no-leak scans, base-to-head self-review, and diff checks passed. No schema/migration, Jobs admission, runtime activation, producer/UI, legacy-route, or Task 11 work was added. Evidence: .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-10-fix-2-report.md.
 
 2026-08-29: Task 10 closed at 928adf14edcc3db00b8b7393bad60094e4863b9d after Fix Round 2 scoped independent re-review. Both remaining findings are addressed: the single-item replay/history path uses public-only columns and mappers under one read snapshot, and the unused attempt.created_at projection is gone. No new Critical, Important, or Minor breakage was found. Final PostgreSQL-required Task 10 gate: 144 passed, 0 skipped. Task 11 may now begin.
+
+2026-08-29: Started Task 11 at exact BASE 0d6dbcf097e2cc15c251d9fda7a5169f3942db84. Preflight expands the local scope to typed capability/status records, a single bounded backend-correct health snapshot, dual-backend retention and expiry contracts, real fail-open low-cardinality metrics integration, runtime supervision, and OpenAPI fingerprint work. Acquisition readiness is separated from full worker-heartbeat readiness to avoid a startup fixed point; retention remains independently visible. Expiry excludes live attempts and uses persisted exact cancellation disposition recovery for attached Jobs work. Canonical startup uses only admin_webhook_delivery_runtime_task; legacy webhook services remain isolated and are never imported or aliased. No schema/migration, Jobs core/WorkerSDK contract change, direct Jobs SQL, deployment activation, PR 3 producer/UI work, or legacy removal is authorized.
+
+2026-08-29: Task 11 complete at pre-commit tree. Added typed sanitized async delivery capability status over one backend-correct bounded health snapshot; separated foundational acquisition from worker-heartbeat activation readiness; integrated the fixed fail-open admin_webhooks_ metrics registry; implemented ruled bounded retention and exact-disposition expiry recovery; supervised independent worker/reconciler/retention loops behind only admin_webhook_delivery_runtime_task for validated on+canonical mode; expanded status/OpenAPI; and added Docs/Admin_Webhooks_Delivery_Runbook.md. Final focused gate: 137 passed; broader relevant regressions: 313 passed; four-backend recovery: 68 passed; full SQLite/PostgreSQL repository contracts: 34 passed each, all zero skips. OpenAPI drift, Ruff, Python 3.10 compile, reviewed Bandit, direct-Jobs-SQL/legacy-import/sensitive-label/scope scans, shutdown assertions, and diff checks passed. Evidence: .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-11-report.md. TASK-13111 remains in progress for Task 12 complete PR 2 verification.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

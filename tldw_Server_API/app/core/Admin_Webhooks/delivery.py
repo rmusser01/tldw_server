@@ -12,7 +12,7 @@ import secrets
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Literal, TypeAlias
+from typing import TYPE_CHECKING, Literal, Protocol, TypeAlias
 from uuid import UUID, uuid4
 
 from tldw_Server_API.app.core.Audit.unified_audit_service import MandatoryAuditWriteError
@@ -584,6 +584,10 @@ def _verify_replay(
         raise WebhookError(WebhookErrorCode.IDEMPOTENCY_CONFLICT)
 
 
+class _DeliveryMetrics(Protocol):
+    def events_committed(self, *, event_type: str, fanout_count: int) -> None: ...
+
+
 class AdminWebhookDeliveryService:
     """Compose protected event capture without owning SQL or cryptography."""
 
@@ -599,6 +603,7 @@ class AdminWebhookDeliveryService:
         executor: DeliveryAttemptExecutor | None = None,
         test_attempt_id_factory: Callable[[], str] | None = None,
         test_token_factory: Callable[[], str] | None = None,
+        metrics: _DeliveryMetrics | None = None,
     ) -> None:
         if not callable(event_id_factory) or not callable(delivery_id_factory):
             raise TypeError("event and delivery ID factories are required")
@@ -613,6 +618,7 @@ class AdminWebhookDeliveryService:
         self._executor = executor
         self._test_attempt_id_factory = test_attempt_id_factory
         self._test_token_factory = test_token_factory
+        self._metrics = metrics
 
     def _require_test_dependencies(
         self,
@@ -1737,6 +1743,14 @@ class AdminWebhookDeliveryService:
                     ),
                 )
                 accepted_emitted = True
+            if result.inserted and self._metrics is not None:
+                try:
+                    self._metrics.events_committed(
+                        event_type=result.event.event.event_type,
+                        fanout_count=len(result.deliveries),
+                    )
+                except Exception:  # noqa: BLE001 - metrics are fail-open
+                    pass
             return result
         except _CaptureAuditUnavailable:
             raise WebhookError(WebhookErrorCode.AUDIT_UNAVAILABLE) from None
@@ -1776,6 +1790,7 @@ async def get_admin_webhook_delivery_service() -> AdminWebhookDeliveryService:
 
     from .config import AdminWebhookSettings
     from .crypto import load_webhook_key_ring
+    from .observability import AdminWebhookMetrics
 
     pool = await get_db_pool()
     settings = AdminWebhookSettings.from_environment(os.environ)
@@ -1791,6 +1806,7 @@ async def get_admin_webhook_delivery_service() -> AdminWebhookDeliveryService:
         ),
         test_attempt_id_factory=lambda: str(uuid4()),
         test_token_factory=lambda: secrets.token_hex(32),
+        metrics=AdminWebhookMetrics(),
     )
 
 
