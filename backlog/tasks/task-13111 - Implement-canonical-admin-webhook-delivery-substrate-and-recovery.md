@@ -4,7 +4,7 @@ title: Implement canonical admin webhook delivery substrate and recovery
 status: In Progress
 assignee: []
 created_date: '2026-08-23 03:15'
-updated_date: '2026-08-30 03:49'
+updated_date: '2026-08-30 04:13'
 labels:
   - admin
   - webhooks
@@ -209,6 +209,8 @@ Task 10 complete: exposed canonical persisted test, atomic manual redelivery, an
 2026-08-29: Task 11 independent review at 99098c213930d36c0b983493099954a659abc4fb found 0 Critical, 6 accepted Important, and 0 Minor issues. Fix Round 1 is required for created-but-unattached Jobs expiry recovery; fresh/recoverable Jobs runtime generations instead of a stopped SDK or permanent unavailable construction; bounded future-heartbeat skew; factual degraded mode/Jobs/database public status; and complete best-effort post-commit metrics for synchronous tests, no-I/O terminal/recovery paths, and one-snapshot registration gauges. Metrics prove one emission per owned commit and none on rollback/replay but do not promise crash-proof exactly-once delivery without an outbox. Required four-backend, dual-repository, startup/status/OpenAPI/static/security gates remain; Task 12 is blocked. Review: .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-11-review-1.md.
 
 2026-08-29: Task 11 Fix Round 1 complete at pre-commit tree from exact FIX_BASE 99098c213930d36c0b983493099954a659abc4fb. Blind expiry now preserves created-but-unattached enqueue claims for lookup-only exact cancellation recovery; supervised workers use fresh atomically promoted Jobs generations and recover transient construction failures in process; future heartbeat evidence is bounded identically; public degraded status retains factual AuthNZ fields with exact mode/Jobs/database reasons; and durable-path metrics cover test, worker, expiry/recovery, lifecycle, and one-snapshot registration ownership without rollback/replay duplication. Final PostgreSQL-required gates: 226 focused/regression tests, 72 complete SQLite/PostgreSQL repository contracts, and 76 four-backend recovery cases, all zero skips. OpenAPI drift, Ruff, Python 3.10 compilation, reviewed Bandit with zero High findings, scope/security scans, warning triage, self-review, and diff checks passed. Evidence: .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-11-fix-1-report.md. TASK-13111 remains In Progress for Task 12 complete PR 2 verification and independent re-review.
+
+2026-08-29: Task 11 closed at fe3290f32d4b411e2d56f41b9b473e3bd788f95e after Fix Round 1 independent re-review found 0 Critical, 0 Important, and 0 Minor defects. All six original findings are closed. Controller independently reran all 8 four-backend crash-expiry variants plus 8 fresh-generation/fail-once/future-skew/degraded-status contracts with required PostgreSQL and zero skips. Residual risks are documented best-effort metrics and cadence-bounded Jobs recovery; Task 12 remains the complete PR 2 verification gate. Re-review: .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-11-fix-1-re-review.md.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
