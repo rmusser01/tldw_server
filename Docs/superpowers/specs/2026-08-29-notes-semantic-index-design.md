@@ -291,6 +291,10 @@ RLS. Generation deletion removes rows rather than tables. An unsupported
 dimension or an installation unable to enforce this schema reports semantic
 capability unavailable. Metrics use low-cardinality backend and operation
 labels, never generation, collection, owner, dataset, or dimension-table names.
+Each pgvector store instance resolves one schema during its first successful
+capability initialization and keeps that binding immutable. Later capability
+checks repair and verify only fully qualified objects in the pinned schema,
+regardless of `search_path`; a failed initialization does not pin a schema.
 The fixed pgvector mapping is limited to dimensions supported by the `vector`
 HNSW index (at most 2,000; no `halfvec` substitution). Filtered iterative HNSW
 queries use separate bounded controls for visited tuples and candidate output;

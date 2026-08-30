@@ -226,11 +226,11 @@ class _SchemaPgBackend(_FakePgBackend):
     def execute(self, sql: str, params=(), *, connection=None, log_errors=True):
         self.executions.append((sql, params, connection))
         table = "note_semantic_vectors_d384"
-        schema_name = self.schema_name
         if "current_schema() AS schema_name" in sql:
-            return _PgResult(rows=({"schema_name": schema_name},))
+            return _PgResult(rows=({"schema_name": self.schema_name},))
         if "pg_extension" in sql and "extversion" in sql:
             return _PgResult(rows=({"extversion": "0.8.0"},))
+        schema_name = params[0] if params else self.schema_name
         if "format_type" in sql:
             rows = (
                 {
@@ -290,6 +290,18 @@ class _SchemaPgBackend(_FakePgBackend):
                 )
             )
         return _PgResult()
+
+
+class _SlowSchemaPgBackend(_SchemaPgBackend):
+    def execute(self, sql: str, params=(), *, connection=None, log_errors=True):
+        if "current_schema() AS schema_name" in sql:
+            time.sleep(0.05)
+        return super().execute(
+            sql,
+            params,
+            connection=connection,
+            log_errors=log_errors,
+        )
 
 
 def _ready_pg_backend(
@@ -702,6 +714,85 @@ def test_pgvector_resolves_and_verifies_exact_schema_inside_repair_transaction()
     assert all(connection is raw_backend.connection for _sql, connection in catalog_queries)
     ddl = "\n".join(sql for sql, _params, _connection in raw_backend.executions)
     assert '"semantic_vectors"."note_semantic_vectors_d384"' in ddl
+
+
+def test_pgvector_recheck_stays_bound_to_first_successful_schema() -> None:
+    raw_backend = _SchemaPgBackend(schema_name="semantic_vectors")
+    backend = PostgresSemanticVectorBackend(
+        raw_backend,
+        allowed_dimensions=frozenset({384}),
+    )
+
+    backend._check_capability_sync()
+    recheck_start = len(raw_backend.executions)
+    raw_backend.schema_name = "search_path_decoy"
+    backend._check_capability_sync()
+
+    recheck = raw_backend.executions[recheck_start:]
+    assert backend._schema_name == "semantic_vectors"
+    assert all("current_schema()" not in sql for sql, _params, _connection in recheck)
+    assert all(
+        params[0] == "semantic_vectors"
+        for sql, params, _connection in recheck
+        if any(
+            marker in sql
+            for marker in (
+                "format_type",
+                "pg_get_constraintdef",
+                "pg_get_indexdef",
+                "pg_policies",
+            )
+        )
+    )
+    ddl = "\n".join(sql for sql, _params, _connection in recheck)
+    assert '"semantic_vectors"."note_semantic_vectors_d384"' in ddl
+    assert '"search_path_decoy"."note_semantic_vectors_d384"' not in ddl
+
+
+@pytest.mark.asyncio
+async def test_pgvector_concurrent_first_checks_pin_schema_once() -> None:
+    raw_backend = _SlowSchemaPgBackend(schema_name="semantic_vectors")
+    backend = PostgresSemanticVectorBackend(
+        raw_backend,
+        allowed_dimensions=frozenset({384}),
+    )
+
+    await asyncio.gather(*(backend.check_capability() for _ in range(8)))
+
+    current_schema_queries = [
+        sql
+        for sql, _params, _connection in raw_backend.executions
+        if "current_schema() AS schema_name" in sql
+    ]
+    assert backend._schema_name == "semantic_vectors"
+    assert len(current_schema_queries) == 1
+
+
+def test_pgvector_failed_first_check_does_not_pin_partial_schema() -> None:
+    raw_backend = _SchemaPgBackend(
+        malformed_catalog=True,
+        schema_name="failed_schema",
+    )
+    backend = PostgresSemanticVectorBackend(
+        raw_backend,
+        allowed_dimensions=frozenset({384}),
+    )
+
+    with pytest.raises(SemanticVectorCapabilityError) as exc_info:
+        backend._check_capability_sync()
+
+    assert exc_info.value.code == "notes_semantic_pgvector_schema_unavailable"
+    assert backend._schema_name is None
+
+    raw_backend.malformed_catalog = False
+    raw_backend.schema_name = "retry_schema"
+    backend._check_capability_sync()
+
+    assert backend._schema_name == "retry_schema"
+    assert sum(
+        "current_schema() AS schema_name" in sql
+        for sql, _params, _connection in raw_backend.executions
+    ) == 2
 
 
 @pytest.mark.asyncio

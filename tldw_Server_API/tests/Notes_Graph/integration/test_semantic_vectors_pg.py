@@ -25,6 +25,7 @@ from tldw_Server_API.app.core.Notes_Graph.semantic_vectors import (
 from tldw_Server_API.app.core.Notes_Graph.semantic_vectors_pg import (
     PGVECTOR_TABLES,
     SEMANTIC_VECTOR_METRIC_LABELS,
+    PostgresSemanticVectorBackend,
 )
 from tldw_Server_API.tests.Notes_Graph.vector_contract import (
     assert_vector_isolation_contract,
@@ -730,17 +731,6 @@ async def test_pgvector_storage_stays_bound_to_resolved_schema_when_search_path_
                     f"embedding vector({DIMENSIONS}) NOT NULL)",
                     connection=connection,
                 )
-                setup_backend.execute(
-                    f"INSERT INTO {qualified(schema)} VALUES (?,?,?,?,?::vector)",  # nosec B608
-                    (
-                        "owner-a",
-                        DATASET_ID,
-                        "decoy-generation",
-                        f"{schema}-decoy",
-                        "[1" + ",0" * (DIMENSIONS - 1) + "]",
-                    ),
-                    connection=connection,
-                )
     finally:
         setup_backend.get_pool().close_all()
 
@@ -762,6 +752,23 @@ async def test_pgvector_storage_stays_bound_to_resolved_schema_when_search_path_
             generation_id,
             (SemanticVector("target-row", axis_vector(DIMENSIONS, 0)),),
         )
+        with backend.transaction() as connection:
+            for schema in ("public", other_schema):
+                backend.execute(
+                    f"INSERT INTO {qualified(schema)} VALUES (?,?,?,?,?::vector)",  # nosec B608
+                    (
+                        "owner-a",
+                        DATASET_ID,
+                        generation_id,
+                        "target-row",
+                        "[1" + ",0" * (DIMENSIONS - 1) + "]",
+                    ),
+                    connection=connection,
+                )
+
+        pg_backend = store._backend
+        assert isinstance(pg_backend, PostgresSemanticVectorBackend)
+        assert pg_backend._schema_name == target_schema
 
         @contextmanager
         def changed_search_path_transaction():
@@ -773,6 +780,8 @@ async def test_pgvector_storage_stays_bound_to_resolved_schema_when_search_path_
                 yield connection
 
         backend.transaction = changed_search_path_transaction  # type: ignore[method-assign]
+        await pg_backend.check_capability()
+        assert pg_backend._schema_name == target_schema
         cleanup = await store.delete_generation(DATASET_ID, generation_id)
         backend.transaction = original_transaction  # type: ignore[method-assign]
 
@@ -783,10 +792,14 @@ async def test_pgvector_storage_stays_bound_to_resolved_schema_when_search_path_
             ("owner-a", DATASET_ID, generation_id),
         ).scalar
         public_count = backend.execute(
-            f"SELECT COUNT(*) AS count FROM {qualified('public')}"  # nosec B608
+            f"SELECT COUNT(*) AS count FROM {qualified('public')} "  # nosec B608
+            "WHERE owner_user_id=? AND dataset_id=? AND generation_id=? AND vector_id=?",
+            ("owner-a", DATASET_ID, generation_id, "target-row"),
         ).scalar
         other_count = backend.execute(
-            f"SELECT COUNT(*) AS count FROM {qualified(other_schema)}"  # nosec B608
+            f"SELECT COUNT(*) AS count FROM {qualified(other_schema)} "  # nosec B608
+            "WHERE owner_user_id=? AND dataset_id=? AND generation_id=? AND vector_id=?",
+            ("owner-a", DATASET_ID, generation_id, "target-row"),
         ).scalar
         assert (target_count, public_count, other_count) == (0, 1, 1)
 

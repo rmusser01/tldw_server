@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import threading
 from collections.abc import Iterable
 from types import MappingProxyType
 from typing import Any
@@ -207,11 +208,16 @@ class PostgresSemanticVectorBackend:
         self._allowed_dimensions = frozenset(allowed_dimensions)
         self._hnsw_max_scan_tuples = hnsw_max_scan_tuples
         self._schema_name: str | None = None
+        self._capability_lock = threading.Lock()
 
     async def check_capability(self) -> None:
         await asyncio.to_thread(self._check_capability_sync)
 
     def _check_capability_sync(self) -> None:
+        with self._capability_lock:
+            self._check_capability_serialized()
+
+    def _check_capability_serialized(self) -> None:
         if self._backend.backend_type is not BackendType.POSTGRESQL:
             raise SemanticVectorCapabilityError("notes_semantic_pgvector_unavailable")
         if (
@@ -238,11 +244,13 @@ class PostgresSemanticVectorBackend:
                     connection=connection,
                     log_errors=False,
                 ).rows
-                schema_rows = self._backend.execute(
-                    "SELECT current_schema() AS schema_name",
-                    connection=connection,
-                    log_errors=False,
-                ).rows
+                schema_rows = None
+                if self._schema_name is None:
+                    schema_rows = self._backend.execute(
+                        "SELECT current_schema() AS schema_name",
+                        connection=connection,
+                        log_errors=False,
+                    ).rows
         except _POSTGRES_OPERATION_ERRORS:
             raise SemanticVectorCapabilityError(
                 "notes_semantic_pgvector_extension_unavailable"
@@ -263,12 +271,18 @@ class PostgresSemanticVectorBackend:
             raise SemanticVectorCapabilityError(
                 "notes_semantic_pgvector_extension_version_unsupported"
             )
-        try:
-            schema_name = schema_rows[0]["schema_name"] if len(schema_rows) == 1 else None
+        schema_name = self._schema_name
+        if schema_name is None:
+            try:
+                schema_name = (
+                    schema_rows[0]["schema_name"] if len(schema_rows) == 1 else None
+                )
+                encoded_schema = schema_name.encode("utf-8")
+            except _POSTGRES_RESULT_ERRORS + (UnicodeEncodeError,):
+                schema_name = None
+                encoded_schema = b""
+        else:
             encoded_schema = schema_name.encode("utf-8")
-        except _POSTGRES_RESULT_ERRORS + (UnicodeEncodeError,):
-            schema_name = None
-            encoded_schema = b""
         if (
             type(schema_name) is not str
             or not encoded_schema
@@ -288,9 +302,10 @@ class PostgresSemanticVectorBackend:
             raise SemanticVectorCapabilityError(
                 "notes_semantic_pgvector_schema_unavailable"
             )
-        self._schema_name = schema_name
         for dimensions in sorted(self._allowed_dimensions):
-            self._ensure_dimension_table(dimensions)
+            self._ensure_dimension_table(dimensions, schema_name=schema_name)
+        if self._schema_name is None:
+            self._schema_name = schema_name
 
     def supports_dimensions(self, dimensions: int) -> bool:
         return dimensions in self._allowed_dimensions and dimensions in PGVECTOR_TABLES
@@ -300,10 +315,11 @@ class PostgresSemanticVectorBackend:
             raise SemanticVectorError("notes_semantic_pgvector_operation_failed")
         return self._schema_name
 
-    def _qualified_table(self, table: str) -> str:
+    def _qualified_table(self, table: str, *, schema_name: str | None = None) -> str:
         try:
+            resolved_schema = self._schema() if schema_name is None else schema_name
             return (
-                f"{self._backend.escape_identifier(self._schema())}."
+                f"{self._backend.escape_identifier(resolved_schema)}."
                 f"{self._backend.escape_identifier(table)}"
             )
         except _POSTGRES_OPERATION_ERRORS:
@@ -329,7 +345,12 @@ class PostgresSemanticVectorBackend:
             )
         return result
 
-    def _ensure_dimension_table(self, dimensions: int) -> None:
+    def _ensure_dimension_table(
+        self,
+        dimensions: int,
+        *,
+        schema_name: str | None = None,
+    ) -> None:
         table = PGVECTOR_TABLES.get(dimensions)
         if table is None or dimensions not in self._allowed_dimensions:
             raise SemanticVectorCapabilityError(
@@ -337,8 +358,8 @@ class PostgresSemanticVectorBackend:
             )
         policy = f"{table}_tenant_isolation"
         index = f"{table}_embedding_hnsw"
-        schema_name = self._schema()
-        qualified_table = self._qualified_table(table)
+        resolved_schema = self._schema() if schema_name is None else schema_name
+        qualified_table = self._qualified_table(table, schema_name=resolved_schema)
         try:
             quoted_policy = self._backend.escape_identifier(policy)
             quoted_index = self._backend.escape_identifier(index)
@@ -393,7 +414,7 @@ class PostgresSemanticVectorBackend:
                 )
                 self._verify_dimension_table(
                     dimensions,
-                    schema_name=schema_name,
+                    schema_name=resolved_schema,
                     connection=connection,
                 )
         except _POSTGRES_OPERATION_ERRORS:
