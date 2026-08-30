@@ -17,10 +17,12 @@ _HARD_MAXIMUMS = {
     "max_provider_bytes_per_run": 1_000_000_000,
     "max_provider_requests_per_run": 10_000,
     "max_query_neighbors": 100,
+    "max_query_vectors_per_call": 256,
     "max_cleanup_vectors_per_run": 100_000,
     "max_retries": 10,
     "retry_backoff_seconds": 3_600,
     "retry_max_backoff_seconds": 86_400,
+    "pgvector_hnsw_max_scan_tuples": 100_000,
     "pgvector_dimension": 32_768,
 }
 
@@ -42,10 +44,12 @@ class SemanticIndexSettings:
     max_provider_bytes_per_run: int = 67_108_864
     max_provider_requests_per_run: int = 1_000
     max_query_neighbors: int = 50
+    max_query_vectors_per_call: int = 16
     max_cleanup_vectors_per_run: int = 10_000
     max_retries: int = 3
     retry_backoff_seconds: int = 1
     retry_max_backoff_seconds: int = 60
+    pgvector_hnsw_max_scan_tuples: int = 10_000
     pgvector_allowed_dimensions: frozenset[int] = frozenset({384, 768, 1_024, 1_536, 3_072})
 
     def __post_init__(self) -> None:
@@ -69,6 +73,8 @@ class SemanticIndexSettings:
             ("max_provider_batch_inputs", "max_chunks_per_run"),
             ("max_provider_input_bytes", "max_provider_batch_bytes"),
             ("max_provider_batch_bytes", "max_provider_bytes_per_run"),
+            ("max_query_vectors_per_call", "max_chunks_per_note"),
+            ("max_query_neighbors", "pgvector_hnsw_max_scan_tuples"),
         ):
             if getattr(self, smaller) > getattr(self, larger):
                 raise ValueError(f"{smaller} cannot exceed {larger}")

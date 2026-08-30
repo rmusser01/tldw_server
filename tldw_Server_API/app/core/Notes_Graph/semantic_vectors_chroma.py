@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+from collections.abc import Mapping, Sequence
 from typing import Any
 
-from chromadb.errors import ChromaError, NotFoundError
+import chromadb.errors as chroma_errors
 
 from .semantic_vectors import (
     SemanticVector,
@@ -17,6 +18,13 @@ from .semantic_vectors import (
     SemanticVectorMatch,
 )
 
+ChromaError = chroma_errors.ChromaError
+_CHROMA_NOT_FOUND_ERRORS = tuple(
+    error_type
+    for error_name in ("NotFoundError", "InvalidCollectionException")
+    if isinstance((error_type := getattr(chroma_errors, error_name, None)), type)
+    and issubclass(error_type, BaseException)
+)
 _CHROMA_OPERATION_ERRORS = (
     AttributeError,
     ChromaError,
@@ -35,10 +43,6 @@ def _namespace(binding: SemanticVectorBinding) -> str:
         (binding.owner_user_id, binding.dataset_id, binding.generation_id)
     ).encode("utf-8")
     return f"nsv_{hashlib.sha256(payload).hexdigest()[:48]}"
-
-
-def _is_missing_collection(exc: BaseException) -> bool:
-    return isinstance(exc, NotFoundError)
 
 
 def _sequence_or_empty(value: Any) -> tuple[Any, ...]:
@@ -60,6 +64,7 @@ class ChromaSemanticVectorBackend:
             "delete_collection",
             "get_collection",
             "get_or_create_collection",
+            "list_collections",
         )
         if client is None or any(not callable(getattr(client, name, None)) for name in required):
             raise SemanticVectorCapabilityError("notes_semantic_chroma_unavailable")
@@ -88,12 +93,36 @@ class ChromaSemanticVectorBackend:
         await asyncio.to_thread(self._create_sync, binding)
 
     def _collection_or_none(self, binding: SemanticVectorBinding) -> Any | None:
+        collection_name = _namespace(binding)
         try:
-            return self._client.get_collection(name=_namespace(binding))
-        except _CHROMA_OPERATION_ERRORS as exc:
-            if _is_missing_collection(exc):
-                return None
+            return self._client.get_collection(name=collection_name)
+        except _CHROMA_NOT_FOUND_ERRORS:
+            return None
+        except ValueError:
+            return self._legacy_collection_or_none(collection_name)
+        except _CHROMA_OPERATION_ERRORS:
             raise SemanticVectorError("notes_semantic_chroma_operation_failed") from None
+
+    def _legacy_collection_or_none(self, collection_name: str) -> None:
+        try:
+            listed = self._client.list_collections()
+        except _CHROMA_OPERATION_ERRORS:
+            raise SemanticVectorError("notes_semantic_chroma_operation_failed") from None
+        if isinstance(listed, (str, bytes)) or not isinstance(listed, Sequence):
+            raise SemanticVectorError(
+                "notes_semantic_vector_backend_result_invalid"
+            )
+        names: list[str] = []
+        for item in listed:
+            name = item if isinstance(item, str) else getattr(item, "name", None)
+            if not isinstance(name, str):
+                raise SemanticVectorError(
+                    "notes_semantic_vector_backend_result_invalid"
+                )
+            names.append(name)
+        if collection_name in names:
+            raise SemanticVectorError("notes_semantic_chroma_operation_failed")
+        return None
 
     def _upsert_sync(
         self,
@@ -221,10 +250,28 @@ class ChromaSemanticVectorBackend:
             return SemanticVectorCleanup(confirmed_absent=True)
         try:
             collection.delete(ids=list(vector_ids))
-            remaining = collection.get(ids=list(vector_ids), include=[]).get("ids") or ()
+            result = collection.get(ids=list(vector_ids), include=[])
         except _CHROMA_OPERATION_ERRORS:
             raise SemanticVectorError("notes_semantic_chroma_operation_failed") from None
-        return SemanticVectorCleanup(confirmed_absent=not bool(remaining))
+        if not isinstance(result, Mapping) or "ids" not in result:
+            raise SemanticVectorError(
+                "notes_semantic_vector_backend_result_invalid"
+            )
+        remaining = result["ids"]
+        if isinstance(remaining, (str, bytes)) or not isinstance(remaining, Sequence):
+            raise SemanticVectorError(
+                "notes_semantic_vector_backend_result_invalid"
+            )
+        remaining_ids = tuple(remaining)
+        if (
+            any(not isinstance(vector_id, str) for vector_id in remaining_ids)
+            or len(remaining_ids) != len(set(remaining_ids))
+            or not set(remaining_ids).issubset(vector_ids)
+        ):
+            raise SemanticVectorError(
+                "notes_semantic_vector_backend_result_invalid"
+            )
+        return SemanticVectorCleanup(confirmed_absent=not remaining_ids)
 
     async def delete_ids(
         self,

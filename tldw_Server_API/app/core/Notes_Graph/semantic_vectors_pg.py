@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import Iterable
 from types import MappingProxyType
 from typing import Any
@@ -56,6 +57,9 @@ _POSTGRES_RESULT_ERRORS = (
     TypeError,
     ValueError,
 )
+_MINIMUM_PGVECTOR_VERSION = (0, 8, 0)
+_MAX_HNSW_SCAN_TUPLES = 100_000
+_PGVECTOR_VERSION_PATTERN = re.compile(r"^(\d+)\.(\d+)(?:\.(\d+))?(?:[-+].*)?$")
 
 
 def _vector_literal(embedding: Iterable[float]) -> str:
@@ -81,13 +85,11 @@ def _parse_vector(value: object) -> tuple[float, ...]:
 
 
 def _cleanup_confirmation(value: object) -> SemanticVectorCleanup:
-    try:
-        remaining = int(value or 0)
-    except _POSTGRES_RESULT_ERRORS:
+    if type(value) is not int or value < 0:
         raise SemanticVectorError(
             "notes_semantic_vector_backend_result_invalid"
-        ) from None
-    return SemanticVectorCleanup(confirmed_absent=remaining == 0)
+        )
+    return SemanticVectorCleanup(confirmed_absent=value == 0)
 
 
 def _normalized_policy_expression(value: object) -> str:
@@ -96,6 +98,91 @@ def _normalized_policy_expression(value: object) -> str:
     except _POSTGRES_RESULT_ERRORS:
         return ""
     return "".join(expression.split()).replace("(", "").replace(")", "")
+
+
+def _pgvector_version(value: object) -> tuple[int, int, int] | None:
+    if not isinstance(value, str):
+        return None
+    match = _PGVECTOR_VERSION_PATTERN.fullmatch(value.strip())
+    if match is None:
+        return None
+    return tuple(int(part or 0) for part in match.groups())
+
+
+def _normalized_index_definition(value: object) -> str:
+    if not isinstance(value, str):
+        return ""
+    return "".join(value.lower().replace('"', "").split())
+
+
+def _schema_contract_is_valid(
+    *,
+    dimensions: int,
+    table: str,
+    index: str,
+    schema: object,
+    primary_key: object,
+    indexes: object,
+    policies: object,
+) -> bool:
+    try:
+        expected_key = "PRIMARY KEY (owner_user_id, dataset_id, generation_id, vector_id)"
+        expected_policy = f"{table}_tenant_isolation"
+        expected_policy_expression = _normalized_policy_expression(
+            _TENANT_POLICY_PREDICATE
+        )
+        policy_qual = policies[0].get("qual", "") if len(policies) == 1 else ""
+        policy_check = (
+            policies[0].get("with_check", "") if len(policies) == 1 else ""
+        )
+        index_definition = (
+            _normalized_index_definition(indexes[0].get("indexdef"))
+            if len(indexes) == 1
+            else ""
+        )
+        schema_name = schema[0].get("schemaname") if len(schema) == 1 else None
+        if not isinstance(schema_name, str) or not schema_name:
+            return False
+        expected_index_definition = (
+            f"createindex{index}on{schema_name}.{table}"
+            "usinghnsw(embeddingvector_cosine_ops)"
+        )
+        return bool(
+            len(schema) == 1
+            and schema[0].get("tablename") == table
+            and schema[0].get("relkind") == "r"
+            and schema[0].get("relrowsecurity") is True
+            and schema[0].get("relforcerowsecurity") is True
+            and schema[0].get("vector_type") == f"vector({dimensions})"
+            and len(primary_key) == 1
+            and primary_key[0].get("definition") == expected_key
+            and len(indexes) == 1
+            and indexes[0].get("schemaname") == schema_name
+            and indexes[0].get("tablename") == table
+            and indexes[0].get("indexname") == index
+            and index_definition == expected_index_definition
+            and indexes[0].get("key_definition") == "embedding"
+            and indexes[0].get("access_method") == "hnsw"
+            and indexes[0].get("operator_class") == "vector_cosine_ops"
+            and indexes[0].get("indnkeyatts") == 1
+            and indexes[0].get("indnatts") == 1
+            and indexes[0].get("indisvalid") is True
+            and indexes[0].get("indisready") is True
+            and indexes[0].get("unqualified") is True
+            and len(policies) == 1
+            and policies[0].get("schemaname") == schema_name
+            and policies[0].get("tablename") == table
+            and policies[0].get("policyname") == expected_policy
+            and policies[0].get("permissive") == "PERMISSIVE"
+            and policies[0].get("roles") == ["public"]
+            and policies[0].get("cmd") == "ALL"
+            and _normalized_policy_expression(policy_qual)
+            == expected_policy_expression
+            and _normalized_policy_expression(policy_check)
+            == expected_policy_expression
+        )
+    except _POSTGRES_RESULT_ERRORS:
+        return False
 
 
 class PostgresSemanticVectorBackend:
@@ -108,9 +195,16 @@ class PostgresSemanticVectorBackend:
         backend: DatabaseBackend,
         *,
         allowed_dimensions: frozenset[int],
+        hnsw_max_scan_tuples: int = 10_000,
     ) -> None:
+        if (
+            type(hnsw_max_scan_tuples) is not int
+            or not 1 <= hnsw_max_scan_tuples <= _MAX_HNSW_SCAN_TUPLES
+        ):
+            raise ValueError("hnsw_max_scan_tuples must be a bounded positive integer")
         self._backend = backend
         self._allowed_dimensions = frozenset(allowed_dimensions)
+        self._hnsw_max_scan_tuples = hnsw_max_scan_tuples
 
     async def check_capability(self) -> None:
         await asyncio.to_thread(self._check_capability_sync)
@@ -129,20 +223,30 @@ class PostgresSemanticVectorBackend:
                     connection=connection,
                     log_errors=False,
                 )
-                installed = bool(
-                    self._backend.execute(
-                        "SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname='vector')",
-                        connection=connection,
-                        log_errors=False,
-                    ).scalar
-                )
+                version_rows = self._backend.execute(
+                    "SELECT extversion FROM pg_extension WHERE extname='vector'",
+                    connection=connection,
+                    log_errors=False,
+                ).rows
         except _POSTGRES_OPERATION_ERRORS:
             raise SemanticVectorCapabilityError(
                 "notes_semantic_pgvector_extension_unavailable"
             ) from None
-        if not installed:
+        try:
+            version_row_count = len(version_rows)
+        except _POSTGRES_RESULT_ERRORS:
+            version_row_count = 0
+        if version_row_count != 1:
             raise SemanticVectorCapabilityError(
                 "notes_semantic_pgvector_extension_unavailable"
+            )
+        try:
+            version = _pgvector_version(version_rows[0]["extversion"])
+        except _POSTGRES_RESULT_ERRORS:
+            version = None
+        if version is None or version < _MINIMUM_PGVECTOR_VERSION:
+            raise SemanticVectorCapabilityError(
+                "notes_semantic_pgvector_extension_version_unsupported"
             )
         for dimensions in sorted(self._allowed_dimensions):
             self._ensure_dimension_table(dimensions)
@@ -152,9 +256,14 @@ class PostgresSemanticVectorBackend:
 
     def _table_exists(self, table: str) -> bool:
         try:
-            return bool(self._backend.table_exists(table))
+            result = self._backend.table_exists(table)
         except _POSTGRES_OPERATION_ERRORS:
             raise SemanticVectorError("notes_semantic_pgvector_operation_failed") from None
+        if type(result) is not bool:
+            raise SemanticVectorError(
+                "notes_semantic_vector_backend_result_invalid"
+            )
+        return result
 
     def _ensure_dimension_table(self, dimensions: int) -> None:
         table = PGVECTOR_TABLES.get(dimensions)
@@ -175,7 +284,7 @@ class PostgresSemanticVectorBackend:
             )
         """  # nosec B608 - identifiers and dimensions come only from PGVECTOR_TABLES.
         create_policy_sql = (
-            f"CREATE POLICY {policy} ON {table} "  # nosec B608
+            f"CREATE POLICY {policy} ON {table} AS PERMISSIVE FOR ALL TO PUBLIC "  # nosec B608
             f"USING ({_TENANT_POLICY_PREDICATE}) "
             f"WITH CHECK ({_TENANT_POLICY_PREDICATE})"
         )
@@ -208,68 +317,75 @@ class PostgresSemanticVectorBackend:
                     connection=connection,
                     log_errors=False,
                 )
+                self._verify_dimension_table(dimensions, connection=connection)
         except _POSTGRES_OPERATION_ERRORS:
             raise SemanticVectorCapabilityError(
                 "notes_semantic_pgvector_schema_unavailable"
             ) from None
-        self._verify_dimension_table(dimensions)
-
-    def _verify_dimension_table(self, dimensions: int) -> None:
+    def _verify_dimension_table(self, dimensions: int, *, connection: Any) -> None:
         table = PGVECTOR_TABLES[dimensions]
+        index = f"{table}_embedding_hnsw"
         try:
             schema = self._backend.execute(
-                "SELECT c.relrowsecurity,c.relforcerowsecurity,"
+                "SELECT n.nspname AS schemaname,c.relname AS tablename,c.relkind,"
+                "c.relrowsecurity,c.relforcerowsecurity,"
                 "format_type(a.atttypid,a.atttypmod) AS vector_type "
-                "FROM pg_class c JOIN pg_attribute a ON a.attrelid=c.oid "
-                "WHERE c.relname=? AND a.attname='embedding'",
+                "FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
+                "JOIN pg_attribute a ON a.attrelid=c.oid "
+                "WHERE n.nspname=current_schema() AND c.relname=? "
+                "AND c.relkind='r' AND a.attname='embedding'",
                 (table,),
+                connection=connection,
                 log_errors=False,
             ).rows
             primary_key = self._backend.execute(
-                "SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint "
-                "WHERE conrelid=?::regclass AND contype='p'",
+                "SELECT pg_get_constraintdef(pc.oid) AS definition "
+                "FROM pg_constraint pc JOIN pg_class c ON c.oid=pc.conrelid "
+                "JOIN pg_namespace n ON n.oid=c.relnamespace "
+                "WHERE n.nspname=current_schema() AND c.relname=? AND pc.contype='p'",
                 (table,),
+                connection=connection,
                 log_errors=False,
             ).rows
             indexes = self._backend.execute(
-                "SELECT indexdef FROM pg_indexes WHERE tablename=?",
-                (table,),
+                "SELECT tn.nspname AS schemaname,tc.relname AS tablename,"
+                "ic.relname AS indexname,pg_get_indexdef(ic.oid) AS indexdef,"
+                "pg_get_indexdef(ic.oid,1,true) AS key_definition,"
+                "am.amname AS access_method,opc.opcname AS operator_class,"
+                "x.indnkeyatts,x.indnatts,x.indisvalid,x.indisready,"
+                "x.indpred IS NULL AS unqualified "
+                "FROM pg_index x JOIN pg_class tc ON tc.oid=x.indrelid "
+                "JOIN pg_namespace tn ON tn.oid=tc.relnamespace "
+                "JOIN pg_class ic ON ic.oid=x.indexrelid "
+                "JOIN pg_namespace ins ON ins.oid=ic.relnamespace "
+                "JOIN pg_am am ON am.oid=ic.relam "
+                "JOIN pg_opclass opc ON opc.oid=x.indclass[0] "
+                "WHERE tn.nspname=current_schema() AND ins.nspname=tn.nspname "
+                "AND tc.relname=? AND ic.relname=?",
+                (table, index),
+                connection=connection,
                 log_errors=False,
             ).rows
             policies = self._backend.execute(
-                "SELECT policyname,qual,with_check FROM pg_policies WHERE tablename=?",
+                "SELECT schemaname,tablename,policyname,permissive,roles,cmd,qual,with_check "
+                "FROM pg_policies WHERE schemaname=current_schema() AND tablename=?",
                 (table,),
+                connection=connection,
                 log_errors=False,
             ).rows
         except _POSTGRES_OPERATION_ERRORS:
             raise SemanticVectorCapabilityError(
                 "notes_semantic_pgvector_schema_unavailable"
             ) from None
-        expected_key = "PRIMARY KEY (owner_user_id, dataset_id, generation_id, vector_id)"
-        expected_policy = f"{table}_tenant_isolation"
-        policy_qual = str(policies[0].get("qual", "")) if len(policies) == 1 else ""
-        policy_check = str(policies[0].get("with_check", "")) if len(policies) == 1 else ""
-        expected_policy_expression = _normalized_policy_expression(
-            _TENANT_POLICY_PREDICATE
-        )
-        valid = (
-            len(schema) == 1
-            and schema[0].get("relrowsecurity") is True
-            and schema[0].get("relforcerowsecurity") is True
-            and schema[0].get("vector_type") == f"vector({dimensions})"
-            and any(row.get("definition") == expected_key for row in primary_key)
-            and any(
-                "USING hnsw (embedding vector_cosine_ops)" in str(row.get("indexdef", ""))
-                for row in indexes
-            )
-            and len(policies) == 1
-            and policies[0].get("policyname") == expected_policy
-            and _normalized_policy_expression(policy_qual)
-            == expected_policy_expression
-            and _normalized_policy_expression(policy_check)
-            == expected_policy_expression
-        )
-        if not valid:
+        if not _schema_contract_is_valid(
+            dimensions=dimensions,
+            table=table,
+            index=index,
+            schema=schema,
+            primary_key=primary_key,
+            indexes=indexes,
+            policies=policies,
+        ):
             raise SemanticVectorCapabilityError(
                 "notes_semantic_pgvector_schema_unavailable"
             )
@@ -396,28 +512,40 @@ class PostgresSemanticVectorBackend:
         if not self._table_exists(table):
             return tuple(() for _ in query_vectors)
         sql = (
-            "WITH scoped AS MATERIALIZED ("
-            f"SELECT vector_id,embedding FROM {table} "  # nosec B608
-            "WHERE owner_user_id=? AND dataset_id=? AND generation_id=?"
-            ") "
-            "SELECT vector_id,(embedding <=> ?::vector) AS distance FROM scoped "
-            "ORDER BY embedding <=> ?::vector,vector_id LIMIT ?"
+            "SELECT vector_id,distance FROM ("
+            f"SELECT vector_id,(embedding <=> ?::vector) AS distance FROM {table} "  # nosec B608
+            "WHERE owner_user_id=? AND dataset_id=? AND generation_id=? "
+            "ORDER BY embedding <=> ?::vector LIMIT ?) AS candidates "
+            "ORDER BY distance,vector_id LIMIT ?"
         )
         results: list[Any] = []
         try:
             with self._backend.transaction() as connection:
                 self._scope(self._backend, connection, binding)
+                self._backend.execute(
+                    "SELECT set_config('hnsw.iterative_scan', ?, true)",
+                    ("strict_order",),
+                    connection=connection,
+                    log_errors=False,
+                )
+                self._backend.execute(
+                    "SELECT set_config('hnsw.max_scan_tuples', ?, true)",
+                    (str(self._hnsw_max_scan_tuples),),
+                    connection=connection,
+                    log_errors=False,
+                )
                 for query_vector in query_vectors:
                     literal = _vector_literal(query_vector)
                     results.append(
                         self._backend.execute(
                             sql,
                             (
+                                literal,
                                 binding.owner_user_id,
                                 binding.dataset_id,
                                 binding.generation_id,
                                 literal,
-                                literal,
+                                self._hnsw_max_scan_tuples,
                                 limit,
                             ),
                             connection=connection,

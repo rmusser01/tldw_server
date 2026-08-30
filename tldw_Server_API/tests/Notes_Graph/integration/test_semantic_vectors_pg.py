@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
+import os
 from datetime import datetime, timezone
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
+import yaml
 
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
@@ -33,6 +37,17 @@ pytestmark = [pytest.mark.integration, pytest.mark.timeout(60)]
 DIMENSIONS = 384
 DATASET_ID = "dataset-a"
 NOW = datetime(2026, 8, 29, 12, 0, tzinfo=timezone.utc)
+_PGVECTOR_REQUIRED_ENV = "TLDW_TEST_PGVECTOR_REQUIRED"
+
+
+def _skip_or_fail_unavailable_pgvector(exc: SemanticVectorCapabilityError) -> None:
+    assert exc.code in {
+        "notes_semantic_pgvector_extension_unavailable",
+        "notes_semantic_pgvector_extension_version_unsupported",
+    }
+    if os.getenv(_PGVECTOR_REQUIRED_ENV) == "1":
+        pytest.fail(f"required pgvector capability unavailable: {exc.code}")
+    pytest.skip(f"pgvector capability unavailable: {exc.code}")
 
 
 def _generation(db: CharactersRAGDB, dataset_id: str = DATASET_ID) -> str:
@@ -138,8 +153,7 @@ async def test_pgvector_schema_and_reusable_contract(
                 settings=settings,
             )
         except SemanticVectorCapabilityError as exc:
-            assert exc.code == "notes_semantic_pgvector_extension_unavailable"
-            pytest.skip("pgvector extension is unavailable in the PostgreSQL fixture")
+            _skip_or_fail_unavailable_pgvector(exc)
 
         other_generation = _additional_generation(db, DATASET_ID)
         other_dataset_generation = _generation(db, "dataset-b")
@@ -180,37 +194,58 @@ async def test_pgvector_schema_and_reusable_contract(
 
         table = PGVECTOR_TABLES[DIMENSIONS]
         schema = backend.execute(
-            "SELECT c.relrowsecurity,c.relforcerowsecurity,"
+            "SELECT n.nspname AS schemaname,c.relname AS tablename,"
+            "c.relrowsecurity,c.relforcerowsecurity,"
             "format_type(a.atttypid,a.atttypmod) AS vector_type "
-            "FROM pg_class c JOIN pg_attribute a ON a.attrelid=c.oid "
-            "WHERE c.relname=? AND a.attname='embedding'",
+            "FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
+            "JOIN pg_attribute a ON a.attrelid=c.oid "
+            "WHERE n.nspname=current_schema() AND c.relname=? "
+            "AND a.attname='embedding'",
             (table,),
         ).one
         assert schema == {
+            "schemaname": "public",
+            "tablename": table,
             "relrowsecurity": True,
             "relforcerowsecurity": True,
             "vector_type": f"vector({DIMENSIONS})",
         }
         primary_key = backend.execute(
-            "SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint "
-            "WHERE conrelid=?::regclass AND contype='p'",
+            "SELECT pg_get_constraintdef(pc.oid) AS definition "
+            "FROM pg_constraint pc JOIN pg_class c ON c.oid=pc.conrelid "
+            "JOIN pg_namespace n ON n.oid=c.relnamespace "
+            "WHERE n.nspname=current_schema() AND c.relname=? AND pc.contype='p'",
             (table,),
         ).one["definition"]
         assert primary_key == "PRIMARY KEY (owner_user_id, dataset_id, generation_id, vector_id)"
         index_definitions = backend.execute(
-            "SELECT indexdef FROM pg_indexes WHERE tablename=?",
-            (table,),
+            "SELECT i.schemaname,i.tablename,i.indexname,i.indexdef,"
+            "x.indisvalid,x.indisready FROM pg_indexes i "
+            "JOIN pg_class ic ON ic.relname=i.indexname "
+            "JOIN pg_namespace ni ON ni.oid=ic.relnamespace AND ni.nspname=i.schemaname "
+            "JOIN pg_index x ON x.indexrelid=ic.oid "
+            "WHERE i.schemaname=current_schema() AND i.tablename=? AND i.indexname=?",
+            (table, f"{table}_embedding_hnsw"),
         ).rows
-        assert any(
-            "USING hnsw (embedding vector_cosine_ops)" in row["indexdef"]
-            for row in index_definitions
-        )
+        assert len(index_definitions) == 1
+        assert index_definitions[0]["schemaname"] == "public"
+        assert index_definitions[0]["tablename"] == table
+        assert index_definitions[0]["indexname"] == f"{table}_embedding_hnsw"
+        assert "USING hnsw (embedding vector_cosine_ops)" in index_definitions[0]["indexdef"]
+        assert index_definitions[0]["indisvalid"] is True
+        assert index_definitions[0]["indisready"] is True
         policies = backend.execute(
-            "SELECT policyname,qual,with_check FROM pg_policies WHERE tablename=?",
+            "SELECT schemaname,tablename,policyname,permissive,roles,cmd,qual,with_check "
+            "FROM pg_policies WHERE schemaname=current_schema() AND tablename=?",
             (table,),
         ).rows
         assert len(policies) == 1
+        assert policies[0]["schemaname"] == "public"
+        assert policies[0]["tablename"] == table
         assert policies[0]["policyname"] == f"{table}_tenant_isolation"
+        assert policies[0]["permissive"] == "PERMISSIVE"
+        assert policies[0]["roles"] == ["public"]
+        assert policies[0]["cmd"] == "ALL"
         assert "app.current_user_id" in policies[0]["qual"]
         assert "app.current_dataset_id" in policies[0]["qual"]
         assert "app.current_user_id" in policies[0]["with_check"]
@@ -320,7 +355,7 @@ async def test_pgvector_schema_and_reusable_contract(
 
 
 @pytest.mark.asyncio
-async def test_pgvector_query_is_not_underfilled_by_other_generation_decoys(
+async def test_pgvector_query_is_bounded_and_never_returns_other_generation_decoys(
     pg_database_config: DatabaseConfig,
 ) -> None:
     backend = DatabaseBackendFactory.create_backend(pg_database_config)
@@ -336,8 +371,7 @@ async def test_pgvector_query_is_not_underfilled_by_other_generation_decoys(
                 settings=settings,
             )
         except SemanticVectorCapabilityError as exc:
-            assert exc.code == "notes_semantic_pgvector_extension_unavailable"
-            pytest.skip("pgvector extension is unavailable in the PostgreSQL fixture")
+            _skip_or_fail_unavailable_pgvector(exc)
 
         decoy_generation = _additional_generation(db, DATASET_ID)
         await store.create_generation_storage(DATASET_ID, generation_id)
@@ -362,7 +396,202 @@ async def test_pgvector_query_is_not_underfilled_by_other_generation_decoys(
             limit=1,
         )
 
-        assert [[match.vector_id for match in batch] for batch in matches] == [["target"]]
+        assert len(matches) == 1
+        assert len(matches[0]) <= 1
+        assert all(match.vector_id == "target" for match in matches[0])
+
+        table = PGVECTOR_TABLES[DIMENSIONS]
+        with backend.transaction() as connection:
+            backend.execute(
+                "SELECT set_config('app.current_user_id', ?, true)",
+                ("owner-a",),
+                connection=connection,
+            )
+            backend.execute(
+                "SELECT set_config('app.current_dataset_id', ?, true)",
+                (DATASET_ID,),
+                connection=connection,
+            )
+            backend.execute(
+                "SELECT set_config('hnsw.iterative_scan', ?, true)",
+                ("strict_order",),
+                connection=connection,
+            )
+            backend.execute(
+                "SELECT set_config('hnsw.max_scan_tuples', ?, true)",
+                (str(settings.pgvector_hnsw_max_scan_tuples),),
+                connection=connection,
+            )
+            backend.execute("SET LOCAL enable_seqscan=off", connection=connection)
+            backend.execute("SET LOCAL enable_sort=off", connection=connection)
+            plan_rows = backend.execute(
+                "EXPLAIN (COSTS OFF) SELECT vector_id,distance FROM ("
+                f"SELECT vector_id,(embedding <=> ?::vector) AS distance FROM {backend.escape_identifier(table)} "  # nosec B608 - allowlisted table.
+                "WHERE owner_user_id=? AND dataset_id=? AND generation_id=? "
+                "ORDER BY embedding <=> ?::vector LIMIT ?) AS candidates "
+                "ORDER BY distance,vector_id LIMIT ?",
+                (
+                    "[1" + ",0" * (DIMENSIONS - 1) + "]",
+                    "owner-a",
+                    DATASET_ID,
+                    generation_id,
+                    "[1" + ",0" * (DIMENSIONS - 1) + "]",
+                    settings.pgvector_hnsw_max_scan_tuples,
+                    1,
+                ),
+                connection=connection,
+            ).rows
+        plan = "\n".join(str(row["QUERY PLAN"]) for row in plan_rows)
+        assert f"{table}_embedding_hnsw" in plan
+    finally:
+        db.close_all_connections()
+        backend.get_pool().close_all()
+
+
+@pytest.mark.asyncio
+async def test_pgvector_repairs_policy_modes_and_concurrent_factory_calls(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = CharactersRAGDB(":memory:", client_id="owner-a", backend=backend)
+    settings = SemanticIndexSettings(pgvector_allowed_dimensions=frozenset({DIMENSIONS}))
+    try:
+        try:
+            await create_semantic_vector_store(
+                "pgvector",
+                authority=db.note_semantic_store,
+                postgres_backend=backend,
+                settings=settings,
+            )
+        except SemanticVectorCapabilityError as exc:
+            _skip_or_fail_unavailable_pgvector(exc)
+
+        table = PGVECTOR_TABLES[DIMENSIONS]
+        policy = f"{table}_tenant_isolation"
+        ident = backend.escape_identifier
+        predicate = (
+            "owner_user_id = current_setting('app.current_user_id', true) "
+            "AND dataset_id = current_setting('app.current_dataset_id', true)"
+        )
+        variants = (
+            f"AS PERMISSIVE FOR SELECT TO PUBLIC USING ({predicate})",
+            f"AS RESTRICTIVE FOR ALL TO PUBLIC USING ({predicate}) "
+            f"WITH CHECK ({predicate})",
+            f"AS PERMISSIVE FOR ALL TO CURRENT_USER USING ({predicate}) "
+            f"WITH CHECK ({predicate})",
+        )
+        for variant in variants:
+            with backend.transaction() as connection:
+                backend.execute(
+                    f"DROP POLICY {ident(policy)} ON {ident(table)}",  # nosec B608
+                    connection=connection,
+                )
+                backend.execute(
+                    f"CREATE POLICY {ident(policy)} ON {ident(table)} {variant}",  # nosec B608
+                    connection=connection,
+                )
+            await create_semantic_vector_store(
+                "pgvector",
+                authority=db.note_semantic_store,
+                postgres_backend=backend,
+                settings=settings,
+            )
+            repaired = backend.execute(
+                "SELECT permissive,roles,cmd FROM pg_policies "
+                "WHERE schemaname=current_schema() AND tablename=? AND policyname=?",
+                (table, policy),
+            ).one
+            assert repaired == {
+                "permissive": "PERMISSIVE",
+                "roles": ["public"],
+                "cmd": "ALL",
+            }
+
+        stores = await asyncio.gather(
+            *(
+                create_semantic_vector_store(
+                    "pgvector",
+                    authority=db.note_semantic_store,
+                    postgres_backend=backend,
+                    settings=settings,
+                )
+                for _ in range(4)
+            )
+        )
+        assert len(stores) == 4
+    finally:
+        db.close_all_connections()
+        backend.get_pool().close_all()
+
+
+@pytest.mark.asyncio
+async def test_pgvector_verification_is_schema_bound_and_rejects_wrong_index(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = CharactersRAGDB(":memory:", client_id="owner-a", backend=backend)
+    settings = SemanticIndexSettings(pgvector_allowed_dimensions=frozenset({DIMENSIONS}))
+    schema_name = f"semantic_decoy_{uuid4().hex[:8]}"
+    table = PGVECTOR_TABLES[DIMENSIONS]
+    index = f"{table}_embedding_hnsw"
+    ident = backend.escape_identifier
+    try:
+        try:
+            await create_semantic_vector_store(
+                "pgvector",
+                authority=db.note_semantic_store,
+                postgres_backend=backend,
+                settings=settings,
+            )
+        except SemanticVectorCapabilityError as exc:
+            _skip_or_fail_unavailable_pgvector(exc)
+
+        with backend.transaction() as connection:
+            backend.execute(
+                f"CREATE SCHEMA {ident(schema_name)}",  # nosec B608
+                connection=connection,
+            )
+            backend.execute(
+                f"CREATE TABLE {ident(schema_name)}.{ident(table)} "  # nosec B608
+                "(embedding vector(384))",
+                connection=connection,
+            )
+        await create_semantic_vector_store(
+            "pgvector",
+            authority=db.note_semantic_store,
+            postgres_backend=backend,
+            settings=settings,
+        )
+
+        with backend.transaction() as connection:
+            backend.execute(
+                f"DROP INDEX {ident(index)}",  # nosec B608
+                connection=connection,
+            )
+            backend.execute(
+                f"CREATE INDEX {ident(index)} ON {ident(table)} (vector_id)",  # nosec B608
+                connection=connection,
+            )
+        with pytest.raises(SemanticVectorCapabilityError) as exc_info:
+            await create_semantic_vector_store(
+                "pgvector",
+                authority=db.note_semantic_store,
+                postgres_backend=backend,
+                settings=settings,
+            )
+        assert exc_info.value.code == "notes_semantic_pgvector_schema_unavailable"
+
+        with backend.transaction() as connection:
+            backend.execute(
+                f"DROP INDEX {ident(index)}",  # nosec B608
+                connection=connection,
+            )
+        await create_semantic_vector_store(
+            "pgvector",
+            authority=db.note_semantic_store,
+            postgres_backend=backend,
+            settings=settings,
+        )
     finally:
         db.close_all_connections()
         backend.get_pool().close_all()
@@ -374,6 +603,43 @@ def test_pgvector_identifiers_and_metric_labels_are_operator_bounded() -> None:
     assert frozenset({"backend", "operation", "outcome"}) == SEMANTIC_VECTOR_METRIC_LABELS
     assert SEMANTIC_VECTOR_METRIC_LABELS.isdisjoint(
         {"owner", "dataset", "generation", "table", "dimensions"}
+    )
+
+
+def test_pgvector_required_flag_converts_capability_skip_to_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    error = SemanticVectorCapabilityError(
+        "notes_semantic_pgvector_extension_unavailable"
+    )
+    monkeypatch.delenv(_PGVECTOR_REQUIRED_ENV, raising=False)
+    with pytest.raises(pytest.skip.Exception):
+        _skip_or_fail_unavailable_pgvector(error)
+
+    monkeypatch.setenv(_PGVECTOR_REQUIRED_ENV, "1")
+    with pytest.raises(pytest.fail.Exception):
+        _skip_or_fail_unavailable_pgvector(error)
+
+
+def test_notes_graph_ci_shard_requires_pgvector_service_and_failure_flag() -> None:
+    workflow_path = Path(__file__).resolve().parents[4] / ".github/workflows/ci.yml"
+    workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+    job = workflow["jobs"]["full-suite-linux-312-shards"]
+    notes_shard = next(
+        shard
+        for shard in job["strategy"]["matrix"]["shard"]
+        if shard["name"] == "gap-verified-5"
+    )
+
+    assert "tldw_Server_API/tests/Notes_Graph" in notes_shard["paths"]
+    assert notes_shard["postgres_image"] == "pgvector/pgvector:pg18"
+    assert notes_shard["pgvector_required"] == "1"
+    assert job["services"]["postgres"]["image"] == (
+        "${{ matrix.shard.postgres_image || "
+        "'mirror.gcr.io/library/postgres:18-bookworm' }}"
+    )
+    assert job["env"][_PGVECTOR_REQUIRED_ENV] == (
+        "${{ matrix.shard.pgvector_required || '0' }}"
     )
 
 

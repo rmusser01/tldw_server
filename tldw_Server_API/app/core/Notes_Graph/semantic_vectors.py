@@ -179,10 +179,12 @@ class NotesSemanticVectorStore:
         authority: SemanticGenerationAuthority,
         backend: SemanticVectorBackend,
         max_query_neighbors: int = 100,
+        max_query_vectors_per_call: int = 16,
     ) -> None:
         self._authority = authority
         self._backend = backend
         self._max_query_neighbors = max_query_neighbors
+        self._max_query_vectors_per_call = max_query_vectors_per_call
 
     async def _binding(
         self,
@@ -277,9 +279,25 @@ class NotesSemanticVectorStore:
         *,
         limit: int,
     ) -> tuple[tuple[SemanticVectorMatch, ...], ...]:
-        binding = await self._binding(dataset_id, generation_id)
+        if isinstance(query_vectors, (str, bytes)) or not isinstance(
+            query_vectors, Sequence
+        ):
+            raise SemanticVectorValidationError(
+                "notes_semantic_vector_query_count_invalid"
+            )
+        try:
+            query_count = len(query_vectors)
+        except (OverflowError, TypeError, ValueError):
+            raise SemanticVectorValidationError(
+                "notes_semantic_vector_query_count_invalid"
+            ) from None
+        if query_count > self._max_query_vectors_per_call:
+            raise SemanticVectorValidationError(
+                "notes_semantic_vector_query_count_invalid"
+            )
         if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= self._max_query_neighbors:
             raise SemanticVectorValidationError("notes_semantic_vector_query_limit_invalid")
+        binding = await self._binding(dataset_id, generation_id)
         normalized = tuple(
             _validated_embedding(vector, dimensions=binding.dimensions)
             for vector in query_vectors
@@ -360,6 +378,7 @@ async def create_semantic_vector_store(
         backend = PostgresSemanticVectorBackend(
             postgres_backend,
             allowed_dimensions=settings.pgvector_allowed_dimensions,
+            hnsw_max_scan_tuples=settings.pgvector_hnsw_max_scan_tuples,
         )
     else:
         raise SemanticVectorCapabilityError("notes_semantic_vector_backend_unsupported")
@@ -368,6 +387,7 @@ async def create_semantic_vector_store(
         authority=authority,
         backend=backend,
         max_query_neighbors=settings.max_query_neighbors,
+        max_query_vectors_per_call=settings.max_query_vectors_per_call,
     )
 
 
