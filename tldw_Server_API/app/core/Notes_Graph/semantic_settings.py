@@ -6,8 +6,15 @@ from dataclasses import dataclass
 
 _HARD_MAXIMUMS = {
     "max_active_notes": 100_000,
+    "max_stored_note_bytes": 10_000_000,
+    "max_canonical_field_code_points": 2_000_000,
+    "max_chunk_code_points": 8_192,
     "max_chunks_per_note": 2_000,
     "max_chunks_per_run": 100_000,
+    "max_provider_input_bytes": 1_000_000,
+    "max_provider_batch_inputs": 2_048,
+    "max_provider_batch_bytes": 16_000_000,
+    "max_provider_bytes_per_run": 1_000_000_000,
     "max_provider_requests_per_run": 10_000,
     "max_query_neighbors": 100,
     "max_cleanup_vectors_per_run": 100_000,
@@ -24,8 +31,15 @@ class SemanticIndexSettings:
 
     indexing_enabled: bool = True
     max_active_notes: int = 10_000
+    max_stored_note_bytes: int = 1_000_000
+    max_canonical_field_code_points: int = 250_000
+    max_chunk_code_points: int = 480
     max_chunks_per_note: int = 200
     max_chunks_per_run: int = 10_000
+    max_provider_input_bytes: int = 16_384
+    max_provider_batch_inputs: int = 128
+    max_provider_batch_bytes: int = 1_048_576
+    max_provider_bytes_per_run: int = 67_108_864
     max_provider_requests_per_run: int = 1_000
     max_query_neighbors: int = 50
     max_cleanup_vectors_per_run: int = 10_000

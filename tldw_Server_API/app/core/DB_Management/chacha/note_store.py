@@ -24,7 +24,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     logger,
 )
 from tldw_Server_API.app.core.Notes.wikilinks import parse_wikilinks
-from tldw_Server_API.app.core.Notes_Graph.suggestion_content import content_fingerprint
+from tldw_Server_API.app.core.Notes_Graph.semantic_content import semantic_content_fingerprint
 from tldw_Server_API.app.core.Sync.v2.models import validate_notes_note_upsert_payload
 from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_contract import (
     SYNC_ENVELOPE_MAX_BYTES,
@@ -92,7 +92,7 @@ class NoteStore:
             dataset_id=dataset_id,
             note_id=note_id,
             content_version=content_version,
-            content_fingerprint=content_fingerprint(title, content),
+            content_fingerprint=semantic_content_fingerprint(title, content, content_version),
             now=self._semantic_now(),
         )
 
@@ -111,7 +111,7 @@ class NoteStore:
             dataset_id=dataset_id,
             note_id=note_id,
             content_version=content_version,
-            content_fingerprint=content_fingerprint(title, content),
+            content_fingerprint=semantic_content_fingerprint(title, content, content_version),
             now=self._semantic_now(),
         )
 

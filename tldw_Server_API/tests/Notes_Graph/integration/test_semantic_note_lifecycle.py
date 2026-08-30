@@ -11,7 +11,7 @@ from tldw_Server_API.app.core.DB_Management.chacha.note_semantic_models import (
     SemanticDimensionState,
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
-from tldw_Server_API.app.core.Notes_Graph.suggestion_content import content_fingerprint
+from tldw_Server_API.app.core.Notes_Graph.semantic_content import semantic_content_fingerprint
 
 pytestmark = pytest.mark.integration
 
@@ -106,7 +106,7 @@ def test_enabled_note_lifecycle_records_transactional_semantic_work(db: Characte
     )
     assert tuple(_state(db)) == (
         1,
-        content_fingerprint("Original", "Body"),
+        semantic_content_fingerprint("Original", "Body", 1),
         1,
         "pending",
     )
@@ -120,7 +120,7 @@ def test_enabled_note_lifecycle_records_transactional_semantic_work(db: Characte
     )
     assert tuple(_state(db)) == (
         2,
-        content_fingerprint("Revised", "Body"),
+        semantic_content_fingerprint("Revised", "Body", 2),
         2,
         "pending",
     )
@@ -131,7 +131,7 @@ def test_enabled_note_lifecycle_records_transactional_semantic_work(db: Characte
     )
     assert tuple(_state(db)) == (
         3,
-        content_fingerprint("Revised", "Body"),
+        semantic_content_fingerprint("Revised", "Body", 3),
         3,
         "tombstoned",
     )
@@ -144,7 +144,7 @@ def test_enabled_note_lifecycle_records_transactional_semantic_work(db: Characte
     )
     assert tuple(_state(db)) == (
         4,
-        content_fingerprint("Revised", "Body"),
+        semantic_content_fingerprint("Revised", "Body", 4),
         4,
         "pending",
     )
@@ -179,7 +179,7 @@ def test_semantic_lifecycle_ignores_relationship_only_updates_and_rolls_back_wit
     )
     assert tuple(_state(db)) == (
         1,
-        content_fingerprint("Original", "Body"),
+        semantic_content_fingerprint("Original", "Body", 1),
         1,
         "pending",
     )
