@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, Depends, Request, Response, status
 from fastapi.responses import JSONResponse
 from loguru import logger
 
@@ -11,6 +11,9 @@ from tldw_Server_API.app.core.DB_Management.DB_Manager import create_workflows_d
 from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
 from tldw_Server_API.app.core.Workflows.engine import WorkflowScheduler
 from tldw_Server_API.app.core.testing import env_flag_enabled, is_test_mode
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequirePermission
+from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_LOGS
+from tldw_Server_API.app.services import readiness_service
 
 _HEALTH_NONCRITICAL_EXCEPTIONS = (
     AttributeError,
@@ -32,7 +35,20 @@ except ImportError:  # pragma: no cover - defensive import guard for optional de
 # Expose symbol for tests to monkeypatch (see test_security_health_thresholds.py)
 UnifiedAuditService = _UnifiedAuditService  # type: ignore[assignment]
 
-router = APIRouter()
+_NO_STORE_HEADERS = {"Cache-Control": "no-store"}
+
+
+async def _set_no_store_header(response: Response) -> None:
+    """Prevent browsers and intermediaries from caching diagnostics."""
+    response.headers["Cache-Control"] = "no-store"
+
+
+router = APIRouter(
+    dependencies=[
+        Depends(RequirePermission(SYSTEM_LOGS)),
+        Depends(_set_no_store_header),
+    ],
+)
 
 
 def _utcnow_iso() -> str:
@@ -86,26 +102,14 @@ async def healthz():
 
 
 @router.get("/readyz", include_in_schema=False)
-async def readyz():
-    """Readiness check: engine stats + DB connectivity and schema version (backend)."""
-    try:
-        stats = WorkflowScheduler.instance().stats()
-    except _HEALTH_NONCRITICAL_EXCEPTIONS:
-        stats = {"queue_depth": None, "active_tenants": None, "active_workflows": None}
-    db = _check_workflows_db()
-    ready = bool(db.get("ok")) and (
-        db.get("schema_version") is None or db.get("schema_version") == db.get("expected_version")
+async def readyz(request: Request) -> JSONResponse:
+    """Return the shared authenticated operator readiness projection."""
+    snapshot = await readiness_service.collect_readiness_snapshot(request.app)
+    return JSONResponse(
+        readiness_service.operator_readiness_payload(snapshot),
+        status_code=200 if snapshot.ready else 503,
+        headers=_NO_STORE_HEADERS,
     )
-    body = {
-        "ready": ready,
-        "engine": stats,
-        "db": db,
-        "time": _utcnow_iso(),
-    }
-    # Fail readiness (HTTP 503) if schema version mismatch or DB not ok
-    if not ready:
-        return JSONResponse(body, status_code=503)
-    return JSONResponse(body, status_code=200)
 
 
 # Compatibility health endpoints expected by tests (/api/v1/health, /api/v1/health/live, /api/v1/health/ready, /api/v1/health/metrics)
@@ -211,7 +215,7 @@ async def api_health():
     except _HEALTH_NONCRITICAL_EXCEPTIONS:
         pass
     code = status.HTTP_200_OK if overall == "ok" else (206 if overall == "degraded" else 503)
-    return JSONResponse(body, status_code=code)
+    return JSONResponse(body, status_code=code, headers=_NO_STORE_HEADERS)
 
 
 @router.get("/health/live", tags=["health"], summary="Liveness probe")
@@ -220,19 +224,14 @@ async def api_liveness():
 
 
 @router.get("/health/ready", tags=["health"], summary="Readiness probe")
-async def api_readiness():
-    """Return readiness similar to /readyz with standardized shape."""
-    r = await readyz()
-    # readyz returns JSONResponse already; normalize body to include 'status'
-    try:
-        body = r.body  # bytes
-        import json as _json
-
-        data = _json.loads(body)
-    except _HEALTH_NONCRITICAL_EXCEPTIONS:
-        data = {"ready": False}
-    status_txt = "ready" if data.get("ready") else "not_ready"
-    return JSONResponse({"status": status_txt, **data}, status_code=(200 if data.get("ready") else 503))
+async def api_readiness(request: Request) -> JSONResponse:
+    """Return the shared authenticated operator readiness projection."""
+    snapshot = await readiness_service.collect_readiness_snapshot(request.app)
+    return JSONResponse(
+        readiness_service.operator_readiness_payload(snapshot),
+        status_code=200 if snapshot.ready else 503,
+        headers=_NO_STORE_HEADERS,
+    )
 
 
 @router.get("/health/metrics", tags=["health"], summary="System metrics (CPU/memory/disk)")
@@ -324,7 +323,7 @@ async def api_security_health():
                 "error": "UnifiedAuditService unavailable",
             }
         )
-        return JSONResponse(response, status_code=503)
+        return JSONResponse(response, status_code=503, headers=_NO_STORE_HEADERS)
 
     service_instance = None
     try:
@@ -352,7 +351,7 @@ async def api_security_health():
                 "error": "Security health unavailable",
             }
         )
-        return JSONResponse(response, status_code=503)
+        return JSONResponse(response, status_code=503, headers=_NO_STORE_HEADERS)
     finally:
         shutdown = getattr(service_instance, "stop", None)
         if callable(shutdown):
@@ -361,4 +360,4 @@ async def api_security_health():
             except _HEALTH_NONCRITICAL_EXCEPTIONS:
                 logger.debug("UnifiedAuditService stop() ignored")
 
-    return JSONResponse(response, status_code=200)
+    return JSONResponse(response, status_code=200, headers=_NO_STORE_HEADERS)

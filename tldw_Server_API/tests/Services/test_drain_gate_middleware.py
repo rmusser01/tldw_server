@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-import os
 
 import pytest
 from fastapi import HTTPException
@@ -26,12 +25,10 @@ def test_app(monkeypatch: pytest.MonkeyPatch):
 
 
 @pytest.fixture()
-def draining_client(test_app):
+def draining_client(test_app, auth_headers):
     from tldw_Server_API.app.services.app_lifecycle import get_or_create_lifecycle_state
 
-    headers = {"X-API-KEY": os.environ.get("SINGLE_USER_API_KEY", "test-api-key-12345")}
-
-    with TestClient(test_app, headers=headers) as client:
+    with TestClient(test_app, headers=auth_headers) as client:
         state = get_or_create_lifecycle_state(test_app)
         state.phase = "draining"
         state.ready = False
@@ -157,6 +154,8 @@ def test_drain_gate_rejects_guarded_request_before_llm_budget_runs(test_app, dra
     [
         ("GET", "/health"),
         ("HEAD", "/health"),
+        ("GET", "/internal/ready"),
+        ("HEAD", "/internal/ready"),
         ("GET", "/ready"),
         ("HEAD", "/ready"),
         ("GET", "/readyz"),

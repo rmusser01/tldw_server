@@ -55,7 +55,11 @@ def _get_client(monkeypatch, env: dict):
     from tldw_Server_API.app import main as app_main
 
     importlib.reload(app_main)
-    return TestClient(app_main.app)
+    client = TestClient(app_main.app)
+    from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+
+    client.headers.update({"X-API-KEY": get_settings().SINGLE_USER_API_KEY})
+    return client
 
 
 def test_security_critical_when_high_risk_meets_threshold(monkeypatch):

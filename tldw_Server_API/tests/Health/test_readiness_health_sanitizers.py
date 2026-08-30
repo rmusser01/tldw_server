@@ -30,15 +30,11 @@ async def test_readyz_sanitizes_workflows_db_check_failure(monkeypatch):
     monkeypatch.setattr(health_mod, "get_content_backend_instance", _raise_backend_error)
 
     with _capture_health_logs() as messages:
-        response = await health_mod.readyz()
-
-    body = json.loads(response.body.decode("utf-8"))
+        body = health_mod._check_workflows_db()
     joined = "\n".join(messages)
 
-    assert response.status_code == 503
-    assert body["ready"] is False
-    assert body["db"]["ok"] is False
-    assert body["db"]["error"] == "Workflow database health check failed"
+    assert body["ok"] is False
+    assert body["error"] == "Workflow database health check failed"
     assert "/readyz DB check failed" in joined
     assert "workflow db exploded" not in joined
     assert "/private/" not in joined

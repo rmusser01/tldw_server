@@ -9,7 +9,17 @@ from starlette.requests import Request
 
 from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 from tldw_Server_API.app.api.v1.endpoints import metrics as metrics_mod
+from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_LOGS
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
+
+DETAILED_METRICS_PATHS = (
+    "/metrics",
+    "/api/v1/metrics",
+    "/api/v1/metrics/text",
+    "/api/v1/metrics/json",
+    "/api/v1/metrics/health",
+    "/api/v1/metrics/chat",
+)
 
 
 def _make_principal(
@@ -64,6 +74,48 @@ def _build_app_with_overrides(
     app.dependency_overrides[auth_deps.get_auth_principal] = _fake_get_auth_principal
 
     return app
+
+
+def _main_app_with_override(principal: Optional[AuthPrincipal], *, fail_with_401: bool = False) -> FastAPI:
+    from tldw_Server_API.app import main
+
+    async def _fake_get_auth_principal(request: Request) -> AuthPrincipal:
+        if fail_with_401:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        assert principal is not None
+        return principal
+
+    main.app.dependency_overrides[auth_deps.get_auth_principal] = _fake_get_auth_principal
+    return main.app
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("path", DETAILED_METRICS_PATHS)
+@pytest.mark.parametrize(
+    ("principal", "fail_with_401", "expected"),
+    ((None, True, 401), (_make_principal(permissions=[]), False, 403)),
+)
+def test_detailed_metrics_require_system_logs(
+    path: str,
+    principal: Optional[AuthPrincipal],
+    fail_with_401: bool,
+    expected: int,
+):
+    with TestClient(_main_app_with_override(principal, fail_with_401=fail_with_401)) as client:
+        response = client.get(path)
+    assert response.status_code == expected
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("path", DETAILED_METRICS_PATHS)
+@pytest.mark.parametrize(
+    "principal",
+    (_make_principal(permissions=[SYSTEM_LOGS]), _make_principal(is_admin=True, roles=["admin"], permissions=[])),
+)
+def test_detailed_metrics_allow_permission_or_admin_bypass(path: str, principal: AuthPrincipal):
+    with TestClient(_main_app_with_override(principal)) as client:
+        response = client.get(path)
+    assert response.status_code not in {401, 403}
 
 
 @pytest.mark.unit

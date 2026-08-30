@@ -9,7 +9,8 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequireRole
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequirePermission, RequireRole
+from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_LOGS
 import tldw_Server_API.app.core.Chat.chat_metrics as chat_metrics
 from tldw_Server_API.app.core.Chat.chat_metrics import get_chat_metrics
 from tldw_Server_API.app.core.Metrics.metrics_manager import get_metrics_registry
@@ -19,7 +20,18 @@ try:
 except ImportError:  # pragma: no cover - redis is an optional deployment dependency
     RedisError = None
 
-router = APIRouter(tags=["metrics"])
+async def _set_no_store_header(response: Response) -> None:
+    """Prevent caching for dictionary-based diagnostic responses."""
+    response.headers["Cache-Control"] = "no-store"
+
+
+router = APIRouter(
+    tags=["metrics"],
+    dependencies=[
+        Depends(RequirePermission(SYSTEM_LOGS)),
+        Depends(_set_no_store_header),
+    ],
+)
 
 _METRICS_NONCRITICAL_EXCEPTIONS = (
     AttributeError,

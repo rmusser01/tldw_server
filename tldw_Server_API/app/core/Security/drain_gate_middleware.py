@@ -28,6 +28,7 @@ CORS_EXPOSE_HEADERS_VALUE = ", ".join(CORS_EXPOSE_HEADERS)
 CONTROL_PLANE_DRAIN_PATHS: frozenset[str] = frozenset(
     {
         "/health",
+        "/internal/ready",
         "/ready",
         "/readyz",
         "/health/ready",
