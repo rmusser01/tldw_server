@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import copy
+from pathlib import Path
 
 import pytest
+
+from Helper_Scripts.Evals.run_web_retrieval_quality_baseline import main
 
 from tldw_Server_API.app.core.Evaluations.article_extraction_benchmark import (
     get_accuracy,
@@ -17,6 +20,7 @@ from tldw_Server_API.app.core.Evaluations.web_retrieval_quality import (
     FIXTURE_SCHEMA_VERSION,
     FixtureValidationError,
     evaluate_fixture_suite,
+    load_fixture_suite,
     render_human_summary,
     serialize_report,
     validate_fixture_suite,
@@ -24,6 +28,9 @@ from tldw_Server_API.app.core.Evaluations.web_retrieval_quality import (
 
 
 REVISION = "f676e23549ea8ed82ef53493260621a05b281863"
+REPOSITORY_ROOT = Path(__file__).parents[3]
+FIXTURE_PATH = Path(__file__).parent / "fixtures/retrieval_quality/v1.json"
+BASELINE_PATH = REPOSITORY_ROOT / "Docs/Evals/baselines/web_retrieval_quality_v1.json"
 
 
 def _suite() -> dict[str, object]:
@@ -297,3 +304,40 @@ def test_human_summary_uses_stable_line_grammar() -> None:
         "total mean_case_score="
     )
     assert not summary.endswith("\n")
+
+
+def test_checked_fixture_covers_the_minimal_current_dev_contract() -> None:
+    suite = load_fixture_suite(FIXTURE_PATH)
+    cases = {case["kind"]: case for case in suite["cases"]}
+
+    assert set(cases) == {"extraction", "search_order", "crawl_graph", "provenance"}
+    assert "<nav>" in cases["extraction"]["input"]["html"]
+    assert "Home Topics Subscribe" not in cases["extraction"]["observed"]["text"]
+    assert len(cases["search_order"]["input"]["provider_results"]) >= 2
+    assert cases["crawl_graph"]["input"]["page_limit"] == 2
+    assert "https://crawl.test/start" in cases["crawl_graph"]["input"]["links"][
+        "https://crawl.test/one"
+    ]
+    assert cases["provenance"]["observed"]["record"]["truncated"] is False
+
+
+def test_checked_fixture_generates_the_checked_baseline() -> None:
+    suite = load_fixture_suite(FIXTURE_PATH)
+    report = evaluate_fixture_suite(suite)
+
+    assert serialize_report(report) == BASELINE_PATH.read_text(encoding="utf-8")
+
+
+def test_cli_writes_json_and_stable_human_summary(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    destination = tmp_path / "report.json"
+
+    assert main(["--fixture", str(FIXTURE_PATH), "--json-out", str(destination)]) == 0
+    assert destination.read_text(encoding="utf-8") == BASELINE_PATH.read_text(
+        encoding="utf-8"
+    )
+    assert capsys.readouterr().out == render_human_summary(
+        evaluate_fixture_suite(load_fixture_suite(FIXTURE_PATH))
+    ) + "\n"
