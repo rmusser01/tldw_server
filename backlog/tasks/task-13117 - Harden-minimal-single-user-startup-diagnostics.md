@@ -2,15 +2,20 @@
 id: TASK-13117
 title: Harden minimal single-user startup diagnostics
 status: In Progress
+assignee: []
 created_date: 2026-08-25 01:12
+updated_date: 2026-08-30 22:16
 labels:
 - authnz
 - deployment
 - documentation
-priority: High
+dependencies: []
+references:
+- https://github.com/rmusser01/tldw_server/pull/2820
 documentation:
 - Docs/Deployment/minimal-deploy.md
 - Docs/Getting_Started/Profile_Local_Single_User.md
+priority: high
 modified_files:
 - tldw_Server_API/app/core/AuthNZ/initialize.py
 - tldw_Server_API/app/core/startup_logging.py
@@ -24,9 +29,6 @@ modified_files:
 - tldw_Server_API/tests/Admin_Webhooks/test_repository_postgres.py
 - Docs/Deployment/minimal-deploy.md
 - Docs/Published/Deployment/minimal-deploy.md
-updated_date: 2026-08-30 18:38
-references:
-- https://github.com/rmusser01/tldw_server/pull/2820
 ---
 
 ## Description
@@ -62,14 +64,21 @@ Create the repository-required implementation plan, then use TDD for prompt EOF 
 2026-08-24: After rebasing onto origin/dev b1d0aed671, broader relevant suite passed 113 tests. Minimal environment Uvicorn smoke returned HTTP 200. Bandit scanned initialize.py, startup_logging.py, and main.py with 0 findings. git diff --check passed.
 
 2026-08-24: Opened draft PR #2820 against dev. Merge readiness is intentionally pending the repository-required human-authored Change summary.
+
 2026-08-30: Reopened for requested PR #2820 rebase, Dodo review follow-up, fresh verification, and merge. Rebased cleanly onto origin/dev f676e23549.
+
 2026-08-30: Latest dev introduced three Admin Webhooks tests that directly registered the prohibited AuthNZ conftest plugin. Replaced those references with the canonical authnz_full_fixtures bridge. Isolation guard: 6 passed; affected Postgres suites: 24 tests collected. Relevant regression suite: 113 passed. One chained smoke immediately after pytest saw a closed SQLite connection; the failure did not reproduce in a direct launch or five consecutive standalone scrubbed smokes, so no speculative database change was made.
+
+2026-08-30: Addressed Qodo review. Routed the closed-stdin default diagnostic through Loguru and added the required test/module/function docstrings. Expanded the subprocess regression to exercise LOG_LEVEL from the selected TLDW_ENV_FILE and verify explicit process-environment precedence; all three cases passed without an additional production change, disproving the reported dotenv-order bug and avoiding a duplicate early dotenv loader.
+
+2026-08-30: Qodo follow-up verification passed: broader startup/deployment/documentation/plugin-isolation suite 108 passed; focused EOF red-to-green regression 2 passed; Bandit scanned all three touched application files with 0 findings; git diff --check passed. Ruff's sole report is an unchanged pre-existing import-order issue in test_initialize_mcp_secrets.py, reproduced against HEAD before these review edits.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Hardened the minimal single-user launch path without weakening database safety. Closed stdin now selects each AuthNZ prompt default instead of raising EOFError; startup logging honors recognized LOG_LEVEL values and safely falls back to INFO; and the source plus published deployment guides now use maintained Make, wizard, and Compose flows with observable log capture and reversible, backup-first invariant recovery. Added unit, subprocess wiring, documentation contract, and published-copy synchronization coverage. Draft PR: https://github.com/rmusser01/tldw_server/pull/2820. The only remaining merge gate is the requester-authored Change summary required by project policy.
 <!-- SECTION:FINAL_SUMMARY:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed

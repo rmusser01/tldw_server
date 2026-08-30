@@ -349,7 +349,7 @@ def _prompt_yes_no(prompt: str, default_yes: bool, non_interactive: bool) -> boo
         response = input(f"{prompt} ({suffix}): ").strip().lower()
     except EOFError:
         default = "yes" if default_yes else "no"
-        print(f"\n⚠️  No interactive input detected; using default: {default}")
+        logger.warning(f"No interactive input detected; using default: {default}")
         return default_yes
     if not response:
         return default_yes

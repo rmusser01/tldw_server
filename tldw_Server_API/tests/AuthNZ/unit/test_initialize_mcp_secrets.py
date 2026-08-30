@@ -107,12 +107,20 @@ def test_authnz_initializer_does_not_create_missing_exclusive_env_file(
 
 def test_prompt_yes_no_uses_yes_default_when_stdin_is_closed(
     monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
 ) -> None:
+    """Use and log the displayed yes default when stdin is closed."""
+    messages: list[str] = []
+
     def _closed_stdin(_prompt: str) -> str:
+        """Simulate a launcher whose standard input is closed."""
         raise EOFError
 
+    def _record_warning(message: str) -> None:
+        """Capture the non-interactive diagnostic sent through Loguru."""
+        messages.append(message)
+
     monkeypatch.setattr("builtins.input", _closed_stdin)
+    monkeypatch.setattr(initialize_module.logger, "warning", _record_warning)
 
     result = initialize_module._prompt_yes_no(
         "Generate missing keys?",
@@ -121,17 +129,25 @@ def test_prompt_yes_no_uses_yes_default_when_stdin_is_closed(
     )
 
     assert result is True
-    assert "No interactive input detected; using default: yes" in capsys.readouterr().out
+    assert messages == ["No interactive input detected; using default: yes"]
 
 
 def test_prompt_yes_no_uses_no_default_when_stdin_is_closed(
     monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
 ) -> None:
+    """Use and log the displayed no default when stdin is closed."""
+    messages: list[str] = []
+
     def _closed_stdin(_prompt: str) -> str:
+        """Simulate a launcher whose standard input is closed."""
         raise EOFError
 
+    def _record_warning(message: str) -> None:
+        """Capture the non-interactive diagnostic sent through Loguru."""
+        messages.append(message)
+
     monkeypatch.setattr("builtins.input", _closed_stdin)
+    monkeypatch.setattr(initialize_module.logger, "warning", _record_warning)
 
     result = initialize_module._prompt_yes_no(
         "Generate replacement keys?",
@@ -140,4 +156,4 @@ def test_prompt_yes_no_uses_no_default_when_stdin_is_closed(
     )
 
     assert result is False
-    assert "No interactive input detected; using default: no" in capsys.readouterr().out
+    assert messages == ["No interactive input detected; using default: no"]
