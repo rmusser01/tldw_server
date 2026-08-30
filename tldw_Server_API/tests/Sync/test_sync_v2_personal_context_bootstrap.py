@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import base64
+import inspect
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
@@ -13,6 +14,7 @@ from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from tldw_profile_core.canonical import canonical_json_bytes
 
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
+from tldw_Server_API.app.core.DB_Management import Sync_DB as sync_db_module
 from tldw_Server_API.app.core.Sync.v2.adapters import SyncAdapterRegistry
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.personal_context import (
     PersonalContextDomainAdapter,
@@ -480,6 +482,17 @@ def test_bootstrap_rewraps_after_registered_public_key_rotation(tmp_path: Path) 
     assert new_private.decrypt(ciphertext, padding.OAEP(mgf=padding.MGF1(hashes.SHA256()), algorithm=hashes.SHA256(), label=b"personal-context:personal-context-integrity-v1")) == _INTEGRITY_KEY
     with pytest.raises(ValueError):
         old_private.decrypt(ciphertext, padding.OAEP(mgf=padding.MGF1(hashes.SHA256()), algorithm=hashes.SHA256(), label=b"personal-context:personal-context-integrity-v1"))
+
+
+def test_link_receipt_schema_and_cas_are_portable_and_not_request_time_ddl() -> None:
+    for schema in (sync_db_module.SYNC_SQLITE_SCHEMA, sync_db_module.SYNC_POSTGRES_SCHEMA):
+        assert "CREATE TABLE IF NOT EXISTS sync_personal_context_link_receipts" in schema
+        assert "PRIMARY KEY (user_id, dataset_id, device_id)" in schema
+    source = inspect.getsource(SyncV2Store.complete_personal_context_link_receipt)
+    assert "CREATE TABLE" not in source
+    assert "DELETE FROM sync_personal_context_link_receipts" not in source
+    assert "ON CONFLICT(user_id, dataset_id, device_id) DO UPDATE" in source
+    assert "personal_context_link_binding_stale" in source
 
 
 
