@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -528,6 +529,7 @@ def test_postgres_create_generation_fences_concurrent_configuration_revision(
     pg_database_config: DatabaseConfig,
 ) -> None:
     backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    observer_backend = DatabaseBackendFactory.create_backend(pg_database_config)
     db = CharactersRAGDB(":memory:", client_id="owner-a", backend=backend)
     resolved_config, old_generation = _create_resolved_store_generation(db)
     with db.transaction() as conn:
@@ -543,13 +545,16 @@ def test_postgres_create_generation_fences_concurrent_configuration_revision(
 
     generation_inserted = threading.Event()
     release_generation_commit = threading.Event()
-    configuration_update_started = threading.Event()
+    configuration_connection_ready = threading.Event()
     configuration_update_finished = threading.Event()
     results: dict[str, object] = {}
 
     def create_generation() -> None:
         try:
-            with db.transaction():
+            with db.transaction() as conn:
+                results["generation_pid"] = int(
+                    conn.execute("SELECT pg_backend_pid() AS pid").fetchone()["pid"]
+                )
                 results["generation"] = db.note_semantic_store.create_generation(
                     dataset_id="dataset-a",
                     configuration_revision=resolved_config.configuration_revision,
@@ -569,8 +574,11 @@ def test_postgres_create_generation_fences_concurrent_configuration_revision(
 
     def update_configuration() -> None:
         try:
-            with db.transaction():
-                configuration_update_started.set()
+            with db.transaction() as conn:
+                results["configuration_pid"] = int(
+                    conn.execute("SELECT pg_backend_pid() AS pid").fetchone()["pid"]
+                )
+                configuration_connection_ready.set()
                 results["disabled"] = db.note_semantic_store.disable_configuration(
                     dataset_id="dataset-a",
                     expected_configuration_revision=resolved_config.configuration_revision,
@@ -578,6 +586,7 @@ def test_postgres_create_generation_fences_concurrent_configuration_revision(
                 )
         except Exception as exc:  # noqa: BLE001 - surface thread failures in the test
             results["configuration_error"] = exc
+            configuration_connection_ready.set()
         finally:
             configuration_update_finished.set()
             db.close_connection()
@@ -585,20 +594,58 @@ def test_postgres_create_generation_fences_concurrent_configuration_revision(
     generation_thread = threading.Thread(target=create_generation)
     configuration_thread = threading.Thread(target=update_configuration)
     try:
-        generation_thread.start()
-        assert generation_inserted.wait(timeout=10)
-        assert "generation_error" not in results
-        configuration_thread.start()
-        assert configuration_update_started.wait(timeout=10)
-        update_was_serialized = not configuration_update_finished.wait(timeout=1)
-    finally:
-        release_generation_commit.set()
-        generation_thread.join(timeout=10)
-        if configuration_thread.ident is not None:
-            configuration_thread.join(timeout=10)
+        try:
+            generation_thread.start()
+            assert generation_inserted.wait(timeout=10)
+            assert "generation_error" not in results
+            configuration_thread.start()
+            assert configuration_connection_ready.wait(timeout=10)
+            assert "configuration_error" not in results
+            generation_pid = int(results["generation_pid"])
+            configuration_pid = int(results["configuration_pid"])
+            deadline = time.monotonic() + 10
+            lock_wait = None
+            last_activity = None
+            while time.monotonic() < deadline:
+                rows = observer_backend.execute(
+                    "SELECT state,wait_event_type,wait_event,pg_blocking_pids(pid) AS blocking_pids "
+                    "FROM pg_stat_activity WHERE datname=current_database() AND pid=%s",
+                    (configuration_pid,),
+                ).rows
+                if rows:
+                    last_activity = dict(rows[0])
+                    blocking_pids = {
+                        int(pid) for pid in (last_activity["blocking_pids"] or [])
+                    }
+                    if (
+                        last_activity["state"] == "active"
+                        and last_activity["wait_event_type"] == "Lock"
+                        and generation_pid in blocking_pids
+                    ):
+                        lock_wait = last_activity
+                        break
+                if configuration_update_finished.wait(timeout=0.02):
+                    break
+            assert lock_wait is not None, (
+                f"configuration backend {configuration_pid} never reached an active Lock wait "
+                f"blocked by generation backend {generation_pid}; "
+                f"update_finished={configuration_update_finished.is_set()}, "
+                f"last_activity={last_activity!r}"
+            )
+        finally:
+            release_generation_commit.set()
+            configuration_update_finished.wait(timeout=10)
+            generation_thread.join(timeout=10)
+            if configuration_thread.ident is not None:
+                configuration_thread.join(timeout=10)
+    except Exception:
+        db.close_all_connections()
+        observer_backend.get_pool().close_all()
+        raise
 
     try:
-        assert update_was_serialized
+        assert lock_wait["wait_event_type"] == "Lock"
+        assert configuration_update_finished.is_set()
         assert not generation_thread.is_alive()
         assert not configuration_thread.is_alive()
         assert "generation_error" not in results
@@ -650,6 +697,7 @@ def test_postgres_create_generation_fences_concurrent_configuration_revision(
         assert replacement.state is SemanticGenerationState.STAGING
     finally:
         db.close_all_connections()
+        observer_backend.get_pool().close_all()
 
 
 @pytest.mark.integration
