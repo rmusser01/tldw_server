@@ -4,7 +4,7 @@ title: Implement Notes embedding index and semantic graph edges
 status: In Progress
 assignee: []
 created_date: 2026-08-27 02:20
-updated_date: 2026-08-30 15:52
+updated_date: 2026-08-30 16:18
 labels:
 - notes
 - notes-graph
@@ -82,7 +82,6 @@ Approved executable plan: `Docs/superpowers/plans/2026-08-29-notes-semantic-inde
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - 2026-08-29: Senior implementation-constraint review identified required spec corrections for user-scoped run APIs, semantic opt-in compatibility, evidence offsets, vector-only backend contracts, DSR erasure, graph admission/async composition, dimension and activation rules, cache freshness, and restore semantics.
 - Design specification: `Docs/superpowers/specs/2026-08-29-notes-semantic-index-design.md`
@@ -96,7 +95,6 @@ Approved executable plan: `Docs/superpowers/plans/2026-08-29-notes-semantic-inde
 - 2026-08-29 Task 2 complete: Canonical Note and Sync create/edit/restore/delete paths now update semantic dirty/tombstone work in the same transaction for the authoritative dataset, remain no-ops when disabled/unscoped, and retain generation cleanup identity across hard deletes. Real Notes JSON round-trip and live PostgreSQL product-lifecycle tests close restore, RLS, rollback, conflict-upsert, and cascade risks. Independent review clean. Verification: 26 tests passed; Ruff, Bandit, and diff checks clean. Range: `88d169beef..ac45d93fe3`.
 - 2026-08-29 Task 3 complete: Added deterministic compatibility/disclosure identities with separate sanitized model and revision fields, durable-credential preflight, bounded semantic operator settings, and AuthNZ migration 096 for `notes.graph.semantic.manage`. Migration/backstop behavior preserves later revocations while granting approved roles on catalog creation. Independent runtime/migration review clean. Verification: 59 tests passed; Ruff, Bandit, and diff checks clean. Range: `c90625d842..37d96af28e`.
 - 2026-08-29 Task 4 complete: Added version-bound canonical chunking and strict endpoint-neutral embedding execution; migrated NoteStore semantic fingerprints to bind `content_version`; extended typed semantic limits. Verification: Task 4 plus orchestrator 73 passed; Task 2 lifecycle 14 passed; PostgreSQL lifecycle 1 passed; Ruff, Bandit, and diff checks clean. Report: `.superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-4-report.md`.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 2026-08-30 Task 4 Fix Round 1 started from fcb7f2a207: correct runtime endpoint provenance and no-redirect adapter transport, pin discovered model revision per run, account for probe/failed/provider-cache outcomes, and reject contradictory semantic settings using strict TDD.
 
@@ -105,8 +103,9 @@ Approved executable plan: `Docs/superpowers/plans/2026-08-29-notes-semantic-inde
 2026-08-30 Task 4 Fix Round 2 started from 06e2371e13: disable resolved Google query-key fallback, make resolved Google list batches one batchEmbedContents request, preserve cancellation usage accounting, pin the full run endpoint, and publish full ResolvedDimension through CAS using strict TDD.
 2026-08-30 Task 4 Fix Round 2 takeover complete: independently audited the inherited six-file diff against 06e2371e13 with no corrective source/test edits required. Fresh verification: Task 4 plus orchestrator 86 passed; settings plus native adapters 83 passed; both cancellation regressions passed in 5 fresh processes (10/10); Ruff passed on all five touched Python files; Bandit scanned 998 lines with 0 findings and 0 skipped lines; git diff --check passed. One initial unchanged Hypothesis too_slow health-check failure passed with its exact seed and on the full-suite rerun. PostgreSQL was not rerun because no lifecycle/CAS persistence files changed. Report: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-4-report.md.
 2026-08-30 Task 4 Fix Round 3 complete from 584d8f9ade: routed every attempted provider usage outcome through one cancellation-draining, single-logger finalizer that preserves truthful success/failure status without duplicate append-only billing rows; added nested Google embedContentConfig.outputDimensionality for resolved scalar/batch requests, probe omission, strict direct-call validation, and a real Notes adapter seam. Verification: focused RED 11 failed/2 passed before implementation; final Task 4 plus orchestrator 89 passed; settings plus OpenAI/Google/HuggingFace adapters 92 passed; four cancellation selectors passed in 10 fresh processes (40/40); Ruff passed all five touched Python files; Bandit scanned 1,061 lines with 0 findings and 0 skipped lines; git diff --check passed. One initial unchanged Hypothesis too_slow health-check failure passed with its exact seed and on the clean full-suite rerun. PostgreSQL was not rerun because lifecycle/CAS persistence was untouched. Report: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-4-report.md.
-<!-- SECTION:NOTES:END -->
-
+2026-08-30 Task 4 Fix Round 4 started from 1b0dcc0d91: preserve original cancellation when the single append-only usage logger raises after provider cancellation or accounting-phase cancellation, retain normal logger exception visibility, and make cancellation regressions Python 3.10 compatible without weakening cross-version status/call/leak assertions.
+2026-08-30 Task 4 Fix Round 4 complete from 1b0dcc0d91: deferred ordinary shielded logger-task exceptions to the existing result-precedence block so original provider/accounting cancellation wins without retrying the append-only logger or changing truthful status; added two cancellation regressions, a visible non-cancelled logger exception control, and Python 3.10 capability guards limited to cancellation count/message details. Verification: focused RED 2 failed/1 passed; final Task 4 plus orchestrator 92 passed in 6.82s; settings plus OpenAI/Google/HuggingFace 92 passed in 5.54s; logger-exception/repeated-cancellation selectors 40/40 across 10 fresh processes (55.95s aggregate pytest runtime); Python 3.10.20 production-finalizer harness 3/3 with full pytest environment unavailable; Ruff passed both touched Python files; Bandit scanned 846 lines with 0 findings/0 skips; git diff --check passed. Report: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-4-report.md. Residual risk is limited to the absence of a full dependency-backed Python 3.10 suite and live provider calls.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
