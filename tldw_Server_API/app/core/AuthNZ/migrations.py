@@ -2219,7 +2219,7 @@ def migration_097_seed_notes_graph_semantic_manage_permission(
     if not all(_sqlite_table_exists(conn, table_name) for table_name in required):
         logger.info("Migration 097: RBAC tables missing; skipping Notes semantic permission seed")
         return
-    conn.execute(
+    permission_insert = conn.execute(
         "INSERT OR IGNORE INTO permissions (name, description, category) VALUES (?, ?, ?)",
         (
             "notes.graph.semantic.manage",
@@ -2227,6 +2227,12 @@ def migration_097_seed_notes_graph_semantic_manage_permission(
             "notes",
         ),
     )
+    if permission_insert.rowcount == 0:
+        conn.commit()
+        logger.info(
+            "Migration 096: Permission already exists; preserving role mappings"
+        )
+        return
     conn.execute(
         """
         INSERT OR IGNORE INTO role_permissions (role_id, permission_id)

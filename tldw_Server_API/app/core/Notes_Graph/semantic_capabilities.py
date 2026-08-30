@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import asdict, dataclass, field
 from math import ceil
 from typing import Literal
@@ -27,6 +28,44 @@ _PROVIDER_LABELS = {
 _STORAGE_LABELS = {"chromadb": "ChromaDB", "pgvector": "pgvector"}
 _OUTBOUND_DATA_CATEGORIES = frozenset({"note_content_chunks", "note_title"})
 _UNAVAILABLE_ENDPOINT_FACTS = b'{"configured":false}'
+_MODEL_LABEL_PATTERN = re.compile(
+    r"[A-Za-z0-9][A-Za-z0-9._-]*"
+    r"(?:/[A-Za-z0-9][A-Za-z0-9._-]*)?"
+    r"(?::[A-Za-z0-9][A-Za-z0-9._-]*)?\Z"
+)
+_ROTATION_REVISION_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
+_CREDENTIAL_MARKER_PATTERN = re.compile(
+    r"(?:^|[._:/-])"
+    r"(?:api[-_]?key|apikey|bearer|password|secret|sk|token)"
+    r"(?:[._:/=-]|$)",
+    re.IGNORECASE,
+)
+
+
+def _looks_credential_bearing(value: str) -> bool:
+    return _CREDENTIAL_MARKER_PATTERN.search(value) is not None
+
+
+def _safe_model_label(value: str | None) -> str | None:
+    if not isinstance(value, str) or len(value) > 256:
+        return None
+    if (
+        value.lower() == "unconfigured"
+        or _looks_credential_bearing(value)
+        or _MODEL_LABEL_PATTERN.fullmatch(value) is None
+    ):
+        return None
+    return value
+
+
+def _valid_rotation_revision(value: str | None) -> bool:
+    if value is None:
+        return True
+    return (
+        isinstance(value, str)
+        and not _looks_credential_bearing(value)
+        and _ROTATION_REVISION_PATTERN.fullmatch(value) is not None
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,8 +73,8 @@ class SemanticCapabilityContract:
     """Already-resolved, non-secret facts used to disclose semantic capability."""
 
     provider: str
-    model: str
-    model_revision: str | None = None
+    model: str = field(repr=False)
+    model_revision: str | None = field(default=None, repr=False)
     endpoint_url: str | None = field(default=None, repr=False)
     execution_boundary: ExecutionBoundary = "unknown"
     vector_backend: str = ""
@@ -45,6 +84,7 @@ class SemanticCapabilityContract:
     normalization_version: str = ""
     chunker_version: str = ""
     credential_source: CredentialSource = "none"
+    credential_rotation_revision: str | None = field(default=None, repr=False)
     provider_healthy: bool = False
     vector_storage_available: bool = False
     active_note_count: int = 0
@@ -57,6 +97,8 @@ class SemanticCapabilityContract:
             raise ValueError("storage_boundary is invalid")
         if self.credential_source not in {"durable", "request", "none"}:
             raise ValueError("credential_source is invalid")
+        if not _valid_rotation_revision(self.credential_rotation_revision):
+            raise ValueError("credential_rotation_revision is invalid")
         if type(self.active_note_count) is not int or self.active_note_count < 0:
             raise ValueError("active_note_count must be a non-negative integer")
         if self.resolved_dimensions is not None and (
@@ -76,6 +118,7 @@ class SemanticCapabilities:
     estimated_run_count: int
     provider_label: str
     model: str
+    model_revision: str | None
     endpoint_display: str | None
     endpoint_origin_revision: str
     execution_boundary: Literal["local", "external"]
@@ -101,13 +144,6 @@ def _canonical_hash(value: object) -> str:
 def _safe_identifier(value: str | None, *, allowed: dict[str, str]) -> str:
     normalized = value.strip().lower() if isinstance(value, str) else ""
     return normalized if normalized in allowed else "unavailable"
-
-
-def _safe_model(value: str | None) -> str:
-    if not isinstance(value, str):
-        return "unconfigured"
-    model = value.strip()
-    return model if model and len(model) <= 256 and all(ord(char) >= 32 for char in model) else "unconfigured"
 
 
 def _endpoint_display(endpoint_url: str | None) -> str | None:
@@ -150,8 +186,12 @@ def build_semantic_capabilities(
     backend_key = _safe_identifier(contract.vector_backend, allowed=_STORAGE_LABELS)
     provider_label = _PROVIDER_LABELS.get(provider_key, "unavailable")
     storage_label = _STORAGE_LABELS.get(backend_key, "unavailable")
-    model = _safe_model(contract.model)
-    model_identity = _safe_model(contract.model_revision) if contract.model_revision else model
+    safe_model = _safe_model_label(contract.model)
+    model = safe_model or "unconfigured"
+    model_revision = _safe_model_label(contract.model_revision)
+    model_revision_invalid = (
+        contract.model_revision is not None and model_revision is None
+    )
     endpoint_display = _endpoint_display(contract.endpoint_url)
     endpoint_origin_revision = _endpoint_origin_revision(endpoint_display)
     execution_boundary = _execution_boundary(contract.execution_boundary)
@@ -162,7 +202,8 @@ def build_semantic_capabilities(
         compatibility_hash = _canonical_hash(
             {
                 "provider": provider_key,
-                "model_revision": model_identity,
+                "model": model,
+                "model_revision": model_revision,
                 "vector_backend": backend_key,
                 "metric": contract.metric,
                 "resolved_dimensions": contract.resolved_dimensions,
@@ -173,7 +214,8 @@ def build_semantic_capabilities(
     disclosure_hash = _canonical_hash(
         {
             "provider": provider_key,
-            "model_revision": model_identity,
+            "model": model,
+            "model_revision": model_revision,
             "endpoint_origin_revision": endpoint_origin_revision,
             "execution_boundary": execution_boundary,
             "storage_boundary": storage_boundary,
@@ -193,7 +235,11 @@ def build_semantic_capabilities(
         unavailable_reason = "notes_semantic_metric_unsupported"
     elif contract.credential_source != "durable":
         unavailable_reason = "notes_semantic_durable_credentials_unavailable"
-    elif provider_key == "unavailable" or model == "unconfigured":
+    elif (
+        provider_key == "unavailable"
+        or safe_model is None
+        or model_revision_invalid
+    ):
         unavailable_reason = "notes_semantic_provider_unavailable"
     elif execution_boundary == "external" and endpoint_display is None:
         unavailable_reason = "notes_semantic_endpoint_unavailable"
@@ -221,6 +267,7 @@ def build_semantic_capabilities(
         estimated_run_count=estimated_runs,
         provider_label=provider_label,
         model=model,
+        model_revision=model_revision,
         endpoint_display=endpoint_display,
         endpoint_origin_revision=endpoint_origin_revision,
         execution_boundary=execution_boundary,
