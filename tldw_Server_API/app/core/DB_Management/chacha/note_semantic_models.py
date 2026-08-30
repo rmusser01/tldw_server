@@ -45,6 +45,14 @@ class SemanticWorkClaimState(str, Enum):
     FAILED = "failed"
 
 
+class SemanticIndexingError(RuntimeError):
+    """Stable, content-free semantic indexing or publication failure."""
+
+    def __init__(self, code: str) -> None:
+        self.code = code
+        super().__init__(code)
+
+
 @dataclass(frozen=True, slots=True)
 class SemanticIndexConfig:
     owner_user_id: str
@@ -133,3 +141,72 @@ class SemanticWorkItem:
     error_code: str | None
     created_at: str
     updated_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class SemanticSnapshotSeed:
+    """Content-free initial state for one Note in a generation snapshot."""
+
+    note_id: str
+    content_version: int
+    content_fingerprint: str
+    state: SemanticNoteState | str
+    planned_chunk_count: int
+    error_code: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class SemanticChunkRecord:
+    """One content-free chunk manifest row ready for Notes publication."""
+
+    chunk_id: str
+    generation_id: str
+    note_id: str
+    content_version: int
+    ordinal: int
+    field: str
+    start_offset: int
+    end_offset: int
+    chunk_fingerprint: str
+    normalization_version: str
+    chunker_version: str
+
+
+@dataclass(frozen=True, slots=True)
+class SemanticManifestPublication:
+    """Result of one transactional Note manifest or tombstone publication."""
+
+    note_id: str
+    generation_id: str
+    old_vector_ids: tuple[str, ...]
+    new_vector_ids: tuple[str, ...]
+    dirty_generation: int
+    manifest_hash: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class SemanticGenerationIntegrity:
+    """Content-free generation counts and canonical manifest identity."""
+
+    generation_id: str
+    generation_fencing_token: str
+    expected_note_count: int
+    expected_chunk_count: int
+    published_note_count: int
+    published_chunk_count: int
+    terminal_note_count: int
+    indexed_note_count: int
+    excluded_note_count: int
+    failed_note_count: int
+    pending_note_count: int
+    tombstoned_note_count: int
+    eligible_note_count: int
+    vector_ids: tuple[str, ...]
+    manifest_hash: str
+    dimensions: int
+    compatibility_hash: str
+    terminal_error_code: str | None
+
+    @property
+    def degraded(self) -> bool:
+        return self.excluded_note_count > 0 or self.failed_note_count > 0
