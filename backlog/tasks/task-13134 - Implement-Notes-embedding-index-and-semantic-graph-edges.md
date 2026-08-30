@@ -12,7 +12,7 @@ labels:
 priority: Medium
 dependencies:
 - TASK-13138
-updated_date: 2026-08-30 01:39
+updated_date: 2026-08-30 04:40
 modified_files:
 - Docs/superpowers/specs/2026-08-29-notes-semantic-index-design.md
 - Docs/superpowers/plans/2026-08-29-notes-semantic-index-implementation-plan.md
@@ -52,6 +52,7 @@ Approved executable plan: `Docs/superpowers/plans/2026-08-29-notes-semantic-inde
 - 2026-08-29: Written specification approved. Added the five-stage, 13-task TDD implementation plan at `Docs/superpowers/plans/2026-08-29-notes-semantic-index-implementation-plan.md`.
 - Plan self-review closed background credential durability, typed operator settings, execution revalidation, semantic conversion audit provenance, DSR ordering, explicit legacy defaults, and runnable frontend command issues.
 - 2026-08-29: Approved spec and executable implementation plan committed in `6e7f95cf8b`. Documentation verification passed: staged diff check, trailing-whitespace scan, balanced 90 code fences, five stages, 13 tasks, and no unresolved TODO/TBD/FIXME markers. Runtime tests and Bandit are not applicable to this docs/task-metadata-only planning revision.
+- 2026-08-29 Fix Wave 5 (Task 1): Repaired the PostgreSQL race-test lifecycle so observer/worker pools are protected from creation, exact blocked worker PIDs are cancelled/terminated before pool close, both non-daemon threads must exit, and injected assertion cleanup preserves the primary failure. Verification: 5/5 fresh race processes and 63 focused+adjacent tests passed; Ruff, Bandit (test assertions excluded), and `git diff --check` passed. Report: `.superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-1-report.md`.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
