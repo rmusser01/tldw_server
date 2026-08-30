@@ -22,6 +22,10 @@ from tldw_Server_API.app.core.Notes_Graph.semantic_settings import SemanticIndex
 
 pytestmark = pytest.mark.unit
 
+_SUPPORTS_TASK_CANCELLATION_COUNTS = all(
+    hasattr(asyncio.Task, attribute) for attribute in ("cancelling", "uncancel")
+)
+
 
 @dataclass
 class RecordingOrchestrator:
@@ -395,8 +399,9 @@ async def test_cancellation_during_success_usage_drains_one_success_row() -> Non
         if task is not asyncio.current_task() and not task.done()
     ]
     assert completed_while_logger_blocked is False
-    assert exc_info.value.args == ("accounting-cancel",)
-    assert operation.cancelling() == 0
+    if _SUPPORTS_TASK_CANCELLATION_COUNTS:
+        assert exc_info.value.args == ("accounting-cancel",)
+        assert operation.cancelling() == 0
     assert len(usage_calls) == 1
     assert usage_calls[0]["status"] == 200
     assert usage_calls[0]["usage_metadata"] == {
@@ -479,8 +484,9 @@ async def test_repeated_cancellation_drains_one_failed_usage_row() -> None:
     ]
     assert second_repeat_was_accepted is True
     assert completed_while_logger_blocked is False
-    assert exc_info.value.args == ("provider-cancel",)
-    assert operation.cancelling() == 0
+    if _SUPPORTS_TASK_CANCELLATION_COUNTS:
+        assert exc_info.value.args == ("provider-cancel",)
+        assert operation.cancelling() == 0
     assert len(usage_calls) == 1
     assert usage_calls[0]["status"] == 502
     assert usage_calls[0]["usage_metadata"] == {
@@ -491,6 +497,167 @@ async def test_repeated_cancellation_drains_one_failed_usage_row() -> None:
         "provider_request_count": 1,
     }
     assert pending_children == []
+
+
+@pytest.mark.asyncio
+async def test_logger_exception_after_provider_cancellation_preserves_cancelled_error() -> None:
+    provider_started = asyncio.Event()
+    usage_calls: list[dict[str, object]] = []
+
+    class BlockingOrchestrator(RecordingOrchestrator):
+        def __post_init__(self) -> None:
+            super().__post_init__()
+            self.identity = SimpleNamespace(
+                model_revision=None,
+                provider_attempt_sequence=0,
+                provider_input_count=0,
+                provider_prompt_tokens=0,
+                provider_request_count=0,
+                provider_status=None,
+            )
+
+        async def execute(self, prepared: object) -> EmbeddingExecutionResult:
+            del prepared
+            self.identity.provider_attempt_sequence = 1
+            self.identity.provider_input_count = 1
+            self.identity.provider_prompt_tokens = 5
+            self.identity.provider_request_count = 1
+            self.identity.provider_status = "started"
+            provider_started.set()
+            await asyncio.Event().wait()
+            raise AssertionError("cancelled provider unexpectedly resumed")
+
+    orchestrator = BlockingOrchestrator([])
+
+    async def record_usage(**kwargs: object) -> None:
+        usage_calls.append(kwargs)
+        raise RuntimeError("usage logger failed")
+
+    embedder = NotesSemanticEmbedder(
+        orchestrator_factory=lambda config, user_id: NotesEmbeddingRuntime(
+            orchestrator=orchestrator,
+            execution_identity=lambda: orchestrator.identity,
+        ),
+        dimension_cas=lambda config, resolution: True,
+        usage_logger=record_usage,
+    )
+    baseline_tasks = set(asyncio.all_tasks())
+    operation = asyncio.create_task(embedder.resolve_dimensions(_pending(), user_id="7"))
+    await provider_started.wait()
+
+    operation.cancel("provider-cancel")
+    with pytest.raises(asyncio.CancelledError) as exc_info:
+        await operation
+    await asyncio.sleep(0)
+
+    pending_children = [
+        task
+        for task in asyncio.all_tasks() - baseline_tasks
+        if task is not asyncio.current_task() and not task.done()
+    ]
+    if _SUPPORTS_TASK_CANCELLATION_COUNTS:
+        assert exc_info.value.args == ("provider-cancel",)
+        assert operation.cancelling() == 0
+    assert len(usage_calls) == 1
+    assert usage_calls[0]["status"] == 502
+    assert usage_calls[0]["usage_metadata"] == {
+        "attempt_status": "failed",
+        "cache_hit_count": 0,
+        "cache_miss_count": 1,
+        "provider_input_count": 1,
+        "provider_request_count": 1,
+    }
+    assert pending_children == []
+
+
+@pytest.mark.asyncio
+async def test_logger_exception_after_accounting_cancellation_preserves_cancelled_error() -> None:
+    chunks = build_semantic_chunks(
+        generation_id="generation-1",
+        note_id="note-1",
+        title="",
+        content="body",
+        content_version=1,
+        settings=_settings(),
+    )
+    usage_started = asyncio.Event()
+    release_usage = asyncio.Event()
+    usage_calls: list[dict[str, object]] = []
+
+    async def record_usage(**kwargs: object) -> None:
+        usage_calls.append(kwargs)
+        usage_started.set()
+        await release_usage.wait()
+        raise RuntimeError("usage logger failed")
+
+    embedder = NotesSemanticEmbedder(
+        orchestrator_factory=lambda config, user_id: _runtime(
+            RecordingOrchestrator([[1.0, 0.0]])
+        ),
+        usage_logger=record_usage,
+        settings=_settings(),
+    )
+    baseline_tasks = set(asyncio.all_tasks())
+    operation = asyncio.create_task(embedder.embed_chunks(chunks, _resolved(), user_id="7"))
+    await usage_started.wait()
+
+    operation.cancel("accounting-cancel")
+    await asyncio.sleep(0)
+    release_usage.set()
+
+    with pytest.raises(asyncio.CancelledError) as exc_info:
+        await operation
+    await asyncio.sleep(0)
+
+    pending_children = [
+        task
+        for task in asyncio.all_tasks() - baseline_tasks
+        if task is not asyncio.current_task() and not task.done()
+    ]
+    if _SUPPORTS_TASK_CANCELLATION_COUNTS:
+        assert exc_info.value.args == ("accounting-cancel",)
+        assert operation.cancelling() == 0
+    assert len(usage_calls) == 1
+    assert usage_calls[0]["status"] == 200
+    assert usage_calls[0]["usage_metadata"] == {
+        "attempt_status": "success",
+        "cache_hit_count": 0,
+        "cache_miss_count": 1,
+        "provider_input_count": 1,
+        "provider_request_count": 1,
+    }
+    assert pending_children == []
+
+
+@pytest.mark.asyncio
+async def test_non_cancelled_logger_exception_remains_visible() -> None:
+    chunks = build_semantic_chunks(
+        generation_id="generation-1",
+        note_id="note-1",
+        title="",
+        content="body",
+        content_version=1,
+        settings=_settings(),
+    )
+    usage_calls: list[dict[str, object]] = []
+
+    async def record_usage(**kwargs: object) -> None:
+        usage_calls.append(kwargs)
+        raise RuntimeError("usage logger failed")
+
+    embedder = NotesSemanticEmbedder(
+        orchestrator_factory=lambda config, user_id: _runtime(
+            RecordingOrchestrator([[1.0, 0.0]])
+        ),
+        usage_logger=record_usage,
+        settings=_settings(),
+    )
+
+    with pytest.raises(RuntimeError, match="usage logger failed"):
+        await embedder.embed_chunks(chunks, _resolved(), user_id="7")
+
+    assert len(usage_calls) == 1
+    assert usage_calls[0]["status"] == 200
 
 
 @pytest.mark.asyncio

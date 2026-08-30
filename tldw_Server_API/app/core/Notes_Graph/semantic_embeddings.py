@@ -746,6 +746,8 @@ class NotesSemanticEmbedder:
                 if deferred_cancellation is None:
                     deferred_cancellation = repeated_cancellation
                 _consume_task_cancellation(current_task)
+            except Exception:  # noqa: BLE001 - logger_task.result() applies precedence
+                break
 
         try:
             usage = logger_task.result()
