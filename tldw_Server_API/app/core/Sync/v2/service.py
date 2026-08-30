@@ -3119,7 +3119,7 @@ class SyncV2Service:
                 )
                 continue
             if envelope.domain in PERSONAL_CONTEXT_SYNC_DOMAINS and not _personal_context_link_is_complete(
-                dataset, device_id=device_id
+                self.store, dataset, user_id=user_id, device_id=device_id
             ):
                 rejected.append(
                     SyncPushRejected(
@@ -8963,21 +8963,25 @@ def _device_requested_domains(device: SyncDevice) -> list[SyncDomain]:
 
 
 def _personal_context_link_is_complete(
-    dataset: SyncDataset, *, device_id: str
+    store: SyncV2Store, dataset: SyncDataset, *, user_id: str, device_id: str
 ) -> bool:
     """Return whether reviewed first-link reconciliation admitted profile writes."""
 
     state = dataset.metadata.get("personal_context")
     if not isinstance(state, Mapping):
         return False
-    receipts = state.get("link_receipts")
-    receipt = receipts.get(device_id) if isinstance(receipts, Mapping) else None
     return (
-        isinstance(receipt, Mapping)
-        and receipt.get("profile_id") == state.get("profile_id")
-        and receipt.get("integrity_key_id") == state.get("integrity_key_id")
-        and receipt.get("purge_generation") == state.get("purge_generation")
-        and isinstance(receipt.get("bootstrap_cursor"), str)
+        isinstance(state.get("profile_id"), str)
+        and isinstance(state.get("integrity_key_id"), str)
+        and isinstance(state.get("purge_generation"), int)
+        and store.has_personal_context_link_receipt(
+            user_id=user_id,
+            dataset_id=dataset.dataset_id,
+            device_id=device_id,
+            profile_id=state["profile_id"],
+            integrity_key_id=state["integrity_key_id"],
+            purge_generation=state["purge_generation"],
+        )
     )
 
 

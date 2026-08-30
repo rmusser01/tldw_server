@@ -158,6 +158,15 @@ def _service(tmp_path: Path) -> tuple[SyncV2Service, _RecordingService, Path]:
             },
         )
     )
+    store.complete_personal_context_link_receipt(
+        user_id="user-a",
+        dataset_id=DATASET_ID,
+        device_id="device-a",
+        profile_id=PROFILE_ID,
+        integrity_key_id=INTEGRITY_KEY_ID,
+        purge_generation=0,
+        bootstrap_cursor="fixture-cursor",
+    )
     return service, target, sqlite_path
 
 

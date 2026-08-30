@@ -97,6 +97,20 @@ def _create_ready_profile(service: PersonalContextService):
     return manifest, scope
 
 
+def test_sync_bootstrap_snapshot_reads_manifest_heads_and_key_in_one_service_call(
+    service: PersonalContextService,
+):
+    manifest, _scope = _create_ready_profile(service)
+
+    snapshot = service.sync_bootstrap_snapshot()
+
+    assert snapshot.manifest == manifest
+    assert snapshot.scopes
+    assert snapshot.integrity_key_id.startswith("personal-context-integrity-v")
+    assert len(snapshot.integrity_key) == 32
+    assert snapshot.cursor.startswith("personal-context-bootstrap-v1:")
+
+
 def _pending_proposal_for_scope(
     service: PersonalContextService,
     *,

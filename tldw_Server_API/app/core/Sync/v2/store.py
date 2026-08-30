@@ -176,6 +176,60 @@ class SyncV2Store:
             connection=self._connection,
         )
 
+    def complete_personal_context_link_receipt(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        device_id: str,
+        profile_id: str,
+        integrity_key_id: str,
+        purge_generation: int,
+        bootstrap_cursor: str,
+    ) -> None:
+        """Atomically persist one device-bound Personal Context link receipt."""
+
+        with self.db.backend.transaction() as connection:
+            self.db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS sync_personal_context_link_receipts (
+                    user_id TEXT NOT NULL, dataset_id TEXT NOT NULL, device_id TEXT NOT NULL,
+                    profile_id TEXT NOT NULL, integrity_key_id TEXT NOT NULL,
+                    purge_generation INTEGER NOT NULL, bootstrap_cursor TEXT NOT NULL,
+                    PRIMARY KEY (user_id, dataset_id, device_id)
+                )
+                """,
+                connection=connection,
+            )
+            self.db.execute(
+                "DELETE FROM sync_personal_context_link_receipts WHERE user_id = ? AND dataset_id = ? AND device_id = ?",
+                (user_id, dataset_id, device_id), connection=connection,
+            )
+            self.db.execute(
+                """INSERT INTO sync_personal_context_link_receipts
+                   (user_id, dataset_id, device_id, profile_id, integrity_key_id, purge_generation, bootstrap_cursor)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (user_id, dataset_id, device_id, profile_id, integrity_key_id, purge_generation, bootstrap_cursor),
+                connection=connection,
+            )
+
+    def has_personal_context_link_receipt(
+        self, *, user_id: str, dataset_id: str, device_id: str, profile_id: str,
+        integrity_key_id: str, purge_generation: int,
+    ) -> bool:
+        """Return whether this exact device has the current server-owned receipt."""
+
+        try:
+            rows = self.db.execute(
+                """SELECT 1 FROM sync_personal_context_link_receipts
+                   WHERE user_id = ? AND dataset_id = ? AND device_id = ? AND profile_id = ?
+                     AND integrity_key_id = ? AND purge_generation = ?""",
+                (user_id, dataset_id, device_id, profile_id, integrity_key_id, purge_generation),
+            ).rows
+        except Exception:
+            return False
+        return bool(rows)
+
     def list_datasets_for_user(self, user_id: str) -> list[SyncDataset]:
         return self.db.list_datasets_for_user(user_id)
 

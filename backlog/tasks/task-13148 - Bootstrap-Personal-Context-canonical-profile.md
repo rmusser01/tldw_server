@@ -69,8 +69,8 @@ Reason: ADR-002 already governs canonical server ownership, key custody, whole-o
   server-owned authority selection; added typed API bootstrap/completion routes.
 - [x] Reserved Personal Context enrollment metadata/domains and made completion
   receipts device-specific so one device cannot unlock another's pushes.
-- [ ] Dedicated canonical snapshot transaction and Sync-store compare-and-set
-  receipt persistence remain under review. TASK-13148 remains In Progress.
+- [x] Added the dedicated canonical snapshot transaction and atomic persisted
+  Sync device receipt path. TASK-13148 remains In Progress for controller closure.
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
