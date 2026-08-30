@@ -12,7 +12,7 @@ labels:
 priority: Medium
 dependencies:
 - TASK-13138
-updated_date: 2026-08-30 04:49
+updated_date: 2026-08-30 05:29
 modified_files:
 - Docs/superpowers/specs/2026-08-29-notes-semantic-index-design.md
 - Docs/superpowers/plans/2026-08-29-notes-semantic-index-implementation-plan.md
@@ -20,10 +20,15 @@ modified_files:
 - tldw_Server_API/app/core/DB_Management/chacha/__init__.py
 - tldw_Server_API/app/core/DB_Management/chacha/note_semantic_models.py
 - tldw_Server_API/app/core/DB_Management/chacha/note_semantic_store.py
+- tldw_Server_API/app/core/DB_Management/chacha/note_store.py
+- tldw_Server_API/app/core/Sync/v2/materializers/notes.py
 - tldw_Server_API/tests/DB_Management/test_chacha_migration_v64.py
 - tldw_Server_API/tests/DB_Management/test_chacha_semantic_migration.py
 - tldw_Server_API/tests/DB_Management/test_chacha_semantic_migration_postgres.py
 - tldw_Server_API/tests/Notes_Graph/unit/test_semantic_store.py
+- tldw_Server_API/tests/Notes_Graph/integration/test_semantic_note_lifecycle.py
+- tldw_Server_API/tests/Notes_Graph/integration/test_semantic_note_lifecycle_postgres.py
+- tldw_Server_API/tests/Sync/test_sync_v2_notes_semantic_lifecycle.py
 documentation:
 - Docs/superpowers/specs/2026-08-29-notes-semantic-index-design.md
 - Docs/superpowers/plans/2026-08-29-notes-semantic-index-implementation-plan.md
@@ -62,6 +67,7 @@ Approved executable plan: `Docs/superpowers/plans/2026-08-29-notes-semantic-inde
 - 2026-08-29: Approved spec and executable implementation plan committed in `6e7f95cf8b`. Documentation verification passed: staged diff check, trailing-whitespace scan, balanced 90 code fences, five stages, 13 tasks, and no unresolved TODO/TBD/FIXME markers. Runtime tests and Bandit are not applicable to this docs/task-metadata-only planning revision.
 - 2026-08-29 Fix Wave 5 (Task 1): Repaired the PostgreSQL race-test lifecycle so observer/worker pools are protected from creation, exact blocked worker PIDs are cancelled/terminated before pool close, both non-daemon threads must exit, and injected assertion cleanup preserves the primary failure. Verification: 5/5 fresh race processes and 63 focused+adjacent tests passed; Ruff, Bandit (test assertions excluded), and `git diff --check` passed. Report: `.superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-1-report.md`.
 - 2026-08-29 Task 1 complete: Added ChaChaNotes v65 semantic configuration, generation, note-state, chunk-manifest, and work-ledger persistence with owner/dataset scoping, forced PostgreSQL RLS, CAS publication/dimension fences, bounded cleanup, canonical digest checks, and deterministic live PostgreSQL concurrency coverage. Independent task review is clean after five bounded fix rounds. Implementation range: `14b4b6464e..6639f7acb6`.
+- 2026-08-29 Task 2 complete: Canonical Note and Sync create/edit/restore/delete paths now update semantic dirty/tombstone work in the same transaction for the authoritative dataset, remain no-ops when disabled/unscoped, and retain generation cleanup identity across hard deletes. Real Notes JSON round-trip and live PostgreSQL product-lifecycle tests close restore, RLS, rollback, conflict-upsert, and cascade risks. Independent review clean. Verification: 26 tests passed; Ruff, Bandit, and diff checks clean. Range: `88d169beef..ac45d93fe3`.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
