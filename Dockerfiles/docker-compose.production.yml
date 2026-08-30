@@ -8,6 +8,12 @@ x-tldw-env-file: &tldw-env-file
 services:
   preflight:
     image: ${TLDW_APP_IMAGE:?Set immutable TLDW_APP_IMAGE}
+    user: "0:0"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     network_mode: none
     env_file:
       - *tldw-env-file
@@ -25,7 +31,7 @@ services:
       - ${TLDW_ENV_FILE:?Set TLDW_ENV_FILE}:/run/tldw/production.env:ro
       - ./docker-compose.production.yml:/run/tldw/docker-compose.production.yml:ro
       - ./Production/Caddyfile:/run/tldw/Caddyfile:ro
-      - ${TLDW_BACKUP_DIR:?Set absolute TLDW_BACKUP_DIR}:/backups
+      - ${TLDW_BACKUP_DIR:?Set absolute TLDW_BACKUP_DIR}:/backups:ro
     restart: "no"
 
   caddy:

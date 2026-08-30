@@ -94,9 +94,17 @@ def test_preflight_is_offline_and_blocks_app_startup_on_failure() -> None:
 
     assert services["preflight"]["network_mode"] == "none"
     assert services["preflight"]["restart"] == "no"
-    assert services["app"]["depends_on"]["preflight"] == {
-        "condition": "service_completed_successfully"
-    }
+    assert services["app"]["depends_on"]["preflight"] == {"condition": "service_completed_successfully"}
+
+
+def test_root_preflight_is_confined_to_read_only_inputs() -> None:
+    preflight = _compose()["services"]["preflight"]
+
+    assert preflight["user"] == "0:0"
+    assert preflight["read_only"] is True
+    assert preflight["cap_drop"] == ["ALL"]
+    assert preflight["security_opt"] == ["no-new-privileges:true"]
+    assert all(str(volume).endswith(":ro") for volume in preflight["volumes"])
 
 
 def test_stateful_services_require_external_credentials() -> None:
@@ -114,21 +122,11 @@ def test_stateful_services_require_external_credentials() -> None:
 def test_images_are_required_external_inputs() -> None:
     services = _compose()["services"]
 
-    assert services["preflight"]["image"] == (
-        "${TLDW_APP_IMAGE:?Set immutable TLDW_APP_IMAGE}"
-    )
-    assert services["app"]["image"] == (
-        "${TLDW_APP_IMAGE:?Set immutable TLDW_APP_IMAGE}"
-    )
-    assert services["caddy"]["image"] == (
-        "${CADDY_IMAGE:?Set exact CADDY_IMAGE version or digest}"
-    )
-    assert services["postgres"]["image"] == (
-        "${POSTGRES_IMAGE:?Set exact POSTGRES_IMAGE version or digest}"
-    )
-    assert services["redis"]["image"] == (
-        "${REDIS_IMAGE:?Set exact REDIS_IMAGE version or digest}"
-    )
+    assert services["preflight"]["image"] == ("${TLDW_APP_IMAGE:?Set immutable TLDW_APP_IMAGE}")
+    assert services["app"]["image"] == ("${TLDW_APP_IMAGE:?Set immutable TLDW_APP_IMAGE}")
+    assert services["caddy"]["image"] == ("${CADDY_IMAGE:?Set exact CADDY_IMAGE version or digest}")
+    assert services["postgres"]["image"] == ("${POSTGRES_IMAGE:?Set exact POSTGRES_IMAGE version or digest}")
+    assert services["redis"]["image"] == ("${REDIS_IMAGE:?Set exact REDIS_IMAGE version or digest}")
 
 
 def test_topology_has_no_builds_container_names_or_docker_socket() -> None:
@@ -144,10 +142,7 @@ def test_topology_has_no_builds_container_names_or_docker_socket() -> None:
     for service in compose["services"].values():
         assert "build" not in service
         assert "container_name" not in service
-        assert all(
-            "/var/run/docker.sock" not in str(volume)
-            for volume in service.get("volumes", [])
-        )
+        assert all("/var/run/docker.sock" not in str(volume) for volume in service.get("volumes", []))
 
 
 def test_app_healthcheck_uses_loopback_internal_readiness() -> None:
@@ -158,9 +153,7 @@ def test_app_healthcheck_uses_loopback_internal_readiness() -> None:
 
 def test_names_only_env_example_has_exact_empty_assignments() -> None:
     assignments = [
-        line
-        for line in ENV_EXAMPLE.read_text(encoding="utf-8").splitlines()
-        if line and not line.startswith("#")
+        line for line in ENV_EXAMPLE.read_text(encoding="utf-8").splitlines() if line and not line.startswith("#")
     ]
 
     assert assignments
@@ -172,9 +165,7 @@ def test_caddy_denies_private_legacy_and_setup_routes_before_proxy() -> None:
     text = CADDYFILE.read_text(encoding="utf-8")
     matcher = next(line for line in text.splitlines() if "@private_control path" in line)
 
-    assert text.index("respond @private_control 404") < text.index(
-        "reverse_proxy app:8000"
-    )
+    assert text.index("respond @private_control 404") < text.index("reverse_proxy app:8000")
     for path in DENIED_PATHS:
         assert path in matcher
     for public_path in ("/health", "/metrics", "/api/v1/health"):
