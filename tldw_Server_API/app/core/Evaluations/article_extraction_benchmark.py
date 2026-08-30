@@ -206,9 +206,13 @@ def evaluate_metrics(
     bootstrap_values: dict[str, list[float]] = {}
     n_items = len(tp_fp_fns)
     indices_range = range(n_items)
-    rng = random.Random(bootstrap_seed)
+    # Bootstrap resampling is deterministic evaluation, never security-sensitive.
+    rng = random.Random(bootstrap_seed)  # nosec B311
     for _ in range(n_bootstrap):
-        indices = [rng.randint(0, n_items - 1) for _ in indices_range]
+        indices = [
+            rng.randint(0, n_items - 1)
+            for _ in indices_range
+        ]
         sample_tp_fp_fns = [tp_fp_fns[i] for i in indices]
         sample_metrics = metrics_from_tp_fp_fns(sample_tp_fp_fns)
         for key, value in sample_metrics.items():

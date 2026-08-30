@@ -20,6 +20,7 @@ from tldw_Server_API.app.core.Evaluations.article_extraction_benchmark import (
 
 FIXTURE_SCHEMA_VERSION = "web-retrieval-quality-fixture-v1"
 REPORT_SCHEMA_VERSION = "web-retrieval-quality-report-v1"
+_CHARACTER_ESTIMATE_ALGORITHM = "characters-ceil-div4-v1"
 ALGORITHM_VERSIONS: Mapping[str, str] = MappingProxyType(
     {
         "budget": "char-utf8-budget-v1",
@@ -27,7 +28,7 @@ ALGORITHM_VERSIONS: Mapping[str, str] = MappingProxyType(
         "extraction": "token-shingle-f1-v1",
         "provenance": "required-field-recall-v1",
         "search_order": "position-match-v1",
-        "token_estimate": "characters-ceil-div4-v1",
+        "token_estimate": _CHARACTER_ESTIMATE_ALGORITHM,
     }
 )
 
@@ -329,7 +330,8 @@ def _validate_provenance(
         raise FixtureValidationError(f"{context}.input.required_fields must be unique")
     record = _require_mapping(observed["record"], f"{context}.observed.record")
     copied_record = _copy_json_value(record, f"{context}.observed.record")
-    assert isinstance(copied_record, dict)
+    if not isinstance(copied_record, dict):
+        raise FixtureValidationError(f"{context}.observed.record must be an object")
     return (
         {"required_fields": required_fields},
         dict(expected),

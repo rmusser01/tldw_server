@@ -225,6 +225,16 @@ def test_rejects_boolean_page_limit() -> None:
         validate_fixture_suite(suite)
 
 
+def test_rejects_non_finite_observed_values() -> None:
+    suite = _suite()
+    cases = suite["cases"]
+    assert isinstance(cases, list)
+    cases[3]["observed"]["record"]["confidence"] = float("inf")
+
+    with pytest.raises(FixtureValidationError, match="non-finite"):
+        validate_fixture_suite(suite)
+
+
 def test_unicode_output_budget_distinguishes_characters_and_utf8_bytes() -> None:
     report = evaluate_fixture_suite(_suite())
     provenance = _case(report, "m-provenance")
