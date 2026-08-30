@@ -13,7 +13,10 @@ from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 from urllib.parse import urlsplit
 
-from tldw_Server_API.app.core.AuthNZ.byok_config import PROVIDER_APP_CONFIG_KEYS
+from tldw_Server_API.app.core.AuthNZ.byok_config import (
+    PROVIDER_APP_CONFIG_KEYS,
+    runtime_base_url_override_provenance,
+)
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
     ByokResolutionStatus,
     ResolvedByokCredentials,
@@ -154,6 +157,10 @@ class SemanticEmbeddingBatch:
 class NotesEmbeddingExecutionIdentity:
     model_revision: str | None = None
     endpoint_origin: str | None = None
+    provider_attempt_sequence: int = 0
+    provider_input_count: int = 0
+    provider_prompt_tokens: int = 0
+    provider_status: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -234,83 +241,107 @@ class NotesEmbeddingExecutor:
             or credentials.status != ByokResolutionStatus.RESOLVED
         ):
             raise SemanticEmbeddingSystemError("durable_credentials_unavailable")
-        endpoint_origin = _credential_endpoint_origin(credentials, provider)
+        resolved_base_url = _credential_base_url(credentials, provider)
+        endpoint_origin = _origin(resolved_base_url)
         if endpoint_origin != self._config.endpoint_origin:
+            raise SemanticEmbeddingSystemError("endpoint_origin_mismatch")
+        if resolved_base_url is None:
             raise SemanticEmbeddingSystemError("endpoint_origin_mismatch")
 
         app_config = copy.deepcopy(credentials.app_config or {})
-        http_config = dict(app_config.get("HTTP") or {})
-        http_config.update(
-            {
-                "allow_redirects": False,
-                "allow_cross_host_redirects": False,
-                "max_redirects": 0,
-            }
-        )
-        app_config["HTTP"] = http_config
         request: dict[str, object] = {
             "input": list(texts),
             "model": model,
             "api_key": credentials.api_key,
             "app_config": app_config,
             "credentials_resolved": True,
+            "base_url": resolved_base_url,
+            "_runtime_base_url_override": runtime_base_url_override_provenance(),
         }
         if dimensions is not None:
             request["dimensions"] = dimensions
-        if credentials.credential_fields.get("base_url"):
-            request["base_url"] = credentials.credential_fields["base_url"]
 
+        previous_identity = self._identity
+        attempt_sequence = previous_identity.provider_attempt_sequence + 1
+        provider_prompt_tokens = sum(_count_tokens(text, model) for text in texts)
+        self._identity = NotesEmbeddingExecutionIdentity(
+            model_revision=previous_identity.model_revision,
+            endpoint_origin=endpoint_origin,
+            provider_attempt_sequence=attempt_sequence,
+            provider_input_count=len(texts),
+            provider_prompt_tokens=provider_prompt_tokens,
+            provider_status="started",
+        )
         try:
             response = await asyncio.to_thread(adapter.embed, request)
             if inspect.isawaitable(response):
                 response = await response
-        except Exception:  # noqa: BLE001 - provider details must not cross this boundary
-            raise SemanticEmbeddingSystemError("provider_execution_failed") from None
-        if not isinstance(response, dict):
-            raise SemanticEmbeddingSystemError("invalid_vectors")
-        response_model = response.get("model")
-        if response_model not in {None, "", model}:
-            raise SemanticEmbeddingSystemError("provider_model_drift")
-        response_origin = _origin(response.get("endpoint_origin"))  # type: ignore[arg-type]
-        if response_origin is not None and response_origin != endpoint_origin:
-            raise SemanticEmbeddingSystemError("endpoint_origin_mismatch")
-        redirect_origins = response.get("redirect_origins")
-        if redirect_origins is not None:
-            if not isinstance(redirect_origins, list) or any(
-                _origin(value) != endpoint_origin for value in redirect_origins
-            ):
-                raise SemanticEmbeddingSystemError("cross_origin_redirect")
-
-        vectors = validated_indexed_embedding_data(response.get("data"), expected=len(texts))
-        if vectors is None:
-            raise SemanticEmbeddingSystemError("invalid_vectors")
-        actual_revision = _safe_revision(
-            response.get("model_revision") or response.get("model_digest")
-        )
-        if actual_revision is None:
-            try:
+            if not isinstance(response, dict):
+                raise SemanticEmbeddingSystemError("invalid_vectors")
+            response_model = response.get("model")
+            if response_model not in {None, "", model}:
+                raise SemanticEmbeddingSystemError("provider_model_drift")
+            vectors = validated_indexed_embedding_data(
+                response.get("data"),
+                expected=len(texts),
+            )
+            if vectors is None:
+                raise SemanticEmbeddingSystemError("invalid_vectors")
+            actual_revision = _safe_revision(
+                response.get("model_revision") or response.get("model_digest")
+            )
+            if actual_revision is None:
                 capabilities = (
                     adapter.capabilities()
                     if callable(getattr(adapter, "capabilities", None))
                     else {}
                 )
-            except Exception:  # noqa: BLE001 - provider details must not cross this boundary
-                raise SemanticEmbeddingSystemError("provider_execution_failed") from None
-            if isinstance(capabilities, dict):
-                actual_revision = _safe_revision(
-                    capabilities.get("model_revision") or capabilities.get("model_digest")
-                )
-        if (
-            self._config.model_revision is not None
-            and actual_revision is not None
-            and actual_revision != self._config.model_revision
-        ):
-            raise SemanticEmbeddingSystemError("model_revision_drift")
+                if isinstance(capabilities, dict):
+                    actual_revision = _safe_revision(
+                        capabilities.get("model_revision")
+                        or capabilities.get("model_digest")
+                    )
+            if (
+                self._config.model_revision is not None
+                and actual_revision is not None
+                and actual_revision != self._config.model_revision
+            ):
+                raise SemanticEmbeddingSystemError("model_revision_drift")
+            if (
+                self._config.model_revision is None
+                and previous_identity.model_revision is not None
+                and actual_revision != previous_identity.model_revision
+            ):
+                raise SemanticEmbeddingSystemError("model_revision_drift")
+            await credentials.touch_last_used()
+        except SemanticEmbeddingSystemError:
+            self._identity = NotesEmbeddingExecutionIdentity(
+                model_revision=previous_identity.model_revision,
+                endpoint_origin=endpoint_origin,
+                provider_attempt_sequence=attempt_sequence,
+                provider_input_count=len(texts),
+                provider_prompt_tokens=provider_prompt_tokens,
+                provider_status="failed",
+            )
+            raise
+        except Exception:  # noqa: BLE001 - provider details must not cross this boundary
+            self._identity = NotesEmbeddingExecutionIdentity(
+                model_revision=previous_identity.model_revision,
+                endpoint_origin=endpoint_origin,
+                provider_attempt_sequence=attempt_sequence,
+                provider_input_count=len(texts),
+                provider_prompt_tokens=provider_prompt_tokens,
+                provider_status="failed",
+            )
+            raise SemanticEmbeddingSystemError("provider_execution_failed") from None
         self._identity = NotesEmbeddingExecutionIdentity(
             model_revision=actual_revision or self._config.model_revision,
             endpoint_origin=endpoint_origin,
+            provider_attempt_sequence=attempt_sequence,
+            provider_input_count=len(texts),
+            provider_prompt_tokens=provider_prompt_tokens,
+            provider_status="success",
         )
-        await credentials.touch_last_used()
         return vectors
 
 
@@ -324,21 +355,21 @@ def _owner_user_id(user_id: str) -> int:
     return value
 
 
-def _credential_endpoint_origin(
+def _credential_base_url(
     credentials: ResolvedByokCredentials,
     provider: str,
 ) -> str | None:
-    direct = _origin(credentials.credential_fields.get("base_url"))
-    if direct is not None:
-        return direct
+    direct = credentials.credential_fields.get("base_url")
+    if _origin(direct) is not None:
+        return direct.rstrip("/")
     app_config = credentials.app_config or {}
     section_name = PROVIDER_APP_CONFIG_KEYS.get(provider)
     section = app_config.get(section_name) if section_name else None
     if isinstance(section, dict):
         for field_name in _ENDPOINT_FIELDS:
-            candidate = _origin(section.get(field_name))
-            if candidate is not None:
-                return candidate
+            candidate = section.get(field_name)
+            if _origin(candidate) is not None:
+                return candidate.rstrip("/")
     return None
 
 
@@ -472,11 +503,43 @@ class NotesSemanticEmbedder:
         if not config.consented:
             raise SemanticEmbeddingSystemError("consent_required")
         runtime = self._orchestrator_factory(config, user_id)
-        result = await self._execute(runtime, [DIMENSION_PROBE_TEXT], config, user_id=user_id)
-        vectors = _strict_vectors(result.vectors, expected=1, dimensions=None)
-        dimensions = len(vectors[0])
-        identity = runtime.execution_identity()
-        model_revision = _safe_revision(getattr(identity, "model_revision", None)) or config.model_revision
+        before_sequence = _provider_attempt_sequence(runtime)
+        result = None
+        try:
+            result = await self._execute(
+                runtime,
+                [DIMENSION_PROBE_TEXT],
+                config,
+                user_id=user_id,
+            )
+            _validate_execution_result(result, config)
+            vectors = _strict_vectors(result.vectors, expected=1, dimensions=None)
+            dimensions = len(vectors[0])
+            identity = runtime.execution_identity()
+            model_revision = (
+                _safe_revision(getattr(identity, "model_revision", None))
+                or config.model_revision
+            )
+        except Exception:
+            await self._record_provider_usage(
+                runtime=runtime,
+                result=result,
+                before_sequence=before_sequence,
+                config=config,
+                user_id=user_id,
+                operation="notes_semantic_dimension_probe",
+                succeeded=False,
+            )
+            raise
+        await self._record_provider_usage(
+            runtime=runtime,
+            result=result,
+            before_sequence=before_sequence,
+            config=config,
+            user_id=user_id,
+            operation="notes_semantic_dimension_probe",
+            succeeded=True,
+        )
         if self._dimension_cas is None:
             raise SemanticEmbeddingSystemError("dimension_cas_unavailable")
         published = self._dimension_cas(config, dimensions)
@@ -506,41 +569,57 @@ class NotesSemanticEmbedder:
         prompt_tokens = 0
         total_tokens = 0
         model_revision = config.model_revision
+        discovered_revision = config.model_revision
         for batch in batches:
             texts = [chunk.provider_input.text for chunk in batch]
-            result = await self._execute(runtime, texts, config, user_id=user_id)
-            batch_vectors = _strict_vectors(
-                result.vectors,
-                expected=len(batch),
-                dimensions=config.dimensions,
-            )
-            identity = runtime.execution_identity()
-            actual_revision = _safe_revision(getattr(identity, "model_revision", None))
-            if (
-                config.model_revision is not None
-                and actual_revision is not None
-                and actual_revision != config.model_revision
-            ):
-                raise SemanticEmbeddingSystemError("model_revision_drift")
-            model_revision = actual_revision or model_revision
-            vectors.extend(batch_vectors)
-            prompt_tokens += result.prompt_tokens
-            total_tokens += result.total_tokens
-            await self._usage_logger(
-                user_id=_owner_user_id(user_id),
-                key_id=None,
-                endpoint="/internal/notes/semantic-embeddings",
+            before_sequence = _provider_attempt_sequence(runtime)
+            result = None
+            try:
+                result = await self._execute(runtime, texts, config, user_id=user_id)
+                _validate_execution_result(result, config)
+                batch_vectors = _strict_vectors(
+                    result.vectors,
+                    expected=len(batch),
+                    dimensions=config.dimensions,
+                )
+                identity = runtime.execution_identity()
+                actual_revision = _safe_revision(
+                    getattr(identity, "model_revision", None)
+                )
+                if config.model_revision is None:
+                    if discovered_revision is None:
+                        discovered_revision = actual_revision
+                    elif actual_revision != discovered_revision:
+                        raise SemanticEmbeddingSystemError("model_revision_drift")
+                elif (
+                    actual_revision is not None
+                    and actual_revision != config.model_revision
+                ):
+                    raise SemanticEmbeddingSystemError("model_revision_drift")
+                model_revision = actual_revision or model_revision
+            except Exception:
+                await self._record_provider_usage(
+                    runtime=runtime,
+                    result=result,
+                    before_sequence=before_sequence,
+                    config=config,
+                    user_id=user_id,
+                    operation="notes_semantic_embeddings",
+                    succeeded=False,
+                )
+                raise
+            provider_prompt_tokens, provider_total_tokens = await self._record_provider_usage(
+                runtime=runtime,
+                result=result,
+                before_sequence=before_sequence,
+                config=config,
+                user_id=user_id,
                 operation="notes_semantic_embeddings",
-                provider=config.provider,
-                model=config.model,
-                status=200,
-                latency_ms=0,
-                prompt_tokens=result.prompt_tokens,
-                completion_tokens=0,
-                total_tokens=result.total_tokens,
-                estimated=True,
-                request=None,
+                succeeded=True,
             )
+            vectors.extend(batch_vectors)
+            prompt_tokens += provider_prompt_tokens
+            total_tokens += provider_total_tokens
         return SemanticEmbeddingBatch(
             vectors=tuple(tuple(vector) for vector in vectors),
             provider=config.provider,
@@ -550,6 +629,63 @@ class NotesSemanticEmbedder:
             prompt_tokens=prompt_tokens,
             total_tokens=total_tokens,
         )
+
+    async def _record_provider_usage(
+        self,
+        *,
+        runtime: NotesEmbeddingRuntime,
+        result: Any,
+        before_sequence: int,
+        config: PendingSemanticConfig | ResolvedSemanticConfig,
+        user_id: str,
+        operation: str,
+        succeeded: bool,
+    ) -> tuple[int, int]:
+        identity = runtime.execution_identity()
+        if result is not None:
+            cache_hits = int(result.cache_hits)
+            cache_misses = int(result.cache_misses)
+            if cache_misses == 0:
+                return 0, 0
+        else:
+            sequence = getattr(identity, "provider_attempt_sequence", 0)
+            if type(sequence) is not int or sequence <= before_sequence:
+                return 0, 0
+            cache_hits = 0
+            cache_misses = int(getattr(identity, "provider_input_count", 0) or 0)
+            if cache_misses <= 0:
+                return 0, 0
+
+        identity_count = getattr(identity, "provider_input_count", 0)
+        identity_tokens = getattr(identity, "provider_prompt_tokens", 0)
+        if identity_count == cache_misses and type(identity_tokens) is int:
+            provider_prompt_tokens = max(0, identity_tokens)
+        elif cache_hits == 0:
+            provider_prompt_tokens = max(0, int(result.prompt_tokens))
+        else:
+            raise SemanticEmbeddingSystemError("provider_usage_unavailable")
+        await self._usage_logger(
+            user_id=_owner_user_id(user_id),
+            key_id=None,
+            endpoint="/internal/notes/semantic-embeddings",
+            operation=operation,
+            provider=config.provider,
+            model=config.model,
+            status=200 if succeeded else 502,
+            latency_ms=0,
+            prompt_tokens=provider_prompt_tokens,
+            completion_tokens=0,
+            total_tokens=provider_prompt_tokens,
+            estimated=True,
+            request=None,
+            usage_metadata={
+                "attempt_status": "success" if succeeded else "failed",
+                "cache_hit_count": cache_hits,
+                "cache_miss_count": cache_misses,
+                "provider_input_count": cache_misses,
+            },
+        )
+        return provider_prompt_tokens, provider_prompt_tokens
 
     def _plan_batches(
         self,
@@ -610,14 +746,24 @@ class NotesSemanticEmbedder:
             or plan.dimensions != config.dimensions
         ):
             raise SemanticEmbeddingSystemError("embedding_policy_drift")
-        result = await runtime.orchestrator.execute(prepared)
-        if (
-            result.provider != config.provider
-            or result.model != config.model
-            or result.fallback_from is not None
-        ):
-            raise SemanticEmbeddingSystemError("provider_model_drift")
-        return result
+        return await runtime.orchestrator.execute(prepared)
+
+
+def _provider_attempt_sequence(runtime: NotesEmbeddingRuntime) -> int:
+    value = getattr(runtime.execution_identity(), "provider_attempt_sequence", 0)
+    return value if type(value) is int and value >= 0 else 0
+
+
+def _validate_execution_result(
+    result: Any,
+    config: PendingSemanticConfig | ResolvedSemanticConfig,
+) -> None:
+    if (
+        result.provider != config.provider
+        or result.model != config.model
+        or result.fallback_from is not None
+    ):
+        raise SemanticEmbeddingSystemError("provider_model_drift")
 
 
 def _strict_vectors(

@@ -87,7 +87,12 @@ def test_whitespace_only_note_is_excluded() -> None:
     ("overrides", "title", "content", "code"),
     [
         ({"max_stored_note_bytes": 3}, "ab", "cd", "stored_note_bytes_exceeded"),
-        ({"max_canonical_field_code_points": 3}, "title", "", "canonical_field_code_points_exceeded"),
+        (
+            {"max_canonical_field_code_points": 3, "max_chunk_code_points": 3},
+            "title",
+            "",
+            "canonical_field_code_points_exceeded",
+        ),
         ({"max_chunks_per_note": 1}, "", "abcdefgh", "chunks_per_note_exceeded"),
         ({"max_provider_input_bytes": 3}, "title", "body", "provider_input_bytes_exceeded"),
     ],

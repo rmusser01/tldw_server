@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 import tldw_Server_API.app.core.Notes_Graph.semantic_embeddings as semantic_embeddings
+from tldw_Server_API.app.core.AuthNZ.byok_config import is_runtime_base_url_override
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
     ByokResolutionStatus,
     ResolvedByokCredentials,
@@ -46,6 +47,16 @@ class Registry:
 
     def get_adapter(self, provider: str) -> RecordingAdapter | None:
         assert provider == "openai"
+        return self.adapter
+
+
+class ProviderRegistry:
+    def __init__(self, provider: str, adapter: object) -> None:
+        self.provider = provider
+        self.adapter = adapter
+
+    def get_adapter(self, provider: str) -> object | None:
+        assert provider == self.provider
         return self.adapter
 
 
@@ -145,10 +156,106 @@ async def test_executor_resolves_only_explicit_durable_credentials_without_reque
         }
     ]
     assert executor.execution_identity().model_revision == "response-revision"
-    app_config = adapter.requests[0]["app_config"]
-    assert isinstance(app_config, dict)
-    assert app_config["HTTP"]["allow_redirects"] is False
-    assert app_config["HTTP"]["allow_cross_host_redirects"] is False
+    assert adapter.requests[0]["base_url"] == "https://api.openai.com/v1"
+    assert is_runtime_base_url_override(
+        adapter.requests[0]["_runtime_base_url_override"]
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", ["openai", "google", "huggingface"])
+async def test_executor_request_is_accepted_by_real_provider_adapter(
+    provider: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base_url = "https://embeddings.example/v1"
+    captured: list[dict[str, object]] = []
+
+    class Response:
+        status_code = 200
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> object:
+            if provider == "openai":
+                return {"data": [{"index": 0, "embedding": [1.0, 2.0]}]}
+            if provider == "google":
+                return {"embedding": {"values": [1.0, 2.0]}}
+            return [[1.0, 2.0]]
+
+    class Client:
+        def __enter__(self) -> Client:
+            return self
+
+        def __exit__(self, *_args: object) -> bool:
+            return False
+
+        def post(self, url: str, **kwargs: object) -> Response:
+            captured.append({"url": url, **kwargs})
+            return Response()
+
+    if provider == "openai":
+        from tldw_Server_API.app.core import http_client
+        from tldw_Server_API.app.core.LLM_Calls.providers.openai_embeddings_adapter import (
+            OpenAIEmbeddingsAdapter,
+        )
+
+        monkeypatch.setenv("LLM_EMBEDDINGS_NATIVE_HTTP_OPENAI", "1")
+
+        def fetch(**kwargs: object) -> Response:
+            captured.append(kwargs)
+            return Response()
+
+        monkeypatch.setattr(http_client, "fetch", fetch)
+        adapter = OpenAIEmbeddingsAdapter()
+        model = "text-embedding-3-small"
+    elif provider == "google":
+        import tldw_Server_API.app.core.LLM_Calls.providers.google_embeddings_adapter as module
+        from tldw_Server_API.app.core.LLM_Calls.providers.google_embeddings_adapter import (
+            GoogleEmbeddingsAdapter,
+        )
+
+        monkeypatch.setenv("LLM_EMBEDDINGS_NATIVE_HTTP_GOOGLE", "1")
+        monkeypatch.setattr(module, "create_client", lambda **_kwargs: Client())
+        adapter = GoogleEmbeddingsAdapter()
+        model = "text-embedding-004"
+    else:
+        import tldw_Server_API.app.core.LLM_Calls.providers.huggingface_embeddings_adapter as module
+        from tldw_Server_API.app.core.LLM_Calls.providers.huggingface_embeddings_adapter import (
+            HuggingFaceEmbeddingsAdapter,
+        )
+
+        monkeypatch.setenv("LLM_EMBEDDINGS_NATIVE_HTTP_HUGGINGFACE", "1")
+        monkeypatch.setattr(module, "create_client", lambda **_kwargs: Client())
+        adapter = HuggingFaceEmbeddingsAdapter()
+        model = "sentence-transformers/all-MiniLM-L6-v2"
+
+    async def resolver(name: str, **kwargs: object) -> ResolvedByokCredentials:
+        del name, kwargs
+        return _credentials(base_url=base_url)
+
+    executor = NotesEmbeddingExecutor(
+        config=_config(
+            provider=provider,
+            model=model,
+            endpoint_origin="https://embeddings.example",
+        ),
+        user_id="7",
+        credential_resolver=resolver,
+        adapter_registry=ProviderRegistry(provider, adapter),
+    )
+
+    vectors = await executor.create(
+        ["provider contract input"],
+        provider=provider,
+        model=model,
+        dimensions=2,
+    )
+
+    assert vectors == [[1.0, 2.0]]
+    assert captured
+    assert "embeddings.example" in str(captured[0]["url"])
 
 
 @pytest.mark.asyncio
@@ -175,7 +282,7 @@ async def test_executor_rejects_request_only_or_wrong_durable_source(source: str
 
 
 @pytest.mark.asyncio
-async def test_executor_rejects_endpoint_model_and_cross_origin_redirect_drift() -> None:
+async def test_executor_rejects_endpoint_and_model_drift() -> None:
     async def wrong_origin(provider: str, **kwargs: object) -> ResolvedByokCredentials:
         del provider, kwargs
         return _credentials(base_url="https://proxy.example/v1")
@@ -212,26 +319,6 @@ async def test_executor_rejects_endpoint_model_and_cross_origin_redirect_drift()
         await model_executor.create(
             ["input"], provider="openai", model="text-embedding-3-small", dimensions=2
         )
-
-    redirect_executor = NotesEmbeddingExecutor(
-        config=_config(),
-        user_id="7",
-        credential_resolver=resolver,
-        adapter_registry=Registry(
-            RecordingAdapter(
-                {
-                    "data": [{"index": 0, "embedding": [1.0, 2.0]}],
-                    "model": "text-embedding-3-small",
-                    "redirect_origins": ["https://api.openai.com", "https://other.example"],
-                }
-            )
-        ),
-    )
-    with pytest.raises(SemanticEmbeddingSystemError, match="cross_origin_redirect"):
-        await redirect_executor.create(
-            ["input"], provider="openai", model="text-embedding-3-small", dimensions=2
-        )
-
 
 @pytest.mark.asyncio
 async def test_executor_rejects_unavailable_pinned_provider() -> None:
