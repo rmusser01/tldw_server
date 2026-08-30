@@ -180,6 +180,17 @@ class PersonalContextService:
             raise KeyError("Personal context profile not found")
         return self._repository.sync_integrity_key(profile_id)
 
+    def ensure_sync_profile(self) -> ProfileManifest:
+        """Create the sole canonical profile when absent, tolerating a concurrent creator."""
+
+        try:
+            return self._manifest()
+        except KeyError:
+            try:
+                return self.create_profile(runtime_enabled=False)
+            except ProfileConflictError:
+                return self._manifest()
+
     def sync_bootstrap_snapshot(self) -> PersonalContextSyncSnapshot:
         """Return all eligible canonical Sync heads from one repository read transaction."""
 

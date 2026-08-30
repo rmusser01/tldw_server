@@ -357,6 +357,17 @@ CREATE TABLE IF NOT EXISTS sync_datasets (
 CREATE INDEX IF NOT EXISTS idx_sync_datasets_owner ON sync_datasets(owner_user_id);
 CREATE INDEX IF NOT EXISTS idx_sync_datasets_workspace ON sync_datasets(workspace_id);
 
+CREATE TABLE IF NOT EXISTS sync_personal_context_link_receipts (
+    user_id TEXT NOT NULL,
+    dataset_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    profile_id TEXT NOT NULL,
+    integrity_key_id TEXT NOT NULL,
+    purge_generation INTEGER NOT NULL,
+    bootstrap_cursor TEXT NOT NULL,
+    PRIMARY KEY (user_id, dataset_id, device_id)
+);
+
 CREATE TABLE IF NOT EXISTS sync_domain_state (
     dataset_id TEXT NOT NULL,
     domain TEXT NOT NULL,
@@ -939,6 +950,17 @@ CREATE TABLE IF NOT EXISTS sync_datasets (
 );
 CREATE INDEX IF NOT EXISTS idx_sync_datasets_owner ON sync_datasets(owner_user_id);
 CREATE INDEX IF NOT EXISTS idx_sync_datasets_workspace ON sync_datasets(workspace_id);
+
+CREATE TABLE IF NOT EXISTS sync_personal_context_link_receipts (
+    user_id TEXT NOT NULL,
+    dataset_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    profile_id TEXT NOT NULL,
+    integrity_key_id TEXT NOT NULL,
+    purge_generation INTEGER NOT NULL,
+    bootstrap_cursor TEXT NOT NULL,
+    PRIMARY KEY (user_id, dataset_id, device_id)
+);
 
 CREATE TABLE IF NOT EXISTS sync_domain_state (
     dataset_id TEXT NOT NULL,

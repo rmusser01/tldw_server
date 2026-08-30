@@ -78,6 +78,11 @@ class _CanonicalService:
             raise KeyError("profile")
         return self.manifest
 
+    def ensure_sync_profile(self):
+        if not self.profile_exists:
+            return self.create_profile()
+        return self.manifest
+
     def list_scopes(self):
         return (self.scope,)
 
@@ -92,6 +97,31 @@ class _CanonicalService:
     def sync_integrity_key(self, profile_id: str) -> tuple[str, bytes]:
         assert profile_id == self.manifest.profile_id
         return "personal-context-integrity-v1", _INTEGRITY_KEY
+
+    def sync_bootstrap_snapshot(self):
+        entries = [
+            f"manifest:{self.manifest.profile_id}:{self.manifest.current_version_id}",
+            f"purge:{self.manifest.purge_generation}",
+            f"scope:{self.scope.scope_id}:{self.scope.version_id}",
+            *(
+                f"record:{item.record_id}:{item.version_id}" for item in self.records
+            ),
+            *(
+                "proposal:" + item.proposal_id + ":" + hashlib.sha256(
+                    item.model_dump_json().encode("utf-8")
+                ).hexdigest()
+                for item in self.proposals
+            ),
+        ]
+        return type("Snapshot", (), {
+            "manifest": self.manifest, "scopes": self.list_scopes(),
+            "records": self.records, "proposals": self.proposals,
+            "integrity_key_id": "personal-context-integrity-v1",
+            "integrity_key": _INTEGRITY_KEY,
+            "cursor": "personal-context-bootstrap-v1:" + hashlib.sha256(
+                "\x1e".join(sorted(entries)).encode("utf-8")
+            ).hexdigest(),
+        })()
 
     def apply_sync_object(self, **values: object) -> object:
         self.applied.append(values)
