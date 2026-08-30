@@ -53,8 +53,50 @@ Configuration is loaded via `load_and_log_configs()` and normalized before use.
 - `web_scraper_retry_count` - integer retry attempts.
 - `web_scraper_retry_timeout` - seconds per navigation; converted to milliseconds for Playwright.
 - `web_scraper_stealth_playwright` - boolean; string values like "true", "1", "yes" are accepted.
+- `web_browser_transport_mode` - browser escalation admission mode: `auto`, `disabled`, `url_guarded`, or `attested_proxy`. Set it with `WEB_BROWSER_TRANSPORT_MODE` or under `[Web-Scraper]`; the legacy `[Web-Scraping]` section remains readable. The environment variable takes precedence.
 
 Stealth waits are configurable via `STEALTH_WAIT_MS` if present; otherwise default 5000 ms.
+
+### Browser transport admission
+
+URL-policy checks resolve and validate a destination before dispatch, and Playwright routes re-check navigation redirects, frames, subresources, HTTP requests, and WebSockets. Those checks remain necessary, but they do not pin Chromium's DNS result or verify the connected peer. Browser escalation therefore uses this additional admission decision:
+
+| Configured mode | Runtime profile | Attestation | Result |
+| --- | --- | --- | --- |
+| `disabled` | Any | Any | Denied with `browser_transport_disabled`. |
+| Malformed | Any | Any | Denied with sanitized mode `disabled` and `browser_transport_config_invalid`. |
+| `auto` or `url_guarded` | Exact `single_user` auth and `compat` outbound policy | Ignored | Allowed as legacy URL-guarded transport; `dns_peer_attested=false`. |
+| `auto` or `url_guarded` | Any other auth/policy combination | Any | Denied with `browser_transport_unattested`. |
+| `attested_proxy` | Any | Missing or incomplete | Denied with `browser_transport_unattested`. |
+| `attested_proxy` | Any | Governed proxy routes every request, pins DNS, and verifies the peer | Allowed with `dns_peer_attested=true`. |
+
+Setting `attested_proxy` alone never grants access. TASK-13139.2 supplies no production attestor or proxy, so default runtime callers cannot claim that mode's evidence. Provider errors, wrong provider types, malformed auth values, and malformed policy values fail closed.
+
+Credentialless governed HTTP extraction remains available when browser escalation is denied. A request returns the browser denial only if the lightweight path cannot satisfy it and browser acquisition is attempted. Direct article retrieval uses this bounded shape:
+
+```json
+{
+  "url": "https://article.example/start",
+  "title": "N/A",
+  "author": "N/A",
+  "date": "N/A",
+  "content": "",
+  "extraction_successful": false,
+  "error": "browser_transport_unavailable",
+  "capability": {
+    "name": "safe_browser_transport",
+    "available": false,
+    "configured_mode": "auto",
+    "effective_mode": "disabled",
+    "dns_peer_attested": false,
+    "reason": "browser_transport_unattested"
+  }
+}
+```
+
+Preflight analyzers expose only the fixed codes `browser_transport_disabled`, `browser_transport_unattested`, or `browser_transport_config_invalid`, each with the message `Safe browser transport is unavailable.` No raw URL, address, header, cookie, credential, proxy URI, configuration value, or exception text is included.
+
+Wave 0 does not add authenticated browser sessions, persistent browser cookies, a proxy, or a resolver. Request-scoped cookies do not make an unattested browser transport safe. Any authenticated browser capability remains dependent on TASK-13100.
 
 ## WebSearch Orchestration
 The WebSearch pipeline supports subquery generation, filtering, and aggregation. To remove interactive code from runtime:

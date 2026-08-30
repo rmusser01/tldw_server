@@ -4,7 +4,7 @@
 **Date:** 2026-06-07
 **Backfilled from:** `tldw_Server_API/app/core/Security/README.md`
 **Decision owner:** TASK-2247 confirmation and TASK-2311 outbound egress backfill scope
-**Related task:** TASK-2311 (`backlog/tasks/task-2311 - Backfill-Security-outbound-egress-policy-ADR.md`)
+**Related tasks:** TASK-2311 (`backlog/tasks/task-2311 - Backfill-Security-outbound-egress-policy-ADR.md`) and TASK-13139.2
 **Related spec/plan:** `Docs/ADR/inventory/2026-06-04-security-confirmation-audit.md`
 
 ## Decision
@@ -27,6 +27,19 @@ TASK-2247 confirmed the current implementation that bounds this ADR:
 - `assert_url_safe()` wraps the central policy for endpoint code and raises a 400 response when a URL is blocked.
 
 This ADR is intentionally bounded to the shared egress policy and future outbound integration rule. It does not claim every historical network call in the repository already uses these helpers. The protection is effective for paths that route URL decisions through the Security module boundary.
+
+### Browser transport boundary
+
+Browser retrieval has an additional boundary. URL-policy evaluation validates names and resolved addresses before dispatch, but it cannot prove which address Chromium later connects to. Playwright interception remains required defense in depth for navigation redirects, frames, subresources, HTTP requests, and WebSockets; it is not DNS pinning or connected-peer verification.
+
+The browser transport admission policy is therefore:
+
+- Single-user `compat` deployments may retain the legacy URL-guarded browser path in `auto` or `url_guarded` mode. Its capability metadata reports `dns_peer_attested=false`.
+- Strict or multi-user deployments may use browser retrieval only when the configured mode is `attested_proxy` and an in-process transport attestation proves that every request is routed through the governed mechanism, DNS is pinned, and the connected peer is verified.
+- Configuration is not evidence. Selecting `attested_proxy` without that complete attestation remains denied.
+- Malformed configuration, missing evidence, and decision-provider failures fail closed before browser capacity is reserved or Playwright starts.
+
+TASK-13139.2 adds the admission contract and denial metadata only. Wave 0 does not provide a production attestor, governed proxy, resolver, persistent cookie store, credentialed browser, or authenticated browser session. Request-scoped cookies do not make an unattested transport safe. Authenticated browser work remains dependent on TASK-13100.
 
 ## Alternatives considered
 
