@@ -3,6 +3,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 
 import pytest
+import yaml
 
 from tldw_Server_API.app.api.v1.endpoints import health as health_mod
 
@@ -194,7 +195,6 @@ async def test_api_health_sanitizes_rg_policy_snapshot_failure(monkeypatch, tmp_
     from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as chacha_deps
     from tldw_Server_API.app.core.AuthNZ import database as auth_database
     from tldw_Server_API.app.core.Metrics import metrics_manager
-    import yaml
 
     class _HealthyPool:
         async def health_check(self):

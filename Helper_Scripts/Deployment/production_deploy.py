@@ -26,6 +26,7 @@ from Helper_Scripts.Deployment.production_preflight import (
     DEFAULT_PROXY_FILE,
     load_raw_env,
     run_preflight,
+    run_preflight_from_environment,
     validate_rendered_compose,
 )
 
@@ -87,6 +88,9 @@ class CommandResult:
 CommandRunner = Callable[
     [Sequence[str], Mapping[str, str] | None, bytes | None], CommandResult
 ]
+StreamingCommandRunner = Callable[
+    [Sequence[str], Mapping[str, str] | None, Path], CommandResult
+]
 
 
 @dataclass(frozen=True)
@@ -123,6 +127,42 @@ def default_command_runner(
     return CommandResult(
         returncode=completed.returncode,
         stdout=completed.stdout,
+        stderr=completed.stderr,
+    )
+
+
+def default_streaming_command_runner(
+    argv: Sequence[str],
+    env: Mapping[str, str] | None,
+    destination: Path,
+) -> CommandResult:
+    """Run one explicit argv while streaming stdout to a private new file."""
+
+    descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            descriptor = -1
+            completed = subprocess.run(  # nosec B603
+                list(argv),
+                shell=False,
+                check=False,
+                env=dict(env) if env is not None else None,
+                stdout=stream,
+                stderr=subprocess.PIPE,
+            )
+            stream.flush()
+            os.fsync(stream.fileno())
+    except (OSError, RuntimeError):
+        destination.unlink(missing_ok=True)
+        raise
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    if completed.returncode != 0:
+        destination.unlink(missing_ok=True)
+    return CommandResult(
+        returncode=completed.returncode,
+        stdout=b"",
         stderr=completed.stderr,
     )
 
@@ -169,6 +209,26 @@ def _run_gate(
     except (OSError, RuntimeError) as exc:
         raise DeploymentError(f"{label} gate could not execute") from exc
     if result.returncode != 0:
+        raise DeploymentError(f"{label} gate failed with exit status {result.returncode}")
+    return result
+
+
+def _run_streaming_gate(
+    runner: StreamingCommandRunner,
+    label: str,
+    argv: Sequence[str],
+    *,
+    env: Mapping[str, str] | None,
+    destination: Path,
+) -> CommandResult:
+    """Run a command whose stdout must stream to one private artifact."""
+
+    try:
+        result = runner(tuple(argv), env, destination)
+    except (OSError, RuntimeError) as exc:
+        raise DeploymentError(f"{label} gate could not execute") from exc
+    if result.returncode != 0:
+        destination.unlink(missing_ok=True)
         raise DeploymentError(f"{label} gate failed with exit status {result.returncode}")
     return result
 
@@ -285,7 +345,10 @@ def _image_smoke(
 
 
 def deploy(
-    config: DeploymentConfig, *, runner: CommandRunner = default_command_runner
+    config: DeploymentConfig,
+    *,
+    runner: CommandRunner = default_command_runner,
+    stream_runner: StreamingCommandRunner | None = None,
 ) -> DeploymentManifest:
     """Back up current state and start the target only after every gate passes."""
 
@@ -325,25 +388,39 @@ def deploy(
     redis_path = snapshot / "redis.rdb"
     app_path = snapshot / "app-data.tar"
 
-    pg_dump = _run_gate(
-        runner,
-        "PostgreSQL backup",
-        (
-            *compose,
-            "exec",
-            "-T",
-            "postgres",
-            "pg_dump",
-            "--format=custom",
-            "--no-owner",
-            "--username",
-            config.values["POSTGRES_USER"],
-            "--dbname",
-            config.values["POSTGRES_DB"],
-        ),
-        env=env,
+    pg_dump_argv = (
+        *compose,
+        "exec",
+        "-T",
+        "postgres",
+        "pg_dump",
+        "--format=custom",
+        "--no-owner",
+        "--username",
+        config.values["POSTGRES_USER"],
+        "--dbname",
+        config.values["POSTGRES_DB"],
     )
-    _write_private_bytes(postgres_path, pg_dump.stdout, "PostgreSQL backup")
+    active_stream_runner = stream_runner
+    if active_stream_runner is None and runner is default_command_runner:
+        active_stream_runner = default_streaming_command_runner
+    if active_stream_runner is not None:
+        _run_streaming_gate(
+            active_stream_runner,
+            "PostgreSQL backup",
+            pg_dump_argv,
+            env=env,
+            destination=postgres_path,
+        )
+        _require_nonempty_file(postgres_path, "PostgreSQL backup")
+    else:
+        pg_dump = _run_gate(
+            runner,
+            "PostgreSQL backup",
+            pg_dump_argv,
+            env=env,
+        )
+        _write_private_bytes(postgres_path, pg_dump.stdout, "PostgreSQL backup")
     _run_gate(
         runner,
         "PostgreSQL archive verification",
@@ -512,6 +589,14 @@ def rollback(
         "TLDW_APP_IMAGE": manifest.rollback_image,
         "TLDW_ROLLBACK_IMAGE": manifest.target_image,
     }
+    rollback_report = run_preflight_from_environment(
+        rollback_values,
+        config.compose_file,
+        config.proxy_file,
+    )
+    if rollback_report.issues:
+        codes = ", ".join(sorted({issue.code for issue in rollback_report.issues}))
+        raise DeploymentError(f"rollback preflight gate failed ({codes})")
     env = _command_env(
         config,
         TLDW_APP_IMAGE=manifest.rollback_image,

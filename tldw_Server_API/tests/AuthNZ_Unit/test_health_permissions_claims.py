@@ -1,14 +1,11 @@
 from __future__ import annotations
 
-from typing import Optional
-
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
 from tldw_Server_API.app.api.v1.API_Deps import auth_deps
-from tldw_Server_API.app.api.v1.endpoints import health
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_LOGS
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 
@@ -41,7 +38,7 @@ def _principal(*, permissions: list[str], is_admin: bool = False) -> AuthPrincip
     )
 
 
-def _app(principal: Optional[AuthPrincipal]) -> FastAPI:
+def _app(principal: AuthPrincipal | None) -> FastAPI:
     from tldw_Server_API.app import main
 
     app = main.app
@@ -63,7 +60,7 @@ def _app(principal: Optional[AuthPrincipal]) -> FastAPI:
         (_principal(permissions=[]), 403),
     ),
 )
-def test_detailed_health_requires_system_logs(path: str, principal: Optional[AuthPrincipal], expected: int) -> None:
+def test_detailed_health_requires_system_logs(path: str, principal: AuthPrincipal | None, expected: int) -> None:
     with TestClient(_app(principal)) as client:
         response = client.get(path)
     assert response.status_code == expected

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Any, Optional
-
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
@@ -26,8 +24,8 @@ def _make_principal(
     *,
     kind: str = "user",
     is_admin: bool = False,
-    roles: Optional[list[str]] = None,
-    permissions: Optional[list[str]] = None,
+    roles: list[str] | None = None,
+    permissions: list[str] | None = None,
 ) -> AuthPrincipal:
     return AuthPrincipal(
         kind=kind,
@@ -45,7 +43,7 @@ def _make_principal(
 
 
 def _build_app_with_overrides(
-    principal: Optional[AuthPrincipal],
+    principal: AuthPrincipal | None,
     *,
     fail_with_401: bool = False,
 ) -> FastAPI:
@@ -76,7 +74,7 @@ def _build_app_with_overrides(
     return app
 
 
-def _main_app_with_override(principal: Optional[AuthPrincipal], *, fail_with_401: bool = False) -> FastAPI:
+def _main_app_with_override(principal: AuthPrincipal | None, *, fail_with_401: bool = False) -> FastAPI:
     from tldw_Server_API.app import main
 
     async def _fake_get_auth_principal(request: Request) -> AuthPrincipal:
@@ -97,7 +95,7 @@ def _main_app_with_override(principal: Optional[AuthPrincipal], *, fail_with_401
 )
 def test_detailed_metrics_require_system_logs(
     path: str,
-    principal: Optional[AuthPrincipal],
+    principal: AuthPrincipal | None,
     fail_with_401: bool,
     expected: int,
 ):
