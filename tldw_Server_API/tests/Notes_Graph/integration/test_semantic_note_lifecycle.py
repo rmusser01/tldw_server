@@ -209,3 +209,51 @@ def test_disabled_or_unresolved_dataset_creates_no_semantic_state(db: Characters
     )
     assert _state(db) is None
     assert _work(db) == []
+
+
+def test_explicitly_disabled_active_generation_creates_no_semantic_work(
+    db: CharactersRAGDB,
+) -> None:
+    generation_id = _activate_semantic_generation(db)
+    enabled = db.note_semantic_store.get_configuration(DATASET_ID)
+    assert enabled is not None
+    disabled = db.note_semantic_store.disable_configuration(
+        dataset_id=DATASET_ID,
+        expected_configuration_revision=enabled.configuration_revision,
+        now=NOW,
+    )
+    assert disabled is not None
+    assert disabled.active_generation_id == generation_id
+    baseline_semantic_revision = disabled.semantic_index_revision
+
+    db.note_store.add_note(
+        "Local only", "Body", note_id=NOTE_ID, semantic_dataset_id=DATASET_ID
+    )
+    assert db.note_store.update_note(
+        NOTE_ID,
+        {"title": "Still local"},
+        expected_version=1,
+        semantic_dataset_id=DATASET_ID,
+    )
+    assert db.note_store.soft_delete_note(
+        NOTE_ID,
+        expected_version=2,
+        semantic_dataset_id=DATASET_ID,
+    )
+    assert db.note_store.restore_note(
+        NOTE_ID,
+        expected_version=3,
+        semantic_dataset_id=DATASET_ID,
+    )
+    assert db.note_store.delete_note(
+        NOTE_ID,
+        hard_delete=True,
+        semantic_dataset_id=DATASET_ID,
+    )
+
+    assert _state(db) is None
+    assert _work(db) == []
+    final_config = db.note_semantic_store.get_configuration(DATASET_ID)
+    assert final_config is not None
+    assert final_config.desired_state.value == "disabled"
+    assert final_config.semantic_index_revision == baseline_semantic_revision
