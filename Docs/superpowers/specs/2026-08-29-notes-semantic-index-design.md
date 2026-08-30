@@ -1,7 +1,7 @@
 # Notes Semantic Index and Graph Edges Design
 
 **Task:** TASK-13134
-**Status:** Draft for written-spec review
+**Status:** Approved
 **Date:** 2026-08-29
 
 ## Summary
