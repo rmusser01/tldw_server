@@ -3,6 +3,7 @@
 These routers handle content ingestion, search, retrieval, and
 related operations.
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -103,12 +104,14 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
 
     # Evaluations and OCR are lazy so route policy can disable them before
     # importing modules with heavier optional dependencies.
-    specs.append(RouterSpec(
-        router=evaluations_router_factory,
-        prefix=f"{API_V1_PREFIX}",
-        tags=("evaluations",),
-        route_key="evaluations",
-    ))
+    specs.append(
+        RouterSpec(
+            router=evaluations_router_factory,
+            prefix=f"{API_V1_PREFIX}",
+            tags=("evaluations",),
+            route_key="evaluations",
+        )
+    )
 
     append_imported_router_spec(
         specs,
@@ -730,6 +733,13 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
             tags=("personalization",),
             route_key="personalization",
             default_stable=False,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.personal_context",
+            log_name="personal-context",
+            prefix=f"{API_V1_PREFIX}/personal-context",
+            tags=("personal-context",),
+            route_key="personal-context",
         ),
         ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.companion",

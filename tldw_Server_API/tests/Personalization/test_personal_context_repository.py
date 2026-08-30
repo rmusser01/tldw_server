@@ -14,6 +14,7 @@ from tldw_profile_core import (
 
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.Personalization_DB import PersonalizationDB
+from tldw_Server_API.app.core.Personalization import personal_context_repository
 from tldw_Server_API.app.core.Personalization.personal_context_repository import (
     PersonalContextRepository,
 )
@@ -201,7 +202,10 @@ def test_deleted_record_is_a_content_free_tombstone(repository) -> None:
 def test_terminal_proposal_replaces_content_with_receipt(repository) -> None:
     repository.create_profile(manifest(), global_scope())
     pending = proposal(value="PRIVATE-PROPOSAL-CONTENT")
-    repository.commit_proposal(pending)
+    repository.commit_proposal(
+        pending,
+        expected_manifest_version="manifest-v1",
+    )
 
     resolved = repository.resolve_proposal("profile-a", "proposal-a", ProposalState.REJECTED)
 
@@ -221,6 +225,7 @@ def test_runtime_policy_is_encrypted_and_optimistic(repository) -> None:
         "profile-a-global",
         version_id="runtime-v1",
         expected_version_id=None,
+        expected_manifest_version="manifest-v1",
         policy=policy,
     )
 
@@ -231,7 +236,75 @@ def test_runtime_policy_is_encrypted_and_optimistic(repository) -> None:
             "profile-a-global",
             version_id="runtime-v2",
             expected_version_id="stale",
+            expected_manifest_version="manifest-v1",
             policy={"enabled": False},
+        )
+
+
+def test_standalone_writes_cannot_cross_a_committed_purge_barrier(repository) -> None:
+    original = manifest()
+    repository.create_profile(original, global_scope())
+    barrier = ProfileManifest.model_validate(
+        {
+            **original.model_dump(mode="python"),
+            "revision": 1,
+            "purge_generation": 1,
+            "updated_at": original.updated_at + timedelta(seconds=1),
+            "current_version_id": "manifest-purge-v2",
+        }
+    )
+    repository.purge_profile(
+        barrier,
+        expected_manifest_version=original.current_version_id,
+    )
+
+    with pytest.raises(ConcurrentProfileUpdateError, match="manifest head"):
+        repository.commit_proposal(
+            proposal(),
+            expected_manifest_version=original.current_version_id,
+        )
+    with pytest.raises(ConcurrentProfileUpdateError, match="manifest head"):
+        repository.set_runtime_policy(
+            original.profile_id,
+            "profile-runtime",
+            version_id="runtime-after-purge",
+            expected_version_id=None,
+            expected_manifest_version=original.current_version_id,
+            policy={"enabled": True},
+        )
+
+    assert repository.get_proposal(original.profile_id, "proposal-a") is None
+    assert repository.get_runtime_policy(original.profile_id, "profile-runtime") is None
+
+
+def test_terminal_proposal_retention_prunes_oldest_receipts(
+    repository,
+    monkeypatch,
+) -> None:
+    repository.create_profile(manifest(), global_scope())
+    monkeypatch.setattr(personal_context_repository, "_MAX_PROPOSAL_HEADS", 1)
+    first = proposal(proposal_id="proposal-retained-first")
+    repository.commit_proposal(
+        first,
+        expected_manifest_version="manifest-v1",
+    )
+    repository.reject_proposal("profile-a", first.proposal_id)
+    second = proposal(proposal_id="proposal-retained-second")
+
+    repository.commit_proposal(
+        second,
+        expected_manifest_version="manifest-v1",
+    )
+
+    assert repository.get_proposal("profile-a", first.proposal_id) is None
+    assert repository.list_proposals("profile-a", limit=1) == (second,)
+    with repository.database.transaction() as connection:
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM personal_context_receipts WHERE profile_id = ?",
+                ("profile-a",),
+            ).fetchone()[0]
+            == 0
         )
 
 

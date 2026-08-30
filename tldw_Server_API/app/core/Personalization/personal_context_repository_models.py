@@ -13,6 +13,10 @@ class ProfileIntegrityError(RuntimeError):
     """Report canonical or encrypted object authentication failure."""
 
 
+class ProfileUnsupportedSchemaError(ProfileIntegrityError):
+    """Report authenticated profile data from an unsupported newer schema."""
+
+
 class ProfileAlreadyExistsError(RuntimeError):
     """Report an attempt to create a second profile in one user database."""
 
@@ -23,6 +27,14 @@ class ProfileKeyAlreadyExistsError(RuntimeError):
 
 class ConcurrentProfileUpdateError(RuntimeError):
     """Report an optimistic object-head mismatch."""
+
+
+class ProfileSemanticKeyCollisionError(RuntimeError):
+    """Report an active same-scope canonical semantic-key collision."""
+
+
+class ProfileQuotaExceededError(RuntimeError):
+    """Report a bounded Personal Context operational quota violation."""
 
 
 @dataclass(frozen=True, slots=True)
