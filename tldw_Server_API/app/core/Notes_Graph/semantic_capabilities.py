@@ -1,0 +1,242 @@
+"""Pure, deterministic Notes semantic-index capability policy."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from dataclasses import asdict, dataclass, field
+from math import ceil
+from typing import Literal
+from urllib.parse import urlsplit
+
+from .semantic_settings import DEFAULT_SEMANTIC_INDEX_SETTINGS, SemanticIndexSettings
+
+ExecutionBoundary = Literal["local", "external", "unknown"]
+StorageBoundary = Literal["local", "external", "unavailable", "unknown"]
+CredentialSource = Literal["durable", "request", "none"]
+
+_PROVIDER_LABELS = {
+    "anthropic": "Anthropic",
+    "cohere": "Cohere",
+    "google": "Google",
+    "mistral": "Mistral",
+    "openai": "OpenAI",
+    "openrouter": "OpenRouter",
+    "voyage": "Voyage",
+}
+_STORAGE_LABELS = {"chromadb": "ChromaDB", "pgvector": "pgvector"}
+_OUTBOUND_DATA_CATEGORIES = frozenset({"note_content_chunks", "note_title"})
+_UNAVAILABLE_ENDPOINT_FACTS = b'{"configured":false}'
+
+
+@dataclass(frozen=True, slots=True)
+class SemanticCapabilityContract:
+    """Already-resolved, non-secret facts used to disclose semantic capability."""
+
+    provider: str
+    model: str
+    model_revision: str | None = None
+    endpoint_url: str | None = field(default=None, repr=False)
+    execution_boundary: ExecutionBoundary = "unknown"
+    vector_backend: str = ""
+    storage_boundary: StorageBoundary = "unknown"
+    metric: str = "cosine"
+    resolved_dimensions: int | None = None
+    normalization_version: str = ""
+    chunker_version: str = ""
+    credential_source: CredentialSource = "none"
+    provider_healthy: bool = False
+    vector_storage_available: bool = False
+    active_note_count: int = 0
+    outbound_data_categories: tuple[str, ...] = ("note_title", "note_content_chunks")
+
+    def __post_init__(self) -> None:
+        if self.execution_boundary not in {"local", "external", "unknown"}:
+            raise ValueError("execution_boundary is invalid")
+        if self.storage_boundary not in {"local", "external", "unavailable", "unknown"}:
+            raise ValueError("storage_boundary is invalid")
+        if self.credential_source not in {"durable", "request", "none"}:
+            raise ValueError("credential_source is invalid")
+        if type(self.active_note_count) is not int or self.active_note_count < 0:
+            raise ValueError("active_note_count must be a non-negative integer")
+        if self.resolved_dimensions is not None and (
+            type(self.resolved_dimensions) is not int or self.resolved_dimensions <= 0
+        ):
+            raise ValueError("resolved_dimensions must be a positive integer or None")
+        if not set(self.outbound_data_categories) <= _OUTBOUND_DATA_CATEGORIES:
+            raise ValueError("outbound_data_categories contains an unapproved category")
+
+
+@dataclass(frozen=True, slots=True)
+class SemanticCapabilities:
+    """Sanitized deterministic capability disclosure for Notes semantic indexing."""
+
+    active_note_count: int
+    estimated_chunk_count: int
+    estimated_run_count: int
+    provider_label: str
+    model: str
+    endpoint_display: str | None
+    endpoint_origin_revision: str
+    execution_boundary: Literal["local", "external"]
+    storage_boundary: Literal["local", "external", "unavailable"]
+    storage_label: str
+    outbound_data_categories: tuple[str, ...]
+    durable_credential_available: bool
+    compatibility_hash: str | None
+    disclosure_hash: str
+    capability_revision: str
+    metric: str
+    resolved_dimensions: int | None
+    effective_limits: SemanticIndexSettings
+    indexing_available: bool
+    unavailable_reason: str | None
+
+
+def _canonical_hash(value: object) -> str:
+    payload = json.dumps(value, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
+    return f"sha256:{hashlib.sha256(payload.encode('utf-8')).hexdigest()}"
+
+
+def _safe_identifier(value: str | None, *, allowed: dict[str, str]) -> str:
+    normalized = value.strip().lower() if isinstance(value, str) else ""
+    return normalized if normalized in allowed else "unavailable"
+
+
+def _safe_model(value: str | None) -> str:
+    if not isinstance(value, str):
+        return "unconfigured"
+    model = value.strip()
+    return model if model and len(model) <= 256 and all(ord(char) >= 32 for char in model) else "unconfigured"
+
+
+def _endpoint_display(endpoint_url: str | None) -> str | None:
+    if not endpoint_url:
+        return None
+    try:
+        parsed = urlsplit(endpoint_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            return None
+        port = parsed.port
+    except ValueError:
+        return None
+    return f"{parsed.scheme}://{parsed.hostname.lower()}{f':{port}' if port is not None else ''}"
+
+
+def _endpoint_origin_revision(endpoint_display: str | None) -> str:
+    if endpoint_display is None:
+        return f"sha256:{hashlib.sha256(_UNAVAILABLE_ENDPOINT_FACTS).hexdigest()}"
+    return _canonical_hash({"origin": endpoint_display})
+
+
+def _execution_boundary(value: ExecutionBoundary) -> Literal["local", "external"]:
+    return "local" if value == "local" else "external"
+
+
+def _storage_boundary(value: StorageBoundary) -> Literal["local", "external", "unavailable"]:
+    if value in {"local", "external", "unavailable"}:
+        return value
+    return "unavailable"
+
+
+def build_semantic_capabilities(
+    contract: SemanticCapabilityContract,
+    *,
+    settings: SemanticIndexSettings = DEFAULT_SEMANTIC_INDEX_SETTINGS,
+) -> SemanticCapabilities:
+    """Build semantic capability facts without provider or vector I/O."""
+
+    provider_key = _safe_identifier(contract.provider, allowed=_PROVIDER_LABELS)
+    backend_key = _safe_identifier(contract.vector_backend, allowed=_STORAGE_LABELS)
+    provider_label = _PROVIDER_LABELS.get(provider_key, "unavailable")
+    storage_label = _STORAGE_LABELS.get(backend_key, "unavailable")
+    model = _safe_model(contract.model)
+    model_identity = _safe_model(contract.model_revision) if contract.model_revision else model
+    endpoint_display = _endpoint_display(contract.endpoint_url)
+    endpoint_origin_revision = _endpoint_origin_revision(endpoint_display)
+    execution_boundary = _execution_boundary(contract.execution_boundary)
+    storage_boundary = _storage_boundary(contract.storage_boundary)
+    outbound_categories = tuple(sorted(contract.outbound_data_categories))
+    compatibility_hash = None
+    if contract.resolved_dimensions is not None:
+        compatibility_hash = _canonical_hash(
+            {
+                "provider": provider_key,
+                "model_revision": model_identity,
+                "vector_backend": backend_key,
+                "metric": contract.metric,
+                "resolved_dimensions": contract.resolved_dimensions,
+                "normalization_version": contract.normalization_version,
+                "chunker_version": contract.chunker_version,
+            }
+        )
+    disclosure_hash = _canonical_hash(
+        {
+            "provider": provider_key,
+            "model_revision": model_identity,
+            "endpoint_origin_revision": endpoint_origin_revision,
+            "execution_boundary": execution_boundary,
+            "storage_boundary": storage_boundary,
+            "outbound_data_categories": outbound_categories,
+        }
+    )
+    estimated_chunks = min(contract.active_note_count, settings.max_active_notes) * settings.max_chunks_per_note
+    estimated_runs = ceil(estimated_chunks / settings.max_chunks_per_run) if estimated_chunks else 0
+    unavailable_reason: str | None = None
+    if not settings.indexing_enabled:
+        unavailable_reason = "notes_semantic_indexing_disabled"
+    elif contract.resolved_dimensions is None:
+        unavailable_reason = "notes_semantic_dimensions_pending"
+    elif contract.active_note_count > settings.max_active_notes:
+        unavailable_reason = "notes_semantic_active_note_limit_exceeded"
+    elif contract.metric != "cosine":
+        unavailable_reason = "notes_semantic_metric_unsupported"
+    elif contract.credential_source != "durable":
+        unavailable_reason = "notes_semantic_durable_credentials_unavailable"
+    elif provider_key == "unavailable" or model == "unconfigured":
+        unavailable_reason = "notes_semantic_provider_unavailable"
+    elif execution_boundary == "external" and endpoint_display is None:
+        unavailable_reason = "notes_semantic_endpoint_unavailable"
+    elif not contract.provider_healthy:
+        unavailable_reason = "notes_semantic_provider_unavailable"
+    elif backend_key == "unavailable" or storage_boundary == "unavailable" or not contract.vector_storage_available:
+        unavailable_reason = "notes_semantic_vector_storage_unavailable"
+    elif backend_key == "pgvector" and contract.resolved_dimensions not in settings.pgvector_allowed_dimensions:
+        unavailable_reason = "notes_semantic_pgvector_dimensions_unsupported"
+    limits_payload = asdict(settings)
+    limits_payload["pgvector_allowed_dimensions"] = sorted(
+        settings.pgvector_allowed_dimensions
+    )
+    capability_revision = _canonical_hash(
+        {
+            "compatibility_hash": compatibility_hash,
+            "disclosure_hash": disclosure_hash,
+            "effective_limits": limits_payload,
+            "credential_source": contract.credential_source,
+        }
+    )
+    return SemanticCapabilities(
+        active_note_count=contract.active_note_count,
+        estimated_chunk_count=estimated_chunks,
+        estimated_run_count=estimated_runs,
+        provider_label=provider_label,
+        model=model,
+        endpoint_display=endpoint_display,
+        endpoint_origin_revision=endpoint_origin_revision,
+        execution_boundary=execution_boundary,
+        storage_boundary=storage_boundary,
+        storage_label=storage_label,
+        outbound_data_categories=outbound_categories,
+        durable_credential_available=contract.credential_source == "durable",
+        compatibility_hash=compatibility_hash,
+        disclosure_hash=disclosure_hash,
+        capability_revision=capability_revision,
+        metric=contract.metric,
+        resolved_dimensions=contract.resolved_dimensions,
+        effective_limits=settings,
+        indexing_available=unavailable_reason is None,
+        unavailable_reason=unavailable_reason,
+    )
+
+
+__all__ = ["SemanticCapabilities", "SemanticCapabilityContract", "build_semantic_capabilities"]

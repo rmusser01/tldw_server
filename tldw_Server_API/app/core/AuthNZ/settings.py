@@ -357,6 +357,7 @@ class Settings(BaseSettings):
             "moderation.review.bulk_decide",
             "moderation.audit.read",
             "notes.graph.suggest",
+            "notes.graph.semantic.manage",
             "notes.link_keyword",
             "keywords.create",
         ],
