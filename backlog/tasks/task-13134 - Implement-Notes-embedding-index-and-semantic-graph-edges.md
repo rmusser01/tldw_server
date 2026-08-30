@@ -12,7 +12,7 @@ labels:
 priority: Medium
 dependencies:
 - TASK-13138
-updated_date: 2026-08-30 05:42
+updated_date: 2026-08-30 06:05
 modified_files:
 - Docs/superpowers/specs/2026-08-29-notes-semantic-index-design.md
 - Docs/superpowers/plans/2026-08-29-notes-semantic-index-implementation-plan.md
@@ -29,6 +29,17 @@ modified_files:
 - tldw_Server_API/tests/Notes_Graph/integration/test_semantic_note_lifecycle.py
 - tldw_Server_API/tests/Notes_Graph/integration/test_semantic_note_lifecycle_postgres.py
 - tldw_Server_API/tests/Sync/test_sync_v2_notes_semantic_lifecycle.py
+- tldw_Server_API/app/core/Notes_Graph/semantic_capabilities.py
+- tldw_Server_API/app/core/Notes_Graph/semantic_settings.py
+- tldw_Server_API/app/core/AuthNZ/permissions.py
+- tldw_Server_API/app/core/AuthNZ/settings.py
+- tldw_Server_API/app/core/AuthNZ/rbac_seed.py
+- tldw_Server_API/app/core/AuthNZ/migrations.py
+- tldw_Server_API/tests/Notes_Graph/unit/test_semantic_capabilities.py
+- tldw_Server_API/tests/Notes_Graph/unit/test_semantic_settings.py
+- tldw_Server_API/tests/AuthNZ_Unit/test_notes_graph_semantic_permissions.py
+- tldw_Server_API/tests/AuthNZ/integration/test_notes_graph_semantic_permissions_postgres.py
+- tldw_Server_API/tests/AuthNZ_Unit/test_notes_graph_suggestion_permissions.py
 documentation:
 - Docs/superpowers/specs/2026-08-29-notes-semantic-index-design.md
 - Docs/superpowers/plans/2026-08-29-notes-semantic-index-implementation-plan.md
@@ -70,6 +81,8 @@ Approved executable plan: `Docs/superpowers/plans/2026-08-29-notes-semantic-inde
 - 2026-08-29 Task 2 complete: Canonical Note and Sync create/edit/restore/delete paths now update semantic dirty/tombstone work in the same transaction for the authoritative dataset, remain no-ops when disabled/unscoped, and retain generation cleanup identity across hard deletes. Real Notes JSON round-trip and live PostgreSQL product-lifecycle tests close restore, RLS, rollback, conflict-upsert, and cascade risks. Independent review clean. Verification: 26 tests passed; Ruff, Bandit, and diff checks clean. Range: `88d169beef..ac45d93fe3`.
 2026-08-29: Task 3 started in .worktrees/notes-second-brain-planning. Scope: deterministic semantic capability/settings policy and AuthNZ semantic-management permission. Following task-3-brief.md with strict RED/GREEN verification.
 2026-08-29: Task 3 complete. Added deterministic capability/disclosure identities, sanitized endpoint/provider/storage disclosure, durable-credential preflight, bounded semantic operator settings, and AuthNZ migration 096 with revocation-preserving seed behavior for `notes.graph.semantic.manage`. Verification: 39 focused Notes/AuthNZ tests passed (including PostgreSQL), Ruff passed with only existing AuthNZ/settings.py UP045 baseline excluded, Bandit production scan passed, and git diff --check passed. Report: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-3-report.md.
+2026-08-29: Task 3 Fix Round 1/5 started from c90625d842. Scope: separate model/model-revision identities, strict model-label disclosure policy, non-secret credential rotation identity exclusion, migration-096 revocation preservation, and Task 3 modified-file metadata.
+2026-08-29: Task 3 Fix Round 1/5 complete. Compatibility and disclosure identities now include sanitized model ID and model revision/digest as separate canonical fields; strict model-label and non-secret credential-rotation policies prevent raw rejected disclosure; migration 096 grants only when creating the permission row and preserves partial/all revocations across no-down rollback/reapply. Verification: strict RED captured (18 failed, 34 passed), final focused plus adjacent verification 59 passed, Ruff passed, Bandit passed with no findings, and git diff --check passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
