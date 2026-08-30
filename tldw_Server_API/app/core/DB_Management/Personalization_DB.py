@@ -16,6 +16,8 @@ This module encapsulates raw SQL per project guidelines.
 import json
 import sqlite3
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,8 +27,8 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import (
     DatabasePaths,
     require_trusted_database_parent_exists,
 )
-from tldw_Server_API.app.core.exceptions import InvalidStoragePathError
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import configure_sqlite_connection
+from tldw_Server_API.app.core.exceptions import InvalidStoragePathError
 
 
 def _utcnow_iso() -> str:
@@ -53,11 +55,11 @@ class SemanticMemory:
 
 class PersonalizationDB:
     @classmethod
-    def for_path(cls, db_path: str | Path) -> "PersonalizationDB":
+    def for_path(cls, db_path: str | Path) -> PersonalizationDB:
         return cls(Path(db_path))
 
     @classmethod
-    def for_user(cls, user_id: str | int) -> "PersonalizationDB":
+    def for_user(cls, user_id: str | int) -> PersonalizationDB:
         return cls.for_path(DatabasePaths.get_personalization_db_path(user_id))
 
     def __init__(self, db_path: str | Path) -> None:
@@ -80,6 +82,10 @@ class PersonalizationDB:
             configure_sqlite_connection(conn)
         except Exception as pragma_error:
             _ = pragma_error  # proceed with defaults if pragmas fail
+        secure_delete = conn.execute("PRAGMA secure_delete = ON").fetchone()
+        if secure_delete is None or int(secure_delete[0]) != 1:
+            conn.close()
+            raise RuntimeError("PersonalizationDB requires SQLite secure deletion")
         return conn
 
     def _ensure_schema(self) -> None:
@@ -211,12 +217,108 @@ class PersonalizationDB:
                     );
                     CREATE INDEX IF NOT EXISTS idx_companion_goals_user_updated
                         ON companion_goals(user_id, updated_at DESC);
+
+                    CREATE TABLE IF NOT EXISTS personal_context_profile_keys (
+                        profile_id TEXT PRIMARY KEY,
+                        key_version INTEGER NOT NULL,
+                        integrity_key_version INTEGER NOT NULL,
+                        wrapped_profile_key BLOB NOT NULL,
+                        wrap_nonce BLOB NOT NULL,
+                        wrapped_integrity_key BLOB NOT NULL,
+                        integrity_wrap_nonce BLOB NOT NULL,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
+                    );
+
+                    CREATE TABLE IF NOT EXISTS personal_context_object_versions (
+                        profile_id TEXT NOT NULL,
+                        object_type TEXT NOT NULL,
+                        object_id TEXT NOT NULL,
+                        version_id TEXT NOT NULL,
+                        parent_version_id TEXT,
+                        schema_version INTEGER NOT NULL,
+                        algorithm TEXT NOT NULL,
+                        key_version INTEGER NOT NULL,
+                        nonce BLOB NOT NULL,
+                        wrapped_dek BLOB NOT NULL,
+                        wrapped_dek_nonce BLOB NOT NULL,
+                        ciphertext BLOB NOT NULL,
+                        integrity_tag TEXT NOT NULL,
+                        payload_size_bytes INTEGER NOT NULL,
+                        created_at TEXT NOT NULL,
+                        PRIMARY KEY (profile_id, object_type, object_id, version_id)
+                    );
+
+                    CREATE TABLE IF NOT EXISTS personal_context_object_heads (
+                        profile_id TEXT NOT NULL,
+                        object_type TEXT NOT NULL,
+                        object_id TEXT NOT NULL,
+                        current_version_id TEXT NOT NULL,
+                        PRIMARY KEY (profile_id, object_type, object_id)
+                    );
+
+                    CREATE TABLE IF NOT EXISTS personal_context_runtime_heads (
+                        profile_id TEXT NOT NULL,
+                        scope_id TEXT NOT NULL,
+                        current_version_id TEXT NOT NULL,
+                        PRIMARY KEY (profile_id, scope_id)
+                    );
+
+                    CREATE TABLE IF NOT EXISTS personal_context_receipts (
+                        profile_id TEXT NOT NULL,
+                        receipt_id TEXT NOT NULL,
+                        version_id TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        PRIMARY KEY (profile_id, receipt_id)
+                    );
+
+                    CREATE INDEX IF NOT EXISTS idx_personal_context_heads_type
+                        ON personal_context_object_heads(profile_id, object_type, object_id);
                     """
                 )
                 conn.commit()
             finally:
                 conn.close()
         self._migrate_schema()
+
+    @contextmanager
+    def transaction(self, *, immediate: bool = False) -> Iterator[sqlite3.Connection]:
+        """Open one parameterized transaction on this user's database."""
+
+        with self._lock:
+            connection = self._connect()
+            try:
+                connection.execute("BEGIN IMMEDIATE" if immediate else "BEGIN")
+                yield connection
+                connection.commit()
+                self._truncate_wal_if_possible(connection)
+            except BaseException:
+                try:
+                    connection.rollback()
+                except sqlite3.Error:
+                    pass
+                raise
+            finally:
+                connection.close()
+
+    @staticmethod
+    def _truncate_wal_if_possible(connection: sqlite3.Connection) -> bool:
+        """Release checkpointed WAL history without waiting on active readers."""
+
+        try:
+            mode = connection.execute("PRAGMA journal_mode").fetchone()
+            if mode is None or str(mode[0]).lower() != "wal":
+                return True
+            prior_timeout = connection.execute("PRAGMA busy_timeout").fetchone()
+            connection.execute("PRAGMA busy_timeout = 0")
+            try:
+                checkpoint = connection.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+            finally:
+                timeout = 5000 if prior_timeout is None else int(prior_timeout[0])
+                connection.execute(f"PRAGMA busy_timeout = {timeout}")
+            return checkpoint is not None and int(checkpoint[0]) == 0
+        except (sqlite3.Error, TypeError, ValueError):
+            return False
 
     def _migrate_schema(self) -> None:
         """Add columns that may be missing in databases created before schema updates."""
@@ -247,10 +349,7 @@ class PersonalizationDB:
             conn = self._connect()
             try:
                 for table, column, col_def in migrations:
-                    existing = {
-                        row[1]
-                        for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
-                    }
+                    existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
                     if column not in existing:
                         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_def}")
                 conn.commit()
@@ -274,7 +373,8 @@ class PersonalizationDB:
                 cur = conn.execute("SELECT * FROM profiles WHERE user_id = ?", (str(user_id),))
                 row = cur.fetchone()
                 if row:
-                    return {k: row[k] for k in row.keys()}
+                    # sqlite3.Row iteration yields values, unlike dict iteration.
+                    return {key: row[key] for key in row.keys()}  # noqa: SIM118
                 now = _utcnow_iso()
                 conn.execute(
                     """
@@ -305,10 +405,19 @@ class PersonalizationDB:
         if not fields:
             return self.get_or_create_profile(user_id)
         allowed = {
-            "enabled", "alpha", "beta", "gamma", "recency_half_life_days",
-            "proactive_enabled", "proactive_frequency", "proactive_types",
-            "quiet_hours_start", "quiet_hours_end", "response_style",
-            "preferred_format", "session_continuity_enabled",
+            "enabled",
+            "alpha",
+            "beta",
+            "gamma",
+            "recency_half_life_days",
+            "proactive_enabled",
+            "proactive_frequency",
+            "proactive_types",
+            "quiet_hours_start",
+            "quiet_hours_end",
+            "response_style",
+            "preferred_format",
+            "session_continuity_enabled",
             "session_summaries_enabled",
             "companion_reflections_enabled",
             "companion_daily_reflections_enabled",
@@ -371,6 +480,7 @@ class PersonalizationDB:
     # Usage events
     def insert_usage_event(self, evt: UsageEvent) -> str:
         import uuid
+
         self.get_or_create_profile(evt.user_id)
         eid = uuid.uuid4().hex
         ts = evt.timestamp or _utcnow_iso()
@@ -402,6 +512,7 @@ class PersonalizationDB:
     # Memories
     def add_semantic_memory(self, mem: SemanticMemory) -> str:
         import uuid
+
         self.get_or_create_profile(mem.user_id)
         mid = uuid.uuid4().hex
         tags_json = json.dumps(mem.tags) if mem.tags else None
@@ -494,7 +605,9 @@ class PersonalizationDB:
         placeholders = ", ".join(["?"] * len(memory_ids))
         params: list[Any] = [now, str(user_id)] + [str(mid) for mid in memory_ids]
         memory_ids_clause = f"({placeholders})"
-        validate_sql_template = "UPDATE semantic_memories SET last_validated = ? WHERE user_id = ? AND id IN {memory_ids_clause}"
+        validate_sql_template = (
+            "UPDATE semantic_memories SET last_validated = ? WHERE user_id = ? AND id IN {memory_ids_clause}"
+        )
         validate_sql = validate_sql_template.format_map(locals())  # nosec B608
         with self._lock:
             conn = self._connect()
@@ -539,15 +652,17 @@ class PersonalizationDB:
                 rows = cur.fetchall()
                 items: list[dict[str, Any]] = []
                 for r in rows:
-                    items.append({
-                        "id": r["id"],
-                        "type": "semantic",
-                        "content": r["content"],
-                        "pinned": bool(r["pinned"]),
-                        "hidden": bool(r["hidden"]),
-                        "tags": (json.loads(r["tags"]) if r["tags"] else None),
-                        "timestamp": datetime.fromisoformat(r["created_at"]) if r["created_at"] else None,
-                    })
+                    items.append(
+                        {
+                            "id": r["id"],
+                            "type": "semantic",
+                            "content": r["content"],
+                            "pinned": bool(r["pinned"]),
+                            "hidden": bool(r["hidden"]),
+                            "tags": (json.loads(r["tags"]) if r["tags"] else None),
+                            "timestamp": datetime.fromisoformat(r["created_at"]) if r["created_at"] else None,
+                        }
+                    )
                 total = int(conn.execute(count_sql, params).fetchone()[0])
                 return items, total
             finally:
@@ -561,6 +676,7 @@ class PersonalizationDB:
     def bulk_add_memories(self, user_id: str, memories: list[dict[str, Any]]) -> int:
         """Bulk-insert semantic memories from import data. Returns count inserted."""
         import uuid
+
         self.get_or_create_profile(user_id)
         count = 0
         with self._lock:
@@ -590,6 +706,7 @@ class PersonalizationDB:
     # Topics
     def upsert_topic(self, user_id: str, label: str, score: float, last_seen: str | None = None) -> None:
         import uuid
+
         last = last_seen or _utcnow_iso()
         with self._lock:
             conn = self._connect()
@@ -660,13 +777,15 @@ class PersonalizationDB:
                         tags = json.loads(r["tags"]) if r["tags"] else None
                     except Exception:
                         tags = None
-                    out.append({
-                        "id": r["id"],
-                        "timestamp": r["timestamp"],
-                        "type": r["type"],
-                        "resource_id": r["resource_id"],
-                        "tags": tags or [],
-                    })
+                    out.append(
+                        {
+                            "id": r["id"],
+                            "timestamp": r["timestamp"],
+                            "type": r["type"],
+                            "resource_id": r["resource_id"],
+                            "tags": tags or [],
+                        }
+                    )
                 return out
             finally:
                 conn.close()
@@ -746,9 +865,7 @@ class PersonalizationDB:
             try:
                 existing_dedupe_keys: set[str] = set()
                 dedupe_keys = [
-                    str(event.get("dedupe_key"))
-                    for event in events
-                    if str(event.get("dedupe_key", "")).strip()
+                    str(event.get("dedupe_key")) for event in events if str(event.get("dedupe_key", "")).strip()
                 ]
                 if dedupe_keys:
                     placeholders = ", ".join(["?"] * len(dedupe_keys))

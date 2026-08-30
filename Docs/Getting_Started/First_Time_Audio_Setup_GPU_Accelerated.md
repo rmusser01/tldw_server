@@ -58,7 +58,7 @@ Use this if:
 ### Shared prerequisites
 
 - Git
-- Python 3.10+ for local/manual or `make`
+- Python 3.11+ for local/manual or `make`
 - `ffmpeg`
 - `git-lfs` if you want the recommended `supertonic` path
 
@@ -77,7 +77,7 @@ nvidia-smi
 ### Apple Silicon-specific prerequisites
 
 - Apple Silicon Mac
-- Python 3.10+
+- Python 3.11+
 - ability to install MLX packages in the active environment
 
 ### OS notes
@@ -99,7 +99,7 @@ git lfs install
 
 Windows:
 
-- install Python 3.10+
+- install Python 3.11+
 - install FFmpeg
 - install Git and Git LFS
 - for NVIDIA, confirm `nvidia-smi` works in PowerShell

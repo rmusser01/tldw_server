@@ -92,8 +92,8 @@ MODEL_CYCLE_DRY_RUN ?=false
 RELEASE_DRY_RUN ?=false
 
 quickstart-prereqs:
-	@command -v $(PYTHON) >/dev/null 2>&1 || (echo "[quickstart] $(PYTHON) not found. Install Python 3.10+ and retry." && exit 1)
-	@$(PYTHON) -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' || (echo "[quickstart] Python 3.10+ is required." && exit 1)
+	@command -v $(PYTHON) >/dev/null 2>&1 || (echo "[quickstart] $(PYTHON) not found. Install Python 3.11+ and retry." && exit 1)
+	@$(PYTHON) -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)' || (echo "[quickstart] Python 3.11+ is required." && exit 1)
 	@$(PYTHON) -c 'import loguru, fastapi, uvicorn, dotenv' >/dev/null 2>&1 || (echo "[quickstart] Missing Python dependencies. Run: make quickstart-install" && exit 1)
 	@if ! command -v ffmpeg >/dev/null 2>&1; then \
 		echo "[quickstart] Warning: ffmpeg not found; audio/video features will be limited."; \
@@ -112,8 +112,8 @@ quickstart-prereqs:
 	fi
 
 setup-wizard-tools:
-	@command -v $(PYTHON) >/dev/null 2>&1 || (echo "[setup-wizard-tools] $(PYTHON) not found. Install Python 3.10+ and retry." && exit 1)
-	@$(PYTHON) -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' || (echo "[setup-wizard-tools] Python 3.10+ is required." && exit 1)
+	@command -v $(PYTHON) >/dev/null 2>&1 || (echo "[setup-wizard-tools] $(PYTHON) not found. Install Python 3.11+ and retry." && exit 1)
+	@$(PYTHON) -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)' || (echo "[setup-wizard-tools] Python 3.11+ is required." && exit 1)
 	@if [ ! -x "$(SETUP_VENV_PYTHON)" ]; then \
 		echo "[setup-wizard-tools] Creating lightweight wizard virtualenv at $(SETUP_VENV_DIR)"; \
 		$(PYTHON) -m venv $(SETUP_VENV_DIR); \
@@ -158,8 +158,8 @@ verify-docker-multi: setup-wizard-tools
 	@$(TLDW_SETUP) verify --profile docker-multi-postgres --env-file "$(TLDW_ENV_FILE)" --base-url "$(TLDW_BASE_URL)" --first-value
 
 install-local:
-	@command -v $(PYTHON) >/dev/null 2>&1 || (echo "[install-local] $(PYTHON) not found. Install Python 3.10+ and retry." && exit 1)
-	@$(PYTHON) -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' || (echo "[install-local] Python 3.10+ is required." && exit 1)
+	@command -v $(PYTHON) >/dev/null 2>&1 || (echo "[install-local] $(PYTHON) not found. Install Python 3.11+ and retry." && exit 1)
+	@$(PYTHON) -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)' || (echo "[install-local] Python 3.11+ is required." && exit 1)
 	@if [ ! -x "$(VENV_PYTHON)" ]; then \
 		echo "[install-local] Creating virtualenv at $(VENV_DIR)"; \
 		$(PYTHON) -m venv $(VENV_DIR); \
@@ -198,8 +198,8 @@ quickstart-install: install-local
 quickstart-local: install-local setup-local-single start-local-single
 
 tooling-install:
-	@command -v $(PYTHON) >/dev/null 2>&1 || (echo "[tooling-install] $(PYTHON) not found. Install Python 3.10+ and retry." && exit 1)
-	@$(PYTHON) -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' || (echo "[tooling-install] Python 3.10+ is required." && exit 1)
+	@command -v $(PYTHON) >/dev/null 2>&1 || (echo "[tooling-install] $(PYTHON) not found. Install Python 3.11+ and retry." && exit 1)
+	@$(PYTHON) -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)' || (echo "[tooling-install] Python 3.11+ is required." && exit 1)
 	@if [ ! -x "$(VENV_PYTHON)" ]; then \
 		echo "[tooling-install] Creating virtualenv at $(VENV_DIR)"; \
 		$(PYTHON) -m venv $(VENV_DIR); \
