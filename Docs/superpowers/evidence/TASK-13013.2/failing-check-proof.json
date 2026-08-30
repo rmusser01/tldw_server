@@ -1,0 +1,90 @@
+{
+  "captured_at": "2026-08-29T22:25:49Z",
+  "repository": "rmusser01/tldw_server",
+  "proof_pr": {
+    "number": 2835,
+    "url": "https://github.com/rmusser01/tldw_server/pull/2835",
+    "base": "dev",
+    "head": "6475cef3c03ef7c39bfe84f7f49030d568881e95",
+    "source_change": "mechanical revert of c336469210016866a9bb877d5ac473916180c47e",
+    "ready_state": {
+      "is_draft": false,
+      "state": "OPEN",
+      "mergeable": "MERGEABLE",
+      "merge_state_status": "BLOCKED"
+    },
+    "cleanup_state": {
+      "state": "CLOSED",
+      "closed_at": "2026-08-29T22:25:24Z",
+      "merged_at": null,
+      "remote_branch_deleted": true
+    }
+  },
+  "canonical_check_runs": [
+    {
+      "name": "backend-required",
+      "status": "completed",
+      "conclusion": "success",
+      "app_id": 15368,
+      "app_slug": "github-actions",
+      "details_url": "https://github.com/rmusser01/tldw_server/actions/runs/33277727560/job/99167372736"
+    },
+    {
+      "name": "container-build-check",
+      "status": "completed",
+      "conclusion": "success",
+      "app_id": 15368,
+      "app_slug": "github-actions",
+      "details_url": "https://github.com/rmusser01/tldw_server/actions/runs/33277727565/job/99167893831"
+    },
+    {
+      "name": "coverage-required",
+      "status": "completed",
+      "conclusion": "failure",
+      "app_id": 15368,
+      "app_slug": "github-actions",
+      "details_url": "https://github.com/rmusser01/tldw_server/actions/runs/33277727573/job/99167420781"
+    },
+    {
+      "name": "e2e-required",
+      "status": "completed",
+      "conclusion": "success",
+      "app_id": 15368,
+      "app_slug": "github-actions",
+      "details_url": "https://github.com/rmusser01/tldw_server/actions/runs/33277727651/job/99167401701"
+    },
+    {
+      "name": "frontend-required",
+      "status": "completed",
+      "conclusion": "success",
+      "app_id": 15368,
+      "app_slug": "github-actions",
+      "details_url": "https://github.com/rmusser01/tldw_server/actions/runs/33277727756/job/99167451044"
+    },
+    {
+      "name": "security-required",
+      "status": "completed",
+      "conclusion": "success",
+      "app_id": 15368,
+      "app_slug": "github-actions",
+      "details_url": "https://github.com/rmusser01/tldw_server/actions/runs/33277727661/job/99167532189"
+    }
+  ],
+  "enforcement": {
+    "failing_required_check": "coverage-required",
+    "failing_check_source_integration_id": 15368,
+    "ready_pr_merge_state_status": "BLOCKED",
+    "additive_ruleset": {
+      "id": 21824526,
+      "name": "dev-core-required-gates",
+      "current_user_can_bypass": "never",
+      "bypass_actors": []
+    },
+    "preserved_ruleset": {
+      "id": 19362594,
+      "name": "frontend-license-gate-dev",
+      "current_user_can_bypass": "never",
+      "bypass_actors": []
+    }
+  }
+}

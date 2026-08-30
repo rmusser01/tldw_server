@@ -1,0 +1,131 @@
+{
+  "repository": "rmusser01/tldw_server",
+  "dev_head": "41bd5dda336c70259595ebf3ce3fb4a6a5b549db",
+  "merged_baseline_pr": {
+    "number": 2831,
+    "url": "https://github.com/rmusser01/tldw_server/pull/2831",
+    "head": "c336469210016866a9bb877d5ac473916180c47e",
+    "merge_commit": "41bd5dda336c70259595ebf3ce3fb4a6a5b549db"
+  },
+  "rulesets": [
+    {
+      "id": 19362594,
+      "name": "frontend-license-gate-dev",
+      "target": "branch",
+      "enforcement": "active"
+    },
+    {
+      "id": 5653432,
+      "name": "safee",
+      "target": "branch",
+      "enforcement": "active"
+    }
+  ],
+  "dev_ruleset": {
+    "id": 19362594,
+    "name": "frontend-license-gate-dev",
+    "target": "branch",
+    "enforcement": "active",
+    "bypass_actors": [],
+    "current_user_can_bypass": "never",
+    "conditions": {
+      "ref_name": {
+        "exclude": [],
+        "include": [
+          "refs/heads/dev"
+        ]
+      }
+    },
+    "rules": [
+      {
+        "type": "pull_request",
+        "parameters": {
+          "required_approving_review_count": 0,
+          "dismiss_stale_reviews_on_push": true,
+          "required_reviewers": [],
+          "require_code_owner_review": false,
+          "require_last_push_approval": false,
+          "required_review_thread_resolution": false,
+          "require_extra_approval_for_unattributed_changes": true,
+          "allowed_merge_methods": [
+            "merge"
+          ]
+        }
+      },
+      {
+        "type": "required_status_checks",
+        "parameters": {
+          "strict_required_status_checks_policy": false,
+          "do_not_enforce_on_create": false,
+          "required_status_checks": [
+            {
+              "context": "frontend-license-policy/trusted/dev",
+              "integration_id": 15368
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "effective_dev_rules": [
+    {
+      "type": "pull_request",
+      "ruleset_id": 19362594
+    },
+    {
+      "type": "required_status_checks",
+      "ruleset_id": 19362594,
+      "strict_required_status_checks_policy": false,
+      "required_status_checks": [
+        {
+          "context": "frontend-license-policy/trusted/dev",
+          "integration_id": 15368
+        }
+      ]
+    }
+  ],
+  "canonical_check_runs": [
+    {
+      "name": "backend-required",
+      "conclusion": "success",
+      "app_id": 15368,
+      "app_slug": "github-actions",
+      "details_url": "https://github.com/rmusser01/tldw_server/actions/runs/33231516900/job/99060572535"
+    },
+    {
+      "name": "container-build-check",
+      "conclusion": "success",
+      "app_id": 15368,
+      "app_slug": "github-actions",
+      "details_url": "https://github.com/rmusser01/tldw_server/actions/runs/33231516843/job/99057626986"
+    },
+    {
+      "name": "coverage-required",
+      "conclusion": "success",
+      "app_id": 15368,
+      "app_slug": "github-actions",
+      "details_url": "https://github.com/rmusser01/tldw_server/actions/runs/33231516862/job/99057205527"
+    },
+    {
+      "name": "e2e-required",
+      "conclusion": "success",
+      "app_id": 15368,
+      "app_slug": "github-actions",
+      "details_url": "https://github.com/rmusser01/tldw_server/actions/runs/33231516919/job/99055542157"
+    },
+    {
+      "name": "frontend-required",
+      "conclusion": "success",
+      "app_id": 15368,
+      "app_slug": "github-actions",
+      "details_url": "https://github.com/rmusser01/tldw_server/actions/runs/33231516897/job/99083416438"
+    },
+    {
+      "name": "security-required",
+      "conclusion": "success",
+      "app_id": 15368,
+      "app_slug": "github-actions",
+      "details_url": "https://github.com/rmusser01/tldw_server/actions/runs/33231516847/job/99056445805"
+    }
+  ]
+}
