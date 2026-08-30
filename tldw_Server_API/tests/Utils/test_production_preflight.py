@@ -10,6 +10,7 @@ import yaml
 from Helper_Scripts.Deployment.production_preflight import (
     PreflightIssue,
     load_raw_env,
+    main,
     run_preflight,
     validate_compose,
     validate_environment,
@@ -36,10 +37,7 @@ def _valid_env(tmp_path: Path) -> dict[str, str]:
         "POSTGRES_USER": "tldw_app",
         "POSTGRES_DB": "tldw",
         "POSTGRES_PASSWORD": postgres_password,
-        "DATABASE_URL": (
-            "postgresql://tldw_app:"
-            f"{quote(postgres_password, safe='')}@postgres:5432/tldw"
-        ),
+        "DATABASE_URL": ("postgresql://tldw_app:" f"{quote(postgres_password, safe='')}@postgres:5432/tldw"),
         "REDIS_PASSWORD": redis_password,
         "REDIS_URL": f"redis://:{quote(redis_password, safe='')}@redis:6379/0",
         "ADMIN_USERNAME": "initial-admin",
@@ -116,9 +114,7 @@ def test_load_raw_env_preserves_literal_values_without_expansion(tmp_path: Path)
         "UNMATCHED='value\n",
     ),
 )
-def test_load_raw_env_rejects_ambiguous_or_duplicate_input(
-    tmp_path: Path, text: str
-) -> None:
+def test_load_raw_env_rejects_ambiguous_or_duplicate_input(tmp_path: Path, text: str) -> None:
     path = tmp_path / "production.env"
     path.write_text(text, encoding="utf-8")
 
@@ -134,9 +130,7 @@ def test_report_aggregates_without_secret_values(tmp_path: Path) -> None:
     values["DATABASE_URL"] = "postgresql://tldw_app:different@postgres:5432/tldw"
 
     issues = validate_environment(values, env_path=tmp_path / "production.env")
-    rendered = "\n".join(
-        f"{item.code}:{item.field}:{item.message}" for item in issues
-    )
+    rendered = "\n".join(f"{item.code}:{item.field}:{item.message}" for item in issues)
 
     assert "weak_secret:JWT_SECRET_KEY" in rendered
     assert "credential_mismatch:DATABASE_URL" in rendered
@@ -159,15 +153,11 @@ def test_report_aggregates_without_secret_values(tmp_path: Path) -> None:
         ("CADDY_IMAGE", "caddy:2", "inexact_third_party_image"),
     ),
 )
-def test_environment_rejects_each_unsafe_value(
-    tmp_path: Path, field: str, value: str, expected_code: str
-) -> None:
+def test_environment_rejects_each_unsafe_value(tmp_path: Path, field: str, value: str, expected_code: str) -> None:
     values = _valid_env(tmp_path)
     values[field] = value
 
-    assert expected_code in _codes(
-        validate_environment(values, env_path=tmp_path / "production.env")
-    )
+    assert expected_code in _codes(validate_environment(values, env_path=tmp_path / "production.env"))
 
 
 def test_environment_requires_independent_target_and_rollback_images(
@@ -176,9 +166,7 @@ def test_environment_requires_independent_target_and_rollback_images(
     values = _valid_env(tmp_path)
     values["TLDW_ROLLBACK_IMAGE"] = values["TLDW_APP_IMAGE"]
 
-    assert "identical_images" in _codes(
-        validate_environment(values, env_path=tmp_path / "production.env")
-    )
+    assert "identical_images" in _codes(validate_environment(values, env_path=tmp_path / "production.env"))
 
 
 def test_environment_requires_bootstrap_only_for_new_installations(
@@ -189,9 +177,7 @@ def test_environment_requires_bootstrap_only_for_new_installations(
     existing_values = _valid_env(tmp_path)
     existing_values["TLDW_EXISTING_INSTALLATION"] = "true"
 
-    assert "missing_required" in _codes(
-        validate_environment(new_values, env_path=tmp_path / "production.env")
-    )
+    assert "missing_required" in _codes(validate_environment(new_values, env_path=tmp_path / "production.env"))
     assert "unexpected_bootstrap_secret" in _codes(
         validate_environment(existing_values, env_path=tmp_path / "production.env")
     )
@@ -214,15 +200,11 @@ def test_environment_requires_origin_domain_and_contact_alignment(
     ("backup_value", "expected_code"),
     (("relative/backups", "unsafe_backup_path"), ("/app/Databases", "live_data_path")),
 )
-def test_environment_rejects_unsafe_backup_paths(
-    tmp_path: Path, backup_value: str, expected_code: str
-) -> None:
+def test_environment_rejects_unsafe_backup_paths(tmp_path: Path, backup_value: str, expected_code: str) -> None:
     values = _valid_env(tmp_path)
     values["TLDW_BACKUP_DIR"] = backup_value
 
-    assert expected_code in _codes(
-        validate_environment(values, env_path=tmp_path / "production.env")
-    )
+    assert expected_code in _codes(validate_environment(values, env_path=tmp_path / "production.env"))
 
 
 def test_static_compose_and_proxy_match_the_reference_contract() -> None:
@@ -233,22 +215,27 @@ def test_static_compose_and_proxy_match_the_reference_contract() -> None:
 @pytest.mark.parametrize(
     ("mutation", "expected_code"),
     (
+        ("project_name", "topology_project"),
         ("app_port", "topology_ports"),
         ("backend_public", "topology_network"),
         ("caddy_backend", "topology_network"),
         ("missing_preflight", "topology_preflight"),
+        ("missing_preflight_env_file", "topology_preflight"),
+        ("unexpected_service", "topology_services"),
+        ("missing_caddyfile", "topology_mounts"),
+        ("missing_caddy_environment", "topology_proxy"),
         ("docker_socket", "topology_socket"),
         ("wildcard_trust", "topology_trust"),
         ("missing_redis_auth", "topology_redis_auth"),
         ("image_default", "topology_image"),
     ),
 )
-def test_static_compose_mutations_fail_closed(
-    mutation: str, expected_code: str
-) -> None:
+def test_static_compose_mutations_fail_closed(mutation: str, expected_code: str) -> None:
     compose = copy.deepcopy(_real_compose())
     services = compose["services"]
-    if mutation == "app_port":
+    if mutation == "project_name":
+        compose["name"] = "other-project"
+    elif mutation == "app_port":
         services["app"]["ports"] = ["8000:8000"]
     elif mutation == "backend_public":
         compose["networks"]["backend"]["internal"] = False
@@ -256,10 +243,16 @@ def test_static_compose_mutations_fail_closed(
         services["caddy"]["networks"].append("backend")
     elif mutation == "missing_preflight":
         del services["app"]["depends_on"]["preflight"]
+    elif mutation == "missing_preflight_env_file":
+        del services["preflight"]["env_file"]
+    elif mutation == "unexpected_service":
+        services["debug"] = {"ports": ["9000:9000"]}
+    elif mutation == "missing_caddyfile":
+        services["caddy"]["volumes"].remove("./Production/Caddyfile:/etc/caddy/Caddyfile:ro")
+    elif mutation == "missing_caddy_environment":
+        del services["caddy"]["environment"]["TLDW_PUBLIC_DOMAIN"]
     elif mutation == "docker_socket":
-        services["preflight"]["volumes"].append(
-            "/var/run/docker.sock:/var/run/docker.sock"
-        )
+        services["preflight"]["volumes"].append("/var/run/docker.sock:/var/run/docker.sock")
     elif mutation == "wildcard_trust":
         services["app"]["environment"]["RG_TRUSTED_PROXIES"] = "0.0.0.0/0"
     elif mutation == "missing_redis_auth":
@@ -315,9 +308,7 @@ def test_rendered_compose_matches_concrete_environment(tmp_path: Path) -> None:
         ("public_backend", "rendered_network"),
     ),
 )
-def test_rendered_compose_mutations_fail_closed(
-    tmp_path: Path, mutation: str, expected_code: str
-) -> None:
+def test_rendered_compose_mutations_fail_closed(tmp_path: Path, mutation: str, expected_code: str) -> None:
     compose, values = _rendered_compose(tmp_path)
     if mutation == "secret_command":
         compose["services"]["redis"]["command"] = [values["REDIS_PASSWORD"]]
@@ -342,6 +333,58 @@ def test_run_preflight_accepts_a_complete_offline_fixture(tmp_path: Path) -> Non
     assert report.issues == ()
 
 
+def test_cli_accepts_compose_injected_environment_without_raw_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    values = _valid_env(tmp_path)
+    (tmp_path / "backups").chmod(0o500)
+    for name, value in values.items():
+        monkeypatch.setenv(name, value)
+
+    exit_code = main(
+        [
+            "--from-environment",
+            "--compose-file",
+            str(COMPOSE_PATH),
+            "--proxy-file",
+            str(PROXY_PATH),
+            "--runtime-backup-dir",
+            str(tmp_path / "backups"),
+        ]
+    )
+
+    assert exit_code == 0
+    assert capsys.readouterr().out == "Production preflight passed.\n"
+
+
+def test_host_preflight_remains_authoritative_for_env_permissions(
+    tmp_path: Path,
+) -> None:
+    values = _valid_env(tmp_path)
+    env_file = tmp_path / "production.env"
+    _write_env(env_file, values)
+    env_file.chmod(0o644)
+
+    report = run_preflight(env_file, COMPOSE_PATH, PROXY_PATH)
+
+    assert "env_permissions" in _codes(report.issues)
+
+
+def test_host_preflight_remains_authoritative_for_backup_writability(
+    tmp_path: Path,
+) -> None:
+    values = _valid_env(tmp_path)
+    env_file = tmp_path / "production.env"
+    _write_env(env_file, values)
+    (tmp_path / "backups").chmod(0o500)
+
+    report = run_preflight(env_file, COMPOSE_PATH, PROXY_PATH)
+
+    assert "backup_unwritable" in _codes(report.issues)
+
+
 def test_run_preflight_converts_parse_errors_to_sorted_issues(tmp_path: Path) -> None:
     env_file = tmp_path / "production.env"
     env_file.write_text("export SECRET=value\n", encoding="utf-8")
@@ -350,8 +393,6 @@ def test_run_preflight_converts_parse_errors_to_sorted_issues(tmp_path: Path) ->
     report = run_preflight(env_file, COMPOSE_PATH, PROXY_PATH)
 
     assert not report.ok
-    assert [issue.code for issue in report.issues] == sorted(
-        issue.code for issue in report.issues
-    )
+    assert [issue.code for issue in report.issues] == sorted(issue.code for issue in report.issues)
     assert report.issues[0].code == "env_parse"
     assert "value" not in report.issues[0].message

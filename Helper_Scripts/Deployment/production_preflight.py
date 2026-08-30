@@ -114,6 +114,32 @@ _EXPECTED_VOLUMES = {
     "caddy_data",
     "caddy_config",
 }
+_EXPECTED_SERVICE_VOLUMES = {
+    "preflight": {
+        "./docker-compose.production.yml:/run/tldw/docker-compose.production.yml:ro",
+        "./Production/Caddyfile:/run/tldw/Caddyfile:ro",
+        "${TLDW_BACKUP_DIR:?Set absolute TLDW_BACKUP_DIR}:/backups:ro",
+    },
+    "caddy": {
+        "./Production/Caddyfile:/etc/caddy/Caddyfile:ro",
+        "caddy_data:/data",
+        "caddy_config:/config",
+    },
+    "app": {"app-data:/app/Databases"},
+    "postgres": {"postgres_data:/var/lib/postgresql"},
+    "redis": {"redis_data:/data"},
+}
+_EXPECTED_CADDY_ENVIRONMENT = {
+    "TLDW_PUBLIC_DOMAIN": "${TLDW_PUBLIC_DOMAIN:?Set TLDW_PUBLIC_DOMAIN}",
+    "TLDW_ACME_EMAIL": "${TLDW_ACME_EMAIL:?Set TLDW_ACME_EMAIL}",
+}
+_EXPECTED_RAW_ENV_FILE = [
+    {
+        "path": "${TLDW_ENV_FILE:?Set TLDW_ENV_FILE to the validated absolute raw env path}",
+        "required": True,
+        "format": "raw",
+    }
+]
 
 
 @dataclass(frozen=True, order=True)
@@ -216,17 +242,11 @@ def _validate_secrets(values: Mapping[str, str]) -> list[PreflightIssue]:
         if not value:
             continue
         if _is_placeholder_secret(value):
-            issues.append(
-                _issue("placeholder_secret", name, "must not use a known placeholder")
-            )
+            issues.append(_issue("placeholder_secret", name, "must not use a known placeholder"))
         elif len(value) < 32:
-            issues.append(
-                _issue("weak_secret", name, "must contain at least 32 characters")
-            )
+            issues.append(_issue("weak_secret", name, "must contain at least 32 characters"))
         if value in seen:
-            issues.append(
-                _issue("shared_secret", name, "must be independent from other secrets")
-            )
+            issues.append(_issue("shared_secret", name, "must be independent from other secrets"))
         else:
             seen[value] = name
     return issues
@@ -274,11 +294,7 @@ def _validate_redis_url(values: Mapping[str, str]) -> list[PreflightIssue]:
         password = unquote(parsed.password or "")
     except (TypeError, ValueError):
         return [_issue("invalid_url", "REDIS_URL", "must be a valid Redis URL")]
-    if (
-        parsed.scheme in {"redis", "rediss"}
-        and parsed.hostname == "redis"
-        and password == values.get("REDIS_PASSWORD")
-    ):
+    if parsed.scheme in {"redis", "rediss"} and parsed.hostname == "redis" and password == values.get("REDIS_PASSWORD"):
         return []
     return [
         _issue(
@@ -307,33 +323,20 @@ def _validate_domain_and_origins(values: Mapping[str, str]) -> list[PreflightIss
     domain = values.get("TLDW_PUBLIC_DOMAIN", "").strip().lower()
     contact = values.get("TLDW_ACME_EMAIL", "").strip().lower()
     if domain and (
-        any(marker in domain for marker in _SAMPLE_MARKERS)
-        or ":" in domain
-        or "/" in domain
-        or "." not in domain
+        any(marker in domain for marker in _SAMPLE_MARKERS) or ":" in domain or "/" in domain or "." not in domain
     ):
-        issues.append(
-            _issue("sample_value", "TLDW_PUBLIC_DOMAIN", "must be a real DNS name")
-        )
-    if contact and (
-        "@" not in contact or any(marker in contact for marker in _SAMPLE_MARKERS)
-    ):
-        issues.append(
-            _issue("sample_value", "TLDW_ACME_EMAIL", "must be a real contact address")
-        )
+        issues.append(_issue("sample_value", "TLDW_PUBLIC_DOMAIN", "must be a real DNS name"))
+    if contact and ("@" not in contact or any(marker in contact for marker in _SAMPLE_MARKERS)):
+        issues.append(_issue("sample_value", "TLDW_ACME_EMAIL", "must be a real contact address"))
     raw_origins = values.get("ALLOWED_ORIGINS", "")
     if not raw_origins:
         return issues
     try:
         origins = _parse_origins(raw_origins)
     except (ValueError, json.JSONDecodeError):
-        return issues + [
-            _issue("unsafe_origin", "ALLOWED_ORIGINS", "must be an explicit HTTPS origin list")
-        ]
+        return issues + [_issue("unsafe_origin", "ALLOWED_ORIGINS", "must be an explicit HTTPS origin list")]
     if not origins or "*" in origins:
-        issues.append(
-            _issue("unsafe_origin", "ALLOWED_ORIGINS", "must not contain a wildcard")
-        )
+        issues.append(_issue("unsafe_origin", "ALLOWED_ORIGINS", "must not contain a wildcard"))
         return issues
     for origin in origins:
         try:
@@ -349,9 +352,7 @@ def _validate_domain_and_origins(values: Mapping[str, str]) -> list[PreflightIss
             or parsed.query
             or parsed.fragment
         ):
-            issues.append(
-                _issue("unsafe_origin", "ALLOWED_ORIGINS", "must contain HTTPS origins only")
-            )
+            issues.append(_issue("unsafe_origin", "ALLOWED_ORIGINS", "must contain HTTPS origins only"))
             continue
         if domain and parsed.hostname.lower() != domain:
             issues.append(
@@ -381,9 +382,7 @@ def _validate_networks(values: Mapping[str, str]) -> list[PreflightIssue]:
 
     issues: list[PreflightIssue] = []
     edge, edge_issue = _network(values.get("TLDW_EDGE_SUBNET", ""), "TLDW_EDGE_SUBNET")
-    backend, backend_issue = _network(
-        values.get("TLDW_BACKEND_SUBNET", ""), "TLDW_BACKEND_SUBNET"
-    )
+    backend, backend_issue = _network(values.get("TLDW_BACKEND_SUBNET", ""), "TLDW_BACKEND_SUBNET")
     for issue in (edge_issue, backend_issue):
         if issue is not None:
             issues.append(issue)
@@ -423,12 +422,8 @@ def _validate_images(values: Mapping[str, str]) -> list[PreflightIssue]:
     for field in ("TLDW_APP_IMAGE", "TLDW_ROLLBACK_IMAGE"):
         value = values.get(field, "")
         if value and not _is_immutable_app_image(value):
-            issues.append(
-                _issue("mutable_image", field, "must use a digest or commit-pinned tag")
-            )
-    if values.get("TLDW_APP_IMAGE") and values.get("TLDW_APP_IMAGE") == values.get(
-        "TLDW_ROLLBACK_IMAGE"
-    ):
+            issues.append(_issue("mutable_image", field, "must use a digest or commit-pinned tag"))
+    if values.get("TLDW_APP_IMAGE") and values.get("TLDW_APP_IMAGE") == values.get("TLDW_ROLLBACK_IMAGE"):
         issues.append(
             _issue(
                 "identical_images",
@@ -454,9 +449,7 @@ def _validate_setup(values: Mapping[str, str]) -> list[PreflightIssue]:
 
     issues: list[PreflightIssue] = []
     if not _is_true(values.get("TLDW_SETUP_COMPLETED", "")):
-        issues.append(
-            _issue("setup_incomplete", "TLDW_SETUP_COMPLETED", "must be explicitly true")
-        )
+        issues.append(_issue("setup_incomplete", "TLDW_SETUP_COMPLETED", "must be explicitly true"))
     raw_existing = values.get("TLDW_EXISTING_INSTALLATION", "")
     if not (_is_true(raw_existing) or _is_false(raw_existing)):
         issues.append(
@@ -486,7 +479,10 @@ def _validate_setup(values: Mapping[str, str]) -> list[PreflightIssue]:
 
 
 def _validate_backup(
-    values: Mapping[str, str], runtime_backup_dir: Path | None
+    values: Mapping[str, str],
+    runtime_backup_dir: Path | None,
+    *,
+    require_writable: bool,
 ) -> list[PreflightIssue]:
     """Validate the operator backup destination without modifying it."""
 
@@ -495,52 +491,47 @@ def _validate_backup(
         return []
     configured = Path(raw)
     if not configured.is_absolute():
-        return [
-            _issue("unsafe_backup_path", "TLDW_BACKUP_DIR", "must be an absolute path")
-        ]
+        return [_issue("unsafe_backup_path", "TLDW_BACKUP_DIR", "must be an absolute path")]
     banned = (Path("/app/Databases"), Path("/var/lib/postgresql"), Path("/data"))
     try:
         resolved = configured.resolve(strict=False)
     except OSError:
         resolved = configured
     if any(resolved == path or path in resolved.parents for path in banned):
-        return [
-            _issue("live_data_path", "TLDW_BACKUP_DIR", "must be separate from live data")
-        ]
+        return [_issue("live_data_path", "TLDW_BACKUP_DIR", "must be separate from live data")]
     visible = runtime_backup_dir if runtime_backup_dir is not None else configured
     if not visible.exists():
-        return [
-            _issue("backup_unavailable", "TLDW_BACKUP_DIR", "must already exist")
-        ]
+        return [_issue("backup_unavailable", "TLDW_BACKUP_DIR", "must already exist")]
     if not visible.is_dir():
-        return [
-            _issue("backup_unavailable", "TLDW_BACKUP_DIR", "must be a directory")
-        ]
+        return [_issue("backup_unavailable", "TLDW_BACKUP_DIR", "must be a directory")]
+    if not require_writable:
+        return []
     try:
         writable_bits = visible.stat().st_mode & 0o222
     except OSError:
         writable_bits = 0
     if not writable_bits or not os.access(visible, os.W_OK):
-        return [
-            _issue("backup_unwritable", "TLDW_BACKUP_DIR", "must be writable")
-        ]
+        return [_issue("backup_unwritable", "TLDW_BACKUP_DIR", "must be writable")]
     return []
 
 
 def validate_environment(
     values: Mapping[str, str],
     *,
-    env_path: Path,
+    env_path: Path | None,
     runtime_backup_dir: Path | None = None,
+    require_backup_writable: bool = True,
 ) -> tuple[PreflightIssue, ...]:
     """Validate all semantic operator-environment invariants."""
 
     issues: list[PreflightIssue] = []
     existing = _is_true(values.get("TLDW_EXISTING_INSTALLATION", ""))
     for name in REQUIRED_ENV_NAMES:
-        if not values.get(name, "") and not (existing and name in SECRET_NAMES[-1:] + ("ADMIN_USERNAME", "ADMIN_EMAIL")):
+        if not values.get(name, "") and not (
+            existing and name in SECRET_NAMES[-1:] + ("ADMIN_USERNAME", "ADMIN_EMAIL")
+        ):
             issues.append(_issue("missing_required", name, "must be provided"))
-    if env_path.exists():
+    if env_path is not None and env_path.exists():
         try:
             mode = env_path.stat().st_mode & 0o777
         except OSError:
@@ -560,7 +551,13 @@ def validate_environment(
     issues.extend(_validate_networks(values))
     issues.extend(_validate_images(values))
     issues.extend(_validate_setup(values))
-    issues.extend(_validate_backup(values, runtime_backup_dir))
+    issues.extend(
+        _validate_backup(
+            values,
+            runtime_backup_dir,
+            require_writable=require_backup_writable,
+        )
+    )
     return _sorted_issues(issues)
 
 
@@ -608,6 +605,14 @@ def validate_compose(document: Mapping[str, Any]) -> tuple[PreflightIssue, ...]:
     """Validate the unrendered production Compose topology."""
 
     issues: list[PreflightIssue] = []
+    if document.get("name") != "tldw-production":
+        issues.append(
+            _issue(
+                "topology_project",
+                "name",
+                "must use the standalone production project name",
+            )
+        )
     services = document.get("services", {})
     networks = document.get("networks", {})
     if not isinstance(services, Mapping) or set(services) != {
@@ -619,85 +624,94 @@ def validate_compose(document: Mapping[str, Any]) -> tuple[PreflightIssue, ...]:
     }:
         return (_issue("topology_services", "services", "must match the reference services"),)
     if not isinstance(networks, Mapping) or set(networks) != {"edge", "backend"}:
-        issues.append(
-            _issue("topology_network", "networks", "must contain only edge and backend")
-        )
+        issues.append(_issue("topology_network", "networks", "must contain only edge and backend"))
     elif networks.get("backend", {}).get("internal") is not True:
-        issues.append(
-            _issue("topology_network", "backend", "must be an internal network")
-        )
+        issues.append(_issue("topology_network", "backend", "must be an internal network"))
     for name, service_value in services.items():
         service = service_value if isinstance(service_value, Mapping) else {}
         declared_ports = _ports(service)
         if name == "caddy":
             if declared_ports != {(80, 80), (443, 443)}:
-                issues.append(
-                    _issue("topology_ports", name, "must publish only host ports 80 and 443")
-                )
+                issues.append(_issue("topology_ports", name, "must publish only host ports 80 and 443"))
         elif declared_ports:
-            issues.append(
-                _issue("topology_ports", name, "must not publish a host port")
-            )
+            issues.append(_issue("topology_ports", name, "must not publish a host port"))
         if "build" in service or "container_name" in service:
-            issues.append(
-                _issue("topology_service", name, "must use the minimal immutable service shape")
-            )
+            issues.append(_issue("topology_service", name, "must use the minimal immutable service shape"))
         if any("/var/run/docker.sock" in str(item) for item in service.get("volumes", []) or []):
-            issues.append(
-                _issue("topology_socket", name, "must not mount the Docker socket")
-            )
+            issues.append(_issue("topology_socket", name, "must not mount the Docker socket"))
     for name, expected in _EXPECTED_NETWORKS.items():
         if _network_names(services[name]) != expected:
-            issues.append(
-                _issue("topology_network", name, "has unexpected network membership")
-            )
+            issues.append(_issue("topology_network", name, "has unexpected network membership"))
     if services["preflight"].get("network_mode") != "none":
-        issues.append(
-            _issue("topology_preflight", "preflight", "must run without networking")
-        )
+        issues.append(_issue("topology_preflight", "preflight", "must run without networking"))
     dependency = services["app"].get("depends_on", {}).get("preflight")
     if dependency != {"condition": "service_completed_successfully"}:
+        issues.append(_issue("topology_preflight", "app", "must fail closed on preflight"))
+    expected_preflight_command = [
+        "--from-environment",
+        "--compose-file",
+        "/run/tldw/docker-compose.production.yml",
+        "--proxy-file",
+        "/run/tldw/Caddyfile",
+        "--runtime-backup-dir",
+        "/backups",
+    ]
+    if services["preflight"].get("command") != expected_preflight_command:
         issues.append(
-            _issue("topology_preflight", "app", "must fail closed on preflight")
+            _issue(
+                "topology_preflight",
+                "preflight.command",
+                "must validate the Compose-injected environment",
+            )
+        )
+    if services["preflight"].get("env_file") != _EXPECTED_RAW_ENV_FILE:
+        issues.append(
+            _issue(
+                "topology_preflight",
+                "preflight.env_file",
+                "must consume the required raw environment through Compose",
+            )
         )
     for name, expected in _STATIC_IMAGE_INPUTS.items():
         if services[name].get("image") != expected:
-            issues.append(
-                _issue("topology_image", name, "must use the required image input")
-            )
+            issues.append(_issue("topology_image", name, "must use the required image input"))
     app_environment = services["app"].get("environment", {})
     edge_input = "${TLDW_EDGE_SUBNET:?Set private TLDW_EDGE_SUBNET}"
-    if app_environment.get("AUTH_MODE") != "multi_user" or app_environment.get(
-        "tldw_production"
-    ) != "true":
-        issues.append(
-            _issue("topology_mode", "app", "must explicitly use multi-user production mode")
-        )
+    if app_environment.get("AUTH_MODE") != "multi_user" or app_environment.get("tldw_production") != "true":
+        issues.append(_issue("topology_mode", "app", "must explicitly use multi-user production mode"))
     for field in TRUST_ENVIRONMENT:
         if app_environment.get(field) != edge_input:
-            issues.append(
-                _issue("topology_trust", field, "must derive from the private edge CIDR")
+            issues.append(_issue("topology_trust", field, "must derive from the private edge CIDR"))
+    if services["caddy"].get("environment") != _EXPECTED_CADDY_ENVIRONMENT:
+        issues.append(
+            _issue(
+                "topology_proxy",
+                "caddy.environment",
+                "must receive only the required domain and ACME contact",
             )
+        )
     redis_command = _command_text(services["redis"])
     redis_health = _command_text(services["redis"].get("healthcheck", {}))
     if "requirepass %s" not in redis_command or "$$REDIS_PASSWORD" not in redis_command:
-        issues.append(
-            _issue("topology_redis_auth", "redis.command", "must require the external password")
-        )
+        issues.append(_issue("topology_redis_auth", "redis.command", "must require the external password"))
     if "REDISCLI_AUTH" not in redis_health or "$$REDIS_PASSWORD" not in redis_health:
-        issues.append(
-            _issue("topology_redis_auth", "redis.healthcheck", "must authenticate")
-        )
+        issues.append(_issue("topology_redis_auth", "redis.healthcheck", "must authenticate"))
     if set(document.get("volumes", {})) != _EXPECTED_VOLUMES:
-        issues.append(
-            _issue("topology_volumes", "volumes", "must match the persistent volume boundary")
-        )
+        issues.append(_issue("topology_volumes", "volumes", "must match the persistent volume boundary"))
+    for name, expected in _EXPECTED_SERVICE_VOLUMES.items():
+        actual = {str(item) for item in services[name].get("volumes", []) or []}
+        if actual != expected:
+            issues.append(
+                _issue(
+                    "topology_mounts",
+                    name,
+                    "must match the required persistent and read-only mounts",
+                )
+            )
     return _sorted_issues(issues)
 
 
-def validate_rendered_compose(
-    document: Mapping[str, Any], values: Mapping[str, str]
-) -> tuple[PreflightIssue, ...]:
+def validate_rendered_compose(document: Mapping[str, Any], values: Mapping[str, str]) -> tuple[PreflightIssue, ...]:
     """Revalidate security invariants after Compose interpolation."""
 
     issues: list[PreflightIssue] = []
@@ -707,29 +721,21 @@ def validate_rendered_compose(
         return (_issue("rendered_services", "services", "must be a mapping"),)
     for name in ("preflight", "caddy", "app", "postgres", "redis"):
         if name not in services or not isinstance(services[name], Mapping):
-            issues.append(
-                _issue("rendered_services", name, "is missing from the rendered model")
-            )
+            issues.append(_issue("rendered_services", name, "is missing from the rendered model"))
     if issues:
         return _sorted_issues(issues)
     for name, service in services.items():
         declared_ports = _ports(service)
         if name == "caddy":
             if declared_ports != {(80, 80), (443, 443)}:
-                issues.append(
-                    _issue("rendered_ports", name, "must publish only ports 80 and 443")
-                )
+                issues.append(_issue("rendered_ports", name, "must publish only ports 80 and 443"))
         elif declared_ports:
             issues.append(_issue("rendered_ports", name, "must not publish ports"))
     if not isinstance(networks, Mapping) or networks.get("backend", {}).get("internal") is not True:
-        issues.append(
-            _issue("rendered_network", "backend", "must remain internal")
-        )
+        issues.append(_issue("rendered_network", "backend", "must remain internal"))
     for name, expected in _EXPECTED_NETWORKS.items():
         if _network_names(services[name]) != expected:
-            issues.append(
-                _issue("rendered_network", name, "has unexpected network membership")
-            )
+            issues.append(_issue("rendered_network", name, "has unexpected network membership"))
     expected_images = {
         "preflight": values.get("TLDW_APP_IMAGE"),
         "app": values.get("TLDW_APP_IMAGE"),
@@ -739,32 +745,30 @@ def validate_rendered_compose(
     }
     for name, expected in expected_images.items():
         if not expected or services[name].get("image") != expected:
-            issues.append(
-                _issue("rendered_image", name, "does not match the validated image input")
-            )
+            issues.append(_issue("rendered_image", name, "does not match the validated image input"))
     app_environment = services["app"].get("environment", {})
     edge = values.get("TLDW_EDGE_SUBNET")
     if not isinstance(app_environment, Mapping):
         issues.append(_issue("rendered_trust", "app", "environment must be a mapping"))
     else:
         for field in TRUST_ENVIRONMENT:
-            if not edge or app_environment.get(field) != edge or app_environment.get(field) in {
-                "*",
-                "0.0.0.0/0",
-            }:
-                issues.append(
-                    _issue("rendered_trust", field, "must equal the bounded edge CIDR")
-                )
+            if (
+                not edge
+                or app_environment.get(field) != edge
+                or app_environment.get(field)
+                in {
+                    "*",
+                    "0.0.0.0/0",
+                }
+            ):
+                issues.append(_issue("rendered_trust", field, "must equal the bounded edge CIDR"))
     sensitive_values = [
-        values.get(name, "")
-        for name in ("POSTGRES_PASSWORD", "REDIS_PASSWORD", "DATABASE_URL", "REDIS_URL")
+        values.get(name, "") for name in ("POSTGRES_PASSWORD", "REDIS_PASSWORD", "DATABASE_URL", "REDIS_URL")
     ]
     for name, service in services.items():
         command = _command_text(service)
         if any(value and value in command for value in sensitive_values):
-            issues.append(
-                _issue("rendered_secret", name, "must not contain resolved credential text")
-            )
+            issues.append(_issue("rendered_secret", name, "must not contain resolved credential text"))
     return _sorted_issues(issues)
 
 
@@ -772,9 +776,7 @@ def validate_proxy(text: str) -> tuple[PreflightIssue, ...]:
     """Validate the production Caddy public/private route boundary."""
 
     issues: list[PreflightIssue] = []
-    matcher = next(
-        (line for line in text.splitlines() if "@private_control path" in line), ""
-    )
+    matcher = next((line for line in text.splitlines() if "@private_control path" in line), "")
     matcher_paths = set(matcher.split()[2:]) if matcher else set()
     for path in DENIED_PROXY_PATHS:
         if path not in matcher_paths:
@@ -782,14 +784,10 @@ def validate_proxy(text: str) -> tuple[PreflightIssue, ...]:
     deny = "respond @private_control 404"
     proxy = "reverse_proxy app:8000"
     if deny not in text or proxy not in text or text.index(deny) > text.index(proxy):
-        issues.append(
-            _issue("proxy_order", "Caddyfile", "must deny private routes before proxying")
-        )
+        issues.append(_issue("proxy_order", "Caddyfile", "must deny private routes before proxying"))
     upstreams = re.findall(r"(?m)^\s*reverse_proxy\s+(\S+)", text)
     if upstreams != ["app:8000"]:
-        issues.append(
-            _issue("proxy_upstream", "Caddyfile", "must proxy only to the application")
-        )
+        issues.append(_issue("proxy_upstream", "Caddyfile", "must proxy only to the application"))
     if not re.search(r"(?m)^\s*tls\s+\{\$TLDW_ACME_EMAIL\}\s*$", text):
         issues.append(_issue("proxy_tls", "Caddyfile", "must terminate TLS"))
     for directive in (
@@ -798,10 +796,32 @@ def validate_proxy(text: str) -> tuple[PreflightIssue, ...]:
         "header_up X-Forwarded-Proto https",
     ):
         if directive not in text:
-            issues.append(
-                _issue("proxy_headers", "Caddyfile", "must overwrite client identity headers")
-            )
+            issues.append(_issue("proxy_headers", "Caddyfile", "must overwrite client identity headers"))
     return _sorted_issues(issues)
+
+
+def _validate_reference_files(
+    compose_file: Path,
+    proxy_file: Path,
+) -> list[PreflightIssue]:
+    """Validate the static Compose and proxy assets."""
+
+    issues: list[PreflightIssue] = []
+    try:
+        compose = yaml.safe_load(compose_file.read_text(encoding="utf-8"))
+        if not isinstance(compose, Mapping):
+            raise ValueError("Compose root must be a mapping")
+    except (OSError, UnicodeError, ValueError, yaml.YAMLError):
+        issues.append(_issue("compose_parse", "compose_file", "could not parse the production Compose file"))
+    else:
+        issues.extend(validate_compose(compose))
+    try:
+        proxy_text = proxy_file.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        issues.append(_issue("proxy_parse", "proxy_file", "could not read the production proxy file"))
+    else:
+        issues.extend(validate_proxy(proxy_text))
+    return issues
 
 
 def run_preflight(
@@ -811,17 +831,14 @@ def run_preflight(
     *,
     runtime_backup_dir: Path | None = None,
 ) -> PreflightReport:
-    """Run every offline preflight check and return all sanitized failures."""
+    """Run host preflight, including raw-file and permission validation."""
 
     issues: list[PreflightIssue] = []
-    values: dict[str, str] | None = None
     try:
         values = load_raw_env(env_file)
     except (OSError, UnicodeError, ValueError):
-        issues.append(
-            _issue("env_parse", "TLDW_ENV_FILE", "could not parse the raw environment file")
-        )
-    if values is not None:
+        issues.append(_issue("env_parse", "TLDW_ENV_FILE", "could not parse the raw environment file"))
+    else:
         issues.extend(
             validate_environment(
                 values,
@@ -829,24 +846,28 @@ def run_preflight(
                 runtime_backup_dir=runtime_backup_dir,
             )
         )
-    try:
-        compose = yaml.safe_load(compose_file.read_text(encoding="utf-8"))
-        if not isinstance(compose, Mapping):
-            raise ValueError("Compose root must be a mapping")
-    except (OSError, UnicodeError, ValueError, yaml.YAMLError):
-        issues.append(
-            _issue("compose_parse", "compose_file", "could not parse the production Compose file")
+    issues.extend(_validate_reference_files(compose_file, proxy_file))
+    return PreflightReport(_sorted_issues(issues))
+
+
+def run_preflight_from_environment(
+    values: Mapping[str, str],
+    compose_file: Path,
+    proxy_file: Path,
+    *,
+    runtime_backup_dir: Path | None = None,
+) -> PreflightReport:
+    """Run confined-container preflight using Compose-injected values."""
+
+    issues = list(
+        validate_environment(
+            values,
+            env_path=None,
+            runtime_backup_dir=runtime_backup_dir,
+            require_backup_writable=False,
         )
-    else:
-        issues.extend(validate_compose(compose))
-    try:
-        proxy_text = proxy_file.read_text(encoding="utf-8")
-    except (OSError, UnicodeError):
-        issues.append(
-            _issue("proxy_parse", "proxy_file", "could not read the production proxy file")
-        )
-    else:
-        issues.extend(validate_proxy(proxy_text))
+    )
+    issues.extend(_validate_reference_files(compose_file, proxy_file))
     return PreflightReport(_sorted_issues(issues))
 
 
@@ -854,7 +875,9 @@ def _parser() -> argparse.ArgumentParser:
     """Build the side-effect-free production-preflight argument parser."""
 
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--env-file", required=True, type=Path)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--env-file", type=Path)
+    source.add_argument("--from-environment", action="store_true")
     parser.add_argument("--compose-file", type=Path, default=DEFAULT_COMPOSE_FILE)
     parser.add_argument("--proxy-file", type=Path, default=DEFAULT_PROXY_FILE)
     parser.add_argument("--runtime-backup-dir", type=Path)
@@ -868,12 +891,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         args = _parser().parse_args(argv)
     except SystemExit as exc:
         return int(exc.code)
-    report = run_preflight(
-        args.env_file,
-        args.compose_file,
-        args.proxy_file,
-        runtime_backup_dir=args.runtime_backup_dir,
-    )
+    if args.from_environment:
+        report = run_preflight_from_environment(
+            os.environ,
+            args.compose_file,
+            args.proxy_file,
+            runtime_backup_dir=args.runtime_backup_dir,
+        )
+    else:
+        report = run_preflight(
+            args.env_file,
+            args.compose_file,
+            args.proxy_file,
+            runtime_backup_dir=args.runtime_backup_dir,
+        )
     if report.ok:
         print("Production preflight passed.")
         return 0

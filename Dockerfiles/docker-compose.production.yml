@@ -19,8 +19,7 @@ services:
       - *tldw-env-file
     entrypoint: ["python", "/app/Helper_Scripts/Deployment/production_preflight.py"]
     command:
-      - --env-file
-      - /run/tldw/production.env
+      - --from-environment
       - --compose-file
       - /run/tldw/docker-compose.production.yml
       - --proxy-file
@@ -28,7 +27,6 @@ services:
       - --runtime-backup-dir
       - /backups
     volumes:
-      - ${TLDW_ENV_FILE:?Set TLDW_ENV_FILE}:/run/tldw/production.env:ro
       - ./docker-compose.production.yml:/run/tldw/docker-compose.production.yml:ro
       - ./Production/Caddyfile:/run/tldw/Caddyfile:ro
       - ${TLDW_BACKUP_DIR:?Set absolute TLDW_BACKUP_DIR}:/backups:ro

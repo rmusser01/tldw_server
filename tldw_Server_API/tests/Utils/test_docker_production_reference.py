@@ -2,7 +2,6 @@ from pathlib import Path
 
 import yaml
 
-
 COMPOSE = Path("Dockerfiles/docker-compose.production.yml")
 CADDYFILE = Path("Dockerfiles/Production/Caddyfile")
 ENV_EXAMPLE = Path("Dockerfiles/production.env.example")
@@ -45,6 +44,15 @@ EXPECTED_ENV_NAMES = {
     "REDIS_IMAGE",
     "TLDW_BACKUP_DIR",
 }
+EXPECTED_SERVICES = {"preflight", "caddy", "app", "postgres", "redis"}
+EXPECTED_NETWORKS = {"edge", "backend"}
+EXPECTED_VOLUMES = {
+    "app-data",
+    "postgres_data",
+    "redis_data",
+    "caddy_data",
+    "caddy_config",
+}
 
 
 def _compose() -> dict:
@@ -57,6 +65,15 @@ def test_only_caddy_publishes_ports() -> None:
     assert services["caddy"]["ports"] == ["80:80", "443:443"]
     for name in ("preflight", "app", "postgres", "redis"):
         assert "ports" not in services[name]
+
+
+def test_compose_project_and_resource_sets_are_exact() -> None:
+    compose = _compose()
+
+    assert compose["name"] == "tldw-production"
+    assert set(compose["services"]) == EXPECTED_SERVICES
+    assert set(compose["networks"]) == EXPECTED_NETWORKS
+    assert set(compose["volumes"]) == EXPECTED_VOLUMES
 
 
 def test_network_membership_and_backend_isolation_are_exact() -> None:
@@ -107,6 +124,51 @@ def test_root_preflight_is_confined_to_read_only_inputs() -> None:
     assert all(str(volume).endswith(":ro") for volume in preflight["volumes"])
 
 
+def test_preflight_consumes_injected_environment_without_raw_env_mount() -> None:
+    preflight = _compose()["services"]["preflight"]
+
+    assert preflight["env_file"] == [
+        {
+            "path": "${TLDW_ENV_FILE:?Set TLDW_ENV_FILE to the validated absolute raw env path}",
+            "required": True,
+            "format": "raw",
+        }
+    ]
+    assert preflight["command"] == [
+        "--from-environment",
+        "--compose-file",
+        "/run/tldw/docker-compose.production.yml",
+        "--proxy-file",
+        "/run/tldw/Caddyfile",
+        "--runtime-backup-dir",
+        "/backups",
+    ]
+    assert all("/run/tldw/production.env" not in str(volume) for volume in preflight["volumes"])
+
+
+def test_persistent_service_mounts_are_exact() -> None:
+    services = _compose()["services"]
+
+    assert set(services["app"]["volumes"]) == {"app-data:/app/Databases"}
+    assert set(services["postgres"]["volumes"]) == {"postgres_data:/var/lib/postgresql"}
+    assert set(services["redis"]["volumes"]) == {"redis_data:/data"}
+    assert set(services["caddy"]["volumes"]) == {
+        "./Production/Caddyfile:/etc/caddy/Caddyfile:ro",
+        "caddy_data:/data",
+        "caddy_config:/config",
+    }
+
+
+def test_caddy_receives_only_required_inputs_and_read_only_config() -> None:
+    caddy = _compose()["services"]["caddy"]
+
+    assert caddy["environment"] == {
+        "TLDW_PUBLIC_DOMAIN": "${TLDW_PUBLIC_DOMAIN:?Set TLDW_PUBLIC_DOMAIN}",
+        "TLDW_ACME_EMAIL": "${TLDW_ACME_EMAIL:?Set TLDW_ACME_EMAIL}",
+    }
+    assert "./Production/Caddyfile:/etc/caddy/Caddyfile:ro" in caddy["volumes"]
+
+
 def test_stateful_services_require_external_credentials() -> None:
     services = _compose()["services"]
     redis_command = " ".join(services["redis"]["command"])
@@ -132,13 +194,6 @@ def test_images_are_required_external_inputs() -> None:
 def test_topology_has_no_builds_container_names_or_docker_socket() -> None:
     compose = _compose()
 
-    assert set(compose["volumes"]) == {
-        "app-data",
-        "postgres_data",
-        "redis_data",
-        "caddy_data",
-        "caddy_config",
-    }
     for service in compose["services"].values():
         assert "build" not in service
         assert "container_name" not in service
