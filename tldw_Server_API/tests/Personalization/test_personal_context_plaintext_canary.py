@@ -50,12 +50,16 @@ def test_canonical_bodies_never_appear_in_database_sidecars_or_logs(tmp_path, mo
         preference_record(value=record_canary),
         expected_version_id=None,
     )
-    repository.commit_proposal(proposal(value=proposal_canary))
+    repository.commit_proposal(
+        proposal(value=proposal_canary),
+        expected_manifest_version="manifest-v1",
+    )
     repository.set_runtime_policy(
         "profile-a",
         "profile-a-global",
         version_id="runtime-v1",
         expected_version_id=None,
+        expected_manifest_version="manifest-v1",
         policy={"note": runtime_canary},
     )
     repository.close()
@@ -121,7 +125,10 @@ def test_rejected_proposal_removes_old_ciphertext_and_wrapped_dek(tmp_path, monk
     db = PersonalizationDB.for_path(tmp_path / "Personalization.db")
     repository = PersonalContextRepository(db)
     repository.create_profile(manifest(), global_scope())
-    repository.commit_proposal(proposal(value="SHRED-ME"))
+    repository.commit_proposal(
+        proposal(value="SHRED-ME"),
+        expected_manifest_version="manifest-v1",
+    )
     old_ciphertext, old_wrapped_dek = repository.encrypted_version_material("profile-a", "proposal", "proposal-a")
 
     repository.reject_proposal("profile-a", "proposal-a")
