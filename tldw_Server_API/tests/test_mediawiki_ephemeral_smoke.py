@@ -9,6 +9,7 @@ import gzip
 import io
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
@@ -255,11 +256,12 @@ def test_mediawiki_process_dump_cleanup_failure_log_is_sanitized(monkeypatch, tm
 
 
 @pytest.mark.integration
-def test_mediawiki_ingest_passes_request_writer_and_vector_user(
-    monkeypatch,
+def test_mediawiki_ingest_passes_request_writer_and_checkpoint_scope(
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-):
-    fake_media_db = object()
+) -> None:
+    """Pass the request writer, vector user, and tenant checkpoint scope."""
+    fake_media_db = SimpleNamespace(org_id=7, team_id=9)
     fake_repo = object()
     captured_kwargs = {}
 
@@ -307,3 +309,4 @@ def test_mediawiki_ingest_passes_request_writer_and_vector_user(
     assert json.loads(response.text)["type"] == "summary"
     assert captured_kwargs["media_writer"] is fake_repo
     assert captured_kwargs["vector_user_id"] == "42"
+    assert captured_kwargs["checkpoint_identity_scope"] == '{"org_id":7,"team_id":9,"user_id":"42"}'

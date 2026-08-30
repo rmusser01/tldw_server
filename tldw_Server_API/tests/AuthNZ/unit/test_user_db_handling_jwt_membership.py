@@ -1,4 +1,7 @@
+"""Tests for JWT membership and impersonation claim validation."""
+
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from fastapi import HTTPException
@@ -19,13 +22,20 @@ def _build_request(client_ip: str = "127.0.0.1") -> Request:
     return Request(scope)
 
 
-def _install_valid_jwt_dependencies(monkeypatch, payload: dict) -> None:
+def _install_valid_jwt_dependencies(
+    monkeypatch: pytest.MonkeyPatch,
+    payload: dict[str, object],
+) -> None:
+    """Install valid repository collaborators around a supplied JWT payload."""
+
     class _StubJWT:
-        def decode_access_token(self, _token: str):
+        def decode_access_token(self, _token: str) -> dict[str, object]:
+            """Return the configured decoded token."""
             return payload
 
     class _StubUsersRepo:
-        async def get_user_by_id(self, user_id: int):
+        async def get_user_by_id(self, user_id: int) -> dict[str, object]:
+            """Return the fixture user by numeric ID."""
             return {
                 "id": user_id,
                 "username": "targetuser",
@@ -34,19 +44,24 @@ def _install_valid_jwt_dependencies(monkeypatch, payload: dict) -> None:
                 "role": "user",
             }
 
-        async def get_user_by_uuid(self, _identifier: str):
+        async def get_user_by_uuid(self, _identifier: str) -> None:
+            """Return no UUID match for this fixture."""
             return None
 
-        async def get_user_by_username(self, _username: str):
+        async def get_user_by_username(self, _username: str) -> None:
+            """Return no username match for this fixture."""
             return None
 
-    async def _from_pool():
+    async def _from_pool() -> _StubUsersRepo:
+        """Return the fixture repository."""
         return _StubUsersRepo()
 
-    async def _list_memberships(_user_id: int):
+    async def _list_memberships(_user_id: int) -> list[object]:
+        """Return no scoped memberships."""
         return []
 
-    async def _apply_scoped_permissions(**kwargs):
+    async def _apply_scoped_permissions(**kwargs: Any) -> SimpleNamespace:
+        """Preserve the base permissions in a neutral scope."""
         return SimpleNamespace(
             permissions=list(kwargs.get("base_permissions") or []),
             active_org_id=None,
@@ -54,10 +69,16 @@ def _install_valid_jwt_dependencies(monkeypatch, payload: dict) -> None:
         )
 
     class _StubSessionManager:
-        async def is_token_blacklisted(self, *_args, **_kwargs):
+        async def is_token_blacklisted(
+            self,
+            *_args: object,
+            **_kwargs: object,
+        ) -> bool:
+            """Treat the fixture token as active."""
             return False
 
-    async def _get_session_manager():
+    async def _get_session_manager() -> _StubSessionManager:
+        """Return the fixture session manager."""
         return _StubSessionManager()
 
     monkeypatch.setattr(user_handling, "get_jwt_service", lambda: _StubJWT())
@@ -340,7 +361,10 @@ async def test_verify_jwt_accepts_valid_membership_claims(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_verify_jwt_preserves_strict_impersonation_claims(monkeypatch):
+async def test_verify_jwt_preserves_strict_impersonation_claims(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Preserve a valid strict impersonation claim pair."""
     _install_valid_jwt_dependencies(
         monkeypatch,
         {
@@ -375,7 +399,11 @@ async def test_verify_jwt_preserves_strict_impersonation_claims(monkeypatch):
         pytest.param({"impersonated_by": 1}, id="actor-without-flag"),
     ],
 )
-async def test_verify_jwt_rejects_malformed_impersonation_claim_pairs(monkeypatch, claims):
+async def test_verify_jwt_rejects_malformed_impersonation_claim_pairs(
+    monkeypatch: pytest.MonkeyPatch,
+    claims: dict[str, object],
+) -> None:
+    """Reject malformed impersonation flag and actor combinations."""
     _install_valid_jwt_dependencies(
         monkeypatch,
         {"sub": "42", "username": "targetuser", **claims},
@@ -389,7 +417,10 @@ async def test_verify_jwt_rejects_malformed_impersonation_claim_pairs(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_verify_jwt_accepts_non_impersonation_token_without_actor(monkeypatch):
+async def test_verify_jwt_accepts_non_impersonation_token_without_actor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Accept a non-impersonation token that omits the actor."""
     _install_valid_jwt_dependencies(
         monkeypatch,
         {"sub": "42", "username": "targetuser", "impersonation": False},
@@ -404,7 +435,8 @@ async def test_verify_jwt_accepts_non_impersonation_token_without_actor(monkeypa
     assert request.state.auth.principal.impersonated_by is None
 
 
-def test_legacy_user_adapter_preserves_validated_impersonation_context():
+def test_legacy_user_adapter_preserves_validated_impersonation_context() -> None:
+    """Preserve validated impersonation context in the legacy adapter."""
     request = _build_request()
     user = user_handling.User(
         id=42,

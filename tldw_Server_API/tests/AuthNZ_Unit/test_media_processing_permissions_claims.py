@@ -1,10 +1,12 @@
+"""Regression tests for media-processing permission and rate-limit claims."""
+
 from __future__ import annotations
 
 import inspect
 from collections.abc import Iterable
 
 import pytest
-from fastapi import FastAPI
+from fastapi import APIRouter, FastAPI
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from starlette.requests import Request
@@ -38,7 +40,8 @@ PROCESSING_ROUTES = (
 )
 
 
-def _route_for_path(router, path: str) -> APIRoute:
+def _route_for_path(router: APIRouter, path: str) -> APIRoute:
+    """Return the POST route registered for ``path``."""
     for route in router.routes:
         if isinstance(route, APIRoute) and route.path == path and "POST" in route.methods:
             return route
@@ -46,6 +49,7 @@ def _route_for_path(router, path: str) -> APIRoute:
 
 
 def _dependency_calls(route: APIRoute) -> Iterable[object]:
+    """Yield dependency callables attached to a route."""
     dependant = getattr(route, "dependant", None)
     for dependency in getattr(dependant, "dependencies", []) or []:
         call = getattr(dependency, "call", None)
@@ -54,6 +58,7 @@ def _dependency_calls(route: APIRoute) -> Iterable[object]:
 
 
 def _required_permissions(route: APIRoute) -> set[str]:
+    """Collect permission claims closed over by route dependencies."""
     permissions: set[str] = set()
     for call in _dependency_calls(route):
         if not callable(call):
@@ -68,6 +73,7 @@ def _required_permissions(route: APIRoute) -> set[str]:
 
 
 def _rate_limit_resources(route: APIRoute) -> set[str]:
+    """Collect rate-limit resource labels attached to route dependencies."""
     return {
         resource
         for call in _dependency_calls(route)
@@ -76,7 +82,11 @@ def _rate_limit_resources(route: APIRoute) -> set[str]:
 
 
 @pytest.mark.parametrize(("router", "path"), PROCESSING_ROUTES)
-def test_media_processing_routes_require_media_create(router, path: str) -> None:
+def test_media_processing_routes_require_media_create(
+    router: APIRouter,
+    path: str,
+) -> None:
+    """Require the media-create claim and matching rate-limit resource."""
     route = _route_for_path(router, path)
 
     assert MEDIA_CREATE in _required_permissions(route)
@@ -84,6 +94,7 @@ def test_media_processing_routes_require_media_create(router, path: str) -> None
 
 
 def _principal_without_media_create() -> AuthPrincipal:
+    """Build an authenticated principal without media-create permission."""
     return AuthPrincipal(
         kind="user",
         user_id=1,
@@ -93,7 +104,10 @@ def _principal_without_media_create() -> AuthPrincipal:
     )
 
 
-def test_processing_endpoint_forbidden_without_media_create_claim(monkeypatch) -> None:
+def test_processing_endpoint_forbidden_without_media_create_claim(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reject processing requests whose principal lacks media-create."""
     monkeypatch.setenv("STORAGE_QUOTA_ENFORCEMENT", "0")
     principal = _principal_without_media_create()
     app = FastAPI()

@@ -963,6 +963,7 @@ def import_mediawiki_dump(
         allowed_dir: Optional[Path] = None,
         media_writer: Any | None = None,
         vector_user_id: Optional[str] = None,
+        checkpoint_identity_scope: Optional[str] = None,
 ) -> Iterator[dict[str, Any]]:
     try:
         # Sanitize wiki_name and validate file_path
@@ -980,12 +981,17 @@ def import_mediawiki_dump(
         normalized_vector_user_id = (
             str(vector_user_id).strip() if vector_user_id is not None else ""
         )
+        normalized_checkpoint_scope = (
+            str(checkpoint_identity_scope).strip()
+            if checkpoint_identity_scope is not None
+            else normalized_vector_user_id
+        )
         checkpoint_file = (
             get_safe_checkpoint_path(
                 safe_wiki_name,
-                identity_scope=normalized_vector_user_id,
+                identity_scope=normalized_checkpoint_scope,
             )
-            if normalized_vector_user_id
+            if normalized_checkpoint_scope
             else get_safe_checkpoint_path(safe_wiki_name)
         )
         last_processed_id = 0

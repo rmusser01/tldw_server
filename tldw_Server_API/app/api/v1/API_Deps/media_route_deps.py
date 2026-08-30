@@ -1,3 +1,5 @@
+"""Shared authorization dependencies for media-processing routes."""
+
 from __future__ import annotations
 
 from typing import Any

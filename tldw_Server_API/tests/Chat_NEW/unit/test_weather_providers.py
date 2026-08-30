@@ -6,10 +6,11 @@ from tldw_Server_API.app.core.Integrations import weather_providers
 
 
 @pytest.fixture
-def reject_direct_httpx(monkeypatch):
+def reject_direct_httpx(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep RED tests local if production still tries its legacy client."""
 
-    def fail_direct_client(*_args, **_kwargs):
+    def fail_direct_client(*_args: object, **_kwargs: object) -> None:
+        """Fail if weather code bypasses the central HTTP client."""
         pytest.fail("weather requests must use the central HTTP client")
 
     monkeypatch.setattr(
@@ -21,7 +22,10 @@ def reject_direct_httpx(monkeypatch):
 
 
 @pytest.mark.unit
-def test_get_weather_client_falls_back_without_api_key(monkeypatch):
+def test_get_weather_client_falls_back_without_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Use the no-key provider when OpenWeather credentials are absent."""
     monkeypatch.setenv("WEATHER_PROVIDER", "openweather")
     monkeypatch.delenv("OPENWEATHER_API_KEY", raising=False)
     client = weather_providers.get_weather_client()
@@ -29,7 +33,10 @@ def test_get_weather_client_falls_back_without_api_key(monkeypatch):
 
 
 @pytest.mark.unit
-def test_get_weather_client_openweather_when_configured(monkeypatch):
+def test_get_weather_client_openweather_when_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Build the configured OpenWeather client from environment settings."""
     monkeypatch.setenv("WEATHER_PROVIDER", "openweather")
     monkeypatch.setenv("OPENWEATHER_API_KEY", "test-key")
     monkeypatch.setenv("WEATHER_UNITS", "imperial")

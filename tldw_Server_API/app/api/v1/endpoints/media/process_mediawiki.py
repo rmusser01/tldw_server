@@ -118,6 +118,19 @@ def _parse_namespaces(namespaces_str: str | None) -> list[int] | None:
     return [int(ns.strip()) for ns in namespaces_str.split(",")]
 
 
+def _build_mediawiki_checkpoint_scope(*, user_id: str, media_db: Any) -> str:
+    """Return a stable checkpoint identity matching the request's DB scope."""
+    return json.dumps(
+        {
+            "org_id": getattr(media_db, "org_id", None),
+            "team_id": getattr(media_db, "team_id", None),
+            "user_id": user_id,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
 async def _process_mediawiki_dump(
     *,
     form_data: MediaWikiDumpOptionsForm,
@@ -127,6 +140,7 @@ async def _process_mediawiki_dump(
     filter_item_results: bool,
     media_writer: Any | None = None,
     vector_user_id: str | None = None,
+    checkpoint_identity_scope: str | None = None,
 ) -> StreamingResponse:
     """Shared ingestion/processing helper."""
     namespaces = _parse_namespaces(form_data.namespaces_str)
@@ -209,6 +223,7 @@ async def _process_mediawiki_dump(
                     allowed_dir=temp_dir_path,
                     media_writer=media_writer,
                     vector_user_id=vector_user_id,
+                    checkpoint_identity_scope=checkpoint_identity_scope,
                 ):
                     if filter_item_results and result_event.get("type") == "item_result":
                         page_data = result_event.get("data", {})
@@ -288,6 +303,10 @@ async def ingest_mediawiki_dump_endpoint(
         filter_item_results=False,
         media_writer=media_writer,
         vector_user_id=current_user.id_str,
+        checkpoint_identity_scope=_build_mediawiki_checkpoint_scope(
+            user_id=current_user.id_str,
+            media_db=db,
+        ),
     )
 
 
