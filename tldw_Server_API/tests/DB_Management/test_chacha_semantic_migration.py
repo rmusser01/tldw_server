@@ -108,6 +108,92 @@ def test_sqlite_v65_fresh_schema_has_semantic_tables_constraints_and_indexes(tmp
             )
 
 
+def test_sqlite_v65_config_dimension_identity_check_preserves_disabled_states(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "chacha-v65-config-dimensions.sqlite"
+    db = _initialize(db_path)
+    db.close_all_connections()
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO note_semantic_index_configs(
+                owner_user_id,dataset_id,desired_state,configuration_revision,
+                semantic_index_revision,metric,dimension_state,dimensions,
+                compatibility_hash,normalization_version,chunker_version,updated_at
+            ) VALUES ('owner-a','dataset-a','disabled',1,0,'cosine','pending',
+                      NULL,NULL,'v1','v1',CURRENT_TIMESTAMP)
+            """
+        )
+        for dimension_state, dimensions, compatibility_hash in (
+            ("pending", 768, None),
+            ("pending", None, "compatibility-v1"),
+            ("resolved", None, "compatibility-v1"),
+            ("resolved", 768, None),
+            ("resolved", 768, ""),
+        ):
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    "UPDATE note_semantic_index_configs SET dimension_state=?, dimensions=?, "
+                    "compatibility_hash=? WHERE owner_user_id='owner-a' AND dataset_id='dataset-a'",
+                    (dimension_state, dimensions, compatibility_hash),
+                )
+        conn.execute(
+            "UPDATE note_semantic_index_configs SET dimension_state='resolved', dimensions=768, "
+            "compatibility_hash='compatibility-v1' "
+            "WHERE owner_user_id='owner-a' AND dataset_id='dataset-a'"
+        )
+        row = conn.execute(
+            "SELECT desired_state,dimension_state,dimensions,compatibility_hash "
+            "FROM note_semantic_index_configs WHERE owner_user_id='owner-a' AND dataset_id='dataset-a'"
+        ).fetchone()
+        assert tuple(row) == ("disabled", "resolved", 768, "compatibility-v1")
+
+
+@pytest.mark.parametrize(
+    ("dimension_state", "dimensions", "compatibility_hash"),
+    (
+        ("pending", 768, None),
+        ("pending", None, "compatibility-v1"),
+        ("resolved", None, "compatibility-v1"),
+        ("resolved", 768, None),
+        ("resolved", 768, ""),
+    ),
+)
+def test_sqlite_v65_generation_dimension_identity_check(
+    tmp_path: Path,
+    dimension_state: str,
+    dimensions: int | None,
+    compatibility_hash: str | None,
+) -> None:
+    db_path = tmp_path / f"chacha-v65-generation-dimensions-{dimension_state}-{dimensions}.sqlite"
+    db = _initialize(db_path)
+    db.close_all_connections()
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO note_semantic_index_configs(
+                owner_user_id,dataset_id,desired_state,configuration_revision,
+                semantic_index_revision,metric,dimension_state,dimensions,
+                compatibility_hash,normalization_version,chunker_version,updated_at
+            ) VALUES ('owner-a','dataset-a','disabled',1,0,'cosine','resolved',
+                      768,'compatibility-v1','v1','v1',CURRENT_TIMESTAMP)
+            """
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                """
+                INSERT INTO note_semantic_generations(
+                    id,owner_user_id,dataset_id,configuration_revision,state,
+                    compatibility_hash,dimension_state,dimensions,created_at
+                ) VALUES ('generation-a','owner-a','dataset-a',1,'staging',?,?,?,CURRENT_TIMESTAMP)
+                """,
+                (compatibility_hash, dimension_state, dimensions),
+            )
+
+
 def test_sqlite_v65_rejects_raw_content_and_chunk_fingerprints(tmp_path: Path) -> None:
     db_path = tmp_path / "chacha-v65-fingerprints.sqlite"
     db = _initialize(db_path)
@@ -123,8 +209,9 @@ def test_sqlite_v65_rejects_raw_content_and_chunk_fingerprints(tmp_path: Path) -
             INSERT INTO note_semantic_index_configs(
                 owner_user_id,dataset_id,desired_state,configuration_revision,
                 semantic_index_revision,metric,dimension_state,dimensions,
-                normalization_version,chunker_version,updated_at
-            ) VALUES ('owner-a','dataset-a','enabled',1,0,'cosine','resolved',768,'v1','v1',CURRENT_TIMESTAMP)
+                compatibility_hash,normalization_version,chunker_version,updated_at
+            ) VALUES ('owner-a','dataset-a','enabled',1,0,'cosine','resolved',768,
+                      'compatibility-v1','v1','v1',CURRENT_TIMESTAMP)
             """
         )
         conn.execute(

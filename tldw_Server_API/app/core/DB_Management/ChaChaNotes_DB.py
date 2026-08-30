@@ -7128,7 +7128,14 @@ CREATE TABLE note_semantic_index_configs(
   consented_at DATETIME,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY(owner_user_id, dataset_id),
-  CHECK((dimension_state = 'pending' AND dimensions IS NULL) OR (dimension_state = 'resolved' AND dimensions IS NOT NULL))
+  CHECK(
+    (dimension_state = 'pending' AND dimensions IS NULL AND compatibility_hash IS NULL)
+    OR
+    (dimension_state = 'resolved' AND dimensions IS NOT NULL AND compatibility_hash IS NOT NULL
+      AND length(compatibility_hash) BETWEEN 1 AND 128
+      AND substr(compatibility_hash, 1, 1) GLOB '[A-Za-z0-9]'
+      AND compatibility_hash NOT GLOB '*[^A-Za-z0-9._:-]*')
+  )
 );
 
 CREATE TABLE note_semantic_generations(
@@ -7154,7 +7161,14 @@ CREATE TABLE note_semantic_generations(
   deleted_at DATETIME,
   UNIQUE(owner_user_id, dataset_id, id),
   FOREIGN KEY(owner_user_id, dataset_id) REFERENCES note_semantic_index_configs(owner_user_id, dataset_id) ON DELETE CASCADE ON UPDATE CASCADE,
-  CHECK((dimension_state = 'pending' AND dimensions IS NULL) OR (dimension_state = 'resolved' AND dimensions IS NOT NULL))
+  CHECK(
+    (dimension_state = 'pending' AND dimensions IS NULL AND compatibility_hash IS NULL)
+    OR
+    (dimension_state = 'resolved' AND dimensions IS NOT NULL AND compatibility_hash IS NOT NULL
+      AND length(compatibility_hash) BETWEEN 1 AND 128
+      AND substr(compatibility_hash, 1, 1) GLOB '[A-Za-z0-9]'
+      AND compatibility_hash NOT GLOB '*[^A-Za-z0-9._:-]*')
+  )
 );
 
 CREATE TABLE note_semantic_note_state(
@@ -7257,7 +7271,12 @@ CREATE TABLE IF NOT EXISTS note_semantic_index_configs(
   enabled_at TIMESTAMPTZ, disabled_at TIMESTAMPTZ, consented_at TIMESTAMPTZ,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY(owner_user_id, dataset_id),
-  CHECK((dimension_state = 'pending' AND dimensions IS NULL) OR (dimension_state = 'resolved' AND dimensions IS NOT NULL))
+  CHECK(
+    (dimension_state = 'pending' AND dimensions IS NULL AND compatibility_hash IS NULL)
+    OR
+    (dimension_state = 'resolved' AND dimensions IS NOT NULL AND compatibility_hash IS NOT NULL
+      AND compatibility_hash ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$')
+  )
 );
 CREATE TABLE IF NOT EXISTS note_semantic_generations(
   id TEXT PRIMARY KEY CHECK(char_length(btrim(id)) > 0),
@@ -7277,7 +7296,12 @@ CREATE TABLE IF NOT EXISTS note_semantic_generations(
   retired_at TIMESTAMPTZ, deleted_at TIMESTAMPTZ,
   UNIQUE(owner_user_id, dataset_id, id),
   FOREIGN KEY(owner_user_id, dataset_id) REFERENCES note_semantic_index_configs(owner_user_id, dataset_id) ON DELETE CASCADE ON UPDATE CASCADE,
-  CHECK((dimension_state = 'pending' AND dimensions IS NULL) OR (dimension_state = 'resolved' AND dimensions IS NOT NULL))
+  CHECK(
+    (dimension_state = 'pending' AND dimensions IS NULL AND compatibility_hash IS NULL)
+    OR
+    (dimension_state = 'resolved' AND dimensions IS NOT NULL AND compatibility_hash IS NOT NULL
+      AND compatibility_hash ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$')
+  )
 );
 CREATE TABLE IF NOT EXISTS note_semantic_note_state(
   owner_user_id TEXT NOT NULL CHECK(char_length(btrim(owner_user_id)) > 0),
@@ -7581,8 +7605,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         from tldw_Server_API.app.core.DB_Management.chacha.note_graph_suggestion_store import (
             NoteGraphSuggestionStore,
         )
-        from tldw_Server_API.app.core.DB_Management.chacha.note_semantic_store import NoteSemanticStore
         from tldw_Server_API.app.core.DB_Management.chacha.note_link_store import NotesLinkStore
+        from tldw_Server_API.app.core.DB_Management.chacha.note_semantic_store import NoteSemanticStore
         from tldw_Server_API.app.core.DB_Management.chacha.note_store import NoteStore
         from tldw_Server_API.app.core.DB_Management.chacha.persona_state_store import (
             PersonaStateStore,
