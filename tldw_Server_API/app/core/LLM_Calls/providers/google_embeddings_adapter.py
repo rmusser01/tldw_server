@@ -8,6 +8,7 @@ from loguru import logger
 
 from tldw_Server_API.app.core.http_client import create_client
 from tldw_Server_API.app.core.LLM_Calls.payload_utils import (
+    EMBEDDING_REDIRECT_STATUS_CODES,
     encode_google_model_path,
     resolve_runtime_embedding_base_url,
 )
@@ -97,7 +98,8 @@ class GoogleEmbeddingsAdapter(EmbeddingsProvider):
         if inputs is None or not model:
             raise ValueError("Embeddings: 'input' and 'model' are required")
 
-        if self._use_native_http():
+        credentials_resolved = request.get("credentials_resolved") is True
+        if credentials_resolved or self._use_native_http():
             # Use single embedContent for 1 input; loop for multiple
             base = resolve_runtime_embedding_base_url(request, provider=self.name) or self._base_url()
             try:
@@ -115,7 +117,10 @@ class GoogleEmbeddingsAdapter(EmbeddingsProvider):
             allow_query_key_fallback = self._allow_query_key_fallback(base, api_key)
             provider_error: Exception | None = None
             try:
-                with create_client(timeout=timeout or 60.0) as client:
+                client_options: dict[str, Any] = {"timeout": timeout or 60.0}
+                if credentials_resolved:
+                    client_options["follow_redirects"] = False
+                with create_client(**client_options) as client:
                     if isinstance(inputs, list):
                         out: list[dict[str, Any]] = []
                         for idx, text in enumerate(inputs):
@@ -129,6 +134,8 @@ class GoogleEmbeddingsAdapter(EmbeddingsProvider):
                                 api_key=api_key,
                                 allow_query_key_fallback=allow_query_key_fallback,
                             )
+                            if getattr(resp, "status_code", None) in EMBEDDING_REDIRECT_STATUS_CODES:
+                                raise RuntimeError("Embedding provider redirected the request")
                             if hasattr(resp, "raise_for_status"):
                                 resp.raise_for_status()
                             data = resp.json()
@@ -145,6 +152,8 @@ class GoogleEmbeddingsAdapter(EmbeddingsProvider):
                             api_key=api_key,
                             allow_query_key_fallback=allow_query_key_fallback,
                         )
+                        if getattr(resp, "status_code", None) in EMBEDDING_REDIRECT_STATUS_CODES:
+                            raise RuntimeError("Embedding provider redirected the request")
                         if hasattr(resp, "raise_for_status"):
                             resp.raise_for_status()
                         data = resp.json()

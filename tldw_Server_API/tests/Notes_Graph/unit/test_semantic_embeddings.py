@@ -61,6 +61,45 @@ class RecordingOrchestrator:
         )
 
 
+class SequencedOrchestrator(RecordingOrchestrator):
+    def __init__(
+        self,
+        outcomes: list[EmbeddingExecutionResult | Exception],
+        revisions: list[str | None],
+    ) -> None:
+        super().__init__([])
+        self.outcomes = outcomes
+        self.revisions = revisions
+        self.identity = SimpleNamespace(
+            model_revision=None,
+            provider_attempt_sequence=0,
+            provider_input_count=0,
+            provider_prompt_tokens=0,
+            provider_status=None,
+        )
+
+    async def execute(self, prepared: object) -> EmbeddingExecutionResult:
+        del prepared
+        index = len(self.inputs) - 1
+        outcome = self.outcomes[index]
+        self.identity.model_revision = self.revisions[index]
+        self.identity.provider_attempt_sequence += 1
+        self.identity.provider_input_count = len(self.inputs[-1])
+        self.identity.provider_prompt_tokens = 5
+        if isinstance(outcome, Exception):
+            self.identity.provider_status = "failed"
+            raise outcome
+        if outcome.cache_misses == 0:
+            self.identity.provider_attempt_sequence -= 1
+            self.identity.provider_input_count = 0
+            self.identity.provider_prompt_tokens = 0
+            self.identity.provider_status = None
+        else:
+            self.identity.provider_input_count = outcome.cache_misses
+            self.identity.provider_status = "success"
+        return outcome
+
+
 def _settings(**overrides: int) -> SemanticIndexSettings:
     values = {
         "max_stored_note_bytes": 10_000,
@@ -132,15 +171,20 @@ async def test_known_dimension_requires_no_probe() -> None:
 async def test_unknown_dimension_uses_fixed_probe_after_consent_and_captures_revision() -> None:
     orchestrator = RecordingOrchestrator([[3.0, 4.0, 5.0]])
     cas_calls: list[int] = []
+    usage_calls: list[dict[str, object]] = []
 
     async def publish_dimension(config: PendingSemanticConfig, dimensions: int) -> bool:
         del config
         cas_calls.append(dimensions)
         return True
 
+    async def record_usage(**kwargs: object) -> None:
+        usage_calls.append(kwargs)
+
     embedder = NotesSemanticEmbedder(
         orchestrator_factory=lambda config, user_id: _runtime(orchestrator, "digest-7"),
         dimension_cas=publish_dimension,
+        usage_logger=record_usage,
     )
 
     resolved = await embedder.resolve_dimensions(_pending(), user_id="7")
@@ -150,6 +194,16 @@ async def test_unknown_dimension_uses_fixed_probe_after_consent_and_captures_rev
     assert resolved.model == "text-embedding-3-small"
     assert resolved.model_revision == "digest-7"
     assert cas_calls == [3]
+    assert len(usage_calls) == 1
+    assert usage_calls[0]["operation"] == "notes_semantic_dimension_probe"
+    assert usage_calls[0]["status"] == 200
+    assert usage_calls[0]["usage_metadata"] == {
+        "attempt_status": "success",
+        "cache_hit_count": 0,
+        "cache_miss_count": 1,
+        "provider_input_count": 1,
+    }
+    assert "Public semantic" not in repr(usage_calls)
 
 
 @pytest.mark.asyncio
@@ -265,8 +319,185 @@ async def test_embedding_rejects_provider_or_model_drift_and_run_caps_before_exe
     cap_orchestrator = RecordingOrchestrator([[1.0, 0.0]])
     capped = NotesSemanticEmbedder(
         orchestrator_factory=lambda config, user_id: _runtime(cap_orchestrator),
-        settings=_settings(max_chunks_per_run=1),
+        settings=_settings(
+            max_chunks_per_note=1,
+            max_chunks_per_run=1,
+            max_provider_batch_inputs=1,
+        ),
     )
     with pytest.raises(SemanticEmbeddingSystemError, match="run_chunk_cap_exceeded"):
         await capped.embed_chunks(chunks, _resolved(), user_id="7")
     assert cap_orchestrator.inputs == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("second_revision", ["revision-2", None])
+async def test_first_discovered_revision_is_pinned_across_batches(
+    second_revision: str | None,
+) -> None:
+    chunks = build_semantic_chunks(
+        generation_id="generation-1",
+        note_id="note-1",
+        title="",
+        content="abcdefgh",
+        content_version=1,
+        settings=_settings(max_chunk_code_points=4),
+    )
+    outcomes = [
+        EmbeddingExecutionResult(
+            vectors=[[1.0, 0.0]],
+            provider="openai",
+            model="text-embedding-3-small",
+            prompt_tokens=5,
+            total_tokens=5,
+            cache_hits=0,
+            cache_misses=1,
+        ),
+        EmbeddingExecutionResult(
+            vectors=[[0.0, 1.0]],
+            provider="openai",
+            model="text-embedding-3-small",
+            prompt_tokens=5,
+            total_tokens=5,
+            cache_hits=0,
+            cache_misses=1,
+        ),
+    ]
+    orchestrator = SequencedOrchestrator(
+        outcomes,
+        ["revision-1", second_revision],
+    )
+    usage_calls: list[dict[str, object]] = []
+
+    async def record_usage(**kwargs: object) -> None:
+        usage_calls.append(kwargs)
+
+    embedder = NotesSemanticEmbedder(
+        orchestrator_factory=lambda config, user_id: NotesEmbeddingRuntime(
+            orchestrator=orchestrator,
+            execution_identity=lambda: orchestrator.identity,
+        ),
+        usage_logger=record_usage,
+        settings=_settings(max_provider_batch_inputs=1),
+    )
+
+    with pytest.raises(SemanticEmbeddingSystemError, match="model_revision_drift"):
+        await embedder.embed_chunks(
+            chunks,
+            _resolved(model_revision=None),
+            user_id="7",
+        )
+
+    assert [call["status"] for call in usage_calls] == [200, 502]
+    assert usage_calls[1]["usage_metadata"] == {
+        "attempt_status": "failed",
+        "cache_hit_count": 0,
+        "cache_miss_count": 1,
+        "provider_input_count": 1,
+    }
+
+
+@pytest.mark.asyncio
+async def test_failed_provider_attempt_is_recorded_without_content() -> None:
+    chunks = build_semantic_chunks(
+        generation_id="generation-1",
+        note_id="note-1",
+        title="",
+        content="secret note body",
+        content_version=1,
+        settings=_settings(),
+    )
+    orchestrator = SequencedOrchestrator(
+        [SemanticEmbeddingSystemError("provider_execution_failed")],
+        [None],
+    )
+    usage_calls: list[dict[str, object]] = []
+
+    async def record_usage(**kwargs: object) -> None:
+        usage_calls.append(kwargs)
+
+    embedder = NotesSemanticEmbedder(
+        orchestrator_factory=lambda config, user_id: NotesEmbeddingRuntime(
+            orchestrator=orchestrator,
+            execution_identity=lambda: orchestrator.identity,
+        ),
+        usage_logger=record_usage,
+        settings=_settings(),
+    )
+
+    with pytest.raises(SemanticEmbeddingSystemError, match="provider_execution_failed"):
+        await embedder.embed_chunks(chunks, _resolved(), user_id="7")
+
+    assert len(usage_calls) == 1
+    assert usage_calls[0]["status"] == 502
+    assert usage_calls[0]["prompt_tokens"] == 5
+    assert usage_calls[0]["usage_metadata"] == {
+        "attempt_status": "failed",
+        "cache_hit_count": 0,
+        "cache_miss_count": 1,
+        "provider_input_count": 1,
+    }
+    assert "secret note body" not in repr(usage_calls)
+
+
+@pytest.mark.asyncio
+async def test_full_cache_hit_batch_records_no_provider_work_or_tokens() -> None:
+    chunks = build_semantic_chunks(
+        generation_id="generation-1",
+        note_id="note-1",
+        title="",
+        content="repeat",
+        content_version=1,
+        settings=_settings(),
+    )
+    outcomes = [
+        EmbeddingExecutionResult(
+            vectors=[[1.0, 0.0]],
+            provider="openai",
+            model="text-embedding-3-small",
+            prompt_tokens=5,
+            total_tokens=5,
+            cache_hits=0,
+            cache_misses=1,
+        ),
+        EmbeddingExecutionResult(
+            vectors=[[1.0, 0.0]],
+            provider="openai",
+            model="text-embedding-3-small",
+            prompt_tokens=5,
+            total_tokens=5,
+            cache_hits=1,
+            cache_misses=0,
+        ),
+    ]
+    orchestrator = SequencedOrchestrator(outcomes, ["revision-1", "revision-1"])
+    usage_calls: list[dict[str, object]] = []
+
+    async def record_usage(**kwargs: object) -> None:
+        usage_calls.append(kwargs)
+
+    embedder = NotesSemanticEmbedder(
+        orchestrator_factory=lambda config, user_id: NotesEmbeddingRuntime(
+            orchestrator=orchestrator,
+            execution_identity=lambda: orchestrator.identity,
+        ),
+        usage_logger=record_usage,
+        settings=_settings(max_provider_batch_inputs=1),
+    )
+
+    batch = await embedder.embed_chunks(
+        [chunks[0], chunks[0]],
+        _resolved(),
+        user_id="7",
+    )
+
+    assert len(batch.vectors) == 2
+    assert batch.prompt_tokens == 5
+    assert batch.total_tokens == 5
+    assert len(usage_calls) == 1
+    assert usage_calls[0]["usage_metadata"] == {
+        "attempt_status": "success",
+        "cache_hit_count": 0,
+        "cache_miss_count": 1,
+        "provider_input_count": 1,
+    }

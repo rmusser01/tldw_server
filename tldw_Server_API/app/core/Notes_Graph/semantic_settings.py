@@ -63,6 +63,15 @@ class SemanticIndexSettings:
                 raise ValueError(f"{field_name} exceeds its hard maximum")
         if self.retry_backoff_seconds > self.retry_max_backoff_seconds:
             raise ValueError("retry_backoff_seconds cannot exceed retry_max_backoff_seconds")
+        for smaller, larger in (
+            ("max_chunk_code_points", "max_canonical_field_code_points"),
+            ("max_chunks_per_note", "max_chunks_per_run"),
+            ("max_provider_batch_inputs", "max_chunks_per_run"),
+            ("max_provider_input_bytes", "max_provider_batch_bytes"),
+            ("max_provider_batch_bytes", "max_provider_bytes_per_run"),
+        ):
+            if getattr(self, smaller) > getattr(self, larger):
+                raise ValueError(f"{smaller} cannot exceed {larger}")
         if not isinstance(self.pgvector_allowed_dimensions, frozenset):
             raise TypeError("pgvector_allowed_dimensions must be a frozenset")
         if not self.pgvector_allowed_dimensions:

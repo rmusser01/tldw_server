@@ -4,7 +4,7 @@ title: Implement Notes embedding index and semantic graph edges
 status: In Progress
 assignee: []
 created_date: 2026-08-27 02:20
-updated_date: 2026-08-30 06:39
+updated_date: 2026-08-30 07:31
 labels:
 - notes
 - notes-graph
@@ -49,6 +49,14 @@ modified_files:
 - tldw_Server_API/tests/Notes_Graph/unit/test_semantic_content.py
 - tldw_Server_API/tests/Notes_Graph/unit/test_semantic_embeddings.py
 - tldw_Server_API/tests/Embeddings_isolated/test_notes_semantic_policy.py
+- tldw_Server_API/app/core/LLM_Calls/payload_utils.py
+- tldw_Server_API/app/core/LLM_Calls/providers/google_embeddings_adapter.py
+- tldw_Server_API/app/core/LLM_Calls/providers/huggingface_embeddings_adapter.py
+- tldw_Server_API/app/core/LLM_Calls/providers/openai_embeddings_adapter.py
+- tldw_Server_API/app/core/http_client.py
+- tldw_Server_API/tests/LLM_Adapters/unit/test_embeddings_google_native_http.py
+- tldw_Server_API/tests/LLM_Adapters/unit/test_embeddings_huggingface_native_http.py
+- tldw_Server_API/tests/LLM_Adapters/unit/test_openai_embeddings_adapter_batch_single.py
 ---
 
 ## Description
@@ -89,6 +97,10 @@ Approved executable plan: `Docs/superpowers/plans/2026-08-29-notes-semantic-inde
 - 2026-08-29 Task 3 complete: Added deterministic compatibility/disclosure identities with separate sanitized model and revision fields, durable-credential preflight, bounded semantic operator settings, and AuthNZ migration 096 for `notes.graph.semantic.manage`. Migration/backstop behavior preserves later revocations while granting approved roles on catalog creation. Independent runtime/migration review clean. Verification: 59 tests passed; Ruff, Bandit, and diff checks clean. Range: `c90625d842..37d96af28e`.
 - 2026-08-29 Task 4 complete: Added version-bound canonical chunking and strict endpoint-neutral embedding execution; migrated NoteStore semantic fingerprints to bind `content_version`; extended typed semantic limits. Verification: Task 4 plus orchestrator 73 passed; Task 2 lifecycle 14 passed; PostgreSQL lifecycle 1 passed; Ruff, Bandit, and diff checks clean. Report: `.superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-4-report.md`.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+2026-08-30 Task 4 Fix Round 1 started from fcb7f2a207: correct runtime endpoint provenance and no-redirect adapter transport, pin discovered model revision per run, account for probe/failed/provider-cache outcomes, and reject contradictory semantic settings using strict TDD.
+
+2026-08-30 Task 4 Fix Round 1 complete: added credential endpoint provenance and strict no-redirect native adapter execution, run-pinned discovered revisions, content-free probe/failure/cache-aware usage accounting, and semantic settings cross-limit validation. Verification: Task 4 plus orchestrator 80 passed; settings plus OpenAI/Google/HuggingFace adapter contracts 80 passed; full Task 2 lifecycle including live PostgreSQL 26 passed; Ruff passed with two unchanged http_client.py TRY203 baseline findings excluded; Bandit 0 findings/0 errors; git diff --check passed. Report: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-4-report.md.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -96,6 +108,7 @@ Approved executable plan: `Docs/superpowers/plans/2026-08-29-notes-semantic-inde
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 TASK-13134 remains in progress after completion of implementation Tasks 1 through 4.
 <!-- SECTION:FINAL_SUMMARY:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed

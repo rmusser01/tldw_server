@@ -64,3 +64,20 @@ def test_semantic_settings_rejects_invalid_or_unbounded_values(
 ) -> None:
     with pytest.raises((TypeError, ValueError)):
         SemanticIndexSettings(**kwargs)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"max_provider_input_bytes": 1_024, "max_provider_batch_bytes": 1_023},
+        {"max_provider_batch_bytes": 2_048, "max_provider_bytes_per_run": 2_047},
+        {"max_chunks_per_note": 5, "max_chunks_per_run": 4},
+        {"max_provider_batch_inputs": 5, "max_chunks_per_run": 4},
+        {"max_chunk_code_points": 257, "max_canonical_field_code_points": 256},
+    ],
+)
+def test_semantic_settings_rejects_contradictory_cross_limits(
+    kwargs: dict[str, object],
+) -> None:
+    with pytest.raises(ValueError):
+        SemanticIndexSettings(**kwargs)

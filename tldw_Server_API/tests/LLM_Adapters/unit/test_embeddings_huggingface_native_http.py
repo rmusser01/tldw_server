@@ -2,6 +2,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 
+import httpx
 import pytest
 
 
@@ -136,6 +137,121 @@ def test_huggingface_embeddings_adapter_native_http_multi(monkeypatch):
         assert isinstance(out, dict)
         embs = [d["embedding"] for d in out.get("data", [])]
         assert embs == [[0.1, 0.2], [0.3, 0.4]]
+
+
+@pytest.mark.unit
+def test_resolved_huggingface_request_forces_pinned_native_client_without_redirects(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("LLM_EMBEDDINGS_NATIVE_HTTP_HUGGINGFACE", raising=False)
+    monkeypatch.setenv("HUGGINGFACE_INFERENCE_BASE_URL", "https://ambient-attacker.example/models")
+
+    import tldw_Server_API.app.core.LLM_Calls.providers.huggingface_embeddings_adapter as module
+    from tldw_Server_API.app.core.AuthNZ.byok_config import (
+        runtime_base_url_override_provenance,
+    )
+    from tldw_Server_API.app.core.LLM_Calls.providers.huggingface_embeddings_adapter import (
+        HuggingFaceEmbeddingsAdapter,
+    )
+
+    client_options: list[dict[str, object]] = []
+    urls: list[str] = []
+
+    class Response:
+        status_code = 200
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> list[list[float]]:
+            return [[0.1, 0.2]]
+
+    class Client:
+        def __enter__(self) -> "Client":
+            return self
+
+        def __exit__(self, *_args: object) -> bool:
+            return False
+
+        def post(self, url: str, **_kwargs: object) -> Response:
+            urls.append(url)
+            return Response()
+
+    def create_client(**kwargs: object) -> Client:
+        client_options.append(kwargs)
+        return Client()
+
+    monkeypatch.setattr(module, "create_client", create_client)
+
+    result = HuggingFaceEmbeddingsAdapter().embed(
+        {
+            "input": ["note text"],
+            "model": "org/model",
+            "api_key": "trusted-key",
+            "base_url": "https://pinned-hf.example/models",
+            "credentials_resolved": True,
+            "_runtime_base_url_override": runtime_base_url_override_provenance(),
+        }
+    )
+
+    assert result["data"]
+    assert client_options == [{"timeout": 60.0, "follow_redirects": False}]
+    assert urls == ["https://pinned-hf.example/models/org/model"]
+    assert "ambient-attacker" not in repr(urls)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("status_code", "location"),
+    [
+        (307, "https://cross-origin.example/receive"),
+        (308, "https://cross-origin.example/receive"),
+        (307, "https://pinned-hf.example/models/redirected"),
+    ],
+)
+def test_resolved_huggingface_request_rejects_redirect_without_replaying_note_text(
+    monkeypatch: pytest.MonkeyPatch,
+    status_code: int,
+    location: str,
+) -> None:
+    monkeypatch.delenv("LLM_EMBEDDINGS_NATIVE_HTTP_HUGGINGFACE", raising=False)
+
+    import tldw_Server_API.app.core.LLM_Calls.providers.huggingface_embeddings_adapter as module
+    from tldw_Server_API.app.core.AuthNZ.byok_config import (
+        runtime_base_url_override_provenance,
+    )
+    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatProviderError
+    from tldw_Server_API.app.core.LLM_Calls.providers.huggingface_embeddings_adapter import (
+        HuggingFaceEmbeddingsAdapter,
+    )
+
+    seen: list[tuple[str, bytes]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.url.host, request.content))
+        if len(seen) == 1:
+            return httpx.Response(status_code, headers={"location": location}, json={})
+        return httpx.Response(200, json=[[0.1, 0.2]])
+
+    def create_client(**kwargs: object) -> httpx.Client:
+        return httpx.Client(transport=httpx.MockTransport(handler), **kwargs)
+
+    monkeypatch.setattr(module, "create_client", create_client)
+
+    with pytest.raises(ChatProviderError):
+        HuggingFaceEmbeddingsAdapter().embed(
+            {
+                "input": ["note text must stay pinned"],
+                "model": "org/model",
+                "api_key": "trusted-key",
+                "base_url": "https://pinned-hf.example/models",
+                "credentials_resolved": True,
+                "_runtime_base_url_override": runtime_base_url_override_provenance(),
+            }
+        )
+
+    assert [host for host, _body in seen] == ["pinned-hf.example"]
+    assert b"note text must stay pinned" in seen[0][1]
 
 
 @pytest.mark.unit
