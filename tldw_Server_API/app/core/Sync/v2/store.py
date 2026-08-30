@@ -190,21 +190,17 @@ class SyncV2Store:
         """Atomically persist one device-bound Personal Context link receipt."""
 
         with self.db.backend.transaction() as connection:
-            self.db.execute(
-                """
-                CREATE TABLE IF NOT EXISTS sync_personal_context_link_receipts (
-                    user_id TEXT NOT NULL, dataset_id TEXT NOT NULL, device_id TEXT NOT NULL,
-                    profile_id TEXT NOT NULL, integrity_key_id TEXT NOT NULL,
-                    purge_generation INTEGER NOT NULL, bootstrap_cursor TEXT NOT NULL,
-                    PRIMARY KEY (user_id, dataset_id, device_id)
-                )
-                """,
-                connection=connection,
+            dataset = self.db.get_dataset(
+                dataset_id, owner_user_id=user_id, connection=connection
             )
-            self.db.execute(
-                "DELETE FROM sync_personal_context_link_receipts WHERE user_id = ? AND dataset_id = ? AND device_id = ?",
-                (user_id, dataset_id, device_id), connection=connection,
-            )
+            metadata = dataset.metadata if dataset is not None else {}
+            binding = metadata.get("personal_context") if isinstance(metadata, dict) else None
+            if not isinstance(binding, dict) or (
+                binding.get("profile_id") != profile_id
+                or binding.get("integrity_key_id") != integrity_key_id
+                or binding.get("purge_generation") != purge_generation
+            ):
+                raise SyncStoreError("personal_context_link_binding_stale")
             self.db.execute(
                 """INSERT INTO sync_personal_context_link_receipts
                    (user_id, dataset_id, device_id, profile_id, integrity_key_id, purge_generation, bootstrap_cursor)
