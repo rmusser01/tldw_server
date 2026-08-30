@@ -12,7 +12,7 @@ labels:
 priority: Medium
 dependencies:
 - TASK-13138
-updated_date: 2026-08-30 05:29
+updated_date: 2026-08-30 05:42
 modified_files:
 - Docs/superpowers/specs/2026-08-29-notes-semantic-index-design.md
 - Docs/superpowers/plans/2026-08-29-notes-semantic-index-implementation-plan.md
@@ -68,6 +68,8 @@ Approved executable plan: `Docs/superpowers/plans/2026-08-29-notes-semantic-inde
 - 2026-08-29 Fix Wave 5 (Task 1): Repaired the PostgreSQL race-test lifecycle so observer/worker pools are protected from creation, exact blocked worker PIDs are cancelled/terminated before pool close, both non-daemon threads must exit, and injected assertion cleanup preserves the primary failure. Verification: 5/5 fresh race processes and 63 focused+adjacent tests passed; Ruff, Bandit (test assertions excluded), and `git diff --check` passed. Report: `.superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-1-report.md`.
 - 2026-08-29 Task 1 complete: Added ChaChaNotes v65 semantic configuration, generation, note-state, chunk-manifest, and work-ledger persistence with owner/dataset scoping, forced PostgreSQL RLS, CAS publication/dimension fences, bounded cleanup, canonical digest checks, and deterministic live PostgreSQL concurrency coverage. Independent task review is clean after five bounded fix rounds. Implementation range: `14b4b6464e..6639f7acb6`.
 - 2026-08-29 Task 2 complete: Canonical Note and Sync create/edit/restore/delete paths now update semantic dirty/tombstone work in the same transaction for the authoritative dataset, remain no-ops when disabled/unscoped, and retain generation cleanup identity across hard deletes. Real Notes JSON round-trip and live PostgreSQL product-lifecycle tests close restore, RLS, rollback, conflict-upsert, and cascade risks. Independent review clean. Verification: 26 tests passed; Ruff, Bandit, and diff checks clean. Range: `88d169beef..ac45d93fe3`.
+2026-08-29: Task 3 started in .worktrees/notes-second-brain-planning. Scope: deterministic semantic capability/settings policy and AuthNZ semantic-management permission. Following task-3-brief.md with strict RED/GREEN verification.
+2026-08-29: Task 3 complete. Added deterministic capability/disclosure identities, sanitized endpoint/provider/storage disclosure, durable-credential preflight, bounded semantic operator settings, and AuthNZ migration 096 with revocation-preserving seed behavior for `notes.graph.semantic.manage`. Verification: 39 focused Notes/AuthNZ tests passed (including PostgreSQL), Ruff passed with only existing AuthNZ/settings.py UP045 baseline excluded, Bandit production scan passed, and git diff --check passed. Report: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-3-report.md.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 

@@ -1,0 +1,66 @@
+"""Bounded operator controls for Notes semantic indexing."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+_HARD_MAXIMUMS = {
+    "max_active_notes": 100_000,
+    "max_chunks_per_note": 2_000,
+    "max_chunks_per_run": 100_000,
+    "max_provider_requests_per_run": 10_000,
+    "max_query_neighbors": 100,
+    "max_cleanup_vectors_per_run": 100_000,
+    "max_retries": 10,
+    "retry_backoff_seconds": 3_600,
+    "retry_max_backoff_seconds": 86_400,
+    "pgvector_dimension": 32_768,
+}
+
+
+@dataclass(frozen=True, slots=True)
+class SemanticIndexSettings:
+    """Validated, bounded semantic-index operator policy."""
+
+    indexing_enabled: bool = True
+    max_active_notes: int = 10_000
+    max_chunks_per_note: int = 200
+    max_chunks_per_run: int = 10_000
+    max_provider_requests_per_run: int = 1_000
+    max_query_neighbors: int = 50
+    max_cleanup_vectors_per_run: int = 10_000
+    max_retries: int = 3
+    retry_backoff_seconds: int = 1
+    retry_max_backoff_seconds: int = 60
+    pgvector_allowed_dimensions: frozenset[int] = frozenset({384, 768, 1_024, 1_536, 3_072})
+
+    def __post_init__(self) -> None:
+        if type(self.indexing_enabled) is not bool:
+            raise TypeError("indexing_enabled must be a boolean")
+        for field_name, hard_maximum in _HARD_MAXIMUMS.items():
+            if field_name == "pgvector_dimension":
+                continue
+            value = getattr(self, field_name)
+            if type(value) is not int:
+                raise TypeError(f"{field_name} must be an integer")
+            if value <= 0:
+                raise ValueError(f"{field_name} must be positive")
+            if value > hard_maximum:
+                raise ValueError(f"{field_name} exceeds its hard maximum")
+        if self.retry_backoff_seconds > self.retry_max_backoff_seconds:
+            raise ValueError("retry_backoff_seconds cannot exceed retry_max_backoff_seconds")
+        if not isinstance(self.pgvector_allowed_dimensions, frozenset):
+            raise TypeError("pgvector_allowed_dimensions must be a frozenset")
+        if not self.pgvector_allowed_dimensions:
+            raise ValueError("pgvector_allowed_dimensions cannot be empty")
+        for dimension in self.pgvector_allowed_dimensions:
+            if type(dimension) is not int:
+                raise TypeError("pgvector dimensions must be integers")
+            if dimension <= 0 or dimension > _HARD_MAXIMUMS["pgvector_dimension"]:
+                raise ValueError("pgvector dimensions must be bounded positive integers")
+
+
+DEFAULT_SEMANTIC_INDEX_SETTINGS = SemanticIndexSettings()
+
+
+__all__ = ["DEFAULT_SEMANTIC_INDEX_SETTINGS", "SemanticIndexSettings"]
