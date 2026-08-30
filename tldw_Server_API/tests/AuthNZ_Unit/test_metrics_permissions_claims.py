@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
@@ -74,8 +77,15 @@ def _build_app_with_overrides(
     return app
 
 
-def _main_app_with_override(principal: AuthPrincipal | None, *, fail_with_401: bool = False) -> FastAPI:
+@contextmanager
+def _main_claim_client(
+    principal: AuthPrincipal | None,
+    *,
+    fail_with_401: bool = False,
+) -> Iterator[TestClient]:
     from tldw_Server_API.app import main
+
+    original_overrides = dict(main.app.dependency_overrides)
 
     async def _fake_get_auth_principal(request: Request) -> AuthPrincipal:
         if fail_with_401:
@@ -84,7 +94,12 @@ def _main_app_with_override(principal: AuthPrincipal | None, *, fail_with_401: b
         return principal
 
     main.app.dependency_overrides[auth_deps.get_auth_principal] = _fake_get_auth_principal
-    return main.app
+    try:
+        with TestClient(main.app) as client:
+            yield client
+    finally:
+        main.app.dependency_overrides.clear()
+        main.app.dependency_overrides.update(original_overrides)
 
 
 @pytest.mark.unit
@@ -99,7 +114,7 @@ def test_detailed_metrics_require_system_logs(
     fail_with_401: bool,
     expected: int,
 ):
-    with TestClient(_main_app_with_override(principal, fail_with_401=fail_with_401)) as client:
+    with _main_claim_client(principal, fail_with_401=fail_with_401) as client:
         response = client.get(path)
     assert response.status_code == expected
 
@@ -111,9 +126,23 @@ def test_detailed_metrics_require_system_logs(
     (_make_principal(permissions=[SYSTEM_LOGS]), _make_principal(is_admin=True, roles=["admin"], permissions=[])),
 )
 def test_detailed_metrics_allow_permission_or_admin_bypass(path: str, principal: AuthPrincipal):
-    with TestClient(_main_app_with_override(principal)) as client:
+    with _main_claim_client(principal) as client:
         response = client.get(path)
     assert response.status_code not in {401, 403}
+
+
+@pytest.mark.unit
+def test_metrics_claim_client_restores_dependency_overrides_after_each_use():
+    from tldw_Server_API.app import main
+
+    original = dict(main.app.dependency_overrides)
+    for principal in (
+        _make_principal(permissions=[]),
+        _make_principal(permissions=[SYSTEM_LOGS]),
+    ):
+        with _main_claim_client(principal):
+            assert auth_deps.get_auth_principal in main.app.dependency_overrides
+        assert main.app.dependency_overrides == original
 
 
 @pytest.mark.unit

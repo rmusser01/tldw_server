@@ -1,7 +1,14 @@
 from __future__ import annotations
 
+import json
+import os
+import shutil
+
+# This contract test runs a locally resolved docker binary with fixed argv and no shell.
+import subprocess  # nosec B404
 from pathlib import Path
 
+import pytest
 import yaml
 
 DOCKERFILE = Path("Dockerfiles/Dockerfile.prod")
@@ -71,17 +78,66 @@ def test_prometheus_uses_scoped_bearer_credential_file() -> None:
     }
 
 
-def test_monitoring_composes_mount_operator_credential_and_bind_loopback() -> None:
-    credential_mount = (
-        "${TLDW_METRICS_API_KEY_FILE:?Set a mode-0600 API-key file whose principal "
-        "has system.logs}:/run/secrets/tldw_metrics_api_key:ro"
-    )
-
+def test_monitoring_composes_stage_operator_credential_for_non_root_prometheus() -> None:
     for path in MONITORING_COMPOSE_FILES:
         compose = _yaml(path)
-        assert credential_mount in compose["services"]["prometheus"]["volumes"], path
+        services = compose["services"]
+        init = services["metrics-credential-init"]
+        prometheus = services["prometheus"]
+
+        assert init["network_mode"] == "none", path
+        assert "networks" not in init, path
+        assert init["read_only"] is True, path
+        assert init["restart"] == "no", path
+        assert init["user"] == "0:0", path
+        assert init["security_opt"] == ["no-new-privileges:true"], path
+        assert init["cap_drop"] == ["ALL"], path
+        assert set(init["cap_add"]) == {
+            "CHOWN",
+            "DAC_OVERRIDE",
+            "SETGID",
+            "SETUID",
+        }, path
+        assert ":?" in init["image"] and ":-" not in init["image"], path
+        assert {key: init["environment"][key] for key in ("PROMETHEUS_UID", "PROMETHEUS_GID")} == {
+            "PROMETHEUS_UID": "${PROMETHEUS_UID:?Set the numeric UID used by the pinned Prometheus image}",
+            "PROMETHEUS_GID": "${PROMETHEUS_GID:?Set the numeric GID used by the pinned Prometheus image}",
+        }, path
+
+        init_volumes = init["volumes"]
+        assert any(
+            volume.startswith("${TLDW_METRICS_API_KEY_FILE:?")
+            and volume.endswith(":/run/source/tldw_metrics_api_key:ro")
+            for volume in init_volumes
+        ), path
+        assert "metrics_credential:/run/staged" in init_volumes, path
+
+        script = "\n".join(init["command"])
+        for contract in (
+            "os.O_NOFOLLOW",
+            "os.fchmod(target_fd, 0o400)",
+            "os.fchown(target_fd, uid, gid)",
+            "os.replace(temporary, target)",
+            "os.setgroups([])",
+            "os.setgid(gid)",
+            "os.setuid(uid)",
+            "os.read(check_fd, 1)",
+        ):
+            assert contract in script, (path, contract)
+
+        assert prometheus["user"] == (
+            "${PROMETHEUS_UID:?Set the numeric UID used by the pinned Prometheus image}:"
+            "${PROMETHEUS_GID:?Set the numeric GID used by the pinned Prometheus image}"
+        ), path
+        assert prometheus["depends_on"]["metrics-credential-init"] == {
+            "condition": "service_completed_successfully"
+        }, path
+        assert "metrics_credential:/run/secrets:ro" in prometheus["volumes"], path
+        assert not any("TLDW_METRICS_API_KEY_FILE" in volume for volume in prometheus["volumes"]), path
+        assert compose["volumes"]["metrics_credential"] == {}, path
+
         for service_name in ("prometheus", "alertmanager", "grafana"):
-            for published_port in compose["services"][service_name]["ports"]:
+            for published_port in services[service_name]["ports"]:
                 assert str(published_port).startswith("127.0.0.1:"), (
                     path,
                     service_name,
@@ -93,6 +149,81 @@ def test_monitoring_composes_mount_operator_credential_and_bind_loopback() -> No
     )
     assert "Bearer " not in tracked_text
     assert "tldw_sk_" not in tracked_text
+
+
+def test_production_alertmanager_requires_an_operator_owned_absolute_config() -> None:
+    compose = _yaml(MONITORING_COMPOSE_FILES[1])
+    config_mount = compose["services"]["alertmanager"]["volumes"][0]
+
+    assert config_mount.startswith("${ALERTMANAGER_CONFIG:?")
+    assert config_mount.endswith(":/etc/alertmanager/alertmanager.yml:ro")
+    assert ":-" not in config_mount
+    assert "alertmanager_webhook_only.yml" not in MONITORING_COMPOSE_FILES[1].read_text(encoding="utf-8")
+
+
+def test_production_monitoring_render_preserves_private_credential_boundary(tmp_path: Path) -> None:
+    docker = shutil.which("docker")
+    if docker is None:
+        pytest.skip("docker compose is not available")
+    # The executable is locally resolved and every argv element is fixed.
+    version = subprocess.run(  # nosec B603
+        [docker, "compose", "version"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if version.returncode != 0:
+        pytest.skip("docker compose is not available")
+
+    metrics_key = tmp_path / "tldw-metrics-key"
+    alertmanager_config = tmp_path / "tldw-alertmanager.yml"
+    env = {
+        **os.environ,
+        "TLDW_APP_IMAGE": ("ghcr.io/example/tldw@sha256:" + "a" * 64),
+        "PROMETHEUS_IMAGE": "prom/prometheus:v2.55.1",
+        "ALERTMANAGER_IMAGE": "prom/alertmanager:v0.30.1",
+        "GRAFANA_IMAGE": "grafana/grafana:11.5.2",
+        "PROMETHEUS_UID": "65534",
+        "PROMETHEUS_GID": "65534",
+        "TLDW_METRICS_API_KEY_FILE": str(metrics_key),
+        "ALERTMANAGER_CONFIG": str(alertmanager_config),
+        "GRAFANA_ADMIN_USER": "tldw-operator",
+        "GRAFANA_ADMIN_PASSWORD": tmp_path.name,
+    }
+    # The executable is locally resolved and every argv element is fixed.
+    rendered = subprocess.run(  # nosec B603
+        [
+            docker,
+            "compose",
+            "-f",
+            str(MONITORING_COMPOSE_FILES[1]),
+            "config",
+            "--format",
+            "json",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+    )
+
+    assert rendered.returncode == 0, rendered.stderr
+    compose = json.loads(rendered.stdout)
+    init = compose["services"]["metrics-credential-init"]
+    prometheus = compose["services"]["prometheus"]
+    alertmanager = compose["services"]["alertmanager"]
+    assert init["network_mode"] == "none"
+    init_source = next(volume for volume in init["volumes"] if volume["target"] == "/run/source/tldw_metrics_api_key")
+    assert init_source["type"] == "bind"
+    assert init_source["source"] == str(metrics_key)
+    assert init_source["read_only"] is True
+    assert prometheus["user"] == "65534:65534"
+    staged_secret = next(volume for volume in prometheus["volumes"] if volume["target"] == "/run/secrets")
+    assert staged_secret["type"] == "volume"
+    assert staged_secret["source"] == "metrics_credential"
+    assert staged_secret["read_only"] is True
+    assert prometheus["depends_on"]["metrics-credential-init"]["condition"] == ("service_completed_successfully")
+    assert alertmanager["volumes"][0]["source"] == str(alertmanager_config)
 
 
 def test_production_monitoring_limits_edge_access_to_prometheus() -> None:

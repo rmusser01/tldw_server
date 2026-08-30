@@ -29,6 +29,12 @@ def _reference_link_target(path: Path) -> Path:
     return (path.parent / match.group(1)).resolve()
 
 
+def _declared_operator_api_paths() -> set[str]:
+    from tldw_Server_API.app.api.v1.endpoints import health, metrics
+
+    return {f"/api/v1{route.path}" for router in (health.router, metrics.router) for route in router.routes}
+
+
 def test_reference_runbook_covers_the_fail_closed_operator_workflow() -> None:
     text = RUNBOOK.read_text(encoding="utf-8")
     commands = _shell_blocks(text)
@@ -62,6 +68,30 @@ def test_reference_runbook_covers_the_fail_closed_operator_workflow() -> None:
     assert "redis-check-rdb" in text
     assert "archive inspection" in text.lower()
     assert "disposable restore drill" in text.lower()
+
+
+def test_executable_operator_api_checks_use_declared_routes() -> None:
+    commands = _shell_blocks(RUNBOOK.read_text(encoding="utf-8"))
+    match = re.search(r"for path in ([^;]+); do", commands)
+    assert match is not None
+    executable_paths = set(match.group(1).split())
+
+    assert executable_paths == {"/api/v1/health", "/api/v1/metrics/text"}
+    assert executable_paths <= _declared_operator_api_paths()
+
+
+def test_monitoring_runbook_requires_operator_inputs_and_explains_networking() -> None:
+    text = RUNBOOK.read_text(encoding="utf-8")
+    commands = _shell_blocks(text)
+
+    assert "ALERTMANAGER_CONFIG=/" in commands
+    assert 'test "${ALERTMANAGER_CONFIG#/}" != "$ALERTMANAGER_CONFIG"' in commands
+    assert "PROMETHEUS_UID" in commands
+    assert "PROMETHEUS_GID" in commands
+    assert '--env-file "$PRODUCTION_ENV_FILE"' in commands
+    assert "receiver" in text.lower()
+    assert "outbound webhook" in text.lower()
+    assert "network is not marked `internal`" in text
 
 
 def test_reference_runbook_assigns_each_deferred_boundary_to_the_right_task() -> None:

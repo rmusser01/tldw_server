@@ -155,7 +155,7 @@ in-container request sends it using the standard `Authorization: Bearer`
 header.
 
 ```bash
-for path in /api/v1/health/detailed /api/v1/metrics/text; do
+for path in /api/v1/health /api/v1/metrics/text; do
   docker compose --env-file "$PRODUCTION_ENV_FILE" \
     -f Dockerfiles/docker-compose.production.yml \
     exec -T -e TLDW_OPERATOR_TOKEN app python -c \
@@ -188,38 +188,61 @@ unset TLDW_METRICS_API_KEY
 chmod 600 "$TLDW_METRICS_API_KEY_FILE"
 ```
 
-Pin the monitoring images and create Grafana credentials without echoing the
-password. Then start the standalone production monitoring companion after the
-main production stack is healthy:
+Pin the monitoring images. Resolve the non-root UID and GID from that exact
+Prometheus image; the credential-init service fails if either identity is root.
+Provide an absolute, operator-managed Alertmanager configuration. That file owns
+the production routing tree, receivers, and receiver credentials: the checked-in
+webhook-only file is a non-production example and is never a production default.
+Then create Grafana credentials without echoing the password and start the
+standalone production monitoring companion after the main production stack is
+healthy:
 
 ```bash
 export PROMETHEUS_IMAGE=prom/prometheus:v2.55.1
 export ALERTMANAGER_IMAGE=prom/alertmanager:v0.30.1
 export GRAFANA_IMAGE=grafana/grafana:11.5.2
+export PROMETHEUS_UID="$(docker run --rm --network none --entrypoint id "$PROMETHEUS_IMAGE" -u)"
+export PROMETHEUS_GID="$(docker run --rm --network none --entrypoint id "$PROMETHEUS_IMAGE" -g)"
+test "$PROMETHEUS_UID" -gt 0
+test "$PROMETHEUS_GID" -gt 0
+export ALERTMANAGER_CONFIG=/srv/tldw/secrets/alertmanager.yml
+test "${ALERTMANAGER_CONFIG#/}" != "$ALERTMANAGER_CONFIG"
+test -r "$ALERTMANAGER_CONFIG"
 export GRAFANA_ADMIN_USER=tldw-operator
 printf 'Grafana admin password: ' >&2
 IFS= read -r -s GRAFANA_ADMIN_PASSWORD
 printf '\n' >&2
 export GRAFANA_ADMIN_PASSWORD
-docker compose -f Dockerfiles/Monitoring/docker-compose.production.yml \
+docker compose --env-file "$PRODUCTION_ENV_FILE" \
+  -f Dockerfiles/Monitoring/docker-compose.production.yml \
   up -d --wait
 ```
 
-`Dockerfiles/Monitoring/docker-compose.production.yml` mounts the API-key file
-read only at `/run/secrets/tldw_metrics_api_key`. Only Prometheus joins the
-existing `tldw-production_edge` network to scrape `app:8000`; Alertmanager and
-Grafana remain on the companion's separate monitoring network. Prometheus uses
-the key as a Bearer credential for `/api/v1/metrics/text`. All three services
-publish only on host loopback; use an authenticated SSH tunnel for remote
-operator access. The legacy `docker-compose.monitoring.yml` is a non-production
-customization overlay and is not compatible with the standalone production
-boundary.
+`Dockerfiles/Monitoring/docker-compose.production.yml` gives the mode-0600 host
+file only to a fail-stop credential-init container. The init container has no
+network, a read-only root filesystem, no-new-privileges, and only the capabilities
+needed to read the owner-only bind, set ownership, and drop to the pinned
+Prometheus identity. It atomically stages a mode-0400 copy in a private named
+volume, proves that identity can read a nonempty credential, and exits. Prometheus
+starts only after that successful proof and mounts only the staged volume read
+only at `/run/secrets`.
+
+Only Prometheus joins the existing `tldw-production_edge` network to scrape
+`app:8000`; Alertmanager and Grafana remain on the companion's separate
+monitoring network. The monitoring network is not marked `internal` because
+Alertmanager receivers may require outbound webhook delivery. That outbound
+path does not add an inbound edge path: all three services publish only on host
+loopback, and remote operators must use an authenticated SSH tunnel. Prometheus
+uses the staged key as a Bearer credential for `/api/v1/metrics/text`. The legacy
+`docker-compose.monitoring.yml` is a non-production customization overlay and is
+not compatible with the standalone production boundary.
 
 Rotate the API key and file together, then reload Prometheus. Stop monitoring
 without removing its Grafana data by omitting `-v`:
 
 ```bash
-docker compose -f Dockerfiles/Monitoring/docker-compose.production.yml down
+docker compose --env-file "$PRODUCTION_ENV_FILE" \
+  -f Dockerfiles/Monitoring/docker-compose.production.yml down
 ```
 
 ## 7. Upgrade and restore-backed rollback
