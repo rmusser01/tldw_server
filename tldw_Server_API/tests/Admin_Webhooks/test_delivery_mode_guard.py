@@ -280,3 +280,70 @@ async def test_production_composition_denies_without_resource_initialization(
     assert len(audits) == 1
     assert audits[0].outcome == "denied"
     assert audits[0].reason_code is expected_code
+
+
+@pytest.mark.asyncio
+async def test_production_composition_constructs_all_resources_in_on_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.Admin_Webhooks import crypto, observability
+    from tldw_Server_API.app.core.AuthNZ import database
+    from tldw_Server_API.app.core.DB_Management import (
+        admin_webhooks_repository,
+    )
+
+    pool = object()
+    repository = object()
+    executor = object()
+    metrics = object()
+    key_result = WebhookKeyRingLoadResult(
+        ring=None,
+        code=WebhookKeyLoadCode.KEY_UNAVAILABLE,
+    )
+    calls: list[tuple[str, object]] = []
+
+    async def _get_pool() -> object:
+        calls.append(("pool", pool))
+        return pool
+
+    def _repository(value: object) -> object:
+        calls.append(("repository", value))
+        return repository
+
+    def _key_ring() -> WebhookKeyRingLoadResult:
+        calls.append(("key_ring", key_result))
+        return key_result
+
+    def _executor(*, allow_http_dev: bool) -> object:
+        calls.append(("executor", allow_http_dev))
+        return executor
+
+    def _metrics() -> object:
+        calls.append(("metrics", metrics))
+        return metrics
+
+    monkeypatch.setenv("TLDW_ADMIN_WEBHOOKS_MODE", "on")
+    monkeypatch.setenv("TLDW_ADMIN_WEBHOOKS_LEGACY_COMPAT", "false")
+    monkeypatch.setattr(database, "get_db_pool", _get_pool)
+    monkeypatch.setattr(
+        admin_webhooks_repository,
+        "AdminWebhookRepository",
+        _repository,
+    )
+    monkeypatch.setattr(crypto, "load_webhook_key_ring", _key_ring)
+    monkeypatch.setattr(delivery, "DeliveryAttemptExecutor", _executor)
+    monkeypatch.setattr(observability, "AdminWebhookMetrics", _metrics)
+
+    service = await delivery.get_admin_webhook_delivery_service()
+
+    assert calls == [
+        ("pool", pool),
+        ("repository", pool),
+        ("key_ring", key_result),
+        ("executor", False),
+        ("metrics", metrics),
+    ]
+    assert service._repository is repository
+    assert service._key_ring_result is key_result
+    assert service._executor is executor
+    assert service._metrics is metrics

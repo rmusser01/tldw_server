@@ -39,6 +39,7 @@ from tldw_Server_API.app.core.Jobs.operations.contracts import (
     ReleaseJobCommand,
     RenewLeaseCommand,
     admin_webhook_disposition_marker_matches,
+    canonical_admin_webhook_row_matches,
     prepared_disposition_fingerprint,
     project_admin_webhook_disposition_marker,
 )
@@ -60,6 +61,51 @@ def _token(character: str = "a") -> str:
 
 def _aware(seconds: int = 0) -> datetime:
     return datetime(2026, 8, 28, tzinfo=timezone.utc) + timedelta(seconds=seconds)
+
+
+def _terminal_complete_row() -> tuple[dict[str, object], PreparedJobDisposition]:
+    delivery_id = _uuid()
+    attempt_id = _uuid()
+    disposition = PreparedJobDisposition.complete(
+        token=_token("7"),
+        delivery_id=delivery_id,
+        attempt_id=attempt_id,
+    )
+    marker = {
+        "schema_version": 1,
+        "token": disposition.token,
+        "kind": disposition.kind.value,
+        "origin": disposition.origin.value,
+        "delivery_id": delivery_id,
+        "attempt_id": attempt_id,
+        "applied_at": _aware().isoformat(),
+    }
+    return (
+        {
+            "uuid": _uuid(),
+            "domain": "admin_webhooks",
+            "queue": "delivery",
+            "job_type": "admin_webhook_delivery",
+            "payload": {"delivery_id": delivery_id},
+            "idempotency_key": f"admin-webhook-delivery:{delivery_id}",
+            "owner_user_id": None,
+            "project_id": None,
+            "batch_group": None,
+            "priority": 5,
+            "max_retries": 3,
+            "status": "completed",
+            "available_at": None,
+            "result": marker,
+            "completion_token": disposition.token,
+            "prepared_disposition_fingerprint": (
+                prepared_disposition_fingerprint(disposition)
+            ),
+            "no_attempt_recovery_fingerprint": None,
+            "expired_lease_policy": "requeue_no_attempt",
+            "quarantine_threshold": 5,
+        },
+        disposition,
+    )
 
 
 def test_prepared_disposition_factories_build_the_closed_protocol() -> None:
@@ -143,44 +189,11 @@ def test_no_attempt_fail_is_limited_to_an_explicit_authnz_terminal_fact() -> Non
 
 
 def test_admin_webhook_marker_projection_is_strict_bounded_and_fingerprint_exact() -> None:
-    delivery_id = _uuid()
-    attempt_id = _uuid()
-    disposition = PreparedJobDisposition.complete(
-        token=_token("7"),
-        delivery_id=delivery_id,
-        attempt_id=attempt_id,
-    )
-    marker = {
-        "schema_version": 1,
-        "token": disposition.token,
-        "kind": disposition.kind.value,
-        "origin": disposition.origin.value,
-        "delivery_id": delivery_id,
-        "attempt_id": attempt_id,
-        "applied_at": _aware().isoformat(),
-    }
-    row = {
-        "uuid": _uuid(),
-        "domain": "admin_webhooks",
-        "queue": "delivery",
-        "job_type": "admin_webhook_delivery",
-        "payload": {"delivery_id": delivery_id},
-        "idempotency_key": f"admin-webhook-delivery:{delivery_id}",
-        "owner_user_id": None,
-        "project_id": None,
-        "batch_group": None,
-        "priority": 5,
-        "max_retries": 3,
-        "status": "completed",
-        "available_at": None,
-        "result": marker,
-        "prepared_disposition_fingerprint": prepared_disposition_fingerprint(
-            disposition
-        ),
-        "no_attempt_recovery_fingerprint": None,
-        "expired_lease_policy": "requeue_no_attempt",
-        "quarantine_threshold": 5,
-    }
+    row, disposition = _terminal_complete_row()
+    delivery_id = disposition.delivery_id
+    attempt_id = disposition.attempt_id
+    marker = row["result"]
+    assert isinstance(marker, dict)
 
     projected = project_admin_webhook_disposition_marker(
         row,
@@ -204,6 +217,57 @@ def test_admin_webhook_marker_projection_is_strict_bounded_and_fingerprint_exact
         {**row, "result": "{" + "x" * 4096 + "}"},
         expected_payload={"delivery_id": delivery_id},
     ) is None
+
+    preserved = project_admin_webhook_disposition_marker(
+        {**row, "prepared_disposition_fingerprint": _token("b")},
+        expected_payload={"delivery_id": delivery_id},
+    )
+    assert preserved is not None
+    assert preserved.fingerprint == _token("b")
+    assert not admin_webhook_disposition_marker_matches(
+        preserved,
+        disposition,
+    )
+
+
+@pytest.mark.parametrize(
+    "corruption",
+    ("proof_absent", "status_kind", "completion_token"),
+)
+def test_terminal_admin_webhook_row_requires_correlated_proof(
+    corruption: str,
+) -> None:
+    row, disposition = _terminal_complete_row()
+    if corruption == "proof_absent":
+        row["result"] = None
+        row["prepared_disposition_fingerprint"] = None
+    elif corruption == "status_kind":
+        marker = row["result"]
+        assert isinstance(marker, dict)
+        row["result"] = {**marker, "kind": "fail"}
+    else:
+        row["completion_token"] = _token("c")
+
+    assert not canonical_admin_webhook_row_matches(
+        row,
+        expected_payload={"delivery_id": disposition.delivery_id},
+    )
+
+
+@pytest.mark.parametrize("status", ("queued", "processing"))
+def test_nonterminal_admin_webhook_row_allows_no_initial_marker(status: str) -> None:
+    row, disposition = _terminal_complete_row()
+    row.update(
+        status=status,
+        result=None,
+        completion_token=None,
+        prepared_disposition_fingerprint=None,
+    )
+
+    assert canonical_admin_webhook_row_matches(
+        row,
+        expected_payload={"delivery_id": disposition.delivery_id},
+    )
 
 
 @pytest.mark.parametrize("token", ["a" * 63, "A" * 64, "g" * 64, "a" * 65])

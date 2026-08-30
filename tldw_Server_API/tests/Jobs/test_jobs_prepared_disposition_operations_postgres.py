@@ -185,7 +185,16 @@ def test_postgres_prune_preserves_unacknowledged_canonical_disposition_proof(
 
 @pytest.mark.parametrize(
     "corruption",
-    ("payload", "uuid", "controls", "marker", "fingerprint"),
+    (
+        "payload",
+        "uuid",
+        "controls",
+        "marker",
+        "fingerprint",
+        "proof_absent",
+        "status_kind",
+        "completion_token",
+    ),
 )
 def test_postgres_prune_rolls_back_malformed_reserved_canonical_evidence(
     jobs_pg_dsn,
@@ -241,10 +250,28 @@ def test_postgres_prune_rolls_back_malformed_reserved_canonical_evidence(
                 "UPDATE jobs SET result='{}'::jsonb WHERE id=%s",
                 (job["id"],),
             )
-        else:
+        elif corruption == "fingerprint":
             cur.execute(
                 "UPDATE jobs SET prepared_disposition_fingerprint=NULL WHERE id=%s",
                 (job["id"],),
+            )
+        elif corruption == "proof_absent":
+            cur.execute(
+                "UPDATE jobs SET result=NULL, "
+                "prepared_disposition_fingerprint=NULL WHERE id=%s",
+                (job["id"],),
+            )
+        elif corruption == "status_kind":
+            cur.execute(
+                "UPDATE jobs SET result=jsonb_set(result, '{kind}', "
+                "to_jsonb(%s::text)) "
+                "WHERE id=%s",
+                ("fail", job["id"]),
+            )
+        else:
+            cur.execute(
+                "UPDATE jobs SET completion_token=%s WHERE id=%s",
+                (_token("8"), job["id"]),
             )
 
     with pytest.raises(IdempotentOperationUnavailableError):
@@ -652,13 +679,29 @@ def test_postgres_identity_lookup_is_read_only_and_fails_closed_on_ambiguity(
     )
     assert missing.state is JobIdentityLookupState.MISSING
 
+    acquired = _acquire(manager)
+    disposition = PreparedJobDisposition.complete(
+        token=_token("6"),
+        delivery_id=job["payload"]["delivery_id"],
+        attempt_id=str(uuid4()),
+    )
+    assert _apply(
+        manager,
+        job,
+        disposition,
+        leased=acquired,
+    ).outcome is OperationOutcome.APPLIED
+    persisted = manager.get_job(int(job["id"]))
+
     with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO jobs_archive(id, uuid, domain, queue, job_type, "
             "idempotency_key, payload, result, status, priority, max_retries, "
-            "expired_lease_policy, quarantine_threshold) "
-            "VALUES(%s,%s,%s,%s,%s,%s,%s::jsonb,NULL,'completed',5,3,"
-            "'requeue_no_attempt',5)",
+            "expired_lease_policy, quarantine_threshold, "
+            "prepared_disposition_fingerprint, "
+            "no_attempt_recovery_fingerprint, completion_token) "
+            "VALUES(%s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,'completed',5,3,"
+            "'requeue_no_attempt',5,%s,NULL,%s)",
             (
                 job["id"],
                 job["uuid"],
@@ -667,6 +710,9 @@ def test_postgres_identity_lookup_is_read_only_and_fails_closed_on_ambiguity(
                 job["job_type"],
                 job["idempotency_key"],
                 psycopg.types.json.Jsonb(job["payload"]),
+                psycopg.types.json.Jsonb(persisted["result"]),
+                persisted["prepared_disposition_fingerprint"],
+                disposition.token,
             ),
         )
         cur.execute("DELETE FROM jobs WHERE id=%s", (job["id"],))
@@ -676,9 +722,11 @@ def test_postgres_identity_lookup_is_read_only_and_fails_closed_on_ambiguity(
         cur.execute(
             "INSERT INTO jobs_archive(id, uuid, domain, queue, job_type, "
             "idempotency_key, payload, result, status, priority, max_retries, "
-            "expired_lease_policy, quarantine_threshold) "
-            "VALUES(%s,%s,%s,%s,%s,%s,%s::jsonb,NULL,'completed',5,3,"
-            "'requeue_no_attempt',5)",
+            "expired_lease_policy, quarantine_threshold, "
+            "prepared_disposition_fingerprint, "
+            "no_attempt_recovery_fingerprint, completion_token) "
+            "VALUES(%s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,'completed',5,3,"
+            "'requeue_no_attempt',5,%s,NULL,%s)",
             (
                 int(job["id"]) + 1,
                 str(uuid4()),
@@ -687,6 +735,9 @@ def test_postgres_identity_lookup_is_read_only_and_fails_closed_on_ambiguity(
                 job["job_type"],
                 job["idempotency_key"],
                 psycopg.types.json.Jsonb(job["payload"]),
+                psycopg.types.json.Jsonb(persisted["result"]),
+                persisted["prepared_disposition_fingerprint"],
+                disposition.token,
             ),
         )
     assert manager.find_job_by_identity(command).state is JobIdentityLookupState.CONFLICT

@@ -27,6 +27,7 @@ from .operations.contracts import (
     ADMIN_WEBHOOK_DELIVERY_QUARANTINE_THRESHOLD,
     ADMIN_WEBHOOK_DELIVERY_QUEUE,
     ExpiredLeasePolicy,
+    canonical_admin_webhook_delivery_id,
     reconstruct_legacy_admin_webhook_archive_fingerprint,
 )
 
@@ -951,7 +952,10 @@ def _upgrade_legacy_admin_webhook_archives_pg(cur: Any) -> None:
     """Backfill only strictly reconstructable reserved archive evidence."""
 
     cur.execute(
-        "SELECT * FROM jobs_archive WHERE domain=%s AND queue=%s "
+        "SELECT *, "
+        "payload IS NOT NULL AS __slides_archive_payload_present, "
+        "result IS NOT NULL AS __slides_archive_result_present "
+        "FROM jobs_archive WHERE domain=%s AND queue=%s "
         "AND job_type=%s FOR UPDATE",
         (
             ADMIN_WEBHOOK_DELIVERY_DOMAIN,
@@ -963,10 +967,24 @@ def _upgrade_legacy_admin_webhook_archives_pg(cur: Any) -> None:
         str(item.name if hasattr(item, "name") else item[0])
         for item in cur.description or ()
     )
+    prepared_rows: list[tuple[dict[str, Any], str | None]] = []
+    delivery_ids: set[str] = set()
+    idempotency_keys: set[str] = set()
     for values in cur.fetchall() or ():
         row = values if isinstance(values, dict) else dict(zip(columns, values))
         row = normalize_slides_archive_projection(row)
         fingerprint = reconstruct_legacy_admin_webhook_archive_fingerprint(row)
+        delivery_id = canonical_admin_webhook_delivery_id(row.get("payload"))
+        idempotency_key = row.get("idempotency_key")
+        if delivery_id in delivery_ids or idempotency_key in idempotency_keys:
+            raise RuntimeError(
+                "duplicate canonical admin webhook archive identity"
+            )
+        delivery_ids.add(delivery_id)
+        idempotency_keys.add(idempotency_key)
+        prepared_rows.append((row, fingerprint))
+
+    for row, fingerprint in prepared_rows:
         if fingerprint is None:
             continue
         cur.execute(
@@ -1504,9 +1522,11 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
                     """
             )
             conn.commit()
+        _ensure_pg_archive_locators(_dsn)
         # Forward-migrate older installs: add missing columns that newer code expects
         required_migration_exceptions = (
             psycopg.Error,
+            SlidesArchiveNormalizationError,
             *_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS,
         )
         try:
@@ -1578,7 +1598,6 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
             except required_migration_exceptions:
                 # Best-effort; existing installs may restrict optional columns.
                 pass
-        _ensure_pg_archive_locators(_dsn)
         # Audit before creating the standalone archive indexes.
         slides_diagnostic: str | None = "ambiguous_generation_legacy_row"
         with psycopg.connect(_dsn) as audit_conn, audit_conn.cursor() as audit_cur:

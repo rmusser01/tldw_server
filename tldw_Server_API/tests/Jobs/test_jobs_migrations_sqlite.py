@@ -22,6 +22,7 @@ from tldw_Server_API.app.core.Jobs.operations.contracts import (
     JobIdentityLookupState,
     PreparedJobDisposition,
     admin_webhook_disposition_marker_matches,
+    prepared_disposition_fingerprint,
     project_admin_webhook_disposition_marker,
 )
 
@@ -32,8 +33,8 @@ _LEGACY_TOKEN = "a" * 64
 _LEGACY_APPLIED_AT = "2026-08-29T12:34:56+00:00"
 
 
-def _legacy_execution_control_ddl() -> str:
-    return JOBS_SQLITE_DDL.replace(
+def _legacy_execution_control_ddl(*, archive_locator: bool = True) -> str:
+    ddl = JOBS_SQLITE_DDL.replace(
         "  expired_lease_policy TEXT NOT NULL DEFAULT 'consume_retry' "
         "CHECK (expired_lease_policy IN ('consume_retry','requeue_no_attempt')),\n",
         "",
@@ -58,6 +59,12 @@ def _legacy_execution_control_ddl() -> str:
         "  ),\n",
         "",
     )
+    if not archive_locator:
+        ddl = ddl.replace(
+            "  archive_id INTEGER PRIMARY KEY AUTOINCREMENT,\n",
+            "",
+        )
+    return ddl
 
 
 def _legacy_complete_marker() -> dict[str, object]:
@@ -79,7 +86,10 @@ def _insert_legacy_canonical_archive(
     status: str,
     job_uuid: str = _LEGACY_JOB_UUID,
     completion_token: str = _LEGACY_TOKEN,
+    error_message: str | None = None,
     error_code: str | None = None,
+    last_error: str | None = None,
+    cancellation_reason: str | None = None,
     failure_streak_code: str | None = None,
     retry_count: int = 0,
     available_at: str | None = None,
@@ -110,11 +120,12 @@ def _insert_legacy_canonical_archive(
         "id, uuid, domain, queue, job_type, owner_user_id, project_id, "
         "batch_group, idempotency_key, payload, result, payload_compressed, "
         "result_compressed, status, priority, "
-        "max_retries, retry_count, available_at, error_code, "
+        "max_retries, retry_count, available_at, error_message, error_code, "
+        "last_error, cancellation_reason, "
         "failure_streak_code, completion_token, completed_at, archived_at"
         ") VALUES(?, ?, 'admin_webhooks', 'delivery', "
         "'admin_webhook_delivery', NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, 5, 3, "
-        "?, ?, ?, ?, ?, ?, ?)",
+        "?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             41,
             job_uuid,
@@ -126,7 +137,10 @@ def _insert_legacy_canonical_archive(
             status,
             retry_count,
             available_at,
+            error_message,
             error_code,
+            last_error,
+            cancellation_reason,
             failure_streak_code,
             completion_token,
             _LEGACY_APPLIED_AT,
@@ -389,6 +403,7 @@ def test_sqlite_upgrade_reconstructs_strict_legacy_canonical_archive(tmp_path):
         )
 
     ensure_jobs_tables(db_path)
+    ensure_jobs_tables(db_path)
 
     manager = JobManager(db_path)
     command = FindJobByIdentityCommand(
@@ -419,6 +434,199 @@ def test_sqlite_upgrade_reconstructs_strict_legacy_canonical_archive(tmp_path):
     )
     assert marker is not None
     assert admin_webhook_disposition_marker_matches(marker, disposition)
+
+
+@pytest.mark.parametrize(
+    ("kind", "status", "reason"),
+    (
+        ("fail", "failed", "receiver_400"),
+        ("cancel", "cancelled", "registration_disabled"),
+    ),
+)
+def test_sqlite_upgrade_reconstructs_exact_terminal_reason_evidence(
+    tmp_path,
+    kind: str,
+    status: str,
+    reason: str,
+) -> None:
+    db_path = tmp_path / f"legacy_canonical_{kind}_archive.db"
+    marker = {**_legacy_complete_marker(), "kind": kind}
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(_legacy_execution_control_ddl())
+        _insert_legacy_canonical_archive(
+            conn,
+            marker=marker,
+            status=status,
+            error_message=reason if kind == "fail" else None,
+            error_code=reason if kind == "fail" else None,
+            last_error=reason if kind == "fail" else None,
+            cancellation_reason=reason if kind == "cancel" else None,
+            sidecar_only=True,
+        )
+
+    ensure_jobs_tables(db_path)
+    ensure_jobs_tables(db_path)
+
+    manager = JobManager(db_path)
+    command = FindJobByIdentityCommand(
+        domain="admin_webhooks",
+        queue="delivery",
+        job_type="admin_webhook_delivery",
+        idempotency_key=f"admin-webhook-delivery:{_LEGACY_DELIVERY_ID}",
+        expected_payload={"delivery_id": _LEGACY_DELIVERY_ID},
+    )
+    found = manager.find_job_by_identity(command)
+    assert found.state is JobIdentityLookupState.ARCHIVED
+    assert found.row is not None
+    projected = project_admin_webhook_disposition_marker(
+        found.row,
+        expected_payload=command.expected_payload,
+        archived=True,
+    )
+    disposition = (
+        PreparedJobDisposition.fail(
+            token=_LEGACY_TOKEN,
+            delivery_id=_LEGACY_DELIVERY_ID,
+            attempt_id=_LEGACY_ATTEMPT_ID,
+            reason_code=reason,
+        )
+        if kind == "fail"
+        else PreparedJobDisposition.cancel(
+            token=_LEGACY_TOKEN,
+            delivery_id=_LEGACY_DELIVERY_ID,
+            attempt_id=_LEGACY_ATTEMPT_ID,
+            reason_code=reason,
+        )
+    )
+    assert projected is not None
+    assert admin_webhook_disposition_marker_matches(projected, disposition)
+
+
+def test_sqlite_canonical_upgrade_projects_primary_presence(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    db_path = tmp_path / "legacy_presence_projection.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(_legacy_execution_control_ddl())
+        _insert_legacy_canonical_archive(
+            conn,
+            marker=_legacy_complete_marker(),
+            status="completed",
+            sidecar_only=True,
+        )
+
+    observed: list[tuple[object, object]] = []
+    normalize = jobs_migrations.normalize_slides_archive_projection
+
+    def _record_presence(row):
+        values = dict(row)
+        if values.get("domain") == "admin_webhooks":
+            observed.append(
+                (
+                    values.get(jobs_migrations.SLIDES_ARCHIVE_PAYLOAD_PRESENT),
+                    values.get(jobs_migrations.SLIDES_ARCHIVE_RESULT_PRESENT),
+                )
+            )
+        return normalize(row)
+
+    monkeypatch.setattr(
+        jobs_migrations,
+        "normalize_slides_archive_projection",
+        _record_presence,
+    )
+
+    ensure_jobs_tables(db_path)
+
+    assert observed == [(0, 0)]
+
+
+def test_sqlite_pre_locator_canonical_archive_upgrades_and_reconciles(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "legacy_canonical_without_locator.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(
+            _legacy_execution_control_ddl(archive_locator=False)
+        )
+        _insert_legacy_canonical_archive(
+            conn,
+            marker=_legacy_complete_marker(),
+            status="completed",
+            sidecar_only=True,
+        )
+
+    ensure_jobs_tables(db_path)
+    ensure_jobs_tables(db_path)
+
+    with sqlite3.connect(db_path) as conn:
+        locator = conn.execute(
+            "SELECT archive_id FROM jobs_archive WHERE uuid=?",
+            (_LEGACY_JOB_UUID,),
+        ).fetchone()
+    assert locator is not None
+    assert isinstance(locator[0], int)
+
+    manager = JobManager(db_path)
+    found = manager.find_job_by_identity(
+        FindJobByIdentityCommand(
+            domain="admin_webhooks",
+            queue="delivery",
+            job_type="admin_webhook_delivery",
+            idempotency_key=f"admin-webhook-delivery:{_LEGACY_DELIVERY_ID}",
+            expected_payload={"delivery_id": _LEGACY_DELIVERY_ID},
+        )
+    )
+    assert found.state is JobIdentityLookupState.ARCHIVED
+
+
+def test_sqlite_duplicate_canonical_archive_identity_rolls_back(tmp_path) -> None:
+    db_path = ensure_jobs_tables(tmp_path / "duplicate_canonical_archive.db")
+    disposition = PreparedJobDisposition.complete(
+        token=_LEGACY_TOKEN,
+        delivery_id=_LEGACY_DELIVERY_ID,
+        attempt_id=_LEGACY_ATTEMPT_ID,
+    )
+    current_uuid = _LEGACY_JOB_UUID
+    legacy_uuid = "00000000-0000-4000-8000-000000000004"
+    with sqlite3.connect(db_path) as conn:
+        _insert_legacy_canonical_archive(
+            conn,
+            marker=_legacy_complete_marker(),
+            status="completed",
+            job_uuid=current_uuid,
+        )
+        conn.execute(
+            "UPDATE jobs_archive SET expired_lease_policy='requeue_no_attempt', "
+            "quarantine_threshold=5, prepared_disposition_fingerprint=? "
+            "WHERE uuid=?",
+            (prepared_disposition_fingerprint(disposition), current_uuid),
+        )
+        _insert_legacy_canonical_archive(
+            conn,
+            marker=_legacy_complete_marker(),
+            status="completed",
+            job_uuid=legacy_uuid,
+        )
+
+    with pytest.raises(RuntimeError):
+        ensure_jobs_tables(db_path)
+
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT uuid, expired_lease_policy, quarantine_threshold, "
+            "prepared_disposition_fingerprint FROM jobs_archive "
+            "ORDER BY uuid"
+        ).fetchall()
+    assert rows == [
+        (
+            current_uuid,
+            "requeue_no_attempt",
+            5,
+            prepared_disposition_fingerprint(disposition),
+        ),
+        (legacy_uuid, "consume_retry", None, None),
+    ]
 
 
 def test_sqlite_upgrade_rolls_back_unrecoverable_canonical_archive(tmp_path):

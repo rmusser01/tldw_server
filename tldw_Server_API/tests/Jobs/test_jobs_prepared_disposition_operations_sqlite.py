@@ -188,7 +188,16 @@ def test_sqlite_prune_preserves_unacknowledged_canonical_disposition_proof(
 
 @pytest.mark.parametrize(
     "corruption",
-    ("payload", "uuid", "controls", "marker", "fingerprint"),
+    (
+        "payload",
+        "uuid",
+        "controls",
+        "marker",
+        "fingerprint",
+        "proof_absent",
+        "status_kind",
+        "completion_token",
+    ),
 )
 def test_sqlite_prune_rolls_back_malformed_reserved_canonical_evidence(
     tmp_path,
@@ -242,10 +251,32 @@ def test_sqlite_prune_rolls_back_malformed_reserved_canonical_evidence(
             )
         elif corruption == "marker":
             conn.execute("UPDATE jobs SET result='{}' WHERE id=?", (job["id"],))
-        else:
+        elif corruption == "fingerprint":
             conn.execute(
                 "UPDATE jobs SET prepared_disposition_fingerprint=NULL WHERE id=?",
                 (job["id"],),
+            )
+        elif corruption == "proof_absent":
+            conn.execute(
+                "UPDATE jobs SET result=NULL, "
+                "prepared_disposition_fingerprint=NULL WHERE id=?",
+                (job["id"],),
+            )
+        elif corruption == "status_kind":
+            marker = json.loads(
+                conn.execute(
+                    "SELECT result FROM jobs WHERE id=?",
+                    (job["id"],),
+                ).fetchone()[0]
+            )
+            conn.execute(
+                "UPDATE jobs SET result=? WHERE id=?",
+                (json.dumps({**marker, "kind": "fail"}), job["id"]),
+            )
+        else:
+            conn.execute(
+                "UPDATE jobs SET completion_token=? WHERE id=?",
+                (_token("8"), job["id"]),
             )
         conn.commit()
     finally:
@@ -706,13 +737,29 @@ def test_sqlite_identity_lookup_is_read_only_active_archived_missing_and_conflic
     assert active.state is JobIdentityLookupState.ACTIVE
     assert missing.state is JobIdentityLookupState.MISSING
 
+    acquired = _acquire(manager)
+    disposition = PreparedJobDisposition.complete(
+        token=_token("6"),
+        delivery_id=payload["delivery_id"],
+        attempt_id=str(uuid4()),
+    )
+    assert _apply(
+        manager,
+        job,
+        disposition,
+        leased=acquired,
+    ).outcome is OperationOutcome.APPLIED
+    persisted = manager.get_job(int(job["id"]))
+
     conn = manager._connect()
     try:
         conn.execute(
             "INSERT INTO jobs_archive(id, uuid, domain, queue, job_type, "
             "idempotency_key, payload, result, status, priority, max_retries, "
-            "expired_lease_policy, quarantine_threshold) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "expired_lease_policy, quarantine_threshold, "
+            "prepared_disposition_fingerprint, "
+            "no_attempt_recovery_fingerprint, completion_token) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 job["id"],
                 job["uuid"],
@@ -721,12 +768,15 @@ def test_sqlite_identity_lookup_is_read_only_active_archived_missing_and_conflic
                 job["job_type"],
                 job["idempotency_key"],
                 json.dumps(payload),
-                None,
+                json.dumps(persisted["result"]),
                 "completed",
                 5,
                 3,
                 "requeue_no_attempt",
                 5,
+                persisted["prepared_disposition_fingerprint"],
+                None,
+                disposition.token,
             ),
         )
         conn.execute("DELETE FROM jobs WHERE id=?", (job["id"],))
@@ -740,8 +790,10 @@ def test_sqlite_identity_lookup_is_read_only_active_archived_missing_and_conflic
         conn.execute(
             "INSERT INTO jobs_archive(id, uuid, domain, queue, job_type, "
             "idempotency_key, payload, result, status, priority, max_retries, "
-            "expired_lease_policy, quarantine_threshold) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "expired_lease_policy, quarantine_threshold, "
+            "prepared_disposition_fingerprint, "
+            "no_attempt_recovery_fingerprint, completion_token) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 int(job["id"]) + 1,
                 str(uuid4()),
@@ -750,12 +802,15 @@ def test_sqlite_identity_lookup_is_read_only_active_archived_missing_and_conflic
                 job["job_type"],
                 job["idempotency_key"],
                 json.dumps(payload),
-                None,
+                json.dumps(persisted["result"]),
                 "completed",
                 5,
                 3,
                 "requeue_no_attempt",
                 5,
+                persisted["prepared_disposition_fingerprint"],
+                None,
+                disposition.token,
             ),
         )
         conn.commit()

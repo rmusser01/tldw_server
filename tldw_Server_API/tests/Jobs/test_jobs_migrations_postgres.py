@@ -16,6 +16,7 @@ from tldw_Server_API.app.core.Jobs.operations.contracts import (
     JobIdentityLookupState,
     PreparedJobDisposition,
     admin_webhook_disposition_marker_matches,
+    prepared_disposition_fingerprint,
     project_admin_webhook_disposition_marker,
 )
 from tldw_Server_API.app.core.Jobs.pg_migrations import (
@@ -61,6 +62,19 @@ def _drop_pg_archive_execution_controls(cur) -> None:
     )
 
 
+def _drop_pg_archive_locator(cur) -> None:
+    cur.execute(
+        "ALTER TABLE jobs_archive DROP CONSTRAINT IF EXISTS "
+        "idx_jobs_archive_id CASCADE"
+    )
+    cur.execute(
+        "ALTER TABLE jobs_archive DROP COLUMN IF EXISTS archive_id CASCADE"
+    )
+    cur.execute(
+        "DROP SEQUENCE IF EXISTS jobs_archive_archive_id_seq CASCADE"
+    )
+
+
 def _legacy_complete_marker() -> dict[str, object]:
     return {
         "schema_version": 1,
@@ -80,15 +94,21 @@ def _insert_legacy_canonical_archive_pg(
     status: str,
     job_uuid: str = _LEGACY_JOB_UUID,
     completion_token: str = _LEGACY_TOKEN,
+    error_message: str | None = None,
     error_code: str | None = None,
+    last_error: str | None = None,
+    cancellation_reason: str | None = None,
     failure_streak_code: str | None = None,
     retry_count: int = 0,
     available_at: str | None = None,
     sidecar_only: bool = False,
+    payload_json_null: bool = False,
 ) -> None:
     payload_json = json.dumps({"delivery_id": _LEGACY_DELIVERY_ID})
     marker_json = json.dumps(marker)
-    payload = None if sidecar_only else payload_json
+    payload = "null" if payload_json_null else (
+        None if sidecar_only else payload_json
+    )
     result = None if sidecar_only else marker_json
     payload_sidecar = (
         gzip.compress(payload_json.encode("utf-8")) if sidecar_only else None
@@ -101,11 +121,13 @@ def _insert_legacy_canonical_archive_pg(
         "id, uuid, domain, queue, job_type, owner_user_id, project_id, "
         "batch_group, idempotency_key, payload, result, payload_compressed, "
         "result_compressed, status, priority, "
-        "max_retries, retry_count, available_at, error_code, "
+        "max_retries, retry_count, available_at, error_message, error_code, "
+        "last_error, cancellation_reason, "
         "failure_streak_code, completion_token, completed_at, archived_at"
         ") VALUES(%s, %s, 'admin_webhooks', 'delivery', "
         "'admin_webhook_delivery', NULL, NULL, NULL, %s, %s::jsonb, "
-        "%s::jsonb, %s, %s, %s, 5, 3, %s, %s, %s, %s, %s, %s, %s)",
+        "%s::jsonb, %s, %s, %s, 5, 3, %s, %s, %s, %s, %s, %s, %s, "
+        "%s, %s, %s)",
         (
             41,
             job_uuid,
@@ -117,7 +139,10 @@ def _insert_legacy_canonical_archive_pg(
             status,
             retry_count,
             available_at,
+            error_message,
             error_code,
+            last_error,
+            cancellation_reason,
             failure_streak_code,
             completion_token,
             _LEGACY_APPLIED_AT,
@@ -348,6 +373,7 @@ def test_pg_upgrade_reconstructs_strict_legacy_canonical_archive(
             )
 
     ensure_jobs_tables_pg(jobs_pg_dsn)
+    ensure_jobs_tables_pg(jobs_pg_dsn)
 
     manager = JobManager(
         None,
@@ -382,6 +408,207 @@ def test_pg_upgrade_reconstructs_strict_legacy_canonical_archive(
     )
     assert marker is not None
     assert admin_webhook_disposition_marker_matches(marker, disposition)
+
+
+@pytest.mark.parametrize(
+    ("kind", "status", "reason"),
+    (
+        ("fail", "failed", "receiver_400"),
+        ("cancel", "cancelled", "registration_disabled"),
+    ),
+)
+def test_pg_upgrade_reconstructs_exact_terminal_reason_evidence(
+    jobs_pg_dsn,
+    kind: str,
+    status: str,
+    reason: str,
+) -> None:
+    marker = {**_legacy_complete_marker(), "kind": kind}
+    with psycopg.connect(jobs_pg_dsn, autocommit=True) as conn:
+        with conn.cursor() as cur:
+            _drop_pg_archive_execution_controls(cur)
+            _insert_legacy_canonical_archive_pg(
+                cur,
+                marker=marker,
+                status=status,
+                error_message=reason if kind == "fail" else None,
+                error_code=reason if kind == "fail" else None,
+                last_error=reason if kind == "fail" else None,
+                cancellation_reason=reason if kind == "cancel" else None,
+                sidecar_only=True,
+            )
+
+    ensure_jobs_tables_pg(jobs_pg_dsn)
+    ensure_jobs_tables_pg(jobs_pg_dsn)
+
+    manager = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
+    command = FindJobByIdentityCommand(
+        domain="admin_webhooks",
+        queue="delivery",
+        job_type="admin_webhook_delivery",
+        idempotency_key=f"admin-webhook-delivery:{_LEGACY_DELIVERY_ID}",
+        expected_payload={"delivery_id": _LEGACY_DELIVERY_ID},
+    )
+    found = manager.find_job_by_identity(command)
+    assert found.state is JobIdentityLookupState.ARCHIVED
+    assert found.row is not None
+    projected = project_admin_webhook_disposition_marker(
+        found.row,
+        expected_payload=command.expected_payload,
+        archived=True,
+    )
+    disposition = (
+        PreparedJobDisposition.fail(
+            token=_LEGACY_TOKEN,
+            delivery_id=_LEGACY_DELIVERY_ID,
+            attempt_id=_LEGACY_ATTEMPT_ID,
+            reason_code=reason,
+        )
+        if kind == "fail"
+        else PreparedJobDisposition.cancel(
+            token=_LEGACY_TOKEN,
+            delivery_id=_LEGACY_DELIVERY_ID,
+            attempt_id=_LEGACY_ATTEMPT_ID,
+            reason_code=reason,
+        )
+    )
+    assert projected is not None
+    assert admin_webhook_disposition_marker_matches(projected, disposition)
+
+
+def test_pg_canonical_upgrade_rejects_jsonb_null_primary_with_sidecar(
+    jobs_pg_dsn,
+) -> None:
+    with psycopg.connect(jobs_pg_dsn, autocommit=True) as conn:
+        with conn.cursor() as cur:
+            _drop_pg_archive_execution_controls(cur)
+            _insert_legacy_canonical_archive_pg(
+                cur,
+                marker=_legacy_complete_marker(),
+                status="completed",
+                sidecar_only=True,
+                payload_json_null=True,
+            )
+
+    with pytest.raises(RuntimeError):
+        ensure_jobs_tables_pg(jobs_pg_dsn)
+
+    with psycopg.connect(jobs_pg_dsn) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT payload IS NOT NULL, payload::text FROM jobs_archive "
+                "WHERE uuid=%s",
+                (_LEGACY_JOB_UUID,),
+            )
+            assert cur.fetchone() == (True, "null")
+            cur.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema=current_schema() "
+                "AND table_name='jobs_archive' AND column_name = ANY(%s)",
+                (
+                    [
+                        "expired_lease_policy",
+                        "quarantine_threshold",
+                        "prepared_disposition_fingerprint",
+                        "no_attempt_recovery_fingerprint",
+                    ],
+                ),
+            )
+            assert cur.fetchall() == []
+
+
+def test_pg_pre_locator_canonical_archive_upgrades_and_reconciles(
+    jobs_pg_dsn,
+) -> None:
+    with psycopg.connect(jobs_pg_dsn, autocommit=True) as conn:
+        with conn.cursor() as cur:
+            _drop_pg_archive_locator(cur)
+            _drop_pg_archive_execution_controls(cur)
+            _insert_legacy_canonical_archive_pg(
+                cur,
+                marker=_legacy_complete_marker(),
+                status="completed",
+                sidecar_only=True,
+            )
+
+    ensure_jobs_tables_pg(jobs_pg_dsn)
+    ensure_jobs_tables_pg(jobs_pg_dsn)
+
+    with psycopg.connect(jobs_pg_dsn) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT archive_id FROM jobs_archive WHERE uuid=%s",
+                (_LEGACY_JOB_UUID,),
+            )
+            locator = cur.fetchone()
+    assert locator is not None
+    assert isinstance(locator[0], int)
+
+    manager = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
+    found = manager.find_job_by_identity(
+        FindJobByIdentityCommand(
+            domain="admin_webhooks",
+            queue="delivery",
+            job_type="admin_webhook_delivery",
+            idempotency_key=f"admin-webhook-delivery:{_LEGACY_DELIVERY_ID}",
+            expected_payload={"delivery_id": _LEGACY_DELIVERY_ID},
+        )
+    )
+    assert found.state is JobIdentityLookupState.ARCHIVED
+
+
+def test_pg_duplicate_canonical_archive_identity_rolls_back(
+    jobs_pg_dsn,
+) -> None:
+    disposition = PreparedJobDisposition.complete(
+        token=_LEGACY_TOKEN,
+        delivery_id=_LEGACY_DELIVERY_ID,
+        attempt_id=_LEGACY_ATTEMPT_ID,
+    )
+    current_uuid = _LEGACY_JOB_UUID
+    legacy_uuid = "00000000-0000-4000-8000-000000000004"
+    with psycopg.connect(jobs_pg_dsn, autocommit=True) as conn:
+        with conn.cursor() as cur:
+            _insert_legacy_canonical_archive_pg(
+                cur,
+                marker=_legacy_complete_marker(),
+                status="completed",
+                job_uuid=current_uuid,
+            )
+            cur.execute(
+                "UPDATE jobs_archive SET "
+                "expired_lease_policy='requeue_no_attempt', "
+                "quarantine_threshold=5, "
+                "prepared_disposition_fingerprint=%s WHERE uuid=%s",
+                (prepared_disposition_fingerprint(disposition), current_uuid),
+            )
+            _insert_legacy_canonical_archive_pg(
+                cur,
+                marker=_legacy_complete_marker(),
+                status="completed",
+                job_uuid=legacy_uuid,
+            )
+
+    with pytest.raises(RuntimeError):
+        ensure_jobs_tables_pg(jobs_pg_dsn)
+
+    with psycopg.connect(jobs_pg_dsn) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT uuid, expired_lease_policy, quarantine_threshold, "
+                "prepared_disposition_fingerprint FROM jobs_archive "
+                "ORDER BY uuid"
+            )
+            rows = cur.fetchall()
+    assert rows == [
+        (
+            current_uuid,
+            "requeue_no_attempt",
+            5,
+            prepared_disposition_fingerprint(disposition),
+        ),
+        (legacy_uuid, "consume_retry", None, None),
+    ]
 
 
 def test_pg_upgrade_rolls_back_unrecoverable_canonical_archive(

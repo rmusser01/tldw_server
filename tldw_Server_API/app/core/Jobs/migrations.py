@@ -30,6 +30,7 @@ from tldw_Server_API.app.core.Jobs.operations.contracts import (
     ADMIN_WEBHOOK_DELIVERY_QUEUE,
     ExpiredLeasePolicy,
     SlidesArchiveNormalizationError,
+    canonical_admin_webhook_delivery_id,
     reconstruct_legacy_admin_webhook_archive_fingerprint,
 )
 
@@ -1271,7 +1272,10 @@ def _upgrade_legacy_admin_webhook_archives_sqlite(
     """Backfill only strictly reconstructable reserved archive evidence."""
 
     cursor = conn.execute(
-        "SELECT * FROM jobs_archive WHERE domain=? AND queue=? AND job_type=?",
+        "SELECT *, "
+        "payload IS NOT NULL AS __slides_archive_payload_present, "
+        "result IS NOT NULL AS __slides_archive_result_present "
+        "FROM jobs_archive WHERE domain=? AND queue=? AND job_type=?",
         (
             ADMIN_WEBHOOK_DELIVERY_DOMAIN,
             ADMIN_WEBHOOK_DELIVERY_QUEUE,
@@ -1279,9 +1283,23 @@ def _upgrade_legacy_admin_webhook_archives_sqlite(
         ),
     )
     columns = tuple(str(item[0]) for item in cursor.description or ())
+    prepared_rows: list[tuple[dict[str, Any], str | None]] = []
+    delivery_ids: set[str] = set()
+    idempotency_keys: set[str] = set()
     for values in cursor.fetchall():
         row = normalize_slides_archive_projection(dict(zip(columns, values)))
         fingerprint = reconstruct_legacy_admin_webhook_archive_fingerprint(row)
+        delivery_id = canonical_admin_webhook_delivery_id(row.get("payload"))
+        idempotency_key = row.get("idempotency_key")
+        if delivery_id in delivery_ids or idempotency_key in idempotency_keys:
+            raise RuntimeError(
+                "duplicate canonical admin webhook archive identity"
+            )
+        delivery_ids.add(delivery_id)
+        idempotency_keys.add(idempotency_key)
+        prepared_rows.append((row, fingerprint))
+
+    for row, fingerprint in prepared_rows:
         if fingerprint is None:
             continue
         updated = conn.execute(
@@ -1359,6 +1377,7 @@ def ensure_jobs_tables(db_path: Path | None = None) -> Path:
                 f"{_sqlite_archive_migration_busy_timeout_ms()}"
             )
             conn.executescript(JOBS_SQLITE_DDL)
+            _ensure_sqlite_archive_locators(conn)
             if not conn.in_transaction:
                 conn.execute("BEGIN IMMEDIATE")
             with contextlib.suppress(_JOBS_DB_EXCEPTIONS):
@@ -1478,7 +1497,6 @@ def ensure_jobs_tables(db_path: Path | None = None) -> Path:
                     raise _SlidesAuditSafetyError(
                         "standalone audit result could not be persisted"
                     ) from persistence_error
-            _ensure_sqlite_archive_locators(conn)
             _ensure_sqlite_archive_batch_read_indexes(conn)
             archive_locator_verified = True
             with contextlib.suppress(_JOBS_DB_EXCEPTIONS):

@@ -175,7 +175,8 @@ def canonical_admin_webhook_row_matches(
     ):
         return False
     prepared_fingerprint = row.get("prepared_disposition_fingerprint")
-    if row.get("status") == "queued":
+    status = row.get("status")
+    if status == "queued":
         if marker is None:
             if available_at is not None or recovery_fingerprint is not None:
                 return False
@@ -199,7 +200,7 @@ def canonical_admin_webhook_row_matches(
             )
         ):
             return False
-    if row.get("status") == "processing":
+    elif status == "processing":
         if recovery_fingerprint is not None:
             return False
         if marker is not None and marker["kind"] not in {
@@ -225,8 +226,21 @@ def canonical_admin_webhook_row_matches(
                 or available_at > acquired_at
             ):
                 return False
-    if row.get("status") not in {"queued", "processing"} and recovery_fingerprint is not None:
-        return False
+    else:
+        terminal_kind = {
+            "completed": PreparedDispositionKind.COMPLETE.value,
+            "failed": PreparedDispositionKind.FAIL.value,
+            "cancelled": PreparedDispositionKind.CANCEL.value,
+            "quarantined": PreparedDispositionKind.RETRY.value,
+        }.get(status)
+        if (
+            terminal_kind is None
+            or marker is None
+            or marker["kind"] != terminal_kind
+            or row.get("completion_token") != marker["token"]
+            or recovery_fingerprint is not None
+        ):
+            return False
     return (
         row.get("expired_lease_policy")
         == ExpiredLeasePolicy.REQUEUE_NO_ATTEMPT.value
