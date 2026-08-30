@@ -186,11 +186,7 @@ def verify_tar_archive(path: Path) -> tuple[str, ...]:
         with tarfile.open(path, mode="r:*") as archive:
             for member in archive:
                 member_path = PurePosixPath(member.name)
-                if (
-                    not member.name
-                    or member_path.is_absolute()
-                    or ".." in member_path.parts
-                ):
+                if not member.name or member_path.is_absolute() or ".." in member_path.parts:
                     raise ValueError("archive contains an unsafe member path")
                 if member.issym() or member.islnk():
                     raise ValueError("archive contains a link member")

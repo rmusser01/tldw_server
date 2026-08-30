@@ -85,12 +85,8 @@ class CommandResult:
     stderr: bytes
 
 
-CommandRunner = Callable[
-    [Sequence[str], Mapping[str, str] | None, bytes | None], CommandResult
-]
-StreamingCommandRunner = Callable[
-    [Sequence[str], Mapping[str, str] | None, Path], CommandResult
-]
+CommandRunner = Callable[[Sequence[str], Mapping[str, str] | None, bytes | None], CommandResult]
+StreamingCommandRunner = Callable[[Sequence[str], Mapping[str, str] | None, Path], CommandResult]
 
 
 @dataclass(frozen=True)
@@ -171,11 +167,7 @@ def default_streaming_command_runner(
 def _command_env(config: DeploymentConfig, **overrides: str) -> dict[str, str]:
     """Build the bounded process environment used by Docker Compose."""
 
-    env = {
-        name: value
-        for name in _INHERITED_ENV_NAMES
-        if (value := os.environ.get(name)) is not None
-    }
+    env = {name: value for name in _INHERITED_ENV_NAMES if (value := os.environ.get(name)) is not None}
     env.update(config.values)
     env["TLDW_ENV_FILE"] = str(config.env_file)
     env.update(overrides)
@@ -327,9 +319,7 @@ def _record(kind: str, path: Path) -> ArtifactRecord:
     )
 
 
-def _image_smoke(
-    image: str, runner: CommandRunner, env: Mapping[str, str], label: str
-) -> None:
+def _image_smoke(image: str, runner: CommandRunner, env: Mapping[str, str], label: str) -> None:
     """Verify an application image can import the server without network access."""
 
     _run_gate(
@@ -537,15 +527,10 @@ def deploy(
     return manifest
 
 
-def _artifacts_by_kind(
-    manifest: DeploymentManifest, manifest_path: Path
-) -> dict[str, tuple[ArtifactRecord, Path]]:
+def _artifacts_by_kind(manifest: DeploymentManifest, manifest_path: Path) -> dict[str, tuple[ArtifactRecord, Path]]:
     """Require a complete deploy backup set for rollback."""
 
-    records = {
-        record.kind: (record, manifest_path.parent / record.path)
-        for record in manifest.artifacts
-    }
+    records = {record.kind: (record, manifest_path.parent / record.path) for record in manifest.artifacts}
     required = {"postgresql", "redis", "app_data"}
     if set(records) != required:
         raise DeploymentError("rollback manifest must contain all three artifact kinds")
@@ -759,9 +744,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         config = _config_from_args(args)
         if args.operation == "deploy":
             manifest = deploy(config)
-            manifest_path = _snapshot_directory(
-                config.backup_dir, manifest.created_at
-            ) / "manifest.json"
+            manifest_path = _snapshot_directory(config.backup_dir, manifest.created_at) / "manifest.json"
             print(f"Production deployment completed. Manifest: {manifest_path}")
         else:
             if not args.restore_artifacts:
