@@ -52,6 +52,7 @@ _MAX_PROPOSAL_HEADS = 1_000
 _MAX_RECORD_HEADS = 1_000
 _MAX_SCOPE_HEADS = 1_000
 _MAX_LIST_ROWS = 1_000
+_SYNC_HISTORY_KEY_LABEL = b"tldw-personal-context-sync-history-v1"
 
 
 def _now_text() -> str:
@@ -894,10 +895,18 @@ class PersonalContextRepository:
         record: ProfileRecord,
         *,
         expected_version_id: str | None,
+        allow_orphan_tombstone: bool = False,
     ) -> None:
         """Insert an immutable record and compare-and-set its head atomically."""
 
-        if record.parent_version_id != expected_version_id:
+        orphan_tombstone = (
+            allow_orphan_tombstone
+            and expected_version_id is None
+            and record.parent_version_id is not None
+            and record.state is RecordState.DELETED
+            and record.payload is None
+        )
+        if record.parent_version_id != expected_version_id and not orphan_tombstone:
             raise ConcurrentProfileUpdateError("record parent does not match head")
         with self._database.transaction(immediate=True) as connection:
             keys = self._keys.load(record.profile_id, connection=connection)
@@ -1124,6 +1133,99 @@ class PersonalContextRepository:
             proposal_id,
             ProfileProposal,
         )
+
+    def commit_synced_proposal_receipt(
+        self,
+        proposal: ProfileProposal,
+        *,
+        expected_manifest_version: str,
+    ) -> None:
+        """Commit one exact inbound terminal receipt without a local rewrite."""
+
+        if proposal.state is ProposalState.PENDING:
+            raise ValueError("synced proposal receipt must be terminal")
+        version_id = str(uuid.uuid4())
+        with self._database.transaction(immediate=True) as connection:
+            keys = self._keys.load(proposal.profile_id, connection=connection)
+            self._require_writable_manifest_state(
+                connection,
+                proposal.profile_id,
+                expected_manifest_version,
+                keys,
+            )
+            row = self._head_row(
+                connection,
+                proposal.profile_id,
+                "proposal",
+                proposal.proposal_id,
+            )
+            if row is not None:
+                current = ProfileProposal.model_validate_json(
+                    self._decrypt_row(row, keys)
+                )
+                if current == proposal:
+                    return
+                if current.state is not ProposalState.PENDING:
+                    raise ConcurrentProfileUpdateError(
+                        "proposal head changed concurrently"
+                    )
+                expected = ProfileProposal.model_validate(
+                    {
+                        **current.model_dump(mode="python"),
+                        "state": proposal.state,
+                        "proposed_record": None,
+                        "confidence": None,
+                    }
+                )
+                if expected != proposal:
+                    raise ConcurrentProfileUpdateError(
+                        "synced proposal receipt differs from pending content"
+                    )
+                self._replace_proposal_with_receipt(
+                    connection,
+                    keys,
+                    row,
+                    current,
+                    proposal.state,
+                    version_id=version_id,
+                )
+                return
+
+            self._prune_terminal_proposals_for_insert(
+                connection,
+                proposal.profile_id,
+            )
+            self._insert_encrypted(
+                connection,
+                keys,
+                profile_id=proposal.profile_id,
+                object_type="proposal",
+                object_id=proposal.proposal_id,
+                version_id=version_id,
+                parent_version_id=None,
+                value=proposal,
+            )
+            self._set_head(
+                connection,
+                profile_id=proposal.profile_id,
+                object_type="proposal",
+                object_id=proposal.proposal_id,
+                version_id=version_id,
+                expected_version_id=None,
+            )
+            connection.execute(
+                """
+                INSERT INTO personal_context_receipts(
+                    profile_id, receipt_id, version_id, created_at
+                ) VALUES (?, ?, ?, ?)
+                """,
+                (
+                    proposal.profile_id,
+                    proposal.proposal_id,
+                    version_id,
+                    _now_text(),
+                ),
+            )
 
     def _replace_proposal_with_receipt(
         self,
@@ -1489,6 +1591,26 @@ class PersonalContextRepository:
         """Return decrypted key material solely for key-custody tests."""
 
         return self._keys.load(profile_id)
+
+    def sync_integrity_key(self, profile_id: str) -> tuple[str, bytes]:
+        """Return the canonical profile integrity key for its Sync adapter."""
+
+        keys = self._keys.load(profile_id)
+        return (
+            f"personal-context-integrity-v{keys.integrity_key_version}",
+            bytes(keys.integrity_key),
+        )
+
+    def sync_encryption_key(self, profile_id: str) -> tuple[bytes, int]:
+        """Return a rotation-stable profile-derived key for Sync history."""
+
+        keys = self._keys.load(profile_id)
+        storage_key = hmac.new(
+            keys.integrity_key,
+            _SYNC_HISTORY_KEY_LABEL,
+            hashlib.sha256,
+        ).digest()
+        return storage_key, int(keys.integrity_key_version)
 
     def rotate_encryption_key(self, profile_id: str) -> ProfileKeyMaterial:
         """Atomically rewrap every DEK under a fresh profile encryption key."""

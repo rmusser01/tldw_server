@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """Sync v2 service composition helpers shared by HTTP and non-HTTP entrypoints."""
 
+import hmac
 import os
 from collections.abc import Mapping
 from functools import lru_cache
@@ -13,7 +14,14 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import (
     DatabasePaths,
     _resolve_user_id_for_storage,
 )
+from tldw_Server_API.app.core.DB_Management.Personalization_DB import PersonalizationDB
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SYNC_DB_FILENAME, SyncDatabase
+from tldw_Server_API.app.core.Personalization.personal_context_repository import (
+    PersonalContextRepository,
+)
+from tldw_Server_API.app.core.Personalization.personal_context_service import (
+    PersonalContextService,
+)
 from tldw_Server_API.app.core.Utils.path_utils import safe_join
 
 from .adapters import StaticSyncAdapter, SyncAdapterRegistry
@@ -25,6 +33,7 @@ from .domain_adapters.notes_link import NotesLinkDomainAdapter
 from .domain_adapters.notes_organization import NotesOrganizationDomainAdapter
 from .domain_adapters.notes_task import NotesTaskDomainAdapter
 from .domain_adapters.notes_task_activity import NotesTaskActivityDomainAdapter
+from .domain_adapters.personal_context import PersonalContextDomainAdapter
 from .domain_adapters.source_cache import SourceCacheAdapter
 from .domain_adapters.workspaces import WorkspacesDomainAdapter
 from .materializers import (
@@ -37,6 +46,7 @@ from .materializers import (
     NotesOrganizationMaterializer,
     NotesTaskActivityMaterializer,
     NotesTaskMaterializer,
+    PersonalContextMaterializer,
     SourceCacheMaterializer,
     SyncMaterializer,
 )
@@ -44,6 +54,7 @@ from .models import (
     M1_SYNC_DOMAINS,
     MEDIA_SYNC_DOMAINS,
     NOTES_ORGANIZATION_DOMAINS,
+    PERSONAL_CONTEXT_SYNC_DOMAINS,
     SOURCE_CACHE_SYNC_DOMAINS,
     WORKSPACE_SYNC_DOMAINS,
     SyncDomain,
@@ -89,6 +100,14 @@ def default_sync_v2_registry() -> SyncAdapterRegistry:
         + [NotesLinkDomainAdapter()]
         + [NotesTaskDomainAdapter()]
         + [NotesTaskActivityDomainAdapter()]
+        + [
+            PersonalContextDomainAdapter(
+                domain=domain,
+                integrity_key_resolver=_personal_context_integrity_key,
+                encryption_key_resolver=_personal_context_encryption_key,
+            )
+            for domain in PERSONAL_CONTEXT_SYNC_DOMAINS
+        ]
     )
 
 
@@ -119,6 +138,13 @@ def sync_v2_service_for_user(user_id: str) -> SyncV2Service:
             domain: NotesOrganizationMaterializer(note_db, domain)
             for domain in NOTES_ORGANIZATION_DOMAINS
         },
+        **{
+            domain: PersonalContextMaterializer(
+                domain=domain,
+                service_resolver=_personal_context_service_for_user,
+            )
+            for domain in PERSONAL_CONTEXT_SYNC_DOMAINS
+        },
     }
     _validate_notes_organization_components(
         adapters=adapters,
@@ -131,6 +157,10 @@ def sync_v2_service_for_user(user_id: str) -> SyncV2Service:
         advertised_domains=settings.supported_domains,
     )
     _validate_notes_task_components(
+        adapters=adapters,
+        materializers=materializers,
+    )
+    _validate_personal_context_components(
         adapters=adapters,
         materializers=materializers,
     )
@@ -214,6 +244,67 @@ def _validate_notes_task_components(
         raise RuntimeError(
             "Private Sync domain has no user-bound materializer: notes.task_activity"
         )
+
+
+def _validate_personal_context_components(
+    *,
+    adapters: SyncAdapterRegistry,
+    materializers: Mapping[SyncDomain, SyncMaterializer],
+) -> None:
+    """Fail closed when a Personal Context domain is only partially wired."""
+
+    for domain in PERSONAL_CONTEXT_SYNC_DOMAINS:
+        adapter = adapters.get(domain)
+        materializer = materializers.get(domain)
+        if not isinstance(adapter, PersonalContextDomainAdapter):
+            raise RuntimeError(
+                f"Personal Context Sync domain has no strict adapter: {domain}"
+            )
+        if (
+            not isinstance(materializer, PersonalContextMaterializer)
+            or materializer.domain != domain
+        ):
+            raise RuntimeError(
+                f"Personal Context Sync domain has no service materializer: {domain}"
+            )
+
+
+def _personal_context_integrity_key(dataset: object, key_id: str) -> bytes:
+    """Resolve the enrolled profile's actual canonical integrity key."""
+
+    service, profile_id = _personal_context_key_service(dataset)
+    actual_key_id, key = service.sync_integrity_key(profile_id)
+    if not hmac.compare_digest(actual_key_id, key_id):
+        raise RuntimeError("Personal Context integrity key is unavailable")
+    return key
+
+
+def _personal_context_encryption_key(dataset: object) -> tuple[bytes, int]:
+    """Resolve the enrolled profile's actual canonical encryption key."""
+
+    service, profile_id = _personal_context_key_service(dataset)
+    return service.sync_encryption_key(profile_id)
+
+
+def _personal_context_key_service(
+    dataset: object,
+) -> tuple[PersonalContextService, str]:
+    owner_user_id = str(getattr(dataset, "owner_user_id", "")).strip()
+    metadata = getattr(dataset, "metadata", {})
+    state = metadata.get("personal_context") if isinstance(metadata, Mapping) else None
+    profile_id = state.get("profile_id") if isinstance(state, Mapping) else None
+    if not owner_user_id or not isinstance(profile_id, str) or not profile_id:
+        raise RuntimeError("Personal Context key custody is unavailable")
+    return _personal_context_service_for_user(owner_user_id), profile_id
+
+
+@lru_cache(maxsize=256)
+def _personal_context_service_for_user(user_id: str) -> PersonalContextService:
+    """Return the canonical service bound to one authenticated Sync owner."""
+
+    storage_user_id = _resolve_user_id_for_storage(user_id)
+    database = PersonalizationDB.for_user(storage_user_id)
+    return PersonalContextService(PersonalContextRepository(database))
 
 
 def sync_v2_storage_exists_for_user(user_id: str) -> bool:

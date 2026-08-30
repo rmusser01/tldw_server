@@ -1169,15 +1169,27 @@ class SyncV2Service:
         except Exception:  # noqa: BLE001 - malformed product authority fails closed.
             return False
 
-    def _personal_context_domains_ready(self) -> bool:
-        """Return whether every Personal Context domain has a v1 transport path."""
+    def _personal_context_domains_ready(
+        self,
+        dataset: SyncDataset | None = None,
+    ) -> bool:
+        """Return whether every Personal Context domain has a usable v1 path."""
 
-        return all(
-            self.adapters.has_domain(domain)
-            and self.adapters.supports_version(domain, 1)
-            and getattr(self.materializers.get(domain), "domain", None) == domain
-            for domain in PERSONAL_CONTEXT_SYNC_DOMAINS
-        )
+        for domain in PERSONAL_CONTEXT_SYNC_DOMAINS:
+            if not self.adapters.has_domain(domain):
+                return False
+            adapter = self.adapters.get(domain)
+            if (
+                not self.adapters.supports_version(domain, 1)
+                or not getattr(adapter, "storage_encryption_ready", False)
+                or getattr(self.materializers.get(domain), "domain", None) != domain
+            ):
+                return False
+            if dataset is not None:
+                key_custody_ready = getattr(adapter, "key_custody_ready", None)
+                if not callable(key_custody_ready) or not key_custody_ready(dataset):
+                    return False
+        return True
 
     def capabilities(
         self,
@@ -1206,7 +1218,9 @@ class SyncV2Service:
                 getattr(attachment_adapter, "v2_writes_enabled", False)
             )
         notes_task_ready = self._notes_task_domains_ready(dataset)
-        personal_context_transport_ready = self._personal_context_domains_ready()
+        personal_context_transport_ready = self._personal_context_domains_ready(
+            dataset if self.settings.personal_context.available else None
+        )
         private_dormant_domains = {
             *NOTES_MOODBOARD_STUDIO_DOMAINS,
             *NOTES_TASK_SYNC_DOMAINS,
@@ -3237,12 +3251,27 @@ class SyncV2Service:
                             retryable=True,
                         )
                     )
+                except SyncStoreError:
+                    rejected.append(
+                        SyncPushRejected(
+                            client_envelope_id=envelope.client_envelope_id,
+                            error_code="personal_context_storage_unavailable",
+                            message=(
+                                "Personal Context storage encryption is unavailable"
+                            ),
+                            retryable=True,
+                        )
+                    )
                 if stop_on_conflict:
                     stopped_after_conflict = True
                 continue
 
             try:
-                inserted = self.store.insert_envelope(replace(envelope, status="accepted"))
+                storage_envelope = self._protect_personal_context_for_storage(
+                    dataset,
+                    replace(envelope, status="accepted"),
+                )
+                inserted = self.store.insert_envelope(storage_envelope)
             except SyncInvalidDomainError:
                 rejected.append(
                     SyncPushRejected(
@@ -3290,6 +3319,17 @@ class SyncV2Service:
                             retryable=True,
                         )
                     )
+                except SyncStoreError:
+                    rejected.append(
+                        SyncPushRejected(
+                            client_envelope_id=envelope.client_envelope_id,
+                            error_code="personal_context_storage_unavailable",
+                            message=(
+                                "Personal Context storage encryption is unavailable"
+                            ),
+                            retryable=True,
+                        )
+                    )
                 if stop_on_conflict:
                     stopped_after_conflict = True
                 continue
@@ -3316,6 +3356,16 @@ class SyncV2Service:
                     )
                 if stop_on_conflict:
                     stopped_after_conflict = True
+                continue
+            except SyncStoreError:
+                rejected.append(
+                    SyncPushRejected(
+                        client_envelope_id=envelope.client_envelope_id,
+                        error_code="personal_context_storage_unavailable",
+                        message="Personal Context storage encryption is unavailable",
+                        retryable=True,
+                    )
+                )
                 continue
             if inserted.apply_status not in {"applied", "superseded"}:
                 materialization = self._materialize_envelope(inserted)
@@ -3383,7 +3433,10 @@ class SyncV2Service:
             adapter_versions=[1],
         )
 
-        page = visible[:page_limit]
+        page = [
+            self._restore_personal_context_from_storage(dataset, envelope)
+            for envelope in visible[:page_limit]
+        ]
         has_visible_lookahead = len(visible) > page_limit
         has_more = has_visible_lookahead or len(raw_envelopes) > page_limit
         if has_visible_lookahead and page:
@@ -5506,13 +5559,24 @@ class SyncV2Service:
                 envelope.domain,
                 envelope.object_id,
             )
+            if current is not None:
+                current = self._restore_personal_context_from_storage(
+                    dataset,
+                    current,
+                )
             context = SyncAdapterContext(
                 prior_envelopes=(current,) if current is not None else (),
-                get_head=lambda domain, object_id: self.store.get_current_head(
-                    dataset.dataset_id, domain, object_id
+                get_head=lambda domain, object_id: self._restore_personal_context_optional_head(
+                    dataset,
+                    self.store.get_current_head(
+                        dataset.dataset_id, domain, object_id
+                    ),
                 ),
-                list_heads=lambda domain: self._list_current_heads_for_adapter(
-                    dataset.dataset_id, domain
+                list_heads=lambda domain: tuple(
+                    self._restore_personal_context_from_storage(dataset, item)
+                    for item in self._list_current_heads_for_adapter(
+                        dataset.dataset_id, domain
+                    )
                 ),
                 supports_attachments=self.settings.supports_attachments,
             )
@@ -5523,6 +5587,58 @@ class SyncV2Service:
             )
         adapter = self.adapters.get(envelope.domain)
         return _call_adapter_evaluate(adapter, envelope, dataset=dataset, context=context)
+
+    def _protect_personal_context_for_storage(
+        self,
+        dataset: SyncDataset,
+        envelope: SyncEnvelopeCreate,
+    ) -> SyncEnvelopeCreate:
+        """Encrypt Personal Context bodies before generic Sync persistence."""
+
+        if envelope.domain not in PERSONAL_CONTEXT_SYNC_DOMAINS:
+            return envelope
+        adapter = self.adapters.get(envelope.domain)
+        protector = getattr(adapter, "protect_for_storage", None)
+        if protector is None:
+            raise SyncStoreError("Personal Context storage encryption is unavailable")
+        try:
+            return protector(envelope, dataset=dataset)
+        except (KeyError, RuntimeError, TypeError, ValueError) as exc:
+            raise SyncStoreError(
+                "Personal Context storage encryption is unavailable"
+            ) from exc
+
+    def _restore_personal_context_from_storage(
+        self,
+        dataset: SyncDataset,
+        envelope: SyncEnvelope,
+    ) -> SyncEnvelope:
+        """Restore one authenticated Personal Context body for use or delivery."""
+
+        if envelope.domain not in PERSONAL_CONTEXT_SYNC_DOMAINS:
+            return envelope
+        adapter = self.adapters.get(envelope.domain)
+        restorer = getattr(adapter, "restore_from_storage", None)
+        if restorer is None:
+            raise SyncStoreError("Personal Context stored envelope is unavailable")
+        try:
+            restored = restorer(envelope, dataset=dataset)
+        except (KeyError, RuntimeError, TypeError, ValueError) as exc:
+            raise SyncStoreError(
+                "Personal Context stored envelope is unavailable"
+            ) from exc
+        if not isinstance(restored, SyncEnvelope):
+            raise SyncStoreError("Personal Context stored envelope is unavailable")
+        return restored
+
+    def _restore_personal_context_optional_head(
+        self,
+        dataset: SyncDataset,
+        envelope: SyncEnvelope | None,
+    ) -> SyncEnvelope | None:
+        if envelope is None:
+            return None
+        return self._restore_personal_context_from_storage(dataset, envelope)
 
     def _list_current_heads_for_adapter(
         self,
@@ -7507,7 +7623,11 @@ class SyncV2Service:
         store: SyncV2Store | None = None,
     ) -> SyncPushConflict:
         active_store = store or self.store
-        inserted = active_store.insert_envelope(replace(envelope, status="conflict"))
+        storage_envelope = self._protect_personal_context_for_storage(
+            dataset,
+            replace(envelope, status="conflict"),
+        )
+        inserted = active_store.insert_envelope(storage_envelope)
         existing = active_store.get_unresolved_conflict_for_envelope(
             dataset.dataset_id,
             local_envelope_id=envelope.client_envelope_id,
@@ -7616,12 +7736,21 @@ class SyncV2Service:
                     message=_safe_projection_error_message(exc),
                 )
         try:
+            clear_envelope = envelope
+            if envelope.domain in PERSONAL_CONTEXT_SYNC_DOMAINS:
+                dataset = store.get_dataset(envelope.dataset_id)
+                if dataset is None:
+                    raise SyncStoreError("Sync dataset was not found")
+                clear_envelope = self._restore_personal_context_from_storage(
+                    dataset,
+                    envelope,
+                )
             if guarded_mutation is None:
-                result = materializer.apply(envelope, store=store)
+                result = materializer.apply(clear_envelope, store=store)
             else:
                 guarded_mutation.require_identity(envelope.domain, envelope.object_id)
                 result = materializer.apply(
-                    envelope,
+                    clear_envelope,
                     store=store,
                     guarded_mutation=guarded_mutation,
                 )

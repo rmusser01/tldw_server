@@ -169,6 +169,20 @@ class PersonalContextService:
             }
         )
 
+    def sync_integrity_key(self, profile_id: str) -> tuple[str, bytes]:
+        """Resolve canonical integrity custody for this user's Sync dataset."""
+
+        if profile_id != self._profile_id():
+            raise KeyError("Personal context profile not found")
+        return self._repository.sync_integrity_key(profile_id)
+
+    def sync_encryption_key(self, profile_id: str) -> tuple[bytes, int]:
+        """Resolve canonical encryption custody for this user's Sync dataset."""
+
+        if profile_id != self._profile_id():
+            raise KeyError("Personal context profile not found")
+        return self._repository.sync_encryption_key(profile_id)
+
     def status(self) -> ProfileStatus:
         """Return a content-free operational state without leaking profile records."""
 
@@ -247,6 +261,183 @@ class PersonalContextService:
         except ProfileAlreadyExistsError as exc:
             raise ProfileConflictError("Personal context profile already exists") from exc
         return manifest
+
+    def apply_sync_object(
+        self,
+        *,
+        domain: str,
+        value: ProfileManifest | ProfileScope | ProfileRecord | ProfileProposal | Mapping[str, Any],
+        actor_type: str,
+        actor_id: str | None,
+        base_object_hash: str | None = None,
+    ) -> ProfileManifest | ProfileScope | ProfileRecord | ProfileProposal | Mapping[str, Any]:
+        """Apply one adapter-authenticated canonical Sync object exactly once.
+
+        Sync adapters own transport integrity and lineage hashes. This service
+        remains the only mutation boundary and re-checks canonical profile,
+        scope, record-version, proposal, and purge fences in repository
+        transactions.
+        """
+
+        del base_object_hash
+        if actor_type != "sync" or not isinstance(actor_id, str) or not actor_id:
+            raise PermissionError("Personal Context sync actor is invalid")
+        try:
+            if domain == "personal_context.manifest":
+                manifest = ProfileManifest.model_validate(value)
+                current = self._manifest()
+                if manifest == current:
+                    return current
+                if manifest.profile_id != current.profile_id:
+                    raise ProfileConflictError("Personal context profile changed")
+                self._repository.commit_manifest_version(
+                    manifest,
+                    expected_version_id=current.current_version_id,
+                )
+                return manifest
+
+            profile_id = self._profile_id()
+            if domain == "personal_context.scope":
+                scope = ProfileScope.model_validate(value)
+                if scope.profile_id != profile_id:
+                    raise ProfileConflictError("Personal context profile changed")
+                current_scope = self._repository.get_scope(profile_id, scope.scope_id)
+                if scope == current_scope:
+                    return scope
+                if current_scope is not None and (
+                    scope.kind is not current_scope.kind
+                    or scope.created_at != current_scope.created_at
+                    or scope.updated_at < current_scope.updated_at
+                    or scope.version_id == current_scope.version_id
+                ):
+                    raise ProfileConflictError("Personal context scope changed")
+                if (
+                    current_scope is None
+                    and scope.kind is ScopeKind.GLOBAL
+                    and any(
+                        candidate.kind is ScopeKind.GLOBAL
+                        for candidate in self.list_scopes()
+                    )
+                ):
+                    raise ProfileConflictError("Personal context global scope changed")
+                self._repository.commit_scope(
+                    scope,
+                    expected_version_id=(
+                        None if current_scope is None else current_scope.version_id
+                    ),
+                )
+                return scope
+
+            if domain == "personal_context.record":
+                record = ProfileRecord.model_validate(value)
+                if record.profile_id != profile_id:
+                    raise ProfileConflictError("Personal context profile changed")
+                self._require_scope(profile_id, record.scope_id)
+                self._validate_server_controls(record.controls)
+                current_record = self._repository.get_record(profile_id, record.record_id)
+                if record == current_record:
+                    return record
+                expected_version = (
+                    None if current_record is None else current_record.version_id
+                )
+                orphan_tombstone = (
+                    current_record is None
+                    and record.state is RecordState.DELETED
+                    and record.payload is None
+                    and record.parent_version_id is not None
+                )
+                if record.parent_version_id != expected_version and not orphan_tombstone:
+                    raise ProfileConflictError("Personal context record changed")
+                if current_record is not None and (
+                    current_record.state is RecordState.DELETED
+                    or record.scope_id != current_record.scope_id
+                    or record.kind is not current_record.kind
+                    or record.created_at != current_record.created_at
+                    or record.updated_at < current_record.updated_at
+                    or record.version_id == current_record.version_id
+                ):
+                    raise ProfileConflictError("Personal context record changed")
+                self._ensure_semantic_key_available(
+                    record,
+                    excluding_record_id=(
+                        None if current_record is None else current_record.record_id
+                    ),
+                )
+                self._repository.commit_record_version(
+                    record,
+                    expected_version_id=expected_version,
+                    allow_orphan_tombstone=orphan_tombstone,
+                )
+                return record
+
+            if domain == "personal_context.proposal":
+                proposal = ProfileProposal.model_validate(value)
+                if proposal.profile_id != profile_id:
+                    raise ProfileConflictError("Personal context profile changed")
+                if (
+                    proposal.state is ProposalState.PENDING
+                    and proposal.proposed_record is not None
+                    and proposal.proposed_record.controls.sync_mode
+                    is SyncMode.DEVICE_ONLY
+                ):
+                    raise ValueError("Device-only proposals cannot synchronize")
+                self._require_scope(profile_id, proposal.scope_id)
+                current_proposal = self._repository.get_proposal(
+                    profile_id, proposal.proposal_id
+                )
+                if proposal == current_proposal:
+                    return proposal
+                if proposal.state is ProposalState.PENDING:
+                    if current_proposal is not None:
+                        raise ProfileConflictError(
+                            "Personal context proposal changed"
+                        )
+                    self.create_proposal(proposal)
+                    return proposal
+                if (
+                    current_proposal is not None
+                    and current_proposal.state is not ProposalState.PENDING
+                ):
+                    raise ProfileConflictError("Personal context proposal changed")
+                self._repository.commit_synced_proposal_receipt(
+                    proposal,
+                    expected_manifest_version=self._manifest().current_version_id,
+                )
+                return proposal
+
+            if domain == "personal_context.purge":
+                barrier = dict(value)
+                if set(barrier) != {
+                    "schema_version",
+                    "profile_id",
+                    "purge_generation",
+                }:
+                    raise ValueError("Personal context purge barrier is invalid")
+                current = self._manifest()
+                if barrier["profile_id"] != current.profile_id:
+                    raise ProfileConflictError("Personal context profile changed")
+                generation = barrier["purge_generation"]
+                if generation == current.purge_generation:
+                    return barrier
+                if generation != current.purge_generation + 1:
+                    raise ProfileConflictError("Personal context purge generation changed")
+                purged = ProfileManifest.model_validate(
+                    {
+                        **current.model_dump(mode="python"),
+                        "revision": current.revision + 1,
+                        "purge_generation": generation,
+                        "updated_at": self._now(),
+                        "current_version_id": self._id_factory("manifest-version"),
+                    }
+                )
+                self._repository.purge_profile(
+                    purged,
+                    expected_manifest_version=current.current_version_id,
+                )
+                return barrier
+        except (ConcurrentProfileUpdateError, ProfileSemanticKeyCollisionError) as exc:
+            raise ProfileConflictError("Personal context changed concurrently") from exc
+        raise ValueError("Unsupported Personal Context Sync domain")
 
     def get_manifest(self) -> ProfileManifest:
         """Return the authenticated user's manifest."""
