@@ -31,39 +31,155 @@ from Helper_Scripts.Deployment.production_preflight import (
 )
 
 _IMPORT_SMOKE = "import tldw_Server_API.app.main"
-_ARCHIVE_SCRIPT = (
-    "import tarfile; "
-    "archive=tarfile.open('/backup/app-data.tar','w'); "
-    "archive.add('/data',arcname='data',recursive=True); "
-    "archive.close()"
-)
+_ARCHIVE_SCRIPT = """\
+import os, sys, tarfile
+root = sys.argv[1]
+with tarfile.open(fileobj=sys.stdout.buffer, mode="w|") as archive:
+    for name in sorted(os.listdir(root)):
+        archive.add(os.path.join(root, name), arcname=name, recursive=True)
+"""
 _RESTORE_APP_SCRIPT = """\
-import hashlib, os, shutil, sys, tarfile
-source = "/backup/" + sys.argv[1]
-with open(source, "rb") as stream:
-    digest = hashlib.file_digest(stream, "sha256").hexdigest()
-if digest != sys.argv[2]:
-    raise RuntimeError("app-data checksum mismatch")
-for name in os.listdir("/data"):
-    path = "/data/" + name
-    shutil.rmtree(path) if os.path.isdir(path) and not os.path.islink(path) else os.unlink(path)
-with tarfile.open(source, "r:*") as archive:
-    archive.extractall("/data", filter="data", numeric_owner=True)
+import hashlib, os, shutil, sys, tarfile, tempfile
+from pathlib import Path, PurePosixPath
+
+source = Path(sys.argv[1])
+expected = sys.argv[2]
+data = Path(sys.argv[3])
+stage = Path(tempfile.mkdtemp(prefix=".tldw-app-restore-", dir=str(data)))
+staged_archive = stage / "archive.tar"
+new = stage / "new"
+old = stage / "old"
+new.mkdir()
+old.mkdir()
+moved_old = []
+installed = []
+replacement_started = False
+rollback_complete = False
+
+def remove_path(path):
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path)
+    else:
+        path.unlink(missing_ok=True)
+
+def apply_metadata(path, member):
+    os.chmod(path, member.mode & 0o777)
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        os.chown(path, member.uid, member.gid, follow_symlinks=False)
+
+try:
+    digest = hashlib.sha256()
+    with open(source, "rb") as input_stream, open(staged_archive, "xb") as output_stream:
+        while True:
+            chunk = input_stream.read(1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+            output_stream.write(chunk)
+        output_stream.flush()
+        os.fsync(output_stream.fileno())
+    if digest.hexdigest() != expected:
+        raise RuntimeError("app-data checksum mismatch")
+
+    seen = set()
+    directory_metadata = []
+    with tarfile.open(staged_archive, "r:*") as archive:
+        for member in archive:
+            member_path = PurePosixPath(member.name)
+            if (
+                not member.name
+                or member_path.is_absolute()
+                or ".." in member_path.parts
+                or not (member.isdir() or member.isfile())
+                or member.name in seen
+            ):
+                raise RuntimeError("app-data archive contains an unsafe member")
+            seen.add(member.name)
+
+    with tarfile.open(staged_archive, "r:*") as archive:
+        for member in archive:
+            target = new.joinpath(*PurePosixPath(member.name).parts)
+            if member.isdir():
+                target.mkdir(parents=True, exist_ok=True)
+                directory_metadata.append((target, member))
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            extracted = archive.extractfile(member)
+            if extracted is None:
+                raise RuntimeError("app-data archive member is unreadable")
+            with extracted, open(target, "xb") as output_stream:
+                shutil.copyfileobj(extracted, output_stream, length=1024 * 1024)
+                output_stream.flush()
+                os.fsync(output_stream.fileno())
+            apply_metadata(target, member)
+    for target, member in sorted(directory_metadata, key=lambda item: len(item[0].parts), reverse=True):
+        apply_metadata(target, member)
+
+    replacement_started = True
+    for entry in sorted(data.iterdir(), key=lambda path: path.name):
+        if entry == stage:
+            continue
+        destination = old / entry.name
+        os.replace(entry, destination)
+        moved_old.append(destination)
+    for entry in sorted(new.iterdir(), key=lambda path: path.name):
+        destination = data / entry.name
+        os.replace(entry, destination)
+        installed.append(destination)
+except BaseException:
+    if replacement_started:
+        rollback_complete = True
+        for entry in reversed(installed):
+            try:
+                remove_path(entry)
+            except OSError:
+                rollback_complete = False
+        for entry in reversed(moved_old):
+            try:
+                os.replace(entry, data / entry.name)
+            except OSError:
+                rollback_complete = False
+    raise
+else:
+    rollback_complete = True
+finally:
+    if not replacement_started or rollback_complete:
+        shutil.rmtree(stage, ignore_errors=True)
 """
 _RESTORE_REDIS_SCRIPT = """\
-import hashlib, os, shutil, sys
-source = "/backup/" + sys.argv[1]
-with open(source, "rb") as stream:
-    digest = hashlib.file_digest(stream, "sha256").hexdigest()
-if digest != sys.argv[2]:
-    raise RuntimeError("Redis checksum mismatch")
-owner = os.stat("/data").st_uid, os.stat("/data").st_gid
-for name in os.listdir("/data"):
-    path = "/data/" + name
-    shutil.rmtree(path) if os.path.isdir(path) and not os.path.islink(path) else os.unlink(path)
-shutil.copyfile(source, "/data/dump.rdb")
-os.chown("/data/dump.rdb", *owner)
-os.chmod("/data/dump.rdb", 0o600)
+import hashlib, os, sys, tempfile
+from pathlib import Path
+
+source = Path(sys.argv[1])
+expected = sys.argv[2]
+data = Path(sys.argv[3])
+descriptor, staged_name = tempfile.mkstemp(prefix=".tldw-redis-restore-", dir=str(data))
+staged = Path(staged_name)
+success = False
+try:
+    digest = hashlib.sha256()
+    with open(source, "rb") as input_stream, os.fdopen(descriptor, "wb") as output_stream:
+        descriptor = -1
+        while True:
+            chunk = input_stream.read(1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+            output_stream.write(chunk)
+        output_stream.flush()
+        os.fsync(output_stream.fileno())
+    if digest.hexdigest() != expected:
+        raise RuntimeError("Redis checksum mismatch")
+    owner = data.stat().st_uid, data.stat().st_gid
+    os.chown(staged, *owner)
+    os.chmod(staged, 0o600)
+    os.replace(staged, data / "dump.rdb")
+    success = True
+finally:
+    if descriptor >= 0:
+        os.close(descriptor)
+    if not success:
+        staged.unlink(missing_ok=True)
 """
 _INHERITED_ENV_NAMES = (
     "PATH",
@@ -134,8 +250,12 @@ def default_streaming_command_runner(
 ) -> CommandResult:
     """Run one explicit argv while streaming stdout to a private new file."""
 
-    descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    descriptor = -1
+    created = False
+    success = False
     try:
+        descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        created = True
         os.fchmod(descriptor, 0o600)
         with os.fdopen(descriptor, "wb") as stream:
             descriptor = -1
@@ -149,19 +269,21 @@ def default_streaming_command_runner(
             )
             stream.flush()
             os.fsync(stream.fileno())
-    except (OSError, RuntimeError):
-        destination.unlink(missing_ok=True)
-        raise
+        result = CommandResult(
+            returncode=completed.returncode,
+            stdout=b"",
+            stderr=completed.stderr,
+        )
+        success = result.returncode == 0
+        return result
     finally:
         if descriptor >= 0:
             os.close(descriptor)
-    if completed.returncode != 0:
-        destination.unlink(missing_ok=True)
-    return CommandResult(
-        returncode=completed.returncode,
-        stdout=b"",
-        stderr=completed.stderr,
-    )
+        if created and not success:
+            try:
+                destination.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def _command_env(config: DeploymentConfig, **overrides: str) -> dict[str, str]:
@@ -216,20 +338,26 @@ def _run_streaming_gate(
 ) -> CommandResult:
     """Run a command whose stdout must stream to one private artifact."""
 
+    success = False
     try:
-        result = runner(tuple(argv), env, destination)
-    except (OSError, RuntimeError) as exc:
-        destination.unlink(missing_ok=True)
-        raise DeploymentError(f"{label} gate could not execute") from exc
-    if result.returncode != 0:
-        destination.unlink(missing_ok=True)
-        raise DeploymentError(f"{label} gate failed with exit status {result.returncode}")
-    try:
-        _require_nonempty_file(destination, label)
-    except (DeploymentError, OSError) as exc:
-        destination.unlink(missing_ok=True)
-        raise DeploymentError(f"{label} gate produced an unusable artifact") from exc
-    return result
+        try:
+            result = runner(tuple(argv), env, destination)
+        except Exception as exc:
+            raise DeploymentError(f"{label} gate could not execute") from exc
+        if result.returncode != 0:
+            raise DeploymentError(f"{label} gate failed with exit status {result.returncode}")
+        try:
+            _require_nonempty_file(destination, label)
+        except (DeploymentError, OSError) as exc:
+            raise DeploymentError(f"{label} gate produced an unusable artifact") from exc
+        success = True
+        return result
+    finally:
+        if not success:
+            try:
+                destination.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def _preflight(config: DeploymentConfig) -> None:
@@ -274,6 +402,7 @@ def _write_private_bytes(path: Path, data: bytes, label: str) -> None:
         raise DeploymentError(f"{label} gate produced an empty artifact")
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
+        os.fchmod(descriptor, 0o600)
         with os.fdopen(descriptor, "wb", closefd=False) as stream:
             stream.write(data)
             stream.flush()
@@ -341,6 +470,59 @@ def _image_smoke(image: str, runner: CommandRunner, env: Mapping[str, str], labe
     )
 
 
+def _existing_installation(value: str) -> bool:
+    """Return the validated installation mode without accepting ambiguity."""
+
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise DeploymentError("installation state gate is invalid")
+
+
+def _verify_running_application(
+    config: DeploymentConfig,
+    runner: CommandRunner,
+    env: Mapping[str, str],
+) -> None:
+    """Bind an upgrade's rollback image to the currently running app."""
+
+    compose = _compose_prefix(config)
+    result = _run_gate(
+        runner,
+        "running application discovery",
+        (*compose, "ps", "-q", "--status", "running", "app"),
+        env=env,
+    )
+    try:
+        container_ids = tuple(line.strip() for line in result.stdout.decode("utf-8").splitlines() if line.strip())
+    except UnicodeError as exc:
+        raise DeploymentError("running application discovery gate returned invalid output") from exc
+    existing = _existing_installation(config.values.get("TLDW_EXISTING_INSTALLATION", ""))
+    if not existing:
+        if container_ids:
+            raise DeploymentError("initial installation gate found a running application")
+        return
+    if len(container_ids) != 1:
+        raise DeploymentError("running application gate requires exactly one container")
+    container_id = container_ids[0]
+    if not (12 <= len(container_id) <= 64) or any(character not in "0123456789abcdef" for character in container_id):
+        raise DeploymentError("running application gate returned an invalid container identifier")
+    image_result = _run_gate(
+        runner,
+        "running application image",
+        ("docker", "inspect", "--format", "{{.Config.Image}}", container_id),
+        env=env,
+    )
+    try:
+        image_lines = tuple(line.strip() for line in image_result.stdout.decode("utf-8").splitlines() if line.strip())
+    except UnicodeError as exc:
+        raise DeploymentError("running application image gate returned invalid output") from exc
+    if len(image_lines) != 1 or image_lines[0] != config.values["TLDW_ROLLBACK_IMAGE"]:
+        raise DeploymentError("running application rollback image gate failed")
+
+
 def deploy(
     config: DeploymentConfig,
     *,
@@ -363,6 +545,7 @@ def deploy(
         _run_gate(runner, label, ("docker", "pull", image), env=env)
     _image_smoke(target_image, runner, env, "target image smoke")
     _image_smoke(rollback_image, runner, env, "rollback image smoke")
+    _verify_running_application(config, runner, env)
 
     compose = _compose_prefix(config)
     _run_gate(
@@ -477,33 +660,46 @@ def deploy(
         env=env,
     )
 
-    _run_gate(
-        runner,
-        "application data archive",
-        (
-            "docker",
-            "run",
-            "--rm",
-            "--network",
-            "none",
-            "--user",
-            "0:0",
-            "--entrypoint",
-            "python",
-            "-v",
-            "tldw-production_app-data:/data:ro",
-            "-v",
-            f"{snapshot}:/backup",
-            target_image,
-            "-c",
-            _ARCHIVE_SCRIPT,
-        ),
-        env=env,
+    app_archive_argv = (
+        "docker",
+        "run",
+        "--rm",
+        "--network",
+        "none",
+        "--user",
+        "0:0",
+        "--entrypoint",
+        "python",
+        "-v",
+        "tldw-production_app-data:/data:ro",
+        target_image,
+        "-c",
+        _ARCHIVE_SCRIPT,
+        "/data",
     )
-    _require_nonempty_file(app_path, "application data archive")
+    if active_stream_runner is not None:
+        _run_streaming_gate(
+            active_stream_runner,
+            "application data archive",
+            app_archive_argv,
+            env=env,
+            destination=app_path,
+        )
+    else:
+        app_archive = _run_gate(
+            runner,
+            "application data archive",
+            app_archive_argv,
+            env=env,
+        )
+        _write_private_bytes(app_path, app_archive.stdout, "application data archive")
     try:
         verify_tar_archive(app_path)
     except ValueError as exc:
+        try:
+            app_path.unlink(missing_ok=True)
+        except OSError as cleanup_exc:
+            raise DeploymentError("application data cleanup gate failed") from cleanup_exc
         raise DeploymentError("application data verification gate failed") from exc
 
     manifest = DeploymentManifest(
@@ -653,8 +849,9 @@ def rollback(
             manifest.rollback_image,
             "-c",
             _RESTORE_REDIS_SCRIPT,
-            artifacts["redis"][0].path,
+            f"/backup/{artifacts['redis'][0].path}",
             artifacts["redis"][0].sha256,
+            "/data",
         ),
         env=env,
     )
@@ -678,8 +875,9 @@ def rollback(
             manifest.rollback_image,
             "-c",
             _RESTORE_APP_SCRIPT,
-            artifacts["app_data"][0].path,
+            f"/backup/{artifacts['app_data'][0].path}",
             artifacts["app_data"][0].sha256,
+            "/data",
         ),
         env=env,
     )

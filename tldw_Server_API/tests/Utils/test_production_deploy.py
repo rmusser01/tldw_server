@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import builtins
+import hashlib
 import io
 import json
 import os
+import subprocess
+import sys
 import tarfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -27,6 +31,8 @@ from Helper_Scripts.Deployment.production_deploy import (
 )
 from Helper_Scripts.Deployment.production_preflight import PreflightIssue, PreflightReport
 
+_RUNNING_CONTAINER_ID = "a" * 64
+
 
 def _write_tar(path: Path, *, member_name: str = "data/state.db") -> None:
     payload = b"application-data"
@@ -34,6 +40,24 @@ def _write_tar(path: Path, *, member_name: str = "data/state.db") -> None:
         info = tarfile.TarInfo(member_name)
         info.size = len(payload)
         archive.addfile(info, io.BytesIO(payload))
+
+
+def _tar_bytes(*, member_name: str = "state.db", payload: bytes = b"application-data") -> bytes:
+    stream = io.BytesIO()
+    with tarfile.open(fileobj=stream, mode="w") as archive:
+        info = tarfile.TarInfo(member_name)
+        info.size = len(payload)
+        archive.addfile(info, io.BytesIO(payload))
+    return stream.getvalue()
+
+
+def _run_embedded_script(script: str, *args: Path | str) -> None:
+    previous_argv = sys.argv
+    sys.argv = ["deployment-helper", *(str(arg) for arg in args)]
+    try:
+        exec(compile(script, "<deployment-helper>", "exec"), {"__name__": "__main__"})
+    finally:
+        sys.argv = previous_argv
 
 
 def _record(path: Path, kind: str) -> ArtifactRecord:
@@ -220,6 +244,58 @@ def test_default_streaming_runner_removes_partial_failed_output(
     assert not destination.exists()
 
 
+@pytest.mark.parametrize("failure", (ValueError, KeyboardInterrupt))
+def test_default_streaming_runner_removes_partial_output_for_every_exception(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: type[BaseException],
+) -> None:
+    destination = tmp_path / "postgres.dump"
+
+    def fake_run(argv, **kwargs):
+        kwargs["stdout"].write(b"partial-secret-dump")
+        raise failure("raw-secret")
+
+    monkeypatch.setattr(production_deploy.subprocess, "run", fake_run)
+
+    with pytest.raises(failure):
+        production_deploy.default_streaming_command_runner(
+            ("docker", "compose", "exec", "postgres", "pg_dump"),
+            None,
+            destination,
+        )
+
+    assert not destination.exists()
+
+
+def test_default_streaming_runner_cleans_up_when_result_capture_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    destination = tmp_path / "postgres.dump"
+
+    class BrokenResult:
+        returncode = 0
+
+        @property
+        def stderr(self):
+            raise ValueError("raw-secret")
+
+    def fake_run(argv, **kwargs):
+        kwargs["stdout"].write(b"partial-secret-dump")
+        return BrokenResult()
+
+    monkeypatch.setattr(production_deploy.subprocess, "run", fake_run)
+
+    with pytest.raises(ValueError, match="raw-secret"):
+        production_deploy.default_streaming_command_runner(
+            ("docker", "compose", "exec", "postgres", "pg_dump"),
+            None,
+            destination,
+        )
+
+    assert not destination.exists()
+
+
 def test_default_streaming_runner_enforces_mode_under_restrictive_umask(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -243,10 +319,34 @@ def test_default_streaming_runner_enforces_mode_under_restrictive_umask(
     assert destination.stat().st_mode & 0o777 == 0o600
 
 
+def test_default_streaming_runner_does_not_remove_preexisting_destination(
+    tmp_path: Path,
+) -> None:
+    destination = tmp_path / "postgres.dump"
+    destination.write_bytes(b"existing-artifact")
+
+    with pytest.raises(FileExistsError):
+        production_deploy.default_streaming_command_runner(
+            ("docker", "compose", "exec", "postgres", "pg_dump"),
+            None,
+            destination,
+        )
+
+    assert destination.read_bytes() == b"existing-artifact"
+
+
 class RecordingRunner:
-    def __init__(self, *, fail_when: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        fail_when: str | None = None,
+        running_container: str | None = None,
+        running_image: str | None = None,
+    ) -> None:
         self.calls: list[tuple[tuple[str, ...], Mapping[str, str] | None, bytes | None]] = []
         self.fail_when = fail_when
+        self.running_container = running_container
+        self.running_image = running_image
 
     def __call__(
         self,
@@ -265,14 +365,26 @@ class RecordingRunner:
             )
         if args[-3:] == ("config", "--format", "json"):
             return CommandResult(0, b"{}", b"")
+        if "ps -q --status running app" in joined:
+            existing = (env or {}).get("TLDW_EXISTING_INSTALLATION", "").strip().lower() in {
+                "1",
+                "true",
+                "yes",
+                "on",
+            }
+            container = self.running_container
+            if container is None:
+                container = _RUNNING_CONTAINER_ID if existing else ""
+            return CommandResult(0, container.encode("utf-8"), b"")
+        if args[:2] == ("docker", "inspect"):
+            image = self.running_image or (env or {})["TLDW_ROLLBACK_IMAGE"]
+            return CommandResult(0, image.encode("utf-8"), b"")
         if "pg_dump" in args:
             return CommandResult(0, b"custom-postgres-dump", b"")
         if "cp" in args and "redis:/data/dump.rdb" in args:
             Path(args[-1]).write_bytes(b"REDIS0011fixture")
         if "production_app-data:/data:ro" in joined:
-            mount = args[args.index("-v", args.index("-v") + 1) + 1]
-            backup_dir = Path(mount.rsplit(":/backup", 1)[0])
-            _write_tar(backup_dir / "app-data.tar")
+            return CommandResult(0, _tar_bytes(), b"")
         return CommandResult(0, b"", b"")
 
 
@@ -287,7 +399,10 @@ class RecordingStreamRunner:
         destination: Path,
     ) -> CommandResult:
         self.calls.append((tuple(argv), env, destination))
-        destination.write_bytes(b"custom-postgres-dump")
+        if "production_app-data:/data:ro" in " ".join(argv):
+            destination.write_bytes(_tar_bytes())
+        else:
+            destination.write_bytes(b"custom-postgres-dump")
         return CommandResult(0, b"", b"")
 
 
@@ -313,6 +428,7 @@ def _config(tmp_path: Path) -> DeploymentConfig:
             "REDIS_IMAGE": "redis:7.4.1-alpine",
             "POSTGRES_USER": "tldw_app",
             "POSTGRES_DB": "tldw",
+            "TLDW_EXISTING_INSTALLATION": "true",
         },
     )
 
@@ -357,6 +473,8 @@ def test_deploy_runs_every_gate_before_final_start(tmp_path: Path, passing_deplo
         "docker pull registry/tldw:sha-7654321",
         "--network none --entrypoint python registry/tldw:sha-1234567",
         "--network none --entrypoint python registry/tldw:sha-7654321",
+        "ps -q --status running app",
+        f"docker inspect --format {{{{.Config.Image}}}} {_RUNNING_CONTAINER_ID}",
         "up -d --wait postgres redis",
         "stop app caddy",
         "pg_dump --format=custom",
@@ -381,7 +499,7 @@ def test_deploy_runs_every_gate_before_final_start(tmp_path: Path, passing_deplo
     assert load_verified_manifest(manifest_path) == manifest
 
 
-def test_deploy_uses_injected_streaming_runner_for_postgres_dump(
+def test_deploy_uses_injected_streaming_runner_for_database_and_app_data(
     tmp_path: Path, passing_deployment_checks: None
 ) -> None:
     runner = RecordingRunner()
@@ -389,10 +507,14 @@ def test_deploy_uses_injected_streaming_runner_for_postgres_dump(
 
     deploy(_config(tmp_path), runner=runner, stream_runner=stream_runner)
 
-    assert len(stream_runner.calls) == 1
+    assert len(stream_runner.calls) == 2
     assert "pg_dump --format=custom" in " ".join(stream_runner.calls[0][0])
+    assert "production_app-data:/data:ro" in " ".join(stream_runner.calls[1][0])
+    assert stream_runner.calls[1][0].count("-v") == 1
+    assert not any(":/backup" in argument for argument in stream_runner.calls[1][0])
     assert not any("pg_dump" in command for command in _commands(runner))
-    assert stream_runner.calls[0][2].stat().st_mode & 0o777 == 0o600
+    assert not any("production_app-data:/data:ro" in command for command in _commands(runner))
+    assert all(call[2].stat().st_mode & 0o777 == 0o600 for call in stream_runner.calls)
 
 
 @pytest.mark.parametrize("outcome", ("empty", "exception"))
@@ -421,6 +543,225 @@ def test_deploy_removes_unusable_injected_stream_output(
     assert not tuple(config.backup_dir.rglob("manifest.json"))
 
 
+def test_deploy_propagates_interrupt_after_removing_partial_stream_output(
+    tmp_path: Path,
+    passing_deployment_checks: None,
+) -> None:
+    config = _config(tmp_path)
+
+    def interrupted_stream_runner(argv, env, destination):
+        destination.write_bytes(b"partial")
+        raise KeyboardInterrupt("raw-secret")
+
+    with pytest.raises(KeyboardInterrupt, match="raw-secret"):
+        deploy(
+            config,
+            runner=RecordingRunner(),
+            stream_runner=interrupted_stream_runner,
+        )
+
+    assert not tuple(config.backup_dir.rglob("postgres.dump"))
+    assert not tuple(config.backup_dir.rglob("manifest.json"))
+
+
+@pytest.mark.parametrize("outcome", ("empty", "nonzero", "exception", "malformed"))
+def test_deploy_removes_unusable_streamed_app_archive(
+    tmp_path: Path,
+    passing_deployment_checks: None,
+    outcome: str,
+) -> None:
+    config = _config(tmp_path)
+
+    def app_failure_stream_runner(argv, env, destination):
+        if "pg_dump" in argv:
+            destination.write_bytes(b"custom-postgres-dump")
+            return CommandResult(0, b"", b"")
+        destination.write_bytes(b"" if outcome == "empty" else b"partial")
+        if outcome == "exception":
+            raise ValueError("raw-secret")
+        return CommandResult(19 if outcome == "nonzero" else 0, b"", b"raw-secret")
+
+    with pytest.raises(DeploymentError) as exc_info:
+        deploy(
+            config,
+            runner=RecordingRunner(),
+            stream_runner=app_failure_stream_runner,
+        )
+
+    assert "raw-secret" not in str(exc_info.value)
+    assert not tuple(config.backup_dir.rglob("app-data.tar"))
+    assert not tuple(config.backup_dir.rglob("manifest.json"))
+
+
+def test_app_archive_and_restore_round_trip_keeps_volume_root_layout(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "file").write_text("root-value", encoding="utf-8")
+    (source / "nested").mkdir()
+    (source / "nested" / "child").write_text("child-value", encoding="utf-8")
+    archive = tmp_path / "app-data.tar"
+    with archive.open("xb") as output:
+        completed = subprocess.run(
+            [sys.executable, "-c", production_deploy._ARCHIVE_SCRIPT, str(source)],
+            check=False,
+            stdout=output,
+            stderr=subprocess.PIPE,
+        )
+    assert completed.returncode == 0, completed.stderr.decode("utf-8", errors="replace")
+    with tarfile.open(archive, "r:*") as stored:
+        assert "file" in stored.getnames()
+        assert "data/file" not in stored.getnames()
+
+    destination = tmp_path / "destination"
+    destination.mkdir()
+    (destination / "old").write_text("old-value", encoding="utf-8")
+    digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+
+    _run_embedded_script(production_deploy._RESTORE_APP_SCRIPT, archive, digest, destination)
+
+    assert (destination / "file").read_text(encoding="utf-8") == "root-value"
+    assert (destination / "nested" / "child").read_text(encoding="utf-8") == "child-value"
+    assert not (destination / "data" / "file").exists()
+    assert not (destination / "old").exists()
+
+
+def test_app_restore_uses_one_open_source_when_artifact_path_is_swapped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "app-data.tar"
+    source.write_bytes(_tar_bytes(member_name="file", payload=b"verified"))
+    replacement = tmp_path / "replacement.tar"
+    replacement.write_bytes(_tar_bytes(member_name="file", payload=b"swapped"))
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    destination = tmp_path / "data"
+    destination.mkdir()
+    real_open = builtins.open
+    swapped = False
+
+    def swap_after_open(path, *args, **kwargs):
+        nonlocal swapped
+        handle = real_open(path, *args, **kwargs)
+        if not swapped and Path(path) == source and args and args[0] == "rb":
+            os.replace(replacement, source)
+            swapped = True
+        return handle
+
+    monkeypatch.setattr(builtins, "open", swap_after_open)
+
+    _run_embedded_script(production_deploy._RESTORE_APP_SCRIPT, source, digest, destination)
+
+    assert (destination / "file").read_bytes() == b"verified"
+
+
+def test_app_restore_rejects_unsafe_archive_before_touching_live_data(tmp_path: Path) -> None:
+    source = tmp_path / "unsafe.tar"
+    source.write_bytes(_tar_bytes(member_name="../escape", payload=b"unsafe"))
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    destination = tmp_path / "data"
+    destination.mkdir()
+    (destination / "original").write_text("keep", encoding="utf-8")
+
+    with pytest.raises((RuntimeError, ValueError, tarfile.TarError)):
+        _run_embedded_script(production_deploy._RESTORE_APP_SCRIPT, source, digest, destination)
+
+    assert (destination / "original").read_text(encoding="utf-8") == "keep"
+    assert not (tmp_path / "escape").exists()
+
+
+def test_app_restore_rolls_back_live_entries_when_replacement_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "app-data.tar"
+    stream = io.BytesIO()
+    with tarfile.open(fileobj=stream, mode="w") as archive:
+        for name in ("new-a", "new-b"):
+            payload = name.encode("utf-8")
+            member = tarfile.TarInfo(name)
+            member.size = len(payload)
+            archive.addfile(member, io.BytesIO(payload))
+    source.write_bytes(stream.getvalue())
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    destination = tmp_path / "data"
+    destination.mkdir()
+    (destination / "original").write_text("keep", encoding="utf-8")
+    real_replace = os.replace
+    failed = False
+
+    def fail_second_new_entry(source_path, destination_path):
+        nonlocal failed
+        path = Path(source_path)
+        if not failed and path.parent.name == "new" and path.name == "new-b":
+            failed = True
+            raise OSError("injected replacement failure")
+        return real_replace(source_path, destination_path)
+
+    monkeypatch.setattr(os, "replace", fail_second_new_entry)
+
+    with pytest.raises(OSError, match="injected replacement failure"):
+        _run_embedded_script(production_deploy._RESTORE_APP_SCRIPT, source, digest, destination)
+
+    assert (destination / "original").read_text(encoding="utf-8") == "keep"
+    assert not (destination / "new-a").exists()
+    assert not (destination / "new-b").exists()
+
+
+def test_redis_restore_stages_one_open_source_before_atomic_replace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "redis.rdb"
+    source.write_bytes(b"verified-rdb")
+    replacement = tmp_path / "replacement.rdb"
+    replacement.write_bytes(b"swapped-rdb")
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    destination = tmp_path / "redis-data"
+    destination.mkdir()
+    (destination / "dump.rdb").write_bytes(b"old-rdb")
+    real_open = builtins.open
+    real_replace = os.replace
+    swapped = False
+    replacements: list[tuple[Path, Path]] = []
+
+    def swap_after_open(path, *args, **kwargs):
+        nonlocal swapped
+        handle = real_open(path, *args, **kwargs)
+        if not swapped and Path(path) == source and args and args[0] == "rb":
+            real_replace(replacement, source)
+            swapped = True
+        return handle
+
+    def record_replace(source_path, destination_path):
+        replacements.append((Path(source_path), Path(destination_path)))
+        return real_replace(source_path, destination_path)
+
+    monkeypatch.setattr(builtins, "open", swap_after_open)
+    monkeypatch.setattr(os, "replace", record_replace)
+
+    _run_embedded_script(production_deploy._RESTORE_REDIS_SCRIPT, source, digest, destination)
+
+    assert (destination / "dump.rdb").read_bytes() == b"verified-rdb"
+    assert replacements[-1][1] == destination / "dump.rdb"
+
+
+def test_redis_restore_checksum_failure_preserves_live_data(tmp_path: Path) -> None:
+    source = tmp_path / "redis.rdb"
+    source.write_bytes(b"unverified-rdb")
+    destination = tmp_path / "redis-data"
+    destination.mkdir()
+    live = destination / "dump.rdb"
+    live.write_bytes(b"old-rdb")
+
+    with pytest.raises(RuntimeError, match="checksum mismatch"):
+        _run_embedded_script(
+            production_deploy._RESTORE_REDIS_SCRIPT,
+            source,
+            "0" * 64,
+            destination,
+        )
+
+    assert live.read_bytes() == b"old-rdb"
+    assert not tuple(destination.glob(".tldw-redis-restore-*"))
+
+
 @pytest.mark.parametrize(
     "failed_gate",
     (
@@ -429,6 +770,8 @@ def test_deploy_removes_unusable_injected_stream_output(
         "docker pull registry/tldw:sha-7654321",
         "--entrypoint python registry/tldw:sha-1234567",
         "--entrypoint python registry/tldw:sha-7654321",
+        "ps -q --status running app",
+        "docker inspect --format {{.Config.Image}}",
         "up -d --wait postgres redis",
         "stop app caddy",
         "pg_dump --format=custom",
@@ -456,11 +799,65 @@ def test_deploy_stops_at_each_failed_gate_without_leaking_output(
     assert len(final_starts) == (1 if failed_gate == "up -d --remove-orphans" else 0)
 
 
+@pytest.mark.parametrize(
+    ("existing", "running_container", "running_image", "expected_gate"),
+    (
+        ("true", "", None, "running application"),
+        ("true", _RUNNING_CONTAINER_ID, "registry/tldw:raw-secret", "rollback image"),
+        ("false", "b" * 64, None, "initial installation"),
+    ),
+)
+def test_deploy_rejects_running_application_state_that_does_not_match_mode(
+    tmp_path: Path,
+    passing_deployment_checks: None,
+    existing: str,
+    running_container: str,
+    running_image: str | None,
+    expected_gate: str,
+) -> None:
+    config = _config(tmp_path)
+    config = DeploymentConfig(
+        env_file=config.env_file,
+        compose_file=config.compose_file,
+        proxy_file=config.proxy_file,
+        backup_dir=config.backup_dir,
+        values={**config.values, "TLDW_EXISTING_INSTALLATION": existing},
+    )
+    runner = RecordingRunner(running_container=running_container, running_image=running_image)
+
+    with pytest.raises(DeploymentError, match=expected_gate) as exc_info:
+        deploy(config, runner=runner)
+
+    assert "raw-secret" not in str(exc_info.value)
+    assert not any("stop app caddy" in command for command in _commands(runner))
+
+
+def test_initial_install_without_running_app_skips_image_inspection(
+    tmp_path: Path, passing_deployment_checks: None
+) -> None:
+    config = _config(tmp_path)
+    config = DeploymentConfig(
+        env_file=config.env_file,
+        compose_file=config.compose_file,
+        proxy_file=config.proxy_file,
+        backup_dir=config.backup_dir,
+        values={**config.values, "TLDW_EXISTING_INSTALLATION": "false"},
+    )
+    runner = RecordingRunner()
+
+    deploy(config, runner=runner)
+
+    commands = _commands(runner)
+    assert any("ps -q --status running app" in command for command in commands)
+    assert not any("docker inspect" in command for command in commands)
+
+
 def test_rollback_verifies_and_restores_all_artifacts_before_prior_image_start(
     tmp_path: Path, passing_deployment_checks: None
 ) -> None:
     config = _config(tmp_path)
     manifest, manifest_path = _manifest(config.backup_dir, compose_file=config.compose_file)
+    source_manifest = manifest_path.read_bytes()
     runner = RecordingRunner()
 
     rollback(config, manifest_path, runner=runner)
@@ -481,9 +878,7 @@ def test_rollback_verifies_and_restores_all_artifacts_before_prior_image_start(
     final_env = runner.calls[-1][1]
     assert final_env is not None
     assert final_env["TLDW_APP_IMAGE"] == "registry/tldw:sha-7654321"
-    assert manifest_path.read_text(encoding="utf-8") == (config.backup_dir / "manifest.json").read_text(
-        encoding="utf-8"
-    )
+    assert manifest_path.read_bytes() == source_manifest
     assert tuple(config.backup_dir.glob("rollback-*.json"))
     restore_calls = tuple(call[0] for call in runner.calls)
     assert manifest.artifacts[1].sha256 in next(
