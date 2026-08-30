@@ -272,11 +272,15 @@ the owner/dataset/generation mapping on every operation, applies backend
 namespace isolation, and the graph projector still revalidates every result
 against current ChaChaNotes authority.
 
-The ChromaDB implementation creates a generation-specific collection with
-`hnsw:space=cosine` in the initial `get_or_create_collection` call and writes
-only `ids` plus `embeddings` through direct collection operations. It never
-calls the shared `store_in_chroma` document path and never relies on changing
-the metric after collection creation.
+The ChromaDB implementation probes generation-specific storage without
+mutation. It validates an existing collection's physical cosine contract, or
+creates an absent collection once with `hnsw:space=cosine` and re-reads any
+concurrent winner before use. It never uses `get_or_create_collection` to
+rewrite legacy metadata. This preserves compatibility across the declared
+ChromaDB range while ensuring an existing L2/non-cosine collection fails
+closed and remains unchanged. The implementation writes only `ids` plus
+`embeddings` through direct collection operations and never calls the shared
+`store_in_chroma` document path.
 
 The pgvector implementation must not use the generic adapter's physical table
 per collection. It uses a bounded set of dimension-specific semantic tables,
@@ -287,6 +291,10 @@ RLS. Generation deletion removes rows rather than tables. An unsupported
 dimension or an installation unable to enforce this schema reports semantic
 capability unavailable. Metrics use low-cardinality backend and operation
 labels, never generation, collection, owner, dataset, or dimension-table names.
+The fixed pgvector mapping is limited to dimensions supported by the `vector`
+HNSW index (at most 2,000; no `halfvec` substitution). Filtered iterative HNSW
+queries use separate bounded controls for visited tuples and candidate output;
+the scan-tuple setting is never reused as a result limit.
 
 Both implementations return raw cosine distance. The facade validates finite,
 consistent dimensions and rejects zero-norm vectors before storage or query;

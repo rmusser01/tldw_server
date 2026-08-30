@@ -17,9 +17,14 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGD
 from tldw_Server_API.app.core.Embeddings.ChromaDB_Library import ChromaDBManager
 from tldw_Server_API.app.core.Notes_Graph.semantic_vectors import (
     SemanticVector,
+    SemanticVectorBinding,
     SemanticVectorCapabilityError,
     SemanticVectorError,
     create_semantic_vector_store,
+)
+from tldw_Server_API.app.core.Notes_Graph.semantic_vectors_chroma import (
+    ChromaSemanticVectorBackend,
+    _namespace,
 )
 from tldw_Server_API.tests.Notes_Graph.vector_contract import (
     assert_vector_isolation_contract,
@@ -157,8 +162,9 @@ async def test_chroma_first_write_is_vector_only_and_namespace_is_opaque(tmp_pat
     collection = Mock()
     collection.metadata = {"hnsw:space": "cosine"}
     client = Mock()
-    client.get_or_create_collection.return_value = collection
-    client.get_collection.return_value = collection
+    client.get_collection.side_effect = [ValueError("legacy missing"), collection]
+    client.list_collections.return_value = []
+    client.create_collection.return_value = collection
     manager = _manager("owner-a", tmp_path, client)
     manager.store_in_chroma = Mock(side_effect=AssertionError("document path used"))
     db = CharactersRAGDB(str(tmp_path / "authority-spy.sqlite"), client_id="owner-a")
@@ -176,7 +182,7 @@ async def test_chroma_first_write_is_vector_only_and_namespace_is_opaque(tmp_pat
             (SemanticVector("opaque-vector", axis_vector(DIMENSIONS, 0)),),
         )
 
-        create_kwargs = client.get_or_create_collection.call_args.kwargs
+        create_kwargs = client.create_collection.call_args.kwargs
         assert create_kwargs["metadata"] == {"hnsw:space": "cosine"}
         namespace = create_kwargs["name"]
         assert namespace.startswith("nsv_")
@@ -188,6 +194,7 @@ async def test_chroma_first_write_is_vector_only_and_namespace_is_opaque(tmp_pat
             "embeddings": [list(axis_vector(DIMENSIONS, 0))],
         }
         manager.store_in_chroma.assert_not_called()
+        client.get_or_create_collection.assert_not_called()
     finally:
         manager.close()
         db.close_all_connections()
@@ -282,6 +289,13 @@ async def test_chroma_legacy_valueerror_confirms_absence_from_collection_listing
         ("target", "notes_semantic_chroma_operation_failed"),
         ([object()], "notes_semantic_vector_backend_result_invalid"),
         (None, "notes_semantic_vector_backend_result_invalid"),
+        (["duplicate", "duplicate"], "notes_semantic_vector_backend_result_invalid"),
+        ([""], "notes_semantic_vector_backend_result_invalid"),
+        (["ab"], "notes_semantic_vector_backend_result_invalid"),
+        (["bad\x00name"], "notes_semantic_vector_backend_result_invalid"),
+        (["bad..name"], "notes_semantic_vector_backend_result_invalid"),
+        (["\ud800xx"], "notes_semantic_vector_backend_result_invalid"),
+        ({"valid-name"}, "notes_semantic_vector_backend_result_invalid"),
     ),
 )
 async def test_chroma_legacy_valueerror_fails_closed_without_proven_absence(
@@ -319,11 +333,91 @@ async def test_chroma_legacy_valueerror_fails_closed_without_proven_absence(
 
 
 @pytest.mark.asyncio
+async def test_chroma_existing_legacy_collection_is_validated_without_metadata_mutation(
+    tmp_path: Path,
+) -> None:
+    collection = Mock()
+    collection.metadata = {"hnsw:space": "l2", "legacy": "preserve"}
+
+    class MutationSensitiveClient:
+        def __init__(self) -> None:
+            self.get_or_create_calls = 0
+            self.create_calls = 0
+
+        def get_collection(self, *, name: str):
+            return collection
+
+        def get_or_create_collection(self, **kwargs):
+            self.get_or_create_calls += 1
+            collection.metadata = kwargs["metadata"]
+            return collection
+
+        def create_collection(self, **_kwargs):
+            self.create_calls += 1
+            raise AssertionError("existing collection must not be recreated")
+
+        def list_collections(self):
+            return ["unrelated"]
+
+        def delete_collection(self, **_kwargs):
+            return None
+
+    client = MutationSensitiveClient()
+    manager = _manager("owner-a", tmp_path, client)
+    db = CharactersRAGDB(str(tmp_path / "authority-legacy-l2.sqlite"), client_id="owner-a")
+    generation_id = _generation(db, "dataset-a")
+    try:
+        store = await create_semantic_vector_store(
+            "chromadb",
+            authority=db.note_semantic_store,
+            chroma_manager=manager,
+        )
+
+        with pytest.raises(SemanticVectorCapabilityError) as exc_info:
+            await store.create_generation_storage("dataset-a", generation_id)
+
+        assert exc_info.value.code == "notes_semantic_chroma_cosine_unavailable"
+        assert collection.metadata == {"hnsw:space": "l2", "legacy": "preserve"}
+        assert client.get_or_create_calls == 0
+        assert client.create_calls == 0
+    finally:
+        manager.close()
+        db.close_all_connections()
+
+
+@pytest.mark.asyncio
+async def test_chroma_concurrent_create_rereads_and_validates_winner(tmp_path: Path) -> None:
+    collection = Mock()
+    collection.metadata = {"hnsw:space": "cosine"}
+    client = Mock()
+    client.get_collection.side_effect = [ValueError("missing"), collection]
+    client.list_collections.return_value = []
+    client.create_collection.side_effect = ValueError("already exists")
+    manager = _manager("owner-a", tmp_path, client)
+    db = CharactersRAGDB(str(tmp_path / "authority-race.sqlite"), client_id="owner-a")
+    generation_id = _generation(db, "dataset-a")
+    try:
+        store = await create_semantic_vector_store(
+            "chromadb",
+            authority=db.note_semantic_store,
+            chroma_manager=manager,
+        )
+
+        await store.create_generation_storage("dataset-a", generation_id)
+
+        assert client.get_collection.call_count == 2
+        client.get_or_create_collection.assert_not_called()
+    finally:
+        manager.close()
+        db.close_all_connections()
+
+
+@pytest.mark.asyncio
 async def test_chroma_capability_requires_collection_listing(tmp_path: Path) -> None:
     client = SimpleNamespace(
+        create_collection=lambda **_kwargs: None,
         delete_collection=lambda **_kwargs: None,
         get_collection=lambda **_kwargs: None,
-        get_or_create_collection=lambda **_kwargs: None,
     )
     manager = _manager("owner-a", tmp_path, client)
     db = CharactersRAGDB(str(tmp_path / "authority-capability.sqlite"), client_id="owner-a")
@@ -444,7 +538,6 @@ async def test_chroma_maps_malformed_distance_to_stable_error(tmp_path: Path) ->
         "distances": [["not-a-distance"]],
     }
     client = Mock()
-    client.get_or_create_collection.return_value = collection
     client.get_collection.return_value = collection
     manager = _manager("owner-a", tmp_path, client)
     db = CharactersRAGDB(str(tmp_path / "authority-malformed.sqlite"), client_id="owner-a")
@@ -466,6 +559,78 @@ async def test_chroma_maps_malformed_distance_to_stable_error(tmp_path: Path) ->
     finally:
         manager.close()
         db.close_all_connections()
+
+
+class _FloatLike:
+    def __float__(self) -> float:
+        return 0.0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "result",
+    (
+        {},
+        {"ids": [[]]},
+        {"ids": "opaque-vector", "distances": [[0.0]]},
+        {"ids": [["opaque-vector"]], "distances": "0.0"},
+        {"ids": ["opaque-vector"], "distances": [[0.0]]},
+        {"ids": [["opaque-vector"]], "distances": ["0.0"]},
+        {"ids": [[object()]], "distances": [[0.0]]},
+        {"ids": [["opaque-vector"]], "distances": [[_FloatLike()]]},
+        {"ids": [["opaque-vector"]], "distances": [[True]]},
+        {"ids": [["opaque-vector"]], "distances": [[float("nan")]]},
+        {"ids": [["opaque-vector"]], "distances": [[float("inf")]]},
+        {"ids": [], "distances": []},
+        {"ids": [["a", "b"]], "distances": [[0.0]]},
+    ),
+)
+async def test_chroma_query_rejects_malformed_result_shapes_and_values(
+    result: object,
+) -> None:
+    collection = Mock()
+    collection.query.return_value = result
+    client = Mock()
+    client.get_collection.return_value = collection
+    backend = ChromaSemanticVectorBackend(SimpleNamespace(client=client))
+    await backend.check_capability()
+    binding = SemanticVectorBinding("owner-a", "dataset-a", "generation-a", DIMENSIONS)
+
+    with pytest.raises(SemanticVectorError) as exc_info:
+        await backend.query(
+            binding,
+            (axis_vector(DIMENSIONS, 0),),
+            limit=1,
+            candidate_limit=2,
+        )
+
+    assert exc_info.value.code == "notes_semantic_vector_backend_result_invalid"
+
+
+@pytest.mark.asyncio
+async def test_current_chroma_existing_l2_collection_remains_unmodified(tmp_path: Path) -> None:
+    client = chromadb.PersistentClient(path=str(tmp_path / "existing-l2-chroma"))
+    manager = _manager("owner-a", tmp_path, client)
+    backend = ChromaSemanticVectorBackend(manager)
+    binding = SemanticVectorBinding("owner-a", "dataset-a", "generation-a", DIMENSIONS)
+    collection_name = _namespace(binding)
+    client.create_collection(
+        name=collection_name,
+        metadata={"hnsw:space": "l2", "legacy": "preserve"},
+    )
+    try:
+        await backend.check_capability()
+
+        with pytest.raises(SemanticVectorCapabilityError) as exc_info:
+            await backend.create_generation_storage(binding)
+
+        assert exc_info.value.code == "notes_semantic_chroma_cosine_unavailable"
+        assert client.get_collection(name=collection_name).metadata == {
+            "hnsw:space": "l2",
+            "legacy": "preserve",
+        }
+    finally:
+        manager.close()
 
 
 @pytest.mark.asyncio

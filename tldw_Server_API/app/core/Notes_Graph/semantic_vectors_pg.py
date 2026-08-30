@@ -29,7 +29,6 @@ PGVECTOR_TABLES = MappingProxyType(
         768: "note_semantic_vectors_d768",
         1_024: "note_semantic_vectors_d1024",
         1_536: "note_semantic_vectors_d1536",
-        3_072: "note_semantic_vectors_d3072",
     }
 )
 SEMANTIC_VECTOR_METRIC_LABELS = frozenset({"backend", "operation", "outcome"})
@@ -59,6 +58,7 @@ _POSTGRES_RESULT_ERRORS = (
 )
 _MINIMUM_PGVECTOR_VERSION = (0, 8, 0)
 _MAX_HNSW_SCAN_TUPLES = 100_000
+_MAX_PGVECTOR_DIMENSIONS = 2_000
 _PGVECTOR_VERSION_PATTERN = re.compile(r"^(\d+)\.(\d+)(?:\.(\d+))?(?:[-+].*)?$")
 
 
@@ -120,6 +120,7 @@ def _schema_contract_is_valid(
     dimensions: int,
     table: str,
     index: str,
+    expected_schema: str,
     schema: object,
     primary_key: object,
     indexes: object,
@@ -141,11 +142,11 @@ def _schema_contract_is_valid(
             else ""
         )
         schema_name = schema[0].get("schemaname") if len(schema) == 1 else None
-        if not isinstance(schema_name, str) or not schema_name:
+        if schema_name != expected_schema:
             return False
-        expected_index_definition = (
-            f"createindex{index}on{schema_name}.{table}"
-            "usinghnsw(embeddingvector_cosine_ops)"
+        expected_index_definition = _normalized_index_definition(
+            f"CREATE INDEX {index} ON {schema_name}.{table} "
+            "USING hnsw (embedding vector_cosine_ops)"
         )
         return bool(
             len(schema) == 1
@@ -205,6 +206,7 @@ class PostgresSemanticVectorBackend:
         self._backend = backend
         self._allowed_dimensions = frozenset(allowed_dimensions)
         self._hnsw_max_scan_tuples = hnsw_max_scan_tuples
+        self._schema_name: str | None = None
 
     async def check_capability(self) -> None:
         await asyncio.to_thread(self._check_capability_sync)
@@ -212,7 +214,15 @@ class PostgresSemanticVectorBackend:
     def _check_capability_sync(self) -> None:
         if self._backend.backend_type is not BackendType.POSTGRESQL:
             raise SemanticVectorCapabilityError("notes_semantic_pgvector_unavailable")
-        if not self._allowed_dimensions or not self._allowed_dimensions <= PGVECTOR_TABLES.keys():
+        if (
+            not self._allowed_dimensions
+            or any(
+                type(dimension) is not int
+                or dimension > _MAX_PGVECTOR_DIMENSIONS
+                for dimension in self._allowed_dimensions
+            )
+            or not self._allowed_dimensions <= PGVECTOR_TABLES.keys()
+        ):
             raise SemanticVectorCapabilityError(
                 "notes_semantic_pgvector_dimensions_unsupported"
             )
@@ -225,6 +235,11 @@ class PostgresSemanticVectorBackend:
                 )
                 version_rows = self._backend.execute(
                     "SELECT extversion FROM pg_extension WHERE extname='vector'",
+                    connection=connection,
+                    log_errors=False,
+                ).rows
+                schema_rows = self._backend.execute(
+                    "SELECT current_schema() AS schema_name",
                     connection=connection,
                     log_errors=False,
                 ).rows
@@ -248,15 +263,64 @@ class PostgresSemanticVectorBackend:
             raise SemanticVectorCapabilityError(
                 "notes_semantic_pgvector_extension_version_unsupported"
             )
+        try:
+            schema_name = schema_rows[0]["schema_name"] if len(schema_rows) == 1 else None
+            encoded_schema = schema_name.encode("utf-8")
+        except _POSTGRES_RESULT_ERRORS + (UnicodeEncodeError,):
+            schema_name = None
+            encoded_schema = b""
+        if (
+            type(schema_name) is not str
+            or not encoded_schema
+            or len(encoded_schema) > 63
+            or any(not character.isprintable() for character in schema_name)
+        ):
+            raise SemanticVectorCapabilityError(
+                "notes_semantic_pgvector_schema_unavailable"
+            )
+        try:
+            quoted_schema = self._backend.escape_identifier(schema_name)
+        except _POSTGRES_OPERATION_ERRORS:
+            raise SemanticVectorCapabilityError(
+                "notes_semantic_pgvector_schema_unavailable"
+            ) from None
+        if type(quoted_schema) is not str or not quoted_schema:
+            raise SemanticVectorCapabilityError(
+                "notes_semantic_pgvector_schema_unavailable"
+            )
+        self._schema_name = schema_name
         for dimensions in sorted(self._allowed_dimensions):
             self._ensure_dimension_table(dimensions)
 
     def supports_dimensions(self, dimensions: int) -> bool:
         return dimensions in self._allowed_dimensions and dimensions in PGVECTOR_TABLES
 
-    def _table_exists(self, table: str) -> bool:
+    def _schema(self) -> str:
+        if self._schema_name is None:
+            raise SemanticVectorError("notes_semantic_pgvector_operation_failed")
+        return self._schema_name
+
+    def _qualified_table(self, table: str) -> str:
         try:
-            result = self._backend.table_exists(table)
+            return (
+                f"{self._backend.escape_identifier(self._schema())}."
+                f"{self._backend.escape_identifier(table)}"
+            )
+        except _POSTGRES_OPERATION_ERRORS:
+            raise SemanticVectorError(
+                "notes_semantic_pgvector_operation_failed"
+            ) from None
+
+    def _table_exists(self, table: str) -> bool:
+        schema_name = self._schema()
+        try:
+            result = self._backend.execute(
+                "SELECT EXISTS(SELECT 1 FROM pg_class c "
+                "JOIN pg_namespace n ON n.oid=c.relnamespace "
+                "WHERE n.nspname=? AND c.relname=? AND c.relkind='r')",
+                (schema_name, table),
+                log_errors=False,
+            ).scalar
         except _POSTGRES_OPERATION_ERRORS:
             raise SemanticVectorError("notes_semantic_pgvector_operation_failed") from None
         if type(result) is not bool:
@@ -273,8 +337,17 @@ class PostgresSemanticVectorBackend:
             )
         policy = f"{table}_tenant_isolation"
         index = f"{table}_embedding_hnsw"
+        schema_name = self._schema()
+        qualified_table = self._qualified_table(table)
+        try:
+            quoted_policy = self._backend.escape_identifier(policy)
+            quoted_index = self._backend.escape_identifier(index)
+        except _POSTGRES_OPERATION_ERRORS:
+            raise SemanticVectorCapabilityError(
+                "notes_semantic_pgvector_schema_unavailable"
+            ) from None
         create_table_sql = f"""
-            CREATE TABLE IF NOT EXISTS {table} (
+            CREATE TABLE IF NOT EXISTS {qualified_table} (
                 owner_user_id TEXT NOT NULL,
                 dataset_id TEXT NOT NULL,
                 generation_id TEXT NOT NULL,
@@ -284,7 +357,8 @@ class PostgresSemanticVectorBackend:
             )
         """  # nosec B608 - identifiers and dimensions come only from PGVECTOR_TABLES.
         create_policy_sql = (
-            f"CREATE POLICY {policy} ON {table} AS PERMISSIVE FOR ALL TO PUBLIC "  # nosec B608
+            f"CREATE POLICY {quoted_policy} ON {qualified_table} "  # nosec B608
+            "AS PERMISSIVE FOR ALL TO PUBLIC "
             f"USING ({_TENANT_POLICY_PREDICATE}) "
             f"WITH CHECK ({_TENANT_POLICY_PREDICATE})"
         )
@@ -292,17 +366,17 @@ class PostgresSemanticVectorBackend:
             with self._backend.transaction() as connection:
                 self._backend.execute(create_table_sql, connection=connection, log_errors=False)
                 self._backend.execute(
-                    f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY",  # nosec B608
+                    f"ALTER TABLE {qualified_table} ENABLE ROW LEVEL SECURITY",  # nosec B608
                     connection=connection,
                     log_errors=False,
                 )
                 self._backend.execute(
-                    f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY",  # nosec B608
+                    f"ALTER TABLE {qualified_table} FORCE ROW LEVEL SECURITY",  # nosec B608
                     connection=connection,
                     log_errors=False,
                 )
                 self._backend.execute(
-                    f"DROP POLICY IF EXISTS {policy} ON {table}",  # nosec B608
+                    f"DROP POLICY IF EXISTS {quoted_policy} ON {qualified_table}",  # nosec B608
                     connection=connection,
                     log_errors=False,
                 )
@@ -312,17 +386,28 @@ class PostgresSemanticVectorBackend:
                     log_errors=False,
                 )
                 self._backend.execute(
-                    f"CREATE INDEX IF NOT EXISTS {index} ON {table} "  # nosec B608
+                    f"CREATE INDEX IF NOT EXISTS {quoted_index} ON {qualified_table} "  # nosec B608
                     "USING hnsw (embedding vector_cosine_ops)",
                     connection=connection,
                     log_errors=False,
                 )
-                self._verify_dimension_table(dimensions, connection=connection)
+                self._verify_dimension_table(
+                    dimensions,
+                    schema_name=schema_name,
+                    connection=connection,
+                )
         except _POSTGRES_OPERATION_ERRORS:
             raise SemanticVectorCapabilityError(
                 "notes_semantic_pgvector_schema_unavailable"
             ) from None
-    def _verify_dimension_table(self, dimensions: int, *, connection: Any) -> None:
+
+    def _verify_dimension_table(
+        self,
+        dimensions: int,
+        *,
+        schema_name: str,
+        connection: Any,
+    ) -> None:
         table = PGVECTOR_TABLES[dimensions]
         index = f"{table}_embedding_hnsw"
         try:
@@ -332,9 +417,9 @@ class PostgresSemanticVectorBackend:
                 "format_type(a.atttypid,a.atttypmod) AS vector_type "
                 "FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
                 "JOIN pg_attribute a ON a.attrelid=c.oid "
-                "WHERE n.nspname=current_schema() AND c.relname=? "
+                "WHERE n.nspname=? AND c.relname=? "
                 "AND c.relkind='r' AND a.attname='embedding'",
-                (table,),
+                (schema_name, table),
                 connection=connection,
                 log_errors=False,
             ).rows
@@ -342,8 +427,8 @@ class PostgresSemanticVectorBackend:
                 "SELECT pg_get_constraintdef(pc.oid) AS definition "
                 "FROM pg_constraint pc JOIN pg_class c ON c.oid=pc.conrelid "
                 "JOIN pg_namespace n ON n.oid=c.relnamespace "
-                "WHERE n.nspname=current_schema() AND c.relname=? AND pc.contype='p'",
-                (table,),
+                "WHERE n.nspname=? AND c.relname=? AND pc.contype='p'",
+                (schema_name, table),
                 connection=connection,
                 log_errors=False,
             ).rows
@@ -360,16 +445,16 @@ class PostgresSemanticVectorBackend:
                 "JOIN pg_namespace ins ON ins.oid=ic.relnamespace "
                 "JOIN pg_am am ON am.oid=ic.relam "
                 "JOIN pg_opclass opc ON opc.oid=x.indclass[0] "
-                "WHERE tn.nspname=current_schema() AND ins.nspname=tn.nspname "
+                "WHERE tn.nspname=? AND ins.nspname=? "
                 "AND tc.relname=? AND ic.relname=?",
-                (table, index),
+                (schema_name, schema_name, table, index),
                 connection=connection,
                 log_errors=False,
             ).rows
             policies = self._backend.execute(
                 "SELECT schemaname,tablename,policyname,permissive,roles,cmd,qual,with_check "
-                "FROM pg_policies WHERE schemaname=current_schema() AND tablename=?",
-                (table,),
+                "FROM pg_policies WHERE schemaname=? AND tablename=?",
+                (schema_name, table),
                 connection=connection,
                 log_errors=False,
             ).rows
@@ -381,6 +466,7 @@ class PostgresSemanticVectorBackend:
             dimensions=dimensions,
             table=table,
             index=index,
+            expected_schema=schema_name,
             schema=schema,
             primary_key=primary_key,
             indexes=indexes,
@@ -420,8 +506,9 @@ class PostgresSemanticVectorBackend:
         table = PGVECTOR_TABLES[binding.dimensions]
         if not self._table_exists(table):
             raise SemanticVectorError("notes_semantic_vector_storage_missing")
+        qualified_table = self._qualified_table(table)
         sql = (
-            f"INSERT INTO {table}(owner_user_id,dataset_id,generation_id,vector_id,embedding) "  # nosec B608
+            f"INSERT INTO {qualified_table}(owner_user_id,dataset_id,generation_id,vector_id,embedding) "  # nosec B608
             "VALUES (?,?,?,?,?::vector) "
             "ON CONFLICT(owner_user_id,dataset_id,generation_id,vector_id) "
             "DO UPDATE SET embedding=EXCLUDED.embedding"
@@ -459,8 +546,9 @@ class PostgresSemanticVectorBackend:
         table = PGVECTOR_TABLES[binding.dimensions]
         if not self._table_exists(table):
             return ()
+        qualified_table = self._qualified_table(table)
         sql = (
-            f"SELECT vector_id,embedding::text AS embedding_text FROM {table} "  # nosec B608
+            f"SELECT vector_id,embedding::text AS embedding_text FROM {qualified_table} "  # nosec B608
             "WHERE owner_user_id=? AND dataset_id=? AND generation_id=? "
             "AND vector_id=ANY(?::text[])"
         )
@@ -507,13 +595,15 @@ class PostgresSemanticVectorBackend:
         binding: SemanticVectorBinding,
         query_vectors: tuple[tuple[float, ...], ...],
         limit: int,
+        candidate_limit: int,
     ) -> tuple[tuple[SemanticVectorMatch, ...], ...]:
         table = PGVECTOR_TABLES[binding.dimensions]
         if not self._table_exists(table):
             return tuple(() for _ in query_vectors)
+        qualified_table = self._qualified_table(table)
         sql = (
             "SELECT vector_id,distance FROM ("
-            f"SELECT vector_id,(embedding <=> ?::vector) AS distance FROM {table} "  # nosec B608
+            f"SELECT vector_id,(embedding <=> ?::vector) AS distance FROM {qualified_table} "  # nosec B608
             "WHERE owner_user_id=? AND dataset_id=? AND generation_id=? "
             "ORDER BY embedding <=> ?::vector LIMIT ?) AS candidates "
             "ORDER BY distance,vector_id LIMIT ?"
@@ -545,7 +635,7 @@ class PostgresSemanticVectorBackend:
                                 binding.dataset_id,
                                 binding.generation_id,
                                 literal,
-                                self._hnsw_max_scan_tuples,
+                                candidate_limit,
                                 limit,
                             ),
                             connection=connection,
@@ -576,12 +666,14 @@ class PostgresSemanticVectorBackend:
         query_vectors: tuple[tuple[float, ...], ...],
         *,
         limit: int,
+        candidate_limit: int,
     ) -> tuple[tuple[SemanticVectorMatch, ...], ...]:
         return await asyncio.to_thread(
             self._query_sync,
             binding,
             query_vectors,
             limit,
+            candidate_limit,
         )
 
     def _delete_ids_sync(
@@ -592,6 +684,7 @@ class PostgresSemanticVectorBackend:
         table = PGVECTOR_TABLES[binding.dimensions]
         if not self._table_exists(table):
             return SemanticVectorCleanup(confirmed_absent=True)
+        qualified_table = self._qualified_table(table)
         predicate = (
             "owner_user_id=? AND dataset_id=? AND generation_id=? "
             "AND vector_id=ANY(?::text[])"
@@ -606,13 +699,13 @@ class PostgresSemanticVectorBackend:
             with self._backend.transaction() as connection:
                 self._scope(self._backend, connection, binding)
                 self._backend.execute(
-                    f"DELETE FROM {table} WHERE {predicate}",  # nosec B608
+                    f"DELETE FROM {qualified_table} WHERE {predicate}",  # nosec B608
                     params,
                     connection=connection,
                     log_errors=False,
                 )
                 remaining = self._backend.execute(
-                    f"SELECT COUNT(*) AS count FROM {table} WHERE {predicate}",  # nosec B608
+                    f"SELECT COUNT(*) AS count FROM {qualified_table} WHERE {predicate}",  # nosec B608
                     params,
                     connection=connection,
                     log_errors=False,
@@ -635,6 +728,7 @@ class PostgresSemanticVectorBackend:
         table = PGVECTOR_TABLES[binding.dimensions]
         if not self._table_exists(table):
             return SemanticVectorCleanup(confirmed_absent=True)
+        qualified_table = self._qualified_table(table)
         predicate = "owner_user_id=? AND dataset_id=? AND generation_id=?"
         params = (
             binding.owner_user_id,
@@ -645,13 +739,13 @@ class PostgresSemanticVectorBackend:
             with self._backend.transaction() as connection:
                 self._scope(self._backend, connection, binding)
                 self._backend.execute(
-                    f"DELETE FROM {table} WHERE {predicate}",  # nosec B608
+                    f"DELETE FROM {qualified_table} WHERE {predicate}",  # nosec B608
                     params,
                     connection=connection,
                     log_errors=False,
                 )
                 remaining = self._backend.execute(
-                    f"SELECT COUNT(*) AS count FROM {table} WHERE {predicate}",  # nosec B608
+                    f"SELECT COUNT(*) AS count FROM {qualified_table} WHERE {predicate}",  # nosec B608
                     params,
                     connection=connection,
                     log_errors=False,
