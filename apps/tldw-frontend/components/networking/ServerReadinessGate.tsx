@@ -42,7 +42,7 @@ const ENTERABLE_HTTP_STATUSES = new Set([200, 206])
 const READY_HEALTH_STATUSES = new Set(["healthy", "ok"])
 const HEALTHY_CHECK_STATUSES = new Set(["healthy", "ok"])
 const SERVER_READINESS_STATE_EVENT = "tldw:server-readiness-state"
-const HEALTH_PATH = "/api/v1/health"
+const HEALTH_PATH = "/health"
 
 const trimTrailingSlash = (value: string): string => value.replace(/\/+$/, "")
 const buildHealthUrl = (origin: string): string =>
