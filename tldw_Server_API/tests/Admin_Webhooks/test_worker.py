@@ -59,8 +59,6 @@ from tldw_Server_API.tests.Admin_Webhooks.test_event_expansion import (
     canonical_uuid4,
 )
 
-pytestmark = pytest.mark.unit
-
 
 def _token(label: str) -> str:
     return hashlib.sha256(label.encode("ascii")).hexdigest()
@@ -409,6 +407,7 @@ def _retryable() -> AttemptExecutionResult:
 
 
 @pytest.mark.asyncio
+@pytest.mark.unit
 async def test_handler_orders_horizon_reservation_execution_and_acknowledgement(
     worker_fixture: WorkerFixture,
 ) -> None:
@@ -441,6 +440,7 @@ async def test_handler_orders_horizon_reservation_execution_and_acknowledgement(
 
 
 @pytest.mark.asyncio
+@pytest.mark.unit
 async def test_worker_observes_closed_executor_outcome_only_after_commit(
     worker_fixture: WorkerFixture,
 ) -> None:
@@ -492,6 +492,7 @@ async def test_worker_observes_closed_executor_outcome_only_after_commit(
 
 
 @pytest.mark.asyncio
+@pytest.mark.unit
 async def test_pre_reservation_key_and_lease_failures_defer_without_attempt(
     worker_fixture: WorkerFixture,
 ) -> None:
@@ -536,6 +537,7 @@ async def test_pre_reservation_key_and_lease_failures_defer_without_attempt(
 
 
 @pytest.mark.asyncio
+@pytest.mark.unit
 async def test_pending_retry_replays_without_io_and_lost_ack_continues_current_lease(
     worker_fixture: WorkerFixture,
 ) -> None:
@@ -588,6 +590,7 @@ async def test_pending_retry_replays_without_io_and_lost_ack_continues_current_l
 
 
 @pytest.mark.asyncio
+@pytest.mark.unit
 async def test_real_executor_attempt_four_exhausts_budget_without_fifth_request(
     worker_fixture: WorkerFixture,
 ) -> None:
@@ -678,6 +681,7 @@ async def test_real_executor_attempt_four_exhausts_budget_without_fifth_request(
 
 
 @pytest.mark.asyncio
+@pytest.mark.unit
 async def test_processing_attempt_defers_until_persisted_timeout_plus_ninety(
     worker_fixture: WorkerFixture,
 ) -> None:
@@ -709,6 +713,7 @@ async def test_processing_attempt_defers_until_persisted_timeout_plus_ninety(
 
 
 @pytest.mark.asyncio
+@pytest.mark.unit
 async def test_stale_attempt_closes_unknown_and_prepares_retry_without_http(
     worker_fixture: WorkerFixture,
 ) -> None:
@@ -749,6 +754,7 @@ async def test_stale_attempt_closes_unknown_and_prepares_retry_without_http(
     ((20, DeliveryReasonCode.DELIVERY_EXPIRED),),
 )
 @pytest.mark.parametrize("kind", (DeliveryKind.AUTOMATIC, DeliveryKind.MANUAL))
+@pytest.mark.unit
 async def test_required_horizon_terminalizes_without_an_attempt(
     worker_fixture: WorkerFixture,
     expires_in: int,
@@ -839,6 +845,7 @@ async def _mutate_registration(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("terminal_trigger", ("lifecycle", "expiry", "budget"))
+@pytest.mark.unit
 async def test_nonstale_processing_precedes_every_no_attempt_terminal_trigger(
     worker_fixture: WorkerFixture,
     terminal_trigger: str,
@@ -906,6 +913,7 @@ async def test_nonstale_processing_precedes_every_no_attempt_terminal_trigger(
         ("config", DeliveryReasonCode.SUPERSEDED_CONFIG),
     ),
 )
+@pytest.mark.unit
 async def test_lifecycle_winner_before_reservation_sends_nothing(
     worker_fixture: WorkerFixture,
     mutation: str,
@@ -963,6 +971,7 @@ async def test_lifecycle_winner_before_reservation_sends_nothing(
         ("config", DeliveryReasonCode.SUPERSEDED_CONFIG, DeliveryState.SUPERSEDED),
     ),
 )
+@pytest.mark.unit
 async def test_post_reservation_config_race_preserves_real_attempt_evidence(
     worker_fixture: WorkerFixture,
     result: AttemptExecutionResult,
@@ -1019,6 +1028,7 @@ async def test_post_reservation_config_race_preserves_real_attempt_evidence(
         WorkerCrashPoint.AFTER_OUTCOME_COMMIT_BEFORE_JOBS_APPLY,
     ),
 )
+@pytest.mark.unit
 async def test_pre_apply_crash_boundaries_never_duplicate_receiver_io(
     worker_fixture: WorkerFixture,
     point: WorkerCrashPoint,
@@ -1057,6 +1067,7 @@ async def test_pre_apply_crash_boundaries_never_duplicate_receiver_io(
 
 
 @pytest.mark.asyncio
+@pytest.mark.unit
 async def test_callback_crashes_are_idempotent_around_exact_acknowledgement(
     worker_fixture: WorkerFixture,
 ) -> None:

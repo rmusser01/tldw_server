@@ -39,7 +39,7 @@ def test_selected_router_has_no_duplicate_method_path_pairs(
 
 
 @pytest.mark.unit
-def test_canonical_selection_excludes_legacy_delivery_routes() -> None:
+def test_canonical_selection_exposes_pr2_routes_only() -> None:
     pairs = set(
         _pairs(
             _build(
@@ -54,8 +54,12 @@ def test_canonical_selection_excludes_legacy_delivery_routes() -> None:
     assert ("GET", "/admin/webhooks/status") in pairs
     assert ("GET", "/admin/webhooks/catalog") in pairs
     assert ("POST", "/admin/webhooks/{webhook_id}/rotate-secret") in pairs
-    assert ("POST", "/admin/webhooks/{webhook_id}/test") not in pairs
-    assert ("GET", "/admin/webhooks/{webhook_id}/deliveries") not in pairs
+    assert ("POST", "/admin/webhooks/{webhook_id}/test") in pairs
+    assert ("GET", "/admin/webhooks/{webhook_id}/deliveries") in pairs
+    assert (
+        "POST",
+        "/admin/webhooks/{webhook_id}/deliveries/{delivery_id}/redeliver",
+    ) in pairs
     assert ("POST", "/admin/incidents/{incident_id}/notify-webhooks") not in pairs
 
 

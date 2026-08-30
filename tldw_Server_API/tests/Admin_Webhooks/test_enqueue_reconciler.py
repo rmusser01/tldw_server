@@ -46,9 +46,8 @@ from tldw_Server_API.tests.Admin_Webhooks.test_event_expansion import (
     seed_registration,
 )
 
-pytestmark = pytest.mark.unit
 
-
+@pytest.mark.unit
 async def test_expiry_is_one_bounded_reconciler_operation() -> None:
     calls: list[dict[str, object]] = []
     expected = object()
@@ -151,6 +150,7 @@ class StubJobManager:
         return self.prepared_result
 
 
+@pytest.mark.unit
 def test_jobs_delivery_queue_uses_only_fixed_canonical_admission_facts() -> None:
     delivery_id = canonical_uuid4("adapter-admission")
     manager = StubJobManager(delivery_id)
@@ -187,6 +187,7 @@ def test_jobs_delivery_queue_uses_only_fixed_canonical_admission_facts() -> None
     }
 
 
+@pytest.mark.unit
 def test_jobs_delivery_queue_turns_idempotent_row_mismatch_into_typed_conflict() -> None:
     delivery_id = canonical_uuid4("adapter-mismatch")
     manager = StubJobManager(delivery_id)
@@ -204,6 +205,7 @@ def test_jobs_delivery_queue_turns_idempotent_row_mismatch_into_typed_conflict()
     assert admission.admission_rejection_reason is None
 
 
+@pytest.mark.unit
 def test_jobs_delivery_queue_lookup_and_known_id_reads_fail_closed() -> None:
     delivery_id = canonical_uuid4("adapter-lookup")
     manager = StubJobManager(delivery_id)
@@ -239,6 +241,7 @@ def test_jobs_delivery_queue_lookup_and_known_id_reads_fail_closed() -> None:
     assert queue.get_delivery_job("17").delivery_id == other_delivery_id
 
 
+@pytest.mark.unit
 def test_jobs_delivery_queue_applies_only_tokenized_unleased_cancel() -> None:
     delivery_id = canonical_uuid4("adapter-cancel")
     manager = StubJobManager(delivery_id)
@@ -421,6 +424,7 @@ def _reconciler(
     )
 
 
+@pytest.mark.unit
 async def test_enqueue_success_observer_runs_for_committed_claim_and_queue(
     auth_fixture: SQLiteAuthFixture,
 ) -> None:
@@ -447,6 +451,7 @@ async def test_enqueue_success_observer_runs_for_committed_claim_and_queue(
     ]
 
 
+@pytest.mark.unit
 async def test_typed_rejection_releases_only_owned_claim_and_retries_later(
     auth_fixture: SQLiteAuthFixture,
 ) -> None:
@@ -480,6 +485,7 @@ async def test_typed_rejection_releases_only_owned_claim_and_retries_later(
     assert queued.delivery.jobs_job_id == "1"
 
 
+@pytest.mark.unit
 async def test_ambiguous_admission_failure_retains_claim_until_expiry_takeover(
     auth_fixture: SQLiteAuthFixture,
 ) -> None:
@@ -510,6 +516,7 @@ async def test_ambiguous_admission_failure_retains_claim_until_expiry_takeover(
     assert len(queue.admit_calls) == 2
 
 
+@pytest.mark.unit
 async def test_ambiguous_terminal_lookup_retains_expired_claim_for_recovery(
     auth_fixture: SQLiteAuthFixture,
 ) -> None:
@@ -545,6 +552,7 @@ async def test_ambiguous_terminal_lookup_retains_expired_claim_for_recovery(
     "outcome",
     (OperationOutcome.BACKEND_CONFLICT, OperationOutcome.BACKEND_SCHEMA_ERROR),
 )
+@pytest.mark.unit
 async def test_permanent_jobs_conflict_terminalizes_owned_nonterminal_claim(
     auth_fixture: SQLiteAuthFixture,
     outcome: OperationOutcome,
@@ -592,6 +600,7 @@ async def test_permanent_jobs_conflict_terminalizes_owned_nonterminal_claim(
     ]
 
 
+@pytest.mark.unit
 async def test_repeated_rejection_is_bounded_by_delivery_expiry(
     auth_fixture: SQLiteAuthFixture,
 ) -> None:
@@ -619,6 +628,7 @@ async def test_repeated_rejection_is_bounded_by_delivery_expiry(
     assert len(queue.admit_calls) == 1
 
 
+@pytest.mark.unit
 async def test_failure_observer_cannot_change_ambiguous_claim_retention(
     auth_fixture: SQLiteAuthFixture,
 ) -> None:
@@ -646,6 +656,7 @@ async def test_failure_observer_cannot_change_ambiguous_claim_retention(
     assert retained.delivery.enqueue_claim_token is not None
 
 
+@pytest.mark.unit
 async def test_enqueue_iteration_claims_at_most_one_hundred_and_skips_test_work(
     auth_fixture: SQLiteAuthFixture,
 ) -> None:
@@ -699,6 +710,7 @@ async def test_enqueue_iteration_claims_at_most_one_hundred_and_skips_test_work(
     assert stored_test.delivery.jobs_job_id is None
 
 
+@pytest.mark.unit
 def test_jobs_delivery_admission_rejects_incoherent_typed_shapes() -> None:
     record = JobsDeliveryRecord(
         "1",

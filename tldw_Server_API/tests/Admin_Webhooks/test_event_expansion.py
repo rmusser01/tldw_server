@@ -65,6 +65,7 @@ KEY_ID = "key-2026-08"
 DISPOSITION_TOKEN = "a" * 64
 
 
+@pytest.mark.unit
 def test_canonical_jobs_reservation_coordinates_are_mandatory() -> None:
     signature = inspect.signature(AdminWebhookUnitOfWork.reserve_jobs_attempt)
 
@@ -334,6 +335,7 @@ def test_redelivery_replay_metadata_has_one_typed_canonical_coordinate() -> None
             _safe_response_metadata({"redelivery_delivery_id": value})
 
 
+@pytest.mark.unit
 def test_test_attempt_completion_allows_only_terminal_no_jobs_shapes() -> None:
     succeeded = TestAttemptCompletion(
         attempt_state=AttemptState.SUCCEEDED,

@@ -188,6 +188,7 @@ async def seed_ready_registration(
     return registration, ring
 
 
+@pytest.mark.unit
 def test_internal_test_contracts_are_frozen_bounded_and_repr_safe() -> None:
     module = importlib.import_module(
         "tldw_Server_API.app.core.Admin_Webhooks.delivery"

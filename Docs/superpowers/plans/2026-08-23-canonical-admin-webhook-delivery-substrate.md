@@ -1912,6 +1912,55 @@ future-heartbeat, and degraded-status contracts with required PostgreSQL and
 zero skips. Task 11 is complete and Task 12 may begin. Re-review evidence is in
 `.superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-11-fix-1-re-review.md`.
 
+#### Task 11 Fix Round 2: Restore Aggregate Direct-Marker Compliance
+
+Task 12's first clean serial aggregate gate stopped on
+`test_each_webhook_pr_test_has_one_direct_accepted_marker`: 41 real PR 2 tests
+relied on module-level markers instead of the repository's deliberately
+required direct accepted marker, and the audit's unrestricted `ast.walk()`
+also misclassified `_FakeDeliveryService.test_webhook()` as a collectable test.
+This is test-selection compliance debt, not evidence of a production-runtime
+defect. The earlier overlapping verifier runs are discarded and Task 12 remains
+blocked.
+
+Fix Round 2 is test-only. Preserve the direct-marker rule; make the audit mirror
+pytest collection by checking top-level test functions and test methods only in
+collectable `Test*` classes, while excluding helper methods in non-test classes.
+Give every affected real test exactly one direct `unit` or `integration` marker
+matching its existing module classification, and remove redundant module-level
+classification only after every test is directly classified. Strict RED is the
+clean serial failure with 42 violations. GREEN requires the exact audit, every
+affected module, and the complete Task 12 Step 1 union to pass serially with
+`TLDW_TEST_POSTGRES_REQUIRED=1`, explicit timeout and `-ra`, zero skips, followed
+by an independent scoped review. No production file may change. Task 12 may
+restart only after that review is clean.
+
+The clean post-marker Step 1 union collected 1,489 tests and then exposed one
+separate stale Task 10 assertion at 46%:
+`test_canonical_selection_excludes_legacy_delivery_routes` still required the
+canonical synchronous-test and delivery-history method/path pairs to be absent.
+That expectation predates Task 10 and contradicts this plan's approved
+canonical `POST /{webhook_id}/test`, `GET /{webhook_id}/deliveries`, and
+`POST /{webhook_id}/deliveries/{delivery_id}/redeliver` API. Focused
+reproduction failed one of one with zero skips. Extend this same test-only fix
+round to rename/correct that route-selection contract, require all three PR 2
+canonical method/path pairs, and continue to require the uniquely legacy
+incident-notify path absent. Do not modify route composition or any production
+file. Rerun the focused route-selection module and the complete serial Step 1
+union after correction; the partial aggregate run is not GREEN evidence.
+
+Fix Round 2 implementation and local verification are complete at the
+pre-commit tree. Strict RED reported 42 direct-marker violations; focused GREEN
+reported 1 exact audit pass and 277 affected-module passes, all with zero skips.
+The stale route contract reproduced 1 failure with zero skips, then the corrected
+node and complete route module passed 1 and 10 tests respectively. The
+controller-owned cache-cleared, host-enabled Step 1 union passed all 1,489 tests
+with zero skips, 2,654 warnings, seed 20260829, and duration 996.39s (0:16:36).
+Focused Ruff, Python 3.10 compilation, `git diff --check`, exact changed-path
+allowlisting, and non-pytest AST marker review passed. No production, schema,
+OpenAPI, runtime, or public API file changed. Fix Round 2 is ready for independent
+scoped review; Task 12 remains blocked until that review is clean.
+
 ### Task 12: Run The Complete PR 2 Verification And Security Gates
 
 **Files:**
@@ -1921,6 +1970,38 @@ zero skips. Task 11 is complete and Task 12 may begin. Re-review evidence is in
 **Interfaces:**
 - Consumes: all PR 2 implementation, test output, OpenAPI delta, and approved design gates.
 - Produces: reproducible evidence proving backend parity, crash convergence, no-buffer egress, no producer/UI activation, static analysis, and review readiness.
+
+**Preflight ruling:** Verification is evidence-only. Task 12 may create the
+evidence artifact and update this plan, the OpenAPI fingerprint only when the
+authoritative exporter changes it, and `TASK-13111`; it may not modify
+production code or tests. A genuine failure blocks Task 12 and returns to the
+owning implementation task for a RED-first fix and review cycle.
+
+Pin scope evidence to merge base
+`1ad2f1e5b30c49ea75396e4b713496b73e875fec` through the verified Task 11
+closure head, while also recording the observed `origin/dev` object at run
+time. Do not fetch, rebase, merge, push, or rewrite history during verification.
+Use `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python`, add
+`TLDW_TEST_POSTGRES_REQUIRED=1`, `-ra`, and an explicit per-test timeout to
+every pytest gate, including the nominal SQLite/security gates, so no
+PostgreSQL contract can silently skip. Large opaque commands may be split into
+named modules while preserving the exact union; record every command, count,
+warning, skip, duration, seed where relevant, and aggregate total.
+
+The plain host `make openapi-fingerprint` target currently selects Python 3.9
+and fails on the repository's existing `dataclass(slots=True)` usage. Record
+that environment mismatch once; the authoritative fingerprint and drift gates
+use `CI_LOCAL_PYTHON=/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python`
+with `make openapi-fingerprint` and `make openapi-drift-check`. Review the
+fingerprint delta before staging it and leave it untouched when unchanged.
+
+Raw Bandit is expected to return the already reviewed fixed-query B608 and
+intentional fail-open observer findings. Capture and classify every hit,
+compare it to the established Task 11 baseline, fail on any unreviewed or High
+finding, add no suppression, and describe the reviewed result rather than
+claiming a misleading raw exit-zero. Query the PostgreSQL server version via
+the project driver because no host `psql` binary is installed, and never place
+test credentials, DSNs, or private connection details in the evidence file.
 
 - [ ] **Step 1: Run the complete SQLite/API/security matrix**
 

@@ -47,6 +47,26 @@ from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
 from tldw_Server_API.app.core.Security.egress import URLPolicyResult
 
 
+def _iter_collectable_test_functions(
+    tree: ast.Module,
+) -> tuple[ast.FunctionDef | ast.AsyncFunctionDef, ...]:
+    functions: list[ast.FunctionDef | ast.AsyncFunctionDef] = []
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if node.name.startswith("test_"):
+                functions.append(node)
+            continue
+        if not isinstance(node, ast.ClassDef) or not node.name.startswith("Test"):
+            continue
+        functions.extend(
+            child
+            for child in node.body
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and child.name.startswith("test_")
+        )
+    return tuple(functions)
+
+
 @pytest.mark.unit
 def test_settings_default_off_and_validate_bounds() -> None:
     settings = AdminWebhookSettings.from_environment({})
@@ -592,6 +612,29 @@ def test_repository_implementation_lives_in_db_management() -> None:
 
 
 @pytest.mark.unit
+def test_direct_marker_audit_matches_pytest_collection_boundaries() -> None:
+    tree = ast.parse(
+        """
+def test_top_level():
+    pass
+
+class _FakeService:
+    def test_webhook(self):
+        pass
+
+class TestEgressPolicy:
+    async def test_policy(self):
+        pass
+"""
+    )
+
+    assert [node.name for node in _iter_collectable_test_functions(tree)] == [
+        "test_top_level",
+        "test_policy",
+    ]
+
+
+@pytest.mark.unit
 def test_each_webhook_pr_test_has_one_direct_accepted_marker() -> None:
     accepted = frozenset(
         {"unit", "integration", "external_api", "local_llm_service"}
@@ -610,11 +653,7 @@ def test_each_webhook_pr_test_has_one_direct_accepted_marker() -> None:
 
     for path in paths:
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        for node in ast.walk(tree):
-            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                continue
-            if not node.name.startswith("test_"):
-                continue
+        for node in _iter_collectable_test_functions(tree):
             markers: list[str] = []
             for decorator in node.decorator_list:
                 target = decorator.func if isinstance(decorator, ast.Call) else decorator

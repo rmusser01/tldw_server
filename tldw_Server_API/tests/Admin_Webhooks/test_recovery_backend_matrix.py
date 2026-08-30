@@ -81,7 +81,6 @@ from tldw_Server_API.tests.Admin_Webhooks.test_event_expansion import (
 )
 
 pytest_plugins = ("tldw_Server_API.tests.AuthNZ.conftest",)
-pytestmark = pytest.mark.integration
 
 BACKEND_PAIRS = (
     ("sqlite", "sqlite"),
@@ -746,6 +745,7 @@ async def _assert_single_queued_identity(
     BACKEND_PAIRS,
     ids=("sqlite-sqlite", "sqlite-postgres", "postgres-sqlite", "postgres-postgres"),
 )
+@pytest.mark.integration
 async def test_enqueue_six_crash_boundaries_converge_across_backend_matrix(
     auth_backend: str,
     jobs_backend: str,
@@ -823,6 +823,7 @@ async def test_enqueue_six_crash_boundaries_converge_across_backend_matrix(
     (True, False),
     ids=("live-claim", "expired-claim-concurrent-reclaim"),
 )
+@pytest.mark.integration
 async def test_before_attach_crash_then_expiry_preserves_exact_cancel_recovery(
     auth_backend: str,
     jobs_backend: str,
@@ -944,6 +945,7 @@ async def test_before_attach_crash_then_expiry_preserves_exact_cancel_recovery(
     BACKEND_PAIRS,
     ids=("sqlite-sqlite", "sqlite-postgres", "postgres-sqlite", "postgres-postgres"),
 )
+@pytest.mark.integration
 async def test_enqueue_revalidates_terminal_work_before_admission_across_backend_matrix(
     auth_backend: str,
     jobs_backend: str,
@@ -1003,6 +1005,7 @@ async def test_enqueue_revalidates_terminal_work_before_admission_across_backend
         (EnqueueCrashPoint.AFTER_JOBS_CANCEL, "cancelled"),
     ),
 )
+@pytest.mark.integration
 async def test_terminal_orphan_crashes_recover_with_exact_claim_and_disposition(
     auth_backend: str,
     jobs_backend: str,
@@ -1103,6 +1106,7 @@ async def test_terminal_orphan_crashes_recover_with_exact_claim_and_disposition(
     BACKEND_PAIRS,
     ids=("sqlite-sqlite", "sqlite-postgres", "postgres-sqlite", "postgres-postgres"),
 )
+@pytest.mark.integration
 async def test_enqueue_foreign_claim_cancellation_and_expiry_matrix(
     auth_backend: str,
     jobs_backend: str,
@@ -1452,6 +1456,7 @@ def _prepared_from_pending(pending) -> PreparedJobDisposition:
         ),
     ),
 )
+@pytest.mark.integration
 async def test_authnz_disposition_lost_ack_reconciles_across_backend_matrix(
     auth_backend: str,
     jobs_backend: str,
@@ -1574,6 +1579,7 @@ async def test_authnz_disposition_lost_ack_reconciles_across_backend_matrix(
     ids=("sqlite-sqlite", "sqlite-postgres", "postgres-sqlite", "postgres-postgres"),
 )
 @pytest.mark.parametrize("origin", ("infrastructure", "recovery"))
+@pytest.mark.integration
 async def test_no_ack_defer_marker_is_historical_across_backend_matrix(
     auth_backend: str,
     jobs_backend: str,
@@ -1816,6 +1822,7 @@ async def test_no_ack_defer_marker_is_historical_across_backend_matrix(
     ids=("sqlite-sqlite", "sqlite-postgres", "postgres-sqlite", "postgres-postgres"),
 )
 @pytest.mark.parametrize("historical_origin", ("retry", "infrastructure", "recovery"))
+@pytest.mark.integration
 async def test_queued_cancel_replaces_only_an_exact_historical_marker(
     auth_backend: str,
     jobs_backend: str,
@@ -1947,6 +1954,7 @@ _WORKER_CRASH_POINTS = (
     BACKEND_PAIRS,
     ids=("sqlite-sqlite", "sqlite-postgres", "postgres-sqlite", "postgres-postgres"),
 )
+@pytest.mark.integration
 async def test_worker_authnz_outcome_crash_cross_product_across_backend_matrix(
     auth_backend: str,
     jobs_backend: str,
@@ -2366,6 +2374,7 @@ async def test_worker_authnz_outcome_crash_cross_product_across_backend_matrix(
     BACKEND_PAIRS,
     ids=("sqlite-sqlite", "sqlite-postgres", "postgres-sqlite", "postgres-postgres"),
 )
+@pytest.mark.integration
 async def test_worker_hard_cap_is_four_receiver_calls_across_backend_matrix(
     auth_backend: str,
     jobs_backend: str,
@@ -2497,6 +2506,7 @@ async def test_worker_hard_cap_is_four_receiver_calls_across_backend_matrix(
     BACKEND_PAIRS,
     ids=("sqlite-sqlite", "sqlite-postgres", "postgres-sqlite", "postgres-postgres"),
 )
+@pytest.mark.integration
 async def test_exact_late_writer_cannot_replace_stale_recovery_across_backend_matrix(
     auth_backend: str,
     jobs_backend: str,
