@@ -4,7 +4,7 @@ title: Implement canonical admin webhook delivery substrate and recovery
 status: In Progress
 assignee: []
 created_date: '2026-08-23 03:15'
-updated_date: '2026-08-30 06:57'
+updated_date: '2026-08-30 07:13'
 labels:
   - admin
   - webhooks
@@ -223,6 +223,10 @@ Task 10 complete: exposed canonical persisted test, atomic manual redelivery, an
 2026-08-29: Independent Fix Round 2 review found 0 Critical, 1 Important, 0 Minor. The test repair and 1,489-test evidence are valid, but Task 12 command blocks contradict their own preflight: relative interpreters and missing PostgreSQL-required/-ra/timeout flags could silently skip contracts; scope checks use mutable origin/dev; OpenAPI omits CI_LOCAL_PYTHON. Task 11 Fix Round 3 is docs-only: make every Task 12 command executable from the worktree with the absolute project interpreter, required PostgreSQL/timeout/reporting flags, pinned base 1ad2f1e5..., and authoritative OpenAPI interpreter before scoped re-review. Task 12 remains blocked.
 
 2026-08-29: Task 11 Fix Round 3 docs-only correction complete from HEAD b0d39e615f4baf4770f4d542219440b9cd7dd2d4. The independent Fix Round 2 review reported 0 Critical, 1 Important, 0 Minor; Fix Round 2's definitive host-enabled, cache-cleared 1,489-pass/zero-skip evidence remains valid. Task 12 Steps 1-3 now use the absolute project interpreter with TLDW_TEST_POSTGRES_REQUIRED=1, RUN_JOBS=1, PYTHONPATH=., -q, --tb=short, -ra, --timeout=90, and seed 20260829; localhost PostgreSQL/loopback evidence requires host network permission. Ruff/Bandit use the same interpreter, committed scope is pinned to 1ad2f1e5b30c49ea75396e4b713496b73e875fec through HEAD with separate worktree checks, PR 3 exclusions inspect committed/tracked/untracked paths, and both OpenAPI make commands set CI_LOCAL_PYTHON. Static command audit found 3 pytest blocks with 10/10 required tokens each, zero relative interpreters, zero origin/dev diff commands, and two authoritative OpenAPI prefixes. No pytest ran and no production, test, schema, migration, OpenAPI, runtime, or public API file changed. Task 12 remains blocked pending clean independent scoped re-review.
+
+2026-08-30: Fix Round 3 re-review found 0 Critical, 1 Important, 0 Minor. Original interpreter/PG/pinning/OpenAPI defect is closed, but Task 12 Step 5 shell gates mask Git/rg errors, normalize forbidden matches to success, and end nonzero on the expected clean legacy-import no-match; Step 4 sensitive scan also conflates rg no-match with execution error. Task 11 Fix Round 4 is docs-only: add status-aware shell helpers so matches fail visibly, clean no-match succeeds, and command errors propagate; execute/bsh-n the gates before re-review. Task 12 remains blocked.
+
+2026-08-30: Task 11 Fix Round 4 docs-only correction complete from HEAD 295963c13b79bf0cc61e17e29ef5e00fbfd88821 after re-review reported 0 Critical, 1 Important, 0 Minor. Task 12 Steps 4/5 now use Bash-3.2-compatible status-aware helpers: forbidden rg/path matches remain visible and return 1, clean no-match alone returns 0, rg statuses greater than 1 propagate, and upstream Git errors propagate before scanning. All 7 Task 12 Bash blocks pass bash -n under Bash 3.2.57; exact current-tree Step 4 and Step 5 blocks exit 0. Extracted-helper probes returned rg/path match=1, no-match=0, rg error=2, upstream Git error=128, with visible matches. No Step 4/5 || true, bare if-rg, failure inversion, or temporary path remains; prior pytest-token/pinned/OpenAPI audits remain clean. git diff --check passed and tracked scope is only the plan plus TASK-13111. No pytest ran and no test, production, OpenAPI, schema, migration, runtime, or public API file changed. Fix Round 2's definitive host-enabled 1,489-pass evidence remains valid; Task 12 remains blocked pending clean independent scoped re-review. Evidence: .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-11-fix-4-report.md.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

@@ -1987,6 +1987,34 @@ committed-range plus current-worktree checks, and the host-network ruling.
 and no pytest command was run. Task 12 remains blocked pending clean independent
 scoped re-review.
 
+#### Task 11 Fix Round 4: Make Scope Scans Fail Closed
+
+Independent Fix Round 3 re-review found 0 Critical, 1 Important, and 0 Minor
+issues. Fix Round 3 closed the interpreter, PostgreSQL, pinning, and OpenAPI
+finding, and Fix Round 2's definitive host-enabled, cache-cleared
+`1,489 passed` evidence remains valid. The remaining documentation defect is
+limited to Task 12 shell status handling: Step 5 normalized forbidden matches
+and upstream Git failures through `|| true`, its final clean legacy-import
+no-match made the block fail, and Step 4's bare `if rg` treated an `rg`
+execution error like a clean scan.
+
+Fix Round 4 is docs-only. The Task 12 Step 4 and Step 5 blocks define
+Bash-3.2-compatible status-aware helpers. The `rg` helper prints forbidden
+matches and returns 1 for `rg` status 0, returns 0 only for the clean no-match
+status 1, and propagates every status greater than 1. The path helper captures
+and validates each upstream Git command before scanning its quoted output with
+the same rules. No production code, test, schema, migration, OpenAPI artifact,
+runtime behavior, or public API changes in this round.
+
+The docs-only correction is complete at the pre-commit tree. All seven Task 12
+shell blocks pass `bash -n` under Bash 3.2.57; the Step 4 and Step 5 blocks each
+exit 0 on the current tree. Isolated probes returned 1 for visible forbidden
+matches, 0 for clean no-match, exact `rg` error status 2, and exact upstream Git
+error status 128. Static review found no Step 4/5 `|| true`, bare `if rg`,
+failure inversion, or temporary path, while the prior pytest-token,
+pinned-scope, and OpenAPI command audits remain clean. No pytest command was
+run. Task 12 remains blocked pending clean independent scoped re-review.
+
 ### Task 12: Run The Complete PR 2 Verification And Security Gates
 
 **Files:**
@@ -2098,6 +2126,25 @@ The evidence maps tests to DNS change, private/reserved ranges, redirects, proxi
 - [ ] **Step 4: Run Ruff, Bandit, diff, and sensitive-data scans**
 
 ```bash
+require_no_rg_matches() {
+  local rg_status
+
+  rg "$@"
+  rg_status=$?
+  case "$rg_status" in
+    0)
+      printf 'forbidden match found\n' >&2
+      return 1
+      ;;
+    1)
+      return 0
+      ;;
+    *)
+      return "$rg_status"
+      ;;
+  esac
+}
+
 /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m ruff check \
   tldw_Server_API/app/core/Admin_Webhooks \
   tldw_Server_API/app/core/DB_Management/admin_webhooks_repository.py \
@@ -2128,28 +2175,62 @@ The evidence maps tests to DNS change, private/reserved ranges, redirects, proxi
   tldw_Server_API/app/api/v1/endpoints/admin/admin_webhooks.py
 git diff --check 1ad2f1e5b30c49ea75396e4b713496b73e875fec HEAD
 git diff --check HEAD
-if rg -n "logger\..*(url|secret|signature|payload|response|ciphertext)|labels=.*(id|host|url|email|secret|payload)" \
+require_no_rg_matches -n "logger\..*(url|secret|signature|payload|response|ciphertext)|labels=.*(id|host|url|email|secret|payload)" \
   tldw_Server_API/app/core/Admin_Webhooks \
   tldw_Server_API/app/services/admin_webhook_delivery_runtime.py \
-  tldw_Server_API/app/api/v1/endpoints/admin/admin_webhooks.py; then
-  printf 'review possible sensitive delivery telemetry\n' >&2
-  exit 1
-fi
+  tldw_Server_API/app/api/v1/endpoints/admin/admin_webhooks.py
 ```
 
 Expected: Ruff and both diff checks pass. Classify Bandit's reviewed baseline as
 required above and fail on any new, unreviewed, or High finding. Review every
 sensitive-data scan hit; only fixed field names in tests or explicit redaction
 guards may remain, and each is recorded in evidence. Do not suppress a real
-sensitive value.
+sensitive value. The status-aware scan prints matches and returns 1 when `rg`
+returns 0, returns 0 only when `rg` returns the clean no-match status 1, and
+propagates every `rg` status greater than 1.
 
 - [ ] **Step 5: Prove PR 3 exclusions and legacy isolation**
 
 ```bash
-git diff --name-only 1ad2f1e5b30c49ea75396e4b713496b73e875fec HEAD | rg '(^|/)(admin-ui|users|incidents|admin_system_ops_service|admin_webhooks_service|jobs_webhooks_service)' || true
-git diff --name-only HEAD | rg '(^|/)(admin-ui|users|incidents|admin_system_ops_service|admin_webhooks_service|jobs_webhooks_service)' || true
-git ls-files --others --exclude-standard | rg '(^|/)(admin-ui|users|incidents|admin_system_ops_service|admin_webhooks_service|jobs_webhooks_service)' || true
-rg -n "services\.(admin_webhooks_service|jobs_webhooks_service)|from .*admin_webhooks_service|from .*jobs_webhooks_service" \
+require_no_rg_matches() {
+  local rg_status
+
+  rg "$@"
+  rg_status=$?
+  case "$rg_status" in
+    0)
+      printf 'forbidden match found\n' >&2
+      return 1
+      ;;
+    1)
+      return 0
+      ;;
+    *)
+      return "$rg_status"
+      ;;
+  esac
+}
+
+require_no_path_matches() {
+  local forbidden_pattern="$1"
+  local path_output
+  local upstream_status
+  shift
+
+  path_output=$("$@")
+  upstream_status=$?
+  if [ "$upstream_status" -ne 0 ]; then
+    return "$upstream_status"
+  fi
+
+  require_no_rg_matches "$forbidden_pattern" <<<"$path_output"
+}
+
+forbidden_path_pattern='(^|/)(admin-ui|users|incidents|admin_system_ops_service|admin_webhooks_service|jobs_webhooks_service)'
+require_no_path_matches "$forbidden_path_pattern" git diff --name-only 1ad2f1e5b30c49ea75396e4b713496b73e875fec HEAD &&
+  require_no_path_matches "$forbidden_path_pattern" git diff --name-only HEAD &&
+  require_no_path_matches "$forbidden_path_pattern" git ls-files --others --exclude-standard &&
+  require_no_rg_matches -n "services\.(admin_webhooks_service|jobs_webhooks_service)|from .*admin_webhooks_service|from .*jobs_webhooks_service" \
   tldw_Server_API/app/core/Admin_Webhooks \
   tldw_Server_API/app/services/admin_webhook_delivery_runtime.py \
   tldw_Server_API/app/api/v1/endpoints/admin/admin_webhooks.py
@@ -2158,7 +2239,11 @@ rg -n "services\.(admin_webhooks_service|jobs_webhooks_service)|from .*admin_web
 Expected: no admin UI, user/incident producer, legacy service, or generic
 Jobs-webhook file is changed/imported. If any committed-range, tracked-worktree,
 or untracked-worktree path scan reports a path, inspect it and remove PR 3 scope
-before review. The legacy-import scan returns no match.
+before review. Each path helper first captures the upstream command: a nonzero
+Git status propagates unchanged, forbidden matches are printed and return 1,
+clean no-match returns 0, and an `rg` status greater than 1 propagates. The
+legacy-import scan uses the same `rg` status rules, so its expected clean
+no-match returns 0.
 
 - [ ] **Step 6: Re-run and review OpenAPI drift**
 
