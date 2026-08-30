@@ -136,7 +136,7 @@ class PersonalContextService:
         value = self._clock()
         if value.tzinfo is None:
             raise ValueError("Personal Context clock must be timezone-aware")
-        return value
+        return value.replace(microsecond=(value.microsecond // 1_000) * 1_000)
 
     def _profile_id(self) -> str:
         profile_ids = self._repository.profile_ids()
