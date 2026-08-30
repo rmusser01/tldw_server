@@ -139,7 +139,7 @@ async def test_pgvector_schema_and_reusable_contract(
             )
         except SemanticVectorCapabilityError as exc:
             assert exc.code == "notes_semantic_pgvector_extension_unavailable"
-            return
+            pytest.skip("pgvector extension is unavailable in the PostgreSQL fixture")
 
         other_generation = _additional_generation(db, DATASET_ID)
         other_dataset_generation = _generation(db, "dataset-b")
@@ -216,6 +216,36 @@ async def test_pgvector_schema_and_reusable_contract(
         assert "app.current_user_id" in policies[0]["with_check"]
         assert "app.current_dataset_id" in policies[0]["with_check"]
 
+        ident = backend.escape_identifier
+        policy_name = f"{table}_tenant_isolation"
+        with backend.transaction() as connection:
+            backend.execute(
+                f"DROP POLICY {ident(policy_name)} ON {ident(table)}",  # nosec B608 - allowlisted identifiers.
+                connection=connection,
+            )
+            backend.execute(
+                f"CREATE POLICY {ident(policy_name)} ON {ident(table)} "  # nosec B608 - allowlisted identifiers.
+                "USING (owner_user_id = current_setting('app.current_user_id', true) "
+                "OR dataset_id = current_setting('app.current_dataset_id', true)) "
+                "WITH CHECK (owner_user_id = current_setting('app.current_user_id', true) "
+                "OR dataset_id = current_setting('app.current_dataset_id', true))",
+                connection=connection,
+            )
+        store = await create_semantic_vector_store(
+            "pgvector",
+            authority=db.note_semantic_store,
+            postgres_backend=backend,
+            settings=settings,
+        )
+        repaired_policy = backend.execute(
+            "SELECT qual,with_check FROM pg_policies WHERE tablename=? AND policyname=?",
+            (table, policy_name),
+        ).one
+        assert " OR " not in repaired_policy["qual"]
+        assert " AND " in repaired_policy["qual"]
+        assert " OR " not in repaired_policy["with_check"]
+        assert " AND " in repaired_policy["with_check"]
+
         await store.create_generation_storage(DATASET_ID, generation_id)
         await store.upsert(
             DATASET_ID,
@@ -285,6 +315,55 @@ async def test_pgvector_schema_and_reusable_contract(
                 )
         if other_owner_db is not None:
             other_owner_db.close_all_connections()
+        db.close_all_connections()
+        backend.get_pool().close_all()
+
+
+@pytest.mark.asyncio
+async def test_pgvector_query_is_not_underfilled_by_other_generation_decoys(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = CharactersRAGDB(":memory:", client_id="owner-a", backend=backend)
+    generation_id = _generation(db)
+    settings = SemanticIndexSettings(pgvector_allowed_dimensions=frozenset({DIMENSIONS}))
+    try:
+        try:
+            store = await create_semantic_vector_store(
+                "pgvector",
+                authority=db.note_semantic_store,
+                postgres_backend=backend,
+                settings=settings,
+            )
+        except SemanticVectorCapabilityError as exc:
+            assert exc.code == "notes_semantic_pgvector_extension_unavailable"
+            pytest.skip("pgvector extension is unavailable in the PostgreSQL fixture")
+
+        decoy_generation = _additional_generation(db, DATASET_ID)
+        await store.create_generation_storage(DATASET_ID, generation_id)
+        await store.upsert(
+            DATASET_ID,
+            generation_id,
+            (SemanticVector("target", axis_vector(DIMENSIONS, 1)),),
+        )
+        await store.upsert(
+            DATASET_ID,
+            decoy_generation,
+            tuple(
+                SemanticVector(f"decoy-{index:04d}", axis_vector(DIMENSIONS, 0))
+                for index in range(256)
+            ),
+        )
+
+        matches = await store.query(
+            DATASET_ID,
+            generation_id,
+            (axis_vector(DIMENSIONS, 0),),
+            limit=1,
+        )
+
+        assert [[match.vector_id for match in batch] for batch in matches] == [["target"]]
+    finally:
         db.close_all_connections()
         backend.get_pool().close_all()
 

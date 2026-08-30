@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
+import time
+from contextlib import nullcontext
 from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseError
 from tldw_Server_API.app.core.DB_Management.chacha.note_semantic_models import (
     SemanticDimensionState,
     SemanticGenerationState,
@@ -20,9 +24,13 @@ from tldw_Server_API.app.core.Notes_Graph.semantic_vectors import (
     SemanticVectorBindingError,
     SemanticVectorCapabilityError,
     SemanticVectorCleanup,
+    SemanticVectorError,
     SemanticVectorMatch,
     SemanticVectorValidationError,
     create_semantic_vector_store,
+)
+from tldw_Server_API.app.core.Notes_Graph.semantic_vectors_pg import (
+    PostgresSemanticVectorBackend,
 )
 from tldw_Server_API.tests.Notes_Graph.vector_contract import axis_vector
 
@@ -96,6 +104,81 @@ class _MalformedResultBackend(_Backend):
         return ((SemanticVectorMatch(vector_id="vector-a", distance=object()),),)
 
 
+class _MalformedVectorIdBackend(_Backend):
+    async def fetch(self, binding: SemanticVectorBinding, vector_ids: tuple[str, ...]):
+        return (SemanticVector(vector_id="\ud800", embedding=axis_vector(384, 0)),)
+
+
+class _SlowAuthority(_Authority):
+    def get_generation(self, dataset_id: str, generation_id: str):
+        time.sleep(0.05)
+        return super().get_generation(dataset_id, generation_id)
+
+
+class _PgResult:
+    def __init__(self, *, rows=(), scalar=None) -> None:
+        self.rows = rows
+        self.scalar = scalar
+
+
+class _FakePgBackend:
+    backend_type = BackendType.POSTGRESQL
+
+    def __init__(
+        self,
+        *,
+        table_error: Exception | None = None,
+        rows=(),
+        scalar=0,
+    ) -> None:
+        self.table_error = table_error
+        self.rows = rows
+        self.scalar = scalar
+        self.queries: list[str] = []
+
+    def table_exists(self, table_name: str) -> bool:
+        if self.table_error is not None:
+            raise self.table_error
+        return True
+
+    def transaction(self):
+        return nullcontext(object())
+
+    def execute(self, sql: str, params=(), *, connection=None, log_errors=True):
+        self.queries.append(sql)
+        if "COUNT(*)" in sql:
+            return _PgResult(scalar=self.scalar)
+        if "embedding::text" in sql or " AS distance" in sql:
+            return _PgResult(rows=self.rows)
+        return _PgResult()
+
+    def execute_many(self, sql: str, params, *, connection=None) -> None:
+        return None
+
+
+class _BadString:
+    def __str__(self) -> str:
+        raise ValueError("raw conversion detail")
+
+
+async def _invoke_pg_operation(
+    backend: PostgresSemanticVectorBackend,
+    operation: str,
+) -> None:
+    binding = SemanticVectorBinding("owner-a", "dataset-a", "generation-a", 384)
+    vector = SemanticVector("vector-a", axis_vector(384, 0))
+    if operation == "upsert":
+        await backend.upsert(binding, (vector,))
+    elif operation == "fetch":
+        await backend.fetch(binding, (vector.vector_id,))
+    elif operation == "query":
+        await backend.query(binding, (vector.embedding,), limit=1)
+    elif operation == "delete_ids":
+        await backend.delete_ids(binding, (vector.vector_id,))
+    else:
+        await backend.delete_generation(binding)
+
+
 @pytest.mark.asyncio
 async def test_facade_revalidates_authoritative_binding_before_every_operation() -> None:
     authority = _Authority()
@@ -119,6 +202,18 @@ async def test_facade_revalidates_authoritative_binding_before_every_operation()
         "delete_ids",
         "delete_generation",
     ]
+
+
+@pytest.mark.asyncio
+async def test_facade_authority_lookup_does_not_block_event_loop() -> None:
+    store = NotesSemanticVectorStore(authority=_SlowAuthority(), backend=_Backend())
+    ticker = asyncio.create_task(asyncio.sleep(0.01))
+
+    await store.create_generation_storage("dataset-a", "generation-a")
+    ticker_completed_during_lookup = ticker.done()
+    await ticker
+
+    assert ticker_completed_during_lookup is True
 
 
 @pytest.mark.asyncio
@@ -178,6 +273,119 @@ async def test_facade_maps_malformed_backend_distance_to_stable_error() -> None:
         )
 
     assert exc_info.value.code == "notes_semantic_vector_backend_result_invalid"
+
+
+@pytest.mark.asyncio
+async def test_facade_maps_lone_surrogate_input_to_stable_vector_id_error() -> None:
+    store = NotesSemanticVectorStore(authority=_Authority(), backend=_Backend())
+
+    with pytest.raises(SemanticVectorValidationError) as exc_info:
+        await store.fetch("dataset-a", "generation-a", ("\ud800",))
+
+    assert exc_info.value.code == "notes_semantic_vector_id_invalid"
+
+
+@pytest.mark.asyncio
+async def test_facade_maps_lone_surrogate_backend_id_to_stable_vector_id_error() -> None:
+    store = NotesSemanticVectorStore(
+        authority=_Authority(),
+        backend=_MalformedVectorIdBackend(),
+    )
+
+    with pytest.raises(SemanticVectorValidationError) as exc_info:
+        await store.fetch("dataset-a", "generation-a", ("vector-a",))
+
+    assert exc_info.value.code == "notes_semantic_vector_id_invalid"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "operation",
+    ("upsert", "fetch", "query", "delete_ids", "delete_generation"),
+)
+async def test_pgvector_operations_map_table_probe_failures_to_stable_error(
+    operation: str,
+) -> None:
+    backend = PostgresSemanticVectorBackend(
+        _FakePgBackend(table_error=DatabaseError("sensitive table detail")),
+        allowed_dimensions=frozenset({384}),
+    )
+
+    with pytest.raises(SemanticVectorError) as exc_info:
+        await _invoke_pg_operation(backend, operation)
+
+    assert exc_info.value.code == "notes_semantic_pgvector_operation_failed"
+    assert "sensitive table detail" not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "row",
+    (
+        {},
+        {"vector_id": "vector-a", "embedding_text": _BadString()},
+        {"vector_id": _BadString(), "embedding_text": "[1,0]"},
+    ),
+)
+async def test_pgvector_fetch_maps_malformed_rows_to_stable_error(row: dict) -> None:
+    backend = PostgresSemanticVectorBackend(
+        _FakePgBackend(rows=(row,)),
+        allowed_dimensions=frozenset({384}),
+    )
+    binding = SemanticVectorBinding("owner-a", "dataset-a", "generation-a", 384)
+
+    with pytest.raises(SemanticVectorError) as exc_info:
+        await backend.fetch(binding, ("vector-a",))
+
+    assert exc_info.value.code == "notes_semantic_vector_backend_result_invalid"
+    assert "raw conversion detail" not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ("delete_ids", "delete_generation"))
+async def test_pgvector_cleanup_maps_malformed_confirmation_to_stable_error(
+    operation: str,
+) -> None:
+    backend = PostgresSemanticVectorBackend(
+        _FakePgBackend(scalar=object()),
+        allowed_dimensions=frozenset({384}),
+    )
+
+    with pytest.raises(SemanticVectorError) as exc_info:
+        await _invoke_pg_operation(backend, operation)
+
+    assert exc_info.value.code == "notes_semantic_vector_backend_result_invalid"
+
+
+@pytest.mark.asyncio
+async def test_pgvector_query_maps_malformed_rows_to_stable_result_error() -> None:
+    raw_backend = _FakePgBackend(rows=({},))
+    backend = PostgresSemanticVectorBackend(
+        raw_backend,
+        allowed_dimensions=frozenset({384}),
+    )
+    binding = SemanticVectorBinding("owner-a", "dataset-a", "generation-a", 384)
+
+    with pytest.raises(SemanticVectorError) as exc_info:
+        await backend.query(binding, (axis_vector(384, 0),), limit=1)
+
+    assert exc_info.value.code == "notes_semantic_vector_backend_result_invalid"
+
+
+@pytest.mark.asyncio
+async def test_pgvector_query_materializes_namespace_before_distance_ordering() -> None:
+    raw_backend = _FakePgBackend(rows=())
+    backend = PostgresSemanticVectorBackend(
+        raw_backend,
+        allowed_dimensions=frozenset({384}),
+    )
+    binding = SemanticVectorBinding("owner-a", "dataset-a", "generation-a", 384)
+
+    await backend.query(binding, (axis_vector(384, 0),), limit=1)
+
+    query_sql = next(sql for sql in raw_backend.queries if " AS distance" in sql)
+    assert "WITH scoped AS MATERIALIZED" in query_sql
+    assert query_sql.index("generation_id=?") < query_sql.index("ORDER BY")
 
 
 @pytest.mark.asyncio

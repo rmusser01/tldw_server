@@ -32,6 +32,10 @@ PGVECTOR_TABLES = MappingProxyType(
     }
 )
 SEMANTIC_VECTOR_METRIC_LABELS = frozenset({"backend", "operation", "outcome"})
+_TENANT_POLICY_PREDICATE = (
+    "owner_user_id = current_setting('app.current_user_id', true) "
+    "AND dataset_id = current_setting('app.current_dataset_id', true)"
+)
 _POSTGRES_OPERATION_ERRORS = (
     AttributeError,
     ConnectionError,
@@ -43,6 +47,15 @@ _POSTGRES_OPERATION_ERRORS = (
     TypeError,
     ValueError,
 )
+_POSTGRES_RESULT_ERRORS = (
+    AttributeError,
+    DatabaseError,
+    KeyError,
+    OverflowError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+)
 
 
 def _vector_literal(embedding: Iterable[float]) -> str:
@@ -50,7 +63,12 @@ def _vector_literal(embedding: Iterable[float]) -> str:
 
 
 def _parse_vector(value: object) -> tuple[float, ...]:
-    text = str(value).strip()
+    try:
+        text = str(value).strip()
+    except _POSTGRES_RESULT_ERRORS:
+        raise SemanticVectorError(
+            "notes_semantic_vector_backend_result_invalid"
+        ) from None
     if not text.startswith("[") or not text.endswith("]"):
         raise SemanticVectorError("notes_semantic_vector_backend_result_invalid")
     body = text[1:-1]
@@ -58,8 +76,26 @@ def _parse_vector(value: object) -> tuple[float, ...]:
         return ()
     try:
         return tuple(float(part) for part in body.split(","))
-    except ValueError:
+    except (OverflowError, TypeError, ValueError):
         raise SemanticVectorError("notes_semantic_vector_backend_result_invalid") from None
+
+
+def _cleanup_confirmation(value: object) -> SemanticVectorCleanup:
+    try:
+        remaining = int(value or 0)
+    except _POSTGRES_RESULT_ERRORS:
+        raise SemanticVectorError(
+            "notes_semantic_vector_backend_result_invalid"
+        ) from None
+    return SemanticVectorCleanup(confirmed_absent=remaining == 0)
+
+
+def _normalized_policy_expression(value: object) -> str:
+    try:
+        expression = str(value).lower().replace("::text", "")
+    except _POSTGRES_RESULT_ERRORS:
+        return ""
+    return "".join(expression.split()).replace("(", "").replace(")", "")
 
 
 class PostgresSemanticVectorBackend:
@@ -114,6 +150,12 @@ class PostgresSemanticVectorBackend:
     def supports_dimensions(self, dimensions: int) -> bool:
         return dimensions in self._allowed_dimensions and dimensions in PGVECTOR_TABLES
 
+    def _table_exists(self, table: str) -> bool:
+        try:
+            return bool(self._backend.table_exists(table))
+        except _POSTGRES_OPERATION_ERRORS:
+            raise SemanticVectorError("notes_semantic_pgvector_operation_failed") from None
+
     def _ensure_dimension_table(self, dimensions: int) -> None:
         table = PGVECTOR_TABLES.get(dimensions)
         if table is None or dimensions not in self._allowed_dimensions:
@@ -132,22 +174,11 @@ class PostgresSemanticVectorBackend:
                 PRIMARY KEY (owner_user_id, dataset_id, generation_id, vector_id)
             )
         """  # nosec B608 - identifiers and dimensions come only from PGVECTOR_TABLES.
-        policy_sql = f"""
-            DO $semantic_vector_policy$
-            BEGIN
-                CREATE POLICY {policy} ON {table}
-                USING (
-                    owner_user_id = current_setting('app.current_user_id', true)
-                    AND dataset_id = current_setting('app.current_dataset_id', true)
-                )
-                WITH CHECK (
-                    owner_user_id = current_setting('app.current_user_id', true)
-                    AND dataset_id = current_setting('app.current_dataset_id', true)
-                );
-            EXCEPTION WHEN duplicate_object THEN NULL;
-            END
-            $semantic_vector_policy$
-        """  # nosec B608 - identifiers come only from PGVECTOR_TABLES.
+        create_policy_sql = (
+            f"CREATE POLICY {policy} ON {table} "  # nosec B608
+            f"USING ({_TENANT_POLICY_PREDICATE}) "
+            f"WITH CHECK ({_TENANT_POLICY_PREDICATE})"
+        )
         try:
             with self._backend.transaction() as connection:
                 self._backend.execute(create_table_sql, connection=connection, log_errors=False)
@@ -161,7 +192,16 @@ class PostgresSemanticVectorBackend:
                     connection=connection,
                     log_errors=False,
                 )
-                self._backend.execute(policy_sql, connection=connection, log_errors=False)
+                self._backend.execute(
+                    f"DROP POLICY IF EXISTS {policy} ON {table}",  # nosec B608
+                    connection=connection,
+                    log_errors=False,
+                )
+                self._backend.execute(
+                    create_policy_sql,
+                    connection=connection,
+                    log_errors=False,
+                )
                 self._backend.execute(
                     f"CREATE INDEX IF NOT EXISTS {index} ON {table} "  # nosec B608
                     "USING hnsw (embedding vector_cosine_ops)",
@@ -209,6 +249,9 @@ class PostgresSemanticVectorBackend:
         expected_policy = f"{table}_tenant_isolation"
         policy_qual = str(policies[0].get("qual", "")) if len(policies) == 1 else ""
         policy_check = str(policies[0].get("with_check", "")) if len(policies) == 1 else ""
+        expected_policy_expression = _normalized_policy_expression(
+            _TENANT_POLICY_PREDICATE
+        )
         valid = (
             len(schema) == 1
             and schema[0].get("relrowsecurity") is True
@@ -221,10 +264,10 @@ class PostgresSemanticVectorBackend:
             )
             and len(policies) == 1
             and policies[0].get("policyname") == expected_policy
-            and "app.current_user_id" in policy_qual
-            and "app.current_dataset_id" in policy_qual
-            and "app.current_user_id" in policy_check
-            and "app.current_dataset_id" in policy_check
+            and _normalized_policy_expression(policy_qual)
+            == expected_policy_expression
+            and _normalized_policy_expression(policy_check)
+            == expected_policy_expression
         )
         if not valid:
             raise SemanticVectorCapabilityError(
@@ -259,7 +302,7 @@ class PostgresSemanticVectorBackend:
         vectors: tuple[SemanticVector, ...],
     ) -> int:
         table = PGVECTOR_TABLES[binding.dimensions]
-        if not self._backend.table_exists(table):
+        if not self._table_exists(table):
             raise SemanticVectorError("notes_semantic_vector_storage_missing")
         sql = (
             f"INSERT INTO {table}(owner_user_id,dataset_id,generation_id,vector_id,embedding) "  # nosec B608
@@ -298,7 +341,7 @@ class PostgresSemanticVectorBackend:
         vector_ids: tuple[str, ...],
     ) -> tuple[SemanticVector, ...]:
         table = PGVECTOR_TABLES[binding.dimensions]
-        if not self._backend.table_exists(table):
+        if not self._table_exists(table):
             return ()
         sql = (
             f"SELECT vector_id,embedding::text AS embedding_text FROM {table} "  # nosec B608
@@ -321,13 +364,20 @@ class PostgresSemanticVectorBackend:
                 ).rows
         except _POSTGRES_OPERATION_ERRORS:
             raise SemanticVectorError("notes_semantic_pgvector_operation_failed") from None
-        return tuple(
-            SemanticVector(
-                vector_id=str(row["vector_id"]),
-                embedding=_parse_vector(row["embedding_text"]),
+        try:
+            return tuple(
+                SemanticVector(
+                    vector_id=str(row["vector_id"]),
+                    embedding=_parse_vector(row["embedding_text"]),
+                )
+                for row in rows
             )
-            for row in rows
-        )
+        except SemanticVectorError:
+            raise
+        except _POSTGRES_RESULT_ERRORS:
+            raise SemanticVectorError(
+                "notes_semantic_vector_backend_result_invalid"
+            ) from None
 
     async def fetch(
         self,
@@ -343,44 +393,54 @@ class PostgresSemanticVectorBackend:
         limit: int,
     ) -> tuple[tuple[SemanticVectorMatch, ...], ...]:
         table = PGVECTOR_TABLES[binding.dimensions]
-        if not self._backend.table_exists(table):
+        if not self._table_exists(table):
             return tuple(() for _ in query_vectors)
         sql = (
-            f"SELECT vector_id,(embedding <=> ?::vector) AS distance FROM {table} "  # nosec B608
-            "WHERE owner_user_id=? AND dataset_id=? AND generation_id=? "
+            "WITH scoped AS MATERIALIZED ("
+            f"SELECT vector_id,embedding FROM {table} "  # nosec B608
+            "WHERE owner_user_id=? AND dataset_id=? AND generation_id=?"
+            ") "
+            "SELECT vector_id,(embedding <=> ?::vector) AS distance FROM scoped "
             "ORDER BY embedding <=> ?::vector,vector_id LIMIT ?"
         )
-        batches: list[tuple[SemanticVectorMatch, ...]] = []
+        results: list[Any] = []
         try:
             with self._backend.transaction() as connection:
                 self._scope(self._backend, connection, binding)
                 for query_vector in query_vectors:
                     literal = _vector_literal(query_vector)
-                    rows = self._backend.execute(
-                        sql,
-                        (
-                            literal,
-                            binding.owner_user_id,
-                            binding.dataset_id,
-                            binding.generation_id,
-                            literal,
-                            limit,
-                        ),
-                        connection=connection,
-                        log_errors=False,
-                    ).rows
-                    batches.append(
-                        tuple(
-                            SemanticVectorMatch(
-                                vector_id=str(row["vector_id"]),
-                                distance=float(row["distance"]),
-                            )
-                            for row in rows
+                    results.append(
+                        self._backend.execute(
+                            sql,
+                            (
+                                binding.owner_user_id,
+                                binding.dataset_id,
+                                binding.generation_id,
+                                literal,
+                                literal,
+                                limit,
+                            ),
+                            connection=connection,
+                            log_errors=False,
                         )
                     )
         except _POSTGRES_OPERATION_ERRORS:
             raise SemanticVectorError("notes_semantic_pgvector_operation_failed") from None
-        return tuple(batches)
+        try:
+            return tuple(
+                tuple(
+                    SemanticVectorMatch(
+                        vector_id=str(row["vector_id"]),
+                        distance=float(row["distance"]),
+                    )
+                    for row in result.rows
+                )
+                for result in results
+            )
+        except _POSTGRES_RESULT_ERRORS:
+            raise SemanticVectorError(
+                "notes_semantic_vector_backend_result_invalid"
+            ) from None
 
     async def query(
         self,
@@ -402,7 +462,7 @@ class PostgresSemanticVectorBackend:
         vector_ids: tuple[str, ...],
     ) -> SemanticVectorCleanup:
         table = PGVECTOR_TABLES[binding.dimensions]
-        if not self._backend.table_exists(table):
+        if not self._table_exists(table):
             return SemanticVectorCleanup(confirmed_absent=True)
         predicate = (
             "owner_user_id=? AND dataset_id=? AND generation_id=? "
@@ -431,7 +491,7 @@ class PostgresSemanticVectorBackend:
                 ).scalar
         except _POSTGRES_OPERATION_ERRORS:
             raise SemanticVectorError("notes_semantic_pgvector_operation_failed") from None
-        return SemanticVectorCleanup(confirmed_absent=int(remaining or 0) == 0)
+        return _cleanup_confirmation(remaining)
 
     async def delete_ids(
         self,
@@ -445,7 +505,7 @@ class PostgresSemanticVectorBackend:
         binding: SemanticVectorBinding,
     ) -> SemanticVectorCleanup:
         table = PGVECTOR_TABLES[binding.dimensions]
-        if not self._backend.table_exists(table):
+        if not self._table_exists(table):
             return SemanticVectorCleanup(confirmed_absent=True)
         predicate = "owner_user_id=? AND dataset_id=? AND generation_id=?"
         params = (
@@ -470,7 +530,7 @@ class PostgresSemanticVectorBackend:
                 ).scalar
         except _POSTGRES_OPERATION_ERRORS:
             raise SemanticVectorError("notes_semantic_pgvector_operation_failed") from None
-        return SemanticVectorCleanup(confirmed_absent=int(remaining or 0) == 0)
+        return _cleanup_confirmation(remaining)
 
     async def delete_generation(
         self,

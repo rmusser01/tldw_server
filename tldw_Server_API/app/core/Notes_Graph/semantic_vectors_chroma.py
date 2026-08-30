@@ -6,7 +6,7 @@ import asyncio
 import hashlib
 from typing import Any
 
-from chromadb.errors import ChromaError
+from chromadb.errors import ChromaError, NotFoundError
 
 from .semantic_vectors import (
     SemanticVector,
@@ -17,11 +17,6 @@ from .semantic_vectors import (
     SemanticVectorMatch,
 )
 
-_MISSING_COLLECTION_EXCEPTIONS = {
-    "InvalidCollectionException",
-    "KeyError",
-    "NotFoundError",
-}
 _CHROMA_OPERATION_ERRORS = (
     AttributeError,
     ChromaError,
@@ -43,7 +38,7 @@ def _namespace(binding: SemanticVectorBinding) -> str:
 
 
 def _is_missing_collection(exc: BaseException) -> bool:
-    return type(exc).__name__ in _MISSING_COLLECTION_EXCEPTIONS
+    return isinstance(exc, NotFoundError)
 
 
 def _sequence_or_empty(value: Any) -> tuple[Any, ...]:

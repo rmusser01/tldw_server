@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -126,7 +127,11 @@ def _dimension_state_value(value: object) -> str:
 def _validated_vector_id(value: object) -> str:
     if not isinstance(value, str):
         raise SemanticVectorValidationError("notes_semantic_vector_id_invalid")
-    if not value or len(value.encode("utf-8")) > 512 or any(ord(char) < 32 for char in value):
+    try:
+        encoded = value.encode("utf-8")
+    except UnicodeEncodeError:
+        raise SemanticVectorValidationError("notes_semantic_vector_id_invalid") from None
+    if not value or len(encoded) > 512 or any(ord(char) < 32 for char in value):
         raise SemanticVectorValidationError("notes_semantic_vector_id_invalid")
     return value
 
@@ -179,8 +184,16 @@ class NotesSemanticVectorStore:
         self._backend = backend
         self._max_query_neighbors = max_query_neighbors
 
-    def _binding(self, dataset_id: str, generation_id: str) -> SemanticVectorBinding:
-        generation = self._authority.get_generation(dataset_id, generation_id)
+    async def _binding(
+        self,
+        dataset_id: str,
+        generation_id: str,
+    ) -> SemanticVectorBinding:
+        generation = await asyncio.to_thread(
+            self._authority.get_generation,
+            dataset_id,
+            generation_id,
+        )
         if generation is None:
             raise SemanticVectorBindingError("notes_semantic_vector_binding_invalid")
         owner_user_id = str(self._authority.owner_user_id)
@@ -206,7 +219,7 @@ class NotesSemanticVectorStore:
         )
 
     async def create_generation_storage(self, dataset_id: str, generation_id: str) -> None:
-        binding = self._binding(dataset_id, generation_id)
+        binding = await self._binding(dataset_id, generation_id)
         await self._backend.create_generation_storage(binding)
 
     async def upsert(
@@ -215,7 +228,7 @@ class NotesSemanticVectorStore:
         generation_id: str,
         vectors: Sequence[SemanticVector],
     ) -> int:
-        binding = self._binding(dataset_id, generation_id)
+        binding = await self._binding(dataset_id, generation_id)
         normalized: list[SemanticVector] = []
         seen_ids: set[str] = set()
         for vector in vectors:
@@ -239,7 +252,7 @@ class NotesSemanticVectorStore:
         generation_id: str,
         vector_ids: Sequence[str],
     ) -> tuple[SemanticVector, ...]:
-        binding = self._binding(dataset_id, generation_id)
+        binding = await self._binding(dataset_id, generation_id)
         ids = _validated_ids(vector_ids)
         if not ids:
             return ()
@@ -264,7 +277,7 @@ class NotesSemanticVectorStore:
         *,
         limit: int,
     ) -> tuple[tuple[SemanticVectorMatch, ...], ...]:
-        binding = self._binding(dataset_id, generation_id)
+        binding = await self._binding(dataset_id, generation_id)
         if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= self._max_query_neighbors:
             raise SemanticVectorValidationError("notes_semantic_vector_query_limit_invalid")
         normalized = tuple(
@@ -307,7 +320,7 @@ class NotesSemanticVectorStore:
         generation_id: str,
         vector_ids: Sequence[str],
     ) -> SemanticVectorCleanup:
-        binding = self._binding(dataset_id, generation_id)
+        binding = await self._binding(dataset_id, generation_id)
         ids = _validated_ids(vector_ids)
         if not ids:
             return SemanticVectorCleanup(confirmed_absent=True)
@@ -318,7 +331,7 @@ class NotesSemanticVectorStore:
         dataset_id: str,
         generation_id: str,
     ) -> SemanticVectorCleanup:
-        binding = self._binding(dataset_id, generation_id)
+        binding = await self._binding(dataset_id, generation_id)
         return await self._backend.delete_generation(binding)
 
 
