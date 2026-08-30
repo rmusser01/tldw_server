@@ -130,11 +130,11 @@ def test_metrics_reset_401_when_principal_unavailable():
 
 
 @pytest.mark.unit
-def test_metrics_reset_403_when_missing_admin_role():
+def test_metrics_reset_403_when_system_logs_principal_is_missing_admin_role():
     principal = _make_principal(
         is_admin=False,
         roles=["user"],
-        permissions=[],
+        permissions=[SYSTEM_LOGS],
     )
     app = _build_app_with_overrides(principal=principal)
 
