@@ -24,9 +24,11 @@ from tldw_Server_API.tests.Admin_Webhooks.test_event_expansion import (
     exercise_malformed_persisted_coordinates,
     exercise_persisted_coordinate_matrix,
     exercise_recovery_runtime_and_retention,
+    exercise_registration_counts_contract,
     exercise_stale_recovery_and_cancellation,
     exercise_task8_attempt_reservation_and_recovery_contract,
     exercise_task9_test_attempt_contract,
+    exercise_task11_future_heartbeat_contract,
     exercise_task11_health_and_expiry_contract,
 )
 from tldw_Server_API.tests.Admin_Webhooks.test_redelivery_history_api import (
@@ -126,6 +128,20 @@ async def test_sqlite_task11_health_and_expiry_contract(
     delivery_repo: SQLiteDeliveryRepositoryFixture,
 ) -> None:
     await exercise_task11_health_and_expiry_contract(delivery_repo)
+
+
+@pytest.mark.unit
+async def test_sqlite_registration_counts_contract(
+    delivery_repo: SQLiteDeliveryRepositoryFixture,
+) -> None:
+    await exercise_registration_counts_contract(delivery_repo)
+
+
+@pytest.mark.unit
+async def test_sqlite_task11_future_heartbeat_contract(
+    delivery_repo: SQLiteDeliveryRepositoryFixture,
+) -> None:
+    await exercise_task11_future_heartbeat_contract(delivery_repo)
 
 
 @pytest.mark.unit

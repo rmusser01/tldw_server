@@ -818,6 +818,132 @@ async def test_enqueue_six_crash_boundaries_converge_across_backend_matrix(
     BACKEND_PAIRS,
     ids=("sqlite-sqlite", "sqlite-postgres", "postgres-sqlite", "postgres-postgres"),
 )
+@pytest.mark.parametrize(
+    "claim_live_at_expiry",
+    (True, False),
+    ids=("live-claim", "expired-claim-concurrent-reclaim"),
+)
+async def test_before_attach_crash_then_expiry_preserves_exact_cancel_recovery(
+    auth_backend: str,
+    jobs_backend: str,
+    claim_live_at_expiry: bool,
+    tmp_path: Path,
+    test_db_pool,
+    matrix_jobs_pg_dsn: str,
+) -> None:
+    manager = _jobs_manager(
+        jobs_backend,
+        tmp_path=tmp_path,
+        jobs_pg_dsn=matrix_jobs_pg_dsn,
+    )
+    queue = CountingQueue(JobsDeliveryQueue(manager))
+    clock = MutableClock(NOW)
+    expiry_offset = 30 if claim_live_at_expiry else 120
+    label = (
+        f"{auth_backend}-{jobs_backend}-before-attach-expiry-"
+        f"{'live' if claim_live_at_expiry else 'expired'}"
+    )
+    async with _auth_repository(
+        auth_backend,
+        tmp_path=tmp_path,
+        test_db_pool=test_db_pool,
+    ) as repository:
+        webhook_id, delivery_id = await _seed_delivery(
+            repository,
+            label,
+            now=clock(),
+            expires_at=NOW + timedelta(seconds=expiry_offset),
+        )
+        with pytest.raises(SimulatedCrash):
+            await _reconciler(
+                repository,
+                queue,
+                clock,
+                TokenSource(f"{label}-initial"),
+                crash_hook=OneShotCrash(EnqueueCrashPoint.BEFORE_AUTHNZ_ATTACH),
+            ).reconcile_enqueue_once()
+
+        jobs_rows = manager.list_jobs(
+            domain="admin_webhooks",
+            queue="delivery",
+            job_type="admin_webhook_delivery",
+            limit=100,
+        )
+        matching_jobs = [
+            row
+            for row in jobs_rows
+            if row.get("payload") == {"delivery_id": delivery_id}
+        ]
+        assert len(matching_jobs) == 1
+        assert matching_jobs[0]["status"] == "queued"
+
+        clock.current = NOW + timedelta(seconds=expiry_offset)
+        recovery_tokens = TokenSource(f"{label}-recovery")
+        if claim_live_at_expiry:
+            expiry = await repository.expire_due_deliveries(
+                now=clock(),
+                batch_size=100,
+                token_factory=TokenSource(f"{label}-blind-expiry"),
+            )
+            assert expiry.expired == 0
+            clock.current = NOW + timedelta(seconds=61)
+            recovered_count = await _reconciler(
+                repository,
+                queue,
+                clock,
+                recovery_tokens,
+            ).reconcile_enqueue_once()
+        else:
+            reclaimed = asyncio.Event()
+            release_reconciler = asyncio.Event()
+
+            async def pause_after_reclaim() -> None:
+                reclaimed.set()
+                await release_reconciler.wait()
+
+            recovery_task = asyncio.create_task(
+                _reconciler(
+                    repository,
+                    queue,
+                    clock,
+                    recovery_tokens,
+                    after_claim_commit_hook=pause_after_reclaim,
+                ).reconcile_enqueue_once()
+            )
+            await asyncio.wait_for(reclaimed.wait(), timeout=10)
+            expiry = await repository.expire_due_deliveries(
+                now=clock(),
+                batch_size=100,
+                token_factory=TokenSource(f"{label}-blind-expiry"),
+            )
+            assert expiry.expired == 0
+            release_reconciler.set()
+            recovered_count = await asyncio.wait_for(recovery_task, timeout=10)
+
+        assert recovered_count == 1
+        recovered = await repository.get_delivery_bundle(delivery_id)
+        assert recovered is not None
+        assert recovered.delivery.delivery.state is DeliveryState.DEAD
+        assert recovered.delivery.delivery.reason_code is DeliveryReasonCode.DELIVERY_EXPIRED
+        assert recovered.delivery.jobs_job_id == str(matching_jobs[0]["id"])
+        assert recovered.delivery.enqueue_claim_token is None
+        assert recovered.delivery.pending_jobs_disposition is JobsDispositionKind.CANCEL
+        assert recovered.delivery.pending_jobs_disposition_token is not None
+        assert recovered.delivery.jobs_disposition_applied
+        assert queue.admit_calls == [delivery_id]
+        assert queue.find_calls == [delivery_id]
+        assert queue.cancel_tokens == [
+            recovered.delivery.pending_jobs_disposition_token
+        ]
+        assert manager.get_job(int(matching_jobs[0]["id"]))["status"] == "cancelled"
+        assert await repository.list_delivery_attempts(webhook_id, delivery_id) == ()
+
+
+@pytest.mark.parametrize(
+    ("auth_backend", "jobs_backend"),
+    BACKEND_PAIRS,
+    ids=("sqlite-sqlite", "sqlite-postgres", "postgres-sqlite", "postgres-postgres"),
+)
 async def test_enqueue_revalidates_terminal_work_before_admission_across_backend_matrix(
     auth_backend: str,
     jobs_backend: str,

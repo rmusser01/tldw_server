@@ -203,6 +203,7 @@ _DELIVERY_RUNTIME_REASON_VALUES = (
     "retention_unavailable",
     "heartbeat_stale",
 )
+_MAX_RUNTIME_HEARTBEAT_FUTURE_SKEW_SECONDS = 5
 _DELIVERY_SQLITE_INDEX_DEFINITIONS = {
     "idx_admin_webhook_deliveries_recovery": (
         "createindexidx_admin_webhook_deliveries_recovery"
@@ -539,6 +540,21 @@ class RegistrationLimitState:
     limit: int
     at_limit: bool
     over_limit: bool
+
+
+@dataclass(frozen=True)
+class RegistrationCounts:
+    """Current non-deleted registration inventory from one snapshot query."""
+
+    total: int
+    active: int
+
+    def __post_init__(self) -> None:
+        if any(
+            isinstance(value, bool) or not isinstance(value, int) or value < 0
+            for value in (self.total, self.active)
+        ) or self.active > self.total:
+            raise ValueError("registration counts are invalid")
 
 
 class IdempotencyLookupKind(str, Enum):
@@ -1090,6 +1106,7 @@ class DeliveryExpiryBatchResult:
 
     expired: int
     pending_dispositions: tuple[PendingJobsDisposition, ...]
+    outcomes: tuple[CommittedDeliveryOutcome, ...] = ()
 
     def __post_init__(self) -> None:
         if (
@@ -1100,6 +1117,38 @@ class DeliveryExpiryBatchResult:
             raise ValueError("expired delivery count is invalid")
         if self.expired < len(self.pending_dispositions):
             raise ValueError("expiry dispositions exceed expired deliveries")
+        if self.expired < len(self.outcomes):
+            raise ValueError("expiry outcomes exceed expired deliveries")
+
+
+@dataclass(frozen=True)
+class CommittedDeliveryOutcome:
+    """Closed facts for one delivery transition committed by its caller."""
+
+    state: DeliveryState
+    kind: DeliveryKind
+    reason_code: DeliveryReasonCode | None
+    status_code: int | None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.state, DeliveryState) or not isinstance(
+            self.kind, DeliveryKind
+        ):
+            raise TypeError("committed delivery outcome is invalid")
+        if self.reason_code is not None and not isinstance(
+            self.reason_code, DeliveryReasonCode
+        ):
+            raise TypeError("committed delivery reason is invalid")
+        if self.status_code is not None and not 100 <= self.status_code <= 599:
+            raise ValueError("committed delivery status is invalid")
+
+
+@dataclass(frozen=True)
+class DeliveryTerminalBatchResult:
+    """Committed lifecycle terminalizations plus exact Jobs recovery work."""
+
+    pending_dispositions: tuple[PendingJobsDisposition, ...]
+    outcomes: tuple[CommittedDeliveryOutcome, ...]
 
 
 def _utc_datetime(value: datetime, *, field: str) -> datetime:
@@ -2090,6 +2139,13 @@ class AdminWebhookRepository:
                 is_postgres=self.is_postgres,
             ).count_active_registrations()
 
+    async def registration_counts(self) -> RegistrationCounts:
+        async with self._read_connection() as connection:
+            return await AdminWebhookUnitOfWork(
+                connection,
+                is_postgres=self.is_postgres,
+            ).registration_counts()
+
     async def count_secret_rotation_required(self) -> int:
         """Return non-deleted registrations awaiting canonical secret rotation."""
         async with self._read_connection() as connection:
@@ -2286,6 +2342,9 @@ class AdminWebhookRepository:
                 maximum=255,
             )
         stale_before = now - timedelta(seconds=heartbeat_freshness_seconds)
+        future_through = now + timedelta(
+            seconds=_MAX_RUNTIME_HEARTBEAT_FUTURE_SKEW_SECONDS
+        )
         unavailable_reasons = {
             DeliveryRuntimeComponent.WORKER: (
                 DeliveryRuntimeReasonCode.WORKER_UNAVAILABLE
@@ -2322,11 +2381,14 @@ class AdminWebhookRepository:
                     """
                     SELECT ready, reason_code, heartbeat_at
                     FROM admin_webhook_runtime_heartbeats
-                    WHERE component = ? AND ready = TRUE AND heartbeat_at >= ?
+                    WHERE component = ?
+                      AND ready = TRUE
+                      AND heartbeat_at >= ?
+                      AND heartbeat_at <= ?
                     ORDER BY heartbeat_at DESC, instance_id ASC
                     LIMIT 1
                     """,
-                    (component.value, stale_before),
+                    (component.value, stale_before, future_through),
                 )
                 row = ready_row
                 if row is None:
@@ -2335,10 +2397,13 @@ class AdminWebhookRepository:
                         SELECT ready, reason_code, heartbeat_at
                         FROM admin_webhook_runtime_heartbeats
                         WHERE component = ?
-                        ORDER BY heartbeat_at DESC, instance_id ASC
+                        ORDER BY
+                            CASE WHEN heartbeat_at <= ? THEN 0 ELSE 1 END ASC,
+                            heartbeat_at DESC,
+                            instance_id ASC
                         LIMIT 1
                         """,
-                        (component.value,),
+                        (component.value, future_through),
                     )
                 if row is None:
                     return DeliveryComponentStatus(
@@ -2351,7 +2416,7 @@ class AdminWebhookRepository:
                 if heartbeat_at is None:
                     raise ValueError("persisted runtime heartbeat time is invalid")
                 age_seconds = max(int((now - heartbeat_at).total_seconds()), 0)
-                if heartbeat_at < stale_before:
+                if heartbeat_at < stale_before or heartbeat_at > future_through:
                     return DeliveryComponentStatus(
                         component=component,
                         ready=False,
@@ -4846,6 +4911,39 @@ class AdminWebhookUnitOfWork(_ConnectionAdapter):
         disposition_token_factory: Callable[[], str],
         now: datetime,
     ) -> tuple[PendingJobsDisposition, ...]:
+        result = await self._cancel_registration_work_batch(
+            webhook_id,
+            cutoff_versions,
+            reason,
+            disposition_token_factory,
+            now,
+        )
+        return result.pending_dispositions
+
+    async def cancel_registration_work_with_outcomes(
+        self,
+        webhook_id: int,
+        cutoff_versions: tuple[int, int],
+        reason: DeliveryReasonCode,
+        disposition_token_factory: Callable[[], str],
+        now: datetime,
+    ) -> DeliveryTerminalBatchResult:
+        return await self._cancel_registration_work_batch(
+            webhook_id,
+            cutoff_versions,
+            reason,
+            disposition_token_factory,
+            now,
+        )
+
+    async def _cancel_registration_work_batch(
+        self,
+        webhook_id: int,
+        cutoff_versions: tuple[int, int],
+        reason: DeliveryReasonCode,
+        disposition_token_factory: Callable[[], str],
+        now: datetime,
+    ) -> DeliveryTerminalBatchResult:
         if (
             not isinstance(cutoff_versions, tuple)
             or len(cutoff_versions) != 2
@@ -4877,6 +4975,7 @@ class AdminWebhookUnitOfWork(_ConnectionAdapter):
             (webhook_id, cutoff_versions[0], cutoff_versions[1]),
         )
         pending: list[PendingJobsDisposition] = []
+        outcomes: list[CommittedDeliveryOutcome] = []
         target_state = (
             DeliveryState.SUPERSEDED
             if reason is DeliveryReasonCode.SUPERSEDED_CONFIG
@@ -4941,7 +5040,18 @@ class AdminWebhookUnitOfWork(_ConnectionAdapter):
                 )
             if disposition is not None:
                 pending.append(disposition)
-        return tuple(pending)
+            outcomes.append(
+                CommittedDeliveryOutcome(
+                    state=target_state,
+                    kind=delivery.delivery.kind,
+                    reason_code=reason,
+                    status_code=delivery.delivery.status_code,
+                )
+            )
+        return DeliveryTerminalBatchResult(
+            pending_dispositions=tuple(pending),
+            outcomes=tuple(outcomes),
+        )
 
     async def expire_due_deliveries(
         self,
@@ -4958,10 +5068,11 @@ class AdminWebhookUnitOfWork(_ConnectionAdapter):
         lock_clause = " FOR UPDATE SKIP LOCKED" if self._is_postgres else ""
         rows = await self._fetch(
             f"""
-            SELECT id, state, jobs_job_id
+            SELECT id, state, kind, status_code, jobs_job_id
             FROM admin_webhook_deliveries
             WHERE expires_at <= ?
               AND state IN ('pending', 'enqueue_claimed', 'queued', 'retry_wait')
+              AND (state != 'enqueue_claimed' OR jobs_job_id IS NOT NULL)
               AND current_attempt_id IS NULL
               AND pending_jobs_disposition IS NULL
             ORDER BY expires_at ASC, created_at ASC, id ASC
@@ -4970,6 +5081,7 @@ class AdminWebhookUnitOfWork(_ConnectionAdapter):
             (now, batch_size),
         )
         pending: list[PendingJobsDisposition] = []
+        outcomes: list[CommittedDeliveryOutcome] = []
         for row in rows:
             delivery_id = _canonical_uuid4(row["id"], field="delivery ID")
             state = DeliveryState(str(row["state"]))
@@ -4999,6 +5111,7 @@ class AdminWebhookUnitOfWork(_ConnectionAdapter):
                     END,
                     updated_at = ?
                 WHERE id = ? AND state = ? AND expires_at <= ?
+                  AND (state != 'enqueue_claimed' OR jobs_job_id IS NOT NULL)
                   AND current_attempt_id IS NULL
                   AND pending_jobs_disposition IS NULL
                 RETURNING id
@@ -5034,9 +5147,22 @@ class AdminWebhookUnitOfWork(_ConnectionAdapter):
                         reason_code=DeliveryReasonCode.DELIVERY_EXPIRED,
                     )
                 )
+            outcomes.append(
+                CommittedDeliveryOutcome(
+                    state=DeliveryState.DEAD,
+                    kind=DeliveryKind(str(row["kind"])),
+                    reason_code=DeliveryReasonCode.DELIVERY_EXPIRED,
+                    status_code=(
+                        int(row["status_code"])
+                        if row["status_code"] is not None
+                        else None
+                    ),
+                )
+            )
         return DeliveryExpiryBatchResult(
             expired=len(rows),
             pending_dispositions=tuple(pending),
+            outcomes=tuple(outcomes),
         )
 
     async def expire_delivery(
@@ -5467,6 +5593,24 @@ class AdminWebhookUnitOfWork(_ConnectionAdapter):
             (True,),
         )
         return int(row["count"]) if row is not None else 0
+
+    async def registration_counts(self) -> RegistrationCounts:
+        row = await self._fetchrow(
+            """
+            SELECT COUNT(*) AS total,
+                   COALESCE(SUM(CASE WHEN active = ? THEN 1 ELSE 0 END), 0)
+                       AS active
+            FROM admin_webhook_registrations
+            WHERE deleted_at IS NULL
+            """,
+            (True,),
+        )
+        if row is None:
+            return RegistrationCounts(total=0, active=0)
+        return RegistrationCounts(
+            total=int(row["total"]),
+            active=int(row["active"]),
+        )
 
     async def count_secret_rotation_required(self) -> int:
         row = await self._fetchrow(

@@ -29,6 +29,7 @@ from tldw_Server_API.app.core.Admin_Webhooks.observability import (
     AdminWebhookMetrics,
     JobManagerJobsCapabilityProbe,
     JobsCapabilityStatus,
+    UnavailableJobsCapabilityProbe,
 )
 from tldw_Server_API.app.core.Admin_Webhooks.reconciler import (
     AdminWebhookReconciler,
@@ -54,16 +55,6 @@ _RESTART_DELAY_SECONDS = 1
 _Loop = Callable[[asyncio.Event, object], Awaitable[None]]
 
 
-class _UnavailableJobsCapabilityProbe:
-    async def status(self) -> JobsCapabilityStatus:
-        return JobsCapabilityStatus(
-            database_ready=False,
-            queue_ready=False,
-            job_type_ready=False,
-            backend="unavailable",
-        )
-
-
 class _UnavailableJobsQueue:
     @staticmethod
     def _raise() -> NoReturn:
@@ -87,17 +78,143 @@ class _UnavailableJobsQueue:
 
 
 @dataclass(frozen=True)
+class _JobsGeneration:
+    queue: JobsDeliveryQueue
+    probe: JobManagerJobsCapabilityProbe
+    backend: str
+    worker_sdk: WorkerSDK | None
+    worker_handler: AdminWebhookPreparedHandler | None
+    worker_instance_id: str
+
+
+class _RefreshableJobsRuntime:
+    """Stable delegates over one atomically promoted Jobs generation."""
+
+    def __init__(
+        self,
+        *,
+        settings: AdminWebhookSettings,
+        worker_repository: AdminWebhookRepository,
+        key_ring_result: object,
+        metrics: AdminWebhookMetrics,
+        token_factory: Callable[[], str],
+        clock: Callable[[], datetime],
+    ) -> None:
+        self._settings = settings
+        self._worker_repository = worker_repository
+        self._key_ring_result = key_ring_result
+        self._metrics = metrics
+        self._token_factory = token_factory
+        self._clock = clock
+        self._generation: _JobsGeneration | None = None
+        self._refresh_lock = asyncio.Lock()
+
+    @property
+    def backend(self) -> str:
+        generation = self._generation
+        if generation is None:
+            return "unavailable"
+        return generation.backend
+
+    async def status(self) -> JobsCapabilityStatus:
+        generation = self._generation
+        if generation is None:
+            return await UnavailableJobsCapabilityProbe().status()
+        return await generation.probe.status()
+
+    def _queue(self) -> JobsDeliveryQueue:
+        generation = self._generation
+        if generation is None:
+            _UnavailableJobsQueue._raise()
+        return generation.queue
+
+    def admit_delivery_job(self, *args: object, **kwargs: object) -> object:
+        return self._queue().admit_delivery_job(*args, **kwargs)
+
+    def find_delivery_job_by_identity(self, *args: object, **kwargs: object) -> object:
+        return self._queue().find_delivery_job_by_identity(*args, **kwargs)
+
+    def get_delivery_job(self, *args: object, **kwargs: object) -> object:
+        return self._queue().get_delivery_job(*args, **kwargs)
+
+    def apply_queued_cancel(self, *args: object, **kwargs: object) -> object:
+        return self._queue().apply_queued_cancel(*args, **kwargs)
+
+    async def refresh(self) -> _JobsGeneration | None:
+        """Build privately, then publish one complete healthy generation."""
+
+        async with self._refresh_lock:
+            try:
+                manager = await asyncio.to_thread(JobManager)
+                queue = JobsDeliveryQueue(manager)
+                probe = JobManagerJobsCapabilityProbe(manager)
+                status = await probe.status()
+                if not (
+                    status.database_ready
+                    and status.queue_ready
+                    and status.job_type_ready
+                ):
+                    raise RuntimeError("Jobs delivery capability is unavailable")
+                worker_id = str(uuid4())
+                worker_sdk: WorkerSDK | None = None
+                worker_handler: AdminWebhookPreparedHandler | None = None
+                ring = getattr(self._key_ring_result, "ring", None)
+                if ring is not None:
+                    worker_handler = AdminWebhookPreparedHandler(
+                        repository=self._worker_repository,
+                        key_ring=ring,
+                        settings=self._settings,
+                        executor=DeliveryAttemptExecutor(
+                            allow_http_dev=self._settings.allow_http_dev,
+                        ),
+                        token_factory=self._token_factory,
+                        attempt_id_factory=lambda: str(uuid4()),
+                        clock=self._clock,
+                        metrics=self._metrics,
+                    )
+                    worker_sdk = WorkerSDK(
+                        manager,
+                        WorkerConfig(
+                            domain=ADMIN_WEBHOOK_DELIVERY_DOMAIN,
+                            queue=ADMIN_WEBHOOK_DELIVERY_QUEUE,
+                            worker_id=worker_id,
+                            lease_seconds=120,
+                            renew_jitter_seconds=5,
+                            renew_threshold_seconds=20,
+                            backoff_base_seconds=(
+                                self._settings.delivery_loop_interval_seconds
+                            ),
+                            backoff_max_seconds=30,
+                        ),
+                    )
+                generation = _JobsGeneration(
+                    queue=queue,
+                    probe=probe,
+                    backend=status.backend,
+                    worker_sdk=worker_sdk,
+                    worker_handler=worker_handler,
+                    worker_instance_id=worker_id,
+                )
+            except Exception as exc:  # noqa: BLE001 - retry remains fail-closed
+                self._generation = None
+                logger.bind(error_type=type(exc).__name__).warning(
+                    "Canonical admin-webhook Jobs generation is unavailable"
+                )
+                return None
+            self._generation = generation
+            return generation
+
+
+@dataclass(frozen=True)
 class _RuntimeComponents:
     settings: AdminWebhookSettings
     worker_repository: AdminWebhookRepository
     reconciler_repository: AdminWebhookRepository
     retention_repository: AdminWebhookRepository
     capability: AdminWebhookDeliveryCapability
-    worker_sdk: WorkerSDK | None
-    worker_handler: AdminWebhookPreparedHandler | None
+    jobs: _RefreshableJobsRuntime
     reconciler: AdminWebhookReconciler
     metrics: AdminWebhookMetrics
-    worker_instance_id: str
     reconciler_instance_id: str
     retention_instance_id: str
     token_factory: Callable[[], str]
@@ -128,7 +245,13 @@ async def _supervise_loop(
         except Exception:  # noqa: BLE001 - one component must not stop its peers
             logger.exception("Canonical admin-webhook {} loop failed", name)
         if not stop_event.is_set():
-            await _wait_interruptibly(stop_event, _RESTART_DELAY_SECONDS)
+            settings = getattr(components, "settings", None)
+            delay = getattr(
+                settings,
+                "delivery_loop_interval_seconds",
+                _RESTART_DELAY_SECONDS,
+            )
+            await _wait_interruptibly(stop_event, delay)
 
 
 async def _build_runtime_components() -> _RuntimeComponents:
@@ -140,20 +263,6 @@ async def _build_runtime_components() -> _RuntimeComponents:
     worker_repository = AdminWebhookRepository(pool)
     reconciler_repository = AdminWebhookRepository(pool)
     retention_repository = AdminWebhookRepository(pool)
-    manager: JobManager | None
-    try:
-        manager = await asyncio.to_thread(JobManager)
-    except Exception as exc:  # noqa: BLE001 - runtime remains observable
-        logger.bind(error_type=type(exc).__name__).warning("Canonical admin-webhook Jobs preflight is unavailable")
-        manager = None
-    if manager is None:
-        queue = _UnavailableJobsQueue()
-        jobs_probe = _UnavailableJobsCapabilityProbe()
-        jobs_backend = "unavailable"
-    else:
-        queue = JobsDeliveryQueue(manager)
-        jobs_probe = JobManagerJobsCapabilityProbe(manager)
-        jobs_backend = str(getattr(manager, "backend", "unavailable"))
     key_ring_result = load_webhook_key_ring()
     metrics = AdminWebhookMetrics()
 
@@ -163,68 +272,46 @@ async def _build_runtime_components() -> _RuntimeComponents:
     def token_factory() -> str:
         return secrets.token_hex(32)
 
+    jobs = _RefreshableJobsRuntime(
+        settings=settings,
+        worker_repository=worker_repository,
+        key_ring_result=key_ring_result,
+        metrics=metrics,
+        token_factory=token_factory,
+        clock=clock,
+    )
     capability = AdminWebhookDeliveryCapability(
         repository=health_repository,
         key_ring_result=key_ring_result,
-        jobs_probe=jobs_probe,
+        jobs_probe=jobs,
         heartbeat_freshness_seconds=(settings.delivery_heartbeat_freshness_seconds),
         metrics=metrics,
     )
     reconciler = AdminWebhookReconciler(
         repository=reconciler_repository,
-        queue=queue,
+        queue=jobs,
         token_factory=token_factory,
         clock=clock,
         claim_ttl_seconds=settings.delivery_claim_ttl_seconds,
         failure_observer=lambda failure: metrics.enqueue_failure(
             failure,
-            backend=jobs_backend,
+            backend=jobs.backend,
         ),
         success_observer=lambda success: metrics.enqueue_success(
             success,
-            backend=jobs_backend,
+            backend=jobs.backend,
         ),
+        metrics=metrics,
     )
-    worker_id = str(uuid4())
-    worker_sdk: WorkerSDK | None = None
-    worker_handler: AdminWebhookPreparedHandler | None = None
-    if key_ring_result.ring is not None and manager is not None:
-        worker_handler = AdminWebhookPreparedHandler(
-            repository=worker_repository,
-            key_ring=key_ring_result.ring,
-            settings=settings,
-            executor=DeliveryAttemptExecutor(
-                allow_http_dev=settings.allow_http_dev,
-            ),
-            token_factory=token_factory,
-            attempt_id_factory=lambda: str(uuid4()),
-            clock=clock,
-            metrics=metrics,
-        )
-        worker_sdk = WorkerSDK(
-            manager,
-            WorkerConfig(
-                domain=ADMIN_WEBHOOK_DELIVERY_DOMAIN,
-                queue=ADMIN_WEBHOOK_DELIVERY_QUEUE,
-                worker_id=worker_id,
-                lease_seconds=120,
-                renew_jitter_seconds=5,
-                renew_threshold_seconds=20,
-                backoff_base_seconds=settings.delivery_loop_interval_seconds,
-                backoff_max_seconds=30,
-            ),
-        )
     return _RuntimeComponents(
         settings=settings,
         worker_repository=worker_repository,
         reconciler_repository=reconciler_repository,
         retention_repository=retention_repository,
         capability=capability,
-        worker_sdk=worker_sdk,
-        worker_handler=worker_handler,
+        jobs=jobs,
         reconciler=reconciler,
         metrics=metrics,
-        worker_instance_id=worker_id,
         reconciler_instance_id=str(uuid4()),
         retention_instance_id=str(uuid4()),
         token_factory=token_factory,
@@ -257,8 +344,12 @@ async def _write_heartbeat(
     return True
 
 
-async def _worker_pre_acquire(components: object) -> bool:
+async def _worker_pre_acquire(
+    components: object,
+    instance_id: str | None = None,
+) -> bool:
     now = components.clock()
+    worker_instance_id = instance_id or components.worker_instance_id
     try:
         status = await components.capability.status(now)
         ready = bool(status.acquisition_ready)
@@ -270,7 +361,7 @@ async def _worker_pre_acquire(components: object) -> bool:
     heartbeat_written = await _write_heartbeat(
         components.worker_repository,
         component=DeliveryRuntimeComponent.WORKER,
-        instance_id=components.worker_instance_id,
+        instance_id=worker_instance_id,
         ready=ready,
         reason_code=None if ready else reason,
         now=now,
@@ -282,22 +373,32 @@ async def _run_worker_loop(
     stop_event: asyncio.Event,
     components: object,
 ) -> None:
+    generation = await components.jobs.refresh()
+    worker_instance_id = (
+        generation.worker_instance_id if generation is not None else str(uuid4())
+    )
     try:
-        if components.worker_sdk is None or components.worker_handler is None:
+        if generation is None:
+            await _worker_pre_acquire(components, worker_instance_id)
+            return
+        if generation.worker_sdk is None or generation.worker_handler is None:
             while not stop_event.is_set():
-                await _worker_pre_acquire(components)
+                await _worker_pre_acquire(components, worker_instance_id)
                 await _wait_interruptibly(
                     stop_event,
                     components.settings.delivery_loop_interval_seconds,
                 )
             return
         run_task = asyncio.create_task(
-            components.worker_sdk.run_prepared(
-                handler=components.worker_handler,
-                pre_acquire_guard=lambda: _worker_pre_acquire(components),
-                handler_error_disposition=(components.worker_handler.handler_error_disposition),
+            generation.worker_sdk.run_prepared(
+                handler=generation.worker_handler,
+                pre_acquire_guard=lambda: _worker_pre_acquire(
+                    components,
+                    worker_instance_id,
+                ),
+                handler_error_disposition=(generation.worker_handler.handler_error_disposition),
                 job_type=ADMIN_WEBHOOK_DELIVERY_JOB_TYPE,
-                on_disposition_applied=(components.worker_handler.on_disposition_applied),
+                on_disposition_applied=(generation.worker_handler.on_disposition_applied),
             ),
             name="admin_webhook_delivery_prepared_worker",
         )
@@ -313,7 +414,7 @@ async def _run_worker_loop(
             if run_task in done:
                 await run_task
         finally:
-            components.worker_sdk.stop()
+            generation.worker_sdk.stop()
             if not stop_task.done():
                 stop_task.cancel()
             await asyncio.gather(stop_task, return_exceptions=True)
@@ -323,7 +424,7 @@ async def _run_worker_loop(
         await _write_heartbeat(
             components.worker_repository,
             component=DeliveryRuntimeComponent.WORKER,
-            instance_id=components.worker_instance_id,
+            instance_id=worker_instance_id,
             ready=False,
             reason_code=DeliveryRuntimeReasonCode.WORKER_UNAVAILABLE,
             now=components.clock(),
@@ -347,8 +448,7 @@ async def _run_reconciler_loop(
                 except Exception:  # noqa: BLE001 - stages recover independently
                     failed = True
             try:
-                expiry = await components.reconciler.reconcile_expired_once()
-                components.metrics.expiries_committed(expiry.expired)
+                await components.reconciler.reconcile_expired_once()
             except Exception:  # noqa: BLE001 - expiry cannot stop other repair
                 failed = True
             await _write_heartbeat(

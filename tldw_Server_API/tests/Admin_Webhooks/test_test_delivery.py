@@ -9,6 +9,7 @@ from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import fields, is_dataclass
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from typing import Protocol
 
 import pytest
@@ -253,6 +254,12 @@ async def exercise_test_service_success_and_terminal_replay(
     )
     egress = EgressRecorder()
     executor = DeliveryAttemptExecutor(egress=egress)
+    metric_observations: list[dict[str, object]] = []
+
+    class Metrics:
+        def attempt_committed(self, **values: object) -> None:
+            metric_observations.append(values)
+
     ids = iter(
         (
             canonical_uuid4("task9-event"),
@@ -273,6 +280,7 @@ async def exercise_test_service_success_and_terminal_replay(
         executor=executor,
         test_attempt_id_factory=lambda: next(ids),
         test_token_factory=lambda: opaque_token("task9-token"),
+        metrics=Metrics(),
     )
     command = delivery_module.TestWebhookCommand(
         actor_id=7,
@@ -341,6 +349,7 @@ async def exercise_test_service_success_and_terminal_replay(
         executor=DeliveryAttemptExecutor(egress=EgressRecorder(500)),
         test_attempt_id_factory=lambda: canonical_uuid4("unused-replay-attempt"),
         test_token_factory=lambda: opaque_token("unused-replay-token"),
+        metrics=Metrics(),
     )
     replay = await replay_service.test_webhook(command, audit_sink=audit_sink)
     assert replay.delivery == result.delivery
@@ -349,6 +358,16 @@ async def exercise_test_service_success_and_terminal_replay(
     assert len(egress.requests) == 1
     assert len(audits) == 2
     assert len(policy_calls) == 2
+    assert metric_observations == [
+        {
+            "state": DeliveryState.SUCCEEDED,
+            "kind": DeliveryKind.TEST,
+            "reason_code": None,
+            "delivery_reason_code": None,
+            "status_code": 204,
+            "latency_ms": result.attempt.latency_ms,
+        }
+    ]
 
 
 async def exercise_processing_replay_and_conflict_precede_current_state(
@@ -1625,11 +1644,29 @@ async def test_stale_test_recovery_pass_is_separate_and_no_jobs() -> None:
         test_attempt_token=opaque_token("reconciler-test-token"),
         stale_at=NOW,
     )
+    metric_observations: list[dict[str, object]] = []
+    recovered_snapshot = SimpleNamespace(
+        delivery=SimpleNamespace(
+            delivery=SimpleNamespace(
+                state=DeliveryState.DEAD,
+                kind=DeliveryKind.TEST,
+                reason_code=DeliveryReasonCode.TEST_ATTEMPT_INTERRUPTED,
+                status_code=None,
+                latency_ms=None,
+            )
+        ),
+        attempt=SimpleNamespace(
+            reason_code=DeliveryReasonCode.OUTCOME_UNKNOWN,
+            status_code=None,
+            latency_ms=None,
+        ),
+    )
 
     class Repository:
         def __init__(self) -> None:
             self.list_call = None
             self.recovery_call = None
+            self.recovery_attempts = 0
 
         async def list_stale_test_attempts(self, *, now, limit):
             self.list_call = (now, limit)
@@ -1647,13 +1684,14 @@ async def test_stale_test_recovery_pass_is_separate_and_no_jobs() -> None:
             *,
             now,
         ):
+            self.recovery_attempts += 1
             self.recovery_call = (
                 delivery_id,
                 attempt_id,
                 test_attempt_token,
                 now,
             )
-            return object()
+            return recovered_snapshot if self.recovery_attempts == 1 else None
 
     repository = Repository()
     reconciler = reconciler_module.AdminWebhookReconciler(
@@ -1663,9 +1701,13 @@ async def test_stale_test_recovery_pass_is_separate_and_no_jobs() -> None:
         clock=lambda: NOW,
         claim_ttl_seconds=30,
         failure_observer=lambda _failure: None,
+        metrics=SimpleNamespace(
+            attempt_committed=lambda **values: metric_observations.append(values)
+        ),
     )
 
     assert await reconciler.recover_stale_test_attempts_once(limit=7) == 1
+    assert await reconciler.recover_stale_test_attempts_once(limit=7) == 0
     assert repository.list_call == (NOW, 7)
     assert repository.recovery_call == (
         candidate.delivery_id,
@@ -1673,3 +1715,13 @@ async def test_stale_test_recovery_pass_is_separate_and_no_jobs() -> None:
         candidate.test_attempt_token,
         NOW,
     )
+    assert metric_observations == [
+        {
+            "state": DeliveryState.DEAD,
+            "kind": DeliveryKind.TEST,
+            "reason_code": DeliveryReasonCode.OUTCOME_UNKNOWN,
+            "delivery_reason_code": DeliveryReasonCode.TEST_ATTEMPT_INTERRUPTED,
+            "status_code": None,
+            "latency_ms": None,
+        }
+    ]

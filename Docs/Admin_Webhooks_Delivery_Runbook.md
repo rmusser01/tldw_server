@@ -82,12 +82,32 @@ For each component, any fresh ready instance wins. If none exists, status uses
 the freshest bounded row: an old row reports `heartbeat_stale`, a current
 unready row reports its closed reason, and no row reports
 `worker_unavailable`, `reconciler_unavailable`, or `retention_unavailable`.
+Heartbeat evidence is valid through an inclusive five-second future-skew bound.
+A row farther in the future is never ready and reports `heartbeat_stale` when
+it is the only evidence; a genuinely fresh ready row takes precedence over an
+invalid future ready or unready row.
+
+When AuthNZ delivery health is readable, status keeps its factual schema,
+migration, key, backlog, and heartbeat fields even while degraded. The final
+acquisition gate reports `mode_off` or `mode_migrate` for those modes and
+`jobs_unavailable` for a Jobs dependency failure. `database_unavailable` is
+reserved for a genuine delivery-health read failure; already loaded migration
+and key facts remain visible.
 
 ## Metrics And Triage
 
 All canonical families begin with `admin_webhooks_` and accept only closed,
 low-cardinality labels. Metric failures are fail-open and never change a durable
 mutation, attempt, reconciliation, or retention result.
+
+Attempt and delivery counters are best-effort post-commit observations. The
+owner of a synchronous test completion, worker terminal transition, expiry or
+recovery transition, or lifecycle cancellation emits once after its owned
+durable commit. Rollback, stale compare-and-swap, and idempotent replay emit
+nothing. A process can still exit between commit and observation; without a
+telemetry outbox these metrics do not claim crash-proof exactly-once delivery.
+Registration gauges initialize and refresh from one bounded current-count
+snapshot.
 
 Start outage triage with:
 
@@ -121,11 +141,23 @@ one initial attempt plus delays of 1 minute, 5 minutes, and 30 minutes, for a
 hard maximum of four network attempts. Valid receiver `Retry-After` values on
 429 or 503 are clamped to 1-1800 seconds and can only lengthen the fixed delay.
 
-Automatic work expires after 72 hours. The reconciler terminalizes due
-unattached work atomically. For attached work it stores one exact cancel token
-and lets the existing lookup/apply/ack path repair Jobs. Live processing rows,
-current attempts, and rows already carrying a disposition coordinate are not
-overwritten. No AuthNZ transaction mutates the Jobs database.
+Automatic work expires after 72 hours. The reconciler terminalizes ordinary
+due unattached work atomically. A claimed enqueue whose Jobs row may have been
+created before AuthNZ attachment is excluded from blind expiry: enqueue
+reconciliation performs the existing lookup-only identity recovery, persists
+one exact cancel token, then applies and acknowledges Jobs cancellation. For
+attached work expiry also stores one exact cancel token and uses the same
+lookup/apply/ack boundary. Live processing rows, current attempts, and rows
+already carrying a disposition coordinate are not overwritten. No AuthNZ
+transaction mutates the Jobs database.
+
+The runtime builds a complete Jobs generation privately and promotes it only
+after database, queue, and job-type capability checks pass. Every supervised
+worker start uses a fresh manager, SDK, worker ID, and handler; a stopped SDK is
+never reused. Initial or transient construction failure leaves closed
+unavailable queue/probe delegates, reports unready heartbeats, and retries at
+the interruptible delivery-loop cadence. Reconciler access recovers when the
+new generation is promoted, while retention continues independently.
 
 Common terminal reasons include:
 

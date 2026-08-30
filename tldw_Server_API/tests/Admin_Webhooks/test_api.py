@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -476,6 +477,64 @@ def test_status_exposes_only_sanitized_delivery_capability(
     encoded = str(delivery).lower()
     for forbidden in ("instance_id", "url", "hostname", "secret", "payload"):
         assert forbidden not in encoded
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("mode", "reason"),
+    (
+        ("off", DeliveryRuntimeReasonCode.MODE_OFF),
+        ("migrate", DeliveryRuntimeReasonCode.MODE_MIGRATE),
+        ("on", DeliveryRuntimeReasonCode.JOBS_UNAVAILABLE),
+        ("on", DeliveryRuntimeReasonCode.DATABASE_UNAVAILABLE),
+    ),
+)
+def test_status_api_preserves_exact_degraded_reason_and_factual_fields(
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str,
+    reason: DeliveryRuntimeReasonCode,
+) -> None:
+    client, service, _, _ = _client(monkeypatch)
+    base = _status()
+    worker = base.delivery.worker
+    if reason is DeliveryRuntimeReasonCode.DATABASE_UNAVAILABLE:
+        worker = replace(worker, ready=False, reason_code=reason)
+    delivery = replace(
+        base.delivery,
+        jobs_database_ready=(reason not in {DeliveryRuntimeReasonCode.JOBS_UNAVAILABLE, DeliveryRuntimeReasonCode.DATABASE_UNAVAILABLE}),
+        queue_ready=(reason not in {DeliveryRuntimeReasonCode.JOBS_UNAVAILABLE, DeliveryRuntimeReasonCode.DATABASE_UNAVAILABLE}),
+        job_type_ready=(reason not in {DeliveryRuntimeReasonCode.JOBS_UNAVAILABLE, DeliveryRuntimeReasonCode.DATABASE_UNAVAILABLE}),
+        jobs_backend=("unavailable" if reason in {DeliveryRuntimeReasonCode.JOBS_UNAVAILABLE, DeliveryRuntimeReasonCode.DATABASE_UNAVAILABLE} else "sqlite"),
+        worker=worker,
+        acquisition_ready=False,
+        acquisition_reason_code=reason,
+        delivery_capability_ready=False,
+    )
+    service.status = AsyncMock(
+        return_value=replace(
+            base,
+            mode=mode,
+            delivery_capability_ready=False,
+            delivery=delivery,
+        )
+    )
+
+    response = client.get("/api/v1/admin/webhooks/status")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["delivery"]["acquisition_reason_code"] == reason.value
+    assert body["delivery"]["canonical_schema_version"] == 1
+    assert body["delivery"]["schema_ready"] is True
+    assert body["delivery"]["migration_complete"] is True
+    assert body["delivery"]["key_ready"] is True
+    assert body["delivery"]["backlog"] == {
+        "pending": 2,
+        "enqueue_claimed": 0,
+        "queued": 1,
+        "processing": 0,
+        "retry_wait": 0,
+    }
 
 
 @pytest.mark.unit

@@ -233,6 +233,7 @@ async def _seed_acquired(
     label: str,
     *,
     expires_in: int = 3600,
+    kind: DeliveryKind = DeliveryKind.AUTOMATIC,
 ) -> tuple[int, str, dict]:
     repository = fixture.repository
     ring = fixture.ring
@@ -261,7 +262,7 @@ async def _seed_acquired(
                     display="https://hooks.example.com",
                 ),
                 event_types=(event_type,),
-                active=True,
+                active=kind is DeliveryKind.AUTOMATIC,
                 timeout_seconds=10,
                 secret=secret,
                 secret_rotation_required=False,
@@ -293,7 +294,22 @@ async def _seed_acquired(
             lambda: delivery_id,
             fixture.clock() + timedelta(hours=72),
         )
-        assert len(captured.deliveries) == 1
+        if kind is DeliveryKind.AUTOMATIC:
+            assert len(captured.deliveries) == 1
+        else:
+            assert captured.deliveries == ()
+            await tx.insert_delivery(
+                delivery_id,
+                event_id=event_id,
+                webhook_id=webhook_id,
+                kind=kind,
+                expires_at=fixture.clock() + timedelta(hours=72),
+                now=fixture.clock(),
+            )
+            await tx._execute(
+                "UPDATE admin_webhook_registrations SET active = ? WHERE id = ?",
+                (True, webhook_id),
+            )
         if expires_in != 72 * 60 * 60:
             await tx._execute(
                 "UPDATE admin_webhook_deliveries SET expires_at = ? WHERE id = ?",
@@ -336,6 +352,7 @@ def _handler(
     executor: FakeExecutor,
     *,
     crash_hook=None,
+    metrics=None,
 ) -> AdminWebhookPreparedHandler:
     return AdminWebhookPreparedHandler(
         repository=fixture.repository,
@@ -348,6 +365,7 @@ def _handler(
         ),
         clock=fixture.clock,
         crash_hook=crash_hook,
+        metrics=metrics,
     )
 
 
@@ -463,6 +481,9 @@ async def test_worker_observes_closed_executor_outcome_only_after_commit(
             "state": DeliveryState.DEAD,
             "kind": DeliveryKind.AUTOMATIC,
             "reason_code": DeliveryReasonCode.HTTP_HOP_DNS_ADDRESS_DENIED,
+            "delivery_reason_code": (
+                DeliveryReasonCode.HTTP_HOP_DNS_ADDRESS_DENIED
+            ),
             "status_code": None,
             "latency_ms": 5,
         }
@@ -727,26 +748,46 @@ async def test_stale_attempt_closes_unknown_and_prepares_retry_without_http(
     ("expires_in", "expected_reason"),
     ((20, DeliveryReasonCode.DELIVERY_EXPIRED),),
 )
+@pytest.mark.parametrize("kind", (DeliveryKind.AUTOMATIC, DeliveryKind.MANUAL))
 async def test_required_horizon_terminalizes_without_an_attempt(
     worker_fixture: WorkerFixture,
     expires_in: int,
     expected_reason: DeliveryReasonCode,
+    kind: DeliveryKind,
 ) -> None:
     webhook_id, delivery_id, acquired = await _seed_acquired(
         worker_fixture,
-        "horizon",
+        f"horizon-{kind.value}",
         expires_in=expires_in,
+        kind=kind,
     )
     executor = FakeExecutor(_success())
-    disposition = await _handler(worker_fixture, executor)(
+    observations: list[dict[str, object]] = []
+
+    class Metrics:
+        def delivery_committed(self, **values: object) -> None:
+            observations.append(values)
+
+    handler = _handler(worker_fixture, executor, metrics=Metrics())
+    disposition = await handler(
         acquired,
         FakeContext(acquired),
     )
+    replay = await handler(acquired, FakeContext(acquired))
 
     assert disposition.kind is PreparedDispositionKind.FAIL
     assert disposition.attempt_id is None
     assert disposition.reason_code == expected_reason.value
     assert executor.requests == []
+    assert replay.token == disposition.token
+    assert observations == [
+        {
+            "state": DeliveryState.DEAD,
+            "kind": kind,
+            "reason_code": expected_reason,
+            "status_code": None,
+        }
+    ]
     assert await worker_fixture.repository.list_delivery_attempts(
         webhook_id, delivery_id
     ) == ()

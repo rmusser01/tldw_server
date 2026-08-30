@@ -1821,6 +1821,88 @@ Ruff, Python 3.10 compilation, OpenAPI drift, reviewed Bandit, shutdown/status,
 scope/security scans, and diff checks passed. Evidence and warning triage are in
 `.superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-11-report.md`.
 
+#### Task 11 Fix Round 1: Close Independent Runtime Review Findings
+
+**FIX_BASE:** `99098c213930d36c0b983493099954a659abc4fb`
+
+**Review:**
+`.superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-11-review-1.md`
+
+The independent review found no Critical issues and six accepted Important
+issues. Task 12 remains blocked until every item below has strict RED evidence,
+required PostgreSQL proof, a fix commit, and a clean independent re-review.
+
+- [x] Preserve the created-but-unattached Jobs recovery coordinate through
+  expiry. Blind repository expiry must not terminalize an `enqueue_claimed` row
+  with no attached `jobs_job_id`; enqueue reconciliation owns lookup-only
+  discovery and exact terminal cancellation after `BEFORE_AUTHNZ_ATTACH`.
+  Exercise crash, live/expired claim, expiry/reconciler interleavings, and
+  concurrent repair across all four AuthNZ/Jobs backend pairs. Prove one Jobs
+  row, one exact persisted cancel token, eventual cancellation/acknowledgement,
+  no HTTP attempt, and no stranded claim or Jobs work.
+
+- [x] Replace the one-shot Jobs runtime objects with a runtime-local bounded
+  refresh boundary. Each supervised worker start receives a fresh `JobManager`,
+  `WorkerSDK`, Jobs worker ID, and handler generation; stopping one SDK must not
+  poison the next generation. A construction failure installs only closed
+  unavailable queue/probe delegates, retries interruptibly at the configured
+  cadence without tight spin, and atomically promotes a complete healthy
+  generation so capability and reconciler delegates recover without process
+  restart. Retention remains independent. Test unexpected SDK exit followed by
+  a live second generation, initial fail-then-success Jobs construction,
+  resumed enqueue/acquisition, truthful heartbeat transitions, and exact
+  stop/await ownership for every child.
+
+- [x] Reject clock-skewed future heartbeat evidence. Apply one explicit small
+  maximum-future-skew bound to both SQLite and PostgreSQL snapshot queries;
+  future-only rows report the closed `heartbeat_stale` reason and cannot satisfy
+  acquisition or activation. A genuinely fresh ready instance still wins over
+  a future invalid ready or unready row. Add dual-backend precedence, boundary,
+  and future-ready/future-unready tests.
+
+- [x] Compose factual degraded public status instead of substituting fabricated
+  schema facts. When AuthNZ is readable, always use its bounded health snapshot,
+  combine it with a closed unavailable Jobs probe as needed, and apply `off` or
+  `migrate` as a mode gate using the existing exact `mode_off` or `mode_migrate`
+  reason. Jobs failure reports `jobs_unavailable`. Reserve fixed fallback for a
+  genuine delivery-health read failure, preserve already-known migration/key
+  facts, and report `database_unavailable`. Add real control-plane/API tests for
+  every mode and dependency failure, internally consistent facts, and exact
+  reason precedence.
+
+- [x] Complete metrics integration at durable product boundaries: synchronous
+  test completion owned by the start caller; worker no-I/O terminal commits;
+  expiry/terminal recovery paths; and registration gauges initialized and
+  refreshed from one bounded current-count snapshot. Include automatic,
+  manual, and test kinds plus delivery state/reason/status class, latency,
+  retry/expiry, and SSRF denial where applicable. Metrics remain fail-open and
+  best effort: prove one emission for an owned committed transition and none on
+  rollback, stale CAS, or idempotent replay, but do not claim crash-proof
+  exactly-once telemetry without a durable outbox. Registry failures must never
+  change durable behavior.
+
+- [x] Update the runbook and Task 11 evidence with enqueue-crash expiry repair,
+  in-process Jobs generation recovery, future-heartbeat handling, degraded
+  status reason precedence, and the best-effort telemetry boundary. Re-run the
+  focused Task 11 gate, complete SQLite/PostgreSQL repository contracts, the
+  four-backend recovery matrix, worker/reconciler/status/startup regressions,
+  OpenAPI drift review, Ruff, reviewed Bandit, Python 3.10 compilation,
+  direct-Jobs-SQL/legacy-import/sensitive-label/scope scans, warning triage, and
+  diff checks with zero required PostgreSQL skips.
+
+Fix Round 1 closed all six accepted Important findings with strict focused RED
+before each production boundary. Final verification passed 226 focused
+status/startup/shutdown/OpenAPI/worker/reconciler/control/API/test/redelivery
+tests, 72 complete SQLite/PostgreSQL repository contracts, and all 76
+four-backend recovery cases with required PostgreSQL and zero skips. The
+project-interpreter OpenAPI drift check, Ruff, Python 3.10 compilation, reviewed
+Bandit, direct-Jobs-SQL/legacy-import/sensitive-label/scope scans, warning
+triage, base-to-head self-review, and diff checks passed. Bandit reported no
+High findings; its 43 Medium/Low-confidence reports are fixed SQL fragments
+with bound values, and its 14 Low findings are the required fail-open observer
+boundaries. Evidence is recorded in
+`.superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-11-fix-1-report.md`.
+
 ### Task 12: Run The Complete PR 2 Verification And Security Gates
 
 **Files:**

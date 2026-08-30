@@ -9,7 +9,7 @@ import os
 import re
 import secrets
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from typing import Generic, NoReturn, Protocol, TypeAlias, TypeVar
 
@@ -21,6 +21,7 @@ from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
 from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
     AdminWebhookRepository,
     AdminWebhookUnitOfWork,
+    CommittedDeliveryOutcome,
     IdempotencyLookup,
     IdempotencyLookupKind,
     MigrationState,
@@ -52,9 +53,11 @@ from .domain import (
     DeliveryBacklogCounts,
     DeliveryCapabilityStatus,
     DeliveryComponentStatus,
+    DeliveryKind,
     DeliveryReasonCode,
     DeliveryRuntimeComponent,
     DeliveryRuntimeReasonCode,
+    DeliveryState,
     IdempotencyScope,
     ValidatedWebhookTarget,
     WebhookError,
@@ -135,6 +138,15 @@ class _ControlMetrics(Protocol):
 
     def admission_denied(self, reason: WebhookErrorCode) -> None: ...
 
+    def delivery_committed(
+        self,
+        *,
+        state: DeliveryState,
+        kind: DeliveryKind,
+        reason_code: DeliveryReasonCode | None,
+        status_code: int | None,
+    ) -> None: ...
+
 
 class UnavailableDeliveryCapability:
     """Fixed fail-closed capability for off, migrate, and isolated tests."""
@@ -179,6 +191,49 @@ class UnavailableDeliveryCapability:
             acquisition_reason_code=DeliveryRuntimeReasonCode.SCHEMA_UNREADY,
             delivery_capability_ready=False,
         )
+
+
+def _database_unavailable_delivery_status(
+    *,
+    migration: MigrationState,
+    key_ring_result: WebhookKeyRingLoadResult,
+) -> DeliveryCapabilityStatus:
+    reason = DeliveryRuntimeReasonCode.DATABASE_UNAVAILABLE
+    components = {
+        component: DeliveryComponentStatus(
+            component=component,
+            ready=False,
+            reason_code=reason,
+            heartbeat_age_seconds=None,
+        )
+        for component in DeliveryRuntimeComponent
+    }
+    ring = key_ring_result.ring
+    key_ready = ring is not None
+    return DeliveryCapabilityStatus(
+        canonical_schema_version=migration.schema_version,
+        schema_ready=migration.schema_version == 1,
+        delivery_schema_ready=False,
+        migration_complete=(
+            migration.phase == "complete" and migration.completed_at is not None
+        ),
+        key_ready=key_ready,
+        key_primary_match=(
+            key_ready and migration.active_primary_key_id == ring.primary_id
+        ),
+        jobs_database_ready=False,
+        queue_ready=False,
+        job_type_ready=False,
+        jobs_backend="unavailable",
+        worker=components[DeliveryRuntimeComponent.WORKER],
+        reconciler=components[DeliveryRuntimeComponent.RECONCILER],
+        retention=components[DeliveryRuntimeComponent.RETENTION],
+        backlog=DeliveryBacklogCounts(),
+        oldest_nonterminal_age_seconds=None,
+        acquisition_ready=False,
+        acquisition_reason_code=reason,
+        delivery_capability_ready=False,
+    )
 
 
 class _Omitted:
@@ -390,6 +445,7 @@ T = TypeVar("T")
 class _TransactionOutcome(Generic[T]):
     value: T
     audit_outcome: MutationOutcome
+    delivery_outcomes: tuple[CommittedDeliveryOutcome, ...] = ()
 
 
 _TransactionOperation: TypeAlias = Callable[
@@ -554,13 +610,28 @@ class AdminWebhookControlPlane:
                     outcome=outcome.audit_outcome,
                 )
             value = outcome.value
-            if self._metrics is not None:
+            if (
+                self._metrics is not None
+                and outcome.audit_outcome == "accepted"
+            ):
                 try:
-                    total = await self._repository.count_registrations()
-                    active = await self._repository.count_active_registrations()
-                    self._metrics.registration_counts(total=total, active=active)
+                    counts = await self._repository.registration_counts()
+                    self._metrics.registration_counts(
+                        total=counts.total,
+                        active=counts.active,
+                    )
                 except Exception:  # noqa: BLE001 - metrics are fail-open
                     pass
+                for delivery_outcome in outcome.delivery_outcomes:
+                    try:
+                        self._metrics.delivery_committed(
+                            state=delivery_outcome.state,
+                            kind=delivery_outcome.kind,
+                            reason_code=delivery_outcome.reason_code,
+                            status_code=delivery_outcome.status_code,
+                        )
+                    except Exception:  # noqa: BLE001 - metrics are fail-open
+                        continue
             return value
         except _AuditSinkUnavailable:
             raise WebhookError(WebhookErrorCode.AUDIT_UNAVAILABLE) from None
@@ -1023,12 +1094,13 @@ class AdminWebhookControlPlane:
                 != current.registration.timeout_seconds
             )
             cancellation_reason: DeliveryReasonCode | None = None
+            delivery_outcomes: tuple[CommittedDeliveryOutcome, ...] = ()
             if current.registration.active and not patched.registration.active:
                 cancellation_reason = DeliveryReasonCode.CANCELED_DISABLED
             elif delivery_config_changed:
                 cancellation_reason = DeliveryReasonCode.SUPERSEDED_CONFIG
             if cancellation_reason is not None:
-                await tx.cancel_registration_work(
+                terminal_batch = await tx.cancel_registration_work_with_outcomes(
                     command.webhook_id,
                     (
                         patched.registration.delivery_config_version,
@@ -1038,6 +1110,7 @@ class AdminWebhookControlPlane:
                     disposition_token_factory,
                     _utc(command.now),
                 )
+                delivery_outcomes = terminal_batch.outcomes
             if patched.changed:
                 await tx.mark_first_canonical_activity(
                     "registration_mutation",
@@ -1049,6 +1122,7 @@ class AdminWebhookControlPlane:
                     changed=patched.changed,
                 ),
                 "accepted" if patched.changed else "no_op",
+                delivery_outcomes,
             )
 
         return await self._run_transactional_mutation(context, audit_sink, operation)
@@ -1132,7 +1206,7 @@ class AdminWebhookControlPlane:
                 actor_user_id=command.actor_id,
                 at=_utc(command.now),
             )
-            await tx.cancel_registration_work(
+            terminal_batch = await tx.cancel_registration_work_with_outcomes(
                 command.webhook_id,
                 (
                     deleted.delivery_config_version,
@@ -1149,6 +1223,7 @@ class AdminWebhookControlPlane:
             return _TransactionOutcome(
                 MutationResult(registration=deleted, changed=True),
                 "accepted",
+                terminal_batch.outcomes,
             )
 
         return await self._run_transactional_mutation(context, audit_sink, operation)
@@ -1269,7 +1344,7 @@ class AdminWebhookControlPlane:
                 at=_utc(command.now),
             )
             registration = patched.registration
-            await tx.cancel_registration_work(
+            terminal_batch = await tx.cancel_registration_work_with_outcomes(
                 command.webhook_id,
                 (
                     registration.delivery_config_version,
@@ -1306,7 +1381,11 @@ class AdminWebhookControlPlane:
                 replayed=False,
             )
             del secret_value
-            return _TransactionOutcome(result, "accepted")
+            return _TransactionOutcome(
+                result,
+                "accepted",
+                terminal_batch.outcomes,
+            )
 
         return await self._run_transactional_mutation(context, audit_sink, operation)
 
@@ -1384,7 +1463,21 @@ class AdminWebhookControlPlane:
         try:
             delivery = await self._delivery_capability.status(observed_at)
         except Exception:  # noqa: BLE001 - status degrades on capability failure
-            delivery = await UnavailableDeliveryCapability().status(observed_at)
+            delivery = _database_unavailable_delivery_status(
+                migration=migration,
+                key_ring_result=self._key_ring_result,
+            )
+        mode_reason = {
+            AdminWebhookMode.OFF: DeliveryRuntimeReasonCode.MODE_OFF,
+            AdminWebhookMode.MIGRATE: DeliveryRuntimeReasonCode.MODE_MIGRATE,
+        }.get(self._settings.mode)
+        if mode_reason is not None:
+            delivery = replace(
+                delivery,
+                acquisition_ready=False,
+                acquisition_reason_code=mode_reason,
+                delivery_capability_ready=False,
+            )
         key_state = self._status_key_state(migration)
         imported_ids = _migration_registration_ids(migration.source_mapping)
         rollback_permitted = bool(
@@ -1444,7 +1537,17 @@ async def get_admin_webhook_control_plane() -> AdminWebhookControlPlane:
     from .observability import AdminWebhookMetrics
 
     metrics = AdminWebhookMetrics()
-    delivery_capability: DeliveryCapability = UnavailableDeliveryCapability()
+    try:
+        counts = await repository.registration_counts()
+        metrics.registration_counts(total=counts.total, active=counts.active)
+    except Exception:  # noqa: BLE001 - metrics initialization is fail-open
+        pass
+    from .observability import (
+        AdminWebhookDeliveryCapability,
+        UnavailableJobsCapabilityProbe,
+    )
+
+    jobs_probe = UnavailableJobsCapabilityProbe()
     if (
         settings.mode is AdminWebhookMode.ON
         and settings.route_selection is WebhookRouteSelection.CANONICAL
@@ -1452,23 +1555,19 @@ async def get_admin_webhook_control_plane() -> AdminWebhookControlPlane:
         try:
             from tldw_Server_API.app.core.Jobs.manager import JobManager
 
-            from .observability import (
-                AdminWebhookDeliveryCapability,
-                JobManagerJobsCapabilityProbe,
-            )
+            from .observability import JobManagerJobsCapabilityProbe
 
             manager = await asyncio.to_thread(JobManager)
-            delivery_capability = AdminWebhookDeliveryCapability(
-                repository=repository,
-                key_ring_result=key_ring_result,
-                jobs_probe=JobManagerJobsCapabilityProbe(manager),
-                heartbeat_freshness_seconds=(
-                    settings.delivery_heartbeat_freshness_seconds
-                ),
-                metrics=metrics,
-            )
+            jobs_probe = JobManagerJobsCapabilityProbe(manager)
         except Exception:  # noqa: BLE001 - status remains available and fail-closed
-            delivery_capability = UnavailableDeliveryCapability()
+            pass
+    delivery_capability: DeliveryCapability = AdminWebhookDeliveryCapability(
+        repository=repository,
+        key_ring_result=key_ring_result,
+        jobs_probe=jobs_probe,
+        heartbeat_freshness_seconds=(settings.delivery_heartbeat_freshness_seconds),
+        metrics=metrics,
+    )
     return AdminWebhookControlPlane(
         repository=repository,
         settings=settings,

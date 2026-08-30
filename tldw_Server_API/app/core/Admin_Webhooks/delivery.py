@@ -587,6 +587,17 @@ def _verify_replay(
 class _DeliveryMetrics(Protocol):
     def events_committed(self, *, event_type: str, fanout_count: int) -> None: ...
 
+    def attempt_committed(
+        self,
+        *,
+        state: DeliveryState,
+        kind: DeliveryKind,
+        reason_code: DeliveryReasonCode | None,
+        delivery_reason_code: DeliveryReasonCode | None,
+        status_code: int | None,
+        latency_ms: int | None,
+    ) -> None: ...
+
 
 class AdminWebhookDeliveryService:
     """Compose protected event capture without owning SQL or cryptography."""
@@ -1052,6 +1063,18 @@ class AdminWebhookDeliveryService:
             raise _map_capture_error(exc) from None
         if completed is None:
             raise WebhookError(WebhookErrorCode.TEST_DELIVERY_UNAVAILABLE)
+        if self._metrics is not None:
+            try:
+                self._metrics.attempt_committed(
+                    state=completion.delivery_state,
+                    kind=DeliveryKind.TEST,
+                    reason_code=completion.reason_code,
+                    delivery_reason_code=completion.reason_code,
+                    status_code=completion.status_code,
+                    latency_ms=completion.latency_ms,
+                )
+            except Exception:  # noqa: BLE001 - metrics cannot alter durable truth
+                pass
         try:
             await audit_sink(
                 self._test_audit(

@@ -85,8 +85,18 @@ class _Metrics(Protocol):
         state: DeliveryState,
         kind: DeliveryKind,
         reason_code: DeliveryReasonCode | None,
+        delivery_reason_code: DeliveryReasonCode | None,
         status_code: int | None,
         latency_ms: int | None,
+    ) -> None: ...
+
+    def delivery_committed(
+        self,
+        *,
+        state: DeliveryState,
+        kind: DeliveryKind,
+        reason_code: DeliveryReasonCode | None,
+        status_code: int | None,
     ) -> None: ...
 
 
@@ -116,6 +126,24 @@ def _pending_from_bundle(bundle: DeliveryBundle) -> PendingJobsDisposition | Non
         not_before_at=delivery.pending_jobs_disposition_not_before_at,
         reason_code=delivery.delivery.reason_code,
     )
+
+
+def _delivery_state_from_pending(
+    pending: PendingJobsDisposition,
+) -> DeliveryState:
+    if pending.kind is JobsDispositionKind.COMPLETE:
+        return DeliveryState.SUCCEEDED
+    if pending.kind is JobsDispositionKind.RETRY:
+        return DeliveryState.RETRY_WAIT
+    if pending.kind is JobsDispositionKind.FAIL:
+        return DeliveryState.DEAD
+    if pending.kind is JobsDispositionKind.CANCEL:
+        return (
+            DeliveryState.SUPERSEDED
+            if pending.reason_code is DeliveryReasonCode.SUPERSEDED_CONFIG
+            else DeliveryState.CANCELED
+        )
+    raise ValueError("pending Jobs disposition is not a delivery outcome")
 
 
 class AdminWebhookPreparedHandler:
@@ -168,6 +196,50 @@ class AdminWebhookPreparedHandler:
     def _token(self) -> str:
         return self._token_factory()
 
+    def _delivery_committed(
+        self,
+        *,
+        state: DeliveryState,
+        kind: DeliveryKind,
+        reason_code: DeliveryReasonCode | None,
+        status_code: int | None,
+    ) -> None:
+        if self._metrics is None:
+            return
+        try:
+            self._metrics.delivery_committed(
+                state=state,
+                kind=kind,
+                reason_code=reason_code,
+                status_code=status_code,
+            )
+        except Exception:  # noqa: BLE001 - metrics cannot alter durable flow
+            pass
+
+    def _attempt_committed(
+        self,
+        *,
+        state: DeliveryState,
+        kind: DeliveryKind,
+        reason_code: DeliveryReasonCode | None,
+        delivery_reason_code: DeliveryReasonCode | None,
+        status_code: int | None,
+        latency_ms: int | None,
+    ) -> None:
+        if self._metrics is None:
+            return
+        try:
+            self._metrics.attempt_committed(
+                state=state,
+                kind=kind,
+                reason_code=reason_code,
+                delivery_reason_code=delivery_reason_code,
+                status_code=status_code,
+                latency_ms=latency_ms,
+            )
+        except Exception:  # noqa: BLE001 - metrics cannot alter durable flow
+            pass
+
     def _infrastructure_defer(
         self,
         delivery_id: str,
@@ -204,6 +276,12 @@ class AdminWebhookPreparedHandler:
                 bundle.delivery.delivery.id,
                 reason_code="delivery_state_conflict",
             )
+        self._delivery_committed(
+            state=_delivery_state_from_pending(pending),
+            kind=bundle.delivery.delivery.kind,
+            reason_code=pending.reason_code,
+            status_code=bundle.delivery.delivery.status_code,
+        )
         return _prepared_from_pending(pending)
 
     def _decrypt_material(
@@ -350,6 +428,14 @@ class AdminWebhookPreparedHandler:
                     not_before_at=stale_at,
                     reason_code="attempt_recovery_conflict",
                 )
+            self._attempt_committed(
+                state=_delivery_state_from_pending(recovered),
+                kind=delivery.kind,
+                reason_code=DeliveryReasonCode.OUTCOME_UNKNOWN,
+                delivery_reason_code=recovered.reason_code,
+                status_code=attempt.status_code,
+                latency_ms=attempt.latency_ms,
+            )
             return _prepared_from_pending(recovered)
         lifecycle_reason = registration_work_lifecycle_reason(
             delivery,
@@ -428,6 +514,14 @@ class AdminWebhookPreparedHandler:
                     delivery_id,
                     reason_code="delivery_state_conflict",
                 )
+            self._delivery_committed(
+                state=_delivery_state_from_pending(
+                    reservation.pending_disposition
+                ),
+                kind=delivery.kind,
+                reason_code=reservation.pending_disposition.reason_code,
+                status_code=delivery.status_code,
+            )
             return _prepared_from_pending(reservation.pending_disposition)
         if reservation.attempt is None:
             return self._infrastructure_defer(delivery_id)
@@ -524,17 +618,14 @@ class AdminWebhookPreparedHandler:
                 not_before_at=stale_at,
                 reason_code="attempt_result_conflict",
             )
-        if self._metrics is not None:
-            try:
-                self._metrics.attempt_committed(
-                    state=completion.delivery_state,
-                    kind=delivery.kind,
-                    reason_code=completion.reason_code,
-                    status_code=completion.status_code,
-                    latency_ms=completion.latency_ms,
-                )
-            except Exception:  # noqa: BLE001 - metrics cannot alter durable flow
-                pass
+        self._attempt_committed(
+            state=_delivery_state_from_pending(pending),
+            kind=delivery.kind,
+            reason_code=completion.reason_code,
+            delivery_reason_code=pending.reason_code,
+            status_code=completion.status_code,
+            latency_ms=completion.latency_ms,
+        )
         self._crash(WorkerCrashPoint.AFTER_OUTCOME_COMMIT_BEFORE_JOBS_APPLY)
         return _prepared_from_pending(pending)
 

@@ -43,6 +43,7 @@ from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
     IdempotencyLookup,
     IdempotencyLookupKind,
     PendingJobsDisposition,
+    RegistrationCounts,
     RegistrationInsert,
     RegistrationTarget,
     RetentionBatchResult,
@@ -174,6 +175,24 @@ async def seed_registration(
                 at=now + timedelta(minutes=1),
             )
     return webhook_id
+
+
+async def exercise_registration_counts_contract(
+    fixture: DeliveryRepositoryFixture,
+) -> None:
+    repository = fixture.repository
+    assert await repository.registration_counts() == RegistrationCounts(
+        total=0,
+        active=0,
+    )
+    await seed_registration(repository, active=True)
+    await seed_registration(repository, active=False)
+    await seed_registration(repository, active=True, deleted=True)
+
+    assert await repository.registration_counts() == RegistrationCounts(
+        total=2,
+        active=1,
+    )
 
 
 async def mark_migration_ready(
@@ -1153,6 +1172,94 @@ async def exercise_recovery_runtime_and_retention(
         await repository.purge_retained_rows(NOW, NOW, 201)
 
 
+async def exercise_task11_future_heartbeat_contract(
+    fixture: DeliveryRepositoryFixture,
+) -> None:
+    repository = fixture.repository
+    await mark_migration_ready(repository, now=NOW - timedelta(hours=1))
+
+    await repository.upsert_runtime_heartbeat(
+        RuntimeHeartbeatWrite(
+            component=DeliveryRuntimeComponent.WORKER,
+            instance_id=canonical_uuid4("task11-future-worker-ready"),
+            ready=True,
+            reason_code=None,
+            heartbeat_at=NOW + timedelta(seconds=6),
+            last_success_at=NOW,
+        )
+    )
+    await repository.upsert_runtime_heartbeat(
+        RuntimeHeartbeatWrite(
+            component=DeliveryRuntimeComponent.RECONCILER,
+            instance_id=canonical_uuid4("task11-future-reconciler-unready"),
+            ready=False,
+            reason_code=DeliveryRuntimeReasonCode.JOBS_UNAVAILABLE,
+            heartbeat_at=NOW + timedelta(seconds=6),
+            last_success_at=None,
+        )
+    )
+    await repository.upsert_runtime_heartbeat(
+        RuntimeHeartbeatWrite(
+            component=DeliveryRuntimeComponent.RETENTION,
+            instance_id=canonical_uuid4("task11-boundary-retention-ready"),
+            ready=True,
+            reason_code=None,
+            heartbeat_at=NOW + timedelta(seconds=5),
+            last_success_at=NOW,
+        )
+    )
+
+    future_only = await repository.get_delivery_health_snapshot(
+        now=NOW,
+        heartbeat_freshness_seconds=30,
+        key_available=True,
+        expected_primary_key_id=KEY_ID,
+    )
+    assert future_only.worker.ready is False
+    assert (
+        future_only.worker.reason_code
+        is DeliveryRuntimeReasonCode.HEARTBEAT_STALE
+    )
+    assert future_only.worker.heartbeat_age_seconds == 0
+    assert future_only.reconciler.ready is False
+    assert (
+        future_only.reconciler.reason_code
+        is DeliveryRuntimeReasonCode.HEARTBEAT_STALE
+    )
+    assert future_only.reconciler.heartbeat_age_seconds == 0
+    assert future_only.retention.ready is True
+    assert future_only.retention.reason_code is None
+    assert future_only.retention.heartbeat_age_seconds == 0
+
+    for component, label in (
+        (DeliveryRuntimeComponent.WORKER, "worker"),
+        (DeliveryRuntimeComponent.RECONCILER, "reconciler"),
+    ):
+        await repository.upsert_runtime_heartbeat(
+            RuntimeHeartbeatWrite(
+                component=component,
+                instance_id=canonical_uuid4(f"task11-fresh-{label}-ready"),
+                ready=True,
+                reason_code=None,
+                heartbeat_at=NOW - timedelta(seconds=2),
+                last_success_at=NOW - timedelta(seconds=2),
+            )
+        )
+
+    precedence = await repository.get_delivery_health_snapshot(
+        now=NOW,
+        heartbeat_freshness_seconds=30,
+        key_available=True,
+        expected_primary_key_id=KEY_ID,
+    )
+    assert precedence.worker.ready is True
+    assert precedence.worker.reason_code is None
+    assert precedence.worker.heartbeat_age_seconds == 2
+    assert precedence.reconciler.ready is True
+    assert precedence.reconciler.reason_code is None
+    assert precedence.reconciler.heartbeat_age_seconds == 2
+
+
 async def exercise_task11_health_and_expiry_contract(
     fixture: DeliveryRepositoryFixture,
 ) -> None:
@@ -1293,6 +1400,15 @@ async def exercise_task11_health_and_expiry_contract(
 
     assert result.expired == 2
     assert len(result.pending_dispositions) == 1
+    assert len(result.outcomes) == 2
+    assert {outcome.kind for outcome in result.outcomes} == {
+        DeliveryKind.AUTOMATIC
+    }
+    assert {outcome.state for outcome in result.outcomes} == {DeliveryState.DEAD}
+    assert {outcome.reason_code for outcome in result.outcomes} == {
+        DeliveryReasonCode.DELIVERY_EXPIRED
+    }
+    assert {outcome.status_code for outcome in result.outcomes} == {None}
     pending = result.pending_dispositions[0]
     assert pending.delivery_id == attached_delivery_id
     assert pending.kind is JobsDispositionKind.CANCEL

@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import urlsplit
 
 import pytest
@@ -56,6 +57,10 @@ from tldw_Server_API.app.core.Admin_Webhooks.domain import (
     canonical_request_hash,
     idempotency_lookup_digest,
 )
+from tldw_Server_API.app.core.Admin_Webhooks.observability import (
+    AdminWebhookDeliveryCapability,
+    JobsCapabilityStatus,
+)
 from tldw_Server_API.app.core.Audit.unified_audit_service import MandatoryAuditWriteError
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
 from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseLockError, TransactionError
@@ -67,6 +72,7 @@ from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
     EventInsert,
     RegistrationInsert,
     RegistrationTarget,
+    RuntimeHeartbeatWrite,
 )
 
 NOW = datetime(2026, 8, 22, 12, 0, tzinfo=timezone.utc)
@@ -136,13 +142,29 @@ async def test_registration_metrics_use_post_commit_current_counts(
     plane: ControlPlaneFixture,
 ) -> None:
     observations: list[tuple[int, int]] = []
+    snapshot_calls = 0
+
+    class Repository:
+        def __getattr__(self, name: str):
+            return getattr(plane.repository, name)
+
+        async def registration_counts(self) -> object:
+            nonlocal snapshot_calls
+            snapshot_calls += 1
+            return SimpleNamespace(total=1, active=0)
+
+        async def count_registrations(self) -> int:
+            raise AssertionError("split total count must not be used for metrics")
+
+        async def count_active_registrations(self) -> int:
+            raise AssertionError("split active count must not be used for metrics")
 
     class Metrics:
         def registration_counts(self, *, total: int, active: int) -> None:
             observations.append((total, active))
 
     service = AdminWebhookControlPlane(
-        repository=plane.repository,
+        repository=Repository(),  # type: ignore[arg-type]
         settings=_settings(),
         key_ring_result=WebhookKeyRingLoadResult(
             ring=plane.ring,
@@ -152,9 +174,39 @@ async def test_registration_metrics_use_post_commit_current_counts(
         metrics=Metrics(),
     )
 
-    await service.create(_create_command(), audit_sink=_recording_sink([]))
+    command = _create_command()
+    await service.create(command, audit_sink=_recording_sink([]))
+    replay = await service.create(command, audit_sink=_recording_sink([]))
 
+    assert replay.replayed is True
     assert observations == [(1, 0)]
+    assert snapshot_calls == 1
+
+
+@pytest.mark.unit
+async def test_factory_initializes_registration_gauges_from_current_snapshot(
+    plane: ControlPlaneFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _seed_registration(plane, active=True)
+    observations: list[tuple[int, int]] = []
+
+    class Metrics:
+        def __init__(self) -> None:
+            return None
+
+        def registration_counts(self, *, total: int, active: int) -> None:
+            observations.append((total, active))
+
+    _patch_control_plane_factory(monkeypatch, plane, mode=AdminWebhookMode.OFF)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Admin_Webhooks.observability.AdminWebhookMetrics",
+        Metrics,
+    )
+
+    await control_plane.get_admin_webhook_control_plane()
+
+    assert observations == [(1, 1)]
 
 
 @pytest.mark.unit
@@ -1352,6 +1404,179 @@ async def test_catalog_and_status_expose_only_effective_pr1_contract(
     assert "/srv/" not in repr(status)
 
 
+async def _seed_factual_delivery_status(plane: ControlPlaneFixture) -> None:
+    registration = await _seed_registration(plane, active=True)
+    await _seed_registration_work(
+        plane,
+        registration,
+        label="status-facts",
+        state=DeliveryState.PENDING,
+        created_at=NOW - timedelta(seconds=12),
+    )
+    for component, ready, reason, age in (
+        (DeliveryRuntimeComponent.WORKER, True, None, 1),
+        (DeliveryRuntimeComponent.RECONCILER, True, None, 2),
+        (
+            DeliveryRuntimeComponent.RETENTION,
+            False,
+            DeliveryRuntimeReasonCode.RETENTION_UNAVAILABLE,
+            3,
+        ),
+    ):
+        await plane.repository.upsert_runtime_heartbeat(
+            RuntimeHeartbeatWrite(
+                component=component,
+                instance_id=_uuid4(f"status-{component.value}"),
+                ready=ready,
+                reason_code=reason,
+                heartbeat_at=NOW - timedelta(seconds=age),
+                last_success_at=(NOW - timedelta(seconds=age) if ready else None),
+            )
+        )
+
+
+def _patch_control_plane_factory(
+    monkeypatch: pytest.MonkeyPatch,
+    plane: ControlPlaneFixture,
+    *,
+    mode: AdminWebhookMode,
+) -> None:
+    async def get_pool() -> DatabasePool:
+        return plane.pool
+
+    monkeypatch.setattr(control_plane, "get_db_pool", get_pool)
+    monkeypatch.setattr(
+        AdminWebhookSettings,
+        "from_environment",
+        classmethod(lambda _cls, _environ: _settings(mode=mode)),
+    )
+    monkeypatch.setattr(
+        control_plane,
+        "load_webhook_key_ring",
+        lambda: _available_keys(plane.ring),
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("mode", "expected_reason"),
+    (
+        (AdminWebhookMode.OFF, DeliveryRuntimeReasonCode.MODE_OFF),
+        (AdminWebhookMode.MIGRATE, DeliveryRuntimeReasonCode.MODE_MIGRATE),
+    ),
+)
+async def test_factory_mode_gate_preserves_factual_delivery_status(
+    plane: ControlPlaneFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    mode: AdminWebhookMode,
+    expected_reason: DeliveryRuntimeReasonCode,
+) -> None:
+    await _seed_factual_delivery_status(plane)
+    _patch_control_plane_factory(monkeypatch, plane, mode=mode)
+
+    status = await (await control_plane.get_admin_webhook_control_plane()).status(
+        now=NOW
+    )
+
+    assert status.delivery.canonical_schema_version == 1
+    assert status.delivery.schema_ready is True
+    assert status.delivery.delivery_schema_ready is True
+    assert status.delivery.migration_complete is True
+    assert status.delivery.key_ready is True
+    assert status.delivery.key_primary_match is True
+    assert status.delivery.worker.ready is True
+    assert status.delivery.worker.heartbeat_age_seconds == 1
+    assert status.delivery.reconciler.ready is True
+    assert status.delivery.retention.reason_code is DeliveryRuntimeReasonCode.RETENTION_UNAVAILABLE
+    assert status.delivery.backlog.pending == 1
+    assert status.delivery.oldest_nonterminal_age_seconds == 12
+    assert status.delivery.acquisition_ready is False
+    assert status.delivery.acquisition_reason_code is expected_reason
+    assert status.delivery.delivery_capability_ready is False
+
+
+@pytest.mark.unit
+async def test_factory_jobs_failure_preserves_facts_and_reports_jobs_unavailable(
+    plane: ControlPlaneFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _seed_factual_delivery_status(plane)
+    _patch_control_plane_factory(monkeypatch, plane, mode=AdminWebhookMode.ON)
+
+    import tldw_Server_API.app.core.Jobs.manager as jobs_manager
+
+    class FailingJobManager:
+        @classmethod
+        def set_acquire_gate(cls, _enabled: bool) -> None:
+            return None
+
+        def __init__(self) -> None:
+            raise RuntimeError("jobs unavailable canary")
+
+    monkeypatch.setattr(jobs_manager, "JobManager", FailingJobManager)
+
+    status = await (await control_plane.get_admin_webhook_control_plane()).status(
+        now=NOW
+    )
+
+    assert status.delivery.canonical_schema_version == 1
+    assert status.delivery.delivery_schema_ready is True
+    assert status.delivery.migration_complete is True
+    assert status.delivery.key_ready is True
+    assert status.delivery.key_primary_match is True
+    assert status.delivery.worker.ready is True
+    assert status.delivery.reconciler.ready is True
+    assert status.delivery.backlog.pending == 1
+    assert status.delivery.oldest_nonterminal_age_seconds == 12
+    assert status.delivery.jobs_database_ready is False
+    assert status.delivery.queue_ready is False
+    assert status.delivery.job_type_ready is False
+    assert status.delivery.jobs_backend == "unavailable"
+    assert status.delivery.acquisition_reason_code is DeliveryRuntimeReasonCode.JOBS_UNAVAILABLE
+
+
+@pytest.mark.unit
+async def test_health_read_failure_preserves_known_facts_and_reports_database(
+    plane: ControlPlaneFixture,
+) -> None:
+    class FailingHealthRepository:
+        async def get_delivery_health_snapshot(self, **_kwargs: object) -> object:
+            raise RuntimeError("delivery health unavailable canary")
+
+    class HealthyJobsProbe:
+        async def status(self) -> JobsCapabilityStatus:
+            return JobsCapabilityStatus(
+                database_ready=True,
+                queue_ready=True,
+                job_type_ready=True,
+                backend="sqlite",
+            )
+
+    capability = AdminWebhookDeliveryCapability(
+        repository=FailingHealthRepository(),
+        key_ring_result=_available_keys(plane.ring),
+        jobs_probe=HealthyJobsProbe(),
+        heartbeat_freshness_seconds=30,
+    )
+    service = AdminWebhookControlPlane(
+        repository=plane.repository,
+        settings=_settings(),
+        key_ring_result=_available_keys(plane.ring),
+        delivery_capability=capability,
+    )
+
+    status = await service.status(now=NOW)
+
+    assert status.delivery.canonical_schema_version == 1
+    assert status.delivery.schema_ready is True
+    assert status.delivery.migration_complete is True
+    assert status.delivery.key_ready is True
+    assert status.delivery.key_primary_match is True
+    assert status.delivery.acquisition_ready is False
+    assert status.delivery.acquisition_reason_code is DeliveryRuntimeReasonCode.DATABASE_UNAVAILABLE
+    assert status.delivery.worker.reason_code is DeliveryRuntimeReasonCode.DATABASE_UNAVAILABLE
+
+
 @pytest.mark.unit
 async def test_mode_and_migration_gates_but_status_remains_available(
     plane: ControlPlaneFixture,
@@ -1875,10 +2100,17 @@ async def test_transaction_replay_resets_complete_cancellation_token_sequence(
         def __getattr__(self, name: str) -> object:
             return getattr(self.wrapped, name)
 
-        async def cancel_registration_work(self, *args: object) -> object:
-            dispositions = await self.wrapped.cancel_registration_work(*args)
-            self.sequences.append(tuple(item.token for item in dispositions))
-            return dispositions
+        async def cancel_registration_work_with_outcomes(
+            self,
+            *args: object,
+        ) -> object:
+            result = await self.wrapped.cancel_registration_work_with_outcomes(
+                *args
+            )
+            self.sequences.append(
+                tuple(item.token for item in result.pending_dispositions)
+            )
+            return result
 
     class ReplayOnceControlPlane(AdminWebhookControlPlane):
         def __init__(self) -> None:
@@ -2034,6 +2266,51 @@ async def test_rotation_and_delete_cancel_old_work_but_rotation_replay_does_not_
 
 
 @pytest.mark.unit
+async def test_lifecycle_terminal_metrics_emit_once_after_commit(
+    plane: ControlPlaneFixture,
+) -> None:
+    registration = await _seed_registration(plane, active=True)
+    await _seed_registration_work(
+        plane,
+        registration,
+        label="lifecycle-metrics",
+        state=DeliveryState.PENDING,
+        created_at=NOW + timedelta(seconds=1),
+    )
+    observations: list[dict[str, object]] = []
+
+    class Metrics:
+        def registration_counts(self, *, total: int, active: int) -> None:
+            del total, active
+
+        def delivery_committed(self, **values: object) -> None:
+            observations.append(values)
+
+    service = AdminWebhookControlPlane(
+        repository=plane.repository,
+        settings=_settings(),
+        key_ring_result=_available_keys(plane.ring),
+        delivery_capability=ReadyDeliveryCapability(),
+        cancellation_seed_factory=lambda: CANCELLATION_SEED,
+        metrics=Metrics(),
+    )
+    command = _delete_command(registration.id, registration.revision)
+
+    await service.delete(command, audit_sink=_recording_sink([]))
+    with pytest.raises(WebhookError):
+        await service.delete(command, audit_sink=_recording_sink([]))
+
+    assert observations == [
+        {
+            "state": DeliveryState.CANCELED,
+            "kind": DeliveryKind.AUTOMATIC,
+            "reason_code": DeliveryReasonCode.CANCELED_DELETED,
+            "status_code": None,
+        }
+    ]
+
+
+@pytest.mark.unit
 async def test_lifecycle_changes_roll_back_with_mandatory_audit_failure(
     plane: ControlPlaneFixture,
 ) -> None:
@@ -2049,8 +2326,25 @@ async def test_lifecycle_changes_roll_back_with_mandatory_audit_failure(
     async def unavailable(_record: MutationAudit) -> None:
         raise MandatoryAuditWriteError("audit unavailable")
 
+    observations: list[dict[str, object]] = []
+
+    class Metrics:
+        def registration_counts(self, *, total: int, active: int) -> None:
+            del total, active
+
+        def delivery_committed(self, **values: object) -> None:
+            observations.append(values)
+
+    service = AdminWebhookControlPlane(
+        repository=plane.repository,
+        settings=_settings(),
+        key_ring_result=_available_keys(plane.ring),
+        delivery_capability=ReadyDeliveryCapability(),
+        cancellation_seed_factory=lambda: CANCELLATION_SEED,
+        metrics=Metrics(),
+    )
     with pytest.raises(WebhookError) as failed:
-        await _lifecycle_service(plane).patch(
+        await service.patch(
             _patch_command(
                 registration.id,
                 registration.revision,
@@ -2067,6 +2361,7 @@ async def test_lifecycle_changes_roll_back_with_mandatory_audit_failure(
     assert retained_work.delivery.delivery.state is DeliveryState.QUEUED
     assert retained_work.delivery.pending_jobs_disposition is None
     assert retained_work.delivery.pending_jobs_disposition_token is None
+    assert observations == []
 
 
 @pytest.mark.unit

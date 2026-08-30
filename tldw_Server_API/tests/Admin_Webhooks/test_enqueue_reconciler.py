@@ -5,6 +5,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import pytest_asyncio
@@ -51,6 +52,7 @@ pytestmark = pytest.mark.unit
 async def test_expiry_is_one_bounded_reconciler_operation() -> None:
     calls: list[dict[str, object]] = []
     expected = object()
+    observed: list[object] = []
 
     class Repository:
         async def expire_due_deliveries(self, **kwargs: object) -> object:
@@ -67,11 +69,15 @@ async def test_expiry_is_one_bounded_reconciler_operation() -> None:
         clock=lambda: NOW,
         claim_ttl_seconds=30,
         failure_observer=lambda _failure: None,
+        metrics=SimpleNamespace(
+            expiry_batch_committed=lambda result: observed.append(result)
+        ),
     )
 
     result = await reconciler.reconcile_expired_once(limit=17)
 
     assert result is expected
+    assert observed == [expected]
     assert calls == [
         {
             "now": NOW,
@@ -398,6 +404,7 @@ def _reconciler(
     *,
     observer=lambda _failure: None,
     success_observer=None,
+    metrics=None,
 ) -> AdminWebhookReconciler:
     kwargs = {}
     if success_observer is not None:
@@ -409,6 +416,7 @@ def _reconciler(
         clock=clock,
         claim_ttl_seconds=60,
         failure_observer=observer,
+        metrics=metrics,
         **kwargs,
     )
 
@@ -548,14 +556,21 @@ async def test_permanent_jobs_conflict_terminalizes_owned_nonterminal_claim(
     queue = StubDeliveryQueue()
     queue.admission = JobsDeliveryAdmission(outcome=outcome)
     observed: list[EnqueueFailureKind] = []
+    delivery_observations: list[dict[str, object]] = []
     reconciler = _reconciler(
         auth_fixture,
         queue,
         MutableClock(),
         observer=observed.append,
+        metrics=SimpleNamespace(
+            delivery_committed=lambda **values: delivery_observations.append(
+                values
+            )
+        ),
     )
 
     assert await reconciler.reconcile_enqueue_once() == 1
+    assert await reconciler.reconcile_enqueue_once() == 0
 
     terminal = await auth_fixture.repository.get_delivery_bundle(delivery_id)
     assert terminal is not None
@@ -567,6 +582,14 @@ async def test_permanent_jobs_conflict_terminalizes_owned_nonterminal_claim(
     assert terminal.delivery.enqueue_claim_token is None
     assert await auth_fixture.repository.list_delivery_attempts(webhook_id, delivery_id) == ()
     assert observed == [EnqueueFailureKind.IDENTITY_CONFLICT]
+    assert delivery_observations == [
+        {
+            "state": DeliveryState.DEAD,
+            "kind": DeliveryKind.AUTOMATIC,
+            "reason_code": DeliveryReasonCode.JOBS_IDENTITY_CONFLICT,
+            "status_code": None,
+        }
+    ]
 
 
 async def test_repeated_rejection_is_bounded_by_delivery_expiry(

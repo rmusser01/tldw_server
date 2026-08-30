@@ -45,7 +45,12 @@ from tldw_Server_API.app.core.Jobs.operations.contracts import (
     project_admin_webhook_disposition_marker,
 )
 
-from .domain import DeliveryReasonCode, DeliveryState, JobsDispositionKind
+from .domain import (
+    DeliveryKind,
+    DeliveryReasonCode,
+    DeliveryState,
+    JobsDispositionKind,
+)
 
 _MAX_ENQUEUE_BATCH = 100
 
@@ -188,6 +193,32 @@ class _DeliveryQueue(Protocol):
         disposition_token: str,
         reason_code: DeliveryReasonCode,
     ) -> PreparedDispositionResult: ...
+
+
+class _Metrics(Protocol):
+    def delivery_committed(
+        self,
+        *,
+        state: DeliveryState,
+        kind: DeliveryKind,
+        reason_code: DeliveryReasonCode | None,
+        status_code: int | None,
+    ) -> None: ...
+
+    def attempt_committed(
+        self,
+        *,
+        state: DeliveryState,
+        kind: DeliveryKind,
+        reason_code: DeliveryReasonCode | None,
+        delivery_reason_code: DeliveryReasonCode | None,
+        status_code: int | None,
+        latency_ms: int | None,
+    ) -> None: ...
+
+    def expiries_committed(self, count: int) -> None: ...
+
+    def expiry_batch_committed(self, result: object) -> None: ...
 
 
 def _aware_utc(value: datetime, *, field: str) -> datetime:
@@ -481,6 +512,7 @@ class AdminWebhookReconciler:
         success_observer: Callable[[EnqueueSuccessKind], None] | None = None,
         crash_hook: Callable[[EnqueueCrashPoint], None] | None = None,
         after_claim_commit_hook: Callable[[], Awaitable[None]] | None = None,
+        metrics: _Metrics | None = None,
     ) -> None:
         if (
             isinstance(claim_ttl_seconds, bool)
@@ -512,6 +544,7 @@ class AdminWebhookReconciler:
         self._success_observer = success_observer
         self._crash_hook = crash_hook
         self._after_claim_commit_hook = after_claim_commit_hook
+        self._metrics = metrics
 
     def _crash(self, point: EnqueueCrashPoint) -> None:
         if self._crash_hook is not None:
@@ -530,6 +563,28 @@ class AdminWebhookReconciler:
             self._success_observer(success)
         except Exception:  # noqa: BLE001 - observation cannot affect state repair.
             return
+
+    def _observe_terminal_delivery(self, delivery: StoredWebhookDelivery) -> None:
+        if self._metrics is None:
+            return
+        try:
+            self._metrics.delivery_committed(
+                state=delivery.delivery.state,
+                kind=delivery.delivery.kind,
+                reason_code=delivery.delivery.reason_code,
+                status_code=delivery.delivery.status_code,
+            )
+        except Exception:  # noqa: BLE001 - metrics cannot alter state repair
+            return
+
+    def _observe_expired_delivery(self, delivery: StoredWebhookDelivery) -> None:
+        if self._metrics is None:
+            return
+        try:
+            self._metrics.expiries_committed(1)
+        except Exception:  # noqa: BLE001 - metrics cannot alter state repair
+            pass
+        self._observe_terminal_delivery(delivery)
 
     async def _apply_terminal_cancel(
         self,
@@ -581,6 +636,8 @@ class AdminWebhookReconciler:
 
         delivery_id = claim.delivery.delivery.id
         terminal_cancel: StoredWebhookDelivery | None = None
+        expired_delivery: StoredWebhookDelivery | None = None
+        failed_delivery: StoredWebhookDelivery | None = None
         failure: EnqueueFailureKind | None = None
         continue_batch = True
         queued = False
@@ -602,6 +659,10 @@ class AdminWebhookReconciler:
                 or current.delivery.expires_at <= now
             )
             if terminal:
+                expires_owned_claim = (
+                    current.delivery.state not in DeliveryState.terminal_states()
+                    and current.delivery.expires_at <= now
+                )
                 try:
                     record = self._queue.find_delivery_job_by_identity(delivery_id)
                 except JobsDeliveryConflictError:
@@ -610,11 +671,13 @@ class AdminWebhookReconciler:
                     failure = EnqueueFailureKind.BACKEND_UNAVAILABLE
                 else:
                     if record is None:
-                        await tx.retire_terminal_enqueue_claim(
+                        retired = await tx.retire_terminal_enqueue_claim(
                             delivery_id,
                             claim.claim_token,
                             now,
                         )
+                        if expires_owned_claim:
+                            expired_delivery = retired
                     elif record.delivery_id != delivery_id:
                         failure = EnqueueFailureKind.IDENTITY_CONFLICT
                     else:
@@ -634,6 +697,8 @@ class AdminWebhookReconciler:
                             jobs_job_id=record.jobs_job_id,
                             disposition_token=disposition_token,
                         )
+                        if expires_owned_claim:
+                            expired_delivery = terminal_cancel
                 continue_batch = failure is None
             else:
                 try:
@@ -642,7 +707,7 @@ class AdminWebhookReconciler:
                         current.delivery.expires_at,
                     )
                 except JobsDeliveryConflictError:
-                    await tx.fail_enqueue_claim(
+                    failed_delivery = await tx.fail_enqueue_claim(
                         delivery_id,
                         claim.claim_token,
                         now,
@@ -670,7 +735,7 @@ class AdminWebhookReconciler:
                         admission.record is None
                         or admission.record.delivery_id != delivery_id
                     ):
-                        await tx.fail_enqueue_claim(
+                        failed_delivery = await tx.fail_enqueue_claim(
                             delivery_id,
                             claim.claim_token,
                             now,
@@ -696,6 +761,11 @@ class AdminWebhookReconciler:
                                 jobs_job_id=admission.record.jobs_job_id,
                                 disposition_token=self._token_factory(),
                             )
+                            expired_delivery = terminal_cancel
+        if expired_delivery is not None:
+            self._observe_expired_delivery(expired_delivery)
+        if failed_delivery is not None:
+            self._observe_terminal_delivery(failed_delivery)
         if failure is not None:
             self._observe(failure)
             return continue_batch
@@ -841,6 +911,11 @@ class AdminWebhookReconciler:
             batch_size=limit,
             token_factory=self._token_factory,
         )
+        if self._metrics is not None:
+            try:
+                self._metrics.expiry_batch_committed(result)
+            except Exception:  # noqa: BLE001 - metrics cannot alter expiry
+                pass
         await asyncio.sleep(0)
         return result
 
@@ -866,5 +941,19 @@ class AdminWebhookReconciler:
                     now=now,
                 )
             recovered += int(result is not None)
+            if result is not None and self._metrics is not None:
+                try:
+                    self._metrics.attempt_committed(
+                        state=result.delivery.delivery.state,
+                        kind=result.delivery.delivery.kind,
+                        reason_code=result.attempt.reason_code,
+                        delivery_reason_code=(
+                            result.delivery.delivery.reason_code
+                        ),
+                        status_code=result.attempt.status_code,
+                        latency_ms=result.attempt.latency_ms,
+                    )
+                except Exception:  # noqa: BLE001 - metrics cannot alter recovery
+                    pass
         await asyncio.sleep(0)
         return recovered

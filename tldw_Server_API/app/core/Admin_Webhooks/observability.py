@@ -288,14 +288,23 @@ class AdminWebhookMetrics:
         state: DeliveryState,
         kind: DeliveryKind,
         reason_code: DeliveryReasonCode | None,
+        delivery_reason_code: DeliveryReasonCode | None = None,
         status_code: int | None,
         latency_ms: int | None,
     ) -> None:
         """Observe one durable attempt outcome using only closed executor facts."""
+        if delivery_reason_code is not None and not isinstance(
+            delivery_reason_code, DeliveryReasonCode
+        ):
+            raise TypeError("delivery metric reason is invalid")
         self.delivery_committed(
             state=state,
             kind=kind,
-            reason_code=reason_code,
+            reason_code=(
+                delivery_reason_code
+                if delivery_reason_code is not None
+                else reason_code
+            ),
             status_code=status_code,
         )
         reason = reason_code.value if reason_code is not None else "none"
@@ -337,6 +346,25 @@ class AdminWebhookMetrics:
             raise ValueError("expiry metric count is invalid")
         if count:
             self._emit_counter("admin_webhooks_expiries_total", value=count)
+
+    def delivery_batch_committed(self, result: object) -> None:
+        """Count one bounded repository-owned batch after its outer commit."""
+        outcomes = getattr(result, "outcomes", None)
+        if not isinstance(outcomes, tuple):
+            raise TypeError("delivery metric batch is invalid")
+        for outcome in outcomes:
+            self.delivery_committed(
+                state=getattr(outcome, "state", None),
+                kind=getattr(outcome, "kind", None),
+                reason_code=getattr(outcome, "reason_code", None),
+                status_code=getattr(outcome, "status_code", None),
+            )
+
+    def expiry_batch_committed(self, result: object) -> None:
+        """Count a committed expiry batch and each closed delivery outcome."""
+        count = getattr(result, "expired", None)
+        self.expiries_committed(count)
+        self.delivery_batch_committed(result)
 
     def retention_committed(self, result: object) -> None:
         """Count committed retention deletions by one fixed row category."""
@@ -459,6 +487,18 @@ class _JobsProbe(Protocol):
     async def status(self) -> JobsCapabilityStatus: ...
 
 
+class UnavailableJobsCapabilityProbe:
+    """Closed Jobs facts used while no healthy manager is available."""
+
+    async def status(self) -> JobsCapabilityStatus:
+        return JobsCapabilityStatus(
+            database_ready=False,
+            queue_ready=False,
+            job_type_ready=False,
+            backend="unavailable",
+        )
+
+
 class JobManagerJobsCapabilityProbe:
     """Bounded read-only preflight over the public Jobs manager surface."""
 
@@ -534,7 +574,10 @@ class AdminWebhookDeliveryCapability:
             key_available=ring is not None,
             expected_primary_key_id=(ring.primary_id if ring is not None else None),
         )
-        jobs = await self._jobs_probe.status()
+        try:
+            jobs = await self._jobs_probe.status()
+        except Exception:  # noqa: BLE001 - Jobs readiness is fail-closed
+            jobs = await UnavailableJobsCapabilityProbe().status()
         checks = (
             (health.canonical_schema_version == _CANONICAL_SCHEMA_VERSION, DeliveryRuntimeReasonCode.SCHEMA_UNREADY),
             (health.delivery_schema_ready, DeliveryRuntimeReasonCode.SCHEMA_UNREADY),
@@ -590,4 +633,5 @@ __all__ = [
     "AdminWebhookMetrics",
     "JobManagerJobsCapabilityProbe",
     "JobsCapabilityStatus",
+    "UnavailableJobsCapabilityProbe",
 ]

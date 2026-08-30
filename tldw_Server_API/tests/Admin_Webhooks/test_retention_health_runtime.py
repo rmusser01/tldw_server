@@ -32,6 +32,7 @@ from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
     AdminWebhookRepository,
     RuntimeHeartbeatWrite,
 )
+from tldw_Server_API.app.core.Jobs.operations.contracts import JobIdentityLookupResult
 from tldw_Server_API.tests.Admin_Webhooks.test_event_expansion import (
     _captured_delivery,
     canonical_uuid4,
@@ -228,6 +229,22 @@ class _RecordingRegistry:
     ) -> None:
         self.observations.append((name, value, dict(labels or {})))
 
+    def observe(
+        self,
+        name: str,
+        value: float,
+        labels: dict[str, str] | None = None,
+    ) -> None:
+        self.observations.append((name, value, dict(labels or {})))
+
+    def set_gauge(
+        self,
+        name: str,
+        value: float,
+        labels: dict[str, str] | None = None,
+    ) -> None:
+        self.observations.append((name, value, dict(labels or {})))
+
 
 @pytest.mark.unit
 def test_metrics_adapter_exposes_only_fixed_names_and_closed_labels() -> None:
@@ -295,6 +312,76 @@ def test_metrics_adapter_accepts_only_closed_admission_denial_codes() -> None:
     ]
     with pytest.raises(TypeError):
         metrics.admission_denied("receiver.example")  # type: ignore[arg-type]
+
+
+@pytest.mark.unit
+def test_metrics_cover_closed_kinds_retries_latency_expiry_and_ssrf() -> None:
+    observability = importlib.import_module(
+        "tldw_Server_API.app.core.Admin_Webhooks.observability"
+    )
+    registry = _RecordingRegistry()
+    metrics = observability.AdminWebhookMetrics(registry=registry)
+
+    metrics.attempt_committed(
+        state=DeliveryState.RETRY_WAIT,
+        kind=DeliveryKind.AUTOMATIC,
+        reason_code=DeliveryReasonCode.HTTP_SERVER_ERROR,
+        status_code=503,
+        latency_ms=12,
+    )
+    metrics.attempt_committed(
+        state=DeliveryState.DEAD,
+        kind=DeliveryKind.MANUAL,
+        reason_code=DeliveryReasonCode.TARGET_REJECTED,
+        status_code=None,
+        latency_ms=3,
+    )
+    metrics.attempt_committed(
+        state=DeliveryState.SUCCEEDED,
+        kind=DeliveryKind.TEST,
+        reason_code=None,
+        status_code=204,
+        latency_ms=1,
+    )
+    metrics.expiry_batch_committed(
+        SimpleNamespace(
+            expired=1,
+            outcomes=(
+                SimpleNamespace(
+                    state=DeliveryState.DEAD,
+                    kind=DeliveryKind.MANUAL,
+                    reason_code=DeliveryReasonCode.DELIVERY_EXPIRED,
+                    status_code=None,
+                ),
+            ),
+        )
+    )
+
+    observations = registry.observations
+    assert any(
+        name == "admin_webhooks_retries_total"
+        and labels == {"reason": "http_server_error"}
+        for name, _, labels in observations
+    )
+    assert any(
+        name == "admin_webhooks_ssrf_denials_total"
+        and labels == {"reason": "target_rejected"}
+        for name, _, labels in observations
+    )
+    assert any(
+        name == "admin_webhooks_expiries_total" and value == 1
+        for name, value, _ in observations
+    )
+    assert {
+        labels["kind"]
+        for name, _, labels in observations
+        if name == "admin_webhooks_attempts_total"
+    } == {"automatic", "manual", "test"}
+    assert {
+        labels["status_class"]
+        for name, _, labels in observations
+        if name == "admin_webhooks_attempt_latency_seconds"
+    } == {"5xx", "none", "2xx"}
 
 
 @pytest.mark.unit
@@ -438,16 +525,45 @@ async def test_runtime_supervises_independent_loops_and_awaits_shutdown(
 
 
 @pytest.mark.unit
-async def test_worker_loop_propagates_sdk_exit_for_supervisor_restart() -> None:
+async def test_worker_supervisor_uses_fresh_generation_after_sdk_exit() -> None:
     runtime = importlib.import_module("tldw_Server_API.app.services.admin_webhook_delivery_runtime")
     writes: list[RuntimeHeartbeatWrite] = []
+    second_started = asyncio.Event()
+    generations: list[object] = []
 
     class WorkerSDK:
+        def __init__(self, index: int) -> None:
+            self.index = index
+            self.stopped = asyncio.Event()
+            self.stop_calls = 0
+            self.finished = False
+
         async def run_prepared(self, **_kwargs: object) -> None:
-            raise RuntimeError("prepared worker stopped")
+            try:
+                if self.index == 1:
+                    raise RuntimeError("prepared worker stopped")
+                second_started.set()
+                await self.stopped.wait()
+            finally:
+                self.finished = True
 
         def stop(self) -> None:
-            return None
+            self.stop_calls += 1
+            self.stopped.set()
+
+    class JobsRuntime:
+        async def refresh(self) -> object:
+            index = len(generations) + 1
+            generation = SimpleNamespace(
+                worker_sdk=WorkerSDK(index),
+                worker_handler=SimpleNamespace(
+                    handler_error_disposition=lambda *_args: None,
+                    on_disposition_applied=lambda *_args: None,
+                ),
+                worker_instance_id=canonical_uuid4(f"task-11-worker-generation-{index}"),
+            )
+            generations.append(generation)
+            return generation
 
     class Repository:
         async def upsert_runtime_heartbeat(
@@ -457,49 +573,141 @@ async def test_worker_loop_propagates_sdk_exit_for_supervisor_restart() -> None:
             writes.append(write)
 
     components = SimpleNamespace(
-        worker_sdk=WorkerSDK(),
-        worker_handler=SimpleNamespace(
-            handler_error_disposition=lambda *_args: None,
-            on_disposition_applied=lambda *_args: None,
-        ),
+        jobs=JobsRuntime(),
         worker_repository=Repository(),
-        worker_instance_id=canonical_uuid4("task-11-worker-sdk-exit"),
+        settings=SimpleNamespace(delivery_loop_interval_seconds=0.01),
         clock=lambda: NOW,
     )
 
     stop_event = asyncio.Event()
-    task = asyncio.create_task(runtime._run_worker_loop(stop_event, components))
-    done, _pending = await asyncio.wait({task}, timeout=0.25)
-    if task not in done:
+    task = asyncio.create_task(
+        runtime._supervise_loop("worker", runtime._run_worker_loop, stop_event, components)
+    )
+    try:
+        await asyncio.wait_for(second_started.wait(), timeout=1)
+    finally:
         stop_event.set()
-        await asyncio.gather(task, return_exceptions=True)
+        await asyncio.wait_for(task, timeout=1)
 
-    assert task in done
-    with pytest.raises(RuntimeError, match="prepared worker stopped"):
-        await task
-
+    assert len(generations) == 2
+    assert generations[0].worker_instance_id != generations[1].worker_instance_id
+    assert [generation.worker_sdk.stop_calls for generation in generations] == [1, 1]
+    assert all(generation.worker_sdk.finished for generation in generations)
     assert writes[-1].ready is False
     assert writes[-1].reason_code is DeliveryRuntimeReasonCode.WORKER_UNAVAILABLE
 
 
 @pytest.mark.unit
-async def test_runtime_builds_observable_recovery_when_jobs_is_unavailable(
+async def test_runtime_recovers_after_jobs_constructor_fails_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     runtime = importlib.import_module("tldw_Server_API.app.services.admin_webhook_delivery_runtime")
+    encoded = base64.b64encode(b"k" * 32).decode("ascii")
+    ring_result = WebhookKeyRingLoadResult(
+        ring=WebhookKeyRing({"key-1": encoded}, primary_id="key-1"),
+        code=WebhookKeyLoadCode.AVAILABLE,
+    )
     settings = SimpleNamespace(
         mode=runtime.AdminWebhookMode.ON,
         route_selection=runtime.WebhookRouteSelection.CANONICAL,
         delivery_claim_ttl_seconds=60,
-        delivery_loop_interval_seconds=1,
+        delivery_loop_interval_seconds=0.01,
         delivery_heartbeat_freshness_seconds=30,
         allow_http_dev=False,
     )
+    manager_calls = 0
+    worker_started = asyncio.Event()
+    writes: list[RuntimeHeartbeatWrite] = []
+    worker_sdks: list[object] = []
 
     async def get_pool() -> object:
         return object()
 
+    class Repository:
+        async def get_delivery_health_snapshot(self, **_kwargs: object) -> object:
+            ready = DeliveryComponentStatus(
+                component=DeliveryRuntimeComponent.RECONCILER,
+                ready=True,
+                reason_code=None,
+                heartbeat_age_seconds=1,
+            )
+            def unavailable(
+                component: DeliveryRuntimeComponent,
+                reason: DeliveryRuntimeReasonCode,
+            ) -> DeliveryComponentStatus:
+                return DeliveryComponentStatus(
+                    component=component,
+                    ready=False,
+                    reason_code=reason,
+                    heartbeat_age_seconds=None,
+                )
+            return SimpleNamespace(
+                canonical_schema_version=1,
+                delivery_schema_ready=True,
+                migration_complete=True,
+                key_ready=True,
+                key_primary_match=True,
+                worker=unavailable(
+                    DeliveryRuntimeComponent.WORKER,
+                    DeliveryRuntimeReasonCode.WORKER_UNAVAILABLE,
+                ),
+                reconciler=ready,
+                retention=unavailable(
+                    DeliveryRuntimeComponent.RETENTION,
+                    DeliveryRuntimeReasonCode.RETENTION_UNAVAILABLE,
+                ),
+                backlog=DeliveryBacklogCounts(),
+                oldest_nonterminal_created_at=None,
+            )
+
+        async def upsert_runtime_heartbeat(self, write: RuntimeHeartbeatWrite) -> None:
+            writes.append(write)
+
+    class Manager:
+        backend = "sqlite"
+        DOMAIN_ALLOWED_QUEUES = {"admin_webhooks": ("delivery",)}
+
+        def get_job(self, _job_id: int) -> None:
+            return None
+
+        def admit_job(self, **_kwargs: object) -> None:
+            return None
+
+        def find_job_by_identity(self, _command: object) -> JobIdentityLookupResult:
+            return JobIdentityLookupResult.missing()
+
+    def manager_factory() -> Manager:
+        nonlocal manager_calls
+        manager_calls += 1
+        if manager_calls == 1:
+            raise RuntimeError("Jobs unavailable")
+        return Manager()
+
+    class WorkerSDK:
+        def __init__(self, _manager: object, config: object) -> None:
+            self.config = config
+            self.stopped = asyncio.Event()
+            self.stop_calls = 0
+            worker_sdks.append(self)
+
+        async def run_prepared(self, *, pre_acquire_guard, **_kwargs: object) -> None:
+            assert await pre_acquire_guard() is True
+            worker_started.set()
+            await self.stopped.wait()
+
+        def stop(self) -> None:
+            self.stop_calls += 1
+            self.stopped.set()
+
+    class Handler:
+        def __init__(self, **_kwargs: object) -> None:
+            self.handler_error_disposition = lambda *_args: None
+            self.on_disposition_applied = lambda *_args: None
+
     class Metrics:
+        def health_snapshot(self, *_args: object, **_kwargs: object) -> None:
+            return None
+
         def enqueue_failure(self, *_args: object, **_kwargs: object) -> None:
             return None
 
@@ -512,29 +720,45 @@ async def test_runtime_builds_observable_recovery_when_jobs_is_unavailable(
         staticmethod(lambda _environ: settings),
     )
     monkeypatch.setattr(runtime, "get_db_pool", get_pool)
-    monkeypatch.setattr(
-        runtime,
-        "JobManager",
-        lambda: (_ for _ in ()).throw(RuntimeError("Jobs unavailable")),
-    )
+    monkeypatch.setattr(runtime, "AdminWebhookRepository", lambda _pool: Repository())
+    monkeypatch.setattr(runtime, "JobManager", manager_factory)
+    monkeypatch.setattr(runtime, "WorkerSDK", WorkerSDK)
+    monkeypatch.setattr(runtime, "AdminWebhookPreparedHandler", Handler)
+    monkeypatch.setattr(runtime, "DeliveryAttemptExecutor", lambda **_kwargs: object())
     monkeypatch.setattr(runtime, "AdminWebhookMetrics", Metrics)
-    monkeypatch.setattr(
-        runtime,
-        "load_webhook_key_ring",
-        lambda: WebhookKeyRingLoadResult(
-            ring=None,
-            code=WebhookKeyLoadCode.KEY_UNAVAILABLE,
-        ),
-    )
+    monkeypatch.setattr(runtime, "load_webhook_key_ring", lambda: ring_result)
 
     components = await runtime._build_runtime_components()
     jobs_status = await components.capability._jobs_probe.status()
-
-    assert components.worker_sdk is None
     assert jobs_status.database_ready is False
-    assert jobs_status.queue_ready is False
-    assert jobs_status.job_type_ready is False
-    assert jobs_status.backend == "unavailable"
+    stop_event = asyncio.Event()
+    worker_task = asyncio.create_task(
+        runtime._supervise_loop("worker", runtime._run_worker_loop, stop_event, components)
+    )
+    try:
+        await asyncio.wait_for(worker_started.wait(), timeout=1)
+        recovered_status = await components.capability._jobs_probe.status()
+        assert recovered_status.database_ready is True
+        assert recovered_status.queue_ready is True
+        assert recovered_status.job_type_ready is True
+        assert recovered_status.backend == "sqlite"
+        assert components.reconciler._queue.find_delivery_job_by_identity(
+            canonical_uuid4("task-11-recovered-queue")
+        ) is None
+        assert any(write.ready for write in writes)
+    finally:
+        stop_event.set()
+        await asyncio.wait_for(worker_task, timeout=1)
+
+    assert manager_calls == 2
+    assert len(worker_sdks) == 1
+    assert worker_sdks[0].stop_calls == 1
+    assert worker_sdks[0].stopped.is_set()
+    assert writes[0].ready is False
+    assert writes[0].reason_code is DeliveryRuntimeReasonCode.JOBS_UNAVAILABLE
+    assert any(write.ready for write in writes[1:-1])
+    assert writes[-1].ready is False
+    assert writes[-1].reason_code is DeliveryRuntimeReasonCode.WORKER_UNAVAILABLE
 
 
 @pytest.mark.unit
