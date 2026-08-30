@@ -36,14 +36,34 @@ def test_request_contract_is_immutable_and_uses_bounded_defaults() -> None:
         request.port = 8443  # type: ignore[misc]
 
 
-def test_request_repr_hides_target_without_changing_semantics() -> None:
-    request = _request(target="/works?pageToken=opaque-target-sentinel")
-    equal_request = _request(target="/works?pageToken=opaque-target-sentinel")
+def test_request_repr_hides_request_material_without_changing_semantics() -> None:
+    target = "/opaque-path-sentinel?pageToken=opaque-query-sentinel"
+    headers = (
+        ("content-type", "application/json"),
+        ("x-tldw-webhook-signature", "v1=opaque-signature-sentinel"),
+    )
+    body = b'{"event":"opaque-body-sentinel"}'
+    request = _request(method="POST", target=target, headers=headers, body=body)
+    equal_request = _request(
+        method="POST",
+        target=target,
+        headers=headers,
+        body=body,
+    )
 
-    assert request.target == "/works?pageToken=opaque-target-sentinel"
+    assert request.target == target
+    assert request.headers == headers
+    assert request.body == body
     assert request == equal_request
     assert hash(request) == hash(equal_request)
-    assert "opaque-target-sentinel" not in repr(request)
+    rendered = repr(request)
+    for canary in (
+        "opaque-path-sentinel",
+        "opaque-query-sentinel",
+        "opaque-signature-sentinel",
+        "opaque-body-sentinel",
+    ):
+        assert canary not in rendered
 
 
 def test_status_only_response_is_frozen_slotted_and_exposes_exactly_three_fields() -> None:

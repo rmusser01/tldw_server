@@ -14,6 +14,11 @@ from typing import Protocol
 
 import pytest
 
+from tldw_Server_API.app.core.Admin_Webhooks.config import (
+    AdminWebhookMode,
+    AdminWebhookSettings,
+    WebhookRouteSelection,
+)
 from tldw_Server_API.app.core.Admin_Webhooks.crypto import (
     EVENT_BODY_MAX_BYTES,
     WebhookKeyLoadCode,
@@ -105,6 +110,18 @@ def _available(ring: WebhookKeyRing) -> WebhookKeyRingLoadResult:
     return WebhookKeyRingLoadResult(
         ring=ring,
         code=WebhookKeyLoadCode.AVAILABLE,
+    )
+
+
+def _operational_settings() -> AdminWebhookSettings:
+    return AdminWebhookSettings(
+        mode=AdminWebhookMode.ON,
+        route_selection=WebhookRouteSelection.CANONICAL,
+        registration_limit=100,
+        active_limit=25,
+        allow_http_dev=False,
+        idempotency_ttl_seconds=86_400,
+        rollback_window_days=7,
     )
 
 
@@ -212,6 +229,7 @@ def _service(
         event_id_factory=dependencies.event_id,
         delivery_id_factory=dependencies.delivery_id,
         clock=dependencies.now,
+        settings=_operational_settings(),
     )
     return module, selected_ring, service, dependencies
 
@@ -537,6 +555,7 @@ async def test_capture_metrics_emit_once_only_after_new_durable_commit(
         event_id_factory=dependencies.event_id,
         delivery_id_factory=dependencies.delivery_id,
         clock=dependencies.now,
+        settings=_operational_settings(),
         metrics=Metrics(),
     )
     await _seed_registration(
@@ -704,6 +723,7 @@ async def test_source_replay_verifies_body_and_every_persisted_source_field(
         event_id_factory=_DeterministicDependencies("wrong-ring").event_id,
         delivery_id_factory=_DeterministicDependencies("wrong-ring").delivery_id,
         clock=lambda: NOW + timedelta(hours=1),
+        settings=_operational_settings(),
     )
     with pytest.raises(WebhookError) as decrypt_conflict:
         await wrong_ring_service.capture_synthetic_event(
@@ -792,6 +812,7 @@ async def test_pretransaction_key_failures_emit_one_failed_audit(
         event_id_factory=dependencies.event_id,
         delivery_id_factory=dependencies.delivery_id,
         clock=dependencies.now,
+        settings=_operational_settings(),
     )
     records: list[object] = []
 
@@ -853,6 +874,7 @@ async def _assert_capture_key_gate(
         event_id_factory=dependencies.event_id,
         delivery_id_factory=dependencies.delivery_id,
         clock=dependencies.now,
+        settings=_operational_settings(),
     )
     records: list[object] = []
 

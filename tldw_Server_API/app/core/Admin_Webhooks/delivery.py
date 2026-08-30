@@ -19,6 +19,7 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import MandatoryAuditW
 
 from .audit import DeliveryMutationAudit, DeliveryMutationAuditSink
 from .catalog import EVENT_API_VERSION, EVENT_CATALOG
+from .config import AdminWebhookMode, AdminWebhookSettings
 from .crypto import EVENT_BODY_MAX_BYTES, WebhookKeyError, WebhookKeyRing, WebhookKeyRingLoadResult
 from .domain import (
     AttemptState,
@@ -57,8 +58,6 @@ if TYPE_CHECKING:
         StoredWebhookEvent,
         StoredWebhookRegistration,
     )
-
-    from .config import AdminWebhookSettings
 
 _ACTIVE_ROTATION_PHASES = frozenset(
     {"rewriting", "verifying", "awaiting_primary_cutover"}
@@ -631,6 +630,16 @@ class AdminWebhookDeliveryService:
         self._test_token_factory = test_token_factory
         self._metrics = metrics
 
+    def _require_delivery_mode(self) -> AdminWebhookSettings:
+        settings = self._settings
+        if settings is None or settings.mode is AdminWebhookMode.OFF:
+            raise WebhookError(WebhookErrorCode.DISABLED)
+        if settings.mode is AdminWebhookMode.MIGRATE:
+            raise WebhookError(WebhookErrorCode.MIGRATION_PENDING)
+        if settings.mode is not AdminWebhookMode.ON:
+            raise WebhookError(WebhookErrorCode.DISABLED)
+        return settings
+
     def _require_test_dependencies(
         self,
     ) -> tuple[AdminWebhookSettings, DeliveryAttemptExecutor, Callable[[], str], Callable[[], str]]:
@@ -649,11 +658,6 @@ class AdminWebhookDeliveryService:
             self._test_attempt_id_factory,
             self._test_token_factory,
         )
-
-    def _require_redelivery_settings(self) -> AdminWebhookSettings:
-        if self._settings is None:
-            raise WebhookError(WebhookErrorCode.DELIVERY_UNAVAILABLE)
-        return self._settings
 
     @staticmethod
     def _test_result(
@@ -906,6 +910,7 @@ class AdminWebhookDeliveryService:
             raise TypeError("test command is required")
         if not callable(audit_sink):
             raise TypeError("test audit sink is required")
+        self._require_delivery_mode()
         settings, executor, attempt_id_factory, token_factory = (
             self._require_test_dependencies()
         )
@@ -1103,6 +1108,7 @@ class AdminWebhookDeliveryService:
         """Return key-independent sanitized history for one retained registration."""
         if isinstance(webhook_id, bool) or not isinstance(webhook_id, int) or webhook_id < 1:
             raise WebhookError(WebhookErrorCode.VALIDATION_FAILED)
+        self._require_delivery_mode()
         try:
             return await self._repository.list_delivery_history(
                 webhook_id,
@@ -1164,6 +1170,17 @@ class AdminWebhookDeliveryService:
     @staticmethod
     def _redelivery_error(exc: BaseException) -> WebhookError:
         return _map_capture_error(exc)
+
+    @staticmethod
+    def _redelivery_failure_outcome(
+        error: WebhookError,
+    ) -> Literal["denied", "failed"]:
+        if error.code in {
+            WebhookErrorCode.DISABLED,
+            WebhookErrorCode.MIGRATION_PENDING,
+        }:
+            return "denied"
+        return "failed" if error.code.http_status >= 500 else "denied"
 
     async def _resolve_redelivery_lookup(
         self,
@@ -1256,11 +1273,7 @@ class AdminWebhookDeliveryService:
                 source_config_version=None,
                 current_config_version=None,
                 changed_config=None,
-                outcome=(
-                    "failed"
-                    if resolved_error.code.http_status >= 500
-                    else "denied"
-                ),
+                outcome=self._redelivery_failure_outcome(resolved_error),
                 reason_code=resolved_error.code,
             ),
         )
@@ -1286,7 +1299,7 @@ class AdminWebhookDeliveryService:
         request_fingerprint: str | None = None
         scope: IdempotencyScope | None = None
         try:
-            settings = self._require_redelivery_settings()
+            settings = self._require_delivery_mode()
             observed_at = _utc(self._clock(), field_name="redelivery start time")
             validate_idempotency_key(command.idempotency_key)
             expected_revision = parse_registration_etag(
@@ -1359,7 +1372,7 @@ class AdminWebhookDeliveryService:
                     source_config_version=None,
                     current_config_version=None,
                     changed_config=None,
-                    outcome=("failed" if error.code.http_status >= 500 else "denied"),
+                    outcome=self._redelivery_failure_outcome(error),
                     reason_code=error.code,
                 ),
             )
@@ -1542,11 +1555,7 @@ class AdminWebhookDeliveryService:
                             source_config_version=source_config_version,
                             current_config_version=current_config_version,
                             changed_config=changed_config,
-                            outcome=(
-                                "failed"
-                                if error.code.http_status >= 500
-                                else "denied"
-                            ),
+                            outcome=self._redelivery_failure_outcome(error),
                             reason_code=error.code,
                         ),
                     )
@@ -1583,9 +1592,7 @@ class AdminWebhookDeliveryService:
                         source_config_version=source_config_version,
                         current_config_version=current_config_version,
                         changed_config=changed_config,
-                        outcome=(
-                            "failed" if error.code.http_status >= 500 else "denied"
-                        ),
+                        outcome=self._redelivery_failure_outcome(error),
                         reason_code=error.code,
                     ),
                 )
@@ -1670,6 +1677,7 @@ class AdminWebhookDeliveryService:
         event_id: str | None = None
         fanout_count = 0
         try:
+            self._require_delivery_mode()
             from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
                 EventInsert,
             )

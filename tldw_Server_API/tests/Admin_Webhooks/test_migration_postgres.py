@@ -180,6 +180,109 @@ async def test_postgres_schema_is_additive_idempotent_and_preserves_legacy_rows(
 
 
 @pytest.mark.integration
+async def test_postgres_attempt_retry_delay_constraint_upgrades_existing_table(
+    test_db_pool,
+) -> None:
+    assert await ensure_admin_webhook_canonical_tables_pg(test_db_pool)
+    connection = await asyncpg.connect(test_db_pool.settings.DATABASE_URL)
+    try:
+        constraints = await connection.fetch(
+            """
+            SELECT conname
+            FROM pg_constraint
+            WHERE conrelid = 'admin_webhook_delivery_attempts'::regclass
+              AND contype = 'c'
+              AND pg_get_constraintdef(oid) LIKE '%state%'
+              AND pg_get_constraintdef(oid)
+                  LIKE '%requested_retry_delay_seconds%'
+            """
+        )
+        for row in constraints:
+            name = str(row["conname"]).replace('"', '""')
+            await connection.execute(
+                'ALTER TABLE admin_webhook_delivery_attempts '
+                f'DROP CONSTRAINT "{name}"'
+            )
+        await connection.execute(
+            """
+            ALTER TABLE admin_webhook_delivery_attempts
+            ADD CONSTRAINT legacy_admin_webhook_attempt_retry_delay_state
+            CHECK (
+                (state = 'retryable' AND requested_retry_delay_seconds IS NOT NULL)
+                OR (
+                    state != 'retryable'
+                    AND requested_retry_delay_seconds IS NULL
+                )
+            )
+            """
+        )
+    finally:
+        await connection.close()
+
+    assert await ensure_admin_webhook_canonical_tables_pg(test_db_pool)
+    await _insert_registration(test_db_pool)
+    await _insert_command_event(test_db_pool)
+    await test_db_pool.execute(
+        """
+        INSERT INTO admin_webhook_deliveries (
+            id, event_id, webhook_id, kind, delivery_config_version,
+            secret_version, state, expires_at
+        ) VALUES ('delivery-retry-evidence', 'event-1', 1, 'automatic', 1, 1,
+                  'retry_wait', '2026-07-04T00:00:00Z')
+        """
+    )
+    await test_db_pool.execute(
+        """
+        INSERT INTO admin_webhook_delivery_attempts (
+            id, delivery_id, attempt_number, jobs_job_id, jobs_lease_id,
+            request_timeout_seconds, started_at, finished_at, state,
+            reason_code, requested_retry_delay_seconds
+        ) VALUES ('attempt-outcome-unknown-retry', 'delivery-retry-evidence', 1,
+                  'jobs-1', 'lease-1', 10, '2026-07-01T00:00:00Z',
+                  '2026-07-01T00:01:00Z', 'outcome_unknown',
+                  'outcome_unknown', 60)
+        """
+    )
+    await test_db_pool.execute(
+        """
+        INSERT INTO admin_webhook_delivery_attempts (
+            id, delivery_id, attempt_number, jobs_job_id, jobs_lease_id,
+            request_timeout_seconds, started_at, finished_at, state,
+            reason_code, requested_retry_delay_seconds
+        ) VALUES ('attempt-outcome-unknown-terminal', 'delivery-retry-evidence', 2,
+                  'jobs-1', 'lease-2', 10, '2026-07-01T00:02:00Z',
+                  '2026-07-01T00:03:00Z', 'outcome_unknown',
+                  'outcome_unknown', NULL)
+        """
+    )
+    with pytest.raises(asyncpg.CheckViolationError):
+        await test_db_pool.execute(
+            """
+            INSERT INTO admin_webhook_delivery_attempts (
+                id, delivery_id, attempt_number, jobs_job_id, jobs_lease_id,
+                request_timeout_seconds, started_at, finished_at, state,
+                requested_retry_delay_seconds
+            ) VALUES ('attempt-retryable-without-delay',
+                      'delivery-retry-evidence', 3, 'jobs-1', 'lease-3', 10,
+                      '2026-07-01T00:04:00Z', '2026-07-01T00:05:00Z',
+                      'retryable', NULL)
+            """
+        )
+    with pytest.raises(asyncpg.CheckViolationError):
+        await test_db_pool.execute(
+            """
+            INSERT INTO admin_webhook_delivery_attempts (
+                id, delivery_id, attempt_number, jobs_job_id, jobs_lease_id,
+                request_timeout_seconds, started_at, finished_at, state,
+                requested_retry_delay_seconds
+            ) VALUES ('attempt-failed-with-delay', 'delivery-retry-evidence', 4,
+                      'jobs-1', 'lease-4', 10, '2026-07-01T00:06:00Z',
+                      '2026-07-01T00:07:00Z', 'failed', 60)
+            """
+        )
+
+
+@pytest.mark.integration
 async def test_postgres_delivery_schema_ready_requires_recovery_indexes(test_db_pool) -> None:
     assert await ensure_admin_webhook_canonical_tables_pg(test_db_pool)
     repository = AdminWebhookRepository(test_db_pool)

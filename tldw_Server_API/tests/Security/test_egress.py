@@ -76,8 +76,46 @@ def test_platform_webhook_policy_composes_all_global_lists(
             "blocked-workflow.example",
             "blocked-webhook.example",
         ],
+        "block_private_override": True,
         "sensitive_observability": True,
     }
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("url", "resolved_ips"),
+    [
+        ("https://127.0.0.1/hook", None),
+        ("https://receiver.example/hook", ["10.0.0.7"]),
+    ],
+)
+def test_platform_webhook_policy_blocks_private_targets_when_ambient_false(
+    monkeypatch: pytest.MonkeyPatch,
+    url: str,
+    resolved_ips: list[str] | None,
+) -> None:
+    monkeypatch.setenv(egress.BLOCK_PRIVATE_ENV, "false")
+    monkeypatch.setenv(egress.PROFILENAME, "permissive")
+    for env_name in (
+        egress.GLOBAL_ALLOWLIST_ENV,
+        egress.ALLOWLIST_ENV,
+        egress.WEBHOOK_ALLOWLIST_ENV,
+        egress.GLOBAL_DENYLIST_ENV,
+        egress.DENYLIST_ENV,
+        egress.WEBHOOK_DENYLIST_ENV,
+    ):
+        monkeypatch.delenv(env_name, raising=False)
+    if resolved_ips is not None:
+        monkeypatch.setattr(
+            egress,
+            "_resolve_host_ips",
+            lambda *_args, **_kwargs: resolved_ips,
+        )
+
+    result = egress.evaluate_platform_webhook_url_policy(url)
+
+    assert result.allowed is False
+    assert result.reason_code == "address_forbidden"
 
 
 @pytest.mark.unit

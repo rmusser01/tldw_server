@@ -1977,6 +1977,131 @@ def migration_095_seed_notes_graph_suggestion_permissions(conn: sqlite3.Connecti
     logger.info("Migration 095: Seeded Notes graph suggestion permissions")
 
 
+_ADMIN_WEBHOOK_DELIVERY_ATTEMPTS_SQLITE_V96 = """
+    CREATE TABLE admin_webhook_delivery_attempts_v96 (
+        id TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 128),
+        delivery_id TEXT NOT NULL REFERENCES admin_webhook_deliveries(id) ON DELETE CASCADE,
+        attempt_number INTEGER NOT NULL CHECK (attempt_number BETWEEN 1 AND 4),
+        jobs_job_id TEXT CHECK (jobs_job_id IS NULL OR length(jobs_job_id) BETWEEN 1 AND 255),
+        jobs_lease_id TEXT CHECK (jobs_lease_id IS NULL OR length(jobs_lease_id) BETWEEN 1 AND 255),
+        test_attempt_token TEXT CHECK (test_attempt_token IS NULL OR length(test_attempt_token) BETWEEN 1 AND 255),
+        started_at TEXT NOT NULL,
+        finished_at TEXT,
+        state TEXT NOT NULL CHECK (
+            state IN (
+                'processing', 'succeeded', 'retryable', 'failed',
+                'canceled', 'superseded', 'outcome_unknown'
+            )
+        ),
+        status_code INTEGER CHECK (status_code IS NULL OR status_code BETWEEN 100 AND 599),
+        latency_ms INTEGER CHECK (latency_ms IS NULL OR latency_ms >= 0),
+        reason_code TEXT CHECK (reason_code IS NULL OR length(reason_code) BETWEEN 1 AND 128),
+        requested_retry_delay_seconds INTEGER CHECK (
+            requested_retry_delay_seconds IS NULL
+            OR requested_retry_delay_seconds BETWEEN 1 AND 1800
+        ),
+        jobs_disposition_applied INTEGER NOT NULL DEFAULT 0
+            CHECK (jobs_disposition_applied IN (0, 1)),
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        request_timeout_seconds INTEGER CHECK (
+            request_timeout_seconds BETWEEN 1 AND 30
+        ),
+        UNIQUE (delivery_id, attempt_number),
+        CHECK (
+            (
+                jobs_job_id IS NOT NULL
+                AND jobs_lease_id IS NOT NULL
+                AND test_attempt_token IS NULL
+            )
+            OR (
+                jobs_job_id IS NULL
+                AND jobs_lease_id IS NULL
+                AND test_attempt_token IS NOT NULL
+            )
+        ),
+        CHECK (
+            (state = 'processing' AND finished_at IS NULL)
+            OR (state != 'processing' AND finished_at IS NOT NULL)
+        ),
+        CHECK (
+            (state = 'retryable' AND requested_retry_delay_seconds IS NOT NULL)
+            OR (
+                state = 'outcome_unknown'
+                AND (
+                    requested_retry_delay_seconds IS NULL
+                    OR requested_retry_delay_seconds BETWEEN 1 AND 1800
+                )
+            )
+            OR (
+                state NOT IN ('retryable', 'outcome_unknown')
+                AND requested_retry_delay_seconds IS NULL
+            )
+        )
+    )
+"""
+
+
+def _sqlite_attempt_retry_delay_constraint_ready(
+    conn: sqlite3.Connection,
+) -> bool:
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master "
+        "WHERE type = 'table' AND name = 'admin_webhook_delivery_attempts'"
+    ).fetchone()
+    normalized = "".join(str(row[0] if row else "").lower().split())
+    return (
+        "state='outcome_unknown'and(requested_retry_delay_secondsisnullor"
+        "requested_retry_delay_secondsbetween1and1800)" in normalized
+        and "statenotin('retryable','outcome_unknown')" in normalized
+    )
+
+
+def _upgrade_sqlite_attempt_retry_delay_constraint(
+    conn: sqlite3.Connection,
+) -> None:
+    if _sqlite_attempt_retry_delay_constraint_ready(conn):
+        return
+    if _sqlite_table_exists(conn, "admin_webhook_delivery_attempts_v96"):
+        raise RuntimeError(
+            "Admin webhook attempt migration found an unsafe rebuild table"
+        )
+    schema_objects = conn.execute(
+        "SELECT sql FROM sqlite_master "
+        "WHERE tbl_name = 'admin_webhook_delivery_attempts' "
+        "AND type IN ('index', 'trigger') AND sql IS NOT NULL"
+    ).fetchall()
+    conn.execute(_ADMIN_WEBHOOK_DELIVERY_ATTEMPTS_SQLITE_V96)
+    conn.execute(
+        """
+        INSERT INTO admin_webhook_delivery_attempts_v96 (
+            id, delivery_id, attempt_number, jobs_job_id, jobs_lease_id,
+            test_attempt_token, started_at, finished_at, state, status_code,
+            latency_ms, reason_code, requested_retry_delay_seconds,
+            jobs_disposition_applied, created_at, request_timeout_seconds
+        )
+        SELECT
+            id, delivery_id, attempt_number, jobs_job_id, jobs_lease_id,
+            test_attempt_token, started_at, finished_at, state, status_code,
+            latency_ms, reason_code, requested_retry_delay_seconds,
+            jobs_disposition_applied, created_at, request_timeout_seconds
+        FROM admin_webhook_delivery_attempts
+        """
+    )
+    conn.execute("DROP TABLE admin_webhook_delivery_attempts")
+    conn.execute(
+        "ALTER TABLE admin_webhook_delivery_attempts_v96 "
+        "RENAME TO admin_webhook_delivery_attempts"
+    )
+    for (statement,) in schema_objects:
+        conn.execute(str(statement))
+    if conn.execute(
+        "PRAGMA foreign_key_check(admin_webhook_delivery_attempts)"
+    ).fetchall():
+        raise RuntimeError(
+            "Admin webhook attempt migration found invalid foreign keys"
+        )
+
+
 def migration_096_add_admin_webhook_delivery_recovery(
     conn: sqlite3.Connection,
 ) -> None:
@@ -2016,6 +2141,7 @@ def migration_096_add_admin_webhook_delivery_recovery(
             "ADD COLUMN request_timeout_seconds INTEGER "
             "CHECK (request_timeout_seconds BETWEEN 1 AND 30)"
         )
+    _upgrade_sqlite_attempt_retry_delay_constraint(conn)
 
     conn.execute(
         """

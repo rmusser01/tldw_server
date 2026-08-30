@@ -129,6 +129,7 @@ def test_sqlite_schema_has_expected_columns_and_indexes(tmp_path):
             "error_stack",
             "expired_lease_policy",
             "quarantine_threshold",
+            "prepared_disposition_fingerprint",
             "no_attempt_recovery_fingerprint",
         ]:
             assert expected in cols
@@ -139,10 +140,21 @@ def test_sqlite_schema_has_expected_columns_and_indexes(tmp_path):
         assert column_details["expired_lease_policy"][3] == 1
         assert column_details["expired_lease_policy"][4] == "'consume_retry'"
         assert column_details["quarantine_threshold"][3] == 0
+        assert column_details["prepared_disposition_fingerprint"][3] == 0
         assert column_details["no_attempt_recovery_fingerprint"][3] == 0
         # Archive table exists
         row = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='jobs_archive'").fetchone()
         assert row and row[0] == "jobs_archive"
+        archive_columns = {
+            item[1]
+            for item in conn.execute("PRAGMA table_info(jobs_archive)").fetchall()
+        }
+        assert {
+            "expired_lease_policy",
+            "quarantine_threshold",
+            "prepared_disposition_fingerprint",
+            "no_attempt_recovery_fingerprint",
+        } <= archive_columns
         # Partial unique index for idempotency exists
         idx = [r[1] for r in conn.execute("PRAGMA index_list('jobs')").fetchall()]
         assert any("idx_jobs_idempotent" in x for x in idx)
@@ -212,6 +224,14 @@ def test_sqlite_forward_migration_backfills_execution_controls(tmp_path):
         "(quarantine_threshold IS NULL OR quarantine_threshold > 0),\n",
         "",
     ).replace(
+        "  prepared_disposition_fingerprint TEXT CHECK (\n"
+        "    prepared_disposition_fingerprint IS NULL OR (\n"
+        "      LENGTH(prepared_disposition_fingerprint) = 64 AND\n"
+        "      prepared_disposition_fingerprint NOT GLOB '*[^0-9a-f]*'\n"
+        "    )\n"
+        "  ),\n",
+        "",
+    ).replace(
         "  no_attempt_recovery_fingerprint TEXT CHECK (\n"
         "    no_attempt_recovery_fingerprint IS NULL OR (\n"
         "      LENGTH(no_attempt_recovery_fingerprint) = 64 AND\n"
@@ -226,21 +246,37 @@ def test_sqlite_forward_migration_backfills_execution_controls(tmp_path):
             "INSERT INTO jobs(uuid, domain, queue, job_type, payload, status) "
             "VALUES('legacy', 'legacy', 'default', 'work', '{}', 'queued')"
         )
+        conn.execute(
+            "INSERT INTO jobs_archive(uuid, domain, queue, job_type, payload, status) "
+            "VALUES('legacy-archive', 'legacy', 'default', 'work', '{}', 'completed')"
+        )
 
     ensure_jobs_tables(db_path)
 
     with sqlite3.connect(db_path) as conn:
         row = conn.execute(
             "SELECT expired_lease_policy, quarantine_threshold, "
-            "no_attempt_recovery_fingerprint FROM jobs WHERE id=1"
+            "prepared_disposition_fingerprint, no_attempt_recovery_fingerprint "
+            "FROM jobs WHERE id=1"
         ).fetchone()
-        assert row == ("consume_retry", None, None)
+        assert row == ("consume_retry", None, None, None)
+        archive_row = conn.execute(
+            "SELECT expired_lease_policy, quarantine_threshold, "
+            "prepared_disposition_fingerprint, no_attempt_recovery_fingerprint "
+            "FROM jobs_archive WHERE uuid='legacy-archive'"
+        ).fetchone()
+        assert archive_row == ("consume_retry", None, None, None)
         with pytest.raises(sqlite3.IntegrityError):
             conn.execute(
                 "UPDATE jobs SET expired_lease_policy='invalid' WHERE id=1"
             )
         with pytest.raises(sqlite3.IntegrityError):
             conn.execute("UPDATE jobs SET quarantine_threshold=0 WHERE id=1")
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "UPDATE jobs_archive SET prepared_disposition_fingerprint='invalid' "
+                "WHERE uuid='legacy-archive'"
+            )
         with pytest.raises(sqlite3.IntegrityError):
             conn.execute(
                 "UPDATE jobs SET no_attempt_recovery_fingerprint='invalid' WHERE id=1"

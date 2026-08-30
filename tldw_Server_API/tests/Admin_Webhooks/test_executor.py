@@ -175,6 +175,59 @@ def test_attempt_contracts_are_frozen_bounded_and_hide_sensitive_inputs(
 
 
 @pytest.mark.unit
+async def test_executor_repr_hides_normalized_request_material(
+    executor_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path_canary = "executor-path-canary"
+    query_canary = "executor-query-canary"
+    body_canary = b'{"event":"executor-body-canary"}'
+    target = ValidatedWebhookTarget(
+        url=(
+            f"https://receiver.example/{path_canary}"
+            f"?credential={query_canary}"
+        ),
+        hostname="receiver.example",
+        target_display="https://receiver.example",
+    )
+    normalized = executor_module._normalize_target(
+        target,
+        allow_http_dev=False,
+    )
+    normalized_rendered = repr(normalized)
+
+    assert normalized.url.endswith(
+        f"/{path_canary}?credential={query_canary}"
+    )
+    assert normalized.request_target.endswith(
+        f"/{path_canary}?credential={query_canary}"
+    )
+    assert normalized.host == "receiver.example"
+    assert "receiver.example" in normalized_rendered
+    assert path_canary not in normalized_rendered
+    assert query_canary not in normalized_rendered
+
+    egress = EgressRecorder(_status(200))
+    executor = _executor(executor_module, monkeypatch, egress)
+    await executor.execute(
+        _command(executor_module, target=target, body=body_canary)
+    )
+
+    request = egress.requests[0]
+    rendered = repr(request)
+    signature = _header(request, "x-tldw-webhook-signature")
+    assert request.body == body_canary
+    assert signature.startswith("v1=")
+    for canary in (
+        path_canary,
+        query_canary,
+        "executor-body-canary",
+        signature,
+    ):
+        assert canary not in rendered
+
+
+@pytest.mark.unit
 async def test_published_signature_vector_and_exact_request_headers(
     executor_module: ModuleType,
     monkeypatch: pytest.MonkeyPatch,

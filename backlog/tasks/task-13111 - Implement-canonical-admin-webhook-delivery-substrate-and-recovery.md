@@ -4,7 +4,7 @@ title: Implement canonical admin webhook delivery substrate and recovery
 status: In Progress
 assignee: []
 created_date: '2026-08-23 03:15'
-updated_date: '2026-08-30 15:45'
+updated_date: '2026-08-30 17:42'
 labels:
   - admin
   - webhooks
@@ -235,6 +235,8 @@ Task 10 complete: exposed canonical persisted test, atomic manual redelivery, an
 2026-08-30: Independent Task 11 Fix Round 5 re-review found 0 Critical, 0 Important, and 0 Minor issues. All status-propagation findings are closed; all seven Task 12 blocks remain Bash 3.2 compatible; required interpreter, PostgreSQL, host-network, pinned-scope, and OpenAPI contracts remain correct; and the authoritative host-enabled 1,489-pass/zero-skip Step 1 evidence remains valid. Task 11 is complete and Task 12 is unblocked. Bandit raw status 1 (17 Low, 43 Medium, 0 High) remains pending Task 12 manual baseline classification.
 
 2026-08-30: PR 2 aggregate verification complete at tested source HEAD cef9ab73ff183824dc483207dbb6a4498b985050, pinned to base 1ad2f1e5b30c49ea75396e4b713496b73e875fec. Valid serial gates: Step 1 1,489 passed/0 skipped/2,654 warnings; required PostgreSQL/four-backend Step 2 307 passed/0 skipped/616 warnings; protocol/security Step 3 423 passed/0 skipped/613 warnings, all seed 20260829. Ruff, diff, sensitive-data, PR 3 exclusion/legacy isolation, and authoritative OpenAPI gates passed. Bandit raw status 1 was manually classified: 43 fixed-query B608, 14 intentional fail-open observer, 3 enum/schema false positives, 0 High, no Task 12 suppression. Exact commands, backend/crash/security mappings, warnings, invalid-run accounting, and default-off scope are recorded in Docs/Evidence/Admin_Webhooks_PR2_Verification.md. Task remains In Progress for independent Task 13 review and PR creation; no merge or activation is authorized.
+
+2026-08-30: Task 13 Final Review Fix Round 1 resolved all five validated findings: fail-closed mode guards on every delivery surface; mandatory archive proof for terminal canonical Jobs rows; request-material repr redaction; persisted stale outcome-unknown retry delay with dual-backend upgrades; and private-address blocking during webhook registration. Strict RED/GREEN: mode 4 failed -> 4 passed; Jobs prune 1 failed and SQLite archive migrations 2 failed -> SQLite/PostgreSQL prune and migration suites passed; repr 2 failed -> 2 passed; stale evidence SQLite repository, SQLite migration, and PostgreSQL migration each failed 1 -> all passed; policy 3 failed -> 3 passed. Final gates: focused union 648 passed; four-backend matrix 76 passed plus current archived lost-ack matrix node 16 passed; Jobs/WorkerSDK compatibility 353 passed and migration compatibility 2 passed; every required PostgreSQL command had zero skips. Ruff, Python 3.10 compile, diff/scope/import scans passed; Bandit manual review found 0 High and added no suppression. TASK-13111 remains In Progress; default-off and PR 3 exclusions remain intact.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

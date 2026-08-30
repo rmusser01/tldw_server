@@ -114,6 +114,10 @@ SLIDES_ARCHIVE_EXACT_FIELDS = (
     "status",
     "priority",
     "max_retries",
+    "expired_lease_policy",
+    "quarantine_threshold",
+    "prepared_disposition_fingerprint",
+    "no_attempt_recovery_fingerprint",
     "retry_count",
     "available_at",
     "started_at",
@@ -438,6 +442,20 @@ CREATE TABLE IF NOT EXISTS jobs_archive (
   status TEXT NOT NULL,
   priority INTEGER,
   max_retries INTEGER,
+  expired_lease_policy TEXT NOT NULL DEFAULT 'consume_retry' CHECK (expired_lease_policy IN ('consume_retry','requeue_no_attempt')),
+  quarantine_threshold INTEGER CHECK (quarantine_threshold IS NULL OR quarantine_threshold > 0),
+  prepared_disposition_fingerprint TEXT CHECK (
+    prepared_disposition_fingerprint IS NULL OR (
+      LENGTH(prepared_disposition_fingerprint) = 64 AND
+      prepared_disposition_fingerprint NOT GLOB '*[^0-9a-f]*'
+    )
+  ),
+  no_attempt_recovery_fingerprint TEXT CHECK (
+    no_attempt_recovery_fingerprint IS NULL OR (
+      LENGTH(no_attempt_recovery_fingerprint) = 64 AND
+      no_attempt_recovery_fingerprint NOT GLOB '*[^0-9a-f]*'
+    )
+  ),
   retry_count INTEGER,
   available_at TEXT,
   started_at TEXT,
@@ -1324,6 +1342,39 @@ def ensure_jobs_tables(db_path: Path | None = None) -> Path:
                 conn.execute(
                     "ALTER TABLE jobs ADD COLUMN no_attempt_recovery_fingerprint TEXT "
                     "CHECK (no_attempt_recovery_fingerprint IS NULL OR "
+                    "(LENGTH(no_attempt_recovery_fingerprint) = 64 AND "
+                    "no_attempt_recovery_fingerprint NOT GLOB '*[^0-9a-f]*'))"
+                )
+            archive_columns = {
+                str(row[1])
+                for row in conn.execute(
+                    "PRAGMA table_info(jobs_archive)"
+                ).fetchall()
+            }
+            if "expired_lease_policy" not in archive_columns:
+                conn.execute(
+                    "ALTER TABLE jobs_archive ADD COLUMN expired_lease_policy TEXT "
+                    "NOT NULL DEFAULT 'consume_retry' CHECK "
+                    "(expired_lease_policy IN ('consume_retry','requeue_no_attempt'))"
+                )
+            if "quarantine_threshold" not in archive_columns:
+                conn.execute(
+                    "ALTER TABLE jobs_archive ADD COLUMN quarantine_threshold INTEGER "
+                    "CHECK (quarantine_threshold IS NULL OR quarantine_threshold > 0)"
+                )
+            if "prepared_disposition_fingerprint" not in archive_columns:
+                conn.execute(
+                    "ALTER TABLE jobs_archive ADD COLUMN "
+                    "prepared_disposition_fingerprint TEXT CHECK "
+                    "(prepared_disposition_fingerprint IS NULL OR "
+                    "(LENGTH(prepared_disposition_fingerprint) = 64 AND "
+                    "prepared_disposition_fingerprint NOT GLOB '*[^0-9a-f]*'))"
+                )
+            if "no_attempt_recovery_fingerprint" not in archive_columns:
+                conn.execute(
+                    "ALTER TABLE jobs_archive ADD COLUMN "
+                    "no_attempt_recovery_fingerprint TEXT CHECK "
+                    "(no_attempt_recovery_fingerprint IS NULL OR "
                     "(LENGTH(no_attempt_recovery_fingerprint) = 64 AND "
                     "no_attempt_recovery_fingerprint NOT GLOB '*[^0-9a-f]*'))"
                 )

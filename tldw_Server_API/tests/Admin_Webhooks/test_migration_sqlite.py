@@ -279,7 +279,7 @@ def _insert_command_event(conn: sqlite3.Connection, event_id: str = "event-1") -
 
 @pytest.mark.parametrize("starting_version", [0, 79, 80, 82, 93, 94])
 @pytest.mark.unit
-def test_sqlite_095_is_additive_across_supported_upgrade_points(
+def test_sqlite_096_is_additive_across_supported_upgrade_points(
     tmp_path: Path,
     starting_version: int,
 ) -> None:
@@ -415,6 +415,33 @@ def test_sqlite_096_preserves_094_rows_and_enforces_new_schema_bounds() -> None:
     assert conn.execute(
         "SELECT id, request_timeout_seconds FROM admin_webhook_delivery_attempts"
     ).fetchone() == ("attempt-1", None)
+    conn.execute(
+        """
+        UPDATE admin_webhook_delivery_attempts
+        SET state = 'outcome_unknown', finished_at = '2026-07-01T00:01:00Z',
+            reason_code = 'outcome_unknown',
+            requested_retry_delay_seconds = 60
+        WHERE id = 'attempt-1'
+        """
+    )
+    assert conn.execute(
+        "SELECT state, requested_retry_delay_seconds "
+        "FROM admin_webhook_delivery_attempts WHERE id = 'attempt-1'"
+    ).fetchone() == ("outcome_unknown", 60)
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            "UPDATE admin_webhook_delivery_attempts SET state = 'failed' "
+            "WHERE id = 'attempt-1'"
+        )
+    conn.execute(
+        "UPDATE admin_webhook_delivery_attempts "
+        "SET requested_retry_delay_seconds = NULL WHERE id = 'attempt-1'"
+    )
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            "UPDATE admin_webhook_delivery_attempts SET state = 'retryable' "
+            "WHERE id = 'attempt-1'"
+        )
     assert conn.execute(
         "SELECT schema_version FROM admin_webhook_migration_state WHERE singleton_id = 1"
     ).fetchone() == (1,)
@@ -564,7 +591,7 @@ def test_sqlite_096_preserves_094_rows_and_enforces_new_schema_bounds() -> None:
 
 
 @pytest.mark.unit
-async def test_sqlite_delivery_schema_ready_requires_the_095_extension(
+async def test_sqlite_delivery_schema_ready_requires_the_096_extension(
     tmp_path: Path,
 ) -> None:
     db_path = tmp_path / "delivery-schema-ready.db"

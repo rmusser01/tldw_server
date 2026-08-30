@@ -4854,12 +4854,12 @@ class AdminWebhookUnitOfWork(_ConnectionAdapter):
             UPDATE admin_webhook_delivery_attempts
             SET state = 'outcome_unknown', finished_at = ?,
                 reason_code = 'outcome_unknown',
-                requested_retry_delay_seconds = NULL
+                requested_retry_delay_seconds = ?
             WHERE id = ? AND delivery_id = ? AND jobs_job_id = ?
               AND state = 'processing'
             RETURNING id
             """,
-            (stale_at, attempt_id, delivery_id, jobs_job_id),
+            (stale_at, delay, attempt_id, delivery_id, jobs_job_id),
         )
         terminal_at = (
             stale_at if target_state in DeliveryState.terminal_states() else None

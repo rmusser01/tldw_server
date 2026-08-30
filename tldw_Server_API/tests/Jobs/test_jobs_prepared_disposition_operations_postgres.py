@@ -23,6 +23,7 @@ from tldw_Server_API.app.core.Jobs.operations.contracts import (
     NoTransitionReason,
     OperationOutcome,
     PreparedJobDisposition,
+    project_admin_webhook_disposition_marker,
 )
 from tldw_Server_API.app.core.Jobs.operations.postgres.lifecycle import (
     ensure_lease_horizon as postgres_ensure_lease_horizon,
@@ -122,6 +123,63 @@ def test_postgres_complete_is_atomic_idempotent_and_records_bounded_proof(
         "attempt_id",
         "applied_at",
     }
+
+
+def test_postgres_prune_preserves_unacknowledged_canonical_disposition_proof(
+    jobs_pg_dsn,
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("JOBS_ARCHIVE_BEFORE_DELETE", raising=False)
+    manager = _manager(jobs_pg_dsn)
+    job = _canonical(manager, suffix="pruned-disposition")
+    acquired = _acquire(manager)
+    delivery_id = job["payload"]["delivery_id"]
+    disposition = PreparedJobDisposition.complete(
+        token=_token("0"),
+        delivery_id=delivery_id,
+        attempt_id=str(uuid4()),
+    )
+    assert _apply(
+        manager,
+        job,
+        disposition,
+        leased=acquired,
+    ).outcome is OperationOutcome.APPLIED
+    unrelated = manager.create_job(
+        domain="other",
+        queue="default",
+        job_type="ordinary",
+        payload={"kind": "ordinary"},
+        owner_user_id=None,
+    )
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE jobs SET status='completed', "
+            "completed_at=NOW() - INTERVAL '40 days' WHERE id = ANY(%s)",
+            ([int(job["id"]), int(unrelated["id"])],),
+        )
+
+    assert manager.prune_jobs(statuses=["completed"], older_than_days=30) == 2
+
+    command = FindJobByIdentityCommand(
+        domain="admin_webhooks",
+        queue="delivery",
+        job_type="admin_webhook_delivery",
+        idempotency_key=f"admin-webhook-delivery:{delivery_id}",
+        expected_payload={"delivery_id": delivery_id},
+    )
+    found = manager.find_job_by_identity(command)
+    assert found.state is JobIdentityLookupState.ARCHIVED
+    assert found.row is not None
+    marker = project_admin_webhook_disposition_marker(
+        found.row,
+        expected_payload=command.expected_payload,
+        archived=True,
+    )
+    assert marker is not None
+    assert marker.token == disposition.token
+    assert marker.fingerprint == found.row["prepared_disposition_fingerprint"]
+    assert manager.get_job_or_archived_by_uuid(unrelated["uuid"]) is None
 
 
 def test_postgres_retry_exact_schedule_and_historical_replay_after_reacquire(
@@ -522,8 +580,10 @@ def test_postgres_identity_lookup_is_read_only_and_fails_closed_on_ambiguity(
     with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO jobs_archive(id, uuid, domain, queue, job_type, "
-            "idempotency_key, payload, result, status) "
-            "VALUES(%s,%s,%s,%s,%s,%s,%s::jsonb,NULL,'completed')",
+            "idempotency_key, payload, result, status, priority, max_retries, "
+            "expired_lease_policy, quarantine_threshold) "
+            "VALUES(%s,%s,%s,%s,%s,%s,%s::jsonb,NULL,'completed',5,3,"
+            "'requeue_no_attempt',5)",
             (
                 job["id"],
                 job["uuid"],
@@ -540,8 +600,10 @@ def test_postgres_identity_lookup_is_read_only_and_fails_closed_on_ambiguity(
     with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO jobs_archive(id, uuid, domain, queue, job_type, "
-            "idempotency_key, payload, result, status) "
-            "VALUES(%s,%s,%s,%s,%s,%s,%s::jsonb,NULL,'completed')",
+            "idempotency_key, payload, result, status, priority, max_retries, "
+            "expired_lease_policy, quarantine_threshold) "
+            "VALUES(%s,%s,%s,%s,%s,%s,%s::jsonb,NULL,'completed',5,3,"
+            "'requeue_no_attempt',5)",
             (
                 int(job["id"]) + 1,
                 str(uuid4()),

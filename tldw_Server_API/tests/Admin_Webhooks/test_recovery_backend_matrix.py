@@ -1382,6 +1382,37 @@ async def test_enqueue_foreign_claim_cancellation_and_expiry_matrix(
         assert queue.cancel_calls == [after_create_id, processing_id]
 
 
+async def _age_terminal_job_for_prune(
+    manager: JobManager,
+    *,
+    jobs_backend: str,
+    jobs_job_id: int,
+    jobs_pg_dsn: str,
+) -> None:
+    if jobs_backend == "postgres":
+        connection = await asyncpg.connect(jobs_pg_dsn)
+        try:
+            await connection.execute(
+                "UPDATE jobs SET completed_at=NOW() - INTERVAL '40 days' "
+                "WHERE id=$1",
+                jobs_job_id,
+            )
+        finally:
+            await connection.close()
+        return
+
+    connection = manager._connect()
+    try:
+        completed_at = datetime.now(timezone.utc) - timedelta(days=40)
+        connection.execute(
+            "UPDATE jobs SET completed_at=? WHERE id=?",
+            (completed_at.isoformat(), jobs_job_id),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+
 def _prepared_from_pending(pending) -> PreparedJobDisposition:
     kwargs = {
         "token": pending.token,
@@ -1469,7 +1500,9 @@ async def test_authnz_disposition_lost_ack_reconciles_across_backend_matrix(
     tmp_path: Path,
     test_db_pool,
     matrix_jobs_pg_dsn: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.delenv("JOBS_ARCHIVE_BEFORE_DELETE", raising=False)
     manager = _jobs_manager(
         jobs_backend,
         tmp_path=tmp_path,
@@ -1558,6 +1591,20 @@ async def test_authnz_disposition_lost_ack_reconciles_across_backend_matrix(
         assert applied.state == jobs_state
         stranded = await repository.get_delivery_bundle(delivery_id)
         assert stranded is not None and not stranded.delivery.jobs_disposition_applied
+        if jobs_state in {"completed", "failed", "cancelled", "quarantined"}:
+            await _age_terminal_job_for_prune(
+                manager,
+                jobs_backend=jobs_backend,
+                jobs_job_id=int(acquired["id"]),
+                jobs_pg_dsn=matrix_jobs_pg_dsn,
+            )
+            assert (
+                manager.prune_jobs(
+                    statuses=[jobs_state],
+                    older_than_days=30,
+                )
+                == 1
+            )
 
         repaired = await _reconciler(
             repository,

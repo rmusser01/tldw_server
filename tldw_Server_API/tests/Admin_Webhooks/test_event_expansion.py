@@ -3227,6 +3227,33 @@ async def exercise_task8_attempt_reservation_and_recovery_contract(
     )
     assert attempts_after[0].state is AttemptState.OUTCOME_UNKNOWN
     assert attempts_after[0].finished_at == stale_at
+    assert attempts_after[0].requested_retry_delay_seconds == 60
+
+    async with repository.transaction() as tx:
+        assert await tx.acknowledge_jobs_disposition(
+            stale_delivery_id,
+            opaque_token("task8-stale-retry"),
+            "queued",
+        )
+    attempts_after_advancement = await repository.list_delivery_attempts(
+        stale_webhook_id,
+        stale_delivery_id,
+    )
+    assert attempts_after_advancement[0].requested_retry_delay_seconds == 60
+    history_item = await repository.get_delivery_history_item(
+        stale_webhook_id,
+        stale_delivery_id,
+    )
+    assert history_item is not None
+    assert history_item.attempts[0].requested_retry_delay_seconds == 60
+    rendered_history = repr(history_item)
+    for hidden_coordinate in (
+        "task8-stale-job",
+        "task8-stale-lease",
+        opaque_token("task8-stale-retry"),
+        opaque_token("unused-stale-reservation"),
+    ):
+        assert hidden_coordinate not in rendered_history
 
     page = await repository.list_pending_jobs_dispositions(limit=1)
     assert len(page) == 1

@@ -2743,9 +2743,19 @@ CANONICAL_ADMIN_WEBHOOK_POSTGRES_DDL = (
             (state = 'processing' AND finished_at IS NULL)
             OR (state != 'processing' AND finished_at IS NOT NULL)
         ),
-        CHECK (
+        CONSTRAINT admin_webhook_attempt_retry_delay_state CHECK (
             (state = 'retryable' AND requested_retry_delay_seconds IS NOT NULL)
-            OR (state != 'retryable' AND requested_retry_delay_seconds IS NULL)
+            OR (
+                state = 'outcome_unknown'
+                AND (
+                    requested_retry_delay_seconds IS NULL
+                    OR requested_retry_delay_seconds BETWEEN 1 AND 1800
+                )
+            )
+            OR (
+                state NOT IN ('retryable', 'outcome_unknown')
+                AND requested_retry_delay_seconds IS NULL
+            )
         )
     )
     """,
@@ -3214,6 +3224,32 @@ ADMIN_WEBHOOK_DELIVERY_RECOVERY_POSTGRES_DDL = (
 )
 
 
+_ADMIN_WEBHOOK_RETRY_DELAY_STATE_CONSTRAINT = (
+    "admin_webhook_attempt_retry_delay_state"
+)
+
+_ADMIN_WEBHOOK_RETRY_DELAY_STATE_POSTGRES_DDL = """
+ALTER TABLE admin_webhook_delivery_attempts
+ADD CONSTRAINT admin_webhook_attempt_retry_delay_state CHECK (
+    (
+        state = 'retryable'
+        AND requested_retry_delay_seconds IS NOT NULL
+    )
+    OR (
+        state = 'outcome_unknown'
+        AND (
+            requested_retry_delay_seconds IS NULL
+            OR requested_retry_delay_seconds BETWEEN 1 AND 1800
+        )
+    )
+    OR (
+        state NOT IN ('retryable', 'outcome_unknown')
+        AND requested_retry_delay_seconds IS NULL
+    )
+)
+"""
+
+
 async def ensure_admin_webhook_canonical_tables_pg(
     pool: DatabasePool | None = None,
 ) -> bool:
@@ -3225,6 +3261,43 @@ async def ensure_admin_webhook_canonical_tables_pg(
         async with db_pool.transaction() as conn:
             for statement in CANONICAL_ADMIN_WEBHOOK_POSTGRES_DDL:
                 await conn.execute(statement)
+            legacy_constraints = await conn.fetch(
+                """
+                SELECT conname
+                FROM pg_constraint
+                WHERE conrelid = 'admin_webhook_delivery_attempts'::regclass
+                  AND contype = 'c'
+                  AND conname != $1
+                  AND pg_get_constraintdef(oid) LIKE '%state%'
+                  AND pg_get_constraintdef(oid)
+                      LIKE '%requested_retry_delay_seconds%'
+                """,
+                _ADMIN_WEBHOOK_RETRY_DELAY_STATE_CONSTRAINT,
+            )
+            for constraint in legacy_constraints:
+                quoted_name = await conn.fetchval(
+                    "SELECT quote_ident($1)", constraint["conname"]
+                )
+                await conn.execute(
+                    "ALTER TABLE admin_webhook_delivery_attempts "
+                    f"DROP CONSTRAINT {quoted_name}"
+                )
+            constraint_exists = await conn.fetchval(
+                """
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM pg_constraint
+                    WHERE conrelid =
+                        'admin_webhook_delivery_attempts'::regclass
+                      AND conname = $1
+                )
+                """,
+                _ADMIN_WEBHOOK_RETRY_DELAY_STATE_CONSTRAINT,
+            )
+            if not constraint_exists:
+                await conn.execute(
+                    _ADMIN_WEBHOOK_RETRY_DELAY_STATE_POSTGRES_DDL
+                )
             for statement in ADMIN_WEBHOOK_DELIVERY_RECOVERY_POSTGRES_DDL:
                 await conn.execute(statement)
             await conn.execute(

@@ -354,6 +354,7 @@ async def exercise_history_projection_is_set_based_and_key_independent(
         event_id_factory=lambda: canonical_uuid4("unused-history-event"),
         delivery_id_factory=lambda: canonical_uuid4("unused-history-delivery"),
         clock=lambda: NOW,
+        settings=settings(),
     )
     page = await service.list_delivery_history(
         registration.id,
@@ -1691,6 +1692,7 @@ async def test_history_service_localizes_repository_not_found_mapping() -> None:
             "unused-missing-history-delivery"
         ),
         clock=lambda: NOW,
+        settings=settings(),
     )
 
     with pytest.raises(WebhookError) as missing:

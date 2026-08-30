@@ -134,6 +134,8 @@ def canonical_admin_webhook_row_matches(
 ) -> bool:
     """Verify immutable canonical identity and controls on a persisted row."""
 
+    if not isinstance(archived, bool):
+        return False
     try:
         delivery_id = canonical_admin_webhook_delivery_id(expected_payload)
     except ValueError:
@@ -150,18 +152,9 @@ def canonical_admin_webhook_row_matches(
     marker_valid, marker = _canonical_admin_webhook_marker(
         row,
         delivery_id=delivery_id,
-        archived=archived,
     )
     if not marker_valid:
         return False
-    if archived:
-        return (
-            row.get("owner_user_id") is None
-            and row.get("project_id") is None
-            and row.get("batch_group") is None
-            and row.get("priority") in {None, ADMIN_WEBHOOK_DELIVERY_PRIORITY}
-            and row.get("max_retries") in {None, ADMIN_WEBHOOK_DELIVERY_MAX_RETRIES}
-        )
     if (
         row.get("owner_user_id") is not None
         or row.get("project_id") is not None
@@ -262,14 +255,13 @@ def _canonical_admin_webhook_marker(
     row: dict[str, Any],
     *,
     delivery_id: str,
-    archived: bool,
 ) -> tuple[bool, dict[str, Any] | None]:
     """Validate the strict public disposition marker without exposing facts."""
 
     marker = row.get("result")
     fingerprint = row.get("prepared_disposition_fingerprint")
     if marker is None:
-        return (archived or fingerprint is None), None
+        return fingerprint is None, None
     if isinstance(marker, str):
         if len(marker.encode("utf-8")) > _ADMIN_WEBHOOK_MARKER_MAX_BYTES:
             return False, None
@@ -290,7 +282,7 @@ def _canonical_admin_webhook_marker(
         return False, None
     if len(encoded_marker) > _ADMIN_WEBHOOK_MARKER_MAX_BYTES:
         return False, None
-    if not archived and (
+    if (
         not isinstance(fingerprint, str)
         or _OPAQUE_TOKEN_RE.fullmatch(fingerprint) is None
     ):
@@ -388,7 +380,6 @@ def project_admin_webhook_disposition_marker(
     marker_valid, marker = _canonical_admin_webhook_marker(
         row,
         delivery_id=delivery_id,
-        archived=archived,
     )
     fingerprint = row.get("prepared_disposition_fingerprint")
     if (

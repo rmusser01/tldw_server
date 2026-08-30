@@ -165,11 +165,11 @@ _Egress: TypeAlias = Callable[
 
 @dataclass(frozen=True, slots=True)
 class _NormalizedTarget:
-    url: str
+    url: str = field(repr=False)
     scheme: str
     host: str
     port: int
-    request_target: str
+    request_target: str = field(repr=False)
 
 
 _HTTP_HOP_REASONS = {

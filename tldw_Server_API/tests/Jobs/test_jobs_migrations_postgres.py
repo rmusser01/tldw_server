@@ -151,11 +151,29 @@ def test_pg_forward_migration_backfills_execution_controls(jobs_pg_dsn):
             cur.execute("ALTER TABLE jobs DROP COLUMN IF EXISTS quarantine_threshold")
             cur.execute(
                 "ALTER TABLE jobs DROP COLUMN IF EXISTS "
+                "prepared_disposition_fingerprint"
+            )
+            cur.execute(
+                "ALTER TABLE jobs DROP COLUMN IF EXISTS "
                 "no_attempt_recovery_fingerprint"
             )
+            for column in (
+                "expired_lease_policy",
+                "quarantine_threshold",
+                "prepared_disposition_fingerprint",
+                "no_attempt_recovery_fingerprint",
+            ):
+                cur.execute(
+                    f"ALTER TABLE jobs_archive DROP COLUMN IF EXISTS {column}"
+                )
             cur.execute(
                 "INSERT INTO jobs(uuid, domain, queue, job_type, payload, status) "
                 "VALUES('legacy-controls', 'legacy', 'default', 'work', '{}'::jsonb, 'queued')"
+            )
+            cur.execute(
+                "INSERT INTO jobs_archive(uuid, domain, queue, job_type, payload, status) "
+                "VALUES('legacy-archive-controls', 'legacy', 'default', 'work', "
+                "'{}'::jsonb, 'completed')"
             )
 
     ensure_jobs_tables_pg(jobs_pg_dsn)
@@ -164,10 +182,17 @@ def test_pg_forward_migration_backfills_execution_controls(jobs_pg_dsn):
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT expired_lease_policy, quarantine_threshold, "
-                "no_attempt_recovery_fingerprint FROM jobs "
+                "prepared_disposition_fingerprint, no_attempt_recovery_fingerprint "
+                "FROM jobs "
                 "WHERE uuid='legacy-controls'"
             )
-            assert cur.fetchone() == ("consume_retry", None, None)
+            assert cur.fetchone() == ("consume_retry", None, None, None)
+            cur.execute(
+                "SELECT expired_lease_policy, quarantine_threshold, "
+                "prepared_disposition_fingerprint, no_attempt_recovery_fingerprint "
+                "FROM jobs_archive WHERE uuid='legacy-archive-controls'"
+            )
+            assert cur.fetchone() == ("consume_retry", None, None, None)
             cur.execute("SAVEPOINT invalid_policy")
             with pytest.raises(psycopg.errors.CheckViolation):
                 cur.execute(
@@ -179,6 +204,12 @@ def test_pg_forward_migration_backfills_execution_controls(jobs_pg_dsn):
                 cur.execute(
                     "UPDATE jobs SET quarantine_threshold=0 "
                     "WHERE uuid='legacy-controls'"
+                )
+            cur.execute("ROLLBACK TO SAVEPOINT invalid_policy")
+            with pytest.raises(psycopg.errors.CheckViolation):
+                cur.execute(
+                    "UPDATE jobs_archive SET prepared_disposition_fingerprint='invalid' "
+                    "WHERE uuid='legacy-archive-controls'"
                 )
             cur.execute("ROLLBACK TO SAVEPOINT invalid_policy")
             with pytest.raises(psycopg.errors.CheckViolation):

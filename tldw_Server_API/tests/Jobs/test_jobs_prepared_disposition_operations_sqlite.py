@@ -18,6 +18,7 @@ from tldw_Server_API.app.core.Jobs.operations.contracts import (
     NoTransitionReason,
     OperationOutcome,
     PreparedJobDisposition,
+    project_admin_webhook_disposition_marker,
 )
 from tldw_Server_API.app.core.Jobs.operations.sqlite.lifecycle import (
     ensure_lease_horizon as sqlite_ensure_lease_horizon,
@@ -119,6 +120,69 @@ def test_sqlite_complete_is_atomic_idempotent_and_records_bounded_proof(tmp_path
         "attempt_id",
         "applied_at",
     }
+
+
+def test_sqlite_prune_preserves_unacknowledged_canonical_disposition_proof(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("JOBS_ARCHIVE_BEFORE_DELETE", raising=False)
+    manager = JobManager(tmp_path / "pruned-disposition.db")
+    job = _canonical(manager, suffix="pruned-disposition")
+    acquired = _acquire(manager)
+    delivery_id = json.loads(job["payload"])["delivery_id"]
+    disposition = PreparedJobDisposition.complete(
+        token=_token("0"),
+        delivery_id=delivery_id,
+        attempt_id=str(uuid4()),
+    )
+    assert _apply(
+        manager,
+        job,
+        disposition,
+        leased=acquired,
+    ).outcome is OperationOutcome.APPLIED
+    unrelated = manager.create_job(
+        domain="other",
+        queue="default",
+        job_type="ordinary",
+        payload={"kind": "ordinary"},
+        owner_user_id=None,
+    )
+    old = (datetime.now(timezone.utc) - timedelta(days=40)).strftime(
+        "%Y-%m-%d %H:%M:%S.%f"
+    )
+    conn = manager._connect()
+    try:
+        conn.execute(
+            "UPDATE jobs SET status='completed', completed_at=? WHERE id IN (?,?)",
+            (old, job["id"], unrelated["id"]),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    assert manager.prune_jobs(statuses=["completed"], older_than_days=30) == 2
+
+    command = FindJobByIdentityCommand(
+        domain="admin_webhooks",
+        queue="delivery",
+        job_type="admin_webhook_delivery",
+        idempotency_key=f"admin-webhook-delivery:{delivery_id}",
+        expected_payload={"delivery_id": delivery_id},
+    )
+    found = manager.find_job_by_identity(command)
+    assert found.state is JobIdentityLookupState.ARCHIVED
+    assert found.row is not None
+    marker = project_admin_webhook_disposition_marker(
+        found.row,
+        expected_payload=command.expected_payload,
+        archived=True,
+    )
+    assert marker is not None
+    assert marker.token == disposition.token
+    assert marker.fingerprint == found.row["prepared_disposition_fingerprint"]
+    assert manager.get_job_or_archived_by_uuid(unrelated["uuid"]) is None
 
 
 def test_sqlite_retry_uses_exact_schedule_and_historical_replay_is_nonmutating(
@@ -568,7 +632,9 @@ def test_sqlite_identity_lookup_is_read_only_active_archived_missing_and_conflic
     try:
         conn.execute(
             "INSERT INTO jobs_archive(id, uuid, domain, queue, job_type, "
-            "idempotency_key, payload, result, status) VALUES(?,?,?,?,?,?,?,?,?)",
+            "idempotency_key, payload, result, status, priority, max_retries, "
+            "expired_lease_policy, quarantine_threshold) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 job["id"],
                 job["uuid"],
@@ -579,6 +645,10 @@ def test_sqlite_identity_lookup_is_read_only_active_archived_missing_and_conflic
                 json.dumps(payload),
                 None,
                 "completed",
+                5,
+                3,
+                "requeue_no_attempt",
+                5,
             ),
         )
         conn.execute("DELETE FROM jobs WHERE id=?", (job["id"],))
@@ -591,7 +661,9 @@ def test_sqlite_identity_lookup_is_read_only_active_archived_missing_and_conflic
     try:
         conn.execute(
             "INSERT INTO jobs_archive(id, uuid, domain, queue, job_type, "
-            "idempotency_key, payload, result, status) VALUES(?,?,?,?,?,?,?,?,?)",
+            "idempotency_key, payload, result, status, priority, max_retries, "
+            "expired_lease_policy, quarantine_threshold) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 int(job["id"]) + 1,
                 str(uuid4()),
@@ -602,6 +674,10 @@ def test_sqlite_identity_lookup_is_read_only_active_archived_missing_and_conflic
                 json.dumps(payload),
                 None,
                 "completed",
+                5,
+                3,
+                "requeue_no_attempt",
+                5,
             ),
         )
         conn.commit()

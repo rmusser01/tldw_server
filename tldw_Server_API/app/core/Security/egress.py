@@ -889,6 +889,7 @@ def evaluate_platform_webhook_url_policy(url: str) -> URLPolicyResult:
         url,
         allowlist=allowlist,
         denylist=denylist,
+        block_private_override=True,
         sensitive_observability=True,
     )
 

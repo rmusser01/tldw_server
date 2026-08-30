@@ -102,6 +102,7 @@ from .operations.contracts import (
     TerminalOperationResultPatchOutcome,
     canonical_admin_webhook_delivery_id,
     canonical_admin_webhook_idempotency_key,
+    canonical_admin_webhook_row_matches,
     is_admin_webhook_delivery_queue,
 )
 from .operations.postgres import acquire_job as _postgres_acquire_job
@@ -9640,6 +9641,60 @@ class JobManager:
             rows = list(conn.execute(query, params).fetchall() or [])
         return self._validate_receipt_candidate_rows(rows)
 
+    def _canonical_admin_webhook_prune_candidates(
+        self,
+        conn: Any,
+        *,
+        where_clause: str,
+        params: tuple[Any, ...],
+        cursor: Any | None = None,
+    ) -> dict[int, str]:
+        """Return strictly validated terminal canonical rows in a prune set."""
+
+        placeholder = "%s" if self.backend == "postgres" else "?"
+        query = (
+            f"SELECT * FROM jobs{where_clause} "
+            f"AND domain={placeholder} AND queue={placeholder} "
+            f"AND job_type={placeholder} AND status IN "
+            "('completed','failed','cancelled','quarantined') ORDER BY id"
+        )
+        query_params = (
+            *params,
+            ADMIN_WEBHOOK_DELIVERY_DOMAIN,
+            ADMIN_WEBHOOK_DELIVERY_QUEUE,
+            ADMIN_WEBHOOK_DELIVERY_JOB_TYPE,
+        )
+        if self.backend == "postgres":
+            if cursor is None:
+                raise RuntimeError("PostgreSQL canonical pruning requires a cursor")
+            cursor.execute(query, query_params)
+            rows = list(cursor.fetchall() or [])
+        else:
+            rows = list(conn.execute(query, query_params).fetchall() or [])
+
+        candidates: dict[int, str] = {}
+        for raw_row in rows:
+            row = dict(raw_row)
+            payload = row.get("payload")
+            if isinstance(payload, str):
+                try:
+                    payload = json.loads(payload)
+                except (TypeError, ValueError):
+                    continue
+            if not isinstance(payload, dict):
+                continue
+            row["payload"] = payload
+            if not canonical_admin_webhook_row_matches(
+                row,
+                expected_payload=payload,
+            ):
+                continue
+            job_uuid = str(row.get("uuid") or "").strip()
+            if not job_uuid:
+                continue
+            candidates[int(row["id"])] = job_uuid
+        return candidates
+
     def _exact_receipt_archive_uuids(
         self,
         conn: Any,
@@ -9783,10 +9838,20 @@ class JobManager:
             int(row["id"] if isinstance(row, dict) else row[0])
             for row in (cur.fetchall() or [])
         }
+        canonical_candidates = self._canonical_admin_webhook_prune_candidates(
+            None,
+            where_clause=candidate_where_clause,
+            params=candidate_params,
+            cursor=cur,
+        )
         archive_candidate_ids = (
             candidate_ids
             if archive_enabled
-            else sorted(set(receipt_candidates) | notes_graph_candidate_ids)
+            else sorted(
+                set(receipt_candidates)
+                | notes_graph_candidate_ids
+                | set(canonical_candidates)
+            )
         )
         cur.execute(
             (
@@ -9935,6 +10000,18 @@ class JobManager:
                 if archived_receipt_uuids != set(receipt_candidates.values()):
                     raise IdempotentOperationUnavailableError(
                         "receipt-backed Jobs were not archived exactly once"
+                    )
+            if canonical_candidates:
+                canonical_ids = sorted(canonical_candidates)
+                archived_canonical_uuids = self._exact_receipt_archive_uuids(
+                    None,
+                    where_clause=" WHERE id = ANY(%s)",
+                    params=(canonical_ids,),
+                    cursor=cur,
+                )
+                if archived_canonical_uuids != set(canonical_candidates.values()):
+                    raise IdempotentOperationUnavailableError(
+                        "canonical admin webhook Jobs were not archived exactly once"
                     )
 
         if JobManager._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", "")):
@@ -10223,6 +10300,17 @@ class JobManager:
                             + ["notes", "graph-suggestions", "note_graph_suggestions"]
                         ),
                     ).fetchall()
+                    notes_graph_candidate_ids = {
+                        int(row["id"] if isinstance(row, dict) else row[0])
+                        for row in notes_graph_candidates
+                    }
+                    canonical_candidates = (
+                        self._canonical_admin_webhook_prune_candidates(
+                            conn,
+                            where_clause=where_clause,
+                            params=tuple(params),
+                        )
+                    )
                     conn.execute(
                         (
                             "UPDATE job_dependencies SET "
@@ -10247,7 +10335,12 @@ class JobManager:
                     )
                     # Receipt-backed jobs always archive before active deletion;
                     # global archive policy still controls all other candidates.
-                    if archive_enabled or receipt_candidates or notes_graph_candidates:
+                    if (
+                        archive_enabled
+                        or receipt_candidates
+                        or notes_graph_candidate_ids
+                        or canonical_candidates
+                    ):
                         receipt_exists_clause = (
                             " EXISTS (SELECT 1 FROM job_idempotency_receipts "
                             "AS receipt WHERE receipt.job_uuid = jobs.uuid "
@@ -10261,23 +10354,22 @@ class JobManager:
                         receipt_where_clause = (
                             where_clause + " AND" + receipt_exists_clause
                         )
-                        archive_params = list(params)
                         if archive_enabled:
                             archive_where_clause = where_clause
+                            archive_params = list(params)
                         else:
+                            mandatory_ids = sorted(
+                                set(receipt_candidates)
+                                | notes_graph_candidate_ids
+                                | set(canonical_candidates)
+                            )
+                            mandatory_placeholders = ",".join(
+                                "?" for _ in mandatory_ids
+                            )
                             archive_where_clause = (
-                                where_clause
-                                + " AND ("
-                                + receipt_exists_clause
-                                + " OR (domain=? AND queue=? AND job_type=?))"
+                                f" WHERE id IN ({mandatory_placeholders})"
                             )
-                            archive_params.extend(
-                                [
-                                    "notes",
-                                    "graph-suggestions",
-                                    "note_graph_suggestions",
-                                ]
-                            )
+                            archive_params = mandatory_ids
                         prompt_archive_params = tuple(
                             archive_params + ["prompt_studio", "optimization"]
                         )
@@ -10425,6 +10517,26 @@ class JobManager:
                             ):
                                 raise IdempotentOperationUnavailableError(
                                     "receipt-backed Jobs were not archived exactly once"
+                                )
+                        if canonical_candidates:
+                            canonical_ids = sorted(canonical_candidates)
+                            canonical_placeholders = ",".join(
+                                "?" for _ in canonical_ids
+                            )
+                            archived_canonical_uuids = (
+                                self._exact_receipt_archive_uuids(
+                                    conn,
+                                    where_clause=(
+                                        f" WHERE id IN ({canonical_placeholders})"
+                                    ),
+                                    params=tuple(canonical_ids),
+                                )
+                            )
+                            if archived_canonical_uuids != set(
+                                canonical_candidates.values()
+                            ):
+                                raise IdempotentOperationUnavailableError(
+                                    "canonical admin webhook Jobs were not archived exactly once"
                                 )
                     # Counters: subtract queued/processing/quarantined rows if they are part of prune set
                     if JobManager._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", "")):

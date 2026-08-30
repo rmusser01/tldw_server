@@ -25,6 +25,7 @@ from tldw_Server_API.app.core.Admin_Webhooks.domain import (
     DeliveryCapabilityStatus,
     DeliveryComponentStatus,
     DeliveryKind,
+    DeliveryReasonCode,
     DeliveryRuntimeComponent,
     DeliveryRuntimeReasonCode,
     DeliveryState,
@@ -239,6 +240,8 @@ def _delivery(
 def _attempt(
     *,
     state: AttemptState = AttemptState.SUCCEEDED,
+    reason_code: DeliveryReasonCode | None = None,
+    requested_retry_delay_seconds: int | None = None,
 ) -> WebhookDeliveryAttempt:
     return WebhookDeliveryAttempt(
         id=ATTEMPT_ID,
@@ -248,8 +251,8 @@ def _attempt(
         request_timeout_seconds=10,
         status_code=204 if state is AttemptState.SUCCEEDED else None,
         latency_ms=8 if state is AttemptState.SUCCEEDED else None,
-        reason_code=None,
-        requested_retry_delay_seconds=None,
+        reason_code=reason_code,
+        requested_retry_delay_seconds=requested_retry_delay_seconds,
         started_at=NOW,
         finished_at=NOW if state is not AttemptState.PROCESSING else None,
     )
@@ -262,6 +265,7 @@ class _FakeDeliveryService:
         self.history_error: Exception | None = None
         self.fail_test_before_audit = False
         self.fail_redelivery_before_audit = False
+        self.history_attempt = _attempt()
 
     async def list_delivery_history(
         self,
@@ -279,7 +283,7 @@ class _FakeDeliveryService:
             delivery=_delivery(),
             event_type="webhook.test",
             completed_after_config_change=False,
-            attempts=(_attempt(),),
+            attempts=(self.history_attempt,),
         )
         return SimpleNamespace(items=(item,), total=1, limit=limit, offset=offset)
 
@@ -1061,6 +1065,11 @@ def test_delivery_history_route_is_sanitized_audited_and_never_cached(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client, service, _, read_audit = _delivery_client(monkeypatch)
+    service.history_attempt = _attempt(
+        state=AttemptState.OUTCOME_UNKNOWN,
+        reason_code=DeliveryReasonCode.OUTCOME_UNKNOWN,
+        requested_retry_delay_seconds=60,
+    )
 
     response = client.get("/api/v1/admin/webhooks/41/deliveries?limit=25&offset=7")
 
@@ -1069,7 +1078,23 @@ def test_delivery_history_route_is_sanitized_audited_and_never_cached(
     assert response.headers["x-request-id"] == REQUEST_ID
     assert response.json()["total"] == 1
     assert response.json()["items"][0]["delivery"]["event_type"] == "webhook.test"
-    assert response.json()["items"][0]["attempts"][0]["sequence"] == 1
+    attempt = response.json()["items"][0]["attempts"][0]
+    assert attempt["sequence"] == 1
+    assert attempt["state"] == "outcome_unknown"
+    assert attempt["reason_code"] == "outcome_unknown"
+    assert attempt["requested_retry_delay_seconds"] == 60
+    assert set(attempt) == {
+        "id",
+        "sequence",
+        "state",
+        "request_timeout_seconds",
+        "status_code",
+        "latency_ms",
+        "reason_code",
+        "requested_retry_delay_seconds",
+        "started_at",
+        "finished_at",
+    }
     assert service.calls == [("list_delivery_history", (41, 25, 7))]
     assert read_audit.await_args.kwargs["metadata"] == {
         "outcome": "succeeded",

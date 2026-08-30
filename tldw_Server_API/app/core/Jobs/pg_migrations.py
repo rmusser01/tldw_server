@@ -336,6 +336,24 @@ CREATE TABLE IF NOT EXISTS jobs_archive (
   status TEXT NOT NULL,
   priority INTEGER,
   max_retries INTEGER,
+  expired_lease_policy TEXT NOT NULL DEFAULT 'consume_retry'
+    CONSTRAINT jobs_archive_expired_lease_policy_valid
+    CHECK (expired_lease_policy IN ('consume_retry','requeue_no_attempt')),
+  quarantine_threshold INTEGER
+    CONSTRAINT jobs_archive_quarantine_threshold_positive
+    CHECK (quarantine_threshold IS NULL OR quarantine_threshold > 0),
+  prepared_disposition_fingerprint TEXT
+    CONSTRAINT jobs_archive_prepared_disposition_fingerprint_valid
+    CHECK (
+      prepared_disposition_fingerprint IS NULL OR
+      prepared_disposition_fingerprint ~ '^[0-9a-f]{64}$'
+    ),
+  no_attempt_recovery_fingerprint TEXT
+    CONSTRAINT jobs_archive_no_attempt_recovery_fingerprint_valid
+    CHECK (
+      no_attempt_recovery_fingerprint IS NULL OR
+      no_attempt_recovery_fingerprint ~ '^[0-9a-f]{64}$'
+    ),
   retry_count INTEGER,
   available_at TIMESTAMPTZ,
   started_at TIMESTAMPTZ,
@@ -940,6 +958,22 @@ def _ensure_pg_execution_control_columns(cur: Any) -> None:
         "no_attempt_recovery_fingerprint TEXT"
     )
     cur.execute(
+        "ALTER TABLE jobs_archive ADD COLUMN IF NOT EXISTS "
+        "expired_lease_policy TEXT NOT NULL DEFAULT 'consume_retry'"
+    )
+    cur.execute(
+        "ALTER TABLE jobs_archive ADD COLUMN IF NOT EXISTS "
+        "quarantine_threshold INTEGER"
+    )
+    cur.execute(
+        "ALTER TABLE jobs_archive ADD COLUMN IF NOT EXISTS "
+        "prepared_disposition_fingerprint TEXT"
+    )
+    cur.execute(
+        "ALTER TABLE jobs_archive ADD COLUMN IF NOT EXISTS "
+        "no_attempt_recovery_fingerprint TEXT"
+    )
+    cur.execute(
         "UPDATE jobs SET expired_lease_policy='consume_retry' "
         "WHERE expired_lease_policy IS NULL"
     )
@@ -1037,6 +1071,98 @@ def _ensure_pg_execution_control_columns(cur: Any) -> None:
     cur.execute(
         "ALTER TABLE jobs VALIDATE CONSTRAINT "
         "jobs_no_attempt_recovery_fingerprint_valid"
+    )
+    cur.execute(
+        """
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+            WHERE conname='jobs_archive_expired_lease_policy_valid'
+              AND conrelid='jobs_archive'::regclass
+          ) THEN
+            ALTER TABLE jobs_archive ADD CONSTRAINT
+            jobs_archive_expired_lease_policy_valid
+            CHECK (expired_lease_policy IN ('consume_retry','requeue_no_attempt'))
+            NOT VALID;
+          END IF;
+        END
+        $$
+        """
+    )
+    cur.execute(
+        "ALTER TABLE jobs_archive VALIDATE CONSTRAINT "
+        "jobs_archive_expired_lease_policy_valid"
+    )
+    cur.execute(
+        """
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+            WHERE conname='jobs_archive_quarantine_threshold_positive'
+              AND conrelid='jobs_archive'::regclass
+          ) THEN
+            ALTER TABLE jobs_archive ADD CONSTRAINT
+            jobs_archive_quarantine_threshold_positive
+            CHECK (quarantine_threshold IS NULL OR quarantine_threshold > 0)
+            NOT VALID;
+          END IF;
+        END
+        $$
+        """
+    )
+    cur.execute(
+        "ALTER TABLE jobs_archive VALIDATE CONSTRAINT "
+        "jobs_archive_quarantine_threshold_positive"
+    )
+    cur.execute(
+        """
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+            WHERE conname='jobs_archive_prepared_disposition_fingerprint_valid'
+              AND conrelid='jobs_archive'::regclass
+          ) THEN
+            ALTER TABLE jobs_archive ADD CONSTRAINT
+            jobs_archive_prepared_disposition_fingerprint_valid
+            CHECK (
+              prepared_disposition_fingerprint IS NULL OR
+              prepared_disposition_fingerprint ~ '^[0-9a-f]{64}$'
+            ) NOT VALID;
+          END IF;
+        END
+        $$
+        """
+    )
+    cur.execute(
+        "ALTER TABLE jobs_archive VALIDATE CONSTRAINT "
+        "jobs_archive_prepared_disposition_fingerprint_valid"
+    )
+    cur.execute(
+        """
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+            WHERE conname='jobs_archive_no_attempt_recovery_fingerprint_valid'
+              AND conrelid='jobs_archive'::regclass
+          ) THEN
+            ALTER TABLE jobs_archive ADD CONSTRAINT
+            jobs_archive_no_attempt_recovery_fingerprint_valid
+            CHECK (
+              no_attempt_recovery_fingerprint IS NULL OR
+              no_attempt_recovery_fingerprint ~ '^[0-9a-f]{64}$'
+            ) NOT VALID;
+          END IF;
+        END
+        $$
+        """
+    )
+    cur.execute(
+        "ALTER TABLE jobs_archive VALIDATE CONSTRAINT "
+        "jobs_archive_no_attempt_recovery_fingerprint_valid"
     )
 
 
