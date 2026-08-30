@@ -4,7 +4,7 @@ title: Implement canonical admin webhook delivery substrate and recovery
 status: In Progress
 assignee: []
 created_date: '2026-08-23 03:15'
-updated_date: '2026-08-30 07:29'
+updated_date: '2026-08-30 07:37'
 labels:
   - admin
   - webhooks
@@ -231,6 +231,8 @@ Task 10 complete: exposed canonical persisted test, atomic manual redelivery, an
 2026-08-30: Fix Round 4 re-review found 0 Critical, 2 Important, 0 Minor. Step 5 rg/Git status handling is closed, but Step 4 still allows later clean scans to overwrite Ruff/diff/Bandit failures, and Steps 6/8 allow later diff/commit success to overwrite failed Make, Backlog, staging, or validation commands. Task 11 Fix Round 5 is the final docs-only correction: short-circuit all required commands; preserve Bandit 1 as a visible manual-classification blocker and >1 as execution failure; make Steps 6/8 fail closed; then audit all seven Task 12 blocks before final review. Task 12 remains blocked.
 
 2026-08-30: Task 11 Fix Round 5/5 final docs-only correction complete from HEAD 379a8e33be0282833dda01b4cc152fb8795a22a8 after re-review reported 0 Critical, 2 Important, 0 Minor. Task 12 Step 4 now short-circuits Ruff, both diff checks, and sensitive scan before Bandit runs last through an exact status helper: 0 succeeds, 1 prints the manual baseline/High-review requirement and remains 1, and >1 propagates. Steps 6/8 now short-circuit Make/drift/diffs and Backlog/stage/check/commit respectively; Step 5 is byte-identical to Fix Round 4. All 7 blocks pass Bash 3.2 syntax. Extracted stubs preserve Ruff 7, diff 8/9, sensitive match 1/error 2, Bandit 0/1/2, Make 7/8, Step 6 diff 9/10, Backlog 11, stage 12, check 13, and commit 14 with no later calls. Real Step 4 automated pre-Bandit checks pass; actual Bandit reports raw 1 with 17 Low, 43 Medium, 0 High, so the block correctly remains 1 pending manual Task 12 classification. Step 5 exits 0. Prior pytest-token/pinned/OpenAPI audits remain clean; git diff --check passes and tracked scope is only plan plus TASK-13111. No pytest ran and no test, production, OpenAPI, schema, migration, runtime, or public API file changed. Task 12 remains blocked pending clean independent scoped re-review. Evidence: .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-11-fix-5-report.md.
+
+2026-08-30: Independent Task 11 Fix Round 5 re-review found 0 Critical, 0 Important, and 0 Minor issues. All status-propagation findings are closed; all seven Task 12 blocks remain Bash 3.2 compatible; required interpreter, PostgreSQL, host-network, pinned-scope, and OpenAPI contracts remain correct; and the authoritative host-enabled 1,489-pass/zero-skip Step 1 evidence remains valid. Task 11 is complete and Task 12 is unblocked. Bandit raw status 1 (17 Low, 43 Medium, 0 High) remains pending Task 12 manual baseline classification.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
