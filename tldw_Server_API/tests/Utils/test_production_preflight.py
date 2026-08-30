@@ -92,12 +92,16 @@ def test_load_raw_env_preserves_literal_values_without_expansion(tmp_path: Path)
     path = tmp_path / "production.env"
     path.write_bytes(
         b"# comment\r\nPLAIN=value\r\nHASH='value#part'\r\n"
+        b"INLINE_HASH=value#part\r\nVARIABLE=$OTHER\r\nESCAPE=one\\ntwo\r\n"
         b'DOUBLE="quoted value"\r\nDOLLAR=$(whoami)\r\nBACKTICK=`id`\r\n'
     )
 
     assert load_raw_env(path) == {
         "PLAIN": "value",
         "HASH": "value#part",
+        "INLINE_HASH": "value#part",
+        "VARIABLE": "$OTHER",
+        "ESCAPE": r"one\ntwo",
         "DOUBLE": "quoted value",
         "DOLLAR": "$(whoami)",
         "BACKTICK": "`id`",
@@ -136,6 +140,60 @@ def test_report_aggregates_without_secret_values(tmp_path: Path) -> None:
     assert "credential_mismatch:DATABASE_URL" in rendered
     assert secret not in rendered
     assert "postgresql://" not in rendered
+
+
+def test_environment_issues_are_deterministic_and_deduplicated(tmp_path: Path) -> None:
+    values = _valid_env(tmp_path)
+    values["JWT_SECRET_KEY"] = "short"
+    values["SESSION_ENCRYPTION_KEY"] = "short"
+    values["ALLOWED_ORIGINS"] = "*"
+
+    issues = validate_environment(values, env_path=tmp_path / "production.env")
+
+    assert issues == tuple(sorted(set(issues)))
+    assert {issue.code for issue in issues} >= {"shared_secret", "unsafe_origin", "weak_secret"}
+
+
+def test_environment_requires_every_secret_to_be_independent(tmp_path: Path) -> None:
+    values = _valid_env(tmp_path)
+    values["SESSION_ENCRYPTION_KEY"] = values["JWT_SECRET_KEY"]
+
+    issues = validate_environment(values, env_path=tmp_path / "production.env")
+
+    assert "shared_secret" in _codes(issues)
+
+
+@pytest.mark.parametrize(
+    "database_url",
+    (
+        "postgresql://other:pg-PPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPP@postgres:5432/tldw",
+        "postgresql://tldw_app:different@postgres:5432/tldw",
+        "postgresql://tldw_app:pg-PPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPP@postgres:5432/other",
+    ),
+)
+def test_environment_rejects_each_database_url_credential_mismatch(
+    tmp_path: Path,
+    database_url: str,
+) -> None:
+    values = _valid_env(tmp_path)
+    values["DATABASE_URL"] = database_url
+
+    assert "credential_mismatch" in _codes(validate_environment(values, env_path=tmp_path / "production.env"))
+
+
+def test_environment_rejects_redis_host_mismatch_after_url_decoding(tmp_path: Path) -> None:
+    values = _valid_env(tmp_path)
+    password = quote(values["REDIS_PASSWORD"], safe="")
+    values["REDIS_URL"] = f"redis://:{password}@other-redis:6379/0"
+
+    assert "credential_mismatch" in _codes(validate_environment(values, env_path=tmp_path / "production.env"))
+
+
+def test_environment_rejects_origin_with_a_path(tmp_path: Path) -> None:
+    values = _valid_env(tmp_path)
+    values["ALLOWED_ORIGINS"] = "https://tldw.acme.internal/application"
+
+    assert "unsafe_origin" in _codes(validate_environment(values, env_path=tmp_path / "production.env"))
 
 
 @pytest.mark.parametrize(
@@ -183,6 +241,16 @@ def test_environment_requires_bootstrap_only_for_new_installations(
     )
 
 
+@pytest.mark.parametrize("field", ("ADMIN_USERNAME", "ADMIN_PASSWORD", "ADMIN_EMAIL"))
+def test_new_installation_requires_each_bootstrap_field(tmp_path: Path, field: str) -> None:
+    values = _valid_env(tmp_path)
+    values[field] = ""
+
+    issues = validate_environment(values, env_path=tmp_path / "production.env")
+
+    assert any(issue.code == "missing_required" and issue.field == field for issue in issues)
+
+
 def test_environment_requires_origin_domain_and_contact_alignment(
     tmp_path: Path,
 ) -> None:
@@ -207,9 +275,36 @@ def test_environment_rejects_unsafe_backup_paths(tmp_path: Path, backup_value: s
     assert expected_code in _codes(validate_environment(values, env_path=tmp_path / "production.env"))
 
 
+def test_environment_rejects_backup_parent_of_live_data(tmp_path: Path) -> None:
+    values = _valid_env(tmp_path)
+    values["TLDW_BACKUP_DIR"] = "/app"
+
+    assert "live_data_path" in _codes(validate_environment(values, env_path=tmp_path / "production.env"))
+
+
+def test_environment_rejects_missing_and_non_directory_backup_targets(tmp_path: Path) -> None:
+    missing_values = _valid_env(tmp_path)
+    missing_values["TLDW_BACKUP_DIR"] = str(tmp_path / "missing")
+    file_target = tmp_path / "backup-file"
+    file_target.write_text("not a directory", encoding="utf-8")
+    file_values = _valid_env(tmp_path)
+    file_values["TLDW_BACKUP_DIR"] = str(file_target)
+
+    assert "backup_unavailable" in _codes(validate_environment(missing_values, env_path=tmp_path / "production.env"))
+    assert "backup_unavailable" in _codes(validate_environment(file_values, env_path=tmp_path / "production.env"))
+
+
 def test_static_compose_and_proxy_match_the_reference_contract() -> None:
     assert validate_compose(_real_compose()) == ()
     assert validate_proxy(PROXY_PATH.read_text(encoding="utf-8")) == ()
+
+
+def test_static_compose_aggregates_independent_project_and_service_failures() -> None:
+    compose = copy.deepcopy(_real_compose())
+    compose["name"] = "other-project"
+    compose["services"]["debug"] = {}
+
+    assert _codes(validate_compose(compose)) == {"topology_project", "topology_services"}
 
 
 @pytest.mark.parametrize(
@@ -217,16 +312,34 @@ def test_static_compose_and_proxy_match_the_reference_contract() -> None:
     (
         ("project_name", "topology_project"),
         ("app_port", "topology_ports"),
+        ("postgres_port", "topology_ports"),
+        ("redis_port", "topology_ports"),
+        ("caddy_extra_port", "topology_ports"),
         ("backend_public", "topology_network"),
         ("caddy_backend", "topology_network"),
+        ("postgres_edge", "topology_network"),
+        ("wrong_edge_ipam", "topology_network"),
+        ("wrong_backend_ipam", "topology_network"),
         ("missing_preflight", "topology_preflight"),
+        ("unconfined_preflight", "topology_preflight"),
+        ("wrong_preflight_entrypoint", "topology_preflight"),
         ("missing_preflight_env_file", "topology_preflight"),
+        ("missing_app_env_file", "topology_env"),
         ("unexpected_service", "topology_services"),
+        ("malformed_service", "topology_service"),
+        ("malformed_backend", "topology_network"),
         ("missing_caddyfile", "topology_mounts"),
         ("missing_caddy_environment", "topology_proxy"),
         ("docker_socket", "topology_socket"),
         ("wildcard_trust", "topology_trust"),
+        ("unsafe_setup_remote", "topology_trust"),
+        ("preserved_forwarded_for", "topology_trust"),
+        ("wrong_client_ip_header", "topology_trust"),
+        ("disabled_mcp_forwarding", "topology_trust"),
         ("missing_redis_auth", "topology_redis_auth"),
+        ("missing_postgres_auth", "topology_postgres_auth"),
+        ("wrong_app_healthcheck", "topology_health"),
+        ("production_fallback", "topology_mode"),
         ("image_default", "topology_image"),
     ),
 )
@@ -237,16 +350,42 @@ def test_static_compose_mutations_fail_closed(mutation: str, expected_code: str)
         compose["name"] = "other-project"
     elif mutation == "app_port":
         services["app"]["ports"] = ["8000:8000"]
+    elif mutation == "postgres_port":
+        services["postgres"]["ports"] = ["5432:5432"]
+    elif mutation == "redis_port":
+        services["redis"]["ports"] = ["6379:6379"]
+    elif mutation == "caddy_extra_port":
+        services["caddy"]["ports"].append("8443:443")
     elif mutation == "backend_public":
         compose["networks"]["backend"]["internal"] = False
     elif mutation == "caddy_backend":
         services["caddy"]["networks"].append("backend")
+    elif mutation == "postgres_edge":
+        services["postgres"]["networks"].append("edge")
+    elif mutation == "wrong_edge_ipam":
+        compose["networks"]["edge"]["ipam"]["config"][0][
+            "subnet"
+        ] = "${TLDW_BACKEND_SUBNET:?Set private TLDW_BACKEND_SUBNET}"
+    elif mutation == "wrong_backend_ipam":
+        compose["networks"]["backend"]["ipam"]["config"][0][
+            "subnet"
+        ] = "${TLDW_EDGE_SUBNET:?Set private TLDW_EDGE_SUBNET}"
     elif mutation == "missing_preflight":
         del services["app"]["depends_on"]["preflight"]
+    elif mutation == "unconfined_preflight":
+        services["preflight"]["read_only"] = False
+    elif mutation == "wrong_preflight_entrypoint":
+        services["preflight"]["entrypoint"] = ["sh"]
     elif mutation == "missing_preflight_env_file":
         del services["preflight"]["env_file"]
+    elif mutation == "missing_app_env_file":
+        del services["app"]["env_file"]
     elif mutation == "unexpected_service":
         services["debug"] = {"ports": ["9000:9000"]}
+    elif mutation == "malformed_service":
+        services["redis"] = "not-a-service"
+    elif mutation == "malformed_backend":
+        compose["networks"]["backend"] = "not-a-network"
     elif mutation == "missing_caddyfile":
         services["caddy"]["volumes"].remove("./Production/Caddyfile:/etc/caddy/Caddyfile:ro")
     elif mutation == "missing_caddy_environment":
@@ -255,10 +394,50 @@ def test_static_compose_mutations_fail_closed(mutation: str, expected_code: str)
         services["preflight"]["volumes"].append("/var/run/docker.sock:/var/run/docker.sock")
     elif mutation == "wildcard_trust":
         services["app"]["environment"]["RG_TRUSTED_PROXIES"] = "0.0.0.0/0"
+    elif mutation == "unsafe_setup_remote":
+        services["app"]["environment"]["TLDW_SETUP_ALLOW_REMOTE"] = "1"
+    elif mutation == "preserved_forwarded_for":
+        services["app"]["environment"]["AUTH_TRUST_X_FORWARDED_FOR"] = "false"
+    elif mutation == "wrong_client_ip_header":
+        services["app"]["environment"]["RG_CLIENT_IP_HEADER"] = "X-Real-IP"
+    elif mutation == "disabled_mcp_forwarding":
+        services["app"]["environment"]["MCP_TRUST_X_FORWARDED"] = "false"
     elif mutation == "missing_redis_auth":
         services["redis"]["command"] = ["redis-server"]
+    elif mutation == "missing_postgres_auth":
+        services["postgres"]["healthcheck"]["test"] = ["CMD", "true"]
+    elif mutation == "wrong_app_healthcheck":
+        services["app"]["healthcheck"]["test"][-1] = "print('healthy')"
+    elif mutation == "production_fallback":
+        services["app"]["environment"]["tldw_production"] = "${tldw_production:-false}"
     elif mutation == "image_default":
         services["app"]["image"] = "${TLDW_APP_IMAGE:-registry/tldw:latest}"
+
+    assert expected_code in _codes(validate_compose(compose))
+
+
+@pytest.mark.parametrize(
+    ("field", "expected_code"),
+    (
+        ("ports", "topology_ports"),
+        ("depends_on", "topology_preflight"),
+        ("environment", "topology_mode"),
+        ("healthcheck", "topology_health"),
+        ("volumes", "topology_volumes"),
+    ),
+)
+def test_static_compose_malformed_nested_shapes_fail_closed(field: str, expected_code: str) -> None:
+    compose = copy.deepcopy(_real_compose())
+    if field == "ports":
+        compose["services"]["caddy"]["ports"] = 443
+    elif field == "depends_on":
+        compose["services"]["app"]["depends_on"] = "preflight"
+    elif field == "environment":
+        compose["services"]["app"]["environment"] = "AUTH_MODE=multi_user"
+    elif field == "healthcheck":
+        compose["services"]["app"]["healthcheck"] = "healthy"
+    elif field == "volumes":
+        compose["volumes"] = None
 
     assert expected_code in _codes(validate_compose(compose))
 
@@ -293,6 +472,60 @@ def test_proxy_mutations_fail_closed(mutation: str, expected_code: str) -> None:
     assert expected_code in _codes(validate_proxy(text))
 
 
+@pytest.mark.parametrize(
+    "path",
+    (
+        "/internal/ready",
+        "/ready",
+        "/health/ready",
+        "/api/v1/healthz",
+        "/api/v1/readyz",
+        "/setup",
+        "/setup/*",
+        "/api/v1/setup",
+        "/api/v1/setup/*",
+    ),
+)
+def test_proxy_requires_every_private_path(path: str) -> None:
+    text = PROXY_PATH.read_text(encoding="utf-8")
+    matcher = next(line for line in text.splitlines() if "@private_control path" in line)
+    text = text.replace(matcher, matcher.replace(f" {path}", "", 1))
+
+    assert "proxy_path" in _codes(validate_proxy(text))
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_code"),
+    (
+        ("commented_matcher", "proxy_path"),
+        ("commented_deny", "proxy_order"),
+        ("wrong_response", "proxy_response"),
+        ("commented_header", "proxy_headers"),
+        ("public_health_denied", "proxy_public_path"),
+        ("missing_domain", "proxy_domain"),
+    ),
+)
+def test_proxy_directives_must_be_active_and_fail_closed(mutation: str, expected_code: str) -> None:
+    text = PROXY_PATH.read_text(encoding="utf-8")
+    if mutation == "commented_matcher":
+        text = text.replace("  @private_control path", "  # @private_control path")
+    elif mutation == "commented_deny":
+        text = text.replace("  respond @private_control 404", "  # respond @private_control 404")
+    elif mutation == "wrong_response":
+        text = text.replace("respond @private_control 404", "respond @private_control 403")
+    elif mutation == "commented_header":
+        text = text.replace(
+            "    header_up X-Real-IP {remote_host}",
+            "    # header_up X-Real-IP {remote_host}",
+        )
+    elif mutation == "public_health_denied":
+        text = text.replace(" /internal/ready", " /health /internal/ready")
+    elif mutation == "missing_domain":
+        text = text.replace("{$TLDW_PUBLIC_DOMAIN} {", "https://fixed.invalid {")
+
+    assert expected_code in _codes(validate_proxy(text))
+
+
 def test_rendered_compose_matches_concrete_environment(tmp_path: Path) -> None:
     compose, values = _rendered_compose(tmp_path)
 
@@ -306,6 +539,15 @@ def test_rendered_compose_matches_concrete_environment(tmp_path: Path) -> None:
         ("published_app", "rendered_ports"),
         ("wrong_image", "rendered_image"),
         ("public_backend", "rendered_network"),
+        ("wildcard_trust", "rendered_trust"),
+        ("unexpected_app_network", "rendered_network"),
+        ("unexpected_service", "rendered_services"),
+        ("unexpected_network", "rendered_network"),
+        ("wrong_edge_subnet", "rendered_network"),
+        ("wrong_backend_subnet", "rendered_network"),
+        ("unconfined_preflight", "rendered_preflight"),
+        ("wrong_caddy_environment", "rendered_proxy"),
+        ("malformed_backend", "rendered_network"),
     ),
 )
 def test_rendered_compose_mutations_fail_closed(tmp_path: Path, mutation: str, expected_code: str) -> None:
@@ -318,6 +560,24 @@ def test_rendered_compose_mutations_fail_closed(tmp_path: Path, mutation: str, e
         compose["services"]["app"]["image"] = values["TLDW_ROLLBACK_IMAGE"]
     elif mutation == "public_backend":
         compose["networks"]["backend"]["internal"] = False
+    elif mutation == "wildcard_trust":
+        compose["services"]["app"]["environment"]["RG_TRUSTED_PROXIES"] = "0.0.0.0/0"
+    elif mutation == "unexpected_app_network":
+        compose["services"]["app"]["networks"].append("debug")
+    elif mutation == "unexpected_service":
+        compose["services"]["debug"] = {"image": "debug:1.2.3"}
+    elif mutation == "unexpected_network":
+        compose["networks"]["debug"] = {"internal": True}
+    elif mutation == "wrong_edge_subnet":
+        compose["networks"]["edge"]["ipam"]["config"][0]["subnet"] = values["TLDW_BACKEND_SUBNET"]
+    elif mutation == "wrong_backend_subnet":
+        compose["networks"]["backend"]["ipam"]["config"][0]["subnet"] = values["TLDW_EDGE_SUBNET"]
+    elif mutation == "unconfined_preflight":
+        compose["services"]["preflight"]["network_mode"] = "default"
+    elif mutation == "wrong_caddy_environment":
+        compose["services"]["caddy"]["environment"]["TLDW_PUBLIC_DOMAIN"] = "other.invalid"
+    elif mutation == "malformed_backend":
+        compose["networks"]["backend"] = "not-a-network"
 
     assert expected_code in _codes(validate_rendered_compose(compose, values))
 
@@ -396,3 +656,61 @@ def test_run_preflight_converts_parse_errors_to_sorted_issues(tmp_path: Path) ->
     assert [issue.code for issue in report.issues] == sorted(issue.code for issue in report.issues)
     assert report.issues[0].code == "env_parse"
     assert "value" not in report.issues[0].message
+
+
+def test_run_preflight_converts_unreadable_inputs_to_sanitized_issues(tmp_path: Path) -> None:
+    report = run_preflight(
+        tmp_path / "missing.env",
+        tmp_path / "missing-compose.yml",
+        tmp_path / "missing-Caddyfile",
+    )
+
+    assert [issue.code for issue in report.issues] == [
+        "compose_parse",
+        "env_parse",
+        "proxy_parse",
+    ]
+    rendered = "\n".join(issue.message for issue in report.issues)
+    assert str(tmp_path) not in rendered
+
+
+def test_cli_returns_two_for_missing_or_conflicting_source_modes(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert main([]) == 2
+    assert main(["--env-file", str(tmp_path / "production.env"), "--from-environment"]) == 2
+    assert "usage:" in capsys.readouterr().err
+
+
+def test_cli_prints_sorted_sanitized_errors_only_to_stderr(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    secret = "must-never-appear-" + "S" * 40
+    values = _valid_env(tmp_path)
+    values["JWT_SECRET_KEY"] = "short"
+    values["POSTGRES_PASSWORD"] = secret
+    values["DATABASE_URL"] = "postgresql://tldw_app:different@postgres:5432/tldw"
+    env_file = tmp_path / "production.env"
+    _write_env(env_file, values)
+
+    exit_code = main(
+        [
+            "--env-file",
+            str(env_file),
+            "--compose-file",
+            str(COMPOSE_PATH),
+            "--proxy-file",
+            str(PROXY_PATH),
+        ]
+    )
+    captured = capsys.readouterr()
+    lines = captured.err.splitlines()
+
+    assert exit_code == 1
+    assert captured.out == ""
+    assert lines == sorted(lines)
+    assert all(line.startswith("ERROR [") for line in lines)
+    assert secret not in captured.err
+    assert "postgresql://" not in captured.err
