@@ -77,7 +77,7 @@ ENV PYTHONPATH=/app/tldw_Server_API \
 EXPOSE 8000
 
 # Basic healthcheck using the readiness probe (avoid extra curl dependency).
-HEALTHCHECK --interval=30s --timeout=5s --retries=5 CMD python -c "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/ready', timeout=3).status == 200 else 1)"
+HEALTHCHECK --interval=30s --timeout=5s --retries=5 CMD python -c "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/internal/ready', timeout=3).status == 200 else 1)"
 
 ENTRYPOINT ["/usr/local/bin/tldw-app-first-run"]
 

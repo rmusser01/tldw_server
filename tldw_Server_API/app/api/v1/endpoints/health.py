@@ -7,12 +7,12 @@ from fastapi import APIRouter, Depends, Request, Response, status
 from fastapi.responses import JSONResponse
 from loguru import logger
 
-from tldw_Server_API.app.core.DB_Management.DB_Manager import create_workflows_database, get_content_backend_instance
-from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
-from tldw_Server_API.app.core.Workflows.engine import WorkflowScheduler
-from tldw_Server_API.app.core.testing import env_flag_enabled, is_test_mode
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequirePermission
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_LOGS
+from tldw_Server_API.app.core.DB_Management.DB_Manager import create_workflows_database, get_content_backend_instance
+from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
+from tldw_Server_API.app.core.testing import env_flag_enabled, is_test_mode
+from tldw_Server_API.app.core.Workflows.engine import WorkflowScheduler
 from tldw_Server_API.app.services import readiness_service
 
 _HEALTH_NONCRITICAL_EXCEPTIONS = (
@@ -81,7 +81,7 @@ def _check_workflows_db() -> dict:
             status["schema_version"] = None
             status["expected_version"] = None
         status["ok"] = True
-    except _HEALTH_NONCRITICAL_EXCEPTIONS as e:
+    except _HEALTH_NONCRITICAL_EXCEPTIONS:
         logger.error("/readyz DB check failed")
         status["error"] = "Workflow database health check failed"
     return status
@@ -132,7 +132,7 @@ async def api_health():
         checks["database"] = dbh
         if dbh.get("status") != "healthy":
             overall = "degraded"
-    except _HEALTH_NONCRITICAL_EXCEPTIONS as e:
+    except _HEALTH_NONCRITICAL_EXCEPTIONS:
         checks["database"] = {"status": "unhealthy", "error": "Database health check failed"}
         overall = "unhealthy"
 
@@ -145,7 +145,7 @@ async def api_health():
         checks["metrics"] = {"status": "healthy" if metrics_ok else "unhealthy"}
         if not metrics_ok and overall == "ok":
             overall = "degraded"
-    except _HEALTH_NONCRITICAL_EXCEPTIONS as e:
+    except _HEALTH_NONCRITICAL_EXCEPTIONS:
         checks["metrics"] = {"status": "unhealthy", "error": "Metrics health check failed"}
         overall = "unhealthy"
 
@@ -157,7 +157,7 @@ async def api_health():
         checks["chacha_notes"] = chacha
         if chacha.get("status") not in {"healthy", "ok"} and overall == "ok":
             overall = "degraded"
-    except _HEALTH_NONCRITICAL_EXCEPTIONS as e:
+    except _HEALTH_NONCRITICAL_EXCEPTIONS:
         logger.warning("ChaChaNotes health snapshot failed")
         checks["chacha_notes"] = {"status": "unhealthy", "error": "ChaChaNotes health check failed"}
         overall = "degraded"
@@ -259,7 +259,7 @@ async def api_health_metrics():
             "percent": float(du.percent),
         }
         return {"cpu": cpu, "memory": mem, "disk": disk}
-    except _HEALTH_NONCRITICAL_EXCEPTIONS as e:
+    except _HEALTH_NONCRITICAL_EXCEPTIONS:
         logger.warning("health/metrics unavailable")
         return {
             "cpu": {"percent": 0.0},
@@ -344,7 +344,7 @@ async def api_security_health():
         response["summary"] = summary
         status_bits = _calculate_security_status(summary)
         response.update(status_bits)
-    except _HEALTH_NONCRITICAL_EXCEPTIONS as exc:
+    except _HEALTH_NONCRITICAL_EXCEPTIONS:
         logger.error("health/security failed")
         response.update(
             {

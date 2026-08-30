@@ -4,6 +4,7 @@ from fastapi.responses import PlainTextResponse
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.endpoints.metrics import router as metrics_router
+from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 from tldw_Server_API.app.core.Metrics import get_metrics_registry
 from tldw_Server_API.app.core.Metrics.http_middleware import HTTPMetricsMiddleware
 from tldw_Server_API.app.core.Metrics.metrics_manager import MetricDefinition, MetricType
@@ -35,6 +36,7 @@ def _make_test_app() -> FastAPI:
 def client():
     app = _make_test_app()
     with TestClient(app) as c:
+        c.headers.update({"X-API-KEY": get_settings().SINGLE_USER_API_KEY})
         yield c
 
 

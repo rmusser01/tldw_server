@@ -45,7 +45,7 @@
 
 **Tests:** Focused Health, Services, AuthNZ, Monitoring, and Resource Governance tests.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Stage 2: Standalone production topology
 
@@ -55,7 +55,7 @@
 
 **Tests:** `test_docker_production_reference.py` plus optional read-only `docker compose config` rendering.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Stage 3: Static fail-closed preflight
 
@@ -65,7 +65,7 @@
 
 **Tests:** `test_production_preflight.py` and focused Bandit.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Stage 4: Operational backup, deployment, and rollback gate
 
@@ -75,7 +75,7 @@
 
 **Tests:** `test_production_deploy.py`, archive/manifest tests, Make target contract tests, and focused Bandit.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Stage 5: Probe migration, monitoring, documentation, and release verification
 
@@ -85,7 +85,7 @@
 
 **Tests:** Probe/docs contracts, docs refresh, OpenAPI check, focused and broader pytest, Bandit, `git diff --check`, and optional Docker render.
 
-**Status:** Not Started
+**Status:** In Progress
 
 ---
 

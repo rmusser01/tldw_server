@@ -157,6 +157,28 @@ _EXPECTED_PREFLIGHT_COMMAND = [
     "--runtime-backup-dir",
     "/backups",
 ]
+_EXPECTED_APP_HEALTHCHECK = (
+    "CMD",
+    "python",
+    "-c",
+    "import sys, urllib.request; "
+    "sys.exit(0 if urllib.request.urlopen('http://localhost:8000/internal/ready', timeout=3).status == 200 else 1)",
+)
+_EXPECTED_POSTGRES_HEALTHCHECK = (
+    "CMD-SHELL",
+    'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"',
+)
+_EXPECTED_REDIS_COMMAND = (
+    "/bin/sh",
+    "-ec",
+    "umask 077; printf 'appendonly yes\\nrequirepass %s\\n' "
+    '"$$REDIS_PASSWORD" > /tmp/tldw-redis.conf; exec redis-server /tmp/tldw-redis.conf',
+)
+_EXPECTED_REDIS_HEALTHCHECK = (
+    "CMD-SHELL",
+    'REDISCLI_AUTH="$$REDIS_PASSWORD" redis-cli ping',
+)
+_DOCKER_SOCKET_PATHS = (Path("/var/run/docker.sock"), Path("/run/docker.sock"))
 
 
 @dataclass(frozen=True, order=True)
@@ -356,10 +378,17 @@ def _is_valid_dns_name(value: str) -> bool:
         value.encode("ascii")
     except UnicodeEncodeError:
         return False
+    try:
+        ipaddress.ip_address(value)
+    except ValueError:
+        pass
+    else:
+        return False
     labels = value.split(".")
     return (
         1 <= len(value) <= 253
         and len(labels) >= 2
+        and not labels[-1].isdigit()
         and all(1 <= len(label) <= 63 and _DNS_LABEL.fullmatch(label) for label in labels)
     )
 
@@ -564,6 +593,25 @@ def _validate_backup(
         resolved = configured.resolve(strict=False)
     except OSError:
         resolved = configured
+    configured_paths = {configured, resolved}
+    socket_paths: set[Path] = set(_DOCKER_SOCKET_PATHS)
+    for socket_path in _DOCKER_SOCKET_PATHS:
+        try:
+            socket_paths.add(socket_path.resolve(strict=False))
+        except OSError:
+            pass
+    if any(
+        backup_path == socket_path or backup_path in socket_path.parents
+        for backup_path in configured_paths
+        for socket_path in socket_paths
+    ):
+        return [
+            _issue(
+                "docker_socket_path",
+                "TLDW_BACKUP_DIR",
+                "must not equal or contain a Docker socket location",
+            )
+        ]
     if any(resolved == path or path in resolved.parents or resolved in path.parents for path in banned):
         return [_issue("live_data_path", "TLDW_BACKUP_DIR", "must be separate from live data")]
     visible = runtime_backup_dir if runtime_backup_dir is not None else configured
@@ -655,6 +703,25 @@ def _command_text(service: object) -> str:
     if isinstance(command, list):
         return " ".join(str(item) for item in command)
     return str(command)
+
+
+def _command_structure(service: object, field: str = "command") -> tuple[str, ...]:
+    """Return a command only when it is an explicit string vector."""
+
+    if not isinstance(service, Mapping):
+        return ()
+    command = service.get(field)
+    if not isinstance(command, list) or not all(isinstance(item, str) for item in command):
+        return ()
+    return tuple(command)
+
+
+def _healthcheck_structure(service: object) -> tuple[str, ...]:
+    """Return the exact test vector from a service healthcheck."""
+
+    if not isinstance(service, Mapping):
+        return ()
+    return _command_structure(service.get("healthcheck"), "test")
 
 
 def _ports(service: Mapping[str, Any]) -> set[tuple[int, int]]:
@@ -918,14 +985,14 @@ def validate_compose(document: Mapping[str, Any]) -> tuple[PreflightIssue, ...]:
                 "must receive only the required domain and ACME contact",
             )
         )
-    redis_command = _command_text(services["redis"])
-    redis_health = _command_text(services["redis"].get("healthcheck", {}))
-    if "requirepass %s" not in redis_command or "$$REDIS_PASSWORD" not in redis_command:
+    redis_command = _command_structure(services["redis"])
+    redis_health = _healthcheck_structure(services["redis"])
+    if redis_command != _EXPECTED_REDIS_COMMAND:
         issues.append(_issue("topology_redis_auth", "redis.command", "must require the external password"))
-    if "REDISCLI_AUTH" not in redis_health or "$$REDIS_PASSWORD" not in redis_health:
+    if redis_health != _EXPECTED_REDIS_HEALTHCHECK:
         issues.append(_issue("topology_redis_auth", "redis.healthcheck", "must authenticate"))
-    postgres_health = _command_text(services["postgres"].get("healthcheck", {}))
-    if not all(marker in postgres_health for marker in ("pg_isready", "$$POSTGRES_USER", "$$POSTGRES_DB")):
+    postgres_health = _healthcheck_structure(services["postgres"])
+    if postgres_health != _EXPECTED_POSTGRES_HEALTHCHECK:
         issues.append(
             _issue(
                 "topology_postgres_auth",
@@ -933,8 +1000,8 @@ def validate_compose(document: Mapping[str, Any]) -> tuple[PreflightIssue, ...]:
                 "must use the external database identity",
             )
         )
-    app_health = _command_text(services["app"].get("healthcheck", {}))
-    if "http://localhost:8000/internal/ready" not in app_health:
+    app_health = _healthcheck_structure(services["app"])
+    if app_health != _EXPECTED_APP_HEALTHCHECK:
         issues.append(
             _issue(
                 "topology_health",
@@ -1161,17 +1228,17 @@ def validate_rendered_compose(document: Mapping[str, Any], values: Mapping[str, 
         for field, expected in fixed_security_environment.items():
             if app_environment.get(field) != expected:
                 issues.append(_issue("rendered_trust", field, "must retain the production trust boundary"))
-    app_health = _command_text(services["app"].get("healthcheck", {}))
-    if "http://localhost:8000/internal/ready" not in app_health:
+    app_health = _healthcheck_structure(services["app"])
+    if app_health != _EXPECTED_APP_HEALTHCHECK:
         issues.append(_issue("rendered_health", "app.healthcheck", "must use loopback internal readiness"))
-    redis_command = _command_text(services["redis"])
-    redis_health = _command_text(services["redis"].get("healthcheck", {}))
-    if "requirepass %s" not in redis_command or "$$REDIS_PASSWORD" not in redis_command:
+    redis_command = _command_structure(services["redis"])
+    redis_health = _healthcheck_structure(services["redis"])
+    if redis_command != _EXPECTED_REDIS_COMMAND:
         issues.append(_issue("rendered_redis_auth", "redis.command", "must require the external password"))
-    if "REDISCLI_AUTH" not in redis_health or "$$REDIS_PASSWORD" not in redis_health:
+    if redis_health != _EXPECTED_REDIS_HEALTHCHECK:
         issues.append(_issue("rendered_redis_auth", "redis.healthcheck", "must authenticate"))
-    postgres_health = _command_text(services["postgres"].get("healthcheck", {}))
-    if not all(marker in postgres_health for marker in ("pg_isready", "$$POSTGRES_USER", "$$POSTGRES_DB")):
+    postgres_health = _healthcheck_structure(services["postgres"])
+    if postgres_health != _EXPECTED_POSTGRES_HEALTHCHECK:
         issues.append(
             _issue(
                 "rendered_postgres_auth",

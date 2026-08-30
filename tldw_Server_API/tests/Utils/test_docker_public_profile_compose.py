@@ -131,14 +131,14 @@ def test_single_user_compose_app_contract() -> None:
                 "CMD",
                 "python",
                 "-c",
-                "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/ready', timeout=3).status == 200 else 1)",
+                "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/internal/ready', timeout=3).status == 200 else 1)",
             ],
             "interval": "10s",
             "timeout": "5s",
             "retries": 12,
             "start_period": "30s",
         },
-        "app healthcheck should probe /ready with onboarding-friendly retries",
+        "app healthcheck should probe internal readiness with onboarding-friendly retries",
     )
 
 

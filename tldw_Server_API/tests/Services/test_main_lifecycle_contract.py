@@ -85,7 +85,7 @@ async def test_asgi_transport_without_lifespan_bypasses_shutdown_coordinator(
         response = await client.get("/health")
 
     assert response.status_code == 200
-    assert response.json()["status"] == "healthy"
+    assert response.json() == {"status": "ok"}
     assert startup_calls == []
     assert shutdown_calls == []
     assert not hasattr(app.state, "_tldw_shutdown_legacy_coordinator_summary")
@@ -1204,7 +1204,10 @@ def test_lifespan_startup_delegates_evaluations_warmup(
     assert recorded_calls[0]["route_enabled"] is main_module.route_enabled
     assert recorded_calls[0]["logger"] is main_module.logger
     assert recorded_calls[0]["startup_guard_exceptions"] == main_module._STARTUP_GUARD_EXCEPTIONS
-    assert recorded_calls[0]["test_mode"] == bool(getattr(main_module, "_TEST_MODE", False))
+    assert recorded_calls[0]["test_mode"] == (
+        bool(getattr(main_module, "_TEST_MODE", False))
+        or main_module._runtime_test_mode_active()
+    )
 
 
 @pytest.mark.integration

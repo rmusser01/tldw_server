@@ -2,16 +2,16 @@
 # Metrics endpoint for Prometheus and health monitoring
 
 import asyncio
-from datetime import datetime, timezone
 import time
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from loguru import logger
 
+import tldw_Server_API.app.core.Chat.chat_metrics as chat_metrics
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequirePermission, RequireRole
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_LOGS
-import tldw_Server_API.app.core.Chat.chat_metrics as chat_metrics
 from tldw_Server_API.app.core.Chat.chat_metrics import get_chat_metrics
 from tldw_Server_API.app.core.Metrics.metrics_manager import get_metrics_registry
 

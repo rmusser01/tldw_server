@@ -2,6 +2,17 @@
 
 This folder contains the base Compose stack for tldw_server, optional overlays, and worker/infra stacks. All commands assume you run from the repo root.
 
+For a public production deployment, use
+[`Docs/Deployment/Production_Reference_Deployment.md`](../Docs/Deployment/Production_Reference_Deployment.md)
+and `Dockerfiles/docker-compose.production.yml`. The quickstart, host-storage,
+and proxy overlays below are non-production examples.
+
+The production monitoring companion is
+`Dockerfiles/Monitoring/docker-compose.production.yml`. It joins the reference
+stack's private edge network and binds all operator UIs to host loopback. The
+similarly named `docker-compose.monitoring.yml` is a legacy non-production
+overlay.
+
 ## Base Stack
 
 - Public single-user file: `Dockerfiles/docker-compose.single-user.yml`
@@ -42,7 +53,11 @@ This folder contains the base Compose stack for tldw_server, optional overlays, 
 
 ## Overlays & Profiles
 
-- Production overrides: `Dockerfiles/docker-compose.override.yml`
+The overlays in this section are non-production customization examples. They do
+not replace the standalone production reference profile, its offline preflight,
+or its restore-backed rollback.
+
+- Legacy production-named overrides (non-production): `Dockerfiles/docker-compose.override.yml`
   - `docker compose -f Dockerfiles/docker-compose.yml -f Dockerfiles/docker-compose.override.yml up -d --build`
   - Sets production flags, disables API key echo, and tightens defaults.
 
@@ -116,13 +131,16 @@ For the full CI/CD pipeline details (workflow triggers, tagging conventions, att
 ## Notes
 
 - Run compose commands from repo root so relative paths resolve correctly.
-- For production, pair the app with a reverse proxy and set strong secrets in `.env`.
+- For production, follow `Docs/Deployment/Production_Reference_Deployment.md`;
+  pairing a quickstart app with a proxy is not an equivalent security boundary.
 - GPU for embeddings workers: ensure the host has NVIDIA runtime configured and adjust `CUDA_VISIBLE_DEVICES` as needed in the embeddings compose.
 - To avoid publishing the app port on host when using a proxy overlay, do not also map `8000:8000` in `app`.
 
 ## Troubleshooting
 
-- Health checks: `app` responds on `/ready`; `postgres`/`redis` include health checks.
+- Health checks: application containers probe loopback `/internal/ready`;
+  PostgreSQL and Redis include private health checks. Public `/health` is the
+  minimal liveness surface.
 - If the app fails waiting for DB, check Postgres readiness; for public multi-user external DB overrides, verify `TLDW_DATABASE_URL_OVERRIDE` and `TLDW_JOBS_DB_URL_OVERRIDE`.
 - `single_user` quickstart bootstraps a strong `SINGLE_USER_API_KEY` (when missing/placeholder) and performs one-time AuthNZ initialization based on the marker file `/app/Databases/.authnz_initialized_single_user` stored in the attached volume.
 - Initialization is skipped when that marker already exists, and will re-run only after volume replacement or marker removal (force re-init by deleting the marker, or by reinitializing the auth DB and clearing the marker).

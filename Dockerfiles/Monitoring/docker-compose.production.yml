@@ -1,23 +1,21 @@
-# Monitoring overlay for tldw_server.
-# Usage (overlay — recommended):
-#   docker compose -f Dockerfiles/docker-compose.yml -f Dockerfiles/Monitoring/docker-compose.monitoring.yml up -d
-# NOTE: This is a compose overlay. prometheus.yml scrapes "app:8000" which
-# requires the main docker-compose.yml stack to provide the "app" service.
-# Running this file standalone will cause Prometheus scrape failures.
+name: tldw-production-monitoring
+
+# Standalone monitoring companion for docker-compose.production.yml.
+# Start the production stack first so the external tldw-production_edge
+# network and the app service alias exist.
 
 services:
   prometheus:
-    image: ${PROMETHEUS_IMAGE:?Set PROMETHEUS_IMAGE to a pinned image reference such as prom/prometheus:v2.55.1}
-    container_name: tldw_prometheus
+    image: ${PROMETHEUS_IMAGE:?Set an exact Prometheus image}
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ../../Docs/Operations/monitoring/prometheus_alerts_tldw.yml:/etc/prometheus/alerts/tldw_alerts.yml:ro
       - ../../Docs/Operations/monitoring/alerts:/etc/prometheus/alerts/extra:ro
       - ${TLDW_METRICS_API_KEY_FILE:?Set a mode-0600 API-key file whose principal has system.logs}:/run/secrets/tldw_metrics_api_key:ro
     command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
+      - "--config.file=/etc/prometheus/prometheus.yml"
     ports:
-      - '9090:9090'
+      - "127.0.0.1:9090:9090"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/healthy"]
@@ -28,14 +26,13 @@ services:
       - alertmanager
 
   alertmanager:
-    image: prom/alertmanager:v0.30.1
-    container_name: tldw_alertmanager
+    image: ${ALERTMANAGER_IMAGE:?Set an exact Alertmanager image}
     volumes:
       - ${ALERTMANAGER_CONFIG:-../../Docs/Operations/monitoring/alertmanager_webhook_only.yml}:/etc/alertmanager/alertmanager.yml:ro
     command:
-      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
     ports:
-      - '9093:9093'
+      - "127.0.0.1:9093:9093"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:9093/-/healthy"]
@@ -44,13 +41,12 @@ services:
       retries: 3
 
   grafana:
-    image: ${GRAFANA_IMAGE:?Set GRAFANA_IMAGE to a pinned image reference such as grafana/grafana:11.5.2}
-    container_name: tldw_grafana
+    image: ${GRAFANA_IMAGE:?Set an exact Grafana image}
     environment:
-      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:?Set GRAFANA_ADMIN_USER before starting Grafana}
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?Set GRAFANA_ADMIN_PASSWORD before starting Grafana}
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:?Set GRAFANA_ADMIN_USER before starting Grafana}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?Set GRAFANA_ADMIN_PASSWORD before starting Grafana}
     ports:
-      - '${GRAFANA_PORT:-3002}:3000'
+      - "127.0.0.1:${GRAFANA_PORT:-3002}:3000"
     depends_on:
       - prometheus
     volumes:
@@ -58,6 +54,11 @@ services:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ../../Docs/Monitoring/Grafana_Dashboards:/var/lib/grafana/dashboards:ro
     restart: unless-stopped
+
+networks:
+  default:
+    external: true
+    name: tldw-production_edge
 
 volumes:
   grafana_data:

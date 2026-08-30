@@ -17,5 +17,8 @@ scrape_configs:
   - job_name: 'tldw_server'
     # tldw_server exposes Prometheus text at /api/v1/metrics/text
     metrics_path: /api/v1/metrics/text
+    authorization:
+      type: Bearer
+      credentials_file: /run/secrets/tldw_metrics_api_key
     static_configs:
       - targets: ['app:8000']

@@ -398,6 +398,9 @@ def test_environment_requires_origin_domain_and_contact_alignment(
         "bad-.acme.internal",
         "tldw",
         "tldwé.acme.internal",
+        "192.0.2.1",
+        "2001:db8::1",
+        "tldw.123",
         f"{'a' * 64}.acme.internal",
         ".".join(["a" * 63] * 4),
     ),
@@ -422,6 +425,10 @@ def test_environment_rejects_non_dns_public_identity(tmp_path: Path, domain: str
         "ops@-bad.internal",
         "ops@localhost",
         "ops@tldwé.acme.internal",
+        "ops@192.0.2.1",
+        "ops@2001:db8::1",
+        "ops@[2001:db8::1]",
+        "ops@tldw.123",
         "ops@@acme.internal",
         ".ops@acme.internal",
         "ops..tls@acme.internal",
@@ -449,6 +456,21 @@ def test_environment_accepts_bounded_dns_and_acme_email_boundaries(tmp_path: Pat
     assert not any(issue.code == "sample_value" for issue in issues)
 
 
+@pytest.mark.parametrize("domain", ("123.acme", "tldw.abc123"))
+def test_environment_accepts_numeric_nonterminal_or_alphanumeric_dns_labels(
+    tmp_path: Path,
+    domain: str,
+) -> None:
+    values = _valid_env(tmp_path)
+    values["TLDW_PUBLIC_DOMAIN"] = domain
+    values["TLDW_ACME_EMAIL"] = f"ops@{domain}"
+    values["ALLOWED_ORIGINS"] = f"https://{domain}"
+
+    issues = validate_environment(values, env_path=tmp_path / "production.env")
+
+    assert not any(issue.code == "sample_value" for issue in issues)
+
+
 @pytest.mark.parametrize(
     ("backup_value", "expected_code"),
     (("relative/backups", "unsafe_backup_path"), ("/app/Databases", "live_data_path")),
@@ -465,6 +487,53 @@ def test_environment_rejects_backup_parent_of_live_data(tmp_path: Path) -> None:
     values["TLDW_BACKUP_DIR"] = "/app"
 
     assert "live_data_path" in _codes(validate_environment(values, env_path=tmp_path / "production.env"))
+
+
+@pytest.mark.parametrize("backup_value", ("/var/run/docker.sock", "/run/docker.sock", "/var/run", "/run"))
+@pytest.mark.parametrize("source_mode", ("host", "container"))
+def test_environment_rejects_backup_paths_that_expose_docker_sockets(
+    tmp_path: Path,
+    backup_value: str,
+    source_mode: str,
+) -> None:
+    values = _valid_env(tmp_path)
+    values["TLDW_BACKUP_DIR"] = backup_value
+    if source_mode == "host":
+        env_file = tmp_path / "production.env"
+        _write_env(env_file, values)
+        issues = validate_environment(values, env_path=env_file)
+    else:
+        issues = validate_environment(
+            values,
+            env_path=None,
+            runtime_backup_dir=tmp_path / "backups",
+            require_backup_writable=False,
+        )
+
+    matching = [issue for issue in issues if issue.code == "docker_socket_path"]
+    assert matching and all(issue.field == "TLDW_BACKUP_DIR" for issue in matching)
+    assert all(backup_value not in issue.message for issue in matching)
+
+
+@pytest.mark.parametrize("source_mode", ("host", "container"))
+def test_environment_accepts_backup_path_outside_docker_socket_ancestors(
+    tmp_path: Path,
+    source_mode: str,
+) -> None:
+    values = _valid_env(tmp_path)
+    if source_mode == "host":
+        env_file = tmp_path / "production.env"
+        _write_env(env_file, values)
+        issues = validate_environment(values, env_path=env_file)
+    else:
+        issues = validate_environment(
+            values,
+            env_path=None,
+            runtime_backup_dir=tmp_path / "backups",
+            require_backup_writable=False,
+        )
+
+    assert "docker_socket_path" not in _codes(issues)
 
 
 def test_environment_rejects_missing_and_non_directory_backup_targets(tmp_path: Path) -> None:
@@ -597,6 +666,54 @@ def test_static_compose_mutations_fail_closed(mutation: str, expected_code: str)
         services["app"]["environment"]["tldw_production"] = "${tldw_production:-false}"
     elif mutation == "image_default":
         services["app"]["image"] = "${TLDW_APP_IMAGE:-registry/tldw:latest}"
+
+    assert expected_code in _codes(validate_compose(compose))
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_code"),
+    (
+        ("app_extra_print", "topology_health"),
+        ("app_alternate_execution", "topology_health"),
+        ("postgres_inert_markers", "topology_postgres_auth"),
+        ("postgres_extra_echo", "topology_postgres_auth"),
+        ("redis_alternate_shell", "topology_redis_auth"),
+        ("redis_extra_echo", "topology_redis_auth"),
+        ("redis_health_inert_markers", "topology_redis_auth"),
+        ("redis_health_extra_echo", "topology_redis_auth"),
+    ),
+)
+def test_static_compose_rejects_inexact_health_and_auth_commands(
+    mutation: str,
+    expected_code: str,
+) -> None:
+    compose = copy.deepcopy(_real_compose())
+    services = compose["services"]
+    if mutation == "app_extra_print":
+        services["app"]["healthcheck"]["test"][-1] += "; print('ready')"
+    elif mutation == "app_alternate_execution":
+        services["app"]["healthcheck"]["test"] = [
+            "CMD-SHELL",
+            services["app"]["healthcheck"]["test"][-1],
+        ]
+    elif mutation == "postgres_inert_markers":
+        services["postgres"]["healthcheck"]["test"] = [
+            "CMD-SHELL",
+            "echo 'pg_isready $$POSTGRES_USER $$POSTGRES_DB'",
+        ]
+    elif mutation == "postgres_extra_echo":
+        services["postgres"]["healthcheck"]["test"][-1] += "; echo ready"
+    elif mutation == "redis_alternate_shell":
+        services["redis"]["command"][0] = "/bin/bash"
+    elif mutation == "redis_extra_echo":
+        services["redis"]["command"][-1] += "; echo ready"
+    elif mutation == "redis_health_inert_markers":
+        services["redis"]["healthcheck"]["test"] = [
+            "CMD-SHELL",
+            "echo 'REDISCLI_AUTH $$REDIS_PASSWORD'",
+        ]
+    elif mutation == "redis_health_extra_echo":
+        services["redis"]["healthcheck"]["test"][-1] += "; echo ready"
 
     assert expected_code in _codes(validate_compose(compose))
 
@@ -943,6 +1060,55 @@ def test_rendered_compose_rechecks_final_wiring(
         services["postgres"]["healthcheck"]["test"] = ["CMD", "true"]
     elif mutation == "declared_volumes":
         compose["volumes"]["extra"] = {"name": "tldw-production_extra"}
+
+    assert expected_code in _codes(validate_rendered_compose(compose, values))
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_code"),
+    (
+        ("app_extra_print", "rendered_health"),
+        ("app_alternate_execution", "rendered_health"),
+        ("postgres_inert_markers", "rendered_postgres_auth"),
+        ("postgres_extra_echo", "rendered_postgres_auth"),
+        ("redis_alternate_shell", "rendered_redis_auth"),
+        ("redis_extra_echo", "rendered_redis_auth"),
+        ("redis_health_inert_markers", "rendered_redis_auth"),
+        ("redis_health_extra_echo", "rendered_redis_auth"),
+    ),
+)
+def test_rendered_compose_rejects_inexact_health_and_auth_commands(
+    tmp_path: Path,
+    mutation: str,
+    expected_code: str,
+) -> None:
+    compose, values = _rendered_compose_json(tmp_path)
+    services = compose["services"]
+    if mutation == "app_extra_print":
+        services["app"]["healthcheck"]["test"][-1] += "; print('ready')"
+    elif mutation == "app_alternate_execution":
+        services["app"]["healthcheck"]["test"] = [
+            "CMD-SHELL",
+            services["app"]["healthcheck"]["test"][-1],
+        ]
+    elif mutation == "postgres_inert_markers":
+        services["postgres"]["healthcheck"]["test"] = [
+            "CMD-SHELL",
+            "echo 'pg_isready $$POSTGRES_USER $$POSTGRES_DB'",
+        ]
+    elif mutation == "postgres_extra_echo":
+        services["postgres"]["healthcheck"]["test"][-1] += "; echo ready"
+    elif mutation == "redis_alternate_shell":
+        services["redis"]["command"][0] = "/bin/bash"
+    elif mutation == "redis_extra_echo":
+        services["redis"]["command"][-1] += "; echo ready"
+    elif mutation == "redis_health_inert_markers":
+        services["redis"]["healthcheck"]["test"] = [
+            "CMD-SHELL",
+            "echo 'REDISCLI_AUTH $$REDIS_PASSWORD'",
+        ]
+    elif mutation == "redis_health_extra_echo":
+        services["redis"]["healthcheck"]["test"][-1] += "; echo ready"
 
     assert expected_code in _codes(validate_rendered_compose(compose, values))
 

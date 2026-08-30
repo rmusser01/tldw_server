@@ -3023,6 +3023,17 @@ def _add_public_control_plane_route(path: str, endpoint: Any) -> None:
     app.add_api_route(path, endpoint, methods=["HEAD"], **route_kwargs)
 
 
+def _add_operator_readiness_route(path: str, endpoint: Any) -> None:
+    """Register authenticated readiness without duplicating OpenAPI operation IDs."""
+
+    route_kwargs = {
+        "tags": ["health"],
+        "dependencies": [Depends(RequirePermission(SYSTEM_LOGS))],
+    }
+    app.add_api_route(path, endpoint, methods=["GET"], **route_kwargs)
+    app.add_api_route(path, endpoint, methods=["HEAD"], **route_kwargs)
+
+
 # Register control-plane health endpoints (works in both minimal and full modes)
 try:
     if route_enabled("health"):
@@ -3033,20 +3044,8 @@ try:
             methods=["GET", "HEAD"],
             include_in_schema=False,
         )
-        app.add_api_route(
-            "/ready",
-            readiness_check,
-            methods=["GET", "HEAD"],
-            tags=["health"],
-            dependencies=[Depends(RequirePermission(SYSTEM_LOGS))],
-        )
-        app.add_api_route(
-            "/health/ready",
-            readiness_alias,
-            methods=["GET", "HEAD"],
-            tags=["health"],
-            dependencies=[Depends(RequirePermission(SYSTEM_LOGS))],
-        )
+        _add_operator_readiness_route("/ready", readiness_check)
+        _add_operator_readiness_route("/health/ready", readiness_alias)
     else:
         logger.info("Route disabled by policy: health (/health, /ready, /health/ready)")
 except _STARTUP_GUARD_EXCEPTIONS as _health_rt_err:
@@ -3058,20 +3057,8 @@ except _STARTUP_GUARD_EXCEPTIONS as _health_rt_err:
         methods=["GET", "HEAD"],
         include_in_schema=False,
     )
-    app.add_api_route(
-        "/ready",
-        readiness_check,
-        methods=["GET", "HEAD"],
-        tags=["health"],
-        dependencies=[Depends(RequirePermission(SYSTEM_LOGS))],
-    )
-    app.add_api_route(
-        "/health/ready",
-        readiness_alias,
-        methods=["GET", "HEAD"],
-        tags=["health"],
-        dependencies=[Depends(RequirePermission(SYSTEM_LOGS))],
-    )
+    _add_operator_readiness_route("/ready", readiness_check)
+    _add_operator_readiness_route("/health/ready", readiness_alias)
 
 # Import-time CI/startup guard: fail immediately if the route table contains duplicates.
 _fail_on_duplicate_route_method_pairs(app, context="module import")
