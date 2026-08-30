@@ -266,13 +266,16 @@ class NoteSemanticStore:
         if capability_revision is not None:
             where += " AND capability_revision=?"
             params += (self._safe_token(capability_revision, field="capability_revision"),)
+        if desired_state is SemanticDesiredState.ENABLED:
+            transition = "enabled_at=?"
+        else:
+            transition = "disabled_at=?"
         with self._db.transaction() as conn:
             self._set_scope(conn, dataset)
             cursor = conn.execute(
                 "UPDATE note_semantic_index_configs SET desired_state=?, configuration_revision=configuration_revision+1, "  # nosec B608
-                "enabled_at=CASE WHEN ?='enabled' THEN ? ELSE enabled_at END, "
-                "disabled_at=CASE WHEN ?='disabled' THEN ? ELSE disabled_at END, updated_at=? WHERE " + where,
-                (desired_state.value, desired_state.value, timestamp, desired_state.value, timestamp, timestamp, *params),
+                + transition + ", updated_at=? WHERE " + where,
+                (desired_state.value, timestamp, timestamp, *params),
             )
             if cursor.rowcount != 1:
                 return None
@@ -324,9 +327,18 @@ class NoteSemanticStore:
         timestamp = self._timestamp(now)
         with self._db.transaction() as conn:
             self._set_scope(conn, dataset)
+            if self.is_postgres:
+                config_query = (
+                    "SELECT configuration_revision,dimension_state,dimensions,compatibility_hash "
+                    "FROM note_semantic_index_configs WHERE owner_user_id=? AND dataset_id=? FOR UPDATE"
+                )
+            else:
+                config_query = (
+                    "SELECT configuration_revision,dimension_state,dimensions,compatibility_hash "
+                    "FROM note_semantic_index_configs WHERE owner_user_id=? AND dataset_id=?"
+                )
             config = conn.execute(
-                "SELECT configuration_revision,dimension_state,dimensions,compatibility_hash "
-                "FROM note_semantic_index_configs WHERE owner_user_id=? AND dataset_id=?",
+                config_query,
                 (self.owner_user_id, dataset),
             ).fetchone()
             if config is None:
