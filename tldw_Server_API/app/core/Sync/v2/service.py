@@ -1122,6 +1122,7 @@ class SyncV2Service:
         notes_task_activity_bootstrapper: object | None = None,
         personal_context_service_resolver: Callable[[str], object] | None = None,
         personal_context_key_wrapper: Callable[..., str] | None = None,
+        personal_context_authority_id: str = "tldw-server",
     ) -> None:
         self.store = store
         self.adapters = adapters
@@ -1138,6 +1139,9 @@ class SyncV2Service:
         self.notes_task_activity_bootstrapper = notes_task_activity_bootstrapper
         self.personal_context_service_resolver = personal_context_service_resolver
         self.personal_context_key_wrapper = personal_context_key_wrapper
+        self.personal_context_authority_id = (
+            str(personal_context_authority_id).strip() or "tldw-server"
+        )
 
     def _notes_task_domains_ready(self, dataset: SyncDataset | None) -> bool:
         """Return the single service-level task/activity activation predicate."""
@@ -2147,12 +2151,17 @@ class SyncV2Service:
             "notes_attachment_v2",
             "default_personal",
             "client_family",
+            "personal_context",
             *NOTES_MOODBOARD_STUDIO_SERVER_METADATA_KEYS,
             *NOTES_TASK_SERVER_METADATA_KEYS,
         }
         if (
             requested_domains.intersection(
-                {*NOTES_ORGANIZATION_DOMAINS, *NOTES_LINK_DOMAINS}
+                {
+                    *NOTES_ORGANIZATION_DOMAINS,
+                    *NOTES_LINK_DOMAINS,
+                    *PERSONAL_CONTEXT_SYNC_DOMAINS,
+                }
             )
             or reserved_metadata.intersection(requested_metadata)
         ):
@@ -2335,7 +2344,7 @@ class SyncV2Service:
         *,
         user_id: str,
         device_id: str,
-        authority_id: str,
+        authority_id: str | None = None,
         required_schema_version: int | None = None,
         required_quotas: Mapping[str, int] | None = None,
         expected_purge_generation: int | None = None,
@@ -2345,7 +2354,7 @@ class SyncV2Service:
         return self._profile_manager().bootstrap_personal_context(
             user_id=user_id,
             device_id=device_id,
-            authority_id=authority_id,
+            authority_id=self.personal_context_authority_id,
             required_schema_version=required_schema_version,
             required_quotas=required_quotas,
             expected_purge_generation=expected_purge_generation,
@@ -3109,9 +3118,8 @@ class SyncV2Service:
                     )
                 )
                 continue
-            if (
-                envelope.domain in PERSONAL_CONTEXT_SYNC_DOMAINS
-                and not _personal_context_link_is_complete(dataset)
+            if envelope.domain in PERSONAL_CONTEXT_SYNC_DOMAINS and not _personal_context_link_is_complete(
+                dataset, device_id=device_id
             ):
                 rejected.append(
                     SyncPushRejected(
@@ -8954,11 +8962,23 @@ def _device_requested_domains(device: SyncDevice) -> list[SyncDomain]:
     return [item for item in requested if item in known]
 
 
-def _personal_context_link_is_complete(dataset: SyncDataset) -> bool:
+def _personal_context_link_is_complete(
+    dataset: SyncDataset, *, device_id: str
+) -> bool:
     """Return whether reviewed first-link reconciliation admitted profile writes."""
 
     state = dataset.metadata.get("personal_context")
-    return isinstance(state, Mapping) and state.get("link_state") == "complete"
+    if not isinstance(state, Mapping):
+        return False
+    receipts = state.get("link_receipts")
+    receipt = receipts.get(device_id) if isinstance(receipts, Mapping) else None
+    return (
+        isinstance(receipt, Mapping)
+        and receipt.get("profile_id") == state.get("profile_id")
+        and receipt.get("integrity_key_id") == state.get("integrity_key_id")
+        and receipt.get("purge_generation") == state.get("purge_generation")
+        and isinstance(receipt.get("bootstrap_cursor"), str)
+    )
 
 
 def _call_adapter_evaluate(

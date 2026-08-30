@@ -600,6 +600,15 @@ class SyncV2ProfileManager:
             raise PersonalContextBootstrapError("personal_context_bootstrap_cursor_stale")
         updated_metadata = dict(dataset.metadata)
         updated_state = dict(state)
+        receipts = updated_state.get("link_receipts")
+        updated_receipts = dict(receipts) if isinstance(receipts, Mapping) else {}
+        updated_receipts[device_id] = {
+            "profile_id": state["profile_id"],
+            "integrity_key_id": state["integrity_key_id"],
+            "purge_generation": state["purge_generation"],
+            "bootstrap_cursor": bootstrap_cursor,
+        }
+        updated_state["link_receipts"] = updated_receipts
         updated_state["link_state"] = _PERSONAL_CONTEXT_LINK_COMPLETE
         updated_metadata["personal_context"] = updated_state
         self.store.enroll_dataset(

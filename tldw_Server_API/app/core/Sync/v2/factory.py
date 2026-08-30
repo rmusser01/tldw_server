@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import hmac
 import os
+from base64 import urlsafe_b64encode
 from collections.abc import Mapping
 from functools import lru_cache
 from pathlib import Path
 from urllib.parse import urlparse
+
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import (
@@ -177,6 +181,10 @@ def sync_v2_service_for_user(user_id: str) -> SyncV2Service:
         notes_task_bootstrapper=NotesTaskBootstrapper(note_db),
         notes_task_activity_bootstrapper=NotesTaskActivityBootstrapper(note_db),
         personal_context_service_resolver=_personal_context_service_for_user,
+        personal_context_key_wrapper=_wrap_personal_context_integrity_key,
+        personal_context_authority_id=os.getenv(
+            "SYNC_V2_PERSONAL_CONTEXT_AUTHORITY_ID", "tldw-server"
+        ),
     )
 
 
@@ -268,6 +276,34 @@ def _validate_personal_context_components(
             raise RuntimeError(
                 f"Personal Context Sync domain has no service materializer: {domain}"
             )
+
+
+def _wrap_personal_context_integrity_key(
+    *, device: object, integrity_key: bytes, integrity_key_id: str
+) -> str:
+    """Encrypt the integrity key to the registered device RSA public key."""
+
+    capabilities = getattr(device, "capabilities", {})
+    public_key_pem = (
+        capabilities.get("personal_context_wrapping_public_key")
+        if isinstance(capabilities, Mapping)
+        else None
+    )
+    if not isinstance(public_key_pem, str) or not public_key_pem.strip():
+        raise ValueError("personal_context_device_key_unavailable")
+    public_key = serialization.load_pem_public_key(public_key_pem.encode("utf-8"))
+    if not isinstance(public_key, rsa.RSAPublicKey) or public_key.key_size < 2048:
+        raise ValueError("personal_context_device_key_invalid")
+    label = f"personal-context:{integrity_key_id}".encode("utf-8")
+    ciphertext = public_key.encrypt(
+        integrity_key,
+        padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=label,
+        ),
+    )
+    return "rsa-oaep-sha256:" + urlsafe_b64encode(ciphertext).decode("ascii")
 
 
 def _personal_context_integrity_key(dataset: object, key_id: str) -> bytes:

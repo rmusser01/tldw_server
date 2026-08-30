@@ -1115,6 +1115,45 @@ class SyncProfileBootstrapResponse(SyncProfileResponse):
     created: bool = False
 
 
+class SyncPersonalContextBootstrapRequest(BaseModel):
+    """Authenticated registered-device request for canonical Personal Context."""
+
+    device_id: str
+    required_schema_version: int | None = Field(None, ge=1)
+    required_quotas: dict[str, int] = Field(default_factory=dict)
+    expected_purge_generation: int | None = Field(None, ge=0)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SyncPersonalContextBootstrapResponse(BaseModel):
+    """Canonical bootstrap snapshot with device-wrapped integrity key material."""
+
+    dataset_id: str
+    authority_id: str
+    manifest: dict[str, Any]
+    scopes: list[dict[str, Any]] = Field(default_factory=list)
+    records: list[dict[str, Any]] = Field(default_factory=list)
+    proposals: list[dict[str, Any]] = Field(default_factory=list)
+    purge_generation: int
+    schema_version: int
+    quotas: dict[str, int]
+    cursor: str
+    integrity_key_id: str
+    key_record_id: str
+    wrapped_key_blob: str
+
+
+class SyncPersonalContextLinkCompleteRequest(BaseModel):
+    """Cursor-bound acknowledgement that one device completed reconciliation."""
+
+    device_id: str
+    dataset_id: str
+    bootstrap_cursor: str
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class SyncRestoreManifestDataset(BaseModel):
     """Metadata-only dataset entry in a restore manifest."""
 
@@ -2238,6 +2277,9 @@ __all__ = [
     "SyncProfileBootstrapMode",
     "SyncProfileBootstrapRequest",
     "SyncProfileBootstrapResponse",
+    "SyncPersonalContextBootstrapRequest",
+    "SyncPersonalContextBootstrapResponse",
+    "SyncPersonalContextLinkCompleteRequest",
     "SyncNotesAttachmentBootstrapDiagnosticsResponse",
     "SyncNotesAttachmentCleanupSampleResponse",
     "SyncNotesOrganizationStatusResponse",
