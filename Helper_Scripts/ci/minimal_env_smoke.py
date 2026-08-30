@@ -14,6 +14,7 @@ Run:
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -64,6 +65,17 @@ def _probe(url: str) -> tuple[int, str]:
             return resp.status, resp.read().decode("utf-8", "replace")
     except urllib.error.HTTPError as err:
         return err.code, err.read().decode("utf-8", "replace")
+
+
+def _is_public_liveness_response(status: int, body: str) -> bool:
+    """Return whether a response matches the exact public liveness contract."""
+    if status != 200:
+        return False
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        return False
+    return payload == {"status": "ok"}
 
 
 def main(argv: list[str]) -> int:
@@ -119,7 +131,7 @@ def main(argv: list[str]) -> int:
                     return 1
                 try:
                     status, body = _probe(health_url)
-                    if status == 200 and "healthy" in body.lower():
+                    if _is_public_liveness_response(status, body):
                         logger.info(
                             "[minimal-env-smoke] OK — /health returned 200 in a scrubbed environment: {}",
                             body[:120],
@@ -130,7 +142,7 @@ def main(argv: list[str]) -> int:
                     last_err = repr(exc)
                 time.sleep(1.0)
             logger.bind(event="minimal_env_smoke", port=args.port).error(
-                "[minimal-env-smoke] FAIL — /health not healthy within {}s (last: {}):\n{}",
+                "[minimal-env-smoke] FAIL — /health did not return canonical public liveness within {}s (last: {}):\n{}",
                 args.timeout,
                 last_err,
                 _tail_log(),
