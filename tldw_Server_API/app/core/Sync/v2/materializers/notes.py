@@ -143,6 +143,7 @@ class NotesMaterializer:
                     object_hash=object_hash,
                     expected_product_version=expected_product_version,
                     projection_timestamp=projection_timestamp,
+                    semantic_dataset_id=envelope.dataset_id,
                 )
                 deleted = False
             elif envelope.operation == "tombstone":
@@ -151,6 +152,7 @@ class NotesMaterializer:
                     sync_client_id=_projection_client_id(self.note_db),
                     object_revision=object_revision,
                     object_hash=object_hash,
+                    semantic_dataset_id=envelope.dataset_id,
                 )
                 deleted = True
             else:
