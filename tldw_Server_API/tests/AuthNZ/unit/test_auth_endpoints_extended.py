@@ -932,6 +932,7 @@ async def test_login_returns_mfa_challenge_when_enabled(monkeypatch):
     class _StubSessionManager:
         def __init__(self):
             self.cached = {}
+            self.stored_value = None
             self.created_kwargs = {}
             self.created_at = None
             self.redis_client = object()
@@ -943,6 +944,7 @@ async def test_login_returns_mfa_challenge_when_enabled(monkeypatch):
             return {"session_id": 777}
 
         async def store_ephemeral_value(self, key: str, value: str, ttl_seconds: int):
+            self.stored_value = value
             self.cached[key] = (value, ttl_seconds)
 
         async def update_session_tokens(self, **kwargs):
@@ -971,7 +973,7 @@ async def test_login_returns_mfa_challenge_when_enabled(monkeypatch):
         "method": "POST",
         "path": "/api/v1/auth/login",
         "headers": [],
-        "client": ("203.0.113.10", 1234),
+        "client": ("203.0.113.9", 1234),
         "scheme": "http",
         "query_string": b"",
         "server": ("testserver", 80),
@@ -998,6 +1000,14 @@ async def test_login_returns_mfa_challenge_when_enabled(monkeypatch):
     assert result.expires_in == 300
     assert result.session_token
     assert session_manager.cached
+    cached = json.loads(session_manager.stored_value)
+    assert cached == {
+        "user_id": 5,
+        "session_id": 777,
+        "login_lockout_key": auth._login_client_lockout_key("203.0.113.9", "mfa_user"),
+    }
+    assert "203.0.113.9" not in session_manager.stored_value
+    assert "mfa_user" not in session_manager.stored_value
     expires_at = session_manager.created_kwargs.get("expires_at_override")
     refresh_expires_at = session_manager.created_kwargs.get("refresh_expires_at_override")
     assert expires_at is not None
@@ -1057,14 +1067,16 @@ async def test_mfa_login_completes_tokens(monkeypatch):
         async def update_session_tokens(self, **kwargs):
             self.updated.update(kwargs)
 
+    reset_calls = []
+
     class _StubLimiter:
-        enabled = False
+        enabled = True
 
         async def check_user_rate_limit(self, user_id: int, endpoint: str):
             return True, {}
 
-        async def reset_failed_attempts(self, *args, **kwargs):
-            return None
+        async def reset_failed_attempts(self, identifier: str, attempt_type: str):
+            reset_calls.append((identifier, attempt_type))
 
     class _StubJWT:
         def create_access_token(self, **kwargs):
@@ -1100,14 +1112,19 @@ async def test_mfa_login_completes_tokens(monkeypatch):
     session_manager = _StubSessionManager()
     token = "mfa-session-token"
     cache_key = auth._mfa_login_cache_key(token)
-    session_manager.ephemeral[cache_key] = '{"user_id": 5, "session_id": 55}'
+    original_login_lockout_key = auth._login_client_lockout_key("203.0.113.9", "mfa_user")
+    session_manager.ephemeral[cache_key] = json.dumps({
+        "user_id": 5,
+        "session_id": 55,
+        "login_lockout_key": original_login_lockout_key,
+    })
 
     scope = {
         "type": "http",
         "method": "POST",
         "path": "/api/v1/auth/mfa/login",
         "headers": [],
-        "client": ("203.0.113.10", 1234),
+        "client": ("198.51.100.44", 1234),
         "scheme": "http",
         "query_string": b"",
         "server": ("testserver", 80),
@@ -1130,6 +1147,84 @@ async def test_mfa_login_completes_tokens(monkeypatch):
     assert result.refresh_token == "REFRESH"
     assert session_manager.updated["session_id"] == 55
     assert cache_key in session_manager.deleted
+    assert reset_calls == [
+        (original_login_lockout_key, "login"),
+        ("mfa_user", "login"),
+    ]
+    assert all(identifier != "198.51.100.44" for identifier, _ in reset_calls)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"user_id": 5, "session_id": 55},
+        {"user_id": 5, "session_id": 55, "login_lockout_key": "203.0.113.9"},
+        {"user_id": 5, "session_id": 55, "login_lockout_key": "login-client-v2:" + "a" * 64},
+        {"user_id": 5, "session_id": 55, "login_lockout_key": "login-client-v1:" + "A" * 64},
+        {"user_id": 5, "session_id": 55, "login_lockout_key": "login-client-v1:" + "a" * 63},
+        {"user_id": 5, "session_id": 55, "login_lockout_key": 123},
+    ],
+)
+async def test_mfa_login_rejects_invalid_cached_lockout_keys_before_user_lookup(monkeypatch, payload):
+    monkeypatch.setenv("AUTH_MODE", "multi_user")
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
+    reset_settings()
+
+    import tldw_Server_API.app.api.v1.endpoints.auth as auth
+
+    class _StubSessionManager:
+        redis_client = object()
+        updated = {}
+
+        async def get_ephemeral_value(self, _key: str):
+            return json.dumps(payload)
+
+        async def update_session_tokens(self, **kwargs):
+            self.updated.update(kwargs)
+
+    reset_calls = []
+
+    class _StubLimiter:
+        enabled = True
+
+        async def reset_failed_attempts(self, identifier: str, attempt_type: str):
+            reset_calls.append((identifier, attempt_type))
+
+    async def _unexpected(*args, **kwargs):
+        raise AssertionError("invalid cached key must be rejected before this call")
+
+    async def _noop_async(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(auth, "_ensure_mfa_available", _noop_async)
+    monkeypatch.setattr(auth, "_ensure_mfa_cache_available", _noop_async)
+    monkeypatch.setattr(auth, "_reserve_auth_rg_requests", _unexpected)
+    monkeypatch.setattr(auth, "fetch_active_user_by_id", _unexpected)
+
+    request = Request({
+        "type": "http", "method": "POST", "path": "/api/v1/auth/mfa/login", "headers": [],
+        "client": ("198.51.100.44", 1234), "scheme": "http", "query_string": b"",
+        "server": ("testserver", 80),
+    })
+    session_manager = _StubSessionManager()
+
+    with pytest.raises(auth.HTTPException) as excinfo:
+        await auth.mfa_login(
+            data=auth.MFALoginRequest(session_token="session-token", mfa_token="123456"),
+            request=request,
+            response=Response(),
+            db=object(),
+            jwt_service=object(),
+            session_manager=session_manager,
+            rate_limiter=_StubLimiter(),
+            settings=auth.get_settings(),
+        )
+
+    assert excinfo.value.status_code == 400
+    assert excinfo.value.detail == "MFA session expired or invalid"
+    assert reset_calls == []
+    assert session_manager.updated == {}
 
 
 @pytest.mark.asyncio
@@ -1338,7 +1433,13 @@ async def test_mfa_login_rate_limited_returns_429(monkeypatch):
     class _StubSessionManager:
         def __init__(self):
             self.redis_client = object()
-            self.ephemeral = {auth._mfa_login_cache_key("session-token"): '{"user_id": 5, "session_id": 55}'}
+            self.ephemeral = {
+                auth._mfa_login_cache_key("session-token"): json.dumps({
+                    "user_id": 5,
+                    "session_id": 55,
+                    "login_lockout_key": auth._login_client_lockout_key("203.0.113.10", "mfa_user"),
+                })
+            }
 
         async def initialize(self):
             return None

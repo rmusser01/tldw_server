@@ -1867,6 +1867,7 @@ async def login(
                 payload = {
                     "user_id": int(user["id"]),
                     "session_id": int(session_id),
+                    "login_lockout_key": client_login_lockout_key,
                 }
                 try:
                     await session_manager.store_ephemeral_value(
@@ -3482,7 +3483,8 @@ async def mfa_login(
 
         session_id = payload.get("session_id")
         user_id = payload.get("user_id")
-        if not session_id or not user_id:
+        login_lockout_key = _validated_login_client_lockout_key(payload.get("login_lockout_key"))
+        if not session_id or not user_id or login_lockout_key is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="MFA session expired or invalid",
@@ -3601,7 +3603,7 @@ async def mfa_login(
         # Reset failed login attempts on successful MFA login
         if getattr(rate_limiter, 'enabled', False):
             try:
-                await rate_limiter.reset_failed_attempts(client_ip, "login")
+                await rate_limiter.reset_failed_attempts(login_lockout_key, "login")
                 await rate_limiter.reset_failed_attempts(user.get("username", ""), "login")
             except _AUTH_NONCRITICAL_EXCEPTIONS as rl_exc:
                 logger.debug(f"rate_limiter.reset_failed_attempts failed: {rl_exc}")
