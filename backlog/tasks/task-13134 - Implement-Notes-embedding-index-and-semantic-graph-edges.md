@@ -1,7 +1,7 @@
 ---
 id: TASK-13134
 title: Implement Notes embedding index and semantic graph edges
-status: To Do
+status: In Progress
 created_date: 2026-08-27 02:20
 labels:
 - notes
@@ -12,7 +12,9 @@ labels:
 priority: Medium
 dependencies:
 - TASK-13138
-updated_date: 2026-08-27 03:56
+updated_date: 2026-08-30 01:06
+modified_files:
+- Docs/superpowers/specs/2026-08-29-notes-semantic-index-design.md
 ---
 
 ## Description
@@ -33,9 +35,11 @@ Add an opt-in, owner-scoped embedding lifecycle for Notes and expose bounded sem
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+- 2026-08-29: Senior implementation-constraint review identified required spec corrections for user-scoped run APIs, semantic opt-in compatibility, evidence offsets, vector-only backend contracts, DSR erasure, graph admission/async composition, dimension and activation rules, cache freshness, and restore semantics.
+- Design specification: `Docs/superpowers/specs/2026-08-29-notes-semantic-index-design.md`
+- 2026-08-29: Addressed all implementation-constraint review findings in the design: nested run APIs, frozen legacy defaults, field-relative code-point evidence, dedicated ChromaDB/pgvector semantic storage, fail-closed DSR erasure, bounded first-page async projection, dimension preflight and activation gates, fresh status projection, and explicit Sync/full-restore behavior.
+- Verification: `git diff --check` passed. This revision changes documentation and task metadata only, so runtime tests and Bandit are not applicable.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
