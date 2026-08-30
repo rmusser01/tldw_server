@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
@@ -75,7 +76,12 @@ def build_semantic_metric_event(
 ) -> SemanticMetricEvent:
     """Build one bounded metric sample without accepting arbitrary labels."""
 
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+    if (
+        isinstance(value, bool)
+        or type(value) is not int
+        or value < 0
+        or not math.isfinite(value)
+    ):
         raise SemanticObservationError("notes_semantic_observation_value_invalid")
     labels = MappingProxyType(
         {

@@ -77,6 +77,10 @@ def _prepare_live_v64(pg_database_config: DatabaseConfig) -> None:
     db = CharactersRAGDB(":memory:", client_id="owner-a", backend=backend)
     try:
         with backend.transaction() as conn:
+            backend.execute(
+                "DROP TABLE IF EXISTS note_semantic_obsolete_vectors CASCADE",
+                connection=conn,
+            )
             for table in reversed(_TABLES):
                 backend.execute(f"DROP TABLE {table} CASCADE", connection=conn)  # nosec B608
             backend.execute(
@@ -191,8 +195,10 @@ def test_postgres_initializer_routes_schema_v64_through_v65(monkeypatch: pytest.
 @pytest.mark.timeout(30)
 def test_postgres_v65_live_schema_has_forced_owner_dataset_rls(
     pg_database_config: DatabaseConfig,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _prepare_live_v64(pg_database_config)
+    monkeypatch.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 65)
     backend = DatabaseBackendFactory.create_backend(pg_database_config)
     db = CharactersRAGDB(":memory:", client_id="owner-a", backend=backend)
     try:

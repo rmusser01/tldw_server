@@ -77,6 +77,7 @@ class SemanticIndexSettings:
             ("max_provider_batch_inputs", "max_chunks_per_run"),
             ("max_provider_input_bytes", "max_provider_batch_bytes"),
             ("max_provider_batch_bytes", "max_provider_bytes_per_run"),
+            ("max_chunks_per_run", "max_cleanup_vectors_per_run"),
             ("max_query_vectors_per_call", "max_chunks_per_note"),
             ("max_query_neighbors", "pgvector_hnsw_max_scan_tuples"),
         ):

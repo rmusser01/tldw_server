@@ -44,8 +44,12 @@ def _prepare_v64_database(path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     db.close_all_connections()
 
 
-def test_sqlite_v65_fresh_schema_has_semantic_tables_constraints_and_indexes(tmp_path: Path) -> None:
+def test_sqlite_v65_fresh_schema_has_semantic_tables_constraints_and_indexes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     db_path = tmp_path / "chacha-v65-fresh.sqlite"
+    monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 65)
     db = _initialize(db_path)
     db.close_all_connections()
 
