@@ -215,6 +215,32 @@ async def test_chroma_fetch_and_delete_do_not_create_missing_storage(tmp_path: P
 
 
 @pytest.mark.asyncio
+async def test_chroma_internal_keyerror_cannot_confirm_generation_absence(
+    tmp_path: Path,
+) -> None:
+    client = Mock()
+    client.get_collection.side_effect = KeyError("internal lookup failure")
+    manager = _manager("owner-a", tmp_path, client)
+    db = CharactersRAGDB(str(tmp_path / "authority-keyerror.sqlite"), client_id="owner-a")
+    generation_id = _generation(db, "dataset-a")
+    try:
+        store = await create_semantic_vector_store(
+            "chromadb",
+            authority=db.note_semantic_store,
+            chroma_manager=manager,
+        )
+
+        with pytest.raises(SemanticVectorError) as exc_info:
+            await store.delete_generation("dataset-a", generation_id)
+
+        assert exc_info.value.code == "notes_semantic_chroma_operation_failed"
+        client.delete_collection.assert_not_called()
+    finally:
+        manager.close()
+        db.close_all_connections()
+
+
+@pytest.mark.asyncio
 async def test_chroma_maps_malformed_distance_to_stable_error(tmp_path: Path) -> None:
     collection = Mock()
     collection.metadata = {"hnsw:space": "cosine"}
