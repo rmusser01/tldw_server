@@ -7,15 +7,15 @@ limiter dependency. The underlying database remains Postgres via the
 `isolated_test_environment` fixture.
 """
 
-from datetime import datetime, timedelta, timezone
 import re
+from datetime import datetime, timedelta, timezone
 
 import asyncpg
 import pytest
 import pytest_asyncio
 
-from tldw_Server_API.tests.helpers.pg_env import get_pg_env
 from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService
+from tldw_Server_API.tests.helpers.pg_env import get_pg_env
 
 pytestmark = pytest.mark.integration
 
@@ -132,8 +132,8 @@ class TestAuthLoginLockoutViaAuthGovernor:
             await conn.close()
 
         # Override the rate limiter dependency to provide a deterministic stub
-        from tldw_Server_API.app.main import app as _app
         from tldw_Server_API.app.api.v1.API_Deps import auth_deps
+        from tldw_Server_API.app.main import app as _app
 
         limiter = _StubLimiter(threshold=3)
 

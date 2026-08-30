@@ -45,7 +45,6 @@ from tldw_Server_API.app.api.v1.API_Deps.federation_deps import (
     get_oidc_federation_service_dep,
     require_enterprise_federation,
 )
-from tldw_Server_API.app.api.v1.utils.deprecation import build_deprecation_headers
 
 #
 # Local imports
@@ -63,6 +62,7 @@ from tldw_Server_API.app.api.v1.schemas.auth_schemas import (
     SingleUserSessionResponse,
     TokenResponse,
 )
+from tldw_Server_API.app.api.v1.utils.deprecation import build_deprecation_headers
 from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditContext,
     AuditEventType,
@@ -72,6 +72,8 @@ from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager
 from tldw_Server_API.app.core.AuthNZ.auth_governor import get_auth_governor
 from tldw_Server_API.app.core.AuthNZ.csrf_protection import (
     global_settings as _csrf_globals,
+)
+from tldw_Server_API.app.core.AuthNZ.csrf_protection import (
     resolve_effective_csrf_enabled,
 )
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, is_postgres_backend
@@ -87,6 +89,9 @@ from tldw_Server_API.app.core.AuthNZ.exceptions import (
     TokenExpiredError,
     WeakPasswordError,
 )
+from tldw_Server_API.app.core.AuthNZ.federation.claim_mapping import preview_claim_mapping
+from tldw_Server_API.app.core.AuthNZ.federation.provisioning_service import FederationProvisioningService
+from tldw_Server_API.app.core.AuthNZ.federation.state_repo import FederationStateRepo
 from tldw_Server_API.app.core.AuthNZ.input_validation import get_input_validator
 from tldw_Server_API.app.core.AuthNZ.ip_allowlist import (
     is_single_user_ip_allowed,
@@ -106,34 +111,50 @@ from tldw_Server_API.app.core.AuthNZ.single_user_session import (
     validate_single_user_session,
 )
 from tldw_Server_API.app.core.AuthNZ.token_blacklist import get_token_blacklist
+from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
 from tldw_Server_API.app.core.Resource_Governance.governor import MemoryResourceGovernor, RGRequest
 from tldw_Server_API.app.core.Resource_Governance.policy_loader import default_policy_loader
 from tldw_Server_API.app.core.Resource_Governance.tenant import hash_entity
-from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
+from tldw_Server_API.app.core.testing import (
+    env_flag_enabled as _env_flag_enabled,
+)
+from tldw_Server_API.app.core.testing import (
+    is_explicit_pytest_runtime as _is_explicit_pytest_runtime,
+)
+from tldw_Server_API.app.core.testing import (
+    is_test_mode as _is_test_mode,
+)
+from tldw_Server_API.app.core.testing import (
+    is_truthy as _is_truthy,
+)
 from tldw_Server_API.app.services.auth_service import (
     apply_password_reset as _svc_apply_password_reset,
+)
+from tldw_Server_API.app.services.auth_service import (
     fetch_active_user_by_id,
-    fetch_password_reset_token_record as _svc_fetch_password_reset_token_record,
-    fetch_user_by_email_for_password_reset as _svc_fetch_user_by_email_for_password_reset,
-    fetch_user_by_email_for_verification as _svc_fetch_user_by_email_for_verification,
     fetch_user_by_login_identifier,
-    mark_user_verified as _svc_mark_user_verified,
-    store_password_reset_token as _svc_store_password_reset_token,
-    verify_user_email_once as _svc_verify_user_email_once,
     update_user_last_login,
     update_user_password_hash,
 )
-from tldw_Server_API.app.services.registration_service import RegistrationService
-from tldw_Server_API.app.core.AuthNZ.federation.claim_mapping import preview_claim_mapping
-from tldw_Server_API.app.core.AuthNZ.federation.oidc_service import OIDCFederationService
-from tldw_Server_API.app.core.AuthNZ.federation.provisioning_service import FederationProvisioningService
-from tldw_Server_API.app.core.AuthNZ.federation.state_repo import FederationStateRepo
-from tldw_Server_API.app.core.testing import (
-    env_flag_enabled as _env_flag_enabled,
-    is_explicit_pytest_runtime as _is_explicit_pytest_runtime,
-    is_test_mode as _is_test_mode,
-    is_truthy as _is_truthy,
+from tldw_Server_API.app.services.auth_service import (
+    fetch_password_reset_token_record as _svc_fetch_password_reset_token_record,
 )
+from tldw_Server_API.app.services.auth_service import (
+    fetch_user_by_email_for_password_reset as _svc_fetch_user_by_email_for_password_reset,
+)
+from tldw_Server_API.app.services.auth_service import (
+    fetch_user_by_email_for_verification as _svc_fetch_user_by_email_for_verification,
+)
+from tldw_Server_API.app.services.auth_service import (
+    mark_user_verified as _svc_mark_user_verified,
+)
+from tldw_Server_API.app.services.auth_service import (
+    store_password_reset_token as _svc_store_password_reset_token,
+)
+from tldw_Server_API.app.services.auth_service import (
+    verify_user_email_once as _svc_verify_user_email_once,
+)
+from tldw_Server_API.app.services.registration_service import RegistrationService
 
 _AUTH_NONCRITICAL_EXCEPTIONS = (
     asyncio.CancelledError,
@@ -1080,9 +1101,9 @@ async def _get_auth_endpoint_rg_governor(request: Request) -> Optional[Any]:
             if loader is None:
                 loader = default_policy_loader()
                 await loader.load_once()
-                setattr(state, "rg_policy_loader", loader)
+                state.rg_policy_loader = loader
             fallback = MemoryResourceGovernor(policy_loader=loader)
-            setattr(state, "auth_endpoint_rg_governor", fallback)
+            state.auth_endpoint_rg_governor = fallback
             return fallback
         except _AUTH_NONCRITICAL_EXCEPTIONS as exc:
             logger.debug("Auth endpoint RG fallback governor init failed: {}", exc)
@@ -2755,7 +2776,7 @@ async def verify_email(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid or expired verification token",
-            )
+            ) from None
 
         # Update user's verification status only when it is currently unverified.
         updated_rows = await _verify_user_email_once(

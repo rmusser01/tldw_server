@@ -1,12 +1,12 @@
-from types import SimpleNamespace
 import json
 import os
 import time
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
-from fastapi import HTTPException
-from fastapi import Response
+from fastapi import HTTPException, Response
+from pydantic import ValidationError
 from starlette.requests import Request
 
 from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
@@ -155,7 +155,7 @@ async def test_reset_password_weak_and_success(monkeypatch):
     request = Request(scope)
 
     # Weak password
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         await _auth.reset_password(
             data=_auth.ResetPasswordRequest(token="tok", new_password="weak"),
             request=request,
@@ -938,9 +938,8 @@ async def test_login_returns_mfa_challenge_when_enabled(monkeypatch):
             self.redis_client = object()
 
         async def create_session(self, **kwargs):
-            from datetime import datetime, timezone as _tz
             self.created_kwargs = dict(kwargs)
-            self.created_at = datetime.now(_tz.utc)
+            self.created_at = datetime.now(timezone.utc)
             return {"session_id": 777}
 
         async def store_ephemeral_value(self, key: str, value: str, ttl_seconds: int):
