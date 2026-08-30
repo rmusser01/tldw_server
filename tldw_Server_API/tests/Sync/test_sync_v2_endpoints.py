@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import base64
 import hashlib
+import hmac
 from pathlib import Path
 from typing import Any
 
 import pytest
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from loguru import logger
+from tldw_profile_core.canonical import canonical_json_bytes
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     User,
@@ -29,10 +34,13 @@ from tldw_Server_API.app.core.Sync.v2.domain_adapters.notes_organization import 
     NotesOrganizationDomainAdapter,
 )
 from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
+from tldw_Server_API.app.core.Sync.v2 import factory as sync_v2_factory
+from tldw_Server_API.app.core.Sync.v2.profile import PersonalContextBootstrapError
 from tldw_Server_API.app.core.Sync.v2.materializers import MaterializationResult
 from tldw_Server_API.app.core.Sync.v2.models import (
     M1_SYNC_DOMAINS,
     NOTES_ORGANIZATION_DOMAINS,
+    PERSONAL_CONTEXT_SYNC_DOMAINS,
     SYNC_V2_SUPPORTED_DOMAINS,
     SyncAttachmentRevisionBindingCreate,
     SyncBlobObjectCreate,
@@ -161,6 +169,18 @@ def _client_for_service(service: SyncV2Service) -> TestClient:
     app.dependency_overrides[sync_endpoint.get_sync_v2_service] = lambda: service
     if hasattr(sync_endpoint, "get_sync_v2_profile_service"):
         app.dependency_overrides[sync_endpoint.get_sync_v2_profile_service] = lambda: service
+    return TestClient(app)
+
+
+def _client_for_factory_service(service: SyncV2Service) -> TestClient:
+    """Build a typed endpoint client with a storage-safe authenticated user ID."""
+
+    app = FastAPI()
+    app.include_router(sync_endpoint.router, prefix="/api/v1/sync")
+    app.dependency_overrides[get_request_user] = lambda: User(
+        id="101", username="factory-user"
+    )
+    app.dependency_overrides[sync_endpoint.get_sync_v2_service] = lambda: service
     return TestClient(app)
 
 
@@ -3053,3 +3073,250 @@ def test_attachment_download_manifest_and_byte_serving_are_dataset_scoped(
     assert bytes_response.content == payload[5:13]
     assert bytes_response.headers["content-type"] == "application/octet-stream"
     assert forbidden_response.status_code == 404
+
+
+@pytest.fixture()
+def factory_personal_context_service(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> SyncV2Service:
+    """Build the production Sync composition with only temporary server storage."""
+
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "user_databases"))
+    monkeypatch.setenv(
+        "TLDW_PERSONAL_CONTEXT_MASTER_KEY",
+        base64.b64encode(b"p" * 32).decode("ascii"),
+    )
+    monkeypatch.setenv("SYNC_V2_AT_REST_ENCRYPTION_MODE", "managed_storage")
+    monkeypatch.setenv("SYNC_V2_SERVER_TRUSTED_ENABLED", "true")
+    monkeypatch.setenv("AUTH_MODE", "multi_user")
+    for cached_factory in (
+        sync_v2_factory._sync_v2_store_for_user,
+        sync_v2_factory._chacha_notes_db_for_user,
+        sync_v2_factory._sync_v2_blob_store_for_user,
+        sync_v2_factory._personal_context_service_for_user,
+    ):
+        cached_factory.cache_clear()
+    try:
+        yield sync_v2_factory.sync_v2_service_for_user("101")
+    finally:
+        for cached_factory in (
+            sync_v2_factory._sync_v2_store_for_user,
+            sync_v2_factory._chacha_notes_db_for_user,
+            sync_v2_factory._sync_v2_blob_store_for_user,
+            sync_v2_factory._personal_context_service_for_user,
+        ):
+            cached_factory.cache_clear()
+
+
+def _registered_personal_context_device_payload(public_key: rsa.RSAPublicKey) -> dict[str, object]:
+    """Return the public endpoint payload for one Personal Context-capable device."""
+
+    return {
+        "device_id": "pc-device",
+        "display_name": "Personal Context test device",
+        "client_type": "chatbook",
+        "supported_domains": list(PERSONAL_CONTEXT_SYNC_DOMAINS),
+        "supported_adapter_versions": {
+            domain: [1] for domain in PERSONAL_CONTEXT_SYNC_DOMAINS
+        },
+        "capabilities": {
+            "personal_context_wrapping_public_key": public_key.public_bytes(
+                serialization.Encoding.PEM,
+                serialization.PublicFormat.SubjectPublicKeyInfo,
+            ).decode("utf-8"),
+        },
+    }
+
+
+def _assert_personal_context_error_is_redacted(response, reason_code: str) -> None:
+    """Assert the typed error exposes only the stable public reason shape."""
+
+    body = response.json()
+    assert body["detail"]["error_code"] == reason_code
+    assert set(body["detail"]) == {"error_code", "message"}
+    for secret in (
+        "bootstrap-private-canary",
+        "personal-context-integrity-v1",
+        "ciphertext",
+        "wrapped_key_blob",
+    ):
+        assert secret not in response.text
+
+
+def test_personal_context_endpoints_use_real_factory_bootstrap_and_complete_flow(
+    factory_personal_context_service: SyncV2Service,
+) -> None:
+    """The typed HTTP flow creates canonical state and delivers a device-only key."""
+
+    client = _client_for_factory_service(factory_personal_context_service)
+    missing = client.post(
+        "/api/v1/sync/personal-context/bootstrap",
+        json={"device_id": "missing-device", "required_schema_version": 1},
+    )
+    assert missing.status_code == 404
+    _assert_personal_context_error_is_redacted(
+        missing, "personal_context_device_unavailable"
+    )
+
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    registration = client.post(
+        "/api/v1/sync/devices/register",
+        json=_registered_personal_context_device_payload(private_key.public_key()),
+    )
+    assert registration.status_code == 200
+    assert registration.json()["device_id"] == "pc-device"
+
+    bootstrap_request = {
+        "device_id": "pc-device",
+        "required_schema_version": 1,
+        "required_quotas": {"max_record_bytes": 16_384},
+    }
+    assert "authority_id" not in bootstrap_request
+    bootstrap = client.post(
+        "/api/v1/sync/personal-context/bootstrap",
+        json=bootstrap_request,
+    )
+    assert bootstrap.status_code == 200, bootstrap.text
+    body = bootstrap.json()
+    assert body["authority_id"] == "tldw-server"
+    assert body["dataset_id"]
+    assert body["cursor"].startswith("personal-context-bootstrap-v1:")
+    assert body["manifest"]["profile_id"]
+    assert body["wrapped_key_blob"].startswith("rsa-oaep-sha256:")
+
+    canonical = factory_personal_context_service.personal_context_service_resolver("101")
+    manifest = canonical.get_manifest()
+    assert manifest.profile_id == body["manifest"]["profile_id"]
+    integrity_key_id, integrity_key = canonical.sync_integrity_key(manifest.profile_id)
+    ciphertext = base64.urlsafe_b64decode(body["wrapped_key_blob"].split(":", 1)[1])
+    assert private_key.decrypt(
+        ciphertext,
+        padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=f"personal-context:{integrity_key_id}".encode("utf-8"),
+        ),
+    ) == integrity_key
+
+    stale_completion = client.post(
+        "/api/v1/sync/personal-context/complete",
+        json={
+            "device_id": "pc-device",
+            "dataset_id": body["dataset_id"],
+            "bootstrap_cursor": "personal-context-bootstrap-v1:stale",
+        },
+    )
+    assert stale_completion.status_code == 409
+    _assert_personal_context_error_is_redacted(
+        stale_completion, "personal_context_bootstrap_cursor_stale"
+    )
+
+    completion = client.post(
+        "/api/v1/sync/personal-context/complete",
+        json={
+            "device_id": "pc-device",
+            "dataset_id": body["dataset_id"],
+            "bootstrap_cursor": body["cursor"],
+        },
+    )
+    assert completion.status_code == 204
+    assert factory_personal_context_service.store.has_personal_context_link_receipt(
+        user_id="101",
+        dataset_id=body["dataset_id"],
+        device_id="pc-device",
+        profile_id=manifest.profile_id,
+        integrity_key_id=integrity_key_id,
+        purge_generation=body["purge_generation"],
+    )
+
+    manifest_payload = manifest.model_dump(mode="json")
+    manifest_canonical = canonical_json_bytes(manifest_payload)
+    manifest_tag = hmac.new(integrity_key, manifest_canonical, hashlib.sha256)
+    push = client.post(
+        "/api/v1/sync/push",
+        json={
+            "dataset_id": body["dataset_id"],
+            "device_id": "pc-device",
+            "envelopes": [
+                {
+                    "dataset_id": body["dataset_id"],
+                    "client_envelope_id": "pc-device:manifest:1",
+                    "device_id": "pc-device",
+                    "domain": "personal_context.manifest",
+                    "operation": "upsert",
+                    "object_id": manifest.profile_id,
+                    "adapter_version": 1,
+                    "schema_version": 1,
+                    "payload": manifest_payload,
+                    "payload_hash": f"hmac-sha256-v1:{manifest_tag.hexdigest()}",
+                    "payload_size_bytes": len(manifest_canonical),
+                    "routing_metadata": {
+                        "integrity_key_id": integrity_key_id,
+                        "profile_id": manifest.profile_id,
+                        "purge_generation": body["purge_generation"],
+                    },
+                    "encryption_metadata": {"policy": "server_trusted_v1"},
+                }
+            ],
+        },
+    )
+    assert push.status_code == 200, push.text
+    assert [item["client_envelope_id"] for item in push.json()["accepted"]] == [
+        "pc-device:manifest:1"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("reason_code", "expected_status"),
+    [
+        ("personal_context_bootstrap_unavailable", 503),
+        ("personal_context_device_unavailable", 404),
+        ("personal_context_authority_invalid", 400),
+        ("personal_context_schema_incompatible", 409),
+        ("personal_context_quota_incompatible", 409),
+        ("personal_context_purge_generation_stale", 409),
+        ("personal_context_authority_mismatch", 409),
+        ("personal_context_snapshot_unavailable", 503),
+        ("personal_context_snapshot_unstable", 409),
+        ("personal_context_capability_unavailable", 503),
+        ("personal_context_key_custody_unavailable", 503),
+        ("personal_context_link_unavailable", 409),
+        ("personal_context_bootstrap_cursor_stale", 409),
+    ],
+)
+def test_personal_context_bootstrap_endpoint_maps_redacted_reason_codes(
+    tmp_path: Path, reason_code: str, expected_status: int,
+) -> None:
+    """Authenticated API failures retain a stable code but no canonical body."""
+    service = _build_service(tmp_path)
+
+    def fail_bootstrap(**_kwargs: object):
+        raise PersonalContextBootstrapError(reason_code)
+
+    service.bootstrap_personal_context = fail_bootstrap  # type: ignore[method-assign]
+    response = _client_for_service(service).post(
+        "/api/v1/sync/personal-context/bootstrap",
+        json={"device_id": "missing-device", "required_schema_version": 1},
+    )
+    assert response.status_code == expected_status
+    _assert_personal_context_error_is_redacted(response, reason_code)
+
+
+def test_personal_context_completion_endpoint_maps_stale_cursor_without_content(
+    tmp_path: Path,
+) -> None:
+    service = _build_service(tmp_path)
+
+    def fail_completion(**_kwargs: object) -> None:
+        raise PersonalContextBootstrapError("personal_context_bootstrap_cursor_stale")
+
+    service.complete_personal_context_link = fail_completion  # type: ignore[method-assign]
+    response = _client_for_service(service).post(
+        "/api/v1/sync/personal-context/complete",
+        json={"device_id": "device-a", "dataset_id": "dataset-a", "bootstrap_cursor": "stale"},
+    )
+    assert response.status_code == 409
+    _assert_personal_context_error_is_redacted(
+        response, "personal_context_bootstrap_cursor_stale"
+    )
