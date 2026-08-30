@@ -1,0 +1,147 @@
+name: tldw-production
+
+x-tldw-env-file: &tldw-env-file
+  path: ${TLDW_ENV_FILE:?Set TLDW_ENV_FILE to the validated absolute raw env path}
+  required: true
+  format: raw
+
+services:
+  preflight:
+    image: ${TLDW_APP_IMAGE:?Set immutable TLDW_APP_IMAGE}
+    network_mode: none
+    env_file:
+      - *tldw-env-file
+    entrypoint: ["python", "/app/Helper_Scripts/Deployment/production_preflight.py"]
+    command:
+      - --env-file
+      - /run/tldw/production.env
+      - --compose-file
+      - /run/tldw/docker-compose.production.yml
+      - --proxy-file
+      - /run/tldw/Caddyfile
+      - --runtime-backup-dir
+      - /backups
+    volumes:
+      - ${TLDW_ENV_FILE:?Set TLDW_ENV_FILE}:/run/tldw/production.env:ro
+      - ./docker-compose.production.yml:/run/tldw/docker-compose.production.yml:ro
+      - ./Production/Caddyfile:/run/tldw/Caddyfile:ro
+      - ${TLDW_BACKUP_DIR:?Set absolute TLDW_BACKUP_DIR}:/backups
+    restart: "no"
+
+  caddy:
+    image: ${CADDY_IMAGE:?Set exact CADDY_IMAGE version or digest}
+    restart: unless-stopped
+    environment:
+      TLDW_PUBLIC_DOMAIN: ${TLDW_PUBLIC_DOMAIN:?Set TLDW_PUBLIC_DOMAIN}
+      TLDW_ACME_EMAIL: ${TLDW_ACME_EMAIL:?Set TLDW_ACME_EMAIL}
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - edge
+    depends_on:
+      app:
+        condition: service_healthy
+    volumes:
+      - ./Production/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+  app:
+    image: ${TLDW_APP_IMAGE:?Set immutable TLDW_APP_IMAGE}
+    restart: unless-stopped
+    env_file:
+      - *tldw-env-file
+    environment:
+      AUTH_MODE: multi_user
+      tldw_production: "true"
+      TLDW_SETUP_ALLOW_REMOTE: "0"
+      FORWARDED_ALLOW_IPS: ${TLDW_EDGE_SUBNET:?Set private TLDW_EDGE_SUBNET}
+      AUTH_TRUST_X_FORWARDED_FOR: "true"
+      AUTH_TRUSTED_PROXY_IPS: ${TLDW_EDGE_SUBNET:?Set private TLDW_EDGE_SUBNET}
+      TLDW_TRUSTED_PROXIES: ${TLDW_EDGE_SUBNET:?Set private TLDW_EDGE_SUBNET}
+      RG_CLIENT_IP_HEADER: X-Forwarded-For
+      RG_TRUSTED_PROXIES: ${TLDW_EDGE_SUBNET:?Set private TLDW_EDGE_SUBNET}
+      MCP_TRUST_X_FORWARDED: "true"
+      MCP_TRUSTED_PROXY_IPS: ${TLDW_EDGE_SUBNET:?Set private TLDW_EDGE_SUBNET}
+    expose:
+      - "8000"
+    networks:
+      - edge
+      - backend
+    depends_on:
+      preflight:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - app-data:/app/Databases
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import sys, urllib.request;
+          sys.exit(0 if urllib.request.urlopen('http://localhost:8000/internal/ready', timeout=3).status == 200 else 1)
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  postgres:
+    image: ${POSTGRES_IMAGE:?Set exact POSTGRES_IMAGE version or digest}
+    restart: unless-stopped
+    env_file:
+      - *tldw-env-file
+    networks:
+      - backend
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  redis:
+    image: ${REDIS_IMAGE:?Set exact REDIS_IMAGE version or digest}
+    restart: unless-stopped
+    env_file:
+      - *tldw-env-file
+    command:
+      - /bin/sh
+      - -ec
+      - >-
+        umask 077;
+        printf 'appendonly yes\nrequirepass %s\n' "$$REDIS_PASSWORD" > /tmp/tldw-redis.conf;
+        exec redis-server /tmp/tldw-redis.conf
+    networks:
+      - backend
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+networks:
+  edge:
+    ipam:
+      config:
+        - subnet: ${TLDW_EDGE_SUBNET:?Set private TLDW_EDGE_SUBNET}
+  backend:
+    internal: true
+    ipam:
+      config:
+        - subnet: ${TLDW_BACKEND_SUBNET:?Set private TLDW_BACKEND_SUBNET}
+
+volumes:
+  app-data:
+  postgres_data:
+  redis_data:
+  caddy_data:
+  caddy_config:
