@@ -2717,6 +2717,34 @@ def web_outbound_policy_mode(default: str = "compat") -> str:
     return s if s in ("compat", "strict") else default
 
 
+def web_browser_transport_mode(default: str = "auto") -> str:
+    """Resolve auto|disabled|url_guarded|attested_proxy, failing closed when malformed."""
+    value = os.getenv("WEB_BROWSER_TRANSPORT_MODE")
+    if value is None:
+        try:
+            config = load_comprehensive_config()
+            if config:
+                has_section = getattr(config, "has_section", None)
+                for section_name in ("Web-Scraper", "Web-Scraping"):
+                    if callable(has_section) and not has_section(section_name):
+                        continue
+                    candidate = config.get(
+                        section_name,
+                        "web_browser_transport_mode",
+                        fallback=None,
+                    )
+                    if candidate is not None:
+                        value = candidate
+                        break
+        except _CONFIG_NONCRITICAL_EXCEPTIONS:
+            value = default
+        if value is None:
+            value = default
+    normalized = str(value).strip().lower()
+    allowed = {"auto", "disabled", "url_guarded", "attested_proxy"}
+    return normalized if normalized in allowed else "disabled"
+
+
 def rag_agentic_cache_backend(default: str = "memory") -> str:
     v = os.getenv("RAG_AGENTIC_CACHE_BACKEND")
     if v is None:
@@ -4818,6 +4846,7 @@ def load_and_log_configs(
             _env_or_cfg('WEB_SCRAPER_RESPECT_ROBOTS', 'Web-Scraper', 'web_scraper_respect_robots', 'true'), True
         )
         web_outbound_policy_mode_value = web_outbound_policy_mode()
+        web_browser_transport_mode_value = web_browser_transport_mode()
         # Optional scorers configuration
         web_crawl_enable_keyword = _as_bool(
             _env_or_cfg('WEB_CRAWL_ENABLE_KEYWORD_SCORER', 'Web-Scraper', 'web_crawl_enable_keyword_scorer', 'false'), False
@@ -5609,6 +5638,7 @@ def load_and_log_configs(
             'web_crawl_blocked_domains': web_crawl_blocked_domains,
             'web_scraper_respect_robots': web_scraper_respect_robots,
             'web_outbound_policy_mode': web_outbound_policy_mode_value,
+            'web_browser_transport_mode': web_browser_transport_mode_value,
             # Scorers
             'web_crawl_enable_keyword_scorer': web_crawl_enable_keyword,
             'web_crawl_keywords': web_crawl_keywords,
