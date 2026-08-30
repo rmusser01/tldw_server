@@ -244,7 +244,10 @@ async def test_standard_search_passes_ephemeral_runtime_and_closes_it(
     assert bundle.resolved_request.payload == original_payload  # nosec B101
     assert "credential_runtime" not in bundle.resolved_request.payload  # nosec B101
     assert _SENTINEL_SECRET not in json.dumps(response)  # nosec B101
-    assert _SENTINEL_SECRET not in "".join(logs)  # nosec B101
+    rendered_logs = "".join(logs)
+    assert _SENTINEL_SECRET not in rendered_logs  # nosec B101
+    assert "credential runtime" not in rendered_logs  # nosec B101
+    assert "query_len=18" in rendered_logs  # nosec B101
     assert runtime.close_calls == 1  # nosec B101
 
 

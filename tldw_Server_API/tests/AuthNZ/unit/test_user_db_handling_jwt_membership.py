@@ -1,9 +1,13 @@
+"""Tests for JWT membership and impersonation claim validation."""
+
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
+from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 from tldw_Server_API.app.core.AuthNZ import User_DB_Handling as user_handling
 
 
@@ -16,6 +20,81 @@ def _build_request(client_ip: str = "127.0.0.1") -> Request:
         "client": (client_ip, 0),
     }
     return Request(scope)
+
+
+def _install_valid_jwt_dependencies(
+    monkeypatch: pytest.MonkeyPatch,
+    payload: dict[str, object],
+) -> None:
+    """Install valid repository collaborators around a supplied JWT payload."""
+
+    class _StubJWT:
+        def decode_access_token(self, _token: str) -> dict[str, object]:
+            """Return the configured decoded token."""
+            return payload
+
+    class _StubUsersRepo:
+        async def get_user_by_id(self, user_id: int) -> dict[str, object]:
+            """Return the fixture user by numeric ID."""
+            return {
+                "id": user_id,
+                "username": "targetuser",
+                "email": "target@example.com",
+                "is_active": True,
+                "role": "user",
+            }
+
+        async def get_user_by_uuid(self, _identifier: str) -> None:
+            """Return no UUID match for this fixture."""
+            return None
+
+        async def get_user_by_username(self, _username: str) -> None:
+            """Return no username match for this fixture."""
+            return None
+
+    async def _from_pool() -> _StubUsersRepo:
+        """Return the fixture repository."""
+        return _StubUsersRepo()
+
+    async def _list_memberships(_user_id: int) -> list[object]:
+        """Return no scoped memberships."""
+        return []
+
+    async def _apply_scoped_permissions(**kwargs: Any) -> SimpleNamespace:
+        """Preserve the base permissions in a neutral scope."""
+        return SimpleNamespace(
+            permissions=list(kwargs.get("base_permissions") or []),
+            active_org_id=None,
+            active_team_id=None,
+        )
+
+    class _StubSessionManager:
+        async def is_token_blacklisted(
+            self,
+            *_args: object,
+            **_kwargs: object,
+        ) -> bool:
+            """Treat the fixture token as active."""
+            return False
+
+    async def _get_session_manager() -> _StubSessionManager:
+        """Return the fixture session manager."""
+        return _StubSessionManager()
+
+    monkeypatch.setattr(user_handling, "get_jwt_service", lambda: _StubJWT())
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.AuthNZ.repos.users_repo.AuthnzUsersRepo.from_pool",
+        _from_pool,
+    )
+    monkeypatch.setattr(user_handling, "list_memberships_for_user", _list_memberships)
+    monkeypatch.setattr(user_handling, "apply_scoped_permissions", _apply_scoped_permissions)
+    monkeypatch.setattr(user_handling, "get_session_manager", _get_session_manager)
+    monkeypatch.setattr(
+        user_handling,
+        "_enrich_user_with_rbac",
+        lambda *_args, **_kwargs: (["user"], [], False),
+    )
+    monkeypatch.setattr(user_handling, "set_scope", lambda *_, **__: None)
 
 
 @pytest.mark.asyncio
@@ -279,3 +358,94 @@ async def test_verify_jwt_accepts_valid_membership_claims(monkeypatch):
     assert user.active_team_id == 10
     assert request.state.org_ids == [1]
     assert request.state.team_ids == [10]
+
+
+@pytest.mark.asyncio
+async def test_verify_jwt_preserves_strict_impersonation_claims(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Preserve a valid strict impersonation claim pair."""
+    _install_valid_jwt_dependencies(
+        monkeypatch,
+        {
+            "sub": "42",
+            "username": "targetuser",
+            "impersonation": True,
+            "impersonated_by": 1,
+        },
+    )
+
+    request = _build_request()
+    user = await user_handling.verify_jwt_and_fetch_user(request, token="fake.jwt.token")
+
+    assert user.impersonation is True
+    assert user.impersonated_by == 1
+    principal = request.state.auth.principal
+    assert principal.user_id == 42
+    assert principal.impersonation is True
+    assert principal.impersonated_by == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "claims",
+    [
+        pytest.param({"impersonation": True}, id="true-without-actor"),
+        pytest.param({"impersonation": True, "impersonated_by": "1"}, id="actor-string"),
+        pytest.param({"impersonation": True, "impersonated_by": True}, id="actor-bool"),
+        pytest.param({"impersonation": "true", "impersonated_by": 1}, id="flag-string"),
+        pytest.param({"impersonation": 1, "impersonated_by": 1}, id="flag-int"),
+        pytest.param({"impersonation": False, "impersonated_by": 1}, id="false-with-actor"),
+        pytest.param({"impersonated_by": 1}, id="actor-without-flag"),
+    ],
+)
+async def test_verify_jwt_rejects_malformed_impersonation_claim_pairs(
+    monkeypatch: pytest.MonkeyPatch,
+    claims: dict[str, object],
+) -> None:
+    """Reject malformed impersonation flag and actor combinations."""
+    _install_valid_jwt_dependencies(
+        monkeypatch,
+        {"sub": "42", "username": "targetuser", **claims},
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await user_handling.verify_jwt_and_fetch_user(_build_request(), token="fake.jwt.token")
+
+    assert exc_info.value.status_code == 401
+    assert exc_info.value.detail == "Could not validate credentials"
+
+
+@pytest.mark.asyncio
+async def test_verify_jwt_accepts_non_impersonation_token_without_actor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Accept a non-impersonation token that omits the actor."""
+    _install_valid_jwt_dependencies(
+        monkeypatch,
+        {"sub": "42", "username": "targetuser", "impersonation": False},
+    )
+
+    request = _build_request()
+    user = await user_handling.verify_jwt_and_fetch_user(request, token="fake.jwt.token")
+
+    assert user.impersonation is False
+    assert user.impersonated_by is None
+    assert request.state.auth.principal.impersonation is False
+    assert request.state.auth.principal.impersonated_by is None
+
+
+def test_legacy_user_adapter_preserves_validated_impersonation_context() -> None:
+    """Preserve validated impersonation context in the legacy adapter."""
+    request = _build_request()
+    user = user_handling.User(
+        id=42,
+        username="targetuser",
+        impersonation=True,
+        impersonated_by=1,
+    )
+
+    principal = auth_deps._principal_from_legacy_active_user_override(request, user)
+
+    assert principal.impersonation is True
+    assert principal.impersonated_by == 1

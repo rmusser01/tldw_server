@@ -211,6 +211,29 @@ def _normalize_active_id(raw: Any, ids: list[int]) -> Optional[int]:
         return active
     return None
 
+
+def _extract_impersonation_claims(payload: dict[str, Any]) -> tuple[bool, Optional[int]]:
+    """Validate the impersonation flag and actor as one inseparable claim pair."""
+    has_flag = "impersonation" in payload
+    has_actor = "impersonated_by" in payload
+    if not has_flag:
+        if has_actor:
+            raise ValueError("impersonation actor without flag")
+        return False, None
+
+    impersonation = payload["impersonation"]
+    if type(impersonation) is not bool:
+        raise ValueError("impersonation flag must be boolean")
+    if not impersonation:
+        if has_actor:
+            raise ValueError("non-impersonation token has actor")
+        return False, None
+
+    actor = payload.get("impersonated_by")
+    if type(actor) is not int:
+        raise ValueError("impersonation actor must be an integer")
+    return True, actor
+
 # --- User Model ---
 # Standardized User object, used even for the dummy single user.
 class User(BaseModel):
@@ -233,6 +256,8 @@ class User(BaseModel):
     team_ids: list[int] = Field(default_factory=list)
     active_org_id: Optional[int] = None
     active_team_id: Optional[int] = None
+    impersonation: bool = False
+    impersonated_by: Optional[int] = None
 
     # Convenience properties for downstream code that expects int ids
     @property
@@ -541,6 +566,10 @@ async def verify_jwt_and_fetch_user(request: Request, token: str = Depends(oauth
         token_team_ids = _coerce_int_list(payload.get("team_ids"))
         token_active_org_id = payload.get("active_org_id")
         token_active_team_id = payload.get("active_team_id")
+        token_impersonation, token_impersonated_by = _extract_impersonation_claims(payload)
+    except ValueError as e:
+        logger.warning("Token contains invalid impersonation claims")
+        raise credentials_exception from e
     except (InvalidTokenError, TokenExpiredError) as e:
         logger.warning(f"Token validation failed: {e}")
         raise credentials_exception from e
@@ -673,7 +702,16 @@ async def verify_jwt_and_fetch_user(request: Request, token: str = Depends(oauth
 
     # --- Create and validate the User Pydantic model ---
     try:
-        user = User(**{**user_data, "roles": roles, "permissions": perms, "is_admin": is_admin})
+        user = User(
+            **{
+                **user_data,
+                "roles": roles,
+                "permissions": perms,
+                "is_admin": is_admin,
+                "impersonation": token_impersonation,
+                "impersonated_by": token_impersonated_by,
+            }
+        )
     except ValidationError as e:  # Catch Pydantic validation errors specifically
         if pii_redact_logs:
             logger.error("Failed to validate user data for authenticated user into User model (details redacted)", exc_info=True)
@@ -883,6 +921,8 @@ async def verify_jwt_and_fetch_user(request: Request, token: str = Depends(oauth
             subject=None,
             token_type="access",
             jti=None,
+            impersonation=user.impersonation,
+            impersonated_by=user.impersonated_by,
             roles=list(user.roles or []),
             permissions=list(user.permissions or []),
             is_admin=bool(user.is_admin),

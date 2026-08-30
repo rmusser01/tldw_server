@@ -8,16 +8,17 @@ from typing import Any, cast
 from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequirePermission, rbac_rate_limit
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import require_within_limit
-from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.media_route_deps import (
+    media_create_dependencies,
+)
 from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
     UsageEventLogger,
     get_usage_event_logger,
 )
 from tldw_Server_API.app.api.v1.schemas.media_request_models import WebScrapingRequest
-from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_CREATE
+from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
 from tldw_Server_API.app.services.web_scraping_service import process_web_scraping_task
 
 router = APIRouter()
@@ -48,8 +49,7 @@ def _resolve_process_web_scraping_task() -> WebScrapingTask:
 @router.post(
     "/process-web-scraping",
     dependencies=[
-        Depends(RequirePermission(MEDIA_CREATE)),
-        Depends(rbac_rate_limit("media.create")),
+        *media_create_dependencies(),
         Depends(require_within_limit(LimitCategory.STORAGE_MB, 1)),
         Depends(require_within_limit(LimitCategory.API_CALLS_DAY, 1)),
     ],

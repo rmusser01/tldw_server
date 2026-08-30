@@ -6,7 +6,6 @@ All features are accessible through explicit parameters.
 """
 
 import asyncio
-import hashlib
 import json
 import os
 import time
@@ -140,6 +139,20 @@ _RAG_PROVIDER_FAILURES = (ByokResolutionError, ChatAPIError)
 
 
 _trusted_credential_runtime_scope = derive_trusted_credential_scope
+
+
+def _log_rag_search_request(
+    label: str,
+    query: object | None,
+    *,
+    user: str | None = None,
+) -> None:
+    """Log non-sensitive request metadata without retaining query text."""
+    query_text = "" if query is None else str(query)
+    if user is None:
+        logger.info("{}: query_len={}", label, len(query_text))
+    else:
+        logger.info("{}: query_len={} user={}", label, len(query_text), user)
 
 
 def _build_credential_runtime(
@@ -1396,7 +1409,11 @@ async def unified_search_endpoint(
 
     try:
         request = _apply_media_collection_scope(request, collections_db)
-        logger.info(f"Unified RAG search: query='{request.query}', user={current_user.username if current_user else 'anonymous'}")
+        _log_rag_search_request(
+            "Unified RAG search",
+            request.query,
+            user=current_user.username if current_user else "anonymous",
+        )
         # Topic monitoring (non-blocking) for query text
         try:
             from tldw_Server_API.app.core.Monitoring.topic_monitoring_service import get_topic_monitoring_service
@@ -1827,11 +1844,7 @@ async def simple_search_endpoint(
         raise_detached_error(_rag_provider_http_exception(exc))
 
     try:
-        try:
-            _qh = hashlib.md5((query or "").encode("utf-8"), usedforsecurity=False).hexdigest()[:8]
-            logger.info(f"Simple search: query_hash={_qh} len={len(query or '')}")
-        except (AttributeError, TypeError, ValueError):
-            logger.info("Simple search request received")
+        _log_rag_search_request("Simple search", query)
         # Topic monitoring (non-blocking)
         try:
             from tldw_Server_API.app.core.Monitoring.topic_monitoring_service import get_topic_monitoring_service
@@ -2339,7 +2352,7 @@ async def advanced_search_endpoint(
         raise_detached_error(_rag_provider_http_exception(exc))
 
     try:
-        logger.info(f"Advanced search: query='{query}'")
+        _log_rag_search_request("Advanced search", query)
         # Topic monitoring (non-blocking)
         try:
             from tldw_Server_API.app.core.Monitoring.topic_monitoring_service import get_topic_monitoring_service
