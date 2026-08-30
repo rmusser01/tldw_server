@@ -25,6 +25,7 @@ from .note_semantic_models import (
     SemanticManifestPublication,
     SemanticNoteRecord,
     SemanticNoteState,
+    SemanticObsoleteVectorClaim,
     SemanticSnapshotSeed,
     SemanticWorkClaimState,
     SemanticWorkItem,
@@ -228,26 +229,44 @@ class NoteSemanticStore:
             "AND c.generation_id=? AND n.state='indexed' AND n.content_version=c.content_version",
             (self.owner_user_id, dataset, generation_id),
         ).fetchone()
-        manifest_hash, _ = self._generation_manifest_locked(
-            conn,
-            dataset=dataset,
-            generation_id=generation_id,
-        )
         conn.execute(
-            "UPDATE note_semantic_generations SET expected_note_count=?,expected_chunk_count=?,"
-            "published_note_count=?,published_chunk_count=?,manifest_hash=? "
+            "UPDATE note_semantic_generations SET published_note_count=?,published_chunk_count=? "
             "WHERE owner_user_id=? AND dataset_id=? AND id=?",
             (
-                int(counts["note_count"] or 0),
-                int(counts["indexed_chunks"] or 0),
                 int(counts["terminal_count"] or 0),
                 int(published_chunks["chunk_count"] or 0),
-                manifest_hash,
                 self.owner_user_id,
                 dataset,
                 generation_id,
             ),
         )
+
+    def _increment_generation_counts_locked(
+        self,
+        conn: SemanticConnection,
+        *,
+        dataset: str,
+        generation_id: str,
+        note_delta: int,
+        chunk_delta: int,
+    ) -> None:
+        cursor = conn.execute(
+            "UPDATE note_semantic_generations SET published_note_count="
+            "published_note_count+?,published_chunk_count=published_chunk_count+? "
+            "WHERE owner_user_id=? AND dataset_id=? AND id=? AND "
+            "published_note_count+?>=0 AND published_chunk_count+?>=0",
+            (
+                note_delta,
+                chunk_delta,
+                self.owner_user_id,
+                dataset,
+                generation_id,
+                note_delta,
+                chunk_delta,
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise _SemanticCASMiss
 
     def _config_from_row(self, row: Any) -> SemanticIndexConfig:
         value = self._record(row)
@@ -330,6 +349,471 @@ class NoteSemanticStore:
             error_code=value["error_code"], created_at=self._read_iso(value["created_at"]) or "",
             updated_at=self._read_iso(value["updated_at"]) or "",
         )
+
+    def _stage_obsolete_vectors_locked(
+        self,
+        conn: SemanticConnection,
+        *,
+        dataset: str,
+        generation_id: str,
+        vector_ids: Sequence[str],
+        source_kind: str,
+        note_id: str | None,
+        dirty_generation: int | None,
+        now: datetime,
+    ) -> int:
+        if source_kind not in {
+            "unpublished",
+            "manifest_replace",
+            "tombstone",
+            "hard_delete",
+            "note_failure",
+        }:
+            raise ValueError("notes_semantic_cleanup_source_invalid")
+        ids = tuple(
+            self._safe_token(vector_id, field="vector_id") for vector_id in vector_ids
+        )
+        if len(ids) != len(set(ids)):
+            raise ValueError("notes_semantic_cleanup_vector_ids_duplicate")
+        if dirty_generation is not None and (
+            type(dirty_generation) is not int or dirty_generation < 1
+        ):
+            raise ValueError("notes_semantic_dirty_generation_invalid")
+        timestamp = self._timestamp(now)
+        for vector_id in ids:
+            conn.execute(
+                "INSERT INTO note_semantic_obsolete_vectors("
+                "id,owner_user_id,dataset_id,generation_id,vector_id,note_id,source_kind,"
+                "dirty_generation,claim_state,attempt_count,next_eligible_at,created_at,updated_at) "
+                "VALUES (?,?,?,?,?,?,?,?,'pending',0,?,?,?) "
+                "ON CONFLICT(owner_user_id,dataset_id,generation_id,vector_id) DO UPDATE SET "
+                "source_kind=excluded.source_kind,note_id=COALESCE(excluded.note_id,"
+                "note_semantic_obsolete_vectors.note_id),dirty_generation=COALESCE("
+                "excluded.dirty_generation,note_semantic_obsolete_vectors.dirty_generation),"
+                "updated_at=excluded.updated_at",
+                (
+                    str(uuid.uuid4()),
+                    self.owner_user_id,
+                    dataset,
+                    generation_id,
+                    vector_id,
+                    note_id,
+                    source_kind,
+                    dirty_generation,
+                    timestamp,
+                    timestamp,
+                    timestamp,
+                ),
+            )
+        return len(ids)
+
+    def stage_obsolete_vector_cleanup(
+        self,
+        *,
+        dataset_id: str,
+        generation_id: str,
+        vector_ids: Sequence[str],
+        source_kind: str,
+        note_id: str | None,
+        dirty_generation: int | None,
+        now: datetime,
+    ) -> int:
+        """Durably record opaque IDs before vector or manifest authority can vanish."""
+
+        dataset = self._scope(dataset_id)
+        with self._db.transaction() as conn:
+            self._set_scope(conn, dataset)
+            return self._stage_obsolete_vectors_locked(
+                conn,
+                dataset=dataset,
+                generation_id=generation_id,
+                vector_ids=vector_ids,
+                source_kind=source_kind,
+                note_id=note_id,
+                dirty_generation=dirty_generation,
+                now=now,
+            )
+
+    def list_obsolete_vector_ids(
+        self,
+        dataset_id: str,
+        generation_id: str,
+        *,
+        limit: int,
+    ) -> tuple[str, ...]:
+        dataset = self._scope(dataset_id)
+        if type(limit) is not int or not 1 <= limit <= 100_000:
+            raise ValueError("notes_semantic_cleanup_limit_invalid")
+        with self._db.transaction() as conn:
+            self._set_scope(conn, dataset)
+            rows = conn.execute(
+                "SELECT vector_id FROM note_semantic_obsolete_vectors WHERE "
+                "owner_user_id=? AND dataset_id=? AND generation_id=? "
+                "ORDER BY created_at,vector_id LIMIT ?",
+                (self.owner_user_id, dataset, generation_id, limit),
+            ).fetchall()
+        return tuple(str(row["vector_id"]) for row in rows)
+
+    def claim_obsolete_vector_cleanup_batch(
+        self,
+        *,
+        dataset_id: str,
+        limit: int,
+        now: datetime,
+        generation_id: str | None = None,
+    ) -> SemanticObsoleteVectorClaim | None:
+        """Claim one bounded generation-homogeneous page that is not visible."""
+
+        dataset = self._scope(dataset_id)
+        if type(limit) is not int or not 1 <= limit <= 100_000:
+            raise ValueError("notes_semantic_cleanup_limit_invalid")
+        timestamp = self._timestamp(now)
+        with self._db.transaction() as conn:
+            self._set_scope(conn, dataset)
+            first_query = (
+                "SELECT o.generation_id FROM note_semantic_obsolete_vectors o WHERE "
+                "o.owner_user_id=? AND o.dataset_id=? AND o.claim_state IN ('pending','failed') "
+                "AND o.attempt_count<? AND o.next_eligible_at<=? AND NOT EXISTS ("
+                "SELECT 1 FROM note_semantic_chunks c JOIN note_semantic_note_state n ON "
+                "n.owner_user_id=c.owner_user_id AND n.dataset_id=c.dataset_id AND "
+                "n.generation_id=c.generation_id AND n.note_id=c.note_id WHERE "
+                "c.owner_user_id=o.owner_user_id AND c.dataset_id=o.dataset_id AND "
+                "c.generation_id=o.generation_id AND c.chunk_id=o.vector_id AND "
+                "n.state='indexed' AND n.content_version=c.content_version) "
+                "ORDER BY o.next_eligible_at,o.id LIMIT 1"
+            )
+            first_params: tuple[Any, ...] = (
+                self.owner_user_id,
+                dataset,
+                self._MAX_WORK_ATTEMPTS,
+                timestamp,
+            )
+            if generation_id is not None:
+                first_query = first_query.replace(
+                    "AND o.claim_state",
+                    "AND o.generation_id=? AND o.claim_state",
+                    1,
+                )
+                first_params = (
+                    self.owner_user_id,
+                    dataset,
+                    generation_id,
+                    self._MAX_WORK_ATTEMPTS,
+                    timestamp,
+                )
+            if self.is_postgres:
+                first_query += " FOR UPDATE SKIP LOCKED"
+            first = conn.execute(
+                first_query,
+                first_params,
+            ).fetchone()
+            if first is None:
+                return None
+            generation_id = str(first["generation_id"])
+            page_query = (
+                "SELECT o.id,o.vector_id,o.attempt_count FROM note_semantic_obsolete_vectors o "
+                "WHERE o.owner_user_id=? AND o.dataset_id=? AND o.generation_id=? "
+                "AND o.claim_state IN ('pending','failed') AND o.attempt_count<? "
+                "AND o.next_eligible_at<=? AND NOT EXISTS (SELECT 1 FROM "
+                "note_semantic_chunks c JOIN note_semantic_note_state n ON "
+                "n.owner_user_id=c.owner_user_id AND n.dataset_id=c.dataset_id AND "
+                "n.generation_id=c.generation_id AND n.note_id=c.note_id WHERE "
+                "c.owner_user_id=o.owner_user_id AND c.dataset_id=o.dataset_id AND "
+                "c.generation_id=o.generation_id AND c.chunk_id=o.vector_id AND "
+                "n.state='indexed' AND n.content_version=c.content_version) "
+                "ORDER BY o.next_eligible_at,o.vector_id,o.id LIMIT ?"
+            )
+            if self.is_postgres:
+                page_query += " FOR UPDATE SKIP LOCKED"
+            rows = conn.execute(
+                page_query,
+                (
+                    self.owner_user_id,
+                    dataset,
+                    generation_id,
+                    self._MAX_WORK_ATTEMPTS,
+                    timestamp,
+                    limit,
+                ),
+            ).fetchall()
+            if not rows:
+                return None
+            claim_token = str(uuid.uuid4())
+            ledger_ids: list[str] = []
+            vector_ids: list[str] = []
+            attempts = 0
+            for row in rows:
+                ledger_id = str(row["id"])
+                updated = conn.execute(
+                    "UPDATE note_semantic_obsolete_vectors SET claim_state='claimed',"
+                    "claim_token=?,claimed_at=?,updated_at=? WHERE owner_user_id=? AND "
+                    "dataset_id=? AND id=? AND claim_state IN ('pending','failed')",
+                    (
+                        claim_token,
+                        timestamp,
+                        timestamp,
+                        self.owner_user_id,
+                        dataset,
+                        ledger_id,
+                    ),
+                )
+                if updated.rowcount == 1:
+                    ledger_ids.append(ledger_id)
+                    vector_ids.append(str(row["vector_id"]))
+                    attempts = max(attempts, int(row["attempt_count"]))
+        if not ledger_ids:
+            return None
+        return SemanticObsoleteVectorClaim(
+            owner_user_id=self.owner_user_id,
+            dataset_id=dataset,
+            generation_id=generation_id,
+            ledger_ids=tuple(ledger_ids),
+            vector_ids=tuple(vector_ids),
+            claim_token=claim_token,
+            attempt_count=attempts,
+        )
+
+    def retry_obsolete_vector_cleanup(
+        self,
+        *,
+        dataset_id: str,
+        ledger_ids: Sequence[str],
+        claim_token: str,
+        error_code: str,
+        retry_at: datetime,
+        now: datetime,
+    ) -> bool:
+        dataset = self._scope(dataset_id)
+        ids = tuple(ledger_ids)
+        if not ids or len(ids) != len(set(ids)) or not claim_token:
+            return False
+        retry_timestamp = self._timestamp(retry_at)
+        now_timestamp = self._timestamp(now)
+        if retry_at <= now:
+            raise ValueError("notes_semantic_retry_timestamp_invalid")
+        with self._db.transaction() as conn:
+            self._set_scope(conn, dataset)
+            updated = 0
+            for ledger_id in ids:
+                cursor = conn.execute(
+                    "UPDATE note_semantic_obsolete_vectors SET claim_state='failed',"
+                    "attempt_count=attempt_count+1,next_eligible_at=?,claim_token=NULL,"
+                    "claimed_at=NULL,error_code=?,updated_at=? WHERE owner_user_id=? AND "
+                    "dataset_id=? AND id=? AND claim_state='claimed' AND claim_token=? "
+                    "AND attempt_count<?",
+                    (
+                        retry_timestamp,
+                        self._error_code(error_code),
+                        now_timestamp,
+                        self.owner_user_id,
+                        dataset,
+                        ledger_id,
+                        claim_token,
+                        self._MAX_WORK_ATTEMPTS,
+                    ),
+                )
+                updated += cursor.rowcount
+        return updated == len(ids)
+
+    def reclaim_expired_obsolete_vector_claims(
+        self,
+        *,
+        dataset_id: str,
+        expired_before: datetime,
+        limit: int,
+        now: datetime,
+    ) -> int:
+        """Boundedly recover cleanup rows retained across worker crashes."""
+
+        dataset = self._scope(dataset_id)
+        if type(limit) is not int or not 1 <= limit <= 100_000:
+            raise ValueError("notes_semantic_cleanup_limit_invalid")
+        expired = self._timestamp(expired_before)
+        timestamp = self._timestamp(now)
+        with self._db.transaction() as conn:
+            self._set_scope(conn, dataset)
+            query = (
+                "SELECT id,claim_token FROM note_semantic_obsolete_vectors WHERE "
+                "owner_user_id=? AND dataset_id=? AND claim_state='claimed' AND "
+                "claimed_at<=? ORDER BY claimed_at,id LIMIT ?"
+            )
+            if self.is_postgres:
+                query += " FOR UPDATE SKIP LOCKED"
+            rows = conn.execute(
+                query,
+                (self.owner_user_id, dataset, expired, limit),
+            ).fetchall()
+            reclaimed = 0
+            for row in rows:
+                cursor = conn.execute(
+                    "UPDATE note_semantic_obsolete_vectors SET claim_state='failed',"
+                    "attempt_count=attempt_count+1,next_eligible_at=?,claim_token=NULL,"
+                    "claimed_at=NULL,error_code='claim_lease_expired',updated_at=? WHERE "
+                    "owner_user_id=? AND dataset_id=? AND id=? AND claim_state='claimed' "
+                    "AND claim_token=? AND attempt_count<?",
+                    (
+                        timestamp,
+                        timestamp,
+                        self.owner_user_id,
+                        dataset,
+                        str(row["id"]),
+                        str(row["claim_token"]),
+                        self._MAX_WORK_ATTEMPTS,
+                    ),
+                )
+                reclaimed += cursor.rowcount
+        return reclaimed
+
+    def authorize_obsolete_vector_claim(
+        self,
+        *,
+        dataset_id: str,
+        ledger_ids: Sequence[str],
+        claim_token: str,
+    ) -> bool:
+        dataset = self._scope(dataset_id)
+        ids = tuple(ledger_ids)
+        if not ids or len(ids) != len(set(ids)):
+            return False
+        with self._db.transaction() as conn:
+            self._set_scope(conn, dataset)
+            for ledger_id in ids:
+                row = conn.execute(
+                    "SELECT o.vector_id,o.generation_id FROM note_semantic_obsolete_vectors o "
+                    "WHERE o.owner_user_id=? AND o.dataset_id=? AND o.id=? AND "
+                    "o.claim_state='claimed' AND o.claim_token=?",
+                    (self.owner_user_id, dataset, ledger_id, claim_token),
+                ).fetchone()
+                if row is None:
+                    return False
+                visible = conn.execute(
+                    "SELECT 1 FROM note_semantic_chunks c JOIN note_semantic_note_state n ON "
+                    "n.owner_user_id=c.owner_user_id AND n.dataset_id=c.dataset_id AND "
+                    "n.generation_id=c.generation_id AND n.note_id=c.note_id WHERE "
+                    "c.owner_user_id=? AND c.dataset_id=? AND c.generation_id=? AND "
+                    "c.chunk_id=? AND n.state='indexed' AND n.content_version=c.content_version "
+                    "LIMIT 1",
+                    (
+                        self.owner_user_id,
+                        dataset,
+                        str(row["generation_id"]),
+                        str(row["vector_id"]),
+                    ),
+                ).fetchone()
+                if visible is not None:
+                    return False
+        return True
+
+    def complete_obsolete_vector_claim(
+        self,
+        *,
+        dataset_id: str,
+        ledger_ids: Sequence[str],
+        claim_token: str,
+    ) -> bool:
+        dataset = self._scope(dataset_id)
+        ids = tuple(ledger_ids)
+        with self._db.transaction() as conn:
+            self._set_scope(conn, dataset)
+            deleted = 0
+            for ledger_id in ids:
+                row = conn.execute(
+                    "SELECT vector_id,generation_id FROM note_semantic_obsolete_vectors "
+                    "WHERE owner_user_id=? AND dataset_id=? AND id=? AND "
+                    "claim_state='claimed' AND claim_token=?",
+                    (self.owner_user_id, dataset, ledger_id, claim_token),
+                ).fetchone()
+                if row is None:
+                    return False
+                visible = conn.execute(
+                    "SELECT 1 FROM note_semantic_chunks c JOIN note_semantic_note_state n ON "
+                    "n.owner_user_id=c.owner_user_id AND n.dataset_id=c.dataset_id AND "
+                    "n.generation_id=c.generation_id AND n.note_id=c.note_id WHERE "
+                    "c.owner_user_id=? AND c.dataset_id=? AND c.generation_id=? AND "
+                    "c.chunk_id=? AND n.state='indexed' AND n.content_version=c.content_version "
+                    "LIMIT 1",
+                    (
+                        self.owner_user_id,
+                        dataset,
+                        str(row["generation_id"]),
+                        str(row["vector_id"]),
+                    ),
+                ).fetchone()
+                if visible is not None:
+                    return False
+                cursor = conn.execute(
+                    "DELETE FROM note_semantic_obsolete_vectors WHERE owner_user_id=? AND "
+                    "dataset_id=? AND id=? AND claim_state='claimed' AND claim_token=?",
+                    (self.owner_user_id, dataset, ledger_id, claim_token),
+                )
+                deleted += cursor.rowcount
+        return deleted == len(ids)
+
+    def list_generation_cleanup_vector_ids(
+        self,
+        *,
+        dataset_id: str,
+        work_id: str,
+        generation_id: str,
+        claim_token: str,
+        fencing_token: str,
+        limit: int,
+    ) -> tuple[str, ...] | None:
+        if type(limit) is not int or not 1 <= limit <= 100_000:
+            raise ValueError("notes_semantic_cleanup_limit_invalid")
+        dataset = self._scope(dataset_id)
+        with self._db.transaction() as conn:
+            self._set_scope(conn, dataset)
+            if not self._generation_cleanup_authorized_locked(
+                conn,
+                dataset=dataset,
+                work_id=work_id,
+                generation_id=generation_id,
+                claim_token=claim_token,
+                fencing_token=fencing_token,
+            ):
+                return None
+            rows = conn.execute(
+                "SELECT chunk_id FROM note_semantic_chunks WHERE owner_user_id=? AND "
+                "dataset_id=? AND generation_id=? ORDER BY note_id,ordinal,chunk_id LIMIT ?",
+                (self.owner_user_id, dataset, generation_id, limit),
+            ).fetchall()
+        return tuple(str(row["chunk_id"]) for row in rows)
+
+    def complete_generation_vector_cleanup_page(
+        self,
+        *,
+        dataset_id: str,
+        work_id: str,
+        generation_id: str,
+        claim_token: str,
+        fencing_token: str,
+        vector_ids: Sequence[str],
+    ) -> bool:
+        ids = tuple(vector_ids)
+        if not ids or len(ids) != len(set(ids)):
+            return False
+        dataset = self._scope(dataset_id)
+        with self._db.transaction() as conn:
+            self._set_scope(conn, dataset)
+            if not self._generation_cleanup_authorized_locked(
+                conn,
+                dataset=dataset,
+                work_id=work_id,
+                generation_id=generation_id,
+                claim_token=claim_token,
+                fencing_token=fencing_token,
+            ):
+                return False
+            deleted = 0
+            for vector_id in ids:
+                cursor = conn.execute(
+                    "DELETE FROM note_semantic_chunks WHERE owner_user_id=? AND dataset_id=? "
+                    "AND generation_id=? AND chunk_id=?",
+                    (self.owner_user_id, dataset, generation_id, vector_id),
+                )
+                deleted += cursor.rowcount
+        return deleted == len(ids)
 
     def create_configuration(
         self, *, dataset_id: str, capability_revision: str, disclosure_hash: str, provider: str,
@@ -694,6 +1178,11 @@ class NoteSemanticStore:
                 "SELECT * FROM note_semantic_note_state WHERE owner_user_id=? AND dataset_id=? AND generation_id=? AND note_id=?",
                 (self.owner_user_id, dataset, generation_id, note_id),
             ).fetchone()
+            self._refresh_generation_counts_locked(
+                conn,
+                dataset=dataset,
+                generation_id=generation_id,
+            )
             return self._note_from_row(row)
 
         if tx is not None:
@@ -750,6 +1239,7 @@ class NoteSemanticStore:
         note_id: str,
         content_version: int,
         content_fingerprint: str,
+        hard_delete: bool = False,
         now: datetime,
         tx: SemanticConnection,
     ) -> SemanticNoteRecord | None:
@@ -763,6 +1253,29 @@ class NoteSemanticStore:
         fingerprint = self._digest(content_fingerprint, field="content_fingerprint")
         timestamp = self._timestamp(now)
         self._set_scope(tx, dataset)
+        if hard_delete:
+            rows = tx.execute(
+                "SELECT generation_id,chunk_id FROM note_semantic_chunks WHERE "
+                "owner_user_id=? AND dataset_id=? AND note_id=? "
+                "ORDER BY generation_id,ordinal,chunk_id",
+                (self.owner_user_id, dataset, note_id),
+            ).fetchall()
+            ids_by_generation: dict[str, list[str]] = {}
+            for vector_row in rows:
+                ids_by_generation.setdefault(
+                    str(vector_row["generation_id"]), []
+                ).append(str(vector_row["chunk_id"]))
+            for source_generation_id, vector_ids in ids_by_generation.items():
+                self._stage_obsolete_vectors_locked(
+                    tx,
+                    dataset=dataset,
+                    generation_id=source_generation_id,
+                    vector_ids=vector_ids,
+                    source_kind="hard_delete",
+                    note_id=note_id,
+                    dirty_generation=None,
+                    now=now,
+                )
         config = tx.execute(
             "SELECT g.id AS target_generation_id FROM note_semantic_index_configs c "
             "JOIN note_semantic_generations g ON g.owner_user_id=c.owner_user_id "
@@ -774,6 +1287,14 @@ class NoteSemanticStore:
         if config is None:
             return None
         generation_id = str(config["target_generation_id"])
+        obsolete_ids = tuple(
+            str(row["chunk_id"])
+            for row in tx.execute(
+                "SELECT chunk_id FROM note_semantic_chunks WHERE owner_user_id=? AND "
+                "dataset_id=? AND generation_id=? AND note_id=? ORDER BY ordinal,chunk_id",
+                (self.owner_user_id, dataset, generation_id, note_id),
+            ).fetchall()
+        )
         tx.execute(
             """
             INSERT INTO note_semantic_note_state(
@@ -801,6 +1322,16 @@ class NoteSemanticStore:
             (self.owner_user_id, dataset, generation_id, note_id),
         ).fetchone()
         dirty_generation = int(row["dirty_generation"])
+        self._stage_obsolete_vectors_locked(
+            tx,
+            dataset=dataset,
+            generation_id=generation_id,
+            vector_ids=obsolete_ids,
+            source_kind="hard_delete" if hard_delete else "tombstone",
+            note_id=note_id,
+            dirty_generation=dirty_generation,
+            now=now,
+        )
         tx.execute(
             "DELETE FROM note_semantic_work WHERE owner_user_id=? AND dataset_id=? "
             "AND kind='index_note' AND note_id=?",
@@ -819,6 +1350,11 @@ class NoteSemanticStore:
             "UPDATE note_semantic_index_configs SET semantic_index_revision=semantic_index_revision+1, "
             "updated_at=? WHERE owner_user_id=? AND dataset_id=?",
             (timestamp, self.owner_user_id, dataset),
+        )
+        self._refresh_generation_counts_locked(
+            tx,
+            dataset=dataset,
+            generation_id=generation_id,
         )
         return self._note_from_row(row)
 
@@ -864,6 +1400,11 @@ class NoteSemanticStore:
                 "WHERE owner_user_id=? AND dataset_id=?",
                 (timestamp, self.owner_user_id, dataset),
             )
+            self._refresh_generation_counts_locked(
+                conn,
+                dataset=dataset,
+                generation_id=generation_id,
+            )
         return True
 
     def tombstone_note(
@@ -901,6 +1442,11 @@ class NoteSemanticStore:
                 "SELECT * FROM note_semantic_note_state WHERE owner_user_id=? AND dataset_id=? AND generation_id=? AND note_id=?",
                 (self.owner_user_id, dataset, generation_id, note_id),
             ).fetchone()
+            self._refresh_generation_counts_locked(
+                conn,
+                dataset=dataset,
+                generation_id=generation_id,
+            )
         return self._note_from_row(row)
 
     def _enqueue_work(
@@ -1088,7 +1634,8 @@ class NoteSemanticStore:
             with self._db.transaction() as conn:
                 self._set_scope(conn, dataset)
                 generation = conn.execute(
-                    "SELECT g.id FROM note_semantic_generations g "
+                    "SELECT g.id,g.expected_note_count,g.expected_chunk_count FROM "
+                    "note_semantic_generations g "
                     "JOIN note_semantic_index_configs c ON c.owner_user_id=g.owner_user_id "
                     "AND c.dataset_id=g.dataset_id WHERE g.owner_user_id=? AND g.dataset_id=? "
                     "AND g.id=? AND g.configuration_revision=? AND g.state='staging' "
@@ -1113,6 +1660,22 @@ class NoteSemanticStore:
                         (self.owner_user_id, dataset, generation_id),
                     ).fetchall()
                 }
+                if not existing_ids:
+                    conn.execute(
+                        "UPDATE note_semantic_generations SET expected_note_count=?,"
+                        "expected_chunk_count=? WHERE owner_user_id=? AND dataset_id=? "
+                        "AND id=? AND state='staging' AND root_job_id=? AND "
+                        "configuration_revision=?",
+                        (
+                            len(normalized),
+                            sum(seed.planned_chunk_count for seed, _state in normalized),
+                            self.owner_user_id,
+                            dataset,
+                            generation_id,
+                            generation_fencing_token,
+                            expected_configuration_revision,
+                        ),
+                    )
                 removed_ids = existing_ids - note_ids
                 for note_id in sorted(removed_ids):
                     conn.execute(
@@ -1302,6 +1865,224 @@ class NoteSemanticStore:
                     claimed.append(self._work_from_row(value))
         return tuple(claimed)
 
+    def release_work_claim(
+        self,
+        *,
+        dataset_id: str,
+        work_id: str,
+        claim_token: str,
+        fencing_token: str,
+        now: datetime,
+    ) -> bool:
+        """Release only the exact unprocessed claim without consuming an attempt."""
+
+        dataset = self._scope(dataset_id)
+        if not claim_token:
+            return False
+        with self._db.transaction() as conn:
+            self._set_scope(conn, dataset)
+            cursor = conn.execute(
+                "UPDATE note_semantic_work SET claim_state='pending',claim_token=NULL,"
+                "claimed_at=NULL,error_code=NULL,updated_at=? WHERE owner_user_id=? AND "
+                "dataset_id=? AND id=? AND claim_state='claimed' AND claim_token=? AND "
+                "fencing_token=?",
+                (
+                    self._timestamp(now),
+                    self.owner_user_id,
+                    dataset,
+                    work_id,
+                    claim_token,
+                    fencing_token,
+                ),
+            )
+        return cursor.rowcount == 1
+
+    def reclaim_expired_work_claims(
+        self,
+        *,
+        dataset_id: str,
+        generation_id: str,
+        kind: SemanticWorkKind | str,
+        expired_before: datetime,
+        limit: int,
+        now: datetime,
+    ) -> int:
+        """Boundedly convert expired claims to deterministic retry attempts."""
+
+        dataset = self._scope(dataset_id)
+        work_kind = SemanticWorkKind(str(getattr(kind, "value", kind)))
+        if type(limit) is not int or not 1 <= limit <= 256:
+            raise ValueError("notes_semantic_work_claim_limit_invalid")
+        expired = self._timestamp(expired_before)
+        timestamp = self._timestamp(now)
+        with self._db.transaction() as conn:
+            self._set_scope(conn, dataset)
+            query = (
+                "SELECT id,claim_token FROM note_semantic_work WHERE owner_user_id=? AND "
+                "dataset_id=? AND generation_id=? AND kind=? AND claim_state='claimed' "
+                "AND claimed_at<=? ORDER BY claimed_at,id LIMIT ?"
+            )
+            if self.is_postgres:
+                query += " FOR UPDATE SKIP LOCKED"
+            rows = conn.execute(
+                query,
+                (
+                    self.owner_user_id,
+                    dataset,
+                    generation_id,
+                    work_kind.value,
+                    expired,
+                    limit,
+                ),
+            ).fetchall()
+            reclaimed = 0
+            for row in rows:
+                cursor = conn.execute(
+                    "UPDATE note_semantic_work SET claim_state='failed',"
+                    "attempt_count=attempt_count+1,next_eligible_at=?,claim_token=NULL,"
+                    "claimed_at=NULL,error_code='claim_lease_expired',updated_at=? WHERE "
+                    "owner_user_id=? AND dataset_id=? AND id=? AND claim_state='claimed' "
+                    "AND claim_token=? AND attempt_count<?",
+                    (
+                        timestamp,
+                        timestamp,
+                        self.owner_user_id,
+                        dataset,
+                        str(row["id"]),
+                        str(row["claim_token"]),
+                        self._MAX_WORK_ATTEMPTS,
+                    ),
+                )
+                reclaimed += cursor.rowcount
+        return reclaimed
+
+    def fail_claimed_note(
+        self,
+        *,
+        dataset_id: str,
+        generation_id: str,
+        generation_fencing_token: str,
+        expected_configuration_revision: int,
+        work_id: str,
+        claim_token: str,
+        work_fencing_token: str,
+        claimed_dirty_generation: int,
+        note_id: str,
+        error_code: str,
+        now: datetime,
+    ) -> bool:
+        """Publish one documented Note-specific terminal failure by exact CAS."""
+
+        dataset = self._scope(dataset_id)
+        timestamp = self._timestamp(now)
+        try:
+            with self._db.transaction() as conn:
+                self._set_scope(conn, dataset)
+                generation = conn.execute(
+                    "SELECT g.state FROM note_semantic_generations g JOIN "
+                    "note_semantic_index_configs c ON c.owner_user_id=g.owner_user_id AND "
+                    "c.dataset_id=g.dataset_id WHERE g.owner_user_id=? AND g.dataset_id=? "
+                    "AND g.id=? AND g.root_job_id=? AND g.configuration_revision=? AND "
+                    "c.configuration_revision=? AND c.desired_state='enabled' AND "
+                    "g.state IN ('staging','active')",
+                    (
+                        self.owner_user_id,
+                        dataset,
+                        generation_id,
+                        generation_fencing_token,
+                        expected_configuration_revision,
+                        expected_configuration_revision,
+                    ),
+                ).fetchone()
+                work = conn.execute(
+                    "SELECT id FROM note_semantic_work WHERE owner_user_id=? AND dataset_id=? "
+                    "AND id=? AND generation_id=? AND note_id=? AND kind='index_note' AND "
+                    "dirty_generation=? AND fencing_token=? AND claim_state='claimed' AND "
+                    "claim_token=?",
+                    (
+                        self.owner_user_id,
+                        dataset,
+                        work_id,
+                        generation_id,
+                        note_id,
+                        claimed_dirty_generation,
+                        work_fencing_token,
+                        claim_token,
+                    ),
+                ).fetchone()
+                state = conn.execute(
+                    "SELECT state,dirty_generation FROM note_semantic_note_state WHERE "
+                    "owner_user_id=? AND dataset_id=? AND generation_id=? AND note_id=?",
+                    (self.owner_user_id, dataset, generation_id, note_id),
+                ).fetchone()
+                if (
+                    generation is None
+                    or work is None
+                    or state is None
+                    or str(state["state"]) != SemanticNoteState.PENDING.value
+                    or int(state["dirty_generation"]) != claimed_dirty_generation
+                ):
+                    raise _SemanticCASMiss
+                obsolete_ids = tuple(
+                    str(row["chunk_id"])
+                    for row in conn.execute(
+                        "SELECT chunk_id FROM note_semantic_chunks WHERE owner_user_id=? "
+                        "AND dataset_id=? AND generation_id=? AND note_id=?",
+                        (self.owner_user_id, dataset, generation_id, note_id),
+                    ).fetchall()
+                )
+                self._stage_obsolete_vectors_locked(
+                    conn,
+                    dataset=dataset,
+                    generation_id=generation_id,
+                    vector_ids=obsolete_ids,
+                    source_kind="note_failure",
+                    note_id=note_id,
+                    dirty_generation=claimed_dirty_generation,
+                    now=now,
+                )
+                failed = conn.execute(
+                    "UPDATE note_semantic_note_state SET state='failed',manifest_hash=NULL,"
+                    "error_code=?,published_at=? WHERE owner_user_id=? AND dataset_id=? AND "
+                    "generation_id=? AND note_id=? AND state='pending' AND dirty_generation=?",
+                    (
+                        self._error_code(error_code),
+                        timestamp,
+                        self.owner_user_id,
+                        dataset,
+                        generation_id,
+                        note_id,
+                        claimed_dirty_generation,
+                    ),
+                )
+                completed = conn.execute(
+                    "UPDATE note_semantic_work SET claim_state='completed',claim_token=NULL,"
+                    "claimed_at=NULL,error_code=?,updated_at=? WHERE owner_user_id=? AND "
+                    "dataset_id=? AND id=? AND claim_state='claimed' AND claim_token=? AND "
+                    "fencing_token=?",
+                    (
+                        self._error_code(error_code),
+                        timestamp,
+                        self.owner_user_id,
+                        dataset,
+                        work_id,
+                        claim_token,
+                        work_fencing_token,
+                    ),
+                )
+                if failed.rowcount != 1 or completed.rowcount != 1:
+                    raise _SemanticCASMiss
+                self._increment_generation_counts_locked(
+                    conn,
+                    dataset=dataset,
+                    generation_id=generation_id,
+                    note_delta=1,
+                    chunk_delta=0,
+                )
+        except _SemanticCASMiss:
+            return False
+        return True
+
     def get_note_state(
         self,
         dataset_id: str,
@@ -1433,12 +2214,43 @@ class NoteSemanticStore:
                         (self.owner_user_id, dataset, generation_id, note_id),
                     ).fetchall()
                 )
+                new_id_set = set(vector_ids)
+                old_only = tuple(
+                    vector_id
+                    for vector_id in old_vector_ids
+                    if vector_id not in new_id_set
+                )
+                self._stage_obsolete_vectors_locked(
+                    conn,
+                    dataset=dataset,
+                    generation_id=generation_id,
+                    vector_ids=old_only,
+                    source_kind="manifest_replace",
+                    note_id=note_id,
+                    dirty_generation=claimed_dirty_generation,
+                    now=now,
+                )
                 conn.execute(
                     "DELETE FROM note_semantic_chunks WHERE owner_user_id=? AND dataset_id=? "
                     "AND generation_id=? AND note_id=?",
                     (self.owner_user_id, dataset, generation_id, note_id),
                 )
                 for chunk in chunk_rows:
+                    cleanup_state = conn.execute(
+                        "SELECT claim_state FROM note_semantic_obsolete_vectors WHERE "
+                        "owner_user_id=? AND dataset_id=? AND generation_id=? AND vector_id=?",
+                        (
+                            self.owner_user_id,
+                            dataset,
+                            generation_id,
+                            chunk.chunk_id,
+                        ),
+                    ).fetchone()
+                    if (
+                        cleanup_state is not None
+                        and str(cleanup_state["claim_state"]) == "claimed"
+                    ):
+                        raise _SemanticCASMiss
                     conn.execute(
                         "INSERT INTO note_semantic_chunks(chunk_id,owner_user_id,dataset_id,"
                         "generation_id,note_id,content_version,ordinal,field,start_offset,end_offset,"
@@ -1458,6 +2270,16 @@ class NoteSemanticStore:
                             chunk.chunk_fingerprint,
                             chunk.normalization_version,
                             chunk.chunker_version,
+                        ),
+                    )
+                    conn.execute(
+                        "DELETE FROM note_semantic_obsolete_vectors WHERE owner_user_id=? "
+                        "AND dataset_id=? AND generation_id=? AND vector_id=?",
+                        (
+                            self.owner_user_id,
+                            dataset,
+                            generation_id,
+                            chunk.chunk_id,
                         ),
                     )
                 updated = conn.execute(
@@ -1501,14 +2323,31 @@ class NoteSemanticStore:
                         "semantic_index_revision+1,updated_at=? WHERE owner_user_id=? AND dataset_id=?",
                         (timestamp, self.owner_user_id, dataset),
                     )
-                self._refresh_generation_counts_locked(
+                self._increment_generation_counts_locked(
                     conn,
                     dataset=dataset,
                     generation_id=generation_id,
+                    note_delta=1,
+                    chunk_delta=len(chunk_rows),
                 )
+                if str(generation["state"]) == SemanticGenerationState.ACTIVE.value:
+                    active_manifest_hash, _active_ids = self._generation_manifest_locked(
+                        conn,
+                        dataset=dataset,
+                        generation_id=generation_id,
+                    )
+                    conn.execute(
+                        "UPDATE note_semantic_generations SET manifest_hash=? WHERE "
+                        "owner_user_id=? AND dataset_id=? AND id=?",
+                        (
+                            active_manifest_hash,
+                            self.owner_user_id,
+                            dataset,
+                            generation_id,
+                        ),
+                    )
         except _SemanticCASMiss:
             return None
-        old_only = tuple(vector_id for vector_id in old_vector_ids if vector_id not in set(vector_ids))
         return SemanticManifestPublication(
             note_id=note_id,
             generation_id=generation_id,
@@ -1572,7 +2411,9 @@ class NoteSemanticStore:
                 "SUM(CASE WHEN state='excluded' THEN 1 ELSE 0 END) AS excluded,"
                 "SUM(CASE WHEN state='failed' THEN 1 ELSE 0 END) AS failed,"
                 "SUM(CASE WHEN state='pending' THEN 1 ELSE 0 END) AS pending,"
-                "SUM(CASE WHEN state='tombstoned' THEN 1 ELSE 0 END) AS tombstoned "
+                "SUM(CASE WHEN state='tombstoned' THEN 1 ELSE 0 END) AS tombstoned,"
+                "SUM(CASE WHEN state IN ('failed','excluded') THEN chunk_count ELSE 0 END) "
+                "AS waived_chunks "
                 "FROM note_semantic_note_state WHERE owner_user_id=? AND dataset_id=? AND generation_id=?",
                 (self.owner_user_id, dataset, generation_id),
             ).fetchone()
@@ -1580,6 +2421,11 @@ class NoteSemanticStore:
                 conn,
                 dataset=dataset,
                 generation_id=generation_id,
+            )
+            conn.execute(
+                "UPDATE note_semantic_generations SET manifest_hash=? WHERE owner_user_id=? "
+                "AND dataset_id=? AND id=?",
+                (manifest_hash, self.owner_user_id, dataset, generation_id),
             )
         record = self._record(generation)
         dimensions = record["dimensions"]
@@ -1592,6 +2438,7 @@ class NoteSemanticStore:
         failed = int(counts["failed"] or 0)
         pending = int(counts["pending"] or 0)
         tombstoned = int(counts["tombstoned"] or 0)
+        waived_chunks = int(counts["waived_chunks"] or 0)
         terminal = indexed + excluded + failed + tombstoned
         return SemanticGenerationIntegrity(
             generation_id=generation_id,
@@ -1607,6 +2454,7 @@ class NoteSemanticStore:
             pending_note_count=pending,
             tombstoned_note_count=tombstoned,
             eligible_note_count=indexed + failed + pending,
+            waived_chunk_count=waived_chunks,
             vector_ids=vector_ids,
             manifest_hash=manifest_hash,
             dimensions=int(dimensions),
@@ -1628,7 +2476,8 @@ class NoteSemanticStore:
         ):
             raise SemanticIndexingError("notes_semantic_note_count_mismatch")
         if (
-            integrity.expected_chunk_count != integrity.published_chunk_count
+            integrity.expected_chunk_count
+            != integrity.published_chunk_count + integrity.waived_chunk_count
             or len(integrity.vector_ids) != integrity.published_chunk_count
         ):
             raise SemanticIndexingError("notes_semantic_chunk_count_mismatch")
@@ -1659,14 +2508,20 @@ class NoteSemanticStore:
         try:
             with self._db.transaction() as conn:
                 self._set_scope(conn, dataset)
-                self._refresh_generation_counts_locked(
-                    conn,
-                    dataset=dataset,
-                    generation_id=generation_id,
+                generation_query = (
+                    "SELECT * FROM note_semantic_generations WHERE owner_user_id=? "
+                    "AND dataset_id=? AND id=? AND configuration_revision=? "
+                    "AND state='staging' AND root_job_id=?"
                 )
+                config_query = (
+                    "SELECT * FROM note_semantic_index_configs WHERE owner_user_id=? "
+                    "AND dataset_id=? AND configuration_revision=? AND desired_state='enabled'"
+                )
+                if self.is_postgres:
+                    generation_query += " FOR UPDATE"
+                    config_query += " FOR UPDATE"
                 generation_row = conn.execute(
-                    "SELECT * FROM note_semantic_generations WHERE owner_user_id=? AND dataset_id=? "
-                    "AND id=? AND configuration_revision=? AND state='staging' AND root_job_id=?",
+                    generation_query,
                     (
                         self.owner_user_id,
                         dataset,
@@ -1676,13 +2531,46 @@ class NoteSemanticStore:
                     ),
                 ).fetchone()
                 config = conn.execute(
-                    "SELECT * FROM note_semantic_index_configs WHERE owner_user_id=? AND dataset_id=? "
-                    "AND configuration_revision=? AND desired_state='enabled'",
+                    config_query,
                     (self.owner_user_id, dataset, expected_configuration_revision),
                 ).fetchone()
                 if generation_row is None or config is None:
                     raise _SemanticCASMiss
+                snapshot_query = (
+                    "SELECT s.note_id,s.content_version,n.version,n.deleted,n.client_id "
+                    "FROM note_semantic_note_state s JOIN notes n ON n.id=s.note_id "
+                    "WHERE s.owner_user_id=? AND s.dataset_id=? AND s.generation_id=? "
+                    "ORDER BY s.note_id"
+                )
+                if self.is_postgres:
+                    snapshot_query += " FOR UPDATE OF s,n"
+                snapshot_rows = conn.execute(
+                    snapshot_query,
+                    (self.owner_user_id, dataset, generation_id),
+                ).fetchall()
                 generation_record = self._record(generation_row)
+                if len(snapshot_rows) != int(generation_record["expected_note_count"]):
+                    raise _SemanticCASMiss
+                if any(
+                    str(row["client_id"]) != self.owner_user_id
+                    or bool(row["deleted"])
+                    or int(row["version"]) != int(row["content_version"])
+                    for row in snapshot_rows
+                ):
+                    raise _SemanticCASMiss
+                self._refresh_generation_counts_locked(
+                    conn,
+                    dataset=dataset,
+                    generation_id=generation_id,
+                )
+                refreshed_generation = conn.execute(
+                    "SELECT * FROM note_semantic_generations WHERE owner_user_id=? "
+                    "AND dataset_id=? AND id=?",
+                    (self.owner_user_id, dataset, generation_id),
+                ).fetchone()
+                if refreshed_generation is None:
+                    raise _SemanticCASMiss
+                generation_record = self._record(refreshed_generation)
                 if (
                     int(generation_record["dimensions"] or 0) != expected_dimensions
                     or str(generation_record["compatibility_hash"] or "")
@@ -1696,7 +2584,9 @@ class NoteSemanticStore:
                     "SUM(CASE WHEN state='excluded' THEN 1 ELSE 0 END) AS excluded,"
                     "SUM(CASE WHEN state='failed' THEN 1 ELSE 0 END) AS failed,"
                     "SUM(CASE WHEN state='pending' THEN 1 ELSE 0 END) AS pending,"
-                    "SUM(CASE WHEN state='tombstoned' THEN 1 ELSE 0 END) AS tombstoned "
+                    "SUM(CASE WHEN state='tombstoned' THEN 1 ELSE 0 END) AS tombstoned,"
+                    "SUM(CASE WHEN state IN ('failed','excluded') THEN chunk_count ELSE 0 END) "
+                    "AS waived_chunks "
                     "FROM note_semantic_note_state WHERE owner_user_id=? AND dataset_id=? "
                     "AND generation_id=?",
                     (self.owner_user_id, dataset, generation_id),
@@ -1725,6 +2615,7 @@ class NoteSemanticStore:
                     pending_note_count=pending,
                     tombstoned_note_count=tombstoned,
                     eligible_note_count=indexed + failed + pending,
+                    waived_chunk_count=int(counts["waived_chunks"] or 0),
                     vector_ids=vector_ids,
                     manifest_hash=manifest_hash,
                     dimensions=expected_dimensions,
@@ -1747,12 +2638,14 @@ class NoteSemanticStore:
                         raise _SemanticCASMiss
                 activated = conn.execute(
                     "UPDATE note_semantic_generations SET state='active',publication_receipt=?,"
-                    "published_at=?,manifest_hash=? WHERE owner_user_id=? AND dataset_id=? "
+                    "published_at=?,manifest_hash=?,configuration_revision=? WHERE "
+                    "owner_user_id=? AND dataset_id=? "
                     "AND id=? AND state='staging' AND root_job_id=?",
                     (
                         receipt,
                         timestamp,
                         manifest_hash,
+                        expected_configuration_revision + 1,
                         self.owner_user_id,
                         dataset,
                         generation_id,
@@ -1869,6 +2762,16 @@ class NoteSemanticStore:
                     (self.owner_user_id, dataset, generation_id, note_id),
                 ).fetchall()
             )
+            self._stage_obsolete_vectors_locked(
+                conn,
+                dataset=dataset,
+                generation_id=generation_id,
+                vector_ids=old_ids,
+                source_kind="tombstone",
+                note_id=note_id,
+                dirty_generation=claimed_dirty_generation,
+                now=now,
+            )
             completed = conn.execute(
                 "UPDATE note_semantic_work SET claim_state='completed',claim_token=NULL,"
                 "claimed_at=NULL,error_code=NULL,updated_at=? WHERE owner_user_id=? "
@@ -1885,11 +2788,6 @@ class NoteSemanticStore:
             )
             if completed.rowcount != 1:
                 return None
-            self._refresh_generation_counts_locked(
-                conn,
-                dataset=dataset,
-                generation_id=generation_id,
-            )
         return SemanticManifestPublication(
             note_id=note_id,
             generation_id=generation_id,
@@ -1980,6 +2878,37 @@ class NoteSemanticStore:
             )
         return True
 
+    def _generation_cleanup_authorized_locked(
+        self,
+        conn: Any,
+        *,
+        dataset: str,
+        work_id: str,
+        generation_id: str,
+        claim_token: str,
+        fencing_token: str,
+    ) -> bool:
+        row = conn.execute(
+            "SELECT w.id FROM note_semantic_work w JOIN note_semantic_generations g "
+            "ON g.owner_user_id=w.owner_user_id AND g.dataset_id=w.dataset_id "
+            "AND g.id=w.generation_id JOIN note_semantic_index_configs c "
+            "ON c.owner_user_id=w.owner_user_id AND c.dataset_id=w.dataset_id "
+            "WHERE w.owner_user_id=? AND w.dataset_id=? AND w.id=? "
+            "AND w.kind='delete_generation' AND w.generation_id=? "
+            "AND w.claim_state='claimed' AND w.claim_token=? AND w.fencing_token=? "
+            "AND g.state IN ('retired','failed','deleting') "
+            "AND (c.active_generation_id IS NULL OR c.active_generation_id<>w.generation_id)",
+            (
+                self.owner_user_id,
+                dataset,
+                work_id,
+                generation_id,
+                claim_token,
+                fencing_token,
+            ),
+        ).fetchone()
+        return row is not None
+
     def authorize_generation_cleanup(
         self,
         *,
@@ -1994,26 +2923,14 @@ class NoteSemanticStore:
         dataset = self._scope(dataset_id)
         with self._db.transaction() as conn:
             self._set_scope(conn, dataset)
-            row = conn.execute(
-                "SELECT w.id FROM note_semantic_work w JOIN note_semantic_generations g "
-                "ON g.owner_user_id=w.owner_user_id AND g.dataset_id=w.dataset_id "
-                "AND g.id=w.generation_id JOIN note_semantic_index_configs c "
-                "ON c.owner_user_id=w.owner_user_id AND c.dataset_id=w.dataset_id "
-                "WHERE w.owner_user_id=? AND w.dataset_id=? AND w.id=? "
-                "AND w.kind='delete_generation' AND w.generation_id=? "
-                "AND w.claim_state='claimed' AND w.claim_token=? AND w.fencing_token=? "
-                "AND g.state IN ('retired','failed','deleting') "
-                "AND (c.active_generation_id IS NULL OR c.active_generation_id<>w.generation_id)",
-                (
-                    self.owner_user_id,
-                    dataset,
-                    work_id,
-                    generation_id,
-                    claim_token,
-                    fencing_token,
-                ),
-            ).fetchone()
-        return row is not None
+            return self._generation_cleanup_authorized_locked(
+                conn,
+                dataset=dataset,
+                work_id=work_id,
+                generation_id=generation_id,
+                claim_token=claim_token,
+                fencing_token=fencing_token,
+            )
 
     def complete_generation_cleanup(
         self,

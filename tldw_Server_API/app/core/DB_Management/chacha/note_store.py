@@ -105,6 +105,7 @@ class NoteStore:
         title: str,
         content: str,
         content_version: int,
+        hard_delete: bool = False,
     ) -> None:
         self._db.note_semantic_store.mark_note_tombstoned(
             tx=conn,
@@ -112,6 +113,7 @@ class NoteStore:
             note_id=note_id,
             content_version=content_version,
             content_fingerprint=semantic_content_fingerprint(title, content, content_version),
+            hard_delete=hard_delete,
             now=self._semantic_now(),
         )
 
@@ -2361,6 +2363,7 @@ class NoteStore:
                         title=str(row["title"]),
                         content=str(row["content"]),
                         content_version=cur_ver + 1,
+                        hard_delete=True,
                     )
                     self._db._delete_note_clipper_sidecars(note_id, conn=conn)
                     conn.execute("DELETE FROM note_studio_documents WHERE note_id = ?", (note_id,))

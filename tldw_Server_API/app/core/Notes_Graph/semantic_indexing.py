@@ -6,7 +6,6 @@ import asyncio
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime
-from math import ceil
 from typing import Any, Protocol
 
 from tldw_Server_API.app.core.DB_Management.chacha.note_semantic_models import (
@@ -31,6 +30,8 @@ from .semantic_embeddings import (
     ResolvedDimension,
     ResolvedSemanticConfig,
     SemanticEmbeddingBatch,
+    SemanticEmbeddingSystemError,
+    plan_semantic_embedding_batches,
 )
 from .semantic_publication import (
     SemanticExecutionFence,
@@ -38,6 +39,7 @@ from .semantic_publication import (
     SemanticPublicationReceipt,
     SemanticPublicationService,
     revalidate_execution_fence,
+    run_reconciled_transaction,
 )
 from .semantic_settings import DEFAULT_SEMANTIC_INDEX_SETTINGS, SemanticIndexSettings
 from .semantic_vectors import SemanticVector
@@ -67,6 +69,22 @@ class InitialGenerationRequest:
 
     fence: SemanticExecutionFence
     embedding_config: PendingSemanticConfig
+
+
+class SemanticNoteIndexingError(SemanticIndexingError):
+    """A documented Note-local failure that may produce degraded activation."""
+
+    _ALLOWED_CODES = frozenset(
+        {
+            "note_content_invalid",
+            "note_content_unavailable",
+        }
+    )
+
+    def __init__(self, code: str) -> None:
+        if code not in self._ALLOWED_CODES:
+            raise ValueError("notes_semantic_note_error_code_invalid")
+        super().__init__(code)
 
 
 class VersionedNoteReader(Protocol):
@@ -150,6 +168,10 @@ class SemanticGenerationStore(Protocol):
 
     def claim_work_batch(self, **kwargs: Any) -> tuple[SemanticWorkItem, ...]: ...
 
+    def release_work_claim(self, **kwargs: Any) -> bool: ...
+
+    def fail_claimed_note(self, **kwargs: Any) -> bool: ...
+
     def get_generation_integrity(
         self,
         dataset_id: str,
@@ -164,6 +186,27 @@ class _SnapshotPlan:
     refs: tuple[NoteVersionRef, ...]
     seeds: tuple[SemanticSnapshotSeed, ...]
     chunks_by_note: dict[str, tuple[SemanticChunkInput, ...]] = field(repr=False)
+
+
+def _build_snapshot_note(
+    fence: SemanticExecutionFence,
+    snapshot: VersionedNoteSnapshot,
+    settings: SemanticIndexSettings,
+) -> tuple[str, tuple[SemanticChunkInput, ...]]:
+    fingerprint = semantic_content_fingerprint(
+        snapshot.title,
+        snapshot.content,
+        snapshot.content_version,
+    )
+    chunks = build_semantic_chunks(
+        generation_id=fence.generation_id,
+        note_id=snapshot.note_id,
+        title=snapshot.title,
+        content=snapshot.content,
+        content_version=snapshot.content_version,
+        settings=settings,
+    )
+    return fingerprint, chunks
 
 
 class SemanticGenerationBuilder:
@@ -248,6 +291,10 @@ class SemanticGenerationBuilder:
             raise SemanticIndexingError("notes_semantic_convergence_exhausted")
         except asyncio.CancelledError:
             raise
+        except SemanticEmbeddingSystemError:
+            code = "notes_semantic_embedding_system_failure"
+            await self._record_systemic_failure(fence, code)
+            raise SemanticIndexingError(code) from None
         except SemanticIndexingError as exc:
             await self._record_systemic_failure(fence, exc.code)
             raise
@@ -265,9 +312,11 @@ class SemanticGenerationBuilder:
             pending.provider != fence.provider
             or pending.model != fence.model
             or pending.model_revision != fence.model_revision
+            or pending.endpoint_origin != fence.endpoint_origin
+            or pending.credential_source != fence.credential_source
         ):
-            raise SemanticIndexingError("notes_semantic_provider_model_drift")
-        await revalidate_execution_fence(self._revalidate, fence)
+            raise SemanticIndexingError("notes_semantic_execution_config_drift")
+        authority = await revalidate_execution_fence(self._revalidate, fence)
         if fence.dimensions is None:
             resolved = await self._embedder.resolve_dimensions(
                 pending,
@@ -275,7 +324,15 @@ class SemanticGenerationBuilder:
             )
             if resolved.provider != fence.provider or resolved.model != fence.model:
                 raise SemanticIndexingError("notes_semantic_provider_model_drift")
-            compatibility_hash = self._compatibility_hash_for_dimension(resolved)
+            if (
+                resolved.endpoint_origin != authority.endpoint_origin
+                or resolved.credential_source != authority.credential_source
+            ):
+                raise SemanticIndexingError("notes_semantic_execution_config_drift")
+            compatibility_hash = await asyncio.to_thread(
+                self._compatibility_hash_for_dimension,
+                resolved,
+            )
             config = await asyncio.to_thread(
                 self._store.get_configuration,
                 fence.dataset_id,
@@ -327,13 +384,16 @@ class SemanticGenerationBuilder:
                 provider=fence.provider,
                 model=fence.model,
                 model_revision=fence.model_revision,
+                endpoint_origin=authority.endpoint_origin,
+                credential_source=authority.credential_source,
             )
+        authority = await revalidate_execution_fence(self._revalidate, fence)
         resolved_config = ResolvedSemanticConfig(
             provider=resolved.provider,
             model=resolved.model,
             model_revision=resolved.model_revision,
-            endpoint_origin=pending.endpoint_origin,
-            credential_source=pending.credential_source,
+            endpoint_origin=authority.endpoint_origin,
+            credential_source=authority.credential_source,
             dimensions=resolved.dimensions,
         )
         await revalidate_execution_fence(self._revalidate, fence)
@@ -353,7 +413,9 @@ class SemanticGenerationBuilder:
         )
         if len(values) > self._settings.max_active_notes:
             raise SemanticIndexingError("notes_semantic_active_note_limit_exceeded")
-        refs = tuple(sorted(values, key=lambda item: item.note_id))
+        refs = await asyncio.to_thread(
+            lambda: tuple(sorted(values, key=lambda item: item.note_id))
+        )
         if len({item.note_id for item in refs}) != len(refs):
             raise SemanticIndexingError("notes_semantic_snapshot_duplicate")
         if any(item.content_version < 1 for item in refs):
@@ -381,21 +443,20 @@ class SemanticGenerationBuilder:
                 or snapshot.content_version != ref.content_version
             ):
                 raise SemanticIndexingError("notes_semantic_snapshot_changed")
-            fingerprint = semantic_content_fingerprint(
-                snapshot.title,
-                snapshot.content,
-                snapshot.content_version,
-            )
             try:
-                chunks = build_semantic_chunks(
-                    generation_id=fence.generation_id,
-                    note_id=snapshot.note_id,
-                    title=snapshot.title,
-                    content=snapshot.content,
-                    content_version=snapshot.content_version,
-                    settings=self._settings,
+                fingerprint, chunks = await asyncio.to_thread(
+                    _build_snapshot_note,
+                    fence,
+                    snapshot,
+                    self._settings,
                 )
             except SemanticContentError as exc:
+                fingerprint = await asyncio.to_thread(
+                    semantic_content_fingerprint,
+                    snapshot.title,
+                    snapshot.content,
+                    snapshot.content_version,
+                )
                 seeds.append(
                     SemanticSnapshotSeed(
                         note_id=ref.note_id,
@@ -407,14 +468,13 @@ class SemanticGenerationBuilder:
                     )
                 )
                 continue
-            note_bytes = sum(
-                len(chunk.provider_input.text.encode("utf-8")) for chunk in chunks
-            )
-            chunk_count += len(chunks)
-            provider_bytes += note_bytes
-            provider_requests += ceil(
-                len(chunks) / self._settings.max_provider_batch_inputs
-            )
+            try:
+                embedding_plan = plan_semantic_embedding_batches(chunks, self._settings)
+            except SemanticEmbeddingSystemError:
+                raise SemanticIndexingError("notes_semantic_run_limit_exceeded") from None
+            chunk_count += embedding_plan.input_count
+            provider_bytes += embedding_plan.total_bytes
+            provider_requests += embedding_plan.request_count
             if (
                 chunk_count > self._settings.max_chunks_per_run
                 or provider_bytes > self._settings.max_provider_bytes_per_run
@@ -445,6 +505,7 @@ class SemanticGenerationBuilder:
             self._settings.max_active_notes,
             self._settings.max_provider_batch_inputs,
         )
+        provider_requests = 0
         while True:
             claims = await asyncio.to_thread(
                 self._store.claim_work_batch,
@@ -456,42 +517,87 @@ class SemanticGenerationBuilder:
             )
             if not claims:
                 return
-            for claim in claims:
-                if claim.note_id is None:
-                    raise SemanticIndexingError("notes_semantic_note_claim_invalid")
-                chunks = plan.chunks_by_note.get(claim.note_id)
-                if not chunks:
-                    return
-                await revalidate_execution_fence(self._revalidate, fence)
-                batch = await self._embedder.embed_chunks(
-                    chunks,
-                    config,
-                    user_id=fence.owner_user_id,
-                )
-                if (
-                    batch.provider != fence.provider
-                    or batch.model != fence.model
-                    or batch.model_revision != fence.model_revision
-                    or batch.dimensions != fence.dimensions
-                    or len(batch.vectors) != len(chunks)
-                    or any(len(vector) != fence.dimensions for vector in batch.vectors)
-                ):
-                    raise SemanticIndexingError("notes_semantic_embedding_identity_mismatch")
-                vectors = tuple(
-                    SemanticVector(chunk.vector_id, tuple(vector))
-                    for chunk, vector in zip(chunks, batch.vectors)
-                )
-                try:
+            try:
+                for claim in claims:
+                    if claim.note_id is None:
+                        raise SemanticIndexingError("notes_semantic_note_claim_invalid")
+                    chunks = plan.chunks_by_note.get(claim.note_id)
+                    if not chunks:
+                        raise SemanticIndexingError("notes_semantic_note_claim_stale")
+                    await revalidate_execution_fence(self._revalidate, fence)
+                    try:
+                        batch = await self._embedder.embed_chunks(
+                            chunks,
+                            config,
+                            user_id=fence.owner_user_id,
+                        )
+                    except SemanticNoteIndexingError as exc:
+                        await revalidate_execution_fence(self._revalidate, fence)
+                        failed = await run_reconciled_transaction(
+                            self._store.fail_claimed_note,
+                            dataset_id=fence.dataset_id,
+                            generation_id=fence.generation_id,
+                            generation_fencing_token=fence.generation_fencing_token,
+                            expected_configuration_revision=fence.configuration_revision,
+                            work_id=claim.id,
+                            claim_token=claim.claim_token,
+                            work_fencing_token=claim.fencing_token,
+                            claimed_dirty_generation=claim.dirty_generation,
+                            note_id=claim.note_id,
+                            error_code=exc.code,
+                            now=self._clock(),
+                        )
+                        if not failed:
+                            raise SemanticIndexingError(
+                                "notes_semantic_note_claim_stale"
+                            ) from exc
+                        continue
+                    if (
+                        batch.provider != fence.provider
+                        or batch.model != fence.model
+                        or batch.model_revision != fence.model_revision
+                        or batch.dimensions != fence.dimensions
+                        or batch.endpoint_origin != fence.endpoint_origin
+                        or batch.credential_source != fence.credential_source
+                        or len(batch.vectors) != len(chunks)
+                        or any(len(vector) != fence.dimensions for vector in batch.vectors)
+                    ):
+                        raise SemanticIndexingError(
+                            "notes_semantic_embedding_identity_mismatch"
+                        )
+                    admitted = plan_semantic_embedding_batches(chunks, self._settings)
+                    if (
+                        type(batch.provider_request_count) is not int
+                        or batch.provider_request_count < 0
+                        or batch.provider_request_count > admitted.request_count
+                    ):
+                        raise SemanticIndexingError(
+                            "notes_semantic_embedding_usage_invalid"
+                        )
+                    provider_requests += batch.provider_request_count
+                    if provider_requests > self._settings.max_provider_requests_per_run:
+                        raise SemanticIndexingError("notes_semantic_run_limit_exceeded")
+                    vectors = tuple(
+                        SemanticVector(chunk.vector_id, tuple(vector))
+                        for chunk, vector in zip(chunks, batch.vectors)
+                    )
                     await self._publication.publish_note(
                         fence,
                         claim,
                         chunks,
                         vectors,
                     )
-                except SemanticIndexingError as exc:
-                    if exc.code != "notes_semantic_note_claim_stale":
-                        raise
-                    return
+            finally:
+                for claim in claims:
+                    if claim.claim_token:
+                        await run_reconciled_transaction(
+                            self._store.release_work_claim,
+                            dataset_id=fence.dataset_id,
+                            work_id=claim.id,
+                            claim_token=claim.claim_token,
+                            fencing_token=claim.fencing_token,
+                            now=self._clock(),
+                        )
 
     async def _record_systemic_failure(
         self,
@@ -517,5 +623,6 @@ __all__ = [
     "InitialGenerationRequest",
     "NoteVersionRef",
     "SemanticGenerationBuilder",
+    "SemanticNoteIndexingError",
     "VersionedNoteSnapshot",
 ]

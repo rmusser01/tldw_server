@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from tldw_Server_API.app.core.Embeddings.request_types import EmbeddingExecutionResult
+from tldw_Server_API.app.core.Notes_Graph import semantic_embeddings
 from tldw_Server_API.app.core.Notes_Graph.semantic_content import build_semantic_chunks
 from tldw_Server_API.app.core.Notes_Graph.semantic_embeddings import (
     DIMENSION_PROBE_TEXT,
@@ -78,6 +79,8 @@ class SequencedOrchestrator(RecordingOrchestrator):
         self.revisions = revisions
         self.identity = SimpleNamespace(
             model_revision=None,
+            endpoint_origin="https://api.openai.com",
+            credential_source="server_default",
             provider_attempt_sequence=0,
             provider_input_count=0,
             provider_prompt_tokens=0,
@@ -156,8 +159,107 @@ def _resolved(**overrides: object) -> ResolvedSemanticConfig:
 def _runtime(orchestrator: RecordingOrchestrator, revision: str | None = None) -> NotesEmbeddingRuntime:
     return NotesEmbeddingRuntime(
         orchestrator=orchestrator,
-        execution_identity=lambda: SimpleNamespace(model_revision=revision),
+        execution_identity=lambda: SimpleNamespace(
+            model_revision=revision,
+            endpoint_origin="https://api.openai.com",
+            credential_source="server_default",
+            provider_attempt_sequence=len(orchestrator.inputs),
+            provider_input_count=len(orchestrator.inputs[-1]) if orchestrator.inputs else 0,
+            provider_prompt_tokens=0,
+            provider_request_count=1 if orchestrator.inputs else 0,
+            provider_status="success" if orchestrator.inputs else None,
+        ),
     )
+
+
+def test_shared_batch_planner_applies_byte_and_input_boundaries_exactly() -> None:
+    chunks = build_semantic_chunks(
+        generation_id="generation-1",
+        note_id="note-1",
+        title=None,
+        content="aa bb cc dd",
+        content_version=1,
+        settings=_settings(max_chunk_code_points=2),
+    )
+    settings = _settings(
+        max_chunk_code_points=2,
+        max_provider_batch_inputs=10,
+        max_provider_batch_bytes=2,
+        max_provider_input_bytes=2,
+        max_provider_requests_per_run=20,
+    )
+
+    plan = semantic_embeddings.plan_semantic_embedding_batches(chunks, settings)
+
+    assert plan.input_count == len(chunks)
+    assert plan.request_count == len(chunks)
+    assert all(len(batch) == 1 for batch in plan.batches)
+    assert all(size <= settings.max_provider_batch_bytes for size in plan.batch_bytes)
+
+
+@pytest.mark.asyncio
+async def test_embedding_batch_proves_runtime_endpoint_scope_and_request_count() -> None:
+    chunks = build_semantic_chunks(
+        generation_id="generation-1",
+        note_id="note-1",
+        title=None,
+        content="alpha beta gamma delta",
+        content_version=1,
+        settings=_settings(max_chunk_code_points=6),
+    )
+    orchestrator = RecordingOrchestrator([[1.0, 0.0] for _ in chunks])
+    embedder = NotesSemanticEmbedder(
+        orchestrator_factory=lambda config, user_id: _runtime(orchestrator, "revision-1"),
+        usage_logger=lambda **kwargs: asyncio.sleep(0),
+        settings=_settings(max_chunk_code_points=6, max_provider_batch_inputs=1),
+    )
+
+    batch = await embedder.embed_chunks(chunks, _resolved(), user_id="7")
+
+    assert batch.endpoint_origin == "https://api.openai.com"
+    assert batch.credential_source == "server_default"
+    assert batch.provider_request_count == len(chunks)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("identity_change", "code"),
+    [
+        ({"endpoint_origin": "https://wrong.example"}, "endpoint_origin_mismatch"),
+        ({"credential_source": "user"}, "credential_scope_mismatch"),
+    ],
+)
+async def test_embedding_rejects_provider_runtime_identity_drift(identity_change, code) -> None:
+    chunks = build_semantic_chunks(
+        generation_id="generation-1",
+        note_id="note-1",
+        title="Title",
+        content="Body",
+        content_version=1,
+    )
+    orchestrator = RecordingOrchestrator([[1.0, 0.0] for _ in chunks])
+    identity = {
+        "model_revision": "revision-1",
+        "endpoint_origin": "https://api.openai.com",
+        "credential_source": "server_default",
+        "provider_attempt_sequence": 1,
+        "provider_input_count": len(chunks),
+        "provider_prompt_tokens": 1,
+        "provider_request_count": 1,
+        "provider_status": "success",
+    }
+    identity.update(identity_change)
+    runtime = NotesEmbeddingRuntime(
+        orchestrator=orchestrator,
+        execution_identity=lambda: SimpleNamespace(**identity),
+    )
+    embedder = NotesSemanticEmbedder(
+        orchestrator_factory=lambda config, user_id: runtime,
+        usage_logger=lambda **kwargs: asyncio.sleep(0),
+    )
+
+    with pytest.raises(SemanticEmbeddingSystemError, match=code):
+        await embedder.embed_chunks(chunks, _resolved(), user_id="7")
 
 
 @pytest.mark.asyncio
@@ -254,6 +356,8 @@ async def test_probe_fails_before_any_note_input_when_consent_missing_or_cas_los
             provider="openai",
             model="text-embedding-3-small",
             model_revision="digest-on-cas-loss",
+            endpoint_origin="https://api.openai.com",
+            credential_source="server_default",
         )
     ]
 
@@ -288,6 +392,8 @@ async def test_unknown_dimension_sync_cas_receives_complete_discovered_identity(
         provider="openai",
         model="text-embedding-3-small",
         model_revision="digest-sync",
+        endpoint_origin="https://api.openai.com",
+        credential_source="server_default",
     )
 
 
@@ -302,6 +408,8 @@ async def test_cancelled_dimension_probe_records_one_failed_provider_attempt() -
             super().__post_init__()
             self.identity = SimpleNamespace(
                 model_revision=None,
+                endpoint_origin="https://api.openai.com",
+                credential_source="server_default",
                 provider_attempt_sequence=0,
                 provider_input_count=0,
                 provider_prompt_tokens=0,
@@ -427,6 +535,8 @@ async def test_repeated_cancellation_drains_one_failed_usage_row() -> None:
             super().__post_init__()
             self.identity = SimpleNamespace(
                 model_revision=None,
+                endpoint_origin="https://api.openai.com",
+                credential_source="server_default",
                 provider_attempt_sequence=0,
                 provider_input_count=0,
                 provider_prompt_tokens=0,
@@ -509,6 +619,8 @@ async def test_logger_exception_after_provider_cancellation_preserves_cancelled_
             super().__post_init__()
             self.identity = SimpleNamespace(
                 model_revision=None,
+                endpoint_origin="https://api.openai.com",
+                credential_source="server_default",
                 provider_attempt_sequence=0,
                 provider_input_count=0,
                 provider_prompt_tokens=0,
@@ -760,6 +872,7 @@ async def test_embedding_rejects_provider_or_model_drift_and_run_caps_before_exe
             max_chunks_per_note=1,
             max_chunks_per_run=1,
             max_provider_batch_inputs=1,
+            max_query_vectors_per_call=1,
         ),
     )
     with pytest.raises(SemanticEmbeddingSystemError, match="run_chunk_cap_exceeded"):

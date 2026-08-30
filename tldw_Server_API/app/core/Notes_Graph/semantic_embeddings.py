@@ -143,6 +143,8 @@ class ResolvedDimension:
     provider: str
     model: str
     model_revision: str | None
+    endpoint_origin: str | None = None
+    credential_source: CredentialScope = "server_default"
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,12 +156,27 @@ class SemanticEmbeddingBatch:
     dimensions: int
     prompt_tokens: int
     total_tokens: int
+    endpoint_origin: str | None = None
+    credential_source: CredentialScope = "server_default"
+    provider_request_count: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class SemanticEmbeddingPlan:
+    """Exact bounded provider batches and their admitted byte/request totals."""
+
+    batches: tuple[tuple[SemanticChunkInput, ...], ...]
+    batch_bytes: tuple[int, ...]
+    input_count: int
+    total_bytes: int
+    request_count: int
 
 
 @dataclass(frozen=True, slots=True)
 class NotesEmbeddingExecutionIdentity:
     model_revision: str | None = None
     endpoint_origin: str | None = None
+    credential_source: CredentialScope | None = None
     endpoint_base_url: str | None = None
     provider_attempt_sequence: int = 0
     provider_input_count: int = 0
@@ -210,6 +227,7 @@ class NotesEmbeddingExecutor:
         self._identity = NotesEmbeddingExecutionIdentity(
             model_revision=config.model_revision,
             endpoint_origin=config.endpoint_origin,
+            credential_source=config.credential_source,
         )
 
     def execution_identity(self) -> NotesEmbeddingExecutionIdentity:
@@ -277,6 +295,7 @@ class NotesEmbeddingExecutor:
         self._identity = NotesEmbeddingExecutionIdentity(
             model_revision=previous_identity.model_revision,
             endpoint_origin=endpoint_origin,
+            credential_source=credentials.source,
             endpoint_base_url=resolved_base_url,
             provider_attempt_sequence=attempt_sequence,
             provider_input_count=len(texts),
@@ -330,6 +349,7 @@ class NotesEmbeddingExecutor:
             self._identity = NotesEmbeddingExecutionIdentity(
                 model_revision=previous_identity.model_revision,
                 endpoint_origin=endpoint_origin,
+                credential_source=credentials.source,
                 endpoint_base_url=resolved_base_url,
                 provider_attempt_sequence=attempt_sequence,
                 provider_input_count=len(texts),
@@ -342,6 +362,7 @@ class NotesEmbeddingExecutor:
             self._identity = NotesEmbeddingExecutionIdentity(
                 model_revision=previous_identity.model_revision,
                 endpoint_origin=endpoint_origin,
+                credential_source=credentials.source,
                 endpoint_base_url=resolved_base_url,
                 provider_attempt_sequence=attempt_sequence,
                 provider_input_count=len(texts),
@@ -354,6 +375,7 @@ class NotesEmbeddingExecutor:
             self._identity = NotesEmbeddingExecutionIdentity(
                 model_revision=previous_identity.model_revision,
                 endpoint_origin=endpoint_origin,
+                credential_source=credentials.source,
                 endpoint_base_url=resolved_base_url,
                 provider_attempt_sequence=attempt_sequence,
                 provider_input_count=len(texts),
@@ -365,6 +387,7 @@ class NotesEmbeddingExecutor:
         self._identity = NotesEmbeddingExecutionIdentity(
             model_revision=actual_revision or self._config.model_revision,
             endpoint_origin=endpoint_origin,
+            credential_source=credentials.source,
             endpoint_base_url=resolved_base_url,
             provider_attempt_sequence=attempt_sequence,
             provider_input_count=len(texts),
@@ -446,6 +469,52 @@ def _reject_token_input(tokens_input: object, model: str) -> object:
     raise SemanticEmbeddingSystemError("token_input_unsupported")
 
 
+def plan_semantic_embedding_batches(
+    chunks: Sequence[SemanticChunkInput],
+    settings: SemanticIndexSettings = DEFAULT_SEMANTIC_INDEX_SETTINGS,
+) -> SemanticEmbeddingPlan:
+    """Apply the single Notes provider input/count/byte batching contract."""
+
+    if len(chunks) > settings.max_chunks_per_run:
+        raise SemanticEmbeddingSystemError("run_chunk_cap_exceeded")
+    sizes = tuple(len(chunk.provider_input.text.encode("utf-8")) for chunk in chunks)
+    if any(size > settings.max_provider_input_bytes for size in sizes):
+        raise SemanticEmbeddingSystemError("provider_input_bytes_exceeded")
+    total_bytes = sum(sizes)
+    if total_bytes > settings.max_provider_bytes_per_run:
+        raise SemanticEmbeddingSystemError("run_byte_cap_exceeded")
+
+    batches: list[tuple[SemanticChunkInput, ...]] = []
+    batch_bytes: list[int] = []
+    current: list[SemanticChunkInput] = []
+    current_bytes = 0
+    for chunk, size in zip(chunks, sizes):
+        if size > settings.max_provider_batch_bytes:
+            raise SemanticEmbeddingSystemError("provider_batch_bytes_exceeded")
+        if current and (
+            len(current) == settings.max_provider_batch_inputs
+            or current_bytes + size > settings.max_provider_batch_bytes
+        ):
+            batches.append(tuple(current))
+            batch_bytes.append(current_bytes)
+            current = []
+            current_bytes = 0
+        current.append(chunk)
+        current_bytes += size
+    if current:
+        batches.append(tuple(current))
+        batch_bytes.append(current_bytes)
+    if len(batches) > settings.max_provider_requests_per_run:
+        raise SemanticEmbeddingSystemError("provider_request_cap_exceeded")
+    return SemanticEmbeddingPlan(
+        batches=tuple(batches),
+        batch_bytes=tuple(batch_bytes),
+        input_count=len(chunks),
+        total_bytes=total_bytes,
+        request_count=len(batches),
+    )
+
+
 def build_notes_semantic_orchestrator(
     config: PendingSemanticConfig | ResolvedSemanticConfig,
     *,
@@ -499,7 +568,11 @@ def build_notes_semantic_orchestrator(
         execution_identity=(
             identity_reader
             if callable(identity_reader)
-            else lambda: NotesEmbeddingExecutionIdentity(model_revision=config.model_revision)
+            else lambda: NotesEmbeddingExecutionIdentity(
+                model_revision=config.model_revision,
+                endpoint_origin=config.endpoint_origin,
+                credential_source=config.credential_source,
+            )
         ),
     )
 
@@ -549,6 +622,8 @@ class NotesSemanticEmbedder:
                 provider=config.provider,
                 model=config.model,
                 model_revision=config.model_revision,
+                endpoint_origin=config.endpoint_origin,
+                credential_source=config.credential_source,
             )
         if not config.consented:
             raise SemanticEmbeddingSystemError("consent_required")
@@ -566,6 +641,7 @@ class NotesSemanticEmbedder:
             vectors = _strict_vectors(result.vectors, expected=1, dimensions=None)
             dimensions = len(vectors[0])
             identity = runtime.execution_identity()
+            _validate_runtime_identity(identity, config)
             model_revision = (
                 _safe_revision(getattr(identity, "model_revision", None))
                 or config.model_revision
@@ -610,6 +686,8 @@ class NotesSemanticEmbedder:
             provider=config.provider,
             model=config.model,
             model_revision=model_revision,
+            endpoint_origin=getattr(identity, "endpoint_origin", None),
+            credential_source=getattr(identity, "credential_source", None),
         )
         published = self._dimension_cas(config, resolved_dimension)
         if inspect.isawaitable(published):
@@ -627,14 +705,15 @@ class NotesSemanticEmbedder:
     ) -> SemanticEmbeddingBatch:
         """Embed a fully admitted bounded run without fallback or durable cache."""
 
-        batches = self._plan_batches(chunks)
+        plan = plan_semantic_embedding_batches(chunks, self._settings)
         runtime = self._orchestrator_factory(config, user_id)
         vectors: list[list[float]] = []
         prompt_tokens = 0
         total_tokens = 0
         model_revision = config.model_revision
         discovered_revision = config.model_revision
-        for batch in batches:
+        provider_request_count = 0
+        for batch in plan.batches:
             texts = [chunk.provider_input.text for chunk in batch]
             before_sequence = _provider_attempt_sequence(runtime)
             result = None
@@ -647,6 +726,13 @@ class NotesSemanticEmbedder:
                     dimensions=config.dimensions,
                 )
                 identity = runtime.execution_identity()
+                _validate_runtime_identity(identity, config)
+                after_sequence = _provider_attempt_sequence(runtime)
+                if after_sequence > before_sequence:
+                    request_count = getattr(identity, "provider_request_count", None)
+                    if type(request_count) is not int or request_count != 1:
+                        raise SemanticEmbeddingSystemError("provider_usage_unavailable")
+                    provider_request_count += request_count
                 actual_revision = _safe_revision(
                     getattr(identity, "model_revision", None)
                 )
@@ -699,6 +785,8 @@ class NotesSemanticEmbedder:
             vectors.extend(batch_vectors)
             prompt_tokens += provider_prompt_tokens
             total_tokens += provider_total_tokens
+        if provider_request_count > plan.request_count:
+            raise SemanticEmbeddingSystemError("provider_request_cap_exceeded")
         return SemanticEmbeddingBatch(
             vectors=tuple(tuple(vector) for vector in vectors),
             provider=config.provider,
@@ -707,6 +795,9 @@ class NotesSemanticEmbedder:
             dimensions=config.dimensions,
             prompt_tokens=prompt_tokens,
             total_tokens=total_tokens,
+            endpoint_origin=config.endpoint_origin,
+            credential_source=config.credential_source,
+            provider_request_count=provider_request_count,
         )
 
     async def _finalize_provider_usage(
@@ -829,34 +920,7 @@ class NotesSemanticEmbedder:
         self,
         chunks: Sequence[SemanticChunkInput],
     ) -> tuple[tuple[SemanticChunkInput, ...], ...]:
-        if len(chunks) > self._settings.max_chunks_per_run:
-            raise SemanticEmbeddingSystemError("run_chunk_cap_exceeded")
-        sizes = [len(chunk.provider_input.text.encode("utf-8")) for chunk in chunks]
-        if any(size > self._settings.max_provider_input_bytes for size in sizes):
-            raise SemanticEmbeddingSystemError("provider_input_bytes_exceeded")
-        if sum(sizes) > self._settings.max_provider_bytes_per_run:
-            raise SemanticEmbeddingSystemError("run_byte_cap_exceeded")
-
-        batches: list[tuple[SemanticChunkInput, ...]] = []
-        current: list[SemanticChunkInput] = []
-        current_bytes = 0
-        for chunk, size in zip(chunks, sizes):
-            if size > self._settings.max_provider_batch_bytes:
-                raise SemanticEmbeddingSystemError("provider_batch_bytes_exceeded")
-            if current and (
-                len(current) == self._settings.max_provider_batch_inputs
-                or current_bytes + size > self._settings.max_provider_batch_bytes
-            ):
-                batches.append(tuple(current))
-                current = []
-                current_bytes = 0
-            current.append(chunk)
-            current_bytes += size
-        if current:
-            batches.append(tuple(current))
-        if len(batches) > self._settings.max_provider_requests_per_run:
-            raise SemanticEmbeddingSystemError("provider_request_cap_exceeded")
-        return tuple(batches)
+        return plan_semantic_embedding_batches(chunks, self._settings).batches
 
     async def _execute(
         self,
@@ -904,6 +968,16 @@ def _validate_execution_result(
         raise SemanticEmbeddingSystemError("provider_model_drift")
 
 
+def _validate_runtime_identity(
+    identity: object,
+    config: PendingSemanticConfig | ResolvedSemanticConfig,
+) -> None:
+    if getattr(identity, "endpoint_origin", None) != config.endpoint_origin:
+        raise SemanticEmbeddingSystemError("endpoint_origin_mismatch")
+    if getattr(identity, "credential_source", None) != config.credential_source:
+        raise SemanticEmbeddingSystemError("credential_scope_mismatch")
+
+
 def _strict_vectors(
     vectors: object,
     *,
@@ -931,6 +1005,8 @@ __all__ = [
     "ResolvedSemanticConfig",
     "RunMemoryEmbeddingCache",
     "SemanticEmbeddingBatch",
+    "SemanticEmbeddingPlan",
     "SemanticEmbeddingSystemError",
     "build_notes_semantic_orchestrator",
+    "plan_semantic_embedding_batches",
 ]

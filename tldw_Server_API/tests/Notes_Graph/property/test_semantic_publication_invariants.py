@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from itertools import count
 from pathlib import Path
 
@@ -47,6 +48,8 @@ class InterleavingVectors:
         self.values: dict[tuple[str, str], SemanticVector] = {}
         self.after_upsert = None
         self.deleted_generations: list[str] = []
+        self.delete_id_calls: list[tuple[str, tuple[str, ...]]] = []
+        self.fail_next_delete_ids = False
 
     async def upsert(self, dataset_id: str, generation_id: str, vectors) -> int:
         for vector in vectors:
@@ -64,7 +67,12 @@ class InterleavingVectors:
         )
 
     async def delete_ids(self, dataset_id: str, generation_id: str, vector_ids):
-        for vector_id in vector_ids:
+        ids = tuple(vector_ids)
+        self.delete_id_calls.append((generation_id, ids))
+        if self.fail_next_delete_ids:
+            self.fail_next_delete_ids = False
+            return SemanticVectorCleanup(confirmed_absent=False)
+        for vector_id in ids:
             self.values.pop((generation_id, vector_id), None)
         return SemanticVectorCleanup(confirmed_absent=True)
 
@@ -139,6 +147,8 @@ def _fence(config, generation_id: str, token: str = GENERATION_FENCE_V1):
         provider="openai",
         model="embedding-model-v1",
         model_revision=None,
+        endpoint_origin="https://api.example.test",
+        credential_source="server_default",
         endpoint_origin_revision="origin-v1",
         compatibility_hash="compatibility-v1",
         dimensions=2,
@@ -162,6 +172,8 @@ def _authority(fence: SemanticExecutionFence):
         provider=fence.provider,
         model=fence.model,
         model_revision=fence.model_revision,
+        endpoint_origin=fence.endpoint_origin,
+        credential_source=fence.credential_source,
         endpoint_origin_revision=fence.endpoint_origin_revision,
         endpoint_policy_allowed=True,
         compatibility_hash=fence.compatibility_hash,
@@ -171,19 +183,26 @@ def _authority(fence: SemanticExecutionFence):
     )
 
 
-@given(edit_after_upsert=st.booleans(), tombstone_after_publish=st.booleans())
+@pytest.mark.parametrize("seed", (3, 17, 101))
+@given(
+    operations=st.lists(
+        st.sampled_from(("edit", "second_edit", "claim", "tombstone")),
+        min_size=1,
+        max_size=6,
+    )
+)
 @settings(
-    max_examples=20,
+    max_examples=5,
     deadline=None,
     suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
 @pytest.mark.asyncio
 async def test_stale_claims_never_clear_newer_dirtiness(
     tmp_path: Path,
-    edit_after_upsert: bool,
-    tombstone_after_publish: bool,
+    seed: int,
+    operations: list[str],
 ) -> None:
-    db = _db(tmp_path / f"dirty-{next(CASE_COUNTER)}.sqlite")
+    db = _db(tmp_path / f"dirty-{seed}-{next(CASE_COUNTER)}.sqlite")
     try:
         db.note_store.add_note("Title", "Body v1", note_id=NOTE_ID)
         config, generation = _resolved_generation(db)
@@ -230,68 +249,108 @@ async def test_stale_claims_never_clear_newer_dirtiness(
             clock=lambda: NOW,
             receipt_factory=lambda: "receipt-property",
         )
-        if edit_after_upsert:
-            vectors.after_upsert = lambda: db.note_store.update_note(
-                NOTE_ID,
-                {"content": "Body v2"},
-                expected_version=1,
-                semantic_dataset_id=DATASET_ID,
-            )
+        mutation = {"version": 1, "changed": False, "deleted": False}
+
+        def interleave_store_operations() -> None:
+            for operation in operations:
+                if operation == "claim":
+                    db.note_semantic_store.claim_work_batch(
+                        dataset_id=DATASET_ID,
+                        generation_id=generation.id,
+                        kind=SemanticWorkKind.INDEX_NOTE,
+                        limit=1,
+                        now=NOW,
+                    )
+                elif operation in {"edit", "second_edit"} and not mutation["deleted"]:
+                    next_version = int(mutation["version"]) + 1
+                    changed = db.note_store.update_note(
+                        NOTE_ID,
+                        {"content": f"Body v{next_version}"},
+                        expected_version=int(mutation["version"]),
+                        semantic_dataset_id=DATASET_ID,
+                    )
+                    if changed:
+                        mutation.update(version=next_version, changed=True)
+                elif operation == "tombstone" and not mutation["deleted"]:
+                    deleted = db.note_store.soft_delete_note(
+                        NOTE_ID,
+                        expected_version=int(mutation["version"]),
+                        semantic_dataset_id=DATASET_ID,
+                    )
+                    if deleted:
+                        mutation.update(
+                            version=int(mutation["version"]) + 1,
+                            changed=True,
+                            deleted=True,
+                        )
+
+        vectors.after_upsert = interleave_store_operations
         embeddings = tuple(
             SemanticVector(chunk.vector_id, (1.0, float(index + 1)))
             for index, chunk in enumerate(chunks)
         )
-        if edit_after_upsert:
-            with pytest.raises(SemanticIndexingError, match="notes_semantic_note_claim_stale"):
-                await service.publish_note(fence, claim, chunks, embeddings)
+        try:
+            publication = await service.publish_note(fence, claim, chunks, embeddings)
+        except SemanticIndexingError as exc:
+            assert exc.code == "notes_semantic_note_claim_stale"
+            assert mutation["changed"]
             state = db.note_semantic_store.get_note_state(DATASET_ID, generation.id, NOTE_ID)
             assert state is not None
-            assert state.content_version == 2
+            assert state.content_version == mutation["version"]
             assert state.dirty_generation > (claim.dirty_generation or 0)
-            assert state.state.value == "pending"
+            assert state.state.value in {"pending", "tombstoned"}
+            assert claim.claim_token is not None
+            db.note_semantic_store.release_work_claim(
+                dataset_id=DATASET_ID,
+                work_id=claim.id,
+                claim_token=claim.claim_token,
+                fencing_token=claim.fencing_token,
+                now=NOW,
+            )
+            after_release = db.note_semantic_store.get_note_state(
+                DATASET_ID, generation.id, NOTE_ID
+            )
+            assert after_release is not None
+            assert after_release.dirty_generation == state.dirty_generation
+            assert after_release.state == state.state
         else:
-            publication = await service.publish_note(fence, claim, chunks, embeddings)
+            assert not mutation["changed"]
             assert publication.new_vector_ids == tuple(chunk.vector_id for chunk in chunks)
             assert db.note_semantic_store.list_visible_vector_ids(
                 DATASET_ID, generation.id, NOTE_ID
             ) == publication.new_vector_ids
-            if tombstone_after_publish:
-                db.note_store.soft_delete_note(
-                    NOTE_ID,
-                    expected_version=1,
-                    semantic_dataset_id=DATASET_ID,
-                )
-                tombstone_claim = db.note_semantic_store.claim_work_batch(
-                    dataset_id=DATASET_ID,
-                    generation_id=generation.id,
-                    kind=SemanticWorkKind.DELETE_NOTE_VECTORS,
-                    limit=1,
-                    now=NOW,
-                )[0]
-                tombstone = await service.publish_tombstone(fence, tombstone_claim)
-                assert tombstone.old_vector_ids == publication.new_vector_ids
-                assert db.note_semantic_store.list_visible_vector_ids(
-                    DATASET_ID, generation.id, NOTE_ID
-                ) == ()
-                assert any(key[0] == generation.id for key in vectors.values)
-                assert await service.cleanup_obsolete(fence, tombstone) is True
-                assert not any(key[0] == generation.id for key in vectors.values)
     finally:
         db.close_all_connections()
 
 
-@given(cleanup_delay=st.integers(min_value=0, max_value=5))
+@pytest.mark.parametrize("seed", (3, 17, 101))
+@given(
+    generated_operations=st.lists(
+        st.sampled_from(
+            (
+                "edit",
+                "tombstone",
+                "hard_delete",
+                "cleanup_retry",
+                "cleanup_crash",
+            )
+        ),
+        min_size=1,
+        max_size=5,
+    )
+)
 @settings(
-    max_examples=12,
+    max_examples=3,
     deadline=None,
     suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
 @pytest.mark.asyncio
 async def test_manifest_visibility_precedes_cleanup_and_old_generation_cleanup_is_fenced(
     tmp_path: Path,
-    cleanup_delay: int,
+    seed: int,
+    generated_operations: list[str],
 ) -> None:
-    db = _db(tmp_path / f"cleanup-{next(CASE_COUNTER)}.sqlite")
+    db = _db(tmp_path / f"cleanup-{seed}-{next(CASE_COUNTER)}.sqlite")
     try:
         db.note_store.add_note("Title", "Body", note_id=NOTE_ID)
         config, old_generation = _resolved_generation(db)
@@ -300,26 +359,37 @@ async def test_manifest_visibility_precedes_cleanup_and_old_generation_cleanup_i
         async def revalidate(actual_fence):
             return _authority(actual_fence)
 
+        clock = [NOW]
         service = SemanticPublicationService(
             store=db.note_semantic_store,
             vectors=vectors,
             revalidate=revalidate,
-            clock=lambda: NOW,
+            clock=lambda: clock[0],
             receipt_factory=lambda: "receipt-property",
+            max_cleanup_vectors=1,
         )
 
-        async def publish_generation(generation, generation_config, token: str):
+        async def publish_generation(
+            generation,
+            generation_config,
+            token: str,
+            *,
+            content: str,
+            content_version: int,
+        ):
             chunks = build_semantic_chunks(
                 generation_id=generation.id,
                 note_id=NOTE_ID,
                 title="Title",
-                content="Body",
-                content_version=1,
+                content=content,
+                content_version=content_version,
             )
             seed = SemanticSnapshotSeed(
                 note_id=NOTE_ID,
-                content_version=1,
-                content_fingerprint=semantic_content_fingerprint("Title", "Body", 1),
+                content_version=content_version,
+                content_fingerprint=semantic_content_fingerprint(
+                    "Title", content, content_version
+                ),
                 state="pending",
                 planned_chunk_count=len(chunks),
                 error_code=None,
@@ -356,9 +426,51 @@ async def test_manifest_visibility_precedes_cleanup_and_old_generation_cleanup_i
             old_generation,
             config,
             GENERATION_FENCE_V1,
+            content="Body",
+            content_version=1,
         )
         active = db.note_semantic_store.get_configuration(DATASET_ID)
         assert active is not None
+
+        old_active_fence = replace(
+            _fence(config, old_generation.id),
+            configuration_revision=active.configuration_revision,
+        )
+        assert db.note_store.update_note(
+            NOTE_ID,
+            {"content": "Body v2"},
+            expected_version=1,
+            semantic_dataset_id=DATASET_ID,
+        )
+        revised_chunks = build_semantic_chunks(
+            generation_id=old_generation.id,
+            note_id=NOTE_ID,
+            title="Title",
+            content="Body v2",
+            content_version=2,
+        )
+        revised_claim = db.note_semantic_store.claim_work_batch(
+            dataset_id=DATASET_ID,
+            generation_id=old_generation.id,
+            kind=SemanticWorkKind.INDEX_NOTE,
+            limit=1,
+            now=NOW,
+        )[0]
+        revised_publication = await service.publish_note(
+            old_active_fence,
+            revised_claim,
+            revised_chunks,
+            tuple(
+                SemanticVector(chunk.vector_id, (2.0, float(index + 1)))
+                for index, chunk in enumerate(revised_chunks)
+            ),
+        )
+        assert db.note_semantic_store.list_obsolete_vector_ids(
+            DATASET_ID,
+            old_generation.id,
+            limit=16,
+        ) == old_publication.new_vector_ids
+
         new_generation = db.note_semantic_store.create_generation(
             dataset_id=DATASET_ID,
             configuration_revision=active.configuration_revision,
@@ -372,6 +484,8 @@ async def test_manifest_visibility_precedes_cleanup_and_old_generation_cleanup_i
             new_generation,
             active,
             GENERATION_FENCE_V2,
+            content="Body v2",
+            content_version=2,
         )
         cleanup_claims = db.note_semantic_store.claim_work_batch(
             dataset_id=DATASET_ID,
@@ -393,18 +507,97 @@ async def test_manifest_visibility_precedes_cleanup_and_old_generation_cleanup_i
             (new_generation.id, vector_id) in vectors.values
             for vector_id in new_publication.new_vector_ids
         )
-        for _ in range(cleanup_delay):
-            assert current.active_generation_id == new_generation.id
+        assert db.note_semantic_store.list_visible_vector_ids(
+            DATASET_ID, new_generation.id, NOTE_ID
+        ) == new_publication.new_vector_ids
 
-        assert await service.cleanup_generation(cleanup_claim) is True
+        prefixes = {
+            3: ("cleanup_crash", "hard_delete"),
+            17: ("hard_delete", "cleanup_crash"),
+            101: ("tombstone", "cleanup_crash", "hard_delete"),
+        }
+        operations = prefixes[seed] + tuple(generated_operations)
+        cleanup_complete = False
+        cleanup_crashed = False
+        note_deleted = False
+        note_version = 2
+        for operation in operations:
+            if operation == "cleanup_crash" and not cleanup_crashed and not cleanup_complete:
+                vectors.fail_next_delete_ids = True
+                with pytest.raises(
+                    SemanticIndexingError,
+                    match="notes_semantic_cleanup_unconfirmed",
+                ):
+                    await service.cleanup_generation(cleanup_claim)
+                cleanup_crashed = True
+                assert db.note_semantic_store.list_obsolete_vector_ids(
+                    DATASET_ID,
+                    old_generation.id,
+                    limit=16,
+                )
+                recovery = clock[0] + timedelta(minutes=1)
+                assert db.note_semantic_store.reclaim_expired_obsolete_vector_claims(
+                    dataset_id=DATASET_ID,
+                    expired_before=recovery,
+                    limit=1,
+                    now=recovery,
+                ) == 1
+                clock[0] = recovery
+            elif operation == "cleanup_retry" and not cleanup_complete:
+                cleanup_complete = await service.cleanup_generation(cleanup_claim)
+            elif operation == "edit" and not note_deleted:
+                next_version = note_version + 1
+                if db.note_store.update_note(
+                    NOTE_ID,
+                    {"content": f"Body v{next_version}"},
+                    expected_version=note_version,
+                    semantic_dataset_id=DATASET_ID,
+                ):
+                    note_version = next_version
+            elif operation == "tombstone" and not note_deleted:
+                if db.note_store.soft_delete_note(
+                    NOTE_ID,
+                    expected_version=note_version,
+                    semantic_dataset_id=DATASET_ID,
+                ):
+                    note_version += 1
+                    note_deleted = True
+            elif operation == "hard_delete":
+                if db.note_store.delete_note(
+                    NOTE_ID,
+                    hard_delete=True,
+                    semantic_dataset_id=DATASET_ID,
+                ):
+                    note_deleted = True
+
+        for _ in range(8):
+            if cleanup_complete:
+                break
+            cleanup_complete = await service.cleanup_generation(cleanup_claim)
+
+        assert cleanup_complete is True
         assert vectors.deleted_generations == [old_generation.id]
+        assert vectors.delete_id_calls
+        assert all(
+            generation_id == old_generation.id and len(vector_ids) <= 1
+            for generation_id, vector_ids in vectors.delete_id_calls
+        )
         assert all(
             (old_generation.id, vector_id) not in vectors.values
             for vector_id in old_publication.new_vector_ids
+            + revised_publication.new_vector_ids
         )
         assert all(
             (new_generation.id, vector_id) in vectors.values
             for vector_id in new_publication.new_vector_ids
         )
+        if note_deleted:
+            assert set(new_publication.new_vector_ids) <= set(
+                db.note_semantic_store.list_obsolete_vector_ids(
+                    DATASET_ID,
+                    new_generation.id,
+                    limit=16,
+                )
+            )
     finally:
         db.close_all_connections()

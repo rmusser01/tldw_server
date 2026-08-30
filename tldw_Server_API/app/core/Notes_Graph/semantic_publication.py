@@ -8,6 +8,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Protocol
+from urllib.parse import urlsplit
 
 from tldw_Server_API.app.core.DB_Management.chacha.note_semantic_models import (
     SemanticChunkRecord,
@@ -22,7 +23,32 @@ from .semantic_content import SemanticChunkInput
 from .semantic_vectors import SemanticVector
 
 
-@dataclass(frozen=True, slots=True)
+def _canonical_origin(value: object) -> str | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = urlsplit(value)
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path not in {"", "/"}
+            or parsed.query
+            or parsed.fragment
+        ):
+            return None
+        port = parsed.port
+    except ValueError:
+        return None
+    return f"{parsed.scheme}://{parsed.hostname.lower()}{f':{port}' if port is not None else ''}"
+
+
+def _redacted_repr(value: object) -> str:
+    return f"{type(value).__name__}(<redacted>)"
+
+
+@dataclass(frozen=True, slots=True, repr=False)
 class SemanticExecutionFence:
     """Complete pinned identity required for content reads and publication."""
 
@@ -36,13 +62,23 @@ class SemanticExecutionFence:
     provider: str
     model: str
     model_revision: str | None
+    endpoint_origin: str
+    credential_source: str
     endpoint_origin_revision: str
     compatibility_hash: str | None
     dimensions: int | None
     vector_backend: str
 
+    def __post_init__(self) -> None:
+        if _canonical_origin(self.endpoint_origin) != self.endpoint_origin:
+            raise ValueError("notes_semantic_endpoint_origin_invalid")
+        if self.credential_source not in {"user", "server_default"}:
+            raise ValueError("notes_semantic_credential_scope_invalid")
 
-@dataclass(frozen=True, slots=True)
+    __repr__ = _redacted_repr
+
+
+@dataclass(frozen=True, slots=True, repr=False)
 class SemanticAuthorityState:
     """Fresh authority and capability facts returned by the application boundary."""
 
@@ -60,12 +96,16 @@ class SemanticAuthorityState:
     provider: str
     model: str
     model_revision: str | None
+    endpoint_origin: str
+    credential_source: str
     endpoint_origin_revision: str
     endpoint_policy_allowed: bool
     compatibility_hash: str | None
     dimensions: int | None
     vector_backend: str
     vector_capable: bool
+
+    __repr__ = _redacted_repr
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,6 +131,8 @@ class SemanticFenceRevalidator(Protocol):
 
 
 class SemanticPublicationStore(Protocol):
+    def stage_obsolete_vector_cleanup(self, **kwargs: Any) -> int: ...
+
     def publish_indexed_manifest(self, **kwargs: Any) -> SemanticManifestPublication | None: ...
 
     def publish_note_tombstone(self, **kwargs: Any) -> SemanticManifestPublication | None: ...
@@ -109,9 +151,19 @@ class SemanticPublicationStore(Protocol):
 
     def complete_obsolete_vector_cleanup(self, **kwargs: Any) -> bool: ...
 
+    def claim_obsolete_vector_cleanup_batch(self, **kwargs: Any) -> Any: ...
+
+    def authorize_obsolete_vector_claim(self, **kwargs: Any) -> bool: ...
+
+    def complete_obsolete_vector_claim(self, **kwargs: Any) -> bool: ...
+
     def authorize_generation_cleanup(self, **kwargs: Any) -> bool: ...
 
     def complete_generation_cleanup(self, **kwargs: Any) -> bool: ...
+
+    def list_generation_cleanup_vector_ids(self, **kwargs: Any) -> tuple[str, ...] | None: ...
+
+    def complete_generation_vector_cleanup_page(self, **kwargs: Any) -> bool: ...
 
 
 class SemanticPublicationVectors(Protocol):
@@ -175,6 +227,13 @@ def validate_execution_fence(
         raise SemanticIndexingError("notes_semantic_model_revision_drift")
     if not current.endpoint_policy_allowed:
         raise SemanticIndexingError("notes_semantic_endpoint_policy_denied")
+    if (
+        _canonical_origin(current.endpoint_origin) != current.endpoint_origin
+        or current.endpoint_origin != fence.endpoint_origin
+    ):
+        raise SemanticIndexingError("notes_semantic_endpoint_origin_drift")
+    if current.credential_source != fence.credential_source:
+        raise SemanticIndexingError("notes_semantic_credential_scope_drift")
     if current.endpoint_origin_revision != fence.endpoint_origin_revision:
         raise SemanticIndexingError("notes_semantic_endpoint_drift")
     if current.compatibility_hash != fence.compatibility_hash:
@@ -190,7 +249,10 @@ async def revalidate_execution_fence(
     revalidate: SemanticFenceRevalidator,
     fence: SemanticExecutionFence,
 ) -> SemanticAuthorityState:
-    current = revalidate(fence)
+    if inspect.iscoroutinefunction(revalidate):
+        current = revalidate(fence)
+    else:
+        current = await asyncio.to_thread(revalidate, fence)
     if inspect.isawaitable(current):
         current = await current
     if not isinstance(current, SemanticAuthorityState):
@@ -212,6 +274,32 @@ def _chunk_record(chunk: SemanticChunkInput) -> SemanticChunkRecord:
         normalization_version=chunk.normalization_version,
         chunker_version=chunk.chunker_version,
     )
+
+
+async def run_reconciled_transaction(function: Callable[..., Any], **kwargs: Any) -> Any:
+    """Drain a transactional thread; a committed result wins over cancellation."""
+
+    operation = asyncio.create_task(asyncio.to_thread(function, **kwargs))
+    cancellation: asyncio.CancelledError | None = None
+    while True:
+        try:
+            result = await asyncio.shield(operation)
+            break
+        except asyncio.CancelledError as exc:
+            if cancellation is None:
+                cancellation = exc
+            current = asyncio.current_task()
+            uncancel = getattr(current, "uncancel", None)
+            if callable(uncancel):
+                uncancel()
+            continue
+        except BaseException:
+            if cancellation is not None:
+                raise cancellation from None
+            raise
+    if cancellation is not None and result is None:
+        raise cancellation
+    return result
 
 
 class SemanticPublicationService:
@@ -278,6 +366,16 @@ class SemanticPublicationService:
         ):
             raise SemanticIndexingError("notes_semantic_note_claim_invalid")
         await revalidate_execution_fence(self._revalidate, fence)
+        await run_reconciled_transaction(
+            self._store.stage_obsolete_vector_cleanup,
+            dataset_id=fence.dataset_id,
+            generation_id=fence.generation_id,
+            vector_ids=expected_ids,
+            source_kind="unpublished",
+            note_id=claim.note_id,
+            dirty_generation=claim.dirty_generation,
+            now=self._clock(),
+        )
         written = await self._vectors.upsert(
             fence.dataset_id,
             fence.generation_id,
@@ -286,7 +384,7 @@ class SemanticPublicationService:
         if written != len(vector_tuple):
             raise SemanticIndexingError("notes_semantic_vector_upsert_incomplete")
         await revalidate_execution_fence(self._revalidate, fence)
-        publication = await asyncio.to_thread(
+        publication = await run_reconciled_transaction(
             self._store.publish_indexed_manifest,
             owner_user_id=fence.owner_user_id,
             dataset_id=fence.dataset_id,
@@ -324,7 +422,7 @@ class SemanticPublicationService:
         ):
             raise SemanticIndexingError("notes_semantic_note_claim_invalid")
         await revalidate_execution_fence(self._revalidate, fence)
-        publication = await asyncio.to_thread(
+        publication = await run_reconciled_transaction(
             self._store.publish_note_tombstone,
             owner_user_id=fence.owner_user_id,
             dataset_id=fence.dataset_id,
@@ -363,18 +461,24 @@ class SemanticPublicationService:
         ):
             raise SemanticIndexingError("notes_semantic_generation_identity_mismatch")
         self._store.assert_generation_activatable(integrity)
-        fetched = await self._vectors.fetch(
-            fence.dataset_id,
-            fence.generation_id,
-            integrity.vector_ids,
-        )
+        fetched_vectors: list[SemanticVector] = []
+        for offset in range(0, len(integrity.vector_ids), self._max_cleanup_vectors):
+            page_ids = integrity.vector_ids[offset : offset + self._max_cleanup_vectors]
+            fetched_vectors.extend(
+                await self._vectors.fetch(
+                    fence.dataset_id,
+                    fence.generation_id,
+                    page_ids,
+                )
+            )
+        fetched = tuple(fetched_vectors)
         if tuple(vector.vector_id for vector in fetched) != integrity.vector_ids:
             raise SemanticIndexingError("notes_semantic_vector_integrity_mismatch")
         if any(len(vector.embedding) != fence.dimensions for vector in fetched):
             raise SemanticIndexingError("notes_semantic_vector_dimension_mismatch")
         await revalidate_execution_fence(self._revalidate, fence)
         receipt_value = self._receipt_factory()
-        activated = await asyncio.to_thread(
+        activated = await run_reconciled_transaction(
             self._store.activate_generation_verified,
             dataset_id=fence.dataset_id,
             generation_id=fence.generation_id,
@@ -408,18 +512,21 @@ class SemanticPublicationService:
     ) -> bool:
         """Delete only IDs proven obsolete after manifest visibility changed."""
 
-        vector_ids = publication.old_vector_ids
-        if len(vector_ids) > self._max_cleanup_vectors:
-            raise SemanticIndexingError("notes_semantic_cleanup_limit_exceeded")
-        if not vector_ids:
-            return True
-        authorized = await asyncio.to_thread(
-            self._store.authorize_obsolete_vector_cleanup,
+        claim = await run_reconciled_transaction(
+            self._store.claim_obsolete_vector_cleanup_batch,
             dataset_id=fence.dataset_id,
             generation_id=fence.generation_id,
-            note_id=publication.note_id,
-            dirty_generation=publication.dirty_generation,
-            vector_ids=vector_ids,
+            limit=self._max_cleanup_vectors,
+            now=self._clock(),
+        )
+        if claim is None:
+            return not publication.old_vector_ids
+        vector_ids = tuple(claim.vector_ids)
+        authorized = await run_reconciled_transaction(
+            self._store.authorize_obsolete_vector_claim,
+            dataset_id=fence.dataset_id,
+            ledger_ids=claim.ledger_ids,
+            claim_token=claim.claim_token,
         )
         if not authorized:
             raise SemanticIndexingError("notes_semantic_cleanup_fence_lost")
@@ -430,14 +537,13 @@ class SemanticPublicationService:
         )
         if not bool(getattr(cleanup, "confirmed_absent", False)):
             raise SemanticIndexingError("notes_semantic_cleanup_unconfirmed")
-        return await asyncio.to_thread(
-            self._store.complete_obsolete_vector_cleanup,
-            dataset_id=fence.dataset_id,
-            generation_id=fence.generation_id,
-            note_id=publication.note_id,
-            dirty_generation=publication.dirty_generation,
-            vector_ids=vector_ids,
-            now=self._clock(),
+        return bool(
+            await run_reconciled_transaction(
+                self._store.complete_obsolete_vector_claim,
+                dataset_id=fence.dataset_id,
+                ledger_ids=claim.ledger_ids,
+                claim_token=claim.claim_token,
+            )
         )
 
     async def cleanup_generation(self, claim: SemanticWorkItem) -> bool:
@@ -461,13 +567,83 @@ class SemanticPublicationService:
         )
         if not authorized:
             raise SemanticIndexingError("notes_semantic_cleanup_fence_lost")
+        obsolete = await run_reconciled_transaction(
+            self._store.claim_obsolete_vector_cleanup_batch,
+            dataset_id=claim.dataset_id,
+            generation_id=claim.generation_id,
+            limit=self._max_cleanup_vectors,
+            now=self._clock(),
+        )
+        if obsolete is not None:
+            if not await run_reconciled_transaction(
+                self._store.authorize_obsolete_vector_claim,
+                dataset_id=claim.dataset_id,
+                ledger_ids=obsolete.ledger_ids,
+                claim_token=obsolete.claim_token,
+            ):
+                raise SemanticIndexingError("notes_semantic_cleanup_fence_lost")
+            cleanup = await self._vectors.delete_ids(
+                claim.dataset_id,
+                claim.generation_id,
+                obsolete.vector_ids,
+            )
+            if not bool(getattr(cleanup, "confirmed_absent", False)):
+                raise SemanticIndexingError("notes_semantic_cleanup_unconfirmed")
+            if not await run_reconciled_transaction(
+                self._store.complete_obsolete_vector_claim,
+                dataset_id=claim.dataset_id,
+                ledger_ids=obsolete.ledger_ids,
+                claim_token=obsolete.claim_token,
+            ):
+                raise SemanticIndexingError("notes_semantic_cleanup_fence_lost")
+            return False
+        vector_ids = await run_reconciled_transaction(
+            self._store.list_generation_cleanup_vector_ids,
+            dataset_id=claim.dataset_id,
+            work_id=claim.id,
+            generation_id=claim.generation_id,
+            claim_token=claim.claim_token,
+            fencing_token=claim.fencing_token,
+            limit=self._max_cleanup_vectors,
+        )
+        if vector_ids is None:
+            raise SemanticIndexingError("notes_semantic_cleanup_fence_lost")
+        if vector_ids:
+            cleanup = await self._vectors.delete_ids(
+                claim.dataset_id,
+                claim.generation_id,
+                vector_ids,
+            )
+            if not bool(getattr(cleanup, "confirmed_absent", False)):
+                raise SemanticIndexingError("notes_semantic_cleanup_unconfirmed")
+            if not await run_reconciled_transaction(
+                self._store.complete_generation_vector_cleanup_page,
+                dataset_id=claim.dataset_id,
+                work_id=claim.id,
+                generation_id=claim.generation_id,
+                claim_token=claim.claim_token,
+                fencing_token=claim.fencing_token,
+                vector_ids=vector_ids,
+            ):
+                raise SemanticIndexingError("notes_semantic_cleanup_fence_lost")
+            remaining = await run_reconciled_transaction(
+                self._store.list_generation_cleanup_vector_ids,
+                dataset_id=claim.dataset_id,
+                work_id=claim.id,
+                generation_id=claim.generation_id,
+                claim_token=claim.claim_token,
+                fencing_token=claim.fencing_token,
+                limit=1,
+            )
+            if remaining:
+                return False
         cleanup = await self._vectors.delete_generation(
             claim.dataset_id,
             claim.generation_id,
         )
         if not bool(getattr(cleanup, "confirmed_absent", False)):
             raise SemanticIndexingError("notes_semantic_cleanup_unconfirmed")
-        completed = await asyncio.to_thread(
+        completed = await run_reconciled_transaction(
             self._store.complete_generation_cleanup,
             dataset_id=claim.dataset_id,
             work_id=claim.id,
@@ -489,5 +665,6 @@ __all__ = [
     "SemanticPublicationReceipt",
     "SemanticPublicationService",
     "revalidate_execution_fence",
+    "run_reconciled_transaction",
     "validate_execution_fence",
 ]

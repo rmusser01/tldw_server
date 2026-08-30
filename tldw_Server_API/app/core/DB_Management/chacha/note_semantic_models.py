@@ -45,6 +45,19 @@ class SemanticWorkClaimState(str, Enum):
     FAILED = "failed"
 
 
+@dataclass(frozen=True, slots=True)
+class SemanticObsoleteVectorClaim:
+    """One bounded, generation-homogeneous physical vector cleanup claim."""
+
+    owner_user_id: str
+    dataset_id: str
+    generation_id: str
+    ledger_ids: tuple[str, ...]
+    vector_ids: tuple[str, ...]
+    claim_token: str
+    attempt_count: int
+
+
 class SemanticIndexingError(RuntimeError):
     """Stable, content-free semantic indexing or publication failure."""
 
@@ -201,6 +214,7 @@ class SemanticGenerationIntegrity:
     pending_note_count: int
     tombstoned_note_count: int
     eligible_note_count: int
+    waived_chunk_count: int
     vector_ids: tuple[str, ...]
     manifest_hash: str
     dimensions: int

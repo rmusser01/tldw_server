@@ -699,8 +699,8 @@ class CharactersRAGDB:
         is_memory_db (bool): True if the database is in-memory.
         db_path_str (str): String representation of the database path for SQLite connection.
     """
-    _CURRENT_SCHEMA_VERSION = 65  # Schema v65 adds durable Notes semantic-index persistence
-    _POSTGRES_SCHEMA_VERSION = 65
+    _CURRENT_SCHEMA_VERSION = 66  # Schema v66 adds durable semantic vector cleanup authority
+    _POSTGRES_SCHEMA_VERSION = 66
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _LOCAL_UNBOUND_TASK_DATASET_ID = "local-unbound"
     _NOTE_TASK_V60_TABLES = (
@@ -7370,6 +7370,90 @@ DROP POLICY IF EXISTS note_semantic_work_tenant_isolation ON note_semantic_work;
 CREATE POLICY note_semantic_work_tenant_isolation ON note_semantic_work USING (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true)) WITH CHECK (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true));
 """
 
+    _MIGRATION_SQL_V65_TO_V66 = """
+CREATE TABLE note_semantic_obsolete_vectors(
+  id TEXT PRIMARY KEY CHECK(length(trim(id)) > 0),
+  owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(length(trim(dataset_id)) > 0),
+  generation_id TEXT NOT NULL CHECK(length(trim(generation_id)) > 0),
+  vector_id TEXT NOT NULL CHECK(length(trim(vector_id)) > 0),
+  note_id TEXT,
+  source_kind TEXT NOT NULL CHECK(source_kind IN (
+    'unpublished','manifest_replace','tombstone','hard_delete','note_failure'
+  )),
+  dirty_generation INTEGER CHECK(dirty_generation IS NULL OR dirty_generation >= 1),
+  claim_state TEXT NOT NULL CHECK(claim_state IN ('pending','claimed','failed')),
+  attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0 AND attempt_count <= 5),
+  next_eligible_at DATETIME NOT NULL,
+  claim_token TEXT,
+  claimed_at DATETIME,
+  error_code TEXT,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(owner_user_id,dataset_id,generation_id,vector_id),
+  CHECK(
+    (claim_state='claimed' AND claim_token IS NOT NULL AND claimed_at IS NOT NULL)
+    OR
+    (claim_state<>'claimed' AND claim_token IS NULL AND claimed_at IS NULL)
+  )
+);
+CREATE INDEX idx_note_semantic_obsolete_vectors_claimable
+  ON note_semantic_obsolete_vectors(
+    owner_user_id,dataset_id,claim_state,next_eligible_at,generation_id,id
+  );
+CREATE INDEX idx_note_semantic_obsolete_vectors_generation
+  ON note_semantic_obsolete_vectors(owner_user_id,dataset_id,generation_id,vector_id);
+"""
+
+    _MIGRATION_SQL_V65_TO_V66_POSTGRES = """
+CREATE TABLE IF NOT EXISTS note_semantic_obsolete_vectors(
+  id TEXT PRIMARY KEY CHECK(char_length(btrim(id)) > 0),
+  owner_user_id TEXT NOT NULL CHECK(char_length(btrim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(char_length(btrim(dataset_id)) > 0),
+  generation_id TEXT NOT NULL CHECK(char_length(btrim(generation_id)) > 0),
+  vector_id TEXT NOT NULL CHECK(char_length(btrim(vector_id)) > 0),
+  note_id TEXT,
+  source_kind TEXT NOT NULL CHECK(source_kind IN (
+    'unpublished','manifest_replace','tombstone','hard_delete','note_failure'
+  )),
+  dirty_generation INTEGER CHECK(dirty_generation IS NULL OR dirty_generation >= 1),
+  claim_state TEXT NOT NULL CHECK(claim_state IN ('pending','claimed','failed')),
+  attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0 AND attempt_count <= 5),
+  next_eligible_at TIMESTAMPTZ NOT NULL,
+  claim_token TEXT,
+  claimed_at TIMESTAMPTZ,
+  error_code TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(owner_user_id,dataset_id,generation_id,vector_id),
+  CHECK(
+    (claim_state='claimed' AND claim_token IS NOT NULL AND claimed_at IS NOT NULL)
+    OR
+    (claim_state<>'claimed' AND claim_token IS NULL AND claimed_at IS NULL)
+  )
+);
+CREATE INDEX IF NOT EXISTS idx_note_semantic_obsolete_vectors_claimable
+  ON note_semantic_obsolete_vectors(
+    owner_user_id,dataset_id,claim_state,next_eligible_at,generation_id,id
+  );
+CREATE INDEX IF NOT EXISTS idx_note_semantic_obsolete_vectors_generation
+  ON note_semantic_obsolete_vectors(owner_user_id,dataset_id,generation_id,vector_id);
+ALTER TABLE note_semantic_obsolete_vectors ENABLE ROW LEVEL SECURITY;
+ALTER TABLE note_semantic_obsolete_vectors FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS note_semantic_obsolete_vectors_tenant_isolation
+  ON note_semantic_obsolete_vectors;
+CREATE POLICY note_semantic_obsolete_vectors_tenant_isolation
+  ON note_semantic_obsolete_vectors
+  USING (
+    owner_user_id=current_setting('app.current_user_id', true)
+    AND dataset_id=current_setting('app.current_dataset_id', true)
+  )
+  WITH CHECK (
+    owner_user_id=current_setting('app.current_user_id', true)
+    AND dataset_id=current_setting('app.current_dataset_id', true)
+  );
+"""
+
     _NOTE_GRAPH_SUGGESTION_RECEIPT_DELETE_SQLITE_TRIGGER_SQL = """
 CREATE TRIGGER note_graph_suggestion_operation_receipts_clear_references
 BEFORE DELETE ON note_graph_suggestion_operation_receipts
@@ -8553,6 +8637,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             (62, "_migrate_from_v62_to_v63_sqlite"),
             (63, "_migrate_from_v63_to_v64_sqlite"),
             (64, "_migrate_from_v64_to_v65_sqlite"),
+            (65, "_migrate_from_v65_to_v66_sqlite"),
         ):
             method = getattr(self, method_name, None)
             if method is not None:
@@ -14242,6 +14327,39 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 raise
             raise SchemaError(f"Notes semantic v65 SQLite migration failed: {exc}") from exc
 
+    def _migrate_from_v65_to_v66_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Add crash-durable semantic obsolete-vector cleanup authority."""
+        if self._get_db_version(conn) != 65:
+            raise SchemaError("Notes semantic v66 migration requires schema version 65.")  # noqa: TRY003
+        savepoint = "note_semantic_v66_migration"
+        savepoint_active = False
+        try:
+            conn.execute(f"SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
+            savepoint_active = True
+            for statement in split_sql_statements(self._MIGRATION_SQL_V65_TO_V66):
+                conn.execute(statement)
+            cursor = conn.execute(
+                "UPDATE db_schema_version SET version=? WHERE schema_name=? AND version=?",
+                (66, self._SCHEMA_NAME, 65),
+            )
+            if cursor.rowcount != 1 or self._get_db_version(conn) != 66:
+                raise SchemaError("Notes semantic v66 SQLite version transition failed.")  # noqa: TRY003
+            conn.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
+            savepoint_active = False
+        except (SchemaError, sqlite3.Error) as exc:
+            if savepoint_active:
+                try:
+                    conn.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")  # nosec B608
+                    conn.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608
+                except sqlite3.Error as rollback_exc:
+                    raise SchemaError(
+                        "Notes semantic v66 SQLite migration rollback failed: "
+                        f"{rollback_exc}"
+                    ) from exc
+            if isinstance(exc, SchemaError):
+                raise
+            raise SchemaError(f"Notes semantic v66 SQLite migration failed: {exc}") from exc
+
     @staticmethod
     def _notes_moodboard_studio_v61_postgres_checkpoint(_stage: str) -> None:
         """Fault-injection seam after durable PostgreSQL v61 phase commits."""
@@ -17480,6 +17598,18 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if self._get_schema_version_postgres(conn) != 65:
             raise SchemaError("Notes semantic v65 PostgreSQL version verification failed.")  # noqa: TRY003
 
+    def _migrate_from_v65_to_v66_postgres(self, conn: Any) -> None:
+        """Add forced-RLS crash-durable semantic cleanup authority."""
+        if self._get_schema_version_postgres(conn) != 65:
+            raise SchemaError("Notes semantic v66 PostgreSQL migration requires schema version 65.")  # noqa: TRY003
+        self._apply_postgres_migration_script(
+            self._MIGRATION_SQL_V65_TO_V66_POSTGRES,
+            conn,
+            expected_version=66,
+        )
+        if self._get_schema_version_postgres(conn) != 66:
+            raise SchemaError("Notes semantic v66 PostgreSQL version verification failed.")  # noqa: TRY003
+
     def _configure_note_graph_suggestion_receipt_delete_trigger_postgres(self, conn: Any) -> None:
         """Clear only receipt IDs before PostgreSQL deletes an expiring receipt."""
         for statement in self._NOTE_GRAPH_SUGGESTION_RECEIPT_DELETE_POSTGRES_TRIGGER_STATEMENTS:
@@ -18251,6 +18381,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "note_semantic_chunks",
             "note_semantic_work",
         }
+        if self._get_db_version(conn) >= 66:
+            required_tables.add("note_semantic_obsolete_vectors")
         missing = required_tables - self._sqlite_table_names(conn)
         if missing:
             raise SchemaError(f"Notes semantic v65 SQLite schema is incomplete: {sorted(missing)}")
@@ -18311,6 +18443,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "note_semantic_chunks",
             "note_semantic_work",
         )
+        if self._get_schema_version_postgres(conn) >= 66:
+            required_tables += ("note_semantic_obsolete_vectors",)
         missing = [
             table for table in required_tables if not self.backend.table_exists(table, connection=conn)
         ]
@@ -20881,6 +21015,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     current_db_version = self._get_db_version(conn)
                 if target_version >= 65 and current_db_version == 64:
                     self._migrate_from_v64_to_v65_sqlite(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 66 and current_db_version == 65:
+                    self._migrate_from_v65_to_v66_sqlite(conn)
                     current_db_version = self._get_db_version(conn)
 
                 self._ensure_recent_persona_schema_sqlite(conn)
@@ -24892,6 +25029,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             if current_version < 65:
                 self._migrate_from_v64_to_v65_postgres(conn)
                 current_version = 65
+            if target_version >= 66 and current_version < 66:
+                self._migrate_from_v65_to_v66_postgres(conn)
+                current_version = 66
             self._runtime_schema_version = current_version
 
             if current_version > target_version:
