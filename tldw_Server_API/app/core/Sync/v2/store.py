@@ -208,7 +208,12 @@ class SyncV2Store:
             self.db.execute(
                 """INSERT INTO sync_personal_context_link_receipts
                    (user_id, dataset_id, device_id, profile_id, integrity_key_id, purge_generation, bootstrap_cursor)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(user_id, dataset_id, device_id) DO UPDATE SET
+                     profile_id = excluded.profile_id,
+                     integrity_key_id = excluded.integrity_key_id,
+                     purge_generation = excluded.purge_generation,
+                     bootstrap_cursor = excluded.bootstrap_cursor""",
                 (user_id, dataset_id, device_id, profile_id, integrity_key_id, purge_generation, bootstrap_cursor),
                 connection=connection,
             )

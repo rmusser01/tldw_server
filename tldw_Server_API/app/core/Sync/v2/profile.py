@@ -461,6 +461,9 @@ class SyncV2ProfileManager:
             snapshot_reader = getattr(canonical_service, "sync_bootstrap_snapshot", None)
             if callable(snapshot_reader):
                 try:
+                    ensure_profile = getattr(canonical_service, "ensure_sync_profile", None)
+                    if callable(ensure_profile):
+                        ensure_profile()
                     snapshot = snapshot_reader()
                     manifest = snapshot.manifest
                     integrity_key_id = snapshot.integrity_key_id
@@ -590,32 +593,12 @@ class SyncV2ProfileManager:
             raise PersonalContextBootstrapError("personal_context_link_unavailable")
         try:
             canonical_service = self.service._personal_context_service_for_user(user_id)
-            manifest = canonical_service.get_manifest()
-            scopes = tuple(canonical_service.list_scopes())
-            records = tuple(
-                record
-                for record in canonical_service.list_records(include_archived=True)
-                if _personal_context_record_is_syncable(record)
-            )
-            proposals = tuple(
-                proposal
-                for proposal in canonical_service.list_proposals(
-                    pending_only=False, limit=200
-                )
-                if _personal_context_proposal_is_syncable(proposal)
-            )
+            snapshot = canonical_service.sync_bootstrap_snapshot()
         except Exception as exc:  # noqa: BLE001 - no data leaks through failures.
             raise PersonalContextBootstrapError(
                 "personal_context_bootstrap_unavailable"
             ) from exc
-        cursor = _personal_context_bootstrap_cursor(
-            manifest=manifest,
-            scopes=scopes,
-            records=records,
-            proposals=proposals,
-            purge_generation=int(manifest.purge_generation),
-        )
-        if bootstrap_cursor != cursor:
+        if bootstrap_cursor != snapshot.cursor:
             raise PersonalContextBootstrapError("personal_context_bootstrap_cursor_stale")
         updated_metadata = dict(dataset.metadata)
         updated_state = dict(state)
@@ -633,9 +616,9 @@ class SyncV2ProfileManager:
             user_id=user_id,
             dataset_id=dataset.dataset_id,
             device_id=device_id,
-            profile_id=str(state["profile_id"]),
+            profile_id=str(snapshot.manifest.profile_id),
             integrity_key_id=str(state["integrity_key_id"]),
-            purge_generation=int(state["purge_generation"]),
+            purge_generation=int(snapshot.manifest.purge_generation),
             bootstrap_cursor=bootstrap_cursor,
         )
         updated_metadata["personal_context"] = updated_state
