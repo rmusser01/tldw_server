@@ -32,6 +32,7 @@ from tldw_Server_API.app.core.Workflows.adapters.audio._config import (
     AudioNormalizeConfig,
     AudioTrimConfig,
 )
+from tldw_Server_API.app.core.Workflows.subprocess_utils import run_checked_async
 
 _AUDIO_PROCESSING_PATH_EXCEPTIONS = (
     AttributeError,
@@ -123,7 +124,7 @@ async def run_audio_normalize_adapter(config: dict[str, Any], context: dict[str,
             "48000",
             str(output_path),
         ]
-        subprocess.run(cmd, check=True, capture_output=True, timeout=300)
+        await run_checked_async(cmd, timeout=300)
 
         if callable(context.get("add_artifact")):
             context["add_artifact"](
@@ -233,7 +234,7 @@ async def run_audio_concat_adapter(config: dict[str, Any], context: dict[str, An
             codec,
             str(output_path),
         ]
-        subprocess.run(cmd, check=True, capture_output=True, timeout=600)
+        await run_checked_async(cmd, timeout=600)
 
         # Cleanup
         Path(concat_file).unlink(missing_ok=True)
@@ -305,7 +306,7 @@ async def run_audio_trim_adapter(config: dict[str, Any], context: dict[str, Any]
             cmd.extend(["-t", str(duration)])
         cmd.extend(["-c", "copy", str(output_path)])
 
-        subprocess.run(cmd, check=True, capture_output=True, timeout=300)
+        await run_checked_async(cmd, timeout=300)
 
         return {"output_path": output_path, "trimmed": True, "start": start, "end": end or duration}
 
@@ -372,7 +373,7 @@ async def run_audio_convert_adapter(config: dict[str, Any], context: dict[str, A
             cmd.extend(["-ar", str(sample_rate)])
         cmd.append(str(output_path))
 
-        subprocess.run(cmd, check=True, capture_output=True, timeout=300)
+        await run_checked_async(cmd, timeout=300)
 
         return {"output_path": output_path, "converted": True, "format": output_format}
 
@@ -438,7 +439,7 @@ async def run_audio_extract_adapter(config: dict[str, Any], context: dict[str, A
             "copy" if output_format == "aac" else "libmp3lame",
             str(output_path),
         ]
-        subprocess.run(cmd, check=True, capture_output=True, timeout=300)
+        await run_checked_async(cmd, timeout=300)
 
         return {"output_path": output_path, "extracted": True, "format": output_format}
 
@@ -500,7 +501,7 @@ async def run_audio_mix_adapter(config: dict[str, Any], context: dict[str, Any])
         cmd = ["ffmpeg", "-y"] + [item for p in resolved_inputs for item in ["-i", p]]
         cmd.extend(["-filter_complex", filter_complex, str(output_path)])
 
-        subprocess.run(cmd, check=True, capture_output=True, timeout=600)
+        await run_checked_async(cmd, timeout=600)
 
         return {"output_path": output_path, "mixed": True, "track_count": len(resolved_inputs)}
 

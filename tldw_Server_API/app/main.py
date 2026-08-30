@@ -33,6 +33,7 @@ from loguru import logger
 from starlette import status as _starlette_status
 from starlette.requests import ClientDisconnect
 from starlette.responses import FileResponse
+from starlette.types import ASGIApp, Receive, Scope, Send
 from starlette.staticfiles import StaticFiles
 
 from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseError
@@ -2076,49 +2077,90 @@ except _STARTUP_GUARD_EXCEPTIONS as _rg_mw_err:
     logger.debug(f"RGSimpleMiddleware not enabled: {_rg_mw_err}")
 
 
-@app.middleware("http")
-async def _guard_workflow_templates_traversal(request, call_next):
-    try:
-        p = request.url.path or ""
-        # Only inspect under the workflows templates prefix
-        prefix = "/api/v1/workflows/templates/"
-        if p.startswith(prefix):
-            tail = p[len(prefix) :]
-            # If any traversal segments are found in the raw path, reject early with 400
-            # This runs before route resolution so it also handles router-level 404 shortcuts.
-            if ".." in tail.split("/"):
-                return JSONResponse({"detail": "Invalid template name"}, status_code=400)
-    except _REQUEST_GUARD_EXCEPTIONS:
-        pass
-    return await call_next(request)
+class _WorkflowTemplateTraversalGuard:
+    """Reject `..` segments under the workflows templates prefix, before routing.
+
+    Pure ASGI rather than @app.middleware("http"): this runs on every request but
+    acts on one prefix, and a BaseHTTPMiddleware layer costs ~0.08 ms per request
+    for its anyio task group regardless of how little work it does.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        """Wrap the downstream ASGI application."""
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """Reject traversal under the templates prefix, else delegate."""
+        if scope["type"] == "http":
+            try:
+                p = scope.get("path") or ""
+                # Only inspect under the workflows templates prefix
+                prefix = "/api/v1/workflows/templates/"
+                if p.startswith(prefix):
+                    tail = p[len(prefix) :]
+                    # If any traversal segments are found in the raw path, reject early with 400
+                    # This runs before route resolution so it also handles router-level 404 shortcuts.
+                    if ".." in tail.split("/"):
+                        response = JSONResponse(
+                            {"detail": "Invalid template name"}, status_code=400
+                        )
+                        await response(scope, receive, send)
+                        return
+            except _REQUEST_GUARD_EXCEPTIONS:
+                pass
+        await self.app(scope, receive, send)
+
+
+app.add_middleware(_WorkflowTemplateTraversalGuard)
 
 
 # Early middleware to guard sandbox artifact path traversal/double-slash before Starlette routing
-@app.middleware("http")
-async def _guard_sandbox_artifact_path(request: Request, call_next):
-    try:
-        # Inspect raw ASGI path first to avoid client/Starlette normalization
-        raw_path = request.scope.get("raw_path")
-        path_raw = (
-            raw_path.decode("utf-8", "ignore") if isinstance(raw_path, (bytes, bytearray)) else (request.url.path or "")
-        )
-        # Debug logging removed after verification
-        # Quick filter: only check sandbox artifact endpoints
-        # Example: /api/v1/sandbox/runs/{run_id}/artifacts/{path}
-        if "/api/v1/sandbox/runs/" in path_raw and "/artifacts/" in path_raw:
-            from urllib.parse import unquote
+class _SandboxArtifactPathGuard:
+    """Reject traversal / absolute / double-slash sandbox artifact paths.
 
-            # Segment after /artifacts/
-            idx = path_raw.find("/artifacts/")
-            tail = path_raw[idx + len("/artifacts/") :]
-            tail_unquoted = unquote(tail)
-            # Reject traversal attempts and absolute/double-slash paths
-            if ".." in tail_unquoted.split("/") or tail_unquoted.startswith("/") or "//" in tail:
-                return JSONResponse({"detail": "invalid_path"}, status_code=400)
-    except _REQUEST_GUARD_EXCEPTIONS:
-        # Fail open: if guard fails, let the request proceed
-        pass
-    return await call_next(request)
+    Pure ASGI for the same reason as _WorkflowTemplateTraversalGuard above.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        """Wrap the downstream ASGI application."""
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """Reject unsafe sandbox artifact paths, else delegate."""
+        if scope["type"] == "http":
+            try:
+                # Inspect raw ASGI path first to avoid client/Starlette normalization
+                raw_path = scope.get("raw_path")
+                path_raw = (
+                    raw_path.decode("utf-8", "ignore")
+                    if isinstance(raw_path, (bytes, bytearray))
+                    else (scope.get("path") or "")
+                )
+                # Quick filter: only check sandbox artifact endpoints
+                # Example: /api/v1/sandbox/runs/{run_id}/artifacts/{path}
+                if "/api/v1/sandbox/runs/" in path_raw and "/artifacts/" in path_raw:
+                    from urllib.parse import unquote
+
+                    # Segment after /artifacts/
+                    idx = path_raw.find("/artifacts/")
+                    tail = path_raw[idx + len("/artifacts/") :]
+                    tail_unquoted = unquote(tail)
+                    # Reject traversal attempts and absolute/double-slash paths
+                    if (
+                        ".." in tail_unquoted.split("/")
+                        or tail_unquoted.startswith("/")
+                        or "//" in tail
+                    ):
+                        response = JSONResponse({"detail": "invalid_path"}, status_code=400)
+                        await response(scope, receive, send)
+                        return
+            except _REQUEST_GUARD_EXCEPTIONS:
+                # Fail open: if guard fails, let the request proceed
+                pass
+        await self.app(scope, receive, send)
+
+
+app.add_middleware(_SandboxArtifactPathGuard)
 
 
 _OPENAPI_HTTP_METHODS = {"get", "post", "put", "patch", "delete", "options", "head", "trace"}

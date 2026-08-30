@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { ConnectionPhase } from "@/types/connection"
 import type { UserPersona } from "@/types/connection"
 
-vi.mock("@/services/tldw-server", () => ({
+vi.mock("@/services/tldw-server-url", () => ({
   getStoredTldwServerURL: vi.fn(async () => null)
 }))
 

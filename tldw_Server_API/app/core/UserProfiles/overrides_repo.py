@@ -5,6 +5,7 @@ Repository for user profile config overrides.
 from __future__ import annotations
 
 import json
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -40,6 +41,46 @@ async def _ensure_postgres_override_schema(db_pool: DatabasePool) -> None:
         )
 
 
+
+# Schema readiness already confirmed for a given pool, keyed by table name.
+#
+# ensure_tables() is a readiness assertion, not a migration: on SQLite it reads
+# sqlite_master and raises if the table is absent. The answer cannot change while
+# the process runs, but each call cost a full DatabasePool.acquire() -- ~2.1 ms,
+# because establishing a connection to a WAL database opens the file and maps the
+# -shm index. _build_effective_config called it up to three times per request.
+#
+# The marker lives on the pool object rather than in a module-level dict, so the
+# memo is scoped to exactly that pool's lifetime: replacing the pool (as
+# reset_db_pool does between tests) discards it automatically, and there is no
+# id() reuse hazard.
+_SCHEMA_READY_ATTRIBUTE = "_userprofiles_schema_verified"
+
+
+def _schema_already_verified(db_pool: Any, table: str) -> bool:
+    verified = getattr(db_pool, _SCHEMA_READY_ATTRIBUTE, None)
+    return bool(verified) and table in verified
+
+
+def _mark_schema_verified(db_pool: Any, table: str) -> None:
+    """Remember a successful readiness check for this pool."""
+    verified = getattr(db_pool, _SCHEMA_READY_ATTRIBUTE, None)
+    if verified is None:
+        verified = set()
+        try:
+            setattr(db_pool, _SCHEMA_READY_ATTRIBUTE, verified)
+        except AttributeError:
+            # A pool that rejects attributes simply never memoizes.
+            return
+    verified.add(table)
+
+
+def reset_schema_verification_cache(db_pool: Any) -> None:
+    """Forget readiness for a pool. Intended for tests."""
+    with suppress(AttributeError):
+        delattr(db_pool, _SCHEMA_READY_ATTRIBUTE)
+
+
 @dataclass
 class UserProfileOverridesRepo:
     """Repository for user profile config overrides."""
@@ -53,6 +94,9 @@ class UserProfileOverridesRepo:
                 await _ensure_postgres_override_schema(self.db_pool)
                 return
 
+            if _schema_already_verified(self.db_pool, "user_config_overrides"):
+                return
+
             row = await self.db_pool.fetchone(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name='user_config_overrides'"
             )
@@ -62,6 +106,7 @@ class UserProfileOverridesRepo:
                     "Run the AuthNZ migrations/bootstrap (see "
                     "'python -m tldw_Server_API.app.core.AuthNZ.initialize')."
                 )
+            _mark_schema_verified(self.db_pool, "user_config_overrides")
         except Exception as exc:
             _log_override_failure("user", "ensure_tables", exc)
             raise
@@ -261,6 +306,9 @@ class OrgProfileOverridesRepo:
                 await _ensure_postgres_override_schema(self.db_pool)
                 return
 
+            if _schema_already_verified(self.db_pool, "org_config_overrides"):
+                return
+
             row = await self.db_pool.fetchone(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name='org_config_overrides'"
             )
@@ -270,6 +318,7 @@ class OrgProfileOverridesRepo:
                     "Run the AuthNZ migrations/bootstrap (see "
                     "'python -m tldw_Server_API.app.core.AuthNZ.initialize')."
                 )
+            _mark_schema_verified(self.db_pool, "org_config_overrides")
         except Exception as exc:
             _log_override_failure("organization", "ensure_tables", exc)
             raise
@@ -455,6 +504,9 @@ class TeamProfileOverridesRepo:
                 await _ensure_postgres_override_schema(self.db_pool)
                 return
 
+            if _schema_already_verified(self.db_pool, "team_config_overrides"):
+                return
+
             row = await self.db_pool.fetchone(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name='team_config_overrides'"
             )
@@ -464,6 +516,7 @@ class TeamProfileOverridesRepo:
                     "Run the AuthNZ migrations/bootstrap (see "
                     "'python -m tldw_Server_API.app.core.AuthNZ.initialize')."
                 )
+            _mark_schema_verified(self.db_pool, "team_config_overrides")
         except Exception as exc:
             _log_override_failure("team", "ensure_tables", exc)
             raise

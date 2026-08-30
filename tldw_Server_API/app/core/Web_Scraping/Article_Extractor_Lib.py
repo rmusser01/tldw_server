@@ -29,7 +29,8 @@ from typing import Any, Optional, Union
 from urllib.parse import urljoin, urlparse
 from urllib.robotparser import RobotFileParser
 
-import pandas as pd
+# pandas is imported inside parse_csv_urls; at module scope it cost ~0.35 s in
+# every process that registers the media router.
 
 # External Libraries
 from bs4 import BeautifulSoup
@@ -1020,6 +1021,8 @@ def collect_bookmarks(file_path: str) -> dict[str, Union[str, list[str]]]:
 
 
 def parse_csv_urls(file_path: str) -> dict[str, Union[str, list[str]]]:
+    import pandas as pd
+
     """
     Parse URLs from a CSV file. The CSV should have at minimum a 'url' column,
     and optionally a 'title' or 'name' column.
