@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import tarfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -225,6 +226,29 @@ def test_default_streaming_runner_removes_partial_failed_output(
     assert not destination.exists()
 
 
+def test_default_streaming_runner_enforces_mode_under_restrictive_umask(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    destination = tmp_path / "postgres.dump"
+
+    def fake_run(argv, **kwargs):
+        kwargs["stdout"].write(b"custom-postgres-dump")
+        return SimpleNamespace(returncode=0, stderr=b"")
+
+    monkeypatch.setattr(production_deploy.subprocess, "run", fake_run)
+    previous_umask = os.umask(0o777)
+    try:
+        production_deploy.default_streaming_command_runner(
+            ("docker", "compose", "exec", "postgres", "pg_dump"),
+            None,
+            destination,
+        )
+    finally:
+        os.umask(previous_umask)
+
+    assert destination.stat().st_mode & 0o777 == 0o600
+
+
 class RecordingRunner:
     def __init__(self, *, fail_when: str | None = None) -> None:
         self.calls: list[tuple[tuple[str, ...], Mapping[str, str] | None, bytes | None]] = []
@@ -372,6 +396,32 @@ def test_deploy_uses_injected_streaming_runner_for_postgres_dump(
     assert "pg_dump --format=custom" in " ".join(stream_runner.calls[0][0])
     assert not any("pg_dump" in command for command in _commands(runner))
     assert stream_runner.calls[0][2].stat().st_mode & 0o777 == 0o600
+
+
+@pytest.mark.parametrize("outcome", ("empty", "exception"))
+def test_deploy_removes_unusable_injected_stream_output(
+    tmp_path: Path,
+    passing_deployment_checks: None,
+    outcome: str,
+) -> None:
+    config = _config(tmp_path)
+
+    def unusable_stream_runner(argv, env, destination):
+        destination.write_bytes(b"partial" if outcome == "exception" else b"")
+        if outcome == "exception":
+            raise RuntimeError("raw-secret")
+        return CommandResult(0, b"", b"")
+
+    with pytest.raises(DeploymentError) as exc_info:
+        deploy(
+            config,
+            runner=RecordingRunner(),
+            stream_runner=unusable_stream_runner,
+        )
+
+    assert "raw-secret" not in str(exc_info.value)
+    assert not tuple(config.backup_dir.rglob("postgres.dump"))
+    assert not tuple(config.backup_dir.rglob("manifest.json"))
 
 
 @pytest.mark.parametrize(

@@ -140,6 +140,7 @@ def default_streaming_command_runner(
 
     descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
+        os.fchmod(descriptor, 0o600)
         with os.fdopen(descriptor, "wb") as stream:
             descriptor = -1
             completed = subprocess.run(  # nosec B603
@@ -226,10 +227,16 @@ def _run_streaming_gate(
     try:
         result = runner(tuple(argv), env, destination)
     except (OSError, RuntimeError) as exc:
+        destination.unlink(missing_ok=True)
         raise DeploymentError(f"{label} gate could not execute") from exc
     if result.returncode != 0:
         destination.unlink(missing_ok=True)
         raise DeploymentError(f"{label} gate failed with exit status {result.returncode}")
+    try:
+        _require_nonempty_file(destination, label)
+    except (DeploymentError, OSError) as exc:
+        destination.unlink(missing_ok=True)
+        raise DeploymentError(f"{label} gate produced an unusable artifact") from exc
     return result
 
 
@@ -412,7 +419,6 @@ def deploy(
             env=env,
             destination=postgres_path,
         )
-        _require_nonempty_file(postgres_path, "PostgreSQL backup")
     else:
         pg_dump = _run_gate(
             runner,
