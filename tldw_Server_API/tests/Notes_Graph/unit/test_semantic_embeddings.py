@@ -12,6 +12,7 @@ from tldw_Server_API.app.core.Notes_Graph import semantic_embeddings
 from tldw_Server_API.app.core.Notes_Graph.semantic_content import build_semantic_chunks
 from tldw_Server_API.app.core.Notes_Graph.semantic_embeddings import (
     DIMENSION_PROBE_TEXT,
+    NotesEmbeddingExecutionIdentity,
     NotesEmbeddingRuntime,
     NotesSemanticEmbedder,
     PendingSemanticConfig,
@@ -26,6 +27,27 @@ pytestmark = pytest.mark.unit
 _SUPPORTS_TASK_CANCELLATION_COUNTS = all(
     hasattr(asyncio.Task, attribute) for attribute in ("cancelling", "uncancel")
 )
+
+
+def test_embedding_execution_identity_repr_hides_runtime_endpoint_details() -> None:
+    endpoint = (
+        "https://creduser:credsecret@example.test/private-segment/credential-path"
+        "?api_key=query-secret"
+    )
+    identity = NotesEmbeddingExecutionIdentity(endpoint_base_url=endpoint)
+
+    serialized = repr(identity)
+
+    assert identity.endpoint_base_url == endpoint
+    for forbidden in (
+        "creduser",
+        "credsecret",
+        "private-segment",
+        "credential-path",
+        "api_key",
+        "query-secret",
+    ):
+        assert forbidden not in serialized
 
 
 @dataclass
