@@ -578,6 +578,123 @@ class NoteSemanticStore:
         with self._db.transaction() as conn:
             return write(conn)
 
+    def mark_note_dirty(
+        self,
+        *,
+        dataset_id: str | None,
+        note_id: str,
+        content_version: int,
+        content_fingerprint: str,
+        now: datetime,
+        tx: SemanticConnection,
+    ) -> SemanticNoteRecord | None:
+        """Mark a Note dirty only when an active local generation owns its dataset."""
+
+        if dataset_id is None:
+            return None
+        dataset = self._scope(dataset_id)
+        self._set_scope(tx, dataset)
+        config = tx.execute(
+            "SELECT active_generation_id FROM note_semantic_index_configs "
+            "WHERE owner_user_id=? AND dataset_id=? AND desired_state='enabled' "
+            "AND active_generation_id IS NOT NULL",
+            (self.owner_user_id, dataset),
+        ).fetchone()
+        if config is None:
+            return None
+        generation_id = str(config["active_generation_id"])
+        tx.execute(
+            "DELETE FROM note_semantic_work WHERE owner_user_id=? AND dataset_id=? "
+            "AND kind='delete_note_vectors' AND note_id=?",
+            (self.owner_user_id, dataset, note_id),
+        )
+        return self.record_note_dirty(
+            dataset_id=dataset,
+            generation_id=generation_id,
+            note_id=note_id,
+            content_version=content_version,
+            content_fingerprint=content_fingerprint,
+            now=now,
+            tx=tx,
+        )
+
+    def mark_note_tombstoned(
+        self,
+        *,
+        dataset_id: str | None,
+        note_id: str,
+        content_version: int,
+        content_fingerprint: str,
+        now: datetime,
+        tx: SemanticConnection,
+    ) -> SemanticNoteRecord | None:
+        """Tombstone one Note and queue opaque vector cleanup when locally enabled."""
+
+        if dataset_id is None:
+            return None
+        dataset = self._scope(dataset_id)
+        if not isinstance(content_version, int) or content_version < 1:
+            raise ValueError("notes_semantic_content_version_invalid")
+        fingerprint = self._digest(content_fingerprint, field="content_fingerprint")
+        timestamp = self._timestamp(now)
+        self._set_scope(tx, dataset)
+        config = tx.execute(
+            "SELECT active_generation_id FROM note_semantic_index_configs "
+            "WHERE owner_user_id=? AND dataset_id=? AND desired_state='enabled' "
+            "AND active_generation_id IS NOT NULL",
+            (self.owner_user_id, dataset),
+        ).fetchone()
+        if config is None:
+            return None
+        generation_id = str(config["active_generation_id"])
+        tx.execute(
+            """
+            INSERT INTO note_semantic_note_state(
+              owner_user_id,dataset_id,generation_id,note_id,content_version,content_fingerprint,
+              dirty_generation,state,chunk_count,published_at
+            ) VALUES (?,?,?,?,?,?,1,'tombstoned',0,?)
+            ON CONFLICT(owner_user_id,dataset_id,generation_id,note_id) DO UPDATE SET
+              content_version=excluded.content_version, content_fingerprint=excluded.content_fingerprint,
+              dirty_generation=note_semantic_note_state.dirty_generation+1, state='tombstoned',
+              manifest_hash=NULL, chunk_count=0, error_code=NULL, published_at=excluded.published_at
+            """,
+            (
+                self.owner_user_id,
+                dataset,
+                generation_id,
+                note_id,
+                content_version,
+                fingerprint,
+                timestamp,
+            ),
+        )
+        row = tx.execute(
+            "SELECT * FROM note_semantic_note_state WHERE owner_user_id=? AND dataset_id=? "
+            "AND generation_id=? AND note_id=?",
+            (self.owner_user_id, dataset, generation_id, note_id),
+        ).fetchone()
+        dirty_generation = int(row["dirty_generation"])
+        tx.execute(
+            "DELETE FROM note_semantic_work WHERE owner_user_id=? AND dataset_id=? "
+            "AND kind='index_note' AND note_id=?",
+            (self.owner_user_id, dataset, note_id),
+        )
+        self._enqueue_work(
+            tx,
+            dataset=dataset,
+            kind=SemanticWorkKind.DELETE_NOTE_VECTORS,
+            note_id=note_id,
+            generation_id=generation_id,
+            dirty_generation=dirty_generation,
+            now=now,
+        )
+        tx.execute(
+            "UPDATE note_semantic_index_configs SET semantic_index_revision=semantic_index_revision+1, "
+            "updated_at=? WHERE owner_user_id=? AND dataset_id=?",
+            (timestamp, self.owner_user_id, dataset),
+        )
+        return self._note_from_row(row)
+
     def claim_dirty_note(
         self, *, dataset_id: str, generation_id: str, note_id: str, dirty_generation: int,
         now: datetime,
