@@ -215,6 +215,92 @@ def test_postgres_v65_live_schema_has_forced_owner_dataset_rls(
 
 @pytest.mark.integration
 @pytest.mark.timeout(30)
+def test_postgres_v65_live_dimension_identity_constraints_preserve_disabled_states(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = CharactersRAGDB(":memory:", client_id="owner-a", backend=backend)
+    try:
+        with backend.transaction() as conn:
+            _set_tenant_scope(backend, conn)
+            backend.execute(
+                """
+                INSERT INTO note_semantic_index_configs(
+                    owner_user_id,dataset_id,desired_state,configuration_revision,
+                    semantic_index_revision,metric,dimension_state,dimensions,
+                    compatibility_hash,normalization_version,chunker_version,updated_at
+                ) VALUES ('owner-a','dataset-a','disabled',1,0,'cosine','pending',
+                          NULL,NULL,'v1','v1',CURRENT_TIMESTAMP)
+                """,
+                connection=conn,
+            )
+
+        for dimension_state, dimensions, compatibility_hash in (
+            ("pending", 768, None),
+            ("pending", None, "compatibility-v1"),
+            ("resolved", None, "compatibility-v1"),
+            ("resolved", 768, None),
+            ("resolved", 768, ""),
+        ):
+            with pytest.raises(BackendDatabaseError):
+                with backend.transaction() as conn:
+                    _set_tenant_scope(backend, conn)
+                    backend.execute(
+                        "UPDATE note_semantic_index_configs SET dimension_state=%s, dimensions=%s, "
+                        "compatibility_hash=%s WHERE owner_user_id='owner-a' AND dataset_id='dataset-a'",
+                        (dimension_state, dimensions, compatibility_hash),
+                        connection=conn,
+                    )
+
+        with backend.transaction() as conn:
+            _set_tenant_scope(backend, conn)
+            backend.execute(
+                "UPDATE note_semantic_index_configs SET dimension_state='resolved', dimensions=768, "
+                "compatibility_hash='compatibility-v1' "
+                "WHERE owner_user_id='owner-a' AND dataset_id='dataset-a'",
+                connection=conn,
+            )
+            row = backend.execute(
+                "SELECT desired_state,dimension_state,dimensions,compatibility_hash "
+                "FROM note_semantic_index_configs "
+                "WHERE owner_user_id='owner-a' AND dataset_id='dataset-a'",
+                connection=conn,
+            ).rows[0]
+        assert (
+            str(row["desired_state"]),
+            str(row["dimension_state"]),
+            int(row["dimensions"]),
+            str(row["compatibility_hash"]),
+        ) == ("disabled", "resolved", 768, "compatibility-v1")
+
+        for index, (dimension_state, dimensions, compatibility_hash) in enumerate(
+            (
+                ("pending", 768, None),
+                ("pending", None, "compatibility-v1"),
+                ("resolved", None, "compatibility-v1"),
+                ("resolved", 768, None),
+                ("resolved", 768, ""),
+            )
+        ):
+            with pytest.raises(BackendDatabaseError):
+                with backend.transaction() as conn:
+                    _set_tenant_scope(backend, conn)
+                    backend.execute(
+                        """
+                        INSERT INTO note_semantic_generations(
+                            id,owner_user_id,dataset_id,configuration_revision,state,
+                            compatibility_hash,dimension_state,dimensions,created_at
+                        ) VALUES (%s,'owner-a','dataset-a',1,'staging',%s,%s,%s,CURRENT_TIMESTAMP)
+                        """,
+                        (f"generation-{index}", compatibility_hash, dimension_state, dimensions),
+                        connection=conn,
+                    )
+    finally:
+        db.close_all_connections()
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(30)
 def test_postgres_v65_live_constraints_reject_raw_fingerprints_and_unbound_work(
     pg_database_config: DatabaseConfig,
 ) -> None:
@@ -233,9 +319,9 @@ def test_postgres_v65_live_constraints_reject_raw_fingerprints_and_unbound_work(
                 INSERT INTO note_semantic_index_configs(
                     owner_user_id,dataset_id,desired_state,configuration_revision,
                     semantic_index_revision,metric,dimension_state,dimensions,
-                    normalization_version,chunker_version,updated_at
+                    compatibility_hash,normalization_version,chunker_version,updated_at
                 ) VALUES ('owner-a','dataset-a','enabled',1,0,'cosine','resolved',
-                          768,'v1','v1',CURRENT_TIMESTAMP)
+                          768,'compatibility-v1','v1','v1',CURRENT_TIMESTAMP)
                 """,
                 connection=conn,
             )

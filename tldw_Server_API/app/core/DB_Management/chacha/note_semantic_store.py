@@ -325,11 +325,27 @@ class NoteSemanticStore:
         with self._db.transaction() as conn:
             self._set_scope(conn, dataset)
             config = conn.execute(
-                "SELECT configuration_revision FROM note_semantic_index_configs WHERE owner_user_id=? AND dataset_id=?",
+                "SELECT configuration_revision,dimension_state,dimensions,compatibility_hash "
+                "FROM note_semantic_index_configs WHERE owner_user_id=? AND dataset_id=?",
                 (self.owner_user_id, dataset),
             ).fetchone()
-            if config is None or int(config[0]) != configuration_revision:
+            if config is None:
                 raise ValueError("notes_semantic_configuration_revision_mismatch")
+            config_record = self._record(config)
+            if int(config_record["configuration_revision"]) != configuration_revision:
+                raise ValueError("notes_semantic_configuration_revision_mismatch")
+            config_dimensions = config_record["dimensions"]
+            if config_dimensions is not None:
+                config_dimensions = int(config_dimensions)
+            config_hash = config_record["compatibility_hash"]
+            if config_hash is not None:
+                config_hash = str(config_hash)
+            if (
+                str(config_record["dimension_state"]) != dimension_state.value
+                or config_dimensions != dimensions
+                or config_hash != resolved_compatibility_hash
+            ):
+                raise ValueError("notes_semantic_generation_identity_mismatch")
             conn.execute(
                 """
                 INSERT INTO note_semantic_generations(
@@ -419,22 +435,26 @@ class NoteSemanticStore:
                 self._set_scope(conn, dataset)
                 config = conn.execute(
                     "SELECT * FROM note_semantic_index_configs WHERE owner_user_id=? AND dataset_id=? "
-                    "AND configuration_revision=? AND desired_state='enabled'",
+                    "AND configuration_revision=? AND desired_state='enabled' "
+                    "AND dimension_state='resolved' AND dimensions IS NOT NULL "
+                    "AND compatibility_hash IS NOT NULL",
                     (self.owner_user_id, dataset, expected_configuration_revision),
                 ).fetchone()
                 if config is None:
                     raise _SemanticCASMiss
-                previous_generation_id = self._record(config)["active_generation_id"]
+                config_record = self._record(config)
+                previous_generation_id = config_record["active_generation_id"]
                 if previous_generation_id == generation_id:
                     raise _SemanticCASMiss
+                config_dimensions = int(config_record["dimensions"])
+                config_hash = str(config_record["compatibility_hash"])
                 candidate = conn.execute(
                     "SELECT id FROM note_semantic_generations WHERE owner_user_id=? AND dataset_id=? "
                     "AND id=? AND configuration_revision=? AND state='staging' "
-                    "AND dimension_state='resolved' AND dimensions IS NOT NULL "
-                    "AND compatibility_hash IS NOT NULL",
+                    "AND dimension_state='resolved' AND dimensions=? AND compatibility_hash=?",
                     (
                         self.owner_user_id, dataset, generation_id,
-                        expected_configuration_revision,
+                        expected_configuration_revision, config_dimensions, config_hash,
                     ),
                 ).fetchone()
                 if candidate is None:
@@ -450,10 +470,11 @@ class NoteSemanticStore:
                 activated = conn.execute(
                     "UPDATE note_semantic_generations SET state='active', publication_receipt=?, published_at=? "
                     "WHERE owner_user_id=? AND dataset_id=? AND id=? AND configuration_revision=? "
-                    "AND state='staging'",
+                    "AND state='staging' AND dimension_state='resolved' "
+                    "AND dimensions=? AND compatibility_hash=?",
                     (
                         receipt, timestamp, self.owner_user_id, dataset, generation_id,
-                        expected_configuration_revision,
+                        expected_configuration_revision, config_dimensions, config_hash,
                     ),
                 )
                 if activated.rowcount != 1:
@@ -463,10 +484,11 @@ class NoteSemanticStore:
                     "configuration_revision=configuration_revision+1, "
                     "semantic_index_revision=semantic_index_revision+1, updated_at=? "
                     "WHERE owner_user_id=? AND dataset_id=? AND configuration_revision=? "
-                    "AND desired_state='enabled'",
+                    "AND desired_state='enabled' AND dimension_state='resolved' "
+                    "AND dimensions=? AND compatibility_hash=?",
                     (
                         generation_id, timestamp, self.owner_user_id, dataset,
-                        expected_configuration_revision,
+                        expected_configuration_revision, config_dimensions, config_hash,
                     ),
                 )
                 if updated.rowcount != 1:
