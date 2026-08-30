@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any
@@ -13,6 +14,7 @@ from tldw_Server_API.app.core.Notes_Graph.semantic_embeddings import (
     NotesEmbeddingRuntime,
     NotesSemanticEmbedder,
     PendingSemanticConfig,
+    ResolvedDimension,
     ResolvedSemanticConfig,
     SemanticEmbeddingSystemError,
 )
@@ -75,6 +77,7 @@ class SequencedOrchestrator(RecordingOrchestrator):
             provider_attempt_sequence=0,
             provider_input_count=0,
             provider_prompt_tokens=0,
+            provider_request_count=0,
             provider_status=None,
         )
 
@@ -86,6 +89,7 @@ class SequencedOrchestrator(RecordingOrchestrator):
         self.identity.provider_attempt_sequence += 1
         self.identity.provider_input_count = len(self.inputs[-1])
         self.identity.provider_prompt_tokens = 5
+        self.identity.provider_request_count = 1
         if isinstance(outcome, Exception):
             self.identity.provider_status = "failed"
             raise outcome
@@ -93,6 +97,7 @@ class SequencedOrchestrator(RecordingOrchestrator):
             self.identity.provider_attempt_sequence -= 1
             self.identity.provider_input_count = 0
             self.identity.provider_prompt_tokens = 0
+            self.identity.provider_request_count = 0
             self.identity.provider_status = None
         else:
             self.identity.provider_input_count = outcome.cache_misses
@@ -170,12 +175,15 @@ async def test_known_dimension_requires_no_probe() -> None:
 @pytest.mark.asyncio
 async def test_unknown_dimension_uses_fixed_probe_after_consent_and_captures_revision() -> None:
     orchestrator = RecordingOrchestrator([[3.0, 4.0, 5.0]])
-    cas_calls: list[int] = []
+    cas_calls: list[ResolvedDimension] = []
     usage_calls: list[dict[str, object]] = []
 
-    async def publish_dimension(config: PendingSemanticConfig, dimensions: int) -> bool:
+    async def publish_dimension(
+        config: PendingSemanticConfig,
+        resolved_dimension: ResolvedDimension,
+    ) -> bool:
         del config
-        cas_calls.append(dimensions)
+        cas_calls.append(resolved_dimension)
         return True
 
     async def record_usage(**kwargs: object) -> None:
@@ -193,7 +201,8 @@ async def test_unknown_dimension_uses_fixed_probe_after_consent_and_captures_rev
     assert resolved.dimensions == 3
     assert resolved.model == "text-embedding-3-small"
     assert resolved.model_revision == "digest-7"
-    assert cas_calls == [3]
+    assert cas_calls == [resolved]
+    assert cas_calls[0] is resolved
     assert len(usage_calls) == 1
     assert usage_calls[0]["operation"] == "notes_semantic_dimension_probe"
     assert usage_calls[0]["status"] == 200
@@ -202,6 +211,7 @@ async def test_unknown_dimension_uses_fixed_probe_after_consent_and_captures_rev
         "cache_hit_count": 0,
         "cache_miss_count": 1,
         "provider_input_count": 1,
+        "provider_request_count": 1,
     }
     assert "Public semantic" not in repr(usage_calls)
 
@@ -209,9 +219,22 @@ async def test_unknown_dimension_uses_fixed_probe_after_consent_and_captures_rev
 @pytest.mark.asyncio
 async def test_probe_fails_before_any_note_input_when_consent_missing_or_cas_lost() -> None:
     orchestrator = RecordingOrchestrator([[1.0, 0.0]])
+    cas_calls: list[ResolvedDimension] = []
+
+    def lose_cas(
+        config: PendingSemanticConfig,
+        resolved_dimension: ResolvedDimension,
+    ) -> bool:
+        del config
+        cas_calls.append(resolved_dimension)
+        return False
+
     embedder = NotesSemanticEmbedder(
-        orchestrator_factory=lambda config, user_id: _runtime(orchestrator),
-        dimension_cas=lambda config, dimensions: False,
+        orchestrator_factory=lambda config, user_id: _runtime(
+            orchestrator,
+            "digest-on-cas-loss",
+        ),
+        dimension_cas=lose_cas,
     )
 
     with pytest.raises(SemanticEmbeddingSystemError, match="consent_required"):
@@ -221,6 +244,108 @@ async def test_probe_fails_before_any_note_input_when_consent_missing_or_cas_los
     with pytest.raises(SemanticEmbeddingSystemError, match="dimension_cas_lost"):
         await embedder.resolve_dimensions(_pending(), user_id="7")
     assert orchestrator.inputs == [[DIMENSION_PROBE_TEXT]]
+    assert cas_calls == [
+        ResolvedDimension(
+            dimensions=2,
+            provider="openai",
+            model="text-embedding-3-small",
+            model_revision="digest-on-cas-loss",
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_unknown_dimension_sync_cas_receives_complete_discovered_identity() -> None:
+    orchestrator = RecordingOrchestrator([[3.0, 4.0]])
+    cas_calls: list[ResolvedDimension] = []
+
+    def publish_dimension(
+        config: PendingSemanticConfig,
+        resolved_dimension: ResolvedDimension,
+    ) -> bool:
+        del config
+        cas_calls.append(resolved_dimension)
+        return True
+
+    embedder = NotesSemanticEmbedder(
+        orchestrator_factory=lambda config, user_id: _runtime(
+            orchestrator,
+            "digest-sync",
+        ),
+        dimension_cas=publish_dimension,
+    )
+
+    resolved = await embedder.resolve_dimensions(_pending(), user_id="7")
+
+    assert cas_calls == [resolved]
+    assert cas_calls[0] is resolved
+    assert resolved == ResolvedDimension(
+        dimensions=2,
+        provider="openai",
+        model="text-embedding-3-small",
+        model_revision="digest-sync",
+    )
+
+
+@pytest.mark.asyncio
+async def test_cancelled_dimension_probe_records_one_failed_provider_attempt() -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+    usage_calls: list[dict[str, object]] = []
+
+    class BlockingOrchestrator(RecordingOrchestrator):
+        def __post_init__(self) -> None:
+            super().__post_init__()
+            self.identity = SimpleNamespace(
+                model_revision=None,
+                provider_attempt_sequence=0,
+                provider_input_count=0,
+                provider_prompt_tokens=0,
+                provider_request_count=0,
+                provider_status=None,
+            )
+
+        async def execute(self, prepared: object) -> EmbeddingExecutionResult:
+            del prepared
+            self.identity.provider_attempt_sequence = 1
+            self.identity.provider_input_count = 1
+            self.identity.provider_prompt_tokens = 5
+            self.identity.provider_request_count = 1
+            self.identity.provider_status = "started"
+            started.set()
+            await release.wait()
+            raise AssertionError("cancelled provider unexpectedly resumed")
+
+    orchestrator = BlockingOrchestrator([])
+
+    async def record_usage(**kwargs: object) -> None:
+        usage_calls.append(kwargs)
+
+    embedder = NotesSemanticEmbedder(
+        orchestrator_factory=lambda config, user_id: NotesEmbeddingRuntime(
+            orchestrator=orchestrator,
+            execution_identity=lambda: orchestrator.identity,
+        ),
+        dimension_cas=lambda config, resolution: True,
+        usage_logger=record_usage,
+    )
+
+    task = asyncio.create_task(embedder.resolve_dimensions(_pending(), user_id="7"))
+    await started.wait()
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert len(usage_calls) == 1
+    assert usage_calls[0]["status"] == 502
+    assert usage_calls[0]["usage_metadata"] == {
+        "attempt_status": "failed",
+        "cache_hit_count": 0,
+        "cache_miss_count": 1,
+        "provider_input_count": 1,
+        "provider_request_count": 1,
+    }
 
 
 @pytest.mark.asyncio
@@ -394,6 +519,7 @@ async def test_first_discovered_revision_is_pinned_across_batches(
         "cache_hit_count": 0,
         "cache_miss_count": 1,
         "provider_input_count": 1,
+        "provider_request_count": 1,
     }
 
 
@@ -436,6 +562,7 @@ async def test_failed_provider_attempt_is_recorded_without_content() -> None:
         "cache_hit_count": 0,
         "cache_miss_count": 1,
         "provider_input_count": 1,
+        "provider_request_count": 1,
     }
     assert "secret note body" not in repr(usage_calls)
 
@@ -500,4 +627,5 @@ async def test_full_cache_hit_batch_records_no_provider_work_or_tokens() -> None
         "cache_hit_count": 0,
         "cache_miss_count": 1,
         "provider_input_count": 1,
+        "provider_request_count": 1,
     }

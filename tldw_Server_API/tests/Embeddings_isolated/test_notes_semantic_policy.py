@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -10,13 +12,17 @@ from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
     ByokResolutionStatus,
     ResolvedByokCredentials,
 )
+from tldw_Server_API.app.core.Notes_Graph.semantic_content import build_semantic_chunks
 from tldw_Server_API.app.core.Notes_Graph.semantic_embeddings import (
     NotesEmbeddingExecutor,
+    NotesSemanticEmbedder,
     PendingSemanticConfig,
+    ResolvedSemanticConfig,
     RunMemoryEmbeddingCache,
     SemanticEmbeddingSystemError,
     build_notes_semantic_orchestrator,
 )
+from tldw_Server_API.app.core.Notes_Graph.semantic_settings import SemanticIndexSettings
 
 pytestmark = pytest.mark.unit
 
@@ -64,10 +70,12 @@ def _credentials(
     *,
     source: str = "server_default",
     base_url: str = "https://api.openai.com/v1",
+    provider: str = "openai",
+    api_key: str = "not-logged",
 ) -> ResolvedByokCredentials:
     return ResolvedByokCredentials(
-        provider="openai",
-        api_key="not-logged",
+        provider=provider,
+        api_key=api_key,
         app_config={"openai_api": {"api_base_url": base_url}},
         credential_fields={"base_url": base_url},
         source=source,
@@ -181,7 +189,7 @@ async def test_executor_request_is_accepted_by_real_provider_adapter(
             if provider == "openai":
                 return {"data": [{"index": 0, "embedding": [1.0, 2.0]}]}
             if provider == "google":
-                return {"embedding": {"values": [1.0, 2.0]}}
+                return {"embeddings": [{"values": [1.0, 2.0]}]}
             return [[1.0, 2.0]]
 
     class Client:
@@ -233,7 +241,7 @@ async def test_executor_request_is_accepted_by_real_provider_adapter(
 
     async def resolver(name: str, **kwargs: object) -> ResolvedByokCredentials:
         del name, kwargs
-        return _credentials(base_url=base_url)
+        return _credentials(base_url=base_url, provider=provider)
 
     executor = NotesEmbeddingExecutor(
         config=_config(
@@ -320,6 +328,91 @@ async def test_executor_rejects_endpoint_and_model_drift() -> None:
             ["input"], provider="openai", model="text-embedding-3-small", dimensions=2
         )
 
+
+@pytest.mark.asyncio
+async def test_executor_pins_normalized_full_endpoint_before_second_dispatch() -> None:
+    adapter = RecordingAdapter(
+        {
+            "data": [{"index": 0, "embedding": [1.0, 2.0]}],
+            "model": "text-embedding-3-small",
+        }
+    )
+    credentials = iter(
+        [
+            _credentials(base_url="  https://api.openai.com/v1/  "),
+            _credentials(base_url="https://api.openai.com/proxy/v1/"),
+        ]
+    )
+
+    async def resolver(provider: str, **kwargs: object) -> ResolvedByokCredentials:
+        del provider, kwargs
+        return next(credentials)
+
+    executor = NotesEmbeddingExecutor(
+        config=_config(),
+        user_id="7",
+        credential_resolver=resolver,
+        adapter_registry=Registry(adapter),
+    )
+
+    assert await executor.create(
+        ["first payload"],
+        provider="openai",
+        model="text-embedding-3-small",
+        dimensions=2,
+    ) == [[1.0, 2.0]]
+    with pytest.raises(SemanticEmbeddingSystemError, match="endpoint_identity_mismatch"):
+        await executor.create(
+            ["second payload must not dispatch"],
+            provider="openai",
+            model="text-embedding-3-small",
+            dimensions=2,
+        )
+
+    assert len(adapter.requests) == 1
+    assert adapter.requests[0]["base_url"] == "https://api.openai.com/v1"
+
+
+@pytest.mark.asyncio
+async def test_executor_allows_key_rotation_at_exact_normalized_endpoint() -> None:
+    adapter = RecordingAdapter(
+        {
+            "data": [{"index": 0, "embedding": [1.0, 2.0]}],
+            "model": "text-embedding-3-small",
+        }
+    )
+    credentials = iter(
+        [
+            _credentials(base_url="https://api.openai.com/v1/", api_key="key-one"),
+            _credentials(base_url=" https://api.openai.com/v1 ", api_key="key-two"),
+        ]
+    )
+
+    async def resolver(provider: str, **kwargs: object) -> ResolvedByokCredentials:
+        del provider, kwargs
+        return next(credentials)
+
+    executor = NotesEmbeddingExecutor(
+        config=_config(),
+        user_id="7",
+        credential_resolver=resolver,
+        adapter_registry=Registry(adapter),
+    )
+
+    for payload in ("first payload", "second payload"):
+        assert await executor.create(
+            [payload],
+            provider="openai",
+            model="text-embedding-3-small",
+            dimensions=2,
+        ) == [[1.0, 2.0]]
+
+    assert [request["api_key"] for request in adapter.requests] == ["key-one", "key-two"]
+    assert [request["base_url"] for request in adapter.requests] == [
+        "https://api.openai.com/v1",
+        "https://api.openai.com/v1",
+    ]
+
 @pytest.mark.asyncio
 async def test_executor_rejects_unavailable_pinned_provider() -> None:
     executor = NotesEmbeddingExecutor(
@@ -368,3 +461,176 @@ async def test_executor_maps_credential_and_provider_failures_to_content_free_co
             ["input"], provider="openai", model="text-embedding-3-small", dimensions=2
         )
     assert "credential-shaped" not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_real_google_batch_result_count_is_validated_by_notes_executor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import tldw_Server_API.app.core.LLM_Calls.providers.google_embeddings_adapter as module
+    from tldw_Server_API.app.core.LLM_Calls.providers.google_embeddings_adapter import (
+        GoogleEmbeddingsAdapter,
+    )
+
+    calls: list[str] = []
+
+    class Response:
+        status_code = 200
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {"embeddings": [{"values": [1.0, 2.0]}]}
+
+    class Client:
+        def __enter__(self) -> Client:
+            return self
+
+        def __exit__(self, *_args: object) -> bool:
+            return False
+
+        def post(self, url: str, **_kwargs: object) -> Response:
+            calls.append(url)
+            return Response()
+
+    monkeypatch.setattr(module, "create_client", lambda **_kwargs: Client())
+
+    async def resolver(provider: str, **kwargs: object) -> ResolvedByokCredentials:
+        del provider, kwargs
+        return _credentials(
+            provider="google",
+            base_url="https://embeddings.example/v1",
+        )
+
+    executor = NotesEmbeddingExecutor(
+        config=_config(
+            provider="google",
+            model="text-embedding-004",
+            endpoint_origin="https://embeddings.example",
+        ),
+        user_id="7",
+        credential_resolver=resolver,
+        adapter_registry=ProviderRegistry("google", GoogleEmbeddingsAdapter()),
+    )
+
+    with pytest.raises(SemanticEmbeddingSystemError, match="invalid_vectors"):
+        await executor.create(
+            ["first note", "second note"],
+            provider="google",
+            model="text-embedding-004",
+            dimensions=2,
+        )
+
+    assert calls == [
+        "https://embeddings.example/v1/models/text-embedding-004:batchEmbedContents"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_cancelled_real_google_batch_records_failure_without_later_post(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import tldw_Server_API.app.core.LLM_Calls.providers.google_embeddings_adapter as module
+    from tldw_Server_API.app.core.LLM_Calls.providers.google_embeddings_adapter import (
+        GoogleEmbeddingsAdapter,
+    )
+
+    request_started = threading.Event()
+    release_request = threading.Event()
+    client_closed = threading.Event()
+    calls: list[str] = []
+    usage_calls: list[dict[str, object]] = []
+
+    class Response:
+        status_code = 200
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {
+                "embeddings": [
+                    {"values": [1.0, 0.0]},
+                    {"values": [0.0, 1.0]},
+                ]
+            }
+
+    class Client:
+        def __enter__(self) -> Client:
+            return self
+
+        def __exit__(self, *_args: object) -> bool:
+            client_closed.set()
+            return False
+
+        def post(self, url: str, **_kwargs: object) -> Response:
+            calls.append(url)
+            request_started.set()
+            assert release_request.wait(10)
+            return Response()
+
+    monkeypatch.setattr(module, "create_client", lambda **_kwargs: Client())
+
+    async def resolver(provider: str, **kwargs: object) -> ResolvedByokCredentials:
+        del provider, kwargs
+        return _credentials(
+            provider="google",
+            base_url="https://embeddings.example/v1",
+        )
+
+    async def record_usage(**kwargs: object) -> None:
+        usage_calls.append(kwargs)
+
+    settings = SemanticIndexSettings(max_chunk_code_points=4)
+    config = ResolvedSemanticConfig(
+        provider="google",
+        model="text-embedding-004",
+        model_revision=None,
+        endpoint_origin="https://embeddings.example",
+        credential_source="server_default",
+        dimensions=2,
+    )
+    runtime = build_notes_semantic_orchestrator(
+        config,
+        user_id="7",
+        settings=settings,
+        credential_resolver=resolver,
+        adapter_registry=ProviderRegistry("google", GoogleEmbeddingsAdapter()),
+    )
+    embedder = NotesSemanticEmbedder(
+        orchestrator_factory=lambda run_config, user_id: runtime,
+        usage_logger=record_usage,
+        settings=settings,
+    )
+    chunks = build_semantic_chunks(
+        generation_id="generation-1",
+        note_id="note-1",
+        title="",
+        content="abcdefgh",
+        content_version=1,
+        settings=settings,
+    )
+
+    task = asyncio.create_task(embedder.embed_chunks(chunks, config, user_id="7"))
+    assert await asyncio.to_thread(request_started.wait, 10)
+    task.cancel()
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    finally:
+        release_request.set()
+
+    assert await asyncio.to_thread(client_closed.wait, 10)
+    assert calls == [
+        "https://embeddings.example/v1/models/text-embedding-004:batchEmbedContents"
+    ]
+    assert len(usage_calls) == 1
+    assert usage_calls[0]["status"] == 502
+    assert usage_calls[0]["usage_metadata"] == {
+        "attempt_status": "failed",
+        "cache_hit_count": 0,
+        "cache_miss_count": 2,
+        "provider_input_count": 2,
+        "provider_request_count": 1,
+    }

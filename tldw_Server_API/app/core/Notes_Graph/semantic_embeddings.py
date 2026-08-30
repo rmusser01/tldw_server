@@ -50,7 +50,10 @@ _ENDPOINT_FIELDS = (
 CredentialScope = Literal["user", "server_default"]
 CredentialResolver = Callable[..., Awaitable[ResolvedByokCredentials]]
 UsageLogger = Callable[..., Awaitable[None]]
-DimensionCas = Callable[["PendingSemanticConfig", int], bool | Awaitable[bool]]
+DimensionCas = Callable[
+    ["PendingSemanticConfig", "ResolvedDimension"],
+    bool | Awaitable[bool],
+]
 
 
 class SemanticEmbeddingSystemError(RuntimeError):
@@ -157,9 +160,11 @@ class SemanticEmbeddingBatch:
 class NotesEmbeddingExecutionIdentity:
     model_revision: str | None = None
     endpoint_origin: str | None = None
+    endpoint_base_url: str | None = None
     provider_attempt_sequence: int = 0
     provider_input_count: int = 0
     provider_prompt_tokens: int = 0
+    provider_request_count: int = 0
     provider_status: str | None = None
 
 
@@ -247,6 +252,12 @@ class NotesEmbeddingExecutor:
             raise SemanticEmbeddingSystemError("endpoint_origin_mismatch")
         if resolved_base_url is None:
             raise SemanticEmbeddingSystemError("endpoint_origin_mismatch")
+        previous_identity = self._identity
+        if (
+            previous_identity.endpoint_base_url is not None
+            and resolved_base_url != previous_identity.endpoint_base_url
+        ):
+            raise SemanticEmbeddingSystemError("endpoint_identity_mismatch")
 
         app_config = copy.deepcopy(credentials.app_config or {})
         request: dict[str, object] = {
@@ -261,15 +272,16 @@ class NotesEmbeddingExecutor:
         if dimensions is not None:
             request["dimensions"] = dimensions
 
-        previous_identity = self._identity
         attempt_sequence = previous_identity.provider_attempt_sequence + 1
         provider_prompt_tokens = sum(_count_tokens(text, model) for text in texts)
         self._identity = NotesEmbeddingExecutionIdentity(
             model_revision=previous_identity.model_revision,
             endpoint_origin=endpoint_origin,
+            endpoint_base_url=resolved_base_url,
             provider_attempt_sequence=attempt_sequence,
             provider_input_count=len(texts),
             provider_prompt_tokens=provider_prompt_tokens,
+            provider_request_count=1,
             provider_status="started",
         )
         try:
@@ -314,13 +326,27 @@ class NotesEmbeddingExecutor:
             ):
                 raise SemanticEmbeddingSystemError("model_revision_drift")
             await credentials.touch_last_used()
+        except asyncio.CancelledError:
+            self._identity = NotesEmbeddingExecutionIdentity(
+                model_revision=previous_identity.model_revision,
+                endpoint_origin=endpoint_origin,
+                endpoint_base_url=resolved_base_url,
+                provider_attempt_sequence=attempt_sequence,
+                provider_input_count=len(texts),
+                provider_prompt_tokens=provider_prompt_tokens,
+                provider_request_count=1,
+                provider_status="failed",
+            )
+            raise
         except SemanticEmbeddingSystemError:
             self._identity = NotesEmbeddingExecutionIdentity(
                 model_revision=previous_identity.model_revision,
                 endpoint_origin=endpoint_origin,
+                endpoint_base_url=resolved_base_url,
                 provider_attempt_sequence=attempt_sequence,
                 provider_input_count=len(texts),
                 provider_prompt_tokens=provider_prompt_tokens,
+                provider_request_count=1,
                 provider_status="failed",
             )
             raise
@@ -328,18 +354,22 @@ class NotesEmbeddingExecutor:
             self._identity = NotesEmbeddingExecutionIdentity(
                 model_revision=previous_identity.model_revision,
                 endpoint_origin=endpoint_origin,
+                endpoint_base_url=resolved_base_url,
                 provider_attempt_sequence=attempt_sequence,
                 provider_input_count=len(texts),
                 provider_prompt_tokens=provider_prompt_tokens,
+                provider_request_count=1,
                 provider_status="failed",
             )
             raise SemanticEmbeddingSystemError("provider_execution_failed") from None
         self._identity = NotesEmbeddingExecutionIdentity(
             model_revision=actual_revision or self._config.model_revision,
             endpoint_origin=endpoint_origin,
+            endpoint_base_url=resolved_base_url,
             provider_attempt_sequence=attempt_sequence,
             provider_input_count=len(texts),
             provider_prompt_tokens=provider_prompt_tokens,
+            provider_request_count=1,
             provider_status="success",
         )
         return vectors
@@ -360,17 +390,26 @@ def _credential_base_url(
     provider: str,
 ) -> str | None:
     direct = credentials.credential_fields.get("base_url")
-    if _origin(direct) is not None:
-        return direct.rstrip("/")
+    normalized = _normalize_base_url(direct)
+    if normalized is not None:
+        return normalized
     app_config = credentials.app_config or {}
     section_name = PROVIDER_APP_CONFIG_KEYS.get(provider)
     section = app_config.get(section_name) if section_name else None
     if isinstance(section, dict):
         for field_name in _ENDPOINT_FIELDS:
             candidate = section.get(field_name)
-            if _origin(candidate) is not None:
-                return candidate.rstrip("/")
+            normalized = _normalize_base_url(candidate)
+            if normalized is not None:
+                return normalized
     return None
+
+
+def _normalize_base_url(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().rstrip("/")
+    return normalized if _origin(normalized) is not None else None
 
 
 def _cache_key(
@@ -520,6 +559,16 @@ class NotesSemanticEmbedder:
                 _safe_revision(getattr(identity, "model_revision", None))
                 or config.model_revision
             )
+        except asyncio.CancelledError:
+            await self._record_cancelled_provider_usage(
+                runtime=runtime,
+                result=result,
+                before_sequence=before_sequence,
+                config=config,
+                user_id=user_id,
+                operation="notes_semantic_dimension_probe",
+            )
+            raise
         except Exception:
             await self._record_provider_usage(
                 runtime=runtime,
@@ -542,17 +591,18 @@ class NotesSemanticEmbedder:
         )
         if self._dimension_cas is None:
             raise SemanticEmbeddingSystemError("dimension_cas_unavailable")
-        published = self._dimension_cas(config, dimensions)
-        if inspect.isawaitable(published):
-            published = await published
-        if published is not True:
-            raise SemanticEmbeddingSystemError("dimension_cas_lost")
-        return ResolvedDimension(
+        resolved_dimension = ResolvedDimension(
             dimensions=dimensions,
             provider=config.provider,
             model=config.model,
             model_revision=model_revision,
         )
+        published = self._dimension_cas(config, resolved_dimension)
+        if inspect.isawaitable(published):
+            published = await published
+        if published is not True:
+            raise SemanticEmbeddingSystemError("dimension_cas_lost")
+        return resolved_dimension
 
     async def embed_chunks(
         self,
@@ -597,6 +647,16 @@ class NotesSemanticEmbedder:
                 ):
                     raise SemanticEmbeddingSystemError("model_revision_drift")
                 model_revision = actual_revision or model_revision
+            except asyncio.CancelledError:
+                await self._record_cancelled_provider_usage(
+                    runtime=runtime,
+                    result=result,
+                    before_sequence=before_sequence,
+                    config=config,
+                    user_id=user_id,
+                    operation="notes_semantic_embeddings",
+                )
+                raise
             except Exception:
                 await self._record_provider_usage(
                     runtime=runtime,
@@ -630,6 +690,33 @@ class NotesSemanticEmbedder:
             total_tokens=total_tokens,
         )
 
+    async def _record_cancelled_provider_usage(
+        self,
+        *,
+        runtime: NotesEmbeddingRuntime,
+        result: Any,
+        before_sequence: int,
+        config: PendingSemanticConfig | ResolvedSemanticConfig,
+        user_id: str,
+        operation: str,
+    ) -> None:
+        try:
+            await asyncio.shield(
+                self._record_provider_usage(
+                    runtime=runtime,
+                    result=result,
+                    before_sequence=before_sequence,
+                    config=config,
+                    user_id=user_id,
+                    operation=operation,
+                    succeeded=False,
+                )
+            )
+        except asyncio.CancelledError:
+            return
+        except Exception:  # noqa: BLE001 - cancellation must remain the visible outcome
+            return
+
     async def _record_provider_usage(
         self,
         *,
@@ -655,6 +742,10 @@ class NotesSemanticEmbedder:
             cache_misses = int(getattr(identity, "provider_input_count", 0) or 0)
             if cache_misses <= 0:
                 return 0, 0
+
+        provider_request_count = getattr(identity, "provider_request_count", 1)
+        if type(provider_request_count) is not int or provider_request_count != 1:
+            raise SemanticEmbeddingSystemError("provider_usage_unavailable")
 
         identity_count = getattr(identity, "provider_input_count", 0)
         identity_tokens = getattr(identity, "provider_prompt_tokens", 0)
@@ -683,6 +774,7 @@ class NotesSemanticEmbedder:
                 "cache_hit_count": cache_hits,
                 "cache_miss_count": cache_misses,
                 "provider_input_count": cache_misses,
+                "provider_request_count": provider_request_count,
             },
         )
         return provider_prompt_tokens, provider_prompt_tokens
