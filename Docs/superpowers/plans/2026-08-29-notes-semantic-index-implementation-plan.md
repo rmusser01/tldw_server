@@ -339,11 +339,11 @@ Build one reusable contract suite for create/upsert/fetch/query/delete IDs/delet
 
 - [ ] **Step 2: Write failing ChromaDB tests**
 
-Assert generation collection creation includes `{"hnsw:space": "cosine"}` on the first call, writes direct `ids` plus `embeddings` only, never writes documents/metadatas/Note text, never calls `store_in_chroma`, and uses opaque owner/dataset/generation namespace mapping.
+Assert generation storage is first probed without mutation. Existing storage is validated in place; absent storage is created with `{"hnsw:space": "cosine"}`, and a concurrent creator's winner is re-read and validated without rewriting metadata. This avoids legacy `get_or_create_collection` metadata mutation across the declared ChromaDB range. Also assert direct writes contain `ids` plus `embeddings` only, never documents/metadatas/Note text, never call `store_in_chroma`, and use opaque owner/dataset/generation namespace mapping.
 
 - [ ] **Step 3: Write failing pgvector tests**
 
-Against the established PostgreSQL fixture, assert only operator-allowlisted dimensions map to a bounded fixed `vector(dim)` table, composite owner/dataset/generation/vector ID keys, cosine ANN index, forced RLS, parameterized row operations, and generation deletion by rows rather than tables. Verify metric labels cannot contain owner/dataset/generation/table names.
+Against the established PostgreSQL fixture, assert only operator-allowlisted dimensions at or below the 2,000-dimension `vector` HNSW ceiling map to a bounded fixed `vector(dim)` table, composite owner/dataset/generation/vector ID keys, cosine ANN index, forced RLS, parameterized row operations, and generation deletion by rows rather than tables. Bind all physical operations to the exact schema resolved at capability initialization. Verify filtered iterative HNSW uses independent bounded scan-tuple and total candidate-output controls, and metric labels cannot contain owner/dataset/generation/table names.
 
 - [ ] **Step 4: Run the red tests**
 

@@ -62,6 +62,7 @@ class _Backend(SemanticVectorBackend):
 
     def __init__(self) -> None:
         self.calls: list[str] = []
+        self.query_limits: list[tuple[int, int]] = []
 
     async def check_capability(self) -> None:
         self.calls.append("capability")
@@ -83,8 +84,16 @@ class _Backend(SemanticVectorBackend):
             for vector_id in reversed(vector_ids)
         )
 
-    async def query(self, binding: SemanticVectorBinding, query_vectors, *, limit: int):
+    async def query(
+        self,
+        binding: SemanticVectorBinding,
+        query_vectors,
+        *,
+        limit: int,
+        candidate_limit: int,
+    ):
         self.calls.append("query")
+        self.query_limits.append((limit, candidate_limit))
         return tuple(
             (SemanticVectorMatch(vector_id="vector-a", distance=0.0),)
             for _ in query_vectors
@@ -100,7 +109,14 @@ class _Backend(SemanticVectorBackend):
 
 
 class _MalformedResultBackend(_Backend):
-    async def query(self, binding: SemanticVectorBinding, query_vectors, *, limit: int):
+    async def query(
+        self,
+        binding: SemanticVectorBinding,
+        query_vectors,
+        *,
+        limit: int,
+        candidate_limit: int,
+    ):
         return ((SemanticVectorMatch(vector_id="vector-a", distance=object()),),)
 
 
@@ -131,11 +147,13 @@ class _FakePgBackend:
         table_result: object = True,
         rows=(),
         scalar=0,
+        schema_name: str = "public",
     ) -> None:
         self.table_error = table_error
         self.table_result = table_result
         self.rows = rows
         self.scalar = scalar
+        self.schema_name = schema_name
         self.executions: list[tuple[str, object, object | None]] = []
 
     def table_exists(self, table_name: str) -> bool:
@@ -143,11 +161,20 @@ class _FakePgBackend:
             raise self.table_error
         return self.table_result  # type: ignore[return-value]
 
+    def escape_identifier(self, identifier: str) -> str:
+        return '"' + identifier.replace('"', '""') + '"'
+
     def transaction(self):
         return nullcontext(object())
 
     def execute(self, sql: str, params=(), *, connection=None, log_errors=True):
         self.executions.append((sql, params, connection))
+        if "current_schema() AS schema_name" in sql:
+            return _PgResult(rows=({"schema_name": self.schema_name},))
+        if "SELECT EXISTS" in sql and "pg_class" in sql:
+            if self.table_error is not None:
+                raise self.table_error
+            return _PgResult(scalar=self.table_result)
         if "COUNT(*)" in sql:
             return _PgResult(scalar=self.scalar)
         if "embedding::text" in sql or " AS distance" in sql:
@@ -183,8 +210,13 @@ class _PgVersionBackend(_FakePgBackend):
 
 
 class _SchemaPgBackend(_FakePgBackend):
-    def __init__(self, *, malformed_catalog: bool = False) -> None:
-        super().__init__()
+    def __init__(
+        self,
+        *,
+        malformed_catalog: bool = False,
+        schema_name: object = "semantic_vectors",
+    ) -> None:
+        super().__init__(schema_name=schema_name)  # type: ignore[arg-type]
         self.connection = object()
         self.malformed_catalog = malformed_catalog
 
@@ -194,10 +226,15 @@ class _SchemaPgBackend(_FakePgBackend):
     def execute(self, sql: str, params=(), *, connection=None, log_errors=True):
         self.executions.append((sql, params, connection))
         table = "note_semantic_vectors_d384"
+        schema_name = self.schema_name
+        if "current_schema() AS schema_name" in sql:
+            return _PgResult(rows=({"schema_name": schema_name},))
+        if "pg_extension" in sql and "extversion" in sql:
+            return _PgResult(rows=({"extversion": "0.8.0"},))
         if "format_type" in sql:
             rows = (
                 {
-                    "schemaname": "public",
+                    "schemaname": schema_name,
                     "tablename": table,
                     "relkind": "r",
                     "relrowsecurity": True,
@@ -218,10 +255,10 @@ class _SchemaPgBackend(_FakePgBackend):
             return _PgResult(
                 rows=(
                     {
-                        "schemaname": "public",
+                        "schemaname": schema_name,
                         "tablename": table,
                         "indexname": f"{table}_embedding_hnsw",
-                        "indexdef": f"CREATE INDEX {table}_embedding_hnsw ON public.{table} USING hnsw (embedding vector_cosine_ops)",
+                        "indexdef": f"CREATE INDEX {table}_embedding_hnsw ON {schema_name}.{table} USING hnsw (embedding vector_cosine_ops)",
                         "key_definition": "embedding",
                         "access_method": "hnsw",
                         "operator_class": "vector_cosine_ops",
@@ -241,7 +278,7 @@ class _SchemaPgBackend(_FakePgBackend):
             return _PgResult(
                 rows=(
                     {
-                        "schemaname": "public",
+                        "schemaname": schema_name,
                         "tablename": table,
                         "policyname": f"{table}_tenant_isolation",
                         "permissive": "PERMISSIVE",
@@ -255,6 +292,20 @@ class _SchemaPgBackend(_FakePgBackend):
         return _PgResult()
 
 
+def _ready_pg_backend(
+    raw_backend: _FakePgBackend,
+    *,
+    hnsw_max_scan_tuples: int = 10_000,
+) -> PostgresSemanticVectorBackend:
+    backend = PostgresSemanticVectorBackend(
+        raw_backend,
+        allowed_dimensions=frozenset({384}),
+        hnsw_max_scan_tuples=hnsw_max_scan_tuples,
+    )
+    backend._schema_name = raw_backend.schema_name
+    return backend
+
+
 async def _invoke_pg_operation(
     backend: PostgresSemanticVectorBackend,
     operation: str,
@@ -266,7 +317,7 @@ async def _invoke_pg_operation(
     elif operation == "fetch":
         await backend.fetch(binding, (vector.vector_id,))
     elif operation == "query":
-        await backend.query(binding, (vector.embedding,), limit=1)
+        await backend.query(binding, (vector.embedding,), limit=1, candidate_limit=2)
     elif operation == "delete_ids":
         await backend.delete_ids(binding, (vector.vector_id,))
     else:
@@ -299,7 +350,9 @@ async def test_facade_revalidates_authoritative_binding_before_every_operation()
 
 
 @pytest.mark.asyncio
-async def test_facade_authority_lookup_does_not_block_event_loop() -> None:
+@pytest.mark.parametrize("iteration", range(20))
+async def test_facade_authority_lookup_does_not_block_event_loop(iteration: int) -> None:
+    assert 0 <= iteration < 20
     store = NotesSemanticVectorStore(authority=_SlowAuthority(), backend=_Backend())
     ticker = asyncio.create_task(asyncio.sleep(0.01))
 
@@ -417,6 +470,58 @@ async def test_facade_rejects_oversized_or_boolean_query_batches_before_authorit
 
 
 @pytest.mark.asyncio
+async def test_facade_derives_candidate_limit_and_enforces_total_before_authority_io() -> None:
+    authority = _Authority()
+    backend = _Backend()
+    store = NotesSemanticVectorStore(
+        authority=authority,
+        backend=backend,
+        max_query_neighbors=3,
+        max_query_vectors_per_call=2,
+        max_query_candidates_per_call=12,
+        query_candidate_oversampling_factor=2,
+    )
+    queries = (axis_vector(384, 0), axis_vector(384, 1))
+
+    await store.query("dataset-a", "generation-a", queries, limit=3)
+
+    assert backend.query_limits == [(3, 6)]
+
+    constrained = NotesSemanticVectorStore(
+        authority=authority,
+        backend=backend,
+        max_query_neighbors=3,
+        max_query_vectors_per_call=2,
+        max_query_candidates_per_call=11,
+        query_candidate_oversampling_factor=2,
+    )
+    authority.calls = 0
+    backend.calls.clear()
+    with pytest.raises(SemanticVectorValidationError) as exc_info:
+        await constrained.query("dataset-a", "generation-a", queries, limit=3)
+    assert exc_info.value.code == "notes_semantic_vector_query_candidate_budget_exceeded"
+    assert authority.calls == 0
+    assert backend.calls == []
+
+    hard_backend = _Backend()
+    hard_store = NotesSemanticVectorStore(
+        authority=_Authority(),
+        backend=hard_backend,
+        max_query_neighbors=100,
+        max_query_vectors_per_call=256,
+        max_query_candidates_per_call=204_800,
+        query_candidate_oversampling_factor=8,
+    )
+    await hard_store.query(
+        "dataset-a",
+        "generation-a",
+        (axis_vector(384, 0),) * 256,
+        limit=100,
+    )
+    assert hard_backend.query_limits == [(100, 800)]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "operation",
     ("upsert", "fetch", "query", "delete_ids", "delete_generation"),
@@ -424,9 +529,8 @@ async def test_facade_rejects_oversized_or_boolean_query_batches_before_authorit
 async def test_pgvector_operations_map_table_probe_failures_to_stable_error(
     operation: str,
 ) -> None:
-    backend = PostgresSemanticVectorBackend(
-        _FakePgBackend(table_error=DatabaseError("sensitive table detail")),
-        allowed_dimensions=frozenset({384}),
+    backend = _ready_pg_backend(
+        _FakePgBackend(table_error=DatabaseError("sensitive table detail"))
     )
 
     with pytest.raises(SemanticVectorError) as exc_info:
@@ -444,10 +548,7 @@ async def test_pgvector_operations_map_table_probe_failures_to_stable_error(
 async def test_pgvector_table_probe_rejects_ambiguous_absence_results(
     ambiguous: object,
 ) -> None:
-    backend = PostgresSemanticVectorBackend(
-        _FakePgBackend(table_result=ambiguous),
-        allowed_dimensions=frozenset({384}),
-    )
+    backend = _ready_pg_backend(_FakePgBackend(table_result=ambiguous))
 
     with pytest.raises(SemanticVectorError) as exc_info:
         await _invoke_pg_operation(backend, "delete_generation")
@@ -465,10 +566,7 @@ async def test_pgvector_table_probe_rejects_ambiguous_absence_results(
     ),
 )
 async def test_pgvector_fetch_maps_malformed_rows_to_stable_error(row: dict) -> None:
-    backend = PostgresSemanticVectorBackend(
-        _FakePgBackend(rows=(row,)),
-        allowed_dimensions=frozenset({384}),
-    )
+    backend = _ready_pg_backend(_FakePgBackend(rows=(row,)))
     binding = SemanticVectorBinding("owner-a", "dataset-a", "generation-a", 384)
 
     with pytest.raises(SemanticVectorError) as exc_info:
@@ -488,10 +586,7 @@ async def test_pgvector_cleanup_maps_malformed_confirmation_to_stable_error(
     operation: str,
     malformed: object,
 ) -> None:
-    backend = PostgresSemanticVectorBackend(
-        _FakePgBackend(scalar=malformed),
-        allowed_dimensions=frozenset({384}),
-    )
+    backend = _ready_pg_backend(_FakePgBackend(scalar=malformed))
 
     with pytest.raises(SemanticVectorError) as exc_info:
         await _invoke_pg_operation(backend, operation)
@@ -502,14 +597,16 @@ async def test_pgvector_cleanup_maps_malformed_confirmation_to_stable_error(
 @pytest.mark.asyncio
 async def test_pgvector_query_maps_malformed_rows_to_stable_result_error() -> None:
     raw_backend = _FakePgBackend(rows=({},))
-    backend = PostgresSemanticVectorBackend(
-        raw_backend,
-        allowed_dimensions=frozenset({384}),
-    )
+    backend = _ready_pg_backend(raw_backend)
     binding = SemanticVectorBinding("owner-a", "dataset-a", "generation-a", 384)
 
     with pytest.raises(SemanticVectorError) as exc_info:
-        await backend.query(binding, (axis_vector(384, 0),), limit=1)
+        await backend.query(
+            binding,
+            (axis_vector(384, 0),),
+            limit=1,
+            candidate_limit=2,
+        )
 
     assert exc_info.value.code == "notes_semantic_vector_backend_result_invalid"
 
@@ -517,14 +614,15 @@ async def test_pgvector_query_maps_malformed_rows_to_stable_result_error() -> No
 @pytest.mark.asyncio
 async def test_pgvector_query_uses_bounded_iterative_hnsw_with_tenant_filters() -> None:
     raw_backend = _FakePgBackend(rows=())
-    backend = PostgresSemanticVectorBackend(
-        raw_backend,
-        allowed_dimensions=frozenset({384}),
-        hnsw_max_scan_tuples=1_234,
-    )
+    backend = _ready_pg_backend(raw_backend, hnsw_max_scan_tuples=1_234)
     binding = SemanticVectorBinding("owner-a", "dataset-a", "generation-a", 384)
 
-    await backend.query(binding, (axis_vector(384, 0),), limit=1)
+    await backend.query(
+        binding,
+        (axis_vector(384, 0),),
+        limit=1,
+        candidate_limit=7,
+    )
 
     query_sql = next(
         sql for sql, _params, _connection in raw_backend.executions if " AS distance" in sql
@@ -539,6 +637,12 @@ async def test_pgvector_query_uses_bounded_iterative_hnsw_with_tenant_filters() 
     assert "WHERE owner_user_id=? AND dataset_id=? AND generation_id=?" in query_sql
     assert "ORDER BY embedding <=> ?::vector LIMIT ?" in query_sql
     assert ") AS candidates ORDER BY distance,vector_id LIMIT ?" in query_sql
+    query_params = next(
+        params
+        for sql, params, _connection in raw_backend.executions
+        if " AS distance" in sql
+    )
+    assert query_params[-2:] == (7, 1)
     assert settings == [
         ("SELECT set_config('hnsw.iterative_scan', ?, true)", ("strict_order",)),
         ("SELECT set_config('hnsw.max_scan_tuples', ?, true)", ("1234",)),
@@ -558,14 +662,14 @@ async def test_pgvector_rejects_extension_versions_before_iterative_hnsw() -> No
     assert exc_info.value.code == "notes_semantic_pgvector_extension_version_unsupported"
 
 
-def test_pgvector_verifies_schema_inside_repair_transaction_and_current_schema() -> None:
+def test_pgvector_resolves_and_verifies_exact_schema_inside_repair_transaction() -> None:
     raw_backend = _SchemaPgBackend()
     backend = PostgresSemanticVectorBackend(
         raw_backend,
         allowed_dimensions=frozenset({384}),
     )
 
-    backend._ensure_dimension_table(384)
+    backend._check_capability_sync()
 
     catalog_queries = [
         (sql, connection)
@@ -581,8 +685,54 @@ def test_pgvector_verifies_schema_inside_repair_transaction_and_current_schema()
         )
     ]
     assert len(catalog_queries) == 4
-    assert all("current_schema()" in sql for sql, _connection in catalog_queries)
+    assert all("current_schema()" not in sql for sql, _connection in catalog_queries)
+    assert all(
+        params[0] == "semantic_vectors"
+        for sql, params, _connection in raw_backend.executions
+        if any(
+            marker in sql
+            for marker in (
+                "format_type",
+                "pg_get_constraintdef",
+                "pg_get_indexdef",
+                "pg_policies",
+            )
+        )
+    )
     assert all(connection is raw_backend.connection for _sql, connection in catalog_queries)
+    ddl = "\n".join(sql for sql, _params, _connection in raw_backend.executions)
+    assert '"semantic_vectors"."note_semantic_vectors_d384"' in ddl
+
+
+@pytest.mark.asyncio
+async def test_pgvector_rejects_3072_dimension_as_typed_capability_failure() -> None:
+    raw_backend = _FakePgBackend()
+    backend = PostgresSemanticVectorBackend(
+        raw_backend,
+        allowed_dimensions=frozenset({3_072}),
+    )
+
+    with pytest.raises(SemanticVectorCapabilityError) as exc_info:
+        await backend.check_capability()
+
+    assert exc_info.value.code == "notes_semantic_pgvector_dimensions_unsupported"
+    assert raw_backend.executions == []
+
+
+@pytest.mark.parametrize(
+    "schema_name",
+    (None, True, "", "bad\x00schema", "x" * 64, "\ud800"),
+)
+def test_pgvector_rejects_malformed_resolved_schema(schema_name: object) -> None:
+    backend = PostgresSemanticVectorBackend(
+        _SchemaPgBackend(schema_name=schema_name),
+        allowed_dimensions=frozenset({384}),
+    )
+
+    with pytest.raises(SemanticVectorCapabilityError) as exc_info:
+        backend._check_capability_sync()
+
+    assert exc_info.value.code == "notes_semantic_pgvector_schema_unavailable"
 
 
 def test_pgvector_maps_malformed_catalog_shape_to_schema_capability_error() -> None:
@@ -592,7 +742,7 @@ def test_pgvector_maps_malformed_catalog_shape_to_schema_capability_error() -> N
     )
 
     with pytest.raises(SemanticVectorCapabilityError) as exc_info:
-        backend._ensure_dimension_table(384)
+        backend._check_capability_sync()
 
     assert exc_info.value.code == "notes_semantic_pgvector_schema_unavailable"
 

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import math
+import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -29,6 +31,7 @@ _CHROMA_OPERATION_ERRORS = (
     AttributeError,
     ChromaError,
     ConnectionError,
+    IndexError,
     KeyError,
     OSError,
     RuntimeError,
@@ -36,6 +39,10 @@ _CHROMA_OPERATION_ERRORS = (
     TypeError,
     ValueError,
 )
+_LEGACY_COLLECTION_NAME = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9._-]{1,61}[A-Za-z0-9]$"
+)
+_IPV4_SHAPE = re.compile(r"^[0-9]{1,3}(?:\.[0-9]{1,3}){3}$")
 
 
 def _namespace(binding: SemanticVectorBinding) -> str:
@@ -47,6 +54,36 @@ def _namespace(binding: SemanticVectorBinding) -> str:
 
 def _sequence_or_empty(value: Any) -> tuple[Any, ...]:
     return () if value is None else tuple(value)
+
+
+def _strict_sequence(value: object) -> tuple[object, ...]:
+    if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
+        raise SemanticVectorError("notes_semantic_vector_backend_result_invalid")
+    try:
+        return tuple(value)
+    except _CHROMA_OPERATION_ERRORS:
+        raise SemanticVectorError(
+            "notes_semantic_vector_backend_result_invalid"
+        ) from None
+
+
+def _legacy_collection_name(value: object) -> str:
+    name = value if type(value) is str else getattr(value, "name", None)
+    if type(name) is not str:
+        raise SemanticVectorError("notes_semantic_vector_backend_result_invalid")
+    try:
+        name.encode("utf-8")
+    except UnicodeEncodeError:
+        raise SemanticVectorError(
+            "notes_semantic_vector_backend_result_invalid"
+        ) from None
+    if (
+        _LEGACY_COLLECTION_NAME.fullmatch(name) is None
+        or ".." in name
+        or _IPV4_SHAPE.fullmatch(name) is not None
+    ):
+        raise SemanticVectorError("notes_semantic_vector_backend_result_invalid")
+    return name
 
 
 class ChromaSemanticVectorBackend:
@@ -61,9 +98,9 @@ class ChromaSemanticVectorBackend:
     async def check_capability(self) -> None:
         client = self._client
         required = (
+            "create_collection",
             "delete_collection",
             "get_collection",
-            "get_or_create_collection",
             "list_collections",
         )
         if client is None or any(not callable(getattr(client, name, None)) for name in required):
@@ -76,14 +113,28 @@ class ChromaSemanticVectorBackend:
 
     def _create_sync(self, binding: SemanticVectorBinding) -> None:
         try:
-            collection = self._client.get_or_create_collection(
-                name=_namespace(binding),
-                metadata={"hnsw:space": "cosine"},
-            )
-        except _CHROMA_OPERATION_ERRORS:
+            collection = self._collection_or_none(binding)
+        except SemanticVectorError:
             raise SemanticVectorCapabilityError("notes_semantic_chroma_unavailable") from None
+        if collection is None:
+            try:
+                collection = self._client.create_collection(
+                    name=_namespace(binding),
+                    metadata={"hnsw:space": "cosine"},
+                )
+            except _CHROMA_OPERATION_ERRORS:
+                try:
+                    collection = self._collection_or_none(binding)
+                except SemanticVectorError:
+                    raise SemanticVectorCapabilityError(
+                        "notes_semantic_chroma_unavailable"
+                    ) from None
+                if collection is None:
+                    raise SemanticVectorCapabilityError(
+                        "notes_semantic_chroma_unavailable"
+                    ) from None
         metadata = getattr(collection, "metadata", None)
-        if not isinstance(metadata, dict) or metadata.get("hnsw:space") != "cosine":
+        if not isinstance(metadata, Mapping) or metadata.get("hnsw:space") != "cosine":
             raise SemanticVectorCapabilityError("notes_semantic_chroma_cosine_unavailable")
         for method in ("delete", "get", "query", "upsert"):
             if not callable(getattr(collection, method, None)):
@@ -113,13 +164,19 @@ class ChromaSemanticVectorBackend:
                 "notes_semantic_vector_backend_result_invalid"
             )
         names: list[str] = []
-        for item in listed:
-            name = item if isinstance(item, str) else getattr(item, "name", None)
-            if not isinstance(name, str):
-                raise SemanticVectorError(
-                    "notes_semantic_vector_backend_result_invalid"
-                )
-            names.append(name)
+        try:
+            for item in listed:
+                names.append(_legacy_collection_name(item))
+        except SemanticVectorError:
+            raise
+        except _CHROMA_OPERATION_ERRORS:
+            raise SemanticVectorError(
+                "notes_semantic_vector_backend_result_invalid"
+            ) from None
+        if len(names) != len(set(names)):
+            raise SemanticVectorError(
+                "notes_semantic_vector_backend_result_invalid"
+            )
         if collection_name in names:
             raise SemanticVectorError("notes_semantic_chroma_operation_failed")
         return None
@@ -193,6 +250,7 @@ class ChromaSemanticVectorBackend:
         binding: SemanticVectorBinding,
         query_vectors: tuple[tuple[float, ...], ...],
         limit: int,
+        candidate_limit: int,
     ) -> tuple[tuple[SemanticVectorMatch, ...], ...]:
         collection = self._collection_or_none(binding)
         if collection is None:
@@ -200,30 +258,60 @@ class ChromaSemanticVectorBackend:
         try:
             result = collection.query(
                 query_embeddings=[list(vector) for vector in query_vectors],
-                n_results=limit,
+                n_results=candidate_limit,
                 include=["distances"],
             )
-            ids_by_query = _sequence_or_empty(result.get("ids"))
-            distances_by_query = _sequence_or_empty(result.get("distances"))
         except _CHROMA_OPERATION_ERRORS:
             raise SemanticVectorError("notes_semantic_chroma_operation_failed") from None
+        try:
+            if (
+                not isinstance(result, Mapping)
+                or "ids" not in result
+                or "distances" not in result
+            ):
+                raise SemanticVectorError(
+                    "notes_semantic_vector_backend_result_invalid"
+                )
+            ids_by_query = _strict_sequence(result["ids"])
+            distances_by_query = _strict_sequence(result["distances"])
+        except SemanticVectorError:
+            raise
+        except _CHROMA_OPERATION_ERRORS:
+            raise SemanticVectorError(
+                "notes_semantic_vector_backend_result_invalid"
+            ) from None
         if len(ids_by_query) != len(query_vectors) or len(distances_by_query) != len(query_vectors):
             raise SemanticVectorError("notes_semantic_vector_backend_result_invalid")
         batches: list[tuple[SemanticVectorMatch, ...]] = []
-        for ids, distances in zip(ids_by_query, distances_by_query):
+        for raw_ids, raw_distances in zip(ids_by_query, distances_by_query):
+            ids = _strict_sequence(raw_ids)
+            distances = _strict_sequence(raw_distances)
             if len(ids) != len(distances):
                 raise SemanticVectorError("notes_semantic_vector_backend_result_invalid")
-            try:
-                batches.append(
-                    tuple(
-                        SemanticVectorMatch(vector_id=str(vector_id), distance=float(distance))
-                        for vector_id, distance in zip(ids, distances)
+            matches: list[SemanticVectorMatch] = []
+            for vector_id, distance in zip(ids, distances):
+                if type(vector_id) is not str or type(distance) not in (int, float):
+                    raise SemanticVectorError(
+                        "notes_semantic_vector_backend_result_invalid"
+                    )
+                try:
+                    finite = math.isfinite(distance)
+                    normalized_distance = float(distance)
+                except (OverflowError, TypeError, ValueError):
+                    raise SemanticVectorError(
+                        "notes_semantic_vector_backend_result_invalid"
+                    ) from None
+                if not finite:
+                    raise SemanticVectorError(
+                        "notes_semantic_vector_backend_result_invalid"
+                    )
+                matches.append(
+                    SemanticVectorMatch(
+                        vector_id=vector_id,
+                        distance=normalized_distance,
                     )
                 )
-            except (TypeError, ValueError, OverflowError):
-                raise SemanticVectorError(
-                    "notes_semantic_vector_backend_result_invalid"
-                ) from None
+            batches.append(tuple(matches))
         return tuple(batches)
 
     async def query(
@@ -232,12 +320,14 @@ class ChromaSemanticVectorBackend:
         query_vectors: tuple[tuple[float, ...], ...],
         *,
         limit: int,
+        candidate_limit: int,
     ) -> tuple[tuple[SemanticVectorMatch, ...], ...]:
         return await asyncio.to_thread(
             self._query_sync,
             binding,
             query_vectors,
             limit,
+            candidate_limit,
         )
 
     def _delete_ids_sync(

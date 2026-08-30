@@ -106,6 +106,7 @@ class SemanticVectorBackend(Protocol):
         query_vectors: tuple[tuple[float, ...], ...],
         *,
         limit: int,
+        candidate_limit: int,
     ) -> tuple[tuple[SemanticVectorMatch, ...], ...]: ...
 
     async def delete_ids(
@@ -178,13 +179,17 @@ class NotesSemanticVectorStore:
         *,
         authority: SemanticGenerationAuthority,
         backend: SemanticVectorBackend,
-        max_query_neighbors: int = 100,
+        max_query_neighbors: int = 50,
         max_query_vectors_per_call: int = 16,
+        max_query_candidates_per_call: int = 1_600,
+        query_candidate_oversampling_factor: int = 2,
     ) -> None:
         self._authority = authority
         self._backend = backend
         self._max_query_neighbors = max_query_neighbors
         self._max_query_vectors_per_call = max_query_vectors_per_call
+        self._max_query_candidates_per_call = max_query_candidates_per_call
+        self._query_candidate_oversampling_factor = query_candidate_oversampling_factor
 
     async def _binding(
         self,
@@ -297,6 +302,11 @@ class NotesSemanticVectorStore:
             )
         if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= self._max_query_neighbors:
             raise SemanticVectorValidationError("notes_semantic_vector_query_limit_invalid")
+        candidate_limit = limit * self._query_candidate_oversampling_factor
+        if query_count * candidate_limit > self._max_query_candidates_per_call:
+            raise SemanticVectorValidationError(
+                "notes_semantic_vector_query_candidate_budget_exceeded"
+            )
         binding = await self._binding(dataset_id, generation_id)
         normalized = tuple(
             _validated_embedding(vector, dimensions=binding.dimensions)
@@ -304,7 +314,12 @@ class NotesSemanticVectorStore:
         )
         if not normalized:
             return ()
-        batches = await self._backend.query(binding, normalized, limit=limit)
+        batches = await self._backend.query(
+            binding,
+            normalized,
+            limit=limit,
+            candidate_limit=candidate_limit,
+        )
         if len(batches) != len(normalized):
             raise SemanticVectorValidationError("notes_semantic_vector_backend_result_invalid")
         validated_batches: list[tuple[SemanticVectorMatch, ...]] = []
@@ -388,6 +403,8 @@ async def create_semantic_vector_store(
         backend=backend,
         max_query_neighbors=settings.max_query_neighbors,
         max_query_vectors_per_call=settings.max_query_vectors_per_call,
+        max_query_candidates_per_call=settings.max_query_candidates_per_call,
+        query_candidate_oversampling_factor=settings.query_candidate_oversampling_factor,
     )
 
 

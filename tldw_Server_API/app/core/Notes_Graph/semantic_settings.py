@@ -18,12 +18,14 @@ _HARD_MAXIMUMS = {
     "max_provider_requests_per_run": 10_000,
     "max_query_neighbors": 100,
     "max_query_vectors_per_call": 256,
+    "max_query_candidates_per_call": 204_800,
+    "query_candidate_oversampling_factor": 8,
     "max_cleanup_vectors_per_run": 100_000,
     "max_retries": 10,
     "retry_backoff_seconds": 3_600,
     "retry_max_backoff_seconds": 86_400,
     "pgvector_hnsw_max_scan_tuples": 100_000,
-    "pgvector_dimension": 32_768,
+    "pgvector_dimension": 2_000,
 }
 
 
@@ -45,12 +47,14 @@ class SemanticIndexSettings:
     max_provider_requests_per_run: int = 1_000
     max_query_neighbors: int = 50
     max_query_vectors_per_call: int = 16
+    max_query_candidates_per_call: int = 1_600
+    query_candidate_oversampling_factor: int = 2
     max_cleanup_vectors_per_run: int = 10_000
     max_retries: int = 3
     retry_backoff_seconds: int = 1
     retry_max_backoff_seconds: int = 60
     pgvector_hnsw_max_scan_tuples: int = 10_000
-    pgvector_allowed_dimensions: frozenset[int] = frozenset({384, 768, 1_024, 1_536, 3_072})
+    pgvector_allowed_dimensions: frozenset[int] = frozenset({384, 768, 1_024, 1_536})
 
     def __post_init__(self) -> None:
         if type(self.indexing_enabled) is not bool:
@@ -78,6 +82,20 @@ class SemanticIndexSettings:
         ):
             if getattr(self, smaller) > getattr(self, larger):
                 raise ValueError(f"{smaller} cannot exceed {larger}")
+        candidates_per_query = (
+            self.max_query_neighbors * self.query_candidate_oversampling_factor
+        )
+        if candidates_per_query > self.pgvector_hnsw_max_scan_tuples:
+            raise ValueError(
+                "maximum candidates per query cannot exceed pgvector_hnsw_max_scan_tuples"
+            )
+        if (
+            self.max_query_vectors_per_call * candidates_per_query
+            > self.max_query_candidates_per_call
+        ):
+            raise ValueError(
+                "maximum query candidate product cannot exceed max_query_candidates_per_call"
+            )
         if not isinstance(self.pgvector_allowed_dimensions, frozenset):
             raise TypeError("pgvector_allowed_dimensions must be a frozenset")
         if not self.pgvector_allowed_dimensions:

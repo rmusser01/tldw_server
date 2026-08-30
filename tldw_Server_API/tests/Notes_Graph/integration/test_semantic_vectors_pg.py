@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -11,7 +12,7 @@ from uuid import uuid4
 import pytest
 import yaml
 
-from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig
+from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig, DatabaseError
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.chacha.note_semantic_models import SemanticDimensionState
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
@@ -436,7 +437,7 @@ async def test_pgvector_query_is_bounded_and_never_returns_other_generation_deco
                     DATASET_ID,
                     generation_id,
                     "[1" + ",0" * (DIMENSIONS - 1) + "]",
-                    settings.pgvector_hnsw_max_scan_tuples,
+                    settings.query_candidate_oversampling_factor,
                     1,
                 ),
                 connection=connection,
@@ -598,7 +599,7 @@ async def test_pgvector_verification_is_schema_bound_and_rejects_wrong_index(
 
 
 def test_pgvector_identifiers_and_metric_labels_are_operator_bounded() -> None:
-    assert set(PGVECTOR_TABLES) == {384, 768, 1024, 1536, 3072}
+    assert set(PGVECTOR_TABLES) == {384, 768, 1024, 1536}
     assert all(name.startswith("note_semantic_vectors_d") for name in PGVECTOR_TABLES.values())
     assert frozenset({"backend", "operation", "outcome"}) == SEMANTIC_VECTOR_METRIC_LABELS
     assert SEMANTIC_VECTOR_METRIC_LABELS.isdisjoint(
@@ -650,17 +651,150 @@ async def test_pgvector_rejects_non_allowlisted_dimension_before_schema_io(
     backend = DatabaseBackendFactory.create_backend(pg_database_config)
     db = CharactersRAGDB(":memory:", client_id="owner-a", backend=backend)
     try:
-        with pytest.raises(SemanticVectorCapabilityError) as exc_info:
+        with pytest.raises(ValueError, match="pgvector dimensions"):
+            SemanticIndexSettings(pgvector_allowed_dimensions=frozenset({3_072}))
+        assert not backend.table_exists("note_semantic_vectors_d3072")
+    finally:
+        db.close_all_connections()
+        backend.get_pool().close_all()
+
+
+@pytest.mark.asyncio
+async def test_pgvector_default_settings_have_live_capability_without_3072(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = CharactersRAGDB(":memory:", client_id="owner-a", backend=backend)
+    try:
+        try:
             await create_semantic_vector_store(
                 "pgvector",
                 authority=db.note_semantic_store,
                 postgres_backend=backend,
-                settings=SemanticIndexSettings(
-                    pgvector_allowed_dimensions=frozenset({32_768})
-                ),
             )
-        assert exc_info.value.code == "notes_semantic_pgvector_dimensions_unsupported"
-        assert not backend.table_exists("note_semantic_vectors_d32768")
+        except SemanticVectorCapabilityError as exc:
+            _skip_or_fail_unavailable_pgvector(exc)
+
+        rows = backend.execute(
+            "SELECT c.relname FROM pg_class c "
+            "JOIN pg_namespace n ON n.oid=c.relnamespace "
+            "WHERE n.nspname=current_schema() AND c.relname LIKE 'note_semantic_vectors_d%' "
+            "AND c.relkind='r' "
+            "ORDER BY c.relname"
+        ).rows
+        assert [row["relname"] for row in rows] == sorted(PGVECTOR_TABLES.values())
+        assert "note_semantic_vectors_d3072" not in {
+            row["relname"] for row in rows
+        }
     finally:
+        db.close_all_connections()
+        backend.get_pool().close_all()
+
+
+@pytest.mark.asyncio
+async def test_pgvector_storage_stays_bound_to_resolved_schema_when_search_path_changes(
+    pg_database_config: DatabaseConfig,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    setup_backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    target_schema = f"semantic_target_{uuid4().hex[:8]}"
+    other_schema = f"semantic_other_{uuid4().hex[:8]}"
+    table = PGVECTOR_TABLES[DIMENSIONS]
+    ident = setup_backend.escape_identifier
+    def qualified(schema: str) -> str:
+        return f"{ident(schema)}.{ident(table)}"
+    try:
+        try:
+            setup_backend.execute("CREATE EXTENSION IF NOT EXISTS vector")
+        except DatabaseError:
+            _skip_or_fail_unavailable_pgvector(
+                SemanticVectorCapabilityError(
+                    "notes_semantic_pgvector_extension_unavailable"
+                )
+            )
+        with setup_backend.transaction() as connection:
+            setup_backend.execute(
+                f"CREATE SCHEMA {ident(target_schema)}",  # nosec B608
+                connection=connection,
+            )
+            setup_backend.execute(
+                f"CREATE SCHEMA {ident(other_schema)}",  # nosec B608
+                connection=connection,
+            )
+            for schema in ("public", other_schema):
+                setup_backend.execute(
+                    f"CREATE TABLE {qualified(schema)} ("  # nosec B608
+                    "owner_user_id TEXT NOT NULL,dataset_id TEXT NOT NULL,"
+                    "generation_id TEXT NOT NULL,vector_id TEXT NOT NULL,"
+                    f"embedding vector({DIMENSIONS}) NOT NULL)",
+                    connection=connection,
+                )
+                setup_backend.execute(
+                    f"INSERT INTO {qualified(schema)} VALUES (?,?,?,?,?::vector)",  # nosec B608
+                    (
+                        "owner-a",
+                        DATASET_ID,
+                        "decoy-generation",
+                        f"{schema}-decoy",
+                        "[1" + ",0" * (DIMENSIONS - 1) + "]",
+                    ),
+                    connection=connection,
+                )
+    finally:
+        setup_backend.get_pool().close_all()
+
+    monkeypatch.setenv("PGOPTIONS", f"-c search_path={target_schema},public")
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    original_transaction = backend.transaction
+    db = CharactersRAGDB(str(tmp_path / "schema-authority.sqlite"), client_id="owner-a")
+    generation_id = _generation(db)
+    settings = SemanticIndexSettings(pgvector_allowed_dimensions=frozenset({DIMENSIONS}))
+    try:
+        store = await create_semantic_vector_store(
+            "pgvector",
+            authority=db.note_semantic_store,
+            postgres_backend=backend,
+            settings=settings,
+        )
+        await store.upsert(
+            DATASET_ID,
+            generation_id,
+            (SemanticVector("target-row", axis_vector(DIMENSIONS, 0)),),
+        )
+
+        @contextmanager
+        def changed_search_path_transaction():
+            with original_transaction() as connection:
+                backend.execute(
+                    f"SET LOCAL search_path={ident('public')},{ident(other_schema)}",  # nosec B608
+                    connection=connection,
+                )
+                yield connection
+
+        backend.transaction = changed_search_path_transaction  # type: ignore[method-assign]
+        cleanup = await store.delete_generation(DATASET_ID, generation_id)
+        backend.transaction = original_transaction  # type: ignore[method-assign]
+
+        assert cleanup.confirmed_absent is True
+        target_count = backend.execute(
+            f"SELECT COUNT(*) AS count FROM {qualified(target_schema)} "  # nosec B608
+            "WHERE owner_user_id=? AND dataset_id=? AND generation_id=?",
+            ("owner-a", DATASET_ID, generation_id),
+        ).scalar
+        public_count = backend.execute(
+            f"SELECT COUNT(*) AS count FROM {qualified('public')}"  # nosec B608
+        ).scalar
+        other_count = backend.execute(
+            f"SELECT COUNT(*) AS count FROM {qualified(other_schema)}"  # nosec B608
+        ).scalar
+        assert (target_count, public_count, other_count) == (0, 1, 1)
+
+        backend.transaction = changed_search_path_transaction  # type: ignore[method-assign]
+        repeated = await store.delete_generation(DATASET_ID, generation_id)
+        backend.transaction = original_transaction  # type: ignore[method-assign]
+        assert repeated.confirmed_absent is True
+    finally:
+        backend.transaction = original_transaction  # type: ignore[method-assign]
         db.close_all_connections()
         backend.get_pool().close_all()
