@@ -2015,6 +2015,36 @@ failure inversion, or temporary path, while the prior pytest-token,
 pinned-scope, and OpenAPI command audits remain clean. No pytest command was
 run. Task 12 remains blocked pending clean independent scoped re-review.
 
+#### Task 11 Fix Round 5: Make Verification Gates Atomic
+
+Independent Fix Round 4 re-review found 0 Critical, 2 Important, and 0 Minor
+issues. Fix Round 4 closed Step 5's Git/`rg` status defect, and Fix Round 2's
+definitive host-enabled, cache-cleared `1,489 passed` evidence remains valid.
+The final documentation defects are status masking in the remaining executable
+Task 12 blocks: Step 4 could overwrite Ruff, diff, or Bandit failure with a
+later clean scan, while Steps 6 and 8 could overwrite failed Make, Backlog,
+staging, or validation commands with later success.
+
+Fix Round 5 is the final docs-only correction. Step 4 short-circuits Ruff, both
+diff checks, and the sensitive scan before running Bandit last through an exact
+status helper. Bandit status 0 succeeds, status 1 remains a visible manual
+baseline/High-review blocker with status 1, and every status greater than 1
+propagates as an execution error. Steps 6 and 8 short-circuit every required
+command in order. Step 5's reviewed helpers remain unchanged. No production
+code, test, schema, migration, OpenAPI artifact, runtime behavior, or public API
+changes in this round.
+
+The final docs-only correction is complete at the pre-commit tree. All seven
+Task 12 blocks pass `bash -n` under Bash 3.2.57. Step 4 stub probes preserve
+Ruff, both diff, sensitive match/error, and Bandit 0/1/2 statuses while proving
+short-circuit order. The real automated pre-Bandit checks pass; Bandit reports
+17 Low, 43 Medium, 0 High and raw status 1, so the complete Step 4 block
+correctly remains 1 pending Task 12 manual classification. Step 5 is unchanged
+and exits 0. Extracted Step 6 and Step 8 stub probes preserve each Make,
+Backlog, stage, check, and commit failure and prevent later actions. Prior
+pytest-token, pinned-scope, and OpenAPI audits remain clean. No pytest command
+was run. Task 12 remains blocked pending clean independent scoped re-review.
+
 ### Task 12: Run The Complete PR 2 Verification And Security Gates
 
 **Files:**
@@ -2145,6 +2175,28 @@ require_no_rg_matches() {
   esac
 }
 
+run_bandit_review_gate() {
+  local bandit_status
+
+  if "$@"; then
+    bandit_status=0
+  else
+    bandit_status=$?
+  fi
+  case "$bandit_status" in
+    0)
+      return 0
+      ;;
+    1)
+      printf 'Bandit findings require manual baseline and High-severity review; preserving status 1\n' >&2
+      return 1
+      ;;
+    *)
+      return "$bandit_status"
+      ;;
+  esac
+}
+
 /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m ruff check \
   tldw_Server_API/app/core/Admin_Webhooks \
   tldw_Server_API/app/core/DB_Management/admin_webhooks_repository.py \
@@ -2157,37 +2209,41 @@ require_no_rg_matches() {
   tldw_Server_API/app/services/admin_webhook_delivery_runtime.py \
   tldw_Server_API/app/services/startup_optional_workers.py \
   tldw_Server_API/app/api/v1/schemas/admin_webhooks.py \
-  tldw_Server_API/app/api/v1/endpoints/admin/admin_webhooks.py
-/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -q -r \
-  tldw_Server_API/app/core/Admin_Webhooks \
-  tldw_Server_API/app/core/DB_Management/admin_webhooks_repository.py \
-  tldw_Server_API/app/core/AuthNZ/migrations.py \
-  tldw_Server_API/app/core/AuthNZ/pg_migrations_extra.py \
-  tldw_Server_API/app/core/Jobs/migrations.py \
-  tldw_Server_API/app/core/Jobs/pg_migrations.py \
-  tldw_Server_API/app/core/Jobs/manager.py \
-  tldw_Server_API/app/core/Jobs/operations \
-  tldw_Server_API/app/core/Jobs/worker_sdk.py \
-  tldw_Server_API/app/core/Security/http_hop.py \
-  tldw_Server_API/app/services/admin_webhook_delivery_runtime.py \
-  tldw_Server_API/app/services/startup_optional_workers.py \
-  tldw_Server_API/app/api/v1/schemas/admin_webhooks.py \
-  tldw_Server_API/app/api/v1/endpoints/admin/admin_webhooks.py
-git diff --check 1ad2f1e5b30c49ea75396e4b713496b73e875fec HEAD
-git diff --check HEAD
-require_no_rg_matches -n "logger\..*(url|secret|signature|payload|response|ciphertext)|labels=.*(id|host|url|email|secret|payload)" \
-  tldw_Server_API/app/core/Admin_Webhooks \
-  tldw_Server_API/app/services/admin_webhook_delivery_runtime.py \
-  tldw_Server_API/app/api/v1/endpoints/admin/admin_webhooks.py
+  tldw_Server_API/app/api/v1/endpoints/admin/admin_webhooks.py &&
+  git diff --check 1ad2f1e5b30c49ea75396e4b713496b73e875fec HEAD &&
+  git diff --check HEAD &&
+  require_no_rg_matches -n "logger\..*(url|secret|signature|payload|response|ciphertext)|labels=.*(id|host|url|email|secret|payload)" \
+    tldw_Server_API/app/core/Admin_Webhooks \
+    tldw_Server_API/app/services/admin_webhook_delivery_runtime.py \
+    tldw_Server_API/app/api/v1/endpoints/admin/admin_webhooks.py &&
+  run_bandit_review_gate /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -q -r \
+    tldw_Server_API/app/core/Admin_Webhooks \
+    tldw_Server_API/app/core/DB_Management/admin_webhooks_repository.py \
+    tldw_Server_API/app/core/AuthNZ/migrations.py \
+    tldw_Server_API/app/core/AuthNZ/pg_migrations_extra.py \
+    tldw_Server_API/app/core/Jobs/migrations.py \
+    tldw_Server_API/app/core/Jobs/pg_migrations.py \
+    tldw_Server_API/app/core/Jobs/manager.py \
+    tldw_Server_API/app/core/Jobs/operations \
+    tldw_Server_API/app/core/Jobs/worker_sdk.py \
+    tldw_Server_API/app/core/Security/http_hop.py \
+    tldw_Server_API/app/services/admin_webhook_delivery_runtime.py \
+    tldw_Server_API/app/services/startup_optional_workers.py \
+    tldw_Server_API/app/api/v1/schemas/admin_webhooks.py \
+    tldw_Server_API/app/api/v1/endpoints/admin/admin_webhooks.py
 ```
 
-Expected: Ruff and both diff checks pass. Classify Bandit's reviewed baseline as
-required above and fail on any new, unreviewed, or High finding. Review every
-sensitive-data scan hit; only fixed field names in tests or explicit redaction
-guards may remain, and each is recorded in evidence. Do not suppress a real
-sensitive value. The status-aware scan prints matches and returns 1 when `rg`
-returns 0, returns 0 only when `rg` returns the clean no-match status 1, and
-propagates every `rg` status greater than 1.
+Expected: Ruff, both diff checks, and the sensitive scan form one ordered
+success chain; any nonzero status short-circuits later commands and remains the
+block status. The status-aware scan prints matches and returns 1 when `rg`
+returns 0, returns 0 only for clean no-match status 1, and propagates every
+`rg` status greater than 1. Bandit runs last: status 0 succeeds, status 1 prints
+the manual baseline/High-review requirement and remains 1, and status greater
+than 1 propagates. Current reviewed findings therefore leave the executable
+block at status 1 pending documented Task 12 classification. Never normalize
+that status or claim an aggregate Step 4 exit 0 alone proves manual review.
+Review every sensitive-data hit and every Bandit finding; fail on any
+unreviewed or High finding and add no suppression.
 
 - [ ] **Step 5: Prove PR 3 exclusions and legacy isolation**
 
@@ -2248,13 +2304,17 @@ no-match returns 0.
 - [ ] **Step 6: Re-run and review OpenAPI drift**
 
 ```bash
-CI_LOCAL_PYTHON=/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python make openapi-fingerprint
-CI_LOCAL_PYTHON=/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python make openapi-drift-check
-git diff 1ad2f1e5b30c49ea75396e4b713496b73e875fec HEAD -- apps/tldw-frontend/lib/api/openapi.fingerprint.json
-git diff HEAD -- apps/tldw-frontend/lib/api/openapi.fingerprint.json
+CI_LOCAL_PYTHON=/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python make openapi-fingerprint &&
+  CI_LOCAL_PYTHON=/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python make openapi-drift-check &&
+  git diff 1ad2f1e5b30c49ea75396e4b713496b73e875fec HEAD -- apps/tldw-frontend/lib/api/openapi.fingerprint.json &&
+  git diff HEAD -- apps/tldw-frontend/lib/api/openapi.fingerprint.json
 ```
 
-Expected: fingerprint is current and the human-reviewed delta contains only PR 2 test/redelivery/history/status contracts.
+Expected: fingerprint generation, drift validation, committed-range review, and
+current-worktree review form one ordered success chain. Any nonzero status is
+preserved and prevents every later command. After all automated commands pass,
+the human-reviewed delta contains only PR 2 test/redelivery/history/status
+contracts.
 
 - [ ] **Step 7: Write the evidence artifact**
 
@@ -2263,14 +2323,18 @@ Expected: fingerprint is current and the human-reviewed delta contains only PR 2
 - [ ] **Step 8: Commit verification evidence**
 
 ```bash
-backlog task edit 13111 --append-notes "PR 2 verification complete: exact counts and all four backend/crash/security gates recorded in Docs/Evidence/Admin_Webhooks_PR2_Verification.md."
-git add \
-  Docs/Evidence/Admin_Webhooks_PR2_Verification.md \
-  apps/tldw-frontend/lib/api/openapi.fingerprint.json \
-  "backlog/tasks/task-13111 - Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md"
-git diff --cached --check
-git commit -m "docs(admin-webhooks): record delivery substrate verification"
+backlog task edit 13111 --append-notes "PR 2 verification complete: exact counts and all four backend/crash/security gates recorded in Docs/Evidence/Admin_Webhooks_PR2_Verification.md." &&
+  git add \
+    Docs/Evidence/Admin_Webhooks_PR2_Verification.md \
+    apps/tldw-frontend/lib/api/openapi.fingerprint.json \
+    "backlog/tasks/task-13111 - Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md" &&
+  git diff --cached --check &&
+  git commit -m "docs(admin-webhooks): record delivery substrate verification"
 ```
+
+Expected: Backlog update, staging, cached-diff validation, and commit form one
+ordered success chain. Any nonzero status is preserved and prevents every later
+mutation or commit command.
 
 ### Task 13: Request Review And Open PR 2 Without Merging It
 
