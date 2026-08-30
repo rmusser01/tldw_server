@@ -45,9 +45,7 @@ def _record(path: Path, kind: str) -> ArtifactRecord:
     )
 
 
-def _manifest(
-    tmp_path: Path, *, compose_file: Path | None = None
-) -> tuple[DeploymentManifest, Path]:
+def _manifest(tmp_path: Path, *, compose_file: Path | None = None) -> tuple[DeploymentManifest, Path]:
     postgres = tmp_path / "postgres.dump"
     postgres.write_bytes(b"custom-dump-fixture")
     redis = tmp_path / "redis.rdb"
@@ -102,9 +100,7 @@ def test_manifest_contains_checksums_but_no_secrets(tmp_path: Path) -> None:
         (lambda body: body["artifacts"].append(dict(body["artifacts"][0])), "duplicate"),
     ),
 )
-def test_manifest_rejects_unsafe_or_unverifiable_artifacts(
-    tmp_path: Path, mutation, expected: str
-) -> None:
+def test_manifest_rejects_unsafe_or_unverifiable_artifacts(tmp_path: Path, mutation, expected: str) -> None:
     _, path = _manifest(tmp_path)
     body = json.loads(path.read_text(encoding="utf-8"))
     mutation(body)
@@ -140,9 +136,7 @@ def test_manifest_and_artifacts_must_not_be_symbolic_links(tmp_path: Path) -> No
 
 
 @pytest.mark.parametrize("member_name", ("/etc/passwd", "../escape", "data/../../escape"))
-def test_tar_verification_rejects_unsafe_member_paths(
-    tmp_path: Path, member_name: str
-) -> None:
+def test_tar_verification_rejects_unsafe_member_paths(tmp_path: Path, member_name: str) -> None:
     path = tmp_path / "unsafe.tar"
     _write_tar(path, member_name=member_name)
 
@@ -284,9 +278,7 @@ class RecordingRunner:
 
 class RecordingStreamRunner:
     def __init__(self) -> None:
-        self.calls: list[
-            tuple[tuple[str, ...], Mapping[str, str] | None, Path]
-        ] = []
+        self.calls: list[tuple[tuple[str, ...], Mapping[str, str] | None, Path]] = []
 
     def __call__(
         self,
@@ -346,15 +338,19 @@ def _commands(runner: RecordingRunner) -> tuple[str, ...]:
     return tuple(" ".join(call[0]) for call in runner.calls)
 
 
-def test_deploy_runs_every_gate_before_final_start(
-    tmp_path: Path, passing_deployment_checks: None
-) -> None:
+def test_deploy_runs_every_gate_before_final_start(tmp_path: Path, passing_deployment_checks: None) -> None:
     config = _config(tmp_path)
-    runner = RecordingRunner()
+    recorded_runner = RecordingRunner()
+    manifest_present_at_final_start: list[bool] = []
+
+    def runner(argv, env, input_bytes):
+        if "up -d --remove-orphans" in " ".join(argv):
+            manifest_present_at_final_start.append(bool(tuple(config.backup_dir.rglob("manifest.json"))))
+        return recorded_runner(argv, env, input_bytes)
 
     manifest = deploy(config, runner=runner)
 
-    commands = _commands(runner)
+    commands = _commands(recorded_runner)
     markers = (
         "config --format json",
         "docker pull registry/tldw:sha-1234567",
@@ -380,6 +376,7 @@ def test_deploy_runs_every_gate_before_final_start(
         "redis",
         "app_data",
     }
+    assert manifest_present_at_final_start == [True]
     manifest_path = next(config.backup_dir.rglob("manifest.json"))
     assert load_verified_manifest(manifest_path) == manifest
 
@@ -429,13 +426,21 @@ def test_deploy_removes_unusable_injected_stream_output(
     (
         "config --format json",
         "docker pull registry/tldw:sha-1234567",
+        "docker pull registry/tldw:sha-7654321",
         "--entrypoint python registry/tldw:sha-1234567",
+        "--entrypoint python registry/tldw:sha-7654321",
         "up -d --wait postgres redis",
+        "stop app caddy",
         "pg_dump --format=custom",
+        "--entrypoint pg_restore",
+        "redis-cli SAVE",
+        "redis:/data/dump.rdb",
         "--entrypoint redis-check-rdb",
+        "tldw-production_app-data:/data:ro",
+        "up -d --remove-orphans",
     ),
 )
-def test_deploy_stops_after_each_failed_gate_without_leaking_output(
+def test_deploy_stops_at_each_failed_gate_without_leaking_output(
     tmp_path: Path, passing_deployment_checks: None, failed_gate: str
 ) -> None:
     runner = RecordingRunner(fail_when=failed_gate)
@@ -445,16 +450,17 @@ def test_deploy_stops_after_each_failed_gate_without_leaking_output(
 
     assert "raw-secret" not in str(exc_info.value)
     assert "postgresql://" not in str(exc_info.value)
-    assert not any("up -d --remove-orphans" in item for item in _commands(runner))
+    commands = _commands(runner)
+    assert failed_gate in commands[-1]
+    final_starts = tuple(item for item in commands if "up -d --remove-orphans" in item)
+    assert len(final_starts) == (1 if failed_gate == "up -d --remove-orphans" else 0)
 
 
 def test_rollback_verifies_and_restores_all_artifacts_before_prior_image_start(
     tmp_path: Path, passing_deployment_checks: None
 ) -> None:
     config = _config(tmp_path)
-    manifest, manifest_path = _manifest(
-        config.backup_dir, compose_file=config.compose_file
-    )
+    manifest, manifest_path = _manifest(config.backup_dir, compose_file=config.compose_file)
     runner = RecordingRunner()
 
     rollback(config, manifest_path, runner=runner)
@@ -463,6 +469,7 @@ def test_rollback_verifies_and_restores_all_artifacts_before_prior_image_start(
     markers = (
         "config --format json",
         "stop app caddy",
+        "up -d --wait postgres",
         "pg_restore --clean --if-exists --no-owner",
         "stop redis",
         "tldw-production_redis_data:/data",
@@ -474,9 +481,9 @@ def test_rollback_verifies_and_restores_all_artifacts_before_prior_image_start(
     final_env = runner.calls[-1][1]
     assert final_env is not None
     assert final_env["TLDW_APP_IMAGE"] == "registry/tldw:sha-7654321"
-    assert manifest_path.read_text(encoding="utf-8") == (
-        config.backup_dir / "manifest.json"
-    ).read_text(encoding="utf-8")
+    assert manifest_path.read_text(encoding="utf-8") == (config.backup_dir / "manifest.json").read_text(
+        encoding="utf-8"
+    )
     assert tuple(config.backup_dir.glob("rollback-*.json"))
     restore_calls = tuple(call[0] for call in runner.calls)
     assert manifest.artifacts[1].sha256 in next(
@@ -493,9 +500,7 @@ def test_rollback_preflights_swapped_prior_image_values_before_restore(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = _config(tmp_path)
-    _, manifest_path = _manifest(
-        config.backup_dir, compose_file=config.compose_file
-    )
+    _, manifest_path = _manifest(config.backup_dir, compose_file=config.compose_file)
     preflight_values: list[Mapping[str, str]] = []
 
     def record_preflight(values, compose_file, proxy_file, **kwargs):
@@ -524,9 +529,7 @@ def test_rollback_stops_before_commands_when_swapped_preflight_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = _config(tmp_path)
-    _, manifest_path = _manifest(
-        config.backup_dir, compose_file=config.compose_file
-    )
+    _, manifest_path = _manifest(config.backup_dir, compose_file=config.compose_file)
     monkeypatch.setattr(
         production_deploy,
         "run_preflight_from_environment",
@@ -550,20 +553,35 @@ def test_rollback_stops_before_commands_when_swapped_preflight_fails(
     assert runner.calls == []
 
 
-@pytest.mark.parametrize("failed_restore", ("pg_restore --clean", "production_redis_data:/data", "production_app-data:/data"))
-def test_rollback_never_starts_prior_image_after_restore_failure(
+@pytest.mark.parametrize(
+    "failed_restore",
+    (
+        "config --format json",
+        "stop app caddy",
+        "up -d --wait postgres",
+        "pg_restore --clean",
+        "stop redis",
+        "production_redis_data:/data",
+        "production_app-data:/data",
+        "up -d --remove-orphans",
+    ),
+)
+def test_rollback_stops_at_each_failed_gate_without_leaking_output(
     tmp_path: Path, passing_deployment_checks: None, failed_restore: str
 ) -> None:
     config = _config(tmp_path)
-    _, manifest_path = _manifest(
-        config.backup_dir, compose_file=config.compose_file
-    )
+    _, manifest_path = _manifest(config.backup_dir, compose_file=config.compose_file)
     runner = RecordingRunner(fail_when=failed_restore)
 
-    with pytest.raises(DeploymentError):
+    with pytest.raises(DeploymentError) as exc_info:
         rollback(config, manifest_path, runner=runner)
 
-    assert not any("up -d --remove-orphans" in item for item in _commands(runner))
+    assert "raw-secret" not in str(exc_info.value)
+    assert "postgresql://" not in str(exc_info.value)
+    commands = _commands(runner)
+    assert failed_restore in commands[-1]
+    final_starts = tuple(item for item in commands if "up -d --remove-orphans" in item)
+    assert len(final_starts) == (1 if failed_restore == "up -d --remove-orphans" else 0)
 
 
 @pytest.mark.parametrize("breakage", ("missing", "checksum", "image"))
@@ -571,9 +589,7 @@ def test_rollback_rejects_unverified_or_mismatched_state_before_start(
     tmp_path: Path, passing_deployment_checks: None, breakage: str
 ) -> None:
     config = _config(tmp_path)
-    manifest, manifest_path = _manifest(
-        config.backup_dir, compose_file=config.compose_file
-    )
+    manifest, manifest_path = _manifest(config.backup_dir, compose_file=config.compose_file)
     if breakage == "missing":
         (config.backup_dir / manifest.artifacts[0].path).unlink()
     elif breakage == "checksum":
@@ -591,4 +607,25 @@ def test_rollback_rejects_unverified_or_mismatched_state_before_start(
     with pytest.raises((DeploymentError, ValueError)):
         rollback(config, manifest_path, runner=runner)
 
-    assert not any("up -d --remove-orphans" in item for item in _commands(runner))
+    assert runner.calls == []
+
+
+def test_rollback_cli_requires_explicit_restore_artifacts(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    env_file = tmp_path / "production.env"
+    env_file.write_text(f"TLDW_BACKUP_DIR={tmp_path / 'backups'}\n", encoding="utf-8")
+    env_file.chmod(0o600)
+
+    result = production_deploy.main(
+        (
+            "rollback",
+            "--env-file",
+            str(env_file),
+            "--manifest",
+            str(tmp_path / "manifest.json"),
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert result == 1
+    assert "requires --restore-artifacts" in captured.err
+    assert "TLDW_BACKUP_DIR" not in captured.err
