@@ -18,6 +18,7 @@ from tldw_Server_API.app.core.Sync.v2.domain_adapters.personal_context import (
     PersonalContextDomainAdapter,
 )
 from tldw_Server_API.app.core.Sync.v2.factory import (
+    _personal_context_wrapping_key_fingerprint,
     _wrap_personal_context_integrity_key,
 )
 from tldw_Server_API.app.core.Sync.v2.materializers.personal_context import (
@@ -157,6 +158,7 @@ def _service(tmp_path: Path) -> tuple[SyncV2Service, _CanonicalService]:
             f"{device.device_id}:{integrity_key_id}:"
             f"{hashlib.sha256(integrity_key).hexdigest()}"
         ),
+        personal_context_key_fingerprint=lambda *, device: f"fingerprint:{device.device_id}",
         settings=SyncV2Settings(
             personal_context=PersonalContextSyncCapabilities(available=True, blockers=()),
             server_trusted_encryption=server_trusted_encryption_status_from_config(
@@ -190,6 +192,8 @@ def _bootstrap(service: SyncV2Service, **overrides: object):
     }
     values.update(overrides)
     return service.bootstrap_personal_context(**values)
+
+
 
 
 def _record_envelope(bootstrap) -> SyncEnvelopeCreate:
@@ -449,6 +453,35 @@ def test_factory_wraps_integrity_key_to_registered_device_public_key() -> None:
             label=b"personal-context:personal-context-integrity-v1",
         ),
     ) == _INTEGRITY_KEY
+
+
+def test_bootstrap_rewraps_after_registered_public_key_rotation(tmp_path: Path) -> None:
+    service, _canonical = _service(tmp_path)
+    old_private = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    new_private = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    def register_key(private_key) -> None:
+        service.register_device(
+            user_id="user-a", display_name="Chatbook A", client_type="chatbook",
+            device_id="device-a", capabilities={
+                "supported_adapter_versions": {domain: [1] for domain in PERSONAL_CONTEXT_SYNC_DOMAINS},
+                "personal_context_wrapping_public_key": private_key.public_key().public_bytes(
+                    serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
+                ).decode("utf-8"),
+            },
+        )
+    service.personal_context_key_wrapper = _wrap_personal_context_integrity_key
+    service.personal_context_key_fingerprint = _personal_context_wrapping_key_fingerprint
+    register_key(old_private)
+    first = _bootstrap(service)
+    register_key(new_private)
+    second = _bootstrap(service)
+    assert first.integrity_key.key_record_id != second.integrity_key.key_record_id
+    ciphertext = base64.urlsafe_b64decode(second.integrity_key.wrapped_key_blob.split(":", 1)[1])
+    assert new_private.decrypt(ciphertext, padding.OAEP(mgf=padding.MGF1(hashes.SHA256()), algorithm=hashes.SHA256(), label=b"personal-context:personal-context-integrity-v1")) == _INTEGRITY_KEY
+    with pytest.raises(ValueError):
+        old_private.decrypt(ciphertext, padding.OAEP(mgf=padding.MGF1(hashes.SHA256()), algorithm=hashes.SHA256(), label=b"personal-context:personal-context-integrity-v1"))
+
+
 
 
 def test_bootstrap_never_persists_plaintext_in_sync_metadata_or_logs(

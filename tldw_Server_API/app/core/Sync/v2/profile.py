@@ -600,18 +600,6 @@ class SyncV2ProfileManager:
             ) from exc
         if bootstrap_cursor != snapshot.cursor:
             raise PersonalContextBootstrapError("personal_context_bootstrap_cursor_stale")
-        updated_metadata = dict(dataset.metadata)
-        updated_state = dict(state)
-        receipts = updated_state.get("link_receipts")
-        updated_receipts = dict(receipts) if isinstance(receipts, Mapping) else {}
-        updated_receipts[device_id] = {
-            "profile_id": state["profile_id"],
-            "integrity_key_id": state["integrity_key_id"],
-            "purge_generation": state["purge_generation"],
-            "bootstrap_cursor": bootstrap_cursor,
-        }
-        updated_state["link_receipts"] = updated_receipts
-        updated_state["link_state"] = _PERSONAL_CONTEXT_LINK_COMPLETE
         self.store.complete_personal_context_link_receipt(
             user_id=user_id,
             dataset_id=dataset.dataset_id,
@@ -620,19 +608,6 @@ class SyncV2ProfileManager:
             integrity_key_id=str(state["integrity_key_id"]),
             purge_generation=int(snapshot.manifest.purge_generation),
             bootstrap_cursor=bootstrap_cursor,
-        )
-        updated_metadata["personal_context"] = updated_state
-        self.store.enroll_dataset(
-            SyncDatasetCreate(
-                dataset_id=dataset.dataset_id,
-                owner_user_id=dataset.owner_user_id,
-                scope_type=dataset.scope_type,
-                encryption_policy=dataset.encryption_policy,
-                domains=list(dataset.domains),
-                workspace_id=dataset.workspace_id,
-                metadata=updated_metadata,
-                archived_at=dataset.archived_at,
-            )
         )
 
     def _bind_personal_context_dataset(
@@ -697,14 +672,30 @@ class SyncV2ProfileManager:
             device_id=device.device_id,
             key_purpose=_PERSONAL_CONTEXT_KEY_PURPOSE,
         )
+        fingerprint_resolver = getattr(self.service, "personal_context_key_fingerprint", None)
+        if not callable(fingerprint_resolver):
+            raise PersonalContextBootstrapError("personal_context_key_custody_unavailable")
+        try:
+            wrapping_key_fingerprint = fingerprint_resolver(device=device)
+        except Exception as exc:  # noqa: BLE001
+            raise PersonalContextBootstrapError("personal_context_key_custody_unavailable") from exc
+        stale_records: list[SyncKeyRecord] = []
         for record in existing:
             if (
                 record.revoked_at is None
                 and record.wrapped_for == "device"
                 and record.rewrap_status == "complete"
                 and record.kdf_metadata.get("integrity_key_id") == integrity_key_id
+                and record.kdf_metadata.get("wrapping_key_fingerprint") == wrapping_key_fingerprint
             ):
                 return record
+            if (
+                record.revoked_at is None
+                and record.wrapped_for == "device"
+                and record.rewrap_status == "complete"
+                and record.kdf_metadata.get("integrity_key_id") == integrity_key_id
+            ):
+                stale_records.append(record)
         wrapper = getattr(self.service, "personal_context_key_wrapper", None)
         if not callable(wrapper):
             raise PersonalContextBootstrapError("personal_context_key_custody_unavailable")
@@ -720,18 +711,27 @@ class SyncV2ProfileManager:
             ) from exc
         if not isinstance(wrapped_key_blob, str) or not wrapped_key_blob.strip():
             raise PersonalContextBootstrapError("personal_context_key_custody_unavailable")
+        for record in stale_records:
+            self.store.revoke_key_record(
+                user_id=user_id,
+                key_record_id=record.key_record_id,
+            )
         return self.store.store_key_record(
             SyncKeyRecordCreate(
                 key_record_id=(
                     f"personal-context-integrity:{dataset.dataset_id}:"
-                    f"{device.device_id}:{integrity_key_id}"
+                    f"{device.device_id}:{integrity_key_id}:"
+                    f"{wrapping_key_fingerprint[:16]}"
                 ),
                 dataset_id=dataset.dataset_id,
                 user_id=user_id,
                 device_id=device.device_id,
                 key_purpose=_PERSONAL_CONTEXT_KEY_PURPOSE,
                 wrapped_key_blob=wrapped_key_blob,
-                kdf_metadata={"integrity_key_id": integrity_key_id},
+                kdf_metadata={
+                    "integrity_key_id": integrity_key_id,
+                    "wrapping_key_fingerprint": wrapping_key_fingerprint,
+                },
                 encryption_policy="device_wrapped_v1",
                 wrapped_for="device",
                 rewrap_status="complete",
