@@ -21,6 +21,9 @@ from tldw_Server_API.app.core.Notes_Graph.semantic_jobs import (
     JOB_TYPE,
     SemanticJobCancelled,
 )
+from tldw_Server_API.app.core.Notes_Graph.semantic_publication import (
+    revalidate_execution_fence,
+)
 from tldw_Server_API.app.core.Notes_Graph.semantic_settings import SemanticIndexSettings
 from tldw_Server_API.app.core.Notes_Graph.semantic_vectors import NotesSemanticVectorStore
 from tldw_Server_API.app.services import (
@@ -760,6 +763,91 @@ async def test_revalidation_requires_authoritative_active_user(
 
     assert authority.user_exists is False
     assert capability_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_revalidation_projects_live_model_revision_and_rejects_drift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root_job_id = "6ec1dfbe-f86f-4d2b-93af-f88f64cd9701"
+    config = SimpleNamespace(
+        configuration_revision=8,
+        desired_state=SimpleNamespace(value="enabled"),
+        capability_revision="capability-v1",
+        disclosure_hash="disclosure-v1",
+        provider="provider-a",
+        model="model-a",
+        model_revision="model-digest-a",
+        endpoint_origin_display="https://api.example.test",
+        endpoint_origin_revision="origin-v1",
+        compatibility_hash="compatibility-v1",
+        dimensions=1536,
+        vector_backend="chromadb",
+    )
+    generation = SimpleNamespace(  # nosec B106
+        id="generation-a",
+        owner_user_id="1",
+        configuration_revision=8,
+        state=SemanticGenerationState.STAGING,
+        root_job_id=root_job_id,
+        model_revision="model-digest-a",
+        fencing_token="generation-fence-a",
+    )
+
+    class Store:
+        owner_user_id = "1"
+
+        def get_configuration(self, _dataset_id):
+            return config
+
+        def get_generation(self, _dataset_id, _generation_id):
+            return generation
+
+    class ActiveUsers:
+        @classmethod
+        async def from_pool(cls):
+            return cls()
+
+        async def get_user_by_id(self, _user_id):
+            return {"id": 1, "is_active": True}
+
+    current = SimpleNamespace(
+        capability_revision="capability-v1",
+        disclosure_hash="disclosure-v1",
+        provider_label="provider-a",
+        model="model-a",
+        model_revision="model-digest-b",
+        endpoint_display="https://api.example.test",
+        endpoint_origin_revision="origin-v1",
+        indexing_available=True,
+    )
+    monkeypatch.setattr(notes_semantic_index_worker, "AuthnzUsersRepo", ActiveUsers)
+    monkeypatch.setattr(
+        notes_semantic_index_worker,
+        "resolve_semantic_capabilities",
+        lambda *_args, **_kwargs: current,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.AuthNZ.rbac.user_has_permission",
+        lambda *_args, **_kwargs: True,
+    )
+    runtime = notes_semantic_index_worker.ProductionSemanticRuntime(
+        db=SimpleNamespace(note_semantic_store=Store(), note_store=object()),
+        owner_user_id="1",
+        dataset_id="dataset-a",
+        configuration_revision=8,
+        generation_id="generation-a",
+        root_job_id=root_job_id,
+        vectors=object(),
+        settings=SemanticIndexSettings(),
+    )
+
+    authority = await runtime._revalidate(runtime._fence())
+
+    assert authority.model_revision == "model-digest-b"
+    with pytest.raises(SemanticIndexingError) as exc_info:
+        await revalidate_execution_fence(runtime._revalidate, runtime._fence())
+    assert exc_info.value.failure_code == "notes_semantic_model_revision_drift"
 
 
 @pytest.mark.asyncio
