@@ -1,10 +1,10 @@
 ---
 id: TASK-13111
 title: Implement canonical admin webhook delivery substrate and recovery
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-08-23 03:15'
-updated_date: '2026-08-31 16:39'
+updated_date: '2026-08-31 19:08'
 labels:
   - admin
   - webhooks
@@ -280,7 +280,15 @@ Task 10 complete: exposed canonical persisted test, atomic manual redelivery, an
 2026-08-31: PR #2842 post-review remediation verified in the pre-push tree. Accepted Qodo items now add principal-aware shared ingress throttling to synchronous test/manual redelivery without exposing the legacy rate_limiter hook in OpenAPI, move the PostgreSQL job-counter transition behind DB_Management, emit sanitized fail-open metric warnings including factory initialization, and document the cited control-plane primitives. Qodo marker item is rejected with repository evidence: postgres is a registered environment selector while each affected test retains exactly one direct accepted integration marker; both direct-marker audits pass. Strict RED/GREEN covered rate-limit 429 behavior, unchanged OpenAPI query contract, sanitized metrics failures, helper docstrings, and the DB helper boundary. The exact Jobs SQLite workflow selector passed 1172 with 2 documented optional-crypto skips and 521 deselected; all nine prior CI failures are closed. PostgreSQL-required prepared-disposition coverage passed 66 with zero skips; Admin API/control/OpenAPI/catalog coverage passed 211. OpenAPI drift, Ruff, Python 3.10 compile, Python 3.12 fixture proof, reviewed Bandit with zero High/Medium, sensitive/legacy scans, and git diff checks passed. Ruff format check remains a non-gating baseline observation because it would rewrite eleven legacy files wholesale. No merge or activation is authorized; TASK-13111 remains In Progress through final PR CI/review.
 
 2026-08-31: PR #2842 remediation code and tests committed as 706344ad7d. Durable review/CI evidence is recorded in Docs/Evidence/Admin_Webhooks_PR2_Verification.md under PR #2842 Review And CI Remediation. This commit has not been merged or activated; final GitHub CI and Qodo thread closure remain pending.
+
+2026-08-31: Integration closeout authorized by the user after final head 9a928f13047987b6b70d516769b948e84f2d1a12 reached 50 passed, 28 policy skips, 0 failed, and 0 pending GitHub checks; Jobs SQLite passed and all 5 Qodo threads are resolved. Final evidence and the PR summary comment are linked from PR #2842. TASK-13111 is complete for merge; canonical activation and all PR 3 scope remain prohibited until PR #2842 lands.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Completed upstream PR 2 for the canonical admin webhook delivery substrate and recovery. The work delivers encrypted SQLite/PostgreSQL event, delivery, and append-only attempt persistence; set-based fanout; crash-convergent AuthNZ/Jobs enqueue, disposition, cancellation, and lost-acknowledgement recovery; prepared Jobs dispositions and lease controls; SSRF-safe status-only delivery with signing, bounded retries, expiry, retention, metrics, health, and supervised runtime; synchronous tests, manual redelivery, history/status APIs, migrations, and operational documentation. Canonical mode remains default-off, and PR 3 durable producers, final activation, legacy-handler removal, and operational admin UI remain excluded. Final PR head is 9a928f13047987b6b70d516769b948e84f2d1a12 on PR #2842. Final GitHub checks: 50 passed, 28 policy skips, 0 failed, 0 pending; the previously failing Jobs SQLite gate passed. Qodo review: 5 of 5 threads resolved and 0 unresolved. Local verification and security/contract evidence are recorded in Docs/Evidence/Admin_Webhooks_PR2_Verification.md. The user explicitly authorized integration on 2026-08-31.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
@@ -288,6 +296,6 @@ Task 10 complete: exposed canonical persisted test, atomic manual redelivery, an
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
+- [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
