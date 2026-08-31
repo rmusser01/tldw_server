@@ -124,6 +124,7 @@ class PersonalContextSyncSnapshot:
     integrity_key_id: str
     integrity_key: bytes
     cursor: str
+    materialized: bool = True
 
 
 class PersonalContextService:
@@ -201,6 +202,131 @@ class PersonalContextService:
             except ProfileConflictError:
                 return self._manifest()
 
+    @staticmethod
+    def _sync_plan_id(profile_id: str, label: str) -> str:
+        """Derive stable opaque object IDs from one random reserved profile ID."""
+
+        value = uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"tldw:personal-context:sync-bootstrap:{profile_id}:{label}",
+        )
+        return f"{label}-{value}"
+
+    @staticmethod
+    def _sync_bootstrap_cursor(
+        *,
+        manifest: ProfileManifest,
+        scopes: tuple[ProfileScope, ...],
+        records: tuple[ProfileRecord, ...],
+        proposals: tuple[ProfileProposal, ...],
+        integrity_key_id: str,
+    ) -> str:
+        """Hash one exact canonical or planned bootstrap snapshot."""
+
+        cursor_values = [
+            f"manifest:{manifest.profile_id}:{manifest.current_version_id}",
+            f"purge:{manifest.purge_generation}",
+            f"integrity:{integrity_key_id}",
+            *(f"scope:{item.scope_id}:{item.version_id}" for item in scopes),
+            *(f"record:{item.record_id}:{item.version_id}" for item in records),
+            *(
+                "proposal:"
+                + item.proposal_id
+                + ":"
+                + hashlib.sha256(item.model_dump_json().encode()).hexdigest()
+                for item in proposals
+            ),
+        ]
+        return "personal-context-bootstrap-v1:" + hashlib.sha256(
+            "\x1e".join(sorted(cursor_values)).encode()
+        ).hexdigest()
+
+    def plan_sync_bootstrap(self) -> PersonalContextSyncSnapshot:
+        """Return a stable snapshot without creating canonical content replicas."""
+
+        if self._repository.profile_ids():
+            return self.sync_bootstrap_snapshot()
+        try:
+            profile_id, created_at_text, key_id, key = (
+                self._repository.reserve_sync_profile(self._id_factory("profile"))
+            )
+        except ProfileAlreadyExistsError:
+            return self.sync_bootstrap_snapshot()
+        try:
+            created_at = datetime.fromisoformat(
+                created_at_text.replace("Z", "+00:00")
+            )
+        except ValueError:
+            raise ProfileIntegrityError(
+                "profile key reservation timestamp is invalid"
+            ) from None
+        if created_at.tzinfo is None:
+            raise ProfileIntegrityError("profile key reservation timestamp is invalid")
+        manifest = ProfileManifest(
+            profile_id=profile_id,
+            revision=0,
+            purge_generation=0,
+            created_at=created_at,
+            updated_at=created_at,
+            current_version_id=self._sync_plan_id(profile_id, "manifest-version"),
+        )
+        global_scope = ProfileScope(
+            scope_id=self._sync_plan_id(profile_id, "scope"),
+            profile_id=profile_id,
+            kind=ScopeKind.GLOBAL,
+            version_id=self._sync_plan_id(profile_id, "scope-version"),
+            created_at=created_at,
+            updated_at=created_at,
+        )
+        scopes = (global_scope,)
+        return PersonalContextSyncSnapshot(
+            manifest=manifest,
+            scopes=scopes,
+            records=(),
+            proposals=(),
+            integrity_key_id=key_id,
+            integrity_key=key,
+            cursor=self._sync_bootstrap_cursor(
+                manifest=manifest,
+                scopes=scopes,
+                records=(),
+                proposals=(),
+                integrity_key_id=key_id,
+            ),
+            materialized=False,
+        )
+
+    def materialize_sync_bootstrap(
+        self,
+        *,
+        profile_id: str,
+        bootstrap_cursor: str,
+    ) -> PersonalContextSyncSnapshot:
+        """Materialize exactly one reviewed bootstrap plan, idempotently."""
+
+        planned = self.plan_sync_bootstrap()
+        if (
+            planned.manifest.profile_id != profile_id
+            or planned.cursor != bootstrap_cursor
+        ):
+            raise ProfileConflictError("Personal context bootstrap plan changed")
+        if not planned.materialized:
+            if len(planned.scopes) != 1:
+                raise ProfileIntegrityError("reviewed global scope is unavailable")
+            try:
+                self._repository.materialize_sync_profile(
+                    planned.manifest,
+                    planned.scopes[0],
+                )
+            except ConcurrentProfileUpdateError as exc:
+                raise ProfileConflictError(
+                    "Personal context bootstrap plan changed"
+                ) from exc
+        materialized = self.sync_bootstrap_snapshot()
+        if materialized.cursor != bootstrap_cursor:
+            raise ProfileConflictError("Personal context bootstrap plan changed")
+        return materialized
+
     def sync_bootstrap_snapshot(self) -> PersonalContextSyncSnapshot:
         """Return all eligible canonical Sync heads from one repository read transaction."""
 
@@ -217,23 +343,6 @@ class PersonalContextService:
             if proposal.proposed_record is None
             or proposal.proposed_record.controls.sync_mode is SyncMode.SYNCABLE
         )
-        cursor_values = [
-            f"manifest:{manifest.profile_id}:{manifest.current_version_id}",
-            f"purge:{manifest.purge_generation}",
-            f"integrity:{key_id}",
-            *(f"scope:{item.scope_id}:{item.version_id}" for item in scopes),
-            *(f"record:{item.record_id}:{item.version_id}" for item in records),
-            *(
-                "proposal:"
-                + item.proposal_id
-                + ":"
-                + hashlib.sha256(item.model_dump_json().encode("utf-8")).hexdigest()
-                for item in proposals
-            ),
-        ]
-        cursor = "personal-context-bootstrap-v1:" + hashlib.sha256(
-            "\x1e".join(sorted(cursor_values)).encode("utf-8")
-        ).hexdigest()
         return PersonalContextSyncSnapshot(
             manifest=manifest,
             scopes=scopes,
@@ -241,7 +350,13 @@ class PersonalContextService:
             proposals=proposals,
             integrity_key_id=key_id,
             integrity_key=key,
-            cursor=cursor,
+            cursor=self._sync_bootstrap_cursor(
+                manifest=manifest,
+                scopes=scopes,
+                records=records,
+                proposals=proposals,
+                integrity_key_id=key_id,
+            ),
         )
 
     def sync_encryption_key(self, profile_id: str) -> tuple[bytes, int]:
@@ -260,6 +375,7 @@ class PersonalContextService:
                 state = (
                     ProfileOperationalState.LOCKED
                     if self._repository.has_profile_state()
+                    and not self._repository.has_sync_profile_reservation()
                     else ProfileOperationalState.ABSENT
                 )
                 return ProfileStatus(state=state)
@@ -298,6 +414,31 @@ class PersonalContextService:
 
     def create_profile(self, *, runtime_enabled: bool = False) -> ProfileManifest:
         """Create one empty canonical profile and its required global scope."""
+
+        if self._repository.has_sync_profile_reservation():
+            planned = self.plan_sync_bootstrap()
+            if planned.materialized or len(planned.scopes) != 1:
+                raise ProfileConflictError("Personal context profile already exists")
+            runtime_policy = (
+                ServerRuntimePolicy(enabled=True).model_dump(mode="json")
+                if runtime_enabled
+                else None
+            )
+            runtime_version_id = (
+                self._id_factory("runtime-version") if runtime_enabled else None
+            )
+            try:
+                self._repository.materialize_sync_profile(
+                    planned.manifest,
+                    planned.scopes[0],
+                    runtime_policy=runtime_policy,
+                    runtime_version_id=runtime_version_id,
+                )
+            except (ConcurrentProfileUpdateError, ProfileAlreadyExistsError) as exc:
+                raise ProfileConflictError(
+                    "Personal context profile already exists"
+                ) from exc
+            return planned.manifest
 
         now = self._now()
         profile_id = self._id_factory("profile")
