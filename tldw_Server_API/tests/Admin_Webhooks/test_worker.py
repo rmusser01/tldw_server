@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -62,6 +63,26 @@ from tldw_Server_API.tests.Admin_Webhooks.test_event_expansion import (
 
 def _token(label: str) -> str:
     return hashlib.sha256(label.encode("ascii")).hexdigest()
+
+
+def _event_body(
+    *,
+    event_id: str,
+    event_type: str,
+    created_at: datetime,
+    api_version: str = "2026-07-01",
+) -> bytes:
+    return json.dumps(
+        {
+            "id": event_id,
+            "type": event_type,
+            "api_version": api_version,
+            "created_at": created_at.isoformat().replace("+00:00", "Z"),
+            "data": {"id": 1},
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
 
 
 class TokenSource:
@@ -232,12 +253,14 @@ async def _seed_acquired(
     *,
     expires_in: int = 3600,
     kind: DeliveryKind = DeliveryKind.AUTOMATIC,
+    api_version: str = "2026-07-01",
 ) -> tuple[int, str, dict]:
     repository = fixture.repository
     ring = fixture.ring
     event_id = canonical_uuid4(f"worker-{label}-event")
     delivery_id = canonical_uuid4(f"worker-{label}-delivery")
     event_type = f"worker.{label}"
+    event_created_at = fixture.clock()
     async with repository.transaction() as tx:
         webhook_id = await tx.allocate_registration_id()
         target = ring.encrypt_text(
@@ -268,12 +291,17 @@ async def _seed_acquired(
                 now=fixture.clock() - timedelta(minutes=1),
             )
         )
-        body = b'{"id":1}'
+        body = _event_body(
+            event_id=event_id,
+            event_type=event_type,
+            created_at=event_created_at,
+            api_version=api_version,
+        )
         captured = await tx.capture_event_and_expand(
             EventInsert(
                 id=event_id,
                 event_type=event_type,
-                api_version="2026-07-01",
+                api_version=api_version,
                 source_kind=EventSourceKind.COMMAND,
                 aggregate_type=None,
                 aggregate_id=None,
@@ -283,11 +311,11 @@ async def _seed_acquired(
                 source_request_id=None,
                 body=ring.encrypt_event_body(
                     event_id=event_id,
-                    api_version="2026-07-01",
+                    api_version=api_version,
                     body=body,
                 ),
                 body_size_bytes=len(body),
-                created_at=fixture.clock(),
+                created_at=event_created_at,
             ),
             lambda: delivery_id,
             fixture.clock() + timedelta(hours=72),
@@ -343,6 +371,70 @@ async def _seed_acquired(
     )
     assert acquired is not None
     return webhook_id, delivery_id, acquired
+
+
+async def _corrupt_event_body(
+    fixture: WorkerFixture,
+    delivery_id: str,
+    corruption: str,
+) -> None:
+    bundle = await fixture.repository.get_delivery_bundle(delivery_id)
+    assert bundle is not None
+    event = bundle.event.event
+    body = fixture.ring.decrypt_event_body(
+        event_id=event.id,
+        api_version=event.api_version,
+        protected=bundle.event.body,
+    )
+    declared_size = len(body)
+    if corruption == "wrong-type":
+        decoded = json.loads(body)
+        decoded["type"] = "worker.forged"
+        body = json.dumps(
+            decoded,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        declared_size = len(body)
+    elif corruption == "wrong-created-at":
+        decoded = json.loads(body)
+        decoded["created_at"] = "2026-08-23T00:00:01Z"
+        body = json.dumps(
+            decoded,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        declared_size = len(body)
+    elif corruption == "noncanonical-json":
+        body = json.dumps(json.loads(body), indent=2).encode("utf-8")
+        declared_size = len(body)
+    elif corruption == "invalid-utf8":
+        body = b"\xff"
+        declared_size = len(body)
+    elif corruption == "wrong-size":
+        declared_size += 1
+    else:
+        raise AssertionError("unknown event-body corruption")
+    protected = fixture.ring.encrypt_event_body(
+        event_id=event.id,
+        api_version=event.api_version,
+        body=body,
+    )
+    async with fixture.repository.transaction() as tx:
+        changed = await tx._execute(
+            """
+            UPDATE admin_webhook_events
+            SET body_ciphertext_json = ?, body_key_id = ?, body_size_bytes = ?
+            WHERE id = ?
+            """,
+            (
+                protected.ciphertext_json,
+                protected.key_id,
+                declared_size,
+                event.id,
+            ),
+        )
+    assert changed == 1
 
 
 def _handler(
@@ -426,7 +518,11 @@ async def test_handler_orders_horizon_reservation_execution_and_acknowledgement(
     assert disposition.delivery_id == delivery_id
     assert len(executor.requests) == 1
     request = executor.requests[0]
-    assert request.body == b'{"id":1}'
+    assert request.body == _event_body(
+        event_id=canonical_uuid4("worker-success-event"),
+        event_type="worker.success",
+        created_at=worker_fixture.clock(),
+    )
     assert request.signing_secret == "whsec_" + "a" * 64
     assert request.attempt_number == 1
 
@@ -437,6 +533,34 @@ async def test_handler_orders_horizon_reservation_execution_and_acknowledgement(
     assert bundle is not None
     assert bundle.delivery.delivery.state is DeliveryState.SUCCEEDED
     assert bundle.delivery.jobs_disposition_applied is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_canonical_historical_event_version_remains_deliverable(
+    worker_fixture: WorkerFixture,
+) -> None:
+    historical_version = "2025-01-01"
+    _, _, acquired = await _seed_acquired(
+        worker_fixture,
+        "historical-version",
+        api_version=historical_version,
+    )
+    executor = FakeExecutor(_success())
+
+    disposition = await _handler(worker_fixture, executor)(
+        acquired,
+        FakeContext(acquired),
+    )
+
+    assert disposition.kind is PreparedDispositionKind.COMPLETE
+    assert len(executor.requests) == 1
+    assert executor.requests[0].body == _event_body(
+        event_id=canonical_uuid4("worker-historical-version-event"),
+        event_type="worker.historical-version",
+        created_at=worker_fixture.clock(),
+        api_version=historical_version,
+    )
 
 
 @pytest.mark.asyncio
@@ -533,6 +657,42 @@ async def test_pre_reservation_key_and_lease_failures_defer_without_attempt(
     assert executor.requests == []
     assert await worker_fixture.repository.list_delivery_attempts(
         webhook_id, delivery_id
+    ) == ()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "corruption",
+    (
+        "wrong-type",
+        "wrong-created-at",
+        "noncanonical-json",
+        "invalid-utf8",
+        "wrong-size",
+    ),
+)
+@pytest.mark.unit
+async def test_invalid_persisted_event_body_defers_before_attempt(
+    worker_fixture: WorkerFixture,
+    corruption: str,
+) -> None:
+    webhook_id, delivery_id, acquired = await _seed_acquired(
+        worker_fixture,
+        f"invalid-body-{corruption}",
+    )
+    await _corrupt_event_body(worker_fixture, delivery_id, corruption)
+    executor = FakeExecutor(_success())
+
+    disposition = await _handler(worker_fixture, executor)(
+        acquired,
+        FakeContext(acquired),
+    )
+
+    assert disposition.origin is PreparedDispositionOrigin.INFRASTRUCTURE
+    assert executor.requests == []
+    assert await worker_fixture.repository.list_delivery_attempts(
+        webhook_id,
+        delivery_id,
     ) == ()
 
 

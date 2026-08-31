@@ -26,7 +26,7 @@ from tldw_Server_API.app.core.Jobs.operations.contracts import (
 
 from .config import AdminWebhookSettings
 from .crypto import WebhookKeyRing
-from .delivery import registration_work_lifecycle_reason
+from .delivery import registration_work_lifecycle_reason, validate_stored_event_body
 from .domain import (
     AttemptState,
     DeliveryKind,
@@ -318,6 +318,7 @@ class AdminWebhookPreparedHandler:
             api_version=bundle.event.event.api_version,
             protected=bundle.event.body,
         )
+        validate_stored_event_body(bundle.event, body)
         return target, secret, body
 
     async def __call__(

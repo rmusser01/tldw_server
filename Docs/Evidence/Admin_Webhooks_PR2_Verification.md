@@ -4,14 +4,20 @@
 
 - Branch: `codex/admin-webhooks-delivery-substrate`
 - Literal scope base: `52774a0453b24123cd4cfb3b2a1a38ebc2496f3e`
-- Tested source head: `a5ec2cfb9d7553cf81f848982078ca7f54588b22`
-- Definitive Step 1 source commit:
+- Original definitive source head:
   `a5ec2cfb9d7553cf81f848982078ca7f54588b22`
+- Original definitive Step 1 source commit:
+  `a5ec2cfb9d7553cf81f848982078ca7f54588b22`
+- Post-review correction base head:
+  `aa2ede91d83aa7309e6a65f9821d9c68f93f5529`
+- Post-review correction state: reviewed, uncommitted working tree based on the
+  correction base head above
 - Observed `origin/dev` metadata, without fetch:
   `54448ef08970e4a348478bdf47be5715c875241c`
 - Merge base of the literal scope base and tested head:
   `52774a0453b24123cd4cfb3b2a1a38ebc2496f3e`
-- Verification date: `2026-08-30`
+- Original verification date: `2026-08-30`
+- Post-review correction verification date: `2026-08-31`
 - Host: macOS 26.5.2, arm64
 - Project Python: 3.11.13
 - Compatibility Python: 3.10.20
@@ -29,7 +35,47 @@ reported 1,521 passing with two test-contract failures: the exact startup-worker
 set omitted two upstream Notes workers, and four delivery-mode guard tests lacked
 direct unit markers. Commit `a5ec2cfb9d` made only those test corrections after
 focused RED/root-cause confirmation and independent specification and quality
-reviews. All definitive gates below ran at that commit.
+reviews. The original definitive gates ran at that commit.
+
+Subsequent review found delivery-integrity and target-parsing gaps. The
+post-review correction tree now rejects insufficient public lease-horizon
+guarantees, validates persisted event bodies before automatic and manual
+delivery, preserves each stored event's API version during validation and
+replay, and shares one strict target parser between registration and execution.
+The parser rejects explicit empty ports, all fragment syntax, malformed or
+ambiguous percent escapes, encoded controls/backslashes, and leading `//`
+paths. Focused RED/GREEN tests cover every correction.
+
+The first complete post-review Step 1 run was intentionally not accepted as
+evidence: it reported `1,526 passed, 16 failed, 2,760 warnings in 991.38s`.
+All failures came from the four-backend recovery matrix seeding a persistence-
+only placeholder body that the new delivery-boundary validator correctly
+rejected. The fixture was changed to seed the canonical event body; the 20
+affected cross-backend variants then passed (`56 deselected`, `42 warnings in
+227.83s`). The three complete gates below were rerun only after that correction.
+Two independent focused re-reviews then reported zero Critical, Important, or
+Minor findings.
+
+A later whole-correction-tree review found three Important defects and one
+Minor evidence gap. Historical source-command replay still compared a stored
+event to the current global API version; registration admitted invalid IDNA
+A-labels and legacy numeric host spellings rejected by the HTTP-hop contract;
+raw and percent-encoded UTF-8 C1 controls remained deliverable; and the Python
+3.10 command did not enumerate the uncommitted correction tree. Strict RED
+reproduced one SQLite historical replay failure, six registration failures, and
+three executor successes that should have failed. The minimal corrections
+removed the command-unowned version comparison, added canonical IDNA round-trip
+and legacy-numeric host checks, and validated decoded UTF-8 controls. Focused
+GREEN passed 36 parser/executor cases and both SQLite/PostgreSQL historical
+source-replay nodes. The complete impacted union then passed 488 tests with zero
+skips and 978 warnings in 764.11s (`0:12:44`).
+Final independent closure review confirmed all three behavioral findings closed
+with zero Critical and zero Important findings. Its one Minor finding was the
+missing Round 3 completion entry in `TASK-13111`; the append-only Backlog note
+now records the final results and resolves that chronology gap.
+After the aggregate gates, Ruff required only an explicit `from None` exception
+chain on the already covered invalid-IDNA mismatch branch. The 25-case invalid-
+target regression and full static gates passed after that non-control-flow edit.
 
 The observed `origin/dev` metadata later advanced by six commits to `54448ef089`
 while this verification remained pinned to `52774a0453`. Those commits are not
@@ -41,11 +87,11 @@ review decision.
 
 | Gate | Result |
 | --- | --- |
-| Complete SQLite/API/security matrix | PASS: 1,523 passed, 0 skipped, 2,722 warnings |
-| Required PostgreSQL/four-backend matrix | PASS: 327 passed, 0 skipped, 656 warnings |
-| Deterministic protocol/security matrix | PASS: 424 passed, 0 skipped, 613 warnings |
+| Complete SQLite/API/security matrix | PASS: 1,553 passed, 0 skipped, 2,782 warnings |
+| Required PostgreSQL/four-backend matrix | PASS: 329 passed, 0 skipped, 660 warnings |
+| Deterministic protocol/security matrix | PASS: 433 passed, 0 skipped, 613 warnings |
 | Ruff | PASS: `All checks passed!` |
-| Python 3.10 compatibility compile | PASS: all 77 changed Python files |
+| Python 3.10 compatibility compile | PASS: original branch set and all 15 post-review changed/new Python files |
 | Committed and worktree diff checks | PASS |
 | Sensitive logger/metric scan | PASS: no matches |
 | Bandit | REVIEWED PASS: raw exit 1, 61 accounted findings, 0 High |
@@ -53,9 +99,9 @@ review decision.
 | OpenAPI fingerprint and drift | PASS |
 | Default-off/no-release gate | PASS: delivery remains disabled by default |
 
-The three pytest gates executed 2,274 test instances, emitted 3,991 warning
-instances, and took 2,238.36 seconds (`37:18.36`) in total. Steps 2 and 3
-deliberately repeat high-risk tests from the complete Step 1 union, so 2,274 is
+The three pytest gates executed 2,315 test instances, emitted 4,055 warning
+instances, and took 2,311.64 seconds (`38:31.64`) in total. Steps 2 and 3
+deliberately repeat high-risk tests from the complete Step 1 union, so 2,315 is
 an execution count, not a unique-test count. No counted test was skipped.
 
 ## Exact Pytest Gates
@@ -90,7 +136,7 @@ TLDW_TEST_POSTGRES_REQUIRED=1 RUN_JOBS=1 PYTHONPATH=. /Users/macbook-dev/Documen
   tldw_Server_API/tests/Services/test_startup_worker_groups.py
 ```
 
-Result: exit 0, `1,523 passed, 2,722 warnings in 983.54s (0:16:23)`,
+Result: exit 0, `1,553 passed, 2,782 warnings in 1007.41s (0:16:47)`,
 zero skips.
 
 ### Step 2: Required PostgreSQL and four-backend crash matrix
@@ -111,7 +157,7 @@ TLDW_TEST_POSTGRES_REQUIRED=1 RUN_JOBS=1 PYTHONPATH=. /Users/macbook-dev/Documen
   tldw_Server_API/tests/Jobs/parity/test_postgres_parity.py
 ```
 
-Result: exit 0, `327 passed, 656 warnings in 781.82s (0:13:01)`, zero
+Result: exit 0, `329 passed, 660 warnings in 812.25s (0:13:32)`, zero
 skips.
 
 ### Step 3: Deterministic protocol and security matrix
@@ -127,7 +173,7 @@ TLDW_TEST_POSTGRES_REQUIRED=1 RUN_JOBS=1 PYTHONPATH=. /Users/macbook-dev/Documen
   tldw_Server_API/tests/Security/test_http_hop_streaming.py
 ```
 
-Result: exit 0, `424 passed, 613 warnings in 473.00s (0:07:52)`, zero
+Result: exit 0, `433 passed, 613 warnings in 491.98s (0:08:11)`, zero
 skips.
 
 ## Backend And Crash-Convergence Proof
@@ -214,13 +260,36 @@ boundary. It returned `All checks passed!` from this exact command:
   tldw_Server_API/app/api/v1/endpoints/admin/admin_webhooks.py
 ```
 
-Every Python file changed from the immutable base also compiled with Python
-3.10.20 while bytecode was redirected outside the worktree:
+The original committed range compiled with Python 3.10.20 while bytecode was
+redirected outside the worktree:
 
 ```bash
 git diff --name-only -z 52774a0453b24123cd4cfb3b2a1a38ebc2496f3e HEAD -- '*.py' | \
   env PYTHONPYCACHEPREFIX=/tmp/admin-webhooks-py310-cache xargs -0 \
   /Users/macbook-dev/.local/bin/python3.10 -m py_compile
+```
+
+The post-review correction was still uncommitted, so the final-tree compile
+used an explicit list that includes every changed and new Python file:
+
+```bash
+env PYTHONPYCACHEPREFIX=/tmp/admin-webhooks-review-py310-cache \
+  /Users/macbook-dev/.local/bin/python3.10 -m py_compile \
+  tldw_Server_API/app/core/Admin_Webhooks/delivery.py \
+  tldw_Server_API/app/core/Admin_Webhooks/domain.py \
+  tldw_Server_API/app/core/Admin_Webhooks/executor.py \
+  tldw_Server_API/app/core/Admin_Webhooks/target.py \
+  tldw_Server_API/app/core/Admin_Webhooks/worker.py \
+  tldw_Server_API/app/core/Jobs/worker_sdk.py \
+  tldw_Server_API/tests/Admin_Webhooks/test_delivery_repository_postgres.py \
+  tldw_Server_API/tests/Admin_Webhooks/test_delivery_repository_sqlite.py \
+  tldw_Server_API/tests/Admin_Webhooks/test_delivery_domain.py \
+  tldw_Server_API/tests/Admin_Webhooks/test_domain_config_catalog.py \
+  tldw_Server_API/tests/Admin_Webhooks/test_executor.py \
+  tldw_Server_API/tests/Admin_Webhooks/test_recovery_backend_matrix.py \
+  tldw_Server_API/tests/Admin_Webhooks/test_redelivery_history_api.py \
+  tldw_Server_API/tests/Admin_Webhooks/test_worker.py \
+  tldw_Server_API/tests/Jobs/test_worker_sdk_prepared.py
 ```
 
 Both of these passed:
@@ -297,7 +366,7 @@ was suppressed or omitted by Task 12.
 | Rule | Count | Exact locations | Classification |
 | --- | ---: | --- | --- |
 | B608, Medium/Low-confidence | 44 | `admin_webhooks_repository.py`: 2789, 2806, 2820, 3003, 3052, 3071, 3109, 3125, 3138, 3164, 3171, 3193, 3214, 3239, 3246, 3283, 3332, 3364, 3435, 3456, 3486, 3521, 3572, 3591, 3729, 3801, 3881, 3937, 3956, 4120, 4141, 4261, 4437, 4538, 4564, 4750, 4797, 4811, 4868, 4965, 5000, 5070, 5255; `Jobs/manager.py`: 9656 | Reviewed fixed SQL. Repository interpolation is limited to module column constants, backend-selected lock/null-safe/due literals, two closed attempt predicates, a fixed terminal SET clause, generated `?` placeholders, and an explicit five-table allowlist. The Jobs query accepts only two private, internally constructed clause shapes: `WHERE id = ANY(%s)` or the prune method's locally assembled placeholder clause. Caller values remain bound parameters. |
-| B110/B112, Low/High-confidence | 14 | `control_plane.py`: 623, 633, 650, 1543, 1562; `delivery.py`: 1098, 1800; `observability.py`: 140, 626; `reconciler.py`: 585, 917, 956; `worker.py`: 216, 240 | Intentional fail-open metric registration/emission and status-probe observers. Each is downstream of durable truth or preserves a fail-closed unavailable probe; metrics cannot change commits, recovery, delivery, or API outcomes. |
+| B110/B112, Low/High-confidence | 14 | `control_plane.py`: 623, 633, 650, 1543, 1562; `delivery.py`: 1129, 1825; `observability.py`: 140, 626; `reconciler.py`: 585, 917, 956; `worker.py`: 216, 240 | Intentional fail-open metric registration/emission and status-probe observers. Each is downstream of durable truth or preserves a fail-closed unavailable probe; metrics cannot change commits, recovery, delivery, or API outcomes. |
 | B105, Low/Medium-confidence | 3 | `schemas/admin_webhooks.py`: 143, 144; `domain.py`: 161 | False positives on numeric/boolean schema example fields named `secret_version`/`secret_rotation_required` and the closed enum value `canceled_secret_rotation`; none is a password or signing secret. |
 
 The inventory contains the established Task 11 baseline of 43 repository
@@ -352,6 +421,11 @@ The following outputs are not counted:
   during the direct-marker correction;
 - the first post-rebase aggregate run (`1,521 passed`, two failed) that exposed
   the stale startup-worker expectation and missing direct markers;
+- the first complete post-review aggregate run (`1,526 passed`, 16 failed)
+  that exposed the recovery matrix's noncanonical persistence-only fixture;
+- the first PostgreSQL source-replay probe whose fixture setup could not access
+  local PostgreSQL inside the restricted sandbox; the authorized host-loopback
+  rerun passed and is the counted result;
 - the expected pre-fix marker and stale route-selection failures;
 - a verifier process terminated by its agent usage limit before it could retain
   terminal output.
@@ -366,9 +440,10 @@ terminal exit status.
   selected; the lifecycle task remains `admin_webhook_delivery_runtime_task`.
 - No user/incident producer, admin UI, generic outgoing-webhook UI/service, or
   final release activation is included. Those remain PR 3 scope.
-- No production edit was made during final verification. The test-only
-  `a5ec2cfb9d` correction was completed and independently reviewed before all
-  definitive gates were rerun.
+- The original test-only `a5ec2cfb9d` correction remains historical. The later
+  post-review production corrections are limited to lease guarantees, stored-
+  body validation/version preservation, and shared target parsing; all were
+  independently re-reviewed before this record was finalized.
 - A user-approved fetch/rebase occurred before the immutable base was pinned.
   No later fetch, rebase, merge, push, force-push, or history rewrite occurred.
 
@@ -384,8 +459,10 @@ terminal exit status.
 
 ## Conclusion
 
-The canonical admin-webhook delivery substrate is ready for independent review
-against the pinned base. Because `origin/dev` subsequently advanced and touches
-three PostgreSQL webhook test modules, reconcile and re-verify that newer
-upstream state before PR creation. This evidence does not authorize merge,
-production activation, durable event producers, or PR 3 UI work.
+The corrected canonical admin-webhook delivery substrate has completed focused
+independent re-review and local verification against the pinned base. It is
+ready for a local review-fix commit, not integration. Because `origin/dev`
+subsequently advanced and touches three PostgreSQL webhook test modules,
+reconcile and re-verify that newer upstream state before any user-authorized
+push or PR update. This evidence does not authorize merge, production
+activation, durable event producers, or PR 3 UI work.

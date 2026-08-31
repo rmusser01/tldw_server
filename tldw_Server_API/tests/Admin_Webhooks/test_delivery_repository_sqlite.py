@@ -35,9 +35,11 @@ from tldw_Server_API.tests.Admin_Webhooks.test_redelivery_history_api import (
     exercise_history_loads_only_public_columns,
     exercise_history_projection_is_set_based_and_key_independent,
     exercise_history_reads_one_consistent_snapshot,
+    exercise_redelivery_accepts_canonical_historical_event_body,
     exercise_redelivery_concurrency_and_commit_failure,
     exercise_redelivery_key_family_conflicts_across_sources,
     exercise_redelivery_preconditions_and_audit_rollback,
+    exercise_redelivery_rejects_noncanonical_event_body,
     exercise_redelivery_replay_ignores_hidden_history_coordinates,
     exercise_redelivery_replay_rows_have_exact_action_shape,
     exercise_redelivery_success_exact_replay_and_malformed_coordinate,
@@ -343,6 +345,20 @@ async def test_sqlite_task10_redelivery_success_and_replay_contract(
     await exercise_redelivery_success_exact_replay_and_malformed_coordinate(
         delivery_repo
     )
+
+
+@pytest.mark.unit
+async def test_sqlite_task10_redelivery_rejects_noncanonical_event_body(
+    delivery_repo: SQLiteDeliveryRepositoryFixture,
+) -> None:
+    await exercise_redelivery_rejects_noncanonical_event_body(delivery_repo)
+
+
+@pytest.mark.unit
+async def test_sqlite_task10_redelivery_accepts_canonical_historical_event_body(
+    delivery_repo: SQLiteDeliveryRepositoryFixture,
+) -> None:
+    await exercise_redelivery_accepts_canonical_historical_event_body(delivery_repo)
 
 
 @pytest.mark.unit

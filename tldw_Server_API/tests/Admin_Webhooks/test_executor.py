@@ -705,6 +705,9 @@ async def test_hop_request_validation_failure_is_closed_without_egress_io(
         "https://receiver.example/hook\r\nnext",
         "https://receiver.example/hook%0Dnext",
         "https://receiver.example/hook%5cnext",
+        "https://receiver.example/hook%C2%80",
+        "https://receiver.example/hook?next=%C2%80",
+        "https://receiver.example/hook\u0080",
     ],
 )
 @pytest.mark.unit

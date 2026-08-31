@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import ipaddress
 import json
 import re
 import uuid
@@ -13,7 +12,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
-from urllib.parse import SplitResult, urlsplit
+from urllib.parse import SplitResult
 
 from tldw_Server_API.app.core.exceptions import WebhookError
 from tldw_Server_API.app.core.Security.egress import (
@@ -21,6 +20,7 @@ from tldw_Server_API.app.core.Security.egress import (
 )
 
 from .crypto import ProtectedValue
+from .target import parse_webhook_target_url
 
 
 class WebhookErrorCode(str, Enum):
@@ -702,7 +702,6 @@ _ETAG_PATTERN = re.compile(r'^"admin-webhook-([1-9][0-9]*)-r([1-9][0-9]*)"$')
 _IDEMPOTENCY_KEY_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{16,255}$")
 _REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 _OPERATION_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
-_DNS_LABEL_PATTERN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$")
 _LOOKUP_DOMAIN = b"tldw-admin-webhook-idempotency-lookup-v1\x00"
 _REQUEST_DOMAIN = "tldw-admin-webhook-request-v1"
 
@@ -821,43 +820,10 @@ def normalize_request_id(
 
 
 def _parse_and_normalize_target(url: str) -> tuple[SplitResult, str]:
-    if not isinstance(url, str) or not url or len(url) > 2_048:
-        raise WebhookError(WebhookErrorCode.VALIDATION_FAILED)
     try:
-        encoded = url.encode("utf-8")
-    except UnicodeError as exc:
+        return parse_webhook_target_url(url)
+    except ValueError as exc:
         raise WebhookError(WebhookErrorCode.VALIDATION_FAILED) from exc
-    if len(encoded) > 2_048 or "\\" in url or any(ord(char) < 32 or ord(char) == 127 for char in url):
-        raise WebhookError(WebhookErrorCode.VALIDATION_FAILED)
-    try:
-        parsed = urlsplit(url)
-        hostname = parsed.hostname
-        port = parsed.port
-    except (TypeError, UnicodeError, ValueError) as exc:
-        raise WebhookError(WebhookErrorCode.VALIDATION_FAILED) from exc
-    if not parsed.scheme or not parsed.netloc or not hostname:
-        raise WebhookError(WebhookErrorCode.VALIDATION_FAILED)
-    if parsed.username is not None or parsed.password is not None or parsed.fragment:
-        raise WebhookError(WebhookErrorCode.VALIDATION_FAILED)
-    if port is not None and not 1 <= port <= 65_535:
-        raise WebhookError(WebhookErrorCode.VALIDATION_FAILED)
-    if "%" in hostname:
-        raise WebhookError(WebhookErrorCode.VALIDATION_FAILED)
-    try:
-        normalized_host = str(ipaddress.ip_address(hostname))
-    except ValueError:
-        try:
-            normalized_host = hostname.rstrip(".").encode("idna").decode("ascii").lower()
-        except UnicodeError as exc:
-            raise WebhookError(WebhookErrorCode.VALIDATION_FAILED) from exc
-        labels = normalized_host.split(".")
-        if (
-            not normalized_host
-            or len(normalized_host) > 253
-            or any(_DNS_LABEL_PATTERN.fullmatch(label) is None for label in labels)
-        ):
-            raise WebhookError(WebhookErrorCode.VALIDATION_FAILED) from None
-    return parsed, normalized_host
 
 
 def _redacted_origin(parsed: SplitResult, normalized_host: str) -> str:

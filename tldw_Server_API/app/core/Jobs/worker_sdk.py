@@ -233,7 +233,11 @@ class WorkerExecutionContext:
             return None
 
     async def ensure_lease_horizon(self, seconds: int) -> bool:
-        return await self._ensure_lease_horizon_typed(seconds) is not None
+        guaranteed_seconds = await self._ensure_lease_horizon_typed(seconds)
+        if guaranteed_seconds is None or guaranteed_seconds < seconds:
+            self._mark_renewal_lost()
+            return False
+        return True
 
 
 PreparedJobHandler = Callable[

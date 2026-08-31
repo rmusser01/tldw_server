@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
+import json
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -515,6 +516,19 @@ async def _seed_worker_delivery(
     event_type = f"worker.matrix.{hashlib.sha256(label.encode('ascii')).hexdigest()[:16]}"
     event_id = canonical_uuid4(f"{label}-event")
     delivery_id = canonical_uuid4(f"{label}-delivery")
+    body = json.dumps(
+        {
+            "id": event_id,
+            "type": event_type,
+            "api_version": "2026-07-01",
+            "created_at": now.astimezone(timezone.utc)
+            .isoformat()
+            .replace("+00:00", "Z"),
+            "data": {"matrix": True},
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
     async with repository.transaction() as tx:
         webhook_id = await tx.allocate_registration_id()
         target = ring.encrypt_text(
@@ -550,6 +564,7 @@ async def _seed_worker_delivery(
                 event_id=event_id,
                 source_identity=f"{label}-command",
                 event_type=event_type,
+                body=body,
                 created_at=now,
             ),
             lambda: delivery_id,

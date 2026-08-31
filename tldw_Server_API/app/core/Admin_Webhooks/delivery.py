@@ -470,6 +470,7 @@ def _canonical_event_body(
     *,
     event_id: str,
     event_type: str,
+    api_version: str,
     created_at: datetime,
     data: dict[str, object],
 ) -> bytes:
@@ -478,7 +479,7 @@ def _canonical_event_body(
             {
                 "id": event_id,
                 "type": event_type,
-                "api_version": EVENT_API_VERSION,
+                "api_version": api_version,
                 "created_at": _canonical_timestamp(created_at),
                 "data": data,
             },
@@ -492,6 +493,35 @@ def _canonical_event_body(
     if len(encoded) > EVENT_BODY_MAX_BYTES:
         raise ValueError("event body is too large")
     return encoded
+
+
+def validate_stored_event_body(
+    event: StoredWebhookEvent,
+    plaintext: bytes,
+) -> None:
+    """Require exact canonical bytes matching immutable event metadata."""
+
+    if not isinstance(plaintext, bytes) or len(plaintext) != event.body_size_bytes:
+        raise ValueError("persisted event body is invalid")
+    try:
+        decoded = json.loads(plaintext)
+        if not isinstance(decoded, dict) or not isinstance(decoded.get("data"), dict):
+            raise ValueError("persisted event body is invalid")
+        data = _snapshot_json_object(decoded["data"])
+        expected = _canonical_event_body(
+            event_id=event.event.id,
+            event_type=event.event.event_type,
+            api_version=event.event.api_version,
+            created_at=event.event.created_at,
+            data=data,
+        )
+    except (OverflowError, RecursionError, TypeError, UnicodeError, ValueError) as exc:
+        raise ValueError("persisted event body is invalid") from exc
+    if (
+        len(expected) != event.body_size_bytes
+        or not hmac.compare_digest(plaintext, expected)
+    ):
+        raise ValueError("persisted event body is invalid")
 
 
 def registration_work_lifecycle_reason(
@@ -560,7 +590,6 @@ def _source_matches(
 ) -> bool:
     return (
         event.event.event_type == command.event_type
-        and event.event.api_version == EVENT_API_VERSION
         and event.event.source_kind is command.source_kind
         and event.aggregate_type == command.aggregate_type
         and event.aggregate_id == command.aggregate_id
@@ -584,6 +613,7 @@ def _verify_replay(
     expected = _canonical_event_body(
         event_id=event.id,
         event_type=event.event.event_type,
+        api_version=event.event.api_version,
         created_at=event.event.created_at,
         data=data,
     )
@@ -846,6 +876,7 @@ class AdminWebhookDeliveryService:
         body = _canonical_event_body(
             event_id=event_id,
             event_type="webhook.test",
+            api_version=EVENT_API_VERSION,
             created_at=started_at,
             data=data,
         )
@@ -1507,20 +1538,13 @@ class AdminWebhookDeliveryService:
                             api_version=source_bundle.event.event.api_version,
                             protected=source_bundle.event.body,
                         )
-                        if len(plaintext) != source_bundle.event.body_size_bytes:
-                            raise WebhookError(WebhookErrorCode.OPERATION_FAILED)
                         try:
-                            decoded = json.loads(plaintext)
-                        except (UnicodeError, json.JSONDecodeError):
+                            validate_stored_event_body(
+                                source_bundle.event,
+                                plaintext,
+                            )
+                        except ValueError:
                             raise WebhookError(WebhookErrorCode.OPERATION_FAILED) from None
-                        if not isinstance(decoded, dict) or (
-                            decoded.get("id") != source_bundle.event.event.id
-                            or decoded.get("type")
-                            != source_bundle.event.event.event_type
-                            or decoded.get("api_version")
-                            != source_bundle.event.event.api_version
-                        ):
-                            raise WebhookError(WebhookErrorCode.OPERATION_FAILED)
                         event_type = source_bundle.event.event.event_type
                         created = await tx.insert_delivery(
                             delivery_id,
@@ -1708,6 +1732,7 @@ class AdminWebhookDeliveryService:
             body = _canonical_event_body(
                 event_id=event_id,
                 event_type=command.event_type,
+                api_version=EVENT_API_VERSION,
                 created_at=created_at,
                 data=data,
             )
@@ -1877,4 +1902,5 @@ __all__ = [
     "EventCaptureAuditSink",
     "get_admin_webhook_delivery_service",
     "registration_work_lifecycle_reason",
+    "validate_stored_event_body",
 ]

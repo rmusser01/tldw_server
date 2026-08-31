@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
-import ipaddress
 import math
 import re
 import time
@@ -14,7 +13,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Protocol, TypeAlias
-from urllib.parse import quote, urlsplit, urlunsplit
+from urllib.parse import quote, urlunsplit
 from uuid import UUID
 
 from tldw_Server_API.app.core.exceptions import HTTPHopError
@@ -29,14 +28,13 @@ from tldw_Server_API.app.core.Security.http_hop import (
 )
 
 from .domain import DeliveryKind, ValidatedWebhookTarget
+from .target import normalize_webhook_hostname, parse_webhook_target_url
 
-_MAX_TARGET_BYTES = 2_048
 _MAX_BODY_BYTES = 64 * 1_024
 _MAX_TIMEOUT_SECONDS = 30
 _RETRY_DELAYS_SECONDS = (60, 300, 1_800)
 _SIGNING_SECRET_PATTERN = re.compile(r"whsec_[0-9a-f]{64}\Z")
 _EVENT_TYPE_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,63}\Z")
-_DNS_LABEL_PATTERN = re.compile(r"(?!-)[A-Za-z0-9-]{1,63}(?<!-)\Z")
 _PERCENT_ESCAPE_PATTERN = re.compile(r"%[0-9A-Fa-f]{2}")
 _PATH_SAFE = "/!$&'()*+,;=:@-._~%"
 _QUERY_SAFE = "/?!$&'()*+,;=:@-._~%"
@@ -265,41 +263,6 @@ def _validate_execution_request(request: AttemptExecutionRequest) -> None:
         raise ValueError("delivery kind is invalid")
 
 
-def _normalize_host(hostname: str) -> str:
-    if not isinstance(hostname, str) or not hostname or "%" in hostname:
-        raise ValueError("target host is invalid")
-    try:
-        return str(ipaddress.ip_address(hostname))
-    except ValueError:
-        try:
-            normalized = hostname.rstrip(".").encode("idna").decode("ascii").lower()
-        except UnicodeError as exc:
-            raise ValueError("target host is invalid") from exc
-        labels = normalized.split(".")
-        if (
-            not normalized
-            or len(normalized) > 253
-            or any(_DNS_LABEL_PATTERN.fullmatch(label) is None for label in labels)
-        ):
-            raise ValueError("target host is invalid") from None
-        return normalized
-
-
-def _validate_percent_escapes(value: str) -> None:
-    index = 0
-    while index < len(value):
-        if value[index] != "%":
-            index += 1
-            continue
-        match = _PERCENT_ESCAPE_PATTERN.match(value, index)
-        if match is None:
-            raise ValueError("target contains a malformed percent escape")
-        decoded = int(value[index + 1 : index + 3], 16)
-        if decoded < 32 or decoded == 127 or decoded == ord("\\"):
-            raise ValueError("target contains an ambiguous percent escape")
-        index += 3
-
-
 def _uppercase_percent_escapes(value: str) -> str:
     return _PERCENT_ESCAPE_PATTERN.sub(lambda match: match.group(0).upper(), value)
 
@@ -310,47 +273,22 @@ def _normalize_target(
     allow_http_dev: bool,
 ) -> _NormalizedTarget:
     url = target.url
-    if not isinstance(url, str) or not url:
-        raise ValueError("target URL is invalid")
     try:
-        encoded = url.encode("utf-8")
-    except UnicodeError as exc:
+        parsed, host = parse_webhook_target_url(url)
+        expected_host = normalize_webhook_hostname(target.hostname)
+    except ValueError as exc:
         raise ValueError("target URL is invalid") from exc
-    if (
-        len(encoded) > _MAX_TARGET_BYTES
-        or "#" in url
-        or "\\" in url
-        or any(ord(character) < 32 or ord(character) == 127 for character in url)
-    ):
-        raise ValueError("target URL is invalid")
-    try:
-        parsed = urlsplit(url)
-        hostname = parsed.hostname
-        port = parsed.port
-    except (TypeError, UnicodeError, ValueError) as exc:
-        raise ValueError("target URL is invalid") from exc
-    if (
-        not parsed.scheme
-        or not parsed.netloc
-        or not hostname
-        or parsed.netloc.endswith(":")
-    ):
-        raise ValueError("target URL is invalid")
-    if parsed.username is not None or parsed.password is not None or parsed.fragment:
-        raise ValueError("target URL is invalid")
 
     scheme = parsed.scheme.lower()
     if scheme != "https" and not (scheme == "http" and allow_http_dev):
         raise ValueError("target URL scheme is invalid")
-    host = _normalize_host(hostname)
-    if _normalize_host(target.hostname) != host:
+    if expected_host != host:
         raise ValueError("target hostname does not match URL")
+    port = parsed.port
     if port is not None and not 1 <= port <= 65_535:
         raise ValueError("target port is invalid")
     effective_port = port if port is not None else (443 if scheme == "https" else 80)
 
-    _validate_percent_escapes(parsed.path)
-    _validate_percent_escapes(parsed.query)
     try:
         path = _uppercase_percent_escapes(quote(parsed.path or "/", safe=_PATH_SAFE))
         query = _uppercase_percent_escapes(quote(parsed.query, safe=_QUERY_SAFE))

@@ -183,13 +183,14 @@ async def _seed_source_delivery(
     fixture: DeliveryRepositoryFixture,
     *,
     label: str,
+    api_version: str = "2026-07-01",
 ) -> tuple[object, WebhookKeyRing, object]:
     registration, ring = await seed_ready_registration(fixture, active=True)
     event_id = canonical_uuid4(f"{label}-event")
     created_at = NOW - timedelta(minutes=5)
     body = json.dumps(
         {
-            "api_version": "2026-07-01",
+            "api_version": api_version,
             "created_at": created_at.isoformat().replace("+00:00", "Z"),
             "data": {"user_id": 11},
             "id": event_id,
@@ -201,7 +202,7 @@ async def _seed_source_delivery(
     event = EventInsert(
         id=event_id,
         event_type="user.created",
-        api_version="2026-07-01",
+        api_version=api_version,
         source_kind=EventSourceKind.COMMAND,
         aggregate_type=None,
         aggregate_id=None,
@@ -211,7 +212,7 @@ async def _seed_source_delivery(
         source_request_id=f"{label}-request",
         body=ring.encrypt_event_body(
             event_id=event_id,
-            api_version="2026-07-01",
+            api_version=api_version,
             body=body,
         ),
         body_size_bytes=len(body),
@@ -1076,6 +1077,116 @@ async def exercise_redelivery_success_exact_replay_and_malformed_coordinate(
     assert await fixture.fetchval(
         "SELECT COUNT(*) FROM admin_webhook_idempotency WHERE operation = 'redeliver'"
     ) == 0
+
+
+async def exercise_redelivery_rejects_noncanonical_event_body(
+    fixture: DeliveryRepositoryFixture,
+) -> None:
+    delivery_module = importlib.import_module(
+        "tldw_Server_API.app.core.Admin_Webhooks.delivery"
+    )
+    registration, ring, source = await _seed_source_delivery(
+        fixture,
+        label="redelivery-noncanonical-body",
+    )
+    bundle = await fixture.repository.get_delivery_bundle(source.delivery.id)
+    assert bundle is not None
+    event = bundle.event.event
+    canonical = ring.decrypt_event_body(
+        event_id=event.id,
+        api_version=event.api_version,
+        protected=bundle.event.body,
+    )
+    noncanonical = json.dumps(json.loads(canonical), indent=2).encode("utf-8")
+    assert noncanonical != canonical
+    protected = ring.encrypt_event_body(
+        event_id=event.id,
+        api_version=event.api_version,
+        body=noncanonical,
+    )
+    await fixture.execute(
+        """
+        UPDATE admin_webhook_events
+        SET body_ciphertext_json = ?, body_key_id = ?, body_size_bytes = ?
+        WHERE id = ?
+        """,
+        protected.ciphertext_json,
+        protected.key_id,
+        len(noncanonical),
+        event.id,
+    )
+    audits: list[object] = []
+
+    async def audit_sink(record: object) -> None:
+        audits.append(record)
+
+    service = _redelivery_service(
+        delivery_module,
+        fixture,
+        WebhookKeyRingLoadResult(
+            ring=ring,
+            code=WebhookKeyLoadCode.AVAILABLE,
+        ),
+        label="redelivery-noncanonical-body",
+    )
+    command = _redelivery_command(
+        delivery_module,
+        registration,
+        source.delivery.id,
+        key="1234567890abcdef1234567890abcdef",
+    )
+
+    with pytest.raises(WebhookError) as rejected:
+        await service.redeliver_webhook(command, audit_sink=audit_sink)
+
+    assert rejected.value.code is WebhookErrorCode.OPERATION_FAILED
+    assert [record.outcome for record in audits] == ["failed"]
+    assert await fixture.fetchval(
+        "SELECT COUNT(*) FROM admin_webhook_deliveries WHERE kind = 'manual'"
+    ) == 0
+    assert await fixture.fetchval(
+        "SELECT COUNT(*) FROM admin_webhook_idempotency WHERE operation = 'redeliver'"
+    ) == 0
+
+
+async def exercise_redelivery_accepts_canonical_historical_event_body(
+    fixture: DeliveryRepositoryFixture,
+) -> None:
+    delivery_module = importlib.import_module(
+        "tldw_Server_API.app.core.Admin_Webhooks.delivery"
+    )
+    historical_version = "2025-01-01"
+    registration, ring, source = await _seed_source_delivery(
+        fixture,
+        label="redelivery-historical-version",
+        api_version=historical_version,
+    )
+    audits: list[object] = []
+
+    async def audit_sink(record: object) -> None:
+        audits.append(record)
+
+    result = await _redelivery_service(
+        delivery_module,
+        fixture,
+        WebhookKeyRingLoadResult(
+            ring=ring,
+            code=WebhookKeyLoadCode.AVAILABLE,
+        ),
+        label="redelivery-historical-version",
+    ).redeliver_webhook(
+        _redelivery_command(
+            delivery_module,
+            registration,
+            source.delivery.id,
+            key="abcdef1234567890abcdef1234567890",
+        ),
+        audit_sink=audit_sink,
+    )
+
+    assert result.delivery.kind is DeliveryKind.MANUAL
+    assert result.delivery.event_id == source.delivery.event_id
+    assert [record.outcome for record in audits] == ["accepted"]
 
 
 async def exercise_redelivery_key_family_conflicts_across_sources(

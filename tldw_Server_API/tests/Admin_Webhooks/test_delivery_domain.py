@@ -528,11 +528,51 @@ async def _exercise_capture_and_replay(fixture: _RepositoryFixture) -> None:
     ) is DeliveryReasonCode.CANCELED_DELETED
 
 
+async def _exercise_capture_replay_after_api_version_change(
+    fixture: _RepositoryFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _complete_migration(fixture.repository)
+    module, ring, service, _dependencies = _service(
+        fixture,
+        label="historical-capture-replay",
+    )
+    await _seed_registration(
+        fixture.repository,
+        ring,
+        event_types=("user.created",),
+        active=True,
+    )
+    command = _command(module, data={"historical": True})
+    captured = await service.capture_synthetic_event(
+        command,
+        audit_sink=_recording_sink([]),
+    )
+
+    monkeypatch.setattr(module, "EVENT_API_VERSION", "2027-01-01")
+    replayed = await service.capture_synthetic_event(
+        command,
+        audit_sink=_recording_sink([]),
+    )
+
+    assert replayed.inserted is False
+    assert replayed.event == captured.event
+    assert replayed.deliveries == captured.deliveries
+
+
 @pytest.mark.unit
 async def test_sqlite_synthetic_capture_replay_and_fanout(
     sqlite_repo: SQLiteRepositoryFixture,
 ) -> None:
     await _exercise_capture_and_replay(sqlite_repo)
+
+
+@pytest.mark.unit
+async def test_sqlite_capture_replay_uses_stored_api_version(
+    sqlite_repo: SQLiteRepositoryFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _exercise_capture_replay_after_api_version_change(sqlite_repo, monkeypatch)
 
 
 @pytest.mark.unit
@@ -578,6 +618,15 @@ async def test_postgres_synthetic_capture_replay_and_fanout(
     pg_repo: PostgreSQLRepositoryFixture,
 ) -> None:
     await _exercise_capture_and_replay(pg_repo)
+
+
+@pytest.mark.integration
+@pytest.mark.postgres
+async def test_postgres_capture_replay_uses_stored_api_version(
+    pg_repo: PostgreSQLRepositoryFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _exercise_capture_replay_after_api_version_change(pg_repo, monkeypatch)
 
 
 @pytest.mark.unit

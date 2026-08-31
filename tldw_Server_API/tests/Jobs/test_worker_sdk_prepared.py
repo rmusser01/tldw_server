@@ -1487,6 +1487,26 @@ async def test_private_typed_horizon_helper_logs_class_only_and_fails_closed(
 
 
 @pytest.mark.asyncio
+async def test_context_rejects_applied_horizon_shorter_than_requested_minimum():
+    manager = PreparedManager()
+    manager.horizon_result = LeaseHorizonResult.applied(
+        leased_until=RENEWED_UNTIL,
+        guaranteed_seconds=30,
+    )
+    context = worker_sdk_module.WorkerExecutionContext(
+        manager,
+        _job(),
+        worker_id="worker-1",
+    )
+
+    ensured = await context.ensure_lease_horizon(60)
+
+    assert ensured is False
+    assert context.renewal_lost is True
+    assert manager.horizon_calls[0].minimum_seconds == 60
+
+
+@pytest.mark.asyncio
 async def test_horizon_failure_remains_sticky_after_later_success():
     manager = PreparedManager()
     manager.horizon_results = [
