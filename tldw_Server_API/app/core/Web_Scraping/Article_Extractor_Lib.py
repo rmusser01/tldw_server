@@ -31,7 +31,6 @@ from urllib.robotparser import RobotFileParser
 
 # pandas is imported inside parse_csv_urls; at module scope it cost ~0.35 s in
 # every process that registers the media router.
-
 # External Libraries
 from bs4 import BeautifulSoup
 from defusedxml import ElementTree as xET
@@ -51,6 +50,11 @@ from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 from tldw_Server_API.app.core.Metrics import increment_counter
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
 from tldw_Server_API.app.core.Utils.Utils import logging
+from tldw_Server_API.app.core.Web_Scraping.browser_transport import (
+    browser_transport_failure_result,
+    default_browser_transport_decision,
+    resolve_browser_transport_decision,
+)
 from tldw_Server_API.app.core.Web_Scraping.content import (
     ContentMetadataHandler,
     convert_html_to_markdown,
@@ -1159,6 +1163,13 @@ async def recursive_scrape(
         progress_callback: Optional[callable] = None,
         allow_llm_extraction: bool = True,
 ) -> list[dict]:
+    transport = resolve_browser_transport_decision(
+        default_browser_transport_decision,
+        component="legacy_article_extractor",
+    )
+    if not transport.allowed:
+        return [browser_transport_failure_result(base_url, transport)]
+
     async def save_progress():
         temp_file = resume_file + ".tmp"
         with open(temp_file, 'w') as f:
@@ -1218,6 +1229,10 @@ async def recursive_scrape(
                             allow_llm_extraction=allow_llm_extraction,
                         )
 
+                        if article_data.get("error") == "browser_transport_unavailable":
+                            scraped_articles.append(article_data)
+                            break
+
                         if article_data and article_data['extraction_successful']:
                             scraped_articles.append(article_data)
                             pages_scraped += 1
@@ -1268,6 +1283,13 @@ async def scrape_article_async(
     *,
     allow_llm_extraction: bool = True,
 ) -> dict[str, Any]:
+    transport = resolve_browser_transport_decision(
+        default_browser_transport_decision,
+        component="legacy_article_extractor",
+    )
+    if not transport.allowed:
+        return browser_transport_failure_result(url, transport)
+
     page = await context.new_page()
     try:
         await page.goto(url)

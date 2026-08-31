@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+import configparser
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Literal, cast
+from typing import Any, Literal, cast
+
+from loguru import logger
 
 from tldw_Server_API.app.core.config import (
+    load_comprehensive_config,
     web_browser_transport_mode,
     web_outbound_policy_mode,
 )
+from tldw_Server_API.app.core.config_sections.auth import load_auth_config
 
 ConfiguredBrowserTransportMode = Literal[
     "auto",
@@ -139,20 +144,82 @@ def default_browser_transport_decision(
     try:
         configured_mode: object = web_browser_transport_mode()
         outbound_mode: object = web_outbound_policy_mode()
-    except Exception:
+        auth_mode: object = _effective_auth_mode(environment)
+    except Exception as exc:  # noqa: BLE001 - configuration errors must fail closed
+        logger.bind(
+            component="browser_transport",
+            operation="resolve_default_configuration",
+            exception_type=type(exc).__name__,
+        ).warning("Browser transport configuration resolution failed.")
         configured_mode = None
         outbound_mode = None
+        auth_mode = None
     return decide_browser_transport(
         configured_mode=configured_mode,
-        auth_mode=environment.get("AUTH_MODE"),
+        auth_mode=auth_mode,
         outbound_policy_mode=outbound_mode,
         attestation=attestation,
     )
 
 
+def resolve_browser_transport_decision(
+    provider: Callable[[], BrowserTransportDecision],
+    *,
+    component: str,
+) -> BrowserTransportDecision:
+    """Resolve a provider fail-closed while logging only bounded diagnostics."""
+    try:
+        decision = provider()
+    except Exception as exc:  # noqa: BLE001 - provider errors must fail closed
+        logger.bind(
+            component=component,
+            operation="resolve_transport",
+            exception_type=type(exc).__name__,
+        ).warning("Browser transport decision provider failed.")
+        return _invalid_browser_transport_decision()
+    if not isinstance(decision, BrowserTransportDecision):
+        return _invalid_browser_transport_decision()
+    return decision
+
+
+def browser_transport_failure_result(
+    url: str,
+    decision: BrowserTransportDecision,
+) -> dict[str, Any]:
+    """Return the fixed public failure contract for denied browser retrieval."""
+    return {
+        "url": url,
+        "error": "browser_transport_unavailable",
+        "extraction_successful": False,
+        "capability": decision.to_capability_metadata(),
+    }
+
+
+def _invalid_browser_transport_decision() -> BrowserTransportDecision:
+    """Return the fixed decision used for invalid provider output."""
+    return BrowserTransportDecision(
+        allowed=False,
+        configured_mode="disabled",
+        effective_mode="disabled",
+        dns_peer_attested=False,
+        reason="browser_transport_config_invalid",
+    )
+
+
+def _effective_auth_mode(environment: Mapping[str, str]) -> str:
+    """Resolve absent auth mode canonically while rejecting explicit invalid input."""
+    explicit = environment.get("AUTH_MODE")
+    if explicit is not None:
+        normalized = _normalize_profile_value(explicit)
+        return normalized if normalized in {"single_user", "multi_user"} else ""
+    config = load_comprehensive_config() or configparser.ConfigParser()
+    return load_auth_config(config, environment).mode
+
+
 def _normalize_configured_mode(
     value: object,
 ) -> ConfiguredBrowserTransportMode | None:
+    """Normalize a supported configured mode without retaining invalid values."""
     if not isinstance(value, str):
         return None
     normalized = value.strip().lower()
@@ -162,12 +229,14 @@ def _normalize_configured_mode(
 
 
 def _normalize_profile_value(value: object) -> str:
+    """Normalize a deployment-profile value to a lowercase string."""
     return value.strip().lower() if isinstance(value, str) else ""
 
 
 def _is_complete_attestation(
     attestation: BrowserTransportAttestation | None,
 ) -> bool:
+    """Return whether governed transport evidence covers every required property."""
     return (
         isinstance(attestation, BrowserTransportAttestation)
         and attestation.mechanism == "governed_proxy"

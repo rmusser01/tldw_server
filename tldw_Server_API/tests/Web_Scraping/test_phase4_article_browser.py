@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from loguru import logger
 
 from tldw_Server_API.app.core.Web_Scraping.browser_transport import (
     BrowserTransportAttestation,
@@ -936,6 +937,32 @@ async def test_invalid_transport_provider_fails_closed_before_launch(
     assert runtime.events == []
     assert guard.calls == []
     assert pool.active_count == 0
+
+
+@pytest.mark.unit
+def test_transport_provider_failure_logs_only_safe_diagnostics() -> None:
+    """Provider failures should be observable without leaking exception details."""
+    secret = "transport-secret"
+    records: list[Any] = []
+    sink_id = logger.add(lambda message: records.append(message.record), level="WARNING")
+    try:
+        adapter = _adapter(
+            _FakeBrowserRuntime(),
+            _FakeGuard([]),
+            transport_decision=lambda: (_ for _ in ()).throw(RuntimeError(secret)),
+        )
+
+        capability = adapter.transport_capability()
+    finally:
+        logger.remove(sink_id)
+
+    assert capability["reason"] == "browser_transport_config_invalid"
+    matching = [record for record in records if record["extra"].get("operation") == "resolve_transport"]
+    assert len(matching) == 1
+    assert matching[0]["extra"]["component"] == "article_browser"
+    assert matching[0]["extra"]["operation"] == "resolve_transport"
+    assert matching[0]["extra"]["exception_type"] == "RuntimeError"
+    assert secret not in matching[0]["message"]
 
 
 @pytest.mark.unit

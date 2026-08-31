@@ -366,6 +366,32 @@ async def test_invalid_browser_transport_provider_fails_closed_before_budget(
     assert launcher.events == []
 
 
+def test_transport_provider_failure_logs_only_safe_diagnostics() -> None:
+    """Provider failures should be observable without leaking exception details."""
+    secret = "transport-secret"
+    records: list[Any] = []
+    sink_id = logger.add(lambda message: records.append(message.record), level="WARNING")
+    try:
+        probe = _probe(
+            controls=_controls(),
+            guard=FakeProbeEgressGuard([]),
+            launcher=FakePlaywrightLauncher(),
+            transport_decision=lambda: (_ for _ in ()).throw(RuntimeError(secret)),
+        )
+
+        capability = probe.transport_capability()
+    finally:
+        logger.remove(sink_id)
+
+    assert capability["reason"] == "browser_transport_config_invalid"
+    matching = [record for record in records if record["extra"].get("operation") == "resolve_transport"]
+    assert len(matching) == 1
+    assert matching[0]["extra"]["component"] == "preflight_browser_probe"
+    assert matching[0]["extra"]["operation"] == "resolve_transport"
+    assert matching[0]["extra"]["exception_type"] == "RuntimeError"
+    assert secret not in matching[0]["message"]
+
+
 def test_browser_transport_capability_is_exactly_bounded() -> None:
     controls = _controls()
     launcher = FakePlaywrightLauncher()

@@ -12,6 +12,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock, Mock
 
 import pytest
 from hypothesis import HealthCheck, given, settings
@@ -20,6 +21,7 @@ from loguru import logger
 
 from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as legacy
 from tldw_Server_API.app.core.Web_Scraping import enhanced_web_scraping
+from tldw_Server_API.app.core.Web_Scraping.browser_transport import decide_browser_transport
 from tldw_Server_API.app.core.Web_Scraping.content import ContentMetadataHandler
 from tldw_Server_API.app.core.Web_Scraping.extraction import pipeline
 from tldw_Server_API.app.core.Web_Scraping.extraction.dependencies import build_default_dependencies
@@ -29,6 +31,120 @@ from tldw_Server_API.app.core.Web_Scraping.extraction.strategies import trafilat
 
 URL = "https://example.com/article"
 HTML = "<html><head><title>Article</title></head><body>demo@example.com</body></html>"
+
+
+@pytest.mark.unit
+async def test_legacy_recursive_scrape_denies_transport_before_playwright_start(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Any,
+) -> None:
+    """Legacy recursive crawling must fail closed before starting Playwright."""
+    denied = decide_browser_transport(
+        configured_mode="disabled",
+        auth_mode="single_user",
+        outbound_policy_mode="compat",
+    )
+    launcher = Mock(side_effect=AssertionError("Playwright must not start"))
+    monkeypatch.setattr(legacy, "default_browser_transport_decision", lambda: denied, raising=False)
+    monkeypatch.setattr(legacy, "async_playwright", launcher)
+
+    results = await legacy.recursive_scrape(
+        URL,
+        max_pages=1,
+        max_depth=0,
+        delay=0,
+        resume_file=str(tmp_path / "progress.json"),
+    )
+
+    assert results == [
+        {
+            "url": URL,
+            "error": "browser_transport_unavailable",
+            "extraction_successful": False,
+            "capability": denied.to_capability_metadata(),
+        }
+    ]
+    launcher.assert_not_called()
+
+
+@pytest.mark.unit
+async def test_legacy_article_scrape_denies_transport_before_page_creation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A caller-supplied browser context must not bypass transport policy."""
+    denied = decide_browser_transport(
+        configured_mode="auto",
+        auth_mode="multi_user",
+        outbound_policy_mode="strict",
+    )
+    context = SimpleNamespace(
+        new_page=AsyncMock(side_effect=AssertionError("page must not be created"))
+    )
+    monkeypatch.setattr(legacy, "default_browser_transport_decision", lambda: denied, raising=False)
+
+    result = await legacy.scrape_article_async(context, URL)
+
+    assert result == {
+        "url": URL,
+        "error": "browser_transport_unavailable",
+        "extraction_successful": False,
+        "capability": denied.to_capability_metadata(),
+    }
+    context.new_page.assert_not_awaited()
+
+
+@pytest.mark.unit
+async def test_legacy_recursive_scrape_stops_when_transport_is_denied_mid_run(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Any,
+) -> None:
+    """Do not discover links after an inner article dispatch loses admission."""
+    allowed = decide_browser_transport(
+        configured_mode="auto",
+        auth_mode="single_user",
+        outbound_policy_mode="compat",
+    )
+    denied = decide_browser_transport(
+        configured_mode="auto",
+        auth_mode="multi_user",
+        outbound_policy_mode="strict",
+    )
+    decision_provider = Mock(side_effect=[allowed, denied])
+    context = SimpleNamespace(
+        new_page=AsyncMock(side_effect=AssertionError("link page must not be created")),
+        add_cookies=AsyncMock(return_value=None),
+    )
+    browser = SimpleNamespace(
+        new_context=AsyncMock(return_value=context),
+        close=AsyncMock(return_value=None),
+    )
+    playwright = SimpleNamespace(
+        chromium=SimpleNamespace(launch=AsyncMock(return_value=browser))
+    )
+    manager = MagicMock()
+    manager.__aenter__ = AsyncMock(return_value=playwright)
+    manager.__aexit__ = AsyncMock(return_value=None)
+    monkeypatch.setattr(legacy, "default_browser_transport_decision", decision_provider)
+    monkeypatch.setattr(legacy, "async_playwright", Mock(return_value=manager))
+
+    results = await legacy.recursive_scrape(
+        URL,
+        max_pages=1,
+        max_depth=1,
+        delay=0,
+        resume_file=str(tmp_path / "progress.json"),
+    )
+
+    assert results == [
+        {
+            "url": URL,
+            "error": "browser_transport_unavailable",
+            "extraction_successful": False,
+            "capability": denied.to_capability_metadata(),
+        }
+    ]
+    context.new_page.assert_not_awaited()
+    assert decision_provider.call_count == 2
 
 
 def _result(

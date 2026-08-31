@@ -178,6 +178,7 @@ def render_human_summary(report: Mapping[str, Any]) -> str:
 
 
 def _validate_case(raw_case: object, index: int) -> dict[str, Any]:
+    """Validate one fixture case and return its normalized copy."""
     context = f"cases[{index}]"
     case = _require_mapping(raw_case, context)
     _require_exact_fields(case, _CASE_FIELDS, context)
@@ -205,6 +206,7 @@ def _validate_case(raw_case: object, index: int) -> dict[str, Any]:
 def _validate_extraction(
     case: Mapping[str, Any], context: str
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """Validate the input, expected, and observed extraction sections."""
     input_value = _section(case, "input", {"url", "html"}, context)
     expected = _section(case, "expected", {"text"}, context)
     observed = _section(case, "observed", {"text", "output_text"}, context)
@@ -226,6 +228,7 @@ def _validate_extraction(
 def _validate_search_order(
     case: Mapping[str, Any], context: str
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """Validate search-provider inputs and ordered URL observations."""
     input_value = _section(case, "input", {"provider_results"}, context)
     expected = _section(case, "expected", {"ordered_urls"}, context)
     observed = _section(case, "observed", {"ordered_urls", "output_text"}, context)
@@ -269,6 +272,7 @@ def _validate_search_order(
 def _validate_crawl_graph(
     case: Mapping[str, Any], context: str
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """Validate a bounded crawl graph and its observed traversal."""
     input_value = _section(case, "input", {"start_url", "links", "page_limit"}, context)
     expected = _section(case, "expected", {"visited_urls", "stop_reason"}, context)
     observed = _section(
@@ -319,6 +323,7 @@ def _validate_crawl_graph(
 def _validate_provenance(
     case: Mapping[str, Any], context: str
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """Validate provenance requirements and a JSON-compatible record."""
     input_value = _section(case, "input", {"required_fields"}, context)
     expected = _section(case, "expected", set(), context)
     observed = _section(case, "observed", {"record", "output_text"}, context)
@@ -345,6 +350,7 @@ def _validate_provenance(
 
 
 def _evaluate_case(case: Mapping[str, Any]) -> dict[str, Any]:
+    """Score one normalized case and attach its output budget."""
     evaluators = {
         "extraction": _score_extraction,
         "search_order": _score_search_order,
@@ -363,6 +369,7 @@ def _evaluate_case(case: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _score_extraction(case: Mapping[str, Any]) -> tuple[dict[str, Any], float]:
+    """Score extraction text with the established shingle metrics."""
     true = case["expected"]["text"]
     predicted = case["observed"]["text"]
     tp, fp, fn = string_shingle_matching(true=true, pred=predicted)
@@ -381,6 +388,7 @@ def _score_extraction(case: Mapping[str, Any]) -> tuple[dict[str, Any], float]:
 
 
 def _score_search_order(case: Mapping[str, Any]) -> tuple[dict[str, Any], float]:
+    """Score position agreement between expected and observed URLs."""
     expected = case["expected"]["ordered_urls"]
     observed = case["observed"]["ordered_urls"]
     ratio = sum(left == right for left, right in zip(expected, observed)) / max(
@@ -396,6 +404,7 @@ def _score_search_order(case: Mapping[str, Any]) -> tuple[dict[str, Any], float]
 
 
 def _score_crawl_graph(case: Mapping[str, Any]) -> tuple[dict[str, Any], float]:
+    """Score crawl coverage, visit order, and terminal reason."""
     expected = case["expected"]["visited_urls"]
     observed = case["observed"]["visited_urls"]
     recall = len(set(expected) & set(observed)) / len(set(expected))
@@ -415,6 +424,7 @@ def _score_crawl_graph(case: Mapping[str, Any]) -> tuple[dict[str, Any], float]:
 
 
 def _score_provenance(case: Mapping[str, Any]) -> tuple[dict[str, Any], float]:
+    """Score recall of required non-empty provenance fields."""
     required_fields = case["input"]["required_fields"]
     record = case["observed"]["record"]
     present = sum(
@@ -425,6 +435,7 @@ def _score_provenance(case: Mapping[str, Any]) -> tuple[dict[str, Any], float]:
 
 
 def _output_budget(output_text: str) -> dict[str, Any]:
+    """Measure characters, UTF-8 bytes, and estimated tokens."""
     characters = len(output_text)
     return {
         "characters": characters,
@@ -434,6 +445,7 @@ def _output_budget(output_text: str) -> dict[str, Any]:
 
 
 def _token_estimate(characters: int) -> dict[str, Any]:
+    """Estimate tokens with the declared non-authoritative algorithm."""
     return {
         "value": (characters + 3) // 4,
         "algorithm": ALGORITHM_VERSIONS["token_estimate"],
@@ -447,12 +459,14 @@ def _section(
     fields: set[str],
     context: str,
 ) -> Mapping[str, Any]:
+    """Return a case section after enforcing its exact field set."""
     section = _require_mapping(case[name], f"{context}.{name}")
     _require_exact_fields(section, fields, f"{context}.{name}")
     return section
 
 
 def _require_mapping(value: object, context: str) -> Mapping[str, Any]:
+    """Require an object-like mapping with string keys."""
     if not isinstance(value, Mapping):
         raise FixtureValidationError(f"{context} must be an object")
     if any(not isinstance(key, str) for key in value):
@@ -463,6 +477,7 @@ def _require_mapping(value: object, context: str) -> Mapping[str, Any]:
 def _require_exact_fields(
     value: Mapping[str, Any], required: set[str] | frozenset[str], context: str
 ) -> None:
+    """Reject missing or unknown fields in a fixture object."""
     fields = set(value)
     missing = required - fields
     unknown = fields - required
@@ -477,12 +492,14 @@ def _require_exact_fields(
 
 
 def _require_string(value: object, context: str) -> str:
+    """Require and return a string value."""
     if not isinstance(value, str):
         raise FixtureValidationError(f"{context} must be a string")
     return value
 
 
 def _require_nonempty_string(value: object, context: str) -> str:
+    """Require and return a non-empty string value."""
     string = _require_string(value, context)
     if not string:
         raise FixtureValidationError(f"{context} must be non-empty")
@@ -490,10 +507,12 @@ def _require_nonempty_string(value: object, context: str) -> str:
 
 
 def _require_url(value: object, context: str) -> str:
+    """Require the fixture's non-empty URL string representation."""
     return _require_nonempty_string(value, context)
 
 
 def _require_string_list(value: object, context: str) -> list[str]:
+    """Require a non-empty list of non-empty strings."""
     if not isinstance(value, list) or not value:
         raise FixtureValidationError(f"{context} must be a non-empty list")
     return [
@@ -505,6 +524,7 @@ def _require_string_list(value: object, context: str) -> list[str]:
 def _require_url_list(
     value: object, context: str, *, allow_empty: bool = False
 ) -> list[str]:
+    """Require a URL-string list, optionally permitting no entries."""
     if not isinstance(value, list) or (not value and not allow_empty):
         qualifier = "a list" if allow_empty else "a non-empty list"
         raise FixtureValidationError(f"{context} must be {qualifier}")
@@ -515,6 +535,7 @@ def _require_url_list(
 
 
 def _copy_json_value(value: object, context: str) -> Any:
+    """Recursively copy a finite JSON-compatible value."""
     if value is None or isinstance(value, (str, bool, int)):
         return value
     if isinstance(value, float):
@@ -537,10 +558,12 @@ def _copy_json_value(value: object, context: str) -> Any:
 
 
 def _is_nonempty(value: object) -> bool:
+    """Return whether a provenance value counts as present."""
     return value is not None and value != "" and value != [] and value != {}
 
 
 def _round_metric(value: float) -> float:
+    """Round a finite metric to the report's fixed precision."""
     if not math.isfinite(value):
         raise FixtureValidationError("reported metrics must be finite")
     return round(value, 6)

@@ -6,7 +6,6 @@ import copy
 from pathlib import Path
 
 import pytest
-
 from Helper_Scripts.Evals.run_web_retrieval_quality_baseline import main
 
 from tldw_Server_API.app.core.Evaluations.article_extraction_benchmark import (
@@ -26,6 +25,8 @@ from tldw_Server_API.app.core.Evaluations.web_retrieval_quality import (
     validate_fixture_suite,
 )
 
+pytestmark = pytest.mark.unit
+
 
 REVISION = "f676e23549ea8ed82ef53493260621a05b281863"
 REPOSITORY_ROOT = Path(__file__).parents[3]
@@ -34,6 +35,7 @@ BASELINE_PATH = REPOSITORY_ROOT / "Docs/Evals/baselines/web_retrieval_quality_v1
 
 
 def _suite() -> dict[str, object]:
+    """Return a complete in-memory fixture covering every v1 case kind."""
     return {
         "schema_version": FIXTURE_SCHEMA_VERSION,
         "suite_id": "in-test-v1",
@@ -128,12 +130,14 @@ def _suite() -> dict[str, object]:
 
 
 def _case(report: dict[str, object], case_id: str) -> dict[str, object]:
+    """Return one report case by its stable identifier."""
     cases = report["cases"]
     assert isinstance(cases, list)
     return next(case for case in cases if case["id"] == case_id)
 
 
 def test_rejects_wrong_schema_version() -> None:
+    """Reject fixture suites from unsupported schema versions."""
     suite = _suite()
     suite["schema_version"] = "future-version"
 
@@ -142,6 +146,7 @@ def test_rejects_wrong_schema_version() -> None:
 
 
 def test_rejects_duplicate_case_ids() -> None:
+    """Reject duplicate stable case identifiers."""
     suite = _suite()
     cases = suite["cases"]
     assert isinstance(cases, list)
@@ -153,6 +158,7 @@ def test_rejects_duplicate_case_ids() -> None:
 
 @pytest.mark.parametrize("target", ["suite", "case"])
 def test_rejects_unknown_fields(target: str) -> None:
+    """Reject unknown fields at both suite and case boundaries."""
     suite = _suite()
     if target == "suite":
         suite["unexpected"] = True
@@ -166,6 +172,7 @@ def test_rejects_unknown_fields(target: str) -> None:
 
 
 def test_rejects_unsupported_case_kind() -> None:
+    """Reject fixture case kinds outside the v1 contract."""
     suite = _suite()
     cases = suite["cases"]
     assert isinstance(cases, list)
@@ -189,6 +196,7 @@ def test_rejects_missing_kind_specific_fields(
     section: str,
     field: str,
 ) -> None:
+    """Reject missing required fields for each supported case kind."""
     suite = _suite()
     cases = suite["cases"]
     assert isinstance(cases, list)
@@ -199,6 +207,7 @@ def test_rejects_missing_kind_specific_fields(
 
 
 def test_validates_all_four_kinds_and_returns_a_defensive_copy() -> None:
+    """Validate all case kinds without retaining caller-owned containers."""
     suite = _suite()
 
     validated = validate_fixture_suite(suite)
@@ -216,6 +225,7 @@ def test_validates_all_four_kinds_and_returns_a_defensive_copy() -> None:
 
 
 def test_rejects_boolean_page_limit() -> None:
+    """Reject booleans masquerading as positive crawl limits."""
     suite = _suite()
     cases = suite["cases"]
     assert isinstance(cases, list)
@@ -226,6 +236,7 @@ def test_rejects_boolean_page_limit() -> None:
 
 
 def test_rejects_non_finite_observed_values() -> None:
+    """Reject non-finite numbers from JSON-compatible observations."""
     suite = _suite()
     cases = suite["cases"]
     assert isinstance(cases, list)
@@ -236,6 +247,7 @@ def test_rejects_non_finite_observed_values() -> None:
 
 
 def test_unicode_output_budget_distinguishes_characters_and_utf8_bytes() -> None:
+    """Count Unicode characters separately from encoded byte length."""
     report = evaluate_fixture_suite(_suite())
     provenance = _case(report, "m-provenance")
 
@@ -251,6 +263,7 @@ def test_unicode_output_budget_distinguishes_characters_and_utf8_bytes() -> None
 
 
 def test_extraction_metrics_reuse_existing_shingle_helpers() -> None:
+    """Keep baseline extraction scores aligned with shared shingle helpers."""
     suite = _suite()
     extraction = suite["cases"][0]
     true = extraction["expected"]["text"]
@@ -275,6 +288,7 @@ def test_extraction_metrics_reuse_existing_shingle_helpers() -> None:
 
 
 def test_report_is_sorted_and_stable_across_calls() -> None:
+    """Produce sorted, byte-stable reports across equivalent inputs."""
     suite = _suite()
 
     first = evaluate_fixture_suite(suite)
@@ -292,6 +306,7 @@ def test_report_is_sorted_and_stable_across_calls() -> None:
 
 
 def test_algorithm_versions_exactly_match_the_v1_contract() -> None:
+    """Pin every algorithm identifier declared by the v1 contract."""
     assert dict(ALGORITHM_VERSIONS) == {
         "budget": "char-utf8-budget-v1",
         "crawl": "ordered-visit-stop-v1",
@@ -303,6 +318,7 @@ def test_algorithm_versions_exactly_match_the_v1_contract() -> None:
 
 
 def test_human_summary_uses_stable_line_grammar() -> None:
+    """Render a stable timestamp-free human summary grammar."""
     report = evaluate_fixture_suite(_suite())
 
     summary = render_human_summary(report)
@@ -317,6 +333,7 @@ def test_human_summary_uses_stable_line_grammar() -> None:
 
 
 def test_checked_fixture_covers_the_minimal_current_dev_contract() -> None:
+    """Ensure the checked fixture spans the current minimal retrieval surface."""
     suite = load_fixture_suite(FIXTURE_PATH)
     cases = {case["kind"]: case for case in suite["cases"]}
 
@@ -332,6 +349,7 @@ def test_checked_fixture_covers_the_minimal_current_dev_contract() -> None:
 
 
 def test_checked_fixture_generates_the_checked_baseline() -> None:
+    """Regenerate the checked baseline exactly from the checked fixture."""
     suite = load_fixture_suite(FIXTURE_PATH)
     report = evaluate_fixture_suite(suite)
 
@@ -342,6 +360,7 @@ def test_cli_writes_json_and_stable_human_summary(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    """Write canonical JSON while printing the stable human summary."""
     destination = tmp_path / "report.json"
 
     assert main(["--fixture", str(FIXTURE_PATH), "--json-out", str(destination)]) == 0

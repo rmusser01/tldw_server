@@ -16,6 +16,7 @@ from loguru import logger
 from tldw_Server_API.app.core.Web_Scraping.browser_transport import (
     BrowserTransportDecision,
     default_browser_transport_decision,
+    resolve_browser_transport_decision,
 )
 from tldw_Server_API.app.core.Web_Scraping.preflight.asyncio_compat import timeout as _asyncio_timeout
 from tldw_Server_API.app.core.Web_Scraping.preflight.context import (
@@ -378,24 +379,12 @@ class GuardedPlaywrightBrowserProbe:
         self._capability_check = capability_check
         self._no_sandbox = bool(no_sandbox)
 
-    @staticmethod
-    def _invalid_transport_decision() -> BrowserTransportDecision:
-        return BrowserTransportDecision(
-            allowed=False,
-            configured_mode="disabled",
-            effective_mode="disabled",
-            dns_peer_attested=False,
-            reason="browser_transport_config_invalid",
-        )
-
     def _resolve_transport_decision(self) -> BrowserTransportDecision:
-        try:
-            decision = self._transport_decision()
-        except Exception:  # noqa: BLE001 - provider errors must fail closed
-            return self._invalid_transport_decision()
-        if not isinstance(decision, BrowserTransportDecision):
-            return self._invalid_transport_decision()
-        return decision
+        """Resolve browser admission without exposing provider failures."""
+        return resolve_browser_transport_decision(
+            self._transport_decision,
+            component="preflight_browser_probe",
+        )
 
     def transport_capability(self) -> dict[str, str | bool]:
         """Return the current bounded browser-transport capability snapshot."""

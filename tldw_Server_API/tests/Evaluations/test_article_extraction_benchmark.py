@@ -13,6 +13,8 @@ from tldw_Server_API.app.core.Evaluations.article_extraction_benchmark import (
     evaluate_metrics,
 )
 
+pytestmark = pytest.mark.unit
+
 
 GROUND_TRUTH = {
     "exact": {"articleBody": "one two three four five"},
@@ -27,6 +29,7 @@ PREDICTIONS = {
 
 
 def _minimal_dataset(tmp_path: Path) -> Path:
+    """Create the smallest valid on-disk benchmark dataset."""
     dataset = tmp_path / "article-benchmark"
     (dataset / "html").mkdir(parents=True)
     (dataset / "ground-truth.json").write_text(
@@ -37,6 +40,7 @@ def _minimal_dataset(tmp_path: Path) -> Path:
 
 
 def test_evaluate_metrics_is_repeatable_without_mutating_global_random_state() -> None:
+    """Seeded scoring must be repeatable and isolate global RNG state."""
     state = random.getstate()
 
     first = evaluate_metrics(GROUND_TRUTH, PREDICTIONS, 50, bootstrap_seed=7)
@@ -51,6 +55,7 @@ def test_evaluator_rejects_non_positive_bootstrap_count(
     tmp_path: Path,
     count: int,
 ) -> None:
+    """The evaluator must reject zero and negative bootstrap counts."""
     dataset = _minimal_dataset(tmp_path)
 
     with pytest.raises(ValueError, match="n_bootstrap must be a positive integer"):
@@ -59,11 +64,13 @@ def test_evaluator_rejects_non_positive_bootstrap_count(
 
 @pytest.mark.parametrize("count", [0, -1])
 def test_evaluate_metrics_rejects_non_positive_bootstrap_count(count: int) -> None:
+    """The scoring helper must reject zero and negative bootstrap counts."""
     with pytest.raises(ValueError, match="n_bootstrap must be a positive integer"):
         evaluate_metrics(GROUND_TRUTH, PREDICTIONS, count)
 
 
 def test_evaluator_rejects_non_integer_bootstrap_seed(tmp_path: Path) -> None:
+    """The evaluator must reject boolean bootstrap seeds."""
     dataset = _minimal_dataset(tmp_path)
 
     with pytest.raises(ValueError, match="bootstrap_seed must be an integer"):
@@ -71,5 +78,6 @@ def test_evaluator_rejects_non_integer_bootstrap_seed(tmp_path: Path) -> None:
 
 
 def test_evaluate_metrics_rejects_non_integer_bootstrap_seed() -> None:
+    """The scoring helper must reject non-integer bootstrap seeds."""
     with pytest.raises(ValueError, match="bootstrap_seed must be an integer"):
         evaluate_metrics(GROUND_TRUTH, PREDICTIONS, 10, bootstrap_seed=1.5)

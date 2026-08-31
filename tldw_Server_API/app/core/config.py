@@ -2718,7 +2718,7 @@ def web_outbound_policy_mode(default: str = "compat") -> str:
 
 
 def web_browser_transport_mode(default: str = "auto") -> str:
-    """Resolve auto|disabled|url_guarded|attested_proxy, failing closed when malformed."""
+    """Resolve a transport mode, returning an empty invalid sentinel if malformed."""
     value = os.getenv("WEB_BROWSER_TRANSPORT_MODE")
     if value is None:
         try:
@@ -2742,7 +2742,7 @@ def web_browser_transport_mode(default: str = "auto") -> str:
             value = default
     normalized = str(value).strip().lower()
     allowed = {"auto", "disabled", "url_guarded", "attested_proxy"}
-    return normalized if normalized in allowed else "disabled"
+    return normalized if normalized in allowed else ""
 
 
 def rag_agentic_cache_backend(default: str = "memory") -> str:

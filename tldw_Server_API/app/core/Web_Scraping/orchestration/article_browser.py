@@ -16,6 +16,7 @@ from urllib.parse import urlsplit, urlunsplit
 from tldw_Server_API.app.core.Web_Scraping.browser_transport import (
     BrowserTransportDecision,
     default_browser_transport_decision,
+    resolve_browser_transport_decision,
 )
 from tldw_Server_API.app.core.Web_Scraping.runtime.browser import (
     RuntimeBrowserRoute,
@@ -700,24 +701,12 @@ class GuardedArticleBrowser:
             label="callback",
         )
 
-    @staticmethod
-    def _invalid_transport_decision() -> BrowserTransportDecision:
-        return BrowserTransportDecision(
-            allowed=False,
-            configured_mode="disabled",
-            effective_mode="disabled",
-            dns_peer_attested=False,
-            reason="browser_transport_config_invalid",
-        )
-
     def _resolve_transport_decision(self) -> BrowserTransportDecision:
-        try:
-            decision = self._transport_decision()
-        except Exception:  # noqa: BLE001 - provider errors must fail closed
-            return self._invalid_transport_decision()
-        if not isinstance(decision, BrowserTransportDecision):
-            return self._invalid_transport_decision()
-        return decision
+        """Resolve browser admission without exposing provider failures."""
+        return resolve_browser_transport_decision(
+            self._transport_decision,
+            component="article_browser",
+        )
 
     def transport_capability(self) -> dict[str, str | bool]:
         """Return the current bounded browser-transport capability snapshot."""

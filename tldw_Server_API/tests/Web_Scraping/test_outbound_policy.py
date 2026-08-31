@@ -3,7 +3,6 @@ from types import SimpleNamespace
 
 import pytest
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -55,6 +54,7 @@ def test_web_outbound_policy_mode_reads_legacy_web_scraping_section_when_needed(
 def test_web_browser_transport_mode_env_overrides_config_sections(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Prefer a valid environment transport mode over config sections."""
     monkeypatch.setenv("WEB_BROWSER_TRANSPORT_MODE", "attested_proxy")
     config_mod = importlib.import_module("tldw_Server_API.app.core.config")
     monkeypatch.setattr(
@@ -71,6 +71,7 @@ def test_web_browser_transport_mode_reads_supported_config_sections(
     monkeypatch: pytest.MonkeyPatch,
     section: str,
 ) -> None:
+    """Read the transport mode from either supported scraper section."""
     monkeypatch.delenv("WEB_BROWSER_TRANSPORT_MODE", raising=False)
     config_mod = importlib.import_module("tldw_Server_API.app.core.config")
 
@@ -91,6 +92,7 @@ def test_web_browser_transport_mode_reads_supported_config_sections(
 def test_web_browser_transport_mode_missing_setting_returns_auto(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Use auto when neither environment nor config supplies a mode."""
     monkeypatch.delenv("WEB_BROWSER_TRANSPORT_MODE", raising=False)
     config_mod = importlib.import_module("tldw_Server_API.app.core.config")
 
@@ -108,6 +110,7 @@ def test_web_browser_transport_mode_malformed_value_fails_closed(
     monkeypatch: pytest.MonkeyPatch,
     source: str,
 ) -> None:
+    """Preserve a safe invalid sentinel so admission reports config invalid."""
     config_mod = importlib.import_module("tldw_Server_API.app.core.config")
     if source == "env":
         monkeypatch.setenv("WEB_BROWSER_TRANSPORT_MODE", "bogus")
@@ -125,7 +128,7 @@ def test_web_browser_transport_mode_malformed_value_fails_closed(
 
         monkeypatch.setattr(config_mod, "load_comprehensive_config", lambda: _ConfigStub())
 
-    assert config_mod.web_browser_transport_mode() == "disabled"
+    assert config_mod.web_browser_transport_mode() == ""
 
 
 def test_web_outbound_policy_sync_denies_provider_request(monkeypatch):

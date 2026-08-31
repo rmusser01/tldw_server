@@ -5,13 +5,13 @@ from __future__ import annotations
 import json
 
 import pytest
+from loguru import logger
 
 from tldw_Server_API.app.core.Web_Scraping.browser_transport import (
     BrowserTransportAttestation,
     decide_browser_transport,
     default_browser_transport_decision,
 )
-
 
 pytestmark = pytest.mark.unit
 
@@ -59,6 +59,7 @@ def test_browser_transport_decision_matrix(
     allowed: bool,
     reason: str,
 ) -> None:
+    """Apply the documented admission matrix to each deployment profile."""
     decision = decide_browser_transport(
         configured_mode=configured,
         auth_mode=auth_mode,
@@ -102,6 +103,7 @@ def test_browser_transport_decision_matrix(
 def test_attested_proxy_denies_incomplete_or_unapproved_evidence(
     attestation: BrowserTransportAttestation | None,
 ) -> None:
+    """Reject incomplete or self-asserted browser transport evidence."""
     decision = decide_browser_transport(
         configured_mode="attested_proxy",
         auth_mode="multi_user",
@@ -116,6 +118,7 @@ def test_attested_proxy_denies_incomplete_or_unapproved_evidence(
 
 
 def test_attested_proxy_allows_only_complete_governed_evidence() -> None:
+    """Allow a governed proxy only when every required property is attested."""
     attestation = BrowserTransportAttestation(
         mechanism="governed_proxy",
         routes_all_requests=True,
@@ -137,6 +140,7 @@ def test_attested_proxy_allows_only_complete_governed_evidence() -> None:
 
 
 def test_attestation_is_ignored_unless_proxy_mode_is_explicit() -> None:
+    """Do not let evidence override a configured non-proxy transport mode."""
     attestation = BrowserTransportAttestation(
         mechanism="governed_proxy",
         routes_all_requests=True,
@@ -156,6 +160,7 @@ def test_attestation_is_ignored_unless_proxy_mode_is_explicit() -> None:
 
 
 def test_malformed_mode_is_sanitized_and_metadata_is_exactly_bounded() -> None:
+    """Return only fixed safe metadata for a malformed transport mode."""
     decision = decide_browser_transport(
         configured_mode="https://proxy.internal/?credential=secret",
         auth_mode="multi_user-header-cookie-secret",
@@ -187,6 +192,7 @@ def test_malformed_mode_is_sanitized_and_metadata_is_exactly_bounded() -> None:
 
 
 def test_default_decision_uses_injected_auth_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Prefer the explicitly injected valid auth environment over process state."""
     module = __import__(
         "tldw_Server_API.app.core.Web_Scraping.browser_transport",
         fromlist=["browser_transport"],
@@ -203,9 +209,62 @@ def test_default_decision_uses_injected_auth_environment(monkeypatch: pytest.Mon
     assert decision.reason == "browser_transport_allowed_legacy"
 
 
+def test_default_decision_uses_canonical_auth_config_when_env_is_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Resolve an absent auth environment through the canonical config helper."""
+    module = __import__(
+        "tldw_Server_API.app.core.Web_Scraping.browser_transport",
+        fromlist=["browser_transport"],
+    )
+
+    class _ConfigStub:
+        """Provide the shipped single-user AuthNZ configuration."""
+
+        def get(self, section: str, option: str, fallback: str = "") -> str:
+            """Return a deterministic AuthNZ mode for the requested option."""
+            if section == "AuthNZ" and option == "auth_mode":
+                return "single_user"
+            return fallback
+
+    monkeypatch.setattr(
+        module,
+        "load_comprehensive_config",
+        lambda: _ConfigStub(),
+        raising=False,
+    )
+    monkeypatch.setattr(module, "web_browser_transport_mode", lambda: "auto")
+    monkeypatch.setattr(module, "web_outbound_policy_mode", lambda: "compat")
+
+    decision = default_browser_transport_decision(environ={})
+
+    assert decision.allowed is True
+    assert decision.reason == "browser_transport_allowed_legacy"
+
+
+def test_default_decision_rejects_explicit_invalid_auth_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fail closed instead of replacing an explicit invalid auth mode with config."""
+    module = __import__(
+        "tldw_Server_API.app.core.Web_Scraping.browser_transport",
+        fromlist=["browser_transport"],
+    )
+    monkeypatch.setattr(module, "web_browser_transport_mode", lambda: "auto")
+    monkeypatch.setattr(module, "web_outbound_policy_mode", lambda: "compat")
+
+    decision = default_browser_transport_decision(
+        environ={"AUTH_MODE": "not-a-supported-profile"}
+    )
+
+    assert decision.allowed is False
+    assert decision.reason == "browser_transport_unattested"
+
+
 def test_default_decision_fails_closed_when_config_resolution_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Fail closed when browser transport configuration cannot be resolved."""
     module = __import__(
         "tldw_Server_API.app.core.Web_Scraping.browser_transport",
         fromlist=["browser_transport"],
@@ -222,3 +281,42 @@ def test_default_decision_fails_closed_when_config_resolution_errors(
 
     assert decision.allowed is False
     assert decision.reason == "browser_transport_config_invalid"
+
+
+def test_default_decision_logs_sanitized_config_resolution_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Record safe operational context without leaking exception payloads."""
+    module = __import__(
+        "tldw_Server_API.app.core.Web_Scraping.browser_transport",
+        fromlist=["browser_transport"],
+    )
+    secret = "https://proxy.invalid/?credential=do-not-log"
+    monkeypatch.setattr(
+        module,
+        "web_browser_transport_mode",
+        lambda: (_ for _ in ()).throw(RuntimeError(secret)),
+    )
+    records: list[dict[str, object]] = []
+    sink_id = logger.add(lambda message: records.append(message.record))
+    try:
+        default_browser_transport_decision(environ={"AUTH_MODE": "single_user"})
+    finally:
+        logger.remove(sink_id)
+
+    matching = [
+        record
+        for record in records
+        if record["message"] == "Browser transport configuration resolution failed."
+    ]
+    assert len(matching) == 1
+    safe_extra = {
+        key: matching[0]["extra"][key]
+        for key in ("component", "operation", "exception_type")
+    }
+    assert safe_extra == {
+        "component": "browser_transport",
+        "operation": "resolve_default_configuration",
+        "exception_type": "RuntimeError",
+    }
+    assert secret not in str(matching[0])
