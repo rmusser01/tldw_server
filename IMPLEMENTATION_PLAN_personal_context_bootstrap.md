@@ -50,9 +50,10 @@ and independent review.
 **Success criteria:** Scoped Sync and Personalization tests plus Ruff,
 compilation, Bandit, diff hygiene, and review pass; TASK-13148 is complete.
 
-**Status:** In Progress — focused SQLite regressions, compilation, and diff hygiene
-pass; Ruff/Bandit are unavailable in the isolated runner and PostgreSQL-only tests
-remain for controller verification.
+**Status:** Complete — the controller reran the affected authenticated endpoint,
+bootstrap, service, and store suites; executed the PostgreSQL Personal Context
+transaction contracts; and completed Ruff, Bandit, Python 3.11 compilation,
+diff hygiene, spec review, and code-quality review.
 
 ## Review round 1 progress
 
@@ -73,3 +74,17 @@ ADR path: `backlog/decisions/002-personal-context-profile-authority-sync-and-enc
 
 Reason: ADR-002 already governs canonical server ownership, key custody,
 whole-object Sync transport, and the service boundary used by bootstrap.
+
+## Final verification evidence
+
+- `140 passed` — Personal Context service, bootstrap, and authenticated Sync
+  endpoint modules.
+- `174 passed, 13 deselected` — non-PostgreSQL Sync store tests.
+- `4 passed` — executable PostgreSQL Personal Context lock/CAS transaction
+  contracts. A live PostgreSQL fixture was unavailable in this environment.
+- Ruff, Bandit, Python 3.11 compilation, and `git diff --check` exited cleanly.
+- Independent spec and code-quality reviews, including a narrow post-Ruff
+  follow-up, reported no actionable findings.
+
+The full repository suite was not run because repository guidance requires
+explicit user opt-in; the verification set was limited to affected modules.
