@@ -3574,10 +3574,14 @@ class SyncDatabase:
             )
         return _device_from_row(row)
 
-    def enroll_dataset(self, dataset: SyncDatasetCreate) -> SyncDataset:
+    def enroll_dataset(
+        self,
+        dataset: SyncDatasetCreate,
+        *,
+        preserve_personal_context: bool = True,
+    ) -> SyncDataset:
         self._validate_dataset_contract(dataset)
         now = utcnow_iso()
-        domains_json = encode_json(dataset.domains, default=[])
         with self.backend.transaction() as conn:
             lock_suffix = (
                 " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
@@ -3608,6 +3612,8 @@ class SyncDatabase:
                     NOTES_TASK_SERVER_METADATA_KEYS
                     | NOTES_MOODBOARD_STUDIO_SERVER_METADATA_KEYS
                 )
+                if preserve_personal_context and "personal_context" in existing_metadata:
+                    server_metadata_keys = server_metadata_keys | {"personal_context"}
                 metadata = {
                     key: value
                     for key, value in dataset.metadata.items()
@@ -3619,6 +3625,17 @@ class SyncDatabase:
                         for key in server_metadata_keys
                         if key in existing_metadata
                     }
+                )
+                protected_personal_context_domains = (
+                    _dataset_domains_from_row(existing)
+                    & set(PERSONAL_CONTEXT_SYNC_DOMAINS)
+                    if preserve_personal_context
+                    else set()
+                )
+                effective_domains = list(
+                    dict.fromkeys(
+                        [*dataset.domains, *sorted(protected_personal_context_domains)]
+                    )
                 )
                 self.execute(
                     """
@@ -3638,7 +3655,7 @@ class SyncDatabase:
                         dataset.workspace_id,
                         dataset.scope_type,
                         dataset.encryption_policy,
-                        domains_json,
+                        encode_json(effective_domains, default=[]),
                         encode_json(metadata, default={}),
                         now,
                         dataset.archived_at,
@@ -3662,7 +3679,7 @@ class SyncDatabase:
                         dataset.workspace_id,
                         dataset.scope_type,
                         dataset.encryption_policy,
-                        domains_json,
+                        encode_json(dataset.domains, default=[]),
                         encode_json(dataset.metadata, default={}),
                         now,
                         now,
@@ -3670,7 +3687,7 @@ class SyncDatabase:
                     ),
                     connection=conn,
                 )
-            for domain in dataset.domains:
+            for domain in effective_domains if existing else dataset.domains:
                 self._ensure_domain_state(
                     dataset_id=dataset.dataset_id,
                     domain=domain,
@@ -3686,6 +3703,87 @@ class SyncDatabase:
                 )
             )
         return _dataset_from_row(row)
+
+    def complete_personal_context_link_receipt(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        device_id: str,
+        profile_id: str,
+        integrity_key_id: str,
+        purge_generation: int,
+        bootstrap_cursor: str,
+    ) -> None:
+        """Lock and compare the opaque Personal Context binding before receipt CAS."""
+
+        with self.backend.transaction() as connection:
+            row = _first(
+                self.execute(
+                    """
+                    SELECT * FROM sync_datasets
+                     WHERE dataset_id = ? AND owner_user_id = ?
+                    """
+                    + (
+                        " FOR UPDATE"
+                        if self.backend_type == BackendType.POSTGRESQL
+                        else ""
+                    ),  # nosec B608 - backend-controlled lock suffix.
+                    (dataset_id, user_id),
+                    connection=connection,
+                )
+            )
+            metadata = decode_json(
+                row.get("metadata_json") if row is not None else None,
+                default={},
+            )
+            binding = metadata.get("personal_context") if isinstance(metadata, dict) else None
+            if not isinstance(binding, dict) or (
+                binding.get("profile_id") != profile_id
+                or binding.get("integrity_key_id") != integrity_key_id
+                or binding.get("purge_generation") != purge_generation
+            ):
+                raise SyncStoreError("personal_context_link_binding_stale")
+            self.execute(
+                """INSERT INTO sync_personal_context_link_receipts
+                   (user_id, dataset_id, device_id, profile_id, integrity_key_id, purge_generation, bootstrap_cursor)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(user_id, dataset_id, device_id) DO UPDATE SET
+                     profile_id = excluded.profile_id,
+                     integrity_key_id = excluded.integrity_key_id,
+                     purge_generation = excluded.purge_generation,
+                     bootstrap_cursor = excluded.bootstrap_cursor""",
+                (
+                    user_id,
+                    dataset_id,
+                    device_id,
+                    profile_id,
+                    integrity_key_id,
+                    purge_generation,
+                    bootstrap_cursor,
+                ),
+                connection=connection,
+            )
+
+    def has_personal_context_link_receipt(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        device_id: str,
+        profile_id: str,
+        integrity_key_id: str,
+        purge_generation: int,
+    ) -> bool:
+        """Return whether a device has the exact current Personal Context receipt."""
+
+        result = self.execute(
+            """SELECT 1 FROM sync_personal_context_link_receipts
+               WHERE user_id = ? AND dataset_id = ? AND device_id = ? AND profile_id = ?
+                 AND integrity_key_id = ? AND purge_generation = ?""",
+            (user_id, dataset_id, device_id, profile_id, integrity_key_id, purge_generation),
+        )
+        return bool(result.rows)
 
     def get_dataset(
         self,

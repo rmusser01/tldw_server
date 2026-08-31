@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import inspect
+import json
 import sqlite3
 import subprocess
 import sys
@@ -64,6 +65,7 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     SyncDeviceUpsert,
     SyncEnvelopeCreate,
     SyncKeyRecordCreate,
+    PERSONAL_CONTEXT_SYNC_DOMAINS,
 )
 from tldw_Server_API.app.core.Sync.v2.mutation_group_validation import (
     mutation_group_plan_hash,
@@ -250,6 +252,47 @@ class _PostgresDeviceLockBackend:
             self.row["capabilities_json"] = params[4]
             self.row["last_seen_at"] = params[5]
             return QueryResult(rows=[], rowcount=1)
+        return QueryResult(rows=[], rowcount=1)
+
+
+class _PostgresPersonalContextReceiptBackend:
+    config = DatabaseConfig(backend_type=BackendType.POSTGRESQL)
+
+    def __init__(self, *, stale_binding: bool = False) -> None:
+        self.calls: list[tuple[str, tuple[Any, ...] | None, Any]] = []
+        integrity_key_id = (
+            "personal-context-integrity-vstale"
+            if stale_binding
+            else "personal-context-integrity-v1"
+        )
+        self.dataset_row = {
+            "dataset_id": "dataset-1",
+            "owner_user_id": "user-1",
+            "metadata_json": json.dumps(
+                {
+                    "personal_context": {
+                        "profile_id": "profile-1",
+                        "integrity_key_id": integrity_key_id,
+                        "purge_generation": 0,
+                    }
+                }
+            ),
+        }
+
+    @contextmanager
+    def transaction(self, connection=None):
+        yield connection or object()
+
+    def execute(
+        self,
+        statement: str,
+        params: tuple[Any, ...] | None = None,
+        connection: Any = None,
+    ) -> QueryResult:
+        normalized = " ".join(statement.split())
+        self.calls.append((normalized, params, connection))
+        if normalized.startswith("SELECT * FROM sync_datasets"):
+            return QueryResult(rows=[dict(self.dataset_row)], rowcount=1)
         return QueryResult(rows=[], rowcount=1)
 
 
@@ -2703,6 +2746,63 @@ def test_postgres_device_upsert_locks_existing_row_before_update() -> None:
     assert first_select.endswith("FOR UPDATE")
 
 
+def test_postgres_personal_context_receipt_locks_binding_before_upsert() -> None:
+    """The receipt CAS holds the dataset lock through its durable upsert."""
+
+    backend = _PostgresPersonalContextReceiptBackend()
+    db = SyncDatabase.__new__(SyncDatabase)
+    db.backend = cast(Any, backend)
+
+    db.complete_personal_context_link_receipt(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        profile_id="profile-1",
+        integrity_key_id="personal-context-integrity-v1",
+        purge_generation=0,
+        bootstrap_cursor="bootstrap-a",
+    )
+
+    statements = [statement for statement, _params, _connection in backend.calls]
+    lock_index = next(
+        index
+        for index, statement in enumerate(statements)
+        if statement.startswith("SELECT * FROM sync_datasets")
+    )
+    upsert_index = next(
+        index
+        for index, statement in enumerate(statements)
+        if statement.startswith("INSERT INTO sync_personal_context_link_receipts")
+    )
+    assert statements[lock_index].endswith("FOR UPDATE")
+    assert lock_index < upsert_index
+    assert len({connection for _statement, _params, connection in backend.calls}) == 1
+
+
+def test_postgres_personal_context_receipt_rejects_transition_observed_under_lock() -> None:
+    """A binding changed before lock acquisition cannot receive a stale receipt."""
+
+    backend = _PostgresPersonalContextReceiptBackend(stale_binding=True)
+    db = SyncDatabase.__new__(SyncDatabase)
+    db.backend = cast(Any, backend)
+
+    with pytest.raises(SyncStoreError, match="personal_context_link_binding_stale"):
+        db.complete_personal_context_link_receipt(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            device_id="device-1",
+            profile_id="profile-1",
+            integrity_key_id="personal-context-integrity-v1",
+            purge_generation=0,
+            bootstrap_cursor="bootstrap-a",
+        )
+
+    assert not any(
+        statement.startswith("INSERT INTO sync_personal_context_link_receipts")
+        for statement, _params, _connection in backend.calls
+    )
+
+
 def test_device_upsert_rejects_cross_user_takeover(sync_store: SyncV2Store):
     sync_store.upsert_device(_device(device_id="device-shared", user_id="user-1"))
 
@@ -3701,6 +3801,66 @@ def test_dataset_reenrollment_preserves_server_owned_task_readiness_metadata(
 
     assert overwritten.metadata == {"label": "after", **server_metadata}
     assert erased.metadata == server_metadata
+
+
+def test_dataset_reenrollment_preserves_personal_context_domains_and_metadata(
+    sync_store: SyncV2Store,
+) -> None:
+    """Generic dataset rewrites cannot erase server-owned Personal Context state."""
+
+    binding = {
+        "profile_id": "profile-1",
+        "authority_id": "authority-a",
+        "integrity_key_id": "personal-context-integrity-v1",
+        "purge_generation": 0,
+        "link_state": "complete",
+    }
+    sync_store.enroll_dataset(
+        _dataset(
+            domains=["notes.note", *PERSONAL_CONTEXT_SYNC_DOMAINS],
+            metadata={"label": "before", "personal_context": binding},
+        )
+    )
+
+    reenrolled = sync_store.enroll_dataset(
+        _dataset(domains=["notes.note"], metadata={"label": "old-client"})
+    )
+    attempted_overwrite = sync_store.enroll_dataset(
+        _dataset(
+            domains=["notes.note"],
+            metadata={
+                "label": "overwrite-attempt",
+                "personal_context": {"profile_id": "attacker"},
+            },
+        )
+    )
+
+    assert set(PERSONAL_CONTEXT_SYNC_DOMAINS).issubset(reenrolled.domains)
+    assert reenrolled.metadata["personal_context"] == binding
+    assert set(PERSONAL_CONTEXT_SYNC_DOMAINS).issubset(attempted_overwrite.domains)
+    assert attempted_overwrite.metadata["personal_context"] == binding
+
+
+def test_personal_context_receipt_lookup_surfaces_storage_failure(
+    sync_store: SyncV2Store,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An outage is not downgraded into a false link-incomplete instruction."""
+
+    def fail_lookup(*_args: object, **_kwargs: object):
+        raise SyncStoreError("receipt storage unavailable")
+
+    monkeypatch.setattr(sync_store.db, "execute", fail_lookup)
+
+    with pytest.raises(SyncStoreError, match="receipt storage unavailable"):
+        sync_store.has_personal_context_link_receipt(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            device_id="device-1",
+            profile_id="profile-1",
+            integrity_key_id="personal-context-integrity-v1",
+            purge_generation=0,
+        )
 
 
 @pytest.mark.parametrize(

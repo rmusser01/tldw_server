@@ -3295,7 +3295,7 @@ def test_personal_context_complete_endpoint_rejects_real_stale_integrity_binding
         **metadata["personal_context"],
         "integrity_key_id": stale_key_id,
     }
-    factory_personal_context_service.store.enroll_dataset(
+    factory_personal_context_service.store.upsert_personal_context_dataset_binding(
         SyncDatasetCreate(
             dataset_id=dataset.dataset_id,
             owner_user_id=dataset.owner_user_id,
@@ -3361,7 +3361,7 @@ def test_personal_context_complete_endpoint_maps_real_receipt_cas_staleness(
             **metadata["personal_context"],
             "integrity_key_id": stale_key_id,
         }
-        factory_personal_context_service.store.enroll_dataset(
+        factory_personal_context_service.store.upsert_personal_context_dataset_binding(
             SyncDatasetCreate(
                 dataset_id=dataset.dataset_id,
                 owner_user_id=dataset.owner_user_id,
@@ -3401,6 +3401,78 @@ def test_personal_context_complete_endpoint_maps_real_receipt_cas_staleness(
         integrity_key_id=stale_key_id,
         purge_generation=body["purge_generation"],
     )
+
+
+def test_personal_context_push_surfaces_receipt_storage_failure_without_reconciliation_hint(
+    factory_personal_context_service: SyncV2Service,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Receipt lookup outages are public operational failures, not false admission hints."""
+
+    client = _client_for_factory_service(factory_personal_context_service)
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    assert client.post(
+        "/api/v1/sync/devices/register",
+        json=_registered_personal_context_device_payload(private_key.public_key()),
+    ).status_code == 200
+    bootstrap = client.post(
+        "/api/v1/sync/personal-context/bootstrap",
+        json={"device_id": "pc-device", "required_schema_version": 1},
+    )
+    assert bootstrap.status_code == 200, bootstrap.text
+    body = bootstrap.json()
+    assert client.post(
+        "/api/v1/sync/personal-context/complete",
+        json={
+            "device_id": "pc-device",
+            "dataset_id": body["dataset_id"],
+            "bootstrap_cursor": body["cursor"],
+        },
+    ).status_code == 204
+
+    original_execute = factory_personal_context_service.store.db.execute
+
+    def fail_receipt_lookup(query: str, *args: object, **kwargs: object):
+        if "sync_personal_context_link_receipts" in query:
+            raise SyncStoreError("receipt storage unavailable")
+        return original_execute(query, *args, **kwargs)
+
+    monkeypatch.setattr(
+        factory_personal_context_service.store.db,
+        "execute",
+        fail_receipt_lookup,
+    )
+    push = client.post(
+        "/api/v1/sync/push",
+        json={
+            "dataset_id": body["dataset_id"],
+            "device_id": "pc-device",
+            "envelopes": [
+                {
+                    "dataset_id": body["dataset_id"],
+                    "client_envelope_id": "pc-device:storage-failure:1",
+                    "device_id": "pc-device",
+                    "domain": "personal_context.manifest",
+                    "operation": "upsert",
+                    "object_id": body["manifest"]["profile_id"],
+                    "adapter_version": 1,
+                    "schema_version": 1,
+                    "payload": {},
+                    "payload_hash": "sha256:storage-failure",
+                    "payload_size_bytes": 2,
+                    "routing_metadata": {},
+                    "encryption_metadata": {"policy": "server_trusted_v1"},
+                }
+            ],
+        },
+    )
+
+    assert push.status_code == 500, push.text
+    assert push.json()["detail"] == {
+        "error_code": "sync_store_error",
+        "message": "Internal sync storage error while processing request.",
+    }
+    assert "receipt storage unavailable" not in push.text
 
 
 @pytest.mark.parametrize(

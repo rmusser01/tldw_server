@@ -491,6 +491,33 @@ def test_generic_enrollment_cannot_forge_personal_context_binding(tmp_path: Path
     assert "sync_reserved_dataset_enrollment" in str(exc_info.value)
 
 
+def test_generic_reenrollment_preserves_server_owned_personal_context_state(
+    tmp_path: Path,
+) -> None:
+    """An old generic client cannot erase canonical Personal Context admission state."""
+
+    service, _canonical = _service(tmp_path)
+    bootstrap = _bootstrap(service)
+    before = service.store.get_dataset(bootstrap.dataset_id)
+    assert before is not None
+    assert "personal_context" in before.metadata
+
+    service.enroll_dataset(
+        user_id="user-a",
+        dataset_id=bootstrap.dataset_id,
+        domains=["notes.note"],
+        metadata={"label": "old-client-update"},
+    )
+
+    durable = service.store.get_dataset(bootstrap.dataset_id)
+    assert durable is not None
+    binding = durable.metadata["personal_context"]
+    assert set(PERSONAL_CONTEXT_SYNC_DOMAINS).issubset(durable.domains)
+    assert binding["profile_id"] == bootstrap.manifest.profile_id
+    assert binding["integrity_key_id"] == bootstrap.integrity_key.integrity_key_id
+    assert binding["purge_generation"] == bootstrap.purge_generation
+
+
 def test_factory_wraps_integrity_key_to_registered_device_public_key() -> None:
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     public_key = private_key.public_key().public_bytes(
@@ -551,7 +578,7 @@ def test_link_receipt_schema_and_cas_are_portable_and_not_request_time_ddl() -> 
     for schema in (sync_db_module.SYNC_SQLITE_SCHEMA, sync_db_module.SYNC_POSTGRES_SCHEMA):
         assert "CREATE TABLE IF NOT EXISTS sync_personal_context_link_receipts" in schema
         assert "PRIMARY KEY (user_id, dataset_id, device_id)" in schema
-    source = inspect.getsource(SyncV2Store.complete_personal_context_link_receipt)
+    source = inspect.getsource(SyncDatabase.complete_personal_context_link_receipt)
     assert "CREATE TABLE" not in source
     assert "DELETE FROM sync_personal_context_link_receipts" not in source
     assert "ON CONFLICT(user_id, dataset_id, device_id) DO UPDATE" in source
