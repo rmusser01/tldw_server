@@ -4,7 +4,7 @@ title: Implement canonical admin webhook delivery substrate and recovery
 status: In Progress
 assignee: []
 created_date: '2026-08-23 03:15'
-updated_date: '2026-08-31 16:35'
+updated_date: '2026-08-31 16:39'
 labels:
   - admin
   - webhooks
@@ -278,6 +278,8 @@ Task 10 complete: exposed canonical persisted test, atomic manual redelivery, an
 2026-08-31: PR #2842 post-push review/CI remediation started at HEAD 219375df2fb6ff805d55d0119d5b8fd678ba25da. Qodo review 5068429294 reported five Medium findings. Initial validation confirms explicit throttling is absent on synchronous test/manual redelivery, fail-open metric exceptions lack sanitized observability, and the newly added PostgreSQL counter upsert should move behind the existing DB_Management Jobs SQL helper boundary. The docstring policy comment is being addressed in the cited control-plane helper region. The marker comment is technically invalid: postgres is a registered environment selector and the three tests already carry exactly one direct accepted classification marker (integration); removing it would weaken PostgreSQL selection. Jobs SQLite CI run 33409346469/job/99544832621 failed 9/1173 selected tests; seven reproduce on Python 3.11, one is timing-sensitive, and one is Python-3.12-specific test construction. Root-cause/TDD remediation is in progress; no merge is authorized.
 
 2026-08-31: PR #2842 post-review remediation verified in the pre-push tree. Accepted Qodo items now add principal-aware shared ingress throttling to synchronous test/manual redelivery without exposing the legacy rate_limiter hook in OpenAPI, move the PostgreSQL job-counter transition behind DB_Management, emit sanitized fail-open metric warnings including factory initialization, and document the cited control-plane primitives. Qodo marker item is rejected with repository evidence: postgres is a registered environment selector while each affected test retains exactly one direct accepted integration marker; both direct-marker audits pass. Strict RED/GREEN covered rate-limit 429 behavior, unchanged OpenAPI query contract, sanitized metrics failures, helper docstrings, and the DB helper boundary. The exact Jobs SQLite workflow selector passed 1172 with 2 documented optional-crypto skips and 521 deselected; all nine prior CI failures are closed. PostgreSQL-required prepared-disposition coverage passed 66 with zero skips; Admin API/control/OpenAPI/catalog coverage passed 211. OpenAPI drift, Ruff, Python 3.10 compile, Python 3.12 fixture proof, reviewed Bandit with zero High/Medium, sensitive/legacy scans, and git diff checks passed. Ruff format check remains a non-gating baseline observation because it would rewrite eleven legacy files wholesale. No merge or activation is authorized; TASK-13111 remains In Progress through final PR CI/review.
+
+2026-08-31: PR #2842 remediation code and tests committed as 706344ad7d. Durable review/CI evidence is recorded in Docs/Evidence/Admin_Webhooks_PR2_Verification.md under PR #2842 Review And CI Remediation. This commit has not been merged or activated; final GitHub CI and Qodo thread closure remain pending.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

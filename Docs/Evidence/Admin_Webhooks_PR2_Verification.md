@@ -535,6 +535,85 @@ loopback tests cannot reproduce every production DNS, NAT, proxy, or certificate
 edge. The reviewer did not rerun tests; the controller-owned post-rebase commands
 and terminal results above remain the authoritative verification evidence.
 
+## PR #2842 Review And CI Remediation
+
+This addendum records the review and CI correction applied on `2026-08-31`.
+It supplements the complete pre-PR verification rather than replacing it.
+
+### Identity
+
+- PR: `#2842`
+- Review starting head: `219375df2fb6ff805d55d0119d5b8fd678ba25da`
+- Verified remediation commit: `706344ad7d`
+- Failed GitHub Jobs lane:
+  `33409346469`, job `99544832621`
+- Qodo review: `5068429294`
+- Merge and activation state: not authorized; canonical delivery remains
+  default-off.
+
+### Review dispositions
+
+| Qodo item | Disposition |
+| --- | --- |
+| Synchronous test/manual redelivery lack finite throttling | Accepted. Both routes now use the shared principal/user/IP keyed ingress limiter after authentication, preserve the canonical bounded `429` response, and stop before service or audit work. A local wrapper prevents the shared dependency's legacy test hook from becoming an OpenAPI query parameter. |
+| PostgreSQL lifecycle embeds raw SQL outside `DB_Management` | Accepted. The fixed bound-parameter counter transition now executes through `DB_Management.jobs_sql_fragments`; lifecycle retains orchestration only. |
+| Mutation metrics exceptions are swallowed | Accepted. All mutation emissions and factory registration-gauge initialization remain fail-open but emit a sanitized fixed metric name and exception class only. Secret-bearing exception messages are never logged. |
+| New control-plane helpers lack docstrings | Accepted. The cited cancellation, metrics-protocol, and unavailable-status primitives have policy docstrings; a direct unit policy test guards them. New remediation helpers are also documented. |
+| PostgreSQL tests use both `integration` and `postgres` markers | Rejected as technically incorrect for this repository. `integration` is the one required direct classification marker; registered `postgres` is an independent environment selector. Removing it would weaken PostgreSQL selection. Both direct-marker audits pass unchanged. |
+
+### Jobs CI root cause and correction
+
+The failed SQLite lane reported nine failures. They were independent test
+contract drift exposed by the PR and Python 3.12, not one runtime defect:
+
+1. Recovery fake rows omitted the new effective expired-lease policy.
+2. An optional-index fake cursor accidentally entered an unrelated required
+   admin-webhook archive migration path.
+3. A one-second `available_at` wall-clock wait was timing-sensitive.
+4. A legacy-schema fixture omitted newly required immutable execution controls.
+5. Three PostgreSQL fake/replay rows omitted or misindexed those controls.
+6. Python 3.12 correctly rejects the deliberately noncanonical excess-padding
+   fixture under strict Base64 validation; fixture equivalence now uses
+   permissive decoding while production rejection remains strict.
+7. A source audit expected three required migration guards after the reviewed
+   implementation legitimately added a fourth.
+
+The corrections update only the affected test contracts and make the scheduling
+test deterministic. No production behavior was relaxed to satisfy the lane.
+
+### Verification results
+
+| Gate | Result |
+| --- | --- |
+| Initial remediation RED | PASS as RED: five selected tests failed for the missing two-route limiter, docstrings, sanitized metrics warning, and DB helper |
+| Factory metrics RED/GREEN | PASS: one expected RED, then `1 passed` after sanitized initialization logging |
+| OpenAPI query-contract RED/GREEN | PASS: direct shared dependency exposed `rate_limiter` in two operations; wrapper correction removed both and the three focused route cases passed |
+| Original nine Jobs failures | PASS: `9 passed` |
+| GitHub-equivalent Jobs SQLite selector | PASS: `1,172 passed, 2 skipped, 521 deselected, 4 warnings in 183.62s`; both skips are the lane's existing optional-crypto tests |
+| Required PostgreSQL prepared-disposition module | PASS: `66 passed, 0 skipped, 2 warnings in 28.41s` |
+| Admin API/control/OpenAPI/catalog regression | PASS: `211 passed, 0 skipped, 6 warnings in 25.50s` |
+| Direct-marker audits | PASS: `2 passed` |
+| OpenAPI drift | PASS: unchanged `2,051` paths, `3,067` schemas, SHA-256 `0f00a5210305d35df7b5638f4b15cd6ad5e67b0a9175daf3ac6f30e1585f15fa` |
+| Ruff | PASS: `All checks passed!` over all changed Python files |
+| Python compatibility | PASS: Python 3.10 compiled every changed Python file; Python 3.12 proved the corrected noncanonical fixture construction |
+| Bandit | REVIEWED PASS: zero High, zero Medium, one pre-existing Low fail-closed Jobs-capability observer suppression |
+| Sensitive-log and legacy-import scans | PASS: clean no-match results |
+| Diff checks | PASS: staged and unstaged `git diff --check` |
+
+The exact Jobs SQLite selector retained the workflow's environment, disabled
+plugin autoload, explicit pytest-cov/pytest-asyncio plugins, `not pg_jobs`
+selection, coverage, and JUnit generation. Artifact paths were redirected to
+`/tmp`; test selection and execution were unchanged. It ran on the project
+Python 3.11 environment. The Python 3.12-specific failed assertion was also
+reproduced directly under Python 3.12 and its corrected fixture construction
+passed there.
+
+An informational `ruff format --check` would rewrite eleven already
+nonconforming legacy files wholesale. It is not a repository gate and no broad
+formatting churn was included; the required Ruff lint gate passes. The local
+Git automatic-GC warning about pre-existing unreachable loose objects was also
+left untouched because it is unrelated to this PR.
+
 ## Records
 
 - Backlog: [`TASK-13111`](../../backlog/tasks/task-13111%20-%20Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md)
@@ -548,7 +627,9 @@ and terminal results above remain the authoritative verification evidence.
 ## Conclusion
 
 The corrected canonical admin-webhook delivery substrate is rebased onto the
-fetched integration base and has completed the full post-rebase verification
-matrix with zero skips plus a clean independent diff review. It is ready for
-user-approved push/PR preparation. This evidence does not authorize merge,
-production activation, durable event producers, or PR 3 UI work.
+fetched integration base and completed the full post-rebase verification
+matrix with zero skips plus a clean independent diff review. The later PR
+review and Jobs CI remediation is committed, locally verified, and ready for
+an additive push followed by final GitHub CI and Qodo review. This evidence
+does not authorize merge, production activation, durable event producers, or
+PR 3 UI work.
