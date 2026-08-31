@@ -8,6 +8,7 @@ import json
 import os
 import time
 from collections import deque
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from loguru import logger
@@ -86,6 +87,16 @@ _SEMANTIC_ADMISSION_ALLOWANCE = DEFAULT_SEMANTIC_INDEX_SETTINGS.max_query_neighb
 
 class GraphProjectionNotReadyError(InputError):
     """Raised when a derived graph read would observe an incomplete projection."""
+
+
+@dataclass(frozen=True, slots=True)
+class SemanticGraphCandidateResult:
+    """Internal first-page graph result for the asynchronous semantic projector."""
+
+    public_graph: NoteGraphResponse
+    candidate_nodes: tuple[GraphNode, ...]
+    candidate_edges: tuple[GraphEdge, ...]
+    candidate_limits: GraphLimits
 
 
 # ---------------------------------------------------------------------------
@@ -222,6 +233,8 @@ def bind_semantic_cursor(
     payload = _decode_cursor(raw)
     if payload is None or payload.get("v") != 1:
         raise InputError("Graph cursor is stale or mismatched")
+    if "semantic" in payload:
+        raise InputError("Graph cursor already carries a semantic binding")
     for field in ("dataset", "revision", "parser", "request"):
         if payload.get(field) is None:
             raise InputError("Graph cursor is stale or mismatched")
@@ -357,21 +370,88 @@ class NoteGraphService:
     def generate_graph(
         self,
         req: NoteGraphRequest,
-        *,
-        semantic_candidate_overfetch: int = 0,
     ) -> NoteGraphResponse:
         """Build and return a bounded note graph."""
-        t0 = time.monotonic()
 
-        if (
-            type(semantic_candidate_overfetch) is not int
-            or semantic_candidate_overfetch < 0
-        ):
-            raise InputError("Semantic candidate overfetch must be a non-negative integer")
-        candidate_allowance = min(
-            semantic_candidate_overfetch,
-            _SEMANTIC_ADMISSION_ALLOWANCE,
+        return self._generate_graph(req)
+
+    def generate_semantic_candidates(
+        self,
+        req: NoteGraphRequest,
+        *,
+        additional_nodes: int,
+        additional_edges: int,
+    ) -> SemanticGraphCandidateResult:
+        """Return an ordinary public page plus a bounded first-page candidate pool."""
+
+        if not req.semantic_requested:
+            raise InputError("Semantic candidates require semantic in edge_types")
+        if not req.center_note_id:
+            raise InputError("Semantic candidates require a current center note")
+        if req.cursor is not None:
+            raise InputError("Semantic candidates are available only on the first page")
+        node_allowance = self._bounded_semantic_allowance(
+            additional_nodes,
+            "node",
         )
+        edge_allowance = self._bounded_semantic_allowance(
+            additional_edges,
+            "edge",
+        )
+
+        initial_identity = self._semantic_candidate_projection_identity()
+        public_graph = self.generate_graph(req)
+        candidate_max_nodes = min(
+            public_graph.limits.max_nodes + node_allowance,
+            _PROJECTION_QUERY_MAX_NOTES,
+        )
+        candidate_max_edges = public_graph.limits.max_edges + edge_allowance
+        candidate_graph = self._generate_graph(
+            req,
+            max_nodes_override=candidate_max_nodes,
+            max_edges_override=candidate_max_edges,
+        )
+        if self._semantic_candidate_projection_identity() != initial_identity:
+            raise GraphProjectionNotReadyError(
+                "Notes graph projection changed during semantic candidate generation"
+            )
+        return SemanticGraphCandidateResult(
+            public_graph=public_graph,
+            candidate_nodes=tuple(candidate_graph.nodes),
+            candidate_edges=tuple(candidate_graph.edges),
+            candidate_limits=candidate_graph.limits,
+        )
+
+    def _semantic_candidate_projection_identity(self) -> tuple[int, int, str, int]:
+        projection_store = self._projection_store()
+        if projection_store is None:
+            return (0, 1, "ready", 0)
+        status = projection_store.get_projection_status()
+        return (
+            projection_store.get_revision(),
+            status.parser_version,
+            status.rebuild_state,
+            projection_store.count_dirty(),
+        )
+
+    @staticmethod
+    def _bounded_semantic_allowance(value: int, kind: str) -> int:
+        if type(value) is not int or value < 0:
+            raise InputError(
+                f"Semantic candidate {kind} allowance must be a non-negative integer"
+            )
+        return min(value, _SEMANTIC_ADMISSION_ALLOWANCE)
+
+    def _generate_graph(
+        self,
+        req: NoteGraphRequest,
+        *,
+        max_nodes_override: int | None = None,
+        max_edges_override: int | None = None,
+    ) -> NoteGraphResponse:
+        """Build one ordinary graph traversal under explicit internal caps."""
+
+        t0 = time.monotonic()
         resolved_edge_types = req.resolved_edge_types
         wanted = set(resolved_edge_types) - {EdgeType.semantic}
         projection_store = self._projection_store()
@@ -391,14 +471,19 @@ class NoteGraphService:
                 )
 
         # 1. Resolve effective limits before any graph expansion work.
-        public_max_nodes, public_max_edges, eff_max_degree, radius_cap_applied = (
+        resolved_max_nodes, resolved_max_edges, eff_max_degree, radius_cap_applied = (
             self._resolve_effective_limits(req)
         )
-        eff_max_nodes = min(
-            public_max_nodes + candidate_allowance,
-            _PROJECTION_QUERY_MAX_NOTES,
+        eff_max_nodes = (
+            resolved_max_nodes
+            if max_nodes_override is None
+            else min(max_nodes_override, _PROJECTION_QUERY_MAX_NOTES)
         )
-        eff_max_edges = public_max_edges + candidate_allowance
+        eff_max_edges = (
+            resolved_max_edges
+            if max_edges_override is None
+            else max_edges_override
+        )
         active_note_count = self._db.count_user_notes(include_deleted=False)
         all_notes_note_cap = min(max(1, ALL_NOTES_NOTE_CAP()), eff_max_nodes)
         ordinary_edge_types = [
@@ -419,8 +504,6 @@ class NoteGraphService:
             "max_degree": eff_max_degree,
             "allow_heavy": req.allow_heavy and self._allow_heavy_limits,
         }
-        if candidate_allowance:
-            normalized_query["semantic_candidate_overfetch"] = candidate_allowance
         dataset_hash = hashlib.sha256(self._dataset_id.encode()).hexdigest()
         request_hash = hashlib.sha256(
             json.dumps(normalized_query, sort_keys=True, separators=(",", ":")).encode()
