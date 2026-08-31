@@ -15,8 +15,10 @@ from starlette.responses import Response
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     RequirePermission,
+    TokenScopeGuard,
     User,
     get_request_user,
+    rbac_rate_limit,
 )
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import try_get_job_manager
@@ -49,6 +51,7 @@ SEMANTIC_ERROR_MESSAGES = {
     "notes_semantic_active_generation_required": "An active semantic generation is required.",
     "notes_semantic_capability_revision_conflict": "Semantic capabilities changed; refresh and retry.",
     "notes_semantic_configuration_revision_conflict": "The semantic index changed; refresh and retry.",
+    "notes_semantic_dataset_not_found": "The semantic dataset was not found.",
     "notes_semantic_idempotency_conflict": "The idempotency key was reused for another request.",
     "notes_semantic_invalid_request": "The semantic index request is invalid.",
     "notes_semantic_jobs_unavailable": "Semantic indexing is temporarily unavailable.",
@@ -115,8 +118,10 @@ def _dataset_key(*, owner_user_id: str, dataset_id: str | None) -> str:
             dataset_id=dataset_id,
         )
     except (NotesLinkDatasetConflictError, NotesLinkSyncInactiveDatasetError) as exc:
-        raise SemanticAPIError(404, "notes_semantic_run_not_found") from exc
-    return authority[1].dataset_id if authority is not None else f"legacy:{owner_user_id}"
+        raise SemanticAPIError(404, "notes_semantic_dataset_not_found") from exc
+    if authority is None:
+        raise SemanticAPIError(404, "notes_semantic_dataset_not_found")
+    return authority[1].dataset_id
 
 
 async def get_semantic_api(
@@ -127,15 +132,17 @@ async def get_semantic_api(
 ) -> AsyncIterator[Any]:
     """Yield one owner/dataset application service and release request DB state."""
 
-    owner = str(user.id_str)
-    api = build_notes_semantic_api(
-        note_db=db,
-        jobs=jobs,
-        owner_user_id=owner,
-        dataset_id=_dataset_key(owner_user_id=owner, dataset_id=dataset_id),
-    )
     try:
+        owner = str(user.id_str)
+        api = build_notes_semantic_api(
+            note_db=db,
+            jobs=jobs,
+            owner_user_id=owner,
+            dataset_id=_dataset_key(owner_user_id=owner, dataset_id=dataset_id),
+        )
         yield api
+    except SemanticAPIError as exc:
+        raise _http_error(exc) from None
     finally:
         release = getattr(db, "release_context_connection", None)
         close = release if callable(release) else getattr(db, "close_connection", None)
@@ -177,6 +184,14 @@ async def _call(operation: Callable[[], _T]) -> _T:
 async def get_semantic_capabilities(
     api: Any = Depends(get_semantic_api),
     _principal: Any = Depends(require_semantic_read),
+    _rate: None = Depends(rbac_rate_limit("notes.graph.read")),
+    _scope: None = Depends(
+        TokenScopeGuard(
+            "notes",
+            require_if_present=True,
+            endpoint_id="notes.graph.read",
+        )
+    ),
 ) -> SemanticCapabilitiesResponse:
     capabilities = await _call(api.capabilities)
     return SemanticCapabilitiesResponse.model_validate(capabilities, from_attributes=True)
@@ -189,6 +204,14 @@ async def get_semantic_capabilities(
 async def get_semantic_status(
     api: Any = Depends(get_semantic_api),
     _principal: Any = Depends(require_semantic_read),
+    _rate: None = Depends(rbac_rate_limit("notes.graph.read")),
+    _scope: None = Depends(
+        TokenScopeGuard(
+            "notes",
+            require_if_present=True,
+            endpoint_id="notes.graph.read",
+        )
+    ),
 ) -> SemanticIndexStatusResponse:
     resource = await _call(api.status)
     return SemanticIndexStatusResponse.model_validate(resource, from_attributes=True)
@@ -204,6 +227,14 @@ async def enable_semantic_index(
     idempotency_key: IdempotencyKeyHeader = None,
     api: Any = Depends(get_semantic_api),
     _principal: Any = Depends(require_semantic_manage),
+    _rate: None = Depends(rbac_rate_limit("notes.graph.write")),
+    _scope: None = Depends(
+        TokenScopeGuard(
+            "notes",
+            require_if_present=True,
+            endpoint_id="notes.graph.write",
+        )
+    ),
 ) -> SemanticIndexMutationResponse:
     mutation = await _call(
         lambda: api.enable(
@@ -225,6 +256,14 @@ async def disable_semantic_index(
     idempotency_key: IdempotencyKeyHeader = None,
     api: Any = Depends(get_semantic_api),
     _principal: Any = Depends(require_semantic_manage),
+    _rate: None = Depends(rbac_rate_limit("notes.graph.write")),
+    _scope: None = Depends(
+        TokenScopeGuard(
+            "notes",
+            require_if_present=True,
+            endpoint_id="notes.graph.write",
+        )
+    ),
 ) -> SemanticIndexMutationResponse:
     mutation = await _call(
         lambda: api.disable(
@@ -245,6 +284,14 @@ async def create_semantic_run(
     idempotency_key: IdempotencyKeyHeader = None,
     api: Any = Depends(get_semantic_api),
     _principal: Any = Depends(require_semantic_manage),
+    _rate: None = Depends(rbac_rate_limit("notes.graph.write")),
+    _scope: None = Depends(
+        TokenScopeGuard(
+            "notes",
+            require_if_present=True,
+            endpoint_id="notes.graph.write",
+        )
+    ),
 ) -> SemanticRunResponse:
     run = await _call(
         lambda: api.create_run(
@@ -264,6 +311,14 @@ async def get_semantic_run(
     run_id: UUID,
     api: Any = Depends(get_semantic_api),
     _principal: Any = Depends(require_semantic_read),
+    _rate: None = Depends(rbac_rate_limit("notes.graph.read")),
+    _scope: None = Depends(
+        TokenScopeGuard(
+            "notes",
+            require_if_present=True,
+            endpoint_id="notes.graph.read",
+        )
+    ),
 ) -> SemanticRunResponse:
     run = await _call(lambda: api.get_run(run_id=run_id))
     return SemanticRunResponse.model_validate(run, from_attributes=True)
@@ -280,6 +335,14 @@ async def cancel_semantic_run(
     idempotency_key: IdempotencyKeyHeader = None,
     api: Any = Depends(get_semantic_api),
     _principal: Any = Depends(require_semantic_manage),
+    _rate: None = Depends(rbac_rate_limit("notes.graph.write")),
+    _scope: None = Depends(
+        TokenScopeGuard(
+            "notes",
+            require_if_present=True,
+            endpoint_id="notes.graph.write",
+        )
+    ),
 ) -> SemanticIndexMutationResponse:
     mutation = await _call(
         lambda: api.cancel_run(

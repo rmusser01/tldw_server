@@ -45,3 +45,28 @@ def test_static_semantic_routes_are_registered_before_run_parameter_route() -> N
     assert paths.index("/graph/semantic-index/runs") < paths.index(
         "/graph/semantic-index/runs/{run_id}"
     )
+
+
+def test_every_semantic_route_declares_notes_scope_and_read_or_manage_rate_guard() -> None:
+    read_routes = {
+        ("GET", "/graph/semantic-index/capabilities"),
+        ("GET", "/graph/semantic-index"),
+        ("GET", "/graph/semantic-index/runs/{run_id}"),
+    }
+    for route in router.routes:
+        calls = [dependency.call for dependency in route.dependant.dependencies]
+        token_scopes = [
+            call for call in calls if getattr(call, "_tldw_token_scope", False)
+        ]
+        rate_limits = [
+            call
+            for call in calls
+            if getattr(call, "_tldw_rate_limit_resource", None) is not None
+        ]
+        assert len(token_scopes) == 1, route.path
+        assert len(rate_limits) == 1, route.path
+        assert token_scopes[0]._tldw_token_scope_required == "notes"  # nosec B105
+        method = next(iter(route.methods))
+        expected = "notes.graph.read" if (method, route.path) in read_routes else "notes.graph.write"
+        assert token_scopes[0]._tldw_endpoint_id == expected
+        assert rate_limits[0]._tldw_rate_limit_resource == expected

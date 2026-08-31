@@ -20,11 +20,17 @@ from tldw_Server_API.app.core.DB_Management.chacha.note_semantic_models import (
 )
 from tldw_Server_API.app.core.Notes_Graph import semantic_indexing
 from tldw_Server_API.app.core.Notes_Graph.semantic_content import build_semantic_chunks
+from tldw_Server_API.app.core.Notes_Graph.semantic_embeddings import (
+    PendingSemanticConfig,
+    ResolvedDimension,
+)
 from tldw_Server_API.app.core.Notes_Graph.semantic_indexing import (
+    InitialGenerationRequest,
     NoteVersionRef,
     SemanticGenerationBuilder,
     VersionedNoteSnapshot,
 )
+from tldw_Server_API.app.core.Notes_Graph.semantic_jobs import SemanticJobCancelled
 from tldw_Server_API.app.core.Notes_Graph.semantic_observability import (
     SemanticObservationError,
     build_semantic_audit_event,
@@ -579,3 +585,263 @@ async def test_snapshot_planning_does_not_charge_provider_budget_before_work_cla
 
     assert len(plan.seeds) == 2
     assert sum(seed.planned_chunk_count for seed in plan.seeds) == 4
+
+
+@pytest.mark.asyncio
+async def test_dimension_provider_is_fenced_by_active_cancellation() -> None:
+    provider_called = False
+    fence = replace(
+        _fence(),
+        model_revision=None,
+        compatibility_hash=None,
+        dimensions=None,
+    )
+    authority = replace(
+        _authority(),
+        model_revision=None,
+        compatibility_hash=None,
+        dimensions=None,
+    )
+
+    class Embedder:
+        async def resolve_dimensions(self, _config, *, user_id):
+            nonlocal provider_called
+            provider_called = True
+            raise AssertionError("dimension provider must not run")
+
+    builder = SemanticGenerationBuilder(
+        store=SimpleNamespace(),
+        note_reader=SimpleNamespace(),
+        embedder=Embedder(),
+        vectors=SimpleNamespace(),
+        revalidate=lambda _fence_value: authority,
+        compatibility_hash_for_dimension=lambda _resolved: "compatibility-a",
+        settings=SemanticIndexSettings(),
+        clock=lambda: None,
+        receipt_factory=lambda: "unused",
+    )
+
+    async def cancel() -> None:
+        raise SemanticJobCancelled()
+
+    with pytest.raises(SemanticJobCancelled):
+        await builder._resolve_generation(
+            fence,
+            PendingSemanticConfig(
+                provider=fence.provider,
+                model=fence.model,
+                model_revision=fence.model_revision,
+                endpoint_origin=fence.endpoint_origin,
+                credential_source=fence.credential_source,
+                consented=True,
+                dimensions=None,
+            ),
+            before_side_effect=cancel,
+        )
+
+    assert provider_called is False
+
+
+@pytest.mark.asyncio
+async def test_dimension_resolution_rejects_preadmitted_model_revision_drift() -> None:
+    store_reads = 0
+    fence = replace(_fence(), compatibility_hash=None, dimensions=None)
+    authority = replace(_authority(), compatibility_hash=None, dimensions=None)
+
+    class Store:
+        def get_configuration(self, _dataset_id):
+            nonlocal store_reads
+            store_reads += 1
+            return None
+
+    class Embedder:
+        async def resolve_dimensions(self, _config, *, user_id):
+            return ResolvedDimension(
+                dimensions=2,
+                provider=fence.provider,
+                model=fence.model,
+                model_revision="revision-b",
+                endpoint_origin=fence.endpoint_origin,
+                credential_source=fence.credential_source,
+            )
+
+    builder = SemanticGenerationBuilder(
+        store=Store(),
+        note_reader=SimpleNamespace(),
+        embedder=Embedder(),
+        vectors=SimpleNamespace(),
+        revalidate=lambda _fence_value: authority,
+        compatibility_hash_for_dimension=lambda _resolved: "compatibility-b",
+        settings=SemanticIndexSettings(),
+        clock=lambda: None,
+        receipt_factory=lambda: "unused",
+    )
+
+    with pytest.raises(SemanticIndexingError) as drift:
+        await builder._resolve_generation(
+            fence,
+            PendingSemanticConfig(
+                provider=fence.provider,
+                model=fence.model,
+                model_revision=fence.model_revision,
+                endpoint_origin=fence.endpoint_origin,
+                credential_source=fence.credential_source,
+                consented=True,
+                dimensions=None,
+            ),
+        )
+
+    assert drift.value.code == "notes_semantic_model_revision_drift"
+    assert store_reads == 0
+
+
+@pytest.mark.asyncio
+async def test_build_preserves_active_cancellation_across_task6_boundary() -> None:
+    provider_called = False
+    fence = replace(
+        _fence(),
+        model_revision=None,
+        compatibility_hash=None,
+        dimensions=None,
+    )
+    authority = replace(
+        _authority(),
+        model_revision=None,
+        compatibility_hash=None,
+        dimensions=None,
+    )
+
+    class Store:
+        def fail_generation(self, **_kwargs):
+            return True
+
+    class Embedder:
+        async def resolve_dimensions(self, _config, *, user_id):
+            nonlocal provider_called
+            provider_called = True
+            raise AssertionError("dimension provider must not run")
+
+    builder = SemanticGenerationBuilder(
+        store=Store(),
+        note_reader=SimpleNamespace(),
+        embedder=Embedder(),
+        vectors=SimpleNamespace(),
+        revalidate=lambda _fence_value: authority,
+        compatibility_hash_for_dimension=lambda _resolved: "compatibility-a",
+        settings=SemanticIndexSettings(),
+        clock=lambda: None,
+        receipt_factory=lambda: "unused",
+    )
+
+    async def cancel() -> None:
+        raise SemanticJobCancelled()
+
+    with pytest.raises(SemanticJobCancelled):
+        await builder.build_initial_generation(
+            InitialGenerationRequest(
+                fence=fence,
+                embedding_config=PendingSemanticConfig(
+                    provider=fence.provider,
+                    model=fence.model,
+                    model_revision=fence.model_revision,
+                    endpoint_origin=fence.endpoint_origin,
+                    credential_source=fence.credential_source,
+                    consented=True,
+                    dimensions=None,
+                ),
+            ),
+            before_side_effect=cancel,
+        )
+
+    assert provider_called is False
+
+
+@pytest.mark.asyncio
+async def test_note_publication_is_fenced_before_vector_or_database_side_effects() -> None:
+    store_calls = 0
+    vector_calls = 0
+
+    class Store:
+        def stage_obsolete_vector_cleanup(self, **_kwargs):
+            nonlocal store_calls
+            store_calls += 1
+            return 1
+
+    class Vectors:
+        async def upsert(self, _dataset_id, _generation_id, _vectors):
+            nonlocal vector_calls
+            vector_calls += 1
+            return 1
+
+    service = SemanticPublicationService(
+        store=Store(),
+        vectors=Vectors(),
+        revalidate=lambda _fence_value: _authority(),
+        clock=lambda: None,
+        receipt_factory=lambda: "unused",
+    )
+    chunks = build_semantic_chunks(
+        generation_id="generation-a",
+        note_id="note-a",
+        title="Title",
+        content="Body",
+        content_version=1,
+    )
+
+    async def cancel() -> None:
+        raise SemanticJobCancelled()
+
+    with pytest.raises(SemanticJobCancelled):
+        await service.publish_note(
+            _fence(),
+            _claimed_work(SemanticWorkKind.INDEX_NOTE),
+            chunks,
+            tuple(
+                SemanticVector(chunk.vector_id, (1.0, 2.0)) for chunk in chunks
+            ),
+            before_side_effect=cancel,
+        )
+
+    assert store_calls == 0
+    assert vector_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_activation_is_fenced_before_vector_read_or_publication_commit() -> None:
+    vector_calls = 0
+    activation_calls = 0
+
+    class Store:
+        def get_generation_integrity(self, _dataset_id, _generation_id):
+            return replace(_empty_integrity(), vector_ids=("vector-a",))
+
+        def assert_generation_activatable(self, _integrity):
+            return None
+
+        def activate_generation_verified(self, **_kwargs):
+            nonlocal activation_calls
+            activation_calls += 1
+            return object()
+
+    class Vectors:
+        async def fetch(self, _dataset_id, _generation_id, _vector_ids):
+            nonlocal vector_calls
+            vector_calls += 1
+            return ()
+
+    service = SemanticPublicationService(
+        store=Store(),
+        vectors=Vectors(),
+        revalidate=lambda _fence_value: _authority(),
+        clock=lambda: None,
+        receipt_factory=lambda: "receipt-a",
+    )
+
+    async def cancel() -> None:
+        raise SemanticJobCancelled()
+
+    with pytest.raises(SemanticJobCancelled):
+        await service.activate(_fence(), before_side_effect=cancel)
+
+    assert vector_calls == 0
+    assert activation_calls == 0

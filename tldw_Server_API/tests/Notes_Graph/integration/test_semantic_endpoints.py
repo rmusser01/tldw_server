@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
@@ -10,6 +11,10 @@ from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.endpoints import notes_semantic_index as endpoint
 from tldw_Server_API.app.core.Notes_Graph.semantic_api import SemanticAPIError
+from tldw_Server_API.app.core.Sync.v2.notes_link_coordinator import (
+    NotesLinkDatasetConflictError,
+    NotesLinkSyncInactiveDatasetError,
+)
 
 
 class _FakeAPI:
@@ -130,6 +135,14 @@ def client():
     app.dependency_overrides[endpoint.get_semantic_api] = lambda: api
     app.dependency_overrides[endpoint.require_semantic_read] = lambda: object()
     app.dependency_overrides[endpoint.require_semantic_manage] = lambda: object()
+    for route in endpoint.router.routes:
+        for dependency in route.dependant.dependencies:
+            call = dependency.call
+            if (
+                getattr(call, "_tldw_token_scope", False)
+                or getattr(call, "_tldw_rate_limit_resource", None) is not None
+            ):
+                app.dependency_overrides[call] = lambda: None
     with TestClient(app) as test_client:
         yield test_client, api, app
 
@@ -332,3 +345,44 @@ def test_manage_permission_failure_is_403(client) -> None:
         json={"mode": "rebuild", "expected_revision": 9},
     )
     assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "authority_failure",
+    [
+        NotesLinkDatasetConflictError(),
+        NotesLinkSyncInactiveDatasetError(),
+        None,
+    ],
+    ids=["foreign", "sync-inactive", "canonical-authority-absent"],
+)
+async def test_dataset_authority_failure_is_typed_404_and_releases_database(
+    monkeypatch: pytest.MonkeyPatch,
+    authority_failure: Exception | None,
+) -> None:
+    released: list[bool] = []
+
+    class FakeDB:
+        def release_context_connection(self) -> None:
+            released.append(True)
+
+    def resolve(**_kwargs):
+        if authority_failure is not None:
+            raise authority_failure
+        return None
+
+    monkeypatch.setattr(endpoint, "resolve_notes_link_dataset_authority", resolve)
+    dependency = endpoint.get_semantic_api(
+        dataset_id="dataset-a",
+        user=SimpleNamespace(id_str="owner-a"),
+        db=FakeDB(),
+        jobs=object(),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await dependency.__anext__()
+
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail["error_code"] == "notes_semantic_dataset_not_found"
+    assert released == [True]

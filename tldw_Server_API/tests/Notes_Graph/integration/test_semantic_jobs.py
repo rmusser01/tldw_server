@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 import pytest
@@ -14,7 +14,7 @@ from tldw_Server_API.app.core.DB_Management.chacha.note_semantic_models import (
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.Jobs.manager import JobManager
-from tldw_Server_API.app.core.Notes_Graph.semantic_api import SemanticIndexAPI
+from tldw_Server_API.app.core.Notes_Graph.semantic_api import SemanticAPIError, SemanticIndexAPI
 from tldw_Server_API.app.core.Notes_Graph.semantic_capabilities import (
     SemanticCapabilityContract,
     build_semantic_capabilities,
@@ -137,6 +137,29 @@ def test_one_active_writer_converges_or_conflicts_by_owner_dataset_and_revision(
         clock=lambda: NOW,
     ).admit(_command(), idempotency_key="writer-one")
     assert other_owner.run_id != first.run_id
+
+
+def test_active_writer_scope_survives_internal_dimension_revision_advance(
+    jobs: JobManager,
+) -> None:
+    coordinator = SemanticJobCoordinator(
+        jobs=jobs,
+        owner_user_id="owner-a",
+        clock=lambda: NOW,
+    )
+    first = coordinator.admit(
+        _command(configuration_revision=7, mode="build"),
+        idempotency_key="dimension-writer",
+    )
+
+    with pytest.raises(SemanticJobsError) as exc_info:
+        coordinator.admit(
+            _command(configuration_revision=8, mode="rebuild"),
+            idempotency_key="revision-advanced-writer",
+        )
+
+    assert first.job["status"] == "queued"
+    assert exc_info.value.code == "notes_semantic_writer_conflict"
 
 
 def test_receipt_replay_survives_exact_retry_and_rejects_key_reuse(
@@ -325,6 +348,45 @@ async def test_handler_replays_published_receipt_after_crash_without_provider_wo
     assert [item["phase"] for item in runtime.executions] == ["recover"]
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["recover", "execute"])
+async def test_handler_sanitizes_non_allowlisted_typed_runtime_failures(stage: str) -> None:
+    secret = "postgresql://user:password@private/db?token=super-secret"  # nosec B105
+
+    class FailingRuntime(_Runtime):
+        async def recover(self, **kwargs):
+            if stage == "recover":
+                raise SemanticJobsError(secret)
+            return await super().recover(**kwargs)
+
+        async def execute(self, **kwargs):
+            if stage == "execute":
+                raise SemanticJobsError(secret)
+            return await super().execute(**kwargs)
+
+    handler = SemanticJobHandler(runtime_factory=lambda **_kwargs: FailingRuntime())
+    job = {
+        "uuid": "6ec1dfbe-f86f-4d2b-93af-f88f64cd9701",
+        "owner_user_id": "owner-a",
+        "domain": JOB_DOMAIN,
+        "queue": JOB_QUEUE,
+        "job_type": JOB_TYPE,
+        "payload": {
+            "schema_version": 1,
+            "dataset_id": "dataset-a",
+            "configuration_revision": 7,
+            "generation_id": None,
+            "mode": "rebuild",
+        },
+    }
+
+    with pytest.raises(SemanticJobsError) as exc_info:
+        await handler.handle(job, cancellation_requested=lambda: False)
+
+    assert exc_info.value.code == "notes_semantic_worker_runtime_failed"
+    assert secret not in str(exc_info.value)
+
+
 def _configuration(db: CharactersRAGDB):
     created = db.note_semantic_store.create_configuration(
         dataset_id="dataset-a",
@@ -389,6 +451,290 @@ def test_generation_root_job_recovery_and_disable_cleanup_are_durable(tmp_path) 
         assert cleanup is not None
         assert cleanup.kind.value == "delete_generation"
         assert cleanup.generation_id == generation.id
+    finally:
+        db.close_all_connections()
+
+
+def test_exhausted_cleanup_projects_attention_and_can_be_rearmed(
+    tmp_path,
+    jobs: JobManager,
+) -> None:
+    db = CharactersRAGDB(str(tmp_path / "semantic-cleanup-rearm.sqlite"), client_id="owner-a")
+    try:
+        enabled = _configuration(db)
+        db.note_semantic_store.create_generation(
+            dataset_id="dataset-a",
+            configuration_revision=enabled.configuration_revision,
+            compatibility_hash=None,
+            dimension_state=SemanticDimensionState.PENDING,
+            dimensions=None,
+            root_job_id="6ec1dfbe-f86f-4d2b-93af-f88f64cd9701",
+            now=NOW,
+        )
+        disabled = db.note_semantic_store.disable_and_schedule_cleanup(
+            dataset_id="dataset-a",
+            expected_configuration_revision=enabled.configuration_revision,
+            now=NOW,
+        )
+        assert disabled is not None
+        moment = NOW
+        for _attempt in range(5):
+            claim = db.note_semantic_store.claim_generation_cleanup_batch(
+                dataset_id="dataset-a",
+                limit=1,
+                now=moment,
+            )[0]
+            retried = db.note_semantic_store.retry_work(
+                dataset_id="dataset-a",
+                work_id=claim.id,
+                expected_claim_token=claim.claim_token,
+                error_code="notes_semantic_cleanup_failed",
+                retry_at=moment + timedelta(seconds=1),
+                now=moment,
+            )
+            assert retried is not None
+            moment += timedelta(seconds=2)
+
+        assert db.note_semantic_store.claim_generation_cleanup_batch(
+            dataset_id="dataset-a",
+            limit=1,
+            now=moment,
+        ) == ()
+        assert db.note_semantic_store.has_stalled_cleanup(
+            "dataset-a",
+            expired_before=moment,
+        ) is True
+        assert _semantic_api(db, jobs).status()["state"] == "needs_attention"
+
+        assert db.note_semantic_store.rearm_exhausted_generation_cleanup(
+            dataset_id="dataset-a",
+            limit=1,
+            now=moment,
+        ) == 1
+        rearmed = db.note_semantic_store.claim_generation_cleanup_batch(
+            dataset_id="dataset-a",
+            limit=1,
+            now=moment,
+        )
+        assert len(rearmed) == 1
+        assert rearmed[0].attempt_count == 0
+    finally:
+        db.close_all_connections()
+
+
+def test_repeated_cleanup_lease_expiry_can_be_rearmed(
+    tmp_path,
+) -> None:
+    db = CharactersRAGDB(str(tmp_path / "semantic-cleanup-lease.sqlite"), client_id="owner-a")
+    try:
+        enabled = _configuration(db)
+        db.note_semantic_store.create_generation(
+            dataset_id="dataset-a",
+            configuration_revision=enabled.configuration_revision,
+            compatibility_hash=None,
+            dimension_state=SemanticDimensionState.PENDING,
+            dimensions=None,
+            root_job_id="6ec1dfbe-f86f-4d2b-93af-f88f64cd9701",
+            now=NOW,
+        )
+        disabled = db.note_semantic_store.disable_and_schedule_cleanup(
+            dataset_id="dataset-a",
+            expected_configuration_revision=enabled.configuration_revision,
+            now=NOW,
+        )
+        assert disabled is not None
+        moment = NOW
+        for _attempt in range(5):
+            claims = db.note_semantic_store.claim_generation_cleanup_batch(
+                dataset_id="dataset-a",
+                limit=1,
+                now=moment,
+            )
+            assert len(claims) == 1
+            reclaimed = db.note_semantic_store.reclaim_expired_dataset_work(
+                dataset_id="dataset-a",
+                expired_before=moment + timedelta(seconds=1),
+                limit=1,
+                now=moment + timedelta(seconds=2),
+            )
+            assert reclaimed == 1
+            moment += timedelta(seconds=3)
+
+        assert db.note_semantic_store.rearm_exhausted_generation_cleanup(
+            dataset_id="dataset-a",
+            limit=1,
+            now=moment,
+        ) == 1
+        assert len(
+            db.note_semantic_store.claim_generation_cleanup_batch(
+                dataset_id="dataset-a",
+                limit=1,
+                now=moment,
+            )
+        ) == 1
+    finally:
+        db.close_all_connections()
+
+
+def test_http_admission_does_not_create_a_post_admission_ghost_generation(
+    tmp_path,
+    jobs: JobManager,
+) -> None:
+    db = CharactersRAGDB(str(tmp_path / "semantic-worker-owned-generation.sqlite"), client_id="owner-a")
+    try:
+        api = _semantic_api(db, jobs)
+        admitted = api.enable(
+            expected_revision=0,
+            capability_revision=api.capabilities()["capability_revision"],
+            idempotency_key="worker-owned-generation",
+        )
+
+        assert db.note_semantic_store.get_generation_by_root_job_id(
+            "dataset-a",
+            admitted["run"]["run_id"],
+        ) is None
+    finally:
+        db.close_all_connections()
+
+
+def test_enable_exact_retry_resumes_jobs_admission_after_committed_config_gap(
+    tmp_path,
+    jobs: JobManager,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db = CharactersRAGDB(str(tmp_path / "semantic-enable-gap.sqlite"), client_id="owner-a")
+    api = _semantic_api(db, jobs)
+    original_admit = jobs.admit_idempotent_operation
+    calls = 0
+
+    def fail_once(command):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("jobs unavailable at /private/secret?token=abc")
+        return original_admit(command)
+
+    monkeypatch.setattr(jobs, "admit_idempotent_operation", fail_once)
+    capability_revision = api.capabilities()["capability_revision"]
+    try:
+        with pytest.raises(SemanticAPIError) as exc_info:
+            api.enable(
+                expected_revision=0,
+                capability_revision=capability_revision,
+                idempotency_key="resume-enable",
+            )
+        assert exc_info.value.code == "notes_semantic_jobs_unavailable"
+        committed = db.note_semantic_store.get_configuration("dataset-a")
+        assert committed is not None
+        assert committed.desired_state is SemanticDesiredState.ENABLED
+
+        resumed = api.enable(
+            expected_revision=0,
+            capability_revision=capability_revision,
+            idempotency_key="resume-enable",
+        )
+        assert resumed["run"]["status"] == "queued"
+
+        with pytest.raises(SemanticAPIError) as reused:
+            api.enable(
+                expected_revision=0,
+                capability_revision=capability_revision,
+                idempotency_key="different-enable-key",
+            )
+        assert reused.value.code in {
+            "notes_semantic_configuration_revision_conflict",
+            "notes_semantic_idempotency_conflict",
+        }
+    finally:
+        db.close_all_connections()
+
+
+def test_resolved_model_revision_is_persisted_on_config_and_generation(tmp_path) -> None:
+    db = CharactersRAGDB(str(tmp_path / "semantic-model-revision.sqlite"), client_id="owner-a")
+    try:
+        created = db.note_semantic_store.create_configuration(
+            dataset_id="dataset-a",
+            capability_revision="capability-v1",
+            disclosure_hash="disclosure-v1",
+            provider="provider-a",
+            model="model-a",
+            model_revision=None,
+            endpoint_origin_revision="origin-v1",
+            endpoint_origin_display="https://api.example.test",
+            data_boundary="external",
+            vector_backend="chromadb",
+            storage_boundary="local",
+            storage_label="local-vectors",
+            normalization_version="normalization-v1",
+            chunker_version="chunker-v1",
+            now=NOW,
+        )
+        enabled = db.note_semantic_store.enable_configuration(
+            dataset_id="dataset-a",
+            expected_configuration_revision=created.configuration_revision,
+            capability_revision="capability-v1",
+            now=NOW,
+        )
+        assert enabled is not None
+        generation = db.note_semantic_store.create_generation(
+            dataset_id="dataset-a",
+            configuration_revision=enabled.configuration_revision,
+            compatibility_hash=None,
+            dimension_state=SemanticDimensionState.PENDING,
+            dimensions=None,
+            root_job_id="6ec1dfbe-f86f-4d2b-93af-f88f64cd9701",
+            model_revision=None,
+            now=NOW,
+        )
+
+        resolved = db.note_semantic_store.resolve_generation_dimensions(
+            dataset_id="dataset-a",
+            generation_id=generation.id,
+            expected_configuration_revision=enabled.configuration_revision,
+            dimensions=1536,
+            compatibility_hash="compatibility-v1",
+            model_revision="model-digest-a",
+            now=NOW,
+        )
+
+        assert resolved is not None
+        assert resolved.model_revision == "model-digest-a"
+        assert db.note_semantic_store.get_configuration("dataset-a").model_revision == "model-digest-a"
+    finally:
+        db.close_all_connections()
+
+
+def test_local_note_lifecycle_targets_the_bound_enabled_canonical_dataset(tmp_path) -> None:
+    db = CharactersRAGDB(str(tmp_path / "semantic-local-lifecycle.sqlite"), client_id="owner-a")
+    try:
+        enabled = _configuration(db)
+        generation = db.note_semantic_store.create_generation(
+            dataset_id="dataset-a",
+            configuration_revision=enabled.configuration_revision,
+            compatibility_hash=None,
+            dimension_state=SemanticDimensionState.PENDING,
+            dimensions=None,
+            root_job_id="6ec1dfbe-f86f-4d2b-93af-f88f64cd9701",
+            now=NOW,
+        )
+        note_id = "11111111-1111-4111-8111-111111111111"
+
+        assert db.note_store.add_note("Title", "Body", note_id=note_id) == note_id
+        created = db.note_semantic_store.get_note_state("dataset-a", generation.id, note_id)
+        assert created is not None and created.content_version == 1
+
+        assert db.note_store.update_note(note_id, {"content": "Edited"}, expected_version=1)
+        edited = db.note_semantic_store.get_note_state("dataset-a", generation.id, note_id)
+        assert edited is not None and edited.content_version == 2
+
+        assert db.note_store.soft_delete_note(note_id, expected_version=2)
+        trashed = db.note_semantic_store.get_note_state("dataset-a", generation.id, note_id)
+        assert trashed is not None and trashed.state.value == "tombstoned"
+
+        assert db.note_store.restore_note(note_id, expected_version=3)
+        restored = db.note_semantic_store.get_note_state("dataset-a", generation.id, note_id)
+        assert restored is not None and restored.state.value == "pending"
+        assert restored.content_version == 4
     finally:
         db.close_all_connections()
 
@@ -470,15 +816,26 @@ def test_enable_receipt_replays_after_dimension_revision_advances(
             "dataset-a",
             first["run"]["run_id"],
         )
-        assert generation is not None
         config = db.note_semantic_store.get_configuration("dataset-a")
         assert config is not None
+        assert generation is None
+        generation = db.note_semantic_store.create_generation(
+            dataset_id="dataset-a",
+            configuration_revision=config.configuration_revision,
+            compatibility_hash=config.compatibility_hash,
+            dimension_state=config.dimension_state,
+            dimensions=config.dimensions,
+            root_job_id=first["run"]["run_id"],
+            model_revision=config.model_revision,
+            now=NOW,
+        )
         resolved = db.note_semantic_store.resolve_generation_dimensions(
             dataset_id="dataset-a",
             generation_id=generation.id,
             expected_configuration_revision=config.configuration_revision,
             dimensions=1536,
             compatibility_hash=api._capabilities().compatibility_hash or "",
+            model_revision=config.model_revision,
             now=NOW,
         )
         assert resolved is not None
@@ -511,7 +868,19 @@ def test_cancelled_staging_generation_is_failed_and_queued_for_cleanup(
             "dataset-a",
             run_id,
         )
-        assert generation is not None
+        assert generation is None
+        config = db.note_semantic_store.get_configuration("dataset-a")
+        assert config is not None
+        generation = db.note_semantic_store.create_generation(
+            dataset_id="dataset-a",
+            configuration_revision=config.configuration_revision,
+            compatibility_hash=config.compatibility_hash,
+            dimension_state=config.dimension_state,
+            dimensions=config.dimensions,
+            root_job_id=run_id,
+            model_revision=config.model_revision,
+            now=NOW,
+        )
 
         api.cancel_run(
             run_id=UUID(run_id),
@@ -523,5 +892,78 @@ def test_cancelled_staging_generation_is_failed_and_queued_for_cleanup(
         assert cancelled is not None
         assert cancelled.state is SemanticGenerationState.FAILED
         assert db.note_semantic_store.has_pending_cleanup("dataset-a") is True
+    finally:
+        db.close_all_connections()
+
+
+def test_cancel_idempotency_replays_bounded_response_and_rejects_key_reuse(
+    tmp_path,
+    jobs: JobManager,
+) -> None:
+    db = CharactersRAGDB(str(tmp_path / "semantic-cancel-receipt.sqlite"), client_id="owner-a")
+    try:
+        api = _semantic_api(db, jobs)
+        enabled = api.enable(
+            expected_revision=0,
+            capability_revision=api.capabilities()["capability_revision"],
+            idempotency_key="enable-for-cancel-receipt",
+        )
+        run_id = enabled["run"]["run_id"]
+        config = db.note_semantic_store.get_configuration("dataset-a")
+        assert config is not None
+        generation = db.note_semantic_store.get_generation_by_root_job_id(
+            "dataset-a",
+            run_id,
+        )
+        if generation is None:
+            generation = db.note_semantic_store.create_generation(
+                dataset_id="dataset-a",
+                configuration_revision=config.configuration_revision,
+                compatibility_hash=config.compatibility_hash,
+                dimension_state=config.dimension_state,
+                dimensions=config.dimensions,
+                root_job_id=run_id,
+                model_revision=config.model_revision,
+                now=NOW,
+            )
+
+        first = api.cancel_run(
+            run_id=UUID(run_id),
+            expected_revision=enabled["run"]["revision"],
+            idempotency_key="cancel-operation-key",
+        )
+        disabled = db.note_semantic_store.disable_and_schedule_cleanup(
+            dataset_id="dataset-a",
+            expected_configuration_revision=config.configuration_revision,
+            now=NOW,
+        )
+        assert disabled is not None
+
+        replay = api.cancel_run(
+            run_id=UUID(run_id),
+            expected_revision=enabled["run"]["revision"],
+            idempotency_key="cancel-operation-key",
+        )
+        assert replay == first
+
+        next_job = SemanticJobCoordinator(
+            jobs=jobs,
+            owner_user_id="owner-a",
+            clock=lambda: NOW,
+        ).admit(
+            SemanticJobCommand(
+                dataset_id="dataset-a",
+                configuration_revision=disabled.configuration_revision,
+                mode="delete",
+            ),
+            idempotency_key="next-cancellable-job",
+        )
+        with pytest.raises(SemanticAPIError) as reused:
+            api.cancel_run(
+                run_id=UUID(next_job.run_id),
+                expected_revision=disabled.configuration_revision,
+                idempotency_key="cancel-operation-key",
+            )
+        assert reused.value.code == "notes_semantic_idempotency_conflict"
     finally:
         db.close_all_connections()

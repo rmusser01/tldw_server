@@ -638,12 +638,14 @@ async def test_chroma_isolates_owner_dataset_and_generation_namespaces(tmp_path:
     client = chromadb.PersistentClient(path=str(tmp_path / "isolated-chroma"))
     owner_a_db = CharactersRAGDB(str(tmp_path / "owner-a.sqlite"), client_id="owner-a")
     owner_b_db = CharactersRAGDB(str(tmp_path / "owner-b.sqlite"), client_id="owner-b")
+    owner_c_db = CharactersRAGDB(str(tmp_path / "owner-c.sqlite"), client_id="owner-c")
     owner_a_manager = _manager("owner-a", tmp_path, client)
     owner_b_manager = _manager("owner-b", tmp_path, client)
+    owner_c_manager = _manager("owner-c", tmp_path, client)
     dataset_generation = _generation(owner_a_db, "dataset-a")
     other_generation = _additional_generation(owner_a_db, "dataset-a")
-    other_dataset_generation = _generation(owner_a_db, "dataset-b")
-    other_owner_generation = _generation(owner_b_db, "dataset-a")
+    other_dataset_generation = _generation(owner_b_db, "dataset-b")
+    other_owner_generation = _generation(owner_c_db, "dataset-a")
     try:
         owner_a_store = await create_semantic_vector_store(
             "chromadb",
@@ -655,17 +657,24 @@ async def test_chroma_isolates_owner_dataset_and_generation_namespaces(tmp_path:
             authority=owner_b_db.note_semantic_store,
             chroma_manager=owner_b_manager,
         )
+        owner_c_store = await create_semantic_vector_store(
+            "chromadb",
+            authority=owner_c_db.note_semantic_store,
+            chroma_manager=owner_c_manager,
+        )
         await assert_vector_isolation_contract(
             (owner_a_store, "dataset-a", dataset_generation),
             (
                 (owner_a_store, "dataset-a", other_generation),
-                (owner_a_store, "dataset-b", other_dataset_generation),
-                (owner_b_store, "dataset-a", other_owner_generation),
+                (owner_b_store, "dataset-b", other_dataset_generation),
+                (owner_c_store, "dataset-a", other_owner_generation),
             ),
             dimensions=DIMENSIONS,
         )
     finally:
+        owner_c_manager.client = None
         owner_b_manager.client = None
         owner_a_manager.close()
         owner_a_db.close_all_connections()
         owner_b_db.close_all_connections()
+        owner_c_db.close_all_connections()

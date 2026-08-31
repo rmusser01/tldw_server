@@ -2,18 +2,21 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
 from tldw_Server_API.app.core.DB_Management.chacha.note_semantic_models import (
     SemanticDesiredState,
-    SemanticGeneration,
     SemanticIndexConfig,
+    SemanticIndexingError,
+    SemanticOperationReceipt,
 )
 from tldw_Server_API.app.core.Embeddings.simplified_config import get_config
 
@@ -59,6 +62,7 @@ class SemanticAPIError(RuntimeError):
     def __init__(self, status_code: int, code: str) -> None:
         self.status_code = status_code
         self.code = code
+        self.failure_code = code
         super().__init__(code)
 
 
@@ -73,12 +77,15 @@ class SemanticStatusFacts:
     cleanup_pending: bool
     indexing_available: bool
     configuration_stale: bool
+    cleanup_stalled: bool = False
 
 
 def derive_semantic_state(facts: SemanticStatusFacts) -> tuple[str, str | None]:
     """Derive the UI state from durable authority facts."""
 
     if facts.desired_state == "disabled":
+        if facts.cleanup_stalled:
+            return "needs_attention", "cleanup_stalled"
         return "off", "cleanup_pending" if facts.cleanup_pending else None
     if not facts.indexing_available:
         return "needs_attention", "unavailable"
@@ -198,6 +205,24 @@ def _safe_job_error(job: Mapping[str, Any]) -> str | None:
     return "notes_semantic_run_failed" if job.get("status") == "failed" else None
 
 
+def _canonical_digest(value: Mapping[str, object]) -> str:
+    encoded = json.dumps(
+        dict(value),
+        allow_nan=False,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _key_digest(value: str) -> str:
+    normalized = str(value).strip()
+    if not normalized or normalized != value or len(normalized.encode("utf-8")) > 256:
+        raise SemanticAPIError(422, "notes_semantic_invalid_request")
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
 class SemanticIndexAPI:
     """Owner/dataset application service backed by Notes authority and Jobs."""
 
@@ -240,6 +265,72 @@ class SemanticIndexAPI:
 
     def capabilities(self) -> dict[str, Any]:
         return _capability_response(self._capabilities())
+
+    def _begin_operation(
+        self,
+        *,
+        action: str,
+        request_identity: Mapping[str, object],
+        idempotency_key: str,
+        run_id: str | None,
+        expected_revision: int,
+    ) -> tuple[SemanticOperationReceipt, str, str]:
+        identity = {
+            "owner_user_id": self._owner_user_id,
+            **dict(request_identity),
+        }
+        key = _key_digest(idempotency_key)
+        fingerprint = _canonical_digest(identity)
+        try:
+            receipt, _replayed = self._store.begin_operation_receipt(
+                dataset_id=self._dataset_id,
+                key_digest=key,
+                action=action,
+                request_fingerprint=fingerprint,
+                run_id=run_id,
+                expected_revision=expected_revision,
+                expires_at=self._clock() + timedelta(days=31),
+                now=self._clock(),
+            )
+        except SemanticIndexingError as exc:
+            status_code = 409 if exc.code.endswith("conflict") else 503
+            raise SemanticAPIError(status_code, exc.code) from None
+        return receipt, key, fingerprint
+
+    @staticmethod
+    def _receipt_response(receipt: SemanticOperationReceipt) -> dict[str, Any] | None:
+        if receipt.state != "completed" or receipt.response_json is None:
+            return None
+        try:
+            response = json.loads(receipt.response_json)
+        except (TypeError, ValueError):
+            raise SemanticAPIError(503, "notes_semantic_jobs_unavailable") from None
+        if not isinstance(response, dict):
+            raise SemanticAPIError(503, "notes_semantic_jobs_unavailable")
+        return response
+
+    def _complete_operation(
+        self,
+        *,
+        key_digest: str,
+        request_fingerprint: str,
+        run_id: str | None,
+        response: dict[str, Any],
+    ) -> dict[str, Any]:
+        try:
+            self._store.complete_operation_receipt(
+                dataset_id=self._dataset_id,
+                key_digest=key_digest,
+                request_fingerprint=request_fingerprint,
+                run_id=run_id,
+                response=response,
+                now=self._clock(),
+            )
+        except (SemanticIndexingError, TypeError, ValueError) as exc:
+            code = getattr(exc, "code", "notes_semantic_jobs_unavailable")
+            status_code = 409 if str(code).endswith("conflict") else 503
+            raise SemanticAPIError(status_code, str(code)) from None
+        return response
 
     def _jobs_for_dataset(self, *, limit: int = 10) -> tuple[dict[str, Any], ...]:
         if self._jobs is None or not callable(getattr(self._jobs, "list_jobs", None)):
@@ -327,12 +418,28 @@ class SemanticIndexAPI:
     def status(self) -> dict[str, Any]:
         config = self._store.get_configuration(self._dataset_id)
         cleanup_pending = bool(self._store.has_pending_cleanup(self._dataset_id))
+        cleanup_stalled = bool(
+            self._store.has_stalled_cleanup(
+                self._dataset_id,
+                expired_before=self._clock()
+                - timedelta(
+                    seconds=max(
+                        int(os.getenv("NOTES_SEMANTIC_LEASE_SECONDS", "180") or "180"),
+                        1,
+                    )
+                ),
+            )
+        )
         active_job = self._active_job()
         failed_job = self._latest_failed_job()
         if config is None:
             return {
-                "state": "off",
-                "detail_reason": "cleanup_pending" if cleanup_pending else None,
+                "state": "needs_attention" if cleanup_stalled else "off",
+                "detail_reason": (
+                    "cleanup_stalled"
+                    if cleanup_stalled
+                    else "cleanup_pending" if cleanup_pending else None
+                ),
                 "desired_state": "disabled",
                 "configuration_revision": 0,
                 "semantic_index_revision": 0,
@@ -361,6 +468,7 @@ class SemanticIndexAPI:
                     config.capability_revision is not None
                     and config.capability_revision != capabilities.capability_revision
                 ),
+                cleanup_stalled=cleanup_stalled,
             )
         )
         return {
@@ -422,37 +530,6 @@ class SemanticIndexAPI:
             status_code = 409 if exc.code.endswith("conflict") else 503
             raise SemanticAPIError(status_code, exc.code) from exc
 
-    def _ensure_generation(
-        self,
-        *,
-        admission: SemanticJobAdmission,
-        config: SemanticIndexConfig,
-    ) -> SemanticGeneration:
-        generation = self._store.get_generation_by_root_job_id(
-            self._dataset_id,
-            admission.run_id,
-        )
-        if generation is not None:
-            return generation
-        try:
-            return self._store.create_generation(
-                dataset_id=self._dataset_id,
-                configuration_revision=config.configuration_revision,
-                compatibility_hash=config.compatibility_hash,
-                dimension_state=config.dimension_state,
-                dimensions=config.dimensions,
-                root_job_id=admission.run_id,
-                now=self._clock(),
-            )
-        except Exception as exc:  # noqa: BLE001 - expose only stable lifecycle code
-            recovered = self._store.get_generation_by_root_job_id(
-                self._dataset_id,
-                admission.run_id,
-            )
-            if recovered is not None:
-                return recovered
-            raise SemanticAPIError(409, "notes_semantic_writer_conflict") from exc
-
     def enable(
         self,
         *,
@@ -472,13 +549,32 @@ class SemanticIndexAPI:
             "expected_revision": expected_revision,
             "capability_revision": capability_revision,
         }
+        receipt, key_digest, request_fingerprint = self._begin_operation(
+            action="enable",
+            request_identity=request_identity,
+            idempotency_key=idempotency_key,
+            run_id=None,
+            expected_revision=expected_revision,
+        )
+        stored = self._receipt_response(receipt)
+        if stored is not None:
+            return stored
         replay = self._replay(
             command,
             idempotency_key=idempotency_key,
             request_identity=request_identity,
         )
         if replay is not None:
-            return {"resource": self.status(), "run": self._run_response(replay.job)}
+            response = {
+                "resource": self.status(),
+                "run": self._run_response(replay.job),
+            }
+            return self._complete_operation(
+                key_digest=key_digest,
+                request_fingerprint=request_fingerprint,
+                run_id=replay.run_id,
+                response=response,
+            )
 
         capabilities = self._require_capability(capability_revision)
         config = self._store.get_configuration(self._dataset_id)
@@ -493,6 +589,7 @@ class SemanticIndexAPI:
                 disclosure_hash=capabilities.disclosure_hash,
                 provider=capabilities.provider_label.lower(),
                 model=capabilities.model,
+                model_revision=capabilities.model_revision,
                 endpoint_origin_revision=capabilities.endpoint_origin_revision,
                 endpoint_origin_display=capabilities.endpoint_display,
                 data_boundary=capabilities.execution_boundary,
@@ -520,7 +617,13 @@ class SemanticIndexAPI:
             if enabled is None:
                 raise SemanticAPIError(409, "notes_semantic_configuration_revision_conflict")
             config = enabled
-        else:
+        elif not (
+            config.configuration_revision == command_revision
+            and config.capability_revision == capability_revision
+            and config.provider == capabilities.provider_label.lower()
+            and config.model == capabilities.model
+            and config.model_revision == capabilities.model_revision
+        ):
             raise SemanticAPIError(409, "notes_semantic_configuration_revision_conflict")
 
         if config.configuration_revision != command_revision:
@@ -530,8 +633,16 @@ class SemanticIndexAPI:
             idempotency_key=idempotency_key,
             request_identity=request_identity,
         )
-        self._ensure_generation(admission=admission, config=config)
-        return {"resource": self.status(), "run": self._run_response(admission.job)}
+        response = {
+            "resource": self.status(),
+            "run": self._run_response(admission.job),
+        }
+        return self._complete_operation(
+            key_digest=key_digest,
+            request_fingerprint=request_fingerprint,
+            run_id=admission.run_id,
+            response=response,
+        )
 
     def disable(
         self,
@@ -652,8 +763,6 @@ class SemanticIndexAPI:
             idempotency_key=idempotency_key,
             request_identity=request_identity,
         )
-        if mode == "rebuild":
-            self._ensure_generation(admission=admission, config=config)
         return self._run_response(admission.job)
 
     def get_run(self, *, run_id: UUID) -> dict[str, Any]:
@@ -676,6 +785,22 @@ class SemanticIndexAPI:
         payload = job.get("payload") if isinstance(job, dict) else None
         if not isinstance(payload, dict) or payload.get("dataset_id") != self._dataset_id:
             raise SemanticAPIError(404, "notes_semantic_run_not_found")
+        request_identity = {
+            "action": "cancel",
+            "dataset_id": self._dataset_id,
+            "run_id": str(run_id),
+            "expected_revision": expected_revision,
+        }
+        receipt, key_digest, request_fingerprint = self._begin_operation(
+            action="cancel",
+            request_identity=request_identity,
+            idempotency_key=idempotency_key,
+            run_id=str(run_id),
+            expected_revision=expected_revision,
+        )
+        stored = self._receipt_response(receipt)
+        if stored is not None:
+            return stored
         try:
             cancelled = self._coordinator().cancel(
                 str(run_id),
@@ -697,7 +822,16 @@ class SemanticIndexAPI:
                 error_code="notes_semantic_run_cancelled",
                 now=self._clock(),
             )
-        return {"resource": self.status(), "run": self._run_response(cancelled)}
+        response = {
+            "resource": self.status(),
+            "run": self._run_response(cancelled),
+        }
+        return self._complete_operation(
+            key_digest=key_digest,
+            request_fingerprint=request_fingerprint,
+            run_id=str(run_id),
+            response=response,
+        )
 
 
 def build_notes_semantic_api(
