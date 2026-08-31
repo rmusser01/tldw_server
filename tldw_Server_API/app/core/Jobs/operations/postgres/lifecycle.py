@@ -11,6 +11,9 @@ from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.DB_Management.jobs_sql_fragments import (
+    apply_postgres_job_counter_transition,
+)
 from tldw_Server_API.app.core.Jobs.migrations import (
     SlidesArchiveNormalizationError,
     normalize_slides_archive_projection,
@@ -604,24 +607,15 @@ def _prepared_counter_transition(
         scheduled_delta += 1
     processing_delta = -int(old_status == "processing")
     quarantined_delta = int(new_status == "quarantined") - int(old_status == "quarantined")
-    cur.execute(
-        "INSERT INTO job_counters(domain,queue,job_type,ready_count,scheduled_count,"
-        "processing_count,quarantined_count) VALUES(%s,%s,%s,%s,%s,%s,%s) "
-        "ON CONFLICT(domain,queue,job_type) DO UPDATE SET "
-        "ready_count=GREATEST(job_counters.ready_count + EXCLUDED.ready_count,0), "
-        "scheduled_count=GREATEST(job_counters.scheduled_count + EXCLUDED.scheduled_count,0), "
-        "processing_count=GREATEST(job_counters.processing_count + EXCLUDED.processing_count,0), "
-        "quarantined_count=GREATEST(job_counters.quarantined_count + EXCLUDED.quarantined_count,0), "
-        "updated_at=NOW()",
-        (
-            row.get("domain"),
-            row.get("queue"),
-            row.get("job_type"),
-            ready_delta,
-            scheduled_delta,
-            processing_delta,
-            quarantined_delta,
-        ),
+    apply_postgres_job_counter_transition(
+        cur,
+        domain=row.get("domain"),
+        queue=row.get("queue"),
+        job_type=row.get("job_type"),
+        ready_delta=ready_delta,
+        scheduled_delta=scheduled_delta,
+        processing_delta=processing_delta,
+        quarantined_delta=quarantined_delta,
     )
 
 

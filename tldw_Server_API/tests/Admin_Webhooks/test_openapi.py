@@ -159,6 +159,11 @@ def test_delivery_openapi_declares_exact_mutation_and_success_headers() -> None:
     ]["get"]
 
     for operation in (test_operation, redelivery_operation):
+        assert [
+            parameter
+            for parameter in operation["parameters"]
+            if parameter["in"] == "query"
+        ] == []
         request_headers = {
             parameter["name"]: parameter
             for parameter in operation["parameters"]

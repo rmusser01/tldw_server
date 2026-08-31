@@ -4,6 +4,7 @@ import asyncio
 import base64
 import hashlib
 import hmac
+import inspect
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -138,6 +139,25 @@ class ReadyDeliveryCapability:
 
 
 @pytest.mark.unit
+def test_control_plane_primitives_have_policy_docstrings() -> None:
+    symbols = (
+        control_plane._random_cancellation_seed,
+        control_plane._CancellationTokenSource,
+        control_plane._CancellationTokenSource.__post_init__,
+        control_plane._CancellationTokenSource.attempt_factory,
+        control_plane._ControlMetrics,
+        control_plane._ControlMetrics.registration_counts,
+        control_plane._ControlMetrics.admission_denied,
+        control_plane._ControlMetrics.delivery_committed,
+        control_plane._database_unavailable_delivery_status,
+    )
+
+    missing = [symbol.__qualname__ for symbol in symbols if inspect.getdoc(symbol) is None]
+
+    assert missing == []
+
+
+@pytest.mark.unit
 async def test_registration_metrics_use_post_commit_current_counts(
     plane: ControlPlaneFixture,
 ) -> None:
@@ -184,6 +204,51 @@ async def test_registration_metrics_use_post_commit_current_counts(
 
 
 @pytest.mark.unit
+async def test_registration_metric_failure_is_sanitized_and_fail_open(
+    plane: ControlPlaneFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    canary = "whsec_metric_failure_secret_canary"
+    warnings: list[tuple[object, ...]] = []
+
+    class Logger:
+        def warning(self, message: str, *values: object) -> None:
+            warnings.append((message, *values))
+
+    class Metrics:
+        def registration_counts(self, *, total: int, active: int) -> None:
+            del total, active
+            raise RuntimeError(canary)
+
+    monkeypatch.setattr(control_plane, "logger", Logger(), raising=False)
+    service = AdminWebhookControlPlane(
+        repository=plane.repository,
+        settings=_settings(),
+        key_ring_result=WebhookKeyRingLoadResult(
+            ring=plane.ring,
+            code=WebhookKeyLoadCode.AVAILABLE,
+        ),
+        delivery_capability=ReadyDeliveryCapability(),
+        metrics=Metrics(),
+    )
+
+    result = await service.create(
+        _create_command(),
+        audit_sink=_recording_sink([]),
+    )
+
+    assert result.registration.id > 0
+    assert warnings == [
+        (
+            "Admin webhook metrics update failed metric={} error_type={}",
+            "registration_counts",
+            "RuntimeError",
+        )
+    ]
+    assert canary not in repr(warnings)
+
+
+@pytest.mark.unit
 async def test_factory_initializes_registration_gauges_from_current_snapshot(
     plane: ControlPlaneFixture,
     monkeypatch: pytest.MonkeyPatch,
@@ -207,6 +272,43 @@ async def test_factory_initializes_registration_gauges_from_current_snapshot(
     await control_plane.get_admin_webhook_control_plane()
 
     assert observations == [(1, 1)]
+
+
+@pytest.mark.unit
+async def test_factory_metric_failure_is_sanitized_and_fail_open(
+    plane: ControlPlaneFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    canary = "whsec_factory_metric_failure_secret_canary"
+    warnings: list[tuple[object, ...]] = []
+
+    class Logger:
+        def warning(self, message: str, *values: object) -> None:
+            warnings.append((message, *values))
+
+    class Metrics:
+        def registration_counts(self, *, total: int, active: int) -> None:
+            del total, active
+            raise RuntimeError(canary)
+
+    _patch_control_plane_factory(monkeypatch, plane, mode=AdminWebhookMode.OFF)
+    monkeypatch.setattr(control_plane, "logger", Logger(), raising=False)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Admin_Webhooks.observability.AdminWebhookMetrics",
+        Metrics,
+    )
+
+    service = await control_plane.get_admin_webhook_control_plane()
+
+    assert isinstance(service, AdminWebhookControlPlane)
+    assert warnings == [
+        (
+            "Admin webhook metrics update failed metric={} error_type={}",
+            "registration_counts_initialization",
+            "RuntimeError",
+        )
+    ]
+    assert canary not in repr(warnings)
 
 
 @pytest.mark.unit

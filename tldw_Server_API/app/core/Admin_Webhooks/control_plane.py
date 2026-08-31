@@ -13,6 +13,8 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from typing import Generic, NoReturn, Protocol, TypeAlias, TypeVar
 
+from loguru import logger
+
 from tldw_Server_API.app.core.Audit.unified_audit_service import MandatoryAuditWriteError
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
@@ -99,21 +101,31 @@ _CANCELLATION_TOKEN_DOMAIN = b"tldw-admin-webhook-cancel-v1\x00"
 
 
 def _random_cancellation_seed() -> bytes:
+    """Return a fresh 256-bit seed for deterministic cancellation tokens."""
+
     return secrets.token_bytes(32)
 
 
 @dataclass(frozen=True)
 class _CancellationTokenSource:
+    """Issue transaction-local cancellation tokens from one random seed."""
+
     seed: bytes
 
     def __post_init__(self) -> None:
+        """Reject seeds that are not exactly 256 bits."""
+
         if not isinstance(self.seed, bytes) or len(self.seed) != 32:
             raise ValueError("cancellation seed must be 256 bits")
 
     def attempt_factory(self) -> Callable[[], str]:
+        """Return a factory that issues unique ordered HMAC tokens."""
+
         ordinal = 0
 
         def issue() -> str:
+            """Issue the next lowercase SHA-256 cancellation token."""
+
             nonlocal ordinal
             token = hmac.new(
                 self.seed,
@@ -134,9 +146,17 @@ class DeliveryCapability(Protocol):
 
 
 class _ControlMetrics(Protocol):
-    def registration_counts(self, *, total: int, active: int) -> None: ...
+    """Observe committed control-plane mutations without affecting them."""
 
-    def admission_denied(self, reason: WebhookErrorCode) -> None: ...
+    def registration_counts(self, *, total: int, active: int) -> None:
+        """Record the current committed registration gauges."""
+
+        ...
+
+    def admission_denied(self, reason: WebhookErrorCode) -> None:
+        """Record a bounded registration-admission denial reason."""
+
+        ...
 
     def delivery_committed(
         self,
@@ -145,7 +165,10 @@ class _ControlMetrics(Protocol):
         kind: DeliveryKind,
         reason_code: DeliveryReasonCode | None,
         status_code: int | None,
-    ) -> None: ...
+    ) -> None:
+        """Record a committed delivery transition using bounded labels."""
+
+        ...
 
 
 class UnavailableDeliveryCapability:
@@ -198,6 +221,8 @@ def _database_unavailable_delivery_status(
     migration: MigrationState,
     key_ring_result: WebhookKeyRingLoadResult,
 ) -> DeliveryCapabilityStatus:
+    """Build a sanitized fail-closed status for an unavailable database."""
+
     reason = DeliveryRuntimeReasonCode.DATABASE_UNAVAILABLE
     components = {
         component: DeliveryComponentStatus(
@@ -494,6 +519,16 @@ def _error_audit_outcome(error: WebhookError | None) -> MutationOutcome:
     return "denied"
 
 
+def _log_metrics_failure(metric: str, exc: BaseException) -> None:
+    """Log only the metric name and exception type for fail-open observers."""
+
+    logger.warning(
+        "Admin webhook metrics update failed metric={} error_type={}",
+        metric,
+        type(exc).__name__,
+    )
+
+
 def _migration_registration_ids(value: object) -> set[int]:
     found: set[int] = set()
     pending = [value]
@@ -620,8 +655,8 @@ class AdminWebhookControlPlane:
                         total=counts.total,
                         active=counts.active,
                     )
-                except Exception:  # noqa: BLE001 - metrics are fail-open
-                    pass
+                except Exception as exc:  # noqa: BLE001 - metrics are fail-open
+                    _log_metrics_failure("registration_counts", exc)
                 for delivery_outcome in outcome.delivery_outcomes:
                     try:
                         self._metrics.delivery_committed(
@@ -630,7 +665,8 @@ class AdminWebhookControlPlane:
                             reason_code=delivery_outcome.reason_code,
                             status_code=delivery_outcome.status_code,
                         )
-                    except Exception:  # noqa: BLE001 - metrics are fail-open
+                    except Exception as exc:  # noqa: BLE001 - metrics are fail-open
+                        _log_metrics_failure("delivery_committed", exc)
                         continue
             return value
         except _AuditSinkUnavailable:
@@ -647,8 +683,8 @@ class AdminWebhookControlPlane:
                     ):
                         try:
                             self._metrics.admission_denied(mapped.code)
-                        except Exception:  # noqa: BLE001 - metrics are fail-open
-                            pass
+                        except Exception as metric_exc:  # noqa: BLE001 - metrics are fail-open
+                            _log_metrics_failure("admission_denied", metric_exc)
                     raise mapped from None
                 raise
             await self._raise_after_audit(context, sink, exc)
@@ -1540,8 +1576,8 @@ async def get_admin_webhook_control_plane() -> AdminWebhookControlPlane:
     try:
         counts = await repository.registration_counts()
         metrics.registration_counts(total=counts.total, active=counts.active)
-    except Exception:  # noqa: BLE001 - metrics initialization is fail-open
-        pass
+    except Exception as exc:  # noqa: BLE001 - metrics initialization is fail-open
+        _log_metrics_failure("registration_counts_initialization", exc)
     from .observability import (
         AdminWebhookDeliveryCapability,
         UnavailableJobsCapabilityProbe,

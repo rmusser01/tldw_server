@@ -21,7 +21,10 @@ from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    check_rate_limit,
+    get_auth_principal,
+)
 from tldw_Server_API.app.api.v1.schemas.admin_webhooks import (
     AdminWebhookRegistrationResponse,
     AdminWebhookStatusResponse,
@@ -190,6 +193,12 @@ def _request_id(request: Request) -> str:
     """Return the normalized request correlation identifier."""
 
     return normalize_request_id(getattr(request.state, "request_id", None))
+
+
+async def _enforce_admin_webhook_rate_limit(request: Request) -> None:
+    """Apply the shared ingress guard without exposing its legacy test hook."""
+
+    await check_rate_limit(request)
 
 
 def _webhook_error_response(
@@ -825,6 +834,7 @@ async def test_webhook_delivery(
         Header(alias="If-Match", include_in_schema=False),
     ] = None,
     principal: AuthPrincipal = Depends(get_auth_principal),
+    _rate_limit: None = Depends(_enforce_admin_webhook_rate_limit),
     service: AdminWebhookDeliveryService = Depends(
         get_admin_webhook_delivery_service
     ),
@@ -942,6 +952,7 @@ async def redeliver_webhook_delivery(
         Header(alias="If-Match", include_in_schema=False),
     ] = None,
     principal: AuthPrincipal = Depends(get_auth_principal),
+    _rate_limit: None = Depends(_enforce_admin_webhook_rate_limit),
     service: AdminWebhookDeliveryService = Depends(
         get_admin_webhook_delivery_service
     ),

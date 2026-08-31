@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 
@@ -976,6 +976,8 @@ def test_control_plane_factory_failure_is_read_audited(
 
 def _delivery_client(
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    rate_limit_error: HTTPException | None = None,
 ) -> tuple[TestClient, _FakeDeliveryService, AsyncMock, AsyncMock]:
     app = FastAPI()
 
@@ -986,6 +988,11 @@ def _delivery_client(
 
     async def auth_dependency() -> AuthPrincipal:
         return _principal()
+
+    async def rate_limit_dependency(request: Request) -> None:
+        assert request.url.path.startswith("/api/v1/admin/webhooks/")
+        if rate_limit_error is not None:
+            raise rate_limit_error
 
     service = _FakeDeliveryService()
     mandatory_audit = AsyncMock()
@@ -998,6 +1005,7 @@ def _delivery_client(
         raising=False,
     )
     monkeypatch.setattr(admin_webhooks, "_emit_admin_audit_event", read_audit)
+    monkeypatch.setattr(admin_webhooks, "check_rate_limit", rate_limit_dependency)
     app.dependency_overrides[admin_webhooks.get_auth_principal] = auth_dependency
     assert hasattr(admin_webhooks, "get_admin_webhook_delivery_service"), (
         "Task 10 delivery-service dependency is missing"
@@ -1194,6 +1202,58 @@ def test_test_and_redelivery_routes_use_typed_audit_and_exact_status_headers(
     assert redelivery.headers["x-request-id"] == REQUEST_ID
     assert redelivery.json()["delivery"]["redelivery_of_id"] == SOURCE_DELIVERY_ID
     assert mandatory_audit.await_count == 3
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("path", "payload"),
+    [
+        (
+            "/api/v1/admin/webhooks/41/test",
+            {"delivery_config_version": 1},
+        ),
+        (
+            f"/api/v1/admin/webhooks/41/deliveries/{SOURCE_DELIVERY_ID}/redeliver",
+            {
+                "delivery_config_version": 1,
+                "confirm_changed_configuration": False,
+            },
+        ),
+    ],
+)
+def test_outbound_mutation_routes_stop_at_explicit_rate_limit(
+    monkeypatch: pytest.MonkeyPatch,
+    path: str,
+    payload: dict[str, object],
+) -> None:
+    client, service, mandatory_audit, _ = _delivery_client(
+        monkeypatch,
+        rate_limit_error=HTTPException(
+            status_code=429,
+            detail="limiter-internal-canary",
+            headers={"Retry-After": "17"},
+        ),
+    )
+
+    response = client.post(
+        path,
+        headers={
+            "If-Match": '"admin-webhook-41-r1"',
+            "Idempotency-Key": IDEMPOTENCY_KEY,
+        },
+        json=payload,
+    )
+
+    assert response.status_code == 429
+    assert response.headers["retry-after"] == "17"
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json()["error"] == {
+        "code": "authentication_rate_limited",
+        "message": "Authentication is rate limited",
+        "request_id": REQUEST_ID,
+    }
+    assert service.calls == []
+    mandatory_audit.assert_not_awaited()
 
 
 @pytest.mark.unit

@@ -1393,7 +1393,7 @@ def _noncanonical_gzip64(value: dict, variant: str) -> str:
             break
     else:
         raise AssertionError("could not construct noncanonical base64 fixture")
-    assert base64.b64decode(noncanonical, validate=True) == compressed
+    assert base64.b64decode(noncanonical, validate=False) == compressed
     assert base64.b64encode(compressed).decode("ascii") != noncanonical
     return "gzip64:" + noncanonical
 

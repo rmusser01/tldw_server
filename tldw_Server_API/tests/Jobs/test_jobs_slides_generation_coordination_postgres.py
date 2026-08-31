@@ -335,7 +335,8 @@ def test_postgres_audit_locks_before_scans_and_normalizes_compressed_rows():
     assert source.index("FOR UPDATE") < source.index("SELECT COALESCE(SUM(candidate_count), 0)")
     assert "normalize_slides_archive_projection" in source
     assert "psycopg.Error" in forward_block
-    assert forward_block.count("except required_migration_exceptions") == 3
+    assert "_ensure_pg_execution_control_columns(required_cur)" in forward_block
+    assert forward_block.count("except required_migration_exceptions") == 4
     assert "except _SLIDES_PG_AUDIT_EXCEPTIONS" in audit_block
     assert audit_block.index("_mark_slides_audit_failure_pg(audit_cur)") < audit_block.index(
         "_audit_slides_generation_pg(audit_cur)"

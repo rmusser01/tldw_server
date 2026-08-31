@@ -203,6 +203,11 @@ def test_pg_ensure_ignores_optional_index_psycopg_error_after_required_indexes(
     )
     monkeypatch.setattr(
         pg_migrations,
+        "_upgrade_legacy_admin_webhook_archives_pg",
+        lambda _cursor: None,
+    )
+    monkeypatch.setattr(
+        pg_migrations,
         "_mark_slides_audit_failure_pg",
         lambda _cursor: None,
     )
@@ -1957,7 +1962,7 @@ def test_available_at_scheduling_delays_acquire(jobs_db):
 
 
     jm = JobManager(jobs_db)
-    future = datetime.utcnow() + timedelta(seconds=1)
+    future = datetime.utcnow() + timedelta(minutes=5)
     jm.create_job(
         domain="chatbooks",
         queue="default",
@@ -1969,9 +1974,14 @@ def test_available_at_scheduling_delays_acquire(jobs_db):
     # Should not acquire before available_at
     j = jm.acquire_next_job(domain="chatbooks", queue="default", lease_seconds=5, worker_id="w4")
     assert j is None
-    # Wait for availability window
-    import time as _t
-    _t.sleep(1.2)
+    connection = jm._connect()
+    try:
+        with connection:
+            connection.execute(
+                "UPDATE jobs SET available_at=DATETIME('now', '-1 second')",
+            )
+    finally:
+        connection.close()
     j2 = jm.acquire_next_job(domain="chatbooks", queue="default", lease_seconds=5, worker_id="w4")
     assert j2 is not None
     assert j2["status"] == "processing"
@@ -1999,6 +2009,8 @@ def test_create_job_backfills_missing_batch_group(tmp_path, monkeypatch):
               status TEXT NOT NULL,
               priority INTEGER DEFAULT 5,
               max_retries INTEGER DEFAULT 3,
+              expired_lease_policy TEXT DEFAULT 'consume_retry',
+              quarantine_threshold INTEGER,
               retry_count INTEGER DEFAULT 0,
               available_at TEXT,
               created_at TEXT,
