@@ -4,7 +4,7 @@ title: Implement canonical admin webhook delivery substrate and recovery
 status: In Progress
 assignee: []
 created_date: '2026-08-23 03:15'
-updated_date: '2026-08-31 13:53'
+updated_date: '2026-08-31 15:32'
 labels:
   - admin
   - webhooks
@@ -265,6 +265,12 @@ Task 10 complete: exposed canonical persisted test, atomic manual redelivery, an
 2026-08-31: Final documentation closure review found 0 Critical, 0 Important, and 0 Minor findings after the evidence identity was split into the original 2026-08-30 verification date and post-review correction date 2026-08-31. The sole edit after the aggregate gates was Ruff B904 exception-chain annotation () on the already covered invalid-IDNA mismatch branch; the complete 25-case invalid-target regression and full Ruff/static gates passed afterward with no control-flow change. Review agent is closed. TASK-13111 remains In Progress solely for user-authorized upstream reconciliation and PR workflow.
 
 2026-08-31: Correction to the immediately preceding immutable note: the Ruff B904 annotation was raise ValueError(...) from None. The shell removed the parenthetical text while appending that note; no repository code, test, or evidence result was affected.
+
+2026-08-31: Approved integration rebase completed onto fetched origin/dev 3eb568b478a637adc2482e101cd1379b4a19f48a. Replayed all 52 commits; the only conflicts were three generated apps/tldw-frontend/lib/api/openapi.fingerprint.json revisions, each resolved by the authoritative make openapi-fingerprint exporter against the combined tree. The one additional upstream/branch path overlap, test_migration_postgres.py, preserved the upstream authnz_full_fixtures plugin migration and all PR 2 coverage without a conflict. New rebased source HEAD is 2b728686ff49cae76445d3a5bad97caf87f880b9. Work remains In Progress pending post-rebase aggregate, static, OpenAPI, independent review, push, and PR preparation. No merge or activation performed.
+
+2026-08-31: Post-rebase integration verification completed at tested source HEAD 2b728686ff49cae76445d3a5bad97caf87f880b9 on fetched origin/dev 3eb568b478a637adc2482e101cd1379b4a19f48a. Exact serial gates passed with zero skips: Step 1 1,553 passed and 2,782 warnings in 1,001.83s; Step 2 329 passed and 660 warnings in 791.21s; Step 3 433 passed and 613 warnings in 484.50s. Total 2,315 executions, 4,055 warnings, 2,277.54s. Two direct-marker audits, scoped Ruff, Python 3.10 compile, committed/worktree diff checks, sensitive scan, PR 3/legacy isolation, and authoritative OpenAPI fingerprint/drift passed. Bandit remained the byte-identical reviewed production baseline: raw exit 1, 17 Low, 44 Medium, 0 High, 61 fully classified findings, no new suppression. Combined OpenAPI is 2,051 paths, 3,067 schemas, sha256 0f00a5210305d35df7b5638f4b15cd6ad5e67b0a9175daf3ac6f30e1585f15fa. Evidence addendum: Docs/Evidence/Admin_Webhooks_PR2_Verification.md. TASK-13111 remains In Progress pending fresh independent review, documentation commit, push, and PR preparation. No merge or activation performed.
+
+2026-08-31: Fresh post-rebase independent read-only review covered the full origin/dev 3eb568b478a637adc2482e101cd1379b4a19f48a to tested source 2b728686ff49cae76445d3a5bad97caf87f880b9 diff plus the uncommitted integration evidence. Result: 0 Critical, 0 Important, 0 Minor; Ready for push/PR preparation: Yes. Residual risks are intentional and documented: at-least-once receiver observations, cross-database reconciliation rather than distributed transactions, deterministic crash injection, and controlled-network SSRF/TLS test limits. Reviewer reran no tests and relied on the controller-owned 2,315-execution zero-skip evidence plus direct code/test inspection. Reviewer is closed. TASK-13111 remains In Progress through PR review; no merge or activation authorized.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

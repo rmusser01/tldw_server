@@ -444,8 +444,96 @@ terminal exit status.
   post-review production corrections are limited to lease guarantees, stored-
   body validation/version preservation, and shared target parsing; all were
   independently re-reviewed before this record was finalized.
-- A user-approved fetch/rebase occurred before the immutable base was pinned.
-  No later fetch, rebase, merge, push, force-push, or history rewrite occurred.
+- The statements above preserve the original pinned-base verification record.
+  The later user-approved integration rebase is recorded separately below; no
+  merge or production activation occurred.
+
+## Post-Rebase Integration Verification
+
+This addendum records the approved integration pass performed on `2026-08-31`.
+It supplements rather than rewrites the original pinned-base evidence above.
+
+### Integration identity and overlap review
+
+- Fetched integration base: `3eb568b478a637adc2482e101cd1379b4a19f48a`
+- Pre-rebase verified branch head: `374c77537fd28bb0ba0b9779a13750daeb2f0c1c`
+- Tested rebased source head: `2b728686ff49cae76445d3a5bad97caf87f880b9`
+- Replayed commits: 52
+- Merge base after rebase: exact integration base above
+
+The rebase stopped only for three successive revisions of the generated
+`apps/tldw-frontend/lib/api/openapi.fingerprint.json`. Each conflict represented
+concurrent OpenAPI contract growth and was resolved by running the authoritative
+`make openapi-fingerprint` exporter against the combined tree. No application,
+migration, repository, worker, security, or test implementation was resolved by
+choosing one side wholesale.
+
+The old merge-base audit found only two paths changed by both upstream and the
+branch: the generated fingerprint and
+`tldw_Server_API/tests/Admin_Webhooks/test_migration_postgres.py`. The latter
+merged without conflict and retains both the upstream
+`tldw_Server_API.tests._plugins.authnz_full_fixtures` fixture path and all PR 2
+migration coverage. The complete PostgreSQL migration module passed in both
+aggregate gates that include it.
+
+### Post-rebase results
+
+| Gate | Result |
+| --- | --- |
+| Complete SQLite/API/security matrix | PASS: 1,553 passed, 0 skipped, 2,782 warnings in 1,001.83s |
+| Required PostgreSQL/four-backend matrix | PASS: 329 passed, 0 skipped, 660 warnings in 791.21s |
+| Deterministic protocol/security matrix | PASS: 433 passed, 0 skipped, 613 warnings in 484.50s |
+| Direct-marker audits | PASS: 2 passed |
+| Ruff | PASS: `All checks passed!` |
+| Python 3.10 compatibility compile | PASS: every Python path changed from the integration base |
+| Committed and worktree diff checks | PASS |
+| Sensitive logger/metric scan | PASS: no matches |
+| Bandit | REVIEWED PASS: raw exit 1, 61 accounted findings, 0 High |
+| PR 3 exclusion and legacy isolation scans | PASS: no matches |
+| OpenAPI fingerprint generation and drift | PASS |
+| Default-off/no-release gate | PASS: delivery remains disabled by default |
+
+The three aggregate commands executed 2,315 test instances with zero skips,
+emitted 4,055 warning instances, and took 2,277.54 seconds (`37:57.54`) in
+total. They used the same required PostgreSQL, Jobs, seed, timeout, and visible
+skip-reporting controls documented in the exact command blocks above. No failed,
+partial, interrupted, or sandbox-restricted run is included in these totals.
+
+The scoped Bandit command again returned 17 Low, 44 Medium, and 0 High findings:
+3 B105 enum/schema false positives, 12 B110 and 2 B112 intentional fail-open
+observers, and 44 B608 fixed-query findings. The complete Bandit-scanned
+production path set is byte-identical between the pre-rebase verified head and
+the tested rebased source head, so the existing per-finding classification
+remains applicable without a new suppression.
+
+The combined OpenAPI fingerprint is:
+
+```text
+path_count:   2048 -> 2051
+schema_count: 3052 -> 3067
+sha256:       b2bb5273d1eda95a44866f58bc19c309aa2f163c0dfaa30b7e6c92a0bcbb1029 -> 0f00a5210305d35df7b5638f4b15cd6ad5e67b0a9175daf3ac6f30e1585f15fa
+```
+
+The authoritative fingerprint regeneration left the worktree copy unchanged,
+and the drift check passed. `TLDW_ADMIN_WEBHOOKS_MODE` still defaults to `off`.
+No durable user/incident producer, admin UI, final route activation, push,
+force-push, PR merge, or production activation occurred during this integration
+verification.
+
+### Post-rebase independent review
+
+A fresh read-only review inspected the complete integration-base-to-tested-head
+diff, the design, implementation plan, Backlog task, runbook, and this
+uncommitted integration addendum. It reported `0 Critical`, `0 Important`, and
+`0 Minor` findings and returned `Ready for push/PR preparation: Yes`.
+
+The reviewer retained the intended residual-risk record: delivery is
+at-least-once; cross-database convergence uses durable fencing and reconciliation
+rather than a distributed transaction; crash tests use deterministic fault
+injection rather than arbitrary process suspension; and controlled resolver and
+loopback tests cannot reproduce every production DNS, NAT, proxy, or certificate
+edge. The reviewer did not rerun tests; the controller-owned post-rebase commands
+and terminal results above remain the authoritative verification evidence.
 
 ## Records
 
@@ -459,10 +547,8 @@ terminal exit status.
 
 ## Conclusion
 
-The corrected canonical admin-webhook delivery substrate has completed focused
-independent re-review and local verification against the pinned base. It is
-ready for a local review-fix commit, not integration. Because `origin/dev`
-subsequently advanced and touches three PostgreSQL webhook test modules,
-reconcile and re-verify that newer upstream state before any user-authorized
-push or PR update. This evidence does not authorize merge, production
-activation, durable event producers, or PR 3 UI work.
+The corrected canonical admin-webhook delivery substrate is rebased onto the
+fetched integration base and has completed the full post-rebase verification
+matrix with zero skips plus a clean independent diff review. It is ready for
+user-approved push/PR preparation. This evidence does not authorize merge,
+production activation, durable event producers, or PR 3 UI work.
