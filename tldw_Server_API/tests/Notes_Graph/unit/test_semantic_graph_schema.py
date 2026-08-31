@@ -173,6 +173,27 @@ def test_semantic_evidence_is_typed_bounded_and_bound_to_the_edge() -> None:
             evidence=evidence,
         )
 
+    omitted = schemas.GraphEdge(
+        id="semantic:omitted",
+        source="note-source",
+        target="note-target",
+        type=schemas.EdgeType.semantic,
+        directed=False,
+        evidence_omitted="response_byte_cap",
+    )
+    assert omitted.evidence is None
+    assert schemas.GraphEdge.model_validate(omitted.model_dump(mode="python")) == omitted
+    with pytest.raises(ValidationError, match="omission"):
+        schemas.GraphEdge(
+            id="semantic:ambiguous",
+            source="note-source",
+            target="note-target",
+            type=schemas.EdgeType.semantic,
+            directed=False,
+            evidence=evidence,
+            evidence_omitted="response_byte_cap",
+        )
+
 
 def test_semantic_status_is_typed_and_legacy_serialization_omits_new_fields() -> None:
     ordinary_edge = schemas.GraphEdge(

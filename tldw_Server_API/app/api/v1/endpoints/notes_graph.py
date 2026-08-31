@@ -1,14 +1,21 @@
+import asyncio
 import uuid as _uuid_mod
+from collections.abc import Callable
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Annotated, Any, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
+from fastapi.exceptions import RequestValidationError
+from fastapi.routing import APIRoute
 from loguru import logger
+from starlette.responses import Response
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     RequirePermission,
     TokenScopeGuard,
     User,
+    enforce_rbac_rate_limit,
+    get_db_pool,
     get_request_user,
     principal_has_admin_bypass_claims,
     rbac_rate_limit,
@@ -49,6 +56,15 @@ from tldw_Server_API.app.core.Notes_Graph.graph_service import (
     encode_notes_link_cursor,
     notes_link_cursor_binding,
 )
+from tldw_Server_API.app.core.Notes_Graph.semantic_api import (
+    load_semantic_settings,
+    resolve_semantic_capabilities,
+)
+from tldw_Server_API.app.core.Notes_Graph.semantic_projector import (
+    SemanticGraphProjector,
+    SemanticProjectionError,
+    build_projection_vector_store,
+)
 from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
 from tldw_Server_API.app.core.Sync.v2.notes_link_coordinator import (
     NotesLinkDatasetConflictError,
@@ -61,8 +77,205 @@ from tldw_Server_API.app.core.Sync.v2.notes_link_coordinator import (
     resolve_notes_link_dataset_authority,
 )
 
-router = APIRouter()
+
+def _semantic_edge_requested(request: Request) -> bool:
+    return any(
+        part.strip() == EdgeType.semantic.value
+        for raw_value in request.query_params.getlist("edge_types")
+        for part in raw_value.split(",")
+    )
+
+
+def _semantic_graph_query_present(request: Request) -> bool:
+    return _semantic_edge_requested(request) or any(
+        key in request.query_params
+        for key in ("semantic_top_k", "semantic_threshold")
+    )
+
+
+def _invalid_semantic_graph_request() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        detail={
+            "error_code": "notes_semantic_invalid_request",
+            "message": "The semantic graph request is invalid.",
+        },
+    )
+
+
+def _is_semantic_graph_validation_error(exc: RequestValidationError) -> bool:
+    semantic_fields = {"edge_types", "semantic_top_k", "semantic_threshold"}
+    for error in exc.errors():
+        location = error.get("loc", ())
+        if any(part in semantic_fields for part in location):
+            return True
+        if "semantic" in str(error.get("msg", "")).lower():
+            return True
+    return False
+
+
+def _invalid_edge_type(request: Request) -> str | None:
+    valid = {edge_type.value for edge_type in EdgeType}
+    for raw_value in request.query_params.getlist("edge_types"):
+        for part in raw_value.split(","):
+            candidate = part.strip()
+            if candidate and candidate not in valid:
+                return candidate
+    return None
+
+
+class _NotesGraphRoute(APIRoute):
+    """Map semantic graph validation failures to the stable feature contract."""
+
+    def get_route_handler(self) -> Callable[[Request], Any]:
+        original = super().get_route_handler()
+
+        async def handler(request: Request) -> Response:
+            try:
+                return await original(request)
+            except RequestValidationError as exc:
+                if request.method == "GET" and self.path.endswith("/graph"):
+                    if (
+                        _semantic_graph_query_present(request)
+                        and _is_semantic_graph_validation_error(exc)
+                    ):
+                        raise _invalid_semantic_graph_request() from exc
+                    invalid_edge_type = _invalid_edge_type(request)
+                    if invalid_edge_type is not None:
+                        valid = [edge_type.value for edge_type in EdgeType]
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=(
+                                f"Invalid edge_type: '{invalid_edge_type}'. "
+                                f"Valid: {valid}"
+                            ),
+                        ) from exc
+                raise
+
+        return handler
+
+
+router = APIRouter(route_class=_NotesGraphRoute)
 _GRAPH_CACHE = GraphCache()
+
+
+async def _enforce_graph_request_rate_limit(
+    request: Request,
+    db_pool: Any = Depends(get_db_pool),
+) -> None:
+    """Charge exactly one ordinary or semantic graph-read resource."""
+
+    resource = (
+        "notes.graph.semantic.read"
+        if _semantic_edge_requested(request)
+        else "notes.graph.read"
+    )
+    await enforce_rbac_rate_limit(request, resource, db_pool)
+
+
+_enforce_graph_request_rate_limit._tldw_rate_limit_resources = (
+    "notes.graph.read",
+    "notes.graph.semantic.read",
+)
+
+
+def _build_semantic_graph_projector(
+    *,
+    owner_user_id: str,
+    dataset_id: str,
+    db: CharactersRAGDB,
+    graph_service: NoteGraphService,
+) -> SemanticGraphProjector:
+    """Build a projector whose physical vector backend remains lazy."""
+
+    settings = load_semantic_settings()
+
+    async def vector_store_factory() -> object:
+        config = await asyncio.to_thread(
+            db.note_semantic_store.get_configuration,
+            dataset_id,
+        )
+        backend_name = str(getattr(config, "vector_backend", "") or "")
+        return await build_projection_vector_store(
+            db=db,
+            owner_user_id=owner_user_id,
+            backend_name=backend_name,
+            settings=settings,
+        )
+
+    return SemanticGraphProjector(
+        owner_user_id=owner_user_id,
+        dataset_id=dataset_id,
+        db=db,
+        graph_service=graph_service,
+        cache=_GRAPH_CACHE,
+        vector_store_factory=vector_store_factory,
+        capability_resolver=lambda: resolve_semantic_capabilities(
+            db,
+            settings=settings,
+        ),
+        settings=settings,
+    )
+
+
+def _semantic_projection_http_error(exc: SemanticProjectionError) -> HTTPException:
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    message = "The semantic relationship is no longer available."
+    if exc.code == "notes_semantic_conversion_owner_mismatch":
+        status_code = status.HTTP_404_NOT_FOUND
+    elif exc.code in {
+        "notes_semantic_conversion_generation_stale",
+        "notes_semantic_conversion_pair_mismatch",
+        "notes_semantic_cursor_mismatch",
+    }:
+        status_code = status.HTTP_409_CONFLICT
+    if exc.code == "notes_semantic_cursor_mismatch":
+        message = "The semantic graph cursor is stale or mismatched."
+    return HTTPException(
+        status_code=status_code,
+        detail={
+            "error_code": exc.code,
+            "message": message,
+        },
+    )
+
+
+async def _audit_semantic_conversion(
+    *,
+    actor_user_id: str,
+    source_note_id: str,
+    target_note_id: str,
+    generation_id: str,
+    result: str,
+) -> None:
+    """Emit a bounded content-free conversion audit record."""
+
+    from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import (
+        get_or_create_audit_service_for_user_id_optional,
+    )
+    from tldw_Server_API.app.core.Audit.unified_audit_service import (
+        AuditContext,
+        AuditEventCategory,
+        AuditEventType,
+    )
+
+    audit_service = await get_or_create_audit_service_for_user_id_optional(
+        actor_user_id
+    )
+    await audit_service.log_event(
+        event_type=AuditEventType.DATA_UPDATE,
+        category=AuditEventCategory.DATA_MODIFICATION,
+        context=AuditContext(user_id=actor_user_id),
+        resource_type="notes_semantic_relationship",
+        resource_id=source_note_id,
+        action="notes_semantic.manual_conversion",
+        result=result,
+        metadata={
+            "target_note_id": target_note_id,
+            "generation_id": generation_id,
+        },
+    )
+    await audit_service.flush(raise_on_failure=True)
 
 
 def _link_response(link: NotesLink) -> dict[str, object]:
@@ -277,11 +490,10 @@ def _suggestions_authorized(principal: AuthPrincipal | None) -> bool:
     },
 )
 async def get_notes_graph(
-    request: Request,
-    req: NoteGraphRequest = Depends(),
+    req: Annotated[NoteGraphRequest, Query()],
     current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
-    _: None = Depends(rbac_rate_limit("notes.graph.read")),
+    _: None = Depends(_enforce_graph_request_rate_limit),
     principal: AuthPrincipal = Depends(RequirePermission(NOTES_GRAPH_READ)),
     ___: None = Depends(TokenScopeGuard("notes", require_if_present=True, endpoint_id="notes.graph.read")),
 ):
@@ -289,22 +501,6 @@ async def get_notes_graph(
     if not NOTES_GRAPH_ENABLED():
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Notes graph is disabled")
     try:
-        # FastAPI Depends() may not propagate edge_types correctly; re-parse from query
-        raw_et = request.query_params.getlist("edge_types")
-        if raw_et:
-            parsed = []
-            for val in raw_et:
-                for part in val.split(","):
-                    part = part.strip()
-                    if part:
-                        try:
-                            parsed.append(EdgeType(part))
-                        except ValueError:
-                            raise HTTPException(
-                                status_code=400,
-                                detail=f"Invalid edge_type: '{part}'. Valid: {[e.value for e in EdgeType]}",
-                            ) from None
-            req.edge_types = parsed or None
         if getattr(req, "center_note_id", None):
             req.center_note_id = _normalize_note_id(req.center_note_id)
         heavy_limits_allowed = _enforce_heavy_graph_permission(req, current_user)
@@ -320,6 +516,14 @@ async def get_notes_graph(
             allow_heavy_limits=heavy_limits_allowed,
         )
         graph = service.generate_graph(req)
+        if req.semantic_requested:
+            projector = _build_semantic_graph_projector(
+                owner_user_id=str(current_user.id_str),
+                dataset_id=dataset_key,
+                db=db,
+                graph_service=service,
+            )
+            graph = await projector.project(req, graph, user=current_user)
         graph = graph.model_copy(
             update={"suggestions_authorized": _suggestions_authorized(principal)}
         )
@@ -344,6 +548,8 @@ async def get_notes_graph(
                 "message": str(e),
             },
         ) from e
+    except SemanticProjectionError as exc:
+        raise _semantic_projection_http_error(exc) from exc
     except SyncStoreError as e:
         raise _link_error(e) from e
     except (InputError, CharactersRAGDBError) as e:
@@ -537,6 +743,37 @@ async def create_manual_link(
     to_note_id = _normalize_note_id(link.to_note_id)
 
     try:
+        directed = bool(link.directed)
+        weight = link.weight if link.weight is not None else 1.0
+        conversion = link.semantic_conversion
+        if conversion is not None:
+            owner_user_id = str(current_user.id_str)
+            dataset_key = _graph_dataset_key(
+                user_id=owner_user_id,
+                dataset_id=link.dataset_id,
+            )
+            service = NoteGraphService(
+                user_id=owner_user_id,
+                dataset_id=dataset_key,
+                db=db,
+                cache=_GRAPH_CACHE,
+            )
+            projector = _build_semantic_graph_projector(
+                owner_user_id=owner_user_id,
+                dataset_id=dataset_key,
+                db=db,
+                graph_service=service,
+            )
+            try:
+                await projector.validate_conversion(
+                    source_note_id=from_note_id,
+                    target_note_id=to_note_id,
+                    generation_id=conversion.generation_id,
+                )
+            except SemanticProjectionError as exc:
+                raise _semantic_projection_http_error(exc) from exc
+            directed = False
+            weight = 1.0
         coordinator = resolve_notes_link_coordinator(
             user_id=str(current_user.id_str),
             note_db=db,
@@ -546,8 +783,8 @@ async def create_manual_link(
             edge = coordinator.create(
                 source_note_id=from_note_id,
                 target_note_id=to_note_id,
-                directed=bool(link.directed),
-                weight=link.weight if link.weight is not None else 1.0,
+                directed=directed,
+                weight=weight,
                 label=link.label,
                 properties=link.properties or {},
                 idempotency_key=link.idempotency_key,
@@ -561,8 +798,8 @@ async def create_manual_link(
                 user_id=str(current_user.id_str),
                 from_note_id=from_note_id,
                 to_note_id=to_note_id,
-                directed=bool(link.directed),
-                weight=link.weight if link.weight is not None else 1.0,
+                directed=directed,
+                weight=weight,
                 metadata=legacy_metadata,
                 created_by=f"user:{current_user.id_str}",
             )
@@ -571,7 +808,20 @@ async def create_manual_link(
                 stored = db.notes_link_store.get(stored_edge_id)
                 if stored is not None:
                     edge_response = _link_response(stored)
+        if conversion is not None:
+            try:
+                await _audit_semantic_conversion(
+                    actor_user_id=str(current_user.id_str),
+                    source_note_id=from_note_id,
+                    target_note_id=to_note_id,
+                    generation_id=conversion.generation_id,
+                    result="created",
+                )
+            except Exception:  # noqa: BLE001 - the link is already authoritative.
+                logger.warning("Notes semantic conversion audit emission failed")
         return {"status": "created", "edge": edge_response}
+    except HTTPException:
+        raise
     except Exception as exc:  # noqa: BLE001 - map the closed link error contract.
         raise _link_error(exc) from exc
 

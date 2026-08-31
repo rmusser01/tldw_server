@@ -27,6 +27,7 @@ from .note_semantic_models import (
     SemanticNoteState,
     SemanticObsoleteVectorClaim,
     SemanticOperationReceipt,
+    SemanticProjectionChunk,
     SemanticSnapshotSeed,
     SemanticWorkClaimState,
     SemanticWorkItem,
@@ -53,6 +54,8 @@ class NoteSemanticStore:
     _HEX_DIGEST = re.compile(r"^[0-9a-f]{64}$")
     _MAX_WORK_ATTEMPTS = 5
     _MAX_OPERATION_RECEIPT_PRUNE = 16
+    _MAX_PROJECTION_VECTOR_IDS = 1_600
+    _PROJECTION_READ_BATCH_SIZE = 500
 
     def __init__(self, db: CharactersRAGDB) -> None:
         self._db = db
@@ -3365,6 +3368,198 @@ class NoteSemanticStore:
                 (self.owner_user_id, dataset, generation_id, note_id),
             ).fetchone()
         return None if row is None else self._note_from_row(row)
+
+    def _projection_vector_ids(self, values: Sequence[str]) -> tuple[str, ...]:
+        vector_ids = tuple(
+            self._safe_token(value, field="projection_vector_id") for value in values
+        )
+        if len(vector_ids) > self._MAX_PROJECTION_VECTOR_IDS:
+            raise ValueError("notes_semantic_projection_vector_limit_exceeded")
+        return tuple(dict.fromkeys(vector_ids))
+
+    def load_projection_chunks(
+        self,
+        *,
+        dataset_id: str,
+        generation_id: str,
+        vector_ids: Sequence[str],
+    ) -> tuple[SemanticProjectionChunk, ...]:
+        """Load current published chunks with live owner-scoped Note content."""
+
+        dataset = self._scope(dataset_id)
+        generation = self._safe_token(generation_id, field="generation_id")
+        requested = self._projection_vector_ids(vector_ids)
+        if not requested:
+            return ()
+        deleted_false: bool | int = False if self.is_postgres else 0
+        records: dict[str, SemanticProjectionChunk] = {}
+        with self._db.transaction() as conn:
+            self._set_scope(conn, dataset)
+            for start in range(0, len(requested), self._PROJECTION_READ_BATCH_SIZE):
+                batch = requested[start : start + self._PROJECTION_READ_BATCH_SIZE]
+                placeholders = ",".join("?" for _ in batch)
+                rows = conn.execute(
+                    "SELECT c.chunk_id,c.owner_user_id,c.dataset_id,c.generation_id,"
+                    "c.note_id,c.content_version,c.ordinal,c.field,c.start_offset,"
+                    "c.end_offset,c.chunk_fingerprint,c.normalization_version,"
+                    "c.chunker_version,s.content_fingerprint,n.title,n.content,"
+                    "n.created_at,n.last_modified AS updated_at "
+                    "FROM note_semantic_chunks c "
+                    "JOIN note_semantic_note_state s ON s.owner_user_id=c.owner_user_id "
+                    "AND s.dataset_id=c.dataset_id AND s.generation_id=c.generation_id "
+                    "AND s.note_id=c.note_id "
+                    "JOIN note_semantic_generations g ON g.owner_user_id=c.owner_user_id "
+                    "AND g.dataset_id=c.dataset_id AND g.id=c.generation_id "
+                    "JOIN note_semantic_index_configs cfg ON cfg.owner_user_id=c.owner_user_id "
+                    "AND cfg.dataset_id=c.dataset_id "
+                    "JOIN notes n ON n.id=c.note_id AND n.client_id=c.owner_user_id "
+                    "WHERE c.owner_user_id=? AND c.dataset_id=? AND c.generation_id=? "
+                    "AND cfg.desired_state='enabled' AND cfg.active_generation_id=c.generation_id "
+                    "AND g.state='active' AND s.state='indexed' "
+                    "AND s.content_version=c.content_version AND n.version=s.content_version "
+                    "AND n.deleted=? AND c.chunk_id IN ("  # nosec B608
+                    + placeholders
+                    + ") ORDER BY c.note_id,c.ordinal,c.chunk_id",
+                    (
+                        self.owner_user_id,
+                        dataset,
+                        generation,
+                        deleted_false,
+                        *batch,
+                    ),
+                ).fetchall()
+                for row in rows:
+                    value = self._record(row)
+                    vector_id = str(value["chunk_id"])
+                    records[vector_id] = SemanticProjectionChunk(
+                        owner_user_id=str(value["owner_user_id"]),
+                        dataset_id=str(value["dataset_id"]),
+                        generation_id=str(value["generation_id"]),
+                        vector_id=vector_id,
+                        note_id=str(value["note_id"]),
+                        content_version=int(value["content_version"]),
+                        content_fingerprint=str(value["content_fingerprint"]),
+                        title=str(value["title"]),
+                        content=str(value["content"]),
+                        created_at=value["created_at"],
+                        updated_at=value["updated_at"],
+                        ordinal=int(value["ordinal"]),
+                        field=str(value["field"]),
+                        start_offset=int(value["start_offset"]),
+                        end_offset=int(value["end_offset"]),
+                        chunk_fingerprint=str(value["chunk_fingerprint"]),
+                        normalization_version=str(value["normalization_version"]),
+                        chunker_version=str(value["chunker_version"]),
+                    )
+        return tuple(records[vector_id] for vector_id in requested if vector_id in records)
+
+    def filter_projection_note_ids(
+        self,
+        *,
+        dataset_id: str,
+        generation_id: str,
+        note_ids: Sequence[str],
+        tag: str | None = None,
+        source: str | None = None,
+        time_range_start: datetime | str | None = None,
+        time_range_end: datetime | str | None = None,
+        time_range_field: str = "updated_at",
+    ) -> frozenset[str]:
+        """Return current indexed Notes satisfying graph request filters."""
+
+        dataset = self._scope(dataset_id)
+        generation = self._safe_token(generation_id, field="generation_id")
+        normalized_ids = tuple(dict.fromkeys(str(value).strip() for value in note_ids))
+        if not normalized_ids:
+            return frozenset()
+        if len(normalized_ids) > self._MAX_PROJECTION_VECTOR_IDS:
+            raise ValueError("notes_semantic_projection_note_limit_exceeded")
+        if any(not value for value in normalized_ids):
+            raise ValueError("notes_semantic_projection_note_id_invalid")
+
+        clauses = [
+            "s.owner_user_id=?",
+            "s.dataset_id=?",
+            "s.generation_id=?",
+            "s.state='indexed'",
+            "cfg.desired_state='enabled'",
+            "cfg.active_generation_id=s.generation_id",
+            "g.state='active'",
+            "n.client_id=s.owner_user_id",
+            "n.version=s.content_version",
+            "n.deleted=?",
+        ]
+        deleted_false: bool | int = False if self.is_postgres else 0
+        params: list[Any] = [
+            self.owner_user_id,
+            dataset,
+            generation,
+            deleted_false,
+        ]
+        normalized_tag = str(tag or "").strip()
+        if normalized_tag.lower().startswith("tag:"):
+            normalized_tag = normalized_tag[4:].strip()
+        if normalized_tag:
+            clauses.append(
+                "EXISTS (SELECT 1 FROM note_keywords nk JOIN keywords k "
+                "ON k.id=nk.keyword_id WHERE nk.note_id=n.id "
+                "AND LOWER(k.keyword)=LOWER(?) AND k.deleted=?)"
+            )
+            params.extend((normalized_tag, deleted_false))
+
+        normalized_source = str(source or "").strip()
+        if normalized_source.lower().startswith("source:"):
+            normalized_source = normalized_source[len("source:") :]
+        if normalized_source:
+            source_name, separator, external_ref = normalized_source.partition(":")
+            if separator and external_ref:
+                clauses.append(
+                    "EXISTS (SELECT 1 FROM conversations conv "
+                    "WHERE conv.id=n.conversation_id AND conv.source=? "
+                    "AND conv.external_ref=?)"
+                )
+            else:
+                clauses.append(
+                    "EXISTS (SELECT 1 FROM conversations conv "
+                    "WHERE conv.id=n.conversation_id AND conv.source=?)"
+                )
+            params.append(source_name.strip())
+            if separator and external_ref:
+                params.append(external_ref.strip())
+
+        timestamp_column = (
+            "n.created_at" if time_range_field == "created_at" else "n.last_modified"
+        )
+        if time_range_field not in {"created_at", "updated_at"}:
+            raise ValueError("notes_semantic_projection_time_field_invalid")
+        if time_range_start is not None:
+            clauses.append(f"{timestamp_column}>=?")  # nosec B608
+            params.append(time_range_start)
+        if time_range_end is not None:
+            clauses.append(f"{timestamp_column}<=?")  # nosec B608
+            params.append(time_range_end)
+
+        admitted: set[str] = set()
+        with self._db.transaction() as conn:
+            self._set_scope(conn, dataset)
+            for start in range(0, len(normalized_ids), self._PROJECTION_READ_BATCH_SIZE):
+                batch = normalized_ids[start : start + self._PROJECTION_READ_BATCH_SIZE]
+                placeholders = ",".join("?" for _ in batch)
+                rows = conn.execute(
+                    "SELECT DISTINCT n.id FROM note_semantic_note_state s "  # nosec B608
+                    "JOIN note_semantic_generations g ON g.owner_user_id=s.owner_user_id "
+                    "AND g.dataset_id=s.dataset_id AND g.id=s.generation_id "
+                    "JOIN note_semantic_index_configs cfg ON cfg.owner_user_id=s.owner_user_id "
+                    "AND cfg.dataset_id=s.dataset_id "
+                    "JOIN notes n ON n.id=s.note_id WHERE "
+                    + " AND ".join(clauses)
+                    + " AND n.id IN ("
+                    + placeholders
+                    + ") ORDER BY n.id",  # nosec B608
+                    (*params, *batch),
+                ).fetchall()
+                admitted.update(str(row["id"]) for row in rows)
+        return frozenset(admitted)
 
     def publish_indexed_manifest(
         self,

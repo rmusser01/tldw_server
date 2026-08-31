@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 
 
@@ -195,6 +196,30 @@ class SemanticChunkRecord:
     generation_id: str
     note_id: str
     content_version: int
+    ordinal: int
+    field: str
+    start_offset: int
+    end_offset: int
+    chunk_fingerprint: str
+    normalization_version: str
+    chunker_version: str
+
+
+@dataclass(frozen=True, slots=True)
+class SemanticProjectionChunk:
+    """One current published chunk joined to its live canonical Note."""
+
+    owner_user_id: str
+    dataset_id: str
+    generation_id: str
+    vector_id: str
+    note_id: str
+    content_version: int
+    content_fingerprint: str
+    title: str
+    content: str
+    created_at: datetime | str
+    updated_at: datetime | str
     ordinal: int
     field: str
     start_offset: int

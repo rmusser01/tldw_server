@@ -26,6 +26,7 @@ def _settings(**overrides: int) -> SemanticIndexSettings:
         "max_chunk_code_points": 4,
         "max_chunks_per_note": 100,
         "max_provider_input_bytes": 100,
+        "max_query_vectors_per_call": 1,
     }
     values.update(overrides)
     return SemanticIndexSettings(**values)
