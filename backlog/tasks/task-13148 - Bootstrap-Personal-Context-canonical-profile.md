@@ -1,11 +1,11 @@
 ---
 id: TASK-13148
 title: Bootstrap Personal Context canonical profile
-status: In Progress
+status: Done
 assignee:
   - '@codex'
 created_date: '2026-08-30 22:21'
-updated_date: '2026-08-30 23:00'
+updated_date: '2026-08-31 01:03'
 labels:
   - personal-context
   - sync
@@ -29,11 +29,11 @@ Expose an authenticated, cursor-consistent Personal Context bootstrap that seria
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The server serializes first-link profile ownership and returns the canonical manifest, scopes, object heads, purge generation, and one consistent bootstrap cursor for the authenticated user.
-- [ ] #2 Bootstrap distributes the server-owned integrity key only to an authenticated registered device using the existing wrapped Sync key-record path; plaintext key material never enters logs, diagnostics, or durable bootstrap metadata.
-- [ ] #3 Pre-reconciliation Personal Context uploads fail closed, retries are idempotent, and mismatched user, device, schema, quota, or purge generation produce stable content-free outcomes.
-- [ ] #4 The bootstrap contract supports Chatbook reviewed reconciliation and full integrity rebaseline without making Sync history the canonical profile authority.
-- [ ] #5 Targeted bootstrap, Sync, and Personalization tests plus Ruff, compilation, Bandit, diff hygiene, and independent review pass.
+- [x] #1 The server serializes first-link profile ownership and returns the canonical manifest, scopes, object heads, purge generation, and one consistent bootstrap cursor for the authenticated user.
+- [x] #2 Bootstrap distributes the server-owned integrity key only to an authenticated registered device using the existing wrapped Sync key-record path; plaintext key material never enters logs, diagnostics, or durable bootstrap metadata.
+- [x] #3 Pre-reconciliation Personal Context uploads fail closed, retries are idempotent, and mismatched user, device, schema, quota, or purge generation produce stable content-free outcomes.
+- [x] #4 The bootstrap contract supports Chatbook reviewed reconciliation and full integrity rebaseline without making Sync history the canonical profile authority.
+- [x] #5 Targeted bootstrap, Sync, and Personalization tests plus Ruff, compilation, Bandit, diff hygiene, and independent review pass.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -50,6 +50,45 @@ ADR path: backlog/decisions/002-personal-context-profile-authority-sync-and-encr
 Reason: ADR-002 already governs canonical server ownership, key custody, whole-object Sync transport, and the service boundary used by bootstrap.
 <!-- SECTION:PLAN:END -->
 
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Implemented an authenticated Personal Context first-link boundary over the same
+canonical profile records used by the server; Sync remains encrypted transport
+and coordination state, never a second profile authority. The server creates or
+reads the canonical profile through `PersonalContextService`, returns one
+transactional manifest/scope/head snapshot and cursor, wraps the server-owned
+integrity key for the registered device with RSA-OAEP-SHA256, and requires an
+exact per-device completion receipt before admitting Personal Context pushes.
+
+The final implementation also fences stale key, purge-generation, profile,
+authority, and link transitions; persists receipts with backend-appropriate
+locking/CAS semantics; preserves unrelated enrollment metadata; rotates device
+wrappers when the registered public key changes; and maps all bootstrap failures
+to stable content-free HTTP outcomes. ADR-002 remains the governing decision; no
+new ADR was required.
+
+Verification after the final production and lint commits:
+
+- `140 passed` across the Personal Context service, bootstrap, and authenticated
+  Sync endpoint modules.
+- `174 passed, 13 deselected` for non-PostgreSQL Sync store coverage.
+- `4 passed` for executable PostgreSQL Personal Context lock/CAS transaction
+  contracts.
+- Ruff reported `All checks passed`; Bandit exited 0 for every touched production
+  module; Python 3.11 compilation and `git diff --check` exited 0.
+- Independent spec review and code-quality review reported no actionable
+  findings; the post-Ruff mechanical diff received a second quality approval.
+
+Known verification limits: the environment did not provide a live PostgreSQL
+fixture, so backend behavior is covered by executable transaction contracts
+rather than a live database integration run. The repository-wide suite was not
+run because project guidance requires explicit opt-in; verification stayed on
+the affected Personalization and Sync modules. The production-factory timestamp
+incident and resulting cross-layer testing rule are recorded in
+`backlog/docs/lessons-testing-evidence.md`.
+<!-- SECTION:NOTES:END -->
+
 ## Progress
 
 - [x] Added the bootstrap contract before production implementation, including
@@ -59,9 +98,9 @@ Reason: ADR-002 already governs canonical server ownership, key custody, whole-o
   canonical Personal Context reads and opaque Sync dataset/key-record state.
 - [x] Ran focused SQLite-backed Sync and Personal Context regressions plus
   Python 3.11 compilation and diff hygiene; results are recorded in the slice report.
-- [ ] Controller verification remains: PostgreSQL-specific coverage, endpoint/model
-  collection dependencies, Ruff/Bandit availability, independent review, and final
-  task closure. This task remains In Progress.
+- [x] Controller verification completed with the authenticated endpoint graph,
+  focused SQLite persistence coverage, PostgreSQL transaction-contract coverage,
+  Ruff, Bandit, compilation, diff hygiene, and two independent review passes.
 
 ## Review round 1 progress
 
@@ -74,10 +113,10 @@ Reason: ADR-002 already governs canonical server ownership, key custody, whole-o
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
