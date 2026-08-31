@@ -223,27 +223,49 @@ class TestMakeCacheKey:
         with pytest.raises(FrozenInstanceError):
             identity.radius = 2
 
-    def test_requested_and_effective_caps_both_bind_semantic_identity(self):
-        default_request = _semantic_query_identity()
+    @pytest.mark.parametrize(
+        "request_update",
+        [
+            {"max_nodes": 300},
+            {"max_edges": 1_200},
+            {"max_degree": 40},
+            {"allow_heavy": True},
+        ],
+    )
+    def test_each_requested_cap_binds_beside_identical_effective_clamps(
+        self,
+        request_update: dict[str, object],
+    ) -> None:
+        effective = {
+            "max_nodes": 200,
+            "max_edges": 800,
+            "max_degree": 20,
+            "allow_heavy": False,
+        }
+        default_request = _semantic_query_identity(
+            request_updates={"radius": 2},
+            **effective,
+        )
         explicitly_bounded_request = _semantic_query_identity(
-            request_updates={
-                "max_nodes": 2,
-                "max_edges": 1,
-                "max_degree": 1,
-                "allow_heavy": True,
-            },
+            request_updates={"radius": 2, **request_update},
+            **effective,
         )
 
-        assert default_request.max_nodes == explicitly_bounded_request.max_nodes
-        assert default_request.max_edges == explicitly_bounded_request.max_edges
-        assert default_request.max_degree == explicitly_bounded_request.max_degree
-        assert default_request.allow_heavy == explicitly_bounded_request.allow_heavy
         assert default_request != explicitly_bounded_request
         common = _semantic_key_values()
         assert GraphCache.make_semantic_revision_key(
             **{**common, "query_identity": default_request}
         ) != GraphCache.make_semantic_revision_key(
             **{**common, "query_identity": explicitly_bounded_request}
+        )
+        assert GraphCache.make_semantic_cursor_binding(
+            **_semantic_binding_values(
+                {**common, "query_identity": default_request}
+            )
+        ) != GraphCache.make_semantic_cursor_binding(
+            **_semantic_binding_values(
+                {**common, "query_identity": explicitly_bounded_request}
+            )
         )
 
     def test_semantic_helpers_reject_untyped_query_identity(self):
