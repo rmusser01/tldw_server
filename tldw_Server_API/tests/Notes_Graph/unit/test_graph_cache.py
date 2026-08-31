@@ -2,9 +2,12 @@
 
 import threading
 import time
+from dataclasses import FrozenInstanceError
 
 import pytest
 
+from tldw_Server_API.app.api.v1.schemas.notes_graph import EdgeType, NoteGraphRequest
+from tldw_Server_API.app.core.Notes_Graph import graph_cache as graph_cache_module
 from tldw_Server_API.app.core.Notes_Graph.graph_cache import GraphCache
 
 pytestmark = pytest.mark.unit
@@ -148,64 +151,146 @@ class TestMakeCacheKey:
             )
 
     @pytest.mark.parametrize(
-        ("path", "value"),
+        ("request_updates", "identity_updates"),
         [
-            (("semantic_threshold",), 0.8),
-            (("semantic_top_k",), 11),
-            (("center",), "note-2"),
-            (("tag",), "tag-2"),
-            (("source",), "source-2"),
-            (("time_range", "start"), "2026-02-01T00:00:00Z"),
-            (("edge_types",), ["manual", "semantic", "wikilink"]),
-            (("effective_limits", "max_nodes"), 301),
-            (("effective_limits", "max_edges"), 1201),
-            (("effective_limits", "max_degree"), 41),
-            (("effective_limits", "semantic_candidate_nodes"), 49),
-            (("effective_limits", "semantic_candidate_edges"), 49),
+            ({}, {"semantic_threshold": 0.8}),
+            ({}, {"semantic_top_k": 11}),
+            ({"center_note_id": "note-2"}, {}),
+            ({"radius": 2}, {}),
+            ({"tag": "tag-2"}, {}),
+            ({"source": "source-2"}, {}),
+            (
+                {
+                    "time_range": {
+                        "start": "2026-02-01T00:00:00Z",
+                        "end": None,
+                    }
+                },
+                {},
+            ),
+            ({"time_range_field": "created_at"}, {}),
+            ({"edge_types": [EdgeType.manual, EdgeType.semantic, EdgeType.wikilink]}, {}),
+            ({}, {"max_nodes": 301}),
+            ({}, {"max_edges": 1_201}),
+            ({}, {"max_degree": 41}),
+            ({}, {"semantic_candidate_nodes": 49}),
+            ({}, {"semantic_candidate_edges": 49}),
+            ({"allow_heavy": True}, {"allow_heavy": True}),
         ],
     )
     def test_semantic_key_and_cursor_binding_cover_request_and_effective_caps(
         self,
-        path: tuple[str, ...],
-        value: object,
+        request_updates: dict[str, object],
+        identity_updates: dict[str, object],
     ) -> None:
         common = _semantic_key_values()
-        changed_query = _replace_nested(common["query_params"], path, value)
+        changed_identity = _semantic_query_identity(
+            request_updates=request_updates,
+            **identity_updates,
+        )
 
         original_key = GraphCache.make_semantic_revision_key(**common)
         changed_key = GraphCache.make_semantic_revision_key(
-            **{**common, "query_params": changed_query}
+            **{**common, "query_identity": changed_identity}
         )
         original_binding = GraphCache.make_semantic_cursor_binding(
             **_semantic_binding_values(common)
         )
         changed_binding = GraphCache.make_semantic_cursor_binding(
-            **_semantic_binding_values({**common, "query_params": changed_query})
+            **_semantic_binding_values(
+                {**common, "query_identity": changed_identity}
+            )
         )
 
         assert changed_key != original_key
         assert changed_binding != original_binding
 
-    def test_mutable_progress_is_not_part_of_stable_semantic_identity(self):
+    def test_semantic_query_identity_is_canonical_and_immutable(self):
+        identity = _semantic_query_identity(
+            request_updates={
+                "edge_types": [
+                    EdgeType.semantic,
+                    EdgeType.manual,
+                    EdgeType.semantic,
+                ]
+            }
+        )
+        canonical = _semantic_query_identity(
+            request_updates={"edge_types": [EdgeType.manual, EdgeType.semantic]}
+        )
+
+        assert identity == canonical
+        with pytest.raises(FrozenInstanceError):
+            identity.radius = 2
+
+    def test_semantic_helpers_reject_untyped_query_identity(self):
         common = _semantic_key_values()
-        progress_before = {
-            "dirty_notes": 10,
-            "failed_notes": 1,
-            "cleanup_pending": True,
-            "state": "updating",
-        }
-        progress_after = {
-            "dirty_notes": 2,
-            "failed_notes": 0,
-            "cleanup_pending": False,
-            "state": "ready",
-        }
 
-        before = GraphCache.make_semantic_revision_key(**common)
-        after = GraphCache.make_semantic_revision_key(**common)
+        with pytest.raises(TypeError, match="SemanticGraphQueryIdentity"):
+            GraphCache.make_semantic_revision_key(
+                **{
+                    **common,
+                    "query_identity": {"dirty_notes": 10, "state": "updating"},
+                }
+            )
 
-        assert progress_before != progress_after
-        assert before == after
+    def test_semantic_query_factory_rejects_mutable_progress_fields(self):
+        request = _semantic_request()
+
+        with pytest.raises(TypeError, match="unexpected keyword"):
+            graph_cache_module.SemanticGraphQueryIdentity.from_request(
+                request,
+                semantic_threshold=0.75,
+                semantic_top_k=10,
+                max_nodes=300,
+                max_edges=1_200,
+                max_degree=40,
+                semantic_candidate_nodes=50,
+                semantic_candidate_edges=50,
+                allow_heavy=False,
+                dirty_notes=10,
+            )
+
+    @pytest.mark.parametrize(
+        ("updates", "message"),
+        [
+            ({"semantic_threshold": float("nan")}, "threshold"),
+            ({"semantic_threshold": 1.01}, "threshold"),
+            ({"semantic_top_k": True}, "top_k"),
+            ({"semantic_top_k": 0}, "top_k"),
+            ({"max_nodes": 0}, "max_nodes"),
+            ({"max_edges": -1}, "max_edges"),
+            ({"max_degree": 0}, "max_degree"),
+            ({"semantic_candidate_nodes": 51}, "candidate_nodes"),
+            ({"semantic_candidate_edges": 51}, "candidate_edges"),
+            ({"allow_heavy": 1}, "allow_heavy"),
+        ],
+    )
+    def test_semantic_query_identity_rejects_noncanonical_effective_values(
+        self,
+        updates: dict[str, object],
+        message: str,
+    ) -> None:
+        with pytest.raises((TypeError, ValueError), match=message):
+            _semantic_query_identity(**updates)
+
+    @pytest.mark.parametrize(
+        ("request_updates", "identity_updates"),
+        [
+            ({"semantic_threshold": 0.7}, {"semantic_threshold": 0.8}),
+            ({"semantic_top_k": 9}, {"semantic_top_k": 10}),
+        ],
+    )
+    def test_semantic_query_identity_rejects_effective_request_mismatch(
+        self,
+        request_updates: dict[str, object],
+        identity_updates: dict[str, object],
+    ) -> None:
+        with pytest.raises(ValueError, match="does not match"):
+            _semantic_query_identity(
+                request_updates=request_updates,
+                **identity_updates,
+            )
 
 
 class TestThreadSafety:
@@ -258,23 +343,7 @@ def _semantic_key_values() -> dict[str, object]:
         "model_revision": "model-revision-1",
         "normalization_version": "normalization-v1",
         "chunker_version": "chunker-v1",
-        "query_params": {
-            "center": "note-1",
-            "edge_types": ["manual", "semantic"],
-            "semantic_threshold": 0.75,
-            "semantic_top_k": 10,
-            "tag": "tag-1",
-            "source": "source-1",
-            "time_range": {"start": "2026-01-01T00:00:00Z", "end": None},
-            "time_range_field": "updated_at",
-            "effective_limits": {
-                "max_nodes": 300,
-                "max_edges": 1_200,
-                "max_degree": 40,
-                "semantic_candidate_nodes": 50,
-                "semantic_candidate_edges": 50,
-            },
-        },
+        "query_identity": _semantic_query_identity(),
     }
 
 
@@ -282,19 +351,41 @@ def _semantic_binding_values(values: dict[str, object]) -> dict[str, object]:
     return {key: value for key, value in values.items() if key != "user_id"}
 
 
-def _replace_nested(
-    original: object,
-    path: tuple[str, ...],
-    value: object,
-) -> dict[str, object]:
-    assert isinstance(original, dict)
-    changed = dict(original)
-    cursor = changed
-    for part in path[:-1]:
-        nested = cursor[part]
-        assert isinstance(nested, dict)
-        copied = dict(nested)
-        cursor[part] = copied
-        cursor = copied
-    cursor[path[-1]] = value
-    return changed
+def _semantic_request(**updates: object) -> NoteGraphRequest:
+    values: dict[str, object] = {
+        "center_note_id": "note-1",
+        "radius": 1,
+        "edge_types": [EdgeType.manual, EdgeType.semantic],
+        "tag": "tag-1",
+        "source": "source-1",
+        "time_range": {"start": "2026-01-01T00:00:00Z", "end": None},
+        "time_range_field": "updated_at",
+    }
+    values.update(updates)
+    return NoteGraphRequest.model_validate(values)
+
+
+def _semantic_query_identity(
+    *,
+    request_updates: dict[str, object] | None = None,
+    semantic_threshold: float = 0.75,
+    semantic_top_k: int = 10,
+    max_nodes: int = 300,
+    max_edges: int = 1_200,
+    max_degree: int = 40,
+    semantic_candidate_nodes: int = 50,
+    semantic_candidate_edges: int = 50,
+    allow_heavy: bool = False,
+):
+    request = _semantic_request(**(request_updates or {}))
+    return graph_cache_module.SemanticGraphQueryIdentity.from_request(
+        request,
+        semantic_threshold=semantic_threshold,
+        semantic_top_k=semantic_top_k,
+        max_nodes=max_nodes,
+        max_edges=max_edges,
+        max_degree=max_degree,
+        semantic_candidate_nodes=semantic_candidate_nodes,
+        semantic_candidate_edges=semantic_candidate_edges,
+        allow_heavy=allow_heavy,
+    )

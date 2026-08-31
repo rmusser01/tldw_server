@@ -4,11 +4,152 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import threading
 import time
 from collections import OrderedDict
+from dataclasses import dataclass
 from typing import Any
+
+from tldw_Server_API.app.api.v1.schemas.notes_graph import NoteGraphRequest
+from tldw_Server_API.app.core.Notes_Graph.semantic_settings import (
+    DEFAULT_SEMANTIC_INDEX_SETTINGS,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class SemanticGraphQueryIdentity:
+    """Canonical immutable identity for one semantic graph request."""
+
+    focus_note_id: str
+    radius: int
+    edge_types: tuple[str, ...]
+    tag: str | None
+    source: str | None
+    time_range_start: str | None
+    time_range_end: str | None
+    time_range_field: str
+    semantic_threshold: float
+    semantic_top_k: int
+    max_nodes: int
+    max_edges: int
+    max_degree: int
+    semantic_candidate_nodes: int
+    semantic_candidate_edges: int
+    allow_heavy: bool
+
+    def __post_init__(self) -> None:
+        if not self.focus_note_id:
+            raise ValueError("focus_note_id must not be empty")
+        canonical_edge_types = tuple(sorted(set(self.edge_types)))
+        if self.edge_types != canonical_edge_types or "semantic" not in self.edge_types:
+            raise ValueError("edge_types must be canonical and include semantic")
+        if type(self.semantic_threshold) is not float or not math.isfinite(
+            self.semantic_threshold
+        ) or not 0.0 <= self.semantic_threshold <= 1.0:
+            raise ValueError("semantic_threshold must be a finite float from 0 to 1")
+        if (
+            type(self.semantic_top_k) is not int
+            or not 1
+            <= self.semantic_top_k
+            <= DEFAULT_SEMANTIC_INDEX_SETTINGS.max_query_neighbors
+        ):
+            raise ValueError("semantic_top_k must be a bounded positive integer")
+        for field_name, value, minimum in (
+            ("max_nodes", self.max_nodes, 1),
+            ("max_edges", self.max_edges, 0),
+            ("max_degree", self.max_degree, 1),
+            ("semantic_candidate_nodes", self.semantic_candidate_nodes, 0),
+            ("semantic_candidate_edges", self.semantic_candidate_edges, 0),
+        ):
+            if type(value) is not int or value < minimum:
+                raise ValueError(f"{field_name} must be a bounded integer")
+        semantic_cap = DEFAULT_SEMANTIC_INDEX_SETTINGS.max_query_neighbors
+        if self.semantic_candidate_nodes > semantic_cap:
+            raise ValueError("semantic_candidate_nodes exceeds the semantic cap")
+        if self.semantic_candidate_edges > semantic_cap:
+            raise ValueError("semantic_candidate_edges exceeds the semantic cap")
+        if type(self.allow_heavy) is not bool:
+            raise TypeError("allow_heavy must be a boolean")
+
+    @classmethod
+    def from_request(
+        cls,
+        request: NoteGraphRequest,
+        *,
+        semantic_threshold: float,
+        semantic_top_k: int,
+        max_nodes: int,
+        max_edges: int,
+        max_degree: int,
+        semantic_candidate_nodes: int,
+        semantic_candidate_edges: int,
+        allow_heavy: bool,
+    ) -> SemanticGraphQueryIdentity:
+        """Build the complete semantic identity from validated effective inputs."""
+
+        if not request.semantic_requested:
+            raise ValueError("Semantic query identity requires semantic edge type")
+        if not request.center_note_id:
+            raise ValueError("Semantic query identity requires a focus note")
+        if (
+            request.semantic_threshold is not None
+            and request.semantic_threshold != semantic_threshold
+        ):
+            raise ValueError("effective semantic threshold does not match the request")
+        if (
+            request.semantic_top_k is not None
+            and request.semantic_top_k != semantic_top_k
+        ):
+            raise ValueError("effective semantic top_k does not match the request")
+        time_range = (
+            request.time_range.model_dump(mode="json")
+            if request.time_range is not None
+            else {}
+        )
+        return cls(
+            focus_note_id=request.center_note_id,
+            radius=request.radius,
+            edge_types=tuple(
+                edge_type.value for edge_type in request.resolved_edge_types
+            ),
+            tag=request.tag,
+            source=request.source,
+            time_range_start=time_range.get("start"),
+            time_range_end=time_range.get("end"),
+            time_range_field=request.time_range_field,
+            semantic_threshold=semantic_threshold,
+            semantic_top_k=semantic_top_k,
+            max_nodes=max_nodes,
+            max_edges=max_edges,
+            max_degree=max_degree,
+            semantic_candidate_nodes=semantic_candidate_nodes,
+            semantic_candidate_edges=semantic_candidate_edges,
+            allow_heavy=allow_heavy,
+        )
+
+    def as_payload(self) -> dict[str, object]:
+        """Return the closed canonical payload used by cache and cursor hashes."""
+
+        return {
+            "focus_note_id": self.focus_note_id,
+            "radius": self.radius,
+            "edge_types": self.edge_types,
+            "tag": self.tag,
+            "source": self.source,
+            "time_range_start": self.time_range_start,
+            "time_range_end": self.time_range_end,
+            "time_range_field": self.time_range_field,
+            "semantic_threshold": self.semantic_threshold,
+            "semantic_top_k": self.semantic_top_k,
+            "max_nodes": self.max_nodes,
+            "max_edges": self.max_edges,
+            "max_degree": self.max_degree,
+            "semantic_candidate_nodes": self.semantic_candidate_nodes,
+            "semantic_candidate_edges": self.semantic_candidate_edges,
+            "allow_heavy": self.allow_heavy,
+        }
 
 
 def _semantic_revision_payload(
@@ -23,10 +164,12 @@ def _semantic_revision_payload(
     model_revision: str | None,
     normalization_version: str,
     chunker_version: str,
-    query_params: dict,
+    query_identity: SemanticGraphQueryIdentity,
 ) -> dict[str, object]:
     """Return only immutable inputs to a final semantic projection."""
 
+    if not isinstance(query_identity, SemanticGraphQueryIdentity):
+        raise TypeError("query_identity must be SemanticGraphQueryIdentity")
     return {
         "dataset_hash": hashlib.sha256(dataset_id.encode()).hexdigest(),
         "graph_revision": graph_revision,
@@ -38,7 +181,7 @@ def _semantic_revision_payload(
         "model_revision": model_revision,
         "normalization_version": normalization_version,
         "chunker_version": chunker_version,
-        "query": query_params,
+        "query": query_identity.as_payload(),
     }
 
 
@@ -115,7 +258,7 @@ class GraphCache:
         model_revision: str | None,
         normalization_version: str,
         chunker_version: str,
-        query_params: dict,
+        query_identity: SemanticGraphQueryIdentity,
     ) -> str:
         """Build the stable outer key for a final semantic projection."""
 
@@ -132,7 +275,7 @@ class GraphCache:
                 model_revision=model_revision,
                 normalization_version=normalization_version,
                 chunker_version=chunker_version,
-                query_params=query_params,
+                query_identity=query_identity,
             ),
         )
 
@@ -149,7 +292,7 @@ class GraphCache:
         model_revision: str | None,
         normalization_version: str,
         chunker_version: str,
-        query_params: dict,
+        query_identity: SemanticGraphQueryIdentity,
     ) -> str:
         """Hash the immutable semantic request identity carried by cursors."""
 
@@ -164,7 +307,7 @@ class GraphCache:
             model_revision=model_revision,
             normalization_version=normalization_version,
             chunker_version=chunker_version,
-            query_params=query_params,
+            query_identity=query_identity,
         )
         raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
         return hashlib.sha256(raw.encode()).hexdigest()
