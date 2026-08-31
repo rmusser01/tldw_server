@@ -9,6 +9,7 @@ between JWTService, APIKeyManager, CSRF, and SessionManager.
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import os
 
@@ -36,7 +37,30 @@ def _derive_hmac_kdf_salt(source: bytes) -> bytes:
     return hashlib.sha256(_HMAC_KDF_SALT_PREFIX + hashlib.sha256(source).digest()).digest()
 
 
-def _derive_hmac_key_from_source(source: bytes, *, legacy: bool = False) -> bytes:
+# Derived keys are memoized on the secret material they come from.
+#
+# The KDF is deliberately expensive -- 100,000 PBKDF2 rounds -- but its input
+# here is server configuration (SINGLE_USER_API_KEY, API_KEY_PEPPER, JWT
+# secrets), not anything a caller supplies, and API key validation re-derived it
+# several times per request:
+#
+#   POST /api/v1/chat/completions   8 derivations, 110 ms of a 167 ms request
+#   POST /api/v1/embeddings         6 derivations,  82 ms of a 107 ms request
+#
+# Caching changes no security property. The stretching exists to make the server
+# secret expensive to recover from a leaked fingerprint, and an attacker gains
+# no additional attempts from a cache the server keeps of its own configuration.
+# The per-request secret -- the presented API key -- is the HMAC *message*, not
+# the KDF input, and is unaffected.
+#
+# Keying on the source bytes means a rotated or reconfigured secret is a
+# different key and misses the cache, so there is nothing to invalidate. The
+# bound keeps rotation or per-test settings churn from growing it without limit.
+_HMAC_KEY_CACHE_MAXSIZE = 64
+
+
+@functools.lru_cache(maxsize=_HMAC_KEY_CACHE_MAXSIZE)
+def _derive_hmac_key_cached(source: bytes, legacy: bool) -> bytes:
     return hashlib.pbkdf2_hmac(
         "sha256",
         source,
@@ -44,6 +68,15 @@ def _derive_hmac_key_from_source(source: bytes, *, legacy: bool = False) -> byte
         _HMAC_KDF_ITERATIONS,
         dklen=_HMAC_KDF_DKLEN,
     )
+
+
+def _derive_hmac_key_from_source(source: bytes, *, legacy: bool = False) -> bytes:
+    return _derive_hmac_key_cached(source, legacy)
+
+
+def reset_hmac_key_cache() -> None:
+    """Drop memoized derived keys. For tests that rotate secrets in place."""
+    _derive_hmac_key_cached.cache_clear()
 
 
 def derive_hmac_key_from_source(raw: str | bytes, *, legacy: bool = False) -> bytes:
@@ -172,4 +205,9 @@ def derive_hmac_key_candidates(settings: Settings | None = None) -> list[bytes]:
     return keys
 
 
-__all__ = ["derive_hmac_key", "derive_hmac_key_candidates", "derive_hmac_key_from_source"]
+__all__ = [
+    "derive_hmac_key",
+    "derive_hmac_key_candidates",
+    "derive_hmac_key_from_source",
+    "reset_hmac_key_cache",
+]
