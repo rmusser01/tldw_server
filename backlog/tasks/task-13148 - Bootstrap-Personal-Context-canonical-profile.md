@@ -106,6 +106,17 @@ content. TDD evidence: focused RED `2 failed, 33 deselected`; focused GREEN
 `2 passed, 33 deselected`; affected bootstrap/endpoint modules `127 passed`.
 TASK-13148 status remains unchanged for controller review.
 
+Final quota-cardinality correction: successful and incompatible quota maps are
+now request-focused whenever requirements are supplied. A valid maximum-size
+32-name request therefore returns exactly 32 safe availability entries instead
+of being expanded with five unrelated server defaults; unknown zero minima
+remain successful at zero and positive unknown minima remain typed deficits at
+zero. The successful response schema independently enforces the same entry,
+name, and strict-integer bounds. Service and authenticated endpoint regressions
+cover 32 unknown names, exact map completeness, typed attention survival, and
+content-free error output. TASK-13148 status remains unchanged for controller
+review.
+
 Transport-watermark correction: successful bootstrap now exposes a separate
 `sync_transport_cursor`, signed with the existing private-pull codec and scoped
 to the authenticated dataset, registered device, negotiated version set, and

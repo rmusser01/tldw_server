@@ -111,6 +111,48 @@ Changed files for this correction:
 Known skip: the repository-wide suite was not run; verification remained scoped
 to the affected bootstrap and authenticated endpoint modules.
 
+## Final quota-cardinality correction
+
+Status: ready for controller review. TASK-13148 status remains unchanged.
+
+Meaningful RED evidence:
+
+- Service selection: `2 failed, 46 deselected`. The success map contained 37
+  entries and the incompatibility map included five unrelated defaults.
+- Authenticated endpoint selection: `2 failed, 150 deselected`. The 37-entry
+  success map violated the bounded contract and strict attention validation
+  stripped the 37-entry incompatibility details from the 409 response.
+
+GREEN evidence:
+
+- Focused service selection: `2 passed, 46 deselected`.
+- Focused authenticated endpoint selection: `2 passed, 102 deselected`.
+- Complete affected bootstrap and endpoint modules: `152 passed`.
+- Sync models, stores, and replay/repair modules: `336 passed, 2 skipped`.
+- Ruff reported `All checks passed!` across the four touched Python files.
+- Python 3.11 compilation exited `0` across the four touched Python files.
+- Bandit exited `0` with no findings or errors across both touched production
+  modules.
+- Working-tree and base-range diff hygiene exited `0`.
+
+Implementation: when requirements are present, successful and incompatible
+quota maps now project server capacity onto exactly the requested safe names.
+Unsupported names retain explicit zero capacity. With no requirements, the
+five standard server capacities remain available. The successful response
+schema also enforces one-to-32 entries, safe quota names, and strict bounded
+integers, matching the already-strict attention schema.
+
+Self-review: the change is confined to quota negotiation and public schema
+validation; it does not touch projection watermark locking, transport cursors,
+materialization, authentication, canonical content, or backend-specific store
+behavior. The 409 regression checks that no manifest, scope, record, proposal,
+ciphertext, or wrapped-key field crosses the boundary.
+
+Known skip: the repository-wide suite was not run because repository guidance
+requires explicit opt-in. Verification stayed on the affected bootstrap,
+endpoint, store, model, and replay/repair modules; the two store skips are the
+existing environment-dependent cases.
+
 ## Projection-safe watermark and strict quota request correction
 
 Status: ready for controller review. TASK-13148 status remains unchanged.

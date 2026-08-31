@@ -460,22 +460,19 @@ class SyncV2ProfileManager:
                 },
             )
         quotas = _personal_context_bootstrap_quotas(personal_context)
+        normalized_required_quotas = dict(required_quotas or {})
+        requested_quota_availability = {
+            name: quotas.get(name, 0)
+            for name in normalized_required_quotas
+            if _valid_personal_context_quota_name(name)
+        }
         if not _personal_context_quotas_compatible(required_quotas, quotas):
-            normalized_required_quotas = dict(required_quotas or {})
-            attention_available_quotas = {
-                **quotas,
-                **{
-                    name: quotas.get(name, 0)
-                    for name in normalized_required_quotas
-                    if isinstance(name, str)
-                },
-            }
             raise PersonalContextBootstrapError(
                 "personal_context_quota_incompatible",
                 attention={
                     "kind": "quota_incompatible",
                     "required_quotas": normalized_required_quotas,
-                    "available_quotas": attention_available_quotas,
+                    "available_quotas": requested_quota_availability,
                     "insufficient_quotas": sorted(
                         name
                         for name, value in normalized_required_quotas.items()
@@ -489,16 +486,7 @@ class SyncV2ProfileManager:
                     ),
                 },
             )
-        effective_quotas = {
-            **quotas,
-            **{
-                name: 0
-                for name, minimum in dict(required_quotas or {}).items()
-                if _valid_personal_context_quota_name(name)
-                and minimum == 0
-                and name not in quotas
-            },
-        }
+        effective_quotas = requested_quota_availability or quotas
 
         try:
             canonical_service = self.service._personal_context_service_for_user(user_id)

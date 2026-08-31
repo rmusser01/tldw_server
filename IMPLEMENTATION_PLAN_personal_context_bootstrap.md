@@ -128,6 +128,24 @@ any subsequent lifecycle update.
 
 TASK-13148 remains unchanged for controller review.
 
+## Quota-cardinality correction
+
+- [x] Project successful quota negotiation onto exactly the client's valid
+  requested names when requirements are supplied; an empty requirement retains
+  the five standard server capacities.
+- [x] Project quota-incompatibility availability onto exactly every requested
+  name, using zero for unsupported names, so a maximum 32-name request remains
+  valid under the strict attention schema.
+- [x] Bound and validate the successful bootstrap quota response to the same
+  public 32-name, safe-name, strict-integer contract.
+- [x] Cover service and authenticated HTTP behavior for 32 unsupported names,
+  both the all-zero success case and a positive typed deficit, including
+  content-free error canaries.
+- [x] Re-run the affected bootstrap, endpoint, model, store, and replay suites
+  plus Ruff, compilation, Bandit, and diff hygiene.
+
+TASK-13148's status remains unchanged for controller review.
+
 ## Sync transport-watermark correction
 
 - [x] Successful bootstrap now returns `sync_transport_cursor` in addition to

@@ -45,6 +45,7 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     SyncDatasetCreate,
     SyncEnvelopeCreate,
 )
+from tldw_Server_API.app.core.Sync.v2.profile import PersonalContextBootstrapError
 from tldw_Server_API.app.core.Sync.v2.security import (
     server_trusted_encryption_status_from_config,
 )
@@ -416,6 +417,37 @@ def test_unknown_zero_minimum_quota_is_satisfied(tmp_path: Path) -> None:
 
     assert bootstrap.manifest == canonical.manifest
     assert bootstrap.quotas["future_sync_quota"] == 0
+
+
+def test_maximum_unknown_zero_minimum_quotas_return_a_bounded_complete_map(
+    tmp_path: Path,
+) -> None:
+    service, canonical = _service(tmp_path)
+    required_quotas = {f"future_quota_{index:02d}": 0 for index in range(32)}
+
+    bootstrap = _bootstrap(service, required_quotas=required_quotas)
+
+    assert bootstrap.manifest == canonical.manifest
+    assert bootstrap.quotas == required_quotas
+
+
+def test_maximum_quota_incompatibility_reports_only_every_requested_quota(
+    tmp_path: Path,
+) -> None:
+    service, _canonical = _service(tmp_path)
+    required_quotas = {f"future_quota_{index:02d}": 0 for index in range(32)}
+    required_quotas["future_quota_31"] = 1
+
+    with pytest.raises(PersonalContextBootstrapError) as exc_info:
+        _bootstrap(service, required_quotas=required_quotas)
+
+    assert exc_info.value.reason_code == "personal_context_quota_incompatible"
+    assert exc_info.value.attention == {
+        "kind": "quota_incompatible",
+        "required_quotas": required_quotas,
+        "available_quotas": dict.fromkeys(required_quotas, 0),
+        "insufficient_quotas": ["future_quota_31"],
+    }
 
 
 def test_bootstrap_sync_transport_cursor_is_accepted_by_private_pull_parser(
@@ -1146,13 +1178,7 @@ def test_bootstrap_blocks_capability_schema_quota_purge_and_key_custody_without_
             {
                 "kind": "quota_incompatible",
                 "required_quotas": {"max_record_bytes": 16_385},
-                "available_quotas": {
-                    "max_record_bytes": 16_384,
-                    "max_search_results": 20,
-                    "max_proposals_per_turn": 5,
-                    "max_proposals_per_session": 25,
-                    "max_unresolved_proposals": 200,
-                },
+                "available_quotas": {"max_record_bytes": 16_384},
                 "insufficient_quotas": ["max_record_bytes"],
             },
         ),

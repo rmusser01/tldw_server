@@ -3325,6 +3325,73 @@ def test_personal_context_bootstrap_response_exposes_effective_zero_quota(
     assert response.json()["quotas"]["future_sync_quota"] == 0
 
 
+def test_personal_context_bootstrap_response_bounds_maximum_zero_quota_map(
+    factory_personal_context_service: SyncV2Service,
+) -> None:
+    client = _client_for_factory_service(factory_personal_context_service)
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    assert client.post(
+        "/api/v1/sync/devices/register",
+        json=_registered_personal_context_device_payload(private_key.public_key()),
+    ).status_code == 200
+    required_quotas = {f"future_quota_{index:02d}": 0 for index in range(32)}
+
+    response = client.post(
+        "/api/v1/sync/personal-context/bootstrap",
+        json={
+            "device_id": "pc-device",
+            "required_schema_version": 1,
+            "required_quotas": required_quotas,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["quotas"] == required_quotas
+
+
+def test_personal_context_bootstrap_preserves_maximum_typed_quota_attention(
+    factory_personal_context_service: SyncV2Service,
+) -> None:
+    client = _client_for_factory_service(factory_personal_context_service)
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    assert client.post(
+        "/api/v1/sync/devices/register",
+        json=_registered_personal_context_device_payload(private_key.public_key()),
+    ).status_code == 200
+    required_quotas = {f"future_quota_{index:02d}": 0 for index in range(32)}
+    required_quotas["future_quota_31"] = 1
+
+    response = client.post(
+        "/api/v1/sync/personal-context/bootstrap",
+        json={
+            "device_id": "pc-device",
+            "required_schema_version": 1,
+            "required_quotas": required_quotas,
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == {
+        "error_code": "personal_context_quota_incompatible",
+        "message": response.json()["detail"]["message"],
+        "attention": {
+            "kind": "quota_incompatible",
+            "required_quotas": required_quotas,
+            "available_quotas": dict.fromkeys(required_quotas, 0),
+            "insufficient_quotas": ["future_quota_31"],
+        },
+    }
+    for secret in (
+        '"wrapped_key_blob":',
+        '"manifest":',
+        '"scopes":',
+        '"records":',
+        '"proposals":',
+        "ciphertext",
+    ):
+        assert secret not in response.text
+
+
 @pytest.mark.parametrize(
     "required_quotas",
     [
@@ -3616,13 +3683,7 @@ def test_personal_context_bootstrap_endpoint_maps_redacted_reason_codes(
             {
                 "kind": "quota_incompatible",
                 "required_quotas": {"max_record_bytes": 16_385},
-                "available_quotas": {
-                    "max_record_bytes": 16_384,
-                    "max_search_results": 20,
-                    "max_proposals_per_turn": 5,
-                    "max_proposals_per_session": 25,
-                    "max_unresolved_proposals": 200,
-                },
+                "available_quotas": {"max_record_bytes": 16_384},
                 "insufficient_quotas": ["max_record_bytes"],
             },
         ),
@@ -3632,14 +3693,7 @@ def test_personal_context_bootstrap_endpoint_maps_redacted_reason_codes(
             {
                 "kind": "quota_incompatible",
                 "required_quotas": {"future_sync_quota": 1},
-                "available_quotas": {
-                    "future_sync_quota": 0,
-                    "max_record_bytes": 16_384,
-                    "max_search_results": 20,
-                    "max_proposals_per_turn": 5,
-                    "max_proposals_per_session": 25,
-                    "max_unresolved_proposals": 200,
-                },
+                "available_quotas": {"future_sync_quota": 0},
                 "insufficient_quotas": ["future_sync_quota"],
             },
         ),
