@@ -542,8 +542,8 @@ and terminal results above remain the authoritative verification evidence.
 - Implementation plan: [Canonical delivery substrate plan](../superpowers/plans/2026-08-23-canonical-admin-webhook-delivery-substrate.md)
 - Operations: [Admin Webhooks delivery runbook](../Admin_Webhooks_Delivery_Runbook.md)
 - PR 1 dependency: [#2828](https://github.com/rmusser01/tldw_server/pull/2828)
-- PR 2: created only after the independent Task 13 review; append its URL to
-  `TASK-13111` when opened.
+- PR 2: [#2842](https://github.com/rmusser01/tldw_server/pull/2842), opened
+  against `dev` only after the post-rebase verification and independent review.
 
 ## Conclusion
 
