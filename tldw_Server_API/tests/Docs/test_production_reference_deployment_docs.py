@@ -130,6 +130,7 @@ def test_monitoring_rotation_uses_read_scope_without_api_key_superuser_bypass() 
     assert has_scope({"service"}, "write")
     assert '"scope": "read"' in rotation
     assert '"scope": "service"' not in rotation
+    assert "/users/{sys.argv[1]}/api-keys" in rotation
 
 
 def test_monitoring_rotation_stages_restarts_verifies_then_revokes_old_key() -> None:
@@ -177,12 +178,21 @@ def test_monitoring_rotation_installs_cleanup_before_key_activation_and_disarms_
     ordered_success = (
         "stage_and_restart",
         "wait_for_tldw_target",
+        "TLDW_NEW_CREDENTIAL_VERIFIED=1",
         'revoke_metrics_key "$TLDW_OLD_METRICS_API_KEY_ID"',
         "TLDW_ROTATION_COMMITTED=1",
         "trap - EXIT",
     )
     positions = [success.index(item) for item in ordered_success]
     assert positions == sorted(positions)
+
+    cleanup = rotation[
+        rotation.index("cleanup_metrics_rotation()") : rotation.index("trap cleanup_metrics_rotation EXIT")
+    ]
+    verified_branch = cleanup[cleanup.index('if [ "$TLDW_NEW_CREDENTIAL_VERIFIED" -eq 1 ]') :]
+    assert 'mv -f -- "$TLDW_ROLLBACK_METRICS_API_KEY_FILE"' not in verified_branch.split("fi", 1)[0]
+    assert "preserving installed new credential" in verified_branch
+    assert 'exit "$cleanup_status"' in cleanup
 
 
 def test_monitoring_rotation_failure_restages_old_key_before_revoking_new_key() -> None:

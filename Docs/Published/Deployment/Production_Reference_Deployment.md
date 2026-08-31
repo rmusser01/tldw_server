@@ -174,11 +174,12 @@ the legacy readiness aliases, or metrics anonymous at the public proxy.
 ## 6. Authenticate Prometheus
 
 Create a dedicated existing AuthNZ principal/role whose only permission is
-`system.logs`, then create a `read`-scoped API key for that principal. The two
-layers are both required: RBAC limits the principal to operational diagnostics,
-and the API-key scope prevents the credential from satisfying write routes. Do
-not use the `service` scope, introduce a shared anonymous metrics token, or reuse
-an administrator's general-purpose credential.
+`system.logs`, then create a `read`-scoped API key for that principal. API-key
+scope is not inferred from HTTP method globally, so every mutating monitoring
+route protected by `system.logs` also explicitly requires `write`. The
+Prometheus credential therefore cannot change watchlists or alerts. Do not use
+the `service` scope, introduce a shared anonymous metrics token, or reuse an
+administrator's general-purpose credential.
 
 Write the returned key once to an owner-only file without printing it:
 
@@ -307,6 +308,7 @@ sys.exit(0 if any(
 }
 
 TLDW_ROTATION_COMMITTED=0
+TLDW_NEW_CREDENTIAL_VERIFIED=0
 TLDW_METRICS_FILE_REPLACED=0
 TLDW_OLD_METRICS_BACKUP_READY=0
 TLDW_NEW_METRICS_API_KEY_ID=
@@ -321,7 +323,7 @@ cleanup_metrics_rotation() {
   rm -f -- "${TLDW_NEW_METRICS_API_KEY_FILE:-}"
 
   if [ "$TLDW_ROTATION_COMMITTED" -eq 1 ]; then
-    return "$cleanup_status"
+    exit "$cleanup_status"
   fi
 
   cleanup_key_id="${TLDW_NEW_METRICS_API_KEY_ID:-}"
@@ -331,8 +333,15 @@ cleanup_metrics_rotation() {
     if [ "$lookup_status" -ne 0 ] || [ -z "$cleanup_key_id" ]; then
       printf '%s\n' 'Unable to prove whether the new key was activated; manual recovery required.' >&2
       [ "$cleanup_status" -ne 0 ] || cleanup_status=1
-      return "$cleanup_status"
+      exit "$cleanup_status"
     fi
+  fi
+
+  if [ "$TLDW_NEW_CREDENTIAL_VERIFIED" -eq 1 ]; then
+    printf '%s\n' 'New credential was verified; preserving installed new credential because old-key revocation status is ambiguous and manual recovery required.' >&2
+    rm -f -- "${TLDW_OLD_METRICS_API_KEY_FILE:-}"
+    [ "$cleanup_status" -ne 0 ] || cleanup_status=1
+    exit "$cleanup_status"
   fi
 
   old_credential_ready=1
@@ -360,7 +369,7 @@ cleanup_metrics_rotation() {
 
   rm -f -- "${TLDW_OLD_METRICS_API_KEY_FILE:-}"
   [ "$cleanup_status" -ne 0 ] || cleanup_status=1
-  return "$cleanup_status"
+  exit "$cleanup_status"
 }
 
 trap cleanup_metrics_rotation EXIT
@@ -401,6 +410,7 @@ unset TLDW_NEW_METRICS_API_KEY
 
 stage_and_restart
 wait_for_tldw_target
+TLDW_NEW_CREDENTIAL_VERIFIED=1
 
 revoke_metrics_key "$TLDW_OLD_METRICS_API_KEY_ID"
 TLDW_ROTATION_COMMITTED=1
@@ -412,11 +422,13 @@ unset TLDW_NEW_METRICS_API_KEY_ID
 
 The exit trap is armed before the create request. If creation succeeds but its
 response cannot be parsed, the trap finds the exact unique key name through the
-admin list route. Any later failure atomically restores and re-stages the old
-file before revoking the unused new key. If old-key recovery or new-key lookup
-cannot be verified, the script reports that manual recovery is required, leaves
-the potentially working new key active, and exits nonzero. The trap is disarmed
-only after the healthy target is observed and the old key is revoked.
+admin key list route. Before the new target is verified, any later
+failure atomically restores and re-stages the old file before revoking the
+unused new key. After the new target is verified, an ambiguous old-key DELETE
+never rolls back or revokes the installed new credential; it leaves both keys'
+status for explicit operator reconciliation and exits nonzero. The trap is
+disarmed only after the healthy target is observed and the old key is confirmed
+revoked.
 
 For monitoring retirement, use the canonical `down` command without `-v`:
 
