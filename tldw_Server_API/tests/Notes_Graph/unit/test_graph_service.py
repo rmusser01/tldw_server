@@ -630,6 +630,44 @@ class TestCacheHit:
         assert response.cursor is not None
         assert _decode_cursor(response.cursor)["request"] == expected_hash
 
+    def test_semantic_binding_does_not_fragment_ordinary_continuation_cache(self):
+        center = _uid()
+        neighbors = sorted(_uid() for _ in range(3))
+        db = _mock_db(
+            notes=[_note(center), *(_note(note_id) for note_id in neighbors)],
+            edges=[_manual_edge(center, note_id) for note_id in neighbors],
+            note_count=4,
+        )
+        cache = GraphCache(ttl_seconds=60, max_keys=100)
+        service = NoteGraphService(user_id="u1", db=db, cache=cache)
+        request = NoteGraphRequest(
+            center_note_id=center,
+            edge_types=[EdgeType.manual, EdgeType.semantic],
+            max_nodes=2,
+        )
+        first = service.generate_graph(request)
+        cursor_a = graph_service_module.bind_semantic_cursor(
+            first.cursor,
+            semantic_binding="semantic-binding-a",
+        )
+        cursor_b = graph_service_module.bind_semantic_cursor(
+            first.cursor,
+            semantic_binding="semantic-binding-b",
+        )
+
+        continuation_a = service.generate_graph(
+            request.model_copy(update={"cursor": cursor_a})
+        )
+        cache_size = cache.stats()["size"]
+        db.get_notes_batch.reset_mock()
+        continuation_b = service.generate_graph(
+            request.model_copy(update={"cursor": cursor_b})
+        )
+
+        assert continuation_b == continuation_a
+        assert cache.stats()["size"] == cache_size
+        db.get_notes_batch.assert_not_called()
+
 
 class TestSemanticCandidateGeneration:
     def test_candidate_generation_preserves_public_graph_and_exposes_bounded_pool(

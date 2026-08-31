@@ -251,6 +251,17 @@ def bind_semantic_cursor(
     )
 
 
+def _ordinary_cursor_cache_identity(raw: str | None) -> dict[str, object] | None:
+    """Return the canonical cursor payload without outer semantic state."""
+
+    payload = _decode_cursor(raw)
+    if payload is None:
+        return None
+    ordinary_payload = dict(payload)
+    ordinary_payload.pop("semantic", None)
+    return ordinary_payload
+
+
 def encode_notes_link_cursor(*, payload: dict[str, object]) -> str:
     """Encode one bounded, revision-bound explicit-link page cursor."""
 
@@ -522,7 +533,10 @@ class NoteGraphService:
                 dataset_id=self._dataset_id,
                 graph_revision=graph_revision,
                 parser_version=parser_version,
-                query_params={**normalized_query, "cursor": req.cursor},
+                query_params={
+                    **normalized_query,
+                    "cursor": _ordinary_cursor_cache_identity(req.cursor),
+                },
             )
             cached = self._cache.get(cache_key)
             if cached is not None:
