@@ -527,7 +527,10 @@ async def get_notifications_settings() -> NotificationSettings:
     response_model=NotificationSettings,
     tags=["monitoring"],
     summary="Update notification settings (runtime only)",
-    dependencies=[Depends(RequirePermission(SYSTEM_CONFIGURE))],
+    dependencies=[
+        Depends(RequirePermission(SYSTEM_CONFIGURE)),
+        Depends(require_api_key_scope("write")),
+    ],
 )
 async def update_notifications_settings(
     payload: NotificationSettingsUpdate,
@@ -557,7 +560,10 @@ async def update_notifications_settings(
     response_model=NotificationTestResponse,
     tags=["monitoring"],
     summary="Send a test notification (critical by default)",
-    dependencies=[Depends(RequirePermission(SYSTEM_CONFIGURE))],
+    dependencies=[
+        Depends(RequirePermission(SYSTEM_CONFIGURE)),
+        Depends(require_api_key_scope("write")),
+    ],
 )
 async def send_test_notification(payload: NotificationTestRequest) -> NotificationTestResponse:
     """Send a synthetic test notification using the current settings."""
