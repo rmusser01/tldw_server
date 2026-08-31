@@ -909,6 +909,7 @@ def bootstrap_sync_v2_personal_context(
         schema_version=snapshot.schema_version,
         quotas=snapshot.quotas,
         cursor=snapshot.cursor,
+        sync_transport_cursor=snapshot.sync_transport_cursor,
         integrity_key_id=snapshot.integrity_key.integrity_key_id,
         key_record_id=snapshot.integrity_key.key_record_id,
         wrapped_key_blob=snapshot.integrity_key.wrapped_key_blob,

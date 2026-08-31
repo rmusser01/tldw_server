@@ -105,6 +105,27 @@ content-free identity/key control state and materializes no canonical profile
 content. TDD evidence: focused RED `2 failed, 33 deselected`; focused GREEN
 `2 passed, 33 deselected`; affected bootstrap/endpoint modules `127 passed`.
 TASK-13148 status remains unchanged for controller review.
+
+Transport-watermark correction: successful bootstrap now exposes a separate
+`sync_transport_cursor`, signed with the existing private-pull codec and scoped
+to the authenticated dataset, registered device, negotiated version set, and
+all Personal Context domain/version streams. The original semantic `cursor`
+remains the canonical review/receipt identity and is not accepted by private
+pull. Bootstrap first enrolls only content-free transport domain control state,
+then holds the Sync dataset-row ordering lock while it captures stream
+watermarks and reads the canonical snapshot. This is not a cross-database
+transaction: the required ordering is canonical commit followed by Sync
+envelope append, and relevant envelope appends share the dataset-row lock. The
+watermark is retained with the device key record and semantic cursor so retrying
+the same reviewed plan cannot advance it; token signing time/expiry may refresh
+without skipping a post-review change. The token lifetime is 30 days with five
+minutes of bounded clock skew. Successful quota responses now also include each
+valid requested unknown zero-minimum key at effective value `0`; positive
+unknown requirements remain typed incompatibilities with available value `0`.
+Focused tests cover retained history, post-boundary delivery, scope/version
+rejection, slow review, retry stability, SQLite interleaving, and an executed
+PostgreSQL lock contract. Live PostgreSQL was unavailable. TASK-13148 status is
+intentionally unchanged.
 <!-- SECTION:NOTES:END -->
 
 ## Progress
