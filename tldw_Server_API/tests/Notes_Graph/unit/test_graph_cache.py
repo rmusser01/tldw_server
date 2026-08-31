@@ -99,6 +99,114 @@ class TestMakeCacheKey:
             **{**common, "parser_version": 3}
         )
 
+    def test_ordinary_revision_key_is_independent_of_semantic_revisions(self):
+        ordinary = {
+            "user_id": "user",
+            "dataset_id": "dataset-1",
+            "graph_revision": 7,
+            "parser_version": 2,
+            "query_params": {
+                "center": "note-1",
+                "edge_types": ["manual"],
+                "max_nodes": 300,
+            },
+        }
+        semantic_before = _semantic_key_values()
+        semantic_after = {
+            **semantic_before,
+            "generation_id": "generation-2",
+            "semantic_index_revision": 10,
+            "configuration_revision": 6,
+        }
+
+        ordinary_before = GraphCache.make_revision_key(**ordinary)
+        semantic_key_before = GraphCache.make_semantic_revision_key(**semantic_before)
+        semantic_key_after = GraphCache.make_semantic_revision_key(**semantic_after)
+        ordinary_after = GraphCache.make_revision_key(**ordinary)
+
+        assert semantic_key_before != semantic_key_after
+        assert ordinary_before == ordinary_after
+
+    def test_semantic_final_projection_key_binds_every_immutable_revision(self):
+        common = _semantic_key_values()
+        original = GraphCache.make_semantic_revision_key(**common)
+
+        for field, value in (
+            ("dataset_id", "dataset-2"),
+            ("graph_revision", 8),
+            ("parser_version", 3),
+            ("generation_id", "generation-2"),
+            ("semantic_index_revision", 10),
+            ("configuration_revision", 6),
+            ("compatibility_hash", "compatibility-2"),
+            ("model_revision", "model-revision-2"),
+            ("normalization_version", "normalization-v2"),
+            ("chunker_version", "chunker-v2"),
+        ):
+            assert original != GraphCache.make_semantic_revision_key(
+                **{**common, field: value}
+            )
+
+    @pytest.mark.parametrize(
+        ("path", "value"),
+        [
+            (("semantic_threshold",), 0.8),
+            (("semantic_top_k",), 11),
+            (("center",), "note-2"),
+            (("tag",), "tag-2"),
+            (("source",), "source-2"),
+            (("time_range", "start"), "2026-02-01T00:00:00Z"),
+            (("edge_types",), ["manual", "semantic", "wikilink"]),
+            (("effective_limits", "max_nodes"), 301),
+            (("effective_limits", "max_edges"), 1201),
+            (("effective_limits", "max_degree"), 41),
+            (("effective_limits", "semantic_candidate_nodes"), 49),
+            (("effective_limits", "semantic_candidate_edges"), 49),
+        ],
+    )
+    def test_semantic_key_and_cursor_binding_cover_request_and_effective_caps(
+        self,
+        path: tuple[str, ...],
+        value: object,
+    ) -> None:
+        common = _semantic_key_values()
+        changed_query = _replace_nested(common["query_params"], path, value)
+
+        original_key = GraphCache.make_semantic_revision_key(**common)
+        changed_key = GraphCache.make_semantic_revision_key(
+            **{**common, "query_params": changed_query}
+        )
+        original_binding = GraphCache.make_semantic_cursor_binding(
+            **_semantic_binding_values(common)
+        )
+        changed_binding = GraphCache.make_semantic_cursor_binding(
+            **_semantic_binding_values({**common, "query_params": changed_query})
+        )
+
+        assert changed_key != original_key
+        assert changed_binding != original_binding
+
+    def test_mutable_progress_is_not_part_of_stable_semantic_identity(self):
+        common = _semantic_key_values()
+        progress_before = {
+            "dirty_notes": 10,
+            "failed_notes": 1,
+            "cleanup_pending": True,
+            "state": "updating",
+        }
+        progress_after = {
+            "dirty_notes": 2,
+            "failed_notes": 0,
+            "cleanup_pending": False,
+            "state": "ready",
+        }
+
+        before = GraphCache.make_semantic_revision_key(**common)
+        after = GraphCache.make_semantic_revision_key(**common)
+
+        assert progress_before != progress_after
+        assert before == after
+
 
 class TestThreadSafety:
     """Basic thread safety smoke test."""
@@ -135,3 +243,58 @@ class TestThreadSafety:
         assert errors == []
         s = cache.stats()
         assert s["size"] <= 1000
+
+
+def _semantic_key_values() -> dict[str, object]:
+    return {
+        "user_id": "user",
+        "dataset_id": "dataset-1",
+        "graph_revision": 7,
+        "parser_version": 2,
+        "generation_id": "generation-1",
+        "semantic_index_revision": 9,
+        "configuration_revision": 5,
+        "compatibility_hash": "compatibility-1",
+        "model_revision": "model-revision-1",
+        "normalization_version": "normalization-v1",
+        "chunker_version": "chunker-v1",
+        "query_params": {
+            "center": "note-1",
+            "edge_types": ["manual", "semantic"],
+            "semantic_threshold": 0.75,
+            "semantic_top_k": 10,
+            "tag": "tag-1",
+            "source": "source-1",
+            "time_range": {"start": "2026-01-01T00:00:00Z", "end": None},
+            "time_range_field": "updated_at",
+            "effective_limits": {
+                "max_nodes": 300,
+                "max_edges": 1_200,
+                "max_degree": 40,
+                "semantic_candidate_nodes": 50,
+                "semantic_candidate_edges": 50,
+            },
+        },
+    }
+
+
+def _semantic_binding_values(values: dict[str, object]) -> dict[str, object]:
+    return {key: value for key, value in values.items() if key != "user_id"}
+
+
+def _replace_nested(
+    original: object,
+    path: tuple[str, ...],
+    value: object,
+) -> dict[str, object]:
+    assert isinstance(original, dict)
+    changed = dict(original)
+    cursor = changed
+    for part in path[:-1]:
+        nested = cursor[part]
+        assert isinstance(nested, dict)
+        copied = dict(nested)
+        cursor[part] = copied
+        cursor = copied
+    cursor[path[-1]] = value
+    return changed

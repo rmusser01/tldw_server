@@ -29,6 +29,9 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     InputError,
 )
 from tldw_Server_API.app.core.Notes_Graph.graph_cache import GraphCache
+from tldw_Server_API.app.core.Notes_Graph.semantic_settings import (
+    DEFAULT_SEMANTIC_INDEX_SETTINGS,
+)
 
 # ---------------------------------------------------------------------------
 # Config constants (env-overridable, matching PRD §11)
@@ -78,6 +81,7 @@ _SOURCE_CAP = 50
 _CURSOR_MAX_ENCODED_BYTES = 8 * 1024
 _CURSOR_MAX_DECODED_BYTES = 4 * 1024
 _LINK_CURSOR_MAX_BYTES = 4 * 1024
+_SEMANTIC_ADMISSION_ALLOWANCE = DEFAULT_SEMANTIC_INDEX_SETTINGS.max_query_neighbors
 
 
 class GraphProjectionNotReadyError(InputError):
@@ -118,6 +122,7 @@ def _encode_cursor(
     graph_revision: int | None = None,
     parser_version: int | None = None,
     request_hash: str | None = None,
+    semantic_binding: str | None = None,
 ) -> str:
     payload_data: dict[str, object] = {
         "layer": layer,
@@ -135,6 +140,8 @@ def _encode_cursor(
                 "request": request_hash,
             }
         )
+        if semantic_binding is not None:
+            payload_data["semantic"] = semantic_binding
     payload = json.dumps(payload_data, sort_keys=True, separators=(",", ":")).encode()
     if len(payload) > _CURSOR_MAX_DECODED_BYTES:
         raise InputError("Graph cursor payload is too large")
@@ -151,6 +158,7 @@ def _decode_cursor(
     expected_graph_revision: int | None = None,
     expected_parser_version: int | None = None,
     expected_request_hash: str | None = None,
+    expected_semantic_binding: str | None = None,
 ) -> dict | None:
     if not raw:
         return None
@@ -180,19 +188,54 @@ def _decode_cursor(
         raise InputError("Invalid graph cursor")
     if not isinstance(payload["last_id"], str):
         raise InputError("Invalid graph cursor")
-    expected = {
+    ordinary_expected = {
         "dataset": expected_dataset_hash,
         "revision": expected_graph_revision,
         "parser": expected_parser_version,
         "request": expected_request_hash,
     }
-    if any(value is not None for value in expected.values()):
+    if any(value is not None for value in ordinary_expected.values()):
         if payload.get("v") != 1 or any(
             payload.get(field) != value
-            for field, value in expected.items()
+            for field, value in ordinary_expected.items()
         ):
             raise InputError("Graph cursor is stale or mismatched")
+    if expected_semantic_binding is not None and (
+        payload.get("v") != 1
+        or payload.get("semantic") != expected_semantic_binding
+    ):
+        raise InputError("Graph cursor is stale or mismatched")
     return payload
+
+
+def bind_semantic_cursor(
+    raw: str | None,
+    *,
+    semantic_binding: str,
+) -> str | None:
+    """Attach an immutable semantic binding to an ordinary graph cursor."""
+
+    if raw is None:
+        return None
+    if not semantic_binding:
+        raise InputError("Graph semantic cursor binding is invalid")
+    payload = _decode_cursor(raw)
+    if payload is None or payload.get("v") != 1:
+        raise InputError("Graph cursor is stale or mismatched")
+    for field in ("dataset", "revision", "parser", "request"):
+        if payload.get(field) is None:
+            raise InputError("Graph cursor is stale or mismatched")
+    return _encode_cursor(
+        payload["layer"],
+        payload["pos"],
+        payload["last_id"],
+        payload["neighbor_pos"],
+        dataset_hash=payload["dataset"],
+        graph_revision=payload["revision"],
+        parser_version=payload["parser"],
+        request_hash=payload["request"],
+        semantic_binding=semantic_binding,
+    )
 
 
 def encode_notes_link_cursor(*, payload: dict[str, object]) -> str:
@@ -311,11 +354,26 @@ class NoteGraphService:
     # Main entry
     # ------------------------------------------------------------------
 
-    def generate_graph(self, req: NoteGraphRequest) -> NoteGraphResponse:
+    def generate_graph(
+        self,
+        req: NoteGraphRequest,
+        *,
+        semantic_candidate_overfetch: int = 0,
+    ) -> NoteGraphResponse:
         """Build and return a bounded note graph."""
         t0 = time.monotonic()
 
-        wanted = set(req.edge_types) if req.edge_types else set(EdgeType)
+        if (
+            type(semantic_candidate_overfetch) is not int
+            or semantic_candidate_overfetch < 0
+        ):
+            raise InputError("Semantic candidate overfetch must be a non-negative integer")
+        candidate_allowance = min(
+            semantic_candidate_overfetch,
+            _SEMANTIC_ADMISSION_ALLOWANCE,
+        )
+        resolved_edge_types = req.resolved_edge_types
+        wanted = set(resolved_edge_types) - {EdgeType.semantic}
         projection_store = self._projection_store()
         if projection_store is None:
             graph_revision = 0
@@ -333,13 +391,25 @@ class NoteGraphService:
                 )
 
         # 1. Resolve effective limits before any graph expansion work.
-        eff_max_nodes, eff_max_edges, eff_max_degree, radius_cap_applied = self._resolve_effective_limits(req)
+        public_max_nodes, public_max_edges, eff_max_degree, radius_cap_applied = (
+            self._resolve_effective_limits(req)
+        )
+        eff_max_nodes = min(
+            public_max_nodes + candidate_allowance,
+            _PROJECTION_QUERY_MAX_NOTES,
+        )
+        eff_max_edges = public_max_edges + candidate_allowance
         active_note_count = self._db.count_user_notes(include_deleted=False)
         all_notes_note_cap = min(max(1, ALL_NOTES_NOTE_CAP()), eff_max_nodes)
+        ordinary_edge_types = [
+            edge_type.value
+            for edge_type in resolved_edge_types
+            if edge_type != EdgeType.semantic
+        ]
         normalized_query = {
             "center": req.center_note_id,
             "radius": req.radius,
-            "edge_types": [e.value for e in req.edge_types] if req.edge_types else None,
+            "edge_types": ordinary_edge_types if req.edge_types else None,
             "tag": req.tag,
             "source": req.source,
             "time_range": req.time_range.model_dump(mode="json") if req.time_range else None,
@@ -349,6 +419,8 @@ class NoteGraphService:
             "max_degree": eff_max_degree,
             "allow_heavy": req.allow_heavy and self._allow_heavy_limits,
         }
+        if candidate_allowance:
+            normalized_query["semantic_candidate_overfetch"] = candidate_allowance
         dataset_hash = hashlib.sha256(self._dataset_id.encode()).hexdigest()
         request_hash = hashlib.sha256(
             json.dumps(normalized_query, sort_keys=True, separators=(",", ":")).encode()

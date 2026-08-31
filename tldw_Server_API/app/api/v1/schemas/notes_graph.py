@@ -9,7 +9,18 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
+
+from tldw_Server_API.app.core.Notes_Graph.semantic_settings import (
+    DEFAULT_SEMANTIC_INDEX_SETTINGS,
+)
 
 
 class EdgeType(str, Enum):
@@ -18,6 +29,27 @@ class EdgeType(str, Enum):
     backlink = "backlink"
     tag_membership = "tag_membership"
     source_membership = "source_membership"
+    semantic = "semantic"
+
+
+LEGACY_EDGE_TYPES: frozenset[EdgeType] = frozenset(
+    {
+        EdgeType.manual,
+        EdgeType.wikilink,
+        EdgeType.backlink,
+        EdgeType.tag_membership,
+        EdgeType.source_membership,
+    }
+)
+_SEMANTIC_MAX_TOP_K = DEFAULT_SEMANTIC_INDEX_SETTINGS.max_query_neighbors
+_SEMANTIC_MAX_EVIDENCE_PAIRS = 3
+_SEMANTIC_MAX_EXCERPT_CODE_POINTS = 480
+_SEMANTIC_MAX_EDGE_EVIDENCE_CODE_POINTS = 2_880
+_SEMANTIC_MAX_RESPONSE_EVIDENCE_BYTES = 256 * 1024
+
+
+def _canonical_edge_types(values: list[EdgeType]) -> tuple[EdgeType, ...]:
+    return tuple(sorted(set(values), key=lambda edge_type: edge_type.value))
 
 
 class GraphFormat(str, Enum):
@@ -47,6 +79,111 @@ class GraphNode(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class _StrictSemanticModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class SemanticExcerpt(_StrictSemanticModel):
+    """One current canonical Note excerpt with field-relative offsets."""
+
+    field: Literal["title", "content"]
+    start_code_point: int = Field(ge=0)
+    end_code_point: int = Field(gt=0)
+    text: str = Field(max_length=_SEMANTIC_MAX_EXCERPT_CODE_POINTS)
+
+    @model_validator(mode="after")
+    def _validate_offsets(self) -> SemanticExcerpt:
+        if self.end_code_point <= self.start_code_point:
+            raise ValueError("semantic excerpt offsets must define a non-empty range")
+        if len(self.text) != self.end_code_point - self.start_code_point:
+            raise ValueError("semantic excerpt text must match its code-point range")
+        return self
+
+
+class SemanticExcerptPair(_StrictSemanticModel):
+    source: SemanticExcerpt
+    target: SemanticExcerpt
+
+
+class SemanticEdgeEvidence(_StrictSemanticModel):
+    """Stable provenance and bounded current excerpts for one semantic edge."""
+
+    similarity: float = Field(ge=0.0, le=1.0, allow_inf_nan=False)
+    qualitative_band: Literal["low", "moderate", "high", "very_high"]
+    source_note_id: str = Field(min_length=1)
+    target_note_id: str = Field(min_length=1)
+    source_content_version: int = Field(ge=1)
+    target_content_version: int = Field(ge=1)
+    generation_id: str = Field(min_length=1)
+    semantic_index_revision: int = Field(ge=0)
+    configuration_revision: int = Field(ge=0)
+    normalization_version: str = Field(min_length=1)
+    chunker_version: str = Field(min_length=1)
+    provider_label: str = Field(min_length=1)
+    model_label: str = Field(min_length=1)
+    model_revision: str | None = None
+    excerpt_pairs: list[SemanticExcerptPair] = Field(
+        default_factory=list,
+        max_length=_SEMANTIC_MAX_EVIDENCE_PAIRS,
+    )
+
+
+SemanticTruncationReason = Literal[
+    "semantic_candidates",
+    "semantic_nodes",
+    "semantic_edges",
+    "semantic_evidence_bytes",
+]
+
+
+class SemanticGraphStatus(_StrictSemanticModel):
+    """Fresh semantic state projected beside a stable graph response."""
+
+    available: bool
+    state: Literal[
+        "off",
+        "preparing",
+        "ready",
+        "updating",
+        "needs_attention",
+        "unavailable",
+        "focus_required",
+    ]
+    detail_reason: str | None = None
+    generation_id: str | None = None
+    semantic_index_revision: int | None = Field(default=None, ge=0)
+    configuration_revision: int | None = Field(default=None, ge=0)
+    active_notes: int = Field(default=0, ge=0)
+    indexed_notes: int = Field(default=0, ge=0)
+    dirty_notes: int = Field(default=0, ge=0)
+    excluded_notes: int = Field(default=0, ge=0)
+    failed_notes: int = Field(default=0, ge=0)
+    effective_top_k: int | None = Field(default=None, ge=1, le=_SEMANTIC_MAX_TOP_K)
+    effective_threshold: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        allow_inf_nan=False,
+    )
+    max_top_k: int = Field(ge=1, le=_SEMANTIC_MAX_TOP_K)
+    max_admission_nodes: int = Field(ge=0, le=_SEMANTIC_MAX_TOP_K)
+    max_admission_edges: int = Field(ge=0, le=_SEMANTIC_MAX_TOP_K)
+    max_evidence_pairs: int = Field(ge=0, le=_SEMANTIC_MAX_EVIDENCE_PAIRS)
+    max_excerpt_code_points: int = Field(
+        ge=0,
+        le=_SEMANTIC_MAX_EXCERPT_CODE_POINTS,
+    )
+    max_edge_evidence_code_points: int = Field(
+        ge=0,
+        le=_SEMANTIC_MAX_EDGE_EVIDENCE_CODE_POINTS,
+    )
+    max_response_evidence_bytes: int = Field(
+        ge=0,
+        le=_SEMANTIC_MAX_RESPONSE_EVIDENCE_BYTES,
+    )
+    truncated_by: list[SemanticTruncationReason] = Field(default_factory=list)
+
+
 class GraphEdge(BaseModel):
     id: str = Field(..., description="Opaque edge id")
     source: str = Field(..., description="Source node id")
@@ -55,6 +192,29 @@ class GraphEdge(BaseModel):
     directed: bool = Field(..., description="Whether the edge is directed")
     weight: float | None = Field(1.0, ge=0.0, description="Optional weight; defaults to 1.0")
     label: str | None = Field(None, description="Optional label for the edge")
+    evidence: SemanticEdgeEvidence | None = None
+
+    @model_validator(mode="after")
+    def _validate_semantic_evidence(self) -> GraphEdge:
+        if self.type == EdgeType.semantic:
+            if self.directed:
+                raise ValueError("semantic edges must be undirected")
+            if self.evidence is None:
+                raise ValueError("semantic edges require typed evidence")
+            if self.evidence.source_note_id != self.source:
+                raise ValueError("semantic evidence source does not match the edge")
+            if self.evidence.target_note_id != self.target:
+                raise ValueError("semantic evidence target does not match the edge")
+        elif self.evidence is not None:
+            raise ValueError("semantic evidence is only valid on semantic edges")
+        return self
+
+    @model_serializer(mode="wrap")
+    def _serialize_without_empty_evidence(self, handler):
+        data = handler(self)
+        if self.evidence is None:
+            data.pop("evidence", None)
+        return data
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -78,6 +238,14 @@ class NoteGraphResponse(BaseModel):
     all_notes_note_cap: int = Field(..., ge=1)
     all_notes_eligible: bool
     suggestions_authorized: bool = False
+    semantic_status: SemanticGraphStatus | None = None
+
+    @model_serializer(mode="wrap")
+    def _serialize_without_empty_semantic_status(self, handler):
+        data = handler(self)
+        if self.semantic_status is None:
+            data.pop("semantic_status", None)
+        return data
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -266,6 +434,13 @@ class NoteGraphRequest(BaseModel):
     max_nodes: int | None = Field(default=None, ge=1)
     max_edges: int | None = Field(default=None, ge=0)
     max_degree: int | None = Field(default=None, ge=1)
+    semantic_top_k: int | None = Field(default=None, ge=1, le=_SEMANTIC_MAX_TOP_K)
+    semantic_threshold: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        allow_inf_nan=False,
+    )
     format: GraphFormat = GraphFormat.default
     cursor: str | None = None
     allow_heavy: bool = False
@@ -283,7 +458,7 @@ class NoteGraphRequest(BaseModel):
         # Accept CSV string or repeated values that arrive as list[str]
         if isinstance(v, str):
             parts = [p.strip() for p in v.split(",") if p.strip()]
-            return [EdgeType(p) for p in parts]
+            return list(_canonical_edge_types([EdgeType(p) for p in parts]))
         if isinstance(v, list):
             out: list[EdgeType] = []
             for item in v:
@@ -291,8 +466,26 @@ class NoteGraphRequest(BaseModel):
                     out.append(item)
                 elif isinstance(item, str):
                     out.append(EdgeType(item))
-            return out
+            return list(_canonical_edge_types(out))
         return v
+
+    @property
+    def resolved_edge_types(self) -> tuple[EdgeType, ...]:
+        if not self.edge_types:
+            return _canonical_edge_types(list(LEGACY_EDGE_TYPES))
+        return _canonical_edge_types(self.edge_types)
+
+    @property
+    def semantic_requested(self) -> bool:
+        return EdgeType.semantic in self.resolved_edge_types and bool(self.edge_types)
+
+    @model_validator(mode="after")
+    def _validate_semantic_controls(self) -> NoteGraphRequest:
+        if (
+            self.semantic_top_k is not None or self.semantic_threshold is not None
+        ) and not self.semantic_requested:
+            raise ValueError("semantic controls require semantic in edge_types")
+        return self
 
     model_config = ConfigDict(
         json_schema_extra={
