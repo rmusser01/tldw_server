@@ -164,13 +164,30 @@ class SyncV2Store:
     def enroll_dataset(self, dataset: SyncDatasetCreate) -> SyncDataset:
         return self.db.enroll_dataset(dataset)
 
-    def upsert_personal_context_dataset_binding(
+    def bind_personal_context_dataset(
         self,
-        dataset: SyncDatasetCreate,
+        *,
+        dataset_id: str,
+        user_id: str,
+        expected_profile_id: str | None,
+        expected_authority_id: str | None,
+        profile_id: str,
+        authority_id: str,
+        integrity_key_id: str,
+        purge_generation: int,
     ) -> SyncDataset:
-        """Apply the server-authoritative Personal Context binding update."""
+        """Merge the server-authoritative binding without rewriting other state."""
 
-        return self.db.enroll_dataset(dataset, preserve_personal_context=False)
+        return self.db.bind_personal_context_dataset(
+            dataset_id=dataset_id,
+            user_id=user_id,
+            expected_profile_id=expected_profile_id,
+            expected_authority_id=expected_authority_id,
+            profile_id=profile_id,
+            authority_id=authority_id,
+            integrity_key_id=integrity_key_id,
+            purge_generation=purge_generation,
+        )
 
     def get_dataset(
         self,

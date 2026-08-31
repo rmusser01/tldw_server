@@ -7,7 +7,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from .errors import SyncStoreError
+from .errors import SyncIdempotencyConflictError, SyncStoreError
 from .models import (
     DEFAULT_M1_ENCRYPTION_POLICY,
     M1_SYNC_DOMAINS,
@@ -16,7 +16,6 @@ from .models import (
     NOTES_ORGANIZATION_DOMAINS,
     NOTES_TASK_SYNC_DOMAINS,
     SyncDataset,
-    SyncDatasetCreate,
     SyncDevice,
     SyncKeyRecord,
     SyncKeyRecordCreate,
@@ -581,30 +580,31 @@ class SyncV2ProfileManager:
             or existing_state.get("authority_id") != authority_id
         ):
             raise PersonalContextBootstrapError("personal_context_authority_mismatch")
-        metadata = dict(dataset.metadata)
-        metadata["personal_context"] = {
-            "profile_id": manifest.profile_id,
-            "authority_id": authority_id,
-            "integrity_key_id": integrity_key_id,
-            "purge_generation": purge_generation,
-            "link_state": (
-                existing_state.get("link_state")
-                if existing_state is not None
-                else _PERSONAL_CONTEXT_LINK_PENDING
-            ),
-        }
-        return self.store.upsert_personal_context_dataset_binding(
-            SyncDatasetCreate(
+        try:
+            return self.store.bind_personal_context_dataset(
                 dataset_id=dataset.dataset_id,
-                owner_user_id=dataset.owner_user_id,
-                scope_type=dataset.scope_type,
-                encryption_policy=dataset.encryption_policy,
-                domains=list(dict.fromkeys((*dataset.domains, *PERSONAL_CONTEXT_SYNC_DOMAINS))),
-                workspace_id=dataset.workspace_id,
-                metadata=metadata,
-                archived_at=dataset.archived_at,
+                user_id=user_id,
+                expected_profile_id=(
+                    str(existing_state["profile_id"])
+                    if existing_state is not None
+                    else None
+                ),
+                expected_authority_id=(
+                    str(existing_state["authority_id"])
+                    if existing_state is not None
+                    else None
+                ),
+                profile_id=str(manifest.profile_id),
+                authority_id=authority_id,
+                integrity_key_id=integrity_key_id,
+                purge_generation=purge_generation,
             )
-        )
+        except SyncStoreError as exc:
+            if str(exc) == "personal_context_authority_mismatch":
+                raise PersonalContextBootstrapError(
+                    "personal_context_authority_mismatch"
+                ) from exc
+            raise
 
     def _device_integrity_key_record(
         self,
@@ -667,27 +667,49 @@ class SyncV2ProfileManager:
                 user_id=user_id,
                 key_record_id=record.key_record_id,
             )
-        return self.store.store_key_record(
-            SyncKeyRecordCreate(
-                key_record_id=(
-                    f"personal-context-integrity:{dataset.dataset_id}:"
-                    f"{device.device_id}:{integrity_key_id}:"
-                    f"{wrapping_key_fingerprint[:16]}"
-                ),
-                dataset_id=dataset.dataset_id,
-                user_id=user_id,
-                device_id=device.device_id,
-                key_purpose=_PERSONAL_CONTEXT_KEY_PURPOSE,
-                wrapped_key_blob=wrapped_key_blob,
-                kdf_metadata={
-                    "integrity_key_id": integrity_key_id,
-                    "wrapping_key_fingerprint": wrapping_key_fingerprint,
-                },
-                encryption_policy="device_wrapped_v1",
-                wrapped_for="device",
-                rewrap_status="complete",
-            )
+        requested = SyncKeyRecordCreate(
+            key_record_id=(
+                f"personal-context-integrity:{dataset.dataset_id}:"
+                f"{device.device_id}:{integrity_key_id}:"
+                f"{wrapping_key_fingerprint[:16]}"
+            ),
+            dataset_id=dataset.dataset_id,
+            user_id=user_id,
+            device_id=device.device_id,
+            key_purpose=_PERSONAL_CONTEXT_KEY_PURPOSE,
+            wrapped_key_blob=wrapped_key_blob,
+            kdf_metadata={
+                "integrity_key_id": integrity_key_id,
+                "wrapping_key_fingerprint": wrapping_key_fingerprint,
+            },
+            encryption_policy="device_wrapped_v1",
+            wrapped_for="device",
+            rewrap_status="complete",
         )
+        try:
+            return self.store.store_key_record(requested)
+        except SyncIdempotencyConflictError as exc:
+            winner = next(
+                (
+                    record
+                    for record in self.store.list_key_records(
+                        dataset.dataset_id,
+                        user_id=user_id,
+                        device_id=device.device_id,
+                        key_purpose=_PERSONAL_CONTEXT_KEY_PURPOSE,
+                    )
+                    if _matches_personal_context_integrity_key_record(
+                        record,
+                        requested=requested,
+                    )
+                ),
+                None,
+            )
+            if winner is not None:
+                return winner
+            raise PersonalContextBootstrapError(
+                "personal_context_key_custody_unavailable"
+            ) from exc
 
     def profile_status(
         self,
@@ -1317,6 +1339,30 @@ def _personal_context_dataset_state(dataset: SyncDataset) -> dict[str, object] |
     ):
         return None
     return dict(state)
+
+
+def _matches_personal_context_integrity_key_record(
+    record: SyncKeyRecord,
+    *,
+    requested: SyncKeyRecordCreate,
+) -> bool:
+    """Accept only the exact durable winner of a randomized wrapper insert race."""
+
+    return (
+        record.key_record_id == requested.key_record_id
+        and record.dataset_id == requested.dataset_id
+        and record.user_id == requested.user_id
+        and record.device_id == requested.device_id
+        and record.key_purpose == requested.key_purpose
+        and record.wrapped_for == "device"
+        and record.rewrap_status == "complete"
+        and record.revoked_at is None
+        and record.encryption_policy == "device_wrapped_v1"
+        and record.kdf_metadata.get("integrity_key_id")
+        == requested.kdf_metadata["integrity_key_id"]
+        and record.kdf_metadata.get("wrapping_key_fingerprint")
+        == requested.kdf_metadata["wrapping_key_fingerprint"]
+    )
 
 
 __all__ = [

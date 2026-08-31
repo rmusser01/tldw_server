@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import base64
 import inspect
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
@@ -28,8 +29,10 @@ from tldw_Server_API.app.core.Sync.v2.materializers.personal_context import (
 )
 from tldw_Server_API.app.core.Sync.v2.models import (
     PERSONAL_CONTEXT_SYNC_DOMAINS,
+    SyncDatasetCreate,
     SyncEnvelopeCreate,
 )
+from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
 from tldw_Server_API.app.core.Sync.v2.service import (
     PersonalContextSyncCapabilities,
     SyncV2Service,
@@ -284,6 +287,60 @@ def test_bootstrap_returns_registered_device_wrapped_integrity_key_only(tmp_path
     assert _INTEGRITY_KEY.hex() not in str(bootstrap)
 
 
+def test_concurrent_real_rsa_bootstraps_share_one_durable_wrapper(tmp_path: Path) -> None:
+    """Randomized RSA wrappers converge on the durable winner after an insert race."""
+
+    service, _canonical = _service(tmp_path)
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    public_key = private_key.public_key().public_bytes(
+        serialization.Encoding.PEM,
+        serialization.PublicFormat.SubjectPublicKeyInfo,
+    ).decode("utf-8")
+    service.register_device(
+        user_id="user-a",
+        display_name="Chatbook A",
+        client_type="chatbook",
+        device_id="device-a",
+        capabilities={
+            "supported_adapter_versions": {
+                domain: [1] for domain in PERSONAL_CONTEXT_SYNC_DOMAINS
+            },
+            "personal_context_wrapping_public_key": public_key,
+        },
+    )
+    wrapper_barrier = threading.Barrier(2)
+
+    def synchronized_real_wrapper(**kwargs: object) -> str:
+        wrapper_barrier.wait(timeout=5)
+        return _wrap_personal_context_integrity_key(**kwargs)
+
+    service.personal_context_key_wrapper = synchronized_real_wrapper
+    service.personal_context_key_fingerprint = _personal_context_wrapping_key_fingerprint
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first, second = tuple(executor.map(lambda _index: _bootstrap(service), range(2)))
+
+    records = service.store.list_key_records(
+        first.dataset_id,
+        user_id="user-a",
+        device_id="device-a",
+        key_purpose="personal_context_integrity",
+    )
+    assert len(records) == 1
+    assert first.integrity_key.wrapped_key_blob == records[0].wrapped_key_blob
+    assert second.integrity_key.wrapped_key_blob == records[0].wrapped_key_blob
+    ciphertext = base64.urlsafe_b64decode(records[0].wrapped_key_blob.split(":", 1)[1])
+    assert private_key.decrypt(
+        ciphertext,
+        padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=b"personal-context:personal-context-integrity-v1",
+        ),
+    ) == _INTEGRITY_KEY
+    assert _INTEGRITY_KEY.hex() not in str((first, second, records))
+
+
 def test_bootstrap_requires_transactional_canonical_snapshot(tmp_path: Path) -> None:
     """A legacy canonical service cannot bypass the atomic snapshot boundary."""
 
@@ -516,6 +573,78 @@ def test_generic_reenrollment_preserves_server_owned_personal_context_state(
     assert binding["profile_id"] == bootstrap.manifest.profile_id
     assert binding["integrity_key_id"] == bootstrap.integrity_key.integrity_key_id
     assert binding["purge_generation"] == bootstrap.purge_generation
+
+
+def test_personal_context_binding_preserves_update_committed_before_its_lock(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A binding refresh merges the locked row instead of a stale profile snapshot."""
+
+    service, _canonical = _service(tmp_path)
+    first = _bootstrap(service)
+    original_bind = service.store.bind_personal_context_dataset
+    interleaved = False
+
+    def bind_after_ordinary_update(**kwargs: object):
+        nonlocal interleaved
+        if not interleaved:
+            interleaved = True
+            current = service.store.get_dataset(
+                str(kwargs["dataset_id"]),
+                owner_user_id="user-a",
+            )
+            assert current is not None
+            service.store.enroll_dataset(
+                SyncDatasetCreate(
+                    dataset_id=current.dataset_id,
+                    owner_user_id=current.owner_user_id,
+                    scope_type=current.scope_type,
+                    encryption_policy=current.encryption_policy,
+                    domains=[*current.domains, "source_cache.entry"],
+                    workspace_id=current.workspace_id,
+                    metadata={**current.metadata, "ordinary_update": "keep"},
+                    archived_at=current.archived_at,
+                )
+            )
+        return original_bind(**kwargs)
+
+    monkeypatch.setattr(
+        service.store,
+        "bind_personal_context_dataset",
+        bind_after_ordinary_update,
+    )
+    refreshed = _bootstrap(service)
+
+    durable = service.store.get_dataset(first.dataset_id, owner_user_id="user-a")
+    assert refreshed.dataset_id == first.dataset_id
+    assert durable is not None
+    assert durable.metadata["ordinary_update"] == "keep"
+    assert "source_cache.entry" in durable.domains
+
+
+def test_personal_context_binding_rejects_profile_or_authority_mismatch_under_lock(
+    tmp_path: Path,
+) -> None:
+    """The narrow binding operation refuses a state changed before its row lock."""
+
+    service, _canonical = _service(tmp_path)
+    bootstrap = _bootstrap(service)
+    dataset = service.store.get_dataset(bootstrap.dataset_id, owner_user_id="user-a")
+    assert dataset is not None
+    binding = dataset.metadata["personal_context"]
+
+    with pytest.raises(SyncStoreError, match="personal_context_authority_mismatch"):
+        service.store.bind_personal_context_dataset(
+            dataset_id=dataset.dataset_id,
+            user_id="user-a",
+            expected_profile_id="other-profile",
+            expected_authority_id=str(binding["authority_id"]),
+            profile_id=str(binding["profile_id"]),
+            authority_id=str(binding["authority_id"]),
+            integrity_key_id=str(binding["integrity_key_id"]),
+            purge_generation=int(binding["purge_generation"]),
+        )
 
 
 def test_factory_wraps_integrity_key_to_registered_device_public_key() -> None:
