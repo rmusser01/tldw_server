@@ -4,7 +4,7 @@ title: Implement Notes embedding index and semantic graph edges
 status: In Progress
 assignee: []
 created_date: 2026-08-27 02:20
-updated_date: 2026-08-30 19:42
+updated_date: 2026-08-31 00:59
 labels:
 - notes
 - notes-graph
@@ -115,11 +115,12 @@ Approved executable plan: `Docs/superpowers/plans/2026-08-29-notes-semantic-inde
 2026-08-30 Task 4 Fix Round 4 complete from 1b0dcc0d91: deferred ordinary shielded logger-task exceptions to the existing result-precedence block so original provider/accounting cancellation wins without retrying the append-only logger or changing truthful status; added two cancellation regressions, a visible non-cancelled logger exception control, and Python 3.10 capability guards limited to cancellation count/message details. Verification: focused RED 2 failed/1 passed; final Task 4 plus orchestrator 92 passed in 6.82s; settings plus OpenAI/Google/HuggingFace 92 passed in 5.54s; logger-exception/repeated-cancellation selectors 40/40 across 10 fresh processes (55.95s aggregate pytest runtime); Python 3.10.20 production-finalizer harness 3/3 with full pytest environment unavailable; Ruff passed both touched Python files; Bandit scanned 846 lines with 0 findings/0 skips; git diff --check passed. Report: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-4-report.md. Residual risk is limited to the absence of a full dependency-backed Python 3.10 suite and live provider calls.
 - 2026-08-30 Task 4 final: bounded review 5/5 clean after four fix rounds. Canonical chunking, durable endpoint-proven embedding execution, no-redirect OpenAI/Google/HuggingFace transports, one-request Google batches with pinned dimensions, exact endpoint/revision fencing, revision-bearing dimension CAS, cache-aware usage accounting, and cancellation-safe single-write finalization are complete. Final verification: 92 Task 4/orchestrator tests, 92 settings/adapter tests, 40/40 fresh-process cancellation checks, Python 3.10 finalizer harness 4/4, Ruff/Bandit/diff checks clean. Implementation range: `fcb7f2a207..7ad9b215b6`; independent review clean.
 - 2026-08-30 Task 5 complete: Added a dedicated authoritative Notes vector facade with vector-only ChromaDB and fixed-dimension pgvector backends, raw cosine semantics, strict generation/owner/dataset binding, fail-closed cleanup confirmation, immutable schema-scoped forced-RLS storage, independently bounded iterative-HNSW retrieval, and required live pgvector CI. Bounded review 5/5 clean after four fix rounds. Final verification: 183 complete vector/settings/live-backend tests, 52 adjacent persistence tests, repeated concurrency/event-loop checks, Ruff, Bandit, Python 3.10 compilation, CI YAML/docs, and diff checks clean. Implementation range: `841d7c4466..0b0e385679`; report: `.superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-5-report.md`.
+- 2026-08-30 Task 6 complete: Added fenced initial/incremental Notes semantic generation publication with durable v66 obsolete-vector cleanup, cancellation-reconciled transactions, exact endpoint/credential/model/configuration authority, bounded provider accounting, active per-Note delta counters, atomic convergence reseeding, production cleanup rearm, and SQLite/PostgreSQL property/race/RLS coverage. Bounded review 5/5 clean after four fix rounds. Final verification: 106 exact Task 6 tests, 141 adjacent persistence/migration/lifecycle/Sync tests, 134 vector tests with 6 expected capability skips, property seeds 3/17/101, Ruff, Bandit, Python 3.10 compilation, and diff checks passed. Implementation range: `ff2a0ce102..40a06e3bde`; report: `.superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-6-report.md`.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-TASK-13134 remains in progress after completion of implementation Tasks 1 through 5. Dedicated ChromaDB/pgvector semantic vector storage is complete and independently reviewed; Task 6 fenced generation build and incremental publication is next.
+TASK-13134 remains in progress after completion of implementation Tasks 1 through 6. Owner-scoped persistence, Note lifecycle hooks, capability/RBAC controls, canonical chunking and provider execution, vector-only ChromaDB/pgvector storage, and fenced generation publication with crash-durable cleanup are complete and independently reviewed. Task 7 Jobs, nested API, startup recovery, and maintenance wiring is next.
 <!-- SECTION:FINAL_SUMMARY:END -->
 ## Definition of Done
 <!-- DOD:BEGIN -->
