@@ -296,6 +296,58 @@ class _PostgresPersonalContextReceiptBackend:
         return QueryResult(rows=[], rowcount=1)
 
 
+class _PostgresPersonalContextBindingBackend:
+    config = DatabaseConfig(backend_type=BackendType.POSTGRESQL)
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, tuple[Any, ...] | None, Any]] = []
+        self.dataset_row = {
+            "dataset_id": "dataset-1",
+            "owner_user_id": "user-1",
+            "scope_type": "personal",
+            "encryption_policy": "server_trusted_v1",
+            "domain_set_json": json.dumps(["notes.note"]),
+            "metadata_json": json.dumps(
+                {
+                    "ordinary_update": "keep",
+                    "personal_context": {
+                        "profile_id": "profile-1",
+                        "authority_id": "authority-1",
+                        "integrity_key_id": "personal-context-integrity-v1",
+                        "purge_generation": 0,
+                        "link_state": "complete",
+                    },
+                }
+            ),
+            "workspace_id": None,
+            "created_at": "2026-05-10T00:00:00+00:00",
+            "updated_at": "2026-05-10T00:00:00+00:00",
+            "archived_at": None,
+        }
+
+    @contextmanager
+    def transaction(self, connection=None):
+        yield connection or object()
+
+    def execute(
+        self,
+        statement: str,
+        params: tuple[Any, ...] | None = None,
+        connection: Any = None,
+    ) -> QueryResult:
+        normalized = " ".join(statement.split())
+        self.calls.append((normalized, params, connection))
+        if normalized.startswith("SELECT * FROM sync_datasets"):
+            return QueryResult(rows=[dict(self.dataset_row)], rowcount=1)
+        if normalized.startswith("UPDATE sync_datasets"):
+            assert params is not None
+            self.dataset_row["domain_set_json"] = params[0]
+            self.dataset_row["metadata_json"] = params[1]
+            self.dataset_row["updated_at"] = params[2]
+            return QueryResult(rows=[], rowcount=1)
+        return QueryResult(rows=[], rowcount=1)
+
+
 def _inject_postgres_mutation_group_race(
     sync_store: SyncV2Store,
     monkeypatch: pytest.MonkeyPatch,
@@ -2801,6 +2853,49 @@ def test_postgres_personal_context_receipt_rejects_transition_observed_under_loc
         statement.startswith("INSERT INTO sync_personal_context_link_receipts")
         for statement, _params, _connection in backend.calls
     )
+
+
+def test_postgres_personal_context_binding_locks_and_merges_current_dataset() -> None:
+    """The narrow binding mutation locks and preserves ordinary locked-row state."""
+
+    backend = _PostgresPersonalContextBindingBackend()
+    db = SyncDatabase.__new__(SyncDatabase)
+    db.backend = cast(Any, backend)
+
+    updated = db.bind_personal_context_dataset(
+        dataset_id="dataset-1",
+        user_id="user-1",
+        expected_profile_id="profile-1",
+        expected_authority_id="authority-1",
+        profile_id="profile-1",
+        authority_id="authority-1",
+        integrity_key_id="personal-context-integrity-v2",
+        purge_generation=1,
+    )
+
+    statements = [statement for statement, _params, _connection in backend.calls]
+    lock_index = next(
+        index
+        for index, statement in enumerate(statements)
+        if statement.startswith("SELECT * FROM sync_datasets")
+    )
+    update_index = next(
+        index
+        for index, statement in enumerate(statements)
+        if statement.startswith("UPDATE sync_datasets")
+    )
+    assert statements[lock_index].endswith("FOR UPDATE")
+    assert lock_index < update_index
+    assert len({connection for _statement, _params, connection in backend.calls}) == 1
+    assert updated.metadata["ordinary_update"] == "keep"
+    assert updated.metadata["personal_context"] == {
+        "profile_id": "profile-1",
+        "authority_id": "authority-1",
+        "integrity_key_id": "personal-context-integrity-v2",
+        "purge_generation": 1,
+        "link_state": "complete",
+    }
+    assert set(PERSONAL_CONTEXT_SYNC_DOMAINS).issubset(updated.domains)
 
 
 def test_device_upsert_rejects_cross_user_takeover(sync_store: SyncV2Store):

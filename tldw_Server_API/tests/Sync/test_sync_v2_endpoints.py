@@ -3290,22 +3290,16 @@ def test_personal_context_complete_endpoint_rejects_real_stale_integrity_binding
     stale_key_id = "personal-context-integrity-vstale"
     dataset = factory_personal_context_service.store.get_dataset(body["dataset_id"])
     assert dataset is not None
-    metadata = dict(dataset.metadata)
-    metadata["personal_context"] = {
-        **metadata["personal_context"],
-        "integrity_key_id": stale_key_id,
-    }
-    factory_personal_context_service.store.upsert_personal_context_dataset_binding(
-        SyncDatasetCreate(
-            dataset_id=dataset.dataset_id,
-            owner_user_id=dataset.owner_user_id,
-            scope_type=dataset.scope_type,
-            encryption_policy=dataset.encryption_policy,
-            domains=dataset.domains,
-            workspace_id=dataset.workspace_id,
-            metadata=metadata,
-            archived_at=dataset.archived_at,
-        )
+    binding = dataset.metadata["personal_context"]
+    factory_personal_context_service.store.bind_personal_context_dataset(
+        dataset_id=dataset.dataset_id,
+        user_id=dataset.owner_user_id,
+        expected_profile_id=str(binding["profile_id"]),
+        expected_authority_id=str(binding["authority_id"]),
+        profile_id=str(binding["profile_id"]),
+        authority_id=str(binding["authority_id"]),
+        integrity_key_id=stale_key_id,
+        purge_generation=int(binding["purge_generation"]),
     )
 
     completion = client.post(
@@ -3356,22 +3350,16 @@ def test_personal_context_complete_endpoint_maps_real_receipt_cas_staleness(
     def transition_binding_then_write_receipt(**values: object) -> None:
         dataset = factory_personal_context_service.store.get_dataset(body["dataset_id"])
         assert dataset is not None
-        metadata = dict(dataset.metadata)
-        metadata["personal_context"] = {
-            **metadata["personal_context"],
-            "integrity_key_id": stale_key_id,
-        }
-        factory_personal_context_service.store.upsert_personal_context_dataset_binding(
-            SyncDatasetCreate(
-                dataset_id=dataset.dataset_id,
-                owner_user_id=dataset.owner_user_id,
-                scope_type=dataset.scope_type,
-                encryption_policy=dataset.encryption_policy,
-                domains=dataset.domains,
-                workspace_id=dataset.workspace_id,
-                metadata=metadata,
-                archived_at=dataset.archived_at,
-            )
+        binding = dataset.metadata["personal_context"]
+        factory_personal_context_service.store.bind_personal_context_dataset(
+            dataset_id=dataset.dataset_id,
+            user_id=dataset.owner_user_id,
+            expected_profile_id=str(binding["profile_id"]),
+            expected_authority_id=str(binding["authority_id"]),
+            profile_id=str(binding["profile_id"]),
+            authority_id=str(binding["authority_id"]),
+            integrity_key_id=stale_key_id,
+            purge_generation=int(binding["purge_generation"]),
         )
         original_receipt(**values)
 
