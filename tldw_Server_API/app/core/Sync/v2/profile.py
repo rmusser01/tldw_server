@@ -584,25 +584,24 @@ class SyncV2ProfileManager:
             return self.store.bind_personal_context_dataset(
                 dataset_id=dataset.dataset_id,
                 user_id=user_id,
-                expected_profile_id=(
-                    str(existing_state["profile_id"])
-                    if existing_state is not None
-                    else None
-                ),
-                expected_authority_id=(
-                    str(existing_state["authority_id"])
-                    if existing_state is not None
-                    else None
-                ),
+                expected_binding=existing_state,
                 profile_id=str(manifest.profile_id),
                 authority_id=authority_id,
                 integrity_key_id=integrity_key_id,
                 purge_generation=purge_generation,
+                link_state=(
+                    str(existing_state["link_state"])
+                    if existing_state is not None
+                    else _PERSONAL_CONTEXT_LINK_PENDING
+                ),
             )
         except SyncStoreError as exc:
-            if str(exc) == "personal_context_authority_mismatch":
+            if str(exc) in {
+                "personal_context_authority_mismatch",
+                "personal_context_link_binding_stale",
+            }:
                 raise PersonalContextBootstrapError(
-                    "personal_context_authority_mismatch"
+                    str(exc)
                 ) from exc
             raise
 

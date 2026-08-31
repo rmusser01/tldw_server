@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from copy import copy
 from typing import Any
@@ -169,24 +169,24 @@ class SyncV2Store:
         *,
         dataset_id: str,
         user_id: str,
-        expected_profile_id: str | None,
-        expected_authority_id: str | None,
+        expected_binding: Mapping[str, object] | None,
         profile_id: str,
         authority_id: str,
         integrity_key_id: str,
         purge_generation: int,
+        link_state: str,
     ) -> SyncDataset:
         """Merge the server-authoritative binding without rewriting other state."""
 
         return self.db.bind_personal_context_dataset(
             dataset_id=dataset_id,
             user_id=user_id,
-            expected_profile_id=expected_profile_id,
-            expected_authority_id=expected_authority_id,
+            expected_binding=expected_binding,
             profile_id=profile_id,
             authority_id=authority_id,
             integrity_key_id=integrity_key_id,
             purge_generation=purge_generation,
+            link_state=link_state,
         )
 
     def get_dataset(

@@ -3294,12 +3294,12 @@ def test_personal_context_complete_endpoint_rejects_real_stale_integrity_binding
     factory_personal_context_service.store.bind_personal_context_dataset(
         dataset_id=dataset.dataset_id,
         user_id=dataset.owner_user_id,
-        expected_profile_id=str(binding["profile_id"]),
-        expected_authority_id=str(binding["authority_id"]),
+        expected_binding=dict(binding),
         profile_id=str(binding["profile_id"]),
         authority_id=str(binding["authority_id"]),
         integrity_key_id=stale_key_id,
         purge_generation=int(binding["purge_generation"]),
+        link_state=str(binding["link_state"]),
     )
 
     completion = client.post(
@@ -3354,12 +3354,12 @@ def test_personal_context_complete_endpoint_maps_real_receipt_cas_staleness(
         factory_personal_context_service.store.bind_personal_context_dataset(
             dataset_id=dataset.dataset_id,
             user_id=dataset.owner_user_id,
-            expected_profile_id=str(binding["profile_id"]),
-            expected_authority_id=str(binding["authority_id"]),
+            expected_binding=dict(binding),
             profile_id=str(binding["profile_id"]),
             authority_id=str(binding["authority_id"]),
             integrity_key_id=stale_key_id,
             purge_generation=int(binding["purge_generation"]),
+            link_state=str(binding["link_state"]),
         )
         original_receipt(**values)
 

@@ -3574,12 +3574,7 @@ class SyncDatabase:
             )
         return _device_from_row(row)
 
-    def enroll_dataset(
-        self,
-        dataset: SyncDatasetCreate,
-        *,
-        preserve_personal_context: bool = True,
-    ) -> SyncDataset:
+    def enroll_dataset(self, dataset: SyncDatasetCreate) -> SyncDataset:
         self._validate_dataset_contract(dataset)
         now = utcnow_iso()
         with self.backend.transaction() as conn:
@@ -3611,9 +3606,8 @@ class SyncDatabase:
                 server_metadata_keys = (
                     NOTES_TASK_SERVER_METADATA_KEYS
                     | NOTES_MOODBOARD_STUDIO_SERVER_METADATA_KEYS
+                    | {"personal_context"}
                 )
-                if preserve_personal_context and "personal_context" in existing_metadata:
-                    server_metadata_keys = server_metadata_keys | {"personal_context"}
                 metadata = {
                     key: value
                     for key, value in dataset.metadata.items()
@@ -3629,8 +3623,6 @@ class SyncDatabase:
                 protected_personal_context_domains = (
                     _dataset_domains_from_row(existing)
                     & set(PERSONAL_CONTEXT_SYNC_DOMAINS)
-                    if preserve_personal_context
-                    else set()
                 )
                 effective_domains = list(
                     dict.fromkeys(
@@ -3790,12 +3782,12 @@ class SyncDatabase:
         *,
         dataset_id: str,
         user_id: str,
-        expected_profile_id: str | None,
-        expected_authority_id: str | None,
+        expected_binding: Mapping[str, object] | None,
         profile_id: str,
         authority_id: str,
         integrity_key_id: str,
         purge_generation: int,
+        link_state: str,
     ) -> SyncDataset:
         """Merge a canonical Personal Context binding into the locked dataset row."""
 
@@ -3804,6 +3796,7 @@ class SyncDatabase:
             or not authority_id
             or not integrity_key_id
             or purge_generation < 0
+            or link_state not in {"bootstrap_pending", "complete"}
         ):
             raise SyncStoreError("personal_context_authority_mismatch")
         with self.backend.transaction() as connection:
@@ -3816,27 +3809,22 @@ class SyncDatabase:
             if not isinstance(metadata, dict):
                 raise SyncStoreError("personal_context_authority_mismatch")
             current_binding = metadata.get("personal_context")
-            if current_binding is None:
-                if expected_profile_id is not None or expected_authority_id is not None:
-                    raise SyncStoreError("personal_context_authority_mismatch")
-                link_state = "bootstrap_pending"
-            elif not isinstance(current_binding, Mapping) or (
-                current_binding.get("profile_id") != expected_profile_id
-                or current_binding.get("authority_id") != expected_authority_id
-            ):
+            if current_binding is not None and not isinstance(current_binding, dict):
                 raise SyncStoreError("personal_context_authority_mismatch")
-            else:
-                link_state = current_binding.get("link_state")
-                if link_state not in {"bootstrap_pending", "complete"}:
-                    raise SyncStoreError("personal_context_authority_mismatch")
-            merged_metadata = dict(metadata)
-            merged_metadata["personal_context"] = {
+            expected = dict(expected_binding) if expected_binding is not None else None
+            desired = {
                 "profile_id": profile_id,
                 "authority_id": authority_id,
                 "integrity_key_id": integrity_key_id,
                 "purge_generation": purge_generation,
                 "link_state": link_state,
             }
+            if current_binding == desired:
+                return _dataset_from_row(row)
+            if current_binding != expected:
+                raise SyncStoreError("personal_context_link_binding_stale")
+            merged_metadata = dict(metadata)
+            merged_metadata["personal_context"] = desired
             raw_domains = decode_json(row.get("domain_set_json"), default=[])
             if not isinstance(raw_domains, list):
                 raise SyncStoreError("personal_context_authority_mismatch")
