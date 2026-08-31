@@ -291,7 +291,7 @@ def test_postgres_v66_live_schema_has_cleanup_constraints_indexes_and_forced_rls
             (_TABLE,),
         ).rows
 
-        assert int(version) == 66
+        assert int(version) == CharactersRAGDB._POSTGRES_SCHEMA_VERSION
         assert relation == {"relrowsecurity": True, "relforcerowsecurity": True}
         assert {"owner_user_id", "dataset_id", "generation_id", "vector_id"} <= columns
         assert {
@@ -351,7 +351,7 @@ def test_postgres_v65_to_v66_upgrade_preserves_all_semantic_rows(
                     (CharactersRAGDB._SCHEMA_NAME,),
                     connection=conn,
                 ).scalar
-            ) == 66
+            ) == CharactersRAGDB._POSTGRES_SCHEMA_VERSION
             assert preserved == {
                 "note_semantic_index_configs": 1,
                 "note_semantic_generations": 1,

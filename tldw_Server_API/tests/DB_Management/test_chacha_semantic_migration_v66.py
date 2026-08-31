@@ -69,13 +69,15 @@ def _assert_cleanup_schema(conn: sqlite3.Connection) -> None:
     assert "note_semantic_generations" not in foreign_tables
 
 
-def test_sqlite_v66_fresh_schema_has_durable_cleanup_ledger(tmp_path: Path) -> None:
+def test_sqlite_v66_fresh_schema_has_durable_cleanup_ledger(
+    tmp_path: Path,
+) -> None:
     db_path = tmp_path / "semantic-v66-fresh.sqlite"
 
     _initialize(db_path)
 
     with sqlite3.connect(db_path) as conn:
-        assert _version(conn) == 66
+        assert _version(conn) == CharactersRAGDB._CURRENT_SCHEMA_VERSION
         _assert_cleanup_schema(conn)
         conn.execute(
             f"""

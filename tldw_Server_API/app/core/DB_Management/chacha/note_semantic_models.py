@@ -58,11 +58,28 @@ class SemanticObsoleteVectorClaim:
     attempt_count: int
 
 
+@dataclass(frozen=True, slots=True)
+class SemanticOperationReceipt:
+    """Bounded durable receipt for a Notes-side semantic mutation."""
+
+    owner_user_id: str
+    dataset_id: str
+    key_digest: str
+    action: str
+    request_fingerprint: str
+    run_id: str | None
+    expected_revision: int
+    state: str
+    response_json: str | None
+    expires_at: str
+
+
 class SemanticIndexingError(RuntimeError):
     """Stable, content-free semantic indexing or publication failure."""
 
     def __init__(self, code: str) -> None:
         self.code = code
+        self.failure_code = code
         super().__init__(code)
 
 
@@ -78,6 +95,7 @@ class SemanticIndexConfig:
     compatibility_hash: str | None
     provider: str | None
     model: str | None
+    model_revision: str | None
     endpoint_origin_revision: str | None
     endpoint_origin_display: str | None
     data_boundary: str | None
@@ -104,6 +122,7 @@ class SemanticGeneration:
     configuration_revision: int
     state: SemanticGenerationState
     compatibility_hash: str | None
+    model_revision: str | None
     dimension_state: SemanticDimensionState
     dimensions: int | None
     root_job_id: str | None

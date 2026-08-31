@@ -469,7 +469,7 @@ def test_activation_rejects_generation_identity_mismatch_without_side_effects(
 def test_manifest_publication_cannot_clear_a_newer_dirty_generation(db: CharactersRAGDB) -> None:
     _config, generation = _create_resolved_generation(db)
     db.add_note("Note A", "content", note_id="note-a")
-    db.note_semantic_store.record_note_dirty(
+    dirty = db.note_semantic_store.record_note_dirty(
         dataset_id=DATASET_ID,
         generation_id=generation.id,
         note_id="note-a",
@@ -481,7 +481,7 @@ def test_manifest_publication_cannot_clear_a_newer_dirty_generation(db: Characte
         dataset_id=DATASET_ID,
         generation_id=generation.id,
         note_id="note-a",
-        dirty_generation=1,
+        dirty_generation=dirty.dirty_generation,
         now=NOW,
     )
     assert claimed is not None
@@ -499,7 +499,7 @@ def test_manifest_publication_cannot_clear_a_newer_dirty_generation(db: Characte
         dataset_id=DATASET_ID,
         generation_id=generation.id,
         note_id="note-a",
-        claimed_dirty_generation=1,
+        claimed_dirty_generation=dirty.dirty_generation,
         content_version=7,
         manifest={"chunk_count": 1, "manifest_hash": "manifest-v7"},
         now=NOW,
@@ -510,7 +510,7 @@ def test_manifest_publication_cannot_clear_a_newer_dirty_generation(db: Characte
 def test_tombstones_queue_coalesced_cleanup_with_bounded_retry(db: CharactersRAGDB) -> None:
     _config, generation = _create_resolved_generation(db)
     db.add_note("Note A", "content", note_id="note-a")
-    db.note_semantic_store.record_note_dirty(
+    dirty = db.note_semantic_store.record_note_dirty(
         dataset_id=DATASET_ID,
         generation_id=generation.id,
         note_id="note-a",
@@ -523,7 +523,7 @@ def test_tombstones_queue_coalesced_cleanup_with_bounded_retry(db: CharactersRAG
         generation_id=generation.id,
         note_id="note-a",
         content_version=2,
-        dirty_generation=2,
+        dirty_generation=dirty.dirty_generation + 1,
         now=NOW,
     )
     assert tombstoned is not None

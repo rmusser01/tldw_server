@@ -35,10 +35,12 @@ from .semantic_embeddings import (
     plan_semantic_embedding_batches,
 )
 from .semantic_publication import (
+    BeforeSemanticSideEffect,
     SemanticExecutionFence,
     SemanticFenceRevalidator,
     SemanticPublicationReceipt,
     SemanticPublicationService,
+    _before_side_effect,
     revalidate_execution_fence,
     run_reconciled_transaction,
 )
@@ -284,6 +286,8 @@ class SemanticGenerationBuilder:
     async def build_initial_generation(
         self,
         request: InitialGenerationRequest,
+        *,
+        before_side_effect: BeforeSemanticSideEffect | None = None,
     ) -> SemanticPublicationReceipt:
         """Build and activate one bounded initial snapshot or fail it closed."""
 
@@ -292,8 +296,10 @@ class SemanticGenerationBuilder:
             fence, resolved_config = await self._resolve_generation(
                 fence,
                 request.embedding_config,
+                before_side_effect=before_side_effect,
             )
             await revalidate_execution_fence(self._revalidate, fence)
+            await _before_side_effect(before_side_effect)
             await self._vectors.create_generation_storage(
                 fence.dataset_id,
                 fence.generation_id,
@@ -301,12 +307,16 @@ class SemanticGenerationBuilder:
             run_budget = _RunBudget(self._settings)
             for _ in range(self._settings.max_retries + 1):
                 try:
-                    plan = await self._read_snapshot(fence)
+                    plan = await self._read_snapshot(
+                        fence,
+                        before_side_effect=before_side_effect,
+                    )
                 except SemanticIndexingError as exc:
                     if exc.code == "notes_semantic_snapshot_changed":
                         continue
                     raise
                 await revalidate_execution_fence(self._revalidate, fence)
+                await _before_side_effect(before_side_effect)
                 seeded = await asyncio.to_thread(
                     self._store.seed_generation_snapshot,
                     dataset_id=fence.dataset_id,
@@ -323,15 +333,22 @@ class SemanticGenerationBuilder:
                     resolved_config,
                     plan,
                     run_budget=run_budget,
+                    before_side_effect=before_side_effect,
                 )
                 integrity = await asyncio.to_thread(
                     self._store.get_generation_integrity,
                     fence.dataset_id,
                     fence.generation_id,
                 )
-                current_refs = await self._list_refs(fence)
+                current_refs = await self._list_refs(
+                    fence,
+                    before_side_effect=before_side_effect,
+                )
                 if integrity.pending_note_count == 0 and current_refs == plan.refs:
-                    return await self._publication.activate(fence)
+                    return await self._publication.activate(
+                        fence,
+                        before_side_effect=before_side_effect,
+                    )
             raise SemanticIndexingError("notes_semantic_convergence_exhausted")
         except asyncio.CancelledError:
             raise
@@ -342,7 +359,9 @@ class SemanticGenerationBuilder:
         except SemanticIndexingError as exc:
             await self._record_systemic_failure(fence, exc.code)
             raise
-        except Exception:  # noqa: BLE001 - sanitize dependency failures at the boundary
+        except Exception as exc:  # noqa: BLE001 - sanitize dependency failures at the boundary
+            if getattr(exc, "failure_code", None) == "notes_semantic_run_cancelled":
+                raise
             code = "notes_semantic_build_system_failure"
             await self._record_systemic_failure(fence, code)
             raise SemanticIndexingError(code) from None
@@ -350,6 +369,8 @@ class SemanticGenerationBuilder:
     async def maintain_generation(
         self,
         request: InitialGenerationRequest,
+        *,
+        before_side_effect: BeforeSemanticSideEffect | None = None,
     ) -> SemanticGenerationIntegrity:
         """Publish bounded dirty or failed Note work into an active generation."""
 
@@ -357,13 +378,18 @@ class SemanticGenerationBuilder:
         fence, resolved_config = await self._resolve_generation(
             fence,
             request.embedding_config,
+            before_side_effect=before_side_effect,
         )
-        plan = await self._read_snapshot(fence)
+        plan = await self._read_snapshot(
+            fence,
+            before_side_effect=before_side_effect,
+        )
         await self._publish_claimed_notes(
             fence,
             resolved_config,
             plan,
             run_budget=_RunBudget(self._settings),
+            before_side_effect=before_side_effect,
         )
         return await asyncio.to_thread(
             self._store.get_generation_integrity,
@@ -375,6 +401,8 @@ class SemanticGenerationBuilder:
         self,
         fence: SemanticExecutionFence,
         pending: PendingSemanticConfig,
+        *,
+        before_side_effect: BeforeSemanticSideEffect | None = None,
     ) -> tuple[SemanticExecutionFence, ResolvedSemanticConfig]:
         if (
             pending.provider != fence.provider
@@ -386,12 +414,18 @@ class SemanticGenerationBuilder:
             raise SemanticIndexingError("notes_semantic_execution_config_drift")
         authority = await revalidate_execution_fence(self._revalidate, fence)
         if fence.dimensions is None:
+            await _before_side_effect(before_side_effect)
             resolved = await self._embedder.resolve_dimensions(
                 pending,
                 user_id=fence.owner_user_id,
             )
             if resolved.provider != fence.provider or resolved.model != fence.model:
                 raise SemanticIndexingError("notes_semantic_provider_model_drift")
+            if (
+                fence.model_revision is not None
+                and resolved.model_revision != fence.model_revision
+            ):
+                raise SemanticIndexingError("notes_semantic_model_revision_drift")
             if (
                 resolved.endpoint_origin != authority.endpoint_origin
                 or resolved.credential_source != authority.credential_source
@@ -419,9 +453,12 @@ class SemanticGenerationBuilder:
                 and generation.dimensions == resolved.dimensions
                 and config.compatibility_hash == compatibility_hash
                 and generation.compatibility_hash == compatibility_hash
+                and config.model_revision == resolved.model_revision
+                and generation.model_revision == resolved.model_revision
             )
             if not already_resolved:
                 await revalidate_execution_fence(self._revalidate, fence)
+                await _before_side_effect(before_side_effect)
                 generation = await asyncio.to_thread(
                     self._store.resolve_generation_dimensions,
                     dataset_id=fence.dataset_id,
@@ -429,6 +466,7 @@ class SemanticGenerationBuilder:
                     expected_configuration_revision=fence.configuration_revision,
                     dimensions=resolved.dimensions,
                     compatibility_hash=compatibility_hash,
+                    model_revision=resolved.model_revision,
                     now=self._clock(),
                 )
                 if generation is None:
@@ -470,8 +508,11 @@ class SemanticGenerationBuilder:
     async def _list_refs(
         self,
         fence: SemanticExecutionFence,
+        *,
+        before_side_effect: BeforeSemanticSideEffect | None = None,
     ) -> tuple[NoteVersionRef, ...]:
         await revalidate_execution_fence(self._revalidate, fence)
+        await _before_side_effect(before_side_effect)
         values = tuple(
             await self._note_reader.list_note_versions(
                 fence.owner_user_id,
@@ -490,12 +531,21 @@ class SemanticGenerationBuilder:
             raise SemanticIndexingError("notes_semantic_snapshot_version_invalid")
         return refs
 
-    async def _read_snapshot(self, fence: SemanticExecutionFence) -> _SnapshotPlan:
-        refs = await self._list_refs(fence)
+    async def _read_snapshot(
+        self,
+        fence: SemanticExecutionFence,
+        *,
+        before_side_effect: BeforeSemanticSideEffect | None = None,
+    ) -> _SnapshotPlan:
+        refs = await self._list_refs(
+            fence,
+            before_side_effect=before_side_effect,
+        )
         seeds: list[SemanticSnapshotSeed] = []
         chunks_by_note: dict[str, tuple[SemanticChunkInput, ...]] = {}
         for ref in refs:
             await revalidate_execution_fence(self._revalidate, fence)
+            await _before_side_effect(before_side_effect)
             snapshot = await self._note_reader.read_note_version(
                 fence.owner_user_id,
                 fence.dataset_id,
@@ -557,6 +607,7 @@ class SemanticGenerationBuilder:
         plan: _SnapshotPlan,
         *,
         run_budget: _RunBudget | None = None,
+        before_side_effect: BeforeSemanticSideEffect | None = None,
     ) -> None:
         claim_limit = min(
             256,
@@ -590,6 +641,7 @@ class SemanticGenerationBuilder:
                             "notes_semantic_run_limit_exceeded"
                         ) from None
                     try:
+                        await _before_side_effect(before_side_effect)
                         batch = await self._embedder.embed_chunks(
                             chunks,
                             config,
@@ -597,6 +649,7 @@ class SemanticGenerationBuilder:
                         )
                     except SemanticNoteIndexingError as exc:
                         await revalidate_execution_fence(self._revalidate, fence)
+                        await _before_side_effect(before_side_effect)
                         failed = await run_reconciled_transaction(
                             self._store.fail_claimed_note,
                             dataset_id=fence.dataset_id,
@@ -642,6 +695,7 @@ class SemanticGenerationBuilder:
                         claim,
                         chunks,
                         vectors,
+                        before_side_effect=before_side_effect,
                     )
             finally:
                 for claim in claims:

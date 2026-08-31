@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import inspect
 import json
+import re
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -54,6 +55,7 @@ _QUOTA_ERROR_MARKERS = (
     "maximum concurrent job limit",
     "quota",
 )
+_SAFE_FAILURE_CODE = re.compile(r"^(?:notes_semantic|note_content)_[a-z0-9_]{1,96}$")
 
 
 class SemanticJobsError(RuntimeError):
@@ -61,6 +63,7 @@ class SemanticJobsError(RuntimeError):
 
     def __init__(self, code: str) -> None:
         self.code = code
+        self.failure_code = code
         super().__init__(code)
 
 
@@ -155,9 +158,15 @@ def _idempotency_digest(value: str) -> str:
     return _digest(normalized.encode("utf-8"))
 
 
-def _operation_scope(command: SemanticJobCommand) -> str:
-    raw = f"{command.dataset_id}\0{command.configuration_revision}".encode()
+def semantic_writer_scope(dataset_id: str) -> str:
+    """Return the stable indexed Jobs scope for one owner-bound dataset writer."""
+
+    raw = _bounded_identity(dataset_id, "dataset_id").encode()
     return f"notes-semantic:{_digest(raw)}"
+
+
+def _operation_scope(command: SemanticJobCommand) -> str:
+    return semantic_writer_scope(command.dataset_id)
 
 
 def _utc_now() -> datetime:
@@ -395,9 +404,20 @@ def _validated_result(raw: object) -> dict[str, Any]:
             raise SemanticJobsError("notes_semantic_job_result_invalid")
     if type(result["cleanup_complete"]) is not bool:
         raise SemanticJobsError("notes_semantic_job_result_invalid")
-    if result["error_code"] is not None and not isinstance(result["error_code"], str):
+    error_code = result["error_code"]
+    if error_code is not None and (
+        not isinstance(error_code, str)
+        or _SAFE_FAILURE_CODE.fullmatch(error_code) is None
+    ):
         raise SemanticJobsError("notes_semantic_job_result_invalid")
     return result
+
+
+def _runtime_failure_code(exc: BaseException) -> str:
+    code = getattr(exc, "code", None)
+    if isinstance(code, str) and _SAFE_FAILURE_CODE.fullmatch(code) is not None:
+        return code
+    return "notes_semantic_worker_runtime_failed"
 
 
 class SemanticJobHandler:
@@ -435,32 +455,46 @@ class SemanticJobHandler:
 
         if await _is_cancelled(cancellation_requested):
             raise SemanticJobCancelled()
-        runtime = await _resolve(
-            self._runtime_factory(
-                owner_user_id=owner_user_id,
-                dataset_id=payload["dataset_id"],
-                configuration_revision=payload["configuration_revision"],
-                generation_id=payload["generation_id"],
-                root_job_id=root_job_id,
-                mode=payload["mode"],
+        try:
+            runtime = await _resolve(
+                self._runtime_factory(
+                    owner_user_id=owner_user_id,
+                    dataset_id=payload["dataset_id"],
+                    configuration_revision=payload["configuration_revision"],
+                    generation_id=payload["generation_id"],
+                    root_job_id=root_job_id,
+                    mode=payload["mode"],
+                )
             )
-        )
-        recovered = await runtime.recover(
-            mode=payload["mode"],
-            payload=payload,
-            root_job_id=root_job_id,
-        )
+            recovered = await runtime.recover(
+                mode=payload["mode"],
+                payload=payload,
+                root_job_id=root_job_id,
+            )
+        except SemanticJobCancelled:
+            raise
+        except SemanticJobsError as exc:
+            raise SemanticJobsError(_runtime_failure_code(exc)) from None
+        except Exception as exc:  # noqa: BLE001 - WorkerSDK receives only a stable code
+            raise SemanticJobsError(_runtime_failure_code(exc)) from None
         if recovered is not None:
             return _validated_result(recovered)
         if await _is_cancelled(cancellation_requested):
             raise SemanticJobCancelled()
-        result = await runtime.execute(
-            mode=payload["mode"],
-            payload=payload,
-            root_job_id=root_job_id,
-            max_batch_retries=self._settings.max_retries,
-            cancellation_requested=cancellation_requested,
-        )
+        try:
+            result = await runtime.execute(
+                mode=payload["mode"],
+                payload=payload,
+                root_job_id=root_job_id,
+                max_batch_retries=self._settings.max_retries,
+                cancellation_requested=cancellation_requested,
+            )
+        except SemanticJobCancelled:
+            raise
+        except SemanticJobsError as exc:
+            raise SemanticJobsError(_runtime_failure_code(exc)) from None
+        except Exception as exc:  # noqa: BLE001 - WorkerSDK receives only a stable code
+            raise SemanticJobsError(_runtime_failure_code(exc)) from None
         return _validated_result(result)
 
 
@@ -475,4 +509,5 @@ __all__ = [
     "SemanticJobCoordinator",
     "SemanticJobHandler",
     "SemanticJobsError",
+    "semantic_writer_scope",
 ]

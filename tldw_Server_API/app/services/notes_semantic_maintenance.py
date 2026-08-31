@@ -18,9 +18,12 @@ from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Notes_Graph.semantic_api import load_semantic_settings
 from tldw_Server_API.app.core.Notes_Graph.semantic_jobs import (
+    JOB_DOMAIN,
+    JOB_TYPE,
     SemanticJobCommand,
     SemanticJobCoordinator,
     SemanticJobsError,
+    semantic_writer_scope,
 )
 from tldw_Server_API.app.core.Notes_Graph.semantic_settings import SemanticIndexSettings
 from tldw_Server_API.app.services.notes_semantic_index_worker import (
@@ -216,6 +219,11 @@ class _ProductionScope:
         )
 
     def claim_cleanup(self, *, limit: int, now: datetime) -> tuple[Any, ...]:
+        self._store.rearm_exhausted_generation_cleanup(
+            dataset_id=self._dataset_id,
+            limit=min(limit, 100),
+            now=now,
+        )
         generation_claims = self._store.claim_generation_cleanup_batch(
             dataset_id=self._dataset_id,
             limit=min(limit, 100),
@@ -238,8 +246,18 @@ class _ProductionScope:
             return False
         generation_id = str(getattr(claim, "generation_id", "") or "")
         watermark = str(getattr(claim, "dirty_generation", "failed"))
+        predecessor = "none"
+        job = self._jobs.find_job_by_batch_group(
+            batch_group=semantic_writer_scope(self._dataset_id),
+            domain=JOB_DOMAIN,
+            owner_user_id=self._owner_user_id,
+            job_type=JOB_TYPE,
+            include_archived=True,
+        )
+        if job is not None:
+            predecessor = str(job.get("uuid") or "none")
         digest = hashlib.sha256(
-            f"{mode}\0{self._dataset_id}\0{generation_id}\0{watermark}".encode()
+            f"{mode}\0{self._dataset_id}\0{generation_id}\0{watermark}\0{predecessor}".encode()
         ).hexdigest()
         try:
             SemanticJobCoordinator(
@@ -253,6 +271,13 @@ class _ProductionScope:
                     mode=mode,
                 ),
                 idempotency_key=f"maintenance:{digest}",
+                request_identity={
+                    "mode": mode,
+                    "dataset_id": self._dataset_id,
+                    "generation_id": generation_id,
+                    "watermark": watermark,
+                    "predecessor": predecessor,
+                },
             )
         except SemanticJobsError:
             return False
@@ -276,12 +301,41 @@ class _ProductionScope:
 
     async def cleanup_claim(self, claim: Any) -> bool:
         generation_id = str(getattr(claim, "generation_id", "") or "")
-        runtime = await self._runtime(generation_id)
-        if isinstance(claim, _ObsoleteCleanupClaim):
-            return await runtime.cleanup_obsolete_generation()
-        for _ in range(self._settings.max_retries + 1):
-            if await runtime.cleanup_claim(claim):
-                return True
+        try:
+            runtime = await self._runtime(generation_id)
+            if isinstance(claim, _ObsoleteCleanupClaim):
+                return await runtime.cleanup_obsolete_generation()
+            for _ in range(self._settings.max_retries + 1):
+                if await runtime.cleanup_claim(claim):
+                    return True
+        except Exception:  # noqa: BLE001 - persist only a bounded failure code
+            if isinstance(claim, _ObsoleteCleanupClaim):
+                return False
+            now = datetime.now(timezone.utc)
+            delay = min(
+                self._settings.retry_max_backoff_seconds,
+                self._settings.retry_backoff_seconds
+                * (2 ** min(int(getattr(claim, "attempt_count", 0)), 8)),
+            )
+            self._store.retry_work(
+                dataset_id=self._dataset_id,
+                work_id=str(getattr(claim, "id", "")),
+                expected_claim_token=getattr(claim, "claim_token", None),
+                error_code="notes_semantic_cleanup_failed",
+                retry_at=now + timedelta(seconds=delay),
+                now=now,
+            )
+            return False
+        if not isinstance(claim, _ObsoleteCleanupClaim):
+            now = datetime.now(timezone.utc)
+            self._store.retry_work(
+                dataset_id=self._dataset_id,
+                work_id=str(getattr(claim, "id", "")),
+                expected_claim_token=getattr(claim, "claim_token", None),
+                error_code="notes_semantic_cleanup_unconfirmed",
+                retry_at=now + timedelta(seconds=self._settings.retry_backoff_seconds),
+                now=now,
+            )
         return False
 
 
@@ -308,6 +362,7 @@ class _MaintenanceRunner:
         self._jobs = jobs
         self._users_repo = users_repo
         self._settings = settings
+        self._owner_offset = 0
 
     async def run_pass(
         self,
@@ -316,56 +371,73 @@ class _MaintenanceRunner:
         limit: int,
     ) -> SemanticMaintenanceResult:
         aggregate = SemanticMaintenanceResult(0, 0, 0, 0)
-        offset = 0
-        total = 1
-        while offset < total and aggregate.claimed < limit:
-            users, total = await self._users_repo.list_users(offset=offset, limit=200)
-            if not users:
+        discovery_used = 0
+        page_limit = min(limit, 100)
+        users, total = await self._users_repo.list_users(
+            offset=self._owner_offset,
+            limit=page_limit,
+        )
+        if not users and self._owner_offset:
+            self._owner_offset = 0
+            users, total = await self._users_repo.list_users(offset=0, limit=page_limit)
+        processed_users = 0
+        for user in users:
+            if discovery_used + aggregate.claimed >= limit:
                 break
-            for user in users:
-                if aggregate.claimed >= limit:
-                    break
-                owner = str(user.get("id") or "")
-                if not owner:
+            discovery_used += 1
+            processed_users += 1
+            owner = str(user.get("id") or "")
+            if not owner:
+                continue
+            db = None
+            try:
+                db = await _open_owner_database(owner)
+                remaining = limit - discovery_used - aggregate.claimed
+                dataset_limit = min(remaining // 2, 100)
+                if dataset_limit <= 0:
                     continue
-                db = None
-                try:
-                    db = await _open_owner_database(owner)
-                    datasets = await asyncio.to_thread(
-                        db.note_semantic_store.list_maintenance_dataset_ids,
-                        limit=100,
+                datasets = await asyncio.to_thread(
+                    db.note_semantic_store.list_maintenance_dataset_ids,
+                    limit=dataset_limit,
+                )
+                discovery_used += min(len(datasets), remaining)
+                remaining = limit - discovery_used - aggregate.claimed
+                if remaining <= 0:
+                    continue
+                scopes = tuple(
+                    _ProductionScope(
+                        db=db,
+                        jobs=self._jobs,
+                        owner_user_id=owner,
+                        dataset_id=dataset_id,
+                        settings=self._settings,
                     )
-                    scopes = tuple(
-                        _ProductionScope(
-                            db=db,
-                            jobs=self._jobs,
-                            owner_user_id=owner,
-                            dataset_id=dataset_id,
-                            settings=self._settings,
-                        )
-                        for dataset_id in datasets
-                    )
-                    result = await SemanticMaintenanceCoordinator(
-                        scopes=scopes,
-                        indexing_enabled=self._settings.indexing_enabled,
-                    ).run_pass(
-                        now=now,
-                        limit=limit - aggregate.claimed,
-                    )
-                    aggregate = SemanticMaintenanceResult(
-                        claimed=aggregate.claimed + result.claimed,
-                        dirty_admitted=aggregate.dirty_admitted + result.dirty_admitted,
-                        failed_retries=aggregate.failed_retries + result.failed_retries,
-                        cleanup_confirmed=(
-                            aggregate.cleanup_confirmed + result.cleanup_confirmed
-                        ),
-                    )
-                except _MAINTENANCE_ERRORS:
-                    logger.warning("Notes semantic owner maintenance failed safely")
-                finally:
-                    if db is not None:
-                        await asyncio.to_thread(_close_database, db)
-            offset += 200
+                    for dataset_id in datasets
+                )
+                result = await SemanticMaintenanceCoordinator(
+                    scopes=scopes,
+                    indexing_enabled=self._settings.indexing_enabled,
+                ).run_pass(
+                    now=now,
+                    limit=remaining,
+                )
+                aggregate = SemanticMaintenanceResult(
+                    claimed=aggregate.claimed + result.claimed,
+                    dirty_admitted=aggregate.dirty_admitted + result.dirty_admitted,
+                    failed_retries=aggregate.failed_retries + result.failed_retries,
+                    cleanup_confirmed=(
+                        aggregate.cleanup_confirmed + result.cleanup_confirmed
+                    ),
+                )
+            except _MAINTENANCE_ERRORS:
+                logger.warning("Notes semantic owner maintenance failed safely")
+            finally:
+                if db is not None:
+                    await asyncio.to_thread(_close_database, db)
+        if total > 0:
+            self._owner_offset = (self._owner_offset + max(processed_users, 1)) % total
+        else:
+            self._owner_offset = 0
         return aggregate
 
 

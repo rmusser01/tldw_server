@@ -699,8 +699,8 @@ class CharactersRAGDB:
         is_memory_db (bool): True if the database is in-memory.
         db_path_str (str): String representation of the database path for SQLite connection.
     """
-    _CURRENT_SCHEMA_VERSION = 66  # Schema v66 adds durable semantic vector cleanup authority
-    _POSTGRES_SCHEMA_VERSION = 66
+    _CURRENT_SCHEMA_VERSION = 67  # Schema v67 adds semantic operation/model authority
+    _POSTGRES_SCHEMA_VERSION = 67
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _LOCAL_UNBOUND_TASK_DATASET_ID = "local-unbound"
     _NOTE_TASK_V60_TABLES = (
@@ -7454,6 +7454,76 @@ CREATE POLICY note_semantic_obsolete_vectors_tenant_isolation
   );
 """
 
+    _MIGRATION_SQL_V66_TO_V67 = """
+ALTER TABLE note_semantic_index_configs ADD COLUMN model_revision TEXT;
+ALTER TABLE note_semantic_generations ADD COLUMN model_revision TEXT;
+CREATE UNIQUE INDEX idx_note_semantic_generations_root_job
+  ON note_semantic_generations(owner_user_id,dataset_id,root_job_id)
+  WHERE root_job_id IS NOT NULL;
+CREATE TABLE note_semantic_operation_receipts(
+  owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(length(trim(dataset_id)) > 0),
+  key_digest TEXT NOT NULL CHECK(length(key_digest) = 64),
+  action TEXT NOT NULL CHECK(action IN ('enable','cancel')),
+  request_fingerprint TEXT NOT NULL CHECK(length(request_fingerprint) = 64),
+  run_id TEXT,
+  expected_revision INTEGER NOT NULL CHECK(expected_revision >= 0),
+  state TEXT NOT NULL CHECK(state IN ('pending','completed')),
+  response_json TEXT CHECK(response_json IS NULL OR length(response_json) <= 8192),
+  expires_at DATETIME NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(owner_user_id,key_digest)
+);
+CREATE INDEX idx_note_semantic_operation_receipts_scope
+  ON note_semantic_operation_receipts(
+    owner_user_id,dataset_id,action,state,updated_at,key_digest
+  );
+"""
+
+    _MIGRATION_SQL_V66_TO_V67_POSTGRES = """
+ALTER TABLE note_semantic_index_configs
+  ADD COLUMN IF NOT EXISTS model_revision TEXT;
+ALTER TABLE note_semantic_generations
+  ADD COLUMN IF NOT EXISTS model_revision TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_note_semantic_generations_root_job
+  ON note_semantic_generations(owner_user_id,dataset_id,root_job_id)
+  WHERE root_job_id IS NOT NULL;
+CREATE TABLE IF NOT EXISTS note_semantic_operation_receipts(
+  owner_user_id TEXT NOT NULL CHECK(char_length(btrim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(char_length(btrim(dataset_id)) > 0),
+  key_digest TEXT NOT NULL CHECK(char_length(key_digest) = 64),
+  action TEXT NOT NULL CHECK(action IN ('enable','cancel')),
+  request_fingerprint TEXT NOT NULL CHECK(char_length(request_fingerprint) = 64),
+  run_id TEXT,
+  expected_revision INTEGER NOT NULL CHECK(expected_revision >= 0),
+  state TEXT NOT NULL CHECK(state IN ('pending','completed')),
+  response_json TEXT CHECK(response_json IS NULL OR octet_length(response_json) <= 8192),
+  expires_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(owner_user_id,key_digest)
+);
+CREATE INDEX IF NOT EXISTS idx_note_semantic_operation_receipts_scope
+  ON note_semantic_operation_receipts(
+    owner_user_id,dataset_id,action,state,updated_at,key_digest
+  );
+ALTER TABLE note_semantic_operation_receipts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE note_semantic_operation_receipts FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS note_semantic_operation_receipts_tenant_isolation
+  ON note_semantic_operation_receipts;
+CREATE POLICY note_semantic_operation_receipts_tenant_isolation
+  ON note_semantic_operation_receipts
+  USING (
+    owner_user_id=current_setting('app.current_user_id', true)
+    AND dataset_id=current_setting('app.current_dataset_id', true)
+  )
+  WITH CHECK (
+    owner_user_id=current_setting('app.current_user_id', true)
+    AND dataset_id=current_setting('app.current_dataset_id', true)
+  );
+"""
+
     _NOTE_GRAPH_SUGGESTION_RECEIPT_DELETE_SQLITE_TRIGGER_SQL = """
 CREATE TRIGGER note_graph_suggestion_operation_receipts_clear_references
 BEFORE DELETE ON note_graph_suggestion_operation_receipts
@@ -8638,6 +8708,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             (63, "_migrate_from_v63_to_v64_sqlite"),
             (64, "_migrate_from_v64_to_v65_sqlite"),
             (65, "_migrate_from_v65_to_v66_sqlite"),
+            (66, "_migrate_from_v66_to_v67_sqlite"),
         ):
             method = getattr(self, method_name, None)
             if method is not None:
@@ -14360,6 +14431,39 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 raise
             raise SchemaError(f"Notes semantic v66 SQLite migration failed: {exc}") from exc
 
+    def _migrate_from_v66_to_v67_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Add durable semantic operation and resolved-model authority."""
+        if self._get_db_version(conn) != 66:
+            raise SchemaError("Notes semantic v67 migration requires schema version 66.")
+        savepoint = "note_semantic_v67_migration"
+        savepoint_active = False
+        try:
+            conn.execute(f"SAVEPOINT {savepoint}")  # nosec B608
+            savepoint_active = True
+            for statement in split_sql_statements(self._MIGRATION_SQL_V66_TO_V67):
+                conn.execute(statement)
+            cursor = conn.execute(
+                "UPDATE db_schema_version SET version=? WHERE schema_name=? AND version=?",
+                (67, self._SCHEMA_NAME, 66),
+            )
+            if cursor.rowcount != 1 or self._get_db_version(conn) != 67:
+                raise SchemaError("Notes semantic v67 SQLite version transition failed.")
+            conn.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608
+            savepoint_active = False
+        except (SchemaError, sqlite3.Error) as exc:
+            if savepoint_active:
+                try:
+                    conn.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")  # nosec B608
+                    conn.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608
+                except sqlite3.Error as rollback_exc:
+                    raise SchemaError(
+                        "Notes semantic v67 SQLite migration rollback failed: "
+                        f"{rollback_exc}"
+                    ) from exc
+            if isinstance(exc, SchemaError):
+                raise
+            raise SchemaError(f"Notes semantic v67 SQLite migration failed: {exc}") from exc
+
     @staticmethod
     def _notes_moodboard_studio_v61_postgres_checkpoint(_stage: str) -> None:
         """Fault-injection seam after durable PostgreSQL v61 phase commits."""
@@ -17610,6 +17714,18 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if self._get_schema_version_postgres(conn) != 66:
             raise SchemaError("Notes semantic v66 PostgreSQL version verification failed.")  # noqa: TRY003
 
+    def _migrate_from_v66_to_v67_postgres(self, conn: Any) -> None:
+        """Add forced-RLS operation receipts and resolved-model authority."""
+        if self._get_schema_version_postgres(conn) != 66:
+            raise SchemaError("Notes semantic v67 PostgreSQL migration requires schema version 66.")
+        self._apply_postgres_migration_script(
+            self._MIGRATION_SQL_V66_TO_V67_POSTGRES,
+            conn,
+            expected_version=67,
+        )
+        if self._get_schema_version_postgres(conn) != 67:
+            raise SchemaError("Notes semantic v67 PostgreSQL version verification failed.")
+
     def _configure_note_graph_suggestion_receipt_delete_trigger_postgres(self, conn: Any) -> None:
         """Clear only receipt IDs before PostgreSQL deletes an expiring receipt."""
         for statement in self._NOTE_GRAPH_SUGGESTION_RECEIPT_DELETE_POSTGRES_TRIGGER_STATEMENTS:
@@ -18383,6 +18499,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         }
         if self._get_db_version(conn) >= 66:
             required_tables.add("note_semantic_obsolete_vectors")
+        if self._get_db_version(conn) >= 67:
+            required_tables.add("note_semantic_operation_receipts")
         missing = required_tables - self._sqlite_table_names(conn)
         if missing:
             raise SchemaError(f"Notes semantic v65 SQLite schema is incomplete: {sorted(missing)}")
@@ -18445,6 +18563,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         )
         if self._get_schema_version_postgres(conn) >= 66:
             required_tables += ("note_semantic_obsolete_vectors",)
+        if self._get_schema_version_postgres(conn) >= 67:
+            required_tables += ("note_semantic_operation_receipts",)
         missing = [
             table for table in required_tables if not self.backend.table_exists(table, connection=conn)
         ]
@@ -21018,6 +21138,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     current_db_version = self._get_db_version(conn)
                 if target_version >= 66 and current_db_version == 65:
                     self._migrate_from_v65_to_v66_sqlite(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 67 and current_db_version == 66:
+                    self._migrate_from_v66_to_v67_sqlite(conn)
                     current_db_version = self._get_db_version(conn)
 
                 self._ensure_recent_persona_schema_sqlite(conn)
@@ -25032,6 +25155,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             if target_version >= 66 and current_version < 66:
                 self._migrate_from_v65_to_v66_postgres(conn)
                 current_version = 66
+            if target_version >= 67 and current_version < 67:
+                self._migrate_from_v66_to_v67_postgres(conn)
+                current_version = 67
             self._runtime_schema_version = current_version
 
             if current_version > target_version:

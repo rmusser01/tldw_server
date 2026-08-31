@@ -508,6 +508,7 @@ async def test_initial_build_enforces_one_provider_budget_across_convergence_pas
                     NOTE_ID,
                     {"content": "ijklmnop"},
                     expected_version=1,
+                    semantic_dataset_id="test-unbound",
                 )
                 notes.snapshots[NOTE_ID] = VersionedNoteSnapshot(
                     NOTE_ID,
@@ -3076,6 +3077,7 @@ async def test_high_priority_cleanup_source_waits_for_newer_reused_vector_public
         NOTE_ID,
         {"content": "Body revised"},
         expected_version=1,
+        semantic_dataset_id="test-unbound",
     )
     revised_chunks = build_semantic_chunks(
         generation_id=pending.id,
@@ -3966,7 +3968,12 @@ def test_postgres_snapshot_convergence_replaces_plan_and_fences_old_claims(
             planned_chunk_count=len(chunks_a),
             error_code=None,
         )
-        db.note_store.add_note("B", "Beta", note_id=note_b)
+        db.note_store.add_note(
+            "B",
+            "Beta",
+            note_id=note_b,
+            semantic_dataset_id="test-unbound",
+        )
         chunks_b = build_semantic_chunks(
             generation_id=pending.id,
             note_id=note_b,
@@ -4010,6 +4017,7 @@ def test_postgres_snapshot_convergence_replaces_plan_and_fences_old_claims(
             note_b,
             {"content": "Beta revised"},
             expected_version=1,
+            semantic_dataset_id="test-unbound",
         )
         revised_b = build_semantic_chunks(
             generation_id=pending.id,

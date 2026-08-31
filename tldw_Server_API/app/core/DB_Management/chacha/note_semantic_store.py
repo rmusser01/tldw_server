@@ -26,6 +26,7 @@ from .note_semantic_models import (
     SemanticNoteRecord,
     SemanticNoteState,
     SemanticObsoleteVectorClaim,
+    SemanticOperationReceipt,
     SemanticSnapshotSeed,
     SemanticWorkClaimState,
     SemanticWorkItem,
@@ -49,6 +50,7 @@ class NoteSemanticStore:
     _SAFE_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
     _ERROR_CODE = re.compile(r"^[a-z][a-z0-9_:-]{0,127}$")
     _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
+    _HEX_DIGEST = re.compile(r"^[0-9a-f]{64}$")
     _MAX_WORK_ATTEMPTS = 5
 
     def __init__(self, db: CharactersRAGDB) -> None:
@@ -356,6 +358,7 @@ class NoteSemanticStore:
             compatibility_hash=value["compatibility_hash"],
             provider=value["provider"],
             model=value["model"],
+            model_revision=value.get("model_revision"),
             endpoint_origin_revision=value["endpoint_origin_revision"],
             endpoint_origin_display=value["endpoint_origin_display"],
             data_boundary=value["data_boundary"],
@@ -383,6 +386,7 @@ class NoteSemanticStore:
             configuration_revision=int(value["configuration_revision"]),
             state=SemanticGenerationState(str(value["state"])),
             compatibility_hash=value["compatibility_hash"],
+            model_revision=value.get("model_revision"),
             dimension_state=SemanticDimensionState(str(value["dimension_state"])),
             dimensions=value["dimensions"],
             root_job_id=value["root_job_id"],
@@ -424,6 +428,202 @@ class NoteSemanticStore:
             error_code=value["error_code"], created_at=self._read_iso(value["created_at"]) or "",
             updated_at=self._read_iso(value["updated_at"]) or "",
         )
+
+    def _operation_from_row(self, row: Any) -> SemanticOperationReceipt:
+        value = self._record(row)
+        return SemanticOperationReceipt(
+            owner_user_id=str(value["owner_user_id"]),
+            dataset_id=str(value["dataset_id"]),
+            key_digest=str(value["key_digest"]),
+            action=str(value["action"]),
+            request_fingerprint=str(value["request_fingerprint"]),
+            run_id=value["run_id"],
+            expected_revision=int(value["expected_revision"]),
+            state=str(value["state"]),
+            response_json=value["response_json"],
+            expires_at=self._read_iso(value["expires_at"]) or "",
+        )
+
+    @classmethod
+    def _hex_digest(cls, value: str, *, field: str) -> str:
+        if not isinstance(value, str) or cls._HEX_DIGEST.fullmatch(value) is None:
+            raise ValueError(f"notes_semantic_{field}_invalid")
+        return value
+
+    def begin_operation_receipt(
+        self,
+        *,
+        dataset_id: str,
+        key_digest: str,
+        action: str,
+        request_fingerprint: str,
+        run_id: str | None,
+        expected_revision: int,
+        expires_at: datetime,
+        now: datetime,
+    ) -> tuple[SemanticOperationReceipt, bool]:
+        """Create or replay one exact bounded Notes-side mutation receipt."""
+
+        dataset = self._scope(dataset_id)
+        key = self._hex_digest(key_digest, field="idempotency_digest")
+        fingerprint = self._hex_digest(
+            request_fingerprint,
+            field="request_fingerprint",
+        )
+        if action not in {"enable", "cancel"}:
+            raise ValueError("notes_semantic_operation_action_invalid")
+        if type(expected_revision) is not int or expected_revision < 0:
+            raise ValueError("notes_semantic_configuration_revision_invalid")
+        normalized_run = (
+            None if run_id is None else self._safe_token(run_id, field="run_id")
+        )
+        timestamp = self._timestamp(now)
+        expiry = self._timestamp(expires_at)
+        with self._db.transaction() as conn:
+            self._set_scope(conn, dataset)
+            predecessor = conn.execute(
+                "SELECT key_digest FROM note_semantic_operation_receipts "
+                "WHERE owner_user_id=? AND dataset_id=? AND action=? "
+                "AND request_fingerprint=? ORDER BY created_at,key_digest LIMIT 1",
+                (self.owner_user_id, dataset, action, fingerprint),
+            ).fetchone()
+            if (
+                predecessor is not None
+                and str(self._record(predecessor)["key_digest"]) != key
+            ):
+                raise SemanticIndexingError("notes_semantic_idempotency_conflict")
+            cursor = conn.execute(
+                "INSERT INTO note_semantic_operation_receipts("
+                "owner_user_id,dataset_id,key_digest,action,request_fingerprint,run_id,"
+                "expected_revision,state,response_json,expires_at,created_at,updated_at"
+                ") VALUES (?,?,?,?,?,?,?,'pending',NULL,?,?,?) "
+                "ON CONFLICT(owner_user_id,key_digest) DO NOTHING",
+                (
+                    self.owner_user_id,
+                    dataset,
+                    key,
+                    action,
+                    fingerprint,
+                    normalized_run,
+                    expected_revision,
+                    expiry,
+                    timestamp,
+                    timestamp,
+                ),
+            )
+            row = conn.execute(
+                "SELECT * FROM note_semantic_operation_receipts "
+                "WHERE owner_user_id=? AND key_digest=?",
+                (self.owner_user_id, key),
+            ).fetchone()
+        if row is None:
+            raise SemanticIndexingError("notes_semantic_operation_receipt_unavailable")
+        receipt = self._operation_from_row(row)
+        if (
+            receipt.dataset_id != dataset
+            or receipt.action != action
+            or receipt.request_fingerprint != fingerprint
+            or (
+                receipt.run_id != normalized_run
+                and not (action == "enable" and normalized_run is None)
+            )
+            or receipt.expected_revision != expected_revision
+        ):
+            raise SemanticIndexingError("notes_semantic_idempotency_conflict")
+        return receipt, cursor.rowcount == 0
+
+    def complete_operation_receipt(
+        self,
+        *,
+        dataset_id: str,
+        key_digest: str,
+        request_fingerprint: str,
+        run_id: str | None,
+        response: dict[str, Any],
+        now: datetime,
+    ) -> SemanticOperationReceipt:
+        """Persist one bounded content-free mutation response behind its fingerprint."""
+
+        dataset = self._scope(dataset_id)
+        key = self._hex_digest(key_digest, field="idempotency_digest")
+        fingerprint = self._hex_digest(
+            request_fingerprint,
+            field="request_fingerprint",
+        )
+        normalized_run = (
+            None if run_id is None else self._safe_token(run_id, field="run_id")
+        )
+        payload = json.dumps(
+            response,
+            allow_nan=False,
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        if len(payload.encode("utf-8")) > 8192:
+            raise ValueError("notes_semantic_operation_response_too_large")
+        timestamp = self._timestamp(now)
+        with self._db.transaction() as conn:
+            self._set_scope(conn, dataset)
+            conn.execute(
+                "UPDATE note_semantic_operation_receipts SET state='completed',run_id=?,"
+                "response_json=?,updated_at=? WHERE owner_user_id=? AND dataset_id=? "
+                "AND key_digest=? AND request_fingerprint=? AND state='pending' "
+                "AND (run_id IS NULL OR run_id=?)",
+                (
+                    normalized_run,
+                    payload,
+                    timestamp,
+                    self.owner_user_id,
+                    dataset,
+                    key,
+                    fingerprint,
+                    normalized_run,
+                ),
+            )
+            row = conn.execute(
+                "SELECT * FROM note_semantic_operation_receipts WHERE owner_user_id=? "
+                "AND dataset_id=? AND key_digest=? AND request_fingerprint=?",
+                (self.owner_user_id, dataset, key, fingerprint),
+            ).fetchone()
+        if row is None:
+            raise SemanticIndexingError("notes_semantic_operation_receipt_conflict")
+        receipt = self._operation_from_row(row)
+        if (
+            receipt.state != "completed"
+            or receipt.run_id != normalized_run
+            or receipt.response_json != payload
+        ):
+            raise SemanticIndexingError("notes_semantic_operation_receipt_conflict")
+        return receipt
+
+    def resolve_enabled_dataset_for_local_mutation(
+        self,
+        *,
+        tx: SemanticConnection | None = None,
+    ) -> str | None:
+        """Return the sole canonical enabled semantic dataset for local Note writes."""
+
+        def resolve(conn: SemanticConnection) -> str | None:
+            authority = conn.execute(
+                "SELECT dataset_id FROM note_task_scope_authority WHERE owner_user_id=?",
+                (self.owner_user_id,),
+            ).fetchone()
+            if authority is None:
+                return None
+            dataset = str(self._record(authority)["dataset_id"])
+            self._set_scope(conn, dataset)
+            enabled = conn.execute(
+                "SELECT 1 FROM note_semantic_index_configs WHERE owner_user_id=? "
+                "AND dataset_id=? AND desired_state='enabled' LIMIT 1",
+                (self.owner_user_id, dataset),
+            ).fetchone()
+            return dataset if enabled is not None else None
+
+        if tx is not None:
+            return resolve(tx)
+        with self._db.transaction() as conn:
+            return resolve(conn)
 
     def _stage_obsolete_vectors_locked(
         self,
@@ -1143,14 +1343,20 @@ class NoteSemanticStore:
         self, *, dataset_id: str, capability_revision: str, disclosure_hash: str, provider: str,
         model: str, endpoint_origin_revision: str, endpoint_origin_display: str, data_boundary: str,
         vector_backend: str, storage_boundary: str, storage_label: str, normalization_version: str,
-        chunker_version: str, now: datetime,
+        chunker_version: str, now: datetime, model_revision: str | None = None,
     ) -> SemanticIndexConfig:
         dataset = self._scope(dataset_id)
         timestamp = self._timestamp(now)
+        revision = (
+            None
+            if model_revision is None
+            else self._safe_token(model_revision, field="model_revision")
+        )
         params = (
             self.owner_user_id, dataset, self._safe_token(capability_revision, field="capability_revision"),
             self._safe_token(disclosure_hash, field="disclosure_hash"), self._safe_token(provider, field="provider"),
-            self._safe_token(model, field="model"), self._safe_token(endpoint_origin_revision, field="endpoint_origin_revision"),
+            self._safe_token(model, field="model"), revision,
+            self._safe_token(endpoint_origin_revision, field="endpoint_origin_revision"),
             self._endpoint_origin_display(endpoint_origin_display), self._safe_token(data_boundary, field="data_boundary"),
             self._safe_token(vector_backend, field="vector_backend"), self._safe_token(storage_boundary, field="storage_boundary"),
             self._safe_token(storage_label.replace(" ", "_"), field="storage_label"),
@@ -1160,14 +1366,34 @@ class NoteSemanticStore:
         )
         with self._db.transaction() as conn:
             self._set_scope(conn, dataset)
+            authority = conn.execute(
+                "SELECT dataset_id FROM note_task_scope_authority WHERE owner_user_id=?",
+                (self.owner_user_id,),
+            ).fetchone()
+            if authority is None:
+                false_value: bool | int = False if self.is_postgres else 0
+                conn.execute(
+                    "INSERT INTO note_task_scope_authority("
+                    "owner_user_id,dataset_id,task_graph_bound,moodboard_graph_bound,studio_graph_bound"
+                    ") VALUES (?,?,?,?,?)",
+                    (
+                        self.owner_user_id,
+                        dataset,
+                        false_value,
+                        false_value,
+                        false_value,
+                    ),
+                )
+            elif str(self._record(authority)["dataset_id"]) != dataset:
+                raise SemanticIndexingError("notes_semantic_dataset_authority_conflict")
             conn.execute(
                 """
                 INSERT INTO note_semantic_index_configs(
                   owner_user_id,dataset_id,desired_state,configuration_revision,semantic_index_revision,
-                  capability_revision,disclosure_hash,provider,model,endpoint_origin_revision,
+                  capability_revision,disclosure_hash,provider,model,model_revision,endpoint_origin_revision,
                   endpoint_origin_display,data_boundary,vector_backend,storage_boundary,storage_label,
                   metric,dimension_state,normalization_version,chunker_version,consented_at,updated_at
-                ) VALUES (?,?, 'disabled',1,0,?,?,?,?,?,?,?,?,?,?, 'cosine','pending',?,?,?,?)
+                ) VALUES (?,?, 'disabled',1,0,?,?,?,?,?,?,?,?,?,?,?, 'cosine','pending',?,?,?,?)
                 """,
                 params,
             )
@@ -1317,7 +1543,7 @@ class NoteSemanticStore:
     def create_generation(
         self, *, dataset_id: str, configuration_revision: int, compatibility_hash: str | None,
         dimension_state: SemanticDimensionState, dimensions: int | None, root_job_id: str | None,
-        now: datetime,
+        now: datetime, model_revision: str | None = None,
     ) -> SemanticGeneration:
         dataset = self._scope(dataset_id)
         if dimension_state is SemanticDimensionState.RESOLVED:
@@ -1337,16 +1563,21 @@ class NoteSemanticStore:
             resolved_compatibility_hash = None
         generation_id = str(uuid.uuid4())
         timestamp = self._timestamp(now)
+        revision = (
+            None
+            if model_revision is None
+            else self._safe_token(model_revision, field="model_revision")
+        )
         with self._db.transaction() as conn:
             self._set_scope(conn, dataset)
             if self.is_postgres:
                 config_query = (
-                    "SELECT configuration_revision,dimension_state,dimensions,compatibility_hash "
+                    "SELECT configuration_revision,dimension_state,dimensions,compatibility_hash,model_revision "
                     "FROM note_semantic_index_configs WHERE owner_user_id=? AND dataset_id=? FOR UPDATE"
                 )
             else:
                 config_query = (
-                    "SELECT configuration_revision,dimension_state,dimensions,compatibility_hash "
+                    "SELECT configuration_revision,dimension_state,dimensions,compatibility_hash,model_revision "
                     "FROM note_semantic_index_configs WHERE owner_user_id=? AND dataset_id=?"
                 )
             config = conn.execute(
@@ -1368,18 +1599,19 @@ class NoteSemanticStore:
                 str(config_record["dimension_state"]) != dimension_state.value
                 or config_dimensions != dimensions
                 or config_hash != resolved_compatibility_hash
+                or config_record.get("model_revision") != revision
             ):
                 raise ValueError("notes_semantic_generation_identity_mismatch")
             conn.execute(
                 """
                 INSERT INTO note_semantic_generations(
                   id,owner_user_id,dataset_id,configuration_revision,state,compatibility_hash,
-                  dimension_state,dimensions,root_job_id,created_at
-                ) VALUES (?,?,?,?, 'staging',?,?,?,?,?)
+                  model_revision,dimension_state,dimensions,root_job_id,created_at
+                ) VALUES (?,?,?,?, 'staging',?,?,?,?,?,?)
                 """,
                 (
                     generation_id, self.owner_user_id, dataset, configuration_revision,
-                    resolved_compatibility_hash, dimension_state.value,
+                    resolved_compatibility_hash, revision, dimension_state.value,
                     dimensions, None if root_job_id is None else self._safe_token(root_job_id, field="root_job_id"), timestamp,
                 ),
             )
@@ -1447,6 +1679,71 @@ class NoteSemanticStore:
             ).fetchone()
         return row is not None
 
+    def has_stalled_cleanup(
+        self,
+        dataset_id: str,
+        *,
+        expired_before: datetime,
+    ) -> bool:
+        """Return whether generation cleanup exhausted attempts or lost its lease."""
+
+        dataset = self._scope(dataset_id)
+        expired = self._timestamp(expired_before)
+        with self._db.transaction() as conn:
+            self._set_scope(conn, dataset)
+            row = conn.execute(
+                "SELECT 1 FROM note_semantic_work WHERE owner_user_id=? AND dataset_id=? "
+                "AND kind='delete_generation' AND (attempt_count>=? OR "
+                "(claim_state='claimed' AND claimed_at<=?)) LIMIT 1",
+                (self.owner_user_id, dataset, self._MAX_WORK_ATTEMPTS, expired),
+            ).fetchone()
+        return row is not None
+
+    def rearm_exhausted_generation_cleanup(
+        self,
+        *,
+        dataset_id: str,
+        limit: int,
+        now: datetime,
+    ) -> int:
+        """Boundedly rearm exhausted generation cleanup for production convergence."""
+
+        dataset = self._scope(dataset_id)
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise ValueError("notes_semantic_maintenance_limit_invalid")
+        timestamp = self._timestamp(now)
+        with self._db.transaction() as conn:
+            self._set_scope(conn, dataset)
+            query = (
+                "SELECT id FROM note_semantic_work WHERE owner_user_id=? AND dataset_id=? "
+                "AND kind='delete_generation' AND claim_state='failed' AND attempt_count>=? "
+                "ORDER BY updated_at,id LIMIT ?"
+            )
+            if self.is_postgres:
+                query += " FOR UPDATE SKIP LOCKED"
+            rows = conn.execute(
+                query,
+                (self.owner_user_id, dataset, self._MAX_WORK_ATTEMPTS, limit),
+            ).fetchall()
+            rearmed = 0
+            for row in rows:
+                cursor = conn.execute(
+                    "UPDATE note_semantic_work SET claim_state='pending',attempt_count=0,"
+                    "next_eligible_at=?,claim_token=NULL,claimed_at=NULL,error_code=NULL,"
+                    "updated_at=? WHERE owner_user_id=? AND dataset_id=? AND id=? "
+                    "AND kind='delete_generation' AND claim_state='failed' AND attempt_count>=?",
+                    (
+                        timestamp,
+                        timestamp,
+                        self.owner_user_id,
+                        dataset,
+                        str(self._record(row)["id"]),
+                        self._MAX_WORK_ATTEMPTS,
+                    ),
+                )
+                rearmed += cursor.rowcount
+        return rearmed
+
     def has_pending_index_work(self, dataset_id: str, generation_id: str) -> bool:
         """Return whether eligible index work remains for one generation."""
 
@@ -1461,16 +1758,22 @@ class NoteSemanticStore:
             ).fetchone()
         return row is not None
 
-    def list_maintenance_dataset_ids(self, *, limit: int) -> tuple[str, ...]:
+    def list_maintenance_dataset_ids(
+        self,
+        *,
+        limit: int,
+        after_dataset_id: str | None = None,
+    ) -> tuple[str, ...]:
         """List owner-scoped datasets that may require bounded maintenance."""
 
         if type(limit) is not int or not 1 <= limit <= 100:
             raise ValueError("notes_semantic_maintenance_limit_invalid")
+        after = "" if after_dataset_id is None else self._scope(after_dataset_id)
         with self._db.transaction() as conn:
             rows = conn.execute(
                 "SELECT dataset_id FROM note_task_scope_authority "
-                "WHERE owner_user_id=? ORDER BY dataset_id LIMIT ?",
-                (self.owner_user_id, limit),
+                "WHERE owner_user_id=? AND dataset_id>? ORDER BY dataset_id LIMIT ?",
+                (self.owner_user_id, after, limit),
             ).fetchall()
             datasets: list[str] = []
             authority_queries = (
@@ -1736,11 +2039,17 @@ class NoteSemanticStore:
     def resolve_generation_dimensions(
         self, *, dataset_id: str, generation_id: str, expected_configuration_revision: int,
         dimensions: int, compatibility_hash: str, now: datetime,
+        model_revision: str | None = None,
     ) -> SemanticGeneration | None:
         dataset = self._scope(dataset_id)
         if isinstance(dimensions, bool) or not isinstance(dimensions, int) or dimensions < 1:
             raise ValueError("notes_semantic_dimensions_invalid")
         final_hash = self._safe_token(compatibility_hash, field="compatibility_hash")
+        revision = (
+            None
+            if model_revision is None
+            else self._safe_token(model_revision, field="model_revision")
+        )
         timestamp = self._timestamp(now)
         next_revision = expected_configuration_revision + 1
         try:
@@ -1748,12 +2057,12 @@ class NoteSemanticStore:
                 self._set_scope(conn, dataset)
                 config_cursor = conn.execute(
                     "UPDATE note_semantic_index_configs SET dimension_state='resolved', dimensions=?, "
-                    "compatibility_hash=?, configuration_revision=?, updated_at=? "
+                    "compatibility_hash=?, model_revision=?, configuration_revision=?, updated_at=? "
                     "WHERE owner_user_id=? AND dataset_id=? AND configuration_revision=? "
                     "AND desired_state='enabled' AND dimension_state='pending' "
                     "AND dimensions IS NULL AND compatibility_hash IS NULL",
                     (
-                        dimensions, final_hash, next_revision, timestamp, self.owner_user_id,
+                        dimensions, final_hash, revision, next_revision, timestamp, self.owner_user_id,
                         dataset, expected_configuration_revision,
                     ),
                 )
@@ -1761,12 +2070,12 @@ class NoteSemanticStore:
                     raise _SemanticCASMiss
                 generation_cursor = conn.execute(
                     "UPDATE note_semantic_generations SET dimension_state='resolved', dimensions=?, "
-                    "compatibility_hash=?, configuration_revision=? "
+                    "compatibility_hash=?, model_revision=?, configuration_revision=? "
                     "WHERE owner_user_id=? AND dataset_id=? AND id=? AND configuration_revision=? "
                     "AND state='staging' AND dimension_state='pending' "
                     "AND dimensions IS NULL AND compatibility_hash IS NULL",
                     (
-                        dimensions, final_hash, next_revision, self.owner_user_id, dataset,
+                        dimensions, final_hash, revision, next_revision, self.owner_user_id, dataset,
                         generation_id, expected_configuration_revision,
                     ),
                 )

@@ -87,6 +87,10 @@ class NoteStore:
         content: str,
         content_version: int,
     ) -> None:
+        if dataset_id is None:
+            dataset_id = self._db.note_semantic_store.resolve_enabled_dataset_for_local_mutation(
+                tx=conn
+            )
         self._db.note_semantic_store.mark_note_dirty(
             tx=conn,
             dataset_id=dataset_id,
@@ -107,6 +111,10 @@ class NoteStore:
         content_version: int,
         hard_delete: bool = False,
     ) -> None:
+        if dataset_id is None:
+            dataset_id = self._db.note_semantic_store.resolve_enabled_dataset_for_local_mutation(
+                tx=conn
+            )
         self._db.note_semantic_store.mark_note_tombstoned(
             tx=conn,
             dataset_id=dataset_id,
