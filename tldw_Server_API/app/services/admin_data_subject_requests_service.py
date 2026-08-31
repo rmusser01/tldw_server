@@ -468,8 +468,35 @@ async def _erase_chat_messages(user_id: int) -> int:
     )
 
 
+def _build_notes_semantic_erasure_coordinator(user_id: int):
+    """Open the owner-bound Notes store used by semantic erasure."""
+
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+    from tldw_Server_API.app.core.Notes_Graph.semantic_api import (
+        load_semantic_settings,
+    )
+    from tldw_Server_API.app.core.Notes_Graph.semantic_erasure import (
+        SemanticErasureCoordinator,
+    )
+
+    path = DatabasePaths.get_chacha_db_path(user_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    db = CharactersRAGDB(db_path=str(path), client_id=str(user_id))
+    return SemanticErasureCoordinator(
+        db=db,
+        settings=load_semantic_settings(),
+        close_database_on_exit=True,
+    )
+
+
 async def _erase_notes(user_id: int) -> int:
-    """Hard-delete all notes for a user."""
+    """Erase semantic projections before hard-deleting canonical owner Notes."""
+
+    coordinator = await asyncio.to_thread(
+        _build_notes_semantic_erasure_coordinator,
+        user_id,
+    )
+    await coordinator.erase()
     path = DatabasePaths.get_chacha_db_path(user_id)
     return await asyncio.to_thread(
         _sqlite_hard_delete_sync,

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -85,30 +84,97 @@ async def test_list_data_subject_requests_passes_org_scope_to_repo(monkeypatch) 
 async def test_erase_notes_removes_graph_edges_before_notes(monkeypatch) -> None:
     from tldw_Server_API.app.services import admin_data_subject_requests_service as service
 
-    captured: list[tuple[str, tuple]] = []
+    events: list[str] = []
+
+    class _Coordinator:
+        async def erase(self):
+            events.append("semantic")
+            return SimpleNamespace(deleted_notes=3)
+
+    def _hard_delete(_path, statements) -> int:
+        for sql, _params in statements:
+            if sql.startswith("DELETE FROM note_edges"):
+                events.append("note_edges")
+            elif sql.startswith("DELETE FROM note_wikilink_edges"):
+                events.append("note_wikilink_edges")
+            elif sql == "DELETE FROM notes":
+                events.append("notes")
+        return 6
+
     monkeypatch.setattr(
-        service.DatabasePaths,
-        "get_chacha_db_path",
-        lambda _user_id: Path("/tmp/user-notes.db"),
+        service,
+        "_build_notes_semantic_erasure_coordinator",
+        lambda _user_id: _Coordinator(),
+    )
+    monkeypatch.setattr(service, "_sqlite_hard_delete_sync", _hard_delete)
+
+    assert await service._erase_notes(7) == 6
+    assert events == ["semantic", "note_edges", "note_wikilink_edges", "notes"]
+
+
+@pytest.mark.asyncio
+async def test_erase_notes_does_not_delete_canonical_notes_after_semantic_failure(
+    monkeypatch,
+) -> None:
+    from tldw_Server_API.app.services import admin_data_subject_requests_service as service
+
+    calls: list[str] = []
+
+    class _Coordinator:
+        async def erase(self):
+            calls.append("semantic")
+            raise RuntimeError("notes_semantic_erasure_timeout")
+
+    monkeypatch.setattr(
+        service,
+        "_build_notes_semantic_erasure_coordinator",
+        lambda _user_id: _Coordinator(),
+    )
+    monkeypatch.setattr(
+        service,
+        "_sqlite_hard_delete_sync",
+        lambda _path, _statements: calls.append("canonical"),
     )
 
-    def _capture(_path: Path, statements: list[tuple[str, tuple]]) -> int:
-        captured.extend(statements)
-        return len(statements)
+    with pytest.raises(RuntimeError, match="notes_semantic_erasure_timeout"):
+        await service._erase_notes(7)
 
-    monkeypatch.setattr(service, "_sqlite_hard_delete_sync", _capture)
+    assert calls == ["semantic"]
 
-    assert await service._erase_notes(7) == 3
-    assert captured == [
-        (
-            "DELETE FROM note_edges WHERE from_note_id IN (SELECT id FROM notes) "
-            "OR to_note_id IN (SELECT id FROM notes)",
-            (),
-        ),
-        (
-            "DELETE FROM note_wikilink_edges WHERE source_note_id IN (SELECT id FROM notes) "
-            "OR target_note_id IN (SELECT id FROM notes)",
-            (),
-        ),
-        ("DELETE FROM notes", ()),
-    ]
+
+@pytest.mark.asyncio
+async def test_notes_erasure_runs_semantic_path_without_generic_embeddings(monkeypatch) -> None:
+    from tldw_Server_API.app.services import admin_data_subject_requests_service as service
+
+    calls: list[str] = []
+
+    async def _notes(_user_id: int) -> int:
+        calls.append("notes")
+        return 2
+
+    async def _embeddings(_user_id: int) -> int:
+        calls.append("embeddings")
+        return 99
+
+    class _Repo:
+        def __init__(self) -> None:
+            self.statuses: list[str] = []
+
+        async def update_request_status(self, _request_id, status, notes=None):
+            del notes
+            self.statuses.append(status)
+
+    monkeypatch.setitem(service._ERASURE_HANDLERS, "notes", _notes)
+    monkeypatch.setitem(service._ERASURE_HANDLERS, "embeddings", _embeddings)
+    repo = _Repo()
+
+    result = await service.execute_dsr_erasure(
+        request_id=41,
+        user_id=7,
+        selected_categories=["notes"],
+        dsr_repo=repo,
+    )
+
+    assert result["status"] == "completed"
+    assert calls == ["notes"]
+    assert repo.statuses == ["executing", "completed"]

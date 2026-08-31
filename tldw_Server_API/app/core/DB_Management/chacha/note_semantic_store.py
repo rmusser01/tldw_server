@@ -1437,6 +1437,7 @@ class NoteSemanticStore:
         )
         with self._db.transaction() as conn:
             self._set_scope(conn, dataset)
+            self._serialize_dataset_mutation(conn, dataset)
             authority = conn.execute(
                 "SELECT dataset_id FROM note_task_scope_authority WHERE owner_user_id=?",
                 (self.owner_user_id,),
@@ -1500,6 +1501,7 @@ class NoteSemanticStore:
             transition = "disabled_at=?"
         with self._db.transaction() as conn:
             self._set_scope(conn, dataset)
+            self._serialize_dataset_mutation(conn, dataset)
             cursor = conn.execute(
                 "UPDATE note_semantic_index_configs SET desired_state=?, configuration_revision=configuration_revision+1, "  # nosec B608
                 + transition + ", updated_at=? WHERE " + where,
@@ -1544,6 +1546,7 @@ class NoteSemanticStore:
         try:
             with self._db.transaction() as conn:
                 self._set_scope(conn, dataset)
+                self._serialize_dataset_mutation(conn, dataset)
                 config_query = (
                     "SELECT configuration_revision FROM note_semantic_index_configs "
                     "WHERE owner_user_id=? AND dataset_id=?"
@@ -1561,8 +1564,11 @@ class NoteSemanticStore:
                     raise _SemanticCASMiss
 
                 generations = conn.execute(
-                    "SELECT id FROM note_semantic_generations "
-                    "WHERE owner_user_id=? AND dataset_id=? AND deleted_at IS NULL",
+                    "SELECT id FROM note_semantic_generations g "
+                    "WHERE owner_user_id=? AND dataset_id=? AND (deleted_at IS NULL OR EXISTS ("
+                    "SELECT 1 FROM note_semantic_obsolete_vectors o WHERE "
+                    "o.owner_user_id=g.owner_user_id AND o.dataset_id=g.dataset_id "
+                    "AND o.generation_id=g.id))",
                     (self.owner_user_id, dataset),
                 ).fetchall()
                 updated = conn.execute(
@@ -1868,6 +1874,10 @@ class NoteSemanticStore:
                 "WHERE owner_user_id=? AND dataset_id=? LIMIT 1",
                 "SELECT 1 FROM note_semantic_work "
                 "WHERE owner_user_id=? AND dataset_id=? LIMIT 1",
+                "SELECT 1 FROM note_semantic_obsolete_vectors "
+                "WHERE owner_user_id=? AND dataset_id=? LIMIT 1",
+                "SELECT 1 FROM note_semantic_operation_receipts "
+                "WHERE owner_user_id=? AND dataset_id=? LIMIT 1",
             )
             for row in rows:
                 dataset = str(self._record(row)["dataset_id"])
@@ -1879,6 +1889,63 @@ class NoteSemanticStore:
                 ):
                     datasets.append(dataset)
         return tuple(datasets)
+
+    def purge_semantic_dataset_for_erasure(
+        self,
+        *,
+        dataset_id: str,
+    ) -> None:
+        """Purge one fenced dataset only after cleanup is fully confirmed."""
+
+        dataset = self._scope(dataset_id)
+        try:
+            with self._db.transaction() as conn:
+                self._set_scope(conn, dataset)
+                self._serialize_dataset_mutation(conn, dataset)
+                config = conn.execute(
+                    "SELECT desired_state,active_generation_id "
+                    "FROM note_semantic_index_configs "
+                    "WHERE owner_user_id=? AND dataset_id=?",
+                    (self.owner_user_id, dataset),
+                ).fetchone()
+                if config is not None and (
+                    str(self._record(config)["desired_state"]) != "disabled"
+                    or self._record(config)["active_generation_id"] is not None
+                ):
+                    raise _SemanticCASMiss
+                live_generation = conn.execute(
+                    "SELECT 1 FROM note_semantic_generations "
+                    "WHERE owner_user_id=? AND dataset_id=? AND deleted_at IS NULL LIMIT 1",
+                    (self.owner_user_id, dataset),
+                ).fetchone()
+                pending_cleanup = conn.execute(
+                    "SELECT 1 FROM note_semantic_work WHERE owner_user_id=? "
+                    "AND dataset_id=? AND kind='delete_generation' "
+                    "AND claim_state IN ('pending','claimed','failed') LIMIT 1",
+                    (self.owner_user_id, dataset),
+                ).fetchone()
+                if live_generation is not None or pending_cleanup is not None:
+                    raise _SemanticCASMiss
+
+                conn.execute(
+                    "DELETE FROM note_semantic_obsolete_vectors "
+                    "WHERE owner_user_id=? AND dataset_id=?",
+                    (self.owner_user_id, dataset),
+                )
+                conn.execute(
+                    "DELETE FROM note_semantic_operation_receipts "
+                    "WHERE owner_user_id=? AND dataset_id=?",
+                    (self.owner_user_id, dataset),
+                )
+                conn.execute(
+                    "DELETE FROM note_semantic_index_configs "
+                    "WHERE owner_user_id=? AND dataset_id=?",
+                    (self.owner_user_id, dataset),
+                )
+        except _SemanticCASMiss:
+            raise SemanticIndexingError(
+                "notes_semantic_erasure_finalization_fence_lost"
+            ) from None
 
     def list_dirty_generation_watermarks(
         self,
@@ -2142,6 +2209,7 @@ class NoteSemanticStore:
         try:
             with self._db.transaction() as conn:
                 self._set_scope(conn, dataset)
+                self._serialize_dataset_mutation(conn, dataset)
                 config_cursor = conn.execute(
                     "UPDATE note_semantic_index_configs SET dimension_state='resolved', dimensions=?, "
                     "compatibility_hash=?, model_revision=?, configuration_revision=?, updated_at=? "
@@ -2651,7 +2719,8 @@ class NoteSemanticStore:
                 "WHERE generation_id IS NOT NULL AND kind='delete_generation' DO UPDATE SET "
                 "generation_id=excluded.generation_id, dirty_generation=excluded.dirty_generation, "
                 "fencing_token=excluded.fencing_token, claim_state='pending', attempt_count=0, next_eligible_at=excluded.next_eligible_at, "
-                "claim_token=NULL, claimed_at=NULL, error_code=NULL, updated_at=excluded.updated_at",
+                "claim_token=NULL, claimed_at=NULL, error_code=NULL, updated_at=excluded.updated_at "
+                "WHERE note_semantic_work.claim_state<>'claimed'",
                 params,
             )
         else:
