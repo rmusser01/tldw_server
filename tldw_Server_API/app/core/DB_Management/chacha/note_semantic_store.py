@@ -52,6 +52,7 @@ class NoteSemanticStore:
     _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
     _HEX_DIGEST = re.compile(r"^[0-9a-f]{64}$")
     _MAX_WORK_ATTEMPTS = 5
+    _MAX_OPERATION_RECEIPT_PRUNE = 16
 
     def __init__(self, db: CharactersRAGDB) -> None:
         self._db = db
@@ -479,13 +480,36 @@ class NoteSemanticStore:
         )
         timestamp = self._timestamp(now)
         expiry = self._timestamp(expires_at)
+        if expires_at <= now:
+            raise ValueError("notes_semantic_operation_expiry_invalid")
         with self._db.transaction() as conn:
             self._set_scope(conn, dataset)
+            conn.execute(
+                "DELETE FROM note_semantic_operation_receipts WHERE owner_user_id=? "
+                "AND dataset_id=? AND key_digest=? AND expires_at<=?",
+                (self.owner_user_id, dataset, key, timestamp),
+            )
+            conn.execute(
+                "DELETE FROM note_semantic_operation_receipts WHERE owner_user_id=? "
+                "AND dataset_id=? AND key_digest IN ("
+                "SELECT key_digest FROM note_semantic_operation_receipts WHERE "
+                "owner_user_id=? AND dataset_id=? AND expires_at<=? "
+                "ORDER BY expires_at,key_digest LIMIT ?)",
+                (
+                    self.owner_user_id,
+                    dataset,
+                    self.owner_user_id,
+                    dataset,
+                    timestamp,
+                    self._MAX_OPERATION_RECEIPT_PRUNE,
+                ),
+            )
             predecessor = conn.execute(
                 "SELECT key_digest FROM note_semantic_operation_receipts "
                 "WHERE owner_user_id=? AND dataset_id=? AND action=? "
-                "AND request_fingerprint=? ORDER BY created_at,key_digest LIMIT 1",
-                (self.owner_user_id, dataset, action, fingerprint),
+                "AND request_fingerprint=? AND expires_at>? "
+                "ORDER BY created_at,key_digest LIMIT 1",
+                (self.owner_user_id, dataset, action, fingerprint, timestamp),
             ).fetchone()
             if (
                 predecessor is not None
@@ -566,10 +590,15 @@ class NoteSemanticStore:
         with self._db.transaction() as conn:
             self._set_scope(conn, dataset)
             conn.execute(
+                "DELETE FROM note_semantic_operation_receipts WHERE owner_user_id=? "
+                "AND dataset_id=? AND key_digest=? AND expires_at<=?",
+                (self.owner_user_id, dataset, key, timestamp),
+            )
+            conn.execute(
                 "UPDATE note_semantic_operation_receipts SET state='completed',run_id=?,"
                 "response_json=?,updated_at=? WHERE owner_user_id=? AND dataset_id=? "
                 "AND key_digest=? AND request_fingerprint=? AND state='pending' "
-                "AND (run_id IS NULL OR run_id=?)",
+                "AND expires_at>? AND (run_id IS NULL OR run_id=?)",
                 (
                     normalized_run,
                     payload,
@@ -578,6 +607,7 @@ class NoteSemanticStore:
                     dataset,
                     key,
                     fingerprint,
+                    timestamp,
                     normalized_run,
                 ),
             )

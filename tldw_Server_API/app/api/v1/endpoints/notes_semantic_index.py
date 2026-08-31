@@ -9,6 +9,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.routing import APIRoute
+from loguru import logger
 from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import Response
@@ -51,6 +52,7 @@ SEMANTIC_ERROR_MESSAGES = {
     "notes_semantic_active_generation_required": "An active semantic generation is required.",
     "notes_semantic_capability_revision_conflict": "Semantic capabilities changed; refresh and retry.",
     "notes_semantic_configuration_revision_conflict": "The semantic index changed; refresh and retry.",
+    "notes_semantic_dataset_authority_unavailable": "Semantic dataset authority is temporarily unavailable.",
     "notes_semantic_dataset_not_found": "The semantic dataset was not found.",
     "notes_semantic_idempotency_conflict": "The idempotency key was reused for another request.",
     "notes_semantic_invalid_request": "The semantic index request is invalid.",
@@ -119,6 +121,11 @@ def _dataset_key(*, owner_user_id: str, dataset_id: str | None) -> str:
         )
     except (NotesLinkDatasetConflictError, NotesLinkSyncInactiveDatasetError) as exc:
         raise SemanticAPIError(404, "notes_semantic_dataset_not_found") from exc
+    except Exception as exc:  # noqa: BLE001 - resolver details stay internal
+        raise SemanticAPIError(
+            503,
+            "notes_semantic_dataset_authority_unavailable",
+        ) from exc
     if authority is None:
         raise SemanticAPIError(404, "notes_semantic_dataset_not_found")
     return authority[1].dataset_id
@@ -147,7 +154,10 @@ async def get_semantic_api(
         release = getattr(db, "release_context_connection", None)
         close = release if callable(release) else getattr(db, "close_connection", None)
         if callable(close):
-            await run_in_threadpool(close)
+            try:
+                await run_in_threadpool(close)
+            except Exception:  # noqa: BLE001 - release details stay internal
+                logger.warning("Notes semantic request database release failed")
 
 
 def _required_idempotency_key(value: str | None) -> str:

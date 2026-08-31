@@ -7479,6 +7479,10 @@ CREATE INDEX idx_note_semantic_operation_receipts_scope
   ON note_semantic_operation_receipts(
     owner_user_id,dataset_id,action,state,updated_at,key_digest
   );
+CREATE INDEX idx_note_semantic_operation_receipts_expiry
+  ON note_semantic_operation_receipts(
+    owner_user_id,dataset_id,expires_at,key_digest
+  );
 """
 
     _MIGRATION_SQL_V66_TO_V67_POSTGRES = """
@@ -7507,6 +7511,10 @@ CREATE TABLE IF NOT EXISTS note_semantic_operation_receipts(
 CREATE INDEX IF NOT EXISTS idx_note_semantic_operation_receipts_scope
   ON note_semantic_operation_receipts(
     owner_user_id,dataset_id,action,state,updated_at,key_digest
+  );
+CREATE INDEX IF NOT EXISTS idx_note_semantic_operation_receipts_expiry
+  ON note_semantic_operation_receipts(
+    owner_user_id,dataset_id,expires_at,key_digest
   );
 ALTER TABLE note_semantic_operation_receipts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE note_semantic_operation_receipts FORCE ROW LEVEL SECURITY;

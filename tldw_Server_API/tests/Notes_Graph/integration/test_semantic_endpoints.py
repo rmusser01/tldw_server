@@ -386,3 +386,82 @@ async def test_dataset_authority_failure_is_typed_404_and_releases_database(
     assert exc_info.value.status_code == 404
     assert exc_info.value.detail["error_code"] == "notes_semantic_dataset_not_found"
     assert released == [True]
+
+
+@pytest.mark.asyncio
+async def test_unexpected_dataset_and_release_failures_preserve_sanitized_503(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    secret = "sqlite:////private/notes.db?token=super-secret"  # nosec B105
+    warnings: list[str] = []
+
+    class FakeDB:
+        def release_context_connection(self) -> None:
+            raise RuntimeError(secret)
+
+    def unavailable(**_kwargs):
+        raise RuntimeError(secret)
+
+    monkeypatch.setattr(endpoint, "resolve_notes_link_dataset_authority", unavailable)
+    monkeypatch.setattr(
+        endpoint,
+        "logger",
+        SimpleNamespace(warning=lambda message: warnings.append(message)),
+        raising=False,
+    )
+    dependency = endpoint.get_semantic_api(
+        dataset_id="dataset-a",
+        user=SimpleNamespace(id_str="owner-a"),
+        db=FakeDB(),
+        jobs=object(),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await dependency.__anext__()
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail == {
+        "error_code": "notes_semantic_dataset_authority_unavailable",
+        "message": "Semantic dataset authority is temporarily unavailable.",
+    }
+    assert warnings == ["Notes semantic request database release failed"]
+    assert secret not in repr((exc_info.value.detail, warnings))
+
+
+@pytest.mark.asyncio
+async def test_release_failure_does_not_override_successful_dependency_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    secret = "postgresql://user:password@private/db?token=secret"  # nosec B105
+    warnings: list[str] = []
+
+    class FakeDB:
+        note_semantic_store = object()
+
+        def release_context_connection(self) -> None:
+            raise RuntimeError(secret)
+
+    monkeypatch.setattr(
+        endpoint,
+        "resolve_notes_link_dataset_authority",
+        lambda **_kwargs: (object(), SimpleNamespace(dataset_id="dataset-a")),
+    )
+    monkeypatch.setattr(
+        endpoint,
+        "logger",
+        SimpleNamespace(warning=lambda message: warnings.append(message)),
+        raising=False,
+    )
+    dependency = endpoint.get_semantic_api(
+        dataset_id="dataset-a",
+        user=SimpleNamespace(id_str="owner-a"),
+        db=FakeDB(),
+        jobs=object(),
+    )
+
+    api = await dependency.__anext__()
+    await dependency.aclose()
+
+    assert api._dataset_id == "dataset-a"
+    assert warnings == ["Notes semantic request database release failed"]
+    assert secret not in repr(warnings)
