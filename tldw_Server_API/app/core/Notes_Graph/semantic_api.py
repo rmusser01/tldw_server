@@ -826,6 +826,8 @@ class SemanticIndexAPI:
         payload = job.get("payload") if isinstance(job, dict) else None
         if not isinstance(payload, dict) or payload.get("dataset_id") != self._dataset_id:
             raise SemanticAPIError(404, "notes_semantic_run_not_found")
+        if payload.get("configuration_revision") != expected_revision:
+            raise SemanticAPIError(409, "notes_semantic_run_revision_conflict")
         request_identity = {
             "action": "cancel",
             "dataset_id": self._dataset_id,

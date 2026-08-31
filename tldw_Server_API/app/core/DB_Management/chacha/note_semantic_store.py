@@ -84,6 +84,43 @@ class NoteSemanticStore:
         if self.is_postgres:
             conn.execute("SELECT set_config('app.current_dataset_id', ?, true)", (dataset_id,))
 
+    def _serialize_dataset_mutation(
+        self,
+        conn: SemanticConnection,
+        dataset_id: str,
+    ) -> None:
+        if not self.is_postgres:
+            return
+        identity = f"{self.owner_user_id}\0{dataset_id}".encode()
+        digest = hashlib.sha256(
+            b"notes-semantic-dataset-mutation-v1\0" + identity
+        ).digest()
+        lock_keys = (
+            int.from_bytes(digest[:4], "big", signed=True),
+            int.from_bytes(digest[4:8], "big", signed=True),
+        )
+        conn.execute("SELECT pg_advisory_xact_lock(?, ?)", lock_keys).fetchone()
+
+    def _has_unexpired_cancellation_intent_locked(
+        self,
+        conn: SemanticConnection,
+        *,
+        dataset_id: str,
+        root_job_id: str,
+        now: datetime,
+    ) -> bool:
+        return conn.execute(
+            "SELECT 1 FROM note_semantic_operation_receipts "
+            "WHERE owner_user_id=? AND dataset_id=? AND action='cancel' "
+            "AND run_id=? AND expires_at>? LIMIT 1",
+            (
+                self.owner_user_id,
+                dataset_id,
+                root_job_id,
+                self._timestamp(now),
+            ),
+        ).fetchone() is not None
+
     @classmethod
     def _safe_token(cls, value: str, *, field: str) -> str:
         normalized = str(value).strip()
@@ -484,6 +521,7 @@ class NoteSemanticStore:
             raise ValueError("notes_semantic_operation_expiry_invalid")
         with self._db.transaction() as conn:
             self._set_scope(conn, dataset)
+            self._serialize_dataset_mutation(conn, dataset)
             conn.execute(
                 "DELETE FROM note_semantic_operation_receipts WHERE owner_user_id=? "
                 "AND dataset_id=? AND key_digest=? AND expires_at<=?",
@@ -1598,8 +1636,24 @@ class NoteSemanticStore:
             if model_revision is None
             else self._safe_token(model_revision, field="model_revision")
         )
+        normalized_root_job_id = (
+            None
+            if root_job_id is None
+            else self._safe_token(root_job_id, field="root_job_id")
+        )
         with self._db.transaction() as conn:
             self._set_scope(conn, dataset)
+            self._serialize_dataset_mutation(conn, dataset)
+            if (
+                normalized_root_job_id is not None
+                and self._has_unexpired_cancellation_intent_locked(
+                    conn,
+                    dataset_id=dataset,
+                    root_job_id=normalized_root_job_id,
+                    now=now,
+                )
+            ):
+                raise SemanticIndexingError("notes_semantic_run_cancelled")
             if self.is_postgres:
                 config_query = (
                     "SELECT configuration_revision,dimension_state,dimensions,compatibility_hash,model_revision "
@@ -1642,7 +1696,7 @@ class NoteSemanticStore:
                 (
                     generation_id, self.owner_user_id, dataset, configuration_revision,
                     resolved_compatibility_hash, revision, dimension_state.value,
-                    dimensions, None if root_job_id is None else self._safe_token(root_job_id, field="root_job_id"), timestamp,
+                    dimensions, normalized_root_job_id, timestamp,
                 ),
             )
             row = conn.execute(
@@ -2130,6 +2184,7 @@ class NoteSemanticStore:
         try:
             with self._db.transaction() as conn:
                 self._set_scope(conn, dataset)
+                self._serialize_dataset_mutation(conn, dataset)
                 config = conn.execute(
                     "SELECT * FROM note_semantic_index_configs WHERE owner_user_id=? AND dataset_id=? "
                     "AND configuration_revision=? AND desired_state='enabled' "
@@ -2146,7 +2201,8 @@ class NoteSemanticStore:
                 config_dimensions = int(config_record["dimensions"])
                 config_hash = str(config_record["compatibility_hash"])
                 candidate = conn.execute(
-                    "SELECT id FROM note_semantic_generations WHERE owner_user_id=? AND dataset_id=? "
+                    "SELECT id,root_job_id FROM note_semantic_generations "
+                    "WHERE owner_user_id=? AND dataset_id=? "
                     "AND id=? AND configuration_revision=? AND state='staging' "
                     "AND dimension_state='resolved' AND dimensions=? AND compatibility_hash=?",
                     (
@@ -2156,6 +2212,17 @@ class NoteSemanticStore:
                 ).fetchone()
                 if candidate is None:
                     raise _SemanticCASMiss
+                candidate_root_job_id = self._record(candidate)["root_job_id"]
+                if (
+                    candidate_root_job_id is not None
+                    and self._has_unexpired_cancellation_intent_locked(
+                        conn,
+                        dataset_id=dataset,
+                        root_job_id=str(candidate_root_job_id),
+                        now=now,
+                    )
+                ):
+                    raise SemanticIndexingError("notes_semantic_run_cancelled")
                 if previous_generation_id is not None:
                     retired = conn.execute(
                         "UPDATE note_semantic_generations SET state='retired', retired_at=? "
@@ -3707,6 +3774,7 @@ class NoteSemanticStore:
         try:
             with self._db.transaction() as conn:
                 self._set_scope(conn, dataset)
+                self._serialize_dataset_mutation(conn, dataset)
                 generation_query = (
                     "SELECT * FROM note_semantic_generations WHERE owner_user_id=? "
                     "AND dataset_id=? AND id=? AND configuration_revision=? "
@@ -3735,6 +3803,17 @@ class NoteSemanticStore:
                 ).fetchone()
                 if generation_row is None or config is None:
                     raise _SemanticCASMiss
+                generation_root_job_id = self._record(generation_row)["root_job_id"]
+                if (
+                    generation_root_job_id is not None
+                    and self._has_unexpired_cancellation_intent_locked(
+                        conn,
+                        dataset_id=dataset,
+                        root_job_id=str(generation_root_job_id),
+                        now=now,
+                    )
+                ):
+                    raise SemanticIndexingError("notes_semantic_run_cancelled")
                 snapshot_query = (
                     "SELECT s.note_id,s.content_version,n.version,n.deleted,n.client_id "
                     "FROM note_semantic_note_state s JOIN notes n ON n.id=s.note_id "

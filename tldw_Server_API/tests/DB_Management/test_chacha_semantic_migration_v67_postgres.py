@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -181,3 +183,162 @@ def test_postgres_v67_live_receipt_expiry_allows_reuse_and_fences_completion(
     finally:
         db.close_connection()
         backend.get_pool().close_all()
+
+
+@pytest.mark.parametrize("with_expired_predecessor", [False, True])
+def test_postgres_v67_serializes_same_fingerprint_admission_across_connections(
+    pg_database_config: DatabaseConfig,
+    with_expired_predecessor: bool,
+) -> None:
+    suffix = "expired" if with_expired_predecessor else "fresh"
+    owner = f"owner-receipt-race-{suffix}"
+    dataset = f"dataset-receipt-race-{suffix}"
+    fingerprint = "f" * 64
+    first_backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    second_backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    observer_backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    first_db = CharactersRAGDB(":memory:", client_id=owner, backend=first_backend)
+    second_db = CharactersRAGDB(":memory:", client_id=owner, backend=second_backend)
+    first_admitted = threading.Event()
+    release_first_commit = threading.Event()
+    second_connection_ready = threading.Event()
+    second_finished = threading.Event()
+    results: dict[str, object] = {}
+    workers: list[threading.Thread] = []
+
+    if with_expired_predecessor:
+        first_db.note_semantic_store.begin_operation_receipt(
+            dataset_id=dataset,
+            key_digest="0" * 64,
+            action="enable",
+            request_fingerprint=fingerprint,
+            run_id=None,
+            expected_revision=0,
+            expires_at=datetime(2026, 8, 30, 12, 0, 1, tzinfo=timezone.utc),
+            now=datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc),
+        )
+
+    admission_now = datetime(2026, 8, 30, 12, 0, 2, tzinfo=timezone.utc)
+
+    def admit_first() -> None:
+        try:
+            with first_db.transaction() as conn:
+                results["first_pid"] = int(
+                    conn.execute("SELECT pg_backend_pid() AS pid").fetchone()["pid"]
+                )
+                results["first"] = first_db.note_semantic_store.begin_operation_receipt(
+                    dataset_id=dataset,
+                    key_digest="a" * 64,
+                    action="enable",
+                    request_fingerprint=fingerprint,
+                    run_id=None,
+                    expected_revision=0,
+                    expires_at=admission_now + timedelta(days=1),
+                    now=admission_now,
+                )
+                first_admitted.set()
+                if not release_first_commit.wait(timeout=10):
+                    raise AssertionError("first receipt commit was not released")
+        except BaseException as exc:  # noqa: BLE001 - surfaced on the test thread
+            results["first_error"] = exc
+            first_admitted.set()
+        finally:
+            first_db.close_connection()
+
+    def admit_second() -> None:
+        try:
+            with second_db.transaction() as conn:
+                results["second_pid"] = int(
+                    conn.execute("SELECT pg_backend_pid() AS pid").fetchone()["pid"]
+                )
+                second_connection_ready.set()
+                results["second"] = second_db.note_semantic_store.begin_operation_receipt(
+                    dataset_id=dataset,
+                    key_digest="b" * 64,
+                    action="enable",
+                    request_fingerprint=fingerprint,
+                    run_id=None,
+                    expected_revision=0,
+                    expires_at=admission_now + timedelta(days=1),
+                    now=admission_now,
+                )
+        except BaseException as exc:  # noqa: BLE001 - surfaced on the test thread
+            results["second_error"] = exc
+            second_connection_ready.set()
+        finally:
+            second_finished.set()
+            second_db.close_connection()
+
+    try:
+        first = threading.Thread(target=admit_first, name=f"receipt-first-{suffix}")
+        second = threading.Thread(target=admit_second, name=f"receipt-second-{suffix}")
+        workers = [first, second]
+        first.start()
+        assert first_admitted.wait(timeout=10)
+        assert "first_error" not in results
+        second.start()
+        assert second_connection_ready.wait(timeout=10)
+        assert "second_error" not in results
+
+        first_pid = int(results["first_pid"])
+        second_pid = int(results["second_pid"])
+        deadline = time.monotonic() + 10
+        lock_wait = None
+        last_activity = None
+        while time.monotonic() < deadline:
+            rows = observer_backend.execute(
+                "SELECT state,wait_event_type,wait_event,pg_blocking_pids(pid) AS blocking_pids "
+                "FROM pg_stat_activity WHERE datname=current_database() AND pid=%s",
+                (second_pid,),
+            ).rows
+            if rows:
+                last_activity = dict(rows[0])
+                blocking_pids = {
+                    int(pid) for pid in (last_activity["blocking_pids"] or [])
+                }
+                if (
+                    last_activity["state"] == "active"
+                    and last_activity["wait_event_type"] == "Lock"
+                    and last_activity["wait_event"] == "advisory"
+                    and first_pid in blocking_pids
+                ):
+                    lock_wait = last_activity
+                    break
+            if second_finished.wait(timeout=0.01):
+                break
+        assert lock_wait is not None, (
+            "second receipt admission never waited on the first dataset mutation lock; "
+            f"finished={second_finished.is_set()}, activity={last_activity!r}, "
+            f"results={results!r}"
+        )
+
+        release_first_commit.set()
+        for worker in workers:
+            worker.join(timeout=10)
+            assert not worker.is_alive()
+
+        assert "first_error" not in results
+        assert "first" in results
+        assert "second" not in results
+        assert isinstance(results.get("second_error"), SemanticIndexingError)
+        assert results["second_error"].code == "notes_semantic_idempotency_conflict"
+        with first_db.transaction() as conn:
+            first_db.note_semantic_store._set_scope(conn, dataset)
+            active = conn.execute(
+                "SELECT key_digest FROM note_semantic_operation_receipts "
+                "WHERE owner_user_id=? AND dataset_id=? AND action='enable' "
+                "AND request_fingerprint=? AND expires_at>?",
+                (owner, dataset, fingerprint, admission_now),
+            ).fetchall()
+        assert [str(row["key_digest"]) for row in active] == ["a" * 64]
+    finally:
+        release_first_commit.set()
+        for worker in workers:
+            if worker.ident is not None:
+                worker.join(timeout=10)
+        assert all(not worker.is_alive() for worker in workers)
+        first_db.close_all_connections()
+        second_db.close_all_connections()
+        first_backend.get_pool().close_all()
+        second_backend.get_pool().close_all()
+        observer_backend.get_pool().close_all()

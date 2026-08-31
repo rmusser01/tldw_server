@@ -478,7 +478,10 @@ class SemanticJobHandler:
         except SemanticJobsError as exc:
             raise SemanticJobsError(_runtime_failure_code(exc)) from None
         except Exception as exc:  # noqa: BLE001 - WorkerSDK receives only a stable code
-            raise SemanticJobsError(_runtime_failure_code(exc)) from None
+            code = _runtime_failure_code(exc)
+            if code == "notes_semantic_run_cancelled":
+                raise SemanticJobCancelled() from None
+            raise SemanticJobsError(code) from None
         if recovered is not None:
             return _validated_result(recovered)
         if await _is_cancelled(cancellation_requested):
@@ -496,7 +499,10 @@ class SemanticJobHandler:
         except SemanticJobsError as exc:
             raise SemanticJobsError(_runtime_failure_code(exc)) from None
         except Exception as exc:  # noqa: BLE001 - WorkerSDK receives only a stable code
-            raise SemanticJobsError(_runtime_failure_code(exc)) from None
+            code = _runtime_failure_code(exc)
+            if code == "notes_semantic_run_cancelled":
+                raise SemanticJobCancelled() from None
+            raise SemanticJobsError(code) from None
         return _validated_result(result)
 
 

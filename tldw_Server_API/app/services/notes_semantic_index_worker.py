@@ -589,6 +589,17 @@ async def build_production_runtime(**kwargs: Any) -> ProductionSemanticRuntime:
                     model_revision=config.model_revision,
                     now=datetime.now(timezone.utc),
                 )
+            except SemanticIndexingError as exc:
+                if exc.code == "notes_semantic_run_cancelled":
+                    raise SemanticJobCancelled() from None
+                generation = db.note_semantic_store.get_generation_by_root_job_id(
+                    kwargs["dataset_id"],
+                    kwargs["root_job_id"],
+                )
+                if generation is None:
+                    raise SemanticIndexingError(
+                        "notes_semantic_generation_recovery_failed"
+                    ) from None
             except (OSError, RuntimeError, TypeError, ValueError):
                 generation = db.note_semantic_store.get_generation_by_root_job_id(
                     kwargs["dataset_id"],
