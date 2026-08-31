@@ -348,6 +348,49 @@ class _PostgresPersonalContextBindingBackend:
         return QueryResult(rows=[], rowcount=1)
 
 
+class _PostgresPersonalContextTransportSnapshotBackend:
+    config = DatabaseConfig(backend_type=BackendType.POSTGRESQL)
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, tuple[Any, ...] | None, Any]] = []
+
+    @contextmanager
+    def transaction(self, connection=None):
+        yield connection or object()
+
+    def execute(
+        self,
+        statement: str,
+        params: tuple[Any, ...] | None = None,
+        connection: Any = None,
+    ) -> QueryResult:
+        normalized = " ".join(statement.split())
+        self.calls.append((normalized, params, connection))
+        if normalized.startswith("SELECT * FROM sync_datasets"):
+            return QueryResult(
+                rows=[
+                    {
+                        "dataset_id": "dataset-1",
+                        "owner_user_id": "user-1",
+                        "domain_set_json": json.dumps(PERSONAL_CONTEXT_SYNC_DOMAINS),
+                    }
+                ],
+                rowcount=1,
+            )
+        if normalized.startswith("SELECT domain, adapter_version"):
+            return QueryResult(
+                rows=[
+                    {
+                        "domain": "personal_context.record",
+                        "adapter_version": 1,
+                        "watermark": 17,
+                    }
+                ],
+                rowcount=1,
+            )
+        return QueryResult(rows=[], rowcount=0)
+
+
 def _inject_postgres_mutation_group_race(
     sync_store: SyncV2Store,
     monkeypatch: pytest.MonkeyPatch,
@@ -2828,6 +2871,38 @@ def test_postgres_personal_context_receipt_locks_binding_before_upsert() -> None
     )
     assert statements[lock_index].endswith("FOR UPDATE")
     assert lock_index < upsert_index
+    assert len({connection for _statement, _params, connection in backend.calls}) == 1
+
+
+def test_postgres_personal_context_transport_snapshot_locks_before_watermark_read() -> None:
+    """The executed PG contract holds one dataset lock through boundary capture."""
+
+    backend = _PostgresPersonalContextTransportSnapshotBackend()
+    db = SyncDatabase.__new__(SyncDatabase)
+    db.backend = cast(Any, backend)
+    streams = [(domain, 1) for domain in PERSONAL_CONTEXT_SYNC_DOMAINS]
+
+    with db.personal_context_transport_snapshot(
+        "dataset-1",
+        owner_user_id="user-1",
+        streams=streams,
+    ) as watermarks:
+        assert watermarks[("personal_context.record", 1)] == 17
+        assert all(stream in watermarks for stream in streams)
+
+    statements = [statement for statement, _params, _connection in backend.calls]
+    lock_index = next(
+        index
+        for index, statement in enumerate(statements)
+        if statement.startswith("SELECT * FROM sync_datasets")
+    )
+    watermark_index = next(
+        index
+        for index, statement in enumerate(statements)
+        if statement.startswith("SELECT domain, adapter_version")
+    )
+    assert statements[lock_index].endswith("FOR UPDATE")
+    assert lock_index < watermark_index
     assert len({connection for _statement, _params, connection in backend.calls}) == 1
 
 

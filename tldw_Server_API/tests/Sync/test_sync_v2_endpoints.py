@@ -3092,6 +3092,10 @@ def factory_personal_context_service(
     )
     monkeypatch.setenv("SYNC_V2_AT_REST_ENCRYPTION_MODE", "managed_storage")
     monkeypatch.setenv("SYNC_V2_SERVER_TRUSTED_ENABLED", "true")
+    monkeypatch.setenv(
+        "SYNC_V2_PULL_TOKEN_SIGNING_SECRET",
+        "personal-context-endpoint-test-signing-secret",
+    )
     monkeypatch.setenv("AUTH_MODE", "multi_user")
     for cached_factory in (
         sync_v2_factory._sync_v2_store_for_user,
@@ -3185,6 +3189,8 @@ def test_personal_context_endpoints_use_real_factory_bootstrap_and_complete_flow
     assert body["authority_id"] == "tldw-server"
     assert body["dataset_id"]
     assert body["cursor"].startswith("personal-context-bootstrap-v1:")
+    assert body["sync_transport_cursor"]
+    assert body["sync_transport_cursor"] != body["cursor"]
     assert body["manifest"]["profile_id"]
     assert body["wrapped_key_blob"].startswith("rsa-oaep-sha256:")
 
@@ -3207,6 +3213,7 @@ def test_personal_context_endpoints_use_real_factory_bootstrap_and_complete_flow
     assert retry.json()["manifest"] == body["manifest"]
     assert retry.json()["scopes"] == body["scopes"]
     assert retry.json()["cursor"] == body["cursor"]
+    assert retry.json()["sync_transport_cursor"]
 
     integrity_key_id = body["integrity_key_id"]
     integrity_key = canonical._repository.sync_integrity_key(
@@ -3293,6 +3300,29 @@ def test_personal_context_endpoints_use_real_factory_bootstrap_and_complete_flow
     assert [item["client_envelope_id"] for item in push.json()["accepted"]] == [
         "pc-device:manifest:1"
     ]
+
+
+def test_personal_context_bootstrap_response_exposes_effective_zero_quota(
+    factory_personal_context_service: SyncV2Service,
+) -> None:
+    client = _client_for_factory_service(factory_personal_context_service)
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    assert client.post(
+        "/api/v1/sync/devices/register",
+        json=_registered_personal_context_device_payload(private_key.public_key()),
+    ).status_code == 200
+
+    response = client.post(
+        "/api/v1/sync/personal-context/bootstrap",
+        json={
+            "device_id": "pc-device",
+            "required_schema_version": 1,
+            "required_quotas": {"future_sync_quota": 0},
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["quotas"]["future_sync_quota"] == 0
 
 
 def test_personal_context_complete_endpoint_rejects_real_stale_integrity_binding(

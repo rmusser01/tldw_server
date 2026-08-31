@@ -189,6 +189,19 @@ class SyncV2Store:
             link_state=link_state,
         )
 
+    def ensure_personal_context_transport_domains(
+        self,
+        *,
+        dataset_id: str,
+        user_id: str,
+    ) -> SyncDataset:
+        """Enroll content-free PC streams before snapshot fencing."""
+
+        return self.db.ensure_personal_context_transport_domains(
+            dataset_id=dataset_id,
+            user_id=user_id,
+        )
+
     def get_dataset(
         self,
         dataset_id: str,
@@ -200,6 +213,23 @@ class SyncV2Store:
             owner_user_id=owner_user_id,
             connection=self._connection,
         )
+
+    @contextmanager
+    def personal_context_transport_snapshot(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        streams: Sequence[tuple[SyncDomain, int]],
+    ) -> Iterator[dict[tuple[SyncDomain, int], int]]:
+        """Hold the dataset insert fence while canonical bootstrap state is read."""
+
+        with self.db.personal_context_transport_snapshot(
+            dataset_id,
+            owner_user_id=owner_user_id,
+            streams=streams,
+        ) as watermarks:
+            yield watermarks
 
     def complete_personal_context_link_receipt(
         self,

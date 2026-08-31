@@ -2506,6 +2506,62 @@ class SyncDatabase:
                 raise SyncMaterializationBusyError() from exc
             raise
 
+    @contextmanager
+    def personal_context_transport_snapshot(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        streams: Sequence[tuple[SyncDomain, int]],
+    ) -> Iterator[dict[tuple[SyncDomain, int], int]]:
+        """Fence Sync inserts while canonical bootstrap state is read.
+
+        This is a Sync-database ordering fence, not a cross-database
+        transaction. Envelope inserts take this same dataset-row lock before
+        receiving a server sequence.
+        """
+
+        expected_streams = set(streams)
+        if not expected_streams:
+            raise SyncStoreError("personal_context_transport_streams_unavailable")
+        with self.backend.transaction() as conn:
+            row = self._require_dataset_owner_for_update(
+                dataset_id,
+                owner_user_id,
+                connection=conn,
+            )
+            enrolled_domains = set(_dataset_domains_from_row(row))
+            if any(domain not in enrolled_domains for domain, _version in streams):
+                raise SyncInvalidDomainError(
+                    "Personal Context transport stream is not enrolled"
+                )
+            domains = sorted({domain for domain, _version in streams})
+            versions = sorted({version for _domain, version in streams})
+            domain_placeholders = ", ".join("?" for _ in domains)
+            version_placeholders = ", ".join("?" for _ in versions)
+            result = self.execute(
+                f"""
+                SELECT domain, adapter_version, MAX(server_sequence) AS watermark
+                  FROM sync_envelopes
+                 WHERE dataset_id = ?
+                   AND status = 'accepted'
+                   AND domain IN ({domain_placeholders})
+                   AND adapter_version IN ({version_placeholders})
+                 GROUP BY domain, adapter_version
+                """,  # nosec B608 - placeholders are generated from bounded lists.
+                (dataset_id, *domains, *versions),
+                connection=conn,
+            )
+            watermarks = dict.fromkeys(expected_streams, 0)
+            for envelope_row in result.rows:
+                stream = (
+                    str(envelope_row["domain"]),
+                    int(envelope_row["adapter_version"]),
+                )
+                if stream in expected_streams:
+                    watermarks[stream] = int(envelope_row["watermark"] or 0)
+            yield watermarks
+
     def _lock_materialization_dataset(
         self,
         dataset_id: str,
@@ -3845,6 +3901,51 @@ class SyncDatabase:
                 ),
                 connection=connection,
             )
+            for domain in PERSONAL_CONTEXT_SYNC_DOMAINS:
+                self._ensure_domain_state(
+                    dataset_id=dataset_id,
+                    domain=domain,
+                    adapter_version=1,
+                    server_sequence=0,
+                    connection=connection,
+                )
+            updated = self._get_dataset_row(
+                dataset_id,
+                owner_user_id=user_id,
+                connection=connection,
+            )
+            if updated is None:
+                raise SyncDatasetNotFoundError(f"Sync dataset not found: {dataset_id}")
+        return _dataset_from_row(updated)
+
+    def ensure_personal_context_transport_domains(
+        self,
+        *,
+        dataset_id: str,
+        user_id: str,
+    ) -> SyncDataset:
+        """Enroll only content-free Personal Context transport control state."""
+
+        with self.backend.transaction() as connection:
+            row = self._require_dataset_owner_for_update(
+                dataset_id,
+                user_id,
+                connection=connection,
+            )
+            raw_domains = decode_json(row.get("domain_set_json"), default=[])
+            if not isinstance(raw_domains, list):
+                raise SyncStoreError("personal_context_authority_mismatch")
+            domains = list(dict.fromkeys([*raw_domains, *PERSONAL_CONTEXT_SYNC_DOMAINS]))
+            if domains != raw_domains:
+                self.execute(
+                    """
+                    UPDATE sync_datasets
+                       SET domain_set_json = ?, updated_at = ?
+                     WHERE dataset_id = ? AND owner_user_id = ?
+                    """,
+                    (encode_json(domains, default=[]), utcnow_iso(), dataset_id, user_id),
+                    connection=connection,
+                )
             for domain in PERSONAL_CONTEXT_SYNC_DOMAINS:
                 self._ensure_domain_state(
                     dataset_id=dataset_id,
@@ -6688,7 +6789,7 @@ class SyncDatabase:
     ) -> SyncEnvelope | None:
         self._validate_envelope_contract(envelope)
         with self.backend.transaction() as conn:
-            dataset_row = self._require_dataset_domain(
+            dataset_row = self._require_dataset_domain_for_update(
                 envelope.dataset_id,
                 envelope.domain,
                 connection=conn,

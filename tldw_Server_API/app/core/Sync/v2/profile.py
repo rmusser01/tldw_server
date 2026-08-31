@@ -18,6 +18,7 @@ from .models import (
     NOTES_LINK_DOMAINS,
     NOTES_ORGANIZATION_DOMAINS,
     NOTES_TASK_SYNC_DOMAINS,
+    PERSONAL_CONTEXT_SYNC_DOMAINS,
     SyncDataset,
     SyncDevice,
     SyncDeviceUpsert,
@@ -43,6 +44,7 @@ _DORMANT_TASK_READINESS_MISSING = object()
 _PERSONAL_CONTEXT_LINK_PENDING = "bootstrap_pending"
 _PERSONAL_CONTEXT_LINK_COMPLETE = "complete"
 _PERSONAL_CONTEXT_KEY_PURPOSE = "personal_context_integrity"
+_PERSONAL_CONTEXT_BOOTSTRAP_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60
 
 
 class PersonalContextBootstrapError(SyncStoreError):
@@ -82,6 +84,7 @@ class PersonalContextBootstrap:
     schema_version: int
     quotas: dict[str, int]
     cursor: str
+    sync_transport_cursor: str
     integrity_key: PersonalContextBootstrapIntegrityKey
     link_state: str
 
@@ -486,6 +489,16 @@ class SyncV2ProfileManager:
                     ),
                 },
             )
+        effective_quotas = {
+            **quotas,
+            **{
+                name: 0
+                for name, minimum in dict(required_quotas or {}).items()
+                if _valid_personal_context_quota_name(name)
+                and minimum == 0
+                and name not in quotas
+            },
+        }
 
         try:
             canonical_service = self.service._personal_context_service_for_user(user_id)
@@ -493,15 +506,31 @@ class SyncV2ProfileManager:
             raise PersonalContextBootstrapError(
                 "personal_context_key_custody_unavailable"
             ) from exc
+        dataset = self._default_personal_dataset(user_id)
+        if dataset is None:
+            dataset = self.store.get_or_create_default_personal_dataset(user_id)
+        dataset = self.store.ensure_personal_context_transport_domains(
+            dataset_id=dataset.dataset_id,
+            user_id=user_id,
+        )
+        streams = self.service._pull_adapter_streams(
+            device,
+            list(PERSONAL_CONTEXT_SYNC_DOMAINS),
+        )
         try:
-            snapshot = canonical_service.plan_sync_bootstrap()
-            manifest = snapshot.manifest
-            integrity_key_id = snapshot.integrity_key_id
-            integrity_key = snapshot.integrity_key
-            scopes = tuple(snapshot.scopes)
-            records = tuple(snapshot.records)
-            proposals = tuple(snapshot.proposals)
-            cursor = snapshot.cursor
+            with self.store.personal_context_transport_snapshot(
+                dataset.dataset_id,
+                owner_user_id=user_id,
+                streams=streams,
+            ) as candidate_watermarks:
+                snapshot = canonical_service.plan_sync_bootstrap()
+                manifest = snapshot.manifest
+                integrity_key_id = snapshot.integrity_key_id
+                integrity_key = snapshot.integrity_key
+                scopes = tuple(snapshot.scopes)
+                records = tuple(snapshot.records)
+                proposals = tuple(snapshot.proposals)
+                cursor = snapshot.cursor
         except Exception as exc:  # noqa: BLE001 - no canonical body in errors.
             raise PersonalContextBootstrapError(
                 "personal_context_snapshot_unavailable"
@@ -525,6 +554,7 @@ class SyncV2ProfileManager:
             authority_id=normalized_authority_id,
             integrity_key_id=integrity_key_id,
             purge_generation=purge_generation,
+            dataset=dataset,
         )
         key_record = self._device_integrity_key_record(
             user_id=user_id,
@@ -532,7 +562,33 @@ class SyncV2ProfileManager:
             device=device,
             integrity_key_id=integrity_key_id,
             integrity_key=integrity_key,
+            bootstrap_cursor=cursor,
+            transport_watermarks=candidate_watermarks,
         )
+        durable_watermarks = _personal_context_key_record_transport_watermarks(
+            key_record,
+            bootstrap_cursor=cursor,
+            streams=streams,
+        )
+        if durable_watermarks is None:
+            raise PersonalContextBootstrapError(
+                "personal_context_key_custody_unavailable"
+            )
+        try:
+            sync_transport_cursor = self.service._encode_pull_token(
+                dataset_id=dataset.dataset_id,
+                device_id=device.device_id,
+                version_set=self.service._pull_version_set(device),
+                watermarks=durable_watermarks,
+                ttl_seconds=max(
+                    self.service.settings.pull_token_ttl_seconds,
+                    _PERSONAL_CONTEXT_BOOTSTRAP_TOKEN_TTL_SECONDS,
+                ),
+            )
+        except SyncStoreError as exc:
+            raise PersonalContextBootstrapError(
+                "personal_context_bootstrap_unavailable"
+            ) from exc
         return PersonalContextBootstrap(
             dataset_id=dataset.dataset_id,
             authority_id=normalized_authority_id,
@@ -542,8 +598,9 @@ class SyncV2ProfileManager:
             proposals=proposals,
             purge_generation=purge_generation,
             schema_version=schema_version,
-            quotas=quotas,
+            quotas=effective_quotas,
             cursor=cursor,
+            sync_transport_cursor=sync_transport_cursor,
             integrity_key=PersonalContextBootstrapIntegrityKey(
                 integrity_key_id=integrity_key_id,
                 key_record_id=key_record.key_record_id,
@@ -631,12 +688,14 @@ class SyncV2ProfileManager:
         authority_id: str,
         integrity_key_id: str,
         purge_generation: int,
+        dataset: SyncDataset | None = None,
     ) -> SyncDataset:
         """Persist only opaque canonical binding state in the Sync dataset."""
 
-        dataset = self._default_personal_dataset(user_id)
         if dataset is None:
-            dataset = self.store.get_or_create_default_personal_dataset(user_id)
+            dataset = self._default_personal_dataset(user_id)
+            if dataset is None:
+                dataset = self.store.get_or_create_default_personal_dataset(user_id)
         existing_state = _personal_context_dataset_state(dataset)
         if existing_state is not None and (
             existing_state.get("profile_id") != manifest.profile_id
@@ -676,6 +735,8 @@ class SyncV2ProfileManager:
         device: SyncDevice,
         integrity_key_id: str,
         integrity_key: bytes,
+        bootstrap_cursor: str,
+        transport_watermarks: Mapping[tuple[SyncDomain, int], int],
     ) -> SyncKeyRecord:
         """Reuse the registered-device key-record channel for one bootstrap key."""
 
@@ -693,13 +754,41 @@ class SyncV2ProfileManager:
         except Exception as exc:  # noqa: BLE001
             raise PersonalContextBootstrapError("personal_context_key_custody_unavailable") from exc
         stale_records: list[SyncKeyRecord] = []
+        durable_transport_watermarks: dict[tuple[SyncDomain, int], int] | None = None
         for record in existing:
+            stored_watermarks = _personal_context_key_record_transport_watermarks(
+                record,
+                bootstrap_cursor=bootstrap_cursor,
+                streams=tuple(transport_watermarks),
+            )
+            if (
+                record.revoked_at is None
+                and record.wrapped_for == "device"
+                and record.rewrap_status == "complete"
+                and record.encryption_policy == "device_wrapped_v1"
+                and record.kdf_metadata.get("integrity_key_id") == integrity_key_id
+                and stored_watermarks is not None
+            ):
+                durable_transport_watermarks = (
+                    stored_watermarks
+                    if durable_transport_watermarks is None
+                    else {
+                        stream: min(sequence, stored_watermarks[stream])
+                        for stream, sequence in durable_transport_watermarks.items()
+                    }
+                )
             if (
                 record.revoked_at is None
                 and record.wrapped_for == "device"
                 and record.rewrap_status == "complete"
                 and record.kdf_metadata.get("integrity_key_id") == integrity_key_id
                 and record.kdf_metadata.get("wrapping_key_fingerprint") == wrapping_key_fingerprint
+                and _personal_context_key_record_transport_watermarks(
+                    record,
+                    bootstrap_cursor=bootstrap_cursor,
+                    streams=tuple(transport_watermarks),
+                )
+                is not None
             ):
                 return record
             if (
@@ -724,16 +813,14 @@ class SyncV2ProfileManager:
             ) from exc
         if not isinstance(wrapped_key_blob, str) or not wrapped_key_blob.strip():
             raise PersonalContextBootstrapError("personal_context_key_custody_unavailable")
-        for record in stale_records:
-            self.store.revoke_key_record(
-                user_id=user_id,
-                key_record_id=record.key_record_id,
-            )
+        if durable_transport_watermarks is None:
+            durable_transport_watermarks = dict(transport_watermarks)
+        cursor_fingerprint = hashlib.sha256(bootstrap_cursor.encode("ascii")).hexdigest()[:16]
         requested = SyncKeyRecordCreate(
             key_record_id=(
                 f"personal-context-integrity:{dataset.dataset_id}:"
                 f"{device.device_id}:{integrity_key_id}:"
-                f"{wrapping_key_fingerprint[:16]}"
+                f"{wrapping_key_fingerprint[:16]}:{cursor_fingerprint}"
             ),
             dataset_id=dataset.dataset_id,
             user_id=user_id,
@@ -743,13 +830,20 @@ class SyncV2ProfileManager:
             kdf_metadata={
                 "integrity_key_id": integrity_key_id,
                 "wrapping_key_fingerprint": wrapping_key_fingerprint,
+                "bootstrap_cursor": bootstrap_cursor,
+                "transport_watermarks": [
+                    [domain, adapter_version, sequence]
+                    for (domain, adapter_version), sequence in sorted(
+                        durable_transport_watermarks.items()
+                    )
+                ],
             },
             encryption_policy="device_wrapped_v1",
             wrapped_for="device",
             rewrap_status="complete",
         )
         try:
-            return self.store.store_key_record(requested)
+            stored = self.store.store_key_record(requested)
         except SyncIdempotencyConflictError as exc:
             winner = next(
                 (
@@ -768,10 +862,17 @@ class SyncV2ProfileManager:
                 None,
             )
             if winner is not None:
-                return winner
-            raise PersonalContextBootstrapError(
-                "personal_context_key_custody_unavailable"
-            ) from exc
+                stored = winner
+            else:
+                raise PersonalContextBootstrapError(
+                    "personal_context_key_custody_unavailable"
+                ) from exc
+        for record in stale_records:
+            self.store.revoke_key_record(
+                user_id=user_id,
+                key_record_id=record.key_record_id,
+            )
+        return stored
 
     def profile_status(
         self,
@@ -1363,6 +1464,22 @@ def _personal_context_bootstrap_quotas(capabilities: Any) -> dict[str, int]:
     }
 
 
+def _valid_personal_context_quota_name(name: object) -> bool:
+    """Match the bounded public quota-name contract."""
+
+    return (
+        isinstance(name, str)
+        and 1 <= len(name) <= 64
+        and name[0].isalpha()
+        and name[0].isascii()
+        and all(
+            character.isascii()
+            and (character.islower() or character.isdigit() or character == "_")
+            for character in name
+        )
+    )
+
+
 def _personal_context_quotas_compatible(
     required: Mapping[str, int] | None,
     available: Mapping[str, int],
@@ -1381,6 +1498,43 @@ def _personal_context_quotas_compatible(
         ):
             return False
     return True
+
+
+def _personal_context_key_record_transport_watermarks(
+    record: SyncKeyRecord,
+    *,
+    bootstrap_cursor: str,
+    streams: Sequence[tuple[SyncDomain, int]],
+) -> dict[tuple[SyncDomain, int], int] | None:
+    """Return an exact device-bound bootstrap baseline or fail closed."""
+
+    if record.kdf_metadata.get("bootstrap_cursor") != bootstrap_cursor:
+        return None
+    expected_streams = set(streams)
+    raw_watermarks = record.kdf_metadata.get("transport_watermarks")
+    if not isinstance(raw_watermarks, list) or len(raw_watermarks) != len(
+        expected_streams
+    ):
+        return None
+    watermarks: dict[tuple[SyncDomain, int], int] = {}
+    for item in raw_watermarks:
+        if not isinstance(item, list) or len(item) != 3:
+            return None
+        domain, adapter_version, sequence = item
+        stream = (domain, adapter_version)
+        if (
+            not isinstance(domain, str)
+            or isinstance(adapter_version, bool)
+            or not isinstance(adapter_version, int)
+            or isinstance(sequence, bool)
+            or not isinstance(sequence, int)
+            or sequence < 0
+            or stream not in expected_streams
+            or stream in watermarks
+        ):
+            return None
+        watermarks[stream] = sequence
+    return watermarks if set(watermarks) == expected_streams else None
 
 
 def _personal_context_dataset_state(dataset: SyncDataset) -> dict[str, object] | None:
@@ -1423,7 +1577,46 @@ def _matches_personal_context_integrity_key_record(
         == requested.kdf_metadata["integrity_key_id"]
         and record.kdf_metadata.get("wrapping_key_fingerprint")
         == requested.kdf_metadata["wrapping_key_fingerprint"]
+        and record.kdf_metadata.get("bootstrap_cursor")
+        == requested.kdf_metadata["bootstrap_cursor"]
+        and _transport_watermark_streams_match(
+            record.kdf_metadata.get("transport_watermarks"),
+            requested.kdf_metadata["transport_watermarks"],
+        )
     )
+
+
+def _transport_watermark_streams_match(
+    candidate: object,
+    requested: object,
+) -> bool:
+    """Match exact stream identities while allowing the durable winner's cursor."""
+
+    def parse(value: object) -> set[tuple[str, int]] | None:
+        if not isinstance(value, list):
+            return None
+        streams: set[tuple[str, int]] = set()
+        for item in value:
+            if not isinstance(item, list) or len(item) != 3:
+                return None
+            domain, adapter_version, sequence = item
+            stream = (domain, adapter_version)
+            if (
+                not isinstance(domain, str)
+                or isinstance(adapter_version, bool)
+                or not isinstance(adapter_version, int)
+                or isinstance(sequence, bool)
+                or not isinstance(sequence, int)
+                or sequence < 0
+                or stream in streams
+            ):
+                return None
+            streams.add(stream)
+        return streams
+
+    candidate_streams = parse(candidate)
+    requested_streams = parse(requested)
+    return candidate_streams is not None and candidate_streams == requested_streams
 
 
 __all__ = [

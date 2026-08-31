@@ -5,8 +5,14 @@ import hashlib
 import hmac
 import inspect
 import threading
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import (
+    ThreadPoolExecutor,
+)
+from concurrent.futures import (
+    TimeoutError as FutureTimeoutError,
+)
 from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -190,6 +196,7 @@ def _service(tmp_path: Path) -> tuple[SyncV2Service, _CanonicalService]:
                 server_trusted_enabled=True,
                 auth_mode="multi_user",
             ),
+            pull_token_signing_secret="personal-context-bootstrap-test-secret",
         ),
     )
     service.register_device(
@@ -246,6 +253,71 @@ def _record_envelope(bootstrap) -> SyncEnvelopeCreate:
     )
 
 
+def _transport_record_envelope(
+    service: SyncV2Service,
+    bootstrap,
+    *,
+    revision: int,
+    previous=None,
+) -> SyncEnvelopeCreate:
+    """Build one accepted encrypted revision through the production protector."""
+
+    payload = preference_record(
+        profile_id=bootstrap.manifest.profile_id,
+        record_id="transport-record",
+        version_id=f"transport-record-v{revision}",
+        parent_version_id=(
+            None if revision == 1 else f"transport-record-v{revision - 1}"
+        ),
+        value=f"value-{revision}",
+    ).model_dump(mode="json")
+    payload_bytes = canonical_json_bytes(payload)
+    tag = hmac.new(_INTEGRITY_KEY, payload_bytes, hashlib.sha256)
+    envelope = SyncEnvelopeCreate(
+        dataset_id=bootstrap.dataset_id,
+        client_envelope_id=f"device-a:transport-record:{revision}",
+        device_id="device-a",
+        domain="personal_context.record",
+        operation="upsert",
+        object_id=str(payload["record_id"]),
+        parent_id=str(payload["scope_id"]),
+        adapter_version=1,
+        schema_version=1,
+        payload=payload,
+        payload_hash=f"hmac-sha256-v1:{tag.hexdigest()}",
+        payload_size_bytes=len(payload_bytes),
+        object_revision=revision,
+        entity_version=str(payload["version_id"]),
+        base_server_cursor=(None if previous is None else previous.server_sequence),
+        base_object_revision=(None if previous is None else previous.object_revision),
+        base_object_hash=(None if previous is None else previous.payload_hash),
+        routing_metadata={
+            "integrity_key_id": bootstrap.integrity_key.integrity_key_id,
+            "profile_id": bootstrap.manifest.profile_id,
+            "purge_generation": bootstrap.purge_generation,
+        },
+        encryption_metadata={"policy": "server_trusted_v1"},
+        apply_status="applied",
+    )
+    dataset = service.store.get_dataset(bootstrap.dataset_id, owner_user_id="user-a")
+    assert dataset is not None
+    return service._protect_personal_context_for_storage(dataset, envelope)
+
+
+def _register_transport_device(service: SyncV2Service, device_id: str) -> None:
+    service.register_device(
+        user_id="user-a",
+        display_name=device_id,
+        client_type="chatbook",
+        device_id=device_id,
+        capabilities={
+            "supported_adapter_versions": {
+                domain: [1] for domain in PERSONAL_CONTEXT_SYNC_DOMAINS
+            }
+        },
+    )
+
+
 def test_bootstrap_returns_canonical_heads_and_one_cursor_for_empty_or_populated_profile(
     tmp_path: Path,
 ) -> None:
@@ -257,6 +329,8 @@ def test_bootstrap_returns_canonical_heads_and_one_cursor_for_empty_or_populated
     assert populated.records == (canonical.record,)
     assert populated.proposals == (canonical.proposal,)
     assert populated.cursor
+    assert populated.sync_transport_cursor
+    assert populated.sync_transport_cursor != populated.cursor
     assert populated.cursor == _bootstrap(service).cursor
     assert populated.link_state == "bootstrap_pending"
 
@@ -306,7 +380,188 @@ def test_unknown_zero_minimum_quota_is_satisfied(tmp_path: Path) -> None:
     )
 
     assert bootstrap.manifest == canonical.manifest
-    assert "future_sync_quota" not in bootstrap.quotas
+    assert bootstrap.quotas["future_sync_quota"] == 0
+
+
+def test_bootstrap_sync_transport_cursor_is_accepted_by_private_pull_parser(
+    tmp_path: Path,
+) -> None:
+    service, _canonical = _service(tmp_path)
+
+    bootstrap = _bootstrap(service)
+    pulled = service.pull(
+        user_id="user-a",
+        dataset_id=bootstrap.dataset_id,
+        device_id="device-a",
+        cursor=bootstrap.sync_transport_cursor,
+        domains=PERSONAL_CONTEXT_SYNC_DOMAINS,
+    )
+
+    assert pulled.envelopes == []
+    assert pulled.next_cursor
+    with pytest.raises(SyncStoreError):
+        service.pull(
+            user_id="user-a",
+            dataset_id=bootstrap.dataset_id,
+            device_id="device-a",
+            cursor=bootstrap.cursor,
+            domains=PERSONAL_CONTEXT_SYNC_DOMAINS,
+        )
+
+
+def test_bootstrap_transport_watermark_skips_retained_history_and_delivers_later_change(
+    tmp_path: Path,
+) -> None:
+    service, _canonical = _service(tmp_path)
+    first_device = _bootstrap(service)
+    prior = service.store.insert_envelope(
+        _transport_record_envelope(service, first_device, revision=1)
+    )
+    prior = service.store.insert_envelope(
+        _transport_record_envelope(
+            service,
+            first_device,
+            revision=2,
+            previous=prior,
+        )
+    )
+    _register_transport_device(service, "device-b")
+
+    reviewed = _bootstrap(service, device_id="device-b")
+    later = service.store.insert_envelope(
+        _transport_record_envelope(
+            service,
+            first_device,
+            revision=3,
+            previous=prior,
+        )
+    )
+    pulled = service.pull(
+        user_id="user-a",
+        dataset_id=reviewed.dataset_id,
+        device_id="device-b",
+        cursor=reviewed.sync_transport_cursor,
+        domains=PERSONAL_CONTEXT_SYNC_DOMAINS,
+    )
+
+    assert [item.server_sequence for item in pulled.envelopes] == [
+        later.server_sequence
+    ]
+    assert pulled.envelopes[0].entity_version == "transport-record-v3"
+    with pytest.raises(SyncStoreError, match="sync_pull_token_invalid"):
+        service.pull(
+            user_id="user-a",
+            dataset_id=reviewed.dataset_id,
+            device_id="device-b",
+            cursor=reviewed.sync_transport_cursor,
+            domains=["personal_context.record"],
+        )
+
+
+def test_bootstrap_transport_cursor_retry_preserves_boundary_and_supports_slow_review(
+    tmp_path: Path,
+) -> None:
+    service, _canonical = _service(tmp_path)
+    now = datetime(2026, 8, 30, tzinfo=timezone.utc)
+    service.clock = lambda: now.isoformat()
+    first = _bootstrap(service)
+    device = service.store.get_device("user-a", "device-a")
+    assert device is not None
+    streams = service._pull_adapter_streams(device, PERSONAL_CONTEXT_SYNC_DOMAINS)
+    version_set = service._pull_version_set(device)
+    first_watermarks = service._decode_pull_token(
+        first.sync_transport_cursor,
+        dataset_id=first.dataset_id,
+        device_id="device-a",
+        version_set=version_set,
+        streams=streams,
+    )
+    later = service.store.insert_envelope(
+        _transport_record_envelope(service, first, revision=1)
+    )
+    service.personal_context_key_fingerprint = lambda *, device: (
+        f"rotated-fingerprint:{device.device_id}"
+    )
+
+    now += timedelta(days=29)
+    assert service.pull(
+        user_id="user-a",
+        dataset_id=first.dataset_id,
+        device_id="device-a",
+        cursor=first.sync_transport_cursor,
+        domains=PERSONAL_CONTEXT_SYNC_DOMAINS,
+        include_own_changes=True,
+    ).envelopes[0].server_sequence == later.server_sequence
+    retry = _bootstrap(service)
+    retry_watermarks = service._decode_pull_token(
+        retry.sync_transport_cursor,
+        dataset_id=retry.dataset_id,
+        device_id="device-a",
+        version_set=version_set,
+        streams=streams,
+    )
+    assert retry.cursor == first.cursor
+    assert retry_watermarks == first_watermarks
+
+    now += timedelta(days=1, seconds=301)
+    with pytest.raises(SyncStoreError, match="sync_pull_token_invalid"):
+        service.pull(
+            user_id="user-a",
+            dataset_id=first.dataset_id,
+            device_id="device-a",
+            cursor=first.sync_transport_cursor,
+            domains=PERSONAL_CONTEXT_SYNC_DOMAINS,
+            include_own_changes=True,
+        )
+    assert service.pull(
+        user_id="user-a",
+        dataset_id=retry.dataset_id,
+        device_id="device-a",
+        cursor=retry.sync_transport_cursor,
+        domains=PERSONAL_CONTEXT_SYNC_DOMAINS,
+        include_own_changes=True,
+    ).envelopes[0].server_sequence == later.server_sequence
+
+
+def test_bootstrap_transport_snapshot_serializes_concurrent_sqlite_insert(
+    tmp_path: Path,
+) -> None:
+    service, canonical = _service(tmp_path)
+    source = _bootstrap(service)
+    _register_transport_device(service, "device-b")
+    entered_snapshot = threading.Event()
+    release_snapshot = threading.Event()
+    original_plan = canonical.plan_sync_bootstrap
+
+    def blocked_plan():
+        entered_snapshot.set()
+        assert release_snapshot.wait(timeout=5)
+        return original_plan()
+
+    canonical.plan_sync_bootstrap = blocked_plan  # type: ignore[method-assign]
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        bootstrap_future = executor.submit(_bootstrap, service, device_id="device-b")
+        assert entered_snapshot.wait(timeout=5)
+        insert_future = executor.submit(
+            service.store.insert_envelope,
+            _transport_record_envelope(service, source, revision=1),
+        )
+        with pytest.raises(FutureTimeoutError):
+            insert_future.result(timeout=0.2)
+        release_snapshot.set()
+        reviewed = bootstrap_future.result(timeout=5)
+        inserted = insert_future.result(timeout=5)
+
+    pulled = service.pull(
+        user_id="user-a",
+        dataset_id=reviewed.dataset_id,
+        device_id="device-b",
+        cursor=reviewed.sync_transport_cursor,
+        domains=PERSONAL_CONTEXT_SYNC_DOMAINS,
+    )
+    assert [item.server_sequence for item in pulled.envelopes] == [
+        inserted.server_sequence
+    ]
 
 
 def test_personal_context_service_has_no_materializing_sync_profile_helper() -> None:
@@ -502,6 +757,8 @@ def test_concurrent_real_rsa_bootstraps_share_one_durable_wrapper(tmp_path: Path
         "policy",
         "integrity_key_id",
         "wrapping_key_fingerprint",
+        "bootstrap_cursor",
+        "transport_watermarks",
     ],
 )
 def test_conflicting_rsa_key_record_winner_mismatch_fails_closed(
@@ -545,10 +802,20 @@ def test_conflicting_rsa_key_record_winner_mismatch_fails_closed(
             **winner.kdf_metadata,
             "integrity_key_id": "foreign-integrity-key",
         }
-    else:
+    elif mismatch == "wrapping_key_fingerprint":
         values["kdf_metadata"] = {
             **winner.kdf_metadata,
             "wrapping_key_fingerprint": "foreign-fingerprint",
+        }
+    elif mismatch == "bootstrap_cursor":
+        values["kdf_metadata"] = {
+            **winner.kdf_metadata,
+            "bootstrap_cursor": "foreign-bootstrap-cursor",
+        }
+    else:
+        values["kdf_metadata"] = {
+            **winner.kdf_metadata,
+            "transport_watermarks": [["personal_context.record", 1, -1]],
         }
     mismatched_winner = replace(winner, **values)
     list_calls = 0
@@ -571,6 +838,10 @@ def test_conflicting_rsa_key_record_winner_mismatch_fails_closed(
             device=device,
             integrity_key_id=canonical.integrity_key_id,
             integrity_key=canonical.integrity_key,
+            bootstrap_cursor=bootstrap.cursor,
+            transport_watermarks={
+                (domain, 1): 0 for domain in PERSONAL_CONTEXT_SYNC_DOMAINS
+            },
         )
 
     assert getattr(exc_info.value, "reason_code", None) == "personal_context_key_custody_unavailable"

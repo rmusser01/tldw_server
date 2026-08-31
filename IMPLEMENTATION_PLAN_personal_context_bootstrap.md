@@ -127,3 +127,34 @@ any subsequent lifecycle update.
   modules produced `127 passed`.
 
 TASK-13148 remains unchanged for controller review.
+
+## Sync transport-watermark correction
+
+- [x] Successful bootstrap now returns `sync_transport_cursor` in addition to
+  the unchanged semantic `cursor`. The semantic cursor remains the receipt and
+  completion identity; it is never accepted by private Sync pull.
+- [x] The transport cursor uses the existing signed pull-token codec and binds
+  the authenticated dataset, registered device, complete negotiated adapter
+  version set, Personal Context domain/version streams, and one sequence
+  watermark per stream. Its 30-day lifetime, plus five minutes of bounded clock
+  skew, covers the durable review window.
+- [x] Before reading the canonical snapshot, bootstrap enrolls only content-free
+  Personal Context transport domains. It then locks the Sync dataset row and
+  captures the stream boundary while that lock remains held across the canonical
+  snapshot read. This is deliberately an ordering fence, not a cross-database
+  transaction: canonical mutations must commit before their Sync envelope is
+  appended, and every relevant envelope append takes the same dataset-row lock.
+- [x] The boundary is durably associated with the device key record and semantic
+  bootstrap cursor. Retrying the same reviewed plan may issue a newly signed
+  token but cannot advance the embedded watermarks; a new semantic plan may
+  capture a new boundary.
+- [x] Unknown valid zero-minimum quota requirements are included in successful
+  response `quotas` with effective value `0`; positive unknown requirements
+  retain typed incompatibility with available value `0`.
+
+TDD coverage includes the exact HTTP quota field, retained multi-revision
+history, post-boundary delivery, signed scope rejection, slow-review expiry,
+stable retry watermarks, deterministic SQLite interleaving, and an executed
+PostgreSQL `FOR UPDATE` transaction contract. A live PostgreSQL fixture remains
+unavailable; the limitation is explicit rather than represented as live-DB
+evidence. TASK-13148's status remains unchanged.

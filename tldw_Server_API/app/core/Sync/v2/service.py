@@ -176,6 +176,7 @@ SYNC_PULL_TOKEN_MAX_ENCODED_BYTES = 32_768
 SYNC_PULL_TOKEN_MAX_DECODED_BYTES = 24_576
 SYNC_PULL_TOKEN_MAX_STREAMS = 800
 SYNC_PULL_TOKEN_VERSION = 1
+SYNC_PULL_TOKEN_CLOCK_SKEW_SECONDS = 300
 SYNC_RETENTION_BINDING_PAGE_SIZE = 1000
 
 SYNC_DATASET_RECOVERY_KEY_PURPOSE = "dataset_recovery"
@@ -3476,7 +3477,9 @@ class SyncV2Service:
 
         selected_domains = self._selected_pull_domains(dataset, device, domains)
         streams = self._pull_adapter_streams(device, selected_domains)
-        if any(adapter_version != 1 for _domain, adapter_version in streams):
+        if any(adapter_version != 1 for _domain, adapter_version in streams) or (
+            isinstance(cursor, str) and "." in cursor
+        ):
             return self._pull_versioned(
                 dataset=dataset,
                 device=device,
@@ -8153,14 +8156,20 @@ class SyncV2Service:
         device_id: str,
         version_set: Mapping[SyncDomain, Sequence[int]],
         watermarks: Mapping[tuple[SyncDomain, int], int],
+        ttl_seconds: int | None = None,
     ) -> str:
         now = _parse_sync_timestamp(self.clock()) or datetime.now(timezone.utc)
+        token_ttl = (
+            self.settings.pull_token_ttl_seconds
+            if ttl_seconds is None
+            else ttl_seconds
+        )
         payload = {
             "v": SYNC_PULL_TOKEN_VERSION,
             "dataset_id": dataset_id,
             "device_id": device_id,
             "iat": int(now.timestamp()),
-            "exp": int(now.timestamp()) + self.settings.pull_token_ttl_seconds,
+            "exp": int(now.timestamp()) + token_ttl,
             "vs": [
                 [domain, list(versions)]
                 for domain, versions in sorted(version_set.items())
@@ -8227,8 +8236,16 @@ class SyncV2Service:
         if payload.get("vs") != expected_version_set:
             raise SyncStoreError("sync_pull_restart_required")
         now = _parse_sync_timestamp(self.clock()) or datetime.now(timezone.utc)
+        iat = payload.get("iat")
         exp = payload.get("exp")
-        if isinstance(exp, bool) or not isinstance(exp, int) or exp < int(now.timestamp()):
+        if (
+            isinstance(iat, bool)
+            or not isinstance(iat, int)
+            or iat > int(now.timestamp()) + SYNC_PULL_TOKEN_CLOCK_SKEW_SECONDS
+            or isinstance(exp, bool)
+            or not isinstance(exp, int)
+            or exp < int(now.timestamp()) - SYNC_PULL_TOKEN_CLOCK_SKEW_SECONDS
+        ):
             raise SyncStoreError("sync_pull_token_invalid")
         raw_watermarks = payload.get("wm")
         if not isinstance(raw_watermarks, list):

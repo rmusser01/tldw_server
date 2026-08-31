@@ -1270,6 +1270,7 @@ class SyncPersonalContextBootstrapResponse(BaseModel):
     schema_version: int
     quotas: dict[str, int]
     cursor: str
+    sync_transport_cursor: str
     integrity_key_id: str
     key_record_id: str
     wrapped_key_blob: str
