@@ -223,6 +223,29 @@ class TestMakeCacheKey:
         with pytest.raises(FrozenInstanceError):
             identity.radius = 2
 
+    def test_requested_and_effective_caps_both_bind_semantic_identity(self):
+        default_request = _semantic_query_identity()
+        explicitly_bounded_request = _semantic_query_identity(
+            request_updates={
+                "max_nodes": 2,
+                "max_edges": 1,
+                "max_degree": 1,
+                "allow_heavy": True,
+            },
+        )
+
+        assert default_request.max_nodes == explicitly_bounded_request.max_nodes
+        assert default_request.max_edges == explicitly_bounded_request.max_edges
+        assert default_request.max_degree == explicitly_bounded_request.max_degree
+        assert default_request.allow_heavy == explicitly_bounded_request.allow_heavy
+        assert default_request != explicitly_bounded_request
+        common = _semantic_key_values()
+        assert GraphCache.make_semantic_revision_key(
+            **{**common, "query_identity": default_request}
+        ) != GraphCache.make_semantic_revision_key(
+            **{**common, "query_identity": explicitly_bounded_request}
+        )
+
     def test_semantic_helpers_reject_untyped_query_identity(self):
         common = _semantic_key_values()
 

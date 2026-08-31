@@ -678,6 +678,76 @@ class TestSemanticCandidateGeneration:
         ) == 52
         assert len(candidates.candidate_edges) == 51
 
+    def test_public_and_candidate_graphs_use_distinct_cache_entries(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        monkeypatch.setenv("NOTES_GRAPH_MAX_DEGREE", "100")
+        center = _uid()
+        neighbors = sorted(_uid() for _ in range(6))
+        cache = GraphCache(ttl_seconds=60, max_keys=10)
+        service = NoteGraphService(
+            user_id="u1",
+            db=_mock_db(
+                notes=[_note(center), *(_note(note_id) for note_id in neighbors)],
+                edges=[_manual_edge(center, note_id) for note_id in neighbors],
+                note_count=7,
+            ),
+            cache=cache,
+        )
+        request = NoteGraphRequest(
+            center_note_id=center,
+            edge_types=[EdgeType.manual, EdgeType.semantic],
+            max_nodes=2,
+            max_edges=1,
+            max_degree=100,
+        )
+
+        result = service.generate_semantic_candidates(
+            request,
+            additional_nodes=3,
+            additional_edges=3,
+        )
+
+        assert result.public_graph.limits.max_nodes == 2
+        assert result.candidate_limits.max_nodes == 5
+        assert len(result.public_graph.nodes) == 2
+        assert len(result.candidate_nodes) == 5
+        assert cache.stats()["size"] == 2
+        assert service.generate_graph(request) == result.public_graph
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("additional_nodes", -1),
+            ("additional_nodes", True),
+            ("additional_nodes", 1.5),
+            ("additional_edges", -1),
+            ("additional_edges", True),
+            ("additional_edges", 1.5),
+        ],
+    )
+    def test_candidate_generation_rejects_invalid_allowances(
+        self,
+        field: str,
+        value: object,
+    ):
+        service = NoteGraphService(user_id="u1", db=_mock_db())
+        kwargs: dict[str, object] = {
+            "additional_nodes": 1,
+            "additional_edges": 1,
+            field: value,
+        }
+
+        with pytest.raises(InputError, match="allowance"):
+            service.generate_semantic_candidates(
+                NoteGraphRequest(
+                    center_note_id=_uid(),
+                    edge_types=[EdgeType.semantic],
+                ),
+                **kwargs,
+            )
+
     @pytest.mark.parametrize(
         ("graph_request", "message"),
         [
