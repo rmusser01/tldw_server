@@ -1027,7 +1027,10 @@ def parse_model_string(model_value: str) -> list[str]:
 
 
 # Local model discovery helpers (best-effort; cached to avoid hammering endpoints)
-LOCAL_MODEL_DISCOVERY_TIMEOUT = 3.0  # seconds
+LOCAL_MODEL_DISCOVERY_TIMEOUT = 1.5  # seconds
+# Local/LAN endpoints answer in milliseconds when present. This bound is only
+# ever paid in full by an endpoint that is configured but not listening, so it
+# is kept short: it is discovery, and a miss degrades to "no models found".
 LOCAL_MODEL_DISCOVERY_TTL = 300  # seconds
 _LOCAL_MODEL_CACHE: dict[str, tuple[float, ModelDiscoveryResult]] = {}
 # Upper bound on simultaneous discovery probes for one endpoint.

@@ -1093,7 +1093,7 @@ llama_max_tokens = 4096
 llama_api_timeout = 90
 llama_api_retry = 3
 llama_api_retry_delay = 1
-ooba_api_IP = http://192.168.2.235:5000/v1/chat/completions
+ooba_api_IP = http://127.0.0.1:5000/v1/chat/completions
 # text-generation-webui OpenAI routes accept the OpenAI payload; include model to be explicit
 # (docs/12 - OpenAI API.md; server will fall back to the loaded model if omitted).
 # ooba_model = <model_name_for_openai_endpoint>
@@ -1131,7 +1131,7 @@ vllm_api_timeout = 90
 vllm_api_retry = 3
 vllm_api_retry_delay = 1
 # Ollama API requires model (docs/api.md: POST /api/generate -> model required).
-ollama_api_IP =  http://192.168.2.216:11434/v1
+ollama_api_IP =  http://127.0.0.1:11434/v1
 ollama_model = gemma3:1b
 ollama_streaming = False
 ollama_temperature = 0.7
