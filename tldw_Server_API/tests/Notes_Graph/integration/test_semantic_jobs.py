@@ -41,6 +41,7 @@ NOW = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
 @pytest.fixture
 def jobs(tmp_path, monkeypatch) -> JobManager:
     monkeypatch.setenv("JOBS_ALLOWED_QUEUES_NOTES", JOB_QUEUE)
+    monkeypatch.setenv("JOBS_TEST_NOW_EPOCH", str(NOW.timestamp()))
     return JobManager(tmp_path / "semantic-jobs.sqlite")
 
 

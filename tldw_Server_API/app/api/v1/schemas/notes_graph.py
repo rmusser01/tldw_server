@@ -193,19 +193,22 @@ class GraphEdge(BaseModel):
     weight: float | None = Field(1.0, ge=0.0, description="Optional weight; defaults to 1.0")
     label: str | None = Field(None, description="Optional label for the edge")
     evidence: SemanticEdgeEvidence | None = None
+    evidence_omitted: Literal["response_byte_cap"] | None = None
 
     @model_validator(mode="after")
     def _validate_semantic_evidence(self) -> GraphEdge:
         if self.type == EdgeType.semantic:
             if self.directed:
                 raise ValueError("semantic edges must be undirected")
-            if self.evidence is None:
+            if self.evidence is None and self.evidence_omitted is None:
                 raise ValueError("semantic edges require typed evidence")
-            if self.evidence.source_note_id != self.source:
+            if self.evidence is not None and self.evidence_omitted is not None:
+                raise ValueError("semantic evidence conflicts with its omission marker")
+            if self.evidence is not None and self.evidence.source_note_id != self.source:
                 raise ValueError("semantic evidence source does not match the edge")
-            if self.evidence.target_note_id != self.target:
+            if self.evidence is not None and self.evidence.target_note_id != self.target:
                 raise ValueError("semantic evidence target does not match the edge")
-        elif self.evidence is not None:
+        elif self.evidence is not None or self.evidence_omitted is not None:
             raise ValueError("semantic evidence is only valid on semantic edges")
         return self
 
@@ -214,6 +217,8 @@ class GraphEdge(BaseModel):
         data = handler(self)
         if self.evidence is None:
             data.pop("evidence", None)
+        if self.evidence_omitted is None:
+            data.pop("evidence_omitted", None)
         return data
 
     model_config = ConfigDict(from_attributes=True)
@@ -298,6 +303,12 @@ class NoteGraphResponse(BaseModel):
     )
 
 
+class SemanticConversionContext(_StrictSemanticModel):
+    """Immutable semantic authority supplied when converting a derived edge."""
+
+    generation_id: str = Field(min_length=1, max_length=256)
+
+
 class NoteLinkCreate(BaseModel):
     to_note_id: str = Field(..., min_length=1, description="Target note id to link to")
     directed: bool = Field(False, description="Whether the link is directed; defaults to false")
@@ -309,6 +320,7 @@ class NoteLinkCreate(BaseModel):
     )
     dataset_id: str | None = Field(default=None, min_length=1, max_length=256)
     idempotency_key: str | None = Field(default=None, min_length=1, max_length=128)
+    semantic_conversion: SemanticConversionContext | None = None
 
     @field_validator("dataset_id", "idempotency_key", mode="before")
     @classmethod
@@ -465,7 +477,11 @@ class NoteGraphRequest(BaseModel):
                 if isinstance(item, EdgeType):
                     out.append(item)
                 elif isinstance(item, str):
-                    out.append(EdgeType(item))
+                    out.extend(
+                        EdgeType(part)
+                        for part in (value.strip() for value in item.split(","))
+                        if part
+                    )
             return list(_canonical_edge_types(out))
         return v
 

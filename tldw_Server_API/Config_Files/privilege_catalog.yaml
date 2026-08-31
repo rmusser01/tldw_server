@@ -1396,6 +1396,23 @@ scopes:
     ownership_predicates:
       - same_org
     doc_url: https://docs.example.com/privileges/notes-graph-read
+  - id: notes.graph.semantic.read
+    description: Query derived semantic relationships in note graphs.
+    resource_tags:
+      - notes
+      - graph
+      - semantic
+    sensitivity_tier: low
+    rate_limit_class: standard
+    default_roles:
+      - admin
+      - analyst
+      - developer
+      - viewer
+    feature_flag_id: null
+    ownership_predicates:
+      - same_org
+    doc_url: https://docs.example.com/privileges/notes-graph-semantic-read
   - id: notes.graph.write
     description: Create or delete manual note links.
     resource_tags:

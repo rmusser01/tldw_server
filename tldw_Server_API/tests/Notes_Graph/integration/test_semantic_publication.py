@@ -354,6 +354,56 @@ def _prepare_ready_generation(db: CharactersRAGDB):
     return resolved, pending, integrity
 
 
+def test_projection_reads_require_current_active_note_authority(
+    sqlite_db: CharactersRAGDB,
+) -> None:
+    db = sqlite_db
+    resolved, pending, integrity = _prepare_ready_generation(db)
+    assert integrity.vector_ids
+    activated = db.note_semantic_store.activate_generation(
+        dataset_id=DATASET_ID,
+        generation_id=pending.id,
+        expected_configuration_revision=resolved.configuration_revision,
+        publication_receipt="projection-read-v1",
+        now=NOW,
+    )
+    assert activated is not None
+
+    loaded = db.note_semantic_store.load_projection_chunks(
+        dataset_id=DATASET_ID,
+        generation_id=pending.id,
+        vector_ids=integrity.vector_ids,
+    )
+    admitted = db.note_semantic_store.filter_projection_note_ids(
+        dataset_id=DATASET_ID,
+        generation_id=pending.id,
+        note_ids=(NOTE_ID,),
+    )
+
+    assert tuple(chunk.vector_id for chunk in loaded) == integrity.vector_ids
+    assert loaded[0].title == "Title"
+    assert loaded[0].content == "Body"
+    assert admitted == frozenset({NOTE_ID})
+
+    assert db.note_store.update_note(
+        NOTE_ID,
+        {"content": "Revised body"},
+        expected_version=1,
+        semantic_dataset_id=DATASET_ID,
+    )
+
+    assert db.note_semantic_store.load_projection_chunks(
+        dataset_id=DATASET_ID,
+        generation_id=pending.id,
+        vector_ids=integrity.vector_ids,
+    ) == ()
+    assert db.note_semantic_store.filter_projection_note_ids(
+        dataset_id=DATASET_ID,
+        generation_id=pending.id,
+        note_ids=(NOTE_ID,),
+    ) == frozenset()
+
+
 def _generation_count_snapshot(
     db: CharactersRAGDB,
     generation_id: str,
