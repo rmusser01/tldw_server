@@ -52,6 +52,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from tldw_Server_API.app.core.DB_Management.schema_once import ensure_once
 from tldw_Server_API.app.core.config import load_comprehensive_config
 from tldw_Server_API.app.core.DB_Management.content_backend import (
     backend_target_key,
@@ -537,6 +538,40 @@ class WatchlistsDatabase:
         finally:
             self._backend_refresh_suspended = previous_suspend
         WatchlistsDatabase._schema_init_keys.add(db_key)
+
+    def _watchlists_schema_present(self) -> bool:
+        """Cheap check that this database still has the watchlists tables."""
+        try:
+            rows = self._backend.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                ("sources",),
+            )
+        except Exception:
+            return False
+        try:
+            return bool(list(rows))
+        except TypeError:
+            return bool(rows)
+
+    def ensure_schema_once(self) -> None:
+        """Ensure the schema, skipping the work when it is demonstrably present.
+
+        ``ensure_schema()`` issues roughly sixty DDL statements, and the FastAPI
+        dependency called it on every request.
+
+        The constructor's ``_schema_init_keys`` memo is not sufficient on its
+        own here: for SQLite its key is just the database path, so a database
+        deleted and recreated at that path (test fixtures do exactly this) keeps
+        a stale entry and the schema would be skipped when it no longer exists.
+        A single catalogue lookup confirms the tables really are there, and is
+        still far cheaper than replaying the schema.
+        """
+        ensure_once(
+            "watchlists",
+            getattr(getattr(self._backend, "config", None), "sqlite_path", None),
+            self.ensure_schema,
+            verify=self._watchlists_schema_present,
+        )
 
     @contextlib.contextmanager
     def _operation_backend_pin(self) -> Generator[DatabaseBackend, None, None]:

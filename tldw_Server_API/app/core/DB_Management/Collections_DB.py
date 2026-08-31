@@ -29,6 +29,7 @@ from uuid import uuid4
 
 from loguru import logger
 
+from tldw_Server_API.app.core.DB_Management.schema_once import ensure_once
 from tldw_Server_API.app.core.Collections.utils import (
     build_highlight_context,
     find_highlight_span,
@@ -653,7 +654,17 @@ class CollectionsDatabase:
         if self._backend.backend_type == BackendType.POSTGRESQL:
             self._ensure_bootstrap_for_backend(self._backend)
         else:
-            self._run_backend_bootstrap()
+            # SQLite ran the full bootstrap on every construction -- roughly 85
+            # DDL statements, and this class is built per request. It is
+            # de-duplicated on the database's *file identity* rather than the
+            # Postgres target key, which for SQLite is just a path: a database
+            # deleted and recreated at that path must be bootstrapped again.
+            ensure_once(
+                "collections",
+                getattr(getattr(self._backend, "config", None), "sqlite_path", None),
+                self._run_backend_bootstrap,
+                verify=self._collections_schema_present,
+            )
 
     @classmethod
     def for_user(cls, user_id: int | str) -> CollectionsDatabase:
@@ -715,6 +726,26 @@ class CollectionsDatabase:
 
     def _get_pinned_backend(self) -> DatabaseBackend | None:
         return getattr(self._local, "backend_pin", None)
+
+    def _collections_schema_present(self) -> bool:
+        """Cheap check that bootstrap output still exists in this database.
+
+        Test fixtures delete and recreate the database at a fixed path, and a
+        filesystem may reuse the inode, so file identity alone can produce a
+        false memo hit. One catalogue lookup is enough to catch that, and is
+        still far cheaper than replaying the whole bootstrap.
+        """
+        try:
+            rows = self._backend.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                ("output_templates",),
+            )
+        except Exception:
+            return False
+        try:
+            return bool(list(rows))
+        except TypeError:
+            return bool(rows)
 
     def _run_backend_bootstrap(self) -> None:
         self.ensure_schema()

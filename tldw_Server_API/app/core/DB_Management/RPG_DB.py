@@ -8,6 +8,7 @@ from typing import Any, cast
 
 from loguru import logger
 
+from tldw_Server_API.app.core.DB_Management.schema_once import ensure_once
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.RPG.constants import (
     RPG_EVENT_SCHEMA_VERSION,
@@ -49,8 +50,14 @@ class RPGRepository:
 
     @classmethod
     def initialized(cls, db: CharactersRAGDB) -> RPGRepository:
+        """Return a repository whose tables exist, creating them once per process.
+
+        This is called per request from the RPG endpoints. ensure_schema() is
+        idempotent but issues ten DDL statements, so it is de-duplicated per
+        database file rather than repeated on every call.
+        """
         repo = cls(db)
-        repo.ensure_schema()
+        ensure_once("rpg", getattr(db, "db_path_str", None), repo.ensure_schema)
         return repo
 
     def ensure_schema(self) -> None:
