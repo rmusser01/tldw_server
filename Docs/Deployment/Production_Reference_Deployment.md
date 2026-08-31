@@ -173,10 +173,12 @@ the legacy readiness aliases, or metrics anonymous at the public proxy.
 
 ## 6. Authenticate Prometheus
 
-Create a dedicated existing AuthNZ principal/role whose only diagnostic
-permission is `system.logs`, then create an API key for that principal. Do not
-introduce a shared anonymous metrics token and do not reuse an administrator's
-general-purpose credential.
+Create a dedicated existing AuthNZ principal/role whose only permission is
+`system.logs`, then create a `read`-scoped API key for that principal. The two
+layers are both required: RBAC limits the principal to operational diagnostics,
+and the API-key scope prevents the credential from satisfying write routes. Do
+not use the `service` scope, introduce a shared anonymous metrics token, or reuse
+an administrator's general-purpose credential.
 
 Write the returned key once to an owner-only file without printing it:
 
@@ -241,8 +243,8 @@ not compatible with the standalone production boundary.
 An ordinary Prometheus reload is insufficient because the one-shot init service
 must first replace the staged tmpfs copy. To rotate without revoking the working
 credential prematurely, use an administrator token to create an additional
-service-scoped key for the same dedicated principal whose only diagnostic
-permission is `system.logs`. Set `TLDW_METRICS_USER_ID` and
+`read`-scoped key for the same dedicated principal whose only permission is
+`system.logs`. Set `TLDW_METRICS_USER_ID` and
 `TLDW_OLD_METRICS_API_KEY_ID` to that principal and its currently staged key,
 then run this transaction. The create response is captured rather than printed.
 The old key stays active until the new file is staged, Prometheus is restarted,
@@ -263,6 +265,22 @@ request = urllib.request.Request(
     method="DELETE",
 )
 urllib.request.urlopen(request, timeout=10).read()
+PY
+}
+
+lookup_metrics_key_id_by_name() {
+  "${MAIN_COMPOSE[@]}" exec -T -e TLDW_ADMIN_TOKEN app \
+    python - "$TLDW_METRICS_USER_ID" "$1" <<'PY'
+import json, os, sys, urllib.request
+request = urllib.request.Request(
+    f"http://localhost:8000/api/v1/admin/users/{sys.argv[1]}/api-keys",
+    headers={"Authorization": "Bearer " + os.environ["TLDW_ADMIN_TOKEN"]},
+)
+items = json.loads(urllib.request.urlopen(request, timeout=10).read())
+matches = [str(item["id"]) for item in items if item.get("name") == sys.argv[2]]
+if len(matches) != 1:
+    raise SystemExit(2)
+sys.stdout.write(matches[0])
 PY
 }
 
@@ -288,13 +306,72 @@ sys.exit(0 if any(
   return 1
 }
 
+TLDW_ROTATION_COMMITTED=0
+TLDW_METRICS_FILE_REPLACED=0
+TLDW_OLD_METRICS_BACKUP_READY=0
+TLDW_NEW_METRICS_API_KEY_ID=
+TLDW_OLD_METRICS_API_KEY_FILE=
+TLDW_NEW_METRICS_API_KEY_FILE=
+TLDW_NEW_METRICS_KEY_NAME="prometheus-rotation-$(python3 -c 'import uuid; print(uuid.uuid4().hex)')"
+
+cleanup_metrics_rotation() {
+  cleanup_status=$?
+  trap - EXIT
+  set +e
+  rm -f -- "${TLDW_NEW_METRICS_API_KEY_FILE:-}"
+
+  if [ "$TLDW_ROTATION_COMMITTED" -eq 1 ]; then
+    return "$cleanup_status"
+  fi
+
+  cleanup_key_id="${TLDW_NEW_METRICS_API_KEY_ID:-}"
+  if [ -z "$cleanup_key_id" ]; then
+    cleanup_key_id="$(lookup_metrics_key_id_by_name "$TLDW_NEW_METRICS_KEY_NAME")"
+    lookup_status=$?
+    if [ "$lookup_status" -ne 0 ] || [ -z "$cleanup_key_id" ]; then
+      printf '%s\n' 'Unable to prove whether the new key was activated; manual recovery required.' >&2
+      [ "$cleanup_status" -ne 0 ] || cleanup_status=1
+      return "$cleanup_status"
+    fi
+  fi
+
+  old_credential_ready=1
+  if [ "$TLDW_METRICS_FILE_REPLACED" -eq 1 ]; then
+    if [ "$TLDW_OLD_METRICS_BACKUP_READY" -eq 1 ]; then
+      TLDW_ROLLBACK_METRICS_API_KEY_FILE="$(mktemp "${TLDW_METRICS_API_KEY_FILE}.restore.XXXXXX")"
+      if install -m 600 "$TLDW_OLD_METRICS_API_KEY_FILE" "$TLDW_ROLLBACK_METRICS_API_KEY_FILE" &&
+        mv -f -- "$TLDW_ROLLBACK_METRICS_API_KEY_FILE" "$TLDW_METRICS_API_KEY_FILE" &&
+        stage_and_restart && wait_for_tldw_target; then
+        old_credential_ready=0
+      fi
+      rm -f -- "${TLDW_ROLLBACK_METRICS_API_KEY_FILE:-}"
+    fi
+  else
+    old_credential_ready=0
+  fi
+
+  if [ "$old_credential_ready" -eq 0 ]; then
+    if ! revoke_metrics_key "$cleanup_key_id"; then
+      printf '%s\n' 'Old credential is healthy but the new key could not be revoked; manual recovery required.' >&2
+    fi
+  else
+    printf '%s\n' 'Old credential recovery was not verified; the new key remains active and manual recovery required.' >&2
+  fi
+
+  rm -f -- "${TLDW_OLD_METRICS_API_KEY_FILE:-}"
+  [ "$cleanup_status" -ne 0 ] || cleanup_status=1
+  return "$cleanup_status"
+}
+
+trap cleanup_metrics_rotation EXIT
+
 TLDW_NEW_METRICS_KEY_RESPONSE="$(
   "${MAIN_COMPOSE[@]}" exec -T -e TLDW_ADMIN_TOKEN app \
-    python - "$TLDW_METRICS_USER_ID" <<'PY'
+    python - "$TLDW_METRICS_USER_ID" "$TLDW_NEW_METRICS_KEY_NAME" <<'PY'
 import json, os, sys, urllib.request
 request = urllib.request.Request(
     f"http://localhost:8000/api/v1/admin/users/{sys.argv[1]}/api-keys",
-    data=json.dumps({"name": "prometheus-rotation", "scope": "service"}).encode(),
+    data=json.dumps({"name": sys.argv[2], "scope": "read"}).encode(),
     headers={
         "Authorization": "Bearer " + os.environ["TLDW_ADMIN_TOKEN"],
         "Content-Type": "application/json",
@@ -313,33 +390,33 @@ unset TLDW_NEW_METRICS_KEY_RESPONSE
 umask 077
 TLDW_OLD_METRICS_API_KEY_FILE="$(mktemp "${TLDW_METRICS_API_KEY_FILE}.rollback.XXXXXX")"
 install -m 600 "$TLDW_METRICS_API_KEY_FILE" "$TLDW_OLD_METRICS_API_KEY_FILE"
+TLDW_OLD_METRICS_BACKUP_READY=1
 TLDW_NEW_METRICS_API_KEY_FILE="$(mktemp "${TLDW_METRICS_API_KEY_FILE}.new.XXXXXX")"
 printf '%s' "$TLDW_NEW_METRICS_API_KEY" > "$TLDW_NEW_METRICS_API_KEY_FILE"
 chmod 600 "$TLDW_NEW_METRICS_API_KEY_FILE"
 mv -f -- "$TLDW_NEW_METRICS_API_KEY_FILE" "$TLDW_METRICS_API_KEY_FILE"
+TLDW_NEW_METRICS_API_KEY_FILE=
+TLDW_METRICS_FILE_REPLACED=1
 unset TLDW_NEW_METRICS_API_KEY
 
-if ! stage_and_restart || ! wait_for_tldw_target; then
-  TLDW_ROLLBACK_METRICS_API_KEY_FILE="$(mktemp "${TLDW_METRICS_API_KEY_FILE}.restore.XXXXXX")"
-  install -m 600 "$TLDW_OLD_METRICS_API_KEY_FILE" "$TLDW_ROLLBACK_METRICS_API_KEY_FILE"
-  mv -f -- "$TLDW_ROLLBACK_METRICS_API_KEY_FILE" "$TLDW_METRICS_API_KEY_FILE"
-  if stage_and_restart && wait_for_tldw_target; then
-    revoke_metrics_key "$TLDW_NEW_METRICS_API_KEY_ID"
-  fi
-  rm -f -- "$TLDW_OLD_METRICS_API_KEY_FILE"
-  exit 1
-fi
+stage_and_restart
+wait_for_tldw_target
 
 revoke_metrics_key "$TLDW_OLD_METRICS_API_KEY_ID"
+TLDW_ROTATION_COMMITTED=1
+trap - EXIT
 rm -f -- "$TLDW_OLD_METRICS_API_KEY_FILE"
 export TLDW_OLD_METRICS_API_KEY_ID="$TLDW_NEW_METRICS_API_KEY_ID"
 unset TLDW_NEW_METRICS_API_KEY_ID
 ```
 
-If the new stage, restart, or target verification fails, the failure branch
-atomically restores and re-stages the old file before revoking the unused new
-key. If old-key recovery cannot itself be verified, both principals remain
-active for operator recovery and the transaction exits nonzero.
+The exit trap is armed before the create request. If creation succeeds but its
+response cannot be parsed, the trap finds the exact unique key name through the
+admin list route. Any later failure atomically restores and re-stages the old
+file before revoking the unused new key. If old-key recovery or new-key lookup
+cannot be verified, the script reports that manual recovery is required, leaves
+the potentially working new key active, and exits nonzero. The trap is disarmed
+only after the healthy target is observed and the old key is revoked.
 
 For monitoring retirement, use the canonical `down` command without `-v`:
 

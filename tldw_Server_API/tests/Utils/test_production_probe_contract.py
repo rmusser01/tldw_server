@@ -125,6 +125,7 @@ def test_monitoring_composes_stage_operator_credential_for_non_root_prometheus()
         script = "\n".join(init["command"])
         for contract in (
             "os.O_NOFOLLOW",
+            "os.O_NONBLOCK",
             "source_info = os.fstat(source_fd)",
             "stat.S_ISREG(source_info.st_mode)",
             "stat.S_IMODE(source_info.st_mode) != 0o600",
@@ -141,6 +142,9 @@ def test_monitoring_composes_stage_operator_credential_for_non_root_prometheus()
             "os.read(check_fd, 1)",
         ):
             assert contract in script, (path, contract)
+
+        source_open = script[script.index("source_fd = os.open") : script.index("source_info = os.fstat")]
+        assert source_open.index("os.O_NONBLOCK") < script.index("source_info = os.fstat"), path
 
         assert prometheus["user"] == (
             "${PROMETHEUS_UID:?Set the numeric UID used by the pinned Prometheus image}:"

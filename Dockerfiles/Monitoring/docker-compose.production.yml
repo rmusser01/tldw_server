@@ -31,7 +31,7 @@ services:
             except FileNotFoundError:
                 pass
 
-            source_fd = os.open(source, os.O_RDONLY | os.O_NOFOLLOW)
+            source_fd = os.open(source, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
             try:
                 source_info = os.fstat(source_fd)
                 if not stat.S_ISREG(source_info.st_mode):

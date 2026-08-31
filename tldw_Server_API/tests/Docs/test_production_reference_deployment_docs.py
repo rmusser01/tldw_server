@@ -102,6 +102,36 @@ def test_monitoring_runbook_requires_operator_inputs_and_explains_networking() -
     assert "network is not marked `internal`" in text
 
 
+def test_monitoring_rotation_uses_read_scope_without_api_key_superuser_bypass() -> None:
+    from tldw_Server_API.app.api.v1.endpoints.admin import admin_api_keys
+    from tldw_Server_API.app.api.v1.schemas.api_key_schemas import (
+        APIKeyCreateRequest,
+        APIKeyCreateResponse,
+        APIKeyMetadata,
+        APIKeyRevokeResponse,
+    )
+    from tldw_Server_API.app.core.AuthNZ.api_key_manager import has_scope
+
+    rotation = _rotation_block(RUNBOOK.read_text(encoding="utf-8"))
+    route_contract = {
+        (route.path, method): route.response_model for route in admin_api_keys.router.routes for method in route.methods
+    }
+
+    assert route_contract[("/users/{user_id}/api-keys", "POST")] is APIKeyCreateResponse
+    assert route_contract[("/users/{user_id}/api-keys", "GET")] == list[APIKeyMetadata]
+    assert route_contract[("/users/{user_id}/api-keys/{key_id}", "DELETE")] is APIKeyRevokeResponse
+    assert {"id", "key"} <= set(APIKeyCreateResponse.model_fields)
+    assert {"user_id", "key_id"} <= set(APIKeyRevokeResponse.model_fields)
+
+    request = APIKeyCreateRequest(name="prometheus-rotation", scope="read")
+    assert request.scope == "read"
+    assert has_scope({"read"}, "read")
+    assert not has_scope({"read"}, "write")
+    assert has_scope({"service"}, "write")
+    assert '"scope": "read"' in rotation
+    assert '"scope": "service"' not in rotation
+
+
 def test_monitoring_rotation_stages_restarts_verifies_then_revokes_old_key() -> None:
     rotation = _rotation_block(RUNBOOK.read_text(encoding="utf-8"))
     stage_function = rotation[rotation.index("stage_and_restart()") : rotation.index("wait_for_tldw_target()")]
@@ -113,7 +143,8 @@ def test_monitoring_rotation_stages_restarts_verifies_then_revokes_old_key() -> 
     ordered_transaction = (
         'method="POST"',
         'mv -f -- "$TLDW_NEW_METRICS_API_KEY_FILE" "$TLDW_METRICS_API_KEY_FILE"',
-        "if ! stage_and_restart || ! wait_for_tldw_target; then",
+        "stage_and_restart",
+        "wait_for_tldw_target",
         'revoke_metrics_key "$TLDW_OLD_METRICS_API_KEY_ID"',
     )
 
@@ -126,14 +157,44 @@ def test_monitoring_rotation_stages_restarts_verifies_then_revokes_old_key() -> 
     assert "reload prometheus" not in rotation
 
 
+def test_monitoring_rotation_installs_cleanup_before_key_activation_and_disarms_after_success() -> None:
+    rotation = _rotation_block(RUNBOOK.read_text(encoding="utf-8"))
+    cleanup = rotation[
+        rotation.index("cleanup_metrics_rotation()") : rotation.index("trap cleanup_metrics_rotation EXIT")
+    ]
+
+    assert rotation.index("trap cleanup_metrics_rotation EXIT") < rotation.index("TLDW_NEW_METRICS_KEY_RESPONSE=")
+    for required_cleanup in (
+        "lookup_metrics_key_id_by_name",
+        'install -m 600 "$TLDW_OLD_METRICS_API_KEY_FILE"',
+        "stage_and_restart && wait_for_tldw_target",
+        'revoke_metrics_key "$cleanup_key_id"',
+        "manual recovery required",
+    ):
+        assert required_cleanup in cleanup
+
+    success = rotation[rotation.index("TLDW_NEW_METRICS_KEY_RESPONSE=") :]
+    ordered_success = (
+        "stage_and_restart",
+        "wait_for_tldw_target",
+        'revoke_metrics_key "$TLDW_OLD_METRICS_API_KEY_ID"',
+        "TLDW_ROTATION_COMMITTED=1",
+        "trap - EXIT",
+    )
+    positions = [success.index(item) for item in ordered_success]
+    assert positions == sorted(positions)
+
+
 def test_monitoring_rotation_failure_restages_old_key_before_revoking_new_key() -> None:
     rotation = _rotation_block(RUNBOOK.read_text(encoding="utf-8"))
-    rollback = rotation[rotation.index("if ! stage_and_restart") :]
+    rollback = rotation[
+        rotation.index("cleanup_metrics_rotation()") : rotation.index("trap cleanup_metrics_rotation EXIT")
+    ]
     ordered_rollback = (
         'install -m 600 "$TLDW_OLD_METRICS_API_KEY_FILE" "$TLDW_ROLLBACK_METRICS_API_KEY_FILE"',
         'mv -f -- "$TLDW_ROLLBACK_METRICS_API_KEY_FILE" "$TLDW_METRICS_API_KEY_FILE"',
-        "if stage_and_restart && wait_for_tldw_target; then",
-        'revoke_metrics_key "$TLDW_NEW_METRICS_API_KEY_ID"',
+        "stage_and_restart && wait_for_tldw_target",
+        'revoke_metrics_key "$cleanup_key_id"',
     )
 
     positions = [rollback.index(item) for item in ordered_rollback]
