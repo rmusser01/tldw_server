@@ -3558,6 +3558,23 @@ def test_personal_context_bootstrap_endpoint_maps_redacted_reason_codes(
             },
         ),
         (
+            {"required_quotas": {"future_sync_quota": 1}},
+            "personal_context_quota_incompatible",
+            {
+                "kind": "quota_incompatible",
+                "required_quotas": {"future_sync_quota": 1},
+                "available_quotas": {
+                    "future_sync_quota": 0,
+                    "max_record_bytes": 16_384,
+                    "max_search_results": 20,
+                    "max_proposals_per_turn": 5,
+                    "max_proposals_per_session": 25,
+                    "max_unresolved_proposals": 200,
+                },
+                "insufficient_quotas": ["future_sync_quota"],
+            },
+        ),
+        (
             {"expected_purge_generation": 1},
             "personal_context_purge_generation_stale",
             {
@@ -3603,6 +3620,60 @@ def test_personal_context_bootstrap_endpoint_exposes_exact_content_free_attentio
         "ciphertext",
     ):
         assert secret not in response.text
+
+
+@pytest.mark.parametrize(
+    ("reason_code", "attention"),
+    [
+        (
+            "personal_context_schema_incompatible",
+            {
+                "kind": "schema_incompatible",
+                "required_schema_version": 2,
+                "server_min_schema_version": 1,
+                "server_max_schema_version": 1,
+                "manifest": {"payload": "canonical-profile-canary"},
+                "wrapped_key_blob": "wrapped-integrity-key-canary",
+                "ciphertext": "ciphertext-canary",
+            },
+        ),
+        (
+            "personal_context_quota_incompatible",
+            {
+                "kind": "schema_incompatible",
+                "required_schema_version": 2,
+                "server_min_schema_version": 1,
+                "server_max_schema_version": 1,
+            },
+        ),
+    ],
+)
+def test_personal_context_bootstrap_endpoint_omits_untrusted_attention(
+    tmp_path: Path,
+    reason_code: str,
+    attention: dict[str, object],
+) -> None:
+    """Malformed or mismatched attention never crosses the HTTP boundary."""
+
+    service = _build_service(tmp_path)
+
+    def fail_bootstrap(**_kwargs: object) -> None:
+        raise PersonalContextBootstrapError(reason_code, attention=attention)
+
+    service.bootstrap_personal_context = fail_bootstrap  # type: ignore[method-assign]
+    response = _client_for_service(service).post(
+        "/api/v1/sync/personal-context/bootstrap",
+        json={"device_id": "device-a", "required_schema_version": 1},
+    )
+
+    assert response.status_code == 409
+    assert set(response.json()["detail"]) == {"error_code", "message"}
+    for canary in (
+        "canonical-profile-canary",
+        "wrapped-integrity-key-canary",
+        "ciphertext-canary",
+    ):
+        assert canary not in response.text
 
 
 @pytest.mark.parametrize(

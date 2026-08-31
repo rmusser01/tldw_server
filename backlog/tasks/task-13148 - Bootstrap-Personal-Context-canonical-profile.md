@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@codex'
 created_date: '2026-08-30 22:21'
-updated_date: '2026-08-31 01:03'
+updated_date: '2026-08-31 05:04'
 labels:
   - personal-context
   - sync
@@ -93,6 +93,8 @@ run because project guidance requires explicit opt-in; verification stayed on
 the affected Personalization and Sync modules. The production-factory timestamp
 incident and resulting cross-layer testing rule are recorded in
 `backlog/docs/lessons-testing-evidence.md`.
+
+Post-closure structured-attention correction: quota incompatibility now includes every required quota name in available_quotas, using an explicit safe zero for unsupported names. The HTTP boundary strictly validates discriminated attention, bounded content-free values, semantic consistency, and reason-code/kind agreement; malformed, mismatched, or extra-field mappings are omitted while preserving the stable 409 reason/message. TDD evidence: focused RED 3 failed/3 passed; GREEN 6 passed; affected endpoint/bootstrap modules 125 passed. Ruff, Python compilation, Bandit (0 findings/errors), Chatbook strict-parser compatibility, and diff hygiene passed. TASK-13148 status intentionally remains unchanged for controller review.
 <!-- SECTION:NOTES:END -->
 
 ## Progress
