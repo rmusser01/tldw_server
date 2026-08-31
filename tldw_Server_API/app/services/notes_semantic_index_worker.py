@@ -397,9 +397,9 @@ class ProductionSemanticRuntime:
             provider=current.provider_label.lower(),
             model=current.model,
             model_revision=(
-                config.model_revision
-                if config is not None and config.model_revision is not None
-                else current.model_revision
+                current.model_revision
+                if current.model_revision is not None
+                else config.model_revision if config is not None else None
             ),
             endpoint_origin=current.endpoint_display or "",
             credential_source="server_default",
