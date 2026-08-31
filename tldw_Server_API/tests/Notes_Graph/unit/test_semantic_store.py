@@ -231,6 +231,135 @@ def test_operation_receipt_begin_prunes_one_bounded_expiry_page(
     assert remaining <= 25
 
 
+@pytest.mark.parametrize("verified", [False, True])
+def test_unexpired_cancellation_intent_blocks_generation_activation(
+    db: CharactersRAGDB,
+    verified: bool,
+) -> None:
+    resolved_config, generation = _create_resolved_generation(
+        db,
+        root_job_id="job-cancel-before-activation",
+    )
+    integrity = db.note_semantic_store.get_generation_integrity(
+        DATASET_ID,
+        generation.id,
+    )
+    db.note_semantic_store.begin_operation_receipt(
+        dataset_id=DATASET_ID,
+        key_digest="a" * 64,
+        action="cancel",
+        request_fingerprint="b" * 64,
+        run_id="job-cancel-before-activation",
+        expected_revision=resolved_config.configuration_revision,
+        expires_at=NOW + timedelta(days=1),
+        now=NOW,
+    )
+
+    with pytest.raises(SemanticIndexingError) as exc_info:
+        if verified:
+            db.note_semantic_store.activate_generation_verified(
+                dataset_id=DATASET_ID,
+                generation_id=generation.id,
+                expected_configuration_revision=resolved_config.configuration_revision,
+                generation_fencing_token="job-cancel-before-activation",
+                expected_manifest_hash=integrity.manifest_hash,
+                expected_vector_ids=integrity.vector_ids,
+                expected_dimensions=integrity.dimensions,
+                expected_compatibility_hash=integrity.compatibility_hash,
+                publication_receipt="receipt-cancelled",
+                now=NOW,
+            )
+        else:
+            db.note_semantic_store.activate_generation(
+                dataset_id=DATASET_ID,
+                generation_id=generation.id,
+                expected_configuration_revision=resolved_config.configuration_revision,
+                publication_receipt="receipt-cancelled",
+                now=NOW,
+            )
+
+    assert exc_info.value.code == "notes_semantic_run_cancelled"
+    current = db.note_semantic_store.get_generation(DATASET_ID, generation.id)
+    assert current is not None
+    assert current.state is SemanticGenerationState.STAGING
+    assert db.note_semantic_store.get_configuration(DATASET_ID).active_generation_id is None
+
+
+@pytest.mark.parametrize("intent_scope", ["other_owner", "other_dataset", "expired"])
+def test_cancellation_intent_preserves_scope_and_expiry_semantics(
+    db: CharactersRAGDB,
+    intent_scope: str,
+) -> None:
+    run_id = f"job-{intent_scope}"
+    receipt_store = db.note_semantic_store
+    receipt_dataset = DATASET_ID
+    receipt_now = NOW
+    receipt_expiry = NOW + timedelta(days=1)
+    other_owner_db = None
+    if intent_scope == "other_owner":
+        other_owner_db = CharactersRAGDB(db.db_path_str, client_id="owner-b")
+        receipt_store = other_owner_db.note_semantic_store
+    elif intent_scope == "other_dataset":
+        receipt_dataset = "dataset-b"
+    else:
+        receipt_expiry = NOW + timedelta(seconds=1)
+        receipt_now = NOW
+
+    try:
+        receipt_store.begin_operation_receipt(
+            dataset_id=receipt_dataset,
+            key_digest="c" * 64,
+            action="cancel",
+            request_fingerprint="d" * 64,
+            run_id=run_id,
+            expected_revision=1,
+            expires_at=receipt_expiry,
+            now=receipt_now,
+        )
+    finally:
+        if other_owner_db is not None:
+            other_owner_db.close_all_connections()
+
+    operation_now = NOW + timedelta(seconds=2) if intent_scope == "expired" else NOW
+    config = _create_config(db)
+    enabled = db.note_semantic_store.enable_configuration(
+        dataset_id=DATASET_ID,
+        expected_configuration_revision=config.configuration_revision,
+        capability_revision="capability-v1",
+        now=operation_now,
+    )
+    assert enabled is not None
+    generation = db.note_semantic_store.create_generation(
+        dataset_id=DATASET_ID,
+        configuration_revision=enabled.configuration_revision,
+        compatibility_hash=None,
+        dimension_state=SemanticDimensionState.PENDING,
+        dimensions=None,
+        root_job_id=run_id,
+        now=operation_now,
+    )
+    resolved = db.note_semantic_store.resolve_generation_dimensions(
+        dataset_id=DATASET_ID,
+        generation_id=generation.id,
+        expected_configuration_revision=enabled.configuration_revision,
+        dimensions=768,
+        compatibility_hash="compatibility-v1",
+        now=operation_now,
+    )
+    assert resolved is not None
+
+    activated = db.note_semantic_store.activate_generation(
+        dataset_id=DATASET_ID,
+        generation_id=resolved.id,
+        expected_configuration_revision=resolved.configuration_revision,
+        publication_receipt="receipt-allowed",
+        now=operation_now,
+    )
+
+    assert activated is not None
+    assert activated.active_generation_id == resolved.id
+
+
 def test_switching_active_generation_increments_semantic_index_revision(db: CharactersRAGDB) -> None:
     resolved_config, first = _create_resolved_generation(db)
     switched = db.note_semantic_store.activate_generation(

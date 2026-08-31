@@ -20,6 +20,7 @@ from tldw_Server_API.app.core.Notes_Graph.semantic_jobs import (
     JOB_QUEUE,
     JOB_TYPE,
     SemanticJobCancelled,
+    SemanticJobHandler,
 )
 from tldw_Server_API.app.core.Notes_Graph.semantic_publication import (
     revalidate_execution_fence,
@@ -58,6 +59,37 @@ def test_worker_config_is_exact_and_disables_unbounded_sdk_retries() -> None:
     assert config.queue == JOB_QUEUE
     assert config.retry_on_exception is False
     assert config.bind_completion_token is True
+
+
+@pytest.mark.asyncio
+async def test_store_cancellation_signal_preserves_worker_cancelled_semantics() -> None:
+    class CancelledRuntime:
+        async def recover(self, **_kwargs):
+            return None
+
+        async def execute(self, **_kwargs):
+            raise SemanticIndexingError("notes_semantic_run_cancelled")
+
+    handler = SemanticJobHandler(
+        runtime_factory=lambda **_kwargs: CancelledRuntime(),
+    )
+    job = {
+        "domain": JOB_DOMAIN,
+        "queue": JOB_QUEUE,
+        "job_type": JOB_TYPE,
+        "owner_user_id": "owner-a",
+        "uuid": "00000000-0000-4000-8000-000000000001",
+        "payload": {
+            "schema_version": 1,
+            "dataset_id": "dataset-a",
+            "configuration_revision": 1,
+            "generation_id": None,
+            "mode": "build",
+        },
+    }
+
+    with pytest.raises(SemanticJobCancelled):
+        await handler.handle(job, cancellation_requested=lambda: False)
 
 
 @pytest.mark.asyncio

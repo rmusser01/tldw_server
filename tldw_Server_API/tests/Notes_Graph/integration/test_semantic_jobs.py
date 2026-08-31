@@ -31,6 +31,9 @@ from tldw_Server_API.app.core.Notes_Graph.semantic_jobs import (
     SemanticJobsError,
 )
 from tldw_Server_API.app.core.Notes_Graph.semantic_settings import SemanticIndexSettings
+from tldw_Server_API.app.services.notes_semantic_index_worker import (
+    build_production_runtime,
+)
 
 NOW = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
 
@@ -925,6 +928,109 @@ def test_cancelled_staging_generation_is_failed_and_queued_for_cleanup(
         assert cancelled is not None
         assert cancelled.state is SemanticGenerationState.FAILED
         assert db.note_semantic_store.has_pending_cleanup("dataset-a") is True
+    finally:
+        db.close_all_connections()
+
+
+@pytest.mark.asyncio
+async def test_committed_cancel_intent_blocks_late_worker_generation_creation(
+    tmp_path,
+    jobs: JobManager,
+) -> None:
+    db = CharactersRAGDB(
+        str(tmp_path / "semantic-cancel-before-create.sqlite"),
+        client_id="owner-a",
+    )
+    try:
+        api = _semantic_api(db, jobs)
+        enabled = api.enable(
+            expected_revision=0,
+            capability_revision=api.capabilities()["capability_revision"],
+            idempotency_key="enable-cancel-before-create",
+        )
+        run_id = enabled["run"]["run_id"]
+        config = db.note_semantic_store.get_configuration("dataset-a")
+        assert config is not None
+        assert db.note_semantic_store.get_generation_by_root_job_id(
+            "dataset-a",
+            run_id,
+        ) is None
+
+        cancelled = api.cancel_run(
+            run_id=UUID(run_id),
+            expected_revision=enabled["run"]["revision"],
+            idempotency_key="cancel-before-worker-create",
+        )
+        assert cancelled["run"]["status"] == "cancelled"
+
+        with pytest.raises(SemanticJobCancelled):
+            await build_production_runtime(
+                db=db,
+                settings=SemanticIndexSettings(),
+                owner_user_id="owner-a",
+                dataset_id="dataset-a",
+                configuration_revision=config.configuration_revision,
+                generation_id=None,
+                root_job_id=run_id,
+                mode="build",
+            )
+
+        assert db.note_semantic_store.get_generation_by_root_job_id(
+            "dataset-a",
+            run_id,
+        ) is None
+        current = db.note_semantic_store.get_configuration("dataset-a")
+        assert current is not None
+        assert current.active_generation_id is None
+    finally:
+        db.close_all_connections()
+
+
+@pytest.mark.asyncio
+async def test_stale_cancel_revision_does_not_create_worker_cancellation_intent(
+    tmp_path,
+    jobs: JobManager,
+) -> None:
+    db = CharactersRAGDB(
+        str(tmp_path / "semantic-stale-cancel-before-create.sqlite"),
+        client_id="owner-a",
+    )
+    try:
+        api = _semantic_api(db, jobs)
+        enabled = api.enable(
+            expected_revision=0,
+            capability_revision=api.capabilities()["capability_revision"],
+            idempotency_key="enable-before-stale-cancel",
+        )
+        run_id = enabled["run"]["run_id"]
+        config = db.note_semantic_store.get_configuration("dataset-a")
+        assert config is not None
+
+        with pytest.raises(SemanticAPIError) as exc_info:
+            api.cancel_run(
+                run_id=UUID(run_id),
+                expected_revision=config.configuration_revision + 1,
+                idempotency_key="stale-cancel-before-worker-create",
+            )
+        assert exc_info.value.code == "notes_semantic_run_revision_conflict"
+
+        await build_production_runtime(
+            db=db,
+            settings=SemanticIndexSettings(),
+            owner_user_id="owner-a",
+            dataset_id="dataset-a",
+            configuration_revision=config.configuration_revision,
+            generation_id=None,
+            root_job_id=run_id,
+            mode="build",
+        )
+
+        generation = db.note_semantic_store.get_generation_by_root_job_id(
+            "dataset-a",
+            run_id,
+        )
+        assert generation is not None
+        assert generation.state is SemanticGenerationState.STAGING
     finally:
         db.close_all_connections()
 

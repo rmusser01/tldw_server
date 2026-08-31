@@ -4,7 +4,7 @@ title: Implement Notes embedding index and semantic graph edges
 status: In Progress
 assignee: []
 created_date: 2026-08-27 02:20
-updated_date: 2026-08-31 00:59
+updated_date: 2026-08-31 06:03
 labels:
 - notes
 - notes-graph
@@ -116,6 +116,8 @@ Approved executable plan: `Docs/superpowers/plans/2026-08-29-notes-semantic-inde
 - 2026-08-30 Task 4 final: bounded review 5/5 clean after four fix rounds. Canonical chunking, durable endpoint-proven embedding execution, no-redirect OpenAI/Google/HuggingFace transports, one-request Google batches with pinned dimensions, exact endpoint/revision fencing, revision-bearing dimension CAS, cache-aware usage accounting, and cancellation-safe single-write finalization are complete. Final verification: 92 Task 4/orchestrator tests, 92 settings/adapter tests, 40/40 fresh-process cancellation checks, Python 3.10 finalizer harness 4/4, Ruff/Bandit/diff checks clean. Implementation range: `fcb7f2a207..7ad9b215b6`; independent review clean.
 - 2026-08-30 Task 5 complete: Added a dedicated authoritative Notes vector facade with vector-only ChromaDB and fixed-dimension pgvector backends, raw cosine semantics, strict generation/owner/dataset binding, fail-closed cleanup confirmation, immutable schema-scoped forced-RLS storage, independently bounded iterative-HNSW retrieval, and required live pgvector CI. Bounded review 5/5 clean after four fix rounds. Final verification: 183 complete vector/settings/live-backend tests, 52 adjacent persistence tests, repeated concurrency/event-loop checks, Ruff, Bandit, Python 3.10 compilation, CI YAML/docs, and diff checks clean. Implementation range: `841d7c4466..0b0e385679`; report: `.superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-5-report.md`.
 - 2026-08-30 Task 6 complete: Added fenced initial/incremental Notes semantic generation publication with durable v66 obsolete-vector cleanup, cancellation-reconciled transactions, exact endpoint/credential/model/configuration authority, bounded provider accounting, active per-Note delta counters, atomic convergence reseeding, production cleanup rearm, and SQLite/PostgreSQL property/race/RLS coverage. Bounded review 5/5 clean after four fix rounds. Final verification: 106 exact Task 6 tests, 141 adjacent persistence/migration/lifecycle/Sync tests, 134 vector tests with 6 expected capability skips, property seeds 3/17/101, Ruff, Bandit, Python 3.10 compilation, and diff checks passed. Implementation range: `ff2a0ce102..40a06e3bde`; report: `.superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-6-report.md`.
+- 2026-08-30 Task 7 fix round 5/5: Addressed the two confirmed review-4 races without schema or public API changes. PostgreSQL now serializes receipt admission, root-generation creation, and activation with one deterministic owner/dataset transaction advisory lock; SQLite retains BEGIN IMMEDIATE. Valid unexpired cancel receipts fence late creation and both activation paths, stale revision requests cannot establish intent, and store cancellation preserves SemanticJobCancelled semantics.
+- Verification: focused race/isolation/expiry 10 passed; exact Task 7 four-file suite 81 passed; semantic migration/store/indexing/publication 169 passed; live PostgreSQL semantic aggregate 31 passed with 6 optional pgvector skips. Ruff clean, Bandit zero findings with B101 excluded, Python 3.10.20 compile clean, and git diff --check clean.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
