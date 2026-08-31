@@ -680,6 +680,7 @@ class JobManager:
         "writing": ("writing-review", "writing-ai"),
         "scheduled_tasks": ("scheduled-tasks",),
         "admin_webhooks": ("delivery",),
+        "notes": ("graph-suggestions", "semantic-index"),
     }
 
     # --- Shutdown/acquisition gate (process-wide) ---

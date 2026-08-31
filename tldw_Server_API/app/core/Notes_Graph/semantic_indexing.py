@@ -347,6 +347,30 @@ class SemanticGenerationBuilder:
             await self._record_systemic_failure(fence, code)
             raise SemanticIndexingError(code) from None
 
+    async def maintain_generation(
+        self,
+        request: InitialGenerationRequest,
+    ) -> SemanticGenerationIntegrity:
+        """Publish bounded dirty or failed Note work into an active generation."""
+
+        fence = request.fence
+        fence, resolved_config = await self._resolve_generation(
+            fence,
+            request.embedding_config,
+        )
+        plan = await self._read_snapshot(fence)
+        await self._publish_claimed_notes(
+            fence,
+            resolved_config,
+            plan,
+            run_budget=_RunBudget(self._settings),
+        )
+        return await asyncio.to_thread(
+            self._store.get_generation_integrity,
+            fence.dataset_id,
+            fence.generation_id,
+        )
+
     async def _resolve_generation(
         self,
         fence: SemanticExecutionFence,

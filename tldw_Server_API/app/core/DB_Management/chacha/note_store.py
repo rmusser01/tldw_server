@@ -1826,6 +1826,34 @@ class NoteStore:
         cursor = self._db.execute_query(query, tuple(params))
         return [dict(row) for row in cursor.fetchall()]
 
+    def list_semantic_note_versions(self, *, limit: int) -> tuple[tuple[str, int], ...]:
+        """List active Note identities for a bounded semantic snapshot."""
+
+        if type(limit) is not int or not 1 <= limit <= 100_001:
+            raise ValueError("notes_semantic_note_limit_invalid")
+        deleted = False if self._db.backend_type == BackendType.POSTGRESQL else 0
+        rows = self._db.execute_query(
+            "SELECT id,version FROM notes WHERE deleted=? ORDER BY id LIMIT ?",
+            (deleted, limit),
+        ).fetchall()
+        return tuple((str(row["id"]), int(row["version"])) for row in rows)
+
+    def get_semantic_note_version(
+        self,
+        *,
+        note_id: str,
+        content_version: int,
+    ) -> dict[str, Any] | None:
+        """Read one exact active Note version for fenced semantic processing."""
+
+        deleted = False if self._db.backend_type == BackendType.POSTGRESQL else 0
+        row = self._db.execute_query(
+            "SELECT id,title,content,version FROM notes "
+            "WHERE id=? AND version=? AND deleted=?",
+            (note_id, content_version, deleted),
+        ).fetchone()
+        return dict(row) if row is not None else None
+
     def list_note_ids_page(
         self,
         *,
