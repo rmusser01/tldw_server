@@ -92,3 +92,22 @@ whole-object Sync transport, and the service boundary used by bootstrap.
 
 The full repository suite was not run because repository guidance requires
 explicit user opt-in; the verification set was limited to affected modules.
+
+## Structured-attention contract correction
+
+- [x] Unknown required quota names remain content-free and are represented in
+  `available_quotas` with an explicit zero, so strict clients can verify the
+  complete required/available relationship.
+- [x] The HTTP boundary validates bootstrap attention against the strict
+  discriminated schema and its matching stable reason code before serialization.
+  Malformed, mismatched, or extra-field attention is omitted rather than echoed.
+- [x] RED evidence: the focused attention selection produced `3 failed, 3 passed`
+  for the missing zero-valued quota and two untrusted-attention leaks.
+- [x] GREEN evidence: the same selection produced `6 passed`; the complete
+  affected endpoint/bootstrap modules produced `125 passed`.
+- [x] Ruff, Python 3.11 compilation, Bandit (`0` findings/errors), and range diff
+  hygiene passed. Chatbook's strict typed response parser accepted the corrected
+  unknown-quota response shape.
+
+TASK-13148's existing status is intentionally unchanged; controller review owns
+any subsequent lifecycle update.

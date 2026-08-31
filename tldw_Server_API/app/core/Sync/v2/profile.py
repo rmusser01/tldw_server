@@ -459,12 +459,20 @@ class SyncV2ProfileManager:
         quotas = _personal_context_bootstrap_quotas(personal_context)
         if not _personal_context_quotas_compatible(required_quotas, quotas):
             normalized_required_quotas = dict(required_quotas or {})
+            attention_available_quotas = {
+                **quotas,
+                **{
+                    name: quotas.get(name, 0)
+                    for name in normalized_required_quotas
+                    if isinstance(name, str)
+                },
+            }
             raise PersonalContextBootstrapError(
                 "personal_context_quota_incompatible",
                 attention={
                     "kind": "quota_incompatible",
                     "required_quotas": normalized_required_quotas,
-                    "available_quotas": quotas,
+                    "available_quotas": attention_available_quotas,
                     "insufficient_quotas": sorted(
                         name
                         for name, value in normalized_required_quotas.items()

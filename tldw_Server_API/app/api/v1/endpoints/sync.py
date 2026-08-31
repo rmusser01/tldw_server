@@ -77,6 +77,7 @@ from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
     SyncKeyRotationPreviewRequest,
     SyncKeyRotationResponse,
     SyncNotesAttachmentBootstrapDiagnosticsResponse,
+    SyncPersonalContextBootstrapErrorDetail,
     SyncPersonalContextBootstrapErrorResponse,
     SyncPersonalContextBootstrapRequest,
     SyncPersonalContextBootstrapResponse,
@@ -267,7 +268,16 @@ def _safe_sync_v2_http_error(exc: Exception, **context: object) -> HTTPException
             "message": message,
         }
         if exc.attention is not None:
-            detail["attention"] = exc.attention
+            try:
+                validated = SyncPersonalContextBootstrapErrorDetail.model_validate(
+                    {**detail, "attention": exc.attention}
+                )
+            except ValidationError:
+                pass
+            else:
+                validated_attention = validated.attention
+                if validated_attention is not None:
+                    detail["attention"] = validated_attention.model_dump(mode="json")
         return HTTPException(status_code=status_code, detail=detail)
     if isinstance(exc, SyncStoreError):
         lowered = str(exc).lower()
