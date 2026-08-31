@@ -30,6 +30,10 @@ class SemanticGraphQueryIdentity:
     time_range_start: str | None
     time_range_end: str | None
     time_range_field: str
+    requested_max_nodes: int | None
+    requested_max_edges: int | None
+    requested_max_degree: int | None
+    requested_allow_heavy: bool
     semantic_threshold: float
     semantic_top_k: int
     max_nodes: int
@@ -72,6 +76,15 @@ class SemanticGraphQueryIdentity:
             raise ValueError("semantic_candidate_edges exceeds the semantic cap")
         if type(self.allow_heavy) is not bool:
             raise TypeError("allow_heavy must be a boolean")
+        for field_name, value, minimum in (
+            ("requested_max_nodes", self.requested_max_nodes, 1),
+            ("requested_max_edges", self.requested_max_edges, 0),
+            ("requested_max_degree", self.requested_max_degree, 1),
+        ):
+            if value is not None and (type(value) is not int or value < minimum):
+                raise ValueError(f"{field_name} must be null or a bounded integer")
+        if type(self.requested_allow_heavy) is not bool:
+            raise TypeError("requested_allow_heavy must be a boolean")
 
     @classmethod
     def from_request(
@@ -119,6 +132,10 @@ class SemanticGraphQueryIdentity:
             time_range_start=time_range.get("start"),
             time_range_end=time_range.get("end"),
             time_range_field=request.time_range_field,
+            requested_max_nodes=request.max_nodes,
+            requested_max_edges=request.max_edges,
+            requested_max_degree=request.max_degree,
+            requested_allow_heavy=request.allow_heavy,
             semantic_threshold=semantic_threshold,
             semantic_top_k=semantic_top_k,
             max_nodes=max_nodes,
@@ -141,6 +158,10 @@ class SemanticGraphQueryIdentity:
             "time_range_start": self.time_range_start,
             "time_range_end": self.time_range_end,
             "time_range_field": self.time_range_field,
+            "requested_max_nodes": self.requested_max_nodes,
+            "requested_max_edges": self.requested_max_edges,
+            "requested_max_degree": self.requested_max_degree,
+            "requested_allow_heavy": self.requested_allow_heavy,
             "semantic_threshold": self.semantic_threshold,
             "semantic_top_k": self.semantic_top_k,
             "max_nodes": self.max_nodes,
