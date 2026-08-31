@@ -678,9 +678,33 @@ class TestSemanticCandidateGeneration:
         ) == 52
         assert len(candidates.candidate_edges) == 51
 
-    def test_public_and_candidate_graphs_use_distinct_cache_entries(
+    @pytest.mark.parametrize(
+        (
+            "max_nodes",
+            "max_edges",
+            "additional_nodes",
+            "additional_edges",
+            "public_node_count",
+            "public_edge_count",
+            "candidate_node_count",
+            "candidate_edge_count",
+        ),
+        [
+            (2, 10, 3, 0, 2, 1, 5, 4),
+            (7, 1, 0, 3, 7, 1, 7, 4),
+        ],
+    )
+    def test_each_candidate_cap_separates_public_and_candidate_cache_entries(
         self,
         monkeypatch: pytest.MonkeyPatch,
+        max_nodes: int,
+        max_edges: int,
+        additional_nodes: int,
+        additional_edges: int,
+        public_node_count: int,
+        public_edge_count: int,
+        candidate_node_count: int,
+        candidate_edge_count: int,
     ):
         monkeypatch.setenv("NOTES_GRAPH_MAX_DEGREE", "100")
         center = _uid()
@@ -698,21 +722,21 @@ class TestSemanticCandidateGeneration:
         request = NoteGraphRequest(
             center_note_id=center,
             edge_types=[EdgeType.manual, EdgeType.semantic],
-            max_nodes=2,
-            max_edges=1,
+            max_nodes=max_nodes,
+            max_edges=max_edges,
             max_degree=100,
         )
 
         result = service.generate_semantic_candidates(
             request,
-            additional_nodes=3,
-            additional_edges=3,
+            additional_nodes=additional_nodes,
+            additional_edges=additional_edges,
         )
 
-        assert result.public_graph.limits.max_nodes == 2
-        assert result.candidate_limits.max_nodes == 5
-        assert len(result.public_graph.nodes) == 2
-        assert len(result.candidate_nodes) == 5
+        assert len(result.public_graph.nodes) == public_node_count
+        assert len(result.public_graph.edges) == public_edge_count
+        assert len(result.candidate_nodes) == candidate_node_count
+        assert len(result.candidate_edges) == candidate_edge_count
         assert cache.stats()["size"] == 2
         assert service.generate_graph(request) == result.public_graph
 
