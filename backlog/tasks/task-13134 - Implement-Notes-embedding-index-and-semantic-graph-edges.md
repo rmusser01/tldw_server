@@ -4,7 +4,7 @@ title: Implement Notes embedding index and semantic graph edges
 status: In Progress
 assignee: []
 created_date: '2026-08-27 02:20'
-updated_date: '2026-08-31 06:23'
+updated_date: '2026-08-31 13:50'
 labels:
   - notes
   - notes-graph
@@ -75,12 +75,14 @@ Approved executable plan: `Docs/superpowers/plans/2026-08-29-notes-semantic-inde
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 2026-08-30 Task 7 complete: Added bounded Jobs-backed Notes semantic indexing, seven nested user-scoped run/configuration routes, startup recovery, maintenance, content-free public Jobs results, durable provider-revision authority, idempotent receipts, typed cancellation, and serialized PostgreSQL owner/dataset mutation authority. Bounded review 5/5 clean. Final verification: 81 exact Task 7 tests, 151 affected semantic tests, 31 live PostgreSQL tests with 6 expected pgvector skips, Ruff, Bandit, Python 3.10 compile, and diff checks passed. Implementation range: 1df5000e887e..4c38e8904969; report: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-7-report.md.
+
+2026-08-31 Task 8 complete: Added frozen legacy graph defaults, semantic edge/status/evidence schemas, bounded first-page candidate projection, public/candidate cache separation, immutable requested/effective semantic query identity, single-assignment semantic cursors, two-pass revision fencing, and ordinary continuation cache identity independent of outer semantic bindings. Bounded review 5/5 completed with all findings resolved. Final verification: 142 Task 8 tests passed; Ruff, Bandit (0 findings/errors), Python 3.10 compilation, and diff checks clean. Implementation range: 048523a7964a..a9352c010f; report: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-8-report.md.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-TASK-13134 remains in progress after completion of implementation Tasks 1 through 7. Owner-scoped persistence, Note lifecycle hooks, capability/RBAC controls, canonical chunking and provider execution, vector-only ChromaDB/pgvector storage, fenced generation publication, and bounded Jobs/API/recovery/maintenance orchestration are complete and independently reviewed. Task 8 graph contracts, immutable semantic request identities, and frozen legacy defaults are next.
+TASK-13134 remains in progress after completion of implementation Tasks 1 through 8. Owner-scoped persistence, Note lifecycle hooks, capability/RBAC controls, canonical chunking and provider execution, vector-only ChromaDB/pgvector storage, fenced generation publication, bounded Jobs/API/recovery/maintenance orchestration, and backward-compatible semantic graph contracts are complete. Task 9 async semantic retrieval, authority revalidation, evidence reconstruction, deterministic precedence composition, endpoint integration, and manual conversion validation are next.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
