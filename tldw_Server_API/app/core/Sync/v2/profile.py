@@ -3,7 +3,6 @@ from __future__ import annotations
 """Profile bootstrap and status helpers for Sync v2 M1."""
 
 import hashlib
-import threading
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -42,8 +41,6 @@ _DORMANT_TASK_READINESS_MISSING = object()
 _PERSONAL_CONTEXT_LINK_PENDING = "bootstrap_pending"
 _PERSONAL_CONTEXT_LINK_COMPLETE = "complete"
 _PERSONAL_CONTEXT_KEY_PURPOSE = "personal_context_integrity"
-_personal_context_bootstrap_locks: dict[str, threading.RLock] = {}
-_personal_context_bootstrap_locks_guard = threading.Lock()
 
 
 class PersonalContextBootstrapError(SyncStoreError):
@@ -447,70 +444,66 @@ class SyncV2ProfileManager:
         if not _personal_context_quotas_compatible(required_quotas, quotas):
             raise PersonalContextBootstrapError("personal_context_quota_incompatible")
 
-        lock = _personal_context_bootstrap_lock(user_id)
-        with lock:
-            try:
-                canonical_service = self.service._personal_context_service_for_user(
-                    user_id
-                )
-            except Exception as exc:  # noqa: BLE001 - custody errors stay content-free.
-                raise PersonalContextBootstrapError(
-                    "personal_context_key_custody_unavailable"
-                ) from exc
-            try:
-                ensure_profile = getattr(canonical_service, "ensure_sync_profile", None)
-                if callable(ensure_profile):
-                    ensure_profile()
-                snapshot = canonical_service.sync_bootstrap_snapshot()
-                manifest = snapshot.manifest
-                integrity_key_id = snapshot.integrity_key_id
-                integrity_key = snapshot.integrity_key
-                scopes = tuple(snapshot.scopes)
-                records = tuple(snapshot.records)
-                proposals = tuple(snapshot.proposals)
-                cursor = snapshot.cursor
-            except Exception as exc:  # noqa: BLE001 - no canonical body in errors.
-                raise PersonalContextBootstrapError(
-                    "personal_context_snapshot_unavailable"
-                ) from exc
-            purge_generation = int(manifest.purge_generation)
-            if (
-                expected_purge_generation is not None
-                and expected_purge_generation != purge_generation
-            ):
-                raise PersonalContextBootstrapError("personal_context_purge_generation_stale")
-            dataset = self._bind_personal_context_dataset(
-                user_id=user_id,
-                manifest=manifest,
-                authority_id=normalized_authority_id,
+        try:
+            canonical_service = self.service._personal_context_service_for_user(user_id)
+        except Exception as exc:  # noqa: BLE001 - custody errors stay content-free.
+            raise PersonalContextBootstrapError(
+                "personal_context_key_custody_unavailable"
+            ) from exc
+        try:
+            ensure_profile = getattr(canonical_service, "ensure_sync_profile", None)
+            if callable(ensure_profile):
+                ensure_profile()
+            snapshot = canonical_service.sync_bootstrap_snapshot()
+            manifest = snapshot.manifest
+            integrity_key_id = snapshot.integrity_key_id
+            integrity_key = snapshot.integrity_key
+            scopes = tuple(snapshot.scopes)
+            records = tuple(snapshot.records)
+            proposals = tuple(snapshot.proposals)
+            cursor = snapshot.cursor
+        except Exception as exc:  # noqa: BLE001 - no canonical body in errors.
+            raise PersonalContextBootstrapError(
+                "personal_context_snapshot_unavailable"
+            ) from exc
+        purge_generation = int(manifest.purge_generation)
+        if (
+            expected_purge_generation is not None
+            and expected_purge_generation != purge_generation
+        ):
+            raise PersonalContextBootstrapError("personal_context_purge_generation_stale")
+        dataset = self._bind_personal_context_dataset(
+            user_id=user_id,
+            manifest=manifest,
+            authority_id=normalized_authority_id,
+            integrity_key_id=integrity_key_id,
+            purge_generation=purge_generation,
+        )
+        key_record = self._device_integrity_key_record(
+            user_id=user_id,
+            dataset=dataset,
+            device=device,
+            integrity_key_id=integrity_key_id,
+            integrity_key=integrity_key,
+        )
+        return PersonalContextBootstrap(
+            dataset_id=dataset.dataset_id,
+            authority_id=normalized_authority_id,
+            manifest=manifest,
+            scopes=scopes,
+            records=records,
+            proposals=proposals,
+            purge_generation=purge_generation,
+            schema_version=schema_version,
+            quotas=quotas,
+            cursor=cursor,
+            integrity_key=PersonalContextBootstrapIntegrityKey(
                 integrity_key_id=integrity_key_id,
-                purge_generation=purge_generation,
-            )
-            key_record = self._device_integrity_key_record(
-                user_id=user_id,
-                dataset=dataset,
-                device=device,
-                integrity_key_id=integrity_key_id,
-                integrity_key=integrity_key,
-            )
-            return PersonalContextBootstrap(
-                dataset_id=dataset.dataset_id,
-                authority_id=normalized_authority_id,
-                manifest=manifest,
-                scopes=scopes,
-                records=records,
-                proposals=proposals,
-                purge_generation=purge_generation,
-                schema_version=schema_version,
-                quotas=quotas,
-                cursor=cursor,
-                integrity_key=PersonalContextBootstrapIntegrityKey(
-                    integrity_key_id=integrity_key_id,
-                    key_record_id=key_record.key_record_id,
-                    wrapped_key_blob=key_record.wrapped_key_blob,
-                ),
-                link_state=_PERSONAL_CONTEXT_LINK_PENDING,
-            )
+                key_record_id=key_record.key_record_id,
+                wrapped_key_blob=key_record.wrapped_key_blob,
+            ),
+            link_state=_PERSONAL_CONTEXT_LINK_PENDING,
+        )
 
     def complete_personal_context_link(
         self,
@@ -600,7 +593,7 @@ class SyncV2ProfileManager:
                 else _PERSONAL_CONTEXT_LINK_PENDING
             ),
         }
-        return self.store.enroll_dataset(
+        return self.store.upsert_personal_context_dataset_binding(
             SyncDatasetCreate(
                 dataset_id=dataset.dataset_id,
                 owner_user_id=dataset.owner_user_id,
@@ -1265,13 +1258,6 @@ def _optional_str(value: object) -> str | None:
         return None
     text = str(value)
     return text or None
-
-
-def _personal_context_bootstrap_lock(user_id: str) -> threading.RLock:
-    """Return one process-local first-link lock for an authenticated user."""
-
-    with _personal_context_bootstrap_locks_guard:
-        return _personal_context_bootstrap_locks.setdefault(user_id, threading.RLock())
 
 
 def _personal_context_bootstrap_quotas(capabilities: Any) -> dict[str, int]:
