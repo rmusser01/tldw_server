@@ -1,0 +1,653 @@
+"""App-managed and standalone Jobs worker for Notes semantic indexing."""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import hashlib
+import json
+import os
+from datetime import datetime, timezone
+from typing import Any
+from uuid import uuid4
+
+from loguru import logger
+
+from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
+    get_chacha_db_for_user_id,
+)
+from tldw_Server_API.app.core.AuthNZ.permissions import NOTES_GRAPH_SEMANTIC_MANAGE
+from tldw_Server_API.app.core.DB_Management.chacha.note_semantic_models import (
+    SemanticGenerationState,
+    SemanticIndexingError,
+    SemanticManifestPublication,
+)
+from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
+from tldw_Server_API.app.core.Notes_Graph.semantic_api import (
+    load_semantic_settings,
+    resolve_semantic_capabilities,
+)
+from tldw_Server_API.app.core.Notes_Graph.semantic_content import (
+    SEMANTIC_CHUNKER_VERSION,
+    SEMANTIC_NORMALIZATION_VERSION,
+)
+from tldw_Server_API.app.core.Notes_Graph.semantic_embeddings import (
+    NotesSemanticEmbedder,
+    PendingSemanticConfig,
+)
+from tldw_Server_API.app.core.Notes_Graph.semantic_indexing import (
+    InitialGenerationRequest,
+    NoteVersionRef,
+    SemanticGenerationBuilder,
+    VersionedNoteSnapshot,
+)
+from tldw_Server_API.app.core.Notes_Graph.semantic_jobs import (
+    JOB_DOMAIN,
+    JOB_QUEUE,
+    JOB_TYPE,
+    SemanticJobCancelled,
+    SemanticJobHandler,
+)
+from tldw_Server_API.app.core.Notes_Graph.semantic_publication import (
+    SemanticAuthorityState,
+    SemanticExecutionFence,
+    SemanticPublicationService,
+)
+from tldw_Server_API.app.core.Notes_Graph.semantic_settings import SemanticIndexSettings
+from tldw_Server_API.app.core.Notes_Graph.semantic_vectors import (
+    create_semantic_vector_store,
+)
+
+
+def build_worker_config(*, worker_id: str) -> WorkerConfig:
+    """Return the exact dedicated WorkerSDK policy for semantic Jobs."""
+
+    return WorkerConfig(
+        domain=JOB_DOMAIN,
+        queue=JOB_QUEUE,
+        worker_id=worker_id,
+        lease_seconds=int(os.getenv("NOTES_SEMANTIC_LEASE_SECONDS", "180") or "180"),
+        renew_threshold_seconds=15,
+        renew_jitter_seconds=0,
+        retry_on_exception=False,
+        bind_completion_token=True,
+    )
+
+
+async def _open_owner_database(owner_user_id: str) -> Any:
+    try:
+        user_id = int(owner_user_id)
+    except (TypeError, ValueError) as exc:
+        raise SemanticIndexingError("notes_semantic_job_owner_invalid") from exc
+    if user_id <= 0 or str(user_id) != owner_user_id:
+        raise SemanticIndexingError("notes_semantic_job_owner_invalid")
+    return await get_chacha_db_for_user_id(user_id, client_id=owner_user_id)
+
+
+def _close_database(db: Any) -> None:
+    release = getattr(db, "release_context_connection", None)
+    close = release if callable(release) else getattr(db, "close_connection", None)
+    if callable(close):
+        close()
+
+
+class _ProductionNoteReader:
+    def __init__(self, db: Any) -> None:
+        self._store = db.note_store
+
+    async def list_note_versions(
+        self,
+        owner_user_id: str,
+        dataset_id: str,
+        *,
+        limit: int,
+    ) -> tuple[NoteVersionRef, ...]:
+        del owner_user_id, dataset_id
+        rows = await asyncio.to_thread(
+            self._store.list_semantic_note_versions,
+            limit=limit,
+        )
+        return tuple(NoteVersionRef(note_id, version) for note_id, version in rows)
+
+    async def read_note_version(
+        self,
+        owner_user_id: str,
+        dataset_id: str,
+        note_id: str,
+        content_version: int,
+    ) -> VersionedNoteSnapshot | None:
+        del owner_user_id, dataset_id
+        row = await asyncio.to_thread(
+            self._store.get_semantic_note_version,
+            note_id=note_id,
+            content_version=content_version,
+        )
+        if row is None:
+            return None
+        return VersionedNoteSnapshot(
+            note_id=str(row["id"]),
+            title=row.get("title"),
+            content=row.get("content"),
+            content_version=int(row["version"]),
+        )
+
+
+def _compatibility_hash(
+    *,
+    provider: str,
+    model: str,
+    model_revision: str | None,
+    vector_backend: str,
+    dimensions: int,
+) -> str:
+    payload = {
+        "provider": provider,
+        "model": model,
+        "model_revision": model_revision,
+        "vector_backend": vector_backend,
+        "metric": "cosine",
+        "resolved_dimensions": dimensions,
+        "normalization_version": SEMANTIC_NORMALIZATION_VERSION,
+        "chunker_version": SEMANTIC_CHUNKER_VERSION,
+    }
+    encoded = json.dumps(payload, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
+    return f"sha256:{hashlib.sha256(encoded.encode('utf-8')).hexdigest()}"
+
+
+async def _build_vector_store(
+    *,
+    db: Any,
+    owner_user_id: str,
+    backend_name: str,
+    settings: SemanticIndexSettings,
+) -> Any:
+    chroma_manager = None
+    postgres_backend = None
+    if backend_name == "chromadb":
+        from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+        from tldw_Server_API.app.core.Embeddings.ChromaDB_Library import ChromaDBManager
+
+        chroma_manager = await asyncio.to_thread(
+            ChromaDBManager,
+            user_id=owner_user_id,
+            user_embedding_config={
+                "USER_DB_BASE_DIR": str(DatabasePaths.get_user_db_base_dir()),
+            },
+        )
+    elif backend_name == "pgvector":
+        postgres_backend = getattr(db, "_backend", None)
+    return await create_semantic_vector_store(
+        backend_name,
+        authority=db.note_semantic_store,
+        chroma_manager=chroma_manager,
+        postgres_backend=postgres_backend,
+        settings=settings,
+    )
+
+
+class ProductionSemanticRuntime:
+    """Concrete adapter over Task 6 indexing, publication, and cleanup services."""
+
+    def __init__(
+        self,
+        *,
+        db: Any,
+        owner_user_id: str,
+        dataset_id: str,
+        configuration_revision: int,
+        generation_id: str | None,
+        root_job_id: str,
+        vectors: Any,
+        settings: SemanticIndexSettings,
+    ) -> None:
+        self._db = db
+        self._store = db.note_semantic_store
+        self._owner_user_id = owner_user_id
+        self._dataset_id = dataset_id
+        self._configuration_revision = configuration_revision
+        self._generation_id = generation_id
+        self._root_job_id = root_job_id
+        self._vectors = vectors
+        self._settings = settings
+        self._publication = SemanticPublicationService(
+            store=self._store,
+            vectors=vectors,
+            revalidate=self._revalidate,
+            clock=lambda: datetime.now(timezone.utc),
+            receipt_factory=lambda: str(uuid4()),
+            max_cleanup_vectors=settings.max_cleanup_vectors_per_run,
+            max_vectors_per_publication=settings.max_chunks_per_note,
+        )
+        embedder = NotesSemanticEmbedder(
+            dimension_cas=lambda _pending, _resolved: True,
+            settings=settings,
+        )
+        self._builder = SemanticGenerationBuilder(
+            store=self._store,
+            note_reader=_ProductionNoteReader(db),
+            embedder=embedder,
+            vectors=vectors,
+            revalidate=self._revalidate,
+            compatibility_hash_for_dimension=lambda resolved: _compatibility_hash(
+                provider=resolved.provider,
+                model=resolved.model,
+                model_revision=resolved.model_revision,
+                vector_backend=self._vector_backend(),
+                dimensions=resolved.dimensions,
+            ),
+            settings=settings,
+            clock=lambda: datetime.now(timezone.utc),
+            receipt_factory=lambda: str(uuid4()),
+        )
+
+    def _vector_backend(self) -> str:
+        config = self._store.get_configuration(self._dataset_id)
+        return str(config.vector_backend or "") if config is not None else ""
+
+    def _generation(self) -> Any:
+        generation = None
+        if self._generation_id is not None:
+            generation = self._store.get_generation(self._dataset_id, self._generation_id)
+        if generation is None:
+            generation = self._store.get_generation_by_root_job_id(
+                self._dataset_id,
+                self._root_job_id,
+            )
+        if generation is None:
+            raise SemanticIndexingError("notes_semantic_generation_missing")
+        return generation
+
+    def _fence(self) -> SemanticExecutionFence:
+        config = self._store.get_configuration(self._dataset_id)
+        generation = self._generation()
+        if (
+            config is None
+            or config.configuration_revision != self._configuration_revision
+            or generation.configuration_revision != self._configuration_revision
+            or not generation.root_job_id
+            or not config.capability_revision
+            or not config.disclosure_hash
+            or not config.provider
+            or not config.model
+            or not config.endpoint_origin_display
+            or not config.endpoint_origin_revision
+            or not config.vector_backend
+        ):
+            raise SemanticIndexingError("notes_semantic_configuration_drift")
+        return SemanticExecutionFence(
+            owner_user_id=self._owner_user_id,
+            dataset_id=self._dataset_id,
+            generation_id=generation.id,
+            generation_fencing_token=generation.root_job_id,
+            configuration_revision=config.configuration_revision,
+            capability_revision=config.capability_revision,
+            disclosure_hash=config.disclosure_hash,
+            provider=config.provider,
+            model=config.model,
+            model_revision=None,
+            endpoint_origin=config.endpoint_origin_display,
+            credential_source="server_default",
+            endpoint_origin_revision=config.endpoint_origin_revision,
+            compatibility_hash=config.compatibility_hash,
+            dimensions=config.dimensions,
+            vector_backend=config.vector_backend,
+        )
+
+    def _revalidate(self, fence: SemanticExecutionFence) -> SemanticAuthorityState:
+        from tldw_Server_API.app.core.AuthNZ.rbac import user_has_permission
+
+        config = self._store.get_configuration(self._dataset_id)
+        generation = self._store.get_generation(self._dataset_id, fence.generation_id)
+        current = resolve_semantic_capabilities(self._db, settings=self._settings)
+        manage_allowed = False
+        try:
+            manage_allowed = user_has_permission(
+                int(self._owner_user_id),
+                NOTES_GRAPH_SEMANTIC_MANAGE,
+            )
+        except (OSError, RuntimeError, TypeError, ValueError):
+            manage_allowed = False
+        return SemanticAuthorityState(
+            user_exists=self._owner_user_id.isdigit() and int(self._owner_user_id) > 0,
+            owner_authorized=(
+                str(self._store.owner_user_id) == self._owner_user_id
+                and generation is not None
+                and generation.owner_user_id == self._owner_user_id
+                and generation.state
+                in {SemanticGenerationState.STAGING, SemanticGenerationState.ACTIVE}
+            ),
+            semantic_manage_allowed=manage_allowed,
+            desired_enabled=(
+                config is not None and config.desired_state.value == "enabled"
+            ),
+            owner_user_id=self._owner_user_id,
+            dataset_id=self._dataset_id,
+            generation_id=generation.id if generation is not None else "missing",
+            generation_fencing_token=(
+                str(generation.root_job_id or "") if generation is not None else ""
+            ),
+            configuration_revision=(
+                config.configuration_revision if config is not None else -1
+            ),
+            capability_revision=current.capability_revision,
+            disclosure_hash=current.disclosure_hash,
+            provider=current.provider_label.lower(),
+            model=current.model,
+            model_revision=None,
+            endpoint_origin=current.endpoint_display or "",
+            credential_source="server_default",
+            endpoint_origin_revision=current.endpoint_origin_revision,
+            endpoint_policy_allowed=current.endpoint_display is not None,
+            compatibility_hash=(
+                config.compatibility_hash if config is not None else None
+            ),
+            dimensions=config.dimensions if config is not None else None,
+            vector_backend=str(config.vector_backend or "") if config is not None else "",
+            vector_capable=current.indexing_available,
+        )
+
+    def _request(self) -> InitialGenerationRequest:
+        fence = self._fence()
+        return InitialGenerationRequest(
+            fence=fence,
+            embedding_config=PendingSemanticConfig(
+                provider=fence.provider,
+                model=fence.model,
+                model_revision=fence.model_revision,
+                endpoint_origin=fence.endpoint_origin,
+                credential_source=fence.credential_source,
+                consented=True,
+                dimensions=fence.dimensions,
+            ),
+        )
+
+    def _integrity_result(self, generation_id: str) -> dict[str, Any]:
+        integrity = self._store.get_generation_integrity(
+            self._dataset_id,
+            generation_id,
+        )
+        return {
+            "state": "completed",
+            "indexed_notes": integrity.indexed_note_count,
+            "excluded_notes": integrity.excluded_note_count,
+            "failed_notes": integrity.failed_note_count,
+            "published_chunks": integrity.published_chunk_count,
+            "cleanup_complete": not self._store.has_pending_cleanup(self._dataset_id),
+            "error_code": integrity.terminal_error_code,
+        }
+
+    async def recover(self, **kwargs: Any) -> dict[str, Any] | None:
+        mode = str(kwargs["mode"])
+        if mode == "delete":
+            if not self._store.has_pending_cleanup(self._dataset_id):
+                return {
+                    "state": "completed",
+                    "indexed_notes": 0,
+                    "excluded_notes": 0,
+                    "failed_notes": 0,
+                    "published_chunks": 0,
+                    "cleanup_complete": True,
+                    "error_code": None,
+                }
+            return None
+        generation = self._generation()
+        if generation.state is SemanticGenerationState.ACTIVE:
+            if mode in {"build", "rebuild"} or not self._store.has_pending_index_work(
+                self._dataset_id,
+                generation.id,
+            ):
+                return self._integrity_result(generation.id)
+        return None
+
+    async def execute(self, **kwargs: Any) -> dict[str, Any]:
+        mode = str(kwargs["mode"])
+        cancellation_requested = kwargs["cancellation_requested"]
+        if mode != "delete" and not self._settings.indexing_enabled:
+            raise SemanticIndexingError("notes_semantic_indexing_disabled")
+        if await cancellation_requested():
+            raise SemanticJobCancelled()
+        if mode in {"build", "rebuild"}:
+            receipt = await self._builder.build_initial_generation(self._request())
+            return {
+                "state": "completed",
+                "indexed_notes": receipt.indexed_notes,
+                "excluded_notes": receipt.excluded_notes,
+                "failed_notes": receipt.failed_notes,
+                "published_chunks": receipt.published_chunks,
+                "cleanup_complete": not self._store.has_pending_cleanup(self._dataset_id),
+                "error_code": None,
+            }
+        if mode in {"maintain", "retry_failed"}:
+            generation = self._generation()
+            if mode == "retry_failed":
+                await asyncio.to_thread(
+                    self._store.rearm_failed_notes,
+                    dataset_id=self._dataset_id,
+                    generation_id=generation.id,
+                    limit=min(256, self._settings.max_active_notes),
+                    now=datetime.now(timezone.utc),
+                )
+            integrity = await self._builder.maintain_generation(self._request())
+            return self._integrity_result(integrity.generation_id)
+        if mode == "delete":
+            claims = await asyncio.to_thread(
+                self._store.claim_generation_cleanup_batch,
+                dataset_id=self._dataset_id,
+                limit=100,
+                now=datetime.now(timezone.utc),
+            )
+            for claim in claims:
+                for _ in range(self._settings.max_retries + 1):
+                    if await cancellation_requested():
+                        raise SemanticJobCancelled()
+                    if await self._publication.cleanup_generation(claim):
+                        break
+            return {
+                "state": "completed",
+                "indexed_notes": 0,
+                "excluded_notes": 0,
+                "failed_notes": 0,
+                "published_chunks": 0,
+                "cleanup_complete": not self._store.has_pending_cleanup(self._dataset_id),
+                "error_code": None,
+            }
+        raise SemanticIndexingError("notes_semantic_job_mode_invalid")
+
+    async def cleanup_claim(self, claim: Any) -> bool:
+        """Confirm one maintenance-owned delayed generation cleanup claim."""
+
+        return await self._publication.cleanup_generation(claim)
+
+    async def cleanup_obsolete_generation(self) -> bool:
+        """Confirm one bounded v66 obsolete-vector cleanup batch."""
+
+        generation = self._generation()
+        marker = SemanticManifestPublication(
+            note_id="maintenance",
+            generation_id=generation.id,
+            old_vector_ids=("maintenance",),
+            new_vector_ids=(),
+            dirty_generation=1,
+            manifest_hash=None,
+        )
+        return await self._publication.cleanup_obsolete(self._fence(), marker)
+
+
+async def build_production_runtime(**kwargs: Any) -> ProductionSemanticRuntime:
+    """Resolve vector capability and pinned runtime from owner-side authority."""
+
+    db = kwargs.pop("db")
+    settings = kwargs.pop("settings")
+    mode = str(kwargs.pop("mode"))
+    config = db.note_semantic_store.get_configuration(kwargs["dataset_id"])
+    if config is None or not config.vector_backend:
+        raise SemanticIndexingError("notes_semantic_configuration_missing")
+    if mode in {"build", "rebuild"}:
+        generation = db.note_semantic_store.get_generation_by_root_job_id(
+            kwargs["dataset_id"],
+            kwargs["root_job_id"],
+        )
+        if generation is None:
+            try:
+                generation = db.note_semantic_store.create_generation(
+                    dataset_id=kwargs["dataset_id"],
+                    configuration_revision=kwargs["configuration_revision"],
+                    compatibility_hash=config.compatibility_hash,
+                    dimension_state=config.dimension_state,
+                    dimensions=config.dimensions,
+                    root_job_id=kwargs["root_job_id"],
+                    now=datetime.now(timezone.utc),
+                )
+            except (OSError, RuntimeError, TypeError, ValueError):
+                generation = db.note_semantic_store.get_generation_by_root_job_id(
+                    kwargs["dataset_id"],
+                    kwargs["root_job_id"],
+                )
+                if generation is None:
+                    raise SemanticIndexingError(
+                        "notes_semantic_generation_recovery_failed"
+                    ) from None
+        kwargs["generation_id"] = generation.id
+    vectors = await _build_vector_store(
+        db=db,
+        owner_user_id=kwargs["owner_user_id"],
+        backend_name=config.vector_backend,
+        settings=settings,
+    )
+    return ProductionSemanticRuntime(
+        db=db,
+        vectors=vectors,
+        settings=settings,
+        **kwargs,
+    )
+
+
+async def _cancellation_requested(job: dict[str, Any], *, jobs: JobManager) -> bool:
+    current = await asyncio.to_thread(
+        jobs.get_job_or_archived_by_uuid,
+        str(job.get("uuid") or ""),
+        domain=JOB_DOMAIN,
+        owner_user_id=str(job.get("owner_user_id") or ""),
+    )
+    return bool(
+        current
+        and (
+            current.get("status") == "cancelled"
+            or current.get("cancel_requested_at")
+        )
+    )
+
+
+async def handle_notes_semantic_index_job(
+    job: dict[str, Any],
+    *,
+    jobs: JobManager,
+    worker_id: str,
+) -> dict[str, Any]:
+    """Execute one semantic root Job against its owner-bound database."""
+
+    owner = str(job.get("owner_user_id") or "")
+    db = await _open_owner_database(owner)
+    settings = load_semantic_settings()
+    try:
+        handler = SemanticJobHandler(
+            runtime_factory=lambda **kwargs: build_production_runtime(
+                db=db,
+                settings=settings,
+                **kwargs,
+            ),
+            settings=settings,
+        )
+        return await handler.handle(
+            job,
+            cancellation_requested=lambda: _cancellation_requested(job, jobs=jobs),
+        )
+    except SemanticJobCancelled:
+        if all(job.get(key) is not None for key in ("id", "uuid", "lease_id")):
+            await asyncio.to_thread(
+                jobs.finalize_cancelled,
+                int(job["id"]),
+                reason="requested",
+                expected_uuid=str(job["uuid"]),
+                worker_id=worker_id,
+                lease_id=str(job["lease_id"]),
+            )
+        raise
+    finally:
+        await asyncio.to_thread(_close_database, db)
+
+
+def _build_sdk(*, jobs: JobManager, config: WorkerConfig) -> WorkerSDK:
+    return WorkerSDK(jobs, config)
+
+
+async def _run_worker(
+    *,
+    stop_event: asyncio.Event | None,
+    handler: Any,
+) -> None:
+    worker_id = (
+        os.getenv("NOTES_SEMANTIC_WORKER_ID")
+        or f"notes-semantic-worker-{os.getpid()}"
+    ).strip()
+    jobs = JobManager()
+    sdk = _build_sdk(jobs=jobs, config=build_worker_config(worker_id=worker_id))
+    watcher: asyncio.Task[None] | None = None
+    stopped = False
+
+    def stop_sdk() -> None:
+        nonlocal stopped
+        if not stopped:
+            stopped = True
+            sdk.stop()
+
+    if stop_event is not None:
+
+        async def watch_stop() -> None:
+            await stop_event.wait()
+            stop_sdk()
+
+        watcher = asyncio.create_task(watch_stop())
+    logger.info("Notes semantic-index Jobs worker starting")
+    try:
+        await sdk.run(
+            handler=lambda job: handler(job, jobs=jobs, worker_id=worker_id),
+            job_type=JOB_TYPE,
+            cancel_check=lambda job: _cancellation_requested(job, jobs=jobs),
+        )
+    finally:
+        if stop_event is not None and stop_event.is_set():
+            stop_sdk()
+        if watcher is not None:
+            watcher.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await watcher
+
+
+async def run_notes_semantic_index_worker(
+    stop_event: asyncio.Event | None = None,
+) -> None:
+    await _run_worker(
+        stop_event=stop_event,
+        handler=handle_notes_semantic_index_job,
+    )
+
+
+async def run_standalone_notes_semantic_index_worker(
+    stop_event: asyncio.Event | None = None,
+) -> None:
+    await _run_worker(
+        stop_event=stop_event,
+        handler=handle_notes_semantic_index_job,
+    )
+
+
+__all__ = [
+    "ProductionSemanticRuntime",
+    "build_production_runtime",
+    "build_worker_config",
+    "handle_notes_semantic_index_job",
+    "run_notes_semantic_index_worker",
+    "run_standalone_notes_semantic_index_worker",
+]

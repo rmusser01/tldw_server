@@ -685,6 +685,7 @@ class JobManager:
         "admin_webhooks": ("delivery",),
         # Long-form TTS jobs (off "default", read unfiltered by the pipeline); GPU transcription.
         "audio": ("tts", "transcribe"),
+        "notes": ("graph-suggestions", "semantic-index"),
     }
 
     # --- Shutdown/acquisition gate (process-wide) ---

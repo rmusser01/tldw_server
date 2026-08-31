@@ -6,7 +6,7 @@ import asyncio
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from tldw_Server_API.app.core.DB_Management.chacha.note_semantic_models import (
     SemanticDimensionState,
@@ -195,7 +195,9 @@ class NotesSemanticVectorStore:
         self,
         dataset_id: str,
         generation_id: str,
-    ) -> SemanticVectorBinding:
+        *,
+        unresolved_is_absent: bool = False,
+    ) -> SemanticVectorBinding | None:
         generation = await asyncio.to_thread(
             self._authority.get_generation,
             dataset_id,
@@ -211,7 +213,16 @@ class NotesSemanticVectorStore:
             or str(getattr(generation, "id", "")) != generation_id
         ):
             raise SemanticVectorBindingError("notes_semantic_vector_binding_invalid")
-        if _dimension_state_value(getattr(generation, "dimension_state", None)) != SemanticDimensionState.RESOLVED.value:
+        dimension_state = _dimension_state_value(
+            getattr(generation, "dimension_state", None)
+        )
+        if (
+            unresolved_is_absent
+            and dimension_state == SemanticDimensionState.PENDING.value
+            and getattr(generation, "dimensions", None) is None
+        ):
+            return None
+        if dimension_state != SemanticDimensionState.RESOLVED.value:
             raise SemanticVectorBindingError("notes_semantic_vector_dimensions_unresolved")
         dimensions = getattr(generation, "dimensions", None)
         if isinstance(dimensions, bool) or not isinstance(dimensions, int) or dimensions <= 0:
@@ -226,7 +237,10 @@ class NotesSemanticVectorStore:
         )
 
     async def create_generation_storage(self, dataset_id: str, generation_id: str) -> None:
-        binding = await self._binding(dataset_id, generation_id)
+        binding = cast(
+            SemanticVectorBinding,
+            await self._binding(dataset_id, generation_id),
+        )
         await self._backend.create_generation_storage(binding)
 
     async def upsert(
@@ -235,7 +249,10 @@ class NotesSemanticVectorStore:
         generation_id: str,
         vectors: Sequence[SemanticVector],
     ) -> int:
-        binding = await self._binding(dataset_id, generation_id)
+        binding = cast(
+            SemanticVectorBinding,
+            await self._binding(dataset_id, generation_id),
+        )
         normalized: list[SemanticVector] = []
         seen_ids: set[str] = set()
         for vector in vectors:
@@ -259,7 +276,10 @@ class NotesSemanticVectorStore:
         generation_id: str,
         vector_ids: Sequence[str],
     ) -> tuple[SemanticVector, ...]:
-        binding = await self._binding(dataset_id, generation_id)
+        binding = cast(
+            SemanticVectorBinding,
+            await self._binding(dataset_id, generation_id),
+        )
         ids = _validated_ids(vector_ids)
         if not ids:
             return ()
@@ -307,7 +327,10 @@ class NotesSemanticVectorStore:
             raise SemanticVectorValidationError(
                 "notes_semantic_vector_query_candidate_budget_exceeded"
             )
-        binding = await self._binding(dataset_id, generation_id)
+        binding = cast(
+            SemanticVectorBinding,
+            await self._binding(dataset_id, generation_id),
+        )
         normalized = tuple(
             _validated_embedding(vector, dimensions=binding.dimensions)
             for vector in query_vectors
@@ -353,7 +376,10 @@ class NotesSemanticVectorStore:
         generation_id: str,
         vector_ids: Sequence[str],
     ) -> SemanticVectorCleanup:
-        binding = await self._binding(dataset_id, generation_id)
+        binding = cast(
+            SemanticVectorBinding,
+            await self._binding(dataset_id, generation_id),
+        )
         ids = _validated_ids(vector_ids)
         if not ids:
             return SemanticVectorCleanup(confirmed_absent=True)
@@ -364,7 +390,13 @@ class NotesSemanticVectorStore:
         dataset_id: str,
         generation_id: str,
     ) -> SemanticVectorCleanup:
-        binding = await self._binding(dataset_id, generation_id)
+        binding = await self._binding(
+            dataset_id,
+            generation_id,
+            unresolved_is_absent=True,
+        )
+        if binding is None:
+            return SemanticVectorCleanup(confirmed_absent=True)
         return await self._backend.delete_generation(binding)
 
 
