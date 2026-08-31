@@ -396,7 +396,11 @@ class ProductionSemanticRuntime:
             disclosure_hash=current.disclosure_hash,
             provider=current.provider_label.lower(),
             model=current.model,
-            model_revision=current.model_revision,
+            model_revision=(
+                config.model_revision
+                if config is not None and config.model_revision is not None
+                else current.model_revision
+            ),
             endpoint_origin=current.endpoint_display or "",
             credential_source="server_default",
             endpoint_origin_revision=current.endpoint_origin_revision,

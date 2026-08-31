@@ -288,6 +288,35 @@ async def test_handler_bounds_retries_and_resolves_pinned_provider_outside_paylo
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("invalid_state", ["failed", "cancelled", "running"])
+async def test_handler_rejects_non_completed_bounded_results(
+    invalid_state: str,
+) -> None:
+    class InvalidStateRuntime(_Runtime):
+        async def execute(self, **kwargs):
+            result = await super().execute(**kwargs)
+            result["state"] = invalid_state
+            return result
+
+    handler = SemanticJobHandler(
+        runtime_factory=lambda **_kwargs: InvalidStateRuntime(),
+    )
+    job = {
+        "uuid": "6ec1dfbe-f86f-4d2b-93af-f88f64cd9701",
+        "owner_user_id": "owner-a",
+        "domain": JOB_DOMAIN,
+        "queue": JOB_QUEUE,
+        "job_type": JOB_TYPE,
+        "payload": _command().payload(),
+    }
+
+    with pytest.raises(SemanticJobsError) as exc_info:
+        await handler.handle(job, cancellation_requested=lambda: False)
+
+    assert exc_info.value.code == "notes_semantic_job_result_invalid"
+
+
+@pytest.mark.asyncio
 async def test_handler_fences_cancellation_before_provider_work() -> None:
     runtime = _Runtime()
     handler = SemanticJobHandler(runtime_factory=lambda **_kwargs: runtime)
@@ -628,6 +657,10 @@ def test_enable_exact_retry_resumes_jobs_admission_after_committed_config_gap(
         assert committed is not None
         assert committed.desired_state is SemanticDesiredState.ENABLED
 
+        api._capability_resolver = lambda: (_ for _ in ()).throw(
+            RuntimeError("provider changed at /private/secret?token=abc")
+        )
+
         resumed = api.enable(
             expected_revision=0,
             capability_revision=capability_revision,
@@ -892,6 +925,195 @@ def test_cancelled_staging_generation_is_failed_and_queued_for_cleanup(
         assert cancelled is not None
         assert cancelled.state is SemanticGenerationState.FAILED
         assert db.note_semantic_store.has_pending_cleanup("dataset-a") is True
+    finally:
+        db.close_all_connections()
+
+
+def test_root_cancellation_fence_precedes_activation_and_jobs_cancellation(
+    tmp_path,
+    jobs: JobManager,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db = CharactersRAGDB(str(tmp_path / "semantic-cancel-order.sqlite"), client_id="owner-a")
+    try:
+        api = _semantic_api(db, jobs)
+        enabled = api.enable(
+            expected_revision=0,
+            capability_revision=api.capabilities()["capability_revision"],
+            idempotency_key="enable-cancel-order",
+        )
+        run_id = enabled["run"]["run_id"]
+        config = db.note_semantic_store.get_configuration("dataset-a")
+        assert config is not None
+        generation = db.note_semantic_store.create_generation(
+            dataset_id="dataset-a",
+            configuration_revision=config.configuration_revision,
+            compatibility_hash=None,
+            dimension_state=SemanticDimensionState.PENDING,
+            dimensions=None,
+            root_job_id=run_id,
+            model_revision=None,
+            now=NOW,
+        )
+        resolved = db.note_semantic_store.resolve_generation_dimensions(
+            dataset_id="dataset-a",
+            generation_id=generation.id,
+            expected_configuration_revision=config.configuration_revision,
+            dimensions=1536,
+            compatibility_hash=api._capabilities().compatibility_hash or "",
+            model_revision=None,
+            now=NOW,
+        )
+        assert resolved is not None
+        original_cancel = jobs.cancel_job
+        activation_wins: list[bool] = []
+
+        def activate_then_cancel(job_id, **kwargs):
+            activated = db.note_semantic_store.activate_generation(
+                dataset_id="dataset-a",
+                generation_id=resolved.id,
+                expected_configuration_revision=resolved.configuration_revision,
+                publication_receipt="publication-a",
+                now=NOW + timedelta(seconds=1),
+            )
+            activation_wins.append(activated is not None)
+            return original_cancel(job_id, **kwargs)
+
+        monkeypatch.setattr(jobs, "cancel_job", activate_then_cancel)
+
+        cancelled = api.cancel_run(
+            run_id=UUID(run_id),
+            expected_revision=enabled["run"]["revision"],
+            idempotency_key="cancel-before-activate",
+        )
+
+        terminal = db.note_semantic_store.get_generation("dataset-a", resolved.id)
+        assert activation_wins == [False]
+        assert terminal is not None
+        assert terminal.state is SemanticGenerationState.FAILED
+        assert terminal.terminal_error_code == "notes_semantic_run_cancelled"
+        assert cancelled["run"]["status"] == "cancelled"
+    finally:
+        db.close_all_connections()
+
+
+def test_root_cancellation_conflicts_when_activation_already_committed(
+    tmp_path,
+    jobs: JobManager,
+) -> None:
+    db = CharactersRAGDB(str(tmp_path / "semantic-cancel-active.sqlite"), client_id="owner-a")
+    try:
+        api = _semantic_api(db, jobs)
+        enabled = api.enable(
+            expected_revision=0,
+            capability_revision=api.capabilities()["capability_revision"],
+            idempotency_key="enable-before-activation",
+        )
+        run_id = enabled["run"]["run_id"]
+        config = db.note_semantic_store.get_configuration("dataset-a")
+        assert config is not None
+        generation = db.note_semantic_store.create_generation(
+            dataset_id="dataset-a",
+            configuration_revision=config.configuration_revision,
+            compatibility_hash=None,
+            dimension_state=SemanticDimensionState.PENDING,
+            dimensions=None,
+            root_job_id=run_id,
+            model_revision=None,
+            now=NOW,
+        )
+        resolved = db.note_semantic_store.resolve_generation_dimensions(
+            dataset_id="dataset-a",
+            generation_id=generation.id,
+            expected_configuration_revision=config.configuration_revision,
+            dimensions=1536,
+            compatibility_hash=api._capabilities().compatibility_hash or "",
+            model_revision=None,
+            now=NOW,
+        )
+        assert resolved is not None
+        activated = db.note_semantic_store.activate_generation(
+            dataset_id="dataset-a",
+            generation_id=resolved.id,
+            expected_configuration_revision=resolved.configuration_revision,
+            publication_receipt="publication-a",
+            now=NOW + timedelta(seconds=1),
+        )
+        assert activated is not None
+
+        with pytest.raises(SemanticAPIError) as exc_info:
+            api.cancel_run(
+                run_id=UUID(run_id),
+                expected_revision=enabled["run"]["revision"],
+                idempotency_key="cancel-after-activation",
+            )
+
+        assert exc_info.value.code == "notes_semantic_run_revision_conflict"
+        assert SemanticJobCoordinator(
+            jobs=jobs,
+            owner_user_id="owner-a",
+            clock=lambda: NOW,
+        ).get_job_for_run(run_id)["status"] == "queued"
+    finally:
+        db.close_all_connections()
+
+
+def test_cancel_retry_finishes_jobs_after_notes_fence_was_committed(
+    tmp_path,
+    jobs: JobManager,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db = CharactersRAGDB(str(tmp_path / "semantic-cancel-crash.sqlite"), client_id="owner-a")
+    try:
+        api = _semantic_api(db, jobs)
+        enabled = api.enable(
+            expected_revision=0,
+            capability_revision=api.capabilities()["capability_revision"],
+            idempotency_key="enable-cancel-crash",
+        )
+        run_id = enabled["run"]["run_id"]
+        config = db.note_semantic_store.get_configuration("dataset-a")
+        assert config is not None
+        generation = db.note_semantic_store.create_generation(
+            dataset_id="dataset-a",
+            configuration_revision=config.configuration_revision,
+            compatibility_hash=config.compatibility_hash,
+            dimension_state=config.dimension_state,
+            dimensions=config.dimensions,
+            root_job_id=run_id,
+            model_revision=config.model_revision,
+            now=NOW,
+        )
+        original_cancel = jobs.cancel_job
+        calls = 0
+
+        def fail_once(job_id, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise SemanticJobsError("notes_semantic_jobs_unavailable")
+            return original_cancel(job_id, **kwargs)
+
+        monkeypatch.setattr(jobs, "cancel_job", fail_once)
+        with pytest.raises(SemanticAPIError):
+            api.cancel_run(
+                run_id=UUID(run_id),
+                expected_revision=enabled["run"]["revision"],
+                idempotency_key="cancel-crash-retry",
+            )
+        fenced = db.note_semantic_store.get_generation("dataset-a", generation.id)
+        assert fenced is not None
+        assert fenced.state is SemanticGenerationState.FAILED
+        assert fenced.terminal_error_code == "notes_semantic_run_cancelled"
+
+        retried = api.cancel_run(
+            run_id=UUID(run_id),
+            expected_revision=enabled["run"]["revision"],
+            idempotency_key="cancel-crash-retry",
+        )
+
+        assert calls == 2
+        assert retried["run"]["status"] == "cancelled"
     finally:
         db.close_all_connections()
 

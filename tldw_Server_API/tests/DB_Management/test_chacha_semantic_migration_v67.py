@@ -63,6 +63,7 @@ def test_sqlite_v67_fresh_schema_has_model_revision_and_operation_receipts(
             for row in conn.execute(f"PRAGMA index_list({_RECEIPTS})")  # nosec B608
         }
         assert "idx_note_semantic_operation_receipts_scope" in indexes
+        assert "idx_note_semantic_operation_receipts_expiry" in indexes
 
 
 def test_sqlite_v66_to_v67_preserves_semantic_authority(

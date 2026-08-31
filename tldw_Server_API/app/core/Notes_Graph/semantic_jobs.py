@@ -393,6 +393,8 @@ def _validated_result(raw: object) -> dict[str, Any]:
     if not isinstance(raw, dict) or set(raw) != _RESULT_KEYS:
         raise SemanticJobsError("notes_semantic_job_result_invalid")
     result = dict(raw)
+    if result["state"] != "completed":
+        raise SemanticJobsError("notes_semantic_job_result_invalid")
     for key in (
         "indexed_notes",
         "excluded_notes",

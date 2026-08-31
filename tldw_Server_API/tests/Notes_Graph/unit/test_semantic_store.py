@@ -9,6 +9,7 @@ import pytest
 from tldw_Server_API.app.core.DB_Management.chacha.note_semantic_models import (
     SemanticDimensionState,
     SemanticGenerationState,
+    SemanticIndexingError,
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
@@ -116,6 +117,118 @@ def test_enable_disable_are_capability_and_revision_fenced(db: CharactersRAGDB) 
     )
     assert disabled is not None
     assert disabled.desired_state.value == "disabled"
+
+
+@pytest.mark.parametrize("prior_state", ["pending", "completed"])
+@pytest.mark.parametrize("reuse_kind", ["exact_key", "same_fingerprint"])
+def test_expired_operation_receipts_do_not_block_key_or_fingerprint_reuse(
+    db: CharactersRAGDB,
+    prior_state: str,
+    reuse_kind: str,
+) -> None:
+    store = db.note_semantic_store
+    key = "a" * 64
+    fingerprint = "b" * 64
+    store.begin_operation_receipt(
+        dataset_id=DATASET_ID,
+        key_digest=key,
+        action="enable",
+        request_fingerprint=fingerprint,
+        run_id=None,
+        expected_revision=0,
+        expires_at=NOW + timedelta(seconds=1),
+        now=NOW,
+    )
+    if prior_state == "completed":
+        store.complete_operation_receipt(
+            dataset_id=DATASET_ID,
+            key_digest=key,
+            request_fingerprint=fingerprint,
+            run_id=None,
+            response={"status": "accepted"},
+            now=NOW,
+        )
+
+    replacement_key = key if reuse_kind == "exact_key" else "c" * 64
+    replacement_fingerprint = (
+        "d" * 64 if reuse_kind == "exact_key" else fingerprint
+    )
+    replacement, replayed = store.begin_operation_receipt(
+        dataset_id=DATASET_ID,
+        key_digest=replacement_key,
+        action="enable",
+        request_fingerprint=replacement_fingerprint,
+        run_id=None,
+        expected_revision=0,
+        expires_at=NOW + timedelta(days=1),
+        now=NOW + timedelta(seconds=2),
+    )
+
+    assert replayed is False
+    assert replacement.state == "pending"
+    assert replacement.key_digest == replacement_key
+    assert replacement.request_fingerprint == replacement_fingerprint
+
+
+def test_expired_pending_operation_receipt_cannot_complete(db: CharactersRAGDB) -> None:
+    store = db.note_semantic_store
+    store.begin_operation_receipt(
+        dataset_id=DATASET_ID,
+        key_digest="a" * 64,
+        action="cancel",
+        request_fingerprint="b" * 64,
+        run_id="run-a",
+        expected_revision=3,
+        expires_at=NOW + timedelta(seconds=1),
+        now=NOW,
+    )
+
+    with pytest.raises(SemanticIndexingError) as exc_info:
+        store.complete_operation_receipt(
+            dataset_id=DATASET_ID,
+            key_digest="a" * 64,
+            request_fingerprint="b" * 64,
+            run_id="run-a",
+            response={"status": "cancelled"},
+            now=NOW + timedelta(seconds=2),
+        )
+
+    assert exc_info.value.code == "notes_semantic_operation_receipt_conflict"
+
+
+def test_operation_receipt_begin_prunes_one_bounded_expiry_page(
+    db: CharactersRAGDB,
+) -> None:
+    store = db.note_semantic_store
+    for index in range(40):
+        store.begin_operation_receipt(
+            dataset_id=DATASET_ID,
+            key_digest=f"{index:064x}",
+            action="enable",
+            request_fingerprint=f"{index + 100:064x}",
+            run_id=None,
+            expected_revision=0,
+            expires_at=NOW + timedelta(seconds=1),
+            now=NOW,
+        )
+
+    store.begin_operation_receipt(
+        dataset_id=DATASET_ID,
+        key_digest="f" * 64,
+        action="enable",
+        request_fingerprint="e" * 64,
+        run_id=None,
+        expected_revision=0,
+        expires_at=NOW + timedelta(days=1),
+        now=NOW + timedelta(seconds=2),
+    )
+    remaining = db.execute_query(
+        "SELECT COUNT(*) FROM note_semantic_operation_receipts "
+        "WHERE owner_user_id=? AND dataset_id=?",
+        ("owner-a", DATASET_ID),
+    ).fetchone()[0]
+
+    assert remaining <= 25
 
 
 def test_switching_active_generation_increments_semantic_index_revision(db: CharactersRAGDB) -> None:

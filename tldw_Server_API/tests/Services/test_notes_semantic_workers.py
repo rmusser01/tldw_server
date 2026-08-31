@@ -363,6 +363,94 @@ async def test_root_job_recovers_exact_dimension_transition_and_rejects_drift(
 
 
 @pytest.mark.asyncio
+async def test_discovered_model_revision_survives_production_revalidation(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db = CharactersRAGDB(
+        str(tmp_path / "model-revision-revalidation.sqlite"),
+        client_id="1",
+    )
+    root_job_id = "6ec1dfbe-f86f-4d2b-93af-f88f64cd9701"
+    try:
+        enabled = _enabled_configuration(db)
+        generation = db.note_semantic_store.create_generation(
+            dataset_id="dataset-a",
+            configuration_revision=enabled.configuration_revision,
+            compatibility_hash=None,
+            dimension_state=SemanticDimensionState.PENDING,
+            dimensions=None,
+            root_job_id=root_job_id,
+            model_revision=None,
+            now=NOW,
+        )
+        resolved = db.note_semantic_store.resolve_generation_dimensions(
+            dataset_id="dataset-a",
+            generation_id=generation.id,
+            expected_configuration_revision=enabled.configuration_revision,
+            dimensions=1536,
+            compatibility_hash="compatibility-v1",
+            model_revision="model-digest-a",
+            now=NOW,
+        )
+        assert resolved is not None
+
+        async def vectors(**_kwargs):
+            return object()
+
+        class ActiveUsers:
+            @classmethod
+            async def from_pool(cls):
+                return cls()
+
+            async def get_user_by_id(self, _user_id):
+                return {"id": 1, "is_active": True}
+
+        current = SimpleNamespace(
+            capability_revision="capability-v1",
+            disclosure_hash="disclosure-v1",
+            provider_label="provider-a",
+            model="model-a",
+            model_revision=None,
+            endpoint_display="https://api.example.test",
+            endpoint_origin_revision="origin-v1",
+            indexing_available=True,
+        )
+        monkeypatch.setattr(notes_semantic_index_worker, "_build_vector_store", vectors)
+        monkeypatch.setattr(notes_semantic_index_worker, "AuthnzUsersRepo", ActiveUsers)
+        monkeypatch.setattr(
+            notes_semantic_index_worker,
+            "resolve_semantic_capabilities",
+            lambda *_args, **_kwargs: current,
+        )
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.AuthNZ.rbac.user_has_permission",
+            lambda *_args, **_kwargs: True,
+        )
+        runtime = await notes_semantic_index_worker.build_production_runtime(
+            db=db,
+            settings=SemanticIndexSettings(),
+            owner_user_id="1",
+            dataset_id="dataset-a",
+            configuration_revision=enabled.configuration_revision,
+            generation_id=None,
+            root_job_id=root_job_id,
+            mode="build",
+        )
+
+        first = await runtime._revalidate(runtime._fence())
+        later = await runtime._revalidate(runtime._fence())
+
+        assert first.model_revision == "model-digest-a"
+        assert later.model_revision == "model-digest-a"
+        assert db.note_semantic_store.get_configuration("dataset-a").model_revision == (
+            "model-digest-a"
+        )
+    finally:
+        db.close_all_connections()
+
+
+@pytest.mark.asyncio
 async def test_missing_root_generation_rejects_unrelated_revision_before_creation() -> None:
     create_calls = 0
     config = SimpleNamespace(
@@ -675,7 +763,7 @@ async def test_revalidation_requires_authoritative_active_user(
 
 
 @pytest.mark.asyncio
-async def test_revalidation_projects_current_provider_model_revision(
+async def test_revalidation_projects_pinned_durable_model_revision(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     root_job_id = "6ec1dfbe-f86f-4d2b-93af-f88f64cd9701"
@@ -725,7 +813,7 @@ async def test_revalidation_projects_current_provider_model_revision(
         disclosure_hash="disclosure-v1",
         provider_label="provider-a",
         model="model-a",
-        model_revision="model-digest-b",
+        model_revision=None,
         endpoint_display="https://api.example.test",
         endpoint_origin_revision="origin-v1",
         indexing_available=True,
@@ -753,7 +841,7 @@ async def test_revalidation_projects_current_provider_model_revision(
 
     authority = await runtime._revalidate(runtime._fence())
 
-    assert authority.model_revision == "model-digest-b"
+    assert authority.model_revision == "model-digest-a"
 
 
 @pytest.mark.asyncio
