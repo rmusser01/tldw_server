@@ -16,6 +16,9 @@ from tldw_profile_core.canonical import canonical_json_bytes
 
 from tldw_Server_API.app.core.DB_Management import Sync_DB as sync_db_module
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
+from tldw_Server_API.app.core.Personalization.personal_context_service import (
+    PersonalContextService,
+)
 from tldw_Server_API.app.core.Sync.v2.adapters import SyncAdapterRegistry
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.personal_context import (
     PersonalContextDomainAdapter,
@@ -86,11 +89,6 @@ class _CanonicalService:
     def get_manifest(self):
         if not self.profile_exists:
             raise KeyError("profile")
-        return self.manifest
-
-    def ensure_sync_profile(self):
-        if not self.profile_exists:
-            return self.create_profile()
         return self.manifest
 
     def list_scopes(self):
@@ -297,6 +295,22 @@ def test_bootstrap_is_idempotent_and_serializes_first_profile_link(tmp_path: Pat
     assert canonical.profile_exists is True
     assert canonical.manifest == first.manifest
     assert canonical.scope == first.scopes[0]
+
+
+def test_unknown_zero_minimum_quota_is_satisfied(tmp_path: Path) -> None:
+    service, canonical = _service(tmp_path)
+
+    bootstrap = _bootstrap(
+        service,
+        required_quotas={"future_sync_quota": 0},
+    )
+
+    assert bootstrap.manifest == canonical.manifest
+    assert "future_sync_quota" not in bootstrap.quotas
+
+
+def test_personal_context_service_has_no_materializing_sync_profile_helper() -> None:
+    assert "ensure_sync_profile" not in PersonalContextService.__dict__
 
 
 def test_concurrent_absent_personal_context_bindings_accept_identical_winner(

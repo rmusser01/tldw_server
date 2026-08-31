@@ -111,3 +111,19 @@ explicit user opt-in; the verification set was limited to affected modules.
 
 TASK-13148's existing status is intentionally unchanged; controller review owns
 any subsequent lifecycle update.
+
+## Final compatibility and cleanup correction
+
+- [x] Treat an unsupported quota as available at zero: a requested minimum of
+  zero is satisfied, while a positive minimum remains a typed, content-free
+  incompatibility with `available_quotas[name] == 0`.
+- [x] Remove the unused `ensure_sync_profile()` service helper and test fake so
+  canonical materialization remains reachable only through the reviewed
+  plan/completion boundary.
+- [x] Retain the absent-profile regression proving bootstrap reserves identity
+  and key custody without materializing canonical profile content.
+- [x] Focused RED produced `2 failed, 33 deselected`; focused GREEN produced
+  `2 passed, 33 deselected`; the complete affected bootstrap and endpoint
+  modules produced `127 passed`.
+
+TASK-13148 remains unchanged for controller review.

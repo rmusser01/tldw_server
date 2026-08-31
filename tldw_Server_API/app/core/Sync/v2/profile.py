@@ -477,11 +477,11 @@ class SyncV2ProfileManager:
                         name
                         for name, value in normalized_required_quotas.items()
                         if (
-                            name not in quotas
+                            not isinstance(name, str)
                             or not isinstance(value, int)
                             or isinstance(value, bool)
                             or value < 0
-                            or value > quotas[name]
+                            or value > quotas.get(name, 0)
                         )
                     ),
                 },
@@ -1377,8 +1377,7 @@ def _personal_context_quotas_compatible(
             or not isinstance(value, int)
             or isinstance(value, bool)
             or value < 0
-            or name not in available
-            or value > available[name]
+            or value > available.get(name, 0)
         ):
             return False
     return True

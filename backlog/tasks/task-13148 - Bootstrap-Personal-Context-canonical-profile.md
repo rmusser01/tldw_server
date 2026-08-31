@@ -95,6 +95,16 @@ incident and resulting cross-layer testing rule are recorded in
 `backlog/docs/lessons-testing-evidence.md`.
 
 Post-closure structured-attention correction: quota incompatibility now includes every required quota name in available_quotas, using an explicit safe zero for unsupported names. The HTTP boundary strictly validates discriminated attention, bounded content-free values, semantic consistency, and reason-code/kind agreement; malformed, mismatched, or extra-field mappings are omitted while preserving the stable 409 reason/message. TDD evidence: focused RED 3 failed/3 passed; GREEN 6 passed; affected endpoint/bootstrap modules 125 passed. Ruff, Python compilation, Bandit (0 findings/errors), Chatbook strict-parser compatibility, and diff hygiene passed. TASK-13148 status intentionally remains unchanged for controller review.
+
+Final review correction: an unsupported quota now behaves as a zero-capacity
+quota, so `future_sync_quota: 0` succeeds while any positive minimum remains a
+typed incompatibility with a safe zero in `available_quotas`. The unused
+`ensure_sync_profile()` helper and its test fake were removed; the existing
+absent-bootstrap regression continues to prove that planning reserves only
+content-free identity/key control state and materializes no canonical profile
+content. TDD evidence: focused RED `2 failed, 33 deselected`; focused GREEN
+`2 passed, 33 deselected`; affected bootstrap/endpoint modules `127 passed`.
+TASK-13148 status remains unchanged for controller review.
 <!-- SECTION:NOTES:END -->
 
 ## Progress
