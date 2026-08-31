@@ -1284,12 +1284,24 @@ class SyncPersonalContextBootstrapResponse(BaseModel):
     proposals: list[dict[str, Any]] = Field(default_factory=list)
     purge_generation: int
     schema_version: int
-    quotas: dict[str, int]
+    quotas: dict[StrictStr, _PersonalContextAttentionInteger] = Field(
+        ..., min_length=1, max_length=32
+    )
     cursor: str
     sync_transport_cursor: str
     integrity_key_id: str
     key_record_id: str
     wrapped_key_blob: str
+
+    @field_validator("quotas")
+    @classmethod
+    def _validate_quota_names(
+        cls,
+        quotas: dict[str, int],
+    ) -> dict[str, int]:
+        if not all(_valid_personal_context_quota_name(name) for name in quotas):
+            raise ValueError("quota name is invalid")
+        return quotas
 
 
 class SyncPersonalContextLinkCompleteRequest(BaseModel):
