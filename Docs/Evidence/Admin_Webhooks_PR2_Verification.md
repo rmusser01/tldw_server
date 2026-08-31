@@ -3,14 +3,14 @@
 ## Verification Identity
 
 - Branch: `codex/admin-webhooks-delivery-substrate`
-- Literal scope base: `1ad2f1e5b30c49ea75396e4b713496b73e875fec`
-- Tested source head: `cef9ab73ff183824dc483207dbb6a4498b985050`
+- Literal scope base: `52774a0453b24123cd4cfb3b2a1a38ebc2496f3e`
+- Tested source head: `a5ec2cfb9d7553cf81f848982078ca7f54588b22`
 - Definitive Step 1 source commit:
-  `b0d39e615f4baf4770f4d542219440b9cd7dd2d4`
+  `a5ec2cfb9d7553cf81f848982078ca7f54588b22`
 - Observed `origin/dev` metadata, without fetch:
-  `f676e23549ea8ed82ef53493260621a05b281863`
+  `54448ef08970e4a348478bdf47be5715c875241c`
 - Merge base of the literal scope base and tested head:
-  `1ad2f1e5b30c49ea75396e4b713496b73e875fec`
+  `52774a0453b24123cd4cfb3b2a1a38ebc2496f3e`
 - Verification date: `2026-08-30`
 - Host: macOS 26.5.2, arm64
 - Project Python: 3.11.13
@@ -23,29 +23,39 @@ The PostgreSQL version was read through the project's `asyncpg` driver with a
 read-only `SHOW server_version` query. Connection credentials, DSNs, private
 receiver addresses, tokens, and private payloads are intentionally omitted.
 
-The definitive Step 1 run was executed at `b0d39e615f`. The only files changed
-between that commit and the tested source head are this implementation plan and
-`TASK-13111`; no production or test file changed. That complete, controller-owned
-run therefore remains authoritative for the tested code and test state.
+The branch was rebased with approval onto the immutable scope base above before
+the definitive gates. The first post-rebase Step 1 run collected 1,523 tests and
+reported 1,521 passing with two test-contract failures: the exact startup-worker
+set omitted two upstream Notes workers, and four delivery-mode guard tests lacked
+direct unit markers. Commit `a5ec2cfb9d` made only those test corrections after
+focused RED/root-cause confirmation and independent specification and quality
+reviews. All definitive gates below ran at that commit.
+
+The observed `origin/dev` metadata later advanced by six commits to `54448ef089`
+while this verification remained pinned to `52774a0453`. Those commits are not
+part of this evidence range. No fetch, rebase, push, or merge occurred after the
+base was pinned; integration with the newer upstream state requires a separate
+review decision.
 
 ## Result Summary
 
 | Gate | Result |
 | --- | --- |
-| Complete SQLite/API/security matrix | PASS: 1,489 passed, 0 skipped, 2,654 warnings |
-| Required PostgreSQL/four-backend matrix | PASS: 307 passed, 0 skipped, 616 warnings |
-| Deterministic protocol/security matrix | PASS: 423 passed, 0 skipped, 613 warnings |
+| Complete SQLite/API/security matrix | PASS: 1,523 passed, 0 skipped, 2,722 warnings |
+| Required PostgreSQL/four-backend matrix | PASS: 327 passed, 0 skipped, 656 warnings |
+| Deterministic protocol/security matrix | PASS: 424 passed, 0 skipped, 613 warnings |
 | Ruff | PASS: `All checks passed!` |
+| Python 3.10 compatibility compile | PASS: all 77 changed Python files |
 | Committed and worktree diff checks | PASS |
 | Sensitive logger/metric scan | PASS: no matches |
-| Bandit | REVIEWED PASS: raw exit 1, 60 accounted findings, 0 High |
+| Bandit | REVIEWED PASS: raw exit 1, 61 accounted findings, 0 High |
 | PR 3 exclusion and legacy isolation scans | PASS: no matches |
 | OpenAPI fingerprint and drift | PASS |
 | Default-off/no-release gate | PASS: delivery remains disabled by default |
 
-The three pytest gates executed 2,219 test instances, emitted 3,883 warning
-instances, and took 2,276.07 seconds (`37:56.07`) in total. Steps 2 and 3
-deliberately repeat high-risk tests from the complete Step 1 union, so 2,219 is
+The three pytest gates executed 2,274 test instances, emitted 3,991 warning
+instances, and took 2,238.36 seconds (`37:18.36`) in total. Steps 2 and 3
+deliberately repeat high-risk tests from the complete Step 1 union, so 2,274 is
 an execution count, not a unique-test count. No counted test was skipped.
 
 ## Exact Pytest Gates
@@ -80,7 +90,7 @@ TLDW_TEST_POSTGRES_REQUIRED=1 RUN_JOBS=1 PYTHONPATH=. /Users/macbook-dev/Documen
   tldw_Server_API/tests/Services/test_startup_worker_groups.py
 ```
 
-Result: exit 0, `1,489 passed, 2,654 warnings in 996.39s (0:16:36)`,
+Result: exit 0, `1,523 passed, 2,722 warnings in 983.54s (0:16:23)`,
 zero skips.
 
 ### Step 2: Required PostgreSQL and four-backend crash matrix
@@ -101,7 +111,7 @@ TLDW_TEST_POSTGRES_REQUIRED=1 RUN_JOBS=1 PYTHONPATH=. /Users/macbook-dev/Documen
   tldw_Server_API/tests/Jobs/parity/test_postgres_parity.py
 ```
 
-Result: exit 0, `307 passed, 616 warnings in 794.64s (0:13:14)`, zero
+Result: exit 0, `327 passed, 656 warnings in 781.82s (0:13:01)`, zero
 skips.
 
 ### Step 3: Deterministic protocol and security matrix
@@ -117,7 +127,7 @@ TLDW_TEST_POSTGRES_REQUIRED=1 RUN_JOBS=1 PYTHONPATH=. /Users/macbook-dev/Documen
   tldw_Server_API/tests/Security/test_http_hop_streaming.py
 ```
 
-Result: exit 0, `423 passed, 613 warnings in 485.04s (0:08:05)`, zero
+Result: exit 0, `424 passed, 613 warnings in 473.00s (0:07:52)`, zero
 skips.
 
 ## Backend And Crash-Convergence Proof
@@ -204,10 +214,19 @@ boundary. It returned `All checks passed!` from this exact command:
   tldw_Server_API/app/api/v1/endpoints/admin/admin_webhooks.py
 ```
 
+Every Python file changed from the immutable base also compiled with Python
+3.10.20 while bytecode was redirected outside the worktree:
+
+```bash
+git diff --name-only -z 52774a0453b24123cd4cfb3b2a1a38ebc2496f3e HEAD -- '*.py' | \
+  env PYTHONPYCACHEPREFIX=/tmp/admin-webhooks-py310-cache xargs -0 \
+  /Users/macbook-dev/.local/bin/python3.10 -m py_compile
+```
+
 Both of these passed:
 
 ```bash
-git diff --check 1ad2f1e5b30c49ea75396e4b713496b73e875fec HEAD
+git diff --check 52774a0453b24123cd4cfb3b2a1a38ebc2496f3e HEAD
 git diff --check HEAD
 ```
 
@@ -259,7 +278,7 @@ match fail and propagate Git/`rg` errors, were:
 
 ```bash
 forbidden_path_pattern='(^|/)(admin-ui|users|incidents|admin_system_ops_service|admin_webhooks_service|jobs_webhooks_service)'
-require_no_path_matches "$forbidden_path_pattern" git diff --name-only 1ad2f1e5b30c49ea75396e4b713496b73e875fec HEAD
+require_no_path_matches "$forbidden_path_pattern" git diff --name-only 52774a0453b24123cd4cfb3b2a1a38ebc2496f3e HEAD
 require_no_path_matches "$forbidden_path_pattern" git diff --name-only HEAD
 require_no_path_matches "$forbidden_path_pattern" git ls-files --others --exclude-standard
 require_no_rg_matches -n "services\.(admin_webhooks_service|jobs_webhooks_service)|from .*admin_webhooks_service|from .*jobs_webhooks_service" \
@@ -271,19 +290,21 @@ require_no_rg_matches -n "services\.(admin_webhooks_service|jobs_webhooks_servic
 ### Bandit classification
 
 The exact planned recursive Bandit path set returned raw status 1. Its summary
-was 17 Low, 43 Medium, 0 High. A JSON-format repeat over the identical path set
-contained exactly 60 results. Every result is accounted for below; no result
+was 17 Low, 44 Medium, 0 High. A JSON-format repeat over the identical path set
+contained exactly 61 results. Every result is accounted for below; no result
 was suppressed or omitted by Task 12.
 
 | Rule | Count | Exact locations | Classification |
 | --- | ---: | --- | --- |
-| B608, Medium/Low-confidence | 43 | `admin_webhooks_repository.py`: 2789, 2806, 2820, 3003, 3052, 3071, 3109, 3125, 3138, 3164, 3171, 3193, 3214, 3239, 3246, 3283, 3332, 3364, 3435, 3456, 3486, 3521, 3572, 3591, 3729, 3801, 3881, 3937, 3956, 4120, 4141, 4261, 4437, 4538, 4564, 4750, 4797, 4811, 4868, 4965, 5000, 5070, 5255 | Reviewed fixed SQL. Interpolation is limited to module column constants, backend-selected lock/null-safe/due literals, two closed attempt predicates, a fixed terminal SET clause, generated `?` placeholders, and an explicit five-table allowlist. Caller values remain bound parameters. |
-| B110/B112, Low/High-confidence | 14 | `control_plane.py`: 623, 633, 650, 1543, 1562; `delivery.py`: 1076, 1775; `observability.py`: 140, 626; `reconciler.py`: 585, 917, 956; `worker.py`: 216, 240 | Intentional fail-open metric registration/emission and status-probe observers. Each is downstream of durable truth or preserves a fail-closed unavailable probe; metrics cannot change commits, recovery, delivery, or API outcomes. |
+| B608, Medium/Low-confidence | 44 | `admin_webhooks_repository.py`: 2789, 2806, 2820, 3003, 3052, 3071, 3109, 3125, 3138, 3164, 3171, 3193, 3214, 3239, 3246, 3283, 3332, 3364, 3435, 3456, 3486, 3521, 3572, 3591, 3729, 3801, 3881, 3937, 3956, 4120, 4141, 4261, 4437, 4538, 4564, 4750, 4797, 4811, 4868, 4965, 5000, 5070, 5255; `Jobs/manager.py`: 9656 | Reviewed fixed SQL. Repository interpolation is limited to module column constants, backend-selected lock/null-safe/due literals, two closed attempt predicates, a fixed terminal SET clause, generated `?` placeholders, and an explicit five-table allowlist. The Jobs query accepts only two private, internally constructed clause shapes: `WHERE id = ANY(%s)` or the prune method's locally assembled placeholder clause. Caller values remain bound parameters. |
+| B110/B112, Low/High-confidence | 14 | `control_plane.py`: 623, 633, 650, 1543, 1562; `delivery.py`: 1098, 1800; `observability.py`: 140, 626; `reconciler.py`: 585, 917, 956; `worker.py`: 216, 240 | Intentional fail-open metric registration/emission and status-probe observers. Each is downstream of durable truth or preserves a fail-closed unavailable probe; metrics cannot change commits, recovery, delivery, or API outcomes. |
 | B105, Low/Medium-confidence | 3 | `schemas/admin_webhooks.py`: 143, 144; `domain.py`: 161 | False positives on numeric/boolean schema example fields named `secret_version`/`secret_rotation_required` and the closed enum value `canceled_secret_rotation`; none is a password or signing secret. |
 
-The inventory exactly matches the established Task 11 baseline of 43 fixed-query
-reports, 14 intentional fail-open observer reports, and 3 enum/schema false
-positives. Task 12 added no suppression. Bandit also emitted diagnostics for
+The inventory contains the established Task 11 baseline of 43 repository
+fixed-query reports, 14 intentional fail-open observer reports, and 3
+enum/schema false positives, plus the one reviewed canonical Jobs prune query
+added by the final implementation-review correction. Task 12 added no
+suppression. Bandit also emitted diagnostics for
 rule-specific suppressions already present in the broader previously reviewed
 Jobs/SQL baseline; no such suppression changed after the definitive Step 1
 source commit.
@@ -295,7 +316,7 @@ Authoritative commands:
 ```bash
 CI_LOCAL_PYTHON=/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python make openapi-fingerprint
 CI_LOCAL_PYTHON=/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python make openapi-drift-check
-git diff 1ad2f1e5b30c49ea75396e4b713496b73e875fec HEAD -- apps/tldw-frontend/lib/api/openapi.fingerprint.json
+git diff 52774a0453b24123cd4cfb3b2a1a38ebc2496f3e HEAD -- apps/tldw-frontend/lib/api/openapi.fingerprint.json
 git diff HEAD -- apps/tldw-frontend/lib/api/openapi.fingerprint.json
 ```
 
@@ -304,9 +325,9 @@ the checked-in snapshot matches. The reviewed committed delta is limited to the
 approved test, manual-redelivery, delivery-history, and status contracts:
 
 ```text
-path_count:   2040 -> 2043
-schema_count: 3037 -> 3053
-sha256:       8a50fa32399f6ffd7ef38588d6f7c0031146535386ddfbeda3fe8212dd4fdfc7
+path_count:   2048 -> 2051
+schema_count: 3052 -> 3067
+sha256:       7175f7d0e4413843b6f720586e6a6d7526604ad085c3fd6c972b2ef3fd2c0df9 -> dca38a546b4ce102ba701aee2c9fea396a11b2790ef74e52b04758087e4da567
 ```
 
 The plain host command uses Python 3.9.6 and is non-authoritative. It exits 2
@@ -329,6 +350,8 @@ The following outputs are not counted:
 - restricted-network PostgreSQL probes and any sandbox-denied loopback run;
 - interrupted, overlapping, partial, or stale-cache aggregate attempts recorded
   during the direct-marker correction;
+- the first post-rebase aggregate run (`1,521 passed`, two failed) that exposed
+  the stale startup-worker expectation and missing direct markers;
 - the expected pre-fix marker and stale route-selection failures;
 - a verifier process terminated by its agent usage limit before it could retain
   terminal output.
@@ -343,9 +366,11 @@ terminal exit status.
   selected; the lifecycle task remains `admin_webhook_delivery_runtime_task`.
 - No user/incident producer, admin UI, generic outgoing-webhook UI/service, or
   final release activation is included. Those remain PR 3 scope.
-- No production or test edit was made during Task 12.
-- No fetch, rebase, merge, push, force-push, or history rewrite occurred during
-  verification.
+- No production edit was made during final verification. The test-only
+  `a5ec2cfb9d` correction was completed and independently reviewed before all
+  definitive gates were rerun.
+- A user-approved fetch/rebase occurred before the immutable base was pinned.
+  No later fetch, rebase, merge, push, force-push, or history rewrite occurred.
 
 ## Records
 
@@ -359,6 +384,8 @@ terminal exit status.
 
 ## Conclusion
 
-The canonical admin-webhook delivery substrate is ready for independent
-whole-branch review and PR creation. This evidence does not authorize merge,
+The canonical admin-webhook delivery substrate is ready for independent review
+against the pinned base. Because `origin/dev` subsequently advanced and touches
+three PostgreSQL webhook test modules, reconcile and re-verify that newer
+upstream state before PR creation. This evidence does not authorize merge,
 production activation, durable event producers, or PR 3 UI work.

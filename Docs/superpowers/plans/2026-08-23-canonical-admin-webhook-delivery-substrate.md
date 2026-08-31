@@ -2072,7 +2072,7 @@ production code or tests. A genuine failure blocks Task 12 and returns to the
 owning implementation task for a RED-first fix and review cycle.
 
 Pin every scope and diff gate to literal base
-`1ad2f1e5b30c49ea75396e4b713496b73e875fec` through `HEAD`, and check the
+`52774a0453b24123cd4cfb3b2a1a38ebc2496f3e` through `HEAD`, and check the
 current worktree separately so uncommitted scope cannot hide. Record the
 observed `origin/dev` object only as run metadata; never use it as a verification
 diff base. Do not fetch, rebase, merge, push, or rewrite history during
@@ -2101,10 +2101,20 @@ claiming a misleading raw exit-zero. Query the PostgreSQL server version via
 the project driver because no host `psql` binary is installed, and never place
 test credentials, DSNs, or private connection details in the evidence file.
 
-- [ ] **Step 1: Run the complete SQLite/API/security matrix**
+Post-rebase execution note (2026-08-30): the branch was rebased with approval
+onto the literal base above before definitive verification. The first aggregate
+run exposed two test-contract failures caused by upstream worker registration
+and missing direct markers. The owning implementation cycle confirmed both RED
+failures, made the test-only correction in `a5ec2cfb9d`, obtained independent
+specification and quality approval, and returned to Task 12. The authoritative
+reruns at that commit passed 1,523, 327, and 424 tests with zero skips. During
+the evidence refresh, observed `origin/dev` advanced to `54448ef089`; that
+moving ref is metadata only and is not substituted for the immutable base.
+
+- [x] **Step 1: Run the complete SQLite/API/security matrix**
 
 ```bash
-TLDW_TEST_POSTGRES_REQUIRED=1 RUN_JOBS=1 PYTHONPATH=. /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest -q --tb=short -ra --show-capture=no --timeout=90 --randomly-seed=20260829 \
+TLDW_TEST_POSTGRES_REQUIRED=1 RUN_JOBS=1 PYTHONPATH=. /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest -q --tb=short -ra --show-capture=no --timeout=90 --randomly-seed=20260829 --cache-clear \
   tldw_Server_API/tests/Admin_Webhooks \
   tldw_Server_API/tests/Jobs/test_jobs_operation_contracts.py \
   tldw_Server_API/tests/Jobs/test_jobs_migrations_sqlite.py \
@@ -2128,7 +2138,7 @@ TLDW_TEST_POSTGRES_REQUIRED=1 RUN_JOBS=1 PYTHONPATH=. /Users/macbook-dev/Documen
 
 Expected: all selected tests pass. Record exact count, warnings, duration, and any skips. A skip in an expected SQLite/security/runtime path blocks review.
 
-- [ ] **Step 2: Run required PostgreSQL and four-backend crash matrix with zero skips**
+- [x] **Step 2: Run required PostgreSQL and four-backend crash matrix with zero skips**
 
 ```bash
 TLDW_TEST_POSTGRES_REQUIRED=1 RUN_JOBS=1 PYTHONPATH=. /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest -q --tb=short -ra --show-capture=no --timeout=90 --randomly-seed=20260829 \
@@ -2148,7 +2158,7 @@ TLDW_TEST_POSTGRES_REQUIRED=1 RUN_JOBS=1 PYTHONPATH=. /Users/macbook-dev/Documen
 
 Expected: all four AuthNZ/Jobs pairs and every enqueue/disposition/cancel crash boundary pass with zero skips. PostgreSQL unavailability blocks review; do not convert it to a documented skip.
 
-- [ ] **Step 3: Run deterministic protocol and security-focused gates separately**
+- [x] **Step 3: Run deterministic protocol and security-focused gates separately**
 
 ```bash
 TLDW_TEST_POSTGRES_REQUIRED=1 RUN_JOBS=1 PYTHONPATH=. /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest -q --tb=short -ra --show-capture=no --timeout=90 --randomly-seed=20260829 \
@@ -2163,7 +2173,7 @@ TLDW_TEST_POSTGRES_REQUIRED=1 RUN_JOBS=1 PYTHONPATH=. /Users/macbook-dev/Documen
 
 The evidence maps tests to DNS change, private/reserved ranges, redirects, proxies, TLS verification, timeout, response no-buffering, URL redaction, retry classification, `Retry-After`, exact signature vector, no overlapping attempt, hard four-attempt cap, lost lease, late completion rejection, and all disposition recovery paths.
 
-- [ ] **Step 4: Run Ruff, Bandit, diff, and sensitive-data scans**
+- [x] **Step 4: Run Ruff, Bandit, diff, and sensitive-data scans**
 
 ```bash
 require_no_rg_matches() {
@@ -2220,7 +2230,7 @@ run_bandit_review_gate() {
   tldw_Server_API/app/services/startup_optional_workers.py \
   tldw_Server_API/app/api/v1/schemas/admin_webhooks.py \
   tldw_Server_API/app/api/v1/endpoints/admin/admin_webhooks.py &&
-  git diff --check 1ad2f1e5b30c49ea75396e4b713496b73e875fec HEAD &&
+  git diff --check 52774a0453b24123cd4cfb3b2a1a38ebc2496f3e HEAD &&
   git diff --check HEAD &&
   require_no_rg_matches -n "logger\..*(url|secret|signature|payload|response|ciphertext)|labels=.*(id|host|url|email|secret|payload)" \
     tldw_Server_API/app/core/Admin_Webhooks \
@@ -2255,7 +2265,7 @@ that status or claim an aggregate Step 4 exit 0 alone proves manual review.
 Review every sensitive-data hit and every Bandit finding; fail on any
 unreviewed or High finding and add no suppression.
 
-- [ ] **Step 5: Prove PR 3 exclusions and legacy isolation**
+- [x] **Step 5: Prove PR 3 exclusions and legacy isolation**
 
 ```bash
 require_no_rg_matches() {
@@ -2293,7 +2303,7 @@ require_no_path_matches() {
 }
 
 forbidden_path_pattern='(^|/)(admin-ui|users|incidents|admin_system_ops_service|admin_webhooks_service|jobs_webhooks_service)'
-require_no_path_matches "$forbidden_path_pattern" git diff --name-only 1ad2f1e5b30c49ea75396e4b713496b73e875fec HEAD &&
+require_no_path_matches "$forbidden_path_pattern" git diff --name-only 52774a0453b24123cd4cfb3b2a1a38ebc2496f3e HEAD &&
   require_no_path_matches "$forbidden_path_pattern" git diff --name-only HEAD &&
   require_no_path_matches "$forbidden_path_pattern" git ls-files --others --exclude-standard &&
   require_no_rg_matches -n "services\.(admin_webhooks_service|jobs_webhooks_service)|from .*admin_webhooks_service|from .*jobs_webhooks_service" \
@@ -2311,12 +2321,12 @@ clean no-match returns 0, and an `rg` status greater than 1 propagates. The
 legacy-import scan uses the same `rg` status rules, so its expected clean
 no-match returns 0.
 
-- [ ] **Step 6: Re-run and review OpenAPI drift**
+- [x] **Step 6: Re-run and review OpenAPI drift**
 
 ```bash
 CI_LOCAL_PYTHON=/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python make openapi-fingerprint &&
   CI_LOCAL_PYTHON=/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python make openapi-drift-check &&
-  git diff 1ad2f1e5b30c49ea75396e4b713496b73e875fec HEAD -- apps/tldw-frontend/lib/api/openapi.fingerprint.json &&
+  git diff 52774a0453b24123cd4cfb3b2a1a38ebc2496f3e HEAD -- apps/tldw-frontend/lib/api/openapi.fingerprint.json &&
   git diff HEAD -- apps/tldw-frontend/lib/api/openapi.fingerprint.json
 ```
 
@@ -2326,16 +2336,17 @@ preserved and prevents every later command. After all automated commands pass,
 the human-reviewed delta contains only PR 2 test/redelivery/history/status
 contracts.
 
-- [ ] **Step 7: Write the evidence artifact**
+- [x] **Step 7: Write the evidence artifact**
 
 `Docs/Evidence/Admin_Webhooks_PR2_Verification.md` records branch/base/head commits, Python/PostgreSQL versions, exact commands and counts, all four backend pairs, crash-point mapping, signature vector, no-buffer proof, static/security output, OpenAPI review, exclusions, known warnings, and links to `TASK-13111`, the design, plan, and PR. Never include DSNs, tokens, URLs with paths/query, secrets, payloads beyond the published synthetic vector, or receiver content.
 
-- [ ] **Step 8: Commit verification evidence**
+- [x] **Step 8: Commit verification evidence**
 
 ```bash
 backlog task edit 13111 --append-notes "PR 2 verification complete: exact counts and all four backend/crash/security gates recorded in Docs/Evidence/Admin_Webhooks_PR2_Verification.md." &&
   git add \
     Docs/Evidence/Admin_Webhooks_PR2_Verification.md \
+    Docs/superpowers/plans/2026-08-23-canonical-admin-webhook-delivery-substrate.md \
     apps/tldw-frontend/lib/api/openapi.fingerprint.json \
     "backlog/tasks/task-13111 - Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md" &&
   git diff --cached --check &&

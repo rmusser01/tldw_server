@@ -4,7 +4,7 @@ title: Implement canonical admin webhook delivery substrate and recovery
 status: In Progress
 assignee: []
 created_date: '2026-08-23 03:15'
-updated_date: '2026-08-30 23:04'
+updated_date: '2026-08-30 23:58'
 labels:
   - admin
   - webhooks
@@ -32,12 +32,12 @@ Implement upstream PR 2 from the approved canonical outgoing-webhook design. Del
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 An executable TDD plan maps every PR 2 requirement to exact files, interfaces, tests, commands, and reviewable commits.
-- [ ] #2 Event, delivery, and append-only attempt persistence plus set-based expansion behave equivalently on SQLite and PostgreSQL with encrypted bounded event bodies.
-- [ ] #3 Enqueue, disposition, cancellation, and lost-acknowledgement recovery pass every crash point for SQLite/SQLite, SQLite/PostgreSQL, PostgreSQL/SQLite, and PostgreSQL/PostgreSQL.
-- [ ] #4 Supported Jobs contracts provide fail-closed acquisition, no-attempt deferral, exact retry delay, disposition recovery, lease-horizon enforcement, and a webhook-safe quarantine threshold.
-- [ ] #5 The webhook worker and shared attempt executor enforce signing, SSRF-safe status-only egress, retries, expiry, hard network-attempt limits, retention, metrics, and health without leaking destinations or secrets.
+- [x] #2 Event, delivery, and append-only attempt persistence plus set-based expansion behave equivalently on SQLite and PostgreSQL with encrypted bounded event bodies.
+- [x] #3 Enqueue, disposition, cancellation, and lost-acknowledgement recovery pass every crash point for SQLite/SQLite, SQLite/PostgreSQL, PostgreSQL/SQLite, and PostgreSQL/PostgreSQL.
+- [x] #4 Supported Jobs contracts provide fail-closed acquisition, no-attempt deferral, exact retry delay, disposition recovery, lease-horizon enforcement, and a webhook-safe quarantine threshold.
+- [x] #5 The webhook worker and shared attempt executor enforce signing, SSRF-safe status-only egress, retries, expiry, hard network-attempt limits, retention, metrics, and health without leaking destinations or secrets.
 - [x] #6 Synchronous test, manual redelivery, delivery-history, audit, and operational service contracts are implemented with durable idempotency and stale-screen preconditions.
-- [ ] #7 All PR 2 gates pass on supported backend combinations while durable domain producers, final route cutover, and canonical activation remain absent.
+- [x] #7 All PR 2 gates pass on supported backend combinations while durable domain producers, final route cutover, and canonical activation remain absent.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -249,14 +249,16 @@ Task 10 complete: exposed canonical persisted test, atomic manual redelivery, an
 2026-08-30: Post-rebase Task 12 Step 1 RED at rebased HEAD 7d1fca1524: 1,521 passed, 2 failed, 0 skipped, 2,722 warnings in 977.81s. Isolated RED reproduced both failures. Root causes are integration-only test-contract drift: upstream base 52774a0 registers notes_graph_suggestions_jobs_task and notes_graph_suggestions_maintenance_task but omits them from the broad startup provider expected set; four final delivery-mode guard tests were added after the direct-marker audit and lack direct accepted unit markers. Fix scope is limited to those two test files, followed by focused GREEN, impacted modules, and a complete Step 1 rerun.
 
 2026-08-30: Post-rebase Step 1 integration Fix Round 1 focused GREEN complete. Exact failing nodes passed 2/2; impacted modules passed 92/92; Ruff, Python 3.10 compilation, and git diff --check passed. Independent spec review found 0 Critical/Important/Minor and returned SPEC COMPLIANT. Separate code-quality review found 0 Critical/Important/Minor and returned CODE QUALITY APPROVED. No production/schema/API/runtime file changed. Complete Step 1 clean-tree rerun remains required.
+
+2026-08-30: Definitive post-rebase Task 12 verification passed at tested source a5ec2cfb9d7553cf81f848982078ca7f54588b22 against immutable base 52774a0453b24123cd4cfb3b2a1a38ebc2496f3e. Step 1 passed 1,523 tests with 0 skips and 2,722 warnings; Step 2 passed 327 with 0 skips and 656 warnings; Step 3 passed 424 with 0 skips and 613 warnings. Aggregate execution was 2,274 tests, 0 skips, 3,991 warnings in 2,238.36 seconds. Ruff, committed/worktree diff checks, sensitive logging and metric scan, Python 3.10 compile, PR 3 exclusions, legacy isolation, OpenAPI regeneration/drift, and PostgreSQL 18.6 proof passed. Bandit raw status 1 was fully classified: 17 Low, 44 Medium, 0 High, 61 accounted findings, with no new suppression. Evidence: Docs/Evidence/Admin_Webhooks_PR2_Verification.md. Observed origin/dev later advanced by six commits to 54448ef08970e4a348478bdf47be5715c875241c and touches three PostgreSQL webhook test modules; reconcile and re-verify that upstream state before PR creation. TASK-13111 remains In Progress; no push, PR, merge, activation, producer, or PR 3 work is authorized.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
 - [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
