@@ -1,6 +1,7 @@
 """Tests for NoteGraphService."""
 
 import base64
+import hashlib
 import json
 import uuid
 from unittest.mock import MagicMock
@@ -35,7 +36,8 @@ def _uid():
 
 def _mock_db(notes=None, edges=None, tag_edges=None, tag_counts=None,
              source_info=None, note_count=0, all_ids=None,
-             tag_seed_ids=None, source_seed_ids=None):
+             tag_seed_ids=None, source_seed_ids=None,
+             projection_state="ready", projection_dirty=0):
     """Build a MagicMock CharactersRAGDB with graph helpers."""
     db = MagicMock()
     _notes = notes or []
@@ -43,13 +45,13 @@ def _mock_db(notes=None, edges=None, tag_edges=None, tag_counts=None,
 
     class _ProjectionStore:
         def get_projection_status(self):
-            return ProjectionStatus(1, "ready", None)
+            return ProjectionStatus(1, projection_state, None)
 
         def get_revision(self):
             return 0
 
         def count_dirty(self):
-            return 0
+            return projection_dirty
 
         def list_live_edges_for_notes(self, note_ids):
             wanted_ids = set(note_ids)
@@ -534,6 +536,28 @@ class TestEdgeTypeFilter:
         assert EdgeType.wikilink not in types
         assert EdgeType.tag_membership not in types
 
+    def test_omitted_edges_keep_legacy_projection_readiness_behavior(self):
+        note_id = _uid()
+        db = _mock_db(
+            notes=[_note(note_id)],
+            note_count=1,
+            all_ids=[note_id],
+            projection_state="rebuilding",
+        )
+        service = NoteGraphService(user_id="u1", db=db)
+
+        with pytest.raises(graph_service_module.GraphProjectionNotReadyError):
+            service.generate_graph(NoteGraphRequest(center_note_id=note_id))
+
+        semantic_only = service.generate_graph(
+            NoteGraphRequest(
+                center_note_id=note_id,
+                edge_types=[EdgeType.semantic],
+            )
+        )
+        assert [node.id for node in semantic_only.nodes] == [note_id]
+        assert semantic_only.edges == []
+
 
 class TestDeletedNotesFlagged:
     def test_soft_deleted_in_graph(self):
@@ -553,6 +577,7 @@ class TestCacheHit:
         n1 = _uid()
         notes = [_note(n1)]
         db = _mock_db(notes=notes, note_count=1, all_ids=[n1])
+        db.note_semantic_store = MagicMock()
         cache = GraphCache(ttl_seconds=60, max_keys=100)
         svc = NoteGraphService(user_id="u1", db=db, cache=cache)
         req = NoteGraphRequest(radius=1)
@@ -562,7 +587,91 @@ class TestCacheHit:
         resp2 = svc.generate_graph(req)
         # Second call should not hit DB
         db.get_notes_batch.assert_not_called()
+        db.note_semantic_store.assert_not_called()
         assert resp1 == resp2
+
+    def test_omitted_edge_cursor_keeps_the_pre_semantic_request_hash(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        monkeypatch.setenv("NOTES_GRAPH_MAX_NODES", "300")
+        monkeypatch.setenv("NOTES_GRAPH_MAX_EDGES", "1200")
+        monkeypatch.setenv("NOTES_GRAPH_MAX_DEGREE", "40")
+        center = _uid()
+        neighbors = sorted(_uid() for _ in range(3))
+        service = NoteGraphService(
+            user_id="u1",
+            db=_mock_db(
+                notes=[_note(center), *(_note(note_id) for note_id in neighbors)],
+                edges=[_manual_edge(center, note_id) for note_id in neighbors],
+                note_count=4,
+            ),
+        )
+        response = service.generate_graph(
+            NoteGraphRequest(center_note_id=center, max_nodes=2)
+        )
+        legacy_query = {
+            "center": center,
+            "radius": 1,
+            "edge_types": None,
+            "tag": None,
+            "source": None,
+            "time_range": None,
+            "time_range_field": "updated_at",
+            "max_nodes": 2,
+            "max_edges": 1_200,
+            "max_degree": 40,
+            "allow_heavy": False,
+        }
+        expected_hash = hashlib.sha256(
+            json.dumps(legacy_query, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+
+        assert response.cursor is not None
+        assert _decode_cursor(response.cursor)["request"] == expected_hash
+
+
+class TestSemanticCandidateOverfetch:
+    def test_overfetch_is_opt_in_and_hard_capped(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("NOTES_GRAPH_MAX_DEGREE", "100")
+        center = _uid()
+        neighbors = sorted(_uid() for _ in range(60))
+        notes = [_note(center), *(_note(note_id) for note_id in neighbors)]
+        edges = [_manual_edge(center, note_id) for note_id in neighbors]
+        request = NoteGraphRequest(
+            center_note_id=center,
+            edge_types=[EdgeType.manual, EdgeType.semantic],
+            max_nodes=2,
+            max_edges=1,
+            max_degree=100,
+        )
+
+        ordinary = NoteGraphService(
+            user_id="u1",
+            db=_mock_db(notes=notes, edges=edges, note_count=len(notes)),
+        ).generate_graph(request)
+        candidates = NoteGraphService(
+            user_id="u1",
+            db=_mock_db(notes=notes, edges=edges, note_count=len(notes)),
+        ).generate_graph(request, semantic_candidate_overfetch=10_000)
+
+        assert ordinary.limits.max_nodes == 2
+        assert ordinary.limits.max_edges == 1
+        assert len([node for node in ordinary.nodes if node.type == "note"]) <= 2
+        assert len(ordinary.edges) <= 1
+        assert candidates.limits.max_nodes == 52
+        assert candidates.limits.max_edges == 51
+        assert len([node for node in candidates.nodes if node.type == "note"]) == 52
+        assert len(candidates.edges) == 51
+
+    def test_negative_overfetch_fails_closed(self):
+        service = NoteGraphService(user_id="u1", db=_mock_db())
+
+        with pytest.raises(InputError, match="overfetch"):
+            service.generate_graph(
+                NoteGraphRequest(edge_types=[EdgeType.semantic]),
+                semantic_candidate_overfetch=-1,
+            )
 
 
 class TestCursorRoundtrip:
@@ -615,6 +724,46 @@ class TestCursorRoundtrip:
         encoded = base64.urlsafe_b64encode(json.dumps(oversized_json).encode()).decode()
         with pytest.raises(InputError, match="too large"):
             _decode_cursor(encoded)
+
+    def test_semantic_binding_mismatch_fails_closed_and_matching_cursor_continues(self):
+        center = _uid()
+        neighbors = sorted(_uid() for _ in range(3))
+        db = _mock_db(
+            notes=[_note(center), *(_note(note_id) for note_id in neighbors)],
+            edges=[_manual_edge(center, note_id) for note_id in neighbors],
+            note_count=4,
+        )
+        db.note_semantic_store = MagicMock()
+        service = NoteGraphService(user_id="u1", db=db)
+        request = NoteGraphRequest(
+            center_note_id=center,
+            edge_types=[EdgeType.manual, EdgeType.semantic],
+            semantic_top_k=2,
+            semantic_threshold=0.75,
+            max_nodes=2,
+        )
+        first = service.generate_graph(request)
+        bound_cursor = graph_service_module.bind_semantic_cursor(
+            first.cursor,
+            semantic_binding="semantic-binding-a",
+        )
+        assert _decode_cursor(
+            bound_cursor,
+            expected_semantic_binding="semantic-binding-a",
+        )["semantic"] == "semantic-binding-a"
+
+        with pytest.raises(InputError, match="stale or mismatched"):
+            _decode_cursor(
+                bound_cursor,
+                expected_semantic_binding="semantic-binding-b",
+            )
+
+        continuation = service.generate_graph(
+            request.model_copy(update={"cursor": bound_cursor})
+        )
+
+        assert continuation.nodes
+        db.note_semantic_store.assert_not_called()
 
 
 class TestDeterministicOrdering:

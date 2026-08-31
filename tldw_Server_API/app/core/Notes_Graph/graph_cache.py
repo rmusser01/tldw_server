@@ -11,6 +11,37 @@ from collections import OrderedDict
 from typing import Any
 
 
+def _semantic_revision_payload(
+    *,
+    dataset_id: str,
+    graph_revision: int,
+    parser_version: int,
+    generation_id: str,
+    semantic_index_revision: int,
+    configuration_revision: int,
+    compatibility_hash: str,
+    model_revision: str | None,
+    normalization_version: str,
+    chunker_version: str,
+    query_params: dict,
+) -> dict[str, object]:
+    """Return only immutable inputs to a final semantic projection."""
+
+    return {
+        "dataset_hash": hashlib.sha256(dataset_id.encode()).hexdigest(),
+        "graph_revision": graph_revision,
+        "parser_version": parser_version,
+        "generation_id": generation_id,
+        "semantic_index_revision": semantic_index_revision,
+        "configuration_revision": configuration_revision,
+        "compatibility_hash": compatibility_hash,
+        "model_revision": model_revision,
+        "normalization_version": normalization_version,
+        "chunker_version": chunker_version,
+        "query": query_params,
+    }
+
+
 def _env_int(name: str, default: int) -> int:
     raw = os.environ.get(name, "")
     try:
@@ -69,6 +100,74 @@ class GraphCache:
                 "query": query_params,
             },
         )
+
+    @staticmethod
+    def make_semantic_revision_key(
+        *,
+        user_id: str,
+        dataset_id: str,
+        graph_revision: int,
+        parser_version: int,
+        generation_id: str,
+        semantic_index_revision: int,
+        configuration_revision: int,
+        compatibility_hash: str,
+        model_revision: str | None,
+        normalization_version: str,
+        chunker_version: str,
+        query_params: dict,
+    ) -> str:
+        """Build the stable outer key for a final semantic projection."""
+
+        return GraphCache.make_cache_key(
+            user_id,
+            _semantic_revision_payload(
+                dataset_id=dataset_id,
+                graph_revision=graph_revision,
+                parser_version=parser_version,
+                generation_id=generation_id,
+                semantic_index_revision=semantic_index_revision,
+                configuration_revision=configuration_revision,
+                compatibility_hash=compatibility_hash,
+                model_revision=model_revision,
+                normalization_version=normalization_version,
+                chunker_version=chunker_version,
+                query_params=query_params,
+            ),
+        )
+
+    @staticmethod
+    def make_semantic_cursor_binding(
+        *,
+        dataset_id: str,
+        graph_revision: int,
+        parser_version: int,
+        generation_id: str,
+        semantic_index_revision: int,
+        configuration_revision: int,
+        compatibility_hash: str,
+        model_revision: str | None,
+        normalization_version: str,
+        chunker_version: str,
+        query_params: dict,
+    ) -> str:
+        """Hash the immutable semantic request identity carried by cursors."""
+
+        payload = _semantic_revision_payload(
+            dataset_id=dataset_id,
+            graph_revision=graph_revision,
+            parser_version=parser_version,
+            generation_id=generation_id,
+            semantic_index_revision=semantic_index_revision,
+            configuration_revision=configuration_revision,
+            compatibility_hash=compatibility_hash,
+            model_revision=model_revision,
+            normalization_version=normalization_version,
+            chunker_version=chunker_version,
+            query_params=query_params,
+        )
+        raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+        return hashlib.sha256(raw.encode()).hexdigest()
 
     # ------------------------------------------------------------------
     # Core API
