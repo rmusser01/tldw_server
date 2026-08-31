@@ -1116,21 +1116,50 @@ class SyncProfileBootstrapResponse(SyncProfileResponse):
     created: bool = False
 
 
+_PersonalContextAttentionInteger = Annotated[
+    int,
+    Field(strict=True, ge=0, le=2**63 - 1),
+]
+
+
+def _valid_personal_context_quota_name(name: str) -> bool:
+    """Return whether one quota name is safe for the public contract."""
+
+    return (
+        1 <= len(name) <= 64
+        and name[0].isalpha()
+        and name[0].isascii()
+        and all(
+            character.isascii()
+            and (character.islower() or character.isdigit() or character == "_")
+            for character in name
+        )
+    )
+
+
 class SyncPersonalContextBootstrapRequest(BaseModel):
     """Authenticated registered-device request for canonical Personal Context."""
 
     device_id: str
     required_schema_version: int | None = Field(None, ge=1)
-    required_quotas: dict[str, int] = Field(default_factory=dict)
+    required_quotas: dict[StrictStr, _PersonalContextAttentionInteger] = Field(
+        default_factory=dict,
+        max_length=32,
+    )
     expected_purge_generation: int | None = Field(None, ge=0)
 
     model_config = ConfigDict(extra="forbid")
 
-
-_PersonalContextAttentionInteger = Annotated[
-    int,
-    Field(strict=True, ge=0, le=2**63 - 1),
-]
+    @model_validator(mode="after")
+    def _validate_required_quota_names(
+        self,
+    ) -> SyncPersonalContextBootstrapRequest:
+        if not all(
+            _valid_personal_context_quota_name(name)
+            for name in self.required_quotas
+        ):
+            raise ValueError("quota name is invalid")
+        return self
 
 
 class SyncPersonalContextSchemaAttention(BaseModel):
@@ -1172,23 +1201,10 @@ class SyncPersonalContextQuotaAttention(BaseModel):
 
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    @staticmethod
-    def _valid_quota_name(name: str) -> bool:
-        return (
-            1 <= len(name) <= 64
-            and name[0].isalpha()
-            and name[0].isascii()
-            and all(
-                character.isascii()
-                and (character.islower() or character.isdigit() or character == "_")
-                for character in name
-            )
-        )
-
     @model_validator(mode="after")
     def _validate_exact_shortfall(self) -> SyncPersonalContextQuotaAttention:
         all_names = set(self.required_quotas) | set(self.available_quotas)
-        if not all(self._valid_quota_name(name) for name in all_names):
+        if not all(_valid_personal_context_quota_name(name) for name in all_names):
             raise ValueError("quota name is invalid")
         if not set(self.required_quotas).issubset(self.available_quotas):
             raise ValueError("available quotas do not cover required quotas")

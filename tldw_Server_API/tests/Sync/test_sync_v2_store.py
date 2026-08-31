@@ -351,8 +351,9 @@ class _PostgresPersonalContextBindingBackend:
 class _PostgresPersonalContextTransportSnapshotBackend:
     config = DatabaseConfig(backend_type=BackendType.POSTGRESQL)
 
-    def __init__(self) -> None:
+    def __init__(self, *, projection_debt: int = 0) -> None:
         self.calls: list[tuple[str, tuple[Any, ...] | None, Any]] = []
+        self.projection_debt = projection_debt
 
     @contextmanager
     def transaction(self, connection=None):
@@ -384,6 +385,7 @@ class _PostgresPersonalContextTransportSnapshotBackend:
                         "domain": "personal_context.record",
                         "adapter_version": 1,
                         "watermark": 17,
+                        "projection_debt": self.projection_debt,
                     }
                 ],
                 rowcount=1,
@@ -2904,6 +2906,22 @@ def test_postgres_personal_context_transport_snapshot_locks_before_watermark_rea
     assert statements[lock_index].endswith("FOR UPDATE")
     assert lock_index < watermark_index
     assert len({connection for _statement, _params, connection in backend.calls}) == 1
+
+
+def test_postgres_personal_context_transport_snapshot_rejects_projection_debt() -> None:
+    """The locked PG watermark read fails closed over unfinished projection."""
+
+    backend = _PostgresPersonalContextTransportSnapshotBackend(projection_debt=1)
+    db = SyncDatabase.__new__(SyncDatabase)
+    db.backend = cast(Any, backend)
+
+    with pytest.raises(SyncStoreError, match="personal_context_projection_incomplete"):
+        with db.personal_context_transport_snapshot(
+            "dataset-1",
+            owner_user_id="user-1",
+            streams=[(domain, 1) for domain in PERSONAL_CONTEXT_SYNC_DOMAINS],
+        ):
+            pytest.fail("unsafe snapshot unexpectedly opened")
 
 
 def test_postgres_personal_context_receipt_rejects_transition_observed_under_lock() -> None:

@@ -2541,7 +2541,15 @@ class SyncDatabase:
             version_placeholders = ", ".join("?" for _ in versions)
             result = self.execute(
                 f"""
-                SELECT domain, adapter_version, MAX(server_sequence) AS watermark
+                SELECT domain,
+                       adapter_version,
+                       MAX(server_sequence) AS watermark,
+                       SUM(
+                           CASE
+                               WHEN apply_status IN ('applied', 'superseded') THEN 0
+                               ELSE 1
+                           END
+                       ) AS projection_debt
                   FROM sync_envelopes
                  WHERE dataset_id = ?
                    AND status = 'accepted'
@@ -2559,6 +2567,10 @@ class SyncDatabase:
                     int(envelope_row["adapter_version"]),
                 )
                 if stream in expected_streams:
+                    if int(envelope_row["projection_debt"] or 0) != 0:
+                        raise SyncStoreError(
+                            "personal_context_projection_incomplete"
+                        )
                     watermarks[stream] = int(envelope_row["watermark"] or 0)
             yield watermarks
 

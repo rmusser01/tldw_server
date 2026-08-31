@@ -531,6 +531,14 @@ class SyncV2ProfileManager:
                 records = tuple(snapshot.records)
                 proposals = tuple(snapshot.proposals)
                 cursor = snapshot.cursor
+        except SyncStoreError as exc:
+            if str(exc) == "personal_context_projection_incomplete":
+                raise PersonalContextBootstrapError(
+                    "personal_context_projection_incomplete"
+                ) from exc
+            raise PersonalContextBootstrapError(
+                "personal_context_snapshot_unavailable"
+            ) from exc
         except Exception as exc:  # noqa: BLE001 - no canonical body in errors.
             raise PersonalContextBootstrapError(
                 "personal_context_snapshot_unavailable"
@@ -1490,10 +1498,11 @@ def _personal_context_quotas_compatible(
         return True
     for name, value in required.items():
         if (
-            not isinstance(name, str)
+            not _valid_personal_context_quota_name(name)
             or not isinstance(value, int)
             or isinstance(value, bool)
             or value < 0
+            or value > 2**63 - 1
             or value > available.get(name, 0)
         ):
             return False

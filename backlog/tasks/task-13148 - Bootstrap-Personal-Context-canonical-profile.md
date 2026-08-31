@@ -126,6 +126,24 @@ Focused tests cover retained history, post-boundary delivery, scope/version
 rejection, slow review, retry stability, SQLite interleaving, and an executed
 PostgreSQL lock contract. Live PostgreSQL was unavailable. TASK-13148 status is
 intentionally unchanged.
+
+Final projection-watermark and request-boundary correction: bootstrap now
+refuses to sign a transport watermark while any accepted Personal Context
+envelope in a negotiated stream is pending, failed, conflicted, or otherwise
+not durably applied/superseded. The check runs under the same dataset-row guard
+used by append, materialization, and replay, preventing a later repair from
+creating canonical content at or below the reviewed cursor. The stable 409 is
+content-free and instructs the caller to repair Sync and retry.
+
+The authenticated request schema now bounds `required_quotas` to 32 safe ASCII
+names and strict non-Boolean integers in `[0, 2**63 - 1]`. Successful responses
+continue to cover every valid requested name; unknown zero minima are returned
+as zero and positive unsupported minima retain typed incompatibility. Meaningful
+RED was `4 failed` for projection state and `8 failed` for malformed quota
+requests. GREEN was `46 passed` bootstrap, `102 passed` endpoints, `187 passed,
+2 skipped` store, and `23 passed` replay/repair. Ruff, compilation, Bandit, and
+diff checks are recorded in the Task 3a report. TASK-13148 status remains
+unchanged for controller review.
 <!-- SECTION:NOTES:END -->
 
 ## Progress
