@@ -1804,6 +1804,7 @@ class SyncV2Envelope(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
     payload_hash: str = Field(..., min_length=1)
     object_revision: int | None = Field(None, ge=0)
+    entity_version: StrictStr | StrictInt | None = None
     created_at_client: str | None = None
     received_at_server: str | None = None
     deleted: bool = False

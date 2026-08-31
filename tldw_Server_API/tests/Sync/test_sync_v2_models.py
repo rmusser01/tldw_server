@@ -814,6 +814,27 @@ def test_sync_envelope_accepts_m1_fields_and_legacy_transition_aliases():
     assert envelope.encryption_metadata == {"policy": "server_trusted_v1"}
 
 
+@pytest.mark.parametrize(("value", "expected_type"), [("version-1", str), (1, int)])
+def test_sync_envelope_entity_version_preserves_wire_type(
+    value: object,
+    expected_type: type,
+) -> None:
+    api_envelope = SyncV2Envelope.model_validate(
+        _m1_envelope_payload(entity_version=value)
+    )
+
+    assert type(api_envelope.entity_version) is expected_type
+    assert type(_core_envelope_from_api(api_envelope).entity_version) is expected_type
+
+
+@pytest.mark.parametrize("value", [True, 1.0])
+def test_sync_envelope_entity_version_rejects_coercible_non_wire_types(
+    value: object,
+) -> None:
+    with pytest.raises(ValidationError):
+        SyncV2Envelope.model_validate(_m1_envelope_payload(entity_version=value))
+
+
 def test_core_sync_mutation_group_metadata_round_trips() -> None:
     expected_sha256 = "a" * 64
     create = core_sync_models.SyncEnvelopeCreate(

@@ -331,6 +331,7 @@ def _validate_envelope_identity(
         if envelope.operation != "upsert":
             raise ValueError("Manifest operation is invalid")
         object_id, parent_id, value_profile_id = value.profile_id, None, value.profile_id
+        entity_version = value.current_version_id
         if value.purge_generation != purge_generation:
             raise _IdentityConflict
     elif envelope.domain == "personal_context.scope":
@@ -341,6 +342,7 @@ def _validate_envelope_identity(
             value.profile_id,
             value.profile_id,
         )
+        entity_version = value.version_id
     elif envelope.domain == "personal_context.record":
         if value.controls.sync_mode is SyncMode.DEVICE_ONLY:
             raise _DeviceOnlyRecord
@@ -354,6 +356,7 @@ def _validate_envelope_identity(
             value.scope_id,
             value.profile_id,
         )
+        entity_version = value.version_id
     elif envelope.domain == "personal_context.proposal":
         if envelope.operation != "upsert":
             raise ValueError("Proposal operation is invalid")
@@ -368,6 +371,9 @@ def _validate_envelope_identity(
             value.scope_id,
             value.profile_id,
         )
+        entity_version = "sync-proposal-sha256:" + hashlib.sha256(
+            canonical_json_bytes(value.model_dump(mode="json"))
+        ).hexdigest()
     else:
         if envelope.operation != "tombstone":
             raise ValueError("Purge operation is invalid")
@@ -376,14 +382,20 @@ def _validate_envelope_identity(
             None,
             value["profile_id"],
         )
+        entity_version = value["purge_generation"]
         if value["purge_generation"] != purge_generation + 1:
             raise _IdentityConflict
     if (
         object_id != envelope.object_id
         or parent_id != envelope.parent_id
         or value_profile_id != profile_id
+        or not _same_wire_version(envelope.entity_version, entity_version)
     ):
         raise _IdentityConflict
+
+
+def _same_wire_version(left: Any, right: Any) -> bool:
+    return type(left) is type(right) and left == right
 
 
 def _current_object_head(

@@ -3286,6 +3286,7 @@ def test_personal_context_endpoints_use_real_factory_bootstrap_and_complete_flow
                     "payload": manifest_payload,
                     "payload_hash": f"hmac-sha256-v1:{manifest_tag.hexdigest()}",
                     "payload_size_bytes": len(manifest_canonical),
+                    "entity_version": manifest.current_version_id,
                     "routing_metadata": {
                         "integrity_key_id": integrity_key_id,
                         "profile_id": manifest.profile_id,
@@ -3299,7 +3300,7 @@ def test_personal_context_endpoints_use_real_factory_bootstrap_and_complete_flow
     assert push.status_code == 200, push.text
     assert [item["client_envelope_id"] for item in push.json()["accepted"]] == [
         "pc-device:manifest:1"
-    ]
+    ], push.json()
 
 
 def test_personal_context_bootstrap_response_exposes_effective_zero_quota(

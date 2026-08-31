@@ -245,6 +245,7 @@ def _record_envelope(bootstrap) -> SyncEnvelopeCreate:
         payload=payload,
         payload_hash=f"hmac-sha256-v1:{tag.hexdigest()}",
         payload_size_bytes=len(canonical_json_bytes(payload)),
+        entity_version=str(payload["version_id"]),
         routing_metadata={
             "integrity_key_id": bootstrap.integrity_key.integrity_key_id,
             "profile_id": bootstrap.manifest.profile_id,

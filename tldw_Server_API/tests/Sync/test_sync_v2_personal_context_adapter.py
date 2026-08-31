@@ -104,6 +104,17 @@ def _tag(payload: dict[str, object]) -> str:
     return f"hmac-sha256-v1:{digest.hexdigest()}"
 
 
+def _wire_version(domain: str, payload: dict[str, object]) -> str | int:
+    if domain == "personal_context.manifest":
+        return str(payload["current_version_id"])
+    if domain in {"personal_context.scope", "personal_context.record"}:
+        return str(payload["version_id"])
+    if domain == "personal_context.proposal":
+        digest = hashlib.sha256(canonical_json_bytes(payload)).hexdigest()
+        return f"sync-proposal-sha256:{digest}"
+    return int(payload["purge_generation"])
+
+
 def _envelope(
     domain: str,
     *,
@@ -113,6 +124,7 @@ def _envelope(
     payload_hash: str | None = None,
     base_object_hash: str | None = None,
     object_revision: int = 1,
+    entity_version: str | int | None = None,
 ) -> SyncEnvelopeCreate:
     default_payload, default_object_id, default_parent_id = _payloads()[domain]
     value = default_payload if payload is None else payload
@@ -131,6 +143,11 @@ def _envelope(
         payload_size_bytes=len(canonical_json_bytes(value)),
         base_object_hash=base_object_hash,
         object_revision=object_revision,
+        entity_version=(
+            _wire_version(domain, value)
+            if entity_version is None
+            else entity_version
+        ),
         encryption_metadata={"policy": "server_trusted_v1"},
         routing_metadata={"integrity_key_id": INTEGRITY_KEY_ID},
     )
@@ -148,6 +165,17 @@ def test_adapter_accepts_exact_canonical_whole_objects(domain: str) -> None:
     result = _adapter(domain).evaluate_envelope(_envelope(domain), dataset=_dataset())
 
     assert isinstance(result, AdapterAccepted)
+
+
+@pytest.mark.parametrize("domain", PERSONAL_CONTEXT_SYNC_DOMAINS)
+def test_adapter_rejects_entity_version_outside_canonical_payload(domain: str) -> None:
+    result = _adapter(domain).evaluate_envelope(
+        _envelope(domain, entity_version="mismatched-version"),
+        dataset=_dataset(),
+    )
+
+    assert isinstance(result, AdapterConflict)
+    assert result.conflict_type == "personal_context_identity_conflict"
 
 
 def test_adapter_rejects_invalid_integrity_without_echoing_body() -> None:
