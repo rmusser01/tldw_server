@@ -22,6 +22,14 @@ def _shell_blocks(text: str) -> str:
     return "\n".join(re.findall(r"```bash\n(.*?)```", text, flags=re.DOTALL))
 
 
+def _rotation_block(text: str) -> str:
+    return next(
+        block
+        for block in re.findall(r"```bash\n(.*?)```", text, flags=re.DOTALL)
+        if "TLDW_OLD_METRICS_API_KEY_ID" in block and "metrics-credential-init" in block
+    )
+
+
 def _reference_link_target(path: Path) -> Path:
     text = path.read_text(encoding="utf-8")
     match = re.search(r"\[[^]]+\]\(([^)]*Production_Reference_Deployment\.md)\)", text)
@@ -92,6 +100,56 @@ def test_monitoring_runbook_requires_operator_inputs_and_explains_networking() -
     assert "receiver" in text.lower()
     assert "outbound webhook" in text.lower()
     assert "network is not marked `internal`" in text
+
+
+def test_monitoring_rotation_stages_restarts_verifies_then_revokes_old_key() -> None:
+    rotation = _rotation_block(RUNBOOK.read_text(encoding="utf-8"))
+    stage_function = rotation[rotation.index("stage_and_restart()") : rotation.index("wait_for_tldw_target()")]
+    assert stage_function.index("run --rm --no-deps metrics-credential-init") < stage_function.index(
+        "restart prometheus"
+    )
+
+    transaction = rotation[rotation.index("TLDW_NEW_METRICS_KEY_RESPONSE=") :]
+    ordered_transaction = (
+        'method="POST"',
+        'mv -f -- "$TLDW_NEW_METRICS_API_KEY_FILE" "$TLDW_METRICS_API_KEY_FILE"',
+        "if ! stage_and_restart || ! wait_for_tldw_target; then",
+        'revoke_metrics_key "$TLDW_OLD_METRICS_API_KEY_ID"',
+    )
+
+    positions = [transaction.index(item) for item in ordered_transaction]
+    assert positions == sorted(positions)
+    assert "/api/v1/targets?state=active" in rotation
+    assert 'chmod 600 "$TLDW_NEW_METRICS_API_KEY_FILE"' in transaction
+    assert "TLDW_ADMIN_TOKEN" in rotation
+    assert "TLDW_OPERATOR_TOKEN" not in rotation
+    assert "reload prometheus" not in rotation
+
+
+def test_monitoring_rotation_failure_restages_old_key_before_revoking_new_key() -> None:
+    rotation = _rotation_block(RUNBOOK.read_text(encoding="utf-8"))
+    rollback = rotation[rotation.index("if ! stage_and_restart") :]
+    ordered_rollback = (
+        'install -m 600 "$TLDW_OLD_METRICS_API_KEY_FILE" "$TLDW_ROLLBACK_METRICS_API_KEY_FILE"',
+        'mv -f -- "$TLDW_ROLLBACK_METRICS_API_KEY_FILE" "$TLDW_METRICS_API_KEY_FILE"',
+        "if stage_and_restart && wait_for_tldw_target; then",
+        'revoke_metrics_key "$TLDW_NEW_METRICS_API_KEY_ID"',
+    )
+
+    positions = [rollback.index(item) for item in ordered_rollback]
+    assert positions == sorted(positions)
+
+
+def test_monitoring_retirement_unmounts_ephemeral_credentials_without_volume_deletion() -> None:
+    text = RUNBOOK.read_text(encoding="utf-8")
+    retirement = next(
+        block
+        for block in re.findall(r"```bash\n(.*?)```", text, flags=re.DOTALL)
+        if "docker-compose.production.yml" in block and re.search(r"\sdown(?:\s|$)", block)
+    )
+
+    assert re.search(r"\sdown(?:\s|$)", retirement)
+    assert " -v" not in retirement
 
 
 def test_reference_runbook_assigns_each_deferred_boundary_to_the_right_task() -> None:

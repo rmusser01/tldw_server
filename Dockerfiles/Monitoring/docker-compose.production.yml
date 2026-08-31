@@ -12,12 +12,13 @@ services:
     command:
       - |
         import os
-        import sys
+        import stat
 
         source = "/run/source/tldw_metrics_api_key"
         directory = "/run/staged"
         target = f"{directory}/tldw_metrics_api_key"
         temporary = f"{directory}/.tldw_metrics_api_key.tmp"
+        MAX_CREDENTIAL_BYTES = 16 * 1024
 
         try:
             uid = int(os.environ["PROMETHEUS_UID"])
@@ -32,6 +33,14 @@ services:
 
             source_fd = os.open(source, os.O_RDONLY | os.O_NOFOLLOW)
             try:
+                source_info = os.fstat(source_fd)
+                if not stat.S_ISREG(source_info.st_mode):
+                    raise ValueError("Metrics credential source must be a regular file")
+                if stat.S_IMODE(source_info.st_mode) != 0o600:
+                    raise PermissionError("Metrics credential source must have mode 0600")
+                if source_info.st_size <= 0 or source_info.st_size > MAX_CREDENTIAL_BYTES:
+                    raise ValueError("Metrics credential source size is outside the allowed range")
+
                 target_fd = os.open(
                     temporary,
                     os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
@@ -39,8 +48,11 @@ services:
                 )
                 try:
                     copied = 0
-                    while True:
-                        chunk = os.read(source_fd, 4096)
+                    while copied <= MAX_CREDENTIAL_BYTES:
+                        chunk = os.read(
+                            source_fd,
+                            min(4096, MAX_CREDENTIAL_BYTES + 1 - copied),
+                        )
                         if not chunk:
                             break
                         remaining = memoryview(chunk)
@@ -52,6 +64,10 @@ services:
                             remaining = remaining[written:]
                     if copied == 0:
                         raise ValueError("Metrics credential is empty")
+                    if copied > MAX_CREDENTIAL_BYTES:
+                        raise ValueError("Metrics credential exceeds the allowed size")
+                    if copied != source_info.st_size:
+                        raise ValueError("Metrics credential changed while it was staged")
                     os.fchmod(target_fd, 0o400)
                     os.fchown(target_fd, uid, gid)
                     os.fsync(target_fd)
@@ -171,4 +187,9 @@ networks:
 
 volumes:
   grafana_data:
-  metrics_credential: {}
+  metrics_credential:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: "uid=0,gid=${PROMETHEUS_GID:?Set the numeric GID used by the pinned Prometheus image},mode=0710,size=64k"

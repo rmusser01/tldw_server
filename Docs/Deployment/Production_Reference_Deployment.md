@@ -218,14 +218,15 @@ docker compose --env-file "$PRODUCTION_ENV_FILE" \
   up -d --wait
 ```
 
-`Dockerfiles/Monitoring/docker-compose.production.yml` gives the mode-0600 host
-file only to a fail-stop credential-init container. The init container has no
-network, a read-only root filesystem, no-new-privileges, and only the capabilities
-needed to read the owner-only bind, set ownership, and drop to the pinned
-Prometheus identity. It atomically stages a mode-0400 copy in a private named
-volume, proves that identity can read a nonempty credential, and exits. Prometheus
-starts only after that successful proof and mounts only the staged volume read
-only at `/run/secrets`.
+`Dockerfiles/Monitoring/docker-compose.production.yml` gives the exact-mode-0600
+regular host file only to a fail-stop credential-init container. It rejects
+empty files and files larger than 16 KiB. The init container has no network, a
+read-only root filesystem, no-new-privileges, and only the capabilities needed
+to read the owner-only bind, set ownership, and drop to the pinned Prometheus
+identity. It atomically stages a mode-0400 copy in a bounded local-driver tmpfs,
+proves that identity can read a nonempty credential, and exits. Prometheus starts
+only after that successful proof and mounts only the staged tmpfs read-only at
+`/run/secrets`; no plaintext is stored as ordinary named-volume data.
 
 Only Prometheus joins the existing `tldw-production_edge` network to scrape
 `app:8000`; Alertmanager and Grafana remain on the companion's separate
@@ -237,13 +238,120 @@ uses the staged key as a Bearer credential for `/api/v1/metrics/text`. The legac
 `docker-compose.monitoring.yml` is a non-production customization overlay and is
 not compatible with the standalone production boundary.
 
-Rotate the API key and file together, then reload Prometheus. Stop monitoring
-without removing its Grafana data by omitting `-v`:
+An ordinary Prometheus reload is insufficient because the one-shot init service
+must first replace the staged tmpfs copy. To rotate without revoking the working
+credential prematurely, use an administrator token to create an additional
+service-scoped key for the same dedicated principal whose only diagnostic
+permission is `system.logs`. Set `TLDW_METRICS_USER_ID` and
+`TLDW_OLD_METRICS_API_KEY_ID` to that principal and its currently staged key,
+then run this transaction. The create response is captured rather than printed.
+The old key stays active until the new file is staged, Prometheus is restarted,
+and its `tldw_server` target reports healthy:
+
+```bash
+set -euo pipefail
+MAIN_COMPOSE=(docker compose --env-file "$PRODUCTION_ENV_FILE" -f Dockerfiles/docker-compose.production.yml)
+MONITORING_COMPOSE=(docker compose --env-file "$PRODUCTION_ENV_FILE" -f Dockerfiles/Monitoring/docker-compose.production.yml)
+
+revoke_metrics_key() {
+  "${MAIN_COMPOSE[@]}" exec -T -e TLDW_ADMIN_TOKEN app \
+    python - "$TLDW_METRICS_USER_ID" "$1" <<'PY'
+import os, sys, urllib.request
+request = urllib.request.Request(
+    f"http://localhost:8000/api/v1/admin/users/{sys.argv[1]}/api-keys/{sys.argv[2]}",
+    headers={"Authorization": "Bearer " + os.environ["TLDW_ADMIN_TOKEN"]},
+    method="DELETE",
+)
+urllib.request.urlopen(request, timeout=10).read()
+PY
+}
+
+stage_and_restart() {
+  "${MONITORING_COMPOSE[@]}" run --rm --no-deps metrics-credential-init &&
+    "${MONITORING_COMPOSE[@]}" restart prometheus
+}
+
+wait_for_tldw_target() {
+  for _attempt in $(seq 1 12); do
+    if "${MONITORING_COMPOSE[@]}" exec -T prometheus \
+      wget -qO- 'http://localhost:9090/api/v1/targets?state=active' |
+      python3 -c 'import json, sys
+targets = json.load(sys.stdin)["data"]["activeTargets"]
+sys.exit(0 if any(
+    target.get("labels", {}).get("job") == "tldw_server" and target.get("health") == "up"
+    for target in targets
+) else 1)'; then
+      return 0
+    fi
+    sleep 5
+  done
+  return 1
+}
+
+TLDW_NEW_METRICS_KEY_RESPONSE="$(
+  "${MAIN_COMPOSE[@]}" exec -T -e TLDW_ADMIN_TOKEN app \
+    python - "$TLDW_METRICS_USER_ID" <<'PY'
+import json, os, sys, urllib.request
+request = urllib.request.Request(
+    f"http://localhost:8000/api/v1/admin/users/{sys.argv[1]}/api-keys",
+    data=json.dumps({"name": "prometheus-rotation", "scope": "service"}).encode(),
+    headers={
+        "Authorization": "Bearer " + os.environ["TLDW_ADMIN_TOKEN"],
+        "Content-Type": "application/json",
+    },
+    method="POST",
+)
+sys.stdout.write(urllib.request.urlopen(request, timeout=10).read().decode())
+PY
+)"
+read -r TLDW_NEW_METRICS_API_KEY_ID TLDW_NEW_METRICS_API_KEY < <(
+  printf '%s' "$TLDW_NEW_METRICS_KEY_RESPONSE" |
+    python3 -c 'import json, sys; result=json.load(sys.stdin); print(result["id"], result["key"])'
+)
+unset TLDW_NEW_METRICS_KEY_RESPONSE
+
+umask 077
+TLDW_OLD_METRICS_API_KEY_FILE="$(mktemp "${TLDW_METRICS_API_KEY_FILE}.rollback.XXXXXX")"
+install -m 600 "$TLDW_METRICS_API_KEY_FILE" "$TLDW_OLD_METRICS_API_KEY_FILE"
+TLDW_NEW_METRICS_API_KEY_FILE="$(mktemp "${TLDW_METRICS_API_KEY_FILE}.new.XXXXXX")"
+printf '%s' "$TLDW_NEW_METRICS_API_KEY" > "$TLDW_NEW_METRICS_API_KEY_FILE"
+chmod 600 "$TLDW_NEW_METRICS_API_KEY_FILE"
+mv -f -- "$TLDW_NEW_METRICS_API_KEY_FILE" "$TLDW_METRICS_API_KEY_FILE"
+unset TLDW_NEW_METRICS_API_KEY
+
+if ! stage_and_restart || ! wait_for_tldw_target; then
+  TLDW_ROLLBACK_METRICS_API_KEY_FILE="$(mktemp "${TLDW_METRICS_API_KEY_FILE}.restore.XXXXXX")"
+  install -m 600 "$TLDW_OLD_METRICS_API_KEY_FILE" "$TLDW_ROLLBACK_METRICS_API_KEY_FILE"
+  mv -f -- "$TLDW_ROLLBACK_METRICS_API_KEY_FILE" "$TLDW_METRICS_API_KEY_FILE"
+  if stage_and_restart && wait_for_tldw_target; then
+    revoke_metrics_key "$TLDW_NEW_METRICS_API_KEY_ID"
+  fi
+  rm -f -- "$TLDW_OLD_METRICS_API_KEY_FILE"
+  exit 1
+fi
+
+revoke_metrics_key "$TLDW_OLD_METRICS_API_KEY_ID"
+rm -f -- "$TLDW_OLD_METRICS_API_KEY_FILE"
+export TLDW_OLD_METRICS_API_KEY_ID="$TLDW_NEW_METRICS_API_KEY_ID"
+unset TLDW_NEW_METRICS_API_KEY_ID
+```
+
+If the new stage, restart, or target verification fails, the failure branch
+atomically restores and re-stages the old file before revoking the unused new
+key. If old-key recovery cannot itself be verified, both principals remain
+active for operator recovery and the transaction exits nonzero.
+
+For monitoring retirement, use the canonical `down` command without `-v`:
 
 ```bash
 docker compose --env-file "$PRODUCTION_ENV_FILE" \
   -f Dockerfiles/Monitoring/docker-compose.production.yml down
 ```
+
+`down` removes the monitoring containers and unmounts the credential tmpfs, so
+its staged plaintext bytes disappear. Omitting `-v` preserves Grafana data and
+any operator-added durable Prometheus volume; the tmpfs volume object carries no
+ordinary on-disk credential payload into the next mount.
 
 ## 7. Upgrade and restore-backed rollback
 
