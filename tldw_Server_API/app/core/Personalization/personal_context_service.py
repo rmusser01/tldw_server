@@ -191,17 +191,6 @@ class PersonalContextService:
             raise KeyError("Personal context profile not found")
         return self._repository.sync_integrity_key(profile_id)
 
-    def ensure_sync_profile(self) -> ProfileManifest:
-        """Create the sole canonical profile when absent, tolerating a concurrent creator."""
-
-        try:
-            return self._manifest()
-        except KeyError:
-            try:
-                return self.create_profile(runtime_enabled=False)
-            except ProfileConflictError:
-                return self._manifest()
-
     @staticmethod
     def _sync_plan_id(profile_id: str, label: str) -> str:
         """Derive stable opaque object IDs from one random reserved profile ID."""
