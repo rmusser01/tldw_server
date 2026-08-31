@@ -23,7 +23,7 @@ from contextlib import asynccontextmanager, contextmanager, suppress
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError, ResponseValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -61,6 +61,9 @@ from tldw_Server_API.app.services.app_lifecycle import (
     mark_lifecycle_startup,  # noqa: F401 - re-exported for lifecycle contract tests.
     get_or_create_lifecycle_state,
 )
+from tldw_Server_API.app.services import readiness_service
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequirePermission
+from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_LOGS
 from tldw_Server_API.app.services import shutdown_coordinated_runtime as _shutdown_coordinated_runtime
 from tldw_Server_API.app.services import shutdown_owned_job_pollers as _shutdown_owned_job_pollers
 from tldw_Server_API.app.services import startup_pg_rls as _startup_pg_rls
@@ -2876,6 +2879,11 @@ async def api_metrics():
     return registry.get_all_metrics()
 
 
+async def _set_diagnostics_no_store(response: Response) -> None:
+    """Prevent caching for direct dictionary-based diagnostic aliases."""
+    response.headers["Cache-Control"] = "no-store"
+
+
 # Router for health monitoring endpoints (NEW)
 if _ULTRA_MINIMAL_APP:
     # Ultra-minimal mode relies exclusively on control-plane health routes
@@ -2928,14 +2936,42 @@ if _shared_env_flag_enabled("ENABLE_ADMIN_E2E_TEST_MODE"):
 
 try:
     if route_enabled("metrics"):
-        app.add_api_route("/metrics", metrics, include_in_schema=False)
-        app.add_api_route(f"{API_V1_PREFIX}/metrics", api_metrics, methods=["GET"], tags=["monitoring"])
+        app.add_api_route(
+            "/metrics",
+            metrics,
+            include_in_schema=False,
+            dependencies=[Depends(RequirePermission(SYSTEM_LOGS))],
+        )
+        app.add_api_route(
+            f"{API_V1_PREFIX}/metrics",
+            api_metrics,
+            methods=["GET"],
+            tags=["monitoring"],
+            dependencies=[
+                Depends(RequirePermission(SYSTEM_LOGS)),
+                Depends(_set_diagnostics_no_store),
+            ],
+        )
     else:
         logger.info("Route disabled by policy: metrics")
 except _STARTUP_GUARD_EXCEPTIONS as _metrics_rt_err:
     logger.warning(f"Route gating error for metrics; including by default. Error: {_metrics_rt_err}")
-    app.add_api_route("/metrics", metrics, include_in_schema=False)
-    app.add_api_route(f"{API_V1_PREFIX}/metrics", api_metrics, methods=["GET"], tags=["monitoring"])
+    app.add_api_route(
+        "/metrics",
+        metrics,
+        include_in_schema=False,
+        dependencies=[Depends(RequirePermission(SYSTEM_LOGS))],
+    )
+    app.add_api_route(
+        f"{API_V1_PREFIX}/metrics",
+        api_metrics,
+        methods=["GET"],
+        tags=["monitoring"],
+        dependencies=[
+            Depends(RequirePermission(SYSTEM_LOGS)),
+            Depends(_set_diagnostics_no_store),
+        ],
+    )
 
 # Router for trash endpoints - deletion of media items / trash file handling (FIXME: Secure delete vs lag on delete?)
 # app.include_router(trash_router, prefix=f"{API_V1_PREFIX}/trash", tags=["trash"])
@@ -2946,188 +2982,34 @@ except _STARTUP_GUARD_EXCEPTIONS as _metrics_rt_err:
 
 
 # Health check (registered conditionally below)
-async def health_check():
-    body = {"status": "healthy"}
-    # Always attempt to include RG policy snapshot: prefer app.state, fallback to configured file
-    try:
-        rgv = getattr(app.state, "rg_policy_version", None)
-        if rgv is not None:
-            body["rg_policy_version"] = int(rgv)
-            body["rg_policy_store"] = getattr(app.state, "rg_policy_store", None)
-            body["rg_policy_count"] = getattr(app.state, "rg_policy_count", None)
-        else:
-            # Fallback to RG_POLICY_PATH (file-based) when loader not initialized
-            import os as _os
-            from pathlib import Path as _Path
-
-            import yaml as _yaml
-
-            p = _os.getenv("RG_POLICY_PATH")
-            if p and _Path(p).exists():
-                try:
-                    with _Path(p).open("r", encoding="utf-8") as _f:
-                        _data = _yaml.safe_load(_f) or {}
-                    body["rg_policy_version"] = int(_data.get("version") or 1)
-                    body["rg_policy_store"] = _os.getenv("RG_POLICY_STORE", "file")
-                    body["rg_policy_count"] = len((_data.get("policies") or {}).keys())
-                except _REQUEST_GUARD_EXCEPTIONS:
-                    pass
-    except _REQUEST_GUARD_EXCEPTIONS:
-        pass
-    return body
+_NO_STORE_HEADERS = {"Cache-Control": "no-store"}
 
 
-# Readiness check (verifies critical dependencies) - registered conditionally below
-def _public_database_health(health: object) -> dict[str, Any]:
-    """Allowlist database health details exposed by public readiness probes."""
-    if not isinstance(health, dict):
-        return {
-            "status": "unhealthy",
-            "type": "unknown",
-            "error": "database_unavailable",
-        }
-    database_type = health.get("type")
-    if database_type not in {"postgresql", "sqlite"}:
-        database_type = "unknown"
-    if health.get("status") != "healthy":
-        return {
-            "status": "unhealthy",
-            "type": database_type,
-            "error": "database_unavailable",
-        }
-    public_health: dict[str, Any] = {
-        "status": "healthy",
-        "type": database_type,
-    }
-    allowed_metrics = (
-        "pool_size",
-        "idle_connections",
-        "active_connections",
-        "database_size_mb",
+async def health_check() -> JSONResponse:
+    """Return the immutable public liveness contract."""
+    return JSONResponse({"status": "ok"}, headers=_NO_STORE_HEADERS)
+
+
+async def internal_readiness_check(request: Request) -> JSONResponse:
+    """Serve only loopback, detail-free readiness for local orchestrators."""
+    if not readiness_service.is_loopback_peer(request):
+        return JSONResponse({"detail": "Not Found"}, status_code=404, headers=_NO_STORE_HEADERS)
+    snapshot = await readiness_service.collect_readiness_snapshot(request.app)
+    return JSONResponse(
+        readiness_service.internal_readiness_payload(snapshot),
+        status_code=200 if snapshot.ready else 503,
+        headers=_NO_STORE_HEADERS,
     )
-    for metric in allowed_metrics:
-        value = health.get(metric)
-        if isinstance(value, (int, float)) and not isinstance(value, bool):
-            public_health[metric] = value
-    return public_health
 
 
 async def readiness_check(request: Request) -> JSONResponse:
-    """Readiness probe for orchestrators and load balancers."""
-    try:
-        lifecycle = get_or_create_lifecycle_state(request.app)
-        if lifecycle.draining or lifecycle.phase == "draining":
-            return JSONResponse(
-                {"status": "not_ready", "reason": "shutdown_in_progress"},
-                status_code=503,
-            )
-        # Engine stats
-        try:
-            from tldw_Server_API.app.core.Workflows.engine import WorkflowScheduler as _WS
-
-            engine_stats = _WS.instance().stats()
-        except _REQUEST_GUARD_EXCEPTIONS:
-            engine_stats = {"queue_depth": None, "active_tenants": None, "active_workflows": None}
-
-        # DB health (AuthNZ pool basic health for API; Workflows DB schema check below)
-        from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
-
-        db_pool = await get_db_pool()
-        db_health = _public_database_health(await db_pool.health_check())
-
-        # Workflows backend schema check
-        try:
-            from tldw_Server_API.app.core.DB_Management.DB_Manager import (
-                create_workflows_database,
-                get_content_backend_instance,
-            )
-            from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase as _WDB
-
-            backend = get_content_backend_instance()
-            wdb: _WDB = create_workflows_database(backend=backend)
-            if wdb._using_backend():
-                with wdb.backend.transaction() as conn:  # type: ignore[union-attr]
-                    try:
-                        wf_schema_version = int(wdb._get_backend_schema_version(conn))  # type: ignore[attr-defined]
-                        wf_expected_version = int(wdb._CURRENT_SCHEMA_VERSION)  # type: ignore[attr-defined]
-                    except _REQUEST_GUARD_EXCEPTIONS:
-                        wf_schema_version = None
-                        wf_expected_version = None
-            else:
-                wf_schema_version = None
-                wf_expected_version = None
-        except _REQUEST_GUARD_EXCEPTIONS:
-            wf_schema_version = None
-            wf_expected_version = None
-
-        # Provider manager health (if initialized)
-        try:
-            from tldw_Server_API.app.core.Chat.provider_manager import get_provider_manager
-
-            pm = get_provider_manager()
-            provider_health = pm.get_health_report() if pm else {}
-            providers_ok = pm is not None
-        except _REQUEST_GUARD_EXCEPTIONS:
-            provider_health = {}
-            providers_ok = False
-
-        # OTEL status
-        from tldw_Server_API.app.core.Metrics import OTEL_AVAILABLE
-
-        ready = db_health.get("status") == "healthy"
-        # If workflows backend reports schema version, ensure it matches expected
-        if wf_schema_version is not None and wf_expected_version is not None:
-            ready = ready and (wf_schema_version == wf_expected_version)
-        body = {
-            "status": "ready" if ready else "not_ready",
-            "database": db_health,
-            "workflows_db": {
-                "schema_version": wf_schema_version,
-                "expected_version": wf_expected_version,
-            },
-            "engine": engine_stats,
-            "providers_initialized": providers_ok,
-            "provider_health": provider_health,
-            "otel_available": bool(OTEL_AVAILABLE),
-        }
-        # Include Resource Governor policy metadata; prefer app.state and fallback to RG_POLICY_PATH
-        try:
-            rgv = getattr(app.state, "rg_policy_version", None)
-            if rgv is not None:
-                body["rg_policy"] = {
-                    "version": int(rgv),
-                    "store": getattr(app.state, "rg_policy_store", None),
-                    "policies": getattr(app.state, "rg_policy_count", None),
-                }
-            else:
-                import os as _os
-                from pathlib import Path as _Path
-
-                import yaml as _yaml
-
-                p = _os.getenv("RG_POLICY_PATH")
-                if p and _Path(p).exists():
-                    try:
-                        with _Path(p).open("r", encoding="utf-8") as _f:
-                            _data = _yaml.safe_load(_f) or {}
-                        body["rg_policy"] = {
-                            "version": int(_data.get("version") or 1),
-                            "store": _os.getenv("RG_POLICY_STORE", "file"),
-                            "policies": len((_data.get("policies") or {}).keys()),
-                        }
-                    except _REQUEST_GUARD_EXCEPTIONS:
-                        pass
-        except _REQUEST_GUARD_EXCEPTIONS:
-            pass
-        return JSONResponse(body, status_code=(200 if ready else 503))
-    except _READINESS_GUARD_EXCEPTIONS as exc:
-        logger.bind(exception_type=type(exc).__name__).debug(
-            "Readiness check failed"
-        )
-        return JSONResponse(
-            {"status": "not_ready", "reason": "dependency_check_failed"},
-            status_code=503,
-        )
+    """Return the authenticated operator readiness projection."""
+    snapshot = await readiness_service.collect_readiness_snapshot(request.app)
+    return JSONResponse(
+        readiness_service.operator_readiness_payload(snapshot),
+        status_code=200 if snapshot.ready else 503,
+        headers=_NO_STORE_HEADERS,
+    )
 
 
 # /health/ready alias for some orchestrators (registered conditionally below)
@@ -3141,19 +3023,42 @@ def _add_public_control_plane_route(path: str, endpoint: Any) -> None:
     app.add_api_route(path, endpoint, methods=["HEAD"], **route_kwargs)
 
 
+def _add_operator_readiness_route(path: str, endpoint: Any) -> None:
+    """Register authenticated readiness without duplicating OpenAPI operation IDs."""
+
+    route_kwargs = {
+        "tags": ["health"],
+        "dependencies": [Depends(RequirePermission(SYSTEM_LOGS))],
+    }
+    app.add_api_route(path, endpoint, methods=["GET"], **route_kwargs)
+    app.add_api_route(path, endpoint, methods=["HEAD"], **route_kwargs)
+
+
 # Register control-plane health endpoints (works in both minimal and full modes)
 try:
     if route_enabled("health"):
         _add_public_control_plane_route("/health", health_check)
-        _add_public_control_plane_route("/ready", readiness_check)
-        _add_public_control_plane_route("/health/ready", readiness_alias)
+        app.add_api_route(
+            "/internal/ready",
+            internal_readiness_check,
+            methods=["GET", "HEAD"],
+            include_in_schema=False,
+        )
+        _add_operator_readiness_route("/ready", readiness_check)
+        _add_operator_readiness_route("/health/ready", readiness_alias)
     else:
         logger.info("Route disabled by policy: health (/health, /ready, /health/ready)")
 except _STARTUP_GUARD_EXCEPTIONS as _health_rt_err:
     logger.warning(f"Route gating error for health; including by default. Error: {_health_rt_err}")
     _add_public_control_plane_route("/health", health_check)
-    _add_public_control_plane_route("/ready", readiness_check)
-    _add_public_control_plane_route("/health/ready", readiness_alias)
+    app.add_api_route(
+        "/internal/ready",
+        internal_readiness_check,
+        methods=["GET", "HEAD"],
+        include_in_schema=False,
+    )
+    _add_operator_readiness_route("/ready", readiness_check)
+    _add_operator_readiness_route("/health/ready", readiness_alias)
 
 # Import-time CI/startup guard: fail immediately if the route table contains duplicates.
 _fail_on_duplicate_route_method_pairs(app, context="module import")

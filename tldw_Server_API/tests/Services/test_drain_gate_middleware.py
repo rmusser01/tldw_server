@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Iterator, Mapping
 from types import SimpleNamespace
-import os
 
 import pytest
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.core.Security.drain_gate_middleware import (
@@ -26,12 +26,15 @@ def test_app(monkeypatch: pytest.MonkeyPatch):
 
 
 @pytest.fixture()
-def draining_client(test_app):
+def draining_client(
+    test_app: FastAPI,
+    auth_headers: Mapping[str, str],
+) -> Iterator[TestClient]:
+    """Yield an authenticated client while the application is draining."""
+
     from tldw_Server_API.app.services.app_lifecycle import get_or_create_lifecycle_state
 
-    headers = {"X-API-KEY": os.environ.get("SINGLE_USER_API_KEY", "test-api-key-12345")}
-
-    with TestClient(test_app, headers=headers) as client:
+    with TestClient(test_app, headers=auth_headers) as client:
         state = get_or_create_lifecycle_state(test_app)
         state.phase = "draining"
         state.ready = False
@@ -157,6 +160,8 @@ def test_drain_gate_rejects_guarded_request_before_llm_budget_runs(test_app, dra
     [
         ("GET", "/health"),
         ("HEAD", "/health"),
+        ("GET", "/internal/ready"),
+        ("HEAD", "/internal/ready"),
         ("GET", "/ready"),
         ("HEAD", "/ready"),
         ("GET", "/readyz"),

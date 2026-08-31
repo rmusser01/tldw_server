@@ -6,6 +6,7 @@ Audience: DevOps/SREs and self-hosters deploying tldw_server for the first time
 This guide walks you through a secure, production-ready first deployment of tldw_server. It covers Docker Compose (recommended) and a bare-metal alternative, plus the initial setup wizard, TLS, CORS, and basic verification.
 
 Related documents
+- [Production-safe reference deployment](Production_Reference_Deployment.md)
 - Reverse proxy examples (Nginx/Traefik): `Docs/Deployment/Reverse_Proxy_Examples.md`
 - Postgres migration: `Docs/Deployment/Postgres_Migration_Guide.md`
 - Sidecar workers (systemd/launchd): `Docs/Deployment/Sidecar_Workers.md`
@@ -38,14 +39,21 @@ Security preflight
 - Need package-managed services and systemd? Use bare-metal + Nginx.
 - Expect multiple users/teams? Prefer Postgres and reverse proxy TLS from day one.
 
-## 3) Option A - Docker Compose (recommended)
+## 3) Option A - Production reference Docker Compose (recommended)
 
-The canonical Compose setup commands are maintained in these profile guides:
+Use the fail-closed workflow in
+`Docs/Deployment/Production_Reference_Deployment.md`. It provides the standalone
+Compose topology, TLS proxy, raw environment contract, offline preflight,
+verified deployment, and restore-backed rollback.
+
+The following quickstart profile guides are for local evaluation and are
+non-production starting points:
 
 - Single-user Docker: `Docs/Getting_Started/Profile_Docker_Single_User.md`
 - Multi-user Docker + Postgres: `Docs/Getting_Started/Profile_Docker_Multi_User_Postgres.md`
 
-Production guidance for Compose deployments:
+Do not assemble a production deployment by combining the legacy quickstart or
+proxy overlays. For the reference profile:
 
 - Keep Postgres volumes backed up and tested for restore.
 - Terminate TLS at your reverse proxy and forward to `app:8000`.
@@ -84,13 +92,19 @@ See `Env_Vars.md` for the complete list and `Docs/AuthNZ/AUTHNZ_DATABASE_CONFIG.
 
 ## 6) Verify and smoke test
 
-Health/ready
-```bash
-curl -f http://127.0.0.1:8000/health
-curl -f http://127.0.0.1:8000/ready
-```
+Use the [production reference verification
+steps](Production_Reference_Deployment.md#5-verify-public-and-operator-surfaces)
+for public liveness and private readiness checks.
 
-Auth check (single-user example)
+Public `/health` returns only `{"status":"ok"}`. Detailed health, readiness,
+and metrics require an authenticated operator; the proxy returns 404 for
+internal and legacy readiness paths.
+
+The remaining direct-host single-user examples are non-production quickstart
+checks; they do not apply to the reference topology, which does not publish the
+app port.
+
+Auth check (non-production single-user example)
 ```bash
 curl -s -H "X-API-KEY: $SINGLE_USER_API_KEY" http://127.0.0.1:8000/api/v1/llm/providers | jq .
 ```
@@ -115,7 +129,8 @@ curl -s -H "X-API-KEY: $SINGLE_USER_API_KEY" \
   - TLS via reverse proxy; enable WebSocket upgrades.
   - Restrict `ALLOWED_ORIGINS`.
 - Observability:
-  - Enable Prometheus scraping; import Grafana dashboards (see Metrics Cheatsheet).
+  - Enable authenticated Prometheus scraping with a `system.logs` principal;
+    import Grafana dashboards (see Metrics Cheatsheet).
   - Centralize logs; set `LOG_LEVEL=info`.
 - Rate limits:
   - Keep global and module-specific rate limiters enabled and tuned for your users.

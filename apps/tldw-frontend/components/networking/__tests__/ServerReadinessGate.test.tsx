@@ -41,13 +41,13 @@ describe("ServerReadinessGate", () => {
     vi.resetModules()
   })
 
-  it("accepts the backend healthy status envelope", async () => {
+  it("accepts the canonical public liveness status envelope", async () => {
     vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "advanced")
     vi.stubEnv("NEXT_PUBLIC_API_URL", "http://127.0.0.1:8000")
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: true,
       status: 200,
-      json: async () => ({ status: "healthy" })
+      json: async () => ({ status: "ok" })
     } as Response)
     const { ServerReadinessGate } = await import("../ServerReadinessGate")
 
@@ -62,7 +62,7 @@ describe("ServerReadinessGate", () => {
     })
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://127.0.0.1:8000/api/v1/health",
+      "http://127.0.0.1:8000/health",
       expect.objectContaining({ method: "GET" })
     )
   })
@@ -89,7 +89,7 @@ describe("ServerReadinessGate", () => {
     })
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://10.0.0.5:9000/api/v1/health",
+      "http://10.0.0.5:9000/health",
       expect.objectContaining({ method: "GET" })
     )
   })
@@ -115,7 +115,7 @@ describe("ServerReadinessGate", () => {
     })
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://127.0.0.1:19042/api/v1/health",
+      "http://127.0.0.1:19042/health",
       expect.objectContaining({ method: "GET" })
     )
   })
@@ -143,7 +143,7 @@ describe("ServerReadinessGate", () => {
     })
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "https://example.test/api/v1/health",
+      "https://example.test/health",
       expect.objectContaining({ method: "GET" })
     )
   })
@@ -171,7 +171,7 @@ describe("ServerReadinessGate", () => {
     })
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://127.0.0.1:8000/api/v1/health",
+      "http://127.0.0.1:8000/health",
       expect.objectContaining({ method: "GET" })
     )
     expect(warnMock).toHaveBeenCalledWith(
@@ -203,7 +203,7 @@ describe("ServerReadinessGate", () => {
     })
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://127.0.0.1:8000/api/v1/health",
+      "http://127.0.0.1:8000/health",
       expect.objectContaining({ method: "GET" })
     )
     expect(warnMock).toHaveBeenCalledWith(
@@ -234,7 +234,7 @@ describe("ServerReadinessGate", () => {
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        "http://old.example:8000/api/v1/health",
+        "http://old.example:8000/health",
         expect.objectContaining({ method: "GET" })
       )
     })
@@ -248,7 +248,7 @@ describe("ServerReadinessGate", () => {
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        "http://new.example:9000/api/v1/health",
+        "http://new.example:9000/health",
         expect.objectContaining({ method: "GET" })
       )
     })
@@ -272,7 +272,7 @@ describe("ServerReadinessGate", () => {
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        "http://127.0.0.1:8000/api/v1/health",
+        "http://127.0.0.1:8000/health",
         expect.objectContaining({ method: "GET" })
       )
     })
@@ -286,7 +286,7 @@ describe("ServerReadinessGate", () => {
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        "http://configured.local:8123/api/v1/health",
+        "http://configured.local:8123/health",
         expect.objectContaining({ method: "GET" })
       )
     })
@@ -355,7 +355,7 @@ describe("ServerReadinessGate", () => {
         expect(readinessEvents.at(-1)).toEqual(
           expect.objectContaining({
             state: "degraded",
-            healthUrl: "http://127.0.0.1:8000/api/v1/health",
+            healthUrl: "http://127.0.0.1:8000/health",
             httpStatus: 206,
             healthStatus: "degraded",
             degradedChecks: ["mcp"]
@@ -631,7 +631,7 @@ describe("ServerReadinessGate", () => {
     expect(
       screen.getByRole("heading", { name: /Backend readiness check failed/i })
     ).toBeInTheDocument()
-    expect(screen.getByText("http://127.0.0.1:8000/api/v1/health")).toBeInTheDocument()
+    expect(screen.getByText("http://127.0.0.1:8000/health")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Health & diagnostics" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Server settings" })).toBeInTheDocument()
@@ -666,7 +666,7 @@ describe("ServerReadinessGate", () => {
     expect(
       screen.getByRole("heading", { name: /Backend readiness check failed/i })
     ).toBeInTheDocument()
-    expect(screen.getByText("http://127.0.0.1:8000/api/v1/health")).toBeInTheDocument()
+    expect(screen.getByText("http://127.0.0.1:8000/health")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Health & diagnostics" })).toBeInTheDocument()
   })

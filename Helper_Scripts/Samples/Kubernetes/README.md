@@ -44,7 +44,9 @@ kubectl apply -f Samples/Kubernetes/ingress.yaml
 - Auth mode: `app-configmap.yaml` defaults to `multi_user`. Set secrets/env accordingly.
 - CORS: Set `ALLOWED_ORIGINS` to your HTTPS origin (e.g., `https://your.domain.com`).
 - Postgres: The sample uses `POSTGRES_DB=tldw_users`, `POSTGRES_USER=tldw_user`, password from `app-secret.yaml`.
-- Liveness/readiness: Probes hit `/health` and `/ready` on port 8000.
+- Liveness is the minimal public `/health` contract. Readiness executes inside the
+  application container against loopback-only `/internal/ready`; detailed readiness
+  is not remotely anonymous.
 
 ## Verify
 ```bash

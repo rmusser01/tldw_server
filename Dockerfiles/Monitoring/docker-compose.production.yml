@@ -1,0 +1,174 @@
+name: tldw-production-monitoring
+
+# Standalone monitoring companion for docker-compose.production.yml.
+# Start the production stack first so the external tldw-production_edge
+# network and the app service alias exist.
+
+services:
+  metrics-credential-init:
+    image: ${TLDW_APP_IMAGE:?Set the same immutable tldw app image used by the production stack}
+    user: "0:0"
+    entrypoint: ["python", "-c"]
+    command:
+      - |
+        import os
+        import sys
+
+        source = "/run/source/tldw_metrics_api_key"
+        directory = "/run/staged"
+        target = f"{directory}/tldw_metrics_api_key"
+        temporary = f"{directory}/.tldw_metrics_api_key.tmp"
+
+        try:
+            uid = int(os.environ["PROMETHEUS_UID"])
+            gid = int(os.environ["PROMETHEUS_GID"])
+            if uid <= 0 or gid <= 0:
+                raise ValueError("Prometheus must use a non-root UID and GID")
+
+            try:
+                os.unlink(temporary)
+            except FileNotFoundError:
+                pass
+
+            source_fd = os.open(source, os.O_RDONLY | os.O_NOFOLLOW)
+            try:
+                target_fd = os.open(
+                    temporary,
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                    0o400,
+                )
+                try:
+                    copied = 0
+                    while True:
+                        chunk = os.read(source_fd, 4096)
+                        if not chunk:
+                            break
+                        remaining = memoryview(chunk)
+                        while remaining:
+                            written = os.write(target_fd, remaining)
+                            if written == 0:
+                                raise OSError("Short write while staging credential")
+                            copied += written
+                            remaining = remaining[written:]
+                    if copied == 0:
+                        raise ValueError("Metrics credential is empty")
+                    os.fchmod(target_fd, 0o400)
+                    os.fchown(target_fd, uid, gid)
+                    os.fsync(target_fd)
+                finally:
+                    os.close(target_fd)
+            finally:
+                os.close(source_fd)
+
+            os.replace(temporary, target)
+            directory_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+
+            os.setgroups([])
+            os.setgid(gid)
+            os.setuid(uid)
+            check_fd = os.open(target, os.O_RDONLY | os.O_NOFOLLOW)
+            try:
+                if not os.read(check_fd, 1):
+                    raise ValueError("Staged metrics credential is unreadable")
+            finally:
+                os.close(check_fd)
+        except BaseException:
+            try:
+                os.unlink(temporary)
+            except OSError:
+                pass
+            raise SystemExit(1)
+    environment:
+      PROMETHEUS_UID: ${PROMETHEUS_UID:?Set the numeric UID used by the pinned Prometheus image}
+      PROMETHEUS_GID: ${PROMETHEUS_GID:?Set the numeric GID used by the pinned Prometheus image}
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - ${TLDW_METRICS_API_KEY_FILE:?Set a mode-0600 API-key file whose principal has system.logs}:/run/source/tldw_metrics_api_key:ro
+      - metrics_credential:/run/staged
+    network_mode: "none"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETGID
+      - SETUID
+    restart: "no"
+
+  prometheus:
+    image: ${PROMETHEUS_IMAGE:?Set an exact Prometheus image}
+    user: "${PROMETHEUS_UID:?Set the numeric UID used by the pinned Prometheus image}:${PROMETHEUS_GID:?Set the numeric GID used by the pinned Prometheus image}"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../../Docs/Operations/monitoring/prometheus_alerts_tldw.yml:/etc/prometheus/alerts/tldw_alerts.yml:ro
+      - ../../Docs/Operations/monitoring/alerts:/etc/prometheus/alerts/extra:ro
+      - metrics_credential:/run/secrets:ro
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+    ports:
+      - "127.0.0.1:9090:9090"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      alertmanager:
+        condition: service_started
+      metrics-credential-init:
+        condition: service_completed_successfully
+    networks:
+      - edge
+      - monitoring
+
+  alertmanager:
+    image: ${ALERTMANAGER_IMAGE:?Set an exact Alertmanager image}
+    volumes:
+      - ${ALERTMANAGER_CONFIG:?Set an absolute operator-managed Alertmanager config file}:/etc/alertmanager/alertmanager.yml:ro
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+    ports:
+      - "127.0.0.1:9093:9093"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9093/-/healthy"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      - monitoring
+
+  grafana:
+    image: ${GRAFANA_IMAGE:?Set an exact Grafana image}
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:?Set GRAFANA_ADMIN_USER before starting Grafana}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?Set GRAFANA_ADMIN_PASSWORD before starting Grafana}
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3002}:3000"
+    depends_on:
+      - prometheus
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../../Docs/Monitoring/Grafana_Dashboards:/var/lib/grafana/dashboards:ro
+    restart: unless-stopped
+    networks:
+      - monitoring
+
+networks:
+  edge:
+    external: true
+    name: tldw-production_edge
+  monitoring: {}
+
+volumes:
+  grafana_data:
+  metrics_credential: {}

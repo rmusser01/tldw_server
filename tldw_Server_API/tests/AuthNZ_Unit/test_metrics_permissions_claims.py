@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, Optional
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 import pytest
 from fastapi import FastAPI, HTTPException
@@ -9,15 +10,25 @@ from starlette.requests import Request
 
 from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 from tldw_Server_API.app.api.v1.endpoints import metrics as metrics_mod
+from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_LOGS
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
+
+DETAILED_METRICS_PATHS = (
+    "/metrics",
+    "/api/v1/metrics",
+    "/api/v1/metrics/text",
+    "/api/v1/metrics/json",
+    "/api/v1/metrics/health",
+    "/api/v1/metrics/chat",
+)
 
 
 def _make_principal(
     *,
     kind: str = "user",
     is_admin: bool = False,
-    roles: Optional[list[str]] = None,
-    permissions: Optional[list[str]] = None,
+    roles: list[str] | None = None,
+    permissions: list[str] | None = None,
 ) -> AuthPrincipal:
     return AuthPrincipal(
         kind=kind,
@@ -35,7 +46,7 @@ def _make_principal(
 
 
 def _build_app_with_overrides(
-    principal: Optional[AuthPrincipal],
+    principal: AuthPrincipal | None,
     *,
     fail_with_401: bool = False,
 ) -> FastAPI:
@@ -66,6 +77,74 @@ def _build_app_with_overrides(
     return app
 
 
+@contextmanager
+def _main_claim_client(
+    principal: AuthPrincipal | None,
+    *,
+    fail_with_401: bool = False,
+) -> Iterator[TestClient]:
+    from tldw_Server_API.app import main
+
+    original_overrides = dict(main.app.dependency_overrides)
+
+    async def _fake_get_auth_principal(request: Request) -> AuthPrincipal:
+        if fail_with_401:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        assert principal is not None
+        return principal
+
+    main.app.dependency_overrides[auth_deps.get_auth_principal] = _fake_get_auth_principal
+    try:
+        with TestClient(main.app) as client:
+            yield client
+    finally:
+        main.app.dependency_overrides.clear()
+        main.app.dependency_overrides.update(original_overrides)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("path", DETAILED_METRICS_PATHS)
+@pytest.mark.parametrize(
+    ("principal", "fail_with_401", "expected"),
+    ((None, True, 401), (_make_principal(permissions=[]), False, 403)),
+)
+def test_detailed_metrics_require_system_logs(
+    path: str,
+    principal: AuthPrincipal | None,
+    fail_with_401: bool,
+    expected: int,
+):
+    with _main_claim_client(principal, fail_with_401=fail_with_401) as client:
+        response = client.get(path)
+    assert response.status_code == expected
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("path", DETAILED_METRICS_PATHS)
+@pytest.mark.parametrize(
+    "principal",
+    (_make_principal(permissions=[SYSTEM_LOGS]), _make_principal(is_admin=True, roles=["admin"], permissions=[])),
+)
+def test_detailed_metrics_allow_permission_or_admin_bypass(path: str, principal: AuthPrincipal):
+    with _main_claim_client(principal) as client:
+        response = client.get(path)
+    assert response.status_code not in {401, 403}
+
+
+@pytest.mark.unit
+def test_metrics_claim_client_restores_dependency_overrides_after_each_use():
+    from tldw_Server_API.app import main
+
+    original = dict(main.app.dependency_overrides)
+    for principal in (
+        _make_principal(permissions=[]),
+        _make_principal(permissions=[SYSTEM_LOGS]),
+    ):
+        with _main_claim_client(principal):
+            assert auth_deps.get_auth_principal in main.app.dependency_overrides
+        assert main.app.dependency_overrides == original
+
+
 @pytest.mark.unit
 def test_metrics_reset_401_when_principal_unavailable():
     app = _build_app_with_overrides(principal=None, fail_with_401=True)
@@ -78,11 +157,11 @@ def test_metrics_reset_401_when_principal_unavailable():
 
 
 @pytest.mark.unit
-def test_metrics_reset_403_when_missing_admin_role():
+def test_metrics_reset_403_when_system_logs_principal_is_missing_admin_role():
     principal = _make_principal(
         is_admin=False,
         roles=["user"],
-        permissions=[],
+        permissions=[SYSTEM_LOGS],
     )
     app = _build_app_with_overrides(principal=principal)
 

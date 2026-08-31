@@ -780,7 +780,7 @@ const deleteLocalPrompt = async (page: Page, promptId: string) => {
 
 const trackRealApiHits = (page: Page) => {
   const hits: ApiHit[] = [];
-  const watchedPaths = ['/api/v1/health', '/api/v1/llm/providers', '/api/v1/llm/models/metadata'];
+  const watchedPaths = ['/health', '/api/v1/llm/providers', '/api/v1/llm/models/metadata'];
 
   const onResponse = (response: Response) => {
     const url = new URL(response.url());
@@ -2023,7 +2023,7 @@ test.describe('/chat cockpit real-server parity', () => {
 
     const failingApiHits = apiTracker.hits.filter((hit) => hit.status >= 400);
     expect(failingApiHits).toEqual([]);
-    expect(apiTracker.hits.some((hit) => hit.path === '/api/v1/health')).toBe(true);
+    expect(apiTracker.hits.some((hit) => hit.path === '/health')).toBe(true);
 
     apiTracker.dispose();
   });

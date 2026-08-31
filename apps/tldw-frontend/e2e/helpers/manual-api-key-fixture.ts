@@ -43,16 +43,9 @@ export const startManualApiKeyFixture = async (
       authenticated
     })
 
-    if (
-      request.method === "GET" &&
-      (pathname === "/api/v1/health" || pathname === "/api/v1/health/live")
-    ) {
+    if (request.method === "GET" && pathname === "/health") {
       response.writeHead(200, { "Content-Type": "application/json" })
-      response.end(
-        JSON.stringify({
-          status: pathname.endsWith("/live") ? "alive" : "ok"
-        })
-      )
+      response.end(JSON.stringify({ status: "ok" }))
       return
     }
 
