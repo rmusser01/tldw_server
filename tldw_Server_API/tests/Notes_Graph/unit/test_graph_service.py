@@ -733,6 +733,10 @@ class TestSemanticCandidateGeneration:
             additional_edges=additional_edges,
         )
 
+        assert result.public_graph.limits.max_nodes == max_nodes
+        assert result.public_graph.limits.max_edges == max_edges
+        assert result.candidate_limits.max_nodes == max_nodes + additional_nodes
+        assert result.candidate_limits.max_edges == max_edges + additional_edges
         assert len(result.public_graph.nodes) == public_node_count
         assert len(result.public_graph.edges) == public_edge_count
         assert len(result.candidate_nodes) == candidate_node_count
