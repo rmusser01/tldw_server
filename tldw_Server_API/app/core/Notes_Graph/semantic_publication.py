@@ -6,7 +6,7 @@ import asyncio
 import inspect
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 
@@ -156,6 +156,12 @@ class SemanticPublicationStore(Protocol):
     def authorize_obsolete_vector_claim(self, **kwargs: Any) -> bool: ...
 
     def complete_obsolete_vector_claim(self, **kwargs: Any) -> bool: ...
+
+    def release_obsolete_vector_claim(self, **kwargs: Any) -> bool: ...
+
+    def retry_obsolete_vector_cleanup(self, **kwargs: Any) -> bool: ...
+
+    def rearm_exhausted_obsolete_vector_cleanup(self, **kwargs: Any) -> int: ...
 
     def authorize_generation_cleanup(self, **kwargs: Any) -> bool: ...
 
@@ -330,6 +336,66 @@ class SemanticPublicationService:
         self._receipt_factory = receipt_factory
         self._max_cleanup_vectors = max_cleanup_vectors
         self._max_vectors_per_publication = max_vectors_per_publication
+
+    async def _release_obsolete_claim(self, claim: Any) -> bool:
+        eligible_at = self._clock() + timedelta(seconds=1)
+        return bool(
+            await run_reconciled_transaction(
+                self._store.release_obsolete_vector_claim,
+                dataset_id=claim.dataset_id,
+                ledger_ids=claim.ledger_ids,
+                claim_token=claim.claim_token,
+                now=eligible_at,
+            )
+        )
+
+    async def _retry_obsolete_claim(self, claim: Any, *, error_code: str) -> bool:
+        now = self._clock()
+        delay_seconds = min(300, 2 ** min(int(claim.attempt_count), 8))
+        return bool(
+            await run_reconciled_transaction(
+                self._store.retry_obsolete_vector_cleanup,
+                dataset_id=claim.dataset_id,
+                ledger_ids=claim.ledger_ids,
+                claim_token=claim.claim_token,
+                error_code=error_code,
+                retry_at=now + timedelta(seconds=delay_seconds),
+                now=now,
+            )
+        )
+
+    async def _claim_obsolete_batch(
+        self,
+        *,
+        dataset_id: str,
+        generation_id: str,
+    ) -> Any:
+        now = self._clock()
+        claim = await run_reconciled_transaction(
+            self._store.claim_obsolete_vector_cleanup_batch,
+            dataset_id=dataset_id,
+            generation_id=generation_id,
+            limit=self._max_cleanup_vectors,
+            now=now,
+        )
+        if claim is not None:
+            return claim
+        rearmed = await run_reconciled_transaction(
+            self._store.rearm_exhausted_obsolete_vector_cleanup,
+            dataset_id=dataset_id,
+            generation_id=generation_id,
+            limit=self._max_cleanup_vectors,
+            now=now,
+        )
+        if not rearmed:
+            return None
+        return await run_reconciled_transaction(
+            self._store.claim_obsolete_vector_cleanup_batch,
+            dataset_id=dataset_id,
+            generation_id=generation_id,
+            limit=self._max_cleanup_vectors,
+            now=now,
+        )
 
     async def publish_note(
         self,
@@ -514,12 +580,9 @@ class SemanticPublicationService:
     ) -> bool:
         """Delete only IDs proven obsolete after manifest visibility changed."""
 
-        claim = await run_reconciled_transaction(
-            self._store.claim_obsolete_vector_cleanup_batch,
+        claim = await self._claim_obsolete_batch(
             dataset_id=fence.dataset_id,
             generation_id=fence.generation_id,
-            limit=self._max_cleanup_vectors,
-            now=self._clock(),
         )
         if claim is None:
             return not publication.old_vector_ids
@@ -531,15 +594,30 @@ class SemanticPublicationService:
             claim_token=claim.claim_token,
         )
         if not authorized:
+            await self._release_obsolete_claim(claim)
             raise SemanticIndexingError("notes_semantic_cleanup_fence_lost")
-        cleanup = await self._vectors.delete_ids(
-            fence.dataset_id,
-            fence.generation_id,
-            vector_ids,
-        )
+        try:
+            cleanup = await self._vectors.delete_ids(
+                fence.dataset_id,
+                fence.generation_id,
+                vector_ids,
+            )
+        except asyncio.CancelledError:
+            await self._release_obsolete_claim(claim)
+            raise
+        except Exception:  # noqa: BLE001 - sanitize injected vector-backend failures
+            await self._retry_obsolete_claim(
+                claim,
+                error_code="vector_backend_failure",
+            )
+            raise SemanticIndexingError("notes_semantic_cleanup_backend_failed") from None
         if not bool(getattr(cleanup, "confirmed_absent", False)):
+            await self._retry_obsolete_claim(
+                claim,
+                error_code="vector_cleanup_unconfirmed",
+            )
             raise SemanticIndexingError("notes_semantic_cleanup_unconfirmed")
-        return bool(
+        completed = bool(
             await run_reconciled_transaction(
                 self._store.complete_obsolete_vector_claim,
                 dataset_id=fence.dataset_id,
@@ -547,6 +625,10 @@ class SemanticPublicationService:
                 claim_token=claim.claim_token,
             )
         )
+        if not completed:
+            await self._release_obsolete_claim(claim)
+            raise SemanticIndexingError("notes_semantic_cleanup_fence_lost")
+        return True
 
     async def cleanup_generation(self, claim: SemanticWorkItem) -> bool:
         """Execute one claimed delayed cleanup against only its fenced generation."""
@@ -569,12 +651,9 @@ class SemanticPublicationService:
         )
         if not authorized:
             raise SemanticIndexingError("notes_semantic_cleanup_fence_lost")
-        obsolete = await run_reconciled_transaction(
-            self._store.claim_obsolete_vector_cleanup_batch,
+        obsolete = await self._claim_obsolete_batch(
             dataset_id=claim.dataset_id,
             generation_id=claim.generation_id,
-            limit=self._max_cleanup_vectors,
-            now=self._clock(),
         )
         if obsolete is not None:
             if not await run_reconciled_transaction(
@@ -583,13 +662,30 @@ class SemanticPublicationService:
                 ledger_ids=obsolete.ledger_ids,
                 claim_token=obsolete.claim_token,
             ):
+                await self._release_obsolete_claim(obsolete)
                 raise SemanticIndexingError("notes_semantic_cleanup_fence_lost")
-            cleanup = await self._vectors.delete_ids(
-                claim.dataset_id,
-                claim.generation_id,
-                obsolete.vector_ids,
-            )
+            try:
+                cleanup = await self._vectors.delete_ids(
+                    claim.dataset_id,
+                    claim.generation_id,
+                    obsolete.vector_ids,
+                )
+            except asyncio.CancelledError:
+                await self._release_obsolete_claim(obsolete)
+                raise
+            except Exception:  # noqa: BLE001 - sanitize injected vector-backend failures
+                await self._retry_obsolete_claim(
+                    obsolete,
+                    error_code="vector_backend_failure",
+                )
+                raise SemanticIndexingError(
+                    "notes_semantic_cleanup_backend_failed"
+                ) from None
             if not bool(getattr(cleanup, "confirmed_absent", False)):
+                await self._retry_obsolete_claim(
+                    obsolete,
+                    error_code="vector_cleanup_unconfirmed",
+                )
                 raise SemanticIndexingError("notes_semantic_cleanup_unconfirmed")
             if not await run_reconciled_transaction(
                 self._store.complete_obsolete_vector_claim,
@@ -597,6 +693,7 @@ class SemanticPublicationService:
                 ledger_ids=obsolete.ledger_ids,
                 claim_token=obsolete.claim_token,
             ):
+                await self._release_obsolete_claim(obsolete)
                 raise SemanticIndexingError("notes_semantic_cleanup_fence_lost")
             return False
         vector_ids = await run_reconciled_transaction(

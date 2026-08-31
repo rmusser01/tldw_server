@@ -523,12 +523,30 @@ async def test_manifest_visibility_precedes_cleanup_and_old_generation_cleanup_i
         note_version = 2
         for operation in operations:
             if operation == "cleanup_crash" and not cleanup_crashed and not cleanup_complete:
-                vectors.fail_next_delete_ids = True
-                with pytest.raises(
-                    SemanticIndexingError,
-                    match="notes_semantic_cleanup_unconfirmed",
-                ):
-                    await service.cleanup_generation(cleanup_claim)
+                crashed_claim = (
+                    db.note_semantic_store.claim_obsolete_vector_cleanup_batch(
+                        dataset_id=DATASET_ID,
+                        generation_id=old_generation.id,
+                        limit=1,
+                        now=clock[0],
+                    )
+                )
+                assert crashed_claim is not None
+                assert db.note_semantic_store.authorize_obsolete_vector_claim(
+                    dataset_id=DATASET_ID,
+                    ledger_ids=crashed_claim.ledger_ids,
+                    claim_token=crashed_claim.claim_token,
+                )
+                deleted = await vectors.delete_ids(
+                    DATASET_ID,
+                    old_generation.id,
+                    crashed_claim.vector_ids,
+                )
+                assert deleted.confirmed_absent
+                assert all(
+                    (old_generation.id, vector_id) not in vectors.values
+                    for vector_id in crashed_claim.vector_ids
+                )
                 cleanup_crashed = True
                 assert db.note_semantic_store.list_obsolete_vector_ids(
                     DATASET_ID,
