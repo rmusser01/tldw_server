@@ -105,7 +105,7 @@ services:
       PYTHONDONTWRITEBYTECODE: "1"
     volumes:
       - ${TLDW_METRICS_API_KEY_FILE:?Set a mode-0600 API-key file whose principal has system.logs}:/run/source/tldw_metrics_api_key:ro
-      - metrics_credential:/run/staged
+      - metrics_credential_tmpfs_v2:/run/staged
     network_mode: "none"
     read_only: true
     security_opt:
@@ -127,7 +127,7 @@ services:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ../../Docs/Operations/monitoring/prometheus_alerts_tldw.yml:/etc/prometheus/alerts/tldw_alerts.yml:ro
       - ../../Docs/Operations/monitoring/alerts:/etc/prometheus/alerts/extra:ro
-      - metrics_credential:/run/secrets:ro
+      - metrics_credential_tmpfs_v2:/run/secrets:ro
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
     ports:
@@ -178,7 +178,7 @@ services:
 
 volumes:
   grafana_data:
-  metrics_credential:
+  metrics_credential_tmpfs_v2:
     driver: local
     driver_opts:
       type: tmpfs

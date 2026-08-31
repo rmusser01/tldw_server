@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
+
 RUNBOOK = Path("Docs/Deployment/Production_Reference_Deployment.md")
 PUBLISHED_MIRRORS = (
     Path("Docs/Deployment/First_Time_Production_Setup.md"),
@@ -23,6 +25,7 @@ def _shell_blocks(text: str) -> str:
 
 
 def _rotation_block(text: str) -> str:
+    """Return the executable monitoring credential rotation block."""
     return next(
         block
         for block in re.findall(r"```bash\n(.*?)```", text, flags=re.DOTALL)
@@ -102,7 +105,9 @@ def test_monitoring_runbook_requires_operator_inputs_and_explains_networking() -
     assert "network is not marked `internal`" in text
 
 
+@pytest.mark.unit
 def test_monitoring_rotation_uses_read_scope_without_api_key_superuser_bypass() -> None:
+    """The documented Prometheus key must be read-scoped rather than a service superuser key."""
     from tldw_Server_API.app.api.v1.endpoints.admin import admin_api_keys
     from tldw_Server_API.app.api.v1.schemas.api_key_schemas import (
         APIKeyCreateRequest,
@@ -133,7 +138,9 @@ def test_monitoring_rotation_uses_read_scope_without_api_key_superuser_bypass() 
     assert "/users/{sys.argv[1]}/api-keys" in rotation
 
 
+@pytest.mark.unit
 def test_monitoring_rotation_stages_restarts_verifies_then_revokes_old_key() -> None:
+    """Rotation must verify the new target before revoking the old working key."""
     rotation = _rotation_block(RUNBOOK.read_text(encoding="utf-8"))
     stage_function = rotation[rotation.index("stage_and_restart()") : rotation.index("wait_for_tldw_target()")]
     assert stage_function.index("run --rm --no-deps metrics-credential-init") < stage_function.index(
@@ -158,7 +165,9 @@ def test_monitoring_rotation_stages_restarts_verifies_then_revokes_old_key() -> 
     assert "reload prometheus" not in rotation
 
 
+@pytest.mark.unit
 def test_monitoring_rotation_installs_cleanup_before_key_activation_and_disarms_after_success() -> None:
+    """Rotation must arm cleanup before activation and disarm it only after success."""
     rotation = _rotation_block(RUNBOOK.read_text(encoding="utf-8"))
     cleanup = rotation[
         rotation.index("cleanup_metrics_rotation()") : rotation.index("trap cleanup_metrics_rotation EXIT")
@@ -195,7 +204,9 @@ def test_monitoring_rotation_installs_cleanup_before_key_activation_and_disarms_
     assert 'exit "$cleanup_status"' in cleanup
 
 
+@pytest.mark.unit
 def test_monitoring_rotation_failure_restages_old_key_before_revoking_new_key() -> None:
+    """Pre-verification failure must restore the old credential before revoking the new key."""
     rotation = _rotation_block(RUNBOOK.read_text(encoding="utf-8"))
     rollback = rotation[
         rotation.index("cleanup_metrics_rotation()") : rotation.index("trap cleanup_metrics_rotation EXIT")
@@ -211,7 +222,9 @@ def test_monitoring_rotation_failure_restages_old_key_before_revoking_new_key() 
     assert positions == sorted(positions)
 
 
+@pytest.mark.unit
 def test_monitoring_retirement_unmounts_ephemeral_credentials_without_volume_deletion() -> None:
+    """Normal retirement must unmount tmpfs without deleting durable Grafana data."""
     text = RUNBOOK.read_text(encoding="utf-8")
     retirement = next(
         block
@@ -221,6 +234,34 @@ def test_monitoring_retirement_unmounts_ephemeral_credentials_without_volume_del
 
     assert re.search(r"\sdown(?:\s|$)", retirement)
     assert " -v" not in retirement
+
+
+@pytest.mark.unit
+def test_monitoring_upgrade_removes_only_the_detached_legacy_credential_volume() -> None:
+    """Upgrade guidance must verify and remove the exact old disk-backed credential volume."""
+    text = RUNBOOK.read_text(encoding="utf-8")
+    upgrade = next(
+        (
+            block
+            for block in re.findall(r"```bash\n(.*?)```", text, flags=re.DOTALL)
+            if "LEGACY_METRICS_VOLUME" in block
+        ),
+        None,
+    )
+
+    assert upgrade is not None
+    assert "LEGACY_METRICS_VOLUME=tldw-production-monitoring_metrics_credential" in upgrade
+    assert "com.docker.compose.project=tldw-production-monitoring" in upgrade
+    assert "com.docker.compose.volume=metrics_credential" in upgrade
+    ordered_upgrade = (
+        " down",
+        'docker volume inspect "$LEGACY_METRICS_VOLUME"',
+        'docker ps -aq --filter "volume=$LEGACY_METRICS_VOLUME"',
+        'docker volume rm "$LEGACY_METRICS_VOLUME"',
+        " up -d --wait",
+    )
+    positions = [upgrade.index(item) for item in ordered_upgrade]
+    assert positions == sorted(positions)
 
 
 def test_reference_runbook_assigns_each_deferred_boundary_to_the_right_task() -> None:

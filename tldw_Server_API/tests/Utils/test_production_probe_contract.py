@@ -19,6 +19,8 @@ MONITORING_COMPOSE_FILES = (
     Path("Dockerfiles/Monitoring/docker-compose.monitoring.yml"),
     Path("Dockerfiles/Monitoring/docker-compose.production.yml"),
 )
+CREDENTIAL_VOLUME_NAME = "metrics_credential_tmpfs_v2"
+LEGACY_CREDENTIAL_VOLUME_NAME = "metrics_credential"
 EXPECTED_CREDENTIAL_VOLUME = {
     "driver": "local",
     "driver_opts": {
@@ -120,7 +122,7 @@ def test_monitoring_composes_stage_operator_credential_for_non_root_prometheus()
             and volume.endswith(":/run/source/tldw_metrics_api_key:ro")
             for volume in init_volumes
         ), path
-        assert "metrics_credential:/run/staged" in init_volumes, path
+        assert f"{CREDENTIAL_VOLUME_NAME}:/run/staged" in init_volumes, path
 
         script = "\n".join(init["command"])
         for contract in (
@@ -153,9 +155,10 @@ def test_monitoring_composes_stage_operator_credential_for_non_root_prometheus()
         assert prometheus["depends_on"]["metrics-credential-init"] == {
             "condition": "service_completed_successfully"
         }, path
-        assert "metrics_credential:/run/secrets:ro" in prometheus["volumes"], path
+        assert f"{CREDENTIAL_VOLUME_NAME}:/run/secrets:ro" in prometheus["volumes"], path
         assert not any("TLDW_METRICS_API_KEY_FILE" in volume for volume in prometheus["volumes"]), path
-        assert compose["volumes"]["metrics_credential"] == EXPECTED_CREDENTIAL_VOLUME, path
+        assert compose["volumes"][CREDENTIAL_VOLUME_NAME] == EXPECTED_CREDENTIAL_VOLUME, path
+        assert LEGACY_CREDENTIAL_VOLUME_NAME not in compose["volumes"], path
 
         for service_name in ("prometheus", "alertmanager", "grafana"):
             for published_port in services[service_name]["ports"]:
@@ -172,12 +175,15 @@ def test_monitoring_composes_stage_operator_credential_for_non_root_prometheus()
     assert "tldw_sk_" not in tracked_text
 
 
+@pytest.mark.unit
 def test_monitoring_credential_storage_is_bounded_tmpfs_not_persistent_volume_data() -> None:
+    """A new logical volume identity must prevent reuse of legacy disk-backed secret data."""
     for path in MONITORING_COMPOSE_FILES:
         compose = _yaml(path)
-        credential_volume = compose["volumes"]["metrics_credential"]
+        credential_volume = compose["volumes"][CREDENTIAL_VOLUME_NAME]
 
         assert credential_volume == EXPECTED_CREDENTIAL_VOLUME, path
+        assert LEGACY_CREDENTIAL_VOLUME_NAME not in compose["volumes"], path
         assert credential_volume["driver_opts"]["type"] == "tmpfs", path
         assert "size=64k" in credential_volume["driver_opts"]["o"], path
         assert "mode=0710" in credential_volume["driver_opts"]["o"], path
@@ -251,12 +257,12 @@ def test_production_monitoring_render_preserves_private_credential_boundary(tmp_
     assert prometheus["user"] == "65534:65534"
     staged_secret = next(volume for volume in prometheus["volumes"] if volume["target"] == "/run/secrets")
     assert staged_secret["type"] == "volume"
-    assert staged_secret["source"] == "metrics_credential"
+    assert staged_secret["source"] == CREDENTIAL_VOLUME_NAME
     assert staged_secret["read_only"] is True
     assert prometheus["depends_on"]["metrics-credential-init"]["condition"] == ("service_completed_successfully")
     assert alertmanager["volumes"][0]["source"] == str(alertmanager_config)
-    assert compose["volumes"]["metrics_credential"]["driver"] == "local"
-    assert compose["volumes"]["metrics_credential"]["driver_opts"] == {
+    assert compose["volumes"][CREDENTIAL_VOLUME_NAME]["driver"] == "local"
+    assert compose["volumes"][CREDENTIAL_VOLUME_NAME]["driver_opts"] == {
         "device": "tmpfs",
         "o": "uid=0,gid=65534,mode=0710,size=64k",
         "type": "tmpfs",

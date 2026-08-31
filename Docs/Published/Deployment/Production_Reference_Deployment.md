@@ -216,9 +216,21 @@ printf 'Grafana admin password: ' >&2
 IFS= read -r -s GRAFANA_ADMIN_PASSWORD
 printf '\n' >&2
 export GRAFANA_ADMIN_PASSWORD
-docker compose --env-file "$PRODUCTION_ENV_FILE" \
-  -f Dockerfiles/Monitoring/docker-compose.production.yml \
-  up -d --wait
+MONITORING_COMPOSE=(docker compose --env-file "$PRODUCTION_ENV_FILE" -f Dockerfiles/Monitoring/docker-compose.production.yml)
+LEGACY_METRICS_VOLUME=tldw-production-monitoring_metrics_credential
+
+"${MONITORING_COMPOSE[@]}" down
+if docker volume inspect "$LEGACY_METRICS_VOLUME" >/dev/null 2>&1; then
+  legacy_metrics_matches="$(
+    docker volume ls -q \
+      --filter label=com.docker.compose.project=tldw-production-monitoring \
+      --filter label=com.docker.compose.volume=metrics_credential
+  )"
+  test "$legacy_metrics_matches" = "$LEGACY_METRICS_VOLUME"
+  test -z "$(docker ps -aq --filter "volume=$LEGACY_METRICS_VOLUME")"
+  docker volume rm "$LEGACY_METRICS_VOLUME"
+fi
+"${MONITORING_COMPOSE[@]}" up -d --wait
 ```
 
 `Dockerfiles/Monitoring/docker-compose.production.yml` gives the exact-mode-0600
@@ -230,6 +242,13 @@ identity. It atomically stages a mode-0400 copy in a bounded local-driver tmpfs,
 proves that identity can read a nonempty credential, and exits. Prometheus starts
 only after that successful proof and mounts only the staged tmpfs read-only at
 `/run/secrets`; no plaintext is stored as ordinary named-volume data.
+
+The tmpfs uses a new logical volume identity so an upgrade cannot reuse the
+disk-backed `metrics_credential` volume from an earlier release. The startup
+transaction first stops the monitoring project, then removes that exact legacy
+volume only when its Compose project and logical-volume labels match and no
+container remains attached. A missing legacy volume is a no-op, and the command
+never deletes `grafana_data`.
 
 Only Prometheus joins the existing `tldw-production_edge` network to scrape
 `app:8000`; Alertmanager and Grafana remain on the companion's separate

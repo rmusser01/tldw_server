@@ -1,3 +1,5 @@
+"""Regression coverage for API-key scope enforcement on monitoring mutations."""
+
 from __future__ import annotations
 
 import pytest
@@ -34,6 +36,7 @@ UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
 
 def _read_scoped_monitoring_app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
+    """Build a monitoring router app authenticated by a read-scoped API key."""
     app = FastAPI()
     app.include_router(monitoring_mod.router, prefix="/api/v1")
     principal = AuthPrincipal(
@@ -51,6 +54,7 @@ def _read_scoped_monitoring_app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
     )
 
     async def _principal(request: Request) -> AuthPrincipal:
+        """Attach the synthetic read-scoped principal to the request."""
         request.state._api_key_scope = "read"
         request.state.auth = AuthContext(
             principal=principal,
@@ -63,7 +67,10 @@ def _read_scoped_monitoring_app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
     app.dependency_overrides[auth_deps.get_auth_principal] = _principal
 
     class _NotificationService:
+        """Provide deterministic notification behavior without filesystem writes."""
+
         def get_settings(self) -> dict[str, object]:
+            """Return stable notification settings for route execution."""
             return {
                 "enabled": False,
                 "min_severity": "critical",
@@ -71,9 +78,11 @@ def _read_scoped_monitoring_app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
             }
 
         def update_settings(self, **changes: object) -> dict[str, object]:
+            """Return the requested settings mutation without persisting it."""
             return {**self.get_settings(), **changes}
 
         def notify(self, _alert: object) -> str:
+            """Return a deterministic notification delivery result."""
             return "ok"
 
     monkeypatch.setattr(monitoring_mod, "get_notification_service", _NotificationService)
@@ -89,6 +98,7 @@ def test_read_scoped_system_logs_key_cannot_mutate_monitoring_state(
     request_path: str,
     payload: dict[str, object] | None,
 ) -> None:
+    """A read-scoped system.logs key must receive 403 for every monitoring mutation."""
     del route_path
     app = _read_scoped_monitoring_app(monkeypatch)
 
@@ -99,9 +109,11 @@ def test_read_scoped_system_logs_key_cannot_mutate_monitoring_state(
     assert "scope" in response.json()["detail"].lower()
 
 
+@pytest.mark.unit
 def test_scope_regression_inventory_covers_every_monitoring_mutation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """The scope regression table must enumerate every unsafe monitoring route."""
     app = _read_scoped_monitoring_app(monkeypatch)
     expected = {(method, route_path) for method, route_path, _request_path, _payload in MUTATING_MONITORING_REQUESTS}
     actual = {
