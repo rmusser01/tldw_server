@@ -3,68 +3,21 @@ id: TASK-13134
 title: Implement Notes embedding index and semantic graph edges
 status: In Progress
 assignee: []
-created_date: 2026-08-27 02:20
-updated_date: 2026-08-31 06:03
+created_date: '2026-08-27 02:20'
+updated_date: '2026-08-31 06:23'
 labels:
-- notes
-- notes-graph
-- embeddings
-- second-brain
-- backend
+  - notes
+  - notes-graph
+  - embeddings
+  - second-brain
+  - backend
 dependencies:
-- TASK-13138
+  - TASK-13138
 documentation:
-- Docs/superpowers/specs/2026-08-29-notes-semantic-index-design.md
-- Docs/superpowers/plans/2026-08-29-notes-semantic-index-implementation-plan.md
+  - Docs/superpowers/specs/2026-08-29-notes-semantic-index-design.md
+  - >-
+    Docs/superpowers/plans/2026-08-29-notes-semantic-index-implementation-plan.md
 priority: medium
-modified_files:
-- Docs/superpowers/specs/2026-08-29-notes-semantic-index-design.md
-- Docs/superpowers/plans/2026-08-29-notes-semantic-index-implementation-plan.md
-- tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py
-- tldw_Server_API/app/core/DB_Management/chacha/__init__.py
-- tldw_Server_API/app/core/DB_Management/chacha/note_semantic_models.py
-- tldw_Server_API/app/core/DB_Management/chacha/note_semantic_store.py
-- tldw_Server_API/app/core/DB_Management/chacha/note_store.py
-- tldw_Server_API/app/core/Sync/v2/materializers/notes.py
-- tldw_Server_API/tests/DB_Management/test_chacha_migration_v64.py
-- tldw_Server_API/tests/DB_Management/test_chacha_semantic_migration.py
-- tldw_Server_API/tests/DB_Management/test_chacha_semantic_migration_postgres.py
-- tldw_Server_API/tests/Notes_Graph/unit/test_semantic_store.py
-- tldw_Server_API/tests/Notes_Graph/integration/test_semantic_note_lifecycle.py
-- tldw_Server_API/tests/Notes_Graph/integration/test_semantic_note_lifecycle_postgres.py
-- tldw_Server_API/tests/Sync/test_sync_v2_notes_semantic_lifecycle.py
-- tldw_Server_API/app/core/Notes_Graph/semantic_capabilities.py
-- tldw_Server_API/app/core/Notes_Graph/semantic_settings.py
-- tldw_Server_API/app/core/AuthNZ/permissions.py
-- tldw_Server_API/app/core/AuthNZ/settings.py
-- tldw_Server_API/app/core/AuthNZ/rbac_seed.py
-- tldw_Server_API/app/core/AuthNZ/migrations.py
-- tldw_Server_API/tests/Notes_Graph/unit/test_semantic_capabilities.py
-- tldw_Server_API/tests/Notes_Graph/unit/test_semantic_settings.py
-- tldw_Server_API/tests/AuthNZ_Unit/test_notes_graph_semantic_permissions.py
-- tldw_Server_API/tests/AuthNZ/integration/test_notes_graph_semantic_permissions_postgres.py
-- tldw_Server_API/tests/AuthNZ_Unit/test_notes_graph_suggestion_permissions.py
-- tldw_Server_API/app/core/Notes_Graph/semantic_content.py
-- tldw_Server_API/app/core/Notes_Graph/semantic_embeddings.py
-- tldw_Server_API/tests/Notes_Graph/unit/test_semantic_content.py
-- tldw_Server_API/tests/Notes_Graph/unit/test_semantic_embeddings.py
-- tldw_Server_API/tests/Embeddings_isolated/test_notes_semantic_policy.py
-- tldw_Server_API/app/core/LLM_Calls/payload_utils.py
-- tldw_Server_API/app/core/LLM_Calls/providers/google_embeddings_adapter.py
-- tldw_Server_API/app/core/LLM_Calls/providers/huggingface_embeddings_adapter.py
-- tldw_Server_API/app/core/LLM_Calls/providers/openai_embeddings_adapter.py
-- tldw_Server_API/app/core/http_client.py
-- tldw_Server_API/tests/LLM_Adapters/unit/test_embeddings_google_native_http.py
-- tldw_Server_API/tests/LLM_Adapters/unit/test_embeddings_huggingface_native_http.py
-- tldw_Server_API/tests/LLM_Adapters/unit/test_openai_embeddings_adapter_batch_single.py
-- .github/workflows/ci.yml
-- tldw_Server_API/app/core/Notes_Graph/semantic_vectors.py
-- tldw_Server_API/app/core/Notes_Graph/semantic_vectors_chroma.py
-- tldw_Server_API/app/core/Notes_Graph/semantic_vectors_pg.py
-- tldw_Server_API/tests/Notes_Graph/vector_contract.py
-- tldw_Server_API/tests/Notes_Graph/unit/test_semantic_vectors.py
-- tldw_Server_API/tests/Notes_Graph/integration/test_semantic_vectors_chroma.py
-- tldw_Server_API/tests/Notes_Graph/integration/test_semantic_vectors_pg.py
 ---
 
 ## Description
@@ -90,6 +43,7 @@ Approved executable plan: `Docs/superpowers/plans/2026-08-29-notes-semantic-inde
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - 2026-08-29: Senior implementation-constraint review identified required spec corrections for user-scoped run APIs, semantic opt-in compatibility, evidence offsets, vector-only backend contracts, DSR erasure, graph admission/async composition, dimension and activation rules, cache freshness, and restore semantics.
 - Design specification: `Docs/superpowers/specs/2026-08-29-notes-semantic-index-design.md`
@@ -119,11 +73,16 @@ Approved executable plan: `Docs/superpowers/plans/2026-08-29-notes-semantic-inde
 - 2026-08-30 Task 7 fix round 5/5: Addressed the two confirmed review-4 races without schema or public API changes. PostgreSQL now serializes receipt admission, root-generation creation, and activation with one deterministic owner/dataset transaction advisory lock; SQLite retains BEGIN IMMEDIATE. Valid unexpired cancel receipts fence late creation and both activation paths, stale revision requests cannot establish intent, and store cancellation preserves SemanticJobCancelled semantics.
 - Verification: focused race/isolation/expiry 10 passed; exact Task 7 four-file suite 81 passed; semantic migration/store/indexing/publication 169 passed; live PostgreSQL semantic aggregate 31 passed with 6 optional pgvector skips. Ruff clean, Bandit zero findings with B101 excluded, Python 3.10.20 compile clean, and git diff --check clean.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+2026-08-30 Task 7 complete: Added bounded Jobs-backed Notes semantic indexing, seven nested user-scoped run/configuration routes, startup recovery, maintenance, content-free public Jobs results, durable provider-revision authority, idempotent receipts, typed cancellation, and serialized PostgreSQL owner/dataset mutation authority. Bounded review 5/5 clean. Final verification: 81 exact Task 7 tests, 151 affected semantic tests, 31 live PostgreSQL tests with 6 expected pgvector skips, Ruff, Bandit, Python 3.10 compile, and diff checks passed. Implementation range: 1df5000e887e..4c38e8904969; report: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-7-report.md.
+<!-- SECTION:NOTES:END -->
+
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-TASK-13134 remains in progress after completion of implementation Tasks 1 through 6. Owner-scoped persistence, Note lifecycle hooks, capability/RBAC controls, canonical chunking and provider execution, vector-only ChromaDB/pgvector storage, and fenced generation publication with crash-durable cleanup are complete and independently reviewed. Task 7 Jobs, nested API, startup recovery, and maintenance wiring is next.
+TASK-13134 remains in progress after completion of implementation Tasks 1 through 7. Owner-scoped persistence, Note lifecycle hooks, capability/RBAC controls, canonical chunking and provider execution, vector-only ChromaDB/pgvector storage, fenced generation publication, and bounded Jobs/API/recovery/maintenance orchestration are complete and independently reviewed. Task 8 graph contracts, immutable semantic request identities, and frozen legacy defaults are next.
 <!-- SECTION:FINAL_SUMMARY:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed
