@@ -158,3 +158,30 @@ stable retry watermarks, deterministic SQLite interleaving, and an executed
 PostgreSQL `FOR UPDATE` transaction contract. A live PostgreSQL fixture remains
 unavailable; the limitation is explicit rather than represented as live-DB
 evidence. TASK-13148's status remains unchanged.
+
+## Projection-safe watermark and quota request correction
+
+- [x] Reject bootstrap while any accepted Personal Context envelope at the
+  proposed transport boundary is not durably `applied` or `superseded`.
+  Snapshot capture, envelope append, materialization, and replay coordinate on
+  the existing dataset-row guard; bootstrap never signs a cursor that can hide
+  a later replay at or below its watermarks.
+- [x] Map incomplete projection to one stable content-free 409 reason with
+  explicit repair/retry guidance. Materialization errors, canonical bodies,
+  IDs, keys, and ciphertext never enter the response.
+- [x] Enforce the public `required_quotas` contract at HTTP parsing: at most 32
+  entries; lower-case ASCII identifier names of at most 64 characters; strict
+  built-in non-Boolean integers between zero and `2**63 - 1`.
+- [x] Preserve the effective quota response contract: every valid requested
+  quota is represented on success, including unknown zero-minimum names at
+  value zero; positive unsupported minima retain typed incompatibility.
+- [x] Cover the durable-append/materialization crash window, failed replay,
+  conflict/unknown states, successful guarded repair, post-boundary visibility,
+  and the executed PostgreSQL lock/query contract.
+
+Focused meaningful RED: projection `4 failed, 42 deselected`; quota parsing
+`8 failed, 93 deselected`. GREEN: bootstrap `46 passed`; endpoints `102 passed`;
+store `187 passed, 2 skipped`; replay/repair `23 passed`; schemas/models
+`126 passed`. Ruff, Python compilation, Bandit, and diff hygiene passed.
+Repository-wide tests remain intentionally unrun under the explicit opt-in
+policy. TASK-13148's status is unchanged for controller review.

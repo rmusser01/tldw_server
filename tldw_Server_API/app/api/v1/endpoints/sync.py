@@ -234,6 +234,10 @@ def _safe_sync_v2_http_error(exc: Exception, **context: object) -> HTTPException
                 status.HTTP_409_CONFLICT,
                 "Personal Context changed during bootstrap; retry the request.",
             ),
+            "personal_context_projection_incomplete": (
+                status.HTTP_409_CONFLICT,
+                "Personal Context Sync projection is incomplete; repair Sync and retry bootstrap.",
+            ),
             "personal_context_purge_generation_stale": (
                 status.HTTP_409_CONFLICT,
                 "Personal Context purge generation is stale.",

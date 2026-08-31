@@ -3325,6 +3325,44 @@ def test_personal_context_bootstrap_response_exposes_effective_zero_quota(
     assert response.json()["quotas"]["future_sync_quota"] == 0
 
 
+@pytest.mark.parametrize(
+    "required_quotas",
+    [
+        {"Bad-Quota": 0},
+        {"quota_name_that_is_far_beyond_the_sixty_four_character_public_limit_123": 0},
+        {"future_sync_quota": True},
+        {"future_sync_quota": "0"},
+        {"future_sync_quota": 0.0},
+        {"future_sync_quota": -1},
+        {"future_sync_quota": 2**63},
+        {f"future_quota_{index}": 0 for index in range(33)},
+    ],
+)
+def test_personal_context_bootstrap_rejects_malformed_quota_contract_at_http_boundary(
+    factory_personal_context_service: SyncV2Service,
+    required_quotas: dict[str, object],
+) -> None:
+    client = _client_for_factory_service(factory_personal_context_service)
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    assert client.post(
+        "/api/v1/sync/devices/register",
+        json=_registered_personal_context_device_payload(private_key.public_key()),
+    ).status_code == 200
+
+    response = client.post(
+        "/api/v1/sync/personal-context/bootstrap",
+        json={
+            "device_id": "pc-device",
+            "required_schema_version": 1,
+            "required_quotas": required_quotas,
+        },
+    )
+
+    assert response.status_code == 422
+    assert "bootstrap-private-canary" not in response.text
+    assert "wrapped_key_blob" not in response.text
+
+
 def test_personal_context_complete_endpoint_rejects_real_stale_integrity_binding(
     factory_personal_context_service: SyncV2Service,
 ) -> None:
@@ -3533,6 +3571,7 @@ def test_personal_context_push_surfaces_receipt_storage_failure_without_reconcil
         ("personal_context_authority_mismatch", 409),
         ("personal_context_snapshot_unavailable", 503),
         ("personal_context_snapshot_unstable", 409),
+        ("personal_context_projection_incomplete", 409),
         ("personal_context_capability_unavailable", 503),
         ("personal_context_key_custody_unavailable", 503),
         ("personal_context_link_unavailable", 409),

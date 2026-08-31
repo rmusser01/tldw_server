@@ -110,3 +110,81 @@ Changed files for this correction:
 
 Known skip: the repository-wide suite was not run; verification remained scoped
 to the affected bootstrap and authenticated endpoint modules.
+
+## Projection-safe watermark and strict quota request correction
+
+Status: ready for controller review. TASK-13148 status remains unchanged.
+
+### Meaningful RED evidence
+
+Projection command:
+
+```text
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest -q --tb=line -p no:cacheprovider tldw_Server_API/tests/Sync/test_sync_v2_personal_context_bootstrap.py -k 'failed_materialization_blocks or nonterminal_or_unknown'
+```
+
+Result: `4 failed, 42 deselected`. Each failure was the intended `DID NOT RAISE`:
+bootstrap accepted a failed, pending, conflicted, or unknown projection state.
+
+Quota command:
+
+```text
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest -q --tb=line -p no:cacheprovider tldw_Server_API/tests/Sync/test_sync_v2_endpoints.py -k 'malformed_quota_contract'
+```
+
+Result: `8 failed, 93 deselected`; malformed names, counts, Boolean/string/float
+values, negatives, and overflow were accepted or reached business logic rather
+than failing request validation.
+
+### GREEN evidence
+
+- Focused projection selection, including the real push paused after durable
+  append: `5 passed, 41 deselected`.
+- Focused malformed quota selection: `8 passed, 93 deselected`.
+- Complete Personal Context bootstrap module: `46 passed`.
+- Complete authenticated Sync endpoint module: `102 passed`.
+- Complete Sync store module: `187 passed, 2 skipped`.
+- Complete replay/repair module: `23 passed`.
+- Complete Sync schema/model module: `126 passed`.
+- Ruff over all touched Python files: `All checks passed!`.
+- Python 3.11 compilation of all touched Python files: exit `0`.
+- Bandit over all touched production files: exit `0`, with no findings.
+- Working-tree `git diff --check`: exit `0`.
+
+### Changed files
+
+- `tldw_Server_API/app/core/DB_Management/Sync_DB.py`
+- `tldw_Server_API/app/core/Sync/v2/profile.py`
+- `tldw_Server_API/app/api/v1/schemas/sync_v2_models.py`
+- `tldw_Server_API/app/api/v1/endpoints/sync.py`
+- `tldw_Server_API/tests/Sync/test_sync_v2_personal_context_bootstrap.py`
+- `tldw_Server_API/tests/Sync/test_sync_v2_endpoints.py`
+- `tldw_Server_API/tests/Sync/test_sync_v2_store.py`
+- `IMPLEMENTATION_PLAN_personal_context_bootstrap.md`
+- `backlog/tasks/task-13148 - Bootstrap-Personal-Context-canonical-profile.md`
+- This report.
+
+### Implementation and self-review
+
+The locked transport snapshot now computes a content-free projection-debt count
+per negotiated Personal Context domain/version stream. Any accepted envelope
+whose apply state is not durably `applied` or `superseded` aborts bootstrap
+before canonical snapshot state is read or a transport cursor is signed.
+Envelope append, normal materialization, and replay already acquire the same
+dataset guard, so a successful boundary cannot hide content that a later replay
+could introduce at or below its watermark. SQLite exercises the real paused
+append and repair paths; the PostgreSQL contract executes the same guarded
+aggregate query after `FOR UPDATE` and now covers fail-closed debt handling.
+
+The request schema bounds quota count, identifier grammar, value type, and
+numeric range before service code. It retains all valid requested names in the
+success/attention contract without echoing arbitrary service mappings or
+canonical content. The new 409 reason contains no envelope ID, canonical ID,
+payload, key, ciphertext, or materialization error.
+
+### Known limitations/skips
+
+The repository-wide suite was not run because repository policy requires
+explicit opt-in. A live PostgreSQL fixture was unavailable; backend coverage is
+an executable transaction/query contract rather than a live integration test.
+The commit containing this report is identified in the controller handoff.

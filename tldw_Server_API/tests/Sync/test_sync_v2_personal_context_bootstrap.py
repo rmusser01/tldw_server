@@ -262,6 +262,27 @@ def _transport_record_envelope(
 ) -> SyncEnvelopeCreate:
     """Build one accepted encrypted revision through the production protector."""
 
+    envelope = _client_transport_record_envelope(
+        bootstrap,
+        revision=revision,
+        previous=previous,
+    )
+    dataset = service.store.get_dataset(bootstrap.dataset_id, owner_user_id="user-a")
+    assert dataset is not None
+    return service._protect_personal_context_for_storage(
+        dataset,
+        replace(envelope, apply_status="applied"),
+    )
+
+
+def _client_transport_record_envelope(
+    bootstrap,
+    *,
+    revision: int,
+    previous=None,
+) -> SyncEnvelopeCreate:
+    """Build one clear client revision for the production push path."""
+
     payload = preference_record(
         profile_id=bootstrap.manifest.profile_id,
         record_id="transport-record",
@@ -297,11 +318,25 @@ def _transport_record_envelope(
             "purge_generation": bootstrap.purge_generation,
         },
         encryption_metadata={"policy": "server_trusted_v1"},
-        apply_status="applied",
     )
-    dataset = service.store.get_dataset(bootstrap.dataset_id, owner_user_id="user-a")
-    assert dataset is not None
-    return service._protect_personal_context_for_storage(dataset, envelope)
+    return envelope
+
+
+def _apply_record_to_fake_canonical(canonical: _CanonicalService, **values: object) -> object:
+    """Apply one record like the canonical materializer target used in production."""
+
+    value = values["value"]
+    canonical.applied.append(values)
+    if values["domain"] == "personal_context.record":
+        canonical.records = (
+            *(
+                item
+                for item in canonical.records
+                if item.record_id != value.record_id
+            ),
+            value,
+        )
+    return value
 
 
 def _register_transport_device(service: SyncV2Service, device_id: str) -> None:
@@ -562,6 +597,162 @@ def test_bootstrap_transport_snapshot_serializes_concurrent_sqlite_insert(
     assert [item.server_sequence for item in pulled.envelopes] == [
         inserted.server_sequence
     ]
+
+
+def test_bootstrap_rejects_real_push_paused_before_canonical_materialization(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A signed boundary cannot cover an accepted-but-unmaterialized push."""
+
+    service, canonical = _service(tmp_path)
+    source = _bootstrap(service)
+    service.complete_personal_context_link(
+        user_id="user-a",
+        device_id="device-a",
+        dataset_id=source.dataset_id,
+        bootstrap_cursor=source.cursor,
+    )
+    _register_transport_device(service, "device-b")
+    canonical.apply_sync_object = lambda **values: _apply_record_to_fake_canonical(
+        canonical, **values
+    )  # type: ignore[method-assign]
+    entered_materialization = threading.Event()
+    release_materialization = threading.Event()
+    original_materialize = service._materialize_envelope
+
+    def blocked_materialize(envelope, **kwargs):
+        entered_materialization.set()
+        assert release_materialization.wait(timeout=5)
+        return original_materialize(envelope, **kwargs)
+
+    monkeypatch.setattr(service, "_materialize_envelope", blocked_materialize)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        push_future = executor.submit(
+            service.push,
+            user_id="user-a",
+            dataset_id=source.dataset_id,
+            device_id="device-a",
+            envelopes=[_client_transport_record_envelope(source, revision=1)],
+        )
+        assert entered_materialization.wait(timeout=5)
+        try:
+            with pytest.raises(Exception) as exc_info:
+                _bootstrap(service, device_id="device-b")
+        finally:
+            release_materialization.set()
+        pushed = push_future.result(timeout=5)
+
+    assert getattr(exc_info.value, "reason_code", None) == (
+        "personal_context_projection_incomplete"
+    )
+    assert "transport-record" not in str(exc_info.value)
+    assert _PLAINTEXT_CANARY not in str(exc_info.value)
+    assert len(pushed.accepted) == 1
+
+    reviewed = _bootstrap(service, device_id="device-b")
+    pulled = service.pull(
+        user_id="user-a",
+        dataset_id=reviewed.dataset_id,
+        device_id="device-b",
+        cursor=reviewed.sync_transport_cursor,
+        domains=PERSONAL_CONTEXT_SYNC_DOMAINS,
+    )
+    assert pulled.envelopes == []
+    assert any(item.record_id == "transport-record" for item in reviewed.records)
+
+
+def test_failed_materialization_blocks_bootstrap_until_guarded_replay_succeeds(
+    tmp_path: Path,
+) -> None:
+    """Repair must finish canonically before bootstrap can watermark its sequence."""
+
+    service, canonical = _service(tmp_path)
+    source = _bootstrap(service)
+    service.complete_personal_context_link(
+        user_id="user-a",
+        device_id="device-a",
+        dataset_id=source.dataset_id,
+        bootstrap_cursor=source.cursor,
+    )
+    _register_transport_device(service, "device-b")
+
+    def fail_apply(**_values: object) -> object:
+        raise RuntimeError("projection-private-canary")
+
+    canonical.apply_sync_object = fail_apply  # type: ignore[method-assign]
+    pushed = service.push(
+        user_id="user-a",
+        dataset_id=source.dataset_id,
+        device_id="device-a",
+        envelopes=[_client_transport_record_envelope(source, revision=1)],
+    )
+    assert len(pushed.accepted) == 1
+    sequence = pushed.accepted[0].server_sequence
+    stored = service.store.get_envelope_by_server_cursor(sequence)
+    assert stored is not None and stored.apply_status == "failed"
+
+    with pytest.raises(Exception) as exc_info:
+        _bootstrap(service, device_id="device-b")
+    assert getattr(exc_info.value, "reason_code", None) == (
+        "personal_context_projection_incomplete"
+    )
+    assert "projection-private-canary" not in str(exc_info.value)
+
+    canonical.apply_sync_object = lambda **values: _apply_record_to_fake_canonical(
+        canonical, **values
+    )  # type: ignore[method-assign]
+    replayed = service.repair(
+        user_id="user-a",
+        dataset_id=source.dataset_id,
+        domains=["personal_context.record"],
+        failed_only=True,
+    )
+    assert replayed.applied_count == 1
+    repaired = service.store.get_envelope_by_server_cursor(sequence)
+    assert repaired is not None and repaired.apply_status == "applied"
+
+    reviewed = _bootstrap(service, device_id="device-b")
+    service.complete_personal_context_link(
+        user_id="user-a",
+        device_id="device-b",
+        dataset_id=reviewed.dataset_id,
+        bootstrap_cursor=reviewed.cursor,
+    )
+    assert service.pull(
+        user_id="user-a",
+        dataset_id=reviewed.dataset_id,
+        device_id="device-b",
+        cursor=reviewed.sync_transport_cursor,
+        domains=PERSONAL_CONTEXT_SYNC_DOMAINS,
+    ).envelopes == []
+
+
+@pytest.mark.parametrize("apply_status", ["pending", "conflict", "unknown"])
+def test_bootstrap_rejects_nonterminal_or_unknown_personal_context_apply_status(
+    tmp_path: Path,
+    apply_status: str,
+) -> None:
+    service, _canonical = _service(tmp_path)
+    source = _bootstrap(service)
+    _register_transport_device(service, "device-b")
+    inserted = service.store.insert_envelope(
+        _transport_record_envelope(service, source, revision=1)
+    )
+    with service.store.db.backend.transaction() as connection:
+        service.store.db.execute(
+            "UPDATE sync_envelopes SET apply_status = ? WHERE server_sequence = ?",
+            (apply_status, inserted.server_sequence),
+            connection=connection,
+        )
+
+    with pytest.raises(Exception) as exc_info:
+        _bootstrap(service, device_id="device-b")
+
+    assert getattr(exc_info.value, "reason_code", None) == (
+        "personal_context_projection_incomplete"
+    )
+    assert "transport-record" not in str(exc_info.value)
 
 
 def test_personal_context_service_has_no_materializing_sync_profile_helper() -> None:
