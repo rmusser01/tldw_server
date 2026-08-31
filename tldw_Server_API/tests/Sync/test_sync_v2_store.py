@@ -2865,12 +2865,18 @@ def test_postgres_personal_context_binding_locks_and_merges_current_dataset() ->
     updated = db.bind_personal_context_dataset(
         dataset_id="dataset-1",
         user_id="user-1",
-        expected_profile_id="profile-1",
-        expected_authority_id="authority-1",
+        expected_binding={
+            "profile_id": "profile-1",
+            "authority_id": "authority-1",
+            "integrity_key_id": "personal-context-integrity-v1",
+            "purge_generation": 0,
+            "link_state": "complete",
+        },
         profile_id="profile-1",
         authority_id="authority-1",
         integrity_key_id="personal-context-integrity-v2",
         purge_generation=1,
+        link_state="complete",
     )
 
     statements = [statement for statement, _params, _connection in backend.calls]
@@ -2896,6 +2902,63 @@ def test_postgres_personal_context_binding_locks_and_merges_current_dataset() ->
         "link_state": "complete",
     }
     assert set(PERSONAL_CONTEXT_SYNC_DOMAINS).issubset(updated.domains)
+
+
+def test_postgres_personal_context_binding_cas_accepts_winner_and_rejects_stale() -> None:
+    """The PostgreSQL transaction contract preserves full binding CAS semantics."""
+
+    backend = _PostgresPersonalContextBindingBackend()
+    db = SyncDatabase.__new__(SyncDatabase)
+    db.backend = cast(Any, backend)
+    v1 = {
+        "profile_id": "profile-1",
+        "authority_id": "authority-1",
+        "integrity_key_id": "personal-context-integrity-v1",
+        "purge_generation": 0,
+        "link_state": "complete",
+    }
+    v2 = {**v1, "integrity_key_id": "personal-context-integrity-v2", "purge_generation": 2}
+
+    db.bind_personal_context_dataset(
+        dataset_id="dataset-1",
+        user_id="user-1",
+        expected_binding=v1,
+        profile_id="profile-1",
+        authority_id="authority-1",
+        integrity_key_id="personal-context-integrity-v2",
+        purge_generation=2,
+        link_state="complete",
+    )
+    winner = db.bind_personal_context_dataset(
+        dataset_id="dataset-1",
+        user_id="user-1",
+        expected_binding=None,
+        profile_id="profile-1",
+        authority_id="authority-1",
+        integrity_key_id="personal-context-integrity-v2",
+        purge_generation=2,
+        link_state="complete",
+    )
+
+    with pytest.raises(SyncStoreError, match="personal_context_link_binding_stale"):
+        db.bind_personal_context_dataset(
+            dataset_id="dataset-1",
+            user_id="user-1",
+            expected_binding=v1,
+            profile_id="profile-1",
+            authority_id="authority-1",
+            integrity_key_id="personal-context-integrity-v1",
+            purge_generation=0,
+            link_state="complete",
+        )
+
+    update_calls = [
+        statement
+        for statement, _params, _connection in backend.calls
+        if statement.startswith("UPDATE sync_datasets")
+    ]
+    assert len(update_calls) == 1
+    assert winner.metadata["personal_context"] == v2
 
 
 def test_device_upsert_rejects_cross_user_takeover(sync_store: SyncV2Store):

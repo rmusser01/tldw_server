@@ -32,7 +32,10 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     SyncDatasetCreate,
     SyncEnvelopeCreate,
 )
-from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
+from tldw_Server_API.app.core.Sync.v2.errors import (
+    SyncIdempotencyConflictError,
+    SyncStoreError,
+)
 from tldw_Server_API.app.core.Sync.v2.service import (
     PersonalContextSyncCapabilities,
     SyncV2Service,
@@ -194,7 +197,6 @@ def _bootstrap(service: SyncV2Service, **overrides: object):
     values: dict[str, object] = {
         "user_id": "user-a",
         "device_id": "device-a",
-        "authority_id": "authority-a",
         "required_schema_version": 1,
         "required_quotas": {"max_record_bytes": 16_384},
     }
@@ -268,6 +270,109 @@ def test_bootstrap_is_idempotent_and_serializes_first_profile_link(tmp_path: Pat
     assert canonical.created == 1
 
 
+def test_concurrent_absent_personal_context_bindings_accept_identical_winner(
+    tmp_path: Path,
+) -> None:
+    """Two callers that pre-read absence converge on the first durable binding."""
+
+    service, canonical = _service(tmp_path)
+    dataset = service.store.get_or_create_default_personal_dataset("user-a")
+    barrier = threading.Barrier(2)
+
+    def bind_from_absent_read():
+        barrier.wait(timeout=5)
+        return service.store.bind_personal_context_dataset(
+            dataset_id=dataset.dataset_id,
+            user_id="user-a",
+            expected_binding=None,
+            profile_id=canonical.manifest.profile_id,
+            authority_id="authority-a",
+            integrity_key_id=canonical.integrity_key_id,
+            purge_generation=canonical.manifest.purge_generation,
+            link_state="bootstrap_pending",
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first, second = tuple(executor.map(lambda _index: bind_from_absent_read(), range(2)))
+
+    assert first.dataset_id == second.dataset_id == dataset.dataset_id
+    durable = service.store.get_dataset(dataset.dataset_id, owner_user_id="user-a")
+    assert durable is not None
+    assert durable.metadata["personal_context"]["integrity_key_id"] == canonical.integrity_key_id
+
+
+def test_stale_personal_context_binding_cannot_overwrite_new_key_or_receipt(
+    tmp_path: Path,
+) -> None:
+    """A caller with v1 state cannot replace a committed v2 binding under lock."""
+
+    service, canonical = _service(tmp_path)
+    bootstrap = _bootstrap(service)
+    dataset = service.store.get_dataset(bootstrap.dataset_id, owner_user_id="user-a")
+    assert dataset is not None
+    before = dataset.metadata["personal_context"]
+    service.store.bind_personal_context_dataset(
+        dataset_id=dataset.dataset_id,
+        user_id="user-a",
+        expected_binding=dict(before),
+        profile_id=str(before["profile_id"]),
+        authority_id=str(before["authority_id"]),
+        integrity_key_id="personal-context-integrity-v2",
+        purge_generation=2,
+        link_state=str(before["link_state"]),
+    )
+    service.store.complete_personal_context_link_receipt(
+        user_id="user-a",
+        dataset_id=dataset.dataset_id,
+        device_id="device-a",
+        profile_id=str(before["profile_id"]),
+        integrity_key_id="personal-context-integrity-v2",
+        purge_generation=2,
+        bootstrap_cursor="v2-cursor",
+    )
+
+    with pytest.raises(SyncStoreError, match="personal_context_link_binding_stale"):
+        service.store.bind_personal_context_dataset(
+            dataset_id=dataset.dataset_id,
+            user_id="user-a",
+            expected_binding=dict(before),
+            profile_id=str(before["profile_id"]),
+            authority_id=str(before["authority_id"]),
+            integrity_key_id=str(before["integrity_key_id"]),
+            purge_generation=int(before["purge_generation"]),
+            link_state=str(before["link_state"]),
+        )
+
+    durable = service.store.get_dataset(dataset.dataset_id, owner_user_id="user-a")
+    assert durable is not None
+    assert durable.metadata["personal_context"]["integrity_key_id"] == "personal-context-integrity-v2"
+    assert durable.metadata["personal_context"]["purge_generation"] == 2
+    assert service.store.has_personal_context_link_receipt(
+        user_id="user-a",
+        dataset_id=dataset.dataset_id,
+        device_id="device-a",
+        profile_id=str(before["profile_id"]),
+        integrity_key_id="personal-context-integrity-v2",
+        purge_generation=2,
+    )
+
+
+def test_personal_context_bootstrap_service_accepts_no_client_authority_argument() -> None:
+    """Authority is server configured rather than a client-callable service input."""
+
+    assert "authority_id" not in inspect.signature(
+        SyncV2Service.bootstrap_personal_context
+    ).parameters
+
+
+def test_generic_enrollment_has_no_personal_context_escape_hatch() -> None:
+    """Generic enrollment always retains server-owned Personal Context state."""
+
+    assert "preserve_personal_context" not in inspect.signature(
+        SyncDatabase.enroll_dataset
+    ).parameters
+
+
 def test_bootstrap_returns_registered_device_wrapped_integrity_key_only(tmp_path: Path) -> None:
     service, _canonical = _service(tmp_path)
 
@@ -339,6 +444,94 @@ def test_concurrent_real_rsa_bootstraps_share_one_durable_wrapper(tmp_path: Path
         ),
     ) == _INTEGRITY_KEY
     assert _INTEGRITY_KEY.hex() not in str((first, second, records))
+
+
+@pytest.mark.parametrize(
+    "mismatch",
+    [
+        "owner",
+        "dataset",
+        "device",
+        "purpose",
+        "wrapped_for",
+        "rewrap_status",
+        "revoked",
+        "policy",
+        "integrity_key_id",
+        "wrapping_key_fingerprint",
+    ],
+)
+def test_conflicting_rsa_key_record_winner_mismatch_fails_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mismatch: str,
+) -> None:
+    """A conflicting wrapper row is accepted only when every durable fence matches."""
+
+    service, canonical = _service(tmp_path)
+    bootstrap = _bootstrap(service)
+    dataset = service.store.get_dataset(bootstrap.dataset_id, owner_user_id="user-a")
+    device = service.store.get_device("user-a", "device-a")
+    records = service.store.list_key_records(
+        bootstrap.dataset_id,
+        user_id="user-a",
+        device_id="device-a",
+        key_purpose="personal_context_integrity",
+    )
+    assert dataset is not None and device is not None and len(records) == 1
+    winner = records[0]
+    values: dict[str, object] = {}
+    if mismatch == "owner":
+        values["user_id"] = "foreign-user"
+    elif mismatch == "dataset":
+        values["dataset_id"] = "foreign-dataset"
+    elif mismatch == "device":
+        values["device_id"] = "foreign-device"
+    elif mismatch == "purpose":
+        values["key_purpose"] = "foreign-purpose"
+    elif mismatch == "wrapped_for":
+        values["wrapped_for"] = "recovery"
+    elif mismatch == "rewrap_status":
+        values["rewrap_status"] = "not_required"
+    elif mismatch == "revoked":
+        values["revoked_at"] = "2026-08-30T00:00:00+00:00"
+    elif mismatch == "policy":
+        values["encryption_policy"] = "server_trusted_v1"
+    elif mismatch == "integrity_key_id":
+        values["kdf_metadata"] = {
+            **winner.kdf_metadata,
+            "integrity_key_id": "foreign-integrity-key",
+        }
+    else:
+        values["kdf_metadata"] = {
+            **winner.kdf_metadata,
+            "wrapping_key_fingerprint": "foreign-fingerprint",
+        }
+    mismatched_winner = replace(winner, **values)
+    list_calls = 0
+
+    def hide_then_return_mismatch(*_args: object, **_kwargs: object):
+        nonlocal list_calls
+        list_calls += 1
+        return [] if list_calls == 1 else [mismatched_winner]
+
+    def conflict_insert(*_args: object, **_kwargs: object):
+        raise SyncIdempotencyConflictError("different randomized wrapper")
+
+    monkeypatch.setattr(service.store, "list_key_records", hide_then_return_mismatch)
+    monkeypatch.setattr(service.store, "store_key_record", conflict_insert)
+
+    with pytest.raises(Exception) as exc_info:
+        service._profile_manager()._device_integrity_key_record(
+            user_id="user-a",
+            dataset=dataset,
+            device=device,
+            integrity_key_id=canonical.integrity_key_id,
+            integrity_key=canonical.integrity_key,
+        )
+
+    assert getattr(exc_info.value, "reason_code", None) == "personal_context_key_custody_unavailable"
+    assert winner.wrapped_key_blob not in str(exc_info.value)
 
 
 def test_bootstrap_requires_transactional_canonical_snapshot(tmp_path: Path) -> None:
@@ -420,7 +613,6 @@ def test_bootstrap_fails_closed_before_profile_disclosure_for_wrong_identity(
         service.bootstrap_personal_context(
             user_id=user_id,
             device_id=device_id,
-            authority_id="authority-a",
         )
 
     assert getattr(exc_info.value, "reason_code", None) == reason
@@ -634,16 +826,16 @@ def test_personal_context_binding_rejects_profile_or_authority_mismatch_under_lo
     assert dataset is not None
     binding = dataset.metadata["personal_context"]
 
-    with pytest.raises(SyncStoreError, match="personal_context_authority_mismatch"):
+    with pytest.raises(SyncStoreError, match="personal_context_link_binding_stale"):
         service.store.bind_personal_context_dataset(
             dataset_id=dataset.dataset_id,
             user_id="user-a",
-            expected_profile_id="other-profile",
-            expected_authority_id=str(binding["authority_id"]),
-            profile_id=str(binding["profile_id"]),
+            expected_binding={**binding, "profile_id": "other-profile"},
+            profile_id="new-profile",
             authority_id=str(binding["authority_id"]),
             integrity_key_id=str(binding["integrity_key_id"]),
             purge_generation=int(binding["purge_generation"]),
+            link_state=str(binding["link_state"]),
         )
 
 

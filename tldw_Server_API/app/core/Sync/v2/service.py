@@ -2346,7 +2346,6 @@ class SyncV2Service:
         *,
         user_id: str,
         device_id: str,
-        authority_id: str | None = None,
         required_schema_version: int | None = None,
         required_quotas: Mapping[str, int] | None = None,
         expected_purge_generation: int | None = None,
