@@ -2,9 +2,9 @@ from __future__ import annotations
 
 """Sync v2 service composition helpers shared by HTTP and non-HTTP entrypoints."""
 
+import hashlib
 import hmac
 import os
-import hashlib
 from base64 import urlsafe_b64encode
 from collections.abc import Mapping
 from functools import lru_cache
@@ -296,7 +296,7 @@ def _wrap_personal_context_integrity_key(
     public_key = serialization.load_pem_public_key(public_key_pem.encode("utf-8"))
     if not isinstance(public_key, rsa.RSAPublicKey) or public_key.key_size < 2048:
         raise ValueError("personal_context_device_key_invalid")
-    label = f"personal-context:{integrity_key_id}".encode("utf-8")
+    label = f"personal-context:{integrity_key_id}".encode()
     ciphertext = public_key.encrypt(
         integrity_key,
         padding.OAEP(

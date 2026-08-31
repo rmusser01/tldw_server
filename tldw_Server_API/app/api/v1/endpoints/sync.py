@@ -77,11 +77,11 @@ from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
     SyncKeyRotationPreviewRequest,
     SyncKeyRotationResponse,
     SyncNotesAttachmentBootstrapDiagnosticsResponse,
-    SyncProfileBootstrapRequest,
-    SyncProfileBootstrapResponse,
     SyncPersonalContextBootstrapRequest,
     SyncPersonalContextBootstrapResponse,
     SyncPersonalContextLinkCompleteRequest,
+    SyncProfileBootstrapRequest,
+    SyncProfileBootstrapResponse,
     SyncProfileResponse,
     SyncPullResponse,
     SyncPushAcceptedEnvelope,
@@ -116,13 +116,13 @@ from tldw_Server_API.app.core.Sync.v2.factory import (
     sync_v2_service_for_user,
     sync_v2_storage_exists_for_user,
 )
-from tldw_Server_API.app.core.Sync.v2.profile import PersonalContextBootstrapError
 from tldw_Server_API.app.core.Sync.v2.models import (
     SyncDeviceBlobAckCreate,
     SyncDeviceBlobIdAckCreate,
     SyncDeviceDomainAckCreate,
     SyncEnvelopeCreate,
 )
+from tldw_Server_API.app.core.Sync.v2.profile import PersonalContextBootstrapError
 from tldw_Server_API.app.core.Sync.v2.security import (
     server_trusted_encryption_status_from_env,
 )
