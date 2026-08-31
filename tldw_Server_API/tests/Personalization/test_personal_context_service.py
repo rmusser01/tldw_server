@@ -111,6 +111,85 @@ def test_sync_bootstrap_snapshot_reads_manifest_heads_and_key_in_one_service_cal
     assert snapshot.cursor.startswith("personal-context-bootstrap-v1:")
 
 
+def test_sync_bootstrap_plan_reserves_only_content_free_state_until_materialized(
+    service: PersonalContextService,
+) -> None:
+    """Planning is stable while canonical manifest/scope replicas remain absent."""
+
+    first = service.plan_sync_bootstrap()
+    retry = service.plan_sync_bootstrap()
+
+    assert retry == first
+    assert first.materialized is False
+    assert first.records == ()
+    assert first.proposals == ()
+    assert len(first.scopes) == 1
+    assert first.scopes[0].kind is ScopeKind.GLOBAL
+    assert service._repository.profile_ids() == ()
+    with service._repository.database.transaction() as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM personal_context_object_versions"
+        ).fetchone()[0] == 0
+        assert connection.execute(
+            "SELECT COUNT(*) FROM personal_context_object_heads"
+        ).fetchone()[0] == 0
+
+    materialized = service.materialize_sync_bootstrap(
+        profile_id=first.manifest.profile_id,
+        bootstrap_cursor=first.cursor,
+    )
+
+    assert materialized.materialized is True
+    assert materialized.manifest == first.manifest
+    assert materialized.scopes == first.scopes
+    assert service.get_manifest() == first.manifest
+    assert service.list_scopes() == first.scopes
+
+
+def test_cancelled_sync_plan_remains_absent_and_does_not_block_explicit_creation(
+    service: PersonalContextService,
+) -> None:
+    """A content-free reservation is not reported as damage or a canonical profile."""
+
+    planned = service.plan_sync_bootstrap()
+
+    assert service.status().state is ProfileOperationalState.ABSENT
+    created = service.create_profile(runtime_enabled=False)
+
+    assert created == planned.manifest
+    assert service.list_scopes() == planned.scopes
+
+
+def test_concurrent_sync_plans_and_materialization_converge_on_exact_objects(
+    service: PersonalContextService,
+) -> None:
+    """Real SQLite reservation/materialization transactions admit one exact plan."""
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first, second = tuple(
+            executor.map(lambda _index: service.plan_sync_bootstrap(), range(2))
+        )
+    assert second == first
+    assert service._repository.profile_ids() == ()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        completed = tuple(
+            executor.map(
+                lambda _index: service.materialize_sync_bootstrap(
+                    profile_id=first.manifest.profile_id,
+                    bootstrap_cursor=first.cursor,
+                ),
+                range(2),
+            )
+        )
+
+    assert completed[0] == completed[1]
+    assert completed[0].manifest == first.manifest
+    assert completed[0].scopes == first.scopes
+
+
 def test_sync_bootstrap_cursor_changes_when_only_integrity_key_changes(
     service: PersonalContextService,
     monkeypatch: pytest.MonkeyPatch,

@@ -134,6 +134,22 @@ class _CanonicalService:
             ).hexdigest(),
         })()
 
+    def plan_sync_bootstrap(self):
+        snapshot = self.sync_bootstrap_snapshot()
+        snapshot.materialized = self.profile_exists
+        return snapshot
+
+    def materialize_sync_bootstrap(self, *, profile_id: str, bootstrap_cursor: str):
+        snapshot = self.plan_sync_bootstrap()
+        if (
+            profile_id != snapshot.manifest.profile_id
+            or bootstrap_cursor != snapshot.cursor
+        ):
+            raise ValueError("stale bootstrap plan")
+        self.profile_exists = True
+        snapshot.materialized = True
+        return snapshot
+
     def apply_sync_object(self, **values: object) -> object:
         self.applied.append(values)
         return values["value"]
@@ -266,7 +282,21 @@ def test_bootstrap_is_idempotent_and_serializes_first_profile_link(tmp_path: Pat
 
     assert retry.dataset_id == first.dataset_id
     assert retry.manifest.profile_id == first.manifest.profile_id
-    assert canonical.created == 1
+    assert retry.manifest == first.manifest
+    assert retry.scopes == first.scopes
+    assert canonical.created == 0
+    assert canonical.profile_exists is False
+
+    service.complete_personal_context_link(
+        user_id="user-a",
+        device_id="device-a",
+        dataset_id=first.dataset_id,
+        bootstrap_cursor=first.cursor,
+    )
+
+    assert canonical.profile_exists is True
+    assert canonical.manifest == first.manifest
+    assert canonical.scope == first.scopes[0]
 
 
 def test_concurrent_absent_personal_context_bindings_accept_identical_winner(
@@ -624,14 +654,47 @@ def test_bootstrap_blocks_capability_schema_quota_purge_and_key_custody_without_
 ) -> None:
     service, canonical = _service(tmp_path)
     cases = [
-        ({"required_schema_version": 2}, "personal_context_schema_incompatible"),
-        ({"required_quotas": {"max_record_bytes": 16_385}}, "personal_context_quota_incompatible"),
-        ({"expected_purge_generation": 1}, "personal_context_purge_generation_stale"),
+        (
+            {"required_schema_version": 2},
+            "personal_context_schema_incompatible",
+            {
+                "kind": "schema_incompatible",
+                "required_schema_version": 2,
+                "server_min_schema_version": 1,
+                "server_max_schema_version": 1,
+            },
+        ),
+        (
+            {"required_quotas": {"max_record_bytes": 16_385}},
+            "personal_context_quota_incompatible",
+            {
+                "kind": "quota_incompatible",
+                "required_quotas": {"max_record_bytes": 16_385},
+                "available_quotas": {
+                    "max_record_bytes": 16_384,
+                    "max_search_results": 20,
+                    "max_proposals_per_turn": 5,
+                    "max_proposals_per_session": 25,
+                    "max_unresolved_proposals": 200,
+                },
+                "insufficient_quotas": ["max_record_bytes"],
+            },
+        ),
+        (
+            {"expected_purge_generation": 1},
+            "personal_context_purge_generation_stale",
+            {
+                "kind": "purge_generation_mismatch",
+                "expected_purge_generation": 1,
+                "current_purge_generation": 0,
+            },
+        ),
     ]
-    for kwargs, reason in cases:
+    for kwargs, reason, attention in cases:
         with pytest.raises(Exception) as exc_info:
             _bootstrap(service, **kwargs)
         assert getattr(exc_info.value, "reason_code", None) == reason
+        assert getattr(exc_info.value, "attention", None) == attention
         assert _PLAINTEXT_CANARY not in str(exc_info.value)
 
     service.personal_context_key_wrapper = None

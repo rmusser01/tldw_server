@@ -77,6 +77,7 @@ from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
     SyncKeyRotationPreviewRequest,
     SyncKeyRotationResponse,
     SyncNotesAttachmentBootstrapDiagnosticsResponse,
+    SyncPersonalContextBootstrapErrorResponse,
     SyncPersonalContextBootstrapRequest,
     SyncPersonalContextBootstrapResponse,
     SyncPersonalContextLinkCompleteRequest,
@@ -261,10 +262,13 @@ def _safe_sync_v2_http_error(exc: Exception, **context: object) -> HTTPException
                 "Personal Context bootstrap failed.",
             ),
         )
-        return HTTPException(
-            status_code=status_code,
-            detail={"error_code": reason_code, "message": message},
-        )
+        detail: dict[str, object] = {
+            "error_code": reason_code,
+            "message": message,
+        }
+        if exc.attention is not None:
+            detail["attention"] = exc.attention
+        return HTTPException(status_code=status_code, detail=detail)
     if isinstance(exc, SyncStoreError):
         lowered = str(exc).lower()
         notes_task_activation_errors = {
@@ -863,6 +867,7 @@ def bootstrap_sync_v2_profile(
 @router.post(
     "/personal-context/bootstrap",
     response_model=SyncPersonalContextBootstrapResponse,
+    responses={409: {"model": SyncPersonalContextBootstrapErrorResponse}},
     summary="Bootstrap canonical Personal Context for one registered device",
 )
 def bootstrap_sync_v2_personal_context(

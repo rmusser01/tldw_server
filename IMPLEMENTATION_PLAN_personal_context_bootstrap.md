@@ -16,7 +16,8 @@ collection/fixture failures and final GREEN evidence are recorded in the task re
 ## Stage 2: Canonical bootstrap transaction
 
 **Goal:** Serialize first-link ownership and return the manifest, scopes,
-eligible object heads, purge generation, quotas, and one bootstrap cursor.
+eligible object heads, purge generation, quotas, and one bootstrap cursor
+without creating canonical content before reviewed completion.
 
 **Success criteria:** Repeated requests are idempotent; mismatched users,
 devices, schema, quotas, and purge generations fail with stable content-free
@@ -24,8 +25,11 @@ outcomes; no bootstrap path treats Sync history as canonical storage.
 
 **Tests:** Focused bootstrap plus Personalization repository/service tests.
 
-**Status:** Complete — canonical service remains authoritative; first-link creation,
-opaque binding state, compatibility checks, and cursor-bounded snapshots are implemented.
+**Status:** Complete — canonical service remains authoritative. An absent profile
+reserves only random identity and wrapped key custody; the deterministic
+manifest/global-scope plan remains transient until reviewed completion persists
+those exact canonical objects. Compatibility failures expose typed content-free
+attention facts while retaining the existing stable 409 reason codes.
 
 ## Stage 3: Wrapped integrity-key delivery and link fence
 
@@ -77,8 +81,8 @@ whole-object Sync transport, and the service boundary used by bootstrap.
 
 ## Final verification evidence
 
-- `140 passed` — Personal Context service, bootstrap, and authenticated Sync
-  endpoint modules.
+- `163 passed` — Personal Context repository/service, bootstrap, and
+  authenticated Sync endpoint modules after the non-mutating review correction.
 - `174 passed, 13 deselected` — non-PostgreSQL Sync store tests.
 - `4 passed` — executable PostgreSQL Personal Context lock/CAS transaction
   contracts. A live PostgreSQL fixture was unavailable in this environment.

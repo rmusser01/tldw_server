@@ -1126,6 +1126,61 @@ class SyncPersonalContextBootstrapRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class SyncPersonalContextSchemaAttention(BaseModel):
+    """Exact content-free schema bounds blocking bootstrap review."""
+
+    kind: Literal["schema_incompatible"]
+    required_schema_version: int = Field(..., ge=1)
+    server_min_schema_version: int = Field(..., ge=1)
+    server_max_schema_version: int = Field(..., ge=1)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SyncPersonalContextQuotaAttention(BaseModel):
+    """Exact content-free quota deficits blocking bootstrap review."""
+
+    kind: Literal["quota_incompatible"]
+    required_quotas: dict[str, int]
+    available_quotas: dict[str, int]
+    insufficient_quotas: list[str]
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SyncPersonalContextPurgeAttention(BaseModel):
+    """Exact content-free purge generations blocking bootstrap review."""
+
+    kind: Literal["purge_generation_mismatch"]
+    expected_purge_generation: int = Field(..., ge=0)
+    current_purge_generation: int = Field(..., ge=0)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SyncPersonalContextBootstrapErrorDetail(BaseModel):
+    """Stable bootstrap failure with actionable content-free review facts."""
+
+    error_code: str
+    message: str
+    attention: (
+        SyncPersonalContextSchemaAttention
+        | SyncPersonalContextQuotaAttention
+        | SyncPersonalContextPurgeAttention
+        | None
+    ) = Field(None, discriminator="kind")
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SyncPersonalContextBootstrapErrorResponse(BaseModel):
+    """FastAPI error envelope for Personal Context bootstrap."""
+
+    detail: SyncPersonalContextBootstrapErrorDetail
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class SyncPersonalContextBootstrapResponse(BaseModel):
     """Canonical bootstrap snapshot with device-wrapped integrity key material."""
 
@@ -2279,6 +2334,11 @@ __all__ = [
     "SyncProfileBootstrapResponse",
     "SyncPersonalContextBootstrapRequest",
     "SyncPersonalContextBootstrapResponse",
+    "SyncPersonalContextBootstrapErrorResponse",
+    "SyncPersonalContextBootstrapErrorDetail",
+    "SyncPersonalContextSchemaAttention",
+    "SyncPersonalContextQuotaAttention",
+    "SyncPersonalContextPurgeAttention",
     "SyncPersonalContextLinkCompleteRequest",
     "SyncNotesAttachmentBootstrapDiagnosticsResponse",
     "SyncNotesAttachmentCleanupSampleResponse",

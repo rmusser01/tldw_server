@@ -21,6 +21,9 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
 )
 from tldw_Server_API.app.api.v1.endpoints import sync as sync_endpoint
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
+from tldw_Server_API.app.core.Personalization.personal_context_repository_models import (
+    ProfileStorageLockedError,
+)
 from tldw_Server_API.app.core.Sync.v2 import factory as sync_v2_factory
 from tldw_Server_API.app.core.Sync.v2.adapters import (
     AttachmentRefAdapter,
@@ -3147,7 +3150,7 @@ def _assert_personal_context_error_is_redacted(response, reason_code: str) -> No
 def test_personal_context_endpoints_use_real_factory_bootstrap_and_complete_flow(
     factory_personal_context_service: SyncV2Service,
 ) -> None:
-    """The typed HTTP flow creates canonical state and delivers a device-only key."""
+    """The typed flow plans read-only state and materializes it only on completion."""
 
     client = _client_for_factory_service(factory_personal_context_service)
     missing = client.post(
@@ -3186,9 +3189,29 @@ def test_personal_context_endpoints_use_real_factory_bootstrap_and_complete_flow
     assert body["wrapped_key_blob"].startswith("rsa-oaep-sha256:")
 
     canonical = factory_personal_context_service.personal_context_service_resolver("101")
-    manifest = canonical.get_manifest()
-    assert manifest.profile_id == body["manifest"]["profile_id"]
-    integrity_key_id, integrity_key = canonical.sync_integrity_key(manifest.profile_id)
+    with pytest.raises((KeyError, ProfileStorageLockedError)):
+        canonical.get_manifest()
+    assert canonical._repository.profile_ids() == ()
+    with canonical._repository.database.transaction() as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM personal_context_object_versions"
+        ).fetchone()[0] == 0
+        assert connection.execute(
+            "SELECT COUNT(*) FROM personal_context_object_heads"
+        ).fetchone()[0] == 0
+    retry = client.post(
+        "/api/v1/sync/personal-context/bootstrap",
+        json=bootstrap_request,
+    )
+    assert retry.status_code == 200
+    assert retry.json()["manifest"] == body["manifest"]
+    assert retry.json()["scopes"] == body["scopes"]
+    assert retry.json()["cursor"] == body["cursor"]
+
+    integrity_key_id = body["integrity_key_id"]
+    integrity_key = canonical._repository.sync_integrity_key(
+        body["manifest"]["profile_id"]
+    )[1]
     ciphertext = base64.urlsafe_b64decode(body["wrapped_key_blob"].split(":", 1)[1])
     assert private_key.decrypt(
         ciphertext,
@@ -3221,6 +3244,11 @@ def test_personal_context_endpoints_use_real_factory_bootstrap_and_complete_flow
         },
     )
     assert completion.status_code == 204
+    manifest = canonical.get_manifest()
+    assert manifest.model_dump(mode="json") == body["manifest"]
+    assert [item.model_dump(mode="json") for item in canonical.list_scopes()] == body[
+        "scopes"
+    ]
     assert factory_personal_context_service.store.has_personal_context_link_receipt(
         user_id="101",
         dataset_id=body["dataset_id"],
@@ -3286,7 +3314,6 @@ def test_personal_context_complete_endpoint_rejects_real_stale_integrity_binding
     assert bootstrap.status_code == 200, bootstrap.text
     body = bootstrap.json()
     canonical = factory_personal_context_service.personal_context_service_resolver("101")
-    manifest = canonical.get_manifest()
     stale_key_id = "personal-context-integrity-vstale"
     dataset = factory_personal_context_service.store.get_dataset(body["dataset_id"])
     assert dataset is not None
@@ -3315,11 +3342,12 @@ def test_personal_context_complete_endpoint_rejects_real_stale_integrity_binding
     _assert_personal_context_error_is_redacted(
         completion, "personal_context_link_binding_stale"
     )
+    assert canonical._repository.profile_ids() == ()
     assert not factory_personal_context_service.store.has_personal_context_link_receipt(
         user_id="101",
         dataset_id=body["dataset_id"],
         device_id="pc-device",
-        profile_id=manifest.profile_id,
+        profile_id=body["manifest"]["profile_id"],
         integrity_key_id=stale_key_id,
         purge_generation=body["purge_generation"],
     )
@@ -3498,6 +3526,83 @@ def test_personal_context_bootstrap_endpoint_maps_redacted_reason_codes(
     )
     assert response.status_code == expected_status
     _assert_personal_context_error_is_redacted(response, reason_code)
+
+
+@pytest.mark.parametrize(
+    ("request_patch", "reason_code", "attention"),
+    [
+        (
+            {"required_schema_version": 2},
+            "personal_context_schema_incompatible",
+            {
+                "kind": "schema_incompatible",
+                "required_schema_version": 2,
+                "server_min_schema_version": 1,
+                "server_max_schema_version": 1,
+            },
+        ),
+        (
+            {"required_quotas": {"max_record_bytes": 16_385}},
+            "personal_context_quota_incompatible",
+            {
+                "kind": "quota_incompatible",
+                "required_quotas": {"max_record_bytes": 16_385},
+                "available_quotas": {
+                    "max_record_bytes": 16_384,
+                    "max_search_results": 20,
+                    "max_proposals_per_turn": 5,
+                    "max_proposals_per_session": 25,
+                    "max_unresolved_proposals": 200,
+                },
+                "insufficient_quotas": ["max_record_bytes"],
+            },
+        ),
+        (
+            {"expected_purge_generation": 1},
+            "personal_context_purge_generation_stale",
+            {
+                "kind": "purge_generation_mismatch",
+                "expected_purge_generation": 1,
+                "current_purge_generation": 0,
+            },
+        ),
+    ],
+)
+def test_personal_context_bootstrap_endpoint_exposes_exact_content_free_attention(
+    factory_personal_context_service: SyncV2Service,
+    request_patch: dict[str, object],
+    reason_code: str,
+    attention: dict[str, object],
+) -> None:
+    """Review blockers disclose exact numeric facts but no canonical body or key."""
+
+    client = _client_for_factory_service(factory_personal_context_service)
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    assert client.post(
+        "/api/v1/sync/devices/register",
+        json=_registered_personal_context_device_payload(private_key.public_key()),
+    ).status_code == 200
+
+    response = client.post(
+        "/api/v1/sync/personal-context/bootstrap",
+        json={"device_id": "pc-device", **request_patch},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == {
+        "error_code": reason_code,
+        "message": response.json()["detail"]["message"],
+        "attention": attention,
+    }
+    for secret in (
+        '"wrapped_key_blob":',
+        '"manifest":',
+        '"scopes":',
+        '"records":',
+        '"proposals":',
+        "ciphertext",
+    ):
+        assert secret not in response.text
 
 
 @pytest.mark.parametrize(

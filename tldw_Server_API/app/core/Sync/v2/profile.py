@@ -7,6 +7,10 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from tldw_Server_API.app.core.Personalization.personal_context_service import (
+    ProfileConflictError,
+)
+
 from .errors import SyncIdempotencyConflictError, SyncStoreError
 from .models import (
     DEFAULT_M1_ENCRYPTION_POLICY,
@@ -44,8 +48,14 @@ _PERSONAL_CONTEXT_KEY_PURPOSE = "personal_context_integrity"
 class PersonalContextBootstrapError(SyncStoreError):
     """Content-free bootstrap failure with a stable reason code."""
 
-    def __init__(self, reason_code: str) -> None:
+    def __init__(
+        self,
+        reason_code: str,
+        *,
+        attention: Mapping[str, object] | None = None,
+    ) -> None:
         self.reason_code = reason_code
+        self.attention = dict(attention) if attention is not None else None
         super().__init__(reason_code)
 
 
@@ -437,10 +447,37 @@ class SyncV2ProfileManager:
             required_schema_version is not None
             and not min_schema_version <= required_schema_version <= schema_version
         ):
-            raise PersonalContextBootstrapError("personal_context_schema_incompatible")
+            raise PersonalContextBootstrapError(
+                "personal_context_schema_incompatible",
+                attention={
+                    "kind": "schema_incompatible",
+                    "required_schema_version": required_schema_version,
+                    "server_min_schema_version": min_schema_version,
+                    "server_max_schema_version": schema_version,
+                },
+            )
         quotas = _personal_context_bootstrap_quotas(personal_context)
         if not _personal_context_quotas_compatible(required_quotas, quotas):
-            raise PersonalContextBootstrapError("personal_context_quota_incompatible")
+            normalized_required_quotas = dict(required_quotas or {})
+            raise PersonalContextBootstrapError(
+                "personal_context_quota_incompatible",
+                attention={
+                    "kind": "quota_incompatible",
+                    "required_quotas": normalized_required_quotas,
+                    "available_quotas": quotas,
+                    "insufficient_quotas": sorted(
+                        name
+                        for name, value in normalized_required_quotas.items()
+                        if (
+                            name not in quotas
+                            or not isinstance(value, int)
+                            or isinstance(value, bool)
+                            or value < 0
+                            or value > quotas[name]
+                        )
+                    ),
+                },
+            )
 
         try:
             canonical_service = self.service._personal_context_service_for_user(user_id)
@@ -449,10 +486,7 @@ class SyncV2ProfileManager:
                 "personal_context_key_custody_unavailable"
             ) from exc
         try:
-            ensure_profile = getattr(canonical_service, "ensure_sync_profile", None)
-            if callable(ensure_profile):
-                ensure_profile()
-            snapshot = canonical_service.sync_bootstrap_snapshot()
+            snapshot = canonical_service.plan_sync_bootstrap()
             manifest = snapshot.manifest
             integrity_key_id = snapshot.integrity_key_id
             integrity_key = snapshot.integrity_key
@@ -469,7 +503,14 @@ class SyncV2ProfileManager:
             expected_purge_generation is not None
             and expected_purge_generation != purge_generation
         ):
-            raise PersonalContextBootstrapError("personal_context_purge_generation_stale")
+            raise PersonalContextBootstrapError(
+                "personal_context_purge_generation_stale",
+                attention={
+                    "kind": "purge_generation_mismatch",
+                    "expected_purge_generation": expected_purge_generation,
+                    "current_purge_generation": purge_generation,
+                },
+            )
         dataset = self._bind_personal_context_dataset(
             user_id=user_id,
             manifest=manifest,
@@ -533,7 +574,7 @@ class SyncV2ProfileManager:
             raise PersonalContextBootstrapError("personal_context_link_unavailable")
         try:
             canonical_service = self.service._personal_context_service_for_user(user_id)
-            snapshot = canonical_service.sync_bootstrap_snapshot()
+            snapshot = canonical_service.plan_sync_bootstrap()
         except Exception as exc:  # noqa: BLE001 - no data leaks through failures.
             raise PersonalContextBootstrapError(
                 "personal_context_bootstrap_unavailable"
@@ -542,6 +583,21 @@ class SyncV2ProfileManager:
             raise PersonalContextBootstrapError("personal_context_bootstrap_cursor_stale")
         if state.get("integrity_key_id") != snapshot.integrity_key_id:
             raise PersonalContextBootstrapError("personal_context_link_binding_stale")
+        if state.get("profile_id") != snapshot.manifest.profile_id:
+            raise PersonalContextBootstrapError("personal_context_link_binding_stale")
+        try:
+            snapshot = canonical_service.materialize_sync_bootstrap(
+                profile_id=str(state["profile_id"]),
+                bootstrap_cursor=bootstrap_cursor,
+            )
+        except ProfileConflictError as exc:
+            raise PersonalContextBootstrapError(
+                "personal_context_snapshot_unstable"
+            ) from exc
+        except Exception as exc:  # noqa: BLE001 - canonical details stay private.
+            raise PersonalContextBootstrapError(
+                "personal_context_bootstrap_unavailable"
+            ) from exc
         try:
             self.store.complete_personal_context_link_receipt(
                 user_id=user_id,

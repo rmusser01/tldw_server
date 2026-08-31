@@ -55,30 +55,36 @@ Reason: ADR-002 already governs canonical server ownership, key custody, whole-o
 <!-- SECTION:NOTES:BEGIN -->
 Implemented an authenticated Personal Context first-link boundary over the same
 canonical profile records used by the server; Sync remains encrypted transport
-and coordination state, never a second profile authority. The server creates or
-reads the canonical profile through `PersonalContextService`, returns one
-transactional manifest/scope/head snapshot and cursor, wraps the server-owned
-integrity key for the registered device with RSA-OAEP-SHA256, and requires an
-exact per-device completion receipt before admitting Personal Context pushes.
+and coordination state, never a second profile authority. When no canonical
+profile exists, bootstrap reserves only random profile identity and wrapped key
+custody, then returns a deterministic transient manifest/global-scope snapshot.
+It does not persist canonical manifest, scope, record, or proposal replicas until
+the reviewed `/personal-context/complete` request materializes those exact IDs,
+versions, and cursor. A cancelled preview therefore leaves canonical content
+absent, and an explicit server-side profile creation can safely adopt the same
+reservation instead of reporting corrupt/locked state.
 
 The final implementation also fences stale key, purge-generation, profile,
 authority, and link transitions; persists receipts with backend-appropriate
 locking/CAS semantics; preserves unrelated enrollment metadata; rotates device
 wrappers when the registered public key changes; and maps all bootstrap failures
-to stable content-free HTTP outcomes. ADR-002 remains the governing decision; no
-new ADR was required.
+to stable content-free HTTP outcomes. Schema, quota, and purge-generation 409s
+now include a typed `attention` object with exact content-free schema bounds,
+required/available/insufficient quotas, or expected/current purge generations;
+no canonical body or key material is included. ADR-002 remains the governing
+decision; no new ADR was required.
 
-Verification after the final production and lint commits:
+Verification after the post-closure contract correction:
 
-- `140 passed` across the Personal Context service, bootstrap, and authenticated
-  Sync endpoint modules.
+- `163 passed` across the Personal Context repository/service, bootstrap, and
+  authenticated Sync endpoint modules.
 - `174 passed, 13 deselected` for non-PostgreSQL Sync store coverage.
 - `4 passed` for executable PostgreSQL Personal Context lock/CAS transaction
   contracts.
 - Ruff reported `All checks passed`; Bandit exited 0 for every touched production
   module; Python 3.11 compilation and `git diff --check` exited 0.
-- Independent spec review and code-quality review reported no actionable
-  findings; the post-Ruff mechanical diff received a second quality approval.
+- Earlier implementation rounds received independent spec/code-quality approval;
+  this correction is ready for the controller-owned follow-up review.
 
 Known verification limits: the environment did not provide a live PostgreSQL
 fixture, so backend behavior is covered by executable transaction contracts

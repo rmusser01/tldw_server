@@ -381,6 +381,73 @@ class PersonalContextRepository:
         except ValidationError:
             raise ProfileIntegrityError("Canonical object validation failed") from None
 
+    def _insert_initial_profile_objects(
+        self,
+        connection: sqlite3.Connection,
+        keys: ProfileKeyMaterial,
+        manifest: ProfileManifest,
+        global_scope: ProfileScope,
+        *,
+        runtime_policy: Mapping[str, Any] | None,
+        runtime_version_id: str | None,
+    ) -> None:
+        """Insert the shared initial object set under caller-owned transaction."""
+
+        self._insert_encrypted(
+            connection,
+            keys,
+            profile_id=manifest.profile_id,
+            object_type="manifest",
+            object_id=manifest.profile_id,
+            version_id=manifest.current_version_id,
+            parent_version_id=None,
+            value=manifest,
+        )
+        self._set_head(
+            connection,
+            profile_id=manifest.profile_id,
+            object_type="manifest",
+            object_id=manifest.profile_id,
+            version_id=manifest.current_version_id,
+            expected_version_id=None,
+        )
+        self._insert_encrypted(
+            connection,
+            keys,
+            profile_id=manifest.profile_id,
+            object_type="scope",
+            object_id=global_scope.scope_id,
+            version_id=global_scope.version_id,
+            parent_version_id=None,
+            value=global_scope,
+        )
+        self._set_head(
+            connection,
+            profile_id=manifest.profile_id,
+            object_type="scope",
+            object_id=global_scope.scope_id,
+            version_id=global_scope.version_id,
+            expected_version_id=None,
+        )
+        if runtime_policy is not None and runtime_version_id is not None:
+            self._insert_encrypted(
+                connection,
+                keys,
+                profile_id=manifest.profile_id,
+                object_type="runtime_policy",
+                object_id="__profile__",
+                version_id=runtime_version_id,
+                parent_version_id=None,
+                value=runtime_policy,
+            )
+            self._set_runtime_head(
+                connection,
+                manifest.profile_id,
+                "__profile__",
+                runtime_version_id,
+                None,
+            )
+
     def create_profile(
         self,
         manifest: ProfileManifest,
@@ -410,60 +477,163 @@ class PersonalContextRepository:
             if surviving_state is not None:
                 raise ProfileStorageLockedError("existing profile key material is unavailable")
             keys = self._keys.create(manifest.profile_id, connection=connection)
-            self._insert_encrypted(
+            self._insert_initial_profile_objects(
                 connection,
                 keys,
-                profile_id=manifest.profile_id,
-                object_type="manifest",
-                object_id=manifest.profile_id,
-                version_id=manifest.current_version_id,
-                parent_version_id=None,
-                value=manifest,
+                manifest,
+                global_scope,
+                runtime_policy=runtime_policy,
+                runtime_version_id=runtime_version_id,
             )
-            self._set_head(
-                connection,
-                profile_id=manifest.profile_id,
-                object_type="manifest",
-                object_id=manifest.profile_id,
-                version_id=manifest.current_version_id,
-                expected_version_id=None,
-            )
-            self._insert_encrypted(
-                connection,
-                keys,
-                profile_id=manifest.profile_id,
-                object_type="scope",
-                object_id=global_scope.scope_id,
-                version_id=global_scope.version_id,
-                parent_version_id=None,
-                value=global_scope,
-            )
-            self._set_head(
-                connection,
-                profile_id=manifest.profile_id,
-                object_type="scope",
-                object_id=global_scope.scope_id,
-                version_id=global_scope.version_id,
-                expected_version_id=None,
-            )
-            if runtime_policy is not None and runtime_version_id is not None:
-                self._insert_encrypted(
-                    connection,
-                    keys,
-                    profile_id=manifest.profile_id,
-                    object_type="runtime_policy",
-                    object_id="__profile__",
-                    version_id=runtime_version_id,
-                    parent_version_id=None,
-                    value=runtime_policy,
+
+    def reserve_sync_profile(
+        self,
+        candidate_profile_id: str,
+    ) -> tuple[str, str, str, bytes]:
+        """Reserve random profile identity and wrapped keys without canonical objects.
+
+        The key row is control-plane custody only. An interrupted or cancelled
+        review therefore leaves no manifest, scope, record, or proposal replica.
+        The first serialized caller wins; retries reuse its profile identity.
+        """
+
+        with self._database.transaction(immediate=True) as connection:
+            object_state = connection.execute(
+                """
+                SELECT 1 FROM personal_context_object_versions
+                UNION ALL SELECT 1 FROM personal_context_object_heads
+                UNION ALL SELECT 1 FROM personal_context_runtime_heads
+                UNION ALL SELECT 1 FROM personal_context_receipts
+                LIMIT 1
+                """
+            ).fetchone()
+            if object_state is not None:
+                raise ProfileAlreadyExistsError("a Personal Context profile exists")
+            key_rows = connection.execute(
+                """
+                SELECT profile_id, created_at
+                FROM personal_context_profile_keys
+                ORDER BY profile_id
+                """
+            ).fetchall()
+            if len(key_rows) > 1:
+                raise ProfileStorageLockedError(
+                    "multiple profile key reservations exist"
                 )
-                self._set_runtime_head(
+            if key_rows:
+                profile_id = str(key_rows[0]["profile_id"])
+                created_at = str(key_rows[0]["created_at"])
+                keys = self._keys.load(profile_id, connection=connection)
+            else:
+                profile_id = candidate_profile_id
+                keys = self._keys.create(profile_id, connection=connection)
+                row = connection.execute(
+                    """
+                    SELECT created_at
+                    FROM personal_context_profile_keys
+                    WHERE profile_id = ?
+                    """,
+                    (profile_id,),
+                ).fetchone()
+                if row is None:
+                    raise ProfileStorageLockedError(
+                        "profile key reservation is unavailable"
+                    )
+                created_at = str(row["created_at"])
+            return (
+                profile_id,
+                created_at,
+                f"personal-context-integrity-v{keys.integrity_key_version}",
+                bytes(keys.integrity_key),
+            )
+
+    def materialize_sync_profile(
+        self,
+        manifest: ProfileManifest,
+        global_scope: ProfileScope,
+        *,
+        runtime_policy: Mapping[str, Any] | None = None,
+        runtime_version_id: str | None = None,
+    ) -> None:
+        """Persist one exact reviewed profile plan using its reserved keys."""
+
+        if (
+            global_scope.profile_id != manifest.profile_id
+            or global_scope.kind is not ScopeKind.GLOBAL
+        ):
+            raise ValueError("global scope must belong to the profile")
+        if (runtime_policy is None) != (runtime_version_id is None):
+            raise ValueError("runtime policy and version must be provided together")
+        with self._database.transaction(immediate=True) as connection:
+            existing_row = self._head_row(
+                connection,
+                manifest.profile_id,
+                "manifest",
+                manifest.profile_id,
+            )
+            if existing_row is not None:
+                keys = self._keys.load(manifest.profile_id, connection=connection)
+                try:
+                    existing_manifest = ProfileManifest.model_validate_json(
+                        self._decrypt_row(existing_row, keys)
+                    )
+                except ValidationError:
+                    raise ProfileIntegrityError(
+                        "Canonical object validation failed"
+                    ) from None
+                existing_scope_row = self._head_row(
                     connection,
                     manifest.profile_id,
-                    "__profile__",
-                    runtime_version_id,
-                    None,
+                    "scope",
+                    global_scope.scope_id,
                 )
+                if existing_scope_row is None:
+                    raise ProfileIntegrityError(
+                        "Canonical global scope is unavailable"
+                    )
+                try:
+                    existing_scope = ProfileScope.model_validate_json(
+                        self._decrypt_row(existing_scope_row, keys)
+                    )
+                except ValidationError:
+                    raise ProfileIntegrityError(
+                        "Canonical object validation failed"
+                    ) from None
+                if existing_manifest != manifest or existing_scope != global_scope:
+                    raise ConcurrentProfileUpdateError("reviewed profile plan changed")
+                return
+
+            other_state = connection.execute(
+                """
+                SELECT 1 FROM personal_context_object_versions
+                UNION ALL SELECT 1 FROM personal_context_object_heads
+                UNION ALL SELECT 1 FROM personal_context_runtime_heads
+                UNION ALL SELECT 1 FROM personal_context_receipts
+                LIMIT 1
+                """
+            ).fetchone()
+            if other_state is not None:
+                raise ProfileStorageLockedError(
+                    "existing profile state is unavailable"
+                )
+            key_rows = connection.execute(
+                "SELECT profile_id FROM personal_context_profile_keys ORDER BY profile_id"
+            ).fetchall()
+            if [str(row["profile_id"]) for row in key_rows] != [
+                manifest.profile_id
+            ]:
+                raise ProfileStorageLockedError(
+                    "profile key reservation is unavailable"
+                )
+            keys = self._keys.load(manifest.profile_id, connection=connection)
+            self._insert_initial_profile_objects(
+                connection,
+                keys,
+                manifest,
+                global_scope,
+                runtime_policy=runtime_policy,
+                runtime_version_id=runtime_version_id,
+            )
 
     def get_manifest(self, profile_id: str) -> ProfileManifest | None:
         """Return one authenticated manifest without cross-profile fallback."""
@@ -506,6 +676,26 @@ class PersonalContextRepository:
                 ).fetchone()
                 is not None
             )
+
+    def has_sync_profile_reservation(self) -> bool:
+        """Return whether the only durable state is one content-free key reservation."""
+
+        with self._database.transaction() as connection:
+            key_count = int(
+                connection.execute(
+                    "SELECT COUNT(*) FROM personal_context_profile_keys"
+                ).fetchone()[0]
+            )
+            object_state = connection.execute(
+                """
+                SELECT 1 FROM personal_context_object_versions
+                UNION ALL SELECT 1 FROM personal_context_object_heads
+                UNION ALL SELECT 1 FROM personal_context_runtime_heads
+                UNION ALL SELECT 1 FROM personal_context_receipts
+                LIMIT 1
+                """
+            ).fetchone()
+        return key_count == 1 and object_state is None
 
     def _list_models(
         self,
