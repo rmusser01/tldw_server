@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from copy import copy
 from typing import Any
@@ -164,6 +164,44 @@ class SyncV2Store:
     def enroll_dataset(self, dataset: SyncDatasetCreate) -> SyncDataset:
         return self.db.enroll_dataset(dataset)
 
+    def bind_personal_context_dataset(
+        self,
+        *,
+        dataset_id: str,
+        user_id: str,
+        expected_binding: Mapping[str, object] | None,
+        profile_id: str,
+        authority_id: str,
+        integrity_key_id: str,
+        purge_generation: int,
+        link_state: str,
+    ) -> SyncDataset:
+        """Merge the server-authoritative binding without rewriting other state."""
+
+        return self.db.bind_personal_context_dataset(
+            dataset_id=dataset_id,
+            user_id=user_id,
+            expected_binding=expected_binding,
+            profile_id=profile_id,
+            authority_id=authority_id,
+            integrity_key_id=integrity_key_id,
+            purge_generation=purge_generation,
+            link_state=link_state,
+        )
+
+    def ensure_personal_context_transport_domains(
+        self,
+        *,
+        dataset_id: str,
+        user_id: str,
+    ) -> SyncDataset:
+        """Enroll content-free PC streams before snapshot fencing."""
+
+        return self.db.ensure_personal_context_transport_domains(
+            dataset_id=dataset_id,
+            user_id=user_id,
+        )
+
     def get_dataset(
         self,
         dataset_id: str,
@@ -174,6 +212,61 @@ class SyncV2Store:
             dataset_id,
             owner_user_id=owner_user_id,
             connection=self._connection,
+        )
+
+    @contextmanager
+    def personal_context_transport_snapshot(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        streams: Sequence[tuple[SyncDomain, int]],
+    ) -> Iterator[dict[tuple[SyncDomain, int], int]]:
+        """Hold the dataset insert fence while canonical bootstrap state is read."""
+
+        with self.db.personal_context_transport_snapshot(
+            dataset_id,
+            owner_user_id=owner_user_id,
+            streams=streams,
+        ) as watermarks:
+            yield watermarks
+
+    def complete_personal_context_link_receipt(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        device_id: str,
+        profile_id: str,
+        integrity_key_id: str,
+        purge_generation: int,
+        bootstrap_cursor: str,
+    ) -> None:
+        """Atomically persist one device-bound Personal Context link receipt."""
+
+        self.db.complete_personal_context_link_receipt(
+            user_id=user_id,
+            dataset_id=dataset_id,
+            device_id=device_id,
+            profile_id=profile_id,
+            integrity_key_id=integrity_key_id,
+            purge_generation=purge_generation,
+            bootstrap_cursor=bootstrap_cursor,
+        )
+
+    def has_personal_context_link_receipt(
+        self, *, user_id: str, dataset_id: str, device_id: str, profile_id: str,
+        integrity_key_id: str, purge_generation: int,
+    ) -> bool:
+        """Return whether this exact device has the current server-owned receipt."""
+
+        return self.db.has_personal_context_link_receipt(
+            user_id=user_id,
+            dataset_id=dataset_id,
+            device_id=device_id,
+            profile_id=profile_id,
+            integrity_key_id=integrity_key_id,
+            purge_generation=purge_generation,
         )
 
     def list_datasets_for_user(self, user_id: str) -> list[SyncDataset]:
@@ -1230,6 +1323,11 @@ class SyncV2Store:
             device_id=device_id,
             key_purpose=key_purpose,
         )
+
+    def revoke_key_record(self, *, user_id: str, key_record_id: str) -> SyncKeyRecord:
+        """Revoke one key record after a registered wrapping-key rotation."""
+
+        return self.db.revoke_key_record(user_id=user_id, key_record_id=key_record_id)
 
     def get_dataset_envelope_range(self, dataset_id: str) -> SyncKeyRotationEnvelopeRange:
         return self.db.get_dataset_envelope_range(dataset_id)

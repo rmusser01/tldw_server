@@ -2,7 +2,7 @@ from __future__ import annotations
 
 """Pydantic schemas for the Sync v2 M1 protocol API."""
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import (
     AliasChoices,
@@ -10,6 +10,7 @@ from pydantic import (
     ConfigDict,
     Field,
     StrictInt,
+    StrictStr,
     field_validator,
     model_validator,
 )
@@ -51,6 +52,11 @@ SyncDomain = Literal[
     "notes.link",
     "notes.task",
     "notes.task_activity",
+    "personal_context.manifest",
+    "personal_context.scope",
+    "personal_context.record",
+    "personal_context.proposal",
+    "personal_context.purge",
 ]
 SyncOperation = Literal["upsert", "append", "tombstone"]
 DatasetScopeType = Literal["personal", "workspace"]
@@ -129,6 +135,16 @@ MEDIA_SYNC_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
     "media.keyword": ["upsert", "tombstone"],
     "media.keyword_link": ["upsert", "tombstone"],
 }
+PERSONAL_CONTEXT_SYNC_DOMAINS: tuple[SyncDomain, ...] = (
+    "personal_context.manifest",
+    "personal_context.scope",
+    "personal_context.record",
+    "personal_context.proposal",
+    "personal_context.purge",
+)
+PERSONAL_CONTEXT_SYNC_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
+    domain: ["upsert", "tombstone"] for domain in PERSONAL_CONTEXT_SYNC_DOMAINS
+}
 SYNC_V2_SUPPORTED_DOMAINS: list[SyncDomain] = (
     list(M1_SYNC_DOMAINS)
     + list(WORKSPACE_SYNC_DOMAINS)
@@ -136,6 +152,7 @@ SYNC_V2_SUPPORTED_DOMAINS: list[SyncDomain] = (
     + list(MEDIA_SYNC_DOMAINS)
     + list(NOTES_ORGANIZATION_DOMAINS)
     + list(NOTES_LINK_DOMAINS)
+    + list(PERSONAL_CONTEXT_SYNC_DOMAINS)
 )
 SYNC_V2_SUPPORTED_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
     **M1_SYNC_OPERATIONS,
@@ -144,6 +161,7 @@ SYNC_V2_SUPPORTED_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
     **MEDIA_SYNC_OPERATIONS,
     **NOTES_ORGANIZATION_SYNC_OPERATIONS,
     **NOTES_LINK_SYNC_OPERATIONS,
+    **PERSONAL_CONTEXT_SYNC_OPERATIONS,
 }
 SYNC_V2_KNOWN_DOMAINS: tuple[SyncDomain, ...] = (
     *SYNC_V2_SUPPORTED_DOMAINS,
@@ -300,6 +318,29 @@ def _with_transition_aliases(data: Any) -> Any:
     return normalized
 
 
+class PersonalContextSyncCapabilitiesResponse(BaseModel):
+    """Typed readiness and bounded transport contract for Personal Context."""
+
+    available: bool = False
+    blockers: list[str] = Field(
+        default_factory=lambda: ["personal_context_profile_key_unavailable"]
+    )
+    authorization_policy: Literal["server_trusted_v1"] = "server_trusted_v1"
+    min_schema_version: Literal[1] = 1
+    max_schema_version: Literal[1] = 1
+    integrity_algorithm: Literal["hmac-sha256-v1"] = "hmac-sha256-v1"
+    integrity_key_distribution: Literal["wrapped-bootstrap-v1"] = "wrapped-bootstrap-v1"
+    privacy_cleanup_ack: Literal["personal-context-cleanup-v1"] = "personal-context-cleanup-v1"
+    purge_generation: Literal["personal-context-purge-v1"] = "personal-context-purge-v1"
+    max_record_bytes: int = Field(16_384, ge=16_384)
+    max_search_results: int = Field(20, ge=20)
+    max_proposals_per_turn: int = Field(5, ge=5)
+    max_proposals_per_session: int = Field(25, ge=25)
+    max_unresolved_proposals: int = Field(200, ge=200)
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class SyncCapabilitiesResponse(BaseModel):
     """Server-supported Sync v2 M1 protocol capabilities."""
 
@@ -323,6 +364,9 @@ class SyncCapabilitiesResponse(BaseModel):
     )
     encryption: dict[str, Any] = Field(default_factory=_default_encryption)
     encryption_policies: list[EncryptionPolicy] = Field(default_factory=lambda: [DEFAULT_M1_ENCRYPTION_POLICY])
+    personal_context: PersonalContextSyncCapabilitiesResponse = Field(
+        default_factory=PersonalContextSyncCapabilitiesResponse
+    )
     blob_transfer: dict[str, Any] = Field(default_factory=_default_blob_transfer)
     quota: dict[str, Any] = Field(default_factory=dict)
     max_batch_size: int = Field(100, ge=1)
@@ -1070,6 +1114,204 @@ class SyncProfileBootstrapResponse(SyncProfileResponse):
     """Response from explicit profile bootstrap."""
 
     created: bool = False
+
+
+_PersonalContextAttentionInteger = Annotated[
+    int,
+    Field(strict=True, ge=0, le=2**63 - 1),
+]
+
+
+def _valid_personal_context_quota_name(name: str) -> bool:
+    """Return whether one quota name is safe for the public contract."""
+
+    return (
+        1 <= len(name) <= 64
+        and name[0].isalpha()
+        and name[0].isascii()
+        and all(
+            character.isascii()
+            and (character.islower() or character.isdigit() or character == "_")
+            for character in name
+        )
+    )
+
+
+class SyncPersonalContextBootstrapRequest(BaseModel):
+    """Authenticated registered-device request for canonical Personal Context."""
+
+    device_id: str
+    required_schema_version: int | None = Field(None, ge=1)
+    required_quotas: dict[StrictStr, _PersonalContextAttentionInteger] = Field(
+        default_factory=dict,
+        max_length=32,
+    )
+    expected_purge_generation: int | None = Field(None, ge=0)
+
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def _validate_required_quota_names(
+        self,
+    ) -> SyncPersonalContextBootstrapRequest:
+        if not all(
+            _valid_personal_context_quota_name(name)
+            for name in self.required_quotas
+        ):
+            raise ValueError("quota name is invalid")
+        return self
+
+
+class SyncPersonalContextSchemaAttention(BaseModel):
+    """Exact content-free schema bounds blocking bootstrap review."""
+
+    kind: Literal["schema_incompatible"]
+    required_schema_version: Annotated[int, Field(strict=True, ge=1)]
+    server_min_schema_version: Annotated[int, Field(strict=True, ge=1)]
+    server_max_schema_version: Annotated[int, Field(strict=True, ge=1)]
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    @model_validator(mode="after")
+    def _validate_incompatible_range(self) -> SyncPersonalContextSchemaAttention:
+        if self.server_min_schema_version > self.server_max_schema_version:
+            raise ValueError("server schema range is invalid")
+        if (
+            self.server_min_schema_version
+            <= self.required_schema_version
+            <= self.server_max_schema_version
+        ):
+            raise ValueError("required schema version is compatible")
+        return self
+
+
+class SyncPersonalContextQuotaAttention(BaseModel):
+    """Exact content-free quota deficits blocking bootstrap review."""
+
+    kind: Literal["quota_incompatible"]
+    required_quotas: dict[StrictStr, _PersonalContextAttentionInteger] = Field(
+        ..., min_length=1, max_length=32
+    )
+    available_quotas: dict[StrictStr, _PersonalContextAttentionInteger] = Field(
+        ..., min_length=1, max_length=32
+    )
+    insufficient_quotas: list[StrictStr] = Field(
+        ..., min_length=1, max_length=32
+    )
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    @model_validator(mode="after")
+    def _validate_exact_shortfall(self) -> SyncPersonalContextQuotaAttention:
+        all_names = set(self.required_quotas) | set(self.available_quotas)
+        if not all(_valid_personal_context_quota_name(name) for name in all_names):
+            raise ValueError("quota name is invalid")
+        if not set(self.required_quotas).issubset(self.available_quotas):
+            raise ValueError("available quotas do not cover required quotas")
+        expected = {
+            name
+            for name, required in self.required_quotas.items()
+            if required > self.available_quotas[name]
+        }
+        actual = set(self.insufficient_quotas)
+        if len(actual) != len(self.insufficient_quotas) or actual != expected:
+            raise ValueError("insufficient quotas do not match the quota values")
+        return self
+
+
+class SyncPersonalContextPurgeAttention(BaseModel):
+    """Exact content-free purge generations blocking bootstrap review."""
+
+    kind: Literal["purge_generation_mismatch"]
+    expected_purge_generation: _PersonalContextAttentionInteger
+    current_purge_generation: _PersonalContextAttentionInteger
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    @model_validator(mode="after")
+    def _validate_mismatch(self) -> SyncPersonalContextPurgeAttention:
+        if self.expected_purge_generation == self.current_purge_generation:
+            raise ValueError("purge generations match")
+        return self
+
+
+class SyncPersonalContextBootstrapErrorDetail(BaseModel):
+    """Stable bootstrap failure with actionable content-free review facts."""
+
+    error_code: StrictStr = Field(..., min_length=1, max_length=128)
+    message: StrictStr = Field(..., min_length=1, max_length=512)
+    attention: (
+        SyncPersonalContextSchemaAttention
+        | SyncPersonalContextQuotaAttention
+        | SyncPersonalContextPurgeAttention
+        | None
+    ) = Field(None, discriminator="kind")
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    @model_validator(mode="after")
+    def _validate_attention_error_code(
+        self,
+    ) -> SyncPersonalContextBootstrapErrorDetail:
+        if self.attention is None:
+            return self
+        expected_codes = {
+            "schema_incompatible": "personal_context_schema_incompatible",
+            "quota_incompatible": "personal_context_quota_incompatible",
+            "purge_generation_mismatch": "personal_context_purge_generation_stale",
+        }
+        if self.error_code != expected_codes[self.attention.kind]:
+            raise ValueError("attention kind does not match error code")
+        return self
+
+
+class SyncPersonalContextBootstrapErrorResponse(BaseModel):
+    """FastAPI error envelope for Personal Context bootstrap."""
+
+    detail: SyncPersonalContextBootstrapErrorDetail
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+
+class SyncPersonalContextBootstrapResponse(BaseModel):
+    """Canonical bootstrap snapshot with device-wrapped integrity key material."""
+
+    dataset_id: str
+    authority_id: str
+    manifest: dict[str, Any]
+    scopes: list[dict[str, Any]] = Field(default_factory=list)
+    records: list[dict[str, Any]] = Field(default_factory=list)
+    proposals: list[dict[str, Any]] = Field(default_factory=list)
+    purge_generation: int
+    schema_version: int
+    quotas: dict[StrictStr, _PersonalContextAttentionInteger] = Field(
+        ..., min_length=1, max_length=32
+    )
+    cursor: str
+    sync_transport_cursor: str
+    integrity_key_id: str
+    key_record_id: str
+    wrapped_key_blob: str
+
+    @field_validator("quotas")
+    @classmethod
+    def _validate_quota_names(
+        cls,
+        quotas: dict[str, int],
+    ) -> dict[str, int]:
+        if not all(_valid_personal_context_quota_name(name) for name in quotas):
+            raise ValueError("quota name is invalid")
+        return quotas
+
+
+class SyncPersonalContextLinkCompleteRequest(BaseModel):
+    """Cursor-bound acknowledgement that one device completed reconciliation."""
+
+    device_id: str
+    dataset_id: str
+    bootstrap_cursor: str
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class SyncRestoreManifestDataset(BaseModel):
@@ -2138,6 +2380,9 @@ __all__ = [
     "M1_SYNC_OPERATIONS",
     "MEDIA_SYNC_DOMAINS",
     "MEDIA_SYNC_OPERATIONS",
+    "PERSONAL_CONTEXT_SYNC_DOMAINS",
+    "PERSONAL_CONTEXT_SYNC_OPERATIONS",
+    "PersonalContextSyncCapabilitiesResponse",
     "STRICT_ENCRYPTION_POLICIES",
     "SOURCE_CACHE_SYNC_DOMAINS",
     "SOURCE_CACHE_SYNC_OPERATIONS",
@@ -2192,6 +2437,14 @@ __all__ = [
     "SyncProfileBootstrapMode",
     "SyncProfileBootstrapRequest",
     "SyncProfileBootstrapResponse",
+    "SyncPersonalContextBootstrapRequest",
+    "SyncPersonalContextBootstrapResponse",
+    "SyncPersonalContextBootstrapErrorResponse",
+    "SyncPersonalContextBootstrapErrorDetail",
+    "SyncPersonalContextSchemaAttention",
+    "SyncPersonalContextQuotaAttention",
+    "SyncPersonalContextPurgeAttention",
+    "SyncPersonalContextLinkCompleteRequest",
     "SyncNotesAttachmentBootstrapDiagnosticsResponse",
     "SyncNotesAttachmentCleanupSampleResponse",
     "SyncNotesOrganizationStatusResponse",

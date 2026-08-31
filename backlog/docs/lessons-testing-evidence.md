@@ -26,3 +26,17 @@ rechecking both the manifest head and surviving scope state under the same
 `BEGIN IMMEDIATE` transaction closed the race; targeted purge-race regressions
 then passed. For destructive lifecycle barriers, a service precheck is UX only:
 the storage transaction must enforce the same fence.
+
+## Exercise canonical factories, not only service fakes
+
+**Incident (TASK-13148, 2026-08-30):** Personal Context bootstrap unit tests
+passed with service fakes, but the first authenticated endpoint test using the
+real factory failed with `personal_context_snapshot_unavailable`. The canonical
+profile clock emitted arbitrary microseconds while canonical serialization
+permits millisecond precision only, so a fresh profile could not be snapshotted.
+
+**Evidence and rule:** Normalizing the service clock at the canonical mutation
+boundary made the real authenticated bootstrap, stale-completion, receipt, and
+post-link push flow pass. When a feature composes storage, canonical models, and
+HTTP dependencies, include at least one test through the production factory;
+service fakes cannot prove cross-layer serialization contracts.

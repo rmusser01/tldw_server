@@ -34,6 +34,7 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     NOTES_LINK_DOMAINS,
     NOTES_ORGANIZATION_DOMAINS,
     NOTES_TASK_SYNC_DOMAINS,
+    PERSONAL_CONTEXT_SYNC_DOMAINS,
     SOURCE_CACHE_SYNC_DOMAINS,
     SYNC_REBASE_REQUIRED_AFTER_CONFLICT_RESOLUTION,
     SYNC_V2_INTERNAL_OPERATIONS,
@@ -355,6 +356,17 @@ CREATE TABLE IF NOT EXISTS sync_datasets (
 );
 CREATE INDEX IF NOT EXISTS idx_sync_datasets_owner ON sync_datasets(owner_user_id);
 CREATE INDEX IF NOT EXISTS idx_sync_datasets_workspace ON sync_datasets(workspace_id);
+
+CREATE TABLE IF NOT EXISTS sync_personal_context_link_receipts (
+    user_id TEXT NOT NULL,
+    dataset_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    profile_id TEXT NOT NULL,
+    integrity_key_id TEXT NOT NULL,
+    purge_generation INTEGER NOT NULL,
+    bootstrap_cursor TEXT NOT NULL,
+    PRIMARY KEY (user_id, dataset_id, device_id)
+);
 
 CREATE TABLE IF NOT EXISTS sync_domain_state (
     dataset_id TEXT NOT NULL,
@@ -938,6 +950,17 @@ CREATE TABLE IF NOT EXISTS sync_datasets (
 );
 CREATE INDEX IF NOT EXISTS idx_sync_datasets_owner ON sync_datasets(owner_user_id);
 CREATE INDEX IF NOT EXISTS idx_sync_datasets_workspace ON sync_datasets(workspace_id);
+
+CREATE TABLE IF NOT EXISTS sync_personal_context_link_receipts (
+    user_id TEXT NOT NULL,
+    dataset_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    profile_id TEXT NOT NULL,
+    integrity_key_id TEXT NOT NULL,
+    purge_generation INTEGER NOT NULL,
+    bootstrap_cursor TEXT NOT NULL,
+    PRIMARY KEY (user_id, dataset_id, device_id)
+);
 
 CREATE TABLE IF NOT EXISTS sync_domain_state (
     dataset_id TEXT NOT NULL,
@@ -1931,7 +1954,7 @@ def _dataset_domains_from_row(row: dict[str, Any]) -> set[str]:
 
 
 def _envelope_fingerprint_from_create(envelope: SyncEnvelopeCreate) -> dict[str, Any]:
-    return {
+    fingerprint = {
         "dataset_id": envelope.dataset_id,
         "domain": envelope.domain,
         "object_id": envelope.object_id,
@@ -1967,6 +1990,13 @@ def _envelope_fingerprint_from_create(envelope: SyncEnvelopeCreate) -> dict[str,
             mutation_plan_hash=envelope.mutation_plan_hash,
         ),
     }
+    if envelope.domain.startswith("personal_context."):
+        fingerprint["payload_ciphertext"] = None
+        fingerprint["payload"] = {}
+        fingerprint["encryption_metadata"] = _without_personal_context_at_rest(
+            fingerprint["encryption_metadata"]
+        )
+    return fingerprint
 
 
 def _envelope_fingerprint_from_row(
@@ -2033,7 +2063,19 @@ def _envelope_fingerprint_from_row(
     }
     if not ignore_client_envelope_id:
         fingerprint["client_envelope_id"] = row["client_envelope_id"]
+    if str(row["domain"]).startswith("personal_context."):
+        fingerprint["payload_ciphertext"] = None
+        fingerprint["payload"] = {}
+        fingerprint["encryption_metadata"] = _without_personal_context_at_rest(
+            fingerprint["encryption_metadata"]
+        )
     return fingerprint
+
+
+def _without_personal_context_at_rest(value: Any) -> dict[str, Any]:
+    metadata = dict(value) if isinstance(value, dict) else {}
+    metadata.pop("personal_context_at_rest", None)
+    return metadata
 
 
 def _mutation_group_fingerprint(
@@ -2463,6 +2505,74 @@ class SyncDatabase:
             if _is_materialization_lock_error(exc):
                 raise SyncMaterializationBusyError() from exc
             raise
+
+    @contextmanager
+    def personal_context_transport_snapshot(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        streams: Sequence[tuple[SyncDomain, int]],
+    ) -> Iterator[dict[tuple[SyncDomain, int], int]]:
+        """Fence Sync inserts while canonical bootstrap state is read.
+
+        This is a Sync-database ordering fence, not a cross-database
+        transaction. Envelope inserts take this same dataset-row lock before
+        receiving a server sequence.
+        """
+
+        expected_streams = set(streams)
+        if not expected_streams:
+            raise SyncStoreError("personal_context_transport_streams_unavailable")
+        with self.backend.transaction() as conn:
+            row = self._require_dataset_owner_for_update(
+                dataset_id,
+                owner_user_id,
+                connection=conn,
+            )
+            enrolled_domains = set(_dataset_domains_from_row(row))
+            if any(domain not in enrolled_domains for domain, _version in streams):
+                raise SyncInvalidDomainError(
+                    "Personal Context transport stream is not enrolled"
+                )
+            domains = sorted({domain for domain, _version in streams})
+            versions = sorted({version for _domain, version in streams})
+            domain_placeholders = ", ".join("?" for _ in domains)
+            version_placeholders = ", ".join("?" for _ in versions)
+            result = self.execute(
+                f"""
+                SELECT domain,
+                       adapter_version,
+                       MAX(server_sequence) AS watermark,
+                       SUM(
+                           CASE
+                               WHEN apply_status IN ('applied', 'superseded') THEN 0
+                               ELSE 1
+                           END
+                       ) AS projection_debt
+                  FROM sync_envelopes
+                 WHERE dataset_id = ?
+                   AND status = 'accepted'
+                   AND domain IN ({domain_placeholders})
+                   AND adapter_version IN ({version_placeholders})
+                 GROUP BY domain, adapter_version
+                """,  # nosec B608 - placeholders are generated from bounded lists.
+                (dataset_id, *domains, *versions),
+                connection=conn,
+            )
+            watermarks = dict.fromkeys(expected_streams, 0)
+            for envelope_row in result.rows:
+                stream = (
+                    str(envelope_row["domain"]),
+                    int(envelope_row["adapter_version"]),
+                )
+                if stream in expected_streams:
+                    if int(envelope_row["projection_debt"] or 0) != 0:
+                        raise SyncStoreError(
+                            "personal_context_projection_incomplete"
+                        )
+                    watermarks[stream] = int(envelope_row["watermark"] or 0)
+            yield watermarks
 
     def _lock_materialization_dataset(
         self,
@@ -3280,6 +3390,7 @@ class SyncDatabase:
                 NOTES_ORGANIZATION_DOMAINS,
                 NOTES_LINK_DOMAINS,
                 NOTES_TASK_SYNC_DOMAINS,
+                PERSONAL_CONTEXT_SYNC_DOMAINS,
             )
         elif dataset.scope_type == "workspace":
             if not dataset.workspace_id or not dataset.workspace_id.strip():
@@ -3305,6 +3416,13 @@ class SyncDatabase:
             )
             if state not in {"initializing", "ready", "failed"}:
                 raise SyncStoreError("notes_organization_sync_not_ready")
+        personal_context_domains = set(dataset.domains).intersection(
+            PERSONAL_CONTEXT_SYNC_DOMAINS
+        )
+        if personal_context_domains and personal_context_domains != set(
+            PERSONAL_CONTEXT_SYNC_DOMAINS
+        ):
+            raise SyncInvalidDomainError("personal_context_sync_domains_incomplete")
         task_domains = set(dataset.domains).intersection(NOTES_TASK_SYNC_DOMAINS)
         if task_domains and task_domains != set(NOTES_TASK_SYNC_DOMAINS):
             raise SyncInvalidDomainError("notes_task_sync_domains_incomplete")
@@ -3527,7 +3645,6 @@ class SyncDatabase:
     def enroll_dataset(self, dataset: SyncDatasetCreate) -> SyncDataset:
         self._validate_dataset_contract(dataset)
         now = utcnow_iso()
-        domains_json = encode_json(dataset.domains, default=[])
         with self.backend.transaction() as conn:
             lock_suffix = (
                 " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
@@ -3557,6 +3674,7 @@ class SyncDatabase:
                 server_metadata_keys = (
                     NOTES_TASK_SERVER_METADATA_KEYS
                     | NOTES_MOODBOARD_STUDIO_SERVER_METADATA_KEYS
+                    | {"personal_context"}
                 )
                 metadata = {
                     key: value
@@ -3569,6 +3687,15 @@ class SyncDatabase:
                         for key in server_metadata_keys
                         if key in existing_metadata
                     }
+                )
+                protected_personal_context_domains = (
+                    _dataset_domains_from_row(existing)
+                    & set(PERSONAL_CONTEXT_SYNC_DOMAINS)
+                )
+                effective_domains = list(
+                    dict.fromkeys(
+                        [*dataset.domains, *sorted(protected_personal_context_domains)]
+                    )
                 )
                 self.execute(
                     """
@@ -3588,7 +3715,7 @@ class SyncDatabase:
                         dataset.workspace_id,
                         dataset.scope_type,
                         dataset.encryption_policy,
-                        domains_json,
+                        encode_json(effective_domains, default=[]),
                         encode_json(metadata, default={}),
                         now,
                         dataset.archived_at,
@@ -3612,7 +3739,7 @@ class SyncDatabase:
                         dataset.workspace_id,
                         dataset.scope_type,
                         dataset.encryption_policy,
-                        domains_json,
+                        encode_json(dataset.domains, default=[]),
                         encode_json(dataset.metadata, default={}),
                         now,
                         now,
@@ -3620,7 +3747,7 @@ class SyncDatabase:
                     ),
                     connection=conn,
                 )
-            for domain in dataset.domains:
+            for domain in effective_domains if existing else dataset.domains:
                 self._ensure_domain_state(
                     dataset_id=dataset.dataset_id,
                     domain=domain,
@@ -3636,6 +3763,217 @@ class SyncDatabase:
                 )
             )
         return _dataset_from_row(row)
+
+    def complete_personal_context_link_receipt(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        device_id: str,
+        profile_id: str,
+        integrity_key_id: str,
+        purge_generation: int,
+        bootstrap_cursor: str,
+    ) -> None:
+        """Lock and compare the opaque Personal Context binding before receipt CAS."""
+
+        with self.backend.transaction() as connection:
+            row = _first(
+                self.execute(
+                    """
+                    SELECT * FROM sync_datasets
+                     WHERE dataset_id = ? AND owner_user_id = ?
+                    """
+                    + (
+                        " FOR UPDATE"
+                        if self.backend_type == BackendType.POSTGRESQL
+                        else ""
+                    ),  # nosec B608 - backend-controlled lock suffix.
+                    (dataset_id, user_id),
+                    connection=connection,
+                )
+            )
+            metadata = decode_json(
+                row.get("metadata_json") if row is not None else None,
+                default={},
+            )
+            binding = metadata.get("personal_context") if isinstance(metadata, dict) else None
+            if not isinstance(binding, dict) or (
+                binding.get("profile_id") != profile_id
+                or binding.get("integrity_key_id") != integrity_key_id
+                or binding.get("purge_generation") != purge_generation
+            ):
+                raise SyncStoreError("personal_context_link_binding_stale")
+            self.execute(
+                """INSERT INTO sync_personal_context_link_receipts
+                   (user_id, dataset_id, device_id, profile_id, integrity_key_id, purge_generation, bootstrap_cursor)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(user_id, dataset_id, device_id) DO UPDATE SET
+                     profile_id = excluded.profile_id,
+                     integrity_key_id = excluded.integrity_key_id,
+                     purge_generation = excluded.purge_generation,
+                     bootstrap_cursor = excluded.bootstrap_cursor""",
+                (
+                    user_id,
+                    dataset_id,
+                    device_id,
+                    profile_id,
+                    integrity_key_id,
+                    purge_generation,
+                    bootstrap_cursor,
+                ),
+                connection=connection,
+            )
+
+    def has_personal_context_link_receipt(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        device_id: str,
+        profile_id: str,
+        integrity_key_id: str,
+        purge_generation: int,
+    ) -> bool:
+        """Return whether a device has the exact current Personal Context receipt."""
+
+        result = self.execute(
+            """SELECT 1 FROM sync_personal_context_link_receipts
+               WHERE user_id = ? AND dataset_id = ? AND device_id = ? AND profile_id = ?
+                 AND integrity_key_id = ? AND purge_generation = ?""",
+            (user_id, dataset_id, device_id, profile_id, integrity_key_id, purge_generation),
+        )
+        return bool(result.rows)
+
+    def bind_personal_context_dataset(
+        self,
+        *,
+        dataset_id: str,
+        user_id: str,
+        expected_binding: Mapping[str, object] | None,
+        profile_id: str,
+        authority_id: str,
+        integrity_key_id: str,
+        purge_generation: int,
+        link_state: str,
+    ) -> SyncDataset:
+        """Merge a canonical Personal Context binding into the locked dataset row."""
+
+        if (
+            not profile_id
+            or not authority_id
+            or not integrity_key_id
+            or purge_generation < 0
+            or link_state not in {"bootstrap_pending", "complete"}
+        ):
+            raise SyncStoreError("personal_context_authority_mismatch")
+        with self.backend.transaction() as connection:
+            row = self._require_dataset_owner_for_update(
+                dataset_id,
+                user_id,
+                connection=connection,
+            )
+            metadata = decode_json(row.get("metadata_json"), default={})
+            if not isinstance(metadata, dict):
+                raise SyncStoreError("personal_context_authority_mismatch")
+            current_binding = metadata.get("personal_context")
+            if current_binding is not None and not isinstance(current_binding, dict):
+                raise SyncStoreError("personal_context_authority_mismatch")
+            expected = dict(expected_binding) if expected_binding is not None else None
+            desired = {
+                "profile_id": profile_id,
+                "authority_id": authority_id,
+                "integrity_key_id": integrity_key_id,
+                "purge_generation": purge_generation,
+                "link_state": link_state,
+            }
+            if current_binding == desired:
+                return _dataset_from_row(row)
+            if current_binding != expected:
+                raise SyncStoreError("personal_context_link_binding_stale")
+            merged_metadata = dict(metadata)
+            merged_metadata["personal_context"] = desired
+            raw_domains = decode_json(row.get("domain_set_json"), default=[])
+            if not isinstance(raw_domains, list):
+                raise SyncStoreError("personal_context_authority_mismatch")
+            domains = list(dict.fromkeys([*raw_domains, *PERSONAL_CONTEXT_SYNC_DOMAINS]))
+            now = utcnow_iso()
+            self.execute(
+                """
+                UPDATE sync_datasets
+                   SET domain_set_json = ?, metadata_json = ?, updated_at = ?
+                 WHERE dataset_id = ? AND owner_user_id = ?
+                """,
+                (
+                    encode_json(domains, default=[]),
+                    encode_json(merged_metadata, default={}),
+                    now,
+                    dataset_id,
+                    user_id,
+                ),
+                connection=connection,
+            )
+            for domain in PERSONAL_CONTEXT_SYNC_DOMAINS:
+                self._ensure_domain_state(
+                    dataset_id=dataset_id,
+                    domain=domain,
+                    adapter_version=1,
+                    server_sequence=0,
+                    connection=connection,
+                )
+            updated = self._get_dataset_row(
+                dataset_id,
+                owner_user_id=user_id,
+                connection=connection,
+            )
+            if updated is None:
+                raise SyncDatasetNotFoundError(f"Sync dataset not found: {dataset_id}")
+        return _dataset_from_row(updated)
+
+    def ensure_personal_context_transport_domains(
+        self,
+        *,
+        dataset_id: str,
+        user_id: str,
+    ) -> SyncDataset:
+        """Enroll only content-free Personal Context transport control state."""
+
+        with self.backend.transaction() as connection:
+            row = self._require_dataset_owner_for_update(
+                dataset_id,
+                user_id,
+                connection=connection,
+            )
+            raw_domains = decode_json(row.get("domain_set_json"), default=[])
+            if not isinstance(raw_domains, list):
+                raise SyncStoreError("personal_context_authority_mismatch")
+            domains = list(dict.fromkeys([*raw_domains, *PERSONAL_CONTEXT_SYNC_DOMAINS]))
+            if domains != raw_domains:
+                self.execute(
+                    """
+                    UPDATE sync_datasets
+                       SET domain_set_json = ?, updated_at = ?
+                     WHERE dataset_id = ? AND owner_user_id = ?
+                    """,
+                    (encode_json(domains, default=[]), utcnow_iso(), dataset_id, user_id),
+                    connection=connection,
+                )
+            for domain in PERSONAL_CONTEXT_SYNC_DOMAINS:
+                self._ensure_domain_state(
+                    dataset_id=dataset_id,
+                    domain=domain,
+                    adapter_version=1,
+                    server_sequence=0,
+                    connection=connection,
+                )
+            updated = self._get_dataset_row(
+                dataset_id,
+                owner_user_id=user_id,
+                connection=connection,
+            )
+            if updated is None:
+                raise SyncDatasetNotFoundError(f"Sync dataset not found: {dataset_id}")
+        return _dataset_from_row(updated)
 
     def get_dataset(
         self,
@@ -6463,7 +6801,7 @@ class SyncDatabase:
     ) -> SyncEnvelope | None:
         self._validate_envelope_contract(envelope)
         with self.backend.transaction() as conn:
-            dataset_row = self._require_dataset_domain(
+            dataset_row = self._require_dataset_domain_for_update(
                 envelope.dataset_id,
                 envelope.domain,
                 connection=conn,
@@ -8773,6 +9111,31 @@ class SyncDatabase:
         sql += " ORDER BY created_at ASC, key_record_id ASC"
         result = self.execute(sql, tuple(params))
         return [_key_record_from_row(row) for row in result.rows]
+
+    def revoke_key_record(self, *, user_id: str, key_record_id: str) -> SyncKeyRecord:
+        """Revoke one device-wrapped key record without revoking the device."""
+
+        now = utcnow_iso()
+        with self.backend.transaction() as conn:
+            self.execute(
+                """
+                UPDATE sync_key_records
+                   SET revoked_at = COALESCE(revoked_at, ?)
+                 WHERE user_id = ? AND key_record_id = ?
+                """,
+                (now, user_id, key_record_id),
+                connection=conn,
+            )
+            row = _first(
+                self.execute(
+                    "SELECT * FROM sync_key_records WHERE user_id = ? AND key_record_id = ?",
+                    (user_id, key_record_id),
+                    connection=conn,
+                )
+            )
+            if row is None:
+                raise SyncStoreError("Sync key record was not found or is not accessible")
+        return _key_record_from_row(row)
 
     def _dataset_envelope_range(
         self,
