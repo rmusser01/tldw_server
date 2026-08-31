@@ -47,6 +47,7 @@ from tldw_Server_API.app.core.Sync.v2.errors import (
     SyncStoreError,
 )
 from tldw_Server_API.app.core.Sync.v2.models import (
+    PERSONAL_CONTEXT_SYNC_DOMAINS,
     SyncAttachmentCreate,
     SyncAttachmentRevisionBinding,
     SyncAttachmentRevisionBindingCreate,
@@ -65,7 +66,6 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     SyncDeviceUpsert,
     SyncEnvelopeCreate,
     SyncKeyRecordCreate,
-    PERSONAL_CONTEXT_SYNC_DOMAINS,
 )
 from tldw_Server_API.app.core.Sync.v2.mutation_group_validation import (
     mutation_group_plan_hash,

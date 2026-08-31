@@ -21,6 +21,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
 )
 from tldw_Server_API.app.api.v1.endpoints import sync as sync_endpoint
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
+from tldw_Server_API.app.core.Sync.v2 import factory as sync_v2_factory
 from tldw_Server_API.app.core.Sync.v2.adapters import (
     AttachmentRefAdapter,
     StaticSyncAdapter,
@@ -34,8 +35,6 @@ from tldw_Server_API.app.core.Sync.v2.domain_adapters.notes_organization import 
     NotesOrganizationDomainAdapter,
 )
 from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
-from tldw_Server_API.app.core.Sync.v2 import factory as sync_v2_factory
-from tldw_Server_API.app.core.Sync.v2.profile import PersonalContextBootstrapError
 from tldw_Server_API.app.core.Sync.v2.materializers import MaterializationResult
 from tldw_Server_API.app.core.Sync.v2.models import (
     M1_SYNC_DOMAINS,
@@ -53,6 +52,7 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     SyncEnvelopeCreate,
     SyncObjectState,
 )
+from tldw_Server_API.app.core.Sync.v2.profile import PersonalContextBootstrapError
 from tldw_Server_API.app.core.Sync.v2.security import (
     server_trusted_encryption_status_from_config,
 )
@@ -3195,7 +3195,7 @@ def test_personal_context_endpoints_use_real_factory_bootstrap_and_complete_flow
         padding.OAEP(
             mgf=padding.MGF1(algorithm=hashes.SHA256()),
             algorithm=hashes.SHA256(),
-            label=f"personal-context:{integrity_key_id}".encode("utf-8"),
+            label=f"personal-context:{integrity_key_id}".encode(),
         ),
     ) == integrity_key
 

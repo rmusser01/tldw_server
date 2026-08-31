@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
-import base64
 import inspect
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -14,11 +14,15 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from tldw_profile_core.canonical import canonical_json_bytes
 
-from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 from tldw_Server_API.app.core.DB_Management import Sync_DB as sync_db_module
+from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 from tldw_Server_API.app.core.Sync.v2.adapters import SyncAdapterRegistry
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.personal_context import (
     PersonalContextDomainAdapter,
+)
+from tldw_Server_API.app.core.Sync.v2.errors import (
+    SyncIdempotencyConflictError,
+    SyncStoreError,
 )
 from tldw_Server_API.app.core.Sync.v2.factory import (
     _personal_context_wrapping_key_fingerprint,
@@ -32,17 +36,13 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     SyncDatasetCreate,
     SyncEnvelopeCreate,
 )
-from tldw_Server_API.app.core.Sync.v2.errors import (
-    SyncIdempotencyConflictError,
-    SyncStoreError,
+from tldw_Server_API.app.core.Sync.v2.security import (
+    server_trusted_encryption_status_from_config,
 )
 from tldw_Server_API.app.core.Sync.v2.service import (
     PersonalContextSyncCapabilities,
     SyncV2Service,
     SyncV2Settings,
-)
-from tldw_Server_API.app.core.Sync.v2.security import (
-    server_trusted_encryption_status_from_config,
 )
 from tldw_Server_API.app.core.Sync.v2.store import SyncV2Store
 from tldw_Server_API.tests.Personalization.personal_context_test_support import (
@@ -51,7 +51,6 @@ from tldw_Server_API.tests.Personalization.personal_context_test_support import 
     preference_record,
     proposal,
 )
-
 
 pytestmark = pytest.mark.unit
 
