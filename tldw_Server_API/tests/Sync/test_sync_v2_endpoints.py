@@ -3267,6 +3267,142 @@ def test_personal_context_endpoints_use_real_factory_bootstrap_and_complete_flow
     ]
 
 
+def test_personal_context_complete_endpoint_rejects_real_stale_integrity_binding(
+    factory_personal_context_service: SyncV2Service,
+) -> None:
+    """Completion fails closed when the Sync binding no longer names the snapshot key."""
+
+    client = _client_for_factory_service(factory_personal_context_service)
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    registration = client.post(
+        "/api/v1/sync/devices/register",
+        json=_registered_personal_context_device_payload(private_key.public_key()),
+    )
+    assert registration.status_code == 200
+    bootstrap = client.post(
+        "/api/v1/sync/personal-context/bootstrap",
+        json={"device_id": "pc-device", "required_schema_version": 1},
+    )
+    assert bootstrap.status_code == 200, bootstrap.text
+    body = bootstrap.json()
+    canonical = factory_personal_context_service.personal_context_service_resolver("101")
+    manifest = canonical.get_manifest()
+    stale_key_id = "personal-context-integrity-vstale"
+    dataset = factory_personal_context_service.store.get_dataset(body["dataset_id"])
+    assert dataset is not None
+    metadata = dict(dataset.metadata)
+    metadata["personal_context"] = {
+        **metadata["personal_context"],
+        "integrity_key_id": stale_key_id,
+    }
+    factory_personal_context_service.store.enroll_dataset(
+        SyncDatasetCreate(
+            dataset_id=dataset.dataset_id,
+            owner_user_id=dataset.owner_user_id,
+            scope_type=dataset.scope_type,
+            encryption_policy=dataset.encryption_policy,
+            domains=dataset.domains,
+            workspace_id=dataset.workspace_id,
+            metadata=metadata,
+            archived_at=dataset.archived_at,
+        )
+    )
+
+    completion = client.post(
+        "/api/v1/sync/personal-context/complete",
+        json={
+            "device_id": "pc-device",
+            "dataset_id": body["dataset_id"],
+            "bootstrap_cursor": body["cursor"],
+        },
+    )
+
+    assert completion.status_code == 409, completion.text
+    _assert_personal_context_error_is_redacted(
+        completion, "personal_context_link_binding_stale"
+    )
+    assert not factory_personal_context_service.store.has_personal_context_link_receipt(
+        user_id="101",
+        dataset_id=body["dataset_id"],
+        device_id="pc-device",
+        profile_id=manifest.profile_id,
+        integrity_key_id=stale_key_id,
+        purge_generation=body["purge_generation"],
+    )
+
+
+def test_personal_context_complete_endpoint_maps_real_receipt_cas_staleness(
+    factory_personal_context_service: SyncV2Service,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A binding transition during receipt CAS reaches the typed 409 response."""
+
+    client = _client_for_factory_service(factory_personal_context_service)
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    registration = client.post(
+        "/api/v1/sync/devices/register",
+        json=_registered_personal_context_device_payload(private_key.public_key()),
+    )
+    assert registration.status_code == 200
+    bootstrap = client.post(
+        "/api/v1/sync/personal-context/bootstrap",
+        json={"device_id": "pc-device", "required_schema_version": 1},
+    )
+    assert bootstrap.status_code == 200, bootstrap.text
+    body = bootstrap.json()
+    stale_key_id = "personal-context-integrity-vstale"
+    original_receipt = factory_personal_context_service.store.complete_personal_context_link_receipt
+
+    def transition_binding_then_write_receipt(**values: object) -> None:
+        dataset = factory_personal_context_service.store.get_dataset(body["dataset_id"])
+        assert dataset is not None
+        metadata = dict(dataset.metadata)
+        metadata["personal_context"] = {
+            **metadata["personal_context"],
+            "integrity_key_id": stale_key_id,
+        }
+        factory_personal_context_service.store.enroll_dataset(
+            SyncDatasetCreate(
+                dataset_id=dataset.dataset_id,
+                owner_user_id=dataset.owner_user_id,
+                scope_type=dataset.scope_type,
+                encryption_policy=dataset.encryption_policy,
+                domains=dataset.domains,
+                workspace_id=dataset.workspace_id,
+                metadata=metadata,
+                archived_at=dataset.archived_at,
+            )
+        )
+        original_receipt(**values)
+
+    monkeypatch.setattr(
+        factory_personal_context_service.store,
+        "complete_personal_context_link_receipt",
+        transition_binding_then_write_receipt,
+    )
+    completion = client.post(
+        "/api/v1/sync/personal-context/complete",
+        json={
+            "device_id": "pc-device",
+            "dataset_id": body["dataset_id"],
+            "bootstrap_cursor": body["cursor"],
+        },
+    )
+
+    assert completion.status_code == 409, completion.text
+    _assert_personal_context_error_is_redacted(
+        completion, "personal_context_link_binding_stale"
+    )
+    assert not factory_personal_context_service.store.has_personal_context_link_receipt(
+        user_id="101",
+        dataset_id=body["dataset_id"],
+        device_id="pc-device",
+        profile_id=body["manifest"]["profile_id"],
+        integrity_key_id=stale_key_id,
+        purge_generation=body["purge_generation"],
+    )
+
+
 @pytest.mark.parametrize(
     ("reason_code", "expected_status"),
     [
@@ -3282,6 +3418,7 @@ def test_personal_context_endpoints_use_real_factory_bootstrap_and_complete_flow
         ("personal_context_capability_unavailable", 503),
         ("personal_context_key_custody_unavailable", 503),
         ("personal_context_link_unavailable", 409),
+        ("personal_context_link_binding_stale", 409),
         ("personal_context_bootstrap_cursor_stale", 409),
     ],
 )
@@ -3303,13 +3440,21 @@ def test_personal_context_bootstrap_endpoint_maps_redacted_reason_codes(
     _assert_personal_context_error_is_redacted(response, reason_code)
 
 
-def test_personal_context_completion_endpoint_maps_stale_cursor_without_content(
+@pytest.mark.parametrize(
+    "reason_code",
+    [
+        "personal_context_bootstrap_cursor_stale",
+        "personal_context_link_binding_stale",
+    ],
+)
+def test_personal_context_completion_endpoint_maps_stale_reason_codes_without_content(
     tmp_path: Path,
+    reason_code: str,
 ) -> None:
     service = _build_service(tmp_path)
 
     def fail_completion(**_kwargs: object) -> None:
-        raise PersonalContextBootstrapError("personal_context_bootstrap_cursor_stale")
+        raise PersonalContextBootstrapError(reason_code)
 
     service.complete_personal_context_link = fail_completion  # type: ignore[method-assign]
     response = _client_for_service(service).post(
@@ -3317,6 +3462,4 @@ def test_personal_context_completion_endpoint_maps_stale_cursor_without_content(
         json={"device_id": "device-a", "dataset_id": "dataset-a", "bootstrap_cursor": "stale"},
     )
     assert response.status_code == 409
-    _assert_personal_context_error_is_redacted(
-        response, "personal_context_bootstrap_cursor_stale"
-    )
+    _assert_personal_context_error_is_redacted(response, reason_code)

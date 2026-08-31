@@ -457,65 +457,22 @@ class SyncV2ProfileManager:
                 raise PersonalContextBootstrapError(
                     "personal_context_key_custody_unavailable"
                 ) from exc
-            snapshot = None
-            snapshot_reader = getattr(canonical_service, "sync_bootstrap_snapshot", None)
-            if callable(snapshot_reader):
-                try:
-                    ensure_profile = getattr(canonical_service, "ensure_sync_profile", None)
-                    if callable(ensure_profile):
-                        ensure_profile()
-                    snapshot = snapshot_reader()
-                    manifest = snapshot.manifest
-                    integrity_key_id = snapshot.integrity_key_id
-                    integrity_key = snapshot.integrity_key
-                    scopes = tuple(snapshot.scopes)
-                    records = tuple(snapshot.records)
-                    proposals = tuple(snapshot.proposals)
-                    cursor = snapshot.cursor
-                except Exception as exc:  # noqa: BLE001 - no canonical body in errors.
-                    raise PersonalContextBootstrapError(
-                        "personal_context_snapshot_unavailable"
-                    ) from exc
-            for _attempt in range(3) if snapshot is None else range(1):
-                try:
-                    if snapshot is not None:
-                        break
-                    manifest = _get_or_create_personal_context_manifest(canonical_service)
-                    integrity_key_id, integrity_key = canonical_service.sync_integrity_key(
-                        manifest.profile_id
-                    )
-                    if (
-                        not isinstance(integrity_key_id, str)
-                        or not integrity_key_id
-                        or not isinstance(integrity_key, bytes)
-                        or len(integrity_key) != 32
-                    ):
-                        raise ValueError("integrity key")
-                    scopes = tuple(canonical_service.list_scopes())
-                    records = tuple(
-                        record
-                        for record in canonical_service.list_records(include_archived=True)
-                        if _personal_context_record_is_syncable(record)
-                    )
-                    proposals = tuple(
-                        proposal
-                        for proposal in canonical_service.list_proposals(
-                            pending_only=False, limit=200
-                        )
-                        if _personal_context_proposal_is_syncable(proposal)
-                    )
-                    ending_manifest = canonical_service.get_manifest()
-                except Exception as exc:  # noqa: BLE001 - custody fails closed without content.
-                    raise PersonalContextBootstrapError(
-                        "personal_context_key_custody_unavailable"
-                    ) from exc
-                if (
-                    ending_manifest.current_version_id == manifest.current_version_id
-                    and ending_manifest.purge_generation == manifest.purge_generation
-                ):
-                    break
-            else:
-                raise PersonalContextBootstrapError("personal_context_snapshot_unstable")
+            try:
+                ensure_profile = getattr(canonical_service, "ensure_sync_profile", None)
+                if callable(ensure_profile):
+                    ensure_profile()
+                snapshot = canonical_service.sync_bootstrap_snapshot()
+                manifest = snapshot.manifest
+                integrity_key_id = snapshot.integrity_key_id
+                integrity_key = snapshot.integrity_key
+                scopes = tuple(snapshot.scopes)
+                records = tuple(snapshot.records)
+                proposals = tuple(snapshot.proposals)
+                cursor = snapshot.cursor
+            except Exception as exc:  # noqa: BLE001 - no canonical body in errors.
+                raise PersonalContextBootstrapError(
+                    "personal_context_snapshot_unavailable"
+                ) from exc
             purge_generation = int(manifest.purge_generation)
             if (
                 expected_purge_generation is not None
@@ -536,14 +493,6 @@ class SyncV2ProfileManager:
                 integrity_key_id=integrity_key_id,
                 integrity_key=integrity_key,
             )
-            if snapshot is None:
-                cursor = _personal_context_bootstrap_cursor(
-                    manifest=manifest,
-                    scopes=scopes,
-                    records=records,
-                    proposals=proposals,
-                    purge_generation=purge_generation,
-                )
             return PersonalContextBootstrap(
                 dataset_id=dataset.dataset_id,
                 authority_id=normalized_authority_id,
@@ -600,15 +549,24 @@ class SyncV2ProfileManager:
             ) from exc
         if bootstrap_cursor != snapshot.cursor:
             raise PersonalContextBootstrapError("personal_context_bootstrap_cursor_stale")
-        self.store.complete_personal_context_link_receipt(
-            user_id=user_id,
-            dataset_id=dataset.dataset_id,
-            device_id=device_id,
-            profile_id=str(snapshot.manifest.profile_id),
-            integrity_key_id=str(state["integrity_key_id"]),
-            purge_generation=int(snapshot.manifest.purge_generation),
-            bootstrap_cursor=bootstrap_cursor,
-        )
+        if state.get("integrity_key_id") != snapshot.integrity_key_id:
+            raise PersonalContextBootstrapError("personal_context_link_binding_stale")
+        try:
+            self.store.complete_personal_context_link_receipt(
+                user_id=user_id,
+                dataset_id=dataset.dataset_id,
+                device_id=device_id,
+                profile_id=str(snapshot.manifest.profile_id),
+                integrity_key_id=str(snapshot.integrity_key_id),
+                purge_generation=int(snapshot.manifest.purge_generation),
+                bootstrap_cursor=bootstrap_cursor,
+            )
+        except SyncStoreError as exc:
+            if str(exc) == "personal_context_link_binding_stale":
+                raise PersonalContextBootstrapError(
+                    "personal_context_link_binding_stale"
+                ) from exc
+            raise
 
     def _bind_personal_context_dataset(
         self,
@@ -1316,18 +1274,6 @@ def _personal_context_bootstrap_lock(user_id: str) -> threading.RLock:
         return _personal_context_bootstrap_locks.setdefault(user_id, threading.RLock())
 
 
-def _get_or_create_personal_context_manifest(service: Any) -> Any:
-    """Create the canonical server profile once, retaining normal retry behavior."""
-
-    try:
-        return service.get_manifest()
-    except KeyError:
-        try:
-            return service.create_profile(runtime_enabled=False)
-        except Exception:
-            return service.get_manifest()
-
-
 def _personal_context_bootstrap_quotas(capabilities: Any) -> dict[str, int]:
     """Expose only reconciliation-relevant numeric Personal Context quotas."""
 
@@ -1345,20 +1291,6 @@ def _personal_context_bootstrap_quotas(capabilities: Any) -> dict[str, int]:
         and not isinstance(value, bool)
         and value >= 0
     }
-
-
-def _personal_context_record_is_syncable(record: Any) -> bool:
-    """Exclude device-only canonical records from server bootstrap transport."""
-
-    controls = getattr(record, "controls", None)
-    return str(getattr(controls, "sync_mode", "")) == "syncable"
-
-
-def _personal_context_proposal_is_syncable(proposal: Any) -> bool:
-    """Exclude proposals whose pending body is device-only."""
-
-    proposed_record = getattr(proposal, "proposed_record", None)
-    return proposed_record is None or _personal_context_record_is_syncable(proposed_record)
 
 
 def _personal_context_quotas_compatible(
@@ -1399,37 +1331,6 @@ def _personal_context_dataset_state(dataset: SyncDataset) -> dict[str, object] |
     ):
         return None
     return dict(state)
-
-
-def _personal_context_bootstrap_cursor(
-    *,
-    manifest: Any,
-    scopes: Sequence[Any],
-    records: Sequence[Any],
-    proposals: Sequence[Any],
-    purge_generation: int,
-) -> str:
-    """Hash version identifiers to bind one canonical whole-object snapshot."""
-
-    entries = [
-        f"manifest:{manifest.profile_id}:{manifest.current_version_id}",
-        f"purge:{purge_generation}",
-    ]
-    entries.extend(
-        f"scope:{value.scope_id}:{value.version_id}" for value in scopes
-    )
-    entries.extend(
-        f"record:{value.record_id}:{value.version_id}" for value in records
-    )
-    entries.extend(
-        "proposal:"
-        + str(value.proposal_id)
-        + ":"
-        + hashlib.sha256(value.model_dump_json().encode("utf-8")).hexdigest()
-        for value in proposals
-    )
-    digest = hashlib.sha256("\x1e".join(sorted(entries)).encode("utf-8")).hexdigest()
-    return f"personal-context-bootstrap-v1:{digest}"
 
 
 __all__ = [

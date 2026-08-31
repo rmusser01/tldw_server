@@ -111,6 +111,32 @@ def test_sync_bootstrap_snapshot_reads_manifest_heads_and_key_in_one_service_cal
     assert snapshot.cursor.startswith("personal-context-bootstrap-v1:")
 
 
+def test_sync_bootstrap_cursor_changes_when_only_integrity_key_changes(
+    service: PersonalContextService,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A key transition invalidates an otherwise identical bootstrap snapshot."""
+
+    manifest, _scope = _create_ready_profile(service)
+    first = service.sync_bootstrap_snapshot()
+    original_snapshot = service._repository.sync_bootstrap_snapshot
+
+    def transitioned_snapshot(profile_id: str):
+        snapshot = original_snapshot(profile_id)
+        return (*snapshot[:4], "personal-context-integrity-v2", b"b" * 32)
+
+    monkeypatch.setattr(
+        service._repository,
+        "sync_bootstrap_snapshot",
+        transitioned_snapshot,
+    )
+    second = service.sync_bootstrap_snapshot()
+
+    assert second.manifest == manifest
+    assert second.integrity_key_id == "personal-context-integrity-v2"
+    assert second.cursor != first.cursor
+
+
 def _pending_proposal_for_scope(
     service: PersonalContextService,
     *,
