@@ -4,7 +4,7 @@ title: Implement Notes embedding index and semantic graph edges
 status: In Progress
 assignee: []
 created_date: 2026-08-27 02:20
-updated_date: 2026-08-31 17:22
+updated_date: 2026-08-31 18:48
 labels:
 - notes
 - notes-graph
@@ -17,6 +17,12 @@ documentation:
 - Docs/superpowers/specs/2026-08-29-notes-semantic-index-design.md
 - Docs/superpowers/plans/2026-08-29-notes-semantic-index-implementation-plan.md
 priority: medium
+modified_files:
+- tldw_Server_API/app/core/DB_Management/chacha/note_semantic_store.py
+- tldw_Server_API/app/core/Notes_Graph/semantic_erasure.py
+- tldw_Server_API/app/services/admin_data_subject_requests_service.py
+- tldw_Server_API/tests/Admin/test_admin_data_subject_requests_service.py
+- tldw_Server_API/tests/Notes_Graph/integration/test_semantic_erasure.py
 ---
 
 ## Description
@@ -76,6 +82,7 @@ Approved executable plan: `Docs/superpowers/plans/2026-08-29-notes-semantic-inde
 2026-08-31 Task 8 complete: Added frozen legacy graph defaults, semantic edge/status/evidence schemas, bounded first-page candidate projection, public/candidate cache separation, immutable requested/effective semantic query identity, single-assignment semantic cursors, two-pass revision fencing, and ordinary continuation cache identity independent of outer semantic bindings. Bounded review 5/5 completed with all findings resolved. Final verification: 142 Task 8 tests passed; Ruff, Bandit (0 findings/errors), Python 3.10 compilation, and diff checks clean. Implementation range: 048523a7964a..a9352c010f; report: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-8-report.md.
 2026-08-31 Task 9 implementation resumed directly in the existing worktree. Approved five-file RED reproduced: four collection errors for missing semantic_scoring.py, semantic_projector.py, and SemanticProjectionChunk. Proceeding within the Task 9 async projection, evidence, endpoint, and manual-conversion scope.
 2026-08-31 Task 9 complete: Added bounded async semantic scoring/projection at the nested Notes graph endpoint, owner/dataset/generation-scoped current-manifest reads, deterministic authority filtering and precedence composition, bounded evidence with response-cap omission markers, stable semantic cache/cursor binding, dynamic semantic graph rate accounting, and explicit conversion through the existing canonical Sync-aware manual-link path with durable content-free audit. Independent review completed with all findings resolved, including final semantic-binding race checks and synchronous audit flush. Verification: reviewed set 120 passed; complete Notes Graph suite 1012 passed with 6 optional live pgvector/PostgreSQL skips; manual-conversion integration 7 passed; Ruff, Bandit (zero findings), Python 3.10 compilation, and diff checks clean. Implementation commit: 9e675b83c5; report: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-9-report.md.
+2026-08-31 Task 10 complete: Added fail-closed Notes semantic DSR erasure with bounded maintenance-catalog discovery, revision fencing, exact ChromaDB/pgvector backend construction, synchronous cleanup draining, semantic-only v66/v67 final purge, and canonical edge/Note deletion ordering. RED: 5 failed, 9 passed. Final focused plus adjacent verification: 18 passed; Ruff clean; Bandit zero findings/errors at /tmp/bandit_task13134_task10.json; Python 3.10 compilation and staged/unstaged diff checks clean. Implementation commit: efd7f7829e; report: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-10-report.md. No live PostgreSQL/pgvector service or repository-wide pytest run was required for this focused task.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
