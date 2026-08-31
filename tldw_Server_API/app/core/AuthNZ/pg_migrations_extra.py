@@ -2743,9 +2743,19 @@ CANONICAL_ADMIN_WEBHOOK_POSTGRES_DDL = (
             (state = 'processing' AND finished_at IS NULL)
             OR (state != 'processing' AND finished_at IS NOT NULL)
         ),
-        CHECK (
+        CONSTRAINT admin_webhook_attempt_retry_delay_state CHECK (
             (state = 'retryable' AND requested_retry_delay_seconds IS NOT NULL)
-            OR (state != 'retryable' AND requested_retry_delay_seconds IS NULL)
+            OR (
+                state = 'outcome_unknown'
+                AND (
+                    requested_retry_delay_seconds IS NULL
+                    OR requested_retry_delay_seconds BETWEEN 1 AND 1800
+                )
+            )
+            OR (
+                state NOT IN ('retryable', 'outcome_unknown')
+                AND requested_retry_delay_seconds IS NULL
+            )
         )
     )
     """,
@@ -3135,6 +3145,111 @@ CANONICAL_ADMIN_WEBHOOK_POSTGRES_DDL = (
 )
 
 
+ADMIN_WEBHOOK_DELIVERY_RECOVERY_POSTGRES_DDL = (
+    """
+    ALTER TABLE admin_webhook_deliveries
+    ADD COLUMN IF NOT EXISTS pending_jobs_disposition_token TEXT
+        CHECK (
+            pending_jobs_disposition_token IS NULL
+            OR pending_jobs_disposition_token ~ '^[0-9a-f]{64}$'
+        )
+    """,
+    """
+    ALTER TABLE admin_webhook_deliveries
+    ADD COLUMN IF NOT EXISTS pending_jobs_disposition_not_before_at TIMESTAMPTZ
+    """,
+    """
+    ALTER TABLE admin_webhook_delivery_attempts
+    ADD COLUMN IF NOT EXISTS request_timeout_seconds INTEGER
+        CHECK (
+            request_timeout_seconds IS NULL
+            OR request_timeout_seconds BETWEEN 1 AND 30
+        )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS admin_webhook_runtime_heartbeats (
+        component TEXT NOT NULL CHECK (
+            component IN ('worker', 'reconciler', 'retention')
+        ),
+        instance_id TEXT NOT NULL CHECK (char_length(instance_id) BETWEEN 1 AND 128),
+        ready BOOLEAN NOT NULL,
+        reason_code TEXT CHECK (
+            (ready AND reason_code IS NULL)
+            OR (
+                NOT ready
+                AND reason_code IS NOT NULL
+                AND reason_code IN (
+                    'mode_off',
+                    'mode_migrate',
+                    'schema_unready',
+                    'migration_pending',
+                    'key_unavailable',
+                    'key_configuration_mismatch',
+                    'jobs_unavailable',
+                    'database_unavailable',
+                    'worker_unavailable',
+                    'reconciler_unavailable',
+                    'retention_unavailable',
+                    'heartbeat_stale'
+                )
+            )
+        ),
+        heartbeat_at TIMESTAMPTZ NOT NULL,
+        last_success_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (component, instance_id)
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_admin_webhook_deliveries_recovery
+    ON admin_webhook_deliveries(
+        state, enqueue_claim_expires_at, expires_at, created_at
+    )
+    WHERE state IN ('pending', 'enqueue_claimed')
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_admin_webhook_deliveries_disposition_recovery
+    ON admin_webhook_deliveries(
+        jobs_disposition_applied,
+        pending_jobs_disposition_not_before_at,
+        updated_at
+    )
+    WHERE pending_jobs_disposition IS NOT NULL
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_admin_webhook_runtime_heartbeats_freshness
+    ON admin_webhook_runtime_heartbeats(component, ready, heartbeat_at DESC)
+    """,
+)
+
+
+_ADMIN_WEBHOOK_RETRY_DELAY_STATE_CONSTRAINT = (
+    "admin_webhook_attempt_retry_delay_state"
+)
+
+_ADMIN_WEBHOOK_RETRY_DELAY_STATE_POSTGRES_DDL = """
+ALTER TABLE admin_webhook_delivery_attempts
+ADD CONSTRAINT admin_webhook_attempt_retry_delay_state CHECK (
+    (
+        state = 'retryable'
+        AND requested_retry_delay_seconds IS NOT NULL
+    )
+    OR (
+        state = 'outcome_unknown'
+        AND (
+            requested_retry_delay_seconds IS NULL
+            OR requested_retry_delay_seconds BETWEEN 1 AND 1800
+        )
+    )
+    OR (
+        state NOT IN ('retryable', 'outcome_unknown')
+        AND requested_retry_delay_seconds IS NULL
+    )
+)
+"""
+
+
 async def ensure_admin_webhook_canonical_tables_pg(
     pool: DatabasePool | None = None,
 ) -> bool:
@@ -3145,6 +3260,45 @@ async def ensure_admin_webhook_canonical_tables_pg(
             return False
         async with db_pool.transaction() as conn:
             for statement in CANONICAL_ADMIN_WEBHOOK_POSTGRES_DDL:
+                await conn.execute(statement)
+            legacy_constraints = await conn.fetch(
+                """
+                SELECT conname
+                FROM pg_constraint
+                WHERE conrelid = 'admin_webhook_delivery_attempts'::regclass
+                  AND contype = 'c'
+                  AND conname != $1
+                  AND pg_get_constraintdef(oid) LIKE '%state%'
+                  AND pg_get_constraintdef(oid)
+                      LIKE '%requested_retry_delay_seconds%'
+                """,
+                _ADMIN_WEBHOOK_RETRY_DELAY_STATE_CONSTRAINT,
+            )
+            for constraint in legacy_constraints:
+                quoted_name = await conn.fetchval(
+                    "SELECT quote_ident($1)", constraint["conname"]
+                )
+                await conn.execute(
+                    "ALTER TABLE admin_webhook_delivery_attempts "
+                    f"DROP CONSTRAINT {quoted_name}"
+                )
+            constraint_exists = await conn.fetchval(
+                """
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM pg_constraint
+                    WHERE conrelid =
+                        'admin_webhook_delivery_attempts'::regclass
+                      AND conname = $1
+                )
+                """,
+                _ADMIN_WEBHOOK_RETRY_DELAY_STATE_CONSTRAINT,
+            )
+            if not constraint_exists:
+                await conn.execute(
+                    _ADMIN_WEBHOOK_RETRY_DELAY_STATE_POSTGRES_DDL
+                )
+            for statement in ADMIN_WEBHOOK_DELIVERY_RECOVERY_POSTGRES_DDL:
                 await conn.execute(statement)
             await conn.execute(
                 """

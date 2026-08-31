@@ -58,34 +58,59 @@ from .metrics import (
 )
 from .migrations import (
     SLIDES_ARCHIVE_EXACT_FIELDS,
+    SLIDES_ARCHIVE_PAYLOAD_PRESENT,
+    SLIDES_ARCHIVE_RESULT_PRESENT,
     SQLITE_ARCHIVE_CURSOR_OUTPUT_SQL,
     SQLITE_ARCHIVE_CURSOR_TIME_SQL,
+    SlidesArchiveNormalizationError,
     _ensure_sqlite_archive_batch_read_indexes,
     ensure_jobs_tables,
     normalize_slides_archive_projection,
     slides_archive_indexes_ready_sqlite,
     slides_archive_projection_ready_sqlite,
+    slides_archive_values_equal,
 )
 from .operations.contracts import (
+    ADMIN_WEBHOOK_DELIVERY_DOMAIN,
+    ADMIN_WEBHOOK_DELIVERY_JOB_TYPE,
+    ADMIN_WEBHOOK_DELIVERY_MAX_RETRIES,
+    ADMIN_WEBHOOK_DELIVERY_PRIORITY,
+    ADMIN_WEBHOOK_DELIVERY_QUARANTINE_THRESHOLD,
+    ADMIN_WEBHOOK_DELIVERY_QUEUE,
     AcquireJobCommand,
     AdmissionRejectionReason,
     AdmissionResult,
+    ApplyPreparedDispositionCommand,
     BatchRenewLeaseItem,
     BatchRenewLeasesCommand,
     CreateJobCommand,
+    EnsureLeaseHorizonCommand,
+    ExpiredLeasePolicy,
+    FindJobByIdentityCommand,
     IdempotentOperationAdmission,
     IdempotentOperationCommand,
     IdempotentOperationDisposition,
     IdempotentOperationUnavailableError,
+    JobIdentityLookupResult,
+    LeaseHorizonResult,
     OperationOutcome,
+    PreparedDispositionKind,
+    PreparedDispositionResult,
     ReleaseJobCommand,
     RenewLeaseCommand,
     TerminalOperationResultPatchCommand,
     TerminalOperationResultPatchOutcome,
+    canonical_admin_webhook_delivery_id,
+    canonical_admin_webhook_idempotency_key,
+    canonical_admin_webhook_row_matches,
+    is_admin_webhook_delivery_queue,
 )
 from .operations.postgres import acquire_job as _postgres_acquire_job
 from .operations.postgres import admit_idempotent_operation as _postgres_admit_idempotent_operation
+from .operations.postgres import apply_prepared_disposition as _postgres_apply_prepared_disposition
 from .operations.postgres import create_job_admission as _postgres_create_job_admission
+from .operations.postgres import ensure_lease_horizon as _postgres_ensure_lease_horizon
+from .operations.postgres import find_job_by_identity as _postgres_find_job_by_identity
 from .operations.postgres import (
     get_job_or_archived_by_idempotency_key as _postgres_get_job_or_archived_by_idempotency_key,
 )
@@ -101,7 +126,10 @@ from .operations.postgres import renew_leases_batch as _postgres_renew_leases_ba
 from .operations.postgres import replay_idempotent_operation as _postgres_replay_idempotent_operation
 from .operations.sqlite import acquire_job as _sqlite_acquire_job
 from .operations.sqlite import admit_idempotent_operation as _sqlite_admit_idempotent_operation
+from .operations.sqlite import apply_prepared_disposition as _sqlite_apply_prepared_disposition
 from .operations.sqlite import create_job_admission as _sqlite_create_job_admission
+from .operations.sqlite import ensure_lease_horizon as _sqlite_ensure_lease_horizon
+from .operations.sqlite import find_job_by_identity as _sqlite_find_job_by_identity
 from .operations.sqlite import (
     get_job_or_archived_by_idempotency_key as _sqlite_get_job_or_archived_by_idempotency_key,
 )
@@ -212,6 +240,42 @@ def _is_slides_generation_scope(domain: object, queue: object, job_type: object)
         and queue == _SLIDES_GENERATION_QUEUE
         and job_type == _SLIDES_GENERATION_JOB_TYPE
     )
+
+
+def _require_canonical_admin_webhook_identity(
+    *,
+    domain: object,
+    queue: object,
+    job_type: object,
+    payload: object,
+) -> str:
+    """Validate the fixed canonical delivery identity before backend access."""
+
+    if (
+        domain != ADMIN_WEBHOOK_DELIVERY_DOMAIN
+        or queue != ADMIN_WEBHOOK_DELIVERY_QUEUE
+        or job_type != ADMIN_WEBHOOK_DELIVERY_JOB_TYPE
+    ):
+        raise ValueError("canonical admin webhook identity is invalid")
+    try:
+        return canonical_admin_webhook_delivery_id(payload)
+    except ValueError as exc:
+        raise ValueError("canonical admin webhook identity is invalid") from exc
+
+
+def _require_unchanged_canonical_admin_webhook_payload(
+    payload: object,
+    *,
+    delivery_id: str,
+) -> None:
+    """Reject any shared admission transform that changes canonical payload."""
+
+    try:
+        transformed_delivery_id = canonical_admin_webhook_delivery_id(payload)
+    except ValueError as exc:
+        raise ValueError("canonical admin webhook payload was transformed") from exc
+    if transformed_delivery_id != delivery_id:
+        raise ValueError("canonical admin webhook payload was transformed")
 
 
 def _require_aware_utc(value: datetime | None, *, field_name: str) -> datetime:
@@ -615,6 +679,7 @@ class JobManager:
         "sharing": ("workspace-clone",),
         "writing": ("writing-review", "writing-ai"),
         "scheduled_tasks": ("scheduled-tasks",),
+        "admin_webhooks": ("delivery",),
     }
 
     # --- Shutdown/acquisition gate (process-wide) ---
@@ -1407,6 +1472,9 @@ class JobManager:
         *,
         owner_user_id: str,
         idempotency_key: str,
+        expected_expired_lease_policy: ExpiredLeasePolicy | None = None,
+        expected_quarantine_threshold: int | None = None,
+        validate_execution_controls: bool = False,
         expected_job_uuid: str | None = None,
         expected_job_id: int | None = None,
         rejection: Exception | None = None,
@@ -1440,6 +1508,15 @@ class JobManager:
                         cursor=cur,
                     )
                     if existing is not None:
+                        if validate_execution_controls:
+                            self._validate_slides_generation_admission(
+                                conn,
+                                existing,
+                                owner_user_id=owner_user_id,
+                                idempotency_key=idempotency_key,
+                                expired_lease_policy=expected_expired_lease_policy,
+                                quarantine_threshold=expected_quarantine_threshold,
+                            )
                         return existing
                     if rejection is not None:
                         raise rejection
@@ -1459,6 +1536,15 @@ class JobManager:
                     expected_job_id=expected_job_id,
                 )
                 if existing is not None:
+                    if validate_execution_controls:
+                        self._validate_slides_generation_admission(
+                            conn,
+                            existing,
+                            owner_user_id=owner_user_id,
+                            idempotency_key=idempotency_key,
+                            expired_lease_policy=expected_expired_lease_policy,
+                            quarantine_threshold=expected_quarantine_threshold,
+                        )
                     return existing
                 if rejection is not None:
                     raise rejection
@@ -1472,6 +1558,8 @@ class JobManager:
         *,
         owner_user_id: str,
         idempotency_key: str,
+        expired_lease_policy: ExpiredLeasePolicy,
+        quarantine_threshold: int | None,
         cursor: Any | None = None,
     ) -> dict[str, Any] | None:
         """Check readiness and resolve one correlation under the same fence."""
@@ -1483,12 +1571,22 @@ class JobManager:
             raise SlidesGenerationJobsUnavailableError(
                 "presentation.generate Jobs coordination is unavailable"
             )
-        return self._lookup_slides_generation_job_in_connection(
+        existing = self._lookup_slides_generation_job_in_connection(
             conn,
             owner_user_id=owner_user_id,
             idempotency_key=idempotency_key,
             cursor=cursor,
         )
+        if existing is not None:
+            self._validate_slides_generation_admission(
+                conn,
+                existing,
+                owner_user_id=owner_user_id,
+                idempotency_key=idempotency_key,
+                expired_lease_policy=expired_lease_policy,
+                quarantine_threshold=quarantine_threshold,
+            )
+        return existing
 
     def _record_slides_generation_diagnostic(
         self,
@@ -1560,14 +1658,18 @@ class JobManager:
             if not rows:
                 if expected_job_uuid is None:
                     cur.execute(
-                        "SELECT * FROM jobs_archive WHERE domain='slides' AND queue='default' "
+                        "SELECT *, payload IS NOT NULL AS __slides_archive_payload_present, "
+                        "result IS NOT NULL AS __slides_archive_result_present "
+                        "FROM jobs_archive WHERE domain='slides' AND queue='default' "
                         "AND job_type='presentation.generate' AND owner_user_id=%s "
                         "AND idempotency_key=%s ORDER BY archived_at DESC, uuid LIMIT 1",
                         (owner_user_id, idempotency_key),
                     )
                 else:
                     cur.execute(
-                        "SELECT * FROM jobs_archive WHERE domain='slides' AND queue='default' "
+                        "SELECT *, payload IS NOT NULL AS __slides_archive_payload_present, "
+                        "result IS NOT NULL AS __slides_archive_result_present "
+                        "FROM jobs_archive WHERE domain='slides' AND queue='default' "
                         "AND job_type='presentation.generate' AND owner_user_id=%s "
                         "AND idempotency_key=%s AND uuid=%s "
                         "ORDER BY archived_at DESC, uuid LIMIT 2",
@@ -1702,7 +1804,13 @@ class JobManager:
 
     def _normalize_archived_job(self, row: Any) -> dict[str, Any]:
         """Decode one archived Jobs row without relying on its reusable numeric id."""
-        result = normalize_slides_archive_projection(row)
+        result = None
+        with contextlib.suppress(SlidesArchiveNormalizationError):
+            result = normalize_slides_archive_projection(row)
+        if result is None:
+            raise SlidesGenerationJobsUnavailableError(
+                "presentation.generate archive projection is unavailable"
+            )
         result["payload"] = self._maybe_decrypt_json(self._parse_json_value(result.get("payload")))
         result["result"] = self._maybe_decrypt_json(self._parse_json_value(result.get("result")))
         result["archived"] = True
@@ -1726,7 +1834,13 @@ class JobManager:
             cursor=cursor,
         )
         for active_row, archived_rows in collision_rows:
-            active = normalize_slides_archive_projection(active_row)
+            active = None
+            with contextlib.suppress(SlidesArchiveNormalizationError):
+                active = normalize_slides_archive_projection(active_row)
+            if active is None:
+                raise SlidesGenerationJobsUnavailableError(
+                    "presentation.generate archive projection is unavailable"
+                )
             job_uuid = str(active.get("uuid") or "").strip()
             if not archived_rows:
                 continue
@@ -1739,7 +1853,13 @@ class JobManager:
             active["result"] = self._maybe_decrypt_json(
                 self._parse_json_value(active.get("result"))
             )
-            if any(archived.get(field) != active.get(field) for field in SLIDES_ARCHIVE_EXACT_FIELDS):
+            if any(
+                not slides_archive_values_equal(
+                    archived.get(field),
+                    active.get(field),
+                )
+                for field in SLIDES_ARCHIVE_EXACT_FIELDS
+            ):
                 raise SlidesGenerationJobsUnavailableError("unsafe presentation.generate archive collision")
             exact_collisions.add(job_uuid)
         return exact_collisions
@@ -2934,6 +3054,8 @@ class JobManager:
         idempotency_key: str | None,
         request_id: str | None,
         trace_id: str | None,
+        expired_lease_policy: ExpiredLeasePolicy,
+        quarantine_threshold: int | None,
     ) -> CreateJobCommand:
         """Build the backend-neutral create command after facade validation."""
 
@@ -2951,6 +3073,8 @@ class JobManager:
             batch_group=batch_group,
             request_id=request_id,
             trace_id=trace_id,
+            expired_lease_policy=expired_lease_policy,
+            quarantine_threshold=quarantine_threshold,
         )
 
     def _owner_scope_admission_lookup(
@@ -3021,6 +3145,10 @@ class JobManager:
             if result.admission_rejection_reason is AdmissionRejectionReason.QUOTA_EXCEEDED:
                 raise ValueError(result.message or "Quota exceeded")  # noqa: TRY003
             raise ValueError(result.message or "Admission rejected")  # noqa: TRY003
+        if result.outcome is OperationOutcome.BACKEND_CONFLICT:
+            raise RuntimeError(result.message or "Job admission conflict")  # noqa: TRY003
+        if result.outcome not in {OperationOutcome.APPLIED, OperationOutcome.NO_TRANSITION}:
+            raise RuntimeError(result.message or "Job admission failed")  # noqa: TRY003
         if result.row is None:
             raise RuntimeError("Job admission did not return a row")  # noqa: TRY003
         return result.row
@@ -3032,10 +3160,12 @@ class JobManager:
         *,
         owner_user_id: str,
         idempotency_key: str,
+        expired_lease_policy: ExpiredLeasePolicy | None,
+        quarantine_threshold: int | None,
     ) -> None:
         """Reject an idempotent replay that is not the exact Slides authority."""
 
-        valid = (
+        identity_valid = (
             str(row.get("uuid") or "").strip() != ""
             and row.get("domain") == _SLIDES_GENERATION_DOMAIN
             and row.get("queue") == _SLIDES_GENERATION_QUEUE
@@ -3043,8 +3173,21 @@ class JobManager:
             and row.get("owner_user_id") == owner_user_id
             and row.get("idempotency_key") == idempotency_key
         )
-        if valid:
+        stored_policy = row.get(
+            "expired_lease_policy",
+            ExpiredLeasePolicy.CONSUME_RETRY.value,
+        )
+        stored_threshold = row.get("quarantine_threshold")
+        if identity_valid and (
+            expired_lease_policy is not None
+            and stored_policy == expired_lease_policy.value
+            and stored_threshold == quarantine_threshold
+        ):
             return
+        if identity_valid:
+            raise SlidesGenerationJobsUnavailableError(
+                "presentation.generate immutable execution controls conflict"
+            )
         self._record_slides_generation_diagnostic(
             conn,
             code="ambiguous_generation_legacy_row",
@@ -3350,7 +3493,7 @@ class JobManager:
             self._assert_invariants(result.job)
         return result
 
-    def create_job(
+    def admit_job(
         self,
         *,
         domain: str,
@@ -3367,8 +3510,10 @@ class JobManager:
         request_id: str | None = None,
         trace_id: str | None = None,
         owner_scope_admission: OwnerScopeAdmissionPolicy | None = None,
-    ) -> dict[str, Any]:
-        """Create a new job.
+        expired_lease_policy: ExpiredLeasePolicy = ExpiredLeasePolicy.CONSUME_RETRY,
+        quarantine_threshold: int | None = None,
+    ) -> AdmissionResult:
+        """Run the complete admission pipeline and return its typed outcome.
 
         Args:
             domain: Logical domain (e.g., "chatbooks", "prompt_studio").
@@ -3383,11 +3528,51 @@ class JobManager:
             available_at: Optional schedule time before the job becomes acquirable.
             idempotency_key: If provided, duplicate creates return the same row.
             owner_scope_admission: Optional transactional owner/job-scope limits.
+            expired_lease_policy: Behavior when a processing lease expires.
+            quarantine_threshold: Optional consecutive-failure quarantine limit.
 
-        Returns:
-            A dict representing the created (or existing, if idempotent) job row.
+        ``create_job`` delegates here and maps only the final typed outcome to
+        its legacy dict/exception contract.
         """
+        try:
+            expired_lease_policy = ExpiredLeasePolicy(expired_lease_policy)
+        except (TypeError, ValueError):
+            raise ValueError("expired_lease_policy is invalid") from None
+        if quarantine_threshold is not None and (
+            isinstance(quarantine_threshold, bool)
+            or not isinstance(quarantine_threshold, int)
+            or quarantine_threshold <= 0
+        ):
+            raise ValueError("quarantine_threshold must be a positive integer")
+        canonical_delivery_id: str | None = None
+        if is_admin_webhook_delivery_queue(domain, queue):
+            canonical_delivery_id = _require_canonical_admin_webhook_identity(
+                domain=domain,
+                queue=queue,
+                job_type=job_type,
+                payload=payload,
+            )
+            canonical = (
+                idempotency_key
+                == canonical_admin_webhook_idempotency_key(canonical_delivery_id)
+                and owner_user_id is None
+                and project_id is None
+                and batch_group is None
+                and available_at is None
+                and priority == ADMIN_WEBHOOK_DELIVERY_PRIORITY
+                and max_retries == ADMIN_WEBHOOK_DELIVERY_MAX_RETRIES
+                and expired_lease_policy is ExpiredLeasePolicy.REQUEUE_NO_ATTEMPT
+                and quarantine_threshold
+                == ADMIN_WEBHOOK_DELIVERY_QUARANTINE_THRESHOLD
+            )
+            if not canonical:
+                raise ValueError("canonical admin webhook admission facts are invalid")
         slides_generation = _is_slides_generation_scope(domain, queue, job_type)
+        slides_replay_controls = {
+            "expected_expired_lease_policy": expired_lease_policy,
+            "expected_quarantine_threshold": quarantine_threshold,
+            "validate_execution_controls": True,
+        }
         if slides_generation:
             if not isinstance(owner_user_id, str) or not owner_user_id.strip():
                 raise ValueError("presentation.generate jobs require owner_user_id")
@@ -3396,9 +3581,10 @@ class JobManager:
             existing = self._serialized_slides_generation_replay(
                 owner_user_id=owner_user_id,
                 idempotency_key=idempotency_key,
+                **slides_replay_controls,
             )
             if existing is not None:
-                return existing
+                return AdmissionResult.existing(row=existing)
 
         # Queue name policy
         allowed_queues = self._get_allowed_queues(domain)
@@ -3410,10 +3596,11 @@ class JobManager:
                 existing = self._serialized_slides_generation_replay(
                     owner_user_id=owner_user_id,
                     idempotency_key=idempotency_key,
+                    **slides_replay_controls,
                     rejection=error,
                 )
                 if existing is not None:
-                    return existing
+                    return AdmissionResult.existing(row=existing)
             raise error  # noqa: TRY003
 
         # Fair-share scheduling: enforce per-user concurrency limits and adjust priority
@@ -3434,10 +3621,11 @@ class JobManager:
                     existing = self._serialized_slides_generation_replay(
                         owner_user_id=owner_user_id,
                         idempotency_key=idempotency_key,
+                        **slides_replay_controls,
                         rejection=exc,
                     )
                     if existing is not None:
-                        return existing
+                        return AdmissionResult.existing(row=existing)
                 raise
             except _JOB_NONCRITICAL_EXCEPTIONS as _fs_exc:
                 logger.warning(f"Fair-share scheduling check skipped: {_fs_exc}")
@@ -3458,12 +3646,22 @@ class JobManager:
                 )  # noqa: TRY003 - public rejection text is an API compatibility contract.
             if found:
                 payload = cleaned
+        if canonical_delivery_id is not None:
+            _require_unchanged_canonical_admin_webhook_payload(
+                payload,
+                delivery_id=canonical_delivery_id,
+            )
 
         # JSON payload size cap
         max_bytes = int(os.getenv("JOBS_MAX_JSON_BYTES", "1048576") or "1048576")
         truncate = JobManager._is_truthy(os.getenv("JOBS_JSON_TRUNCATE", ""))
         # Optional encryption at rest for payload
         payload = self._maybe_encrypt_json(payload, domain)
+        if canonical_delivery_id is not None:
+            _require_unchanged_canonical_admin_webhook_payload(
+                payload,
+                delivery_id=canonical_delivery_id,
+            )
         try:
             payload_json = json.dumps(payload)
         except (TypeError, ValueError) as exc:
@@ -3471,15 +3669,21 @@ class JobManager:
                 existing = self._serialized_slides_generation_replay(
                     owner_user_id=owner_user_id,
                     idempotency_key=idempotency_key,
+                    **slides_replay_controls,
                     rejection=exc,
                 )
                 if existing is not None:
-                    return existing
+                    return AdmissionResult.existing(row=existing)
             raise
         payload_bytes = len(payload_json.encode("utf-8"))
         if payload_bytes > max_bytes:
             if truncate:
                 payload = {"_truncated": True, "len_bytes": payload_bytes}
+                if canonical_delivery_id is not None:
+                    _require_unchanged_canonical_admin_webhook_payload(
+                        payload,
+                        delivery_id=canonical_delivery_id,
+                    )
                 payload_json = json.dumps(payload)
                 with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
                     increment_json_truncated({"domain": domain, "queue": queue, "job_type": job_type}, "payload")
@@ -3491,12 +3695,18 @@ class JobManager:
                     existing = self._serialized_slides_generation_replay(
                         owner_user_id=owner_user_id,
                         idempotency_key=idempotency_key,
+                        **slides_replay_controls,
                         rejection=error,
                     )
                     if existing is not None:
-                        return existing
+                        return AdmissionResult.existing(row=existing)
                 raise error  # noqa: TRY003
 
+        if canonical_delivery_id is not None:
+            _require_unchanged_canonical_admin_webhook_payload(
+                payload,
+                delivery_id=canonical_delivery_id,
+            )
         # Note: completion_token enforcement applies to finalize paths (complete/fail), not creation.
         conn = self._connect()
         try:
@@ -3543,10 +3753,11 @@ class JobManager:
                     existing = self._serialized_slides_generation_replay(
                         owner_user_id=owner_user_id,
                         idempotency_key=idempotency_key,
+                        **slides_replay_controls,
                         rejection=error,
                     )
                     if existing is not None:
-                        return existing
+                        return AdmissionResult.existing(row=existing)
                 raise error  # noqa: TRY003
 
             if self.backend == "postgres":
@@ -3564,6 +3775,8 @@ class JobManager:
                     idempotency_key=idempotency_key,
                     request_id=request_id,
                     trace_id=trace_id,
+                    expired_lease_policy=expired_lease_policy,
+                    quarantine_threshold=quarantine_threshold,
                 )
                 advisory_xact_lock_key = None
                 pre_admission_lookup = None
@@ -3593,6 +3806,8 @@ class JobManager:
                             conn,
                             owner_user_id=str(owner_user_id),
                             idempotency_key=str(idempotency_key),
+                            expired_lease_policy=expired_lease_policy,
+                            quarantine_threshold=quarantine_threshold,
                             cursor=cur,
                         )
 
@@ -3608,13 +3823,22 @@ class JobManager:
                     advisory_xact_lock_key=advisory_xact_lock_key,
                     pre_admission_lookup=pre_admission_lookup,
                 )
-                d = self._map_admission_result(result)
+                if result.outcome not in {
+                    OperationOutcome.APPLIED,
+                    OperationOutcome.NO_TRANSITION,
+                }:
+                    return result
+                if result.row is None:
+                    raise RuntimeError("Job admission did not return a row")  # noqa: TRY003
+                d = result.row
                 if slides_generation:
                     self._validate_slides_generation_admission(
                         conn,
                         d,
                         owner_user_id=str(owner_user_id),
                         idempotency_key=str(idempotency_key),
+                        expired_lease_policy=expired_lease_policy,
+                        quarantine_threshold=quarantine_threshold,
                     )
                 try:
                     pol = self._get_sla_policy(d.get("domain"), d.get("queue"), d.get("job_type"))
@@ -3639,7 +3863,7 @@ class JobManager:
                 with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
                     self._assert_invariants(d)
                 self._emit_create_side_effects(result, backend="postgres", idempotency_key=idempotency_key)
-                return d
+                return result
             else:
                 command = self._build_create_job_command(
                     domain=domain,
@@ -3655,6 +3879,8 @@ class JobManager:
                     idempotency_key=idempotency_key,
                     request_id=request_id,
                     trace_id=trace_id,
+                    expired_lease_policy=expired_lease_policy,
+                    quarantine_threshold=quarantine_threshold,
                 )
                 pre_admission_lookup = None
                 if owner_scope_admission is not None:
@@ -3671,6 +3897,8 @@ class JobManager:
                             active_conn,
                             owner_user_id=str(owner_user_id),
                             idempotency_key=str(idempotency_key),
+                            expired_lease_policy=expired_lease_policy,
+                            quarantine_threshold=quarantine_threshold,
                         )
 
                 for attempt in range(2):
@@ -3692,20 +3920,29 @@ class JobManager:
                             ),
                             pre_admission_lookup=pre_admission_lookup,
                         )
-                        d = self._map_admission_result(result)
+                        if result.outcome not in {
+                            OperationOutcome.APPLIED,
+                            OperationOutcome.NO_TRANSITION,
+                        }:
+                            return result
+                        if result.row is None:
+                            raise RuntimeError("Job admission did not return a row")  # noqa: TRY003
+                        d = result.row
                         if slides_generation:
                             self._validate_slides_generation_admission(
                                 conn,
                                 d,
                                 owner_user_id=str(owner_user_id),
                                 idempotency_key=str(idempotency_key),
+                                expired_lease_policy=expired_lease_policy,
+                                quarantine_threshold=quarantine_threshold,
                             )
                         with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
                             self._update_gauges(domain=domain, queue=queue, job_type=job_type)
                         with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
                             self._assert_invariants(d)
                         self._emit_create_side_effects(result, backend="sqlite", idempotency_key=idempotency_key)
-                        return d
+                        return result
                     except sqlite3.OperationalError as exc:
                         if attempt == 0 and self._sqlite_missing_column_error(exc, "batch_group"):  # noqa: SIM102
                             if self._sqlite_ensure_batch_group(conn):
@@ -3713,6 +3950,201 @@ class JobManager:
                         raise
         finally:
             conn.close()
+
+    def create_job(
+        self,
+        *,
+        domain: str,
+        queue: str,
+        job_type: str,
+        payload: dict[str, Any],
+        owner_user_id: str | None,
+        project_id: int | None = None,
+        batch_group: str | None = None,
+        priority: int = 5,
+        max_retries: int = 3,
+        available_at: datetime | None = None,
+        idempotency_key: str | None = None,
+        request_id: str | None = None,
+        trace_id: str | None = None,
+        owner_scope_admission: OwnerScopeAdmissionPolicy | None = None,
+        expired_lease_policy: ExpiredLeasePolicy = ExpiredLeasePolicy.CONSUME_RETRY,
+        quarantine_threshold: int | None = None,
+    ) -> dict[str, Any]:
+        """Create a job using the typed admission pipeline and legacy mapping."""
+
+        result = self.admit_job(
+            domain=domain,
+            queue=queue,
+            job_type=job_type,
+            payload=payload,
+            owner_user_id=owner_user_id,
+            project_id=project_id,
+            batch_group=batch_group,
+            priority=priority,
+            max_retries=max_retries,
+            available_at=available_at,
+            idempotency_key=idempotency_key,
+            request_id=request_id,
+            trace_id=trace_id,
+            owner_scope_admission=owner_scope_admission,
+            expired_lease_policy=expired_lease_policy,
+            quarantine_threshold=quarantine_threshold,
+        )
+        return self._map_admission_result(result)
+
+    def find_job_by_identity(
+        self,
+        command: FindJobByIdentityCommand,
+    ) -> JobIdentityLookupResult:
+        """Read one exact active/archive identity without creating work."""
+
+        delivery_id = _require_canonical_admin_webhook_identity(
+            domain=command.domain,
+            queue=command.queue,
+            job_type=command.job_type,
+            payload=command.expected_payload,
+        )
+        if command.idempotency_key != canonical_admin_webhook_idempotency_key(
+            delivery_id
+        ):
+            raise ValueError("canonical admin webhook idempotency key is invalid")
+        conn = self._connect()
+        try:
+            if self.backend == "postgres":
+                return _postgres_find_job_by_identity(
+                    conn,
+                    self._pg_cursor,
+                    command=command,
+                )
+            return _sqlite_find_job_by_identity(conn, command=command)
+        finally:
+            conn.close()
+
+    def ensure_lease_horizon(
+        self,
+        command: EnsureLeaseHorizonCommand,
+    ) -> LeaseHorizonResult:
+        """Ensure an exact processing lease horizon within the configured cap."""
+
+        _require_canonical_admin_webhook_identity(
+            domain=command.domain,
+            queue=command.queue,
+            job_type=command.job_type,
+            payload=command.expected_payload,
+        )
+        max_seconds = max(
+            1,
+            int(os.getenv("JOBS_LEASE_MAX_SECONDS", "3600") or "3600"),
+        )
+        capped_command = replace(
+            command,
+            minimum_seconds=min(command.minimum_seconds, max_seconds),
+        )
+        conn = self._connect()
+        try:
+            if self.backend == "postgres":
+                return _postgres_ensure_lease_horizon(
+                    conn,
+                    self._pg_cursor,
+                    command=capped_command,
+                )
+            return _sqlite_ensure_lease_horizon(conn, command=capped_command)
+        finally:
+            conn.close()
+
+    def apply_prepared_disposition(
+        self,
+        command: ApplyPreparedDispositionCommand,
+    ) -> PreparedDispositionResult:
+        """Apply one exact prepared transition and observe it once post-commit."""
+
+        delivery_id = _require_canonical_admin_webhook_identity(
+            domain=command.domain,
+            queue=command.queue,
+            job_type=command.job_type,
+            payload=command.expected_payload,
+        )
+        if command.disposition.delivery_id != delivery_id:
+            raise ValueError("canonical admin webhook disposition delivery_id is invalid")
+        counters_enabled = JobManager._is_truthy(
+            os.getenv("JOBS_COUNTERS_ENABLED", "")
+        )
+        outbox_enabled = JobManager._is_truthy(os.getenv("JOBS_EVENTS_OUTBOX", ""))
+        conn = self._connect()
+        try:
+            if self.backend == "postgres":
+                result = _postgres_apply_prepared_disposition(
+                    conn,
+                    self._pg_cursor,
+                    command=command,
+                    counters_enabled=counters_enabled,
+                    outbox_enabled=outbox_enabled,
+                )
+            else:
+                result = _sqlite_apply_prepared_disposition(
+                    conn,
+                    command=command,
+                    counters_enabled=counters_enabled,
+                    outbox_enabled=outbox_enabled,
+                )
+        finally:
+            conn.close()
+
+        if result.outcome is not OperationOutcome.APPLIED or result.already_applied:
+            return result
+
+        job = self.get_job(command.job_id)
+        if job is None:
+            return result
+        disposition = command.disposition
+        if disposition.kind is PreparedDispositionKind.COMPLETE:
+            event_type = "job.completed"
+        elif disposition.kind is PreparedDispositionKind.RETRY:
+            event_type = (
+                "job.quarantined"
+                if result.state == "quarantined"
+                else "job.retry_scheduled"
+            )
+        elif disposition.kind is PreparedDispositionKind.FAIL:
+            event_type = "job.failed"
+        elif disposition.kind is PreparedDispositionKind.CANCEL:
+            event_type = "job.cancelled"
+        else:
+            event_type = "job.deferred"
+        attrs = {
+            "kind": disposition.kind.value,
+            "origin": disposition.origin.value,
+        }
+        if disposition.reason_code is not None:
+            attrs["reason_code"] = disposition.reason_code
+
+        with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
+            if disposition.kind is PreparedDispositionKind.COMPLETE:
+                increment_completed(job)
+            elif (
+                disposition.kind is PreparedDispositionKind.RETRY
+                and result.state == "queued"
+            ):
+                increment_retries(job)
+            elif disposition.kind is PreparedDispositionKind.FAIL:
+                increment_failures(job, reason="terminal")
+            elif disposition.kind is PreparedDispositionKind.CANCEL:
+                increment_cancelled(job)
+        with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
+            self._assert_invariants(job)
+        with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
+            self._update_gauges(
+                domain=command.domain,
+                queue=command.queue,
+                job_type=command.job_type,
+            )
+        with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
+            if outbox_enabled:
+                submit_job_audit_event(event_type, job=job, attrs=attrs)
+            else:
+                emit_job_event(event_type, job=job, attrs=attrs)
+        return result
 
     def _dependency_path_exists_in_transaction(
         self,
@@ -5408,7 +5840,8 @@ class JobManager:
                         (
                             "SELECT id, uuid, domain, queue, job_type, owner_user_id, request_id, trace_id, "
                             "COALESCE(retry_count, 0) AS effective_retry_count, "
-                            "COALESCE(max_retries, %s) AS effective_max_retries "
+                            "COALESCE(max_retries, %s) AS effective_max_retries, "
+                            "COALESCE(expired_lease_policy, 'consume_retry') AS effective_expired_lease_policy "
                             f"FROM jobs WHERE {' AND '.join(where)} "  # nosec B608
                             "ORDER BY leased_until ASC NULLS FIRST, id ASC "
                             "LIMIT %s FOR UPDATE SKIP LOCKED"
@@ -5420,8 +5853,31 @@ class JobManager:
                         row = dict(raw_row)
                         retry_count = int(row["effective_retry_count"])
                         max_retries = int(row["effective_max_retries"])
-                        requeue = retry_count < max_retries
-                        if requeue:
+                        no_attempt = (
+                            row["effective_expired_lease_policy"]
+                            == ExpiredLeasePolicy.REQUEUE_NO_ATTEMPT.value
+                        )
+                        requeue = no_attempt or retry_count < max_retries
+                        if no_attempt:
+                            cur.execute(
+                                (
+                                    "UPDATE jobs SET status='queued', available_at=NULL, "
+                                    "no_attempt_recovery_fingerprint="
+                                    "prepared_disposition_fingerprint, "
+                                    "leased_until=NULL, worker_id=NULL, lease_id=NULL, "
+                                    "completion_token=NULL, acquired_at=NULL, started_at=NULL "
+                                    "WHERE id=%s AND status='processing' "
+                                    "AND (leased_until IS NULL OR leased_until <= NOW()) "
+                                    "AND expired_lease_policy='requeue_no_attempt'"
+                                ),
+                                (int(row["id"]),),
+                            )
+                            event_type = "job.deferred"
+                            attrs = {
+                                "error_code": _LEASE_EXPIRED_ERROR_CODE,
+                                "origin": "recovery",
+                            }
+                        elif requeue:
                             cur.execute(
                                 (
                                     "UPDATE jobs SET status='queued', "
@@ -5516,7 +5972,8 @@ class JobManager:
             else:
                 where = [
                     "status = 'processing'",
-                    "(leased_until IS NULL OR leased_until <= DATETIME('now'))",
+                    "(leased_until IS NULL OR leased_until <= "
+                    "STRFTIME('%Y-%m-%d %H:%M:%f','now'))",
                 ]
                 params = []
                 for column, value in (
@@ -5543,7 +6000,8 @@ class JobManager:
                         (
                             "SELECT id, uuid, domain, queue, job_type, owner_user_id, request_id, trace_id, "
                             "COALESCE(retry_count, 0) AS effective_retry_count, "
-                            "COALESCE(max_retries, ?) AS effective_max_retries "
+                            "COALESCE(max_retries, ?) AS effective_max_retries, "
+                            "COALESCE(expired_lease_policy, 'consume_retry') AS effective_expired_lease_policy "
                             f"FROM jobs WHERE {scoped_where} "  # nosec B608
                             "ORDER BY leased_until ASC, id ASC LIMIT ?"
                         ),
@@ -5553,8 +6011,32 @@ class JobManager:
                         row = dict(raw_row)
                         retry_count = int(row["effective_retry_count"])
                         max_retries = int(row["effective_max_retries"])
-                        requeue = retry_count < max_retries
-                        if requeue:
+                        no_attempt = (
+                            row["effective_expired_lease_policy"]
+                            == ExpiredLeasePolicy.REQUEUE_NO_ATTEMPT.value
+                        )
+                        requeue = no_attempt or retry_count < max_retries
+                        if no_attempt:
+                            changed = conn.execute(
+                                (
+                                    "UPDATE jobs SET status='queued', available_at=NULL, "
+                                    "no_attempt_recovery_fingerprint="
+                                    "prepared_disposition_fingerprint, "
+                                    "leased_until=NULL, worker_id=NULL, lease_id=NULL, "
+                                    "completion_token=NULL, acquired_at=NULL, started_at=NULL "
+                                    "WHERE id=? AND status='processing' "
+                                    "AND (leased_until IS NULL OR leased_until <= "
+                                    "STRFTIME('%Y-%m-%d %H:%M:%f','now')) "
+                                    "AND expired_lease_policy='requeue_no_attempt'"
+                                ),
+                                (int(row["id"]),),
+                            )
+                            event_type = "job.deferred"
+                            attrs = {
+                                "error_code": _LEASE_EXPIRED_ERROR_CODE,
+                                "origin": "recovery",
+                            }
+                        elif requeue:
                             changed = conn.execute(
                                 (
                                     "UPDATE jobs SET status='queued', "
@@ -5562,7 +6044,8 @@ class JobManager:
                                     "max_retries=COALESCE(max_retries, ?), available_at=NULL, "
                                     "leased_until=NULL, worker_id=NULL, lease_id=NULL, completion_token=NULL "
                                     "WHERE id=? AND status='processing' "
-                                    "AND (leased_until IS NULL OR leased_until <= DATETIME('now')) "
+                                    "AND (leased_until IS NULL OR leased_until <= "
+                                    "STRFTIME('%Y-%m-%d %H:%M:%f','now')) "
                                     "AND COALESCE(retry_count, 0) < COALESCE(max_retries, ?)"
                                 ),
                                 (_DEFAULT_MAX_RETRIES, int(row["id"]), _DEFAULT_MAX_RETRIES),
@@ -5582,7 +6065,8 @@ class JobManager:
                                     "last_error=?, error_message=?, error_code=?, completed_at=DATETIME('now'), "
                                     "leased_until=NULL, worker_id=NULL, lease_id=NULL "
                                     "WHERE id=? AND status='processing' "
-                                    "AND (leased_until IS NULL OR leased_until <= DATETIME('now')) "
+                                    "AND (leased_until IS NULL OR leased_until <= "
+                                    "STRFTIME('%Y-%m-%d %H:%M:%f','now')) "
                                     "AND COALESCE(retry_count, 0) >= COALESCE(max_retries, ?)"
                                 ),
                                 (
@@ -5662,7 +6146,7 @@ class JobManager:
             with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
                 if event_type == "job.retry_scheduled":
                     increment_retries(job)
-                else:
+                elif event_type == "job.failed":
                     increment_failures(job, reason="terminal")
             with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
                 self._update_gauges(
@@ -9157,6 +9641,63 @@ class JobManager:
             rows = list(conn.execute(query, params).fetchall() or [])
         return self._validate_receipt_candidate_rows(rows)
 
+    def _canonical_admin_webhook_prune_candidates(
+        self,
+        conn: Any,
+        *,
+        where_clause: str,
+        params: tuple[Any, ...],
+        cursor: Any | None = None,
+    ) -> dict[int, str]:
+        """Return strictly validated terminal canonical rows in a prune set."""
+
+        placeholder = "%s" if self.backend == "postgres" else "?"
+        query = (
+            f"SELECT * FROM jobs{where_clause} "
+            f"AND domain={placeholder} AND queue={placeholder} "
+            f"AND job_type={placeholder} AND status IN "
+            "('completed','failed','cancelled','quarantined') ORDER BY id"
+        )
+        query_params = (
+            *params,
+            ADMIN_WEBHOOK_DELIVERY_DOMAIN,
+            ADMIN_WEBHOOK_DELIVERY_QUEUE,
+            ADMIN_WEBHOOK_DELIVERY_JOB_TYPE,
+        )
+        if self.backend == "postgres":
+            if cursor is None:
+                raise RuntimeError("PostgreSQL canonical pruning requires a cursor")
+            cursor.execute(query, query_params)
+            rows = list(cursor.fetchall() or [])
+        else:
+            rows = list(conn.execute(query, query_params).fetchall() or [])
+
+        candidates: dict[int, str] = {}
+        for raw_row in rows:
+            row = dict(raw_row)
+            payload = row.get("payload")
+            if isinstance(payload, str):
+                try:
+                    payload = json.loads(payload)
+                except (TypeError, ValueError):
+                    raise IdempotentOperationUnavailableError(
+                        "canonical admin webhook prune evidence is invalid"
+                    ) from None
+            if not isinstance(payload, dict):
+                raise IdempotentOperationUnavailableError(
+                    "canonical admin webhook prune evidence is invalid"
+                )
+            row["payload"] = payload
+            if not canonical_admin_webhook_row_matches(
+                row,
+                expected_payload=payload,
+            ):
+                raise IdempotentOperationUnavailableError(
+                    "canonical admin webhook prune evidence is invalid"
+                )
+            candidates[int(row["id"])] = row["uuid"]
+        return candidates
+
     def _exact_receipt_archive_uuids(
         self,
         conn: Any,
@@ -9180,10 +9721,15 @@ class JobManager:
             WITH candidates AS (
               SELECT * FROM jobs{where_clause}
             )
-            SELECT {active_projection}, archived.archive_id AS archived__archive_id,
+            SELECT {active_projection},
+                   candidates.payload IS NOT NULL AS active__payload_present,
+                   candidates.result IS NOT NULL AS active__result_present,
+                   archived.archive_id AS archived__archive_id,
                    {archive_projection},
                    archived.payload_compressed AS archived__payload_compressed,
-                   archived.result_compressed AS archived__result_compressed
+                   archived.result_compressed AS archived__result_compressed,
+                   archived.payload IS NOT NULL AS archived__payload_present,
+                   archived.result IS NOT NULL AS archived__result_present
             FROM candidates
             LEFT JOIN jobs_archive AS archived ON archived.uuid = candidates.uuid
             ORDER BY candidates.id, archived.archive_id
@@ -9202,6 +9748,12 @@ class JobManager:
             active = {
                 field: row.get(f"active__{field}") for field in projection_fields
             }
+            active[SLIDES_ARCHIVE_PAYLOAD_PRESENT] = row.get(
+                "active__payload_present"
+            )
+            active[SLIDES_ARCHIVE_RESULT_PRESENT] = row.get(
+                "active__result_present"
+            )
             job_uuid = str(active.get("uuid") or "").strip()
             if not job_uuid:
                 raise IdempotentOperationUnavailableError(
@@ -9221,6 +9773,12 @@ class JobManager:
                         "result_compressed": row.get(
                             "archived__result_compressed"
                         ),
+                        SLIDES_ARCHIVE_PAYLOAD_PRESENT: row.get(
+                            "archived__payload_present"
+                        ),
+                        SLIDES_ARCHIVE_RESULT_PRESENT: row.get(
+                            "archived__result_present"
+                        ),
                     }
                 )
 
@@ -9232,10 +9790,20 @@ class JobManager:
                 raise IdempotentOperationUnavailableError(
                     "receipt-backed Job has ambiguous archive authority"
                 )
-            active = normalize_slides_archive_projection(active_raw)
-            archived = normalize_slides_archive_projection(archived_rows[0])
+            active = None
+            archived = None
+            with contextlib.suppress(SlidesArchiveNormalizationError):
+                active = normalize_slides_archive_projection(active_raw)
+                archived = normalize_slides_archive_projection(archived_rows[0])
+            if active is None or archived is None:
+                raise IdempotentOperationUnavailableError(
+                    "job archive projection is unavailable"
+                )
             if any(
-                active.get(field) != archived.get(field)
+                not slides_archive_values_equal(
+                    active.get(field),
+                    archived.get(field),
+                )
                 for field in projection_fields
             ):
                 raise IdempotentOperationUnavailableError(
@@ -9273,10 +9841,20 @@ class JobManager:
             int(row["id"] if isinstance(row, dict) else row[0])
             for row in (cur.fetchall() or [])
         }
+        canonical_candidates = self._canonical_admin_webhook_prune_candidates(
+            None,
+            where_clause=candidate_where_clause,
+            params=candidate_params,
+            cursor=cur,
+        )
         archive_candidate_ids = (
             candidate_ids
             if archive_enabled
-            else sorted(set(receipt_candidates) | notes_graph_candidate_ids)
+            else sorted(
+                set(receipt_candidates)
+                | notes_graph_candidate_ids
+                | set(canonical_candidates)
+            )
         )
         cur.execute(
             (
@@ -9425,6 +10003,18 @@ class JobManager:
                 if archived_receipt_uuids != set(receipt_candidates.values()):
                     raise IdempotentOperationUnavailableError(
                         "receipt-backed Jobs were not archived exactly once"
+                    )
+            if canonical_candidates:
+                canonical_ids = sorted(canonical_candidates)
+                archived_canonical_uuids = self._exact_receipt_archive_uuids(
+                    None,
+                    where_clause=" WHERE id = ANY(%s)",
+                    params=(canonical_ids,),
+                    cursor=cur,
+                )
+                if archived_canonical_uuids != set(canonical_candidates.values()):
+                    raise IdempotentOperationUnavailableError(
+                        "canonical admin webhook Jobs were not archived exactly once"
                     )
 
         if JobManager._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", "")):
@@ -9713,6 +10303,17 @@ class JobManager:
                             + ["notes", "graph-suggestions", "note_graph_suggestions"]
                         ),
                     ).fetchall()
+                    notes_graph_candidate_ids = {
+                        int(row["id"] if isinstance(row, dict) else row[0])
+                        for row in notes_graph_candidates
+                    }
+                    canonical_candidates = (
+                        self._canonical_admin_webhook_prune_candidates(
+                            conn,
+                            where_clause=where_clause,
+                            params=tuple(params),
+                        )
+                    )
                     conn.execute(
                         (
                             "UPDATE job_dependencies SET "
@@ -9737,7 +10338,12 @@ class JobManager:
                     )
                     # Receipt-backed jobs always archive before active deletion;
                     # global archive policy still controls all other candidates.
-                    if archive_enabled or receipt_candidates or notes_graph_candidates:
+                    if (
+                        archive_enabled
+                        or receipt_candidates
+                        or notes_graph_candidate_ids
+                        or canonical_candidates
+                    ):
                         receipt_exists_clause = (
                             " EXISTS (SELECT 1 FROM job_idempotency_receipts "
                             "AS receipt WHERE receipt.job_uuid = jobs.uuid "
@@ -9751,23 +10357,22 @@ class JobManager:
                         receipt_where_clause = (
                             where_clause + " AND" + receipt_exists_clause
                         )
-                        archive_params = list(params)
                         if archive_enabled:
                             archive_where_clause = where_clause
+                            archive_params = list(params)
                         else:
+                            mandatory_ids = sorted(
+                                set(receipt_candidates)
+                                | notes_graph_candidate_ids
+                                | set(canonical_candidates)
+                            )
+                            mandatory_placeholders = ",".join(
+                                "?" for _ in mandatory_ids
+                            )
                             archive_where_clause = (
-                                where_clause
-                                + " AND ("
-                                + receipt_exists_clause
-                                + " OR (domain=? AND queue=? AND job_type=?))"
+                                f" WHERE id IN ({mandatory_placeholders})"
                             )
-                            archive_params.extend(
-                                [
-                                    "notes",
-                                    "graph-suggestions",
-                                    "note_graph_suggestions",
-                                ]
-                            )
+                            archive_params = mandatory_ids
                         prompt_archive_params = tuple(
                             archive_params + ["prompt_studio", "optimization"]
                         )
@@ -9915,6 +10520,26 @@ class JobManager:
                             ):
                                 raise IdempotentOperationUnavailableError(
                                     "receipt-backed Jobs were not archived exactly once"
+                                )
+                        if canonical_candidates:
+                            canonical_ids = sorted(canonical_candidates)
+                            canonical_placeholders = ",".join(
+                                "?" for _ in canonical_ids
+                            )
+                            archived_canonical_uuids = (
+                                self._exact_receipt_archive_uuids(
+                                    conn,
+                                    where_clause=(
+                                        f" WHERE id IN ({canonical_placeholders})"
+                                    ),
+                                    params=tuple(canonical_ids),
+                                )
+                            )
+                            if archived_canonical_uuids != set(
+                                canonical_candidates.values()
+                            ):
+                                raise IdempotentOperationUnavailableError(
+                                    "canonical admin webhook Jobs were not archived exactly once"
                                 )
                     # Counters: subtract queued/processing/quarantined rows if they are part of prune set
                     if JobManager._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", "")):
@@ -11748,7 +12373,11 @@ class JobManager:
                     "status <> 'processing'",
                     "(lease_id IS NOT NULL OR worker_id IS NOT NULL OR leased_until IS NOT NULL)",
                 ]
-                where_pr = ["status = 'processing'", "(leased_until IS NULL OR leased_until <= DATETIME('now'))"]
+                where_pr = [
+                    "status = 'processing'",
+                    "(leased_until IS NULL OR leased_until <= "
+                    "STRFTIME('%Y-%m-%d %H:%M:%f','now'))",
+                ]
                 params_np: list[Any] = []
                 params_pr: list[Any] = []
                 if domain:

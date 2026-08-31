@@ -21,6 +21,14 @@ from tldw_Server_API.app.core.Admin_Webhooks.config import (
     is_production_environment_mapping,
 )
 from tldw_Server_API.app.core.Admin_Webhooks.domain import (
+    AttemptState,
+    DeliveryKind,
+    DeliveryReasonCode,
+    DeliveryRuntimeComponent,
+    DeliveryRuntimeReasonCode,
+    DeliveryState,
+    EventSourceKind,
+    JobsDispositionKind,
     WebhookError,
     WebhookErrorCode,
     build_idempotency_scope,
@@ -39,6 +47,26 @@ from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
 from tldw_Server_API.app.core.Security.egress import URLPolicyResult
 
 
+def _iter_collectable_test_functions(
+    tree: ast.Module,
+) -> tuple[ast.FunctionDef | ast.AsyncFunctionDef, ...]:
+    functions: list[ast.FunctionDef | ast.AsyncFunctionDef] = []
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if node.name.startswith("test_"):
+                functions.append(node)
+            continue
+        if not isinstance(node, ast.ClassDef) or not node.name.startswith("Test"):
+            continue
+        functions.extend(
+            child
+            for child in node.body
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and child.name.startswith("test_")
+        )
+    return tuple(functions)
+
+
 @pytest.mark.unit
 def test_settings_default_off_and_validate_bounds() -> None:
     settings = AdminWebhookSettings.from_environment({})
@@ -50,6 +78,137 @@ def test_settings_default_off_and_validate_bounds() -> None:
     assert settings.allow_http_dev is False
     assert settings.idempotency_ttl_seconds == 86_400
     assert settings.rollback_window_days == 7
+
+
+@pytest.mark.unit
+def test_delivery_protocol_invariants_are_not_operator_expandable() -> None:
+    settings = AdminWebhookSettings.from_environment({})
+
+    assert settings.delivery_retry_delays_seconds == (60, 300, 1800)
+    assert settings.delivery_max_attempts == 4
+    assert settings.jobs_quarantine_threshold == 5
+    assert settings.delivery_infrastructure_defer_seconds == 30
+    assert settings.delivery_expiry_seconds == 72 * 60 * 60
+    assert settings.delivery_retention_days == 30
+    assert settings.delivery_commit_margin_seconds == 30
+    assert settings.delivery_stale_attempt_margin_seconds == 90
+    assert settings.delivery_claim_ttl_seconds == 60
+    assert settings.delivery_loop_interval_seconds == 1
+    assert settings.delivery_heartbeat_interval_seconds == 10
+    assert settings.delivery_heartbeat_freshness_seconds == 30
+
+
+@pytest.mark.unit
+def test_delivery_enums_are_closed_and_have_stable_values() -> None:
+    assert tuple(DeliveryKind) == (
+        DeliveryKind.AUTOMATIC,
+        DeliveryKind.MANUAL,
+        DeliveryKind.TEST,
+    )
+    assert tuple(DeliveryState) == (
+        DeliveryState.PENDING,
+        DeliveryState.ENQUEUE_CLAIMED,
+        DeliveryState.QUEUED,
+        DeliveryState.PROCESSING,
+        DeliveryState.RETRY_WAIT,
+        DeliveryState.SUCCEEDED,
+        DeliveryState.DEAD,
+        DeliveryState.CANCELED,
+        DeliveryState.SUPERSEDED,
+    )
+    assert DeliveryState.terminal_states() == frozenset(
+        {
+            DeliveryState.SUCCEEDED,
+            DeliveryState.DEAD,
+            DeliveryState.CANCELED,
+            DeliveryState.SUPERSEDED,
+        }
+    )
+    assert tuple(AttemptState) == (
+        AttemptState.PROCESSING,
+        AttemptState.SUCCEEDED,
+        AttemptState.RETRYABLE,
+        AttemptState.FAILED,
+        AttemptState.CANCELED,
+        AttemptState.SUPERSEDED,
+        AttemptState.OUTCOME_UNKNOWN,
+    )
+    assert AttemptState.terminal_states() == frozenset(set(AttemptState) - {AttemptState.PROCESSING})
+    assert tuple(JobsDispositionKind) == (
+        JobsDispositionKind.COMPLETE,
+        JobsDispositionKind.RETRY,
+        JobsDispositionKind.FAIL,
+        JobsDispositionKind.CANCEL,
+        JobsDispositionKind.DEFER,
+    )
+    assert tuple(EventSourceKind) == (
+        EventSourceKind.AGGREGATE,
+        EventSourceKind.COMMAND,
+    )
+    assert tuple(DeliveryRuntimeComponent) == (
+        DeliveryRuntimeComponent.WORKER,
+        DeliveryRuntimeComponent.RECONCILER,
+        DeliveryRuntimeComponent.RETENTION,
+    )
+    assert tuple(DeliveryRuntimeReasonCode) == (
+        DeliveryRuntimeReasonCode.MODE_OFF,
+        DeliveryRuntimeReasonCode.MODE_MIGRATE,
+        DeliveryRuntimeReasonCode.SCHEMA_UNREADY,
+        DeliveryRuntimeReasonCode.MIGRATION_PENDING,
+        DeliveryRuntimeReasonCode.KEY_UNAVAILABLE,
+        DeliveryRuntimeReasonCode.KEY_CONFIGURATION_MISMATCH,
+        DeliveryRuntimeReasonCode.JOBS_UNAVAILABLE,
+        DeliveryRuntimeReasonCode.DATABASE_UNAVAILABLE,
+        DeliveryRuntimeReasonCode.WORKER_UNAVAILABLE,
+        DeliveryRuntimeReasonCode.RECONCILER_UNAVAILABLE,
+        DeliveryRuntimeReasonCode.RETENTION_UNAVAILABLE,
+        DeliveryRuntimeReasonCode.HEARTBEAT_STALE,
+    )
+    assert {code.value for code in DeliveryReasonCode} >= {
+        "attempt_budget_exhausted",
+        "canceled_disabled",
+        "canceled_secret_rotation",
+        "delivery_expired",
+        "superseded_config",
+        "test_attempt_interrupted",
+    }
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("TLDW_ADMIN_WEBHOOK_DELIVERY_CLAIM_TTL_SECONDS", "4"),
+        ("TLDW_ADMIN_WEBHOOK_DELIVERY_CLAIM_TTL_SECONDS", "301"),
+        ("TLDW_ADMIN_WEBHOOK_DELIVERY_LOOP_INTERVAL_SECONDS", "000"),
+        ("TLDW_ADMIN_WEBHOOK_DELIVERY_LOOP_INTERVAL_SECONDS", "61"),
+        ("TLDW_ADMIN_WEBHOOK_DELIVERY_HEARTBEAT_INTERVAL_SECONDS", "000"),
+        ("TLDW_ADMIN_WEBHOOK_DELIVERY_HEARTBEAT_INTERVAL_SECONDS", "61"),
+        ("TLDW_ADMIN_WEBHOOK_DELIVERY_HEARTBEAT_FRESHNESS_SECONDS", "000"),
+        ("TLDW_ADMIN_WEBHOOK_DELIVERY_HEARTBEAT_FRESHNESS_SECONDS", "61"),
+        ("TLDW_ADMIN_WEBHOOK_DELIVERY_CLAIM_TTL_SECONDS", "not-a-number"),
+    ],
+)
+@pytest.mark.unit
+def test_delivery_settings_reject_invalid_values_without_echoing_them(
+    name: str,
+    value: str,
+) -> None:
+    with pytest.raises(ValueError) as exc_info:
+        AdminWebhookSettings.from_environment({name: value})
+
+    assert name in str(exc_info.value)
+    assert value not in str(exc_info.value)
+
+
+@pytest.mark.unit
+def test_delivery_settings_require_heartbeat_freshness_after_interval() -> None:
+    with pytest.raises(ValueError, match="FRESHNESS"):
+        AdminWebhookSettings.from_environment(
+            {
+                "TLDW_ADMIN_WEBHOOK_DELIVERY_HEARTBEAT_INTERVAL_SECONDS": "30",
+                "TLDW_ADMIN_WEBHOOK_DELIVERY_HEARTBEAT_FRESHNESS_SECONDS": "30",
+            }
+        )
 
 
 @pytest.mark.parametrize("value", ["", "enabled", "disabled"])
@@ -339,9 +498,23 @@ def test_request_id_accepts_only_bounded_safe_values() -> None:
         "ftp://receiver.example/hook",
         "https://user:pass@receiver.example/hook",
         "https://receiver.example/hook#fragment",
+        "https://receiver.example/hook#",
         "https://receiver.example\\hook",
         "https://receiver.example/line\nbreak",
+        "https://receiver.example//hook",
+        "https://receiver.example/hook%",
+        "https://receiver.example/hook%0g",
+        "https://receiver.example/hook%0Dnext",
+        "https://receiver.example/hook%5cnext",
+        "https://receiver.example/hook%C2%80",
+        "https://receiver.example/hook?next=%C2%80",
+        "https://receiver.example/hook\u0080",
+        "https://xn--a.example/hook",
+        "https://0x08080808/hook",
+        "https://134744072/hook",
         "https://receiver.example:bad/hook",
+        "https://receiver.example:/hook",
+        "https://[2001:4860:4860::8888]:/hook",
         "https://[::1/hook",
         "https://.example/hook",
         "https://receiver.example/" + ("x" * 2_050),
@@ -453,6 +626,29 @@ def test_repository_implementation_lives_in_db_management() -> None:
 
 
 @pytest.mark.unit
+def test_direct_marker_audit_matches_pytest_collection_boundaries() -> None:
+    tree = ast.parse(
+        """
+def test_top_level():
+    pass
+
+class _FakeService:
+    def test_webhook(self):
+        pass
+
+class TestEgressPolicy:
+    async def test_policy(self):
+        pass
+"""
+    )
+
+    assert [node.name for node in _iter_collectable_test_functions(tree)] == [
+        "test_top_level",
+        "test_policy",
+    ]
+
+
+@pytest.mark.unit
 def test_each_webhook_pr_test_has_one_direct_accepted_marker() -> None:
     accepted = frozenset(
         {"unit", "integration", "external_api", "local_llm_service"}
@@ -471,11 +667,7 @@ def test_each_webhook_pr_test_has_one_direct_accepted_marker() -> None:
 
     for path in paths:
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        for node in ast.walk(tree):
-            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                continue
-            if not node.name.startswith("test_"):
-                continue
+        for node in _iter_collectable_test_functions(tree):
             markers: list[str] = []
             for decorator in node.decorator_list:
                 target = decorator.func if isinstance(decorator, ast.Call) else decorator

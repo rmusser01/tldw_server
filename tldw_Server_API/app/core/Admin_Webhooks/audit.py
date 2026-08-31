@@ -9,6 +9,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from enum import Enum
 from typing import Literal, TypeAlias
+from uuid import UUID
 
 from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditContext,
@@ -19,7 +20,7 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import (
 )
 
 from .catalog import EVENT_CATALOG
-from .domain import WebhookErrorCode
+from .domain import DeliveryReasonCode, WebhookErrorCode
 
 AUDIT_WRITE_TIMEOUT_SECONDS = 5.0
 AUDIT_STOP_TIMEOUT_SECONDS = 1.0
@@ -42,6 +43,18 @@ OperationalAction: TypeAlias = Literal[
     "admin_webhook.rollback.destroy",
 ]
 OperationalOutcome: TypeAlias = Literal["accepted", "completed", "failed"]
+DeliveryMutationAction: TypeAlias = Literal[
+    "admin_webhook.test",
+    "admin_webhook.redeliver",
+]
+DeliveryMutationOutcome: TypeAlias = Literal[
+    "accepted",
+    "succeeded",
+    "no_op",
+    "denied",
+    "failed",
+]
+DeliveryMutationReasonCode: TypeAlias = DeliveryReasonCode | WebhookErrorCode
 
 _MUTATION_ACTIONS = frozenset(
     {
@@ -65,6 +78,12 @@ _OPERATIONAL_ACTIONS = frozenset(
     }
 )
 _OPERATIONAL_OUTCOMES = frozenset({"accepted", "completed", "failed"})
+_DELIVERY_MUTATION_ACTIONS = frozenset(
+    {"admin_webhook.test", "admin_webhook.redeliver"}
+)
+_DELIVERY_MUTATION_OUTCOMES = frozenset(
+    {"accepted", "succeeded", "no_op", "denied", "failed"}
+)
 _PRINCIPAL_KINDS = frozenset({"user", "api_key", "service", "anonymous"})
 _SAFE_ID = re.compile(r"^[A-Za-z0-9._:@-]{1,128}$")
 _SAFE_ROLE = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
@@ -100,6 +119,18 @@ def _validate_positive_id(value: object, *, field: str) -> int:
 
 def _validate_safe_id(value: object, *, field: str) -> str:
     if not isinstance(value, str) or _SAFE_ID.fullmatch(value) is None:
+        raise ValueError(f"{field} is invalid")
+    return value
+
+
+def _validate_canonical_uuid4(value: object, *, field: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{field} is invalid")
+    try:
+        parsed = UUID(value)
+    except (AttributeError, ValueError):
+        raise ValueError(f"{field} is invalid") from None
+    if parsed.version != 4 or str(parsed) != value:
         raise ValueError(f"{field} is invalid")
     return value
 
@@ -174,6 +205,110 @@ class MutationAudit:
 
 
 MutationAuditSink: TypeAlias = Callable[[MutationAudit], Awaitable[None]]
+
+
+@dataclass(frozen=True)
+class DeliveryMutationAudit:
+    """Closed test/redelivery audit record without transport-owned content."""
+
+    actor_id: int
+    action: DeliveryMutationAction
+    webhook_id: int
+    source_delivery_id: str | None
+    delivery_id: str | None
+    attempt_id: str | None
+    target_hostname: str | None
+    source_config_version: int | None
+    current_config_version: int | None
+    redelivery_to_changed_config: bool | None
+    status_code: int | None
+    outcome: DeliveryMutationOutcome
+    request_id: str
+    reason_code: DeliveryMutationReasonCode | None
+
+    def __post_init__(self) -> None:
+        _validate_positive_id(self.actor_id, field="actor ID")
+        _validate_positive_id(self.webhook_id, field="webhook ID")
+        if self.action not in _DELIVERY_MUTATION_ACTIONS:
+            raise ValueError("delivery mutation action is invalid")
+        for value, field_name in (
+            (self.source_delivery_id, "source delivery ID"),
+            (self.delivery_id, "delivery ID"),
+            (self.attempt_id, "attempt ID"),
+        ):
+            if value is not None:
+                _validate_canonical_uuid4(value, field=field_name)
+        if self.target_hostname is not None and (
+            not isinstance(self.target_hostname, str)
+            or _SAFE_HOSTNAME.fullmatch(self.target_hostname) is None
+        ):
+            raise ValueError("target hostname is invalid")
+        for value, field_name in (
+            (self.source_config_version, "source config version"),
+            (self.current_config_version, "current config version"),
+        ):
+            if value is not None:
+                _validate_positive_id(value, field=field_name)
+        if self.redelivery_to_changed_config is not None and not isinstance(
+            self.redelivery_to_changed_config,
+            bool,
+        ):
+            raise TypeError("redelivery configuration-change state is invalid")
+        if self.status_code is not None and (
+            isinstance(self.status_code, bool)
+            or not isinstance(self.status_code, int)
+            or not 100 <= self.status_code <= 599
+        ):
+            raise ValueError("delivery mutation status is invalid")
+        if self.outcome not in _DELIVERY_MUTATION_OUTCOMES:
+            raise ValueError("delivery mutation outcome is invalid")
+        _validate_safe_id(self.request_id, field="request ID")
+        if self.reason_code is not None and not isinstance(
+            self.reason_code,
+            (DeliveryReasonCode, WebhookErrorCode),
+        ):
+            raise TypeError("delivery mutation reason code is invalid")
+        if (self.outcome in {"denied", "failed"}) != (
+            self.reason_code is not None
+        ):
+            raise ValueError("delivery mutation reason does not match outcome")
+        if self.action == "admin_webhook.test":
+            self._validate_test_shape()
+        else:
+            self._validate_redelivery_shape()
+
+    def _validate_test_shape(self) -> None:
+        if (
+            self.source_delivery_id is not None
+            or self.source_config_version is not None
+            or self.current_config_version is not None
+            or self.redelivery_to_changed_config is not None
+            or self.outcome == "no_op"
+        ):
+            raise ValueError("test audit shape is invalid")
+        if self.outcome in {"accepted", "succeeded"} and (
+            self.delivery_id is None
+            or self.attempt_id is None
+            or self.target_hostname is None
+        ):
+            raise ValueError("test audit coordinates are required")
+
+    def _validate_redelivery_shape(self) -> None:
+        if self.attempt_id is not None or self.status_code is not None or self.outcome == "succeeded":
+            raise ValueError("redelivery audit shape is invalid")
+        if self.outcome in {"accepted", "no_op"} and (
+            self.source_delivery_id is None
+            or self.delivery_id is None
+            or self.source_config_version is None
+            or self.current_config_version is None
+            or self.redelivery_to_changed_config is None
+        ):
+            raise ValueError("redelivery audit coordinates are required")
+
+
+DeliveryMutationAuditSink: TypeAlias = Callable[
+    [DeliveryMutationAudit], Awaitable[None]
+]
 
 
 @dataclass(frozen=True)
@@ -328,3 +463,49 @@ async def emit_mandatory_webhook_operation_audit(
         )
 
     await _emit_bounded(user_id=record.operator_id, write=write)
+
+
+async def emit_mandatory_webhook_delivery_audit(
+    record: DeliveryMutationAudit,
+) -> None:
+    """Persist one bounded test/redelivery event or fail the caller closed."""
+    if not isinstance(record, DeliveryMutationAudit):
+        raise TypeError("delivery mutation audit record is required")
+    event_type = (
+        AuditEventType.DATA_WRITE
+        if record.action == "admin_webhook.redeliver"
+        else AuditEventType.DATA_UPDATE
+    )
+
+    async def write(service: UnifiedAuditService) -> None:
+        await service.log_event(
+            event_type=event_type,
+            category=AuditEventCategory.DATA_MODIFICATION,
+            context=AuditContext(user_id=str(record.actor_id)),
+            resource_type="admin_webhook_delivery",
+            resource_id=record.delivery_id or record.source_delivery_id,
+            action=record.action,
+            metadata={
+                "actor_id": record.actor_id,
+                "webhook_id": record.webhook_id,
+                "source_delivery_id": record.source_delivery_id,
+                "delivery_id": record.delivery_id,
+                "attempt_id": record.attempt_id,
+                "target_hostname": record.target_hostname,
+                "source_config_version": record.source_config_version,
+                "current_config_version": record.current_config_version,
+                "redelivery_to_changed_config": (
+                    record.redelivery_to_changed_config
+                ),
+                "status_code": record.status_code,
+                "outcome": record.outcome,
+                "request_id": record.request_id,
+                "reason_code": (
+                    record.reason_code.value
+                    if record.reason_code is not None
+                    else None
+                ),
+            },
+        )
+
+    await _emit_bounded(user_id=record.actor_id, write=write)

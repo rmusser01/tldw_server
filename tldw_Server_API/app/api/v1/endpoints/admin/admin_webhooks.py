@@ -21,26 +21,41 @@ from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    check_rate_limit,
+    get_auth_principal,
+)
 from tldw_Server_API.app.api.v1.schemas.admin_webhooks import (
     AdminWebhookRegistrationResponse,
     AdminWebhookStatusResponse,
+    DeliveryCapabilityStatusResponse,
     WebhookCatalogItemResponse,
     WebhookCatalogResponse,
     WebhookCreateRequest,
     WebhookDeleteResponse,
+    WebhookDeliveryAttemptResponse,
+    WebhookDeliveryHistoryItemResponse,
+    WebhookDeliveryListResponse,
+    WebhookDeliveryResponse,
     WebhookErrorDetail,
     WebhookErrorResponse,
     WebhookLimitsResponse,
     WebhookListResponse,
     WebhookMigrationStatusResponse,
     WebhookPatchRequest,
+    WebhookRedeliveryRequest,
+    WebhookRedeliveryResponse,
     WebhookSecretResponse,
+    WebhookTestRequest,
+    WebhookTestResponse,
 )
 from tldw_Server_API.app.core.Admin_Webhooks.audit import (
+    DeliveryMutationAudit,
+    DeliveryMutationAuditSink,
     MutationAudit,
     MutationAuditSink,
     emit_mandatory_webhook_audit,
+    emit_mandatory_webhook_delivery_audit,
     validate_actor_kind,
     validate_actor_principal_id,
     validate_actor_roles,
@@ -53,7 +68,17 @@ from tldw_Server_API.app.core.Admin_Webhooks.control_plane import (
     RotateSecretCommand,
     get_admin_webhook_control_plane,
 )
+from tldw_Server_API.app.core.Admin_Webhooks.delivery import (
+    AdminWebhookDeliveryService,
+    RedeliverWebhookCommand,
+    TestWebhookAudit,
+    TestWebhookCommand,
+    get_admin_webhook_delivery_service,
+)
 from tldw_Server_API.app.core.Admin_Webhooks.domain import (
+    DeliveryHistoryItem,
+    WebhookDelivery,
+    WebhookDeliveryAttempt,
     WebhookError,
     WebhookErrorCode,
     WebhookRegistration,
@@ -95,6 +120,19 @@ _DOMAIN_ERRORS: dict[WebhookErrorCode, tuple[int, str]] = {
     WebhookErrorCode.OPERATION_FAILED: (503, "Webhook operation is temporarily unavailable"),
     WebhookErrorCode.USER_PRINCIPAL_REQUIRED: (403, "A user-backed platform administrator is required"),
     WebhookErrorCode.DELIVERY_UNAVAILABLE: (503, "Webhook delivery capability is unavailable"),
+    WebhookErrorCode.TEST_DELIVERY_UNAVAILABLE: (503, "Webhook test delivery is unavailable"),
+    WebhookErrorCode.REDELIVERY_CONFIRMATION_REQUIRED: (
+        428,
+        "Redelivery to changed configuration requires confirmation",
+    ),
+    WebhookErrorCode.DELIVERY_HISTORY_UNAVAILABLE: (
+        503,
+        "Webhook delivery history is unavailable",
+    ),
+    WebhookErrorCode.RECOVERY_UNAVAILABLE: (
+        503,
+        "Webhook delivery recovery is unavailable",
+    ),
 }
 
 _AUTH_ERRORS = {
@@ -117,12 +155,50 @@ _ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
     }
     for status in (401, 403, 404, 409, 412, 422, 428, 429, 500, 503)
 }
+_IDEMPOTENCY_KEY_PATTERN = r"^[A-Za-z0-9._:-]{16,255}$"
+_REQUIRED_IF_MATCH_PARAMETER = {
+    "name": "If-Match",
+    "in": "header",
+    "required": True,
+    "schema": {"type": "string"},
+}
+_REQUEST_ID_RESPONSE_HEADER = {
+    "description": "Normalized request correlation identifier",
+    "schema": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": r"^[A-Za-z0-9._:-]{1,128}$",
+    },
+}
+_NO_STORE_RESPONSE_HEADER = {
+    "description": "Disables response caching",
+    "schema": {"type": "string", "enum": ["no-store"]},
+}
+_RETRY_AFTER_RESPONSE_HEADER = {
+    "description": "Bounded retry delay in seconds",
+    "schema": {"type": "integer", "minimum": 0, "maximum": 86_400},
+}
+_DELIVERY_SUCCESS_HEADERS = {
+    "X-Request-ID": _REQUEST_ID_RESPONSE_HEADER,
+    "Cache-Control": _NO_STORE_RESPONSE_HEADER,
+}
+_TEST_PROCESSING_HEADERS = {
+    **_DELIVERY_SUCCESS_HEADERS,
+    "Retry-After": _RETRY_AFTER_RESPONSE_HEADER,
+}
 
 
 def _request_id(request: Request) -> str:
     """Return the normalized request correlation identifier."""
 
     return normalize_request_id(getattr(request.state, "request_id", None))
+
+
+async def _enforce_admin_webhook_rate_limit(request: Request) -> None:
+    """Apply the shared ingress guard without exposing its legacy test hook."""
+
+    await check_rate_limit(request)
 
 
 def _webhook_error_response(
@@ -217,7 +293,6 @@ class AdminWebhookRoute(APIRoute):
                     message=message,
                     headers=_filtered_http_exception_headers(exc),
                 )
-
         return redacted_handler
 
 
@@ -291,6 +366,58 @@ def _build_webhook_audit_sink(
         )
 
     return sink
+
+
+def _build_delivery_audit_sink(
+    *,
+    request_id: str,
+    principal: AuthPrincipal,
+    actor_id: int,
+) -> DeliveryMutationAuditSink:
+    validate_actor_principal_id(principal.principal_id)
+    validate_actor_kind(principal.kind)
+    validate_actor_roles(tuple(principal.roles))
+
+    async def sink(record: DeliveryMutationAudit) -> None:
+        if record.actor_id != actor_id or record.request_id != request_id:
+            raise WebhookError(WebhookErrorCode.AUDIT_UNAVAILABLE)
+        try:
+            await emit_mandatory_webhook_delivery_audit(record)
+        except Exception:  # noqa: BLE001 - mandatory adapter is fail closed
+            raise WebhookError(WebhookErrorCode.AUDIT_UNAVAILABLE) from None
+
+    return sink
+
+
+def _test_audit_bridge(
+    sink: DeliveryMutationAuditSink,
+) -> tuple[Callable[[TestWebhookAudit], Coroutine[Any, Any, None]], list[TestWebhookAudit]]:
+    observed: list[TestWebhookAudit] = []
+
+    async def bridge(record: TestWebhookAudit) -> None:
+        if not isinstance(record, TestWebhookAudit):
+            raise WebhookError(WebhookErrorCode.AUDIT_UNAVAILABLE)
+        observed.append(record)
+        await sink(
+            DeliveryMutationAudit(
+                actor_id=record.actor_id,
+                action="admin_webhook.test",
+                webhook_id=record.webhook_id,
+                source_delivery_id=None,
+                delivery_id=record.delivery_id,
+                attempt_id=record.attempt_id,
+                target_hostname=record.target_hostname,
+                source_config_version=None,
+                current_config_version=None,
+                redelivery_to_changed_config=None,
+                status_code=record.status_code,
+                outcome=record.outcome,
+                request_id=record.request_id,
+                reason_code=record.reason_code,
+            )
+        )
+
+    return bridge, observed
 
 
 async def _emit_read_audit(
@@ -390,6 +517,9 @@ def _status_response(status: WebhookStatus) -> AdminWebhookStatusResponse:
             "schema_ready": status.schema_ready,
             "key_state": status.key_state,
             "delivery_capability_ready": status.delivery_capability_ready,
+            "delivery": DeliveryCapabilityStatusResponse.model_validate(
+                status.delivery
+            ),
             "limits": WebhookLimitsResponse.model_validate(status.limits),
             "migration": WebhookMigrationStatusResponse(
                 phase=status.migration.phase,
@@ -401,6 +531,64 @@ def _status_response(status: WebhookStatus) -> AdminWebhookStatusResponse:
                 rollback_window_expires_at=status.migration.rollback_expires_at,
             ),
         }
+    )
+
+
+def _delivery_response(
+    delivery: WebhookDelivery,
+    *,
+    event_type: str,
+    completed_after_config_change: bool,
+) -> WebhookDeliveryResponse:
+    return WebhookDeliveryResponse(
+        id=delivery.id,
+        event_id=delivery.event_id,
+        event_type=event_type,
+        webhook_id=delivery.webhook_id,
+        kind=delivery.kind,
+        state=delivery.state,
+        delivery_config_version=delivery.delivery_config_version,
+        secret_version=delivery.secret_version,
+        attempt_count=delivery.attempt_count,
+        status_code=delivery.status_code,
+        latency_ms=delivery.latency_ms,
+        reason_code=delivery.reason_code,
+        expires_at=delivery.expires_at,
+        created_at=delivery.created_at,
+        updated_at=delivery.updated_at,
+        terminal_at=delivery.terminal_at,
+        redelivery_of_id=delivery.redelivery_of_id,
+        completed_after_config_change=completed_after_config_change,
+    )
+
+
+def _attempt_response(
+    attempt: WebhookDeliveryAttempt,
+) -> WebhookDeliveryAttemptResponse:
+    return WebhookDeliveryAttemptResponse(
+        id=attempt.id,
+        sequence=attempt.attempt_number,
+        state=attempt.state,
+        request_timeout_seconds=attempt.request_timeout_seconds,
+        status_code=attempt.status_code,
+        latency_ms=attempt.latency_ms,
+        reason_code=attempt.reason_code,
+        requested_retry_delay_seconds=attempt.requested_retry_delay_seconds,
+        started_at=attempt.started_at,
+        finished_at=attempt.finished_at,
+    )
+
+
+def _history_item_response(
+    item: DeliveryHistoryItem,
+) -> WebhookDeliveryHistoryItemResponse:
+    return WebhookDeliveryHistoryItemResponse(
+        delivery=_delivery_response(
+            item.delivery,
+            event_type=item.event_type,
+            completed_after_config_change=item.completed_after_config_change,
+        ),
+        attempts=[_attempt_response(attempt) for attempt in item.attempts],
     )
 
 
@@ -550,6 +738,293 @@ async def create_webhook(
         registration=_registration_response(result.registration),
         signing_secret=result.secret,
         replayed=result.replayed,
+    )
+
+
+@canonical_router.get(
+    "/webhooks/{webhook_id}/deliveries",
+    response_model=WebhookDeliveryListResponse,
+    responses={
+        200: {
+            "description": "Sanitized webhook delivery history",
+            "headers": _DELIVERY_SUCCESS_HEADERS,
+        }
+    },
+)
+async def list_webhook_deliveries(
+    request: Request,
+    response: Response,
+    webhook_id: int = Path(ge=1),
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0, le=1_000),
+    principal: AuthPrincipal = Depends(get_auth_principal),
+    service: AdminWebhookDeliveryService = Depends(
+        get_admin_webhook_delivery_service
+    ),
+) -> WebhookDeliveryListResponse:
+    _require_platform_admin(principal)
+    request_id = _request_id(request)
+    try:
+        page = await service.list_delivery_history(
+            webhook_id,
+            limit=limit,
+            offset=offset,
+        )
+    except Exception as exc:
+        await _audit_read_failure(
+            request=request,
+            principal=principal,
+            request_id=request_id,
+            action="admin_webhook.delivery_history.read",
+            resource_id=webhook_id,
+            exc=exc,
+        )
+        raise
+    await _emit_read_audit(
+        request=request,
+        principal=principal,
+        request_id=request_id,
+        action="admin_webhook.delivery_history.read",
+        resource_id=webhook_id,
+        outcome="succeeded",
+        result_count=len(page.items),
+    )
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Request-ID"] = request_id
+    return WebhookDeliveryListResponse(
+        items=[_history_item_response(item) for item in page.items],
+        total=page.total,
+        limit=page.limit,
+        offset=page.offset,
+    )
+
+
+@canonical_router.post(
+    "/webhooks/{webhook_id}/test",
+    response_model=WebhookTestResponse,
+    openapi_extra={"parameters": [_REQUIRED_IF_MATCH_PARAMETER]},
+    responses={
+        200: {
+            "description": "Completed persisted webhook test",
+            "headers": _DELIVERY_SUCCESS_HEADERS,
+        },
+        202: {
+            "model": WebhookTestResponse,
+            "description": "Exact persisted test attempt is still processing",
+            "headers": _TEST_PROCESSING_HEADERS,
+        }
+    },
+)
+async def test_webhook_delivery(
+    payload: WebhookTestRequest,
+    request: Request,
+    response: Response,
+    idempotency_key: Annotated[
+        str,
+        Header(
+            alias="Idempotency-Key",
+            min_length=16,
+            max_length=255,
+            pattern=_IDEMPOTENCY_KEY_PATTERN,
+        ),
+    ],
+    webhook_id: int = Path(ge=1),
+    if_match: Annotated[
+        str | None,
+        Header(alias="If-Match", include_in_schema=False),
+    ] = None,
+    principal: AuthPrincipal = Depends(get_auth_principal),
+    _rate_limit: None = Depends(_enforce_admin_webhook_rate_limit),
+    service: AdminWebhookDeliveryService = Depends(
+        get_admin_webhook_delivery_service
+    ),
+) -> WebhookTestResponse:
+    actor_id = _require_webhook_mutation_actor(principal)
+    request_id = _request_id(request)
+    delivery_sink = _build_delivery_audit_sink(
+        request_id=request_id,
+        principal=principal,
+        actor_id=actor_id,
+    )
+    audit_bridge, observed_audits = _test_audit_bridge(delivery_sink)
+    try:
+        result = await service.test_webhook(
+            TestWebhookCommand(
+                actor_id=actor_id,
+                webhook_id=webhook_id,
+                if_match=if_match,
+                delivery_config_version=payload.delivery_config_version,
+                idempotency_key=idempotency_key,
+                request_id=request_id,
+            ),
+            audit_sink=audit_bridge,
+        )
+    except Exception as exc:
+        if not observed_audits:
+            error = (
+                exc
+                if isinstance(exc, WebhookError)
+                else WebhookError(WebhookErrorCode.OPERATION_FAILED)
+            )
+            await delivery_sink(
+                DeliveryMutationAudit(
+                    actor_id=actor_id,
+                    action="admin_webhook.test",
+                    webhook_id=webhook_id,
+                    source_delivery_id=None,
+                    delivery_id=None,
+                    attempt_id=None,
+                    target_hostname=None,
+                    source_config_version=None,
+                    current_config_version=None,
+                    redelivery_to_changed_config=None,
+                    status_code=None,
+                    outcome=(
+                        "failed" if error.code.http_status >= 500 else "denied"
+                    ),
+                    request_id=request_id,
+                    reason_code=error.code,
+                )
+            )
+        raise
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Request-ID"] = request_id
+    if result.in_progress:
+        retry_after = result.retry_after_seconds
+        if (
+            isinstance(retry_after, bool)
+            or not isinstance(retry_after, int)
+            or not 0 <= retry_after <= 86_400
+        ):
+            raise WebhookError(WebhookErrorCode.TEST_DELIVERY_UNAVAILABLE)
+        response.status_code = 202
+        response.headers["Retry-After"] = str(retry_after)
+    return WebhookTestResponse(
+        delivery=_delivery_response(
+            result.delivery,
+            event_type="webhook.test",
+            completed_after_config_change=(
+                result.completed_after_config_change
+            ),
+        ),
+        attempt=_attempt_response(result.attempt),
+        idempotent_replay=result.idempotent_replay,
+        in_progress=result.in_progress,
+    )
+
+
+@canonical_router.post(
+    "/webhooks/{webhook_id}/deliveries/{delivery_id}/redeliver",
+    response_model=WebhookRedeliveryResponse,
+    status_code=202,
+    openapi_extra={"parameters": [_REQUIRED_IF_MATCH_PARAMETER]},
+    responses={
+        202: {
+            "description": "Pending manual webhook redelivery",
+            "headers": _DELIVERY_SUCCESS_HEADERS,
+        }
+    },
+)
+async def redeliver_webhook_delivery(
+    payload: WebhookRedeliveryRequest,
+    request: Request,
+    response: Response,
+    idempotency_key: Annotated[
+        str,
+        Header(
+            alias="Idempotency-Key",
+            min_length=16,
+            max_length=255,
+            pattern=_IDEMPOTENCY_KEY_PATTERN,
+        ),
+    ],
+    webhook_id: int = Path(ge=1),
+    delivery_id: str = Path(
+        min_length=36,
+        max_length=36,
+        pattern=(
+            r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-"
+            r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        ),
+    ),
+    if_match: Annotated[
+        str | None,
+        Header(alias="If-Match", include_in_schema=False),
+    ] = None,
+    principal: AuthPrincipal = Depends(get_auth_principal),
+    _rate_limit: None = Depends(_enforce_admin_webhook_rate_limit),
+    service: AdminWebhookDeliveryService = Depends(
+        get_admin_webhook_delivery_service
+    ),
+) -> WebhookRedeliveryResponse:
+    actor_id = _require_webhook_mutation_actor(principal)
+    request_id = _request_id(request)
+    audit_sink = _build_delivery_audit_sink(
+        request_id=request_id,
+        principal=principal,
+        actor_id=actor_id,
+    )
+    observed_audits: list[DeliveryMutationAudit] = []
+
+    async def observed_audit_sink(record: DeliveryMutationAudit) -> None:
+        observed_audits.append(record)
+        await audit_sink(record)
+
+    try:
+        result = await service.redeliver_webhook(
+            RedeliverWebhookCommand(
+                actor_id=actor_id,
+                webhook_id=webhook_id,
+                source_delivery_id=delivery_id,
+                if_match=if_match,
+                delivery_config_version=payload.delivery_config_version,
+                confirm_changed_configuration=(
+                    payload.confirm_changed_configuration
+                ),
+                idempotency_key=idempotency_key,
+                request_id=request_id,
+            ),
+            audit_sink=observed_audit_sink,
+        )
+    except Exception as exc:
+        if not observed_audits:
+            error = (
+                exc
+                if isinstance(exc, WebhookError)
+                else WebhookError(WebhookErrorCode.OPERATION_FAILED)
+            )
+            await audit_sink(
+                DeliveryMutationAudit(
+                    actor_id=actor_id,
+                    action="admin_webhook.redeliver",
+                    webhook_id=webhook_id,
+                    source_delivery_id=delivery_id,
+                    delivery_id=None,
+                    attempt_id=None,
+                    target_hostname=None,
+                    source_config_version=None,
+                    current_config_version=None,
+                    redelivery_to_changed_config=None,
+                    status_code=None,
+                    outcome=(
+                        "failed" if error.code.http_status >= 500 else "denied"
+                    ),
+                    request_id=request_id,
+                    reason_code=error.code,
+                )
+            )
+        raise
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Request-ID"] = request_id
+    return WebhookRedeliveryResponse(
+        delivery=_delivery_response(
+            result.delivery,
+            event_type=result.event_type,
+            completed_after_config_change=(
+                result.completed_after_config_change
+            ),
+        ),
+        idempotent_replay=result.idempotent_replay,
     )
 
 

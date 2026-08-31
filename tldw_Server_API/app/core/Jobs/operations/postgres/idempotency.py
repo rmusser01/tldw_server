@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import secrets
@@ -12,6 +13,7 @@ from typing import Any
 
 from tldw_Server_API.app.core.Jobs.migrations import (
     SLIDES_ARCHIVE_EXACT_FIELDS,
+    SlidesArchiveNormalizationError,
     normalize_slides_archive_projection,
 )
 from tldw_Server_API.app.core.Jobs.operations.contracts import (
@@ -109,12 +111,16 @@ def get_job_or_archived_by_uuid(
     cur.execute(
         f"""
         SELECT {projection}, NULL AS payload_compressed,
-               NULL AS result_compressed, FALSE AS archived
+               NULL AS result_compressed, FALSE AS archived,
+               payload IS NOT NULL AS __slides_archive_payload_present,
+               result IS NOT NULL AS __slides_archive_result_present
         FROM jobs
         WHERE {where_sql}
         UNION ALL
         SELECT {projection}, payload_compressed,
-               result_compressed, TRUE AS archived
+               result_compressed, TRUE AS archived,
+               payload IS NOT NULL AS __slides_archive_payload_present,
+               result IS NOT NULL AS __slides_archive_result_present
         FROM jobs_archive
         WHERE {where_sql}
         """,  # nosec B608
@@ -127,7 +133,13 @@ def get_job_or_archived_by_uuid(
         )
     if not rows:
         return None
-    job = normalize_slides_archive_projection(rows[0])
+    job = None
+    with contextlib.suppress(SlidesArchiveNormalizationError):
+        job = normalize_slides_archive_projection(rows[0])
+    if job is None:
+        raise IdempotentOperationUnavailableError(
+            "job archive projection is unavailable"
+        )
     job["archived"] = bool(job.get("archived"))
     return job
 

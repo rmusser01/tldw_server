@@ -3,21 +3,43 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from collections.abc import Callable
 from contextlib import AbstractContextManager
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.DB_Management.jobs_sql_fragments import (
+    apply_postgres_job_counter_transition,
+)
+from tldw_Server_API.app.core.Jobs.migrations import (
+    SlidesArchiveNormalizationError,
+    normalize_slides_archive_projection,
+    slides_archive_values_equal,
+)
 from tldw_Server_API.app.core.Jobs.operations.contracts import (
     AcquireJobCommand,
+    ApplyPreparedDispositionCommand,
     BatchRenewLeasesCommand,
     BatchRenewLeasesResult,
+    EnsureLeaseHorizonCommand,
+    FindJobByIdentityCommand,
+    JobIdentityLookupResult,
+    JobIdentityLookupState,
+    LeaseHorizonResult,
     LifecycleResult,
     NoTransitionReason,
+    OperationOutcome,
+    PreparedDispositionKind,
+    PreparedDispositionOrigin,
+    PreparedDispositionResult,
     ReleaseJobCommand,
     RenewLeaseCommand,
+    canonical_admin_webhook_row_matches,
+    is_admin_webhook_delivery_queue,
+    prepared_disposition_fingerprint,
 )
 
 try:
@@ -381,7 +403,8 @@ def _single_update_acquire(cur: Any, *, command: AcquireJobCommand) -> dict[str,
             "retry_count = CASE WHEN status='processing' THEN retry_count + 1 ELSE retry_count END, "
             "started_at = COALESCE(started_at, NOW()), acquired_at = COALESCE(acquired_at, NOW()), "
             "leased_until = NOW() + (%s || ' seconds')::interval, worker_id = %s, lease_id = %s, "
-            "completion_token = NULL WHERE id IN (SELECT id FROM picked) RETURNING *",
+            "completion_token = NULL, no_attempt_recovery_fingerprint = NULL "
+            "WHERE id IN (SELECT id FROM picked) RETURNING *",
         ]
     )
     cur.execute(
@@ -405,7 +428,8 @@ def _two_step_acquire(cur: Any, *, command: AcquireJobCommand) -> dict[str, Any]
             "retry_count = CASE WHEN status = 'processing' THEN retry_count + 1 ELSE retry_count END, "
             "started_at = COALESCE(started_at, NOW()), acquired_at = COALESCE(acquired_at, NOW()), "
             "leased_until = NOW() + (%s || ' seconds')::interval, "
-            "worker_id = %s, lease_id = %s, completion_token = NULL WHERE id = %s"
+            "worker_id = %s, lease_id = %s, completion_token = NULL, "
+            "no_attempt_recovery_fingerprint = NULL WHERE id = %s"
         ),
         (command.lease_seconds, command.worker_id, command.lease_id, job_id),
     )
@@ -491,4 +515,545 @@ def acquire_job(
             return LifecycleResult.applied(row=acquired)
 
 
-__all__ = ["acquire_job", "release_job", "renew_lease"]
+def _parse_json_object(value: Any) -> dict[str, Any] | None:
+    if isinstance(value, dict):
+        return value
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _aware_timestamp(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        try:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _marker_matches(
+    marker: dict[str, Any],
+    command: ApplyPreparedDispositionCommand,
+) -> bool:
+    if _aware_timestamp(marker.get("applied_at")) is None:
+        return False
+    disposition = command.disposition
+    expected = {
+        "schema_version": 1,
+        "token": disposition.token,
+        "kind": disposition.kind.value,
+        "origin": disposition.origin.value,
+        "delivery_id": disposition.delivery_id,
+    }
+    if disposition.attempt_id is not None:
+        expected["attempt_id"] = disposition.attempt_id
+    if disposition.not_before_at is not None:
+        expected["original_not_before_at"] = disposition.not_before_at.isoformat()
+    elif disposition.origin is PreparedDispositionOrigin.INFRASTRUCTURE:
+        if _aware_timestamp(marker.get("original_not_before_at")) is None:
+            return False
+        expected["original_not_before_at"] = marker["original_not_before_at"]
+    comparable = {key: marker.get(key) for key in expected}
+    return comparable == expected and set(marker) == {*expected, "applied_at"}
+
+
+def _identity_matches(
+    row: dict[str, Any],
+    *,
+    domain: str,
+    queue: str,
+    job_type: str,
+    expected_payload: dict[str, Any],
+    archived: bool = False,
+) -> bool:
+    payload = _parse_json_object(row.get("payload"))
+    if is_admin_webhook_delivery_queue(domain, queue):
+        return canonical_admin_webhook_row_matches(
+            {**row, "payload": payload},
+            expected_payload=expected_payload,
+            archived=archived,
+        )
+    return (
+        row.get("domain") == domain
+        and row.get("queue") == queue
+        and row.get("job_type") == job_type
+        and slides_archive_values_equal(payload, expected_payload)
+    )
+
+
+def _prepared_counter_transition(
+    cur: Any,
+    *,
+    row: dict[str, Any],
+    new_status: str,
+) -> None:
+    old_status = str(row.get("status") or "")
+    old_scheduled = old_status == "queued" and row.get("available_at") is not None
+    ready_delta = -int(old_status == "queued" and not old_scheduled)
+    scheduled_delta = -int(old_scheduled)
+    if new_status == "queued":
+        ready_delta = 0
+        scheduled_delta += 1
+    processing_delta = -int(old_status == "processing")
+    quarantined_delta = int(new_status == "quarantined") - int(old_status == "quarantined")
+    apply_postgres_job_counter_transition(
+        cur,
+        domain=row.get("domain"),
+        queue=row.get("queue"),
+        job_type=row.get("job_type"),
+        ready_delta=ready_delta,
+        scheduled_delta=scheduled_delta,
+        processing_delta=processing_delta,
+        quarantined_delta=quarantined_delta,
+    )
+
+
+def _insert_prepared_event(
+    cur: Any,
+    *,
+    row: dict[str, Any],
+    event_type: str,
+    marker: dict[str, Any],
+    reason_code: str | None,
+) -> None:
+    attrs = {
+        "kind": marker["kind"],
+        "origin": marker["origin"],
+        "reason_code": reason_code,
+    }
+    cur.execute(
+        "INSERT INTO job_events(job_id,domain,queue,job_type,event_type,attrs_json,"
+        "owner_user_id,request_id,trace_id,created_at) "
+        "VALUES(%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s,NOW())",
+        (
+            row.get("id"),
+            row.get("domain"),
+            row.get("queue"),
+            row.get("job_type"),
+            event_type,
+            json.dumps(attrs, separators=(",", ":"), sort_keys=True),
+            row.get("owner_user_id"),
+            row.get("request_id"),
+            row.get("trace_id"),
+        ),
+    )
+
+
+def apply_prepared_disposition(
+    conn: Any,
+    cursor_factory: Callable[[Any], AbstractContextManager[Any]],
+    *,
+    command: ApplyPreparedDispositionCommand,
+    counters_enabled: bool,
+    outbox_enabled: bool,
+) -> PreparedDispositionResult:
+    """Apply one exact prepared transition under a Postgres row lock."""
+
+    with conn:
+        with cursor_factory(conn) as cur:
+            cur.execute("SELECT * FROM jobs WHERE id=%s FOR UPDATE", (command.job_id,))
+            selected = cur.fetchone()
+            if selected is None:
+                return PreparedDispositionResult.no_transition(NoTransitionReason.MISSING)
+            row = dict(selected)
+            if not _identity_matches(
+                row,
+                domain=command.domain,
+                queue=command.queue,
+                job_type=command.job_type,
+                expected_payload=command.expected_payload,
+            ):
+                return PreparedDispositionResult.conflict(state=str(row.get("status")))
+
+            facts_fingerprint = prepared_disposition_fingerprint(command.disposition)
+            marker = _parse_json_object(row.get("result"))
+            if marker is not None and marker.get("token") == command.disposition.token:
+                if (
+                    not _marker_matches(marker, command)
+                    or row.get("prepared_disposition_fingerprint")
+                    != facts_fingerprint
+                ):
+                    return PreparedDispositionResult.conflict(state=str(row.get("status")))
+                return PreparedDispositionResult.applied(
+                    state=str(row.get("status")),
+                    metadata=marker,
+                    already_applied=True,
+                    not_before_at=(
+                        _aware_timestamp(row.get("available_at"))
+                        or _aware_timestamp(marker.get("original_not_before_at"))
+                    ),
+                )
+
+            disposition = command.disposition
+            status = str(row.get("status") or "")
+            queued_cancel = (
+                disposition.kind is PreparedDispositionKind.CANCEL
+                and status == "queued"
+                and command.worker_id is None
+                and command.lease_id is None
+            )
+            if not queued_cancel:
+                if status != "processing":
+                    return PreparedDispositionResult.no_transition(
+                        NoTransitionReason.WRONG_STATUS,
+                        state=status,
+                    )
+                if (
+                    command.worker_id is None
+                    or command.lease_id is None
+                    or row.get("worker_id") != command.worker_id
+                    or row.get("lease_id") != command.lease_id
+                ):
+                    return PreparedDispositionResult.no_transition(
+                        NoTransitionReason.STALE_LEASE,
+                        state=status,
+                    )
+
+            cur.execute(
+                "SELECT NOW() AS database_now, "
+                "NOW() + interval '30 seconds' AS infrastructure_not_before"
+            )
+            clock_row = cur.fetchone()
+            if isinstance(clock_row, dict):
+                database_now = _aware_timestamp(clock_row.get("database_now"))
+                infrastructure_not_before = _aware_timestamp(
+                    clock_row.get("infrastructure_not_before")
+                )
+            else:
+                clock_values = tuple(clock_row)
+                database_now = _aware_timestamp(clock_values[0])
+                infrastructure_not_before = _aware_timestamp(clock_values[1])
+            if database_now is None or infrastructure_not_before is None:
+                raise RuntimeError("Jobs database clock returned an invalid timestamp")
+            not_before: datetime | None = None
+            if disposition.kind is PreparedDispositionKind.RETRY:
+                not_before = max(database_now, disposition.not_before_at)
+            elif disposition.origin is PreparedDispositionOrigin.INFRASTRUCTURE:
+                not_before = infrastructure_not_before
+            elif disposition.origin is PreparedDispositionOrigin.RECOVERY:
+                not_before = max(database_now, disposition.not_before_at)
+
+            marker = {
+                "schema_version": 1,
+                "token": disposition.token,
+                "kind": disposition.kind.value,
+                "origin": disposition.origin.value,
+                "delivery_id": disposition.delivery_id,
+            }
+            if disposition.attempt_id is not None:
+                marker["attempt_id"] = disposition.attempt_id
+            if not_before is not None:
+                marker["original_not_before_at"] = (
+                    disposition.not_before_at.isoformat()
+                    if disposition.not_before_at is not None
+                    else not_before.isoformat()
+                )
+            marker["applied_at"] = database_now.isoformat()
+            marker_json = json.dumps(marker, separators=(",", ":"), sort_keys=True)
+
+            event_type: str
+            new_status: str
+            if disposition.kind is PreparedDispositionKind.COMPLETE:
+                new_status = "completed"
+                event_type = "job.completed"
+                cur.execute(
+                    "UPDATE jobs SET status='completed',result=%s::jsonb,"
+                    "prepared_disposition_fingerprint=%s,completed_at=NOW(),"
+                    "leased_until=NULL,worker_id=NULL,lease_id=NULL,completion_token=%s "
+                    "WHERE id=%s AND status='processing' AND worker_id=%s AND lease_id=%s",
+                    (
+                        marker_json,
+                        facts_fingerprint,
+                        disposition.token,
+                        command.job_id,
+                        command.worker_id,
+                        command.lease_id,
+                    ),
+                )
+            elif disposition.kind is PreparedDispositionKind.RETRY:
+                current_streak = int(row.get("failure_streak_count") or 0)
+                next_streak = (
+                    current_streak + 1
+                    if row.get("failure_streak_code") == disposition.reason_code
+                    else 1
+                )
+                threshold = row.get("quarantine_threshold")
+                quarantine = threshold is not None and next_streak >= int(threshold)
+                new_status = "quarantined" if quarantine else "queued"
+                event_type = "job.quarantined" if quarantine else "job.retry_scheduled"
+                cur.execute(
+                    "UPDATE jobs SET status=%s,result=%s::jsonb,"
+                    "prepared_disposition_fingerprint=%s,"
+                    "retry_count=COALESCE(retry_count,0)+1,"
+                    "failure_streak_code=%s,failure_streak_count=%s,error_code=%s,available_at=%s,"
+                    "quarantined_at=CASE WHEN %s THEN NOW() ELSE quarantined_at END,"
+                    "completed_at=CASE WHEN %s THEN NOW() ELSE completed_at END,"
+                    "leased_until=NULL,worker_id=NULL,lease_id=NULL,completion_token=%s,"
+                    "acquired_at=NULL,started_at=NULL WHERE id=%s AND status='processing' "
+                    "AND worker_id=%s AND lease_id=%s",
+                    (
+                        new_status,
+                        marker_json,
+                        facts_fingerprint,
+                        disposition.reason_code,
+                        next_streak,
+                        disposition.reason_code,
+                        not_before,
+                        quarantine,
+                        quarantine,
+                        disposition.token if quarantine else None,
+                        command.job_id,
+                        command.worker_id,
+                        command.lease_id,
+                    ),
+                )
+            elif disposition.kind is PreparedDispositionKind.FAIL:
+                new_status = "failed"
+                event_type = "job.failed"
+                cur.execute(
+                    "UPDATE jobs SET status='failed',result=%s::jsonb,"
+                    "prepared_disposition_fingerprint=%s,error_code=%s,"
+                    "error_message=%s,last_error=%s,completed_at=NOW(),leased_until=NULL,"
+                    "worker_id=NULL,lease_id=NULL,completion_token=%s WHERE id=%s "
+                    "AND status='processing' AND worker_id=%s AND lease_id=%s",
+                    (
+                        marker_json,
+                        facts_fingerprint,
+                        disposition.reason_code,
+                        disposition.reason_code,
+                        disposition.reason_code,
+                        disposition.token,
+                        command.job_id,
+                        command.worker_id,
+                        command.lease_id,
+                    ),
+                )
+            elif disposition.kind is PreparedDispositionKind.CANCEL:
+                new_status = "cancelled"
+                event_type = "job.cancelled"
+                if queued_cancel:
+                    cur.execute(
+                        "UPDATE jobs SET status='cancelled',result=%s::jsonb,"
+                        "prepared_disposition_fingerprint=%s,"
+                        "cancellation_reason=%s,cancelled_at=NOW(),completed_at=NOW(),"
+                        "completion_token=%s,no_attempt_recovery_fingerprint=NULL "
+                        "WHERE id=%s AND status='queued'",
+                        (
+                            marker_json,
+                            facts_fingerprint,
+                            disposition.reason_code,
+                            disposition.token,
+                            command.job_id,
+                        ),
+                    )
+                else:
+                    cur.execute(
+                        "UPDATE jobs SET status='cancelled',result=%s::jsonb,"
+                        "prepared_disposition_fingerprint=%s,"
+                        "cancellation_reason=%s,cancelled_at=NOW(),completed_at=NOW(),"
+                        "leased_until=NULL,worker_id=NULL,lease_id=NULL,completion_token=%s "
+                        "WHERE id=%s AND status='processing' AND worker_id=%s AND lease_id=%s",
+                        (
+                            marker_json,
+                            facts_fingerprint,
+                            disposition.reason_code,
+                            disposition.token,
+                            command.job_id,
+                            command.worker_id,
+                            command.lease_id,
+                        ),
+                    )
+            else:
+                new_status = "queued"
+                event_type = "job.deferred"
+                cur.execute(
+                    "UPDATE jobs SET status='queued',result=%s::jsonb,"
+                    "prepared_disposition_fingerprint=%s,available_at=%s,"
+                    "leased_until=NULL,worker_id=NULL,lease_id=NULL,completion_token=NULL,"
+                    "acquired_at=NULL,started_at=NULL WHERE id=%s AND status='processing' "
+                    "AND worker_id=%s AND lease_id=%s",
+                    (
+                        marker_json,
+                        facts_fingerprint,
+                        not_before,
+                        command.job_id,
+                        command.worker_id,
+                        command.lease_id,
+                    ),
+                )
+
+            if cur.rowcount != 1:
+                return PreparedDispositionResult.no_transition(
+                    NoTransitionReason.STALE_LEASE,
+                    state=status,
+                )
+            if counters_enabled:
+                _prepared_counter_transition(cur, row=row, new_status=new_status)
+            cur.execute("SELECT * FROM jobs WHERE id=%s", (command.job_id,))
+            updated = dict(cur.fetchone())
+            if outbox_enabled:
+                _insert_prepared_event(
+                    cur,
+                    row=updated,
+                    event_type=event_type,
+                    marker=marker,
+                    reason_code=disposition.reason_code,
+                )
+            return PreparedDispositionResult.applied(
+                state=new_status,
+                metadata=marker,
+                already_applied=False,
+                not_before_at=not_before,
+            )
+
+
+def ensure_lease_horizon(
+    conn: Any,
+    cursor_factory: Callable[[Any], AbstractContextManager[Any]],
+    *,
+    command: EnsureLeaseHorizonCommand,
+) -> LeaseHorizonResult:
+    """Extend but never shorten one exact Postgres processing lease."""
+
+    with conn:
+        with cursor_factory(conn) as cur:
+            cur.execute("SELECT * FROM jobs WHERE id=%s FOR UPDATE", (command.job_id,))
+            selected = cur.fetchone()
+            if selected is None:
+                return LeaseHorizonResult.no_transition(NoTransitionReason.MISSING)
+            row = dict(selected)
+            observed = _aware_timestamp(row.get("leased_until"))
+            if not _identity_matches(
+                row,
+                domain=command.domain,
+                queue=command.queue,
+                job_type=command.job_type,
+                expected_payload=command.expected_payload,
+            ):
+                return LeaseHorizonResult(
+                    outcome=OperationOutcome.BACKEND_CONFLICT,
+                    ensured=False,
+                    leased_until=observed,
+                )
+            if row.get("status") != "processing":
+                return LeaseHorizonResult.no_transition(
+                    NoTransitionReason.WRONG_STATUS,
+                    leased_until=observed,
+                )
+            if row.get("worker_id") != command.worker_id or row.get("lease_id") != command.lease_id:
+                return LeaseHorizonResult.no_transition(
+                    NoTransitionReason.STALE_LEASE,
+                    leased_until=observed,
+                )
+            cur.execute(
+                "WITH lease_clock AS (SELECT statement_timestamp() AS database_now) "
+                "UPDATE jobs SET leased_until=GREATEST("
+                "COALESCE(leased_until,lease_clock.database_now),"
+                "lease_clock.database_now+(%s || ' seconds')::interval) "
+                "FROM lease_clock WHERE id=%s AND status='processing' "
+                "AND worker_id=%s AND lease_id=%s RETURNING leased_until",
+                (
+                    command.minimum_seconds,
+                    command.job_id,
+                    command.worker_id,
+                    command.lease_id,
+                ),
+            )
+            changed = cur.fetchone()
+            if changed is None:
+                return LeaseHorizonResult.no_transition(NoTransitionReason.STALE_LEASE)
+            leased_until = (
+                changed.get("leased_until")
+                if isinstance(changed, dict)
+                else changed[0]
+            )
+            return LeaseHorizonResult.applied(
+                leased_until=leased_until,
+                guaranteed_seconds=command.minimum_seconds,
+            )
+
+
+def find_job_by_identity(
+    conn: Any,
+    cursor_factory: Callable[[Any], AbstractContextManager[Any]],
+    *,
+    command: FindJobByIdentityCommand,
+) -> JobIdentityLookupResult:
+    """Find one exact active or archived Postgres job without inserting work."""
+
+    with conn:
+        with cursor_factory(conn) as cur:
+            params = (
+                command.domain,
+                command.queue,
+                command.job_type,
+                command.idempotency_key,
+            )
+            cur.execute(
+                "SELECT * FROM jobs WHERE domain=%s AND queue=%s AND job_type=%s "
+                "AND idempotency_key=%s",
+                params,
+            )
+            active_rows = cur.fetchall() or []
+            cur.execute(
+                "SELECT *, payload IS NOT NULL AS __slides_archive_payload_present, "
+                "result IS NOT NULL AS __slides_archive_result_present "
+                "FROM jobs_archive WHERE domain=%s AND queue=%s AND job_type=%s "
+                "AND idempotency_key=%s",
+                params,
+            )
+            archived_rows = cur.fetchall() or []
+    matches = [
+        (JobIdentityLookupState.ACTIVE, dict(row)) for row in active_rows
+    ] + [
+        (JobIdentityLookupState.ARCHIVED, dict(row)) for row in archived_rows
+    ]
+    if not matches:
+        return JobIdentityLookupResult.missing()
+    if len(matches) != 1:
+        return JobIdentityLookupResult.conflict()
+    state, raw_row = matches[0]
+    try:
+        row = (
+            normalize_slides_archive_projection(raw_row)
+            if state is JobIdentityLookupState.ARCHIVED
+            else raw_row
+        )
+    except SlidesArchiveNormalizationError:
+        return JobIdentityLookupResult.conflict()
+    if not _identity_matches(
+        row,
+        domain=command.domain,
+        queue=command.queue,
+        job_type=command.job_type,
+        expected_payload=command.expected_payload,
+        archived=state is JobIdentityLookupState.ARCHIVED,
+    ):
+        return JobIdentityLookupResult.conflict()
+    payload = _parse_json_object(row.get("payload"))
+    row["payload"] = payload
+    result = _parse_json_object(row.get("result"))
+    if result is not None:
+        row["result"] = result
+    return JobIdentityLookupResult.found(state, row)
+
+
+__all__ = [
+    "acquire_job",
+    "apply_prepared_disposition",
+    "ensure_lease_horizon",
+    "find_job_by_identity",
+    "release_job",
+    "renew_lease",
+]

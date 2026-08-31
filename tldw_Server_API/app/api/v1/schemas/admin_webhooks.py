@@ -9,6 +9,12 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from typing_extensions import Self
 
 from tldw_Server_API.app.core.Admin_Webhooks.catalog import EVENT_CATALOG
+from tldw_Server_API.app.core.Admin_Webhooks.domain import (
+    AttemptState,
+    DeliveryKind,
+    DeliveryReasonCode,
+    DeliveryState,
+)
 
 _EVENT_TYPES = frozenset(item.event_type for item in EVENT_CATALOG)
 _FAKE_SIGNING_SECRET = "whsec_" + ("0" * 64)
@@ -173,6 +179,130 @@ class WebhookListResponse(BaseModel):
     offset: int = Field(ge=0, le=1_000)
 
 
+class WebhookTestRequest(BaseModel):
+    """Reviewed delivery configuration for one persisted test attempt."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    delivery_config_version: int = Field(ge=1)
+
+
+class WebhookRedeliveryRequest(BaseModel):
+    """Reviewed current configuration and explicit changed-config decision."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    delivery_config_version: int = Field(ge=1)
+    confirm_changed_configuration: bool
+
+
+class WebhookDeliveryAttemptResponse(BaseModel):
+    """Bounded append-only attempt evidence without transport material."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    id: str = Field(
+        pattern=(
+            r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-"
+            r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        )
+    )
+    sequence: int = Field(ge=1, le=4)
+    state: AttemptState
+    request_timeout_seconds: int | None = Field(default=None, ge=1, le=30)
+    status_code: int | None = Field(default=None, ge=100, le=599)
+    latency_ms: int | None = Field(default=None, ge=0)
+    reason_code: DeliveryReasonCode | None = None
+    requested_retry_delay_seconds: int | None = Field(
+        default=None,
+        ge=1,
+        le=1_800,
+    )
+    started_at: datetime
+    finished_at: datetime | None = None
+
+
+class WebhookDeliveryResponse(BaseModel):
+    """Sanitized delivery metadata shared by history and operation responses."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    id: str = Field(
+        pattern=(
+            r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-"
+            r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        )
+    )
+    event_id: str = Field(
+        pattern=(
+            r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-"
+            r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        )
+    )
+    event_type: str = Field(min_length=1, max_length=64)
+    webhook_id: int = Field(ge=1)
+    kind: DeliveryKind
+    state: DeliveryState
+    delivery_config_version: int = Field(ge=1)
+    secret_version: int = Field(ge=1)
+    attempt_count: int = Field(ge=0, le=4)
+    status_code: int | None = Field(default=None, ge=100, le=599)
+    latency_ms: int | None = Field(default=None, ge=0)
+    reason_code: DeliveryReasonCode | None = None
+    expires_at: datetime
+    created_at: datetime
+    updated_at: datetime
+    terminal_at: datetime | None = None
+    redelivery_of_id: str | None = Field(
+        default=None,
+        pattern=(
+            r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-"
+            r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        ),
+    )
+    completed_after_config_change: bool
+
+
+class WebhookDeliveryHistoryItemResponse(BaseModel):
+    """One delivery and its ordered bounded attempt history."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    delivery: WebhookDeliveryResponse
+    attempts: list[WebhookDeliveryAttemptResponse] = Field(max_length=4)
+
+
+class WebhookDeliveryListResponse(BaseModel):
+    """Newest-first offset page of sanitized delivery history."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    items: list[WebhookDeliveryHistoryItemResponse]
+    total: int = Field(ge=0)
+    limit: int = Field(ge=1, le=100)
+    offset: int = Field(ge=0, le=1_000)
+
+
+class WebhookTestResponse(BaseModel):
+    """One terminal test result or exact processing replay."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    delivery: WebhookDeliveryResponse
+    attempt: WebhookDeliveryAttemptResponse
+    idempotent_replay: bool
+    in_progress: bool
+
+
+class WebhookRedeliveryResponse(BaseModel):
+    """One accepted pending manual delivery or exact replay."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    delivery: WebhookDeliveryResponse
+    idempotent_replay: bool
+
+
 class WebhookCatalogItemResponse(BaseModel):
     """One supported event from the immutable server catalog."""
 
@@ -223,6 +353,80 @@ class WebhookMigrationStatusResponse(BaseModel):
     rollback_window_expires_at: datetime | None = None
 
 
+class DeliveryComponentStatusResponse(BaseModel):
+    """Sanitized readiness for one fixed delivery runtime component."""
+
+    model_config = ConfigDict(extra="forbid", from_attributes=True)
+
+    component: Literal["worker", "reconciler", "retention"]
+    ready: bool
+    reason_code: Literal[
+        "mode_off",
+        "mode_migrate",
+        "schema_unready",
+        "migration_pending",
+        "key_unavailable",
+        "key_configuration_mismatch",
+        "jobs_unavailable",
+        "database_unavailable",
+        "worker_unavailable",
+        "reconciler_unavailable",
+        "retention_unavailable",
+        "heartbeat_stale",
+    ] | None = None
+    heartbeat_age_seconds: int | None = Field(default=None, ge=0)
+
+
+class DeliveryBacklogCountsResponse(BaseModel):
+    """Closed nonterminal delivery counts from one current snapshot."""
+
+    model_config = ConfigDict(extra="forbid", from_attributes=True)
+
+    pending: int = Field(ge=0)
+    enqueue_claimed: int = Field(ge=0)
+    queued: int = Field(ge=0)
+    processing: int = Field(ge=0)
+    retry_wait: int = Field(ge=0)
+
+
+class DeliveryCapabilityStatusResponse(BaseModel):
+    """Sanitized delivery acquisition and activation readiness."""
+
+    model_config = ConfigDict(extra="forbid", from_attributes=True)
+
+    canonical_schema_version: int = Field(ge=0)
+    schema_ready: bool
+    delivery_schema_ready: bool
+    migration_complete: bool
+    key_ready: bool
+    key_primary_match: bool
+    jobs_database_ready: bool
+    queue_ready: bool
+    job_type_ready: bool
+    jobs_backend: Literal["sqlite", "postgres", "unavailable"]
+    worker: DeliveryComponentStatusResponse
+    reconciler: DeliveryComponentStatusResponse
+    retention: DeliveryComponentStatusResponse
+    backlog: DeliveryBacklogCountsResponse
+    oldest_nonterminal_age_seconds: int | None = Field(default=None, ge=0)
+    acquisition_ready: bool
+    acquisition_reason_code: Literal[
+        "mode_off",
+        "mode_migrate",
+        "schema_unready",
+        "migration_pending",
+        "key_unavailable",
+        "key_configuration_mismatch",
+        "jobs_unavailable",
+        "database_unavailable",
+        "worker_unavailable",
+        "reconciler_unavailable",
+        "retention_unavailable",
+        "heartbeat_stale",
+    ] | None = None
+    delivery_capability_ready: bool
+
+
 class AdminWebhookStatusResponse(BaseModel):
     """Explicit canonical-mode readiness without artifact or credential data."""
 
@@ -233,6 +437,7 @@ class AdminWebhookStatusResponse(BaseModel):
     schema_ready: bool
     key_state: str = Field(min_length=1, max_length=128)
     delivery_capability_ready: bool
+    delivery: DeliveryCapabilityStatusResponse
     limits: WebhookLimitsResponse
     migration: WebhookMigrationStatusResponse
 

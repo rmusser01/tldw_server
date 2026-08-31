@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import inspect
 import threading
 from collections.abc import Sequence
 
@@ -35,14 +36,87 @@ def test_request_contract_is_immutable_and_uses_bounded_defaults() -> None:
         request.port = 8443  # type: ignore[misc]
 
 
-def test_request_repr_hides_target_without_changing_semantics() -> None:
-    request = _request(target="/works?pageToken=opaque-target-sentinel")
-    equal_request = _request(target="/works?pageToken=opaque-target-sentinel")
+def test_request_repr_hides_request_material_without_changing_semantics() -> None:
+    target = "/opaque-path-sentinel?pageToken=opaque-query-sentinel"
+    headers = (
+        ("content-type", "application/json"),
+        ("x-tldw-webhook-signature", "v1=opaque-signature-sentinel"),
+    )
+    body = b'{"event":"opaque-body-sentinel"}'
+    request = _request(method="POST", target=target, headers=headers, body=body)
+    equal_request = _request(
+        method="POST",
+        target=target,
+        headers=headers,
+        body=body,
+    )
 
-    assert request.target == "/works?pageToken=opaque-target-sentinel"
+    assert request.target == target
+    assert request.headers == headers
+    assert request.body == body
     assert request == equal_request
     assert hash(request) == hash(equal_request)
-    assert "opaque-target-sentinel" not in repr(request)
+    rendered = repr(request)
+    for canary in (
+        "opaque-path-sentinel",
+        "opaque-query-sentinel",
+        "opaque-signature-sentinel",
+        "opaque-body-sentinel",
+    ):
+        assert canary not in rendered
+
+
+def test_status_only_response_is_frozen_slotted_and_exposes_exactly_three_fields() -> None:
+    response = http_hop.StatusOnlyHTTPHopResponse(
+        status_code=503,
+        latency_ms=125,
+        retry_after_seconds=300,
+    )
+
+    assert tuple(field.name for field in dataclasses.fields(response)) == (
+        "status_code",
+        "latency_ms",
+        "retry_after_seconds",
+    )
+    assert not hasattr(response, "__dict__")
+    for forbidden in (
+        "headers",
+        "body",
+        "stream",
+        "target",
+        "resolved_ips",
+        "connected_ip",
+    ):
+        assert not hasattr(response, forbidden)
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        response.status_code = 200  # type: ignore[misc]
+
+
+def test_public_status_only_function_accepts_only_the_request() -> None:
+    signature = inspect.signature(http_hop.request_http_hop_status)
+
+    assert tuple(signature.parameters) == ("request",)
+    assert signature.parameters["request"].kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
+    assert "request_http_hop_status" in http_hop.__all__
+    assert "StatusOnlyHTTPHopResponse" in http_hop.__all__
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        {"status_code": 99, "latency_ms": 0, "retry_after_seconds": None},
+        {"status_code": 600, "latency_ms": 0, "retry_after_seconds": None},
+        {"status_code": 200, "latency_ms": -1, "retry_after_seconds": None},
+        {"status_code": 200, "latency_ms": 0, "retry_after_seconds": 1},
+        {"status_code": 429, "latency_ms": 0, "retry_after_seconds": 0},
+        {"status_code": 503, "latency_ms": 0, "retry_after_seconds": 1_801},
+    ],
+)
+def test_status_only_response_rejects_unbounded_or_inconsistent_evidence(
+    values: dict[str, int | None],
+) -> None:
+    with pytest.raises(ValueError):
+        http_hop.StatusOnlyHTTPHopResponse(**values)  # type: ignore[arg-type]
 
 
 def test_http_hop_error_is_the_centralized_core_exception() -> None:

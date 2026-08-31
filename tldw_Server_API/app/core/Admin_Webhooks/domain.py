@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import ipaddress
 import json
 import re
 import uuid
@@ -13,7 +12,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
-from urllib.parse import SplitResult, urlsplit
+from urllib.parse import SplitResult
 
 from tldw_Server_API.app.core.exceptions import WebhookError
 from tldw_Server_API.app.core.Security.egress import (
@@ -21,6 +20,7 @@ from tldw_Server_API.app.core.Security.egress import (
 )
 
 from .crypto import ProtectedValue
+from .target import parse_webhook_target_url
 
 
 class WebhookErrorCode(str, Enum):
@@ -53,6 +53,10 @@ class WebhookErrorCode(str, Enum):
     OPERATION_FAILED = "admin_webhook_operation_failed"
     USER_PRINCIPAL_REQUIRED = "admin_webhook_user_principal_required"
     DELIVERY_UNAVAILABLE = "admin_webhook_delivery_unavailable"
+    TEST_DELIVERY_UNAVAILABLE = "admin_webhook_test_delivery_unavailable"
+    REDELIVERY_CONFIRMATION_REQUIRED = "admin_webhook_redelivery_confirmation_required"
+    DELIVERY_HISTORY_UNAVAILABLE = "admin_webhook_delivery_history_unavailable"
+    RECOVERY_UNAVAILABLE = "admin_webhook_recovery_unavailable"
 
     @property
     def http_status(self) -> int:
@@ -86,8 +90,342 @@ _ERROR_STATUS = {
     WebhookErrorCode.OPERATION_FAILED: 503,
     WebhookErrorCode.USER_PRINCIPAL_REQUIRED: 403,
     WebhookErrorCode.DELIVERY_UNAVAILABLE: 503,
+    WebhookErrorCode.TEST_DELIVERY_UNAVAILABLE: 503,
+    WebhookErrorCode.REDELIVERY_CONFIRMATION_REQUIRED: 428,
+    WebhookErrorCode.DELIVERY_HISTORY_UNAVAILABLE: 503,
+    WebhookErrorCode.RECOVERY_UNAVAILABLE: 503,
     WebhookErrorCode.REQUEST_REJECTED: 400,
 }
+
+
+class DeliveryKind(str, Enum):
+    """Closed origin for one persisted webhook delivery."""
+
+    AUTOMATIC = "automatic"
+    MANUAL = "manual"
+    TEST = "test"
+
+
+class DeliveryState(str, Enum):
+    """Closed state machine for persisted webhook delivery work."""
+
+    PENDING = "pending"
+    ENQUEUE_CLAIMED = "enqueue_claimed"
+    QUEUED = "queued"
+    PROCESSING = "processing"
+    RETRY_WAIT = "retry_wait"
+    SUCCEEDED = "succeeded"
+    DEAD = "dead"
+    CANCELED = "canceled"
+    SUPERSEDED = "superseded"
+
+    @classmethod
+    def terminal_states(cls) -> frozenset[DeliveryState]:
+        """Return terminal delivery states that never regress."""
+        return frozenset({cls.SUCCEEDED, cls.DEAD, cls.CANCELED, cls.SUPERSEDED})
+
+
+class AttemptState(str, Enum):
+    """Closed state machine for one append-only attempt record."""
+
+    PROCESSING = "processing"
+    SUCCEEDED = "succeeded"
+    RETRYABLE = "retryable"
+    FAILED = "failed"
+    CANCELED = "canceled"
+    SUPERSEDED = "superseded"
+    OUTCOME_UNKNOWN = "outcome_unknown"
+
+    @classmethod
+    def terminal_states(cls) -> frozenset[AttemptState]:
+        """Return attempt states that no longer own network I/O."""
+        return frozenset(set(cls) - {cls.PROCESSING})
+
+
+class JobsDispositionKind(str, Enum):
+    """Closed acknowledgement required from the Jobs scheduler."""
+
+    COMPLETE = "complete"
+    RETRY = "retry"
+    FAIL = "fail"
+    CANCEL = "cancel"
+    DEFER = "defer"
+
+
+class DeliveryReasonCode(str, Enum):
+    """Stable bounded reasons retained in delivery and attempt metadata."""
+
+    ATTEMPT_BUDGET_EXHAUSTED = "attempt_budget_exhausted"
+    CANCELED_DELETED = "canceled_deleted"
+    CANCELED_DISABLED = "canceled_disabled"
+    CANCELED_SECRET_ROTATION = "canceled_secret_rotation"
+    DELIVERY_EXPIRED = "delivery_expired"
+    JOBS_IDENTITY_CONFLICT = "jobs_identity_conflict"
+    OUTCOME_UNKNOWN = "outcome_unknown"
+    SUPERSEDED_CONFIG = "superseded_config"
+    TEST_ATTEMPT_INTERRUPTED = "test_attempt_interrupted"
+    TARGET_INVALID = "target_invalid"
+    TARGET_REJECTED = "target_rejected"
+    POLICY_ERROR = "policy_error"
+    CLOCK_ERROR = "clock_error"
+    TRANSPORT_ERROR = "transport_error"
+    HTTP_REDIRECT = "http_redirect"
+    HTTP_CLIENT_ERROR = "http_client_error"
+    HTTP_REQUEST_TIMEOUT = "http_request_timeout"
+    HTTP_RATE_LIMITED = "http_rate_limited"
+    HTTP_SERVER_ERROR = "http_server_error"
+    HTTP_STATUS_INVALID = "http_status_invalid"
+    HTTP_HOP_INVALID_REQUEST = "http_hop_invalid_request"
+    HTTP_HOP_DNS_RESOLUTION_FAILED = "http_hop_dns_resolution_failed"
+    HTTP_HOP_DNS_TIMEOUT = "http_hop_dns_timeout"
+    HTTP_HOP_DNS_ADDRESS_DENIED = "http_hop_dns_address_denied"
+    HTTP_HOP_CONNECT_TIMEOUT = "http_hop_connect_timeout"
+    HTTP_HOP_READ_TIMEOUT = "http_hop_read_timeout"
+    HTTP_HOP_WRITE_TIMEOUT = "http_hop_write_timeout"
+    HTTP_HOP_TOTAL_TIMEOUT = "http_hop_total_timeout"
+    HTTP_HOP_PEER_VERIFICATION_FAILED = "http_hop_peer_verification_failed"
+    HTTP_HOP_TLS_ERROR = "http_hop_tls_error"
+    HTTP_HOP_PROTOCOL_ERROR = "http_hop_protocol_error"
+    HTTP_HOP_RESPONSE_HEADERS_TOO_LARGE = "http_hop_response_headers_too_large"
+    HTTP_HOP_RESPONSE_TOO_LARGE = "http_hop_response_too_large"
+    HTTP_HOP_DECOMPRESSED_RESPONSE_TOO_LARGE = (
+        "http_hop_decompressed_response_too_large"
+    )
+    HTTP_HOP_PARSER_INPUT_TOO_LARGE = "http_hop_parser_input_too_large"
+    HTTP_HOP_UNSUPPORTED_CONTENT_ENCODING = (
+        "http_hop_unsupported_content_encoding"
+    )
+    HTTP_HOP_INVALID_CONTENT_ENCODING = "http_hop_invalid_content_encoding"
+    HTTP_HOP_TRANSPORT_ERROR = "http_hop_transport_error"
+
+
+class DeliveryRuntimeReasonCode(str, Enum):
+    """Closed readiness reasons retained in runtime heartbeat metadata."""
+
+    MODE_OFF = "mode_off"
+    MODE_MIGRATE = "mode_migrate"
+    SCHEMA_UNREADY = "schema_unready"
+    MIGRATION_PENDING = "migration_pending"
+    KEY_UNAVAILABLE = "key_unavailable"
+    KEY_CONFIGURATION_MISMATCH = "key_configuration_mismatch"
+    JOBS_UNAVAILABLE = "jobs_unavailable"
+    DATABASE_UNAVAILABLE = "database_unavailable"
+    WORKER_UNAVAILABLE = "worker_unavailable"
+    RECONCILER_UNAVAILABLE = "reconciler_unavailable"
+    RETENTION_UNAVAILABLE = "retention_unavailable"
+    HEARTBEAT_STALE = "heartbeat_stale"
+
+
+class EventSourceKind(str, Enum):
+    """Closed source identity shape for an immutable webhook event."""
+
+    AGGREGATE = "aggregate"
+    COMMAND = "command"
+
+
+class DeliveryRuntimeComponent(str, Enum):
+    """Closed runtime components that write durable heartbeat evidence."""
+
+    WORKER = "worker"
+    RECONCILER = "reconciler"
+    RETENTION = "retention"
+
+
+@dataclass(frozen=True)
+class WebhookEvent:
+    """Public immutable event metadata without a body or encryption material."""
+
+    id: str
+    event_type: str
+    api_version: str
+    source_kind: EventSourceKind
+    created_at: datetime
+
+
+@dataclass(frozen=True)
+class WebhookDelivery:
+    """Sanitized delivery history metadata without destination or Jobs tokens."""
+
+    id: str
+    event_id: str
+    webhook_id: int
+    kind: DeliveryKind
+    state: DeliveryState
+    delivery_config_version: int
+    secret_version: int
+    attempt_count: int
+    status_code: int | None
+    latency_ms: int | None
+    reason_code: DeliveryReasonCode | None
+    expires_at: datetime
+    created_at: datetime
+    updated_at: datetime
+    terminal_at: datetime | None = None
+    redelivery_of_id: str | None = None
+
+
+@dataclass(frozen=True)
+class WebhookDeliveryAttempt:
+    """Sanitized append-only attempt metadata without network request material."""
+
+    id: str
+    delivery_id: str
+    attempt_number: int
+    state: AttemptState
+    request_timeout_seconds: int | None
+    status_code: int | None
+    latency_ms: int | None
+    reason_code: DeliveryReasonCode | None
+    requested_retry_delay_seconds: int | None
+    started_at: datetime
+    finished_at: datetime | None
+
+
+@dataclass(frozen=True)
+class DeliveryHistoryItem:
+    """One sanitized delivery with its ordered append-only attempts."""
+
+    delivery: WebhookDelivery
+    event_type: str
+    completed_after_config_change: bool
+    attempts: tuple[WebhookDeliveryAttempt, ...]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.delivery, WebhookDelivery):
+            raise TypeError("history delivery is invalid")
+        if not isinstance(self.event_type, str) or not 1 <= len(self.event_type) <= 64:
+            raise ValueError("history event type is invalid")
+        if not isinstance(self.completed_after_config_change, bool):
+            raise TypeError("history configuration-change state is invalid")
+        if not isinstance(self.attempts, tuple):
+            raise TypeError("history attempts are invalid")
+        numbers = tuple(attempt.attempt_number for attempt in self.attempts)
+        if (
+            any(
+                not isinstance(attempt, WebhookDeliveryAttempt)
+                or attempt.delivery_id != self.delivery.id
+                for attempt in self.attempts
+            )
+            or numbers != tuple(sorted(numbers))
+            or len(set(numbers)) != len(numbers)
+        ):
+            raise ValueError("history attempts are invalid")
+
+    @property
+    def id(self) -> str:
+        """Return the delivery ID for legacy internal callers."""
+        return self.delivery.id
+
+    @property
+    def kind(self) -> DeliveryKind:
+        """Return the delivery kind for legacy internal callers."""
+        return self.delivery.kind
+
+
+@dataclass(frozen=True)
+class DeliveryHistoryPage:
+    """Bounded page of sanitized delivery-history items."""
+
+    items: tuple[DeliveryHistoryItem, ...]
+    total: int
+    limit: int
+    offset: int
+
+
+@dataclass(frozen=True)
+class DeliveryRuntimeHeartbeat:
+    """Durable per-instance readiness metadata without host or error text."""
+
+    component: DeliveryRuntimeComponent
+    instance_id: str
+    ready: bool
+    reason_code: DeliveryRuntimeReasonCode | None
+    heartbeat_at: datetime
+    last_success_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
+class DeliveryComponentStatus:
+    """Sanitized readiness for one runtime component."""
+
+    component: DeliveryRuntimeComponent
+    ready: bool
+    reason_code: DeliveryRuntimeReasonCode | None
+    heartbeat_age_seconds: int | None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.component, DeliveryRuntimeComponent):
+            raise TypeError("delivery component is invalid")
+        if not isinstance(self.ready, bool):
+            raise TypeError("delivery component readiness is invalid")
+        if self.ready == (self.reason_code is not None):
+            raise ValueError("delivery component reason is invalid")
+        if self.heartbeat_age_seconds is not None and (
+            isinstance(self.heartbeat_age_seconds, bool)
+            or not isinstance(self.heartbeat_age_seconds, int)
+            or self.heartbeat_age_seconds < 0
+        ):
+            raise ValueError("delivery component heartbeat age is invalid")
+
+
+@dataclass(frozen=True)
+class DeliveryBacklogCounts:
+    """Closed nonterminal delivery counts from one read snapshot."""
+
+    pending: int = 0
+    enqueue_claimed: int = 0
+    queued: int = 0
+    processing: int = 0
+    retry_wait: int = 0
+
+    def __post_init__(self) -> None:
+        if any(
+            isinstance(value, bool) or not isinstance(value, int) or value < 0
+            for value in self.__dict__.values()
+        ):
+            raise ValueError("delivery backlog count is invalid")
+
+
+@dataclass(frozen=True)
+class DeliveryHealthSnapshot:
+    """Sanitized AuthNZ delivery facts from one bounded read snapshot."""
+
+    canonical_schema_version: int
+    delivery_schema_ready: bool
+    migration_complete: bool
+    key_ready: bool
+    key_primary_match: bool
+    worker: DeliveryComponentStatus
+    reconciler: DeliveryComponentStatus
+    retention: DeliveryComponentStatus
+    backlog: DeliveryBacklogCounts
+    oldest_nonterminal_created_at: datetime | None
+
+
+@dataclass(frozen=True)
+class DeliveryCapabilityStatus:
+    """Closed public delivery capability without instance or secret identity."""
+
+    canonical_schema_version: int
+    schema_ready: bool
+    delivery_schema_ready: bool
+    migration_complete: bool
+    key_ready: bool
+    key_primary_match: bool
+    jobs_database_ready: bool
+    queue_ready: bool
+    job_type_ready: bool
+    jobs_backend: str
+    worker: DeliveryComponentStatus
+    reconciler: DeliveryComponentStatus
+    retention: DeliveryComponentStatus
+    backlog: DeliveryBacklogCounts
+    oldest_nonterminal_age_seconds: int | None
+    acquisition_ready: bool
+    acquisition_reason_code: DeliveryRuntimeReasonCode | None
+    delivery_capability_ready: bool
 
 
 @dataclass(frozen=True)
@@ -141,13 +479,14 @@ class WebhookMigrationSummary:
 
 @dataclass(frozen=True)
 class WebhookStatus:
-    """Sanitized PR 1 status projection."""
+    """Sanitized canonical control-plane and delivery status projection."""
 
     mode: str
     route_selection: str
     schema_ready: bool
     key_state: str
     delivery_capability_ready: bool
+    delivery: DeliveryCapabilityStatus
     limits: WebhookLimits
     migration: WebhookMigrationSummary
 
@@ -363,7 +702,6 @@ _ETAG_PATTERN = re.compile(r'^"admin-webhook-([1-9][0-9]*)-r([1-9][0-9]*)"$')
 _IDEMPOTENCY_KEY_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{16,255}$")
 _REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 _OPERATION_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
-_DNS_LABEL_PATTERN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$")
 _LOOKUP_DOMAIN = b"tldw-admin-webhook-idempotency-lookup-v1\x00"
 _REQUEST_DOMAIN = "tldw-admin-webhook-request-v1"
 
@@ -482,43 +820,10 @@ def normalize_request_id(
 
 
 def _parse_and_normalize_target(url: str) -> tuple[SplitResult, str]:
-    if not isinstance(url, str) or not url or len(url) > 2_048:
-        raise WebhookError(WebhookErrorCode.VALIDATION_FAILED)
     try:
-        encoded = url.encode("utf-8")
-    except UnicodeError as exc:
+        return parse_webhook_target_url(url)
+    except ValueError as exc:
         raise WebhookError(WebhookErrorCode.VALIDATION_FAILED) from exc
-    if len(encoded) > 2_048 or "\\" in url or any(ord(char) < 32 or ord(char) == 127 for char in url):
-        raise WebhookError(WebhookErrorCode.VALIDATION_FAILED)
-    try:
-        parsed = urlsplit(url)
-        hostname = parsed.hostname
-        port = parsed.port
-    except (TypeError, UnicodeError, ValueError) as exc:
-        raise WebhookError(WebhookErrorCode.VALIDATION_FAILED) from exc
-    if not parsed.scheme or not parsed.netloc or not hostname:
-        raise WebhookError(WebhookErrorCode.VALIDATION_FAILED)
-    if parsed.username is not None or parsed.password is not None or parsed.fragment:
-        raise WebhookError(WebhookErrorCode.VALIDATION_FAILED)
-    if port is not None and not 1 <= port <= 65_535:
-        raise WebhookError(WebhookErrorCode.VALIDATION_FAILED)
-    if "%" in hostname:
-        raise WebhookError(WebhookErrorCode.VALIDATION_FAILED)
-    try:
-        normalized_host = str(ipaddress.ip_address(hostname))
-    except ValueError:
-        try:
-            normalized_host = hostname.rstrip(".").encode("idna").decode("ascii").lower()
-        except UnicodeError as exc:
-            raise WebhookError(WebhookErrorCode.VALIDATION_FAILED) from exc
-        labels = normalized_host.split(".")
-        if (
-            not normalized_host
-            or len(normalized_host) > 253
-            or any(_DNS_LABEL_PATTERN.fullmatch(label) is None for label in labels)
-        ):
-            raise WebhookError(WebhookErrorCode.VALIDATION_FAILED) from None
-    return parsed, normalized_host
 
 
 def _redacted_origin(parsed: SplitResult, normalized_host: str) -> str:

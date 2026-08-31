@@ -8,11 +8,13 @@ database path. This scaffolds the future core JobManager backend.
 from __future__ import annotations
 
 import base64
+import binascii
 import contextlib
-import gzip
 import json
+import math
 import os
 import sqlite3
+import zlib
 from pathlib import Path
 from typing import Any
 
@@ -21,9 +23,23 @@ from loguru import logger
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
     configure_sqlite_connection,
 )
+from tldw_Server_API.app.core.Jobs.operations.contracts import (
+    ADMIN_WEBHOOK_DELIVERY_DOMAIN,
+    ADMIN_WEBHOOK_DELIVERY_JOB_TYPE,
+    ADMIN_WEBHOOK_DELIVERY_QUARANTINE_THRESHOLD,
+    ADMIN_WEBHOOK_DELIVERY_QUEUE,
+    ExpiredLeasePolicy,
+    SlidesArchiveNormalizationError,
+    canonical_admin_webhook_delivery_id,
+    reconstruct_legacy_admin_webhook_archive_fingerprint,
+)
 
 _JOBS_PATH_EXCEPTIONS = (ImportError, OSError, RuntimeError, TypeError, ValueError)
 _JOBS_DB_EXCEPTIONS = (sqlite3.Error, OSError, RuntimeError, TypeError, ValueError)
+_SLIDES_AUDIT_EXCEPTIONS = (
+    *_JOBS_DB_EXCEPTIONS,
+    SlidesArchiveNormalizationError,
+)
 
 SQLITE_ARCHIVE_CURSOR_SENTINEL = "0001-01-01 00:00:00"
 _SQLITE_ARCHIVE_ISO_DATE_GLOB = (
@@ -105,6 +121,10 @@ SLIDES_ARCHIVE_EXACT_FIELDS = (
     "status",
     "priority",
     "max_retries",
+    "expired_lease_policy",
+    "quarantine_threshold",
+    "prepared_disposition_fingerprint",
+    "no_attempt_recovery_fingerprint",
     "retry_count",
     "available_at",
     "started_at",
@@ -133,6 +153,17 @@ SLIDES_ARCHIVE_EXACT_FIELDS = (
 )
 
 SLIDES_ARCHIVE_COMPRESSED_FIELDS = ("payload_compressed", "result_compressed")
+SLIDES_ARCHIVE_PAYLOAD_PRESENT = "__slides_archive_payload_present"
+SLIDES_ARCHIVE_RESULT_PRESENT = "__slides_archive_result_present"
+
+# Jobs payload JSON defaults to a 1 MiB admission cap. Archive readback uses the
+# same fixed logical limit plus bounded gzip overhead for compressed input.
+JOBS_ARCHIVE_JSON_MAX_BYTES = 1_048_576
+JOBS_ARCHIVE_COMPRESSED_MAX_BYTES = JOBS_ARCHIVE_JSON_MAX_BYTES + 65_536
+_JOBS_ARCHIVE_BASE64_MAX_CHARS = (
+    4 * ((JOBS_ARCHIVE_COMPRESSED_MAX_BYTES + 2) // 3)
+)
+_JOBS_ARCHIVE_GZIP_CHUNK_BYTES = 65_536
 
 
 def _parse_slides_archive_json(value: Any) -> Any:
@@ -152,33 +183,129 @@ def _parse_slides_archive_json(value: Any) -> Any:
     return value
 
 
+def slides_archive_values_equal(left: Any, right: Any) -> bool:
+    """Compare logical archive values with exact recursive JSON semantics."""
+    if type(left) is not type(right):
+        return False
+    if isinstance(left, dict):
+        return left.keys() == right.keys() and all(
+            slides_archive_values_equal(left[key], right[key]) for key in left
+        )
+    if isinstance(left, list):
+        return len(left) == len(right) and all(
+            slides_archive_values_equal(left_item, right_item)
+            for left_item, right_item in zip(left, right)
+        )
+    if isinstance(left, float) and math.isnan(left):
+        return math.isnan(right)
+    return left == right
+
+
+def _bounded_gzip_decompress(compressed: bytes) -> bytes:
+    """Decode one complete gzip member without exceeding archive bounds."""
+
+    if not 1 <= len(compressed) <= JOBS_ARCHIVE_COMPRESSED_MAX_BYTES:
+        raise ValueError("archive compressed input is outside the fixed bound")
+    decompressor = zlib.decompressobj(16 + zlib.MAX_WBITS)
+    output = bytearray()
+    for offset in range(0, len(compressed), _JOBS_ARCHIVE_GZIP_CHUNK_BYTES):
+        remaining = JOBS_ARCHIVE_JSON_MAX_BYTES - len(output)
+        if remaining <= 0:
+            raise ValueError("archive JSON exceeds the fixed bound")
+        chunk = compressed[offset : offset + _JOBS_ARCHIVE_GZIP_CHUNK_BYTES]
+        decoded = decompressor.decompress(chunk, remaining)
+        output.extend(decoded)
+        if decompressor.unconsumed_tail:
+            raise ValueError("archive JSON exceeds the fixed bound")
+        if decompressor.unused_data:
+            raise ValueError("archive gzip contains trailing or concatenated data")
+    remaining = JOBS_ARCHIVE_JSON_MAX_BYTES - len(output)
+    if remaining > 0:
+        output.extend(decompressor.flush(remaining))
+    if (
+        len(output) > JOBS_ARCHIVE_JSON_MAX_BYTES
+        or not decompressor.eof
+        or decompressor.unused_data
+        or decompressor.unconsumed_tail
+    ):
+        raise ValueError("archive gzip stream is incomplete or exceeds its bound")
+    return bytes(output)
+
+
+def _strict_archive_compressed_bytes(value: Any) -> bytes:
+    """Validate one backend archive encoding before allocating decoded bytes."""
+
+    if isinstance(value, memoryview):
+        if value.nbytes > JOBS_ARCHIVE_COMPRESSED_MAX_BYTES:
+            raise ValueError("archive compressed input is outside the fixed bound")
+        return value.tobytes()
+    if isinstance(value, (bytes, bytearray)):
+        if len(value) > JOBS_ARCHIVE_COMPRESSED_MAX_BYTES:
+            raise ValueError("archive compressed input is outside the fixed bound")
+        return bytes(value)
+    if isinstance(value, str) and value.startswith("gzip64:"):
+        encoded = value[len("gzip64:") :]
+        if (
+            not encoded
+            or len(encoded) > _JOBS_ARCHIVE_BASE64_MAX_CHARS
+            or len(encoded) % 4 != 0
+        ):
+            raise ValueError("archive base64 input is outside the fixed bound")
+        encoded_bytes = encoded.encode("ascii")
+        compressed = base64.b64decode(encoded_bytes, validate=True)
+        if len(compressed) > JOBS_ARCHIVE_COMPRESSED_MAX_BYTES:
+            raise ValueError("archive compressed input is outside the fixed bound")
+        if base64.b64encode(compressed) != encoded_bytes:
+            raise ValueError("archive base64 input is not canonically encoded")
+        return compressed
+    raise ValueError("archive compressed input uses an unsupported encoding")
+
+
 def _decode_slides_archive_blob(value: Any) -> Any:
-    """Decode the SQLite/PostgreSQL archive compression formats."""
+    """Decode one bounded, strictly framed SQLite/PostgreSQL archive blob."""
     if value is None:
         return None
-    if isinstance(value, memoryview):
-        value = value.tobytes()
     try:
-        if isinstance(value, (bytes, bytearray)):
-            return _parse_slides_archive_json(gzip.decompress(bytes(value)).decode("utf-8"))
-        if isinstance(value, str) and value.startswith("gzip64:"):
-            compressed = base64.b64decode(value[len("gzip64:") :])
-            return _parse_slides_archive_json(gzip.decompress(compressed).decode("utf-8"))
-    except (OSError, TypeError, ValueError, UnicodeError):
-        return _parse_slides_archive_json(value)
-    return _parse_slides_archive_json(value)
+        compressed = _strict_archive_compressed_bytes(value)
+        decoded = _bounded_gzip_decompress(compressed).decode("utf-8")
+        return json.loads(decoded)
+    except (binascii.Error, TypeError, ValueError, UnicodeError, zlib.error):
+        pass
+    raise SlidesArchiveNormalizationError
 
 
 def normalize_slides_archive_projection(row: Any) -> dict[str, Any]:
-    """Return one logical exactness projection, decoding archived JSON blobs."""
+    """Return one logical projection or reject an invalid compressed field."""
     normalized = dict(row)
-    for field in ("payload", "result"):
-        value = normalized.get(field)
-        if value is None:
-            value = _decode_slides_archive_blob(normalized.get(f"{field}_compressed"))
+    presence_fields = {
+        "payload": SLIDES_ARCHIVE_PAYLOAD_PRESENT,
+        "result": SLIDES_ARCHIVE_RESULT_PRESENT,
+    }
+    for field, presence_field in presence_fields.items():
+        raw_primary = normalized.get(field)
+        presence = normalized.pop(presence_field, None)
+        if presence is None:
+            primary_present = raw_primary is not None
+        elif type(presence) is bool:
+            primary_present = presence
+        elif type(presence) is int and presence in (0, 1):
+            primary_present = bool(presence)
         else:
-            value = _parse_slides_archive_json(value)
-        normalized[field] = value
+            raise SlidesArchiveNormalizationError
+        if not primary_present and raw_primary is not None:
+            raise SlidesArchiveNormalizationError
+        primary = _parse_slides_archive_json(raw_primary)
+        compressed = normalized.get(f"{field}_compressed")
+        if compressed is not None:
+            sidecar = _decode_slides_archive_blob(compressed)
+            if primary_present and not slides_archive_values_equal(
+                primary,
+                sidecar,
+            ):
+                raise SlidesArchiveNormalizationError
+            if not primary_present:
+                primary = sidecar
+        normalized[field] = primary
     return normalized
 
 
@@ -237,6 +364,20 @@ CREATE TABLE IF NOT EXISTS jobs (
   status TEXT NOT NULL CHECK (status IN ('queued','processing','completed','failed','cancelled','quarantined')),
   priority INTEGER DEFAULT 5 CHECK (priority >= 1 AND priority <= 10),
   max_retries INTEGER DEFAULT 3 CHECK (max_retries >= 0 AND max_retries <= 100),
+  expired_lease_policy TEXT NOT NULL DEFAULT 'consume_retry' CHECK (expired_lease_policy IN ('consume_retry','requeue_no_attempt')),
+  quarantine_threshold INTEGER CHECK (quarantine_threshold IS NULL OR quarantine_threshold > 0),
+  prepared_disposition_fingerprint TEXT CHECK (
+    prepared_disposition_fingerprint IS NULL OR (
+      LENGTH(prepared_disposition_fingerprint) = 64 AND
+      prepared_disposition_fingerprint NOT GLOB '*[^0-9a-f]*'
+    )
+  ),
+  no_attempt_recovery_fingerprint TEXT CHECK (
+    no_attempt_recovery_fingerprint IS NULL OR (
+      LENGTH(no_attempt_recovery_fingerprint) = 64 AND
+      no_attempt_recovery_fingerprint NOT GLOB '*[^0-9a-f]*'
+    )
+  ),
   retry_count INTEGER DEFAULT 0,
   available_at TEXT,
   started_at TEXT,
@@ -308,6 +449,20 @@ CREATE TABLE IF NOT EXISTS jobs_archive (
   status TEXT NOT NULL,
   priority INTEGER,
   max_retries INTEGER,
+  expired_lease_policy TEXT NOT NULL DEFAULT 'consume_retry' CHECK (expired_lease_policy IN ('consume_retry','requeue_no_attempt')),
+  quarantine_threshold INTEGER CHECK (quarantine_threshold IS NULL OR quarantine_threshold > 0),
+  prepared_disposition_fingerprint TEXT CHECK (
+    prepared_disposition_fingerprint IS NULL OR (
+      LENGTH(prepared_disposition_fingerprint) = 64 AND
+      prepared_disposition_fingerprint NOT GLOB '*[^0-9a-f]*'
+    )
+  ),
+  no_attempt_recovery_fingerprint TEXT CHECK (
+    no_attempt_recovery_fingerprint IS NULL OR (
+      LENGTH(no_attempt_recovery_fingerprint) = 64 AND
+      no_attempt_recovery_fingerprint NOT GLOB '*[^0-9a-f]*'
+    )
+  ),
   retry_count INTEGER,
   available_at TEXT,
   started_at TEXT,
@@ -942,7 +1097,10 @@ def _audit_and_index_slides_generation(conn: sqlite3.Connection) -> None:
         archived_values["result_compressed"] = row[2 * projection_size + 1]
         archived = normalize_slides_archive_projection(archived_values)
         if any(
-            active.get(field) != archived.get(field)
+            not slides_archive_values_equal(
+                active.get(field),
+                archived.get(field),
+            )
             for field in SLIDES_ARCHIVE_EXACT_FIELDS
         ):
             cross_table_count += 1
@@ -1108,6 +1266,64 @@ def _record_slides_audit_failure_sqlite(conn: sqlite3.Connection) -> None:
         )
 
 
+def _upgrade_legacy_admin_webhook_archives_sqlite(
+    conn: sqlite3.Connection,
+) -> None:
+    """Backfill only strictly reconstructable reserved archive evidence."""
+
+    cursor = conn.execute(
+        "SELECT *, "
+        "payload IS NOT NULL AS __slides_archive_payload_present, "
+        "result IS NOT NULL AS __slides_archive_result_present "
+        "FROM jobs_archive WHERE domain=? AND queue=? AND job_type=?",
+        (
+            ADMIN_WEBHOOK_DELIVERY_DOMAIN,
+            ADMIN_WEBHOOK_DELIVERY_QUEUE,
+            ADMIN_WEBHOOK_DELIVERY_JOB_TYPE,
+        ),
+    )
+    columns = tuple(str(item[0]) for item in cursor.description or ())
+    prepared_rows: list[tuple[dict[str, Any], str | None]] = []
+    delivery_ids: set[str] = set()
+    idempotency_keys: set[str] = set()
+    for values in cursor.fetchall():
+        row = normalize_slides_archive_projection(dict(zip(columns, values)))
+        fingerprint = reconstruct_legacy_admin_webhook_archive_fingerprint(row)
+        delivery_id = canonical_admin_webhook_delivery_id(row.get("payload"))
+        idempotency_key = row.get("idempotency_key")
+        if delivery_id in delivery_ids or idempotency_key in idempotency_keys:
+            raise RuntimeError(
+                "duplicate canonical admin webhook archive identity"
+            )
+        delivery_ids.add(delivery_id)
+        idempotency_keys.add(idempotency_key)
+        prepared_rows.append((row, fingerprint))
+
+    for row, fingerprint in prepared_rows:
+        if fingerprint is None:
+            continue
+        updated = conn.execute(
+            "UPDATE jobs_archive SET expired_lease_policy=?, "
+            "quarantine_threshold=?, prepared_disposition_fingerprint=?, "
+            "no_attempt_recovery_fingerprint=NULL WHERE archive_id=? "
+            "AND expired_lease_policy=? "
+            "AND quarantine_threshold IS NULL "
+            "AND prepared_disposition_fingerprint IS NULL "
+            "AND no_attempt_recovery_fingerprint IS NULL",
+            (
+                ExpiredLeasePolicy.REQUEUE_NO_ATTEMPT.value,
+                ADMIN_WEBHOOK_DELIVERY_QUARANTINE_THRESHOLD,
+                fingerprint,
+                row.get("archive_id"),
+                ExpiredLeasePolicy.CONSUME_RETRY.value,
+            ),
+        )
+        if updated.rowcount != 1:
+            raise RuntimeError(
+                "canonical admin webhook legacy archive upgrade lost its row"
+            )
+
+
 def ensure_jobs_tables(db_path: Path | None = None) -> Path:
     """Ensure the jobs table exists in the given SQLite database.
 
@@ -1161,10 +1377,73 @@ def ensure_jobs_tables(db_path: Path | None = None) -> Path:
                 f"{_sqlite_archive_migration_busy_timeout_ms()}"
             )
             conn.executescript(JOBS_SQLITE_DDL)
+            _ensure_sqlite_archive_locators(conn)
             if not conn.in_transaction:
                 conn.execute("BEGIN IMMEDIATE")
             with contextlib.suppress(_JOBS_DB_EXCEPTIONS):
                 conn.execute("ALTER TABLE jobs ADD COLUMN batch_group TEXT")
+            columns = {
+                str(row[1])
+                for row in conn.execute("PRAGMA table_info(jobs)").fetchall()
+            }
+            if "expired_lease_policy" not in columns:
+                conn.execute(
+                    "ALTER TABLE jobs ADD COLUMN expired_lease_policy TEXT "
+                    "NOT NULL DEFAULT 'consume_retry' CHECK "
+                    "(expired_lease_policy IN ('consume_retry','requeue_no_attempt'))"
+                )
+            if "quarantine_threshold" not in columns:
+                conn.execute(
+                    "ALTER TABLE jobs ADD COLUMN quarantine_threshold INTEGER "
+                    "CHECK (quarantine_threshold IS NULL OR quarantine_threshold > 0)"
+                )
+            if "prepared_disposition_fingerprint" not in columns:
+                conn.execute(
+                    "ALTER TABLE jobs ADD COLUMN prepared_disposition_fingerprint TEXT "
+                    "CHECK (prepared_disposition_fingerprint IS NULL OR "
+                    "(LENGTH(prepared_disposition_fingerprint) = 64 AND "
+                    "prepared_disposition_fingerprint NOT GLOB '*[^0-9a-f]*'))"
+                )
+            if "no_attempt_recovery_fingerprint" not in columns:
+                conn.execute(
+                    "ALTER TABLE jobs ADD COLUMN no_attempt_recovery_fingerprint TEXT "
+                    "CHECK (no_attempt_recovery_fingerprint IS NULL OR "
+                    "(LENGTH(no_attempt_recovery_fingerprint) = 64 AND "
+                    "no_attempt_recovery_fingerprint NOT GLOB '*[^0-9a-f]*'))"
+                )
+            archive_columns = {
+                str(row[1])
+                for row in conn.execute(
+                    "PRAGMA table_info(jobs_archive)"
+                ).fetchall()
+            }
+            if "expired_lease_policy" not in archive_columns:
+                conn.execute(
+                    "ALTER TABLE jobs_archive ADD COLUMN expired_lease_policy TEXT "
+                    "NOT NULL DEFAULT 'consume_retry' CHECK "
+                    "(expired_lease_policy IN ('consume_retry','requeue_no_attempt'))"
+                )
+            if "quarantine_threshold" not in archive_columns:
+                conn.execute(
+                    "ALTER TABLE jobs_archive ADD COLUMN quarantine_threshold INTEGER "
+                    "CHECK (quarantine_threshold IS NULL OR quarantine_threshold > 0)"
+                )
+            if "prepared_disposition_fingerprint" not in archive_columns:
+                conn.execute(
+                    "ALTER TABLE jobs_archive ADD COLUMN "
+                    "prepared_disposition_fingerprint TEXT CHECK "
+                    "(prepared_disposition_fingerprint IS NULL OR "
+                    "(LENGTH(prepared_disposition_fingerprint) = 64 AND "
+                    "prepared_disposition_fingerprint NOT GLOB '*[^0-9a-f]*'))"
+                )
+            if "no_attempt_recovery_fingerprint" not in archive_columns:
+                conn.execute(
+                    "ALTER TABLE jobs_archive ADD COLUMN "
+                    "no_attempt_recovery_fingerprint TEXT CHECK "
+                    "(no_attempt_recovery_fingerprint IS NULL OR "
+                    "(LENGTH(no_attempt_recovery_fingerprint) = 64 AND "
+                    "no_attempt_recovery_fingerprint NOT GLOB '*[^0-9a-f]*'))"
+                )
             with contextlib.suppress(_JOBS_DB_EXCEPTIONS):
                 conn.execute("ALTER TABLE jobs_archive ADD COLUMN batch_group TEXT")
             with contextlib.suppress(_JOBS_DB_EXCEPTIONS):
@@ -1183,6 +1462,7 @@ def ensure_jobs_tables(db_path: Path | None = None) -> Path:
             ):
                 with contextlib.suppress(_JOBS_DB_EXCEPTIONS):
                     conn.execute(f"ALTER TABLE jobs_archive ADD COLUMN {column_sql}")  # nosec B608
+            _upgrade_legacy_admin_webhook_archives_sqlite(conn)
             _ensure_sqlite_dependency_snapshot_columns(conn)
             try:
                 _record_slides_audit_failure_sqlite(conn)
@@ -1194,7 +1474,7 @@ def ensure_jobs_tables(db_path: Path | None = None) -> Path:
                 ) from poison_error
             try:
                 _audit_and_index_slides_generation(conn)
-            except _JOBS_DB_EXCEPTIONS as audit_error:
+            except _SLIDES_AUDIT_EXCEPTIONS as audit_error:
                 try:
                     conn.execute("ROLLBACK TO SAVEPOINT slides_generation_audit")
                     conn.execute("RELEASE SAVEPOINT slides_generation_audit")
@@ -1217,7 +1497,6 @@ def ensure_jobs_tables(db_path: Path | None = None) -> Path:
                     raise _SlidesAuditSafetyError(
                         "standalone audit result could not be persisted"
                     ) from persistence_error
-            _ensure_sqlite_archive_locators(conn)
             _ensure_sqlite_archive_batch_read_indexes(conn)
             archive_locator_verified = True
             with contextlib.suppress(_JOBS_DB_EXCEPTIONS):

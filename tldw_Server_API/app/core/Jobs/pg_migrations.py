@@ -15,7 +15,20 @@ from tldw_Server_API.app.core.testing import is_truthy as _is_truthy
 from .migrations import (
     SLIDES_ARCHIVE_COMPRESSED_FIELDS,
     SLIDES_ARCHIVE_EXACT_FIELDS,
+    SLIDES_ARCHIVE_PAYLOAD_PRESENT,
+    SLIDES_ARCHIVE_RESULT_PRESENT,
+    SlidesArchiveNormalizationError,
     normalize_slides_archive_projection,
+    slides_archive_values_equal,
+)
+from .operations.contracts import (
+    ADMIN_WEBHOOK_DELIVERY_DOMAIN,
+    ADMIN_WEBHOOK_DELIVERY_JOB_TYPE,
+    ADMIN_WEBHOOK_DELIVERY_QUARANTINE_THRESHOLD,
+    ADMIN_WEBHOOK_DELIVERY_QUEUE,
+    ExpiredLeasePolicy,
+    canonical_admin_webhook_delivery_id,
+    reconstruct_legacy_admin_webhook_archive_fingerprint,
 )
 
 _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS = (
@@ -34,6 +47,10 @@ _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS = (
     TypeError,
     ValueError,
     UnicodeDecodeError,
+)
+_SLIDES_PG_AUDIT_EXCEPTIONS = (
+    *_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS,
+    SlidesArchiveNormalizationError,
 )
 
 POSTGRES_ARCHIVE_CURSOR_TIME_SQL = (
@@ -224,6 +241,24 @@ CREATE TABLE IF NOT EXISTS jobs (
   status TEXT NOT NULL CHECK (status IN ('queued','processing','completed','failed','cancelled','quarantined')),
   priority INTEGER DEFAULT 5 CHECK (priority >= 1 AND priority <= 10),
   max_retries INTEGER DEFAULT 3 CHECK (max_retries >= 0 AND max_retries <= 100),
+  expired_lease_policy TEXT NOT NULL DEFAULT 'consume_retry'
+    CONSTRAINT jobs_expired_lease_policy_valid
+    CHECK (expired_lease_policy IN ('consume_retry','requeue_no_attempt')),
+  quarantine_threshold INTEGER
+    CONSTRAINT jobs_quarantine_threshold_positive
+    CHECK (quarantine_threshold IS NULL OR quarantine_threshold > 0),
+  prepared_disposition_fingerprint TEXT
+    CONSTRAINT jobs_prepared_disposition_fingerprint_valid
+    CHECK (
+      prepared_disposition_fingerprint IS NULL OR
+      prepared_disposition_fingerprint ~ '^[0-9a-f]{64}$'
+    ),
+  no_attempt_recovery_fingerprint TEXT
+    CONSTRAINT jobs_no_attempt_recovery_fingerprint_valid
+    CHECK (
+      no_attempt_recovery_fingerprint IS NULL OR
+      no_attempt_recovery_fingerprint ~ '^[0-9a-f]{64}$'
+    ),
   retry_count INTEGER DEFAULT 0,
   available_at TIMESTAMPTZ,
   started_at TIMESTAMPTZ,
@@ -310,6 +345,24 @@ CREATE TABLE IF NOT EXISTS jobs_archive (
   status TEXT NOT NULL,
   priority INTEGER,
   max_retries INTEGER,
+  expired_lease_policy TEXT NOT NULL DEFAULT 'consume_retry'
+    CONSTRAINT jobs_archive_expired_lease_policy_valid
+    CHECK (expired_lease_policy IN ('consume_retry','requeue_no_attempt')),
+  quarantine_threshold INTEGER
+    CONSTRAINT jobs_archive_quarantine_threshold_positive
+    CHECK (quarantine_threshold IS NULL OR quarantine_threshold > 0),
+  prepared_disposition_fingerprint TEXT
+    CONSTRAINT jobs_archive_prepared_disposition_fingerprint_valid
+    CHECK (
+      prepared_disposition_fingerprint IS NULL OR
+      prepared_disposition_fingerprint ~ '^[0-9a-f]{64}$'
+    ),
+  no_attempt_recovery_fingerprint TEXT
+    CONSTRAINT jobs_archive_no_attempt_recovery_fingerprint_valid
+    CHECK (
+      no_attempt_recovery_fingerprint IS NULL OR
+      no_attempt_recovery_fingerprint ~ '^[0-9a-f]{64}$'
+    ),
   retry_count INTEGER,
   available_at TIMESTAMPTZ,
   started_at TIMESTAMPTZ,
@@ -894,6 +947,297 @@ def _ensure_pg_dependency_snapshot_columns(cur: Any) -> None:
         "depends_on_cancellation_reason FROM job_dependencies LIMIT 0"
     )
 
+
+def _upgrade_legacy_admin_webhook_archives_pg(cur: Any) -> None:
+    """Backfill only strictly reconstructable reserved archive evidence."""
+
+    cur.execute(
+        "SELECT *, "
+        "payload IS NOT NULL AS __slides_archive_payload_present, "
+        "result IS NOT NULL AS __slides_archive_result_present "
+        "FROM jobs_archive WHERE domain=%s AND queue=%s "
+        "AND job_type=%s FOR UPDATE",
+        (
+            ADMIN_WEBHOOK_DELIVERY_DOMAIN,
+            ADMIN_WEBHOOK_DELIVERY_QUEUE,
+            ADMIN_WEBHOOK_DELIVERY_JOB_TYPE,
+        ),
+    )
+    columns = tuple(
+        str(item.name if hasattr(item, "name") else item[0])
+        for item in cur.description or ()
+    )
+    prepared_rows: list[tuple[dict[str, Any], str | None]] = []
+    delivery_ids: set[str] = set()
+    idempotency_keys: set[str] = set()
+    for values in cur.fetchall() or ():
+        row = values if isinstance(values, dict) else dict(zip(columns, values))
+        row = normalize_slides_archive_projection(row)
+        fingerprint = reconstruct_legacy_admin_webhook_archive_fingerprint(row)
+        delivery_id = canonical_admin_webhook_delivery_id(row.get("payload"))
+        idempotency_key = row.get("idempotency_key")
+        if delivery_id in delivery_ids or idempotency_key in idempotency_keys:
+            raise RuntimeError(
+                "duplicate canonical admin webhook archive identity"
+            )
+        delivery_ids.add(delivery_id)
+        idempotency_keys.add(idempotency_key)
+        prepared_rows.append((row, fingerprint))
+
+    for row, fingerprint in prepared_rows:
+        if fingerprint is None:
+            continue
+        cur.execute(
+            "UPDATE jobs_archive SET "
+            "expired_lease_policy=%s, quarantine_threshold=%s, "
+            "prepared_disposition_fingerprint=%s, "
+            "no_attempt_recovery_fingerprint=NULL WHERE archive_id=%s "
+            "AND expired_lease_policy=%s "
+            "AND quarantine_threshold IS NULL "
+            "AND prepared_disposition_fingerprint IS NULL "
+            "AND no_attempt_recovery_fingerprint IS NULL",
+            (
+                ExpiredLeasePolicy.REQUEUE_NO_ATTEMPT.value,
+                ADMIN_WEBHOOK_DELIVERY_QUARANTINE_THRESHOLD,
+                fingerprint,
+                row.get("archive_id"),
+                ExpiredLeasePolicy.CONSUME_RETRY.value,
+            ),
+        )
+        if cur.rowcount != 1:
+            raise RuntimeError(
+                "canonical admin webhook legacy archive upgrade lost its row"
+            )
+
+
+def _ensure_pg_execution_control_columns(cur: Any) -> None:
+    """Add, backfill, and validate required per-job execution controls."""
+
+    cur.execute(
+        "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS "
+        "expired_lease_policy TEXT NOT NULL DEFAULT 'consume_retry'"
+    )
+    cur.execute(
+        "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS quarantine_threshold INTEGER"
+    )
+    cur.execute(
+        "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS "
+        "prepared_disposition_fingerprint TEXT"
+    )
+    cur.execute(
+        "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS "
+        "no_attempt_recovery_fingerprint TEXT"
+    )
+    cur.execute(
+        "ALTER TABLE jobs_archive ADD COLUMN IF NOT EXISTS "
+        "expired_lease_policy TEXT NOT NULL DEFAULT 'consume_retry'"
+    )
+    cur.execute(
+        "ALTER TABLE jobs_archive ADD COLUMN IF NOT EXISTS "
+        "quarantine_threshold INTEGER"
+    )
+    cur.execute(
+        "ALTER TABLE jobs_archive ADD COLUMN IF NOT EXISTS "
+        "prepared_disposition_fingerprint TEXT"
+    )
+    cur.execute(
+        "ALTER TABLE jobs_archive ADD COLUMN IF NOT EXISTS "
+        "no_attempt_recovery_fingerprint TEXT"
+    )
+    cur.execute(
+        "UPDATE jobs SET expired_lease_policy='consume_retry' "
+        "WHERE expired_lease_policy IS NULL"
+    )
+    _upgrade_legacy_admin_webhook_archives_pg(cur)
+    cur.execute(
+        "ALTER TABLE jobs ALTER COLUMN expired_lease_policy "
+        "SET DEFAULT 'consume_retry'"
+    )
+    cur.execute(
+        "ALTER TABLE jobs ALTER COLUMN expired_lease_policy SET NOT NULL"
+    )
+    cur.execute(
+        """
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+            WHERE conname='jobs_expired_lease_policy_valid'
+              AND conrelid='jobs'::regclass
+          ) THEN
+            ALTER TABLE jobs ADD CONSTRAINT jobs_expired_lease_policy_valid
+            CHECK (expired_lease_policy IN ('consume_retry','requeue_no_attempt'))
+            NOT VALID;
+          END IF;
+        END
+        $$
+        """
+    )
+    cur.execute(
+        "ALTER TABLE jobs VALIDATE CONSTRAINT jobs_expired_lease_policy_valid"
+    )
+    cur.execute(
+        """
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+            WHERE conname='jobs_quarantine_threshold_positive'
+              AND conrelid='jobs'::regclass
+          ) THEN
+            ALTER TABLE jobs ADD CONSTRAINT jobs_quarantine_threshold_positive
+            CHECK (quarantine_threshold IS NULL OR quarantine_threshold > 0)
+            NOT VALID;
+          END IF;
+        END
+        $$
+        """
+    )
+    cur.execute(
+        "ALTER TABLE jobs VALIDATE CONSTRAINT jobs_quarantine_threshold_positive"
+    )
+    cur.execute(
+        """
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+            WHERE conname='jobs_prepared_disposition_fingerprint_valid'
+              AND conrelid='jobs'::regclass
+          ) THEN
+            ALTER TABLE jobs ADD CONSTRAINT
+            jobs_prepared_disposition_fingerprint_valid
+            CHECK (
+              prepared_disposition_fingerprint IS NULL OR
+              prepared_disposition_fingerprint ~ '^[0-9a-f]{64}$'
+            ) NOT VALID;
+          END IF;
+        END
+        $$
+        """
+    )
+    cur.execute(
+        "ALTER TABLE jobs VALIDATE CONSTRAINT "
+        "jobs_prepared_disposition_fingerprint_valid"
+    )
+    cur.execute(
+        """
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+            WHERE conname='jobs_no_attempt_recovery_fingerprint_valid'
+              AND conrelid='jobs'::regclass
+          ) THEN
+            ALTER TABLE jobs ADD CONSTRAINT
+            jobs_no_attempt_recovery_fingerprint_valid
+            CHECK (
+              no_attempt_recovery_fingerprint IS NULL OR
+              no_attempt_recovery_fingerprint ~ '^[0-9a-f]{64}$'
+            ) NOT VALID;
+          END IF;
+        END
+        $$
+        """
+    )
+    cur.execute(
+        "ALTER TABLE jobs VALIDATE CONSTRAINT "
+        "jobs_no_attempt_recovery_fingerprint_valid"
+    )
+    cur.execute(
+        """
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+            WHERE conname='jobs_archive_expired_lease_policy_valid'
+              AND conrelid='jobs_archive'::regclass
+          ) THEN
+            ALTER TABLE jobs_archive ADD CONSTRAINT
+            jobs_archive_expired_lease_policy_valid
+            CHECK (expired_lease_policy IN ('consume_retry','requeue_no_attempt'))
+            NOT VALID;
+          END IF;
+        END
+        $$
+        """
+    )
+    cur.execute(
+        "ALTER TABLE jobs_archive VALIDATE CONSTRAINT "
+        "jobs_archive_expired_lease_policy_valid"
+    )
+    cur.execute(
+        """
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+            WHERE conname='jobs_archive_quarantine_threshold_positive'
+              AND conrelid='jobs_archive'::regclass
+          ) THEN
+            ALTER TABLE jobs_archive ADD CONSTRAINT
+            jobs_archive_quarantine_threshold_positive
+            CHECK (quarantine_threshold IS NULL OR quarantine_threshold > 0)
+            NOT VALID;
+          END IF;
+        END
+        $$
+        """
+    )
+    cur.execute(
+        "ALTER TABLE jobs_archive VALIDATE CONSTRAINT "
+        "jobs_archive_quarantine_threshold_positive"
+    )
+    cur.execute(
+        """
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+            WHERE conname='jobs_archive_prepared_disposition_fingerprint_valid'
+              AND conrelid='jobs_archive'::regclass
+          ) THEN
+            ALTER TABLE jobs_archive ADD CONSTRAINT
+            jobs_archive_prepared_disposition_fingerprint_valid
+            CHECK (
+              prepared_disposition_fingerprint IS NULL OR
+              prepared_disposition_fingerprint ~ '^[0-9a-f]{64}$'
+            ) NOT VALID;
+          END IF;
+        END
+        $$
+        """
+    )
+    cur.execute(
+        "ALTER TABLE jobs_archive VALIDATE CONSTRAINT "
+        "jobs_archive_prepared_disposition_fingerprint_valid"
+    )
+    cur.execute(
+        """
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+            WHERE conname='jobs_archive_no_attempt_recovery_fingerprint_valid'
+              AND conrelid='jobs_archive'::regclass
+          ) THEN
+            ALTER TABLE jobs_archive ADD CONSTRAINT
+            jobs_archive_no_attempt_recovery_fingerprint_valid
+            CHECK (
+              no_attempt_recovery_fingerprint IS NULL OR
+              no_attempt_recovery_fingerprint ~ '^[0-9a-f]{64}$'
+            ) NOT VALID;
+          END IF;
+        END
+        $$
+        """
+    )
+    cur.execute(
+        "ALTER TABLE jobs_archive VALIDATE CONSTRAINT "
+        "jobs_archive_no_attempt_recovery_fingerprint_valid"
+    )
+
+
 def _audit_slides_generation_pg(cur) -> tuple[str | None, int]:
     """Persist bounded legacy diagnostics before archive index creation."""
     cur.execute(
@@ -963,7 +1307,11 @@ def _audit_slides_generation_pg(cur) -> tuple[str | None, int]:
         f"""
         SELECT {active_projection}, {archived_projection},
                archived.payload_compressed AS archived_payload_compressed,
-               archived.result_compressed AS archived_result_compressed
+               archived.result_compressed AS archived_result_compressed,
+               active.payload IS NOT NULL AS active_payload_present,
+               active.result IS NOT NULL AS active_result_present,
+               archived.payload IS NOT NULL AS archived_payload_present,
+               archived.result IS NOT NULL AS archived_result_present
         FROM jobs active
         JOIN jobs_archive archived ON archived.uuid = active.uuid
         WHERE active.uuid IS NOT NULL AND BTRIM(active.uuid) <> ''
@@ -994,6 +1342,18 @@ def _audit_slides_generation_pg(cur) -> tuple[str | None, int]:
             archived_values["result_compressed"] = row.get(
                 "archived_result_compressed"
             )
+            active_values[SLIDES_ARCHIVE_PAYLOAD_PRESENT] = row.get(
+                "active_payload_present"
+            )
+            active_values[SLIDES_ARCHIVE_RESULT_PRESENT] = row.get(
+                "active_result_present"
+            )
+            archived_values[SLIDES_ARCHIVE_PAYLOAD_PRESENT] = row.get(
+                "archived_payload_present"
+            )
+            archived_values[SLIDES_ARCHIVE_RESULT_PRESENT] = row.get(
+                "archived_result_present"
+            )
         else:
             active_values = dict(
                 zip(SLIDES_ARCHIVE_EXACT_FIELDS, row[:projection_size])
@@ -1006,10 +1366,25 @@ def _audit_slides_generation_pg(cur) -> tuple[str | None, int]:
             )
             archived_values["payload_compressed"] = row[2 * projection_size]
             archived_values["result_compressed"] = row[2 * projection_size + 1]
+            active_values[SLIDES_ARCHIVE_PAYLOAD_PRESENT] = row[
+                2 * projection_size + 2
+            ]
+            active_values[SLIDES_ARCHIVE_RESULT_PRESENT] = row[
+                2 * projection_size + 3
+            ]
+            archived_values[SLIDES_ARCHIVE_PAYLOAD_PRESENT] = row[
+                2 * projection_size + 4
+            ]
+            archived_values[SLIDES_ARCHIVE_RESULT_PRESENT] = row[
+                2 * projection_size + 5
+            ]
         active = normalize_slides_archive_projection(active_values)
         archived = normalize_slides_archive_projection(archived_values)
         if any(
-            active.get(field) != archived.get(field)
+            not slides_archive_values_equal(
+                active.get(field),
+                archived.get(field),
+            )
             for field in SLIDES_ARCHIVE_EXACT_FIELDS
         ):
             cross_table_count += 1
@@ -1147,18 +1522,28 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
                     """
             )
             conn.commit()
+        _ensure_pg_archive_locators(_dsn)
         # Forward-migrate older installs: add missing columns that newer code expects
+        required_migration_exceptions = (
+            psycopg.Error,
+            SlidesArchiveNormalizationError,
+            *_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS,
+        )
+        try:
+            with psycopg.connect(_dsn) as required_conn, required_conn.cursor() as required_cur:
+                _configure_pg_archive_migration_session(required_cur)
+                _ensure_pg_execution_control_columns(required_cur)
+        except required_migration_exceptions as exc:
+            raise RuntimeError(
+                "PostgreSQL Jobs required schema migration failed"
+            ) from exc
         with psycopg.connect(_dsn, autocommit=True) as cfix, cfix.cursor() as f:
             _configure_pg_archive_migration_session(f, local=False)
-            required_migration_exceptions = (
-                psycopg.Error,
-                *_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS,
-            )
             try:
                 _ensure_pg_dependency_snapshot_columns(f)
             except required_migration_exceptions as exc:
                 raise RuntimeError(
-                    "PostgreSQL Jobs dependency snapshot migration failed"
+                    "PostgreSQL Jobs required schema migration failed"
                 ) from exc
             try:
                 f.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS completion_token TEXT")
@@ -1213,7 +1598,6 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
             except required_migration_exceptions:
                 # Best-effort; existing installs may restrict optional columns.
                 pass
-        _ensure_pg_archive_locators(_dsn)
         # Audit before creating the standalone archive indexes.
         slides_diagnostic: str | None = "ambiguous_generation_legacy_row"
         with psycopg.connect(_dsn) as audit_conn, audit_conn.cursor() as audit_cur:
@@ -1224,7 +1608,7 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
             except psycopg.Error:
                 audit_cur.execute("ROLLBACK TO SAVEPOINT slides_generation_audit")
                 audit_cur.execute("RELEASE SAVEPOINT slides_generation_audit")
-            except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
+            except _SLIDES_PG_AUDIT_EXCEPTIONS:
                 audit_cur.execute("ROLLBACK TO SAVEPOINT slides_generation_audit")
                 audit_cur.execute("RELEASE SAVEPOINT slides_generation_audit")
             else:

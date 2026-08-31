@@ -7,9 +7,12 @@ import ipaddress
 import math
 import re
 import ssl
+import time
 import zlib
 from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Literal, Protocol
 
 import certifi
@@ -110,8 +113,8 @@ class NormalizedHTTPHopRequest:
     port: int
     method: Literal["GET", "HEAD", "POST"]
     target: str = field(repr=False)
-    headers: tuple[tuple[str, str], ...] = ()
-    body: bytes = b""
+    headers: tuple[tuple[str, str], ...] = field(default=(), repr=False)
+    body: bytes = field(default=b"", repr=False)
     limits: HTTPHopLimits = field(default_factory=HTTPHopLimits)
 
     def __post_init__(self) -> None:
@@ -139,7 +142,57 @@ class HTTPHopResponse:
     wire_bytes: int
 
 
+@dataclass(frozen=True, slots=True)
+class StatusOnlyHTTPHopResponse:
+    """Status evidence that cannot expose receiver content or peer metadata."""
+
+    status_code: int
+    latency_ms: int
+    retry_after_seconds: int | None
+
+    def __post_init__(self) -> None:
+        if (
+            isinstance(self.status_code, bool)
+            or not isinstance(self.status_code, int)
+            or not 100 <= self.status_code <= 599
+        ):
+            raise ValueError("status_code must be a valid HTTP status")
+        if (
+            isinstance(self.latency_ms, bool)
+            or not isinstance(self.latency_ms, int)
+            or self.latency_ms < 0
+        ):
+            raise ValueError("latency_ms must be a non-negative integer")
+        if self.retry_after_seconds is not None:
+            if (
+                isinstance(self.retry_after_seconds, bool)
+                or not isinstance(self.retry_after_seconds, int)
+                or not 1 <= self.retry_after_seconds <= 1_800
+                or self.status_code not in {429, 503}
+            ):
+                raise ValueError("retry_after_seconds is invalid")
+
+
 _Resolver = Callable[[str, int, float], Awaitable[Sequence[str]]]
+
+
+class _Clock(Protocol):
+    """Clock shape shared by latency and HTTP-date calculations."""
+
+    def monotonic(self) -> float: ...
+
+    def utc_now(self) -> datetime: ...
+
+
+class _SystemClock:
+    def monotonic(self) -> float:
+        return time.monotonic()
+
+    def utc_now(self) -> datetime:
+        return datetime.now(timezone.utc)
+
+
+_SYSTEM_CLOCK = _SystemClock()
 
 
 def _invalid_request() -> HTTPHopError:
@@ -334,6 +387,7 @@ class _PeerEvidence:
     final_http_version: bytes | None = None
     final_status: int | None = None
     final_content_lengths: tuple[bytes, ...] = ()
+    final_retry_after_values: tuple[bytes, ...] = ()
 
 
 class _ContentDecoder(Protocol):
@@ -349,9 +403,16 @@ class _ContentDecoder(Protocol):
 class _RawResponseGuard:
     """Bound plaintext response headers and wire bytes before h11 sees them."""
 
-    def __init__(self, *, evidence: _PeerEvidence, limits: HTTPHopLimits) -> None:
+    def __init__(
+        self,
+        *,
+        evidence: _PeerEvidence,
+        limits: HTTPHopLimits,
+        response_mode: Literal["bounded_body", "status_only"],
+    ) -> None:
         self._evidence = evidence
         self._limits = limits
+        self._response_mode = response_mode
         self._pending = bytearray()
         self._scan_position = 0
         self._output_position = 0
@@ -368,6 +429,8 @@ class _RawResponseGuard:
             return self._read_pending(max_bytes)
 
         if self._final_headers_seen:
+            if self._response_mode == "status_only":
+                return b""
             return await self._read_wire(stream, max_bytes, timeout)
 
         while not self._final_headers_seen:
@@ -424,6 +487,10 @@ class _RawResponseGuard:
             self._scan_position = block_end
             if self._final_headers_seen:
                 body_bytes = len(self._pending) - block_end
+                if self._response_mode == "status_only":
+                    del self._pending[block_end:]
+                    self._evidence.wire_bytes = 0
+                    return
                 if body_bytes > self._limits.max_wire_bytes:
                     raise HTTPHopError("response_too_large")
                 self._evidence.wire_bytes = body_bytes
@@ -455,15 +522,22 @@ class _RawResponseGuard:
             return
 
         content_lengths: list[bytes] = []
+        retry_after_values: list[bytes] = []
         for line in field_lines:
             if not line or line[:1] in {b" ", b"\t"}:
                 continue
             name, separator, value = line.partition(b":")
-            if separator and name.lower() == b"content-length":
+            if not separator:
+                continue
+            normalized_name = name.lower()
+            if normalized_name == b"content-length":
                 content_lengths.append(value.strip(b" \t"))
+            elif normalized_name == b"retry-after":
+                retry_after_values.append(value)
         if len(content_lengths) > 1:
             raise HTTPHopError("protocol_error")
         self._evidence.final_content_lengths = tuple(content_lengths)
+        self._evidence.final_retry_after_values = tuple(retry_after_values)
         self._evidence.final_http_version = http_version
         self._evidence.final_status = status
         self._final_headers_seen = True
@@ -813,6 +887,72 @@ def _response_headers(response: httpcore.Response) -> tuple[tuple[str, str], ...
     return tuple((name.decode("ascii").lower(), value.decode("latin-1")) for name, value in response.headers)
 
 
+def _clock_failure() -> HTTPHopError:
+    return HTTPHopError("transport_error", retryable=True)
+
+
+def _monotonic_now(clock: _Clock) -> float:
+    try:
+        value = clock.monotonic()
+    except Exception:  # noqa: BLE001 - injected clock detail is not boundary-safe
+        raise _clock_failure() from None
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise _clock_failure()
+    return float(value)
+
+
+def _utc_now(clock: _Clock) -> datetime:
+    try:
+        value = clock.utc_now()
+        offset = value.utcoffset() if isinstance(value, datetime) else None
+        normalized = value.astimezone(timezone.utc) if offset is not None else None
+    except Exception:  # noqa: BLE001 - injected clock detail is not boundary-safe
+        raise _clock_failure() from None
+    if normalized is None:
+        raise _clock_failure()
+    return normalized
+
+
+def _latency_ms(clock: _Clock, started: float) -> int:
+    finished = _monotonic_now(clock)
+    elapsed_ms = (finished - started) * 1_000
+    if finished < started or not math.isfinite(elapsed_ms):
+        raise _clock_failure()
+    return int(elapsed_ms)
+
+
+def _retry_after_seconds(
+    evidence: _PeerEvidence,
+    *,
+    clock: _Clock,
+) -> int | None:
+    if evidence.final_status not in {429, 503}:
+        return None
+    if len(evidence.final_retry_after_values) != 1:
+        return None
+    raw_value = evidence.final_retry_after_values[0]
+    if any(byte < 32 or byte > 126 for byte in raw_value):
+        return None
+    value = raw_value.strip(b" ").decode("ascii")
+    if not value:
+        return None
+    if value.isdigit():
+        significant = value.lstrip("0") or "0"
+        seconds = 1_800 if len(significant) > 4 else int(significant)
+        return min(1_800, max(1, seconds))
+    try:
+        parsed = parsedate_to_datetime(value)
+        offset = parsed.utcoffset()
+    except (OverflowError, TypeError, ValueError):
+        return None
+    if offset is None:
+        return None
+    delay = (parsed.astimezone(timezone.utc) - _utc_now(clock)).total_seconds()
+    if not math.isfinite(delay):
+        raise _clock_failure()
+    return min(1_800, max(1, math.ceil(delay)))
+
+
 def _body_is_permitted(request: NormalizedHTTPHopRequest, status_code: int) -> bool:
     return request.method != "HEAD" and status_code not in {204, 205, 304}
 
@@ -948,16 +1088,30 @@ async def _read_decoded_body(
     return bytes(body)
 
 
+@dataclass(frozen=True, slots=True)
+class _StatusOnlyEvidence:
+    status_code: int
+    retry_after_seconds: int | None
+
+
 async def _perform_http_hop(
     request: NormalizedHTTPHopRequest,
     *,
     resolved_ips: tuple[str, ...],
     network_backend: httpcore.AsyncNetworkBackend,
-) -> HTTPHopResponse:
+    response_mode: Literal["bounded_body", "status_only"],
+    clock: _Clock | None,
+) -> HTTPHopResponse | _StatusOnlyEvidence:
+    if response_mode not in {"bounded_body", "status_only"}:
+        raise HTTPHopError("transport_error")
     selected_ip = resolved_ips[0]
     transport_headers = _transport_headers(request)
     evidence = _PeerEvidence()
-    response_guard = _RawResponseGuard(evidence=evidence, limits=request.limits)
+    response_guard = _RawResponseGuard(
+        evidence=evidence,
+        limits=request.limits,
+        response_mode=response_mode,
+    )
     tls_context = _build_tls_context() if request.scheme == "https" else None
     backend = _PinnedBackend(
         network_backend,
@@ -982,6 +1136,10 @@ async def _perform_http_hop(
         "read": request.limits.read_timeout_seconds,
         "write": request.limits.write_timeout_seconds,
     }
+    status_code: int | None = None
+    status_evidence: _StatusOnlyEvidence | None = None
+    headers: tuple[tuple[str, str], ...] | None = None
+    body: bytes | None = None
     async with httpcore.AsyncConnectionPool(
         ssl_context=tls_context,
         proxy=None,
@@ -1002,49 +1160,62 @@ async def _perform_http_hop(
         ) as response:
             if evidence.final_status is None or evidence.final_status != response.status:
                 raise HTTPHopError("protocol_error")
-            body_permitted = _body_is_permitted(request, response.status)
-            chunked = _transfer_is_chunked(response)
-            declared_length = _declared_content_length(evidence)
-            if chunked and evidence.final_http_version != b"1.1":
-                raise HTTPHopError("protocol_error")
-            if chunked and declared_length is not None:
-                raise HTTPHopError("protocol_error")
-            if response.status == 204 and (chunked or declared_length is not None):
-                raise HTTPHopError("protocol_error")
-            if body_permitted and not chunked and declared_length is not None:
-                if declared_length > request.limits.max_wire_bytes:
-                    raise HTTPHopError("response_too_large")
-            encoding = _content_encoding(response) if body_permitted else "identity"
-            body = await _read_decoded_body(
-                response,
-                encoding=encoding,
-                limits=request.limits,
-            )
-            if not body_permitted:
-                empty_chunked_205 = (
-                    request.method != "HEAD"
-                    and response.status == 205
-                    and chunked
-                    and not body
-                    and evidence.wire_bytes == 5
+            status_code = response.status
+            if response_mode == "status_only":
+                if clock is None:
+                    raise HTTPHopError("transport_error")
+                status_evidence = _StatusOnlyEvidence(
+                    status_code=response.status,
+                    retry_after_seconds=_retry_after_seconds(evidence, clock=clock),
                 )
-                if body or (evidence.wire_bytes and not empty_chunked_205):
+            else:
+                body_permitted = _body_is_permitted(request, response.status)
+                chunked = _transfer_is_chunked(response)
+                declared_length = _declared_content_length(evidence)
+                if chunked and evidence.final_http_version != b"1.1":
                     raise HTTPHopError("protocol_error")
-            if (
-                body_permitted
-                and not chunked
-                and declared_length is not None
-                and evidence.wire_bytes != declared_length
-            ):
-                raise HTTPHopError("protocol_error")
-            headers = _response_headers(response)
+                if chunked and declared_length is not None:
+                    raise HTTPHopError("protocol_error")
+                if response.status == 204 and (chunked or declared_length is not None):
+                    raise HTTPHopError("protocol_error")
+                if body_permitted and not chunked and declared_length is not None:
+                    if declared_length > request.limits.max_wire_bytes:
+                        raise HTTPHopError("response_too_large")
+                encoding = _content_encoding(response) if body_permitted else "identity"
+                body = await _read_decoded_body(
+                    response,
+                    encoding=encoding,
+                    limits=request.limits,
+                )
+                if not body_permitted:
+                    empty_chunked_205 = (
+                        request.method != "HEAD"
+                        and response.status == 205
+                        and chunked
+                        and not body
+                        and evidence.wire_bytes == 5
+                    )
+                    if body or (evidence.wire_bytes and not empty_chunked_205):
+                        raise HTTPHopError("protocol_error")
+                if (
+                    body_permitted
+                    and not chunked
+                    and declared_length is not None
+                    and evidence.wire_bytes != declared_length
+                ):
+                    raise HTTPHopError("protocol_error")
+                headers = _response_headers(response)
 
     if evidence.connected_ip is None:
         raise HTTPHopError("peer_verification_failed")
+    if status_evidence is not None:
+        return status_evidence
+    if status_code is None or headers is None or body is None:
+        raise HTTPHopError("transport_error")
     return HTTPHopResponse(
-        status_code=response.status,
+        status_code=status_code,
         headers=headers,
-        body=bytes(body),
+        body=body,
         resolved_ips=resolved_ips,
         connected_ip=evidence.connected_ip,
         response_header_bytes=evidence.response_header_bytes,
@@ -1052,13 +1223,14 @@ async def _perform_http_hop(
     )
 
 
-async def _execute_http_hop(
+async def _execute_http_hop_mode(
     request: NormalizedHTTPHopRequest,
     *,
     resolved_ips: Sequence[str],
     network_backend: httpcore.AsyncNetworkBackend,
-) -> HTTPHopResponse:
-    """Private deterministic transport seam; public callers cannot inject I/O."""
+    response_mode: Literal["bounded_body", "status_only"],
+    clock: _Clock | None,
+) -> HTTPHopResponse | _StatusOnlyEvidence:
     validated_ips = _validate_resolved_ips(resolved_ips)
     failure: HTTPHopError | None = None
     try:
@@ -1066,6 +1238,8 @@ async def _execute_http_hop(
             request,
             resolved_ips=validated_ips,
             network_backend=network_backend,
+            response_mode=response_mode,
+            clock=clock,
         )
     except HTTPHopError:
         raise
@@ -1082,6 +1256,44 @@ async def _execute_http_hop(
     except Exception:  # noqa: BLE001 - transport failures cross a sanitized boundary
         failure = HTTPHopError("transport_error")
     raise failure
+
+
+async def _execute_http_hop(
+    request: NormalizedHTTPHopRequest,
+    *,
+    resolved_ips: Sequence[str],
+    network_backend: httpcore.AsyncNetworkBackend,
+) -> HTTPHopResponse:
+    """Private deterministic bounded-body seam; public callers cannot inject I/O."""
+    response = await _execute_http_hop_mode(
+        request,
+        resolved_ips=resolved_ips,
+        network_backend=network_backend,
+        response_mode="bounded_body",
+        clock=None,
+    )
+    if not isinstance(response, HTTPHopResponse):
+        raise HTTPHopError("transport_error")
+    return response
+
+
+async def _execute_http_hop_status(
+    request: NormalizedHTTPHopRequest,
+    *,
+    resolved_ips: Sequence[str],
+    network_backend: httpcore.AsyncNetworkBackend,
+    clock: _Clock,
+) -> _StatusOnlyEvidence:
+    response = await _execute_http_hop_mode(
+        request,
+        resolved_ips=resolved_ips,
+        network_backend=network_backend,
+        response_mode="status_only",
+        clock=clock,
+    )
+    if not isinstance(response, _StatusOnlyEvidence):
+        raise HTTPHopError("transport_error")
+    return response
 
 
 async def _request_http_hop(
@@ -1113,6 +1325,43 @@ async def _request_http_hop(
         raise HTTPHopError("total_timeout", retryable=True) from None
 
 
+async def _request_http_hop_status(
+    request: NormalizedHTTPHopRequest,
+    *,
+    resolver: _Resolver,
+    network_backend: httpcore.AsyncNetworkBackend,
+    clock: _Clock,
+) -> StatusOnlyHTTPHopResponse:
+    """Private deterministic status-only seam covered by the whole-hop deadline."""
+    if not isinstance(request, NormalizedHTTPHopRequest):
+        raise HTTPHopError("invalid_request")
+    started = _monotonic_now(clock)
+
+    async def execute() -> _StatusOnlyEvidence:
+        resolved_ips = await _resolve_validated_ips(request, resolver=resolver)
+        return await _execute_http_hop_status(
+            request,
+            resolved_ips=resolved_ips,
+            network_backend=network_backend,
+            clock=clock,
+        )
+
+    try:
+        evidence = await asyncio.wait_for(
+            execute(),
+            timeout=min(request.limits.total_timeout_seconds, 30.0),
+        )
+    except asyncio.CancelledError:
+        raise
+    except asyncio.TimeoutError:
+        raise HTTPHopError("total_timeout", retryable=True) from None
+    return StatusOnlyHTTPHopResponse(
+        status_code=evidence.status_code,
+        latency_ms=_latency_ms(clock, started),
+        retry_after_seconds=evidence.retry_after_seconds,
+    )
+
+
 async def request_http_hop(
     request: NormalizedHTTPHopRequest,
 ) -> HTTPHopResponse:
@@ -1124,11 +1373,25 @@ async def request_http_hop(
     )
 
 
+async def request_http_hop_status(
+    request: NormalizedHTTPHopRequest,
+) -> StatusOnlyHTTPHopResponse:
+    """Perform one production-only hop and retain no receiver body or metadata."""
+    return await _request_http_hop_status(
+        request,
+        resolver=_default_resolver,
+        network_backend=httpcore.AnyIOBackend(),
+        clock=_SYSTEM_CLOCK,
+    )
+
+
 __all__ = [
     "HTTPHopError",
     "HTTPHopErrorCode",
     "HTTPHopLimits",
     "HTTPHopResponse",
     "NormalizedHTTPHopRequest",
+    "StatusOnlyHTTPHopResponse",
     "request_http_hop",
+    "request_http_hop_status",
 ]

@@ -15,6 +15,9 @@ from tldw_Server_API.app.core.Jobs.operations.contracts import (
     AdmissionRejectionReason,
     AdmissionResult,
     CreateJobCommand,
+    OperationOutcome,
+    canonical_admin_webhook_row_matches,
+    is_admin_webhook_delivery_queue,
 )
 
 _MAX_QUEUED_MESSAGE = "Quota exceeded: max queued per user/domain"
@@ -22,6 +25,21 @@ _SUBMITS_PER_MINUTE_MESSAGE = "Quota exceeded: submits per minute"
 _PSYCOPG_REQUIRED_MESSAGE = "psycopg is required for PostgreSQL quota admission"
 _IDEMPOTENT_CONFLICT_ATTEMPTS = 3
 _IDEMPOTENT_CONFLICT_LOST_MESSAGE = "Idempotent job conflict repeatedly disappeared during admission"
+_EXECUTION_CONTROL_CONFLICT_MESSAGE = "Idempotent job execution controls conflict"
+
+
+def _execution_controls_match(row: dict[str, Any], command: CreateJobCommand) -> bool:
+    """Return whether an existing row has the requested immutable controls."""
+
+    if is_admin_webhook_delivery_queue(command.domain, command.queue):
+        return canonical_admin_webhook_row_matches(
+            row,
+            expected_payload=command.payload,
+        )
+    return (
+        row.get("expired_lease_policy") == command.expired_lease_policy.value
+        and row.get("quarantine_threshold") == command.quarantine_threshold
+    )
 
 try:
     import psycopg as _psycopg  # type: ignore
@@ -234,14 +252,14 @@ def _insert_job(
 ) -> dict[str, Any] | None:
     if idempotent_insert:
         sql = (
-            "INSERT INTO jobs (uuid, domain, queue, job_type, owner_user_id, project_id, batch_group, idempotency_key, payload, result, status, priority, max_retries, retry_count, available_at, created_at, updated_at, request_id, trace_id) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, NULL, 'queued', %s, %s, 0, %s, NOW(), NOW(), %s, %s) "
+            "INSERT INTO jobs (uuid, domain, queue, job_type, owner_user_id, project_id, batch_group, idempotency_key, payload, result, status, priority, max_retries, expired_lease_policy, quarantine_threshold, retry_count, available_at, created_at, updated_at, request_id, trace_id) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, NULL, 'queued', %s, %s, %s, %s, 0, %s, NOW(), NOW(), %s, %s) "
             "ON CONFLICT (domain, queue, job_type, idempotency_key) DO NOTHING RETURNING *"
         )
     else:
         sql = (
-            "INSERT INTO jobs (uuid, domain, queue, job_type, owner_user_id, project_id, batch_group, idempotency_key, payload, result, status, priority, max_retries, retry_count, available_at, created_at, updated_at, request_id, trace_id) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, NULL, 'queued', %s, %s, 0, %s, NOW(), NOW(), %s, %s) RETURNING *"
+            "INSERT INTO jobs (uuid, domain, queue, job_type, owner_user_id, project_id, batch_group, idempotency_key, payload, result, status, priority, max_retries, expired_lease_policy, quarantine_threshold, retry_count, available_at, created_at, updated_at, request_id, trace_id) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, NULL, 'queued', %s, %s, %s, %s, 0, %s, NOW(), NOW(), %s, %s) RETURNING *"
         )
     cur.execute(
         sql,
@@ -257,6 +275,8 @@ def _insert_job(
             payload_json,
             command.priority,
             command.max_retries,
+            command.expired_lease_policy.value,
+            command.quarantine_threshold,
             available_at,
             command.request_id,
             command.trace_id,
@@ -358,6 +378,12 @@ def create_job_admission(
                     payload_json=payload_json,
                     available_at=available_at,
                 )
+                if not inserted and not _execution_controls_match(row, command):
+                    return AdmissionResult(
+                        outcome=OperationOutcome.BACKEND_CONFLICT,
+                        row=row,
+                        message=_EXECUTION_CONTROL_CONFLICT_MESSAGE,
+                    )
                 if inserted and counters_enabled:
                     _bump_counters_best_effort(cur, command=command, available_at=available_at)
                 event = _insert_created_event(
