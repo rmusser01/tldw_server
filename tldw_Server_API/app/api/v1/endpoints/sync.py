@@ -240,6 +240,10 @@ def _safe_sync_v2_http_error(exc: Exception, **context: object) -> HTTPException
                 status.HTTP_409_CONFLICT,
                 "Personal Context bootstrap link is unavailable.",
             ),
+            "personal_context_link_binding_stale": (
+                status.HTTP_409_CONFLICT,
+                "Personal Context bootstrap link binding is stale.",
+            ),
             "personal_context_bootstrap_cursor_stale": (
                 status.HTTP_409_CONFLICT,
                 "Personal Context bootstrap cursor is stale.",

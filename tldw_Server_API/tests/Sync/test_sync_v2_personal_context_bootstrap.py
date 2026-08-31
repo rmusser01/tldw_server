@@ -69,6 +69,8 @@ class _CanonicalService:
         self.profile_exists = True
         self.created = 0
         self.applied: list[object] = []
+        self.integrity_key_id = "personal-context-integrity-v1"
+        self.integrity_key = _INTEGRITY_KEY
 
     def create_profile(self, *, runtime_enabled: bool = False):
         del runtime_enabled
@@ -99,12 +101,13 @@ class _CanonicalService:
 
     def sync_integrity_key(self, profile_id: str) -> tuple[str, bytes]:
         assert profile_id == self.manifest.profile_id
-        return "personal-context-integrity-v1", _INTEGRITY_KEY
+        return self.integrity_key_id, self.integrity_key
 
     def sync_bootstrap_snapshot(self):
         entries = [
             f"manifest:{self.manifest.profile_id}:{self.manifest.current_version_id}",
             f"purge:{self.manifest.purge_generation}",
+            f"integrity:{self.integrity_key_id}",
             f"scope:{self.scope.scope_id}:{self.scope.version_id}",
             *(
                 f"record:{item.record_id}:{item.version_id}" for item in self.records
@@ -119,8 +122,8 @@ class _CanonicalService:
         return type("Snapshot", (), {
             "manifest": self.manifest, "scopes": self.list_scopes(),
             "records": self.records, "proposals": self.proposals,
-            "integrity_key_id": "personal-context-integrity-v1",
-            "integrity_key": _INTEGRITY_KEY,
+            "integrity_key_id": self.integrity_key_id,
+            "integrity_key": self.integrity_key,
             "cursor": "personal-context-bootstrap-v1:" + hashlib.sha256(
                 "\x1e".join(sorted(entries)).encode("utf-8")
             ).hexdigest(),
@@ -279,6 +282,66 @@ def test_bootstrap_returns_registered_device_wrapped_integrity_key_only(tmp_path
         bootstrap.integrity_key.wrapped_key_blob
     ]
     assert _INTEGRITY_KEY.hex() not in str(bootstrap)
+
+
+def test_bootstrap_requires_transactional_canonical_snapshot(tmp_path: Path) -> None:
+    """A legacy canonical service cannot bypass the atomic snapshot boundary."""
+
+    service, _canonical = _service(tmp_path)
+    service.personal_context_service_resolver = lambda _user_id: object()
+
+    with pytest.raises(Exception) as exc_info:
+        _bootstrap(service)
+
+    assert getattr(exc_info.value, "reason_code", None) == "personal_context_snapshot_unavailable"
+
+
+def test_integrity_key_transition_invalidates_old_completion_and_rebinds_fresh_bootstrap(
+    tmp_path: Path,
+) -> None:
+    """Link admission is bound to the canonical integrity-key generation."""
+
+    service, canonical = _service(tmp_path)
+    first = _bootstrap(service)
+    canonical.integrity_key_id = "personal-context-integrity-v2"
+    canonical.integrity_key = b"b" * 32
+    second = _bootstrap(service)
+
+    assert second.cursor != first.cursor
+    assert second.integrity_key.integrity_key_id == "personal-context-integrity-v2"
+    assert "personal-context-integrity-v2" in second.integrity_key.wrapped_key_blob
+
+    with pytest.raises(Exception) as exc_info:
+        service.complete_personal_context_link(
+            user_id="user-a",
+            device_id="device-a",
+            dataset_id=first.dataset_id,
+            bootstrap_cursor=first.cursor,
+        )
+    assert getattr(exc_info.value, "reason_code", None) == "personal_context_bootstrap_cursor_stale"
+    assert not service.store.has_personal_context_link_receipt(
+        user_id="user-a",
+        dataset_id=first.dataset_id,
+        device_id="device-a",
+        profile_id=canonical.manifest.profile_id,
+        integrity_key_id="personal-context-integrity-v2",
+        purge_generation=canonical.manifest.purge_generation,
+    )
+
+    service.complete_personal_context_link(
+        user_id="user-a",
+        device_id="device-a",
+        dataset_id=second.dataset_id,
+        bootstrap_cursor=second.cursor,
+    )
+    assert service.store.has_personal_context_link_receipt(
+        user_id="user-a",
+        dataset_id=second.dataset_id,
+        device_id="device-a",
+        profile_id=canonical.manifest.profile_id,
+        integrity_key_id="personal-context-integrity-v2",
+        purge_generation=canonical.manifest.purge_generation,
+    )
 
 
 @pytest.mark.parametrize(

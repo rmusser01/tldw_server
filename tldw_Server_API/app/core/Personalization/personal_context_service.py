@@ -220,6 +220,7 @@ class PersonalContextService:
         cursor_values = [
             f"manifest:{manifest.profile_id}:{manifest.current_version_id}",
             f"purge:{manifest.purge_generation}",
+            f"integrity:{key_id}",
             *(f"scope:{item.scope_id}:{item.version_id}" for item in scopes),
             *(f"record:{item.record_id}:{item.version_id}" for item in records),
             *(
