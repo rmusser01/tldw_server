@@ -111,6 +111,19 @@ class _RunBudget:
         self.provider_requests = next_requests
         return plan
 
+    def reconcile_requests(
+        self,
+        reservation: SemanticEmbeddingPlan,
+        actual_request_count: object,
+    ) -> None:
+        if (
+            type(actual_request_count) is not int
+            or actual_request_count < 0
+            or actual_request_count > reservation.request_count
+        ):
+            raise SemanticIndexingError("notes_semantic_embedding_usage_invalid")
+        self.provider_requests -= reservation.request_count - actual_request_count
+
 
 class VersionedNoteReader(Protocol):
     async def list_note_versions(
@@ -592,14 +605,10 @@ class SemanticGenerationBuilder:
                         raise SemanticIndexingError(
                             "notes_semantic_embedding_identity_mismatch"
                         )
-                    if (
-                        type(batch.provider_request_count) is not int
-                        or batch.provider_request_count < 0
-                        or batch.provider_request_count != admitted.request_count
-                    ):
-                        raise SemanticIndexingError(
-                            "notes_semantic_embedding_usage_invalid"
-                        )
+                    budget.reconcile_requests(
+                        admitted,
+                        batch.provider_request_count,
+                    )
                     vectors = tuple(
                         SemanticVector(chunk.vector_id, tuple(vector))
                         for chunk, vector in zip(chunks, batch.vectors)

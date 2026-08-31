@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.base import (
+    BackendType,
     DatabaseConfig,
+    QueryResult,
 )
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
@@ -29,6 +32,55 @@ pytestmark = [pytest.mark.integration, pytest.mark.timeout(30)]
 
 _TABLE = "note_semantic_obsolete_vectors"
 _NOW = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+
+
+class _FakeTransaction:
+    def __enter__(self) -> object:
+        return object()
+
+    def __exit__(self, exc_type: object, exc: object, tb: object) -> bool:
+        return False
+
+
+class _FakeBackend:
+    backend_type = BackendType.POSTGRESQL
+
+    def transaction(self) -> _FakeTransaction:
+        return _FakeTransaction()
+
+    def table_exists(self, _name: str, connection: object = None) -> bool:
+        return True
+
+
+def _fake_postgres_initializer(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    current_version: int,
+    target_version: int,
+) -> CharactersRAGDB:
+    db = CharactersRAGDB.__new__(CharactersRAGDB)
+    db._backend = _FakeBackend()
+    db._uses_shared_content_backend = False
+    db._backend_refresh_suspended = False
+    db._local = SimpleNamespace()
+
+    monkeypatch.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", target_version)
+    monkeypatch.setattr(
+        db,
+        "_get_schema_version_postgres",
+        lambda _conn, lock=False: current_version,
+    )
+    monkeypatch.setattr(db, "_verify_note_attachment_schema_postgres", lambda _conn: None)
+    monkeypatch.setattr(db, "_verify_note_task_schema_postgres", lambda _conn: None)
+    monkeypatch.setattr(db, "_verify_notes_moodboard_studio_schema_postgres", lambda _conn: None)
+    monkeypatch.setattr(db, "_ensure_note_graph_suggestion_schema_postgres", lambda _conn: None)
+    monkeypatch.setattr(db, "_ensure_note_semantic_schema_postgres", lambda _conn: None)
+    monkeypatch.setattr(
+        db,
+        "_configure_notes_moodboard_studio_v61_postgres_transaction",
+        lambda _conn: None,
+    )
+    return db
 
 
 def _seed_complete_semantic_generation(db: CharactersRAGDB) -> tuple[str, str, str, str]:
@@ -153,6 +205,46 @@ def test_postgres_v66_ddl_is_owner_scoped_forced_rls_and_has_no_cascading_author
     assert "idx_note_semantic_obsolete_vectors_generation" in sql
     assert "REFERENCES notes" not in sql
     assert "REFERENCES note_semantic_generations" not in sql
+
+
+def test_postgres_initializer_routes_schema_v65_through_v66(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db = _fake_postgres_initializer(
+        monkeypatch,
+        current_version=65,
+        target_version=66,
+    )
+
+    def _reached_v66(_conn: object) -> None:
+        raise RuntimeError("reached-v66")
+
+    monkeypatch.setattr(db, "_migrate_from_v65_to_v66_postgres", _reached_v66)
+
+    with pytest.raises(RuntimeError, match="^reached-v66$"):
+        db._initialize_schema_postgres()
+
+
+def test_postgres_initializer_honors_target_v65_without_dispatching_v66(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db = _fake_postgres_initializer(
+        monkeypatch,
+        current_version=65,
+        target_version=65,
+    )
+
+    def _unexpected_v66(_conn: object) -> None:
+        pytest.fail("v66 migration dispatched for a v65 target")
+
+    def _stayed_at_v65(_conn: object) -> None:
+        raise RuntimeError("stayed-v65")
+
+    monkeypatch.setattr(db, "_migrate_from_v65_to_v66_postgres", _unexpected_v66)
+    monkeypatch.setattr(db, "_ensure_flashcard_asset_schema_postgres", _stayed_at_v65)
+
+    with pytest.raises(RuntimeError, match="^stayed-v65$"):
+        db._initialize_schema_postgres()
 
 
 def test_postgres_v66_live_schema_has_cleanup_constraints_indexes_and_forced_rls(
@@ -372,68 +464,99 @@ def test_postgres_v66_ledger_enforces_exact_tenant_scope_and_fails_closed(
             backend.execute(f"GRANT {ident(role_name)} TO CURRENT_USER", connection=conn)
         role_created = True
 
-        with backend.transaction() as conn:
-            backend.execute(f"SET LOCAL ROLE {ident(role_name)}", connection=conn)
-            backend.execute("SET LOCAL row_security=on", connection=conn)
-            backend.execute(
-                "SELECT set_config('app.current_user_id', %s, true)",
-                ("owner-a",),
-                connection=conn,
-            )
-            backend.execute(
-                "SELECT set_config('app.current_dataset_id', %s, true)",
-                ("dataset-a",),
-                connection=conn,
-            )
-            assert backend.execute(
-                f"SELECT vector_id FROM {_TABLE} ORDER BY vector_id",  # nosec B608
-                connection=conn,
-            ).rows == [{"vector_id": "vector-a"}]
-
-        with pytest.raises(BackendDatabaseError):
+        def execute_as_scope(
+            owner_user_id: str,
+            dataset_id: str | None,
+            sql: str,
+            params: tuple[object, ...] = (),
+        ) -> QueryResult:
             with backend.transaction() as conn:
                 backend.execute(f"SET LOCAL ROLE {ident(role_name)}", connection=conn)
                 backend.execute("SET LOCAL row_security=on", connection=conn)
                 backend.execute(
                     "SELECT set_config('app.current_user_id', %s, true)",
-                    ("owner-a",),
+                    (owner_user_id,),
                     connection=conn,
                 )
-                backend.execute(
-                    "SELECT set_config('app.current_dataset_id', %s, true)",
-                    ("dataset-a",),
-                    connection=conn,
-                )
-                backend.execute(
-                    f"INSERT INTO {_TABLE}(id,owner_user_id,dataset_id,generation_id,"  # nosec B608
-                    "vector_id,source_kind,claim_state,attempt_count,next_eligible_at,"
-                    "created_at,updated_at) VALUES (%s,%s,%s,%s,%s,'hard_delete',"
-                    "'pending',0,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)",
-                    (
-                        "forged-cleanup",
-                        "owner-b",
-                        "dataset-b",
-                        "generation-b",
-                        "forged-vector",
-                    ),
-                    connection=conn,
-                )
+                if dataset_id is None:
+                    backend.execute(
+                        "SET LOCAL app.current_dataset_id TO DEFAULT",
+                        connection=conn,
+                    )
+                else:
+                    backend.execute(
+                        "SELECT set_config('app.current_dataset_id', %s, true)",
+                        (dataset_id,),
+                        connection=conn,
+                    )
+                return backend.execute(sql, params, connection=conn)
 
-        with backend.transaction() as conn:
-            backend.execute(f"SET LOCAL ROLE {ident(role_name)}", connection=conn)
-            backend.execute("SET LOCAL row_security=on", connection=conn)
-            backend.execute(
-                "SELECT set_config('app.current_user_id', %s, true)",
-                ("owner-a",),
-                connection=conn,
-            )
-            backend.execute("SET LOCAL app.current_dataset_id TO DEFAULT", connection=conn)
-            assert int(
-                backend.execute(
-                    f"SELECT COUNT(*) FROM {_TABLE}",  # nosec B608
-                    connection=conn,
-                ).scalar
-            ) == 0
+        select_sql = f"SELECT vector_id FROM {_TABLE} ORDER BY vector_id"  # nosec B608
+        assert execute_as_scope("owner-a", "dataset-a", select_sql).rows == [
+            {"vector_id": "vector-a"}
+        ]
+
+        mismatched_scopes = (
+            ("owner-a", "dataset-b", "wrong-dataset"),
+            ("owner-b", "dataset-a", "wrong-owner"),
+        )
+        insert_sql = (
+            f"INSERT INTO {_TABLE}(id,owner_user_id,dataset_id,generation_id,"  # nosec B608
+            "vector_id,source_kind,claim_state,attempt_count,next_eligible_at,"
+            "created_at,updated_at) VALUES (%s,%s,%s,%s,%s,'hard_delete',"
+            "'pending',0,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)"
+        )
+        update_sql = (
+            f"UPDATE {_TABLE} SET error_code='rls-forged' WHERE vector_id=%s "  # nosec B608
+            "RETURNING vector_id"
+        )
+        delete_sql = (
+            f"DELETE FROM {_TABLE} WHERE vector_id=%s RETURNING vector_id"  # nosec B608
+        )
+        for scoped_owner, scoped_dataset, suffix in mismatched_scopes:
+            assert execute_as_scope(scoped_owner, scoped_dataset, select_sql).rows == []
+            with pytest.raises(BackendDatabaseError):
+                execute_as_scope(
+                    scoped_owner,
+                    scoped_dataset,
+                    insert_sql,
+                    (
+                        f"forged-cleanup-{suffix}",
+                        "owner-a",
+                        "dataset-a",
+                        "generation-a",
+                        f"forged-vector-{suffix}",
+                    ),
+                )
+            assert execute_as_scope(
+                scoped_owner,
+                scoped_dataset,
+                update_sql,
+                ("vector-a",),
+            ).rows == []
+            assert execute_as_scope(
+                scoped_owner,
+                scoped_dataset,
+                delete_sql,
+                ("vector-a",),
+            ).rows == []
+
+        assert execute_as_scope("owner-a", None, select_sql).rows == []
+        assert execute_as_scope(
+            "owner-a",
+            "dataset-a",
+            update_sql,
+            ("vector-a",),
+        ).rows == [{"vector_id": "vector-a"}]
+        assert execute_as_scope(
+            "owner-a",
+            "dataset-a",
+            delete_sql,
+            ("vector-a",),
+        ).rows == [{"vector_id": "vector-a"}]
+        assert execute_as_scope("owner-b", "dataset-b", select_sql).rows == [
+            {"vector_id": "vector-b"}
+        ]
     finally:
         db_a.close_connection()
         db_b.close_connection()
