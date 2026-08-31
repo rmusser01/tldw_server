@@ -3,20 +3,19 @@ id: TASK-13134
 title: Implement Notes embedding index and semantic graph edges
 status: In Progress
 assignee: []
-created_date: '2026-08-27 02:20'
-updated_date: '2026-08-31 13:50'
+created_date: 2026-08-27 02:20
+updated_date: 2026-08-31 17:22
 labels:
-  - notes
-  - notes-graph
-  - embeddings
-  - second-brain
-  - backend
+- notes
+- notes-graph
+- embeddings
+- second-brain
+- backend
 dependencies:
-  - TASK-13138
+- TASK-13138
 documentation:
-  - Docs/superpowers/specs/2026-08-29-notes-semantic-index-design.md
-  - >-
-    Docs/superpowers/plans/2026-08-29-notes-semantic-index-implementation-plan.md
+- Docs/superpowers/specs/2026-08-29-notes-semantic-index-design.md
+- Docs/superpowers/plans/2026-08-29-notes-semantic-index-implementation-plan.md
 priority: medium
 ---
 
@@ -43,7 +42,6 @@ Approved executable plan: `Docs/superpowers/plans/2026-08-29-notes-semantic-inde
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - 2026-08-29: Senior implementation-constraint review identified required spec corrections for user-scoped run APIs, semantic opt-in compatibility, evidence offsets, vector-only backend contracts, DSR erasure, graph admission/async composition, dimension and activation rules, cache freshness, and restore semantics.
 - Design specification: `Docs/superpowers/specs/2026-08-29-notes-semantic-index-design.md`
@@ -72,19 +70,18 @@ Approved executable plan: `Docs/superpowers/plans/2026-08-29-notes-semantic-inde
 - 2026-08-30 Task 6 complete: Added fenced initial/incremental Notes semantic generation publication with durable v66 obsolete-vector cleanup, cancellation-reconciled transactions, exact endpoint/credential/model/configuration authority, bounded provider accounting, active per-Note delta counters, atomic convergence reseeding, production cleanup rearm, and SQLite/PostgreSQL property/race/RLS coverage. Bounded review 5/5 clean after four fix rounds. Final verification: 106 exact Task 6 tests, 141 adjacent persistence/migration/lifecycle/Sync tests, 134 vector tests with 6 expected capability skips, property seeds 3/17/101, Ruff, Bandit, Python 3.10 compilation, and diff checks passed. Implementation range: `ff2a0ce102..40a06e3bde`; report: `.superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-6-report.md`.
 - 2026-08-30 Task 7 fix round 5/5: Addressed the two confirmed review-4 races without schema or public API changes. PostgreSQL now serializes receipt admission, root-generation creation, and activation with one deterministic owner/dataset transaction advisory lock; SQLite retains BEGIN IMMEDIATE. Valid unexpired cancel receipts fence late creation and both activation paths, stale revision requests cannot establish intent, and store cancellation preserves SemanticJobCancelled semantics.
 - Verification: focused race/isolation/expiry 10 passed; exact Task 7 four-file suite 81 passed; semantic migration/store/indexing/publication 169 passed; live PostgreSQL semantic aggregate 31 passed with 6 optional pgvector skips. Ruff clean, Bandit zero findings with B101 excluded, Python 3.10.20 compile clean, and git diff --check clean.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 2026-08-30 Task 7 complete: Added bounded Jobs-backed Notes semantic indexing, seven nested user-scoped run/configuration routes, startup recovery, maintenance, content-free public Jobs results, durable provider-revision authority, idempotent receipts, typed cancellation, and serialized PostgreSQL owner/dataset mutation authority. Bounded review 5/5 clean. Final verification: 81 exact Task 7 tests, 151 affected semantic tests, 31 live PostgreSQL tests with 6 expected pgvector skips, Ruff, Bandit, Python 3.10 compile, and diff checks passed. Implementation range: 1df5000e887e..4c38e8904969; report: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-7-report.md.
 
 2026-08-31 Task 8 complete: Added frozen legacy graph defaults, semantic edge/status/evidence schemas, bounded first-page candidate projection, public/candidate cache separation, immutable requested/effective semantic query identity, single-assignment semantic cursors, two-pass revision fencing, and ordinary continuation cache identity independent of outer semantic bindings. Bounded review 5/5 completed with all findings resolved. Final verification: 142 Task 8 tests passed; Ruff, Bandit (0 findings/errors), Python 3.10 compilation, and diff checks clean. Implementation range: 048523a7964a..a9352c010f; report: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-8-report.md.
-<!-- SECTION:NOTES:END -->
-
+2026-08-31 Task 9 implementation resumed directly in the existing worktree. Approved five-file RED reproduced: four collection errors for missing semantic_scoring.py, semantic_projector.py, and SemanticProjectionChunk. Proceeding within the Task 9 async projection, evidence, endpoint, and manual-conversion scope.
+2026-08-31 Task 9 complete: Added bounded async semantic scoring/projection at the nested Notes graph endpoint, owner/dataset/generation-scoped current-manifest reads, deterministic authority filtering and precedence composition, bounded evidence with response-cap omission markers, stable semantic cache/cursor binding, dynamic semantic graph rate accounting, and explicit conversion through the existing canonical Sync-aware manual-link path with durable content-free audit. Independent review completed with all findings resolved, including final semantic-binding race checks and synchronous audit flush. Verification: reviewed set 120 passed; complete Notes Graph suite 1012 passed with 6 optional live pgvector/PostgreSQL skips; manual-conversion integration 7 passed; Ruff, Bandit (zero findings), Python 3.10 compilation, and diff checks clean. Implementation commit: 9e675b83c5; report: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-9-report.md.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-TASK-13134 remains in progress after completion of implementation Tasks 1 through 8. Owner-scoped persistence, Note lifecycle hooks, capability/RBAC controls, canonical chunking and provider execution, vector-only ChromaDB/pgvector storage, fenced generation publication, bounded Jobs/API/recovery/maintenance orchestration, and backward-compatible semantic graph contracts are complete. Task 9 async semantic retrieval, authority revalidation, evidence reconstruction, deterministic precedence composition, endpoint integration, and manual conversion validation are next.
+TASK-13134 remains In Progress after implementation Tasks 1 through 9. Owner-scoped persistence and Note lifecycle hooks, capability/RBAC controls, canonical chunking and provider execution, vector-only ChromaDB/pgvector storage, fenced publication, bounded Jobs/API/recovery/maintenance orchestration, backward-compatible graph contracts, and reviewed async semantic graph projection with evidence and canonical manual conversion are complete. Task 10 semantic DSR/erasure integration is next, followed by the shared client/UI, visual evidence/conversion workflows, documentation, and integrated release gates.
 <!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed
