@@ -19,6 +19,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     TokenScopeGuard,
     User,
     get_request_user,
+    principal_has_admin_bypass_claims,
     rbac_rate_limit,
 )
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
@@ -38,6 +39,7 @@ from tldw_Server_API.app.core.AuthNZ.permissions import (
     NOTES_GRAPH_READ,
     NOTES_GRAPH_SEMANTIC_MANAGE,
 )
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.Notes_Graph.semantic_api import (
     SemanticAPIError,
     build_notes_semantic_api,
@@ -193,7 +195,7 @@ async def _call(operation: Callable[[], _T]) -> _T:
 )
 async def get_semantic_capabilities(
     api: Any = Depends(get_semantic_api),
-    _principal: Any = Depends(require_semantic_read),
+    principal: AuthPrincipal = Depends(require_semantic_read),
     _rate: None = Depends(rbac_rate_limit("notes.graph.read")),
     _scope: None = Depends(
         TokenScopeGuard(
@@ -204,7 +206,17 @@ async def get_semantic_capabilities(
     ),
 ) -> SemanticCapabilitiesResponse:
     capabilities = await _call(api.capabilities)
-    return SemanticCapabilitiesResponse.model_validate(capabilities, from_attributes=True)
+    response = SemanticCapabilitiesResponse.model_validate(
+        capabilities,
+        from_attributes=True,
+    )
+    permissions = set(principal.permissions)
+    return response.model_copy(
+        update={
+            "manage_authorized": principal_has_admin_bypass_claims(principal)
+            or NOTES_GRAPH_SEMANTIC_MANAGE in permissions
+        }
+    )
 
 
 @router.get(

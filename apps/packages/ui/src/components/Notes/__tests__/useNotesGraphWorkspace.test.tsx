@@ -347,7 +347,17 @@ describe("useNotesGraphWorkspace", () => {
           null,
           1,
           120,
-          480
+          480,
+          false,
+          [
+            "manual",
+            "wikilink",
+            "backlink",
+            "tag_membership",
+            "source_membership"
+          ],
+          0.75,
+          10
         ])
       }
 
@@ -408,7 +418,17 @@ describe("useNotesGraphWorkspace", () => {
         "note:a",
         1,
         120,
-        480
+        480,
+        false,
+        [
+          "manual",
+          "wikilink",
+          "backlink",
+          "tag_membership",
+          "source_membership"
+        ],
+        0.75,
+        10
       ])
       expect(
         scopeAData?.pages.flatMap((page) => page.nodes.map((node) => node.id))
@@ -1141,5 +1161,208 @@ describe("useNotesGraphWorkspace", () => {
 
     expect(consoleError).not.toHaveBeenCalled()
     consoleError.mockRestore()
+  })
+
+  it("keeps semantic off by default and binds the complete edge set and controls into query identity", async () => {
+    mocks.fetchNotesGraph.mockResolvedValue(graph())
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: Infinity } }
+    })
+    const { result } = renderHook(
+      () =>
+        useNotesGraphWorkspace({
+          authorityScope: "authority-a",
+          enabled: true,
+          isOnline: true,
+          initialFocusNoteId: "note:a",
+          datasetId: "dataset-a"
+        }),
+      { wrapper: wrapper(client) }
+    )
+    await flush()
+
+    const ordinaryEdgeTypes = [
+      "manual",
+      "wikilink",
+      "backlink",
+      "tag_membership",
+      "source_membership"
+    ]
+    expect(result.current.semantic.enabled).toBe(false)
+    expect(mocks.fetchNotesGraph).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        edgeTypes: ordinaryEdgeTypes,
+        semanticThreshold: undefined,
+        semanticTopK: undefined
+      })
+    )
+
+    act(() => result.current.semantic.setEnabled(true))
+    await flush()
+
+    expect(mocks.fetchNotesGraph).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        edgeTypes: [...ordinaryEdgeTypes, "semantic"],
+        semanticThreshold: 0.75,
+        semanticTopK: 10
+      })
+    )
+    expect(
+      client
+        .getQueryCache()
+        .findAll()
+        .some(
+          (query) =>
+            JSON.stringify(query.queryKey) ===
+            JSON.stringify([
+              "notes-graph-workspace",
+              "authority-a",
+              "dataset-a",
+              "focused",
+              "note:a",
+              "note:a",
+              1,
+              120,
+              480,
+              true,
+              [...ordinaryEdgeTypes, "semantic"],
+              0.75,
+              10
+            ])
+        )
+    ).toBe(true)
+  })
+
+  it("preserves semantic cursor bindings while merging ordinary continuation pages", async () => {
+    const semanticEdge = {
+      id: "semantic:one",
+      source: "note:a",
+      target: "note:b",
+      type: "semantic",
+      directed: false,
+      weight: 0.9,
+      label: null
+    }
+    mocks.fetchNotesGraph
+      .mockResolvedValueOnce(graph())
+      .mockResolvedValueOnce(
+        graph({
+          edges: [semanticEdge],
+          has_more: true,
+          cursor: "ordinary-page-2",
+          limits: { max_nodes: 5, max_edges: 5, max_degree: 40 }
+        })
+      )
+      .mockResolvedValueOnce(
+        graph({
+          nodes: [
+            { id: "note:a", type: "note", label: "Alpha note" },
+            { id: "note:b", type: "note", label: "Beta note" },
+            { id: "note:c", type: "note", label: "Gamma note" }
+          ],
+          edges: [
+            {
+              id: "edge:ordinary-two",
+              source: "note:b",
+              target: "note:c",
+              type: "wikilink",
+              directed: true,
+              weight: 1,
+              label: null
+            }
+          ],
+          has_more: false,
+          cursor: null,
+          limits: { max_nodes: 5, max_edges: 5, max_degree: 40 }
+        })
+      )
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } }
+    })
+    const { result } = renderHook(
+      () =>
+        useNotesGraphWorkspace({
+          authorityScope: "authority-a",
+          enabled: true,
+          isOnline: true,
+          initialFocusNoteId: "note:a"
+        }),
+      { wrapper: wrapper(client) }
+    )
+    await flush()
+    act(() => result.current.semantic.setEnabled(true))
+    await flush()
+
+    await act(async () => {
+      await result.current.expand()
+    })
+    await flush()
+
+    expect(mocks.fetchNotesGraph).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({
+        cursor: "ordinary-page-2",
+        edgeTypes: [
+          "manual",
+          "wikilink",
+          "backlink",
+          "tag_membership",
+          "source_membership",
+          "semantic"
+        ],
+        semanticThreshold: 0.75,
+        semanticTopK: 10
+      })
+    )
+    expect(result.current.graph?.nodes.map((node) => node.id)).toEqual([
+      "note:a",
+      "note:b",
+      "tag:research",
+      "note:c"
+    ])
+    expect(result.current.graph?.edges.map((edge) => edge.id)).toEqual([
+      "semantic:one",
+      "edge:ordinary-two"
+    ])
+  })
+
+  it("preserves the last ordinary graph offline when a semantic request has no result", async () => {
+    let resolveSemantic: ((value: ReturnType<typeof graph>) => void) | undefined
+    mocks.fetchNotesGraph.mockResolvedValueOnce(graph()).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveSemantic = resolve
+        })
+    )
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } }
+    })
+    const { result, rerender } = renderHook(
+      ({ isOnline }) =>
+        useNotesGraphWorkspace({
+          authorityScope: "authority-a",
+          enabled: true,
+          isOnline,
+          initialFocusNoteId: "note:a"
+        }),
+      {
+        initialProps: { isOnline: true },
+        wrapper: wrapper(client)
+      }
+    )
+    await flush()
+    expect(result.current.graph?.nodes[0].id).toBe("note:a")
+
+    act(() => result.current.semantic.setEnabled(true))
+    await act(async () => Promise.resolve())
+    rerender({ isOnline: false })
+
+    expect(result.current.isOffline).toBe(true)
+    expect(result.current.graph?.nodes[0].id).toBe("note:a")
+    await act(async () => {
+      resolveSemantic?.(graph())
+    })
   })
 })

@@ -4,7 +4,7 @@ title: Implement Notes embedding index and semantic graph edges
 status: In Progress
 assignee: []
 created_date: '2026-08-27 02:20'
-updated_date: '2026-09-01 15:44'
+updated_date: '2026-09-01 16:51'
 labels:
   - notes
   - notes-graph
@@ -84,12 +84,16 @@ Approved executable plan: `Docs/superpowers/plans/2026-08-29-notes-semantic-inde
 2026-09-01 Task 10 hardening complete pending final independent review: preserved authorized vector-write fences across Note update, tombstone, and snapshot convergence; made stale release rearm the newest pending generation; routed all DSR cleanup store phases through one quiescent owned executor; closed constructor/vector-authority/exact worker connections without shutting shared PostgreSQL pools; retained existing-file-only SQLite mode=rw. Verification: 81 focused erasure/DSR/indexing tests and 128 adjacent publication/Jobs/lifecycle/store/property tests passed; Ruff, Bandit (0 findings/errors), and git diff --check clean. Report: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-10-report.md.
 
 2026-09-01 Task 10 hardening independently reviewed clean after all findings were resolved. SQLite DSR finalization now uses the per-user database file as the Notes/edge owner boundary and fails closed on foreign semantic-owner evidence; exact claim reclamation preserves authorized vector side effects; both release and successful publication atomically retarget active claims to the preferred pending staging generation. Final verification: 83 focused and 131 adjacent Python 3.11 tests passed; Ruff clean; Bandit 0 findings/errors; git diff --check clean. Report: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-10-report.md.
+
+2026-09-01 Task 11 complete: added the shared nested Notes semantic-index client, strict semantic graph contracts, authority/dataset-scoped TanStack state, active-run-only polling, cursor-stable semantic pagination, offline last-good graph retention, and the existing Graph inspector setup/status/management experience. Added request-local manage_authorized capability projection from verified AuthPrincipal claims; core capability services remain auth-free. Management commands are proactively hidden for revoked readers, cleanup conflicts are disabled, mutation failures provide safe localized recovery, unresolved dimensions disclose the fixed non-user probe, and no root Jobs or arbitrary provider/model/endpoint controls are exposed. Task 12 visuals/evidence/manual conversion remain out of scope. RED: frontend 15 expected failures with 42 existing assertions passing; backend 3 expected manage_authorized failures with 19 passing; later acceptance RED covered pagination and four inspector gaps. Final verification: exact frontend 71 passed; adjacent frontend graph 110 passed plus inspector suggestions 16 passed; backend endpoint 22 passed and adjacent semantic 61 passed; TypeScript compile, Prettier, locale sync/duplicate/coverage, Ruff, Bandit (0 findings), and git diff --check passed.
+
+2026-09-01 Task 11 review follow-up: moved stale semantic mutation-error clearing from the unrelated suggestion rejection reset into the confirmed semantic command path, so a later successful command clears prior recovery guidance. The primary setup disclosure now renders both sanitized vector-storage destination and localized local/remote boundary. RED: focused inspector suite failed 2/16 on the missing destination and stale alert. GREEN: exact Task 11 frontend 71/71, focused semantic inspector 16/16, adjacent suggestions inspector 16/16, extension TypeScript compile, and repository-pinned Prettier check passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-TASK-13134 remains In Progress with implementation Tasks 1 through 10 complete and independently reviewed. Tasks 11-13 remain: shared client/UI integration, visual evidence/conversion workflows, and documentation plus integrated release gates.
+TASK-13134 remains In Progress with implementation Tasks 1 through 11 complete and reviewed. Tasks 12-13 remain: semantic graph visuals/evidence/manual conversion, then documentation and integrated release gates.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
