@@ -13,6 +13,7 @@ export type IncidentActionItem = {
 
 export type IncidentItem = {
   id: string;
+  version: number;
   title: string;
   status: 'open' | 'investigating' | 'mitigating' | 'resolved';
   severity: 'low' | 'medium' | 'high' | 'critical';
@@ -53,4 +54,17 @@ export type IncidentNotifyRecipientResult = {
 export type IncidentNotifyResponse = {
   incident_id: string;
   notifications: IncidentNotifyRecipientResult[];
+};
+
+export type IncidentWebhookNotifyRequest = {
+  narrative: string | null;
+};
+
+export type IncidentWebhookNotifyResponse = {
+  incident_id: string;
+  event_id: string;
+  event_type: 'incident.notify';
+  command_id: string;
+  accepted: true;
+  replayed: boolean;
 };

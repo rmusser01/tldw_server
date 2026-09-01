@@ -1,19 +1,66 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
 
-import type { WebhookRegistration, WebhookStatus } from '../../types';
+import type {
+  WebhookDelivery,
+  WebhookDeliveryAttempt,
+  WebhookRegistration,
+  WebhookStatus,
+} from '../../types';
 import { installAdminApiRoutes, setAuthenticatedSession } from './smoke-helpers';
 
 const DESTINATION_URL = 'https://receiver.example/private/control-plane-hook';
 const CREATE_SECRET = `whsec_${'c'.repeat(64)}`;
 const ROTATED_SECRET = `whsec_${'r'.repeat(64)}`;
 const SECOND_ROTATED_SECRET = `whsec_${'s'.repeat(64)}`;
+const DELIVERY_ID = '11111111-1111-4111-8111-111111111111';
 
 const STATUS: WebhookStatus = {
-  mode: 'migrate',
+  mode: 'on',
   route_selection: 'canonical',
   schema_ready: true,
   key_state: 'available',
-  delivery_capability_ready: false,
+  delivery_capability_ready: true,
+  delivery: {
+    canonical_schema_version: 1,
+    schema_ready: true,
+    delivery_schema_ready: true,
+    migration_complete: true,
+    key_ready: true,
+    key_primary_match: true,
+    jobs_database_ready: true,
+    queue_ready: true,
+    job_type_ready: true,
+    jobs_backend: 'postgres',
+    worker: {
+      component: 'worker',
+      ready: true,
+      reason_code: null,
+      heartbeat_age_seconds: 2,
+    },
+    reconciler: {
+      component: 'reconciler',
+      ready: true,
+      reason_code: null,
+      heartbeat_age_seconds: 4,
+    },
+    retention: {
+      component: 'retention',
+      ready: true,
+      reason_code: null,
+      heartbeat_age_seconds: 7,
+    },
+    backlog: {
+      pending: 0,
+      enqueue_claimed: 0,
+      queued: 1,
+      processing: 0,
+      retry_wait: 0,
+    },
+    oldest_nonterminal_age_seconds: 9,
+    acquisition_ready: true,
+    acquisition_reason_code: null,
+    delivery_capability_ready: true,
+  },
   limits: {
     registrations: 100,
     active_registrations: 25,
@@ -31,6 +78,40 @@ const STATUS: WebhookStatus = {
     legacy_file_restore_permitted: true,
     rollback_window_expires_at: '2026-08-29T12:00:00Z',
   },
+};
+
+const DELIVERY: WebhookDelivery = {
+  id: DELIVERY_ID,
+  event_id: '22222222-2222-4222-8222-222222222222',
+  event_type: 'incident.created',
+  webhook_id: 41,
+  kind: 'automatic',
+  state: 'succeeded',
+  delivery_config_version: 1,
+  secret_version: 1,
+  attempt_count: 1,
+  status_code: 204,
+  latency_ms: 42,
+  reason_code: null,
+  expires_at: '2026-08-29T12:00:00Z',
+  created_at: '2026-08-22T12:00:00Z',
+  updated_at: '2026-08-22T12:00:01Z',
+  terminal_at: '2026-08-22T12:00:01Z',
+  redelivery_of_id: null,
+  completed_after_config_change: false,
+};
+
+const ATTEMPT: WebhookDeliveryAttempt = {
+  id: '33333333-3333-4333-8333-333333333333',
+  sequence: 1,
+  state: 'succeeded',
+  request_timeout_seconds: 12,
+  status_code: 204,
+  latency_ms: 42,
+  reason_code: null,
+  requested_retry_delay_seconds: null,
+  started_at: '2026-08-22T12:00:00Z',
+  finished_at: '2026-08-22T12:00:01Z',
 };
 
 type CapturedRequest = {
@@ -181,6 +262,61 @@ test('manages the canonical webhook lifecycle without leaking one-time secrets',
       return;
     }
 
+    if (method === 'GET' && path === '/admin/webhooks/41/deliveries' && registration) {
+      expect(url.searchParams.get('limit')).toBe('50');
+      expect(url.searchParams.get('offset')).toBe('0');
+      await fulfillJson(route, {
+        items: [{ delivery: DELIVERY, attempts: [ATTEMPT] }],
+        total: 1,
+        limit: 50,
+        offset: 0,
+      });
+      return;
+    }
+
+    if (method === 'POST' && path === '/admin/webhooks/41/test' && registration) {
+      expect(headers['if-match']).toBe(webhookEtag(registration));
+      expect(headers['idempotency-key']).toMatch(/^[0-9a-f]{32}$/);
+      expect(request.postDataJSON()).toEqual({
+        delivery_config_version: registration.delivery_config_version,
+      });
+      await fulfillJson(route, {
+        delivery: { ...DELIVERY, kind: 'test', event_type: 'webhook.test' },
+        attempt: ATTEMPT,
+        idempotent_replay: false,
+        in_progress: false,
+      });
+      return;
+    }
+
+    if (
+      method === 'POST'
+      && path === `/admin/webhooks/41/deliveries/${DELIVERY_ID}/redeliver`
+      && registration
+    ) {
+      expect(headers['if-match']).toBe(webhookEtag(registration));
+      expect(headers['idempotency-key']).toMatch(/^[0-9a-f]{32}$/);
+      expect(request.postDataJSON()).toEqual({
+        delivery_config_version: registration.delivery_config_version,
+        confirm_changed_configuration: false,
+      });
+      await fulfillJson(route, {
+        delivery: {
+          ...DELIVERY,
+          id: '44444444-4444-4444-8444-444444444444',
+          kind: 'manual',
+          state: 'pending',
+          attempt_count: 0,
+          status_code: null,
+          latency_ms: null,
+          terminal_at: null,
+          redelivery_of_id: DELIVERY_ID,
+        },
+        idempotent_replay: false,
+      }, { status: 202 });
+      return;
+    }
+
     if (method === 'PATCH' && path === '/admin/webhooks/41' && registration) {
       patchAttempts += 1;
       expect(headers['if-match']).toBe(webhookEtag(registration));
@@ -320,6 +456,22 @@ test('manages the canonical webhook lifecycle without leaking one-time secrets',
     .getByRole('button', { name: /^cancel$/i })
     .click();
 
+  await expect(page.getByLabel('Webhook delivery runtime')).toContainText('Worker ready');
+  await expect(page.getByLabel('Webhook delivery runtime')).toContainText('1 nonterminal delivery');
+
+  await page.getByRole('button', { name: /^run test$/i }).click();
+  await approvePrivilegedAction(page, /^run webhook test$/i, /^run test$/i);
+  await expect(page.getByText(/test delivery succeeded/i)).toBeVisible();
+
+  await page.getByRole('button', { name: /show delivery history/i }).click();
+  const history = page.getByRole('region', { name: /delivery history/i });
+  await expect(history.getByText('incident.created', { exact: true })).toBeVisible();
+  await expect(history.getByText('HTTP 204 (2xx)', { exact: true }).first()).toBeVisible();
+  await expect(history.getByText(/attempt 1: succeeded/i)).toBeVisible();
+  await history.getByRole('button', { name: /redeliver incident\.created/i }).click();
+  await approvePrivilegedAction(page, /^redeliver webhook event$/i, /^redeliver event$/i);
+  await expect(page.getByText(/manual redelivery accepted/i)).toBeVisible();
+
   await page.getByRole('button', { name: /generate a new secret/i }).click();
   await approvePrivilegedAction(
     page,
@@ -392,6 +544,7 @@ test('manages the canonical webhook lifecycle without leaking one-time secrets',
   for (const secret of [CREATE_SECRET, ROTATED_SECRET, SECOND_ROTATED_SECRET]) {
     expect(JSON.stringify(browserPersistence)).not.toContain(secret);
   }
-  expect(capturedRequests.some((request) => /\/test(?:[/?]|$)/.test(request.url))).toBe(false);
-  expect(capturedRequests.some((request) => /\/deliveries(?:[/?]|$)/.test(request.url))).toBe(false);
+  expect(capturedRequests.some((request) => /\/test(?:[/?]|$)/.test(request.url))).toBe(true);
+  expect(capturedRequests.some((request) => /\/deliveries(?:[/?]|$)/.test(request.url))).toBe(true);
+  expect(capturedRequests.some((request) => /\/redeliver(?:[/?]|$)/.test(request.url))).toBe(true);
 });

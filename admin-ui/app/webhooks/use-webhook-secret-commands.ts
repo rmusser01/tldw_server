@@ -16,9 +16,6 @@ type SecretCommandLease = {
   lifecycleGeneration: number;
   token: symbol;
 };
-type LegacySecretCommand = () => Promise<
-  Pick<WebhookSecretResponse, 'signing_secret' | 'replayed'>
->;
 
 type UseWebhookSecretCommandsOptions = {
   clearCreateForm: () => void;
@@ -230,42 +227,6 @@ export const useWebhookSecretCommands = ({
     await runSecretCommand(pending, true, lease);
   }, [acquireCommandLease, runSecretCommand]);
 
-  const startLegacySecretCommand = useCallback(async (command: LegacySecretCommand) => {
-    const lease = acquireCommandLease();
-    if (!lease) return false;
-    setPendingOperation('create');
-    let secretRevealed = false;
-    try {
-      const response = await command();
-      if (!isCommandLeaseCurrent(lease)) return false;
-      setCreateOpen(false);
-      clearCreateForm();
-      secretRevealed = revealSecret(response, 'create', lease.lifecycleGeneration);
-      if (!secretRevealed) return false;
-      success('Legacy webhook created');
-      await loadControlPlane(0);
-      return true;
-    } catch {
-      if (isCommandLeaseCurrent(lease) && !secretRevealed) {
-        showError('Webhook creation failed', 'The legacy webhook could not be created.');
-      }
-      return false;
-    } finally {
-      if (isCommandLeaseCurrent(lease)) setPendingOperation(null);
-      releaseCommandLease(lease);
-    }
-  }, [
-    acquireCommandLease,
-    clearCreateForm,
-    isCommandLeaseCurrent,
-    loadControlPlane,
-    releaseCommandLease,
-    revealSecret,
-    setCreateOpen,
-    showError,
-    success,
-  ]);
-
   const handleCopySecret = useCallback(async () => {
     const current = secretRef.current;
     if (!current) return;
@@ -315,7 +276,6 @@ export const useWebhookSecretCommands = ({
     setSecretAcknowledged,
     clearSensitiveCommandState,
     startSecretCommand,
-    startLegacySecretCommand,
     retrySecretCommand,
     handleCopySecret,
     requestSecretClose,

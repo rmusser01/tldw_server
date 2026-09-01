@@ -3,16 +3,20 @@
 import { Fragment } from 'react';
 import {
   AlertTriangle,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   Copy,
   Edit3,
+  History,
   KeyRound,
   Link2,
   Play,
   Plus,
   RefreshCw,
   RotateCw,
+  Send,
   Trash2,
   Webhook,
 } from 'lucide-react';
@@ -43,13 +47,73 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { formatDateTime } from '@/lib/format';
-import type { WebhookStatus } from '@/types';
+import type {
+  WebhookDelivery,
+  WebhookDeliveryComponent,
+  WebhookStatus,
+} from '@/types';
 import {
   activationBlockReason,
-  canLoadCanonicalData,
   useWebhooksPageController,
   WEBHOOK_PAGE_SIZE,
 } from './use-webhooks-page-controller';
+
+const componentLabel = (component: WebhookDeliveryComponent): string => (
+  `${component.component[0]?.toUpperCase()}${component.component.slice(1)} ${
+    component.ready ? 'ready' : component.reason_code?.replaceAll('_', ' ') ?? 'unavailable'
+  }`
+);
+
+const terminalDelivery = (delivery: WebhookDelivery): boolean => (
+  ['succeeded', 'dead', 'canceled', 'superseded'].includes(delivery.state)
+);
+
+const httpStatusLabel = (statusCode: number | null): string => (
+  statusCode === null ? 'No HTTP status' : `HTTP ${statusCode} (${Math.floor(statusCode / 100)}xx)`
+);
+
+function RuntimeStatus({ status }: { status: WebhookStatus }) {
+  const delivery = status.delivery;
+  const backlog = Object.values(delivery.backlog).reduce((sum, count) => sum + count, 0);
+  return (
+    <section
+      className="grid gap-3 border-y py-3 text-sm md:grid-cols-[minmax(0,1fr)_auto] md:items-center"
+      aria-label="Webhook delivery runtime"
+    >
+      <div className="flex flex-wrap gap-2">
+        <Badge
+          variant={delivery.key_ready && delivery.key_primary_match ? 'outline' : 'destructive'}
+        >
+          {delivery.key_ready && delivery.key_primary_match
+            ? 'Signing key ready'
+            : delivery.key_ready
+              ? 'Signing key primary mismatch'
+              : 'Signing key unavailable'}
+        </Badge>
+        {[delivery.worker, delivery.reconciler, delivery.retention].map((component) => (
+          <Badge key={component.component} variant={component.ready ? 'outline' : 'destructive'}>
+            {componentLabel(component)}
+            {component.heartbeat_age_seconds !== null && ` (${component.heartbeat_age_seconds}s)`}
+          </Badge>
+        ))}
+        <Badge variant={delivery.acquisition_ready ? 'outline' : 'destructive'}>
+          {delivery.acquisition_ready
+            ? 'Acquisition ready'
+            : `Acquisition ${delivery.acquisition_reason_code?.replaceAll('_', ' ') ?? 'blocked'}`}
+        </Badge>
+      </div>
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-muted-foreground md:justify-end">
+        <span>{backlog} nonterminal {backlog === 1 ? 'delivery' : 'deliveries'}</span>
+        <span>
+          {delivery.oldest_nonterminal_age_seconds === null
+            ? 'No outstanding work'
+            : `Oldest work ${delivery.oldest_nonterminal_age_seconds}s`}
+        </span>
+        <span>Jobs: {delivery.jobs_backend}</span>
+      </div>
+    </section>
+  );
+}
 
 function StatusAlerts({ status }: { status: WebhookStatus }) {
   const required = status.migration.secret_rotation_required_count;
@@ -59,6 +123,13 @@ function StatusAlerts({ status }: { status: WebhookStatus }) {
         <Alert variant="destructive">
           <AlertDescription>
             The webhook control plane is off. Enable it in deployment configuration before managing registrations.
+          </AlertDescription>
+        </Alert>
+      )}
+      {status.mode === 'migrate' && (
+        <Alert variant="destructive">
+          <AlertDescription>
+            Webhooks are in migration mode. Complete the predeploy migration and switch to on before managing registrations.
           </AlertDescription>
         </Alert>
       )}
@@ -85,15 +156,13 @@ function StatusAlerts({ status }: { status: WebhookStatus }) {
       )}
       {status.limits.active_registrations_over_limit && (
         <Alert variant="destructive">
-          <AlertDescription>
-            The active webhook limit is exceeded. New activations are blocked.
-          </AlertDescription>
+          <AlertDescription>The active webhook limit is exceeded. New activations are blocked.</AlertDescription>
         </Alert>
       )}
       {!status.delivery_capability_ready && (
         <Alert>
           <AlertDescription>
-            Webhook delivery capability is unavailable. Registrations can be prepared, but activation is disabled.
+            Webhook delivery capability is unavailable. Activation and delivery commands are disabled.
           </AlertDescription>
         </Alert>
       )}
@@ -119,28 +188,27 @@ function StatusAlerts({ status }: { status: WebhookStatus }) {
           </AlertDescription>
         </Alert>
       )}
+      {status.mode === 'on' && <RuntimeStatus status={status} />}
     </div>
   );
 }
 
 function WebhooksPageContent() {
+  const controller = useWebhooksPageController();
   const {
-    mode,
     status,
     catalog,
     canonicalPage,
-    legacyItems,
     offset,
     loading,
     statusError,
+    ready,
     createOpen,
     createUrl,
     createUrlError,
     createDescription,
     createTimeout,
     createEvents,
-    legacyEvents,
-    legacyEnabled,
     creating,
     editor,
     editDescription,
@@ -158,51 +226,22 @@ function WebhooksPageContent() {
     commandBusy,
     pendingOperation,
     sensitiveCommandLocked,
-    legacyExpandedId,
-    legacyDeliveries,
-    legacyDeliveryLoading,
+    expandedId,
+    deliveryPage,
+    deliveryLoading,
+    deliveryError,
+    testingId,
+    testStatus,
+    testRetryAvailable,
+    redeliveringId,
+    redeliveryStatus,
+    redeliveryRetryAvailable,
     addDisabled,
     visibleTotal,
     visibleCount,
     hasPrevious,
     hasNext,
-    setCommandError,
-    setCreateDescription,
-    setCreateOpen,
-    setCreateTimeout,
-    setCreateUrl,
-    setCreateUrlError,
-    setEditDescription,
-    setEditTimeout,
-    setEditor,
-    setLegacyEnabled,
-    setLegacyEvents,
-    setReplacementUrl,
-    setReplacementUrlError,
-    setSecretAcknowledged,
-    clearSensitiveCommandState,
-    loadControlPlane,
-    retrySecretCommand,
-    beginCanonicalCreate,
-    beginLegacyCreate,
-    openCreate,
-    handleCreateOpenChange,
-    toggleCreateEvent,
-    toggleEditEvent,
-    openMetadataEditor,
-    openDestinationEditor,
-    submitEditor,
-    toggleCanonicalRegistration,
-    deleteCanonicalRegistration,
-    rotateCanonicalSecret,
-    handleCopySecret,
-    requestSecretClose,
-    toggleLegacyEnabled,
-    deleteLegacyRegistration,
-    testLegacyRegistration,
-    toggleLegacyDeliveries,
-    goToPage,
-  } = useWebhooksPageController();
+  } = controller;
 
   return (
     <ResponsiveLayout>
@@ -211,7 +250,7 @@ function WebhooksPageContent() {
           <div>
             <h1 className="text-2xl font-semibold">Webhooks</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              Manage outgoing event registrations and signing secrets.
+              Manage outgoing event registrations, delivery history, and signing secrets.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -219,7 +258,7 @@ function WebhooksPageContent() {
               type="button"
               variant="outline"
               size="sm"
-              onClick={() => void loadControlPlane(offset)}
+              onClick={() => void controller.loadControlPlane(offset)}
               loading={loading}
               loadingText="Refreshing"
             >
@@ -229,7 +268,7 @@ function WebhooksPageContent() {
             <Button
               type="button"
               size="sm"
-              onClick={openCreate}
+              onClick={controller.openCreate}
               disabled={addDisabled || sensitiveCommandLocked}
             >
               <Plus className="h-4 w-4" aria-hidden="true" />
@@ -246,7 +285,12 @@ function WebhooksPageContent() {
               {statusError.requestId && (
                 <p className="font-mono text-xs">Request ID: {statusError.requestId}</p>
               )}
-              <Button type="button" variant="outline" size="sm" onClick={() => void loadControlPlane(0)}>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => void controller.loadControlPlane(0)}
+              >
                 <RefreshCw className="h-4 w-4" aria-hidden="true" />
                 Retry status
               </Button>
@@ -254,15 +298,7 @@ function WebhooksPageContent() {
           </Alert>
         )}
 
-        {status && mode === 'canonical' && <StatusAlerts status={status} />}
-
-        {mode === 'legacy' && (
-          <Alert>
-            <AlertDescription>
-              <strong>Legacy compatibility mode.</strong> ETags and secret rotation are unavailable. Complete migration before switching to canonical management.
-            </AlertDescription>
-          </Alert>
-        )}
+        {status && <StatusAlerts status={status} />}
 
         {conflict && (
           <Alert variant="destructive">
@@ -285,7 +321,7 @@ function WebhooksPageContent() {
                 <Button
                   type="button"
                   size="sm"
-                  onClick={() => void retrySecretCommand()}
+                  onClick={() => void controller.retrySecretCommand()}
                   loading={commandBusy}
                   loadingText="Retrying"
                 >
@@ -297,8 +333,8 @@ function WebhooksPageContent() {
                   size="sm"
                   variant="outline"
                   onClick={() => {
-                    clearSensitiveCommandState(false);
-                    void loadControlPlane(offset);
+                    controller.clearSensitiveCommandState(false);
+                    void controller.loadControlPlane(offset);
                   }}
                 >
                   Reload registrations
@@ -308,11 +344,39 @@ function WebhooksPageContent() {
           </Alert>
         )}
 
+        {testStatus && (
+          <Alert>
+            <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
+              <span>{testStatus}</span>
+              {testRetryAvailable && (
+                <Button type="button" size="sm" onClick={() => void controller.retrySameTest()}>
+                  <RotateCw className="h-4 w-4" aria-hidden="true" />
+                  Retry same test
+                </Button>
+              )}
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {redeliveryStatus && (
+          <Alert>
+            <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
+              <span>{redeliveryStatus}</span>
+              {redeliveryRetryAvailable && (
+                <Button type="button" size="sm" onClick={() => void controller.retrySameRedelivery()}>
+                  <RotateCw className="h-4 w-4" aria-hidden="true" />
+                  Retry same redelivery
+                </Button>
+              )}
+            </AlertDescription>
+          </Alert>
+        )}
+
         {loading && visibleCount === 0 && !statusError ? (
-          <div className="py-12 text-center text-sm text-muted-foreground" role="status" aria-live="polite">
+          <div className="min-h-40 py-12 text-center text-sm text-muted-foreground" role="status">
             Loading webhooks...
           </div>
-        ) : mode === 'canonical' && status && canLoadCanonicalData(status) ? (
+        ) : ready ? (
           canonicalPage.items.length === 0 ? (
             <EmptyState
               icon={Webhook}
@@ -320,7 +384,7 @@ function WebhooksPageContent() {
               description="Create an inactive registration, store its signing secret, then enable it when delivery is ready."
             />
           ) : (
-            <div className="overflow-x-auto rounded-md border">
+            <div className="overflow-x-auto border-y">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -329,215 +393,283 @@ function WebhooksPageContent() {
                     <TableHead>Events</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Updated</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
+                    <TableHead className="min-w-80 text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {canonicalPage.items.map((registration) => {
-                    const activationReason = activationBlockReason(registration, status);
+                    const activationReason = status
+                      ? activationBlockReason(registration, status)
+                      : 'Webhook status is unavailable';
                     const busy = mutatingId === registration.id;
                     const rowActionsDisabled = busy || sensitiveCommandLocked;
                     const rotationBlocked = registration.active
                       ? 'Disable the webhook before generating a new secret'
-                      : status.key_state !== 'available'
+                      : status?.key_state !== 'available'
                         ? 'Webhook signing key is unavailable'
                         : null;
+                    const expanded = expandedId === registration.id;
                     return (
-                      <TableRow key={registration.id}>
-                        <TableCell>
-                          <div className="max-w-64">
-                            <p className="truncate font-mono text-sm" title={registration.target_display}>
-                              {registration.target_display}
-                            </p>
-                            <p className="text-xs text-muted-foreground">ID {registration.id}, revision {registration.revision}</p>
-                          </div>
-                        </TableCell>
-                        <TableCell className="max-w-56">
-                          <span className="line-clamp-2 text-sm">{registration.description || 'No description'}</span>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex max-w-64 flex-wrap gap-1">
-                            {registration.event_types.map((eventType) => (
-                              <Badge key={eventType} variant="secondary" className="text-xs">
-                                {eventType}
-                              </Badge>
-                            ))}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="space-y-1">
-                            <Badge variant={registration.active ? 'default' : 'outline'}>
-                              {registration.active ? 'Active' : 'Inactive'}
-                            </Badge>
-                            {registration.secret_rotation_required && (
-                              <Badge variant="destructive">Secret rotation required</Badge>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
-                          {formatDateTime(registration.updated_at, { fallback: 'Unknown' })}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex min-w-max flex-wrap justify-end gap-1">
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              onClick={() => openMetadataEditor(registration)}
-                              disabled={rowActionsDisabled}
-                            >
-                              <Edit3 className="h-4 w-4" aria-hidden="true" />
-                              Edit metadata
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              onClick={() => openDestinationEditor(registration)}
-                              disabled={rowActionsDisabled}
-                            >
-                              <Link2 className="h-4 w-4" aria-hidden="true" />
-                              Replace destination
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              onClick={() => void rotateCanonicalSecret(registration)}
-                              disabled={rowActionsDisabled || Boolean(rotationBlocked)}
-                              title={rotationBlocked ?? undefined}
-                            >
-                              <KeyRound className="h-4 w-4" aria-hidden="true" />
-                              Generate a new secret
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              onClick={() => void toggleCanonicalRegistration(registration)}
-                              disabled={rowActionsDisabled || Boolean(activationReason)}
-                              title={activationReason ?? undefined}
-                            >
-                              {registration.active ? 'Disable' : 'Enable'}
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              className="h-9 w-9"
-                              onClick={() => void deleteCanonicalRegistration(registration)}
-                              disabled={rowActionsDisabled}
-                              aria-label="Delete webhook"
-                            >
-                              <Trash2 className="h-4 w-4 text-destructive" aria-hidden="true" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </div>
-          )
-        ) : mode === 'legacy' ? (
-          legacyItems.length === 0 ? (
-            <EmptyState icon={Webhook} title="No legacy webhooks configured" />
-          ) : (
-            <div className="space-y-4">
-              <div className="overflow-x-auto rounded-md border">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Destination</TableHead>
-                      <TableHead>Events</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="text-right">Legacy actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {legacyItems.map((registration) => (
                       <Fragment key={registration.id}>
                         <TableRow>
-                          <TableCell className="max-w-72 truncate font-mono text-sm">
-                            {registration.targetUrl}
+                          <TableCell>
+                            <div className="max-w-64">
+                              <p className="truncate font-mono text-sm" title={registration.target_display}>
+                                {registration.target_display}
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                ID {registration.id}, revision {registration.revision}
+                              </p>
+                            </div>
+                          </TableCell>
+                          <TableCell className="max-w-56">
+                            <span className="line-clamp-2 text-sm">
+                              {registration.description || 'No description'}
+                            </span>
                           </TableCell>
                           <TableCell>
-                            <div className="flex flex-wrap gap-1">
-                              {registration.eventTypes.map((eventType) => (
-                                <Badge key={eventType} variant="secondary">{eventType}</Badge>
+                            <div className="flex max-w-64 flex-wrap gap-1">
+                              {registration.event_types.map((eventType) => (
+                                <Badge key={eventType} variant="secondary" className="text-xs">
+                                  {eventType}
+                                </Badge>
                               ))}
                             </div>
                           </TableCell>
                           <TableCell>
-                            <Badge variant={registration.enabled ? 'default' : 'outline'}>
-                              {registration.enabled ? 'Enabled' : 'Disabled'}
-                            </Badge>
+                            <div className="space-y-1">
+                              <Badge variant={registration.active ? 'default' : 'outline'}>
+                                {registration.active ? 'Active' : 'Inactive'}
+                              </Badge>
+                              {registration.secret_rotation_required && (
+                                <p className="text-xs text-amber-700">Secret rotation required</p>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell className="whitespace-nowrap text-sm">
+                            {formatDateTime(registration.updated_at)}
                           </TableCell>
                           <TableCell>
-                            <div className="flex min-w-max justify-end gap-1">
+                            <div className="flex min-h-9 flex-wrap justify-end gap-1">
                               <Button
                                 type="button"
-                                variant="outline"
-                              size="sm"
-                              onClick={() => void testLegacyRegistration(registration)}
-                              disabled={sensitiveCommandLocked}
+                                variant="ghost"
+                                size="icon"
+                                className="h-9 w-9"
+                                onClick={() => controller.openMetadataEditor(registration)}
+                                disabled={rowActionsDisabled}
+                                aria-label="Edit metadata"
+                                title="Edit metadata"
                               >
-                                <Play className="h-4 w-4" aria-hidden="true" />
-                                Test
-                              </Button>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                              onClick={() => void toggleLegacyDeliveries(registration)}
-                              disabled={sensitiveCommandLocked}
-                                aria-label={legacyExpandedId === registration.id
-                                  ? 'Hide delivery history'
-                                  : 'Show delivery history'}
-                              >
-                                Delivery history
-                              </Button>
-                              <Button
-                                type="button"
-                                variant="outline"
-                              size="sm"
-                              onClick={() => void toggleLegacyEnabled(registration)}
-                              disabled={sensitiveCommandLocked}
-                              >
-                                {registration.enabled ? 'Disable' : 'Enable'}
+                                <Edit3 className="h-4 w-4" aria-hidden="true" />
                               </Button>
                               <Button
                                 type="button"
                                 variant="ghost"
                                 size="icon"
                                 className="h-9 w-9"
-                              onClick={() => void deleteLegacyRegistration(registration)}
-                              disabled={sensitiveCommandLocked}
-                                aria-label="Delete legacy webhook"
+                                onClick={() => controller.openDestinationEditor(registration)}
+                                disabled={rowActionsDisabled}
+                                aria-label="Replace destination"
+                                title="Replace destination"
+                              >
+                                <Link2 className="h-4 w-4" aria-hidden="true" />
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => void controller.testCanonicalRegistration(registration)}
+                                disabled={rowActionsDisabled || !status?.delivery_capability_ready}
+                                loading={testingId === registration.id}
+                                loadingText="Testing"
+                              >
+                                <Play className="h-4 w-4" aria-hidden="true" />
+                                {testRetryAvailable ? 'Run new test' : 'Run test'}
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => void controller.rotateCanonicalSecret(registration)}
+                                disabled={rowActionsDisabled || Boolean(rotationBlocked)}
+                                title={rotationBlocked ?? undefined}
+                              >
+                                <KeyRound className="h-4 w-4" aria-hidden="true" />
+                                Generate a new secret
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => void controller.toggleCanonicalRegistration(registration)}
+                                disabled={rowActionsDisabled || Boolean(activationReason)}
+                                title={activationReason ?? undefined}
+                              >
+                                {registration.active ? 'Disable' : 'Enable'}
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => void controller.toggleDeliveryHistory(registration)}
+                                disabled={rowActionsDisabled}
+                                aria-label={expanded ? 'Hide delivery history' : 'Show delivery history'}
+                              >
+                                <History className="h-4 w-4" aria-hidden="true" />
+                                History
+                                {expanded
+                                  ? <ChevronUp className="h-4 w-4" aria-hidden="true" />
+                                  : <ChevronDown className="h-4 w-4" aria-hidden="true" />}
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="h-9 w-9"
+                                onClick={() => void controller.deleteCanonicalRegistration(registration)}
+                                disabled={rowActionsDisabled}
+                                aria-label="Delete webhook"
+                                title="Delete webhook"
                               >
                                 <Trash2 className="h-4 w-4 text-destructive" aria-hidden="true" />
                               </Button>
                             </div>
                           </TableCell>
                         </TableRow>
-                        {legacyExpandedId === registration.id && (
+                        {expanded && (
                           <TableRow>
-                            <TableCell colSpan={4}>
-                              <section aria-label="Delivery history" className="space-y-2 py-2">
-                                <h2 className="text-sm font-semibold">Delivery history</h2>
-                                {legacyDeliveryLoading ? (
-                                  <p className="text-sm text-muted-foreground">Loading delivery history...</p>
-                                ) : legacyDeliveries.length === 0 ? (
-                                  <p className="text-sm text-muted-foreground">No legacy deliveries recorded.</p>
+                            <TableCell colSpan={6} className="bg-muted/20 p-0">
+                              <section className="min-h-32 space-y-3 px-4 py-4" aria-label="Delivery history">
+                                <div className="flex items-center justify-between gap-3">
+                                  <h2 className="text-sm font-semibold">Delivery history</h2>
+                                  <span className="text-xs text-muted-foreground">
+                                    Sanitized metadata only
+                                  </span>
+                                </div>
+                                {deliveryLoading ? (
+                                  <p className="text-sm text-muted-foreground" role="status">
+                                    Loading delivery history...
+                                  </p>
+                                ) : deliveryError ? (
+                                  <p className="text-sm text-destructive">{deliveryError}</p>
+                                ) : deliveryPage.items.length === 0 ? (
+                                  <p className="text-sm text-muted-foreground">No deliveries recorded.</p>
                                 ) : (
-                                  <ul className="space-y-2">
-                                    {legacyDeliveries.map((delivery) => (
-                                      <li key={delivery.id} className="flex flex-wrap gap-x-4 gap-y-1 border-t pt-2 text-sm">
-                                        <span className="font-mono">{delivery.eventType}</span>
-                                        <span>{delivery.success ? 'Succeeded' : 'Failed'}</span>
-                                        <span>{delivery.statusCode ?? 'No HTTP status'}</span>
-                                        <span>{formatDateTime(delivery.attemptedAt, { fallback: 'Unknown time' })}</span>
+                                  <ul className="divide-y">
+                                    {deliveryPage.items.map(({ delivery, attempts }) => (
+                                      <li key={delivery.id} className="space-y-2 py-3 first:pt-0">
+                                        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+                                          <span className="font-mono">{delivery.event_type}</span>
+                                          <Badge variant="secondary">{delivery.kind}</Badge>
+                                          <Badge variant={delivery.state === 'succeeded' ? 'outline' : 'secondary'}>
+                                            {delivery.state.replaceAll('_', ' ')}
+                                          </Badge>
+                                          <span>{httpStatusLabel(delivery.status_code)}</span>
+                                          <span>{delivery.latency_ms === null ? 'No latency' : `${delivery.latency_ms}ms`}</span>
+                                          {delivery.reason_code && (
+                                            <span>{delivery.reason_code.replaceAll('_', ' ')}</span>
+                                          )}
+                                          <span className="text-muted-foreground">
+                                            {formatDateTime(delivery.created_at)}
+                                          </span>
+                                          {terminalDelivery(delivery) && delivery.kind !== 'test' && (
+                                            <Button
+                                              type="button"
+                                              variant="outline"
+                                              size="sm"
+                                              className="ml-auto"
+                                              onClick={() => void controller.redeliverWebhook(delivery)}
+                                              loading={redeliveringId === delivery.id}
+                                              loadingText="Redelivering"
+                                              aria-label={`Redeliver ${delivery.event_type}`}
+                                            >
+                                              <Send className="h-4 w-4" aria-hidden="true" />
+                                              Redeliver
+                                            </Button>
+                                          )}
+                                        </div>
+                                        <dl className="grid gap-x-5 gap-y-1 text-xs text-muted-foreground sm:grid-cols-2 lg:grid-cols-4">
+                                          <div>
+                                            <dt className="inline font-medium text-foreground">Delivery ID: </dt>
+                                            <dd className="inline break-all font-mono">{delivery.id}</dd>
+                                          </div>
+                                          <div>
+                                            <dt className="inline font-medium text-foreground">Event ID: </dt>
+                                            <dd className="inline break-all font-mono">{delivery.event_id}</dd>
+                                          </div>
+                                          <div>
+                                            <dt className="inline font-medium text-foreground">Versions: </dt>
+                                            <dd className="inline">
+                                              Config v{delivery.delivery_config_version}, secret v{delivery.secret_version}
+                                            </dd>
+                                          </div>
+                                          <div>
+                                            <dt className="inline font-medium text-foreground">Attempts: </dt>
+                                            <dd className="inline">{delivery.attempt_count}</dd>
+                                          </div>
+                                          <div>
+                                            <dt className="inline font-medium text-foreground">Updated: </dt>
+                                            <dd className="inline">{formatDateTime(delivery.updated_at)}</dd>
+                                          </div>
+                                          <div>
+                                            <dt className="inline font-medium text-foreground">Terminal: </dt>
+                                            <dd className="inline">
+                                              {delivery.terminal_at ? formatDateTime(delivery.terminal_at) : 'Not terminal'}
+                                            </dd>
+                                          </div>
+                                          <div>
+                                            <dt className="inline font-medium text-foreground">Expires: </dt>
+                                            <dd className="inline">{formatDateTime(delivery.expires_at)}</dd>
+                                          </div>
+                                          <div>
+                                            <dt className="inline font-medium text-foreground">Redelivery: </dt>
+                                            <dd className="inline break-all font-mono">
+                                              {delivery.redelivery_of_id
+                                                ? `Of ${delivery.redelivery_of_id}`
+                                                : 'Original delivery'}
+                                            </dd>
+                                          </div>
+                                        </dl>
+                                        {delivery.completed_after_config_change && (
+                                          <p className="text-xs text-amber-700">
+                                            Completed after the registration configuration changed.
+                                          </p>
+                                        )}
+                                        {attempts.length > 0 && (
+                                          <ol className="divide-y text-xs text-muted-foreground">
+                                            {attempts.map((attempt) => (
+                                              <li key={attempt.id} className="flex flex-wrap gap-x-4 gap-y-1 py-2">
+                                                <span className="font-medium text-foreground">
+                                                  Attempt {attempt.sequence}: {attempt.state.replaceAll('_', ' ')}
+                                                </span>
+                                                <span>{httpStatusLabel(attempt.status_code)}</span>
+                                                <span>
+                                                  {attempt.latency_ms === null ? 'No latency' : `${attempt.latency_ms}ms`}
+                                                </span>
+                                                <span>
+                                                  {attempt.request_timeout_seconds === null
+                                                    ? 'No request timeout'
+                                                    : `${attempt.request_timeout_seconds}s timeout`}
+                                                </span>
+                                                <span>
+                                                  {attempt.requested_retry_delay_seconds === null
+                                                    ? 'No requested retry delay'
+                                                    : `${attempt.requested_retry_delay_seconds}s requested retry delay`}
+                                                </span>
+                                                {attempt.reason_code && (
+                                                  <span>Reason: {attempt.reason_code.replaceAll('_', ' ')}</span>
+                                                )}
+                                                <span>Started {formatDateTime(attempt.started_at)}</span>
+                                                <span>
+                                                  {attempt.finished_at
+                                                    ? `Finished ${formatDateTime(attempt.finished_at)}`
+                                                    : 'Not finished'}
+                                                </span>
+                                              </li>
+                                            ))}
+                                          </ol>
+                                        )}
                                       </li>
                                     ))}
                                   </ul>
@@ -547,15 +679,15 @@ function WebhooksPageContent() {
                           </TableRow>
                         )}
                       </Fragment>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
+                    );
+                  })}
+                </TableBody>
+              </Table>
             </div>
           )
         ) : null}
 
-        {mode && visibleTotal > 0 && (
+        {ready && visibleTotal > 0 && (
           <nav className="flex flex-wrap items-center justify-between gap-3 border-t pt-4" aria-label="Webhook pagination">
             <p className="text-sm text-muted-foreground">
               Showing {offset + 1}-{offset + visibleCount} of {visibleTotal}
@@ -565,7 +697,7 @@ function WebhooksPageContent() {
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => void goToPage(offset - WEBHOOK_PAGE_SIZE)}
+                onClick={() => void controller.goToPage(offset - WEBHOOK_PAGE_SIZE)}
                 disabled={!hasPrevious || loading}
                 aria-label="Previous page"
               >
@@ -576,7 +708,7 @@ function WebhooksPageContent() {
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => void goToPage(offset + WEBHOOK_PAGE_SIZE)}
+                onClick={() => void controller.goToPage(offset + WEBHOOK_PAGE_SIZE)}
                 disabled={!hasNext || loading}
                 aria-label="Next page"
               >
@@ -588,14 +720,12 @@ function WebhooksPageContent() {
         )}
       </div>
 
-      <Dialog open={createOpen} onOpenChange={handleCreateOpenChange}>
+      <Dialog open={createOpen} onOpenChange={controller.handleCreateOpenChange}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>Add webhook</DialogTitle>
             <DialogDescription>
-              {mode === 'canonical'
-                ? 'Create an inactive registration and store its generated signing secret.'
-                : 'Create a registration through the legacy compatibility API.'}
+              Create an inactive registration and store its generated signing secret.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -607,9 +737,9 @@ function WebhooksPageContent() {
                 autoComplete="off"
                 value={createUrl}
                 onChange={(event) => {
-                  setCreateUrl(event.target.value);
-                  setCreateUrlError('');
-                  setCommandError('');
+                  controller.setCreateUrl(event.target.value);
+                  controller.setCreateUrlError('');
+                  controller.setCommandError('');
                 }}
                 placeholder="https://receiver.example/hooks/events"
                 maxLength={2_048}
@@ -623,70 +753,45 @@ function WebhooksPageContent() {
                 </p>
               )}
             </div>
-            {mode === 'canonical' ? (
-              <>
-                <div className="space-y-2">
-                  <Label htmlFor="webhook-create-description">Description</Label>
-                  <Input
-                    id="webhook-create-description"
-                    value={createDescription}
-                    onChange={(event) => setCreateDescription(event.target.value)}
-                    maxLength={500}
-                    disabled={sensitiveCommandLocked}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="webhook-create-timeout">Timeout (seconds)</Label>
-                  <Input
-                    id="webhook-create-timeout"
-                    type="number"
-                    min={1}
-                    max={30}
-                    step={1}
-                    value={createTimeout}
-                    onChange={(event) => setCreateTimeout(event.target.value)}
-                    disabled={sensitiveCommandLocked}
-                  />
-                </div>
-                <fieldset className="space-y-3">
-                  <legend className="text-sm font-medium">Events</legend>
-                  {catalog?.events.map((event) => (
-                    <label key={event.event_type} className="flex items-start gap-3 rounded-md border p-3">
-                      <Checkbox
-                        checked={createEvents.includes(event.event_type)}
-                        onCheckedChange={() => toggleCreateEvent(event.event_type)}
-                        disabled={sensitiveCommandLocked}
-                      />
-                      <span className="min-w-0">
-                        <span className="block break-all font-mono text-sm">{event.event_type}</span>
-                        <span className="block text-xs text-muted-foreground">{event.description}</span>
-                      </span>
-                    </label>
-                  ))}
-                </fieldset>
-              </>
-            ) : (
-              <>
-                <div className="space-y-2">
-                  <Label htmlFor="legacy-webhook-events">Events</Label>
-                  <Input
-                    id="legacy-webhook-events"
-                    value={legacyEvents}
-                    onChange={(event) => setLegacyEvents(event.target.value)}
-                    placeholder="incident.created, user.created"
-                    disabled={sensitiveCommandLocked}
-                  />
-                </div>
-                <label className="flex items-center gap-2 text-sm">
+            <div className="space-y-2">
+              <Label htmlFor="webhook-create-description">Description</Label>
+              <Input
+                id="webhook-create-description"
+                value={createDescription}
+                onChange={(event) => controller.setCreateDescription(event.target.value)}
+                maxLength={500}
+                disabled={sensitiveCommandLocked}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="webhook-create-timeout">Timeout (seconds)</Label>
+              <Input
+                id="webhook-create-timeout"
+                type="number"
+                min={1}
+                max={30}
+                step={1}
+                value={createTimeout}
+                onChange={(event) => controller.setCreateTimeout(event.target.value)}
+                disabled={sensitiveCommandLocked}
+              />
+            </div>
+            <fieldset className="space-y-3">
+              <legend className="text-sm font-medium">Events</legend>
+              {catalog?.events.map((event) => (
+                <label key={event.event_type} className="flex items-start gap-3 rounded-md border p-3">
                   <Checkbox
-                    checked={legacyEnabled}
-                    onCheckedChange={(checked) => setLegacyEnabled(checked === true)}
+                    checked={createEvents.includes(event.event_type)}
+                    onCheckedChange={() => controller.toggleCreateEvent(event.event_type)}
                     disabled={sensitiveCommandLocked}
                   />
-                  Enabled
+                  <span className="min-w-0">
+                    <span className="block break-all font-mono text-sm">{event.event_type}</span>
+                    <span className="block text-xs text-muted-foreground">{event.description}</span>
+                  </span>
                 </label>
-              </>
-            )}
+              ))}
+            </fieldset>
             {commandError && (
               <Alert variant="destructive">
                 <AlertDescription className="space-y-3">
@@ -696,7 +801,7 @@ function WebhooksPageContent() {
                       <Button
                         type="button"
                         size="sm"
-                        onClick={() => void retrySecretCommand()}
+                        onClick={() => void controller.retrySecretCommand()}
                         loading={commandBusy}
                         loadingText="Retrying"
                       >
@@ -708,9 +813,9 @@ function WebhooksPageContent() {
                         variant="outline"
                         size="sm"
                         onClick={() => {
-                          clearSensitiveCommandState(false);
-                          setCreateOpen(false);
-                          void loadControlPlane(0);
+                          controller.clearSensitiveCommandState(false);
+                          controller.setCreateOpen(false);
+                          void controller.loadControlPlane(0);
                         }}
                       >
                         Reload registrations
@@ -722,18 +827,13 @@ function WebhooksPageContent() {
             )}
           </div>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => handleCreateOpenChange(false)}>
+            <Button type="button" variant="outline" onClick={() => controller.handleCreateOpenChange(false)}>
               Cancel
             </Button>
             <Button
               type="button"
-              onClick={() => void (mode === 'canonical' ? beginCanonicalCreate() : beginLegacyCreate())}
-              disabled={
-                creating
-                || sensitiveCommandLocked
-                || !createUrl.trim()
-                || (mode === 'canonical' ? createEvents.length === 0 : !legacyEvents.trim())
-              }
+              onClick={() => void controller.beginCanonicalCreate()}
+              disabled={creating || sensitiveCommandLocked || !createUrl.trim() || createEvents.length === 0}
               loading={creating}
               loadingText="Creating"
             >
@@ -743,7 +843,7 @@ function WebhooksPageContent() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={Boolean(editor)} onOpenChange={(open) => !open && setEditor(null)}>
+      <Dialog open={Boolean(editor)} onOpenChange={(open) => !open && controller.setEditor(null)}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>
@@ -764,8 +864,8 @@ function WebhooksPageContent() {
                 autoComplete="off"
                 value={replacementUrl}
                 onChange={(event) => {
-                  setReplacementUrl(event.target.value);
-                  setReplacementUrlError('');
+                  controller.setReplacementUrl(event.target.value);
+                  controller.setReplacementUrlError('');
                 }}
                 placeholder="https://receiver.example/hooks/new"
                 maxLength={2_048}
@@ -785,7 +885,7 @@ function WebhooksPageContent() {
                 <Input
                   id="webhook-edit-description"
                   value={editDescription}
-                  onChange={(event) => setEditDescription(event.target.value)}
+                  onChange={(event) => controller.setEditDescription(event.target.value)}
                   maxLength={500}
                 />
               </div>
@@ -797,7 +897,7 @@ function WebhooksPageContent() {
                   min={1}
                   max={30}
                   value={editTimeout}
-                  onChange={(event) => setEditTimeout(event.target.value)}
+                  onChange={(event) => controller.setEditTimeout(event.target.value)}
                 />
               </div>
               <fieldset className="space-y-2">
@@ -806,7 +906,7 @@ function WebhooksPageContent() {
                   <label key={event.event_type} className="flex items-start gap-3 rounded-md border p-3">
                     <Checkbox
                       checked={editEvents.includes(event.event_type)}
-                      onCheckedChange={() => toggleEditEvent(event.event_type)}
+                      onCheckedChange={() => controller.toggleEditEvent(event.event_type)}
                     />
                     <span>
                       <span className="block break-all font-mono text-sm">{event.event_type}</span>
@@ -818,12 +918,12 @@ function WebhooksPageContent() {
             </div>
           ) : null}
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setEditor(null)}>
+            <Button type="button" variant="outline" onClick={() => controller.setEditor(null)}>
               Cancel
             </Button>
             <Button
               type="button"
-              onClick={() => void submitEditor()}
+              onClick={() => void controller.submitEditor()}
               loading={editor ? mutatingId === editor.registration.id : false}
               loadingText="Saving"
               disabled={editor?.kind === 'destination' ? !replacementUrl.trim() : editEvents.length === 0}
@@ -834,7 +934,7 @@ function WebhooksPageContent() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={Boolean(secretState)} onOpenChange={(open) => !open && requestSecretClose()}>
+      <Dialog open={Boolean(secretState)} onOpenChange={(open) => !open && controller.requestSecretClose()}>
         <DialogContent className="sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>Signing secret</DialogTitle>
@@ -863,33 +963,29 @@ function WebhooksPageContent() {
                   type="button"
                   variant="outline"
                   size="icon"
-                  onClick={() => void handleCopySecret()}
+                  onClick={() => void controller.handleCopySecret()}
                   aria-label="Copy signing secret"
                 >
                   <Copy className="h-4 w-4" aria-hidden="true" />
                 </Button>
               </div>
-              {secretCopied && (
-                <p className="text-sm text-emerald-700" role="status">Copied to clipboard.</p>
-              )}
+              {secretCopied && <p className="text-sm text-emerald-700" role="status">Copied to clipboard.</p>}
               <label className="flex items-start gap-3 rounded-md border p-3 text-sm">
                 <Checkbox
                   checked={secretAcknowledged}
-                  onCheckedChange={(checked) => setSecretAcknowledged(checked === true)}
+                  onCheckedChange={(checked) => controller.setSecretAcknowledged(checked === true)}
                 />
                 <span>I have stored this signing secret in the destination service.</span>
               </label>
               {secretWarning && (
-                <Alert variant="destructive">
-                  <AlertDescription>{secretWarning}</AlertDescription>
-                </Alert>
+                <Alert variant="destructive"><AlertDescription>{secretWarning}</AlertDescription></Alert>
               )}
             </div>
           )}
           <DialogFooter>
             <Button
               type="button"
-              onClick={requestSecretClose}
+              onClick={controller.requestSecretClose}
               disabled={!secretCopied || !secretAcknowledged}
             >
               Done
@@ -903,11 +999,7 @@ function WebhooksPageContent() {
 
 export default function WebhooksPage() {
   return (
-    <PermissionGuard
-      role={['admin', 'super_admin', 'owner']}
-      requireAuth
-      variant="route"
-    >
+    <PermissionGuard variant="route" requireAuth role={['admin', 'super_admin', 'owner']}>
       <WebhooksPageContent />
     </PermissionGuard>
   );

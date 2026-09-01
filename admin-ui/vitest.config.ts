@@ -13,6 +13,10 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     exclude: [...configDefaults.exclude, 'tests/e2e/**'],
+    // Node 25+ Web Storage shadows JSDOM unless a process-wide storage file is configured.
+    execArgv: process.allowedNodeEnvironmentFlags.has('--no-experimental-webstorage')
+      ? ['--no-experimental-webstorage']
+      : [],
     setupFiles: ['./vitest.setup.ts'],
   },
 });

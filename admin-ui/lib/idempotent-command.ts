@@ -48,7 +48,7 @@ const isTransportFailure = (error: unknown): boolean => {
     );
 };
 
-const generateIdempotencyKey = (): string => {
+export const generateIdempotencyKey = (): string => {
   if (!globalThis.crypto?.getRandomValues) {
     throw new Error('Secure random generation is unavailable');
   }

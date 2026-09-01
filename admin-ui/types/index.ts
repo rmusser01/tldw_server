@@ -517,20 +517,43 @@ export interface VoiceAnalyticsSummary {
   usage_by_day: VoiceAnalytics[];
 }
 
-export type { IncidentEvent, IncidentItem, IncidentNotifyResponse, IncidentsResponse } from './incidents';
+export type {
+  IncidentEvent,
+  IncidentItem,
+  IncidentNotifyResponse,
+  IncidentsResponse,
+  IncidentWebhookNotifyRequest,
+  IncidentWebhookNotifyResponse,
+} from './incidents';
 export type {
   WebhookCatalog,
   WebhookCatalogItem,
   WebhookCreateRequest,
   WebhookDeleteResponse,
+  WebhookDelivery,
+  WebhookDeliveryAttempt,
+  WebhookDeliveryAttemptState,
+  WebhookDeliveryBacklog,
+  WebhookDeliveryCapability,
+  WebhookDeliveryComponent,
+  WebhookDeliveryHistoryItem,
+  WebhookDeliveryKind,
+  WebhookDeliveryListResponse,
+  WebhookDeliveryReason,
+  WebhookDeliveryRuntimeReason,
+  WebhookDeliveryState,
   WebhookErrorResponse,
   WebhookLimits,
   WebhookListResponse,
   WebhookMigrationStatus,
   WebhookPatchRequest,
   WebhookRegistration,
+  WebhookRedeliveryRequest,
+  WebhookRedeliveryResponse,
   WebhookSecretResponse,
   WebhookStatus,
+  WebhookTestRequest,
+  WebhookTestResponse,
 } from './webhooks';
 export type { EmailDeliveryStatus, EmailDeliveryItem, EmailDeliveryListResponse } from './email-deliveries';
 
