@@ -37,6 +37,7 @@ const status = (state = "ready") => ({
   configuration_revision: 9,
   semantic_index_revision: 2,
   active_generation_id: state === "off" ? null : "generation-a",
+  active_generation_usable: state !== "off",
   indexed_notes: 4,
   excluded_notes: 0,
   failed_notes: 0,
@@ -52,6 +53,7 @@ const capabilities = () => ({
   estimated_run_count: 1,
   provider_label: "OpenAI",
   model: "text-embedding-3-small",
+  endpoint_display: "https://api.openai.com",
   execution_boundary: "external",
   storage_boundary: "local",
   storage_label: "ChromaDB",
@@ -61,6 +63,8 @@ const capabilities = () => ({
   unavailable_reason: null,
   metric: "cosine",
   resolved_dimensions: 1536,
+  dimension_probe_required: false,
+  renewal_requires_delete: false,
   manage_authorized: true
 })
 
@@ -258,7 +262,20 @@ describe("Notes semantic index client", () => {
       "an unavailable reason",
       { unavailable_reason: "notes_semantic_provider_unavailable" }
     ],
-    ["unresolved dimensions", { resolved_dimensions: null }]
+    ["blank provider", { provider_label: " " }],
+    ["blank model", { model: "" }],
+    ["blank storage", { storage_label: "\t" }],
+    ["blank endpoint", { endpoint_display: "" }],
+    [
+      "a path-bearing endpoint",
+      {
+        endpoint_display: "https://proxy.example.test/v1/embeddings?key=secret"
+      }
+    ],
+    [
+      "contradictory pending dimensions",
+      { resolved_dimensions: null, dimension_probe_required: false }
+    ]
   ])(
     "rejects an available capability disclosure with %s",
     async (_label, override) => {
@@ -272,6 +289,48 @@ describe("Notes semantic index client", () => {
       })
     }
   )
+
+  it("accepts a probe-eligible pending capability with a sanitized custom origin", async () => {
+    mocks.bgRequest.mockResolvedValueOnce({
+      ...capabilities(),
+      model: "custom-model",
+      endpoint_display: "https://proxy.example.test:8443",
+      resolved_dimensions: null,
+      dimension_probe_required: true
+    })
+
+    const disclosure = await getNotesSemanticCapabilities({})
+
+    expect(disclosure.endpoint_display).toBe("https://proxy.example.test:8443")
+    expect(disclosure.dimension_probe_required).toBe(true)
+    expect(disclosure.resolved_dimensions).toBeNull()
+  })
+
+  it("accepts a sanitized origin with an explicit default port", async () => {
+    mocks.bgRequest.mockResolvedValueOnce({
+      ...capabilities(),
+      endpoint_display: "https://proxy.example.test:443"
+    })
+
+    const disclosure = await getNotesSemanticCapabilities({})
+
+    expect(disclosure.endpoint_display).toBe("https://proxy.example.test:443")
+  })
+
+  it("accepts unresolved dimensions when another capability check is unavailable", async () => {
+    mocks.bgRequest.mockResolvedValueOnce({
+      ...capabilities(),
+      indexing_available: false,
+      unavailable_reason: "notes_semantic_provider_unavailable",
+      resolved_dimensions: null,
+      dimension_probe_required: false
+    })
+
+    const disclosure = await getNotesSemanticCapabilities({})
+
+    expect(disclosure.indexing_available).toBe(false)
+    expect(disclosure.dimension_probe_required).toBe(false)
+  })
 
   it("accepts only the complete allowlisted outbound category set", async () => {
     mocks.bgRequest.mockResolvedValueOnce(capabilities())

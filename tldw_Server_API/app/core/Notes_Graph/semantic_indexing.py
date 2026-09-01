@@ -431,6 +431,13 @@ class SemanticGenerationBuilder:
                 or resolved.credential_source != authority.credential_source
             ):
                 raise SemanticIndexingError("notes_semantic_execution_config_drift")
+            if (
+                fence.vector_backend == "pgvector"
+                and resolved.dimensions not in self._settings.pgvector_allowed_dimensions
+            ):
+                raise SemanticIndexingError(
+                    "notes_semantic_pgvector_dimensions_unsupported"
+                )
             compatibility_hash = await asyncio.to_thread(
                 self._compatibility_hash_for_dimension,
                 resolved,

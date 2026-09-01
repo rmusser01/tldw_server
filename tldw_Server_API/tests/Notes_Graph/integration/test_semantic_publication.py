@@ -452,6 +452,7 @@ def sqlite_db(tmp_path: Path):
 @pytest.mark.asyncio
 async def test_initial_build_probes_seeds_publishes_verifies_and_returns_receipt(
     sqlite_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     db = sqlite_db
     db.note_store.add_note("Title", "Body text", note_id=NOTE_ID)
@@ -462,6 +463,19 @@ async def test_initial_build_probes_seeds_publishes_verifies_and_returns_receipt
     vectors = MemoryVectors(events)
     embedder = MemoryEmbedder(events)
     revalidations: list[SemanticExecutionFence] = []
+    events.append("consent_committed")
+    resolve_dimensions = db.note_semantic_store.resolve_generation_dimensions
+
+    def record_dimension_cas(**kwargs):
+        result = resolve_dimensions(**kwargs)
+        events.append("dimension_cas")
+        return result
+
+    monkeypatch.setattr(
+        db.note_semantic_store,
+        "resolve_generation_dimensions",
+        record_dimension_cas,
+    )
 
     async def revalidate(fence: SemanticExecutionFence) -> SemanticAuthorityState:
         events.append("revalidate")
@@ -505,10 +519,65 @@ async def test_initial_build_probes_seeds_publishes_verifies_and_returns_receipt
     assert receipt.receipt == "receipt-v1"
     assert receipt.indexed_notes == 1
     assert receipt.degraded is False
+    assert events.index("consent_committed") < events.index("dimension_probe")
     assert events.index("dimension_probe") < events.index("content_read")
+    assert events.index("dimension_probe") < events.index("dimension_cas")
+    assert events.index("dimension_cas") < events.index("content_read")
     assert events.index("storage") < events.index("vector_upsert")
     assert events.index("vector_upsert") < events.index("vector_fetch")
     assert len(revalidations) >= 4
+
+
+@pytest.mark.asyncio
+async def test_pgvector_probe_rejects_unsupported_dimensions_before_note_content_read(
+    sqlite_db: CharactersRAGDB,
+) -> None:
+    db = sqlite_db
+    enabled, generation = _create_pending_generation(db)
+    with db.transaction() as conn:
+        conn.execute(
+            "UPDATE note_semantic_index_configs SET vector_backend='pgvector' "
+            "WHERE owner_user_id=? AND dataset_id=?",
+            (OWNER_ID, DATASET_ID),
+        )
+    updated = db.note_semantic_store.get_configuration(DATASET_ID)
+    assert updated is not None
+    fence = replace(_fence(updated, generation), vector_backend="pgvector")
+    events: list[str] = []
+
+    async def revalidate(current: SemanticExecutionFence) -> SemanticAuthorityState:
+        return _authority_from_store(db, current)
+
+    builder = SemanticGenerationBuilder(
+        store=db.note_semantic_store,
+        note_reader=MemoryNotes((), events),
+        embedder=MemoryEmbedder(events),
+        vectors=MemoryVectors(events),
+        revalidate=revalidate,
+        compatibility_hash_for_dimension=lambda _resolved: "compatibility-v1",
+        settings=SemanticIndexSettings(pgvector_allowed_dimensions=frozenset({1_536})),
+        clock=lambda: NOW,
+        receipt_factory=lambda: "receipt-unsupported",
+    )
+
+    with pytest.raises(SemanticIndexingError) as failed:
+        await builder.build_initial_generation(
+            InitialGenerationRequest(
+                fence=fence,
+                embedding_config=PendingSemanticConfig(
+                    provider="openai",
+                    model="embedding-model-v1",
+                    model_revision=None,
+                    endpoint_origin="https://api.example.test",
+                    credential_source="server_default",
+                    consented=True,
+                ),
+            )
+        )
+
+    assert failed.value.code == "notes_semantic_pgvector_dimensions_unsupported"
+    assert "dimension_probe" in events
+    assert "content_read" not in events
 
 
 @pytest.mark.asyncio

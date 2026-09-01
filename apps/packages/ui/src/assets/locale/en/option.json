@@ -1577,6 +1577,7 @@
       "cleanup_pending": "Indexed data is being removed.",
       "cleanup_stalled": "Indexed data cleanup needs attention.",
       "unavailable": "The configured embedding service is unavailable.",
+      "rebuild_required": "The current semantic index does not match this configuration. Rebuild it before using similar-content relationships.",
       "generic": "Semantic index details changed. Review the current status."
     },
     "semanticConfirm": {
@@ -1634,10 +1635,13 @@
       "refresh": "Semantic index details changed. Refresh and try again.",
       "writerConflict": "Another semantic-index operation is active. Wait for it to finish, then try again.",
       "quota": "The semantic-index quota is reached. Wait for capacity or ask an administrator to review limits.",
+      "backendChangeRequiresDelete": "Vector storage changed. Delete the existing index before setting it up again.",
       "unavailable": "Semantic indexing is temporarily unavailable. Check the configured provider and worker, then try again."
     },
     "semanticRenewConsent": "Review consent and rebuild",
-    "semanticRenewStarted": "Consent renewed and semantic index rebuild started."
+    "semanticRenewStarted": "Consent renewed and semantic index rebuild started.",
+    "semanticEndpoint": "Endpoint destination",
+    "semanticBackendChangeRequiresDelete": "Vector storage changed. Delete the existing index before setting it up again."
   },
   "tts": {
     "playground": "TTS Playground"

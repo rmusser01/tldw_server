@@ -3,8 +3,17 @@
 from __future__ import annotations
 
 from typing import Literal
+from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
+
+_SEMANTIC_OUTBOUND_CATEGORIES = {"note_content_chunks", "note_title"}
 
 
 class _StrictModel(BaseModel):
@@ -15,18 +24,86 @@ class SemanticCapabilitiesResponse(_StrictModel):
     active_note_count: int = Field(ge=0)
     estimated_chunk_count: int = Field(ge=0)
     estimated_run_count: int = Field(ge=0)
-    provider_label: str
-    model: str
+    provider_label: str = Field(min_length=1, max_length=128)
+    model: str = Field(min_length=1, max_length=256)
+    endpoint_display: str = Field(min_length=1, max_length=512)
     execution_boundary: Literal["external", "local"]
     storage_boundary: Literal["external", "local", "unavailable"]
-    storage_label: str
-    outbound_data_categories: tuple[str, ...]
-    capability_revision: str
+    storage_label: str = Field(min_length=1, max_length=128)
+    outbound_data_categories: tuple[
+        Literal["note_content_chunks", "note_title"], ...
+    ]
+    capability_revision: str = Field(min_length=1, max_length=128)
     indexing_available: bool
     unavailable_reason: str | None
     metric: Literal["cosine"] = "cosine"
     resolved_dimensions: int | None = Field(default=None, ge=1)
+    dimension_probe_required: bool
+    renewal_requires_delete: bool
     manage_authorized: bool = False
+
+    @field_validator("provider_label", "model", "storage_label")
+    @classmethod
+    def validate_consent_label(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("consent identity labels must not be blank")
+        return normalized
+
+    @field_validator("endpoint_display")
+    @classmethod
+    def validate_endpoint_display(cls, value: str) -> str:
+        if value != value.strip():
+            raise ValueError("endpoint_display must be a sanitized origin")
+        try:
+            endpoint = urlsplit(value)
+            port = endpoint.port
+        except ValueError as exc:
+            raise ValueError("endpoint_display must be a sanitized origin") from exc
+        hostname = endpoint.hostname or ""
+        display_host = f"[{hostname}]" if ":" in hostname else hostname
+        expected = (
+            f"{endpoint.scheme}://{display_host}"
+            f"{f':{port}' if port is not None else ''}"
+        )
+        if (
+            endpoint.scheme not in {"http", "https"}
+            or not endpoint.hostname
+            or endpoint.username is not None
+            or endpoint.password is not None
+            or endpoint.path
+            or endpoint.query
+            or endpoint.fragment
+            or value != expected
+        ):
+            raise ValueError("endpoint_display must be a sanitized origin")
+        return value
+
+    @model_validator(mode="after")
+    def validate_disclosure_identity(self) -> SemanticCapabilitiesResponse:
+        if (
+            len(self.outbound_data_categories) != len(_SEMANTIC_OUTBOUND_CATEGORIES)
+            or set(self.outbound_data_categories) != _SEMANTIC_OUTBOUND_CATEGORIES
+        ):
+            raise ValueError("the exact semantic outbound disclosure is required")
+        if self.dimension_probe_required and (
+            self.resolved_dimensions is not None
+            or not self.indexing_available
+            or self.unavailable_reason is not None
+        ):
+            raise ValueError("dimension disclosure is contradictory")
+        if (
+            self.indexing_available
+            and self.resolved_dimensions is None
+            and not self.dimension_probe_required
+        ):
+            raise ValueError("dimension disclosure is contradictory")
+        if self.indexing_available and (
+            self.storage_boundary == "unavailable"
+            or self.unavailable_reason is not None
+        ):
+            raise ValueError("available capability disclosure is contradictory")
+        return self
 
 
 class SemanticRunResponse(_StrictModel):
@@ -51,6 +128,7 @@ class SemanticIndexStatusResponse(_StrictModel):
     configuration_revision: int = Field(ge=0)
     semantic_index_revision: int = Field(ge=0)
     active_generation_id: str | None
+    active_generation_usable: bool
     indexed_notes: int = Field(ge=0)
     excluded_notes: int = Field(ge=0)
     failed_notes: int = Field(ge=0)

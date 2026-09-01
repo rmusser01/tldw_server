@@ -41,6 +41,7 @@ class _FakeAPI:
             "estimated_run_count": 1,
             "provider_label": "OpenAI",
             "model": "text-embedding-3-small",
+            "endpoint_display": "https://api.openai.com",
             "execution_boundary": "external",
             "storage_boundary": "local",
             "storage_label": "ChromaDB",
@@ -50,6 +51,8 @@ class _FakeAPI:
             "unavailable_reason": None,
             "metric": "cosine",
             "resolved_dimensions": 1536,
+            "dimension_probe_required": False,
+            "renewal_requires_delete": False,
         }
 
     def status(self):
@@ -61,6 +64,7 @@ class _FakeAPI:
             "configuration_revision": 9,
             "semantic_index_revision": 2,
             "active_generation_id": "generation-a",
+            "active_generation_usable": True,
             "indexed_notes": 4,
             "excluded_notes": 0,
             "failed_notes": 0,
@@ -131,6 +135,7 @@ def _mutation(mode: str, *, run_id: str = RUN_ID) -> dict[str, object]:
             "configuration_revision": 9,
             "semantic_index_revision": 2,
             "active_generation_id": None,
+            "active_generation_usable": False,
             "indexed_notes": 0,
             "excluded_notes": 0,
             "failed_notes": 0,

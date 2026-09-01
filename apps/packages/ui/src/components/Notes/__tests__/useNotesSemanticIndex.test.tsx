@@ -44,6 +44,7 @@ const capability = (manageAuthorized = true) => ({
   estimated_run_count: 2,
   provider_label: "OpenAI",
   model: "text-embedding-3-small",
+  endpoint_display: "https://api.openai.com",
   execution_boundary: "external",
   storage_boundary: "local",
   storage_label: "ChromaDB",
@@ -53,6 +54,8 @@ const capability = (manageAuthorized = true) => ({
   unavailable_reason: null,
   metric: "cosine",
   resolved_dimensions: 1536,
+  dimension_probe_required: false,
+  renewal_requires_delete: false,
   manage_authorized: manageAuthorized
 })
 
@@ -82,6 +85,7 @@ const semanticStatus = (
   configuration_revision: 7,
   semantic_index_revision: 3,
   active_generation_id: state === "off" ? null : "generation-a",
+  active_generation_usable: state !== "off",
   indexed_notes: 4,
   excluded_notes: 0,
   failed_notes: 0,

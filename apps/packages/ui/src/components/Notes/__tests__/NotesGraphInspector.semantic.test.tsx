@@ -25,6 +25,7 @@ vi.mock("react-i18next", () => ({
         "notesSearch.semanticState.needs_attention": "Needs attention",
         "notesSearch.semanticProvider": "Provider",
         "notesSearch.semanticModel": "Model",
+        "notesSearch.semanticEndpoint": "Embedding destination",
         "notesSearch.semanticExecutionBoundary": "Embedding execution",
         "notesSearch.semanticStorageBoundary": "Vector storage",
         "notesSearch.semanticBoundary.external": "External",
@@ -52,6 +53,10 @@ vi.mock("react-i18next", () => ({
           "Configuration changed; review consent.",
         "notesSearch.semanticDetail.consent_required":
           "Consent must be renewed.",
+        "notesSearch.semanticDetail.rebuild_required":
+          "The semantic index must be rebuilt before similar content is available.",
+        "notesSearch.semanticBackendChangeRequiresDelete":
+          "Vector storage changed. Delete the existing index before setting it up again.",
         "notesSearch.semanticDetail.cleanup_pending":
           "Vector cleanup is pending.",
         "notesSearch.semanticDetail.cleanup_stalled":
@@ -133,6 +138,7 @@ const capabilities = (overrides: Record<string, unknown> = {}) => ({
   estimated_run_count: 2,
   provider_label: "OpenAI",
   model: "text-embedding-3-small",
+  endpoint_display: "https://api.openai.com",
   execution_boundary: "external",
   storage_boundary: "local",
   storage_label: "ChromaDB",
@@ -142,26 +148,35 @@ const capabilities = (overrides: Record<string, unknown> = {}) => ({
   unavailable_reason: null,
   metric: "cosine",
   resolved_dimensions: 1536,
+  dimension_probe_required: false,
+  renewal_requires_delete: false,
   manage_authorized: true,
   ...overrides
 })
 
-const status = (overrides: Record<string, unknown> = {}) => ({
-  state: "off",
-  detail_reason: null,
-  desired_state: "disabled",
-  configuration_revision: 0,
-  semantic_index_revision: 0,
-  active_generation_id: null,
-  indexed_notes: 0,
-  excluded_notes: 0,
-  failed_notes: 0,
-  pending_notes: 0,
-  published_chunks: 0,
-  cleanup_pending: false,
-  active_run: null,
-  ...overrides
-})
+const status = (overrides: Record<string, unknown> = {}) => {
+  const activeGenerationUsable =
+    typeof overrides.active_generation_usable === "boolean"
+      ? overrides.active_generation_usable
+      : Boolean(overrides.active_generation_id)
+  return {
+    state: "off",
+    detail_reason: null,
+    desired_state: "disabled",
+    configuration_revision: 0,
+    semantic_index_revision: 0,
+    active_generation_id: null,
+    active_generation_usable: activeGenerationUsable,
+    indexed_notes: 0,
+    excluded_notes: 0,
+    failed_notes: 0,
+    pending_notes: 0,
+    published_chunks: 0,
+    cleanup_pending: false,
+    active_run: null,
+    ...overrides
+  }
+}
 
 const semanticController = (overrides: Record<string, unknown> = {}) => ({
   capabilities: capabilities(),
@@ -250,6 +265,7 @@ describe("NotesGraphInspector semantic setup", () => {
     ).toBeInTheDocument()
     expect(screen.getByText("OpenAI")).toBeInTheDocument()
     expect(screen.getByText("text-embedding-3-small")).toBeInTheDocument()
+    expect(screen.getByText("https://api.openai.com")).toBeInTheDocument()
     const storageDisclosure =
       screen.getByText("Vector storage").nextElementSibling
     expect(storageDisclosure).toHaveTextContent("ChromaDB")
@@ -286,7 +302,10 @@ describe("NotesGraphInspector semantic setup", () => {
   it("discloses unresolved dimensions before consent and keeps technical metadata restrained", () => {
     renderInspector(
       semanticController({
-        capabilities: capabilities({ resolved_dimensions: null })
+        capabilities: capabilities({
+          resolved_dimensions: null,
+          dimension_probe_required: true
+        })
       })
     )
 
@@ -300,6 +319,9 @@ describe("NotesGraphInspector semantic setup", () => {
     ).toBeInTheDocument()
     expect(screen.getByText("Pending probe")).toBeInTheDocument()
     expect(screen.getByText("Cosine")).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Enable semantic index" })
+    ).toBeEnabled()
     expect(screen.queryByLabelText(/dimensions|metric/i)).toBeNull()
   })
 
@@ -307,6 +329,24 @@ describe("NotesGraphInspector semantic setup", () => {
     renderInspector(
       semanticController({
         status: status({ state: "preparing", detail_reason: "building" })
+      })
+    )
+
+    expect(
+      screen.queryByRole("checkbox", { name: "Show similar content" })
+    ).toBeNull()
+  })
+
+  it("does not enable semantic edges for an incompatible active generation", () => {
+    renderInspector(
+      semanticController({
+        status: status({
+          state: "needs_attention",
+          detail_reason: "rebuild_required",
+          desired_state: "enabled",
+          active_generation_id: "generation-a",
+          active_generation_usable: false
+        })
       })
     )
 
@@ -389,6 +429,7 @@ describe("NotesGraphInspector semantic setup", () => {
         detail_reason: "degraded",
         desired_state: "enabled",
         configuration_revision: 7,
+        active_generation_id: "generation-a",
         failed_notes: 2
       })
     })
@@ -514,7 +555,11 @@ describe("NotesGraphInspector semantic setup", () => {
         semanticController={
           semanticController({
             capabilities: capabilities({ manage_authorized: false }),
-            status: status({ state: "ready", desired_state: "enabled" })
+            status: status({
+              state: "ready",
+              desired_state: "enabled",
+              active_generation_id: "generation-a"
+            })
           }) as never
         }
         semanticEnabled
@@ -655,6 +700,89 @@ describe("NotesGraphInspector semantic setup", () => {
       ["Review consent and rebuild", "Delete index"]
     ],
     [
+      "post-renewal admission gap",
+      status({
+        state: "needs_attention",
+        detail_reason: "rebuild_required",
+        desired_state: "enabled",
+        active_generation_id: "generation-a",
+        active_generation_usable: false
+      }),
+      capabilities(),
+      null,
+      ["Rebuild index", "Delete index"]
+    ],
+    [
+      "recovered initial build failure",
+      status({
+        state: "needs_attention",
+        detail_reason: "unavailable",
+        desired_state: "enabled",
+        active_generation_id: null,
+        active_generation_usable: false
+      }),
+      capabilities(),
+      null,
+      ["Rebuild index", "Delete index"]
+    ],
+    [
+      "unavailable initial build failure",
+      status({
+        state: "needs_attention",
+        detail_reason: "unavailable",
+        desired_state: "enabled",
+        active_generation_id: null,
+        active_generation_usable: false,
+        failed_notes: 2
+      }),
+      capabilities({
+        indexing_available: false,
+        unavailable_reason: "notes_semantic_provider_unavailable"
+      }),
+      null,
+      ["Delete index"]
+    ],
+    [
+      "degraded state without a generation",
+      status({
+        state: "needs_attention",
+        detail_reason: "degraded",
+        desired_state: "enabled",
+        active_generation_id: null,
+        active_generation_usable: false,
+        failed_notes: 2
+      }),
+      capabilities(),
+      null,
+      ["Rebuild index", "Delete index"]
+    ],
+    [
+      "committed initial admission gap",
+      status({
+        state: "preparing",
+        detail_reason: "building",
+        desired_state: "enabled",
+        active_generation_id: null,
+        active_generation_usable: false
+      }),
+      capabilities(),
+      null,
+      ["Rebuild index", "Delete index"]
+    ],
+    [
+      "vector backend drift",
+      status({
+        state: "needs_attention",
+        detail_reason: "stale_configuration",
+        desired_state: "enabled",
+        active_generation_id: "generation-a",
+        active_generation_usable: false
+      }),
+      capabilities({ renewal_requires_delete: true }),
+      null,
+      ["Delete index"]
+    ],
+    [
       "active rebuild",
       status({
         state: "updating",
@@ -771,6 +899,51 @@ describe("NotesGraphInspector semantic setup", () => {
     expect(
       screen.queryByRole("button", { name: "Enable semantic index" })
     ).toBeNull()
+  })
+
+  it.each([
+    ["provider", { provider_label: " " }],
+    ["model", { model: "" }],
+    ["storage", { storage_label: "\t" }],
+    ["endpoint", { endpoint_display: "" }],
+    [
+      "pending dimensions without a probe",
+      { resolved_dimensions: null, dimension_probe_required: false }
+    ]
+  ])(
+    "hides enablement for incomplete direct %s disclosure",
+    (_label, value) => {
+      renderInspector(semanticController({ capabilities: capabilities(value) }))
+
+      expect(
+        screen.queryByRole("button", { name: "Enable semantic index" })
+      ).toBeNull()
+    }
+  )
+
+  it("explains that backend drift requires deletion instead of renewal", () => {
+    renderInspector(
+      semanticController({
+        capabilities: capabilities({ renewal_requires_delete: true }),
+        status: status({
+          state: "needs_attention",
+          detail_reason: "stale_configuration",
+          desired_state: "enabled",
+          active_generation_id: "generation-a",
+          active_generation_usable: false
+        })
+      })
+    )
+
+    expect(
+      screen.getByText(
+        "Vector storage changed. Delete the existing index before setting it up again."
+      )
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Review consent and rebuild" })
+    ).toBeNull()
+    expect(screen.getByRole("button", { name: "Delete index" })).toBeEnabled()
   })
 
   it("uses one localized generic detail for unknown server reasons", () => {

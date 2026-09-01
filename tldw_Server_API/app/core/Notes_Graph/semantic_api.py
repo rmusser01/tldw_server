@@ -14,6 +14,7 @@ from uuid import UUID
 
 from tldw_Server_API.app.core.DB_Management.chacha.note_semantic_models import (
     SemanticDesiredState,
+    SemanticDimensionState,
     SemanticGenerationState,
     SemanticIndexConfig,
     SemanticIndexingError,
@@ -71,6 +72,7 @@ class SemanticAPIError(RuntimeError):
 class SemanticStatusFacts:
     desired_state: str
     has_active_generation: bool
+    active_generation_usable: bool
     has_active_job: bool
     active_job_failed: bool
     pending_notes: int
@@ -88,17 +90,20 @@ def derive_semantic_state(facts: SemanticStatusFacts) -> tuple[str, str | None]:
         if facts.cleanup_stalled:
             return "needs_attention", "cleanup_stalled"
         return "off", "cleanup_pending" if facts.cleanup_pending else None
+    if facts.has_active_job:
+        return (
+            "updating" if facts.has_active_generation else "preparing",
+            "building",
+        )
     if not facts.indexing_available:
         return "needs_attention", "unavailable"
     if facts.configuration_stale:
         return "needs_attention", "stale_configuration"
-    if not facts.has_active_generation:
-        if facts.active_job_failed:
-            return "needs_attention", "unavailable"
-        return "preparing", "building"
+    if not facts.active_generation_usable:
+        return "needs_attention", "rebuild_required"
     if facts.failed_notes:
         return "needs_attention", "degraded"
-    if facts.has_active_job or facts.pending_notes:
+    if facts.pending_notes:
         return "updating", "building"
     return "ready", None
 
@@ -174,13 +179,18 @@ def resolve_semantic_capabilities(
     return build_semantic_capabilities(contract, settings=settings)
 
 
-def _capability_response(capabilities: SemanticCapabilities) -> dict[str, Any]:
+def _capability_response(
+    capabilities: SemanticCapabilities,
+    *,
+    renewal_requires_delete: bool = False,
+) -> dict[str, Any]:
     return {
         "active_note_count": capabilities.active_note_count,
         "estimated_chunk_count": capabilities.estimated_chunk_count,
         "estimated_run_count": capabilities.estimated_run_count,
         "provider_label": capabilities.provider_label,
         "model": capabilities.model,
+        "endpoint_display": capabilities.endpoint_display,
         "execution_boundary": capabilities.execution_boundary,
         "storage_boundary": capabilities.storage_boundary,
         "storage_label": capabilities.storage_label,
@@ -190,6 +200,8 @@ def _capability_response(capabilities: SemanticCapabilities) -> dict[str, Any]:
         "unavailable_reason": capabilities.unavailable_reason,
         "metric": capabilities.metric,
         "resolved_dimensions": capabilities.resolved_dimensions,
+        "dimension_probe_required": capabilities.dimension_probe_required,
+        "renewal_requires_delete": renewal_requires_delete,
     }
 
 
@@ -265,7 +277,26 @@ class SemanticIndexAPI:
             raise SemanticAPIError(503, "notes_semantic_provider_unavailable") from exc
 
     def capabilities(self) -> dict[str, Any]:
-        return _capability_response(self._capabilities())
+        capabilities = self._capabilities()
+        config = self._store.get_configuration(self._dataset_id)
+        backend_changed = bool(
+            config is not None
+            and config.vector_backend
+            and config.vector_backend != capabilities.vector_backend
+        )
+        return _capability_response(
+            capabilities,
+            renewal_requires_delete=(
+                backend_changed
+                and config is not None
+                and (
+                    config.desired_state is SemanticDesiredState.ENABLED
+                    or not self._store.can_rebind_disabled_configuration(
+                        self._dataset_id
+                    )
+                )
+            ),
+        )
 
     def _begin_operation(
         self,
@@ -370,9 +401,36 @@ class SemanticIndexAPI:
                 raise
             return _active_note_count(self._note_db)
 
-    def _integrity(self, config: SemanticIndexConfig) -> dict[str, int]:
+    def _active_generation_usable(self, config: SemanticIndexConfig) -> bool:
         generation_id = config.active_generation_id
         if generation_id is None:
+            return False
+        try:
+            generation = self._store.get_generation(self._dataset_id, generation_id)
+        except (OSError, RuntimeError, TypeError, ValueError):
+            return False
+        return bool(
+            generation is not None
+            and generation.owner_user_id == self._owner_user_id
+            and generation.dataset_id == self._dataset_id
+            and generation.state is SemanticGenerationState.ACTIVE
+            and generation.configuration_revision == config.configuration_revision
+            and generation.compatibility_hash == config.compatibility_hash
+            and generation.model_revision == config.model_revision
+            and generation.dimension_state is SemanticDimensionState.RESOLVED
+            and config.dimension_state is SemanticDimensionState.RESOLVED
+            and generation.dimensions == config.dimensions
+            and bool(config.compatibility_hash)
+        )
+
+    def _integrity(
+        self,
+        config: SemanticIndexConfig,
+        *,
+        active_generation_usable: bool,
+    ) -> dict[str, int]:
+        generation_id = config.active_generation_id
+        if generation_id is None or not active_generation_usable:
             return {
                 "indexed_notes": 0,
                 "excluded_notes": 0,
@@ -456,6 +514,7 @@ class SemanticIndexAPI:
                 "configuration_revision": 0,
                 "semantic_index_revision": 0,
                 "active_generation_id": None,
+                "active_generation_usable": False,
                 "indexed_notes": 0,
                 "excluded_notes": 0,
                 "failed_notes": 0,
@@ -464,7 +523,11 @@ class SemanticIndexAPI:
                 "cleanup_pending": cleanup_pending,
                 "active_run": self._run_response(active_job) if active_job else None,
             }
-        counts = self._integrity(config)
+        active_generation_usable = self._active_generation_usable(config)
+        counts = self._integrity(
+            config,
+            active_generation_usable=active_generation_usable,
+        )
         try:
             capabilities = self._capabilities()
         except SemanticAPIError as exc:
@@ -475,6 +538,7 @@ class SemanticIndexAPI:
             SemanticStatusFacts(
                 desired_state=config.desired_state.value,
                 has_active_generation=config.active_generation_id is not None,
+                active_generation_usable=active_generation_usable,
                 has_active_job=active_job is not None,
                 active_job_failed=failed_job is not None,
                 pending_notes=counts["pending_notes"],
@@ -500,6 +564,7 @@ class SemanticIndexAPI:
             "configuration_revision": config.configuration_revision,
             "semantic_index_revision": config.semantic_index_revision,
             "active_generation_id": config.active_generation_id,
+            "active_generation_usable": active_generation_usable,
             **counts,
             "cleanup_pending": cleanup_pending,
             "active_run": self._run_response(active_job) if active_job else None,
@@ -552,6 +617,43 @@ class SemanticIndexAPI:
             status_code = 409 if exc.code.endswith("conflict") else 503
             raise SemanticAPIError(status_code, exc.code) from exc
 
+    def _commit_capability_consent(
+        self,
+        *,
+        expected_revision: int,
+        capabilities: SemanticCapabilities,
+        activate_disabled: bool = False,
+    ) -> SemanticIndexConfig:
+        if capabilities.endpoint_display is None:
+            raise SemanticAPIError(503, "notes_semantic_provider_unavailable")
+        renewed = self._store.renew_configuration_consent(
+            dataset_id=self._dataset_id,
+            expected_configuration_revision=expected_revision,
+            capability_revision=capabilities.capability_revision,
+            disclosure_hash=capabilities.disclosure_hash,
+            compatibility_hash=capabilities.compatibility_hash,
+            provider=capabilities.provider_label.lower(),
+            model=capabilities.model,
+            model_revision=capabilities.model_revision,
+            endpoint_origin_revision=capabilities.endpoint_origin_revision,
+            endpoint_origin_display=capabilities.endpoint_display,
+            data_boundary=capabilities.execution_boundary,
+            vector_backend=capabilities.vector_backend,
+            storage_boundary=capabilities.storage_boundary,
+            storage_label=capabilities.storage_label,
+            resolved_dimensions=capabilities.resolved_dimensions,
+            normalization_version=SEMANTIC_NORMALIZATION_VERSION,
+            chunker_version=SEMANTIC_CHUNKER_VERSION,
+            now=self._clock(),
+            activate_disabled=activate_disabled,
+        )
+        if renewed is None:
+            raise SemanticAPIError(
+                409,
+                "notes_semantic_configuration_revision_conflict",
+            )
+        return renewed
+
     def enable(
         self,
         *,
@@ -579,6 +681,58 @@ class SemanticIndexAPI:
             "expected_revision": expected_revision,
             "capability_revision": capability_revision,
         }
+        preflight_key = _key_digest(idempotency_key)
+        preflight_fingerprint = _canonical_digest(
+            {"owner_user_id": self._owner_user_id, **request_identity}
+        )
+        existing_receipt = self._store.get_operation_receipt(
+            dataset_id=self._dataset_id,
+            key_digest=preflight_key,
+            now=self._clock(),
+        )
+        if existing_receipt is not None and (
+            existing_receipt.action != "enable"
+            or existing_receipt.request_fingerprint != preflight_fingerprint
+            or existing_receipt.expected_revision != expected_revision
+        ):
+            raise SemanticAPIError(409, "notes_semantic_idempotency_conflict")
+        if existing_receipt is not None:
+            stored = self._receipt_response(existing_receipt)
+            if stored is not None:
+                return stored
+        preflight_committed_retry = bool(
+            existing_receipt is not None
+            and existing_receipt.state == "pending"
+            and config is not None
+            and config.desired_state is SemanticDesiredState.ENABLED
+            and config.configuration_revision == command_revision
+            and config.capability_revision == capability_revision
+        )
+        validated_capabilities: SemanticCapabilities | None = None
+        if config is not None and not preflight_committed_retry:
+            allowed_revisions = {config.configuration_revision}
+            if (
+                config.desired_state is SemanticDesiredState.DISABLED
+                and config.configuration_revision == 1
+            ):
+                allowed_revisions.add(0)
+            if expected_revision not in allowed_revisions:
+                raise SemanticAPIError(
+                    409,
+                    "notes_semantic_configuration_revision_conflict",
+                )
+            validated_capabilities = self._require_capability(capability_revision)
+            backend_changed = (
+                config.vector_backend != validated_capabilities.vector_backend
+            )
+            if backend_changed and (
+                config.desired_state is SemanticDesiredState.ENABLED
+                or self._store.has_pending_cleanup(self._dataset_id)
+            ):
+                raise SemanticAPIError(
+                    409,
+                    "notes_semantic_backend_change_requires_delete",
+                )
         receipt, key_digest, request_fingerprint, receipt_replayed = (
             self._begin_operation(
                 action="enable",
@@ -620,7 +774,7 @@ class SemanticIndexAPI:
         capabilities = (
             None
             if committed_retry
-            else self._require_capability(capability_revision)
+            else validated_capabilities or self._require_capability(capability_revision)
         )
         if config is None:
             if expected_revision != 0:
@@ -639,9 +793,7 @@ class SemanticIndexAPI:
                 endpoint_origin_revision=capabilities.endpoint_origin_revision,
                 endpoint_origin_display=capabilities.endpoint_display,
                 data_boundary=capabilities.execution_boundary,
-                vector_backend=(
-                    os.getenv("NOTES_SEMANTIC_VECTOR_BACKEND") or "chromadb"
-                ).strip().lower(),
+                vector_backend=capabilities.vector_backend,
                 storage_boundary=capabilities.storage_boundary,
                 storage_label=capabilities.storage_label,
                 normalization_version=SEMANTIC_NORMALIZATION_VERSION,
@@ -652,58 +804,65 @@ class SemanticIndexAPI:
             allowed_revisions = {config.configuration_revision}
             if config.configuration_revision == 1:
                 allowed_revisions.add(0)
-            if expected_revision not in allowed_revisions:
+            if expected_revision not in allowed_revisions or capabilities is None:
                 raise SemanticAPIError(409, "notes_semantic_configuration_revision_conflict")
-            enabled = self._store.enable_configuration(
-                dataset_id=self._dataset_id,
-                expected_configuration_revision=config.configuration_revision,
-                capability_revision=capability_revision,
-                now=self._clock(),
+            backend_changed = config.vector_backend != capabilities.vector_backend
+            if (
+                backend_changed
+                and not self._store.can_rebind_disabled_configuration(
+                    self._dataset_id
+                )
+            ):
+                raise SemanticAPIError(
+                    409,
+                    "notes_semantic_backend_change_requires_delete",
+                )
+            capability_changed = (
+                config.capability_revision != capabilities.capability_revision
             )
-            if enabled is None:
-                raise SemanticAPIError(409, "notes_semantic_configuration_revision_conflict")
-            config = enabled
+            if backend_changed or capability_changed:
+                config = self._commit_capability_consent(
+                    expected_revision=config.configuration_revision,
+                    capabilities=capabilities,
+                    activate_disabled=True,
+                )
+            else:
+                enabled = self._store.enable_configuration(
+                    dataset_id=self._dataset_id,
+                    expected_configuration_revision=config.configuration_revision,
+                    capability_revision=capability_revision,
+                    now=self._clock(),
+                )
+                if enabled is None:
+                    raise SemanticAPIError(
+                        409,
+                        "notes_semantic_configuration_revision_conflict",
+                    )
+                config = enabled
         elif not committed_retry:
             if (
                 capabilities is None
                 or config.configuration_revision != expected_revision
                 or config.capability_revision == capabilities.capability_revision
-                or capabilities.compatibility_hash is None
-                or capabilities.resolved_dimensions is None
                 or capabilities.endpoint_display is None
+                or (
+                    capabilities.resolved_dimensions is None
+                    and not capabilities.dimension_probe_required
+                )
             ):
                 raise SemanticAPIError(
                     409,
                     "notes_semantic_configuration_revision_conflict",
                 )
-            renewed = self._store.renew_configuration_consent(
-                dataset_id=self._dataset_id,
-                expected_configuration_revision=expected_revision,
-                capability_revision=capabilities.capability_revision,
-                disclosure_hash=capabilities.disclosure_hash,
-                compatibility_hash=capabilities.compatibility_hash,
-                provider=capabilities.provider_label.lower(),
-                model=capabilities.model,
-                model_revision=capabilities.model_revision,
-                endpoint_origin_revision=capabilities.endpoint_origin_revision,
-                endpoint_origin_display=capabilities.endpoint_display,
-                data_boundary=capabilities.execution_boundary,
-                vector_backend=(
-                    os.getenv("NOTES_SEMANTIC_VECTOR_BACKEND") or "chromadb"
-                ).strip().lower(),
-                storage_boundary=capabilities.storage_boundary,
-                storage_label=capabilities.storage_label,
-                resolved_dimensions=capabilities.resolved_dimensions,
-                normalization_version=SEMANTIC_NORMALIZATION_VERSION,
-                chunker_version=SEMANTIC_CHUNKER_VERSION,
-                now=self._clock(),
-            )
-            if renewed is None:
+            if config.vector_backend != capabilities.vector_backend:
                 raise SemanticAPIError(
                     409,
-                    "notes_semantic_configuration_revision_conflict",
+                    "notes_semantic_backend_change_requires_delete",
                 )
-            config = renewed
+            config = self._commit_capability_consent(
+                expected_revision=expected_revision,
+                capabilities=capabilities,
+            )
 
         if config.configuration_revision != command_revision:
             raise SemanticAPIError(409, "notes_semantic_configuration_revision_conflict")

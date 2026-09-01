@@ -5,6 +5,8 @@ import { z } from "zod"
 const ERROR_MESSAGES = {
   notes_semantic_active_generation_required:
     "An active semantic generation is required.",
+  notes_semantic_backend_change_requires_delete:
+    "Delete the existing semantic index before changing vector storage.",
   notes_semantic_capability_revision_conflict:
     "Semantic capabilities changed; refresh and retry.",
   notes_semantic_configuration_revision_conflict:
@@ -66,6 +68,7 @@ export type NotesSemanticCapabilities = {
   estimated_run_count: number
   provider_label: string
   model: string
+  endpoint_display: string
   execution_boundary: "external" | "local"
   storage_boundary: "external" | "local" | "unavailable"
   storage_label: string
@@ -75,6 +78,8 @@ export type NotesSemanticCapabilities = {
   unavailable_reason: string | null
   metric: "cosine"
   resolved_dimensions: number | null
+  dimension_probe_required: boolean
+  renewal_requires_delete: boolean
   manage_authorized: boolean
 }
 
@@ -108,6 +113,7 @@ export type NotesSemanticIndexStatus = {
   configuration_revision: number
   semantic_index_revision: number
   active_generation_id: string | null
+  active_generation_usable: boolean
   indexed_notes: number
   excluded_notes: number
   failed_notes: number
@@ -158,6 +164,35 @@ const runStatusSchema = z.enum([
   "quarantined"
 ])
 const outboundCategorySchema = z.enum(NOTES_SEMANTIC_OUTBOUND_DATA_CATEGORIES)
+const boundedIdentity = (maximum: number) =>
+  z.string().trim().min(1).max(maximum)
+const endpointDisplaySchema = boundedIdentity(512).superRefine(
+  (value, context) => {
+    try {
+      const endpoint = new URL(value)
+      const defaultPort = endpoint.protocol === "https:" ? "443" : "80"
+      const matchesSanitizedOrigin =
+        value === endpoint.origin ||
+        value === `${endpoint.origin}:${defaultPort}`
+      if (
+        !["http:", "https:"].includes(endpoint.protocol) ||
+        endpoint.username ||
+        endpoint.password ||
+        endpoint.pathname !== "/" ||
+        endpoint.search ||
+        endpoint.hash ||
+        !matchesSanitizedOrigin
+      ) {
+        throw new Error("endpoint must be a sanitized HTTP origin")
+      }
+    } catch {
+      context.addIssue({
+        code: "custom",
+        message: "sanitized endpoint origin required"
+      })
+    }
+  }
+)
 
 const runSchema = z.strictObject({
   run_id: nonempty,
@@ -181,6 +216,7 @@ const statusSchema: z.ZodType<NotesSemanticIndexStatus> = z.strictObject({
   configuration_revision: nonnegative,
   semantic_index_revision: nonnegative,
   active_generation_id: nonempty.nullable(),
+  active_generation_usable: z.boolean(),
   indexed_notes: nonnegative,
   excluded_notes: nonnegative,
   failed_notes: nonnegative,
@@ -195,21 +231,23 @@ const capabilitiesSchema: z.ZodType<NotesSemanticCapabilities> = z
     active_note_count: nonnegative,
     estimated_chunk_count: nonnegative,
     estimated_run_count: nonnegative,
-    provider_label: z.string(),
-    model: z.string(),
+    provider_label: boundedIdentity(128),
+    model: boundedIdentity(256),
+    endpoint_display: endpointDisplaySchema,
     execution_boundary: z.enum(["external", "local"]),
     storage_boundary: z.enum(["external", "local", "unavailable"]),
-    storage_label: z.string(),
+    storage_label: boundedIdentity(128),
     outbound_data_categories: z.array(outboundCategorySchema).max(2),
     capability_revision: nonempty,
     indexing_available: z.boolean(),
     unavailable_reason: nonempty.nullable(),
     metric: z.literal("cosine"),
     resolved_dimensions: z.number().int().min(1).nullable(),
+    dimension_probe_required: z.boolean(),
+    renewal_requires_delete: z.boolean(),
     manage_authorized: z.boolean()
   })
   .superRefine((capability, context) => {
-    if (!capability.indexing_available) return
     const outbound = new Set(capability.outbound_data_categories)
     const completeOutboundDisclosure =
       capability.outbound_data_categories.length ===
@@ -224,10 +262,26 @@ const capabilitiesSchema: z.ZodType<NotesSemanticCapabilities> = z
         message: "complete outbound disclosure required"
       })
     }
+    const invalidProbeDisclosure =
+      capability.dimension_probe_required &&
+      (capability.resolved_dimensions !== null ||
+        !capability.indexing_available ||
+        capability.unavailable_reason !== null)
+    const missingAvailableDimensionDisclosure =
+      capability.indexing_available &&
+      capability.resolved_dimensions === null &&
+      !capability.dimension_probe_required
+    if (invalidProbeDisclosure || missingAvailableDimensionDisclosure) {
+      context.addIssue({
+        code: "custom",
+        path: ["dimension_probe_required"],
+        message: "dimension disclosure is contradictory"
+      })
+    }
+    if (!capability.indexing_available) return
     if (
       capability.storage_boundary === "unavailable" ||
-      capability.unavailable_reason !== null ||
-      capability.resolved_dimensions === null
+      capability.unavailable_reason !== null
     ) {
       context.addIssue({
         code: "custom",

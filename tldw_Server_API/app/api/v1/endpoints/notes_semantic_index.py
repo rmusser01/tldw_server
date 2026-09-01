@@ -52,6 +52,7 @@ from tldw_Server_API.app.core.Sync.v2.notes_link_coordinator import (
 
 SEMANTIC_ERROR_MESSAGES = {
     "notes_semantic_active_generation_required": "An active semantic generation is required.",
+    "notes_semantic_backend_change_requires_delete": "Delete the existing semantic index before changing vector storage backends.",
     "notes_semantic_capability_revision_conflict": "Semantic capabilities changed; refresh and retry.",
     "notes_semantic_configuration_revision_conflict": "The semantic index changed; refresh and retry.",
     "notes_semantic_dataset_authority_unavailable": "Semantic dataset authority is temporarily unavailable.",
