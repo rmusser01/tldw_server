@@ -9,7 +9,7 @@ import tomllib
 from packaging.specifiers import SpecifierSet
 from packaging.version import Version
 
-EXPECTED_CONTRACT_DIGEST = "a1e0868dcd873a0c94eb0405934983466ceed68fced4b749489226d9932a5e9b"
+EXPECTED_CONTRACT_DIGEST = "421672c5cc0e43481280b3cf5a5a63fe01f44bf33255353e1cd9a6dbc2f2e7d0"
 
 
 def _contract_files(root: Path) -> list[Path]:

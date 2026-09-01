@@ -30,6 +30,12 @@ from tldw_profile_core import (
     SyncMode,
 )
 
+from tldw_Server_API.app.core.exceptions import (
+    ProfileConflictError,
+    ProfileKeyCollisionError,
+    ProfileNotFoundError,
+    ProfileUnsupportedOperationError,
+)
 from tldw_Server_API.app.core.Personalization.personal_context_export import (
     PLAINTEXT_EXPORT_CONFIRMATION,
     RECOVERY_EXPORT_CONFIRMATION,
@@ -57,22 +63,6 @@ from tldw_Server_API.app.core.Personalization.personal_context_runtime_policy im
 _PayloadAdapter = TypeAdapter(ProfilePayload)
 _ControlsAdapter = TypeAdapter(ProfileControls)
 _SemanticKeyAdapter = TypeAdapter(SemanticKey)
-
-
-class ProfileConflictError(RuntimeError):
-    """A caller supplied a stale canonical or runtime version."""
-
-
-class ProfileKeyCollisionError(RuntimeError):
-    """An active same-scope semantic key already exists."""
-
-
-class ProfileUnsupportedOperationError(RuntimeError):
-    """An operation is valid in another owner but not on the server."""
-
-    def __init__(self, code: str) -> None:
-        super().__init__(code)
-        self.code = code
 
 
 class ProfileOperationalState(StrEnum):
@@ -139,7 +129,7 @@ class PersonalContextService:
         if not profile_ids:
             if self._repository.has_profile_state():
                 raise ProfileStorageLockedError("Personal Context key material exists without a manifest")
-            raise KeyError("Personal context profile not found")
+            raise ProfileNotFoundError("Personal context profile not found")
         if len(profile_ids) != 1:
             raise ProfileIntegrityError("Multiple Personal Context manifests exist")
         return profile_ids[0]
@@ -198,10 +188,7 @@ class PersonalContextService:
                     **base,
                 )
             now = self._now()
-            if any(
-                proposal.state is ProposalState.PENDING and proposal.expires_at > now
-                for proposal in self._current_proposals(profile_id)
-            ):
+            if self._has_live_pending_proposal(profile_id, now=now):
                 return ProfileStatus(
                     state=ProfileOperationalState.REVIEW_REQUIRED,
                     **base,
@@ -635,6 +622,19 @@ class PersonalContextService:
                 continue
         return self._repository.list_unresolved_proposals(profile_id) if expired else proposals
 
+    def _has_live_pending_proposal(
+        self,
+        profile_id: str,
+        *,
+        now: datetime,
+    ) -> bool:
+        """Check review status without mutating expired proposal heads."""
+
+        return any(
+            proposal.state is ProposalState.PENDING and proposal.expires_at > now
+            for proposal in self._repository.list_unresolved_proposals(profile_id)
+        )
+
     def list_proposals(
         self,
         *,
@@ -803,7 +803,11 @@ class PersonalContextService:
             if not requested.issubset(selected):
                 raise KeyError("Personal context scope not found")
             selected = requested
-        records = tuple(record for record in self.list_records(include_archived=True) if record.scope_id in selected)
+        records = tuple(
+            record
+            for record in self._repository.list_records(manifest.profile_id)
+            if record.scope_id in selected
+        )
         return {
             "schema_version": 1,
             "manifest": manifest.model_dump(mode="json"),

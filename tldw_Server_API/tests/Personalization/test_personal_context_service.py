@@ -19,8 +19,10 @@ from tldw_profile_core import (
 )
 from tldw_profile_core.models import ActorType, ProvenanceSource
 
+from tldw_Server_API.app.core.DB_Management import (
+    Personal_Context_Repository as personal_context_repository,
+)
 from tldw_Server_API.app.core.DB_Management.Personalization_DB import PersonalizationDB
-from tldw_Server_API.app.core.Personalization import personal_context_repository
 from tldw_Server_API.app.core.Personalization.personal_context_repository import (
     PersonalContextRepository,
 )
@@ -126,6 +128,49 @@ def test_status_fails_closed_for_residual_state_without_manifest(
         )
 
     assert service.status().state is ProfileOperationalState.LOCKED
+
+
+def test_status_does_not_mutate_expired_proposals(
+    service: PersonalContextService,
+    monkeypatch,
+) -> None:
+    manifest, scope = _create_ready_profile(service)
+    proposed = service.build_manual_record(
+        scope_id=scope.scope_id,
+        payload=_payload("temporary"),
+        semantic_key=None,
+        controls=_controls(),
+    )
+    pending = ProfileProposal(
+        proposal_id="proposal-expired-status",
+        profile_id=manifest.profile_id,
+        scope_id=scope.scope_id,
+        operation=ProposalOperation.CREATE,
+        target_record_id=None,
+        base_version_id=None,
+        proposed_record=proposed,
+        provenance=ProfileProvenance(
+            source=ProvenanceSource.AGENT,
+            actor=ActorType.AGENT,
+            reason_code="conversation_learning",
+        ),
+        created_at=NOW,
+        expires_at=NOW + timedelta(days=90),
+    )
+    service._repository.commit_proposal(
+        pending,
+        expected_manifest_version=manifest.current_version_id,
+    )
+    service._clock = lambda: NOW + timedelta(days=91)
+    monkeypatch.setattr(
+        service._repository,
+        "resolve_proposal",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("status attempted a write")
+        ),
+    )
+
+    assert service.status().state is ProfileOperationalState.DISABLED
 
 
 def test_status_distinguishes_unsupported_schema(
@@ -733,6 +778,30 @@ def test_exports_and_global_purge_are_explicit_server_operations(
         match="profile_purge_pending",
     ):
         service.set_runtime_enabled(True, expected_version_id=None)
+
+
+def test_exports_preserve_canonical_tombstones(
+    service: PersonalContextService,
+) -> None:
+    _manifest, scope = _create_ready_profile(service)
+    record = service.create_manual_record(
+        scope_id=scope.scope_id,
+        payload=_payload("delete me"),
+        semantic_key=None,
+        controls=_controls(),
+    )
+    service.delete_record(record.record_id, expected_version_id=record.version_id)
+
+    exported = service.export_plaintext(confirmation="EXPORT PLAINTEXT")
+
+    assert exported["records"] == [
+        {
+            **exported["records"][0],
+            "state": "deleted",
+            "payload": None,
+            "semantic_key": None,
+        }
+    ]
 
 
 def test_repository_caps_encrypted_heads_and_pages(

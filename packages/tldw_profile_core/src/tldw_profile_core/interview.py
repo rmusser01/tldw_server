@@ -1,6 +1,6 @@
 import re
 from enum import StrEnum
-from typing import Annotated
+from typing import Annotated, Any, Self
 
 from pydantic import AfterValidator, Field, field_validator, model_validator
 
@@ -16,7 +16,16 @@ from .payloads import (
 )
 
 
-def _bounded(max_length: int):
+def _bounded(max_length: int) -> Any:
+    """Build a reusable bounded, nonblank string annotation.
+
+    Args:
+        max_length: Maximum accepted Unicode code-point length.
+
+    Returns:
+        An ``Annotated[str, ...]`` type form for Pydantic fields.
+    """
+
     return Annotated[
         str, Field(min_length=1, max_length=max_length), AfterValidator(reject_blank)
     ]
@@ -75,7 +84,7 @@ class InterviewPack(FrozenModel):
     questions: tuple[InterviewQuestion, ...] = Field(max_length=20)
 
     @model_validator(mode="after")
-    def validate_pack(self):
+    def validate_pack(self) -> Self:
         if len(set(self.coverage_topics)) != len(self.coverage_topics):
             raise ValueError("coverage topics must be unique")
         question_ids = [question.question_id for question in self.questions]
@@ -98,7 +107,7 @@ class InterviewProposedChange(FrozenModel):
     semantic_key: SemanticKey | None = None
 
     @model_validator(mode="after")
-    def shape(self):
+    def shape(self) -> Self:
         expected = {
             ProposalOperation.CREATE: (False, False, True, True),
             ProposalOperation.UPDATE: (True, True, True, True),

@@ -56,6 +56,8 @@ Reason: The existing ADR already governs authenticated service ownership, server
 
 <!-- SECTION:NOTES:BEGIN -->
 Implemented one authenticated PersonalContextService over the encrypted repository, strict API schemas/routes, server-local runtime policy, explicit exports and purge barriers, workspace ownership checks, optimistic mutations, proposal review and bounded receipt retention. Hardened purge and expiry races inside BEGIN IMMEDIATE transactions, enforced record lifecycle and immutable kind/scope authority, added storage caps and proposal pagination, and documented the contract. Verified 264 targeted Personal Context, existing Personalization, auth-boundary, and router-contract tests; Ruff format/check, compileall, Bandit, git diff hygiene, and independent review all passed. ADR 002 applies; no new ADR was needed. Per repository policy, the full test suite was not run.
+
+PR review follow-up attached the finite ingress rate guard, added production-composed authentication/middleware/OpenAPI coverage for every route, preserved canonical tombstones in exports, and made status polling side-effect free. The expanded focused run passed 189 tests, including the adjacent notification-deduplication regression exposed by reflection coverage.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

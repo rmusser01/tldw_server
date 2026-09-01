@@ -53,6 +53,8 @@ Reason: This establishes persistent encrypted storage, key custody, sync authori
 
 <!-- SECTION:NOTES:BEGIN -->
 Implemented the exact tldw-profile-core 0.1.0 snapshot and digest, encrypted immutable Personal Context persistence in each existing user Personalization database, explicit 32-byte master-key custody, per-profile wrapped keys, optimistic heads, content-free tombstones and receipts, fail-closed integrity checks, runtime policy storage, and encryption-key rotation. ADR: backlog/decisions/002-personal-context-profile-authority-sync-and-encryption.md. Verification: 59 focused Personal Context plus existing Personalization tests passed; 15 CI workflow contracts passed; 30 Makefile/onboarding contracts passed; 13 final documentation parity tests passed; Ruff lint and format checks passed on the touched scope; compileall passed; Bandit passed with only the existing justified B608 nosec; TOML/YAML parsing, diff hygiene, and wheel metadata/content inspection passed. Independent review completed clean after fixes for orphaned key state, schema-version AAD binding, and Python 3.11 floor consistency. The full repository suite was not run because project instructions require explicit opt-in; no known feature blockers remain.
+
+PR review follow-up moved all Personal Context SQL and key custody into the DB management boundary, centralized profile exceptions, persisted integrity-key rotation inputs, fenced standalone writes after purge, bounded semantic-key scans, logged rollback failures, and made secure deletion best-effort for unrelated Personalization features. Added mirrored shared-package tests and targeted regressions for every corrected invariant.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

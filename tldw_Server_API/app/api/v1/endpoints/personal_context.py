@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from pydantic import ValidationError
 from tldw_profile_core import ProfileManifest, ProfileProposal, ProfileRecord, ProfileScope
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit
 from tldw_Server_API.app.api.v1.API_Deps.personal_context_deps import (
     get_personal_context_service,
 )
@@ -46,7 +47,7 @@ from tldw_Server_API.app.core.Personalization.personal_context_service import (
     RecordMutation,
 )
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(check_rate_limit)])
 OpaquePath = Annotated[str, Path(min_length=1, max_length=128)]
 
 

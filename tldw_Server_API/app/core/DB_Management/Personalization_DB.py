@@ -23,6 +23,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from loguru import logger
+
 from tldw_Server_API.app.core.DB_Management.db_path_utils import (
     DatabasePaths,
     require_trusted_database_parent_exists,
@@ -82,10 +84,18 @@ class PersonalizationDB:
             configure_sqlite_connection(conn)
         except Exception as pragma_error:
             _ = pragma_error  # proceed with defaults if pragmas fail
-        secure_delete = conn.execute("PRAGMA secure_delete = ON").fetchone()
-        if secure_delete is None or int(secure_delete[0]) != 1:
-            conn.close()
-            raise RuntimeError("PersonalizationDB requires SQLite secure deletion")
+        try:
+            secure_delete = conn.execute("PRAGMA secure_delete = ON").fetchone()
+            if secure_delete is None or int(secure_delete[0]) != 1:
+                logger.warning(
+                    "SQLite secure_delete is unavailable for PersonalizationDB; "
+                    "encrypted Personal Context values remain protected"
+                )
+        except (sqlite3.Error, TypeError, ValueError) as exc:
+            logger.warning(
+                "Could not enable SQLite secure_delete for PersonalizationDB: {}",
+                exc,
+            )
         return conn
 
     def _ensure_schema(self) -> None:
@@ -295,8 +305,11 @@ class PersonalizationDB:
             except BaseException:
                 try:
                     connection.rollback()
-                except sqlite3.Error:
-                    pass
+                except sqlite3.Error as rollback_error:
+                    logger.opt(exception=rollback_error).error(
+                        "PersonalizationDB rollback failed for {}",
+                        self.db_path,
+                    )
                 raise
             finally:
                 connection.close()

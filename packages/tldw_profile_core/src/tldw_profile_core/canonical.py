@@ -107,6 +107,15 @@ VersionOne = Annotated[Literal[1], BeforeValidator(parse_version_one)]
 
 
 def _json_value(value: Any) -> Any:
+    """Convert supported model values into RFC 8785-compatible JSON values.
+
+    Args:
+        value: A scalar, datetime, mapping, list, or tuple from a validated model.
+
+    Returns:
+        The recursively normalized JSON-compatible value.
+    """
+
     if isinstance(value, datetime):
         return normalize_datetime(value)
     if isinstance(value, Mapping):
@@ -123,11 +132,33 @@ def canonical_json_bytes(value: Any) -> bytes:
 
 
 def canonical_bytes(value: BaseModel) -> bytes:
+    """Serialize a Pydantic model into canonical RFC 8785 bytes.
+
+    Args:
+        value: Validated profile-core model to serialize with aliases and nulls.
+
+    Returns:
+        Deterministic UTF-8 JSON bytes suitable for hashing and signatures.
+    """
+
     payload = value.model_dump(mode="python", exclude_none=False, by_alias=True)
     return canonical_json_bytes(payload)
 
 
 def integrity_tag(value: BaseModel, key: bytes) -> str:
+    """Calculate the versioned HMAC integrity tag for a canonical model.
+
+    Args:
+        value: Validated profile-core model to authenticate.
+        key: Exactly 32 bytes of integrity-key material.
+
+    Returns:
+        A lowercase ``hmac-sha256-v1`` tag.
+
+    Raises:
+        ValueError: If ``key`` is not exactly 32 bytes.
+    """
+
     if len(key) != 32:
         raise ValueError("integrity key must be exactly 32 bytes")
     return f"hmac-sha256-v1:{hmac.new(key, canonical_bytes(value), hashlib.sha256).hexdigest()}"

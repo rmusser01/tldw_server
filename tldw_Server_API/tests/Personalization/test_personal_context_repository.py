@@ -12,9 +12,11 @@ from tldw_profile_core import (
     RecordState,
 )
 
+from tldw_Server_API.app.core.DB_Management import (
+    Personal_Context_Repository as personal_context_repository,
+)
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.Personalization_DB import PersonalizationDB
-from tldw_Server_API.app.core.Personalization import personal_context_repository
 from tldw_Server_API.app.core.Personalization.personal_context_repository import (
     PersonalContextRepository,
 )
@@ -272,9 +274,39 @@ def test_standalone_writes_cannot_cross_a_committed_purge_barrier(repository) ->
             expected_manifest_version=original.current_version_id,
             policy={"enabled": True},
         )
+    with pytest.raises(ConcurrentProfileUpdateError, match="purge barrier"):
+        repository.commit_record_version(
+            preference_record(),
+            expected_version_id=None,
+        )
+    with pytest.raises(ConcurrentProfileUpdateError, match="purge barrier"):
+        repository.commit_scope(
+            global_scope().model_copy(update={"version_id": "scope-after-purge"}),
+            expected_version_id=None,
+        )
 
     assert repository.get_proposal(original.profile_id, "proposal-a") is None
     assert repository.get_runtime_policy(original.profile_id, "profile-runtime") is None
+
+
+def test_key_provider_persists_replacement_integrity_material(repository) -> None:
+    repository.create_profile(manifest(), global_scope())
+    original = repository.key_material_for_test("profile-a")
+    replacement_integrity_key = b"z" * 32
+
+    with repository.database.transaction(immediate=True) as connection:
+        repository._keys.replace_encryption_key(
+            "profile-a",
+            encryption_key=original.encryption_key,
+            integrity_key=replacement_integrity_key,
+            expected_key_version=original.key_version,
+            integrity_key_version=original.integrity_key_version + 1,
+            connection=connection,
+        )
+
+    reloaded = repository.key_material_for_test("profile-a")
+    assert reloaded.integrity_key == replacement_integrity_key
+    assert reloaded.integrity_key_version == original.integrity_key_version + 1
 
 
 def test_terminal_proposal_retention_prunes_oldest_receipts(
