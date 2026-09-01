@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 
 import pytest
@@ -74,12 +75,33 @@ class _FakeUserDb:
             return _FakeCursor((2, 1))
         if "SELECT id FROM users WHERE id" in concrete:
             return _FakeCursor((42,))
+        if "SELECT is_active, created_at FROM users" in concrete:
+            return _FakeCursor((1, "2026-08-01T12:00:00.000000Z"))
+        if "SELECT updated_at FROM users" in concrete:
+            return _FakeCursor(("2026-08-01T12:00:01.000000Z",))
         if "SELECT metadata FROM users" in concrete:
             return _FakeCursor((self.metadata,))
         return _FakeCursor()
 
     async def commit(self) -> None:
         self.committed = True
+
+
+class _FakePool:
+    backend = "sqlite"
+    pool = None
+
+    def __init__(self, connection: _FakeUserDb) -> None:
+        self.connection = connection
+
+    @asynccontextmanager
+    async def transaction(self):
+        yield self.connection
+
+
+class _DisabledEventProducer:
+    async def begin_capture(self, **_kwargs):
+        return None
 
 
 class _FakeSessionManager:
@@ -302,9 +324,9 @@ async def test_delete_user_forwards_admin_reauth_token_to_guardrails(monkeypatch
             admin_password=None,
             admin_reauth_token="magic-token-123",
         ),
-        _FakeUserDb(),
         password_service=object(),
-        is_pg_fn=lambda: _false_async(),
+        db_pool=_FakePool(_FakeUserDb()),
+        webhook_event_producer=_DisabledEventProducer(),
     )
 
     assert received["reason"] == "Support case 123"
@@ -343,9 +365,9 @@ async def test_delete_user_unwraps_secretstr_admin_reauth_token_before_guardrail
             reason="Support case 123",
             admin_reauth_token="magic-token-123",
         ),
-        _FakeUserDb(),
         password_service=object(),
-        is_pg_fn=lambda: _false_async(),
+        db_pool=_FakePool(_FakeUserDb()),
+        webhook_event_producer=_DisabledEventProducer(),
     )
 
     assert received["reason"] == "Support case 123"
@@ -372,9 +394,9 @@ async def test_delete_user_emits_durable_audit_event(monkeypatch) -> None:
         _admin_principal(),
         42,
         SimpleNamespace(reason="Support case 123", admin_password="AdminPass123!"),
-        _FakeUserDb(),
         password_service=object(),
-        is_pg_fn=lambda: _false_async(),
+        db_pool=_FakePool(_FakeUserDb()),
+        webhook_event_producer=_DisabledEventProducer(),
     )
 
     assert result["message"] == "User 42 has been deactivated"

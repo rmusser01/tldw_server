@@ -144,6 +144,7 @@ class _CaptureUnitProbe:
             build_user_created_data,
             {
                 "user_id": 7,
+                "is_active": True,
                 "resource_version": PROFILE_VERSION,
                 "created_at": CREATED_AT,
                 "updated_at": UPDATED_AT,
@@ -286,7 +287,10 @@ def test_production_builder_signatures_expose_only_approved_fields() -> None:
         "resolved_at",
     }
 
-    assert set(signature(build_user_created_data).parameters) == user_fields
+    assert set(signature(build_user_created_data).parameters) == {
+        *user_fields,
+        "is_active",
+    }
     assert set(signature(build_user_deleted_data).parameters) == user_fields
     assert set(signature(build_incident_created_data).parameters) == incident_fields
     assert set(signature(build_incident_updated_data).parameters) == incident_fields
@@ -303,6 +307,7 @@ def test_user_builders_reject_invalid_stable_ids(user_id: object) -> None:
     with pytest.raises(ValueError, match="user ID"):
         build_user_created_data(
             user_id=user_id,  # type: ignore[arg-type]
+            is_active=True,
             resource_version=PROFILE_VERSION,
             created_at=CREATED_AT,
             updated_at=UPDATED_AT,
@@ -346,6 +351,7 @@ def test_event_builders_reject_naive_or_reversed_timestamps() -> None:
     with pytest.raises(ValueError, match="timezone-aware"):
         build_user_created_data(
             user_id=7,
+            is_active=True,
             resource_version=PROFILE_VERSION.replace(tzinfo=None),
             created_at=CREATED_AT,
             updated_at=UPDATED_AT,
@@ -506,6 +512,7 @@ def test_prepared_event_is_encrypted_and_replay_verification_is_exact() -> None:
         created_at=CREATED_AT,
         data=build_user_created_data(
             user_id=7,
+            is_active=True,
             resource_version=PROFILE_VERSION,
             created_at=CREATED_AT,
             updated_at=UPDATED_AT,
@@ -565,6 +572,7 @@ def test_prepared_event_is_encrypted_and_replay_verification_is_exact() -> None:
         created_at=UPDATED_AT,
         data=build_user_created_data(
             user_id=8,
+            is_active=True,
             resource_version=PROFILE_VERSION,
             created_at=CREATED_AT,
             updated_at=UPDATED_AT,
@@ -686,6 +694,7 @@ async def test_production_capture_revalidates_and_encrypts_inside_source_transac
     tx = _CaptureUnitProbe(_migration_state())
     data = build_user_created_data(
         user_id=7,
+        is_active=True,
         resource_version=PROFILE_VERSION,
         created_at=CREATED_AT,
         updated_at=UPDATED_AT,
@@ -735,6 +744,7 @@ async def test_production_capture_rejects_unreviewed_payload_and_source_coordina
     assert preparation is not None
     data = build_user_created_data(
         user_id=7,
+        is_active=True,
         resource_version=PROFILE_VERSION,
         created_at=CREATED_AT,
         updated_at=UPDATED_AT,

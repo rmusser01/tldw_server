@@ -63,6 +63,7 @@ from .domain import (
 from .producer import (
     AdminWebhookEventProducer,
     ProductionEventPreparation,
+    build_admin_webhook_event_producer,
     build_incident_created_data,
     build_incident_notify_data,
     build_incident_resolved_data,
@@ -114,6 +115,7 @@ __all__ = [
     "WebhookKeyLoadCode",
     "WebhookKeyRing",
     "WebhookKeyRingLoadResult",
+    "build_admin_webhook_event_producer",
     "build_incident_created_data",
     "build_incident_notify_data",
     "build_incident_resolved_data",

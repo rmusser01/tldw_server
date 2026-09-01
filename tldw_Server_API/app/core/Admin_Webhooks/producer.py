@@ -2,19 +2,26 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from .catalog import EVENT_API_VERSION
 from .config import AdminWebhookMode, AdminWebhookSettings
-from .crypto import WebhookKeyError, WebhookKeyRing, WebhookKeyRingLoadResult
+from .crypto import (
+    WebhookKeyError,
+    WebhookKeyRing,
+    WebhookKeyRingLoadResult,
+    load_webhook_key_ring,
+)
 from .domain import EventSourceKind, WebhookError, WebhookErrorCode
 from .events import prepare_event_insert, verify_event_replay
 
 if TYPE_CHECKING:
+    from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
     from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
         AdminWebhookRepository,
         AdminWebhookUnitOfWork,
@@ -114,15 +121,18 @@ def _user_data(
 def build_user_created_data(
     *,
     user_id: int,
+    is_active: bool,
     resource_version: datetime,
     created_at: datetime,
     updated_at: datetime,
 ) -> dict[str, object]:
     """Build the complete public payload for ``user.created``."""
 
+    if not isinstance(is_active, bool):
+        raise ValueError("user status is invalid")
     return _user_data(
         user_id=user_id,
-        status="active",
+        status="active" if is_active else "inactive",
         resource_version=resource_version,
         created_at=created_at,
         updated_at=updated_at,
@@ -345,17 +355,26 @@ def _validated_user_data(
         if event_type == "user.created"
         else build_user_deleted_data
     )
-    expected_status = "active" if event_type == "user.created" else "inactive"
-    if data["status"] != expected_status:
+    if data["status"] not in {"active", "inactive"}:
         raise ValueError("user event status is invalid")
-    return builder(
-        user_id=data["user_id"],  # type: ignore[arg-type]
-        resource_version=_public_timestamp(
+    if event_type == "user.deleted" and data["status"] != "inactive":
+        raise ValueError("user event status is invalid")
+    kwargs = {
+        "user_id": data["user_id"],
+        "resource_version": _public_timestamp(
             data["resource_version"],
             field_name="resource version",
         ),
-        created_at=_public_timestamp(data["created_at"], field_name="created at"),
-        updated_at=_public_timestamp(data["updated_at"], field_name="updated at"),
+        "created_at": _public_timestamp(data["created_at"], field_name="created at"),
+        "updated_at": _public_timestamp(data["updated_at"], field_name="updated at"),
+    }
+    if event_type == "user.created":
+        return builder(  # type: ignore[call-arg]
+            **kwargs,
+            is_active=data["status"] == "active",
+        )
+    return builder(
+        **kwargs,  # type: ignore[arg-type]
     )
 
 
@@ -483,6 +502,11 @@ class AdminWebhookEventProducer:
         self._delivery_id_factory = delivery_id_factory
         self._clock = clock
 
+    def bind_transaction(self, connection: object) -> AdminWebhookUnitOfWork:
+        """Bind capture to a source-owned AuthNZ transaction."""
+
+        return self._repository.unit_of_work(connection)
+
     async def begin_capture(
         self,
         *,
@@ -577,6 +601,32 @@ class AdminWebhookEventProducer:
         return result
 
 
+def build_admin_webhook_event_producer(
+    pool: DatabasePool,
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> AdminWebhookEventProducer:
+    """Compose the application production-event boundary for one AuthNZ pool."""
+
+    from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
+        AdminWebhookRepository,
+    )
+
+    settings = AdminWebhookSettings.from_environment(
+        os.environ if environ is None else environ
+    )
+    return AdminWebhookEventProducer(
+        repository=AdminWebhookRepository(pool),
+        settings=settings,
+        key_ring_result=load_webhook_key_ring(
+            os.environ if environ is None else environ
+        ),
+        event_id_factory=lambda: str(uuid4()),
+        delivery_id_factory=lambda: str(uuid4()),
+        clock=lambda: datetime.now(timezone.utc),
+    )
+
+
 __all__ = [
     "AdminWebhookEventProducer",
     "ProductionEventPreparation",
@@ -584,6 +634,7 @@ __all__ = [
     "build_incident_notify_data",
     "build_incident_resolved_data",
     "build_incident_updated_data",
+    "build_admin_webhook_event_producer",
     "build_user_created_data",
     "build_user_deleted_data",
     "require_writable_event_ring",
