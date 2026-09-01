@@ -45,8 +45,16 @@ TARGET_WORKFLOWS = (
 # The distinction matters: on a workflow_run trigger there is no
 # github.event.pull_request, so a group keyed only on that form degrades to the
 # ref and stops collapsing anything.
+#
+# Every trigger whose payload carries a pull request is listed, not just the two
+# in use today. A trigger that is absent from this mapping has no requirement at
+# all, so an unlisted PR trigger would let a group with no PR identity through
+# silently -- the guard failing open is worse than it failing loudly.
 PR_IDENTITY_BY_TRIGGER = {
     "pull_request": "github.event.pull_request.number",
+    "pull_request_target": "github.event.pull_request.number",
+    "pull_request_review": "github.event.pull_request.number",
+    "pull_request_review_comment": "github.event.pull_request.number",
     "workflow_run": "github.event.workflow_run.pull_requests[0].number",
 }
 
