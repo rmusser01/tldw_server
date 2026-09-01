@@ -65,5 +65,19 @@ profile in `purge_pending` until synchronization acknowledgment is implemented.
 All profile mutations return HTTP 409 with
 `detail.code = "profile_purge_pending"` while that barrier is pending.
 
-Sync endpoints and device registration are intentionally outside this API and
-are introduced by the separate Personal Context synchronization contract.
+## REST and Sync-v2 boundary
+
+The authenticated REST API and Sync V2 are separate surfaces over the same
+canonical `PersonalContextService` and encrypted repository. Sync device
+registration, capability negotiation, bootstrap, and reviewed link completion
+remain under `/api/v1/sync` rather than `/api/v1/personal-context`.
+
+The shipped Sync V2 path supports capability negotiation, registered-device
+bootstrap, reviewed Chatbook link completion, and inbound Chatbook-originated
+manifest, scope, record, and proposal domains. Sync V2 also validates and
+materializes the `personal_context.purge` protocol domain, but the current
+linked flow has no end-to-end purge producer.
+
+REST edits are not published to linked clients.
+
+Server purge does not publish the protocol purge envelope and remains pending because acknowledgement completion is absent.
