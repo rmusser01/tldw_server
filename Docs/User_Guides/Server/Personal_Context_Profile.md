@@ -21,17 +21,32 @@ user's storage. Each authenticated user can have one manifest in that user's
 
 Configure `TLDW_PERSONAL_CONTEXT_MASTER_KEY` before starting the server. Its
 value must be strict base64 that decodes to exactly 32 bytes. Generate a fresh
-random value with the Python standard library:
+random value with an installed Python 3.11 or newer interpreter:
 
 ```bash
 python3 -c 'import base64, secrets; print(base64.b64encode(secrets.token_bytes(32)).decode("ascii"))'
 ```
+
+On Windows PowerShell, use `py -3.11` instead of `python3` (or invoke another
+installed, supported Python interpreter explicitly).
 
 Store the output with your protected server secrets and make a secure backup
 before creating the first profile. A missing, malformed, or changed key fails
 closed: existing profile content becomes locked, and the server does not create
 replacement profile keys. Restore the exact original key from backup instead
 of attempting to create another profile.
+
+### Trust and transport boundary
+
+Personal Context Sync currently uses `server_trusted_v1`: the authorized home
+server can read syncable canonical profile content to validate and materialize
+it, then encrypts it at rest. Peer-local at-rest keys protect each peer's stored
+copy but are not end-to-end encryption from the authorized home server.
+
+For any non-loopback connection, expose the API only through authenticated
+TLS/HTTPS. Otherwise API keys or JWTs and profile content can cross plaintext
+transport. Follow the [production hardening checklist](Production_Hardening_Checklist.md)
+for reverse-proxy and TLS setup.
 
 ## Setup and status workflow
 
@@ -40,16 +55,20 @@ reference](../../API-related/Personal_Context_API.md).
 
 1. Configure API-key or JWT authentication and the master key before the server
    starts.
-2. Authenticate and call `GET /api/v1/personal-context/status`. Resolve
-   `locked`, `unsupported`, or `purge_pending` before attempting writes.
+2. Authenticate and call `GET /api/v1/personal-context/status`. Remediate a
+   `locked` or `unsupported` state before attempting writes. If the state is
+   `purge_pending`, stop: the profile is non-writable and has no current
+   completion path.
 3. Call `GET /api/v1/sync/capabilities` and confirm that Personal Context is
    available with the required domains, schema version, and quotas. Do not
    bypass capability negotiation.
 4. Inspect `GET /api/v1/personal-context/manifest`. If a server-side profile is
    intentionally needed and none exists, `POST /api/v1/personal-context/manifest`
    creates the one allowed manifest and its required global scope.
-5. From Chatbook, start the home-server link, review any identity or semantic
-   reconciliation, and complete the link before profile changes are uploaded.
+5. With an active authenticated home server in Chatbook, open:
+   **Settings → Data & Privacy → My Profile → Server sync → Link to home server**.
+   Review any identity or semantic reconciliation and complete the link before
+   profile changes are uploaded.
 6. Use Chatbook to edit changes that are expected to travel through the current
    linked Sync flow. The REST API remains useful for server inspection and
    explicit server-local operations, but its ordinary edits are not a
@@ -73,25 +92,22 @@ reference](../../API-related/Personal_Context_API.md).
 | Exact canonical object identities, versions, and bytes for eligible shared objects | Local undo history, caches, ciphertext, database row identities, and other operational metadata |
 | — | Conflict-review objects and acknowledgement tracking |
 
-The current flow accepts eligible Chatbook-originated manifest, scope, record/tombstone, and proposal changes.
-
 The home server wraps its Sync integrity key for authenticated registered Chatbook devices; this is not at-rest key sharing.
 
 Ordinary server REST record/proposal mutations are not currently published to linked Chatbook clients.
 
-Compatibility comes from the versioned [Shared Core
+The versioned [Shared Core
 contract](https://github.com/rmusser01/tldw_server/tree/dev/packages/tldw_profile_core)
-and the server's [parity and conformance
-test](https://github.com/rmusser01/tldw_server/blob/dev/tldw_Server_API/tests/Personalization/test_personal_context_contract.py),
-not a digest copied into this guide.
+is the compatibility boundary used by both peers.
 
 ## Export, removal, and purge
 
 Profile exports contain sensitive personal context. Confirm the intended scope,
 destination, and access controls before exporting. Plaintext export requires
 the exact confirmation `EXPORT PLAINTEXT`. Recovery export requires `EXPORT
-RECOVERY` and a passphrase of at least 12 characters; protect the passphrase
-separately from the exported envelope.
+RECOVERY` and enforces a minimum of 12 characters. That is only the validation
+minimum, not a strength recommendation: use a long, unique passphrase and store
+it separately from the exported envelope.
 
 Removing a local Chatbook copy is owned by Chatbook. The server rejects purge
 requests with `mode: local_copy` as `server_local_copy_unsupported`.
@@ -102,8 +118,7 @@ the exact confirmation `DELETE EVERYWHERE`. It advances a server-local purge
 fence, removes canonical bodies and server runtime state, blocks further
 profile mutations, and leaves the profile in `purge_pending`.
 
-The `personal_context.purge` protocol domain exists, but this endpoint does not
-produce or distribute it.
+The `personal_context.purge` protocol domain exists.
 
 The server purge endpoint does not publish the protocol purge envelope, and acknowledgement completion is not wired.
 Reconnecting devices does not currently clear `purge_pending`, and the current
