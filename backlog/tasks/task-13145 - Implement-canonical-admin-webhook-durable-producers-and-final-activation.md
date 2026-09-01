@@ -4,7 +4,7 @@ title: Implement canonical admin webhook durable producers and final activation
 status: In Progress
 assignee: []
 created_date: '2026-08-31 22:44'
-updated_date: '2026-09-01 16:02'
+updated_date: '2026-09-01 16:06'
 labels:
   - admin
   - webhooks
@@ -94,6 +94,8 @@ Pre-change baseline at 8cb4d2df: backend command completed with TLDW_TEST_NO_DOC
 2026-09-01 final integrated verification: Rebasing the complete eleven-commit branch onto observed origin/dev e3c198224bb63a995190863e9dcb9adbd95204b2 completed without conflicts; implementation head 1298ee5d0d9208e5b457c783d82e8f0110a11498 was eleven commits ahead and zero behind. Post-rebase UI verification passed 128/128 focused tests, typecheck, full lint with 36 unrelated warnings and zero errors, the 49-page production build, mocked Chromium 1/1, and the real-backend lifecycle 1/1 in 32.9s. Changed-path Ruff, production Python compilation, Bandit review, local Markdown links, and diff whitespace passed. The authoritative deterministic backend aggregate with seed 1831171713 then passed 1,201/1,201 with zero skips and 2,110 warnings in 1131.73s (0:18:51), including the available PostgreSQL fixture. Exact commands and chronological invalid attempts are recorded in Docs/Evidence/Admin_Webhooks_PR3_Verification.md. The branch is ready to publish for normal PR review and CI; no production activation occurred.
 
 2026-09-01 publication: Opened final implementation PR https://github.com/rmusser01/tldw_server/pull/2855 against dev with the complete validation, UX, risk, rollback, and no-production-activation record. Definition of Done item 6 is satisfied by this final summary and PR reference. Task status remains In Progress until review, CI, and merge complete.
+
+2026-09-01 PR CI remediation: The first Shard coverage guard run found that Task 5's newly extracted tldw_Server_API/tests/Admin/test_admin_ops_reports.py was not assigned to a CI shard. Added it beside the related admin reports test in all five duplicated backend shard matrices. The exact local guard now passes with 791 shards, 4,517 test files, 4 intentional ignores, the 130-file baseline, and zero newly uncovered files. The extracted reports test passes 29/29 with six warnings in 1.25s. This was CI coverage wiring, not a production behavior defect; PR #2855 remains unmerged and production remains unactivated.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

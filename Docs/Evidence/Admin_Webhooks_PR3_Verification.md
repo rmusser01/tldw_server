@@ -51,6 +51,7 @@ https://github.com/rmusser01/tldw_server/pull/2855 for normal CI and review.
 | Changed-path Ruff | PASS |
 | Broad planned Ruff scope | REVIEWED BASELINE: 13 errors in branch-unmodified admin files |
 | Bandit | REVIEWED: 11 Low, 0 Medium, 0 High |
+| CI shard coverage guard | PASS: 4,517 test files, 0 newly uncovered |
 | Markdown local links and diff whitespace | PASS |
 
 ## Test-Contract Correction
@@ -392,6 +393,11 @@ failures or omitted from the historical record:
     was a harness error rather than a product failure. The test now dispatches
     the same cancelable anchor event directly, retains a real `history.back()`
     assertion, and passed the complete lifecycle.
+11. PR #2855's first `Shard coverage guard` run correctly found that the newly
+    extracted `test_admin_ops_reports.py` was in no CI shard. The test was added
+    beside the related admin reports coverage in all five duplicated backend
+    matrices. The local guard then reported 4,517 test files and zero newly
+    uncovered files, and the test itself passed 29/29.
 
 ## Documentation And Release Decision
 

@@ -893,6 +893,7 @@ jobs:
               tldw_Server_API/tests/Admin/test_admin_ops_new_endpoints.py
           - name: admin-ops-webhooks-orgs
             paths: >-
+              tldw_Server_API/tests/Admin/test_admin_ops_reports.py
               tldw_Server_API/tests/Admin/test_admin_ops_webhooks_reports.py
               tldw_Server_API/tests/Admin/test_admin_orgs_*.py
           - name: admin-profiles-rate-registration
@@ -2380,6 +2381,7 @@ jobs:
               tldw_Server_API/tests/Admin/test_admin_ops_new_endpoints.py
           - name: admin-ops-webhooks-orgs
             paths: >-
+              tldw_Server_API/tests/Admin/test_admin_ops_reports.py
               tldw_Server_API/tests/Admin/test_admin_ops_webhooks_reports.py
               tldw_Server_API/tests/Admin/test_admin_orgs_*.py
           - name: admin-profiles-rate-registration
@@ -3738,6 +3740,7 @@ jobs:
               tldw_Server_API/tests/Admin/test_admin_ops_new_endpoints.py
           - name: admin-ops-webhooks-orgs
             paths: >-
+              tldw_Server_API/tests/Admin/test_admin_ops_reports.py
               tldw_Server_API/tests/Admin/test_admin_ops_webhooks_reports.py
               tldw_Server_API/tests/Admin/test_admin_orgs_*.py
           - name: admin-profiles-rate-registration
@@ -5019,6 +5022,7 @@ jobs:
               tldw_Server_API/tests/Admin/test_admin_ops_new_endpoints.py
           - name: admin-ops-webhooks-orgs
             paths: >-
+              tldw_Server_API/tests/Admin/test_admin_ops_reports.py
               tldw_Server_API/tests/Admin/test_admin_ops_webhooks_reports.py
               tldw_Server_API/tests/Admin/test_admin_orgs_*.py
           - name: admin-profiles-rate-registration
@@ -6306,6 +6310,7 @@ jobs:
               tldw_Server_API/tests/Admin/test_admin_ops_new_endpoints.py
           - name: admin-ops-webhooks-orgs
             paths: >-
+              tldw_Server_API/tests/Admin/test_admin_ops_reports.py
               tldw_Server_API/tests/Admin/test_admin_ops_webhooks_reports.py
               tldw_Server_API/tests/Admin/test_admin_orgs_*.py
           - name: admin-profiles-rate-registration
