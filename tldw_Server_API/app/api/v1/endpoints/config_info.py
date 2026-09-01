@@ -157,6 +157,7 @@ def load_safe_config() -> dict:
             and bool(config_mod.route_enabled("personalization", default_stable=False)),
             "persona": bool(config_mod.legacy_get("PERSONA_ENABLED", True))
             and bool(config_mod.route_enabled("persona", default_stable=True)),
+            "hasReadingSnapshotPagesV1": True,
         }
         caps["hasSlides"] = bool(config_mod.route_enabled("slides", default_stable=True))
         caps["hasPresentationStudio"] = bool(caps["hasSlides"])

@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@codex'
 created_date: '2026-09-01 14:26'
-updated_date: '2026-09-01 14:35'
+updated_date: '2026-09-01 14:37'
 labels:
   - collections
   - reading-list
@@ -51,6 +51,8 @@ Reason: This is a bounded correctness fix and capability attestation for an exis
 
 <!-- SECTION:NOTES:BEGIN -->
 Stage 1 complete. Baseline: existing list selection passed. RED evidence: controlled writer produced total 21 with rows beginning at newly committed ID 22; connection test observed None for count/page/tag; PostgreSQL-mode test observed no repeatable-read request. GREEN evidence: all 4 list/snapshot-focused tests pass after reusing the existing transaction, passing one connection through count/page/tag hydration, and requesting REPEATABLE READ READ ONLY for PostgreSQL. Plan correction: generic PostgreSQL transactions are READ COMMITTED, so the focused isolation statement was required before the capability can truthfully be server-wide.
+
+Stage 2 complete. RED: the focused docs-info test failed with KeyError for hasReadingSnapshotPagesV1. GREEN: one literal capability entry now appears identically in capabilities, supported_features, and the endpoint response; the exact test passes, all 17 docs-info capability tests pass, and the 4 list/snapshot tests remain green. No endpoint or response shape changed.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

@@ -22,7 +22,7 @@
 
 ## Stage 2: Exact docs-info attestation
 
-**Status:** In Progress
+**Status:** Complete
 
 **Success criteria:** Both `capabilities` and `supported_features` expose literal `hasReadingSnapshotPagesV1: true`, with the existing Reading List endpoint and response unchanged.
 
@@ -30,7 +30,7 @@
 
 ## Stage 3: Review and verification
 
-**Status:** Not Started
+**Status:** In Progress
 
 **Success criteria:** Focused tests, touched-scope Bandit, formatting/diff checks, self-review, Backlog evidence, and an independent review pass are clean.
 

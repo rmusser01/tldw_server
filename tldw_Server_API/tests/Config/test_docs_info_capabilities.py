@@ -138,6 +138,21 @@ def test_docs_info_exposes_slides_and_presentation_studio_capabilities(
     assert safe_config["supported_features"]["hasPresentationRender"] is True
 
 
+def test_docs_info_attests_reading_snapshot_pages(monkeypatch, tmp_path: Path) -> None:
+    """Docs-info attests that Reading totals and rows share one snapshot."""
+    config_path = tmp_path / "config.txt"
+    _write_minimal_config(config_path)
+    monkeypatch.setenv("TLDW_CONFIG_PATH", str(config_path))
+
+    safe_config = config_info.load_safe_config()
+
+    assert safe_config["capabilities"]["hasReadingSnapshotPagesV1"] is True
+    assert safe_config["supported_features"]["hasReadingSnapshotPagesV1"] is True
+
+    response = asyncio.run(config_info.get_documentation_config())
+    assert response["capabilities"]["hasReadingSnapshotPagesV1"] is True
+
+
 def test_docs_info_exposes_audio_capabilities_from_audio_and_websocket_routes(
     monkeypatch, tmp_path: Path
 ) -> None:
