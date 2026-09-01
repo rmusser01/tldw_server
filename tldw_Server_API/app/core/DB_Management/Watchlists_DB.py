@@ -567,7 +567,10 @@ class WatchlistsDatabase:
             "(?, ?, ?, ?, ?, ?)",
             _WATCHLISTS_REQUIRED_TABLES,
         )
-        found = {row[0] for row in rows}
+        # QueryResult yields dict rows, so the column has to be named:
+        # row[0] raises KeyError, which ensure_once() swallows as "absent"
+        # and then replays the whole schema on every single call.
+        found = {row["name"] for row in rows}
         return found.issuperset(_WATCHLISTS_REQUIRED_TABLES)
 
     def _ensure_schema_deduplicated(self) -> None:
