@@ -1,10 +1,10 @@
 ---
 id: TASK-13145
 title: Implement canonical admin webhook durable producers and final activation
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-08-31 22:44'
-updated_date: '2026-09-01 00:12'
+updated_date: '2026-09-01 00:49'
 labels:
   - admin
   - webhooks
@@ -61,6 +61,10 @@ Detailed TDD plan: Docs/superpowers/plans/2026-08-31-canonical-admin-webhook-dur
 2026-08-31 planning: Inspected merged PR #2842 boundaries across canonical delivery/domain/repository/runtime, user registration/deactivation transactions, file-backed incidents, route selection, admin Webhooks UI, and incident notification UI. The executable PR 3 plan preserves status compatibility while deleting runtime selection, separates durable incident webhook notification from stakeholder email, requires pending-file and reconciled-DB idempotency checks, and splits activation into migrate-mode predeploy plus no-traffic on-canary live gates.
 
 Planning PR: https://github.com/rmusser01/tldw_server/pull/2846 at reviewed plan commit 62e4d6e9e5fe0badd84ff91bad8d78894c7a7594.
+
+2026-09-01 execution start: Planning PR #2846 merged into dev as 8cb4d2dfdfdf04abee5bee6c08ae959092d413ce. Runtime branch codex/admin-webhooks-durable-producers-runtime starts exactly at that commit. Dependency PR #2842 merge 7b1450c927de9001975fe50694f37d91eb4ef8d6 is an ancestor of origin/dev. Pre-change verification is in progress.
+
+Pre-change baseline at 8cb4d2df: backend command completed with TLDW_TEST_NO_DOCKER=1 after the unguarded run repeatedly attempted unavailable Docker/PostgreSQL provisioning and was interrupted without a test failure. Guarded result: 695 passed, 150 skipped, 1204 warnings in 388.60s; skips are the plan-permitted local PostgreSQL paths. Admin UI focused baseline: 3 files and 69 tests passed in 5.64s. bun run typecheck passed. bun install --frozen-lockfile installed the existing lockfile dependencies without tracked changes.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
