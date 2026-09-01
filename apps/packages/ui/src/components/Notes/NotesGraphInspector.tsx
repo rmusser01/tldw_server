@@ -4,7 +4,13 @@ import type {
   NotesGraphResponse,
   NotesGraphSuggestion
 } from "@/services/note-graph-suggestions"
-import { NotesSemanticClientError } from "@/services/note-semantic-index"
+import {
+  NOTES_SEMANTIC_OUTBOUND_DATA_CATEGORIES,
+  type NotesSemanticCapabilities,
+  NotesSemanticClientError,
+  type NotesSemanticIndexStatus,
+  type NotesSemanticRun
+} from "@/services/note-semantic-index"
 import { Ellipsis } from "lucide-react"
 import React from "react"
 import { useTranslation } from "react-i18next"
@@ -33,6 +39,104 @@ type NotesGraphInspectorProps = {
 
 const pending = (mutation: unknown): boolean =>
   Boolean((mutation as { isPending?: boolean } | undefined)?.isPending)
+
+const CANCELLABLE_SEMANTIC_RUN_MODES = new Set([
+  "build",
+  "rebuild",
+  "retry_failed"
+])
+const SEMANTIC_DETAIL_REASONS = new Set([
+  "building",
+  "degraded",
+  "stale_configuration",
+  "consent_required",
+  "cleanup_pending",
+  "cleanup_stalled",
+  "unavailable"
+])
+type SemanticAction =
+  | "enable"
+  | "renew"
+  | "rebuild"
+  | "retry"
+  | "cancel"
+  | "deleteIndex"
+
+const semanticDetailKey = (reason: string): string =>
+  SEMANTIC_DETAIL_REASONS.has(reason)
+    ? `notesSearch.semanticDetail.${reason}`
+    : "notesSearch.semanticDetail.generic"
+
+const hasCompleteConsentDisclosure = (
+  capability: NotesSemanticCapabilities | null
+): boolean => {
+  if (!capability) return false
+  const outbound = new Set(capability.outbound_data_categories)
+  return Boolean(
+    capability.indexing_available &&
+      capability.storage_boundary !== "unavailable" &&
+      capability.unavailable_reason === null &&
+      capability.resolved_dimensions !== null &&
+      capability.outbound_data_categories.length ===
+        NOTES_SEMANTIC_OUTBOUND_DATA_CATEGORIES.length &&
+      NOTES_SEMANTIC_OUTBOUND_DATA_CATEGORIES.every((category) =>
+        outbound.has(category)
+      )
+  )
+}
+
+const semanticManagementActions = ({
+  capability,
+  status,
+  activeRun
+}: {
+  capability: NotesSemanticCapabilities | null
+  status: NotesSemanticIndexStatus | null
+  activeRun: NotesSemanticRun | null
+}): SemanticAction[] => {
+  if (!capability?.manage_authorized || !status) return []
+  const cleanupBlocked = Boolean(
+    status.cleanup_pending ||
+      status.detail_reason === "cleanup_pending" ||
+      status.detail_reason === "cleanup_stalled"
+  )
+  if (cleanupBlocked) return []
+  if (activeRun) {
+    return status.desired_state === "enabled" &&
+      CANCELLABLE_SEMANTIC_RUN_MODES.has(activeRun.mode)
+      ? ["cancel"]
+      : []
+  }
+  const capabilityUsable = hasCompleteConsentDisclosure(capability)
+  if (status.desired_state === "disabled") {
+    return status.state === "off" &&
+      status.detail_reason === null &&
+      capabilityUsable
+      ? ["enable"]
+      : []
+  }
+  if (
+    status.detail_reason === "stale_configuration" ||
+    status.detail_reason === "consent_required"
+  ) {
+    return capabilityUsable ? ["renew", "deleteIndex"] : ["deleteIndex"]
+  }
+  if (!capabilityUsable || status.detail_reason === "unavailable") {
+    return ["deleteIndex"]
+  }
+  if (status.state === "ready") return ["rebuild", "deleteIndex"]
+  if (
+    status.state === "needs_attention" &&
+    status.detail_reason === "degraded"
+  ) {
+    return [
+      ...(status.failed_notes > 0 ? (["retry"] as const) : []),
+      "rebuild",
+      "deleteIndex"
+    ]
+  }
+  return ["deleteIndex"]
+}
 
 const semanticMutationErrorKey = (error: unknown): string => {
   if (!(error instanceof NotesSemanticClientError)) {
@@ -85,6 +189,10 @@ const NotesGraphInspector: React.FC<NotesGraphInspectorProps> = ({
   const detailsTabRef = React.useRef<HTMLButtonElement | null>(null)
   const suggestionsTabRef = React.useRef<HTMLButtonElement | null>(null)
   const semanticTabRef = React.useRef<HTMLButtonElement | null>(null)
+  const semanticHeadingRef = React.useRef<HTMLHeadingElement | null>(null)
+  const semanticActionRegionRef = React.useRef<HTMLDivElement | null>(null)
+  const semanticActionWasFocused = React.useRef(false)
+  const previousSemanticRunId = React.useRef<string | null>(null)
   const suggestionHeadingRef = React.useRef<HTMLHeadingElement | null>(null)
   const menuTriggerRef = React.useRef<HTMLButtonElement | null>(null)
   const menuItemRef = React.useRef<HTMLButtonElement | null>(null)
@@ -109,6 +217,29 @@ const NotesGraphInspector: React.FC<NotesGraphInspectorProps> = ({
 
   const semanticStatus = semanticController?.status ?? null
   const semanticCapabilities = semanticController?.capabilities ?? null
+  const semanticActiveRun = semanticController?.activeRun ?? null
+  const activeIndexingRun =
+    semanticActiveRun &&
+    CANCELLABLE_SEMANTIC_RUN_MODES.has(semanticActiveRun.mode)
+      ? semanticActiveRun
+      : null
+  const semanticDisplayState =
+    activeIndexingRun && semanticStatus
+      ? semanticStatus.active_generation_id
+        ? "updating"
+        : "preparing"
+      : semanticStatus?.state
+  const semanticProgress = activeIndexingRun ?? semanticStatus
+  const semanticDetail = semanticStatus?.detail_reason
+    ? t(semanticDetailKey(semanticStatus.detail_reason))
+    : ""
+  const semanticActions = new Set(
+    semanticManagementActions({
+      capability: semanticCapabilities,
+      status: semanticStatus,
+      activeRun: semanticActiveRun
+    })
+  )
   const semanticEdgesUsable = Boolean(
     semanticStatus &&
       (semanticStatus.state === "ready" ||
@@ -117,10 +248,8 @@ const NotesGraphInspector: React.FC<NotesGraphInspectorProps> = ({
   )
   const semanticAnnouncement = semanticStatus
     ? t("notesSearch.semanticStatusAnnouncement", {
-        state: t(`notesSearch.semanticState.${semanticStatus.state}`),
-        detail: semanticStatus.detail_reason
-          ? t(`notesSearch.semanticDetail.${semanticStatus.detail_reason}`)
-          : ""
+        state: t(`notesSearch.semanticState.${semanticDisplayState}`),
+        detail: semanticDetail
       }).trim()
     : ""
   const previousSemanticAnnouncement = React.useRef("")
@@ -133,6 +262,19 @@ const NotesGraphInspector: React.FC<NotesGraphInspectorProps> = ({
     previousSemanticAnnouncement.current = semanticAnnouncement
     onAnnounce(semanticAnnouncement)
   }, [onAnnounce, semanticAnnouncement])
+
+  const focusSemanticStatus = React.useCallback(() => {
+    requestAnimationFrame(() => semanticHeadingRef.current?.focus())
+  }, [])
+
+  React.useEffect(() => {
+    const previous = previousSemanticRunId.current
+    previousSemanticRunId.current = semanticActiveRun?.run_id ?? null
+    if (previous && !semanticActiveRun && semanticActionWasFocused.current) {
+      semanticActionWasFocused.current = false
+      focusSemanticStatus()
+    }
+  }, [focusSemanticStatus, semanticActiveRun])
 
   React.useEffect(() => {
     if (!menuOpen) return
@@ -261,9 +403,7 @@ const NotesGraphInspector: React.FC<NotesGraphInspectorProps> = ({
     }
   }
 
-  const runSemanticAction = async (
-    action: "enable" | "rebuild" | "retry" | "cancel" | "deleteIndex"
-  ) => {
+  const runSemanticAction = async (action: SemanticAction) => {
     if (!semanticController) return
     const confirmed = await confirmDanger({
       title: t(`notesSearch.semanticConfirm.${action}.title`),
@@ -275,6 +415,7 @@ const NotesGraphInspector: React.FC<NotesGraphInspectorProps> = ({
     setSemanticActionError(null)
     const commands = {
       enable: semanticController.enable,
+      renew: semanticController.enable,
       rebuild: semanticController.rebuild,
       retry: semanticController.retryFailed,
       cancel: semanticController.cancel,
@@ -282,6 +423,7 @@ const NotesGraphInspector: React.FC<NotesGraphInspectorProps> = ({
     }
     const successKeys = {
       enable: "notesSearch.semanticEnableStarted",
+      renew: "notesSearch.semanticRenewStarted",
       rebuild: "notesSearch.semanticRebuildStarted",
       retry: "notesSearch.semanticRetryStarted",
       cancel: "notesSearch.semanticCancelRequested",
@@ -290,6 +432,7 @@ const NotesGraphInspector: React.FC<NotesGraphInspectorProps> = ({
     try {
       await commands[action]()
       onAnnounce(t(successKeys[action]))
+      focusSemanticStatus()
     } catch (error) {
       const errorKey = semanticMutationErrorKey(error)
       setSemanticActionError(errorKey)
@@ -429,12 +572,15 @@ const NotesGraphInspector: React.FC<NotesGraphInspectorProps> = ({
           aria-labelledby="notes-graph-semantic-tab"
           className="p-3">
           <div className="flex items-start justify-between gap-3">
-            <h2 className="text-base font-semibold">
+            <h2
+              ref={semanticHeadingRef}
+              tabIndex={-1}
+              className="text-base font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">
               {t("notesSearch.semanticIndex")}
             </h2>
             {semanticStatus ? (
               <p className="text-sm font-semibold" role="status">
-                {t(`notesSearch.semanticState.${semanticStatus.state}`)}
+                {t(`notesSearch.semanticState.${semanticDisplayState}`)}
               </p>
             ) : null}
           </div>
@@ -505,13 +651,17 @@ const NotesGraphInspector: React.FC<NotesGraphInspectorProps> = ({
                     {t("notesSearch.semanticOutboundData")}
                   </h3>
                   <ul className="mt-1 list-disc pl-5 text-sm">
-                    {semanticCapabilities.outbound_data_categories.map(
-                      (category) => (
+                    {semanticCapabilities.outbound_data_categories
+                      .filter((category) =>
+                        NOTES_SEMANTIC_OUTBOUND_DATA_CATEGORIES.includes(
+                          category
+                        )
+                      )
+                      .map((category) => (
                         <li key={category}>
                           {t(`notesSearch.semanticOutbound.${category}`)}
                         </li>
-                      )
-                    )}
+                      ))}
                   </ul>
                 </div>
               ) : null}
@@ -562,21 +712,17 @@ const NotesGraphInspector: React.FC<NotesGraphInspectorProps> = ({
             <>
               <p className="mt-4 text-sm">
                 {t("notesSearch.semanticProgress", {
-                  indexed: semanticStatus.indexed_notes,
+                  indexed: semanticProgress?.indexed_notes ?? 0,
                   total:
                     semanticCapabilities?.active_note_count ??
-                    semanticStatus.indexed_notes +
-                      semanticStatus.excluded_notes +
-                      semanticStatus.failed_notes +
-                      semanticStatus.pending_notes
+                    (semanticProgress?.indexed_notes ?? 0) +
+                      (semanticProgress?.excluded_notes ?? 0) +
+                      (semanticProgress?.failed_notes ?? 0) +
+                      (semanticProgress?.pending_notes ?? 0)
                 })}
               </p>
               {semanticStatus.detail_reason ? (
-                <p className="mt-2 text-sm text-text-muted">
-                  {t(
-                    `notesSearch.semanticDetail.${semanticStatus.detail_reason}`
-                  )}
-                </p>
+                <p className="mt-2 text-sm text-text-muted">{semanticDetail}</p>
               ) : null}
             </>
           ) : null}
@@ -617,23 +763,45 @@ const NotesGraphInspector: React.FC<NotesGraphInspectorProps> = ({
             </label>
           ) : null}
 
-          {semanticCapabilities?.manage_authorized ? (
-            <div className="mt-4 flex flex-wrap gap-2">
-              {semanticStatus?.state === "off" ? (
+          {semanticActions.size ? (
+            <div
+              ref={semanticActionRegionRef}
+              className="mt-4 flex flex-wrap gap-2"
+              onFocusCapture={() => {
+                semanticActionWasFocused.current = true
+              }}
+              onBlurCapture={(event) => {
+                const next = event.relatedTarget
+                if (
+                  !next ||
+                  !semanticActionRegionRef.current?.contains(next as Node)
+                ) {
+                  semanticActionWasFocused.current = false
+                }
+              }}>
+              {semanticActions.has("enable") ? (
                 <button
                   type="button"
                   className="min-h-11 border border-border bg-primary px-3 text-sm text-primary-foreground disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
                   disabled={
-                    !isOnline ||
-                    Boolean(semanticStatus.cleanup_pending) ||
-                    !semanticCapabilities.indexing_available ||
-                    pending(semanticController.mutations.enable)
+                    !isOnline || pending(semanticController.mutations.enable)
                   }
                   onClick={() => void runSemanticAction("enable")}>
                   {t("notesSearch.semanticEnable")}
                 </button>
               ) : null}
-              {semanticController.activeRun ? (
+              {semanticActions.has("renew") ? (
+                <button
+                  type="button"
+                  className="min-h-11 border border-border bg-primary px-3 text-sm text-primary-foreground disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+                  disabled={
+                    !isOnline || pending(semanticController.mutations.enable)
+                  }
+                  onClick={() => void runSemanticAction("renew")}>
+                  {t("notesSearch.semanticRenewConsent")}
+                </button>
+              ) : null}
+              {semanticActions.has("cancel") ? (
                 <button
                   type="button"
                   className="min-h-11 border border-border bg-surface px-3 text-sm disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
@@ -643,39 +811,40 @@ const NotesGraphInspector: React.FC<NotesGraphInspectorProps> = ({
                   onClick={() => void runSemanticAction("cancel")}>
                   {t("notesSearch.semanticCancel")}
                 </button>
-              ) : semanticStatus?.state !== "off" ? (
-                <>
-                  {semanticStatus && semanticStatus.failed_notes > 0 ? (
-                    <button
-                      type="button"
-                      className="min-h-11 border border-border bg-primary px-3 text-sm text-primary-foreground disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
-                      disabled={
-                        !isOnline || pending(semanticController.mutations.retry)
-                      }
-                      onClick={() => void runSemanticAction("retry")}>
-                      {t("notesSearch.semanticRetry")}
-                    </button>
-                  ) : null}
-                  <button
-                    type="button"
-                    className="min-h-11 border border-border bg-surface px-3 text-sm disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
-                    disabled={
-                      !isOnline || pending(semanticController.mutations.rebuild)
-                    }
-                    onClick={() => void runSemanticAction("rebuild")}>
-                    {t("notesSearch.semanticRebuild")}
-                  </button>
-                  <button
-                    type="button"
-                    className="min-h-11 border border-error bg-surface px-3 text-sm text-error disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
-                    disabled={
-                      !isOnline ||
-                      pending(semanticController.mutations.deleteIndex)
-                    }
-                    onClick={() => void runSemanticAction("deleteIndex")}>
-                    {t("notesSearch.semanticDelete")}
-                  </button>
-                </>
+              ) : null}
+              {semanticActions.has("retry") ? (
+                <button
+                  type="button"
+                  className="min-h-11 border border-border bg-primary px-3 text-sm text-primary-foreground disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+                  disabled={
+                    !isOnline || pending(semanticController.mutations.retry)
+                  }
+                  onClick={() => void runSemanticAction("retry")}>
+                  {t("notesSearch.semanticRetry")}
+                </button>
+              ) : null}
+              {semanticActions.has("rebuild") ? (
+                <button
+                  type="button"
+                  className="min-h-11 border border-border bg-surface px-3 text-sm disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+                  disabled={
+                    !isOnline || pending(semanticController.mutations.rebuild)
+                  }
+                  onClick={() => void runSemanticAction("rebuild")}>
+                  {t("notesSearch.semanticRebuild")}
+                </button>
+              ) : null}
+              {semanticActions.has("deleteIndex") ? (
+                <button
+                  type="button"
+                  className="min-h-11 border border-error bg-surface px-3 text-sm text-error disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+                  disabled={
+                    !isOnline ||
+                    pending(semanticController.mutations.deleteIndex)
+                  }
+                  onClick={() => void runSemanticAction("deleteIndex")}>
+                  {t("notesSearch.semanticDelete")}
+                </button>
               ) : null}
             </div>
           ) : null}

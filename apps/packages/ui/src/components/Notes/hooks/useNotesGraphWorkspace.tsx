@@ -319,8 +319,15 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
     identity: string
     graph: NotesGraphResponse
   } | null>(null)
-  if (currentGraph) {
-    lastGoodGraph.current = { identity: fallbackIdentity, graph: currentGraph }
+  if (currentGraph && !semanticEnabled) {
+    lastGoodGraph.current = {
+      identity: fallbackIdentity,
+      graph: {
+        ...currentGraph,
+        edges: currentGraph.edges.filter((edge) => edge.type !== "semantic"),
+        semantic_status: undefined
+      }
+    }
   }
   const graph =
     currentGraph ??

@@ -21,6 +21,13 @@ const ACTIVE_RUN_STATUSES = new Set<NotesSemanticRun["status"]>([
   "queued",
   "processing"
 ])
+const CANCELLABLE_RUN_MODES = new Set(["build", "rebuild", "retry_failed"])
+const RECONCILABLE_CONFLICTS = new Set([
+  "notes_semantic_capability_revision_conflict",
+  "notes_semantic_configuration_revision_conflict",
+  "notes_semantic_run_revision_conflict",
+  "notes_semantic_writer_conflict"
+])
 const DEFAULT_POLL_INTERVAL_MS = 1500
 
 export const notesSemanticIndexQueryKey = ["notes-semantic-index"] as const
@@ -145,17 +152,39 @@ export function useNotesSemanticIndex(options: UseNotesSemanticIndexOptions) {
       })
   })
 
-  const runDetail = runQuery.data ?? null
-  const activeRun = runDetail
-    ? ACTIVE_RUN_STATUSES.has(runDetail.status)
-      ? runDetail
-      : null
-    : statusRun &&
-        statusRun.run_id !== effectiveRunState.resolvedId &&
-        ACTIVE_RUN_STATUSES.has(statusRun.status)
-      ? statusRun
-      : null
+  const runNotFound = Boolean(
+    runQuery.error instanceof NotesSemanticClientError &&
+      runQuery.error.code === "notes_semantic_run_not_found"
+  )
+  const runDetail = runNotFound ? null : runQuery.data ?? null
+  const activeRun = runNotFound
+    ? null
+    : runDetail
+      ? ACTIVE_RUN_STATUSES.has(runDetail.status)
+        ? runDetail
+        : null
+      : statusRun &&
+          statusRun.run_id !== effectiveRunState.resolvedId &&
+          ACTIVE_RUN_STATUSES.has(statusRun.status)
+        ? statusRun
+        : null
   const reconciledTerminal = React.useRef<string | null>(null)
+  const reconciledMissingRun = React.useRef<string | null>(null)
+
+  React.useEffect(() => {
+    if (!runNotFound || !runId) return
+    const identity = JSON.stringify([scopeIdentity, runId])
+    setRunState((current) => ({
+      scope: scopeIdentity,
+      trackedId: null,
+      resolvedId: runId,
+      lastTerminal:
+        current.scope === scopeIdentity ? current.lastTerminal : null
+    }))
+    if (reconciledMissingRun.current === identity) return
+    reconciledMissingRun.current = identity
+    void queryClient.invalidateQueries({ queryKey: statusKey, exact: true })
+  }, [queryClient, runId, runNotFound, scopeIdentity, statusKey])
 
   React.useEffect(() => {
     if (!runDetail || ACTIVE_RUN_STATUSES.has(runDetail.status)) return
@@ -213,6 +242,27 @@ export function useNotesSemanticIndex(options: UseNotesSemanticIndexOptions) {
     }
   }
 
+  const reconcileMutationError = async (
+    error: unknown,
+    commandScope: string
+  ) => {
+    revokeManageOnDenied(error, commandScope)
+    if (
+      currentScope.current !== commandScope ||
+      !(error instanceof NotesSemanticClientError) ||
+      !RECONCILABLE_CONFLICTS.has(error.code)
+    ) {
+      return
+    }
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: capabilitiesKey, exact: true }),
+      queryClient.invalidateQueries({ queryKey: statusKey, exact: true }),
+      runId
+        ? queryClient.invalidateQueries({ queryKey: runKey, exact: true })
+        : Promise.resolve()
+    ])
+  }
+
   const trackRun = (run: NotesSemanticRun, commandScope: string) => {
     if (currentScope.current !== commandScope) return
     queryClient.setQueryData([...scopeKey, "run", run.run_id], run)
@@ -253,7 +303,8 @@ export function useNotesSemanticIndex(options: UseNotesSemanticIndexOptions) {
       }),
     onSuccess: (mutation, variables) =>
       applyMutation(mutation, variables.scope),
-    onError: (error, variables) => revokeManageOnDenied(error, variables.scope)
+    onError: (error, variables) =>
+      reconcileMutationError(error, variables.scope)
   })
 
   const createRunMutation = useMutation({
@@ -271,8 +322,13 @@ export function useNotesSemanticIndex(options: UseNotesSemanticIndexOptions) {
         expectedRevision: variables.status.configuration_revision,
         idempotencyKey: variables.idempotencyKey
       }),
-    onSuccess: (run, variables) => trackRun(run, variables.scope),
-    onError: (error, variables) => revokeManageOnDenied(error, variables.scope)
+    onSuccess: async (run, variables) => {
+      trackRun(run, variables.scope)
+      if (currentScope.current !== variables.scope) return
+      await queryClient.invalidateQueries({ queryKey: statusKey, exact: true })
+    },
+    onError: (error, variables) =>
+      reconcileMutationError(error, variables.scope)
   })
 
   const cancelMutation = useMutation({
@@ -291,7 +347,8 @@ export function useNotesSemanticIndex(options: UseNotesSemanticIndexOptions) {
       }),
     onSuccess: (mutation, variables) =>
       applyMutation(mutation, variables.scope),
-    onError: (error, variables) => revokeManageOnDenied(error, variables.scope)
+    onError: (error, variables) =>
+      reconcileMutationError(error, variables.scope)
   })
 
   const deleteMutation = useMutation({
@@ -317,7 +374,8 @@ export function useNotesSemanticIndex(options: UseNotesSemanticIndexOptions) {
         })
       ])
     },
-    onError: (error, variables) => revokeManageOnDenied(error, variables.scope)
+    onError: (error, variables) =>
+      reconcileMutationError(error, variables.scope)
   })
 
   const commandKey = () => createNotesSemanticCommand().idempotencyKey
@@ -368,7 +426,7 @@ export function useNotesSemanticIndex(options: UseNotesSemanticIndexOptions) {
     retryFailed: () => createRun("retry_failed"),
     cancel: async () => {
       requireCommand()
-      if (!activeRun) {
+      if (!activeRun || !CANCELLABLE_RUN_MODES.has(activeRun.mode)) {
         throw new NotesSemanticClientError(
           422,
           "notes_semantic_invalid_request"

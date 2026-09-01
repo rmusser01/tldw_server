@@ -57,22 +57,7 @@ def _command(**overrides: object) -> SemanticJobCommand:
 
 
 def _semantic_api(db: CharactersRAGDB, jobs: JobManager) -> SemanticIndexAPI:
-    capabilities = build_semantic_capabilities(
-        SemanticCapabilityContract(
-            provider="openai",
-            model="text-embedding-3-small",
-            endpoint_url="https://api.openai.com",
-            execution_boundary="external",
-            vector_backend="chromadb",
-            storage_boundary="local",
-            resolved_dimensions=1536,
-            normalization_version="normalization-v1",
-            chunker_version="chunker-v1",
-            credential_source="durable",
-            provider_healthy=True,
-            vector_storage_available=True,
-        )
-    )
+    capabilities = _capabilities()
     return SemanticIndexAPI(
         note_db=db,
         jobs=jobs,
@@ -80,6 +65,29 @@ def _semantic_api(db: CharactersRAGDB, jobs: JobManager) -> SemanticIndexAPI:
         dataset_id="dataset-a",
         capability_resolver=lambda: capabilities,
         clock=lambda: NOW,
+    )
+
+
+def _capabilities(
+    *,
+    model: str = "text-embedding-3-small",
+    dimensions: int = 1536,
+):
+    return build_semantic_capabilities(
+        SemanticCapabilityContract(
+            provider="openai",
+            model=model,
+            endpoint_url="https://api.openai.com",
+            execution_boundary="external",
+            vector_backend="chromadb",
+            storage_boundary="local",
+            resolved_dimensions=dimensions,
+            normalization_version="normalization-v1",
+            chunker_version="chunker-v1",
+            credential_source="durable",
+            provider_healthy=True,
+            vector_storage_available=True,
+        )
     )
 
 
@@ -445,6 +453,215 @@ def _configuration(db: CharactersRAGDB):
     )
     assert enabled is not None
     return enabled
+
+
+def _active_configuration(db: CharactersRAGDB):
+    enabled = _configuration(db)
+    pending = db.note_semantic_store.create_generation(
+        dataset_id="dataset-a",
+        configuration_revision=enabled.configuration_revision,
+        compatibility_hash=None,
+        dimension_state=SemanticDimensionState.PENDING,
+        dimensions=None,
+        root_job_id="6ec1dfbe-f86f-4d2b-93af-f88f64cd9701",
+        now=NOW,
+    )
+    resolved = db.note_semantic_store.resolve_generation_dimensions(
+        dataset_id="dataset-a",
+        generation_id=pending.id,
+        expected_configuration_revision=enabled.configuration_revision,
+        dimensions=1536,
+        compatibility_hash="compatibility-v1",
+        now=NOW,
+    )
+    assert resolved is not None
+    resolved_config = db.note_semantic_store.get_configuration("dataset-a")
+    assert resolved_config is not None
+    active = db.note_semantic_store.activate_generation(
+        dataset_id="dataset-a",
+        generation_id=resolved.id,
+        expected_configuration_revision=resolved_config.configuration_revision,
+        publication_receipt="receipt-active",
+        now=NOW,
+    )
+    assert active is not None
+    return active
+
+
+def test_enabled_stale_configuration_renews_consent_rebuilds_and_replays(
+    tmp_path,
+    jobs: JobManager,
+) -> None:
+    db = CharactersRAGDB(
+        str(tmp_path / "semantic-renew-consent.sqlite"),
+        client_id="owner-a",
+    )
+    try:
+        active = _active_configuration(db)
+        active_generation_id = active.active_generation_id
+        capabilities = _capabilities(
+            model="text-embedding-3-large",
+            dimensions=3072,
+        )
+        api = SemanticIndexAPI(
+            note_db=db,
+            jobs=jobs,
+            owner_user_id="owner-a",
+            dataset_id="dataset-a",
+            capability_resolver=lambda: capabilities,
+            clock=lambda: NOW + timedelta(minutes=10),
+        )
+        assert api.status()["detail_reason"] == "stale_configuration"
+
+        first = api.enable(
+            expected_revision=active.configuration_revision,
+            capability_revision=capabilities.capability_revision,
+            idempotency_key="renew-consent",
+        )
+
+        assert first["resource"]["state"] == "updating"
+        assert first["resource"]["detail_reason"] == "building"
+        assert first["run"]["mode"] == "rebuild"
+        assert first["run"]["revision"] == active.configuration_revision + 1
+        renewed = db.note_semantic_store.get_configuration("dataset-a")
+        assert renewed is not None
+        assert renewed.configuration_revision == active.configuration_revision + 1
+        assert renewed.active_generation_id == active_generation_id
+        assert renewed.capability_revision == capabilities.capability_revision
+        assert renewed.disclosure_hash == capabilities.disclosure_hash
+        assert renewed.compatibility_hash == capabilities.compatibility_hash
+        assert renewed.provider == "openai"
+        assert renewed.model == "text-embedding-3-large"
+        assert renewed.dimensions == 3072
+        assert renewed.consented_at == (NOW + timedelta(minutes=10)).isoformat()
+
+        replay = api.enable(
+            expected_revision=active.configuration_revision,
+            capability_revision=capabilities.capability_revision,
+            idempotency_key="renew-consent",
+        )
+        assert replay == first
+        assert len(api._jobs_for_dataset()) == 1
+    finally:
+        db.close_all_connections()
+
+
+def test_renewed_consent_rejects_capability_mismatch_and_store_cas_loss(
+    tmp_path,
+    jobs: JobManager,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db = CharactersRAGDB(
+        str(tmp_path / "semantic-renew-conflicts.sqlite"),
+        client_id="owner-a",
+    )
+    try:
+        active = _active_configuration(db)
+        capabilities = _capabilities(
+            model="text-embedding-3-large",
+            dimensions=3072,
+        )
+        api = SemanticIndexAPI(
+            note_db=db,
+            jobs=jobs,
+            owner_user_id="owner-a",
+            dataset_id="dataset-a",
+            capability_resolver=lambda: capabilities,
+            clock=lambda: NOW,
+        )
+
+        with pytest.raises(SemanticAPIError) as mismatch:
+            api.enable(
+                expected_revision=active.configuration_revision,
+                capability_revision="stale-capability-revision",
+                idempotency_key="renew-capability-mismatch",
+            )
+        assert mismatch.value.code == "notes_semantic_capability_revision_conflict"
+
+        renew_calls = 0
+
+        def lose_renewal_cas(**_kwargs):
+            nonlocal renew_calls
+            renew_calls += 1
+            return None
+
+        monkeypatch.setattr(
+            db.note_semantic_store,
+            "renew_configuration_consent",
+            lose_renewal_cas,
+            raising=False,
+        )
+        with pytest.raises(SemanticAPIError) as cas_loss:
+            api.enable(
+                expected_revision=active.configuration_revision,
+                capability_revision=capabilities.capability_revision,
+                idempotency_key="renew-cas-loss",
+            )
+        assert cas_loss.value.code == "notes_semantic_configuration_revision_conflict"
+        assert renew_calls == 1
+        unchanged = db.note_semantic_store.get_configuration("dataset-a")
+        assert unchanged is not None
+        assert unchanged.configuration_revision == active.configuration_revision
+        assert unchanged.capability_revision == active.capability_revision
+    finally:
+        db.close_all_connections()
+
+
+def test_delete_run_cancellation_fails_before_receipt_or_jobs_side_effects(
+    tmp_path,
+    jobs: JobManager,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db = CharactersRAGDB(
+        str(tmp_path / "semantic-delete-cancel.sqlite"),
+        client_id="owner-a",
+    )
+    api = _semantic_api(db, jobs)
+    admitted = SemanticJobCoordinator(
+        jobs=jobs,
+        owner_user_id="owner-a",
+        clock=lambda: NOW,
+    ).admit(
+        _command(mode="delete", configuration_revision=7),
+        idempotency_key="delete-run",
+    )
+    receipt_calls = 0
+    cancel_calls = 0
+    original_receipt = db.note_semantic_store.begin_operation_receipt
+    original_cancel = jobs.cancel_job
+
+    def record_receipt(**kwargs):
+        nonlocal receipt_calls
+        receipt_calls += 1
+        return original_receipt(**kwargs)
+
+    def record_cancel(job_id, **kwargs):
+        nonlocal cancel_calls
+        cancel_calls += 1
+        return original_cancel(job_id, **kwargs)
+
+    monkeypatch.setattr(db.note_semantic_store, "begin_operation_receipt", record_receipt)
+    monkeypatch.setattr(jobs, "cancel_job", record_cancel)
+    try:
+        with pytest.raises(SemanticAPIError) as exc_info:
+            api.cancel_run(
+                run_id=UUID(admitted.run_id),
+                expected_revision=7,
+                idempotency_key="cancel-delete-run",
+            )
+        assert exc_info.value.status_code == 422
+        assert exc_info.value.code == "notes_semantic_invalid_request"
+        assert receipt_calls == 0
+        assert cancel_calls == 0
+        current = jobs.get_job_or_archived_by_uuid(
+            admitted.run_id,
+            domain=JOB_DOMAIN,
+            owner_user_id="owner-a",
+        )
+        assert current is not None
+        assert current["status"] == "queued"
+    finally:
+        db.close_all_connections()
 
 
 def test_generation_root_job_recovery_and_disable_cleanup_are_durable(tmp_path) -> None:
@@ -1283,7 +1500,7 @@ def test_cancel_idempotency_replays_bounded_response_and_rejects_key_reuse(
             SemanticJobCommand(
                 dataset_id="dataset-a",
                 configuration_revision=disabled.configuration_revision,
-                mode="delete",
+                mode="rebuild",
             ),
             idempotency_key="next-cancellable-job",
         )

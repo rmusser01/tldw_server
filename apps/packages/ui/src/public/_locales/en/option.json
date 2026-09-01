@@ -6513,7 +6513,7 @@
     "message": "Some Notes could not be indexed. Retry failed Notes or rebuild the index."
   },
   "notesSearch_semanticDetail_stale_configuration": {
-    "message": "The embedding configuration changed. Rebuild the index before using similar-content relationships."
+    "message": "The embedding configuration changed. Review the current disclosure and renew consent before rebuilding."
   },
   "notesSearch_semanticDetail_consent_required": {
     "message": "Indexing requires renewed consent before work can continue."
@@ -6567,7 +6567,7 @@
     "message": "Disable and delete the semantic index?"
   },
   "notesSearch_semanticConfirm_deleteIndex_body": {
-    "message": "Published vectors and semantic relationships will be removed. Ordinary graph relationships are not affected."
+    "message": "Published vectors and semantic relationships will be removed. Ordinary graph relationships are not affected. Offline backups may retain derived vectors until normal backup retention expires."
   },
   "notesSearch_semanticConfirm_deleteIndex_confirm": {
     "message": "Delete index"
@@ -6634,5 +6634,23 @@
   },
   "notesSearch_semanticError_unavailable": {
     "message": "Semantic indexing is temporarily unavailable. Check the configured provider and worker, then try again."
+  },
+  "notesSearch_semanticRenewConsent": {
+    "message": "Review consent and rebuild"
+  },
+  "notesSearch_semanticDetail_generic": {
+    "message": "Semantic index details changed. Review the current status."
+  },
+  "notesSearch_semanticConfirm_renew_title": {
+    "message": "Review consent and rebuild?"
+  },
+  "notesSearch_semanticConfirm_renew_body": {
+    "message": "Review the current provider, model, data boundaries, and outbound data above before renewing consent."
+  },
+  "notesSearch_semanticConfirm_renew_confirm": {
+    "message": "Renew consent and rebuild"
+  },
+  "notesSearch_semanticRenewStarted": {
+    "message": "Consent renewed and semantic index rebuild started."
   }
 }

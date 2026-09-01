@@ -1365,4 +1365,112 @@ describe("useNotesGraphWorkspace", () => {
       resolveSemantic?.(graph())
     })
   })
+
+  it("does not expose a completed semantic graph while changed threshold controls are unresolved", async () => {
+    const semanticEdge = {
+      id: "semantic:stale-threshold",
+      source: "note:a",
+      target: "note:b",
+      type: "semantic",
+      directed: false,
+      weight: 0.8,
+      label: null
+    }
+    let rejectChangedThreshold: ((reason?: unknown) => void) | undefined
+    mocks.fetchNotesGraph
+      .mockResolvedValueOnce(graph())
+      .mockResolvedValueOnce(graph({ edges: [graph().edges[0], semanticEdge] }))
+      .mockImplementationOnce(
+        () =>
+          new Promise((_resolve, reject) => {
+            rejectChangedThreshold = reject
+          })
+      )
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } }
+    })
+    const { result } = renderHook(
+      () =>
+        useNotesGraphWorkspace({
+          authorityScope: "authority-a",
+          enabled: true,
+          isOnline: true,
+          initialFocusNoteId: "note:a"
+        }),
+      { wrapper: wrapper(client) }
+    )
+    await flush()
+    act(() => result.current.semantic.setEnabled(true))
+    await flush()
+    expect(result.current.graph?.edges.map((edge) => edge.id)).toContain(
+      "semantic:stale-threshold"
+    )
+
+    act(() => result.current.semantic.setThreshold(0.85))
+    await act(async () => Promise.resolve())
+
+    expect(result.current.semantic.threshold).toBe(0.85)
+    expect(result.current.graph?.edges.map((edge) => edge.id)).toEqual([
+      "edge:one"
+    ])
+    await act(async () => {
+      rejectChangedThreshold?.(new Error("threshold request failed"))
+      await Promise.resolve()
+    })
+    expect(result.current.graph?.edges.map((edge) => edge.id)).toEqual([
+      "edge:one"
+    ])
+  })
+
+  it("removes semantic fallback edges immediately when the edge toggle is turned off", async () => {
+    const semanticEdge = {
+      id: "semantic:toggle-off",
+      source: "note:a",
+      target: "note:b",
+      type: "semantic",
+      directed: false,
+      weight: 0.9,
+      label: null
+    }
+    let resolveOrdinary: ((value: ReturnType<typeof graph>) => void) | undefined
+    mocks.fetchNotesGraph
+      .mockResolvedValueOnce(graph())
+      .mockResolvedValueOnce(graph({ edges: [graph().edges[0], semanticEdge] }))
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveOrdinary = resolve
+          })
+      )
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } }
+    })
+    const { result } = renderHook(
+      () =>
+        useNotesGraphWorkspace({
+          authorityScope: "authority-a",
+          enabled: true,
+          isOnline: true,
+          initialFocusNoteId: "note:a"
+        }),
+      { wrapper: wrapper(client) }
+    )
+    await flush()
+    act(() => result.current.semantic.setEnabled(true))
+    await flush()
+    expect(result.current.graph?.edges.map((edge) => edge.id)).toContain(
+      "semantic:toggle-off"
+    )
+
+    act(() => result.current.semantic.setEnabled(false))
+    await act(async () => Promise.resolve())
+
+    expect(result.current.graph?.edges.map((edge) => edge.id)).toEqual([
+      "edge:one"
+    ])
+    await act(async () => {
+      resolveOrdinary?.(graph())
+      await Promise.resolve()
+    })
+  })
 })

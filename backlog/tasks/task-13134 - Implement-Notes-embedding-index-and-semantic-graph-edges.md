@@ -4,7 +4,7 @@ title: Implement Notes embedding index and semantic graph edges
 status: In Progress
 assignee: []
 created_date: '2026-08-27 02:20'
-updated_date: '2026-09-01 16:51'
+updated_date: '2026-09-01 17:40'
 labels:
   - notes
   - notes-graph
@@ -88,6 +88,8 @@ Approved executable plan: `Docs/superpowers/plans/2026-08-29-notes-semantic-inde
 2026-09-01 Task 11 complete: added the shared nested Notes semantic-index client, strict semantic graph contracts, authority/dataset-scoped TanStack state, active-run-only polling, cursor-stable semantic pagination, offline last-good graph retention, and the existing Graph inspector setup/status/management experience. Added request-local manage_authorized capability projection from verified AuthPrincipal claims; core capability services remain auth-free. Management commands are proactively hidden for revoked readers, cleanup conflicts are disabled, mutation failures provide safe localized recovery, unresolved dimensions disclose the fixed non-user probe, and no root Jobs or arbitrary provider/model/endpoint controls are exposed. Task 12 visuals/evidence/manual conversion remain out of scope. RED: frontend 15 expected failures with 42 existing assertions passing; backend 3 expected manage_authorized failures with 19 passing; later acceptance RED covered pagination and four inspector gaps. Final verification: exact frontend 71 passed; adjacent frontend graph 110 passed plus inspector suggestions 16 passed; backend endpoint 22 passed and adjacent semantic 61 passed; TypeScript compile, Prettier, locale sync/duplicate/coverage, Ruff, Bandit (0 findings), and git diff --check passed.
 
 2026-09-01 Task 11 review follow-up: moved stale semantic mutation-error clearing from the unrelated suggestion rejection reset into the confirmed semantic command path, so a later successful command clears prior recovery guidance. The primary setup disclosure now renders both sanitized vector-storage destination and localized local/remote boundary. RED: focused inspector suite failed 2/16 on the missing destination and stale alert. GREEN: exact Task 11 frontend 71/71, focused semantic inspector 16/16, adjacent suggestions inspector 16/16, extension TypeScript compile, and repository-pinned Prettier check passed.
+
+2026-09-01 Task 11 accepted-review hardening complete pending commit: blocked delete-cleanup cancellation in UI and core; added stale-configuration renewed consent through the existing nested PUT with owner/dataset/configuration CAS, active-generation preservation, rebuild admission, and receipt replay; reconciled scoped run/configuration/capability/writer conflicts and run 404s; projected live run state/progress; replaced lifecycle controls with a backend-valid state matrix; confined last-good fallback to ordinary edges; allowlisted complete consent disclosure and unknown-detail fallback; added backup-retention copy, focus handoff, and three-tab roving coverage; removed duplicated English semantic strings from non-English assets/mirrors under fallbackLng=en. RED evidence was recorded per finding in the Task 11 fix report. GREEN verification: 79 focused and 110 adjacent frontend tests; 89 focused and 141 adjacent Python 3.11 backend tests; TypeScript compile; canonical Prettier; locale sync, duplicate-key and coverage checks; Ruff; Bandit zero findings at /tmp/bandit_task13134_task11_fix.json; git diff --check. Report: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-11-fix-report.md.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

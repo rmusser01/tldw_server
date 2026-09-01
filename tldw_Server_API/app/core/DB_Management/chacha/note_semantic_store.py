@@ -1525,6 +1525,99 @@ class NoteSemanticStore:
             capability_revision=capability_revision, desired_state=SemanticDesiredState.ENABLED, now=now,
         )
 
+    def renew_configuration_consent(
+        self,
+        *,
+        dataset_id: str,
+        expected_configuration_revision: int,
+        capability_revision: str,
+        disclosure_hash: str,
+        compatibility_hash: str,
+        provider: str,
+        model: str,
+        model_revision: str | None,
+        endpoint_origin_revision: str,
+        endpoint_origin_display: str,
+        data_boundary: str,
+        vector_backend: str,
+        storage_boundary: str,
+        storage_label: str,
+        resolved_dimensions: int,
+        normalization_version: str,
+        chunker_version: str,
+        now: datetime,
+    ) -> SemanticIndexConfig | None:
+        """Renew an enabled configuration from one freshly disclosed capability."""
+
+        if (
+            type(expected_configuration_revision) is not int
+            or expected_configuration_revision < 0
+            or type(resolved_dimensions) is not int
+            or resolved_dimensions <= 0
+        ):
+            raise ValueError("notes_semantic_configuration_revision_invalid")
+        dataset = self._scope(dataset_id)
+        timestamp = self._timestamp(now)
+        revision = (
+            None
+            if model_revision is None
+            else self._safe_token(model_revision, field="model_revision")
+        )
+        values = (
+            self._safe_token(capability_revision, field="capability_revision"),
+            self._safe_token(disclosure_hash, field="disclosure_hash"),
+            self._safe_token(compatibility_hash, field="compatibility_hash"),
+            self._safe_token(provider, field="provider"),
+            self._safe_token(model, field="model"),
+            revision,
+            self._safe_token(
+                endpoint_origin_revision,
+                field="endpoint_origin_revision",
+            ),
+            self._endpoint_origin_display(endpoint_origin_display),
+            self._safe_token(data_boundary, field="data_boundary"),
+            self._safe_token(vector_backend, field="vector_backend"),
+            self._safe_token(storage_boundary, field="storage_boundary"),
+            self._safe_token(
+                storage_label.replace(" ", "_"),
+                field="storage_label",
+            ),
+            resolved_dimensions,
+            self._safe_token(
+                normalization_version,
+                field="normalization_version",
+            ),
+            self._safe_token(chunker_version, field="chunker_version"),
+            timestamp,
+            timestamp,
+            self.owner_user_id,
+            dataset,
+            expected_configuration_revision,
+        )
+        with self._db.transaction() as conn:
+            self._set_scope(conn, dataset)
+            self._serialize_dataset_mutation(conn, dataset)
+            cursor = conn.execute(
+                "UPDATE note_semantic_index_configs SET capability_revision=?,"
+                "disclosure_hash=?,compatibility_hash=?,provider=?,model=?,"
+                "model_revision=?,endpoint_origin_revision=?,endpoint_origin_display=?,"
+                "data_boundary=?,vector_backend=?,storage_boundary=?,storage_label=?,"
+                "metric='cosine',dimension_state='resolved',dimensions=?,"
+                "normalization_version=?,chunker_version=?,"
+                "configuration_revision=configuration_revision+1,consented_at=?,"
+                "updated_at=? WHERE owner_user_id=? AND dataset_id=? "
+                "AND configuration_revision=? AND desired_state='enabled'",
+                values,
+            )
+            if cursor.rowcount != 1:
+                return None
+            row = conn.execute(
+                "SELECT * FROM note_semantic_index_configs "
+                "WHERE owner_user_id=? AND dataset_id=?",
+                (self.owner_user_id, dataset),
+            ).fetchone()
+        return None if row is None else self._config_from_row(row)
+
     def disable_configuration(
         self, *, dataset_id: str, expected_configuration_revision: int, now: datetime,
     ) -> SemanticIndexConfig | None:

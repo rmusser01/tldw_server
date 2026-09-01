@@ -52,6 +52,14 @@ export class NotesSemanticClientError extends Error {
   }
 }
 
+export const NOTES_SEMANTIC_OUTBOUND_DATA_CATEGORIES = [
+  "note_content_chunks",
+  "note_title"
+] as const
+
+export type NotesSemanticOutboundDataCategory =
+  (typeof NOTES_SEMANTIC_OUTBOUND_DATA_CATEGORIES)[number]
+
 export type NotesSemanticCapabilities = {
   active_note_count: number
   estimated_chunk_count: number
@@ -61,7 +69,7 @@ export type NotesSemanticCapabilities = {
   execution_boundary: "external" | "local"
   storage_boundary: "external" | "local" | "unavailable"
   storage_label: string
-  outbound_data_categories: string[]
+  outbound_data_categories: NotesSemanticOutboundDataCategory[]
   capability_revision: string
   indexing_available: boolean
   unavailable_reason: string | null
@@ -149,6 +157,7 @@ const runStatusSchema = z.enum([
   "cancelled",
   "quarantined"
 ])
+const outboundCategorySchema = z.enum(NOTES_SEMANTIC_OUTBOUND_DATA_CATEGORIES)
 
 const runSchema = z.strictObject({
   run_id: nonempty,
@@ -181,8 +190,8 @@ const statusSchema: z.ZodType<NotesSemanticIndexStatus> = z.strictObject({
   active_run: runSchema.nullable()
 })
 
-const capabilitiesSchema: z.ZodType<NotesSemanticCapabilities> = z.strictObject(
-  {
+const capabilitiesSchema: z.ZodType<NotesSemanticCapabilities> = z
+  .strictObject({
     active_note_count: nonnegative,
     estimated_chunk_count: nonnegative,
     estimated_run_count: nonnegative,
@@ -191,15 +200,41 @@ const capabilitiesSchema: z.ZodType<NotesSemanticCapabilities> = z.strictObject(
     execution_boundary: z.enum(["external", "local"]),
     storage_boundary: z.enum(["external", "local", "unavailable"]),
     storage_label: z.string(),
-    outbound_data_categories: z.array(nonempty),
+    outbound_data_categories: z.array(outboundCategorySchema).max(2),
     capability_revision: nonempty,
     indexing_available: z.boolean(),
     unavailable_reason: nonempty.nullable(),
     metric: z.literal("cosine"),
     resolved_dimensions: z.number().int().min(1).nullable(),
     manage_authorized: z.boolean()
-  }
-)
+  })
+  .superRefine((capability, context) => {
+    if (!capability.indexing_available) return
+    const outbound = new Set(capability.outbound_data_categories)
+    const completeOutboundDisclosure =
+      capability.outbound_data_categories.length ===
+        NOTES_SEMANTIC_OUTBOUND_DATA_CATEGORIES.length &&
+      NOTES_SEMANTIC_OUTBOUND_DATA_CATEGORIES.every((category) =>
+        outbound.has(category)
+      )
+    if (!completeOutboundDisclosure) {
+      context.addIssue({
+        code: "custom",
+        path: ["outbound_data_categories"],
+        message: "complete outbound disclosure required"
+      })
+    }
+    if (
+      capability.storage_boundary === "unavailable" ||
+      capability.unavailable_reason !== null ||
+      capability.resolved_dimensions === null
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "available capability disclosure is contradictory"
+      })
+    }
+  })
 
 const mutationSchema: z.ZodType<NotesSemanticMutation> = z.strictObject({
   resource: statusSchema,
