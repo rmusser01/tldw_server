@@ -2006,6 +2006,14 @@ class AdminWebhookRepository:
     def is_postgres(self) -> bool:
         return self._pool.pool is not None
 
+    def unit_of_work(self, connection: object) -> AdminWebhookUnitOfWork:
+        """Bind webhook operations to a caller-owned database transaction."""
+
+        return AdminWebhookUnitOfWork(
+            connection,
+            is_postgres=self.is_postgres,
+        )
+
     @asynccontextmanager
     async def transaction(self) -> AsyncIterator[AdminWebhookUnitOfWork]:
         """Open one atomic unit and map only bounded contention to a stable error."""

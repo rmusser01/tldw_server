@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import hmac
-import json
 import logging
-import math
 import os
 import re
 import secrets
@@ -21,10 +18,8 @@ from .audit import DeliveryMutationAudit, DeliveryMutationAuditSink
 from .catalog import EVENT_API_VERSION, EVENT_CATALOG
 from .config import AdminWebhookMode, AdminWebhookSettings
 from .crypto import (
-    EVENT_BODY_MAX_BYTES,
     WebhookKeyError,
     WebhookKeyLoadCode,
-    WebhookKeyRing,
     WebhookKeyRingLoadResult,
 )
 from .domain import (
@@ -48,11 +43,20 @@ from .domain import (
     validate_idempotency_key,
     validate_webhook_target,
 )
+from .events import (
+    canonical_event_body as _canonical_event_body,
+)
+from .events import (
+    prepare_event_insert,
+    validate_stored_event_body,
+    verify_event_replay,
+)
 from .executor import (
     AttemptExecutionRequest,
     AttemptOutcome,
     DeliveryAttemptExecutor,
 )
+from .producer import require_writable_event_ring
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
@@ -60,18 +64,12 @@ if TYPE_CHECKING:
         EventCaptureResult,
         EventInsert,
         IdempotencyLookup,
-        MigrationState,
-        StoredWebhookEvent,
         StoredWebhookRegistration,
     )
 
-_ACTIVE_ROTATION_PHASES = frozenset(
-    {"rewriting", "verifying", "awaiting_primary_cutover"}
-)
 _CATALOG_EVENTS = frozenset(item.event_type for item in EVENT_CATALOG)
 _SAFE_ID = re.compile(r"^[A-Za-z0-9._:@-]{1,128}$")
 _SIGNING_SECRET = re.compile(r"^whsec_[0-9a-f]{64}$")
-_MAX_JSON_DEPTH = 64
 _TEST_REPLAY_RETRY_SECONDS = 5
 
 logger = logging.getLogger(__name__)
@@ -422,108 +420,6 @@ def _utc(value: datetime, *, field_name: str) -> datetime:
     return value.astimezone(timezone.utc)
 
 
-def _canonical_timestamp(value: datetime) -> str:
-    return _utc(value, field_name="created_at").isoformat().replace("+00:00", "Z")
-
-
-def _validate_json_value(value: object, *, depth: int = 0) -> None:
-    if depth > _MAX_JSON_DEPTH:
-        raise ValueError("event data nesting is invalid")
-    if value is None or isinstance(value, (str, bool, int)):
-        return
-    if isinstance(value, float):
-        if not math.isfinite(value):
-            raise ValueError("event data number is invalid")
-        return
-    if isinstance(value, list):
-        for item in value:
-            _validate_json_value(item, depth=depth + 1)
-        return
-    if isinstance(value, dict):
-        if any(not isinstance(key, str) for key in value):
-            raise ValueError("event data key is invalid")
-        for item in value.values():
-            _validate_json_value(item, depth=depth + 1)
-        return
-    raise ValueError("event data value is invalid")
-
-
-def _snapshot_json_object(data: dict[str, object]) -> dict[str, object]:
-    _validate_json_value(data)
-    try:
-        encoded = json.dumps(
-            data,
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-            allow_nan=False,
-        )
-        snapshot = json.loads(encoded)
-    except (OverflowError, RecursionError, TypeError, ValueError) as exc:
-        raise ValueError("event data is invalid") from exc
-    if not isinstance(snapshot, dict):
-        raise ValueError("event data must be a JSON object")
-    return snapshot
-
-
-def _canonical_event_body(
-    *,
-    event_id: str,
-    event_type: str,
-    api_version: str,
-    created_at: datetime,
-    data: dict[str, object],
-) -> bytes:
-    try:
-        encoded = json.dumps(
-            {
-                "id": event_id,
-                "type": event_type,
-                "api_version": api_version,
-                "created_at": _canonical_timestamp(created_at),
-                "data": data,
-            },
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-            allow_nan=False,
-        ).encode("utf-8")
-    except (OverflowError, RecursionError, TypeError, ValueError) as exc:
-        raise ValueError("event body is invalid") from exc
-    if len(encoded) > EVENT_BODY_MAX_BYTES:
-        raise ValueError("event body is too large")
-    return encoded
-
-
-def validate_stored_event_body(
-    event: StoredWebhookEvent,
-    plaintext: bytes,
-) -> None:
-    """Require exact canonical bytes matching immutable event metadata."""
-
-    if not isinstance(plaintext, bytes) or len(plaintext) != event.body_size_bytes:
-        raise ValueError("persisted event body is invalid")
-    try:
-        decoded = json.loads(plaintext)
-        if not isinstance(decoded, dict) or not isinstance(decoded.get("data"), dict):
-            raise ValueError("persisted event body is invalid")
-        data = _snapshot_json_object(decoded["data"])
-        expected = _canonical_event_body(
-            event_id=event.event.id,
-            event_type=event.event.event_type,
-            api_version=event.event.api_version,
-            created_at=event.event.created_at,
-            data=data,
-        )
-    except (OverflowError, RecursionError, TypeError, UnicodeError, ValueError) as exc:
-        raise ValueError("persisted event body is invalid") from exc
-    if (
-        len(expected) != event.body_size_bytes
-        or not hmac.compare_digest(plaintext, expected)
-    ):
-        raise ValueError("persisted event body is invalid")
-
-
 def registration_work_lifecycle_reason(
     delivery: WebhookDelivery,
     registration: WebhookRegistration,
@@ -562,75 +458,6 @@ def _map_capture_error(exc: BaseException) -> WebhookError:
     if isinstance(exc, (TypeError, ValueError, OverflowError, RecursionError)):
         return WebhookError(WebhookErrorCode.VALIDATION_FAILED)
     return WebhookError(WebhookErrorCode.OPERATION_FAILED)
-
-
-def _require_migration_ready(state: MigrationState) -> None:
-    if state.phase != "complete" or state.completed_at is None:
-        raise WebhookError(WebhookErrorCode.MIGRATION_PENDING)
-
-
-def _require_writable_ring(
-    state: MigrationState,
-    key_ring_result: WebhookKeyRingLoadResult,
-) -> WebhookKeyRing:
-    _require_migration_ready(state)
-    if state.rotation_phase in _ACTIVE_ROTATION_PHASES:
-        raise WebhookError(WebhookErrorCode.KEY_ROTATION_IN_PROGRESS)
-    ring = key_ring_result.ring
-    if ring is None:
-        raise WebhookError(WebhookErrorCode.KEY_UNAVAILABLE)
-    if state.active_primary_key_id != ring.primary_id:
-        raise WebhookError(WebhookErrorCode.KEY_CONFIGURATION_MISMATCH)
-    return ring
-
-
-def _source_matches(
-    event: StoredWebhookEvent,
-    command: CaptureSyntheticEventCommand,
-) -> bool:
-    return (
-        event.event.event_type == command.event_type
-        and event.event.source_kind is command.source_kind
-        and event.aggregate_type == command.aggregate_type
-        and event.aggregate_id == command.aggregate_id
-        and event.aggregate_version == command.aggregate_version
-        and event.source_command_id == command.source_command_id
-        and event.source_component == command.source_component
-        and event.source_request_id == command.source_request_id
-    )
-
-
-def _verify_replay(
-    *,
-    ring: WebhookKeyRing,
-    result: EventCaptureResult,
-    command: CaptureSyntheticEventCommand,
-    data: dict[str, object],
-) -> None:
-    event = result.event
-    if not _source_matches(event, command):
-        raise WebhookError(WebhookErrorCode.IDEMPOTENCY_CONFLICT)
-    expected = _canonical_event_body(
-        event_id=event.id,
-        event_type=event.event.event_type,
-        api_version=event.event.api_version,
-        created_at=event.event.created_at,
-        data=data,
-    )
-    try:
-        plaintext = ring.decrypt_event_body(
-            event_id=event.id,
-            api_version=event.event.api_version,
-            protected=event.body,
-        )
-    except WebhookKeyError:
-        raise WebhookError(WebhookErrorCode.IDEMPOTENCY_CONFLICT) from None
-    if (
-        event.body_size_bytes != len(expected)
-        or event.body_size_bytes != len(plaintext)
-        or not hmac.compare_digest(plaintext, expected)
-    ):
-        raise WebhookError(WebhookErrorCode.IDEMPOTENCY_CONFLICT)
 
 
 class _DeliveryMetrics(Protocol):
@@ -808,7 +635,7 @@ class AdminWebhookDeliveryService:
             return None, replay
 
         state = await self._repository.get_migration_state()
-        ring = _require_writable_ring(state, self._key_ring_result)
+        ring = require_writable_event_ring(state, self._key_ring_result)
         registration = await self._repository.get_protected_registration(
             command.webhook_id,
             include_deleted=False,
@@ -995,7 +822,7 @@ class AdminWebhookDeliveryService:
                     raced_lookup = claim
                 else:
                     locked_state = await tx.lock_migration_state()
-                    _require_writable_ring(locked_state, self._key_ring_result)
+                    require_writable_event_ring(locked_state, self._key_ring_result)
                     current = prepared.registration.registration
                     reservation = await tx.start_test_attempt(
                         prepared.event,
@@ -1486,7 +1313,7 @@ class AdminWebhookDeliveryService:
                         raced_lookup = claim
                     else:
                         locked_state = await tx.lock_migration_state()
-                        ring = _require_writable_ring(
+                        ring = require_writable_event_ring(
                             locked_state,
                             self._key_ring_result,
                         )
@@ -1719,27 +1546,16 @@ class AdminWebhookDeliveryService:
         fanout_count = 0
         try:
             self._require_delivery_mode()
-            from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
-                EventInsert,
-            )
-
-            data = _snapshot_json_object(command.data)
             event_id = _canonical_uuid4(
                 self._event_id_factory(),
                 field_name="event ID",
             )
             created_at = _utc(self._clock(), field_name="created_at")
-            body = _canonical_event_body(
-                event_id=event_id,
-                event_type=command.event_type,
-                api_version=EVENT_API_VERSION,
-                created_at=created_at,
-                data=data,
-            )
             state = await self._repository.get_migration_state()
-            ring = _require_writable_ring(state, self._key_ring_result)
-            event = EventInsert(
-                id=event_id,
+            ring = require_writable_event_ring(state, self._key_ring_result)
+            prepared = prepare_event_insert(
+                ring=ring,
+                event_id=event_id,
                 event_type=command.event_type,
                 api_version=EVENT_API_VERSION,
                 source_kind=command.source_kind,
@@ -1749,14 +1565,10 @@ class AdminWebhookDeliveryService:
                 source_command_id=command.source_command_id,
                 source_component=command.source_component,
                 source_request_id=command.source_request_id,
-                body=ring.encrypt_event_body(
-                    event_id=event_id,
-                    api_version=EVENT_API_VERSION,
-                    body=body,
-                ),
-                body_size_bytes=len(body),
                 created_at=created_at,
+                data=command.data,
             )
+            event = prepared.event
         except Exception as exc:  # noqa: BLE001 - boundary must audit preparation failures
             error = _map_capture_error(exc)
             try:
@@ -1776,7 +1588,7 @@ class AdminWebhookDeliveryService:
             async with self._repository.transaction() as tx:
                 try:
                     locked = await tx.lock_migration_state()
-                    locked_ring = _require_writable_ring(
+                    locked_ring = require_writable_event_ring(
                         locked,
                         self._key_ring_result,
                     )
@@ -1788,11 +1600,10 @@ class AdminWebhookDeliveryService:
                     event_id = result.event.id
                     fanout_count = len(result.deliveries)
                     if not result.inserted:
-                        _verify_replay(
+                        verify_event_replay(
                             ring=locked_ring,
                             result=result,
-                            command=command,
-                            data=data,
+                            prepared=prepared,
                         )
                 except Exception as exc:  # noqa: BLE001 - boundary must audit transaction failures
                     error = _map_capture_error(exc)

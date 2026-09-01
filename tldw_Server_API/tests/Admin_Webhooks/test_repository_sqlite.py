@@ -156,6 +156,20 @@ async def test_create_commits_before_connection_close(
 
 
 @pytest.mark.unit
+async def test_unit_of_work_joins_caller_owned_transaction(
+    sqlite_repo: SQLiteRepositoryFixture,
+) -> None:
+    async with sqlite_repo.pool.transaction() as connection:
+        tx = sqlite_repo.repository.unit_of_work(connection)
+        first = await tx.allocate_registration_id()
+
+    async with sqlite_repo.repository.transaction() as tx:
+        second = await tx.allocate_registration_id()
+
+    assert (first, second) == (1, 2)
+
+
+@pytest.mark.unit
 async def test_sequence_allocation_is_unique_under_concurrency(
     sqlite_repo: SQLiteRepositoryFixture,
 ) -> None:

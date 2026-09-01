@@ -4,7 +4,7 @@ title: Implement canonical admin webhook durable producers and final activation
 status: In Progress
 assignee: []
 created_date: '2026-08-31 22:44'
-updated_date: '2026-09-01 00:49'
+updated_date: '2026-09-01 01:12'
 labels:
   - admin
   - webhooks
@@ -65,6 +65,8 @@ Planning PR: https://github.com/rmusser01/tldw_server/pull/2846 at reviewed plan
 2026-09-01 execution start: Planning PR #2846 merged into dev as 8cb4d2dfdfdf04abee5bee6c08ae959092d413ce. Runtime branch codex/admin-webhooks-durable-producers-runtime starts exactly at that commit. Dependency PR #2842 merge 7b1450c927de9001975fe50694f37d91eb4ef8d6 is an ancestor of origin/dev. Pre-change verification is in progress.
 
 Pre-change baseline at 8cb4d2df: backend command completed with TLDW_TEST_NO_DOCKER=1 after the unguarded run repeatedly attempted unavailable Docker/PostgreSQL provisioning and was interrupted without a test failure. Guarded result: 695 passed, 150 skipped, 1204 warnings in 388.60s; skips are the plan-permitted local PostgreSQL paths. Admin UI focused baseline: 3 files and 69 tests passed in 5.64s. bun run typecheck passed. bun install --frozen-lockfile installed the existing lockfile dependencies without tracked changes.
+
+2026-09-01 Task 1 complete pending commit: Added six closed privacy-bounded production payload builders; extracted deterministic JSON snapshot/body validation, encrypted EventInsert preparation, stored-body validation, and exact source/body replay proof from synthetic delivery; added mode/key/migration preflight and transaction-bound AdminWebhookEventProducer; added caller-owned AdminWebhookRepository.unit_of_work(connection); and consolidated synthetic and production capture on one writable-key gate. Strict TDD reds were observed for missing events module, validation gaps, missing event preparation/replay interfaces, missing repository factory, and missing production producer. Final focused matrix: 76 passed, 3 skipped, 88 warnings in 35.77s (skips are existing environment-gated cases). The caller-owned SQLite transaction contract passed separately. Ruff passed all changed production/test paths; git diff --check passed. Self-review found no unresolved correctness or privacy issue; no subagent reviewer was available in this execution environment. PostgreSQL producer integration remains a Task 2 required gate.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
