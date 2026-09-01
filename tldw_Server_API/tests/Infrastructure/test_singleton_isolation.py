@@ -151,10 +151,14 @@ def test_a_reload_in_one_test_does_not_leak_into_the_next() -> None:
     lives under tests/ so the root conftest applies to it, and is named with a
     leading underscore so the outer run does not collect it.
     """
+    import os
     import subprocess
     import sys
 
-    probe = Path(__file__).parent / "_app_main_leak_probe.py"
+    # Unique per process: xdist workers running this same leaf test would
+    # otherwise write, spawn against, and unlink one shared pathname, and a hard
+    # kill leaves a stale file behind under a name the next run reuses.
+    probe = Path(__file__).parent / f"_app_main_leak_probe_{os.getpid()}.py"
     probe.write_text(PROBE, encoding="utf-8")
     try:
         result = subprocess.run(
@@ -175,7 +179,10 @@ def test_a_reload_in_one_test_does_not_leak_into_the_next() -> None:
             capture_output=True,
             text=True,
             cwd=Path(__file__).resolve().parents[3],
-            timeout=600,
+            # Under the global pytest-timeout budget (300s in pyproject), so
+            # this fires with a usable message instead of the outer test being
+            # killed first.
+            timeout=240,
         )
     finally:
         probe.unlink(missing_ok=True)
