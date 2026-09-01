@@ -885,6 +885,7 @@ class CollectionsDatabase:
         connection = pool.get_connection()
         previous_autocommit: bool | None = None
         primary_failure: BaseException | None = None
+        owns_snapshot = True
         try:
             if backend.backend_type == BackendType.POSTGRESQL:
                 # Pool checkout applies session-scoped RLS settings using SQL,
@@ -900,17 +901,22 @@ class CollectionsDatabase:
                         "BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY"
                     )
             else:
-                connection.execute("BEGIN DEFERRED")
+                owns_snapshot = not bool(
+                    getattr(connection, "in_transaction", False)
+                )
+                if owns_snapshot:
+                    connection.execute("BEGIN DEFERRED")
             yield connection
         except BaseException as exc:  # noqa: BLE001 - preserve primary failure
             primary_failure = exc
             raise
         finally:
             cleanup_failure: BaseException | None = None
-            try:
-                connection.rollback()
-            except BaseException as exc:  # noqa: BLE001 - preserve primary failure
-                cleanup_failure = exc
+            if owns_snapshot:
+                try:
+                    connection.rollback()
+                except BaseException as exc:  # noqa: BLE001 - preserve primary failure
+                    cleanup_failure = exc
             if previous_autocommit is not None:
                 try:
                     connection.autocommit = previous_autocommit
