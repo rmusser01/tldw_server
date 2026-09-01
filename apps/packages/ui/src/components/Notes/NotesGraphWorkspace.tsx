@@ -120,7 +120,8 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
     initialFocusNoteId: mountedFocusNoteId,
     radius,
     maxNodes,
-    maxEdges
+    maxEdges,
+    semanticManagementEnabled: true
   })
   const loadedNodeIds = React.useMemo(
     () => new Set(workspace.graph?.nodes.map((node) => node.id) ?? []),
@@ -158,7 +159,7 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
   )
   const isDecisionPending = Boolean(
     suggestions.mutations?.acceptance?.isPending ||
-    suggestions.mutations?.rejection?.isPending
+      suggestions.mutations?.rejection?.isPending
   )
   const announce = React.useCallback((message: string) => {
     setAnnouncement((current) => ({ id: current.id + 1, message }))
@@ -430,6 +431,9 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
               suggestionsAuthorized={suggestionsAuthorized}
               isOnline={isOnline}
               controller={suggestions}
+              semanticController={workspace.semanticIndex}
+              semanticEnabled={workspace.semantic?.enabled ?? false}
+              onSemanticEnabledChange={workspace.semantic?.setEnabled}
               onSelectNode={handleFocusNode}
               onAnnounce={announce}
               onDecideSuggestion={handleSuggestionDecision}

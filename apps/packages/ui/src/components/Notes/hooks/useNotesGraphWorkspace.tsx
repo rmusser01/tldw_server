@@ -1,4 +1,5 @@
 import {
+  NOTES_GRAPH_SEMANTIC_MAX_TOP_K,
   type NotesGraphEdge,
   type NotesGraphEdgeType,
   type NotesGraphNode,
@@ -12,13 +13,17 @@ import {
 } from "@tanstack/react-query"
 import * as React from "react"
 
-const DEFAULT_EDGE_TYPES: NotesGraphEdgeType[] = [
+import { useNotesSemanticIndex } from "./useNotesSemanticIndex"
+
+const ORDINARY_EDGE_TYPES: NotesGraphEdgeType[] = [
   "manual",
   "wikilink",
   "backlink",
   "tag_membership",
   "source_membership"
 ]
+const DEFAULT_SEMANTIC_THRESHOLD = 0.75
+const DEFAULT_SEMANTIC_TOP_K = 10
 
 export const notesGraphWorkspaceQueryKey = ["notes-graph-workspace"] as const
 
@@ -33,6 +38,7 @@ export type UseNotesGraphWorkspaceOptions = {
   radius?: 1 | 2
   maxNodes?: number
   maxEdges?: number
+  semanticManagementEnabled?: boolean
 }
 
 type NavigationState = {
@@ -145,6 +151,12 @@ const authority = (value: string | null | undefined): string | null =>
 export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
   const queryClient = useQueryClient()
   const authorityScope = authority(options.authorityScope)
+  const semanticIndex = useNotesSemanticIndex({
+    authorityScope,
+    enabled: Boolean(options.enabled && options.semanticManagementEnabled),
+    isOnline: options.isOnline,
+    datasetId: options.datasetId
+  })
   const inputIdentity = JSON.stringify([
     authorityScope,
     options.datasetId ?? null,
@@ -165,8 +177,12 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
   const [layout, setLayout] = React.useState<NotesGraphLayout>("dagre")
   const [search, setSearch] = React.useState("")
   const [visibleEdgeTypes, setVisibleEdgeTypes] = React.useState(
-    () => new Set<NotesGraphEdgeType>(DEFAULT_EDGE_TYPES)
+    () => new Set<NotesGraphEdgeType>(ORDINARY_EDGE_TYPES)
   )
+  const [semanticThreshold, setSemanticThreshold] = React.useState(
+    DEFAULT_SEMANTIC_THRESHOLD
+  )
+  const [semanticTopK, setSemanticTopK] = React.useState(DEFAULT_SEMANTIC_TOP_K)
   React.useEffect(() => {
     setNavigation((current) =>
       current.inputIdentity === inputIdentity ? current : initialNavigation
@@ -180,6 +196,14 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
   const radius = options.radius ?? 1
   const maxNodes = options.maxNodes ?? 120
   const maxEdges = options.maxEdges ?? 480
+  const semanticEnabled = visibleEdgeTypes.has("semantic")
+  const requestedEdgeTypes = React.useMemo<NotesGraphEdgeType[]>(
+    () =>
+      semanticEnabled
+        ? [...ORDINARY_EDGE_TYPES, "semantic"]
+        : [...ORDINARY_EDGE_TYPES],
+    [semanticEnabled]
+  )
   const enabled = Boolean(
     authorityScope &&
       options.enabled &&
@@ -198,7 +222,11 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
         centerNoteId ?? null,
         radius,
         maxNodes,
-        maxEdges
+        maxEdges,
+        semanticEnabled,
+        requestedEdgeTypes,
+        semanticThreshold,
+        semanticTopK
       ] as const,
     [
       authorityScope,
@@ -208,21 +236,39 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
       maxEdges,
       maxNodes,
       options.datasetId,
-      radius
+      radius,
+      requestedEdgeTypes,
+      semanticEnabled,
+      semanticThreshold,
+      semanticTopK
     ]
   )
   const queryIdentity = JSON.stringify(queryKey)
   const fetchPage = React.useCallback(
-    (pageParam: string | undefined) =>
-      fetchNotesGraph({
+    (pageParam: string | undefined) => {
+      return fetchNotesGraph({
         centerNoteId,
         datasetId: options.datasetId,
         radius,
+        edgeTypes: requestedEdgeTypes,
         maxNodes,
         maxEdges,
-        cursor: pageParam
-      }),
-    [centerNoteId, maxEdges, maxNodes, options.datasetId, radius]
+        cursor: pageParam,
+        semanticThreshold: semanticEnabled ? semanticThreshold : undefined,
+        semanticTopK: semanticEnabled ? semanticTopK : undefined
+      })
+    },
+    [
+      centerNoteId,
+      maxEdges,
+      maxNodes,
+      options.datasetId,
+      radius,
+      requestedEdgeTypes,
+      semanticEnabled,
+      semanticThreshold,
+      semanticTopK
+    ]
   )
   const graphQuery = useInfiniteQuery<
     NotesGraphResponse,
@@ -255,10 +301,32 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
     }
   })
 
-  const graph = React.useMemo(
+  const currentGraph = React.useMemo(
     () => aggregatePages(graphQuery.data),
     [graphQuery.data]
   )
+  const fallbackIdentity = JSON.stringify([
+    authorityScope,
+    options.datasetId ?? null,
+    effectiveNavigation.scope,
+    effectiveNavigation.focusNoteId,
+    centerNoteId ?? null,
+    radius,
+    maxNodes,
+    maxEdges
+  ])
+  const lastGoodGraph = React.useRef<{
+    identity: string
+    graph: NotesGraphResponse
+  } | null>(null)
+  if (currentGraph) {
+    lastGoodGraph.current = { identity: fallbackIdentity, graph: currentGraph }
+  }
+  const graph =
+    currentGraph ??
+    (lastGoodGraph.current?.identity === fallbackIdentity
+      ? lastGoodGraph.current.graph
+      : null)
 
   const allNotes = React.useMemo(() => {
     if (!graph) {
@@ -397,6 +465,31 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
     searchResults,
     visibleEdgeTypes,
     toggleEdgeType,
+    semantic: {
+      enabled: semanticEnabled,
+      setEnabled: (next: boolean) => {
+        setVisibleEdgeTypes((current) => {
+          const enabledNow = current.has("semantic")
+          if (enabledNow === next) return current
+          const updated = new Set(current)
+          if (next) updated.add("semantic")
+          else updated.delete("semantic")
+          return updated
+        })
+      },
+      threshold: semanticThreshold,
+      setThreshold: (next: number) =>
+        setSemanticThreshold(Math.min(1, Math.max(0, next))),
+      topK: semanticTopK,
+      setTopK: (next: number) =>
+        setSemanticTopK(
+          Math.min(
+            NOTES_GRAPH_SEMANTIC_MAX_TOP_K,
+            Math.max(1, Math.trunc(next))
+          )
+        )
+    },
+    semanticIndex,
     allNotes,
     canExpand: Boolean(
       enabled &&

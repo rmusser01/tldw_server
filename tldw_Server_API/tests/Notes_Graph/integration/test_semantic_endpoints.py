@@ -10,6 +10,11 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.endpoints import notes_semantic_index as endpoint
+from tldw_Server_API.app.core.AuthNZ.permissions import (
+    NOTES_GRAPH_READ,
+    NOTES_GRAPH_SEMANTIC_MANAGE,
+)
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.Notes_Graph.semantic_api import SemanticAPIError
 from tldw_Server_API.app.core.Sync.v2.notes_link_coordinator import (
     NotesLinkDatasetConflictError,
@@ -89,6 +94,17 @@ class _FakeAPI:
 RUN_ID = "6ec1dfbe-f86f-4d2b-93af-f88f64cd9701"
 
 
+def _principal(
+    permissions: tuple[str, ...],
+) -> AuthPrincipal:
+    return AuthPrincipal(
+        kind="user",
+        user_id=1,
+        roles=["user"],
+        permissions=list(permissions),
+    )
+
+
 def _run(mode: str, *, run_id: str = RUN_ID) -> dict[str, object]:
     return {
         "run_id": run_id,
@@ -133,7 +149,9 @@ def client():
     app = FastAPI()
     app.include_router(endpoint.router, prefix="/api/v1/notes")
     app.dependency_overrides[endpoint.get_semantic_api] = lambda: api
-    app.dependency_overrides[endpoint.require_semantic_read] = lambda: object()
+    app.dependency_overrides[endpoint.require_semantic_read] = lambda: _principal(
+        (NOTES_GRAPH_READ, NOTES_GRAPH_SEMANTIC_MANAGE)
+    )
     app.dependency_overrides[endpoint.require_semantic_manage] = lambda: object()
     for route in endpoint.router.routes:
         for dependency in route.dependant.dependencies:
@@ -170,6 +188,31 @@ def test_all_seven_routes_are_nested_and_main_status_has_no_history(client) -> N
     assert response.status_code == 200
     assert "runs" not in response.json()
     assert response.json()["active_run"] is None
+
+
+@pytest.mark.parametrize(
+    ("principal", "expected"),
+    [
+        (_principal((NOTES_GRAPH_READ, NOTES_GRAPH_SEMANTIC_MANAGE)), True),
+        (_principal((NOTES_GRAPH_READ,)), False),
+        (_principal((NOTES_GRAPH_READ, "*")), True),
+    ],
+    ids=["manage-granted", "manage-revoked", "admin-bypass"],
+)
+def test_capabilities_project_request_local_manage_authority(
+    client,
+    principal: AuthPrincipal,
+    expected: bool,
+) -> None:
+    test_client, _api, app = client
+    app.dependency_overrides[endpoint.require_semantic_read] = lambda: principal
+
+    response = test_client.get(
+        "/api/v1/notes/graph/semantic-index/capabilities"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["manage_authorized"] is expected
 
 
 def test_enable_binds_capability_revision_and_returns_202(client) -> None:

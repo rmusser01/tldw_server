@@ -7,6 +7,7 @@ const FINGERPRINT = /^sha256:[0-9a-f]{64}$/
 const STRONG_ETAG = /^"(sha256:[0-9a-f]{64})"$/
 const MAX_LIST_ITEMS = 100
 const MAX_CURSOR_LENGTH = 4096
+export const NOTES_GRAPH_SEMANTIC_MAX_TOP_K = 50
 
 const ERROR_MESSAGES = {
   notes_graph_active_run_conflict:
@@ -118,6 +119,71 @@ export type NotesGraphEdgeType =
   | "backlink"
   | "tag_membership"
   | "source_membership"
+  | "semantic"
+
+export type NotesSemanticExcerpt = {
+  field: "title" | "content"
+  start_code_point: number
+  end_code_point: number
+  text: string
+}
+
+export type NotesSemanticEdgeEvidence = {
+  similarity: number
+  qualitative_band: "low" | "moderate" | "high" | "very_high"
+  source_note_id: string
+  target_note_id: string
+  source_content_version: number
+  target_content_version: number
+  generation_id: string
+  semantic_index_revision: number
+  configuration_revision: number
+  normalization_version: string
+  chunker_version: string
+  provider_label: string
+  model_label: string
+  model_revision: string | null
+  excerpt_pairs: Array<{
+    source: NotesSemanticExcerpt
+    target: NotesSemanticExcerpt
+  }>
+}
+
+export type NotesSemanticGraphStatus = {
+  available: boolean
+  state:
+    | "off"
+    | "preparing"
+    | "ready"
+    | "updating"
+    | "needs_attention"
+    | "unavailable"
+    | "focus_required"
+  detail_reason: string | null
+  generation_id: string | null
+  semantic_index_revision: number | null
+  configuration_revision: number | null
+  active_notes: number
+  indexed_notes: number
+  dirty_notes: number
+  excluded_notes: number
+  failed_notes: number
+  effective_top_k: number | null
+  effective_threshold: number | null
+  max_top_k: number
+  max_admission_nodes: number
+  max_admission_edges: number
+  max_evidence_pairs: number
+  max_excerpt_code_points: number
+  max_edge_evidence_code_points: number
+  max_response_evidence_bytes: number
+  truncated_by: Array<
+    | "semantic_candidates"
+    | "semantic_nodes"
+    | "semantic_edges"
+    | "semantic_evidence_bytes"
+  >
+}
 
 export type NotesGraphNode = {
   id: string
@@ -138,6 +204,8 @@ export type NotesGraphEdge = {
   directed: boolean
   weight: number | null
   label: string | null
+  evidence?: NotesSemanticEdgeEvidence
+  evidence_omitted?: "response_byte_cap"
 }
 
 export type NotesGraphResponse = {
@@ -157,6 +225,7 @@ export type NotesGraphResponse = {
   all_notes_note_cap: number
   all_notes_eligible: boolean
   suggestions_authorized?: boolean
+  semantic_status?: NotesSemanticGraphStatus
 }
 
 export type FetchNotesGraphInput = {
@@ -168,6 +237,8 @@ export type FetchNotesGraphInput = {
   maxEdges?: number
   maxDegree?: number
   cursor?: string
+  semanticTopK?: number
+  semanticThreshold?: number
 }
 
 export type NotesGraphSuggestionCapabilityLimits = {
@@ -402,7 +473,8 @@ const edgeTypeSchema = z.enum([
   "wikilink",
   "backlink",
   "tag_membership",
-  "source_membership"
+  "source_membership",
+  "semantic"
 ])
 const runStateSchema = z.enum([
   "admitting",
@@ -547,14 +619,136 @@ const graphNodeSchema = z.strictObject({
   primary_source_id: idSchema.nullable()
 })
 
-const graphEdgeSchema = z.strictObject({
-  id: idSchema,
-  source: idSchema,
-  target: idSchema,
-  type: edgeTypeSchema,
-  directed: z.boolean(),
-  weight: z.number().finite().min(0).nullable(),
-  label: z.string().nullable()
+const semanticExcerptSchema = z
+  .strictObject({
+    field: z.enum(["title", "content"]),
+    start_code_point: nonnegativeRevisionSchema,
+    end_code_point: positiveRevisionSchema,
+    text: boundedTextSchema(480)
+  })
+  .superRefine((value, context) => {
+    if (
+      value.end_code_point <= value.start_code_point ||
+      Array.from(value.text).length !==
+        value.end_code_point - value.start_code_point
+    ) {
+      context.addIssue({ code: "custom", message: "invalid excerpt offsets" })
+    }
+  })
+
+const semanticEvidenceSchema = z.strictObject({
+  similarity: z.number().finite().min(0).max(1),
+  qualitative_band: z.enum(["low", "moderate", "high", "very_high"]),
+  source_note_id: idSchema,
+  target_note_id: idSchema,
+  source_content_version: positiveRevisionSchema,
+  target_content_version: positiveRevisionSchema,
+  generation_id: idSchema,
+  semantic_index_revision: nonnegativeRevisionSchema,
+  configuration_revision: nonnegativeRevisionSchema,
+  normalization_version: idSchema,
+  chunker_version: idSchema,
+  provider_label: idSchema,
+  model_label: idSchema,
+  model_revision: idSchema.nullable(),
+  excerpt_pairs: z
+    .array(
+      z.strictObject({
+        source: semanticExcerptSchema,
+        target: semanticExcerptSchema
+      })
+    )
+    .max(3)
+})
+
+const graphEdgeSchema = z
+  .strictObject({
+    id: idSchema,
+    source: idSchema,
+    target: idSchema,
+    type: edgeTypeSchema,
+    directed: z.boolean(),
+    weight: z.number().finite().min(0).nullable(),
+    label: z.string().nullable(),
+    evidence: semanticEvidenceSchema.optional(),
+    evidence_omitted: z.literal("response_byte_cap").optional()
+  })
+  .superRefine((value, context) => {
+    if (value.type === "semantic") {
+      if (value.directed) {
+        context.addIssue({ code: "custom", message: "semantic edge directed" })
+      }
+      if (Boolean(value.evidence) === Boolean(value.evidence_omitted)) {
+        context.addIssue({
+          code: "custom",
+          message: "semantic evidence invalid"
+        })
+      }
+      if (
+        value.evidence &&
+        (value.evidence.source_note_id !== value.source ||
+          value.evidence.target_note_id !== value.target)
+      ) {
+        context.addIssue({
+          code: "custom",
+          message: "semantic evidence mismatch"
+        })
+      }
+    } else if (value.evidence || value.evidence_omitted) {
+      context.addIssue({ code: "custom", message: "ordinary edge evidence" })
+    }
+  })
+
+const semanticGraphStatusSchema = z.strictObject({
+  available: z.boolean(),
+  state: z.enum([
+    "off",
+    "preparing",
+    "ready",
+    "updating",
+    "needs_attention",
+    "unavailable",
+    "focus_required"
+  ]),
+  detail_reason: z.string().nullable(),
+  generation_id: idSchema.nullable(),
+  semantic_index_revision: nonnegativeRevisionSchema.nullable(),
+  configuration_revision: nonnegativeRevisionSchema.nullable(),
+  active_notes: safeCountSchema,
+  indexed_notes: safeCountSchema,
+  dirty_notes: safeCountSchema,
+  excluded_notes: safeCountSchema,
+  failed_notes: safeCountSchema,
+  effective_top_k: z
+    .number()
+    .int()
+    .min(1)
+    .max(NOTES_GRAPH_SEMANTIC_MAX_TOP_K)
+    .nullable(),
+  effective_threshold: z.number().finite().min(0).max(1).nullable(),
+  max_top_k: z.number().int().min(1).max(NOTES_GRAPH_SEMANTIC_MAX_TOP_K),
+  max_admission_nodes: z
+    .number()
+    .int()
+    .min(0)
+    .max(NOTES_GRAPH_SEMANTIC_MAX_TOP_K),
+  max_admission_edges: z
+    .number()
+    .int()
+    .min(0)
+    .max(NOTES_GRAPH_SEMANTIC_MAX_TOP_K),
+  max_evidence_pairs: z.number().int().min(0).max(3),
+  max_excerpt_code_points: z.number().int().min(0).max(480),
+  max_edge_evidence_code_points: z.number().int().min(0).max(2880),
+  max_response_evidence_bytes: z.number().int().min(0).max(262144),
+  truncated_by: z.array(
+    z.enum([
+      "semantic_candidates",
+      "semantic_nodes",
+      "semantic_edges",
+      "semantic_evidence_bytes"
+    ])
+  )
 })
 
 const graphResponseSchema = z
@@ -574,7 +768,8 @@ const graphResponseSchema = z
     active_note_count: safeCountSchema,
     all_notes_note_cap: z.number().int().min(1),
     all_notes_eligible: z.boolean(),
-    suggestions_authorized: z.boolean().optional()
+    suggestions_authorized: z.boolean().optional(),
+    semantic_status: semanticGraphStatusSchema.optional()
   })
   .superRefine((value, context) => {
     if (value.nodes.length > value.limits.max_nodes) {
@@ -585,19 +780,39 @@ const graphResponseSchema = z
     }
   })
 
-const graphInputSchema = z.strictObject({
-  centerNoteId: inputIdSchema.optional(),
-  datasetId: datasetIdSchema.optional(),
-  radius: z
-    .union([z.literal(1), z.literal(2)])
-    .optional()
-    .default(1),
-  edgeTypes: z.array(edgeTypeSchema).optional().default([]),
-  maxNodes: z.number().int().min(1).optional().default(120),
-  maxEdges: z.number().int().min(0).optional().default(480),
-  maxDegree: z.number().int().min(1).optional(),
-  cursor: cursorSchema.optional()
-})
+const graphInputSchema = z
+  .strictObject({
+    centerNoteId: inputIdSchema.optional(),
+    datasetId: datasetIdSchema.optional(),
+    radius: z
+      .union([z.literal(1), z.literal(2)])
+      .optional()
+      .default(1),
+    edgeTypes: z.array(edgeTypeSchema).optional().default([]),
+    maxNodes: z.number().int().min(1).optional().default(120),
+    maxEdges: z.number().int().min(0).optional().default(480),
+    maxDegree: z.number().int().min(1).optional(),
+    cursor: cursorSchema.optional(),
+    semanticTopK: z
+      .number()
+      .int()
+      .min(1)
+      .max(NOTES_GRAPH_SEMANTIC_MAX_TOP_K)
+      .optional(),
+    semanticThreshold: z.number().finite().min(0).max(1).optional()
+  })
+  .superRefine((value, context) => {
+    if (
+      (value.semanticTopK !== undefined ||
+        value.semanticThreshold !== undefined) &&
+      !value.edgeTypes.includes("semantic")
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "semantic controls require semantic"
+      })
+    }
+  })
 
 const normalizeGraph = (value: unknown): NotesGraphResponse => {
   return parseResponseAs<NotesGraphResponse>(graphResponseSchema, value)
@@ -618,6 +833,8 @@ export const fetchNotesGraph = async (
       ],
       ["max_nodes", parsed.maxNodes],
       ["max_edges", parsed.maxEdges],
+      ["semantic_top_k", parsed.semanticTopK],
+      ["semantic_threshold", parsed.semanticThreshold],
       ["max_degree", parsed.maxDegree],
       ["cursor", parsed.cursor]
     ]),

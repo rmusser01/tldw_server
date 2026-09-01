@@ -2722,5 +2722,230 @@
   },
   "repo2txt_status_generated": {
     "message": "Generated output for {{count}} files ({{tokenCount}} tokens)."
+  },
+  "notesSearch_graphSimilarContent": {
+    "message": "Similar content"
+  },
+  "notesSearch_semanticIndex": {
+    "message": "Semantic index"
+  },
+  "notesSearch_semanticState_off": {
+    "message": "Off"
+  },
+  "notesSearch_semanticState_preparing": {
+    "message": "Preparing"
+  },
+  "notesSearch_semanticState_ready": {
+    "message": "Ready"
+  },
+  "notesSearch_semanticState_updating": {
+    "message": "Updating"
+  },
+  "notesSearch_semanticState_needs_attention": {
+    "message": "Needs attention"
+  },
+  "notesSearch_semanticStatusAnnouncement": {
+    "message": "Semantic index {{state}}. {{detail}}"
+  },
+  "notesSearch_semanticProvider": {
+    "message": "Provider"
+  },
+  "notesSearch_semanticModel": {
+    "message": "Model"
+  },
+  "notesSearch_semanticExecutionBoundary": {
+    "message": "Embedding execution"
+  },
+  "notesSearch_semanticStorageBoundary": {
+    "message": "Vector storage"
+  },
+  "notesSearch_semanticBoundary_external": {
+    "message": "External"
+  },
+  "notesSearch_semanticBoundary_local": {
+    "message": "Local"
+  },
+  "notesSearch_semanticBoundary_unavailable": {
+    "message": "Unavailable"
+  },
+  "notesSearch_semanticOutboundData": {
+    "message": "Data sent for indexing"
+  },
+  "notesSearch_semanticOutbound_note_content_chunks": {
+    "message": "Note body chunks"
+  },
+  "notesSearch_semanticOutbound_note_title": {
+    "message": "Note titles"
+  },
+  "notesSearch_semanticActiveNotes": {
+    "message": "{{count}} active Notes"
+  },
+  "notesSearch_semanticEstimate": {
+    "message": "About {{chunks}} chunks across {{runs}} runs"
+  },
+  "notesSearch_semanticProgress": {
+    "message": "{{indexed}} of {{total}} Notes indexed"
+  },
+  "notesSearch_semanticLoading": {
+    "message": "Loading semantic index details."
+  },
+  "notesSearch_semanticLoadFailed": {
+    "message": "Semantic index details are unavailable."
+  },
+  "notesSearch_semanticUnavailable": {
+    "message": "Semantic indexing is unavailable with the current server configuration."
+  },
+  "notesSearch_semanticPermissionReadOnly": {
+    "message": "You can view similar content, but you do not have permission to manage the semantic index."
+  },
+  "notesSearch_semanticOffline": {
+    "message": "Semantic index management is unavailable while offline."
+  },
+  "notesSearch_semanticShowEdges": {
+    "message": "Show similar-content relationships"
+  },
+  "notesSearch_semanticEnable": {
+    "message": "Enable semantic index"
+  },
+  "notesSearch_semanticRebuild": {
+    "message": "Rebuild index"
+  },
+  "notesSearch_semanticRetry": {
+    "message": "Retry failed Notes"
+  },
+  "notesSearch_semanticCancel": {
+    "message": "Cancel indexing"
+  },
+  "notesSearch_semanticDelete": {
+    "message": "Disable and delete index"
+  },
+  "notesSearch_semanticDetail_building": {
+    "message": "The first semantic index is being built."
+  },
+  "notesSearch_semanticDetail_degraded": {
+    "message": "Some Notes could not be indexed. Retry failed Notes or rebuild the index."
+  },
+  "notesSearch_semanticDetail_stale_configuration": {
+    "message": "The embedding configuration changed. Rebuild the index before using similar-content relationships."
+  },
+  "notesSearch_semanticDetail_consent_required": {
+    "message": "Indexing requires renewed consent before work can continue."
+  },
+  "notesSearch_semanticDetail_cleanup_pending": {
+    "message": "Indexed data is being removed."
+  },
+  "notesSearch_semanticDetail_cleanup_stalled": {
+    "message": "Indexed data cleanup needs attention."
+  },
+  "notesSearch_semanticDetail_unavailable": {
+    "message": "The configured embedding service is unavailable."
+  },
+  "notesSearch_semanticConfirm_enable_title": {
+    "message": "Enable semantic indexing?"
+  },
+  "notesSearch_semanticConfirm_enable_body": {
+    "message": "Notes will be indexed using the provider and data boundaries shown above."
+  },
+  "notesSearch_semanticConfirm_enable_confirm": {
+    "message": "Enable"
+  },
+  "notesSearch_semanticConfirm_rebuild_title": {
+    "message": "Rebuild the semantic index?"
+  },
+  "notesSearch_semanticConfirm_rebuild_body": {
+    "message": "A new generation will replace the currently published index when it is ready."
+  },
+  "notesSearch_semanticConfirm_rebuild_confirm": {
+    "message": "Rebuild"
+  },
+  "notesSearch_semanticConfirm_retry_title": {
+    "message": "Retry failed Notes?"
+  },
+  "notesSearch_semanticConfirm_retry_body": {
+    "message": "Only Notes that failed during the current generation will be retried."
+  },
+  "notesSearch_semanticConfirm_retry_confirm": {
+    "message": "Retry"
+  },
+  "notesSearch_semanticConfirm_cancel_title": {
+    "message": "Cancel semantic indexing?"
+  },
+  "notesSearch_semanticConfirm_cancel_body": {
+    "message": "The active run will stop. The last published graph remains available."
+  },
+  "notesSearch_semanticConfirm_cancel_confirm": {
+    "message": "Cancel indexing"
+  },
+  "notesSearch_semanticConfirm_deleteIndex_title": {
+    "message": "Disable and delete the semantic index?"
+  },
+  "notesSearch_semanticConfirm_deleteIndex_body": {
+    "message": "Published vectors and semantic relationships will be removed. Ordinary graph relationships are not affected."
+  },
+  "notesSearch_semanticConfirm_deleteIndex_confirm": {
+    "message": "Delete index"
+  },
+  "notesSearch_semanticEnableStarted": {
+    "message": "Semantic indexing started."
+  },
+  "notesSearch_semanticRebuildStarted": {
+    "message": "Semantic index rebuild started."
+  },
+  "notesSearch_semanticRetryStarted": {
+    "message": "Failed Notes are being retried."
+  },
+  "notesSearch_semanticCancelRequested": {
+    "message": "Semantic indexing cancellation requested."
+  },
+  "notesSearch_semanticDeleteStarted": {
+    "message": "Semantic index deletion started."
+  },
+  "notesSearch_semanticActionFailed": {
+    "message": "The semantic index action failed. Try again."
+  },
+  "notesSearch_semanticDimensionProbeDisclosure": {
+    "message": "A fixed non-user probe will resolve dimensions after you consent and before any Note text is read or transferred."
+  },
+  "notesSearch_semanticTechnicalDetails": {
+    "message": "Technical details"
+  },
+  "notesSearch_semanticVectorBackend": {
+    "message": "Vector backend"
+  },
+  "notesSearch_semanticDimensions": {
+    "message": "Dimensions"
+  },
+  "notesSearch_semanticDimensionsPending": {
+    "message": "Pending probe"
+  },
+  "notesSearch_semanticMetric": {
+    "message": "Similarity metric"
+  },
+  "notesSearch_semanticMetricValue_cosine": {
+    "message": "Cosine"
+  },
+  "notesSearch_semanticConfigurationRevision": {
+    "message": "Configuration revision"
+  },
+  "notesSearch_semanticIndexRevision": {
+    "message": "Semantic index revision"
+  },
+  "notesSearch_semanticPublishedChunks": {
+    "message": "Published chunks"
+  },
+  "notesSearch_semanticError_permission": {
+    "message": "Your semantic-index management permission changed. Refresh; contact an administrator if access is still needed."
+  },
+  "notesSearch_semanticError_refresh": {
+    "message": "Semantic index details changed. Refresh and try again."
+  },
+  "notesSearch_semanticError_writerConflict": {
+    "message": "Another semantic-index operation is active. Wait for it to finish, then try again."
+  },
+  "notesSearch_semanticError_quota": {
+    "message": "The semantic-index quota is reached. Wait for capacity or ask an administrator to review limits."
+  },
+  "notesSearch_semanticError_unavailable": {
+    "message": "Semantic indexing is temporarily unavailable. Check the configured provider and worker, then try again."
   }
 }

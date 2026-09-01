@@ -26,6 +26,7 @@ class SemanticCapabilitiesResponse(_StrictModel):
     unavailable_reason: str | None
     metric: Literal["cosine"] = "cosine"
     resolved_dimensions: int | None = Field(default=None, ge=1)
+    manage_authorized: bool = False
 
 
 class SemanticRunResponse(_StrictModel):
