@@ -48,6 +48,7 @@ Common workflows:
 
 - **Find the right WebUI or extension page**: use the [WebUI and extension guide](WebUI/index.md) and [page and feature index](WebUI/Page_Feature_Index.md).
 - **Chat with models and characters**: use [Chat pages](WebUI_Extension/Chat_Pages.md), [Chat API documentation](../API-related/Chat_API_Documentation.md), [Character roleplay quickstart](WebUI_Extension/Character_Roleplay_Quickstart.md), [Character cards and character chat](Server/Character_Cards_User_Guide.md), and [Personas](Server/Personas_User_Guide.md).
+- **Set up and operate a Personal Context Profile**: use the [Personal Context Profile guide](Server/Personal_Context_Profile.md) for master-key setup, Chatbook linking, exports, and recovery boundaries.
 - **Add sources and media**: use [Media to RAG evals workflow](Server/Media_to_RAG_Evals_Workflow.md), [Web scraping and ingestion](Server/Web_Scraping_Ingestion_Guide.md), [Media ingest jobs API](../API-related/Media_Ingest_Jobs_API.md), and [Bulk conference playlist ingest](Bulk_Conference_Playlist_Ingest.md).
 - **Search and ask questions over knowledge**: use [RAG API guide](../API-related/RAG-API-Guide.md), [RAG production configuration](Server/RAG_Production_Configuration_Guide.md), and [Quick Chat Docs Assistant](WebUI_Extension/Quick_Chat_Docs_Assistant_Guide.md).
 - **Transcribe and generate speech**: use [Getting started with STT and TTS](WebUI_Extension/Getting-Started-STT_and_TTS.md), [Audio transcription API](../API-related/Audio_Transcription_API.md), [Native batch STT benchmark](STT_Benchmark_User_Guide.md), and [TTS getting started](WebUI_Extension/TTS_Getting_Started.md).
@@ -63,6 +64,7 @@ Start with the guide that matches the failing surface:
 
 - Setup and profile issues: [self-hosting profiles](../Getting_Started/README.md) and [troubleshooting](../Getting_Started/TROUBLESHOOTING.md).
 - Authentication and access issues: [Authentication setup](Server/Authentication_Setup.md), [Multi-user Postgres setup](Server/Multi-User_Postgres_Setup.md), and [Multi-user SQLite setup](Server/Multi-User_SQLite_Setup.md).
+- Personal Context issues: use the [Personal Context Profile guide](Server/Personal_Context_Profile.md) for locked profiles, Sync/link states, version conflicts, and purge-pending limitations.
 - Provider and model issues: [BYOK user guide](Server/BYOK_User_Guide.md), [OpenAI OAuth first-time setup](Server/OpenAI_OAuth_First_Time_Setup.md), [local LLM setup](Integrations_Experiments/Setting_up_a_local_LLM.md), and [Providers API documentation](../API-related/Providers_API_Documentation.md).
 - Media and ingestion issues: [Web scraping and ingestion](Server/Web_Scraping_Ingestion_Guide.md), [Media ingest jobs API](../API-related/Media_Ingest_Jobs_API.md), and [Chunking templates user guide](Server/Chunking_Templates_User_Guide.md).
 - Audio issues: [CPU audio setup](../Getting_Started/First_Time_Audio_Setup_CPU.md), [GPU or accelerated audio setup](../Getting_Started/First_Time_Audio_Setup_GPU_Accelerated.md), and [TTS setup guide](WebUI_Extension/TTS-SETUP-GUIDE.md).
