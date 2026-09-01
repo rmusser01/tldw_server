@@ -30,7 +30,7 @@
 
 ## Stage 3: Review and verification
 
-**Status:** In Progress
+**Status:** Complete
 
 **Success criteria:** Focused tests, touched-scope Bandit, formatting/diff checks, self-review, Backlog evidence, and an independent review pass are clean. The pre-existing punctuation-search failure exposed by the full touched-file verification is corrected at the Collections natural-language query boundary.
 

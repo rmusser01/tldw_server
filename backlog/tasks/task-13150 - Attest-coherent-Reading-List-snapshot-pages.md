@@ -1,11 +1,11 @@
 ---
 id: TASK-13150
 title: Attest coherent Reading List snapshot pages
-status: In Progress
+status: Done
 assignee:
   - '@codex'
 created_date: '2026-09-01 14:26'
-updated_date: '2026-09-01 14:42'
+updated_date: '2026-09-01 15:39'
 labels:
   - collections
   - reading-list
@@ -27,12 +27,12 @@ Make Reading List page totals, rows, and tag hydration come from one database sn
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A concurrent writer cannot produce a mixed total/page result.
-- [ ] #2 Tag hydration uses the same snapshot as count and rows.
-- [ ] #3 Docs-info exposes hasReadingSnapshotPagesV1=true in capabilities and supported_features.
-- [ ] #4 The existing Reading List endpoint and response shape remain unchanged.
-- [ ] #5 Focused tests and touched-scope security checks pass.
-- [ ] #6 Punctuation-heavy Reading search is treated as natural language and does not surface an FTS parser error.
+- [x] #1 A concurrent writer cannot produce a mixed total/page result.
+- [x] #2 Tag hydration uses the same snapshot as count and rows.
+- [x] #3 Docs-info exposes hasReadingSnapshotPagesV1=true in capabilities and supported_features.
+- [x] #4 The existing Reading List endpoint and response shape remain unchanged.
+- [x] #5 Focused tests and touched-scope security checks pass.
+- [x] #6 Punctuation-heavy Reading search is treated as natural language and does not surface an FTS parser error.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -58,14 +58,16 @@ Stage 2 complete. RED: the focused docs-info test failed with KeyError for hasRe
 Stage 3 verification exposed a pre-existing punctuation-search defect: the complete touched Collections test file failed identically on this branch and a detached origin/dev worktree because `C++/Rust: Intro? [Guide]` reached SQLite FTS as raw syntax. The existing regression was the RED evidence. The Collections natural-language query builder now extracts Unicode word tokens, quotes each prefix term, and only permits raw mode for unmistakable FTS syntax; the regression is GREEN. Both focused files pass (42 tests), touched production Bandit passes, and both cumulative and working-tree diff checks pass. Whole-file Black/Ruff remain a documented baseline rather than an expanded rewrite: all four legacy files would be reformatted, and Ruff reports unrelated pre-existing issues including undefined `global_settings` in config_info.py and longstanding Collections warnings. Changed hunks were reviewed directly for style.
 
 Independent review then found that the first snapshot implementation requested PostgreSQL isolation after pool checkout had already run scope-setting queries, used SQLite's writer-reserving `BEGIN IMMEDIATE`, left capability maps absent on docs-info fallback paths, and still allowed some punctuation into raw FTS mode. Each finding was verified against the concrete backend lifecycle and received a failing regression. The correction commits the PostgreSQL scope setup before beginning `REPEATABLE READ READ ONLY`, uses `BEGIN DEFERRED` for SQLite, always publishes the shipped capability, and treats all public search text as natural language. GREEN evidence: 47/47 touched-file tests and 21/22 adjacent FTS/watchlist consumer tests pass with one pre-existing optional skip.
+
+Final PostgreSQL lifecycle review found that Psycopg could still emit a plain implicit `BEGIN` before the requested isolation statement. The final correction commits scope setup, temporarily enables autocommit, issues raw `BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY`, rolls back the snapshot, restores autocommit, and always returns the connection. Cleanup failures are logged without replacing a primary operation failure. Final evidence: 47/47 touched-file tests pass in a complete ephemeral dependency environment; selected Ruff, `py_compile`, touched production Bandit, working-tree diff, and cumulative `origin/dev...HEAD` diff checks pass. Independent re-review approved the cumulative branch with no findings. No new ADR was required because this remains a bounded correctness repair to an existing service contract.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
