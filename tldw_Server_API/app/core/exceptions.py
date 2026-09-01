@@ -211,6 +211,14 @@ class ProfileNotFoundError(PersonalContextError, KeyError):
     """Report that the authenticated user has no canonical profile."""
 
 
+class PersonalContextSyncIdentityConflict(PersonalContextError, ValueError):
+    """Report that a Sync envelope conflicts with canonical profile identity."""
+
+
+class PersonalContextSyncDeviceOnlyRecord(PersonalContextError, ValueError):
+    """Report that a device-only profile record was offered to Sync."""
+
+
 class ProfileDatabaseBusy(ProfileTransactionError):
     """Raised when a profile transaction cannot acquire the database in time."""
 

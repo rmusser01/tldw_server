@@ -23,6 +23,10 @@ from tldw_profile_core import (
 )
 from tldw_profile_core.canonical import canonical_json_bytes
 
+from tldw_Server_API.app.core.exceptions import (
+    PersonalContextSyncDeviceOnlyRecord,
+    PersonalContextSyncIdentityConflict,
+)
 from tldw_Server_API.app.core.Personalization.personal_context_crypto import (
     EncryptedEnvelope,
     EnvelopeAuthenticationError,
@@ -123,14 +127,14 @@ class PersonalContextDomainAdapter:
                 profile_id=dataset_state["profile_id"],
                 purge_generation=dataset_state["purge_generation"],
             )
-        except _IdentityConflict:
+        except PersonalContextSyncIdentityConflict:
             return AdapterConflict(
                 client_envelope_id=envelope.client_envelope_id,
                 domain=self.domain,
                 entity_id=envelope.object_id,
                 conflict_type="personal_context_identity_conflict",
             )
-        except _DeviceOnlyRecord:
+        except PersonalContextSyncDeviceOnlyRecord:
             return self._reject(envelope, "personal_context_device_only_forbidden")
         except (ValidationError, ValueError, TypeError):
             return self._reject(envelope, "personal_context_payload_invalid")
@@ -272,14 +276,6 @@ class PersonalContextDomainAdapter:
         )
 
 
-class _IdentityConflict(ValueError):
-    pass
-
-
-class _DeviceOnlyRecord(ValueError):
-    pass
-
-
 def _dataset_state(dataset: SyncDataset) -> dict[str, Any]:
     state = dataset.metadata.get("personal_context")
     if not isinstance(state, Mapping):
@@ -304,6 +300,8 @@ def _dataset_state(dataset: SyncDataset) -> dict[str, Any]:
 
 
 def _parse_payload(domain: str, payload: Mapping[str, Any]) -> Any:
+    """Parse one canonical Personal Context wire payload for its Sync domain."""
+
     model = _PERSONAL_CONTEXT_MODELS.get(domain)
     if model is not None:
         return model.model_validate(payload)
@@ -327,13 +325,15 @@ def _validate_envelope_identity(
     profile_id: str,
     purge_generation: int,
 ) -> None:
+    """Require envelope routing and version identity to match its payload."""
+
     if envelope.domain == "personal_context.manifest":
         if envelope.operation != "upsert":
             raise ValueError("Manifest operation is invalid")
         object_id, parent_id, value_profile_id = value.profile_id, None, value.profile_id
         entity_version = value.current_version_id
         if value.purge_generation != purge_generation:
-            raise _IdentityConflict
+            raise PersonalContextSyncIdentityConflict
     elif envelope.domain == "personal_context.scope":
         if envelope.operation != "upsert":
             raise ValueError("Scope operation is invalid")
@@ -345,7 +345,7 @@ def _validate_envelope_identity(
         entity_version = value.version_id
     elif envelope.domain == "personal_context.record":
         if value.controls.sync_mode is SyncMode.DEVICE_ONLY:
-            raise _DeviceOnlyRecord
+            raise PersonalContextSyncDeviceOnlyRecord
         if envelope.operation == "tombstone":
             if value.state is not RecordState.DELETED or value.payload is not None:
                 raise ValueError("Record tombstone must be content-free")
@@ -365,7 +365,7 @@ def _validate_envelope_identity(
             and value.proposed_record is not None
             and value.proposed_record.controls.sync_mode is SyncMode.DEVICE_ONLY
         ):
-            raise _DeviceOnlyRecord
+            raise PersonalContextSyncDeviceOnlyRecord
         object_id, parent_id, value_profile_id = (
             value.proposal_id,
             value.scope_id,
@@ -384,24 +384,28 @@ def _validate_envelope_identity(
         )
         entity_version = value["purge_generation"]
         if value["purge_generation"] != purge_generation + 1:
-            raise _IdentityConflict
+            raise PersonalContextSyncIdentityConflict
     if (
         object_id != envelope.object_id
         or parent_id != envelope.parent_id
         or value_profile_id != profile_id
         or not _same_wire_version(envelope.entity_version, entity_version)
     ):
-        raise _IdentityConflict
+        raise PersonalContextSyncIdentityConflict
 
 
 def _same_wire_version(left: Any, right: Any) -> bool:
+    """Return whether two version values have identical wire type and value."""
+
     return type(left) is type(right) and left == right
 
 
 def _current_object_head(
     envelope: SyncEnvelopeCreate,
     context: SyncAdapterContext | None,
-):
+) -> SyncEnvelope | None:
+    """Return the newest prior envelope for the same canonical object."""
+
     if context is None:
         return None
     matching = [
@@ -413,6 +417,8 @@ def _current_object_head(
 
 
 def _references_head(envelope: SyncEnvelopeCreate, head: Any, value: Any) -> bool:
+    """Return whether an incoming value extends the current canonical head."""
+
     if (
         envelope.base_object_hash is not None
         and envelope.base_object_hash != head.payload_hash
@@ -459,6 +465,8 @@ def _references_head(envelope: SyncEnvelopeCreate, head: Any, value: Any) -> boo
 
 
 def _storage_aad(envelope: SyncEnvelope | SyncEnvelopeCreate) -> bytes:
+    """Build stable associated data for encrypted transport persistence."""
+
     return canonical_json_bytes(
         {
             "adapter_version": envelope.adapter_version,
@@ -472,16 +480,22 @@ def _storage_aad(envelope: SyncEnvelope | SyncEnvelopeCreate) -> bytes:
 
 
 def _replace_envelope(envelope: Any, **changes: Any) -> Any:
+    """Return a dataclass envelope with the requested immutable replacements."""
+
     from dataclasses import replace
 
     return replace(envelope, **changes)
 
 
 def _b64(value: bytes) -> str:
+    """Encode bytes as canonical ASCII base64 text."""
+
     return base64.b64encode(value).decode("ascii")
 
 
 def _unb64(value: Any) -> bytes:
+    """Decode strictly validated ASCII base64 text."""
+
     if not isinstance(value, str):
         raise TypeError("encoded value must be text")
     return base64.b64decode(value.encode("ascii"), validate=True)

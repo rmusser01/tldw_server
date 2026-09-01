@@ -601,6 +601,47 @@ class PersonalContextRepository:
                     ) from None
                 if existing_manifest != manifest or existing_scope != global_scope:
                     raise ConcurrentProfileUpdateError("reviewed profile plan changed")
+                runtime_row = connection.execute(
+                    """
+                    SELECT versions.*
+                    FROM personal_context_runtime_heads AS heads
+                    JOIN personal_context_object_versions AS versions
+                      ON versions.profile_id = heads.profile_id
+                     AND versions.object_type = 'runtime_policy'
+                     AND versions.object_id = heads.scope_id
+                     AND versions.version_id = heads.current_version_id
+                    WHERE heads.profile_id = ? AND heads.scope_id = ?
+                    """,
+                    (manifest.profile_id, global_scope.scope_id),
+                ).fetchone()
+                if runtime_policy is None:
+                    if runtime_row is not None:
+                        raise ConcurrentProfileUpdateError(
+                            "reviewed profile plan changed"
+                        )
+                else:
+                    if (
+                        runtime_row is None
+                        or str(runtime_row["version_id"]) != runtime_version_id
+                    ):
+                        raise ConcurrentProfileUpdateError(
+                            "reviewed profile plan changed"
+                        )
+                    try:
+                        existing_runtime = json.loads(
+                            self._decrypt_row(runtime_row, keys)
+                        )
+                    except (TypeError, ValueError):
+                        raise ProfileIntegrityError(
+                            "Runtime policy validation failed"
+                        ) from None
+                    if (
+                        not isinstance(existing_runtime, dict)
+                        or existing_runtime != dict(runtime_policy)
+                    ):
+                        raise ConcurrentProfileUpdateError(
+                            "reviewed profile plan changed"
+                        )
                 return
 
             other_state = connection.execute(

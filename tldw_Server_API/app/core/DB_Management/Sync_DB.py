@@ -3879,6 +3879,12 @@ class SyncDatabase:
             current_binding = metadata.get("personal_context")
             if current_binding is not None and not isinstance(current_binding, dict):
                 raise SyncStoreError("personal_context_authority_mismatch")
+            if current_binding is not None:
+                current_generation = current_binding.get("purge_generation", 0)
+                if type(current_generation) is not int or current_generation < 0:
+                    raise SyncStoreError("personal_context_authority_mismatch")
+                if purge_generation < current_generation:
+                    raise SyncStoreError("personal_context_link_binding_stale")
             expected = dict(expected_binding) if expected_binding is not None else None
             desired = {
                 "profile_id": profile_id,

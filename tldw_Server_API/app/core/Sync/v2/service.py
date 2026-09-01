@@ -40,6 +40,7 @@ from .adapters import (
 from .attachment_refs_v2 import parse_attachment_ref_v2_payload
 from .blob_store import LocalSyncBlobStore, SyncBlobStoreError
 from .errors import (
+    PersonalContextStorageEncryptionUnavailableError,
     SyncHeadConflictError,
     SyncIdempotencyConflictError,
     SyncInvalidDomainError,
@@ -3316,7 +3317,7 @@ class SyncV2Service:
                             retryable=True,
                         )
                     )
-                except SyncStoreError:
+                except PersonalContextStorageEncryptionUnavailableError:
                     rejected.append(
                         SyncPushRejected(
                             client_envelope_id=envelope.client_envelope_id,
@@ -3336,6 +3337,18 @@ class SyncV2Service:
                     dataset,
                     replace(envelope, status="accepted"),
                 )
+            except PersonalContextStorageEncryptionUnavailableError:
+                rejected.append(
+                    SyncPushRejected(
+                        client_envelope_id=envelope.client_envelope_id,
+                        error_code="personal_context_storage_unavailable",
+                        message="Personal Context storage encryption is unavailable",
+                        retryable=True,
+                    )
+                )
+                continue
+
+            try:
                 inserted = self.store.insert_envelope(storage_envelope)
             except SyncInvalidDomainError:
                 rejected.append(
@@ -3384,7 +3397,7 @@ class SyncV2Service:
                             retryable=True,
                         )
                     )
-                except SyncStoreError:
+                except PersonalContextStorageEncryptionUnavailableError:
                     rejected.append(
                         SyncPushRejected(
                             client_envelope_id=envelope.client_envelope_id,
@@ -3421,16 +3434,6 @@ class SyncV2Service:
                     )
                 if stop_on_conflict:
                     stopped_after_conflict = True
-                continue
-            except SyncStoreError:
-                rejected.append(
-                    SyncPushRejected(
-                        client_envelope_id=envelope.client_envelope_id,
-                        error_code="personal_context_storage_unavailable",
-                        message="Personal Context storage encryption is unavailable",
-                        retryable=True,
-                    )
-                )
                 continue
             if inserted.apply_status not in {"applied", "superseded"}:
                 materialization = self._materialize_envelope(inserted)
@@ -5667,11 +5670,13 @@ class SyncV2Service:
         adapter = self.adapters.get(envelope.domain)
         protector = getattr(adapter, "protect_for_storage", None)
         if protector is None:
-            raise SyncStoreError("Personal Context storage encryption is unavailable")
+            raise PersonalContextStorageEncryptionUnavailableError(
+                "Personal Context storage encryption is unavailable"
+            )
         try:
             return protector(envelope, dataset=dataset)
         except (KeyError, RuntimeError, TypeError, ValueError) as exc:
-            raise SyncStoreError(
+            raise PersonalContextStorageEncryptionUnavailableError(
                 "Personal Context storage encryption is unavailable"
             ) from exc
 

@@ -178,7 +178,7 @@ class PersonalContextService:
         """Resolve canonical integrity custody for this user's Sync dataset."""
 
         if profile_id != self._profile_id():
-            raise KeyError("Personal context profile not found")
+            raise ProfileNotFoundError("Personal context profile not found")
         return self._repository.sync_integrity_key(profile_id)
 
     @staticmethod
@@ -342,7 +342,7 @@ class PersonalContextService:
         """Resolve canonical encryption custody for this user's Sync dataset."""
 
         if profile_id != self._profile_id():
-            raise KeyError("Personal context profile not found")
+            raise ProfileNotFoundError("Personal context profile not found")
         return self._repository.sync_encryption_key(profile_id)
 
     def status(self) -> ProfileStatus:

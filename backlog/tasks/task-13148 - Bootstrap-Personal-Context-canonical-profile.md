@@ -155,6 +155,20 @@ requests. GREEN was `46 passed` bootstrap, `102 passed` endpoints, `187 passed,
 2 skipped` store, and `23 passed` replay/repair. Ruff, compilation, Bandit, and
 diff checks are recorded in the Task 3a report. TASK-13148 status remains
 unchanged for controller review.
+
+PR review follow-up: both bootstrap mutation routes now declare the shared
+ingress rate limiter, invalid optional attention metadata is recorded without
+logging user content, and handlers expose explicit documentation and return
+types. Idempotent materialization now compares the complete reviewed runtime
+plan, canonical companion identity resolution is shared with the API boundary,
+and dataset bindings reject purge-generation rollback even when the caller's
+compare-and-set snapshot otherwise matches. The OpenAPI fingerprint was
+regenerated after these contract corrections.
+
+Final review verification selected 201 affected Personal Context, Sync,
+capability, and authenticated endpoint tests; all passed. Ruff, OpenAPI
+fingerprint validation, compilation, Bandit, and diff hygiene also passed. The
+repository-wide suite was not run under the project's targeted-test policy.
 <!-- SECTION:NOTES:END -->
 
 ## Progress

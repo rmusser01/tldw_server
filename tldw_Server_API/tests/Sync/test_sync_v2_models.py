@@ -130,11 +130,11 @@ def test_capabilities_advertise_personal_and_workspace_domains_with_server_trust
         "notes.folder": ["upsert", "tombstone"],
         "notes.folder_link": ["upsert", "tombstone"],
         "notes.link": ["upsert", "tombstone"],
-        "personal_context.manifest": ["upsert", "tombstone"],
-        "personal_context.scope": ["upsert", "tombstone"],
+        "personal_context.manifest": ["upsert"],
+        "personal_context.scope": ["upsert"],
         "personal_context.record": ["upsert", "tombstone"],
-        "personal_context.proposal": ["upsert", "tombstone"],
-        "personal_context.purge": ["upsert", "tombstone"],
+        "personal_context.proposal": ["upsert"],
+        "personal_context.purge": ["tombstone"],
     }
     assert capabilities.encryption["policy"] == "server_trusted_v1"
     assert capabilities.encryption["ready"] is True
@@ -196,12 +196,38 @@ def test_personal_context_domains_match_core_and_api_literals() -> None:
     assert expected == api_sync_models.PERSONAL_CONTEXT_SYNC_DOMAINS
     assert set(expected).issubset(core_sync_models.SyncDomain.__args__)
     assert set(expected).issubset(api_sync_models.SyncDomain.__args__)
-    assert {
-        domain: ["upsert", "tombstone"] for domain in expected
-    } == core_sync_models.PERSONAL_CONTEXT_SYNC_OPERATIONS
+    assert core_sync_models.PERSONAL_CONTEXT_SYNC_OPERATIONS == {
+        "personal_context.manifest": ["upsert"],
+        "personal_context.scope": ["upsert"],
+        "personal_context.record": ["upsert", "tombstone"],
+        "personal_context.proposal": ["upsert"],
+        "personal_context.purge": ["tombstone"],
+    }
     assert api_sync_models.PERSONAL_CONTEXT_SYNC_OPERATIONS == (
         core_sync_models.PERSONAL_CONTEXT_SYNC_OPERATIONS
     )
+
+
+@pytest.mark.parametrize(
+    ("domain", "operations"),
+    [
+        ("personal_context.manifest", {"upsert"}),
+        ("personal_context.scope", {"upsert"}),
+        ("personal_context.record", {"upsert", "tombstone"}),
+        ("personal_context.proposal", {"upsert"}),
+        ("personal_context.purge", {"tombstone"}),
+    ],
+)
+def test_personal_context_schema_is_discoverable(
+    domain: str,
+    operations: set[str],
+) -> None:
+    schema = core_sync_models.sync_v2_domain_schemas()[domain]
+
+    assert schema["schema_version"] == 1
+    assert schema["encryption_policy"] == "server_trusted_v1"
+    assert operations.issubset(schema)
+    assert SyncCapabilitiesResponse().domain_schemas[domain] == schema
 
 
 @pytest.mark.parametrize("domain", NOTES_ORGANIZATION_DOMAINS)

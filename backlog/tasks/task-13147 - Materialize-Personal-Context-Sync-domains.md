@@ -69,4 +69,15 @@ Reason: ADR-002 already governs canonical whole-object transport, server mutatio
 - Verification: 87 targeted Personalization/Personal Context Sync tests and 8 capability/model tests passed; Ruff, Python compilation, Bandit, `git diff --check`, and independent review passed with no remaining actionable blocker.
 - Known skips: the full repository suite was not run per repository policy. Wrapped-key bootstrap/distribution remains approved plan Task 3; delete-everywhere mutation lifecycle remains Task 6.
 - ADR: existing `backlog/decisions/002-personal-context-profile-authority-sync-and-encryption.md` applies; no new ADR was required.
+
+PR review follow-up: moved the rebased Sync implementation onto the canonical
+DB-management repository seam, added discoverable schemas and exact operation
+sets for all five domains, centralized adapter identity exceptions, preserved
+typed profile-not-found and encryption-unavailable failures, and stopped generic
+Sync store errors from being mislabeled as Personal Context key failures. The
+focused regression set also covers factory identity resolution and encrypted
+transport failure classification. Final focused verification selected 201
+Personal Context, Sync, capability, and authenticated endpoint tests; all
+passed. Ruff, OpenAPI fingerprint validation, compilation, Bandit, and diff
+hygiene also passed.
 <!-- SECTION:NOTES:END -->

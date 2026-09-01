@@ -11,6 +11,10 @@ class SyncStoreError(SyncV2Error):
     """Raised when the Sync v2 store cannot complete an operation."""
 
 
+class PersonalContextStorageEncryptionUnavailableError(SyncStoreError):
+    """Raised when a Personal Context envelope cannot be protected at rest."""
+
+
 class SyncIdempotencyConflictError(SyncStoreError):
     """Raised when an idempotent retry reuses an ID with different content."""
 
@@ -78,6 +82,7 @@ class SyncConflictNotFoundError(SyncStoreError):
 
 
 __all__ = [
+    "PersonalContextStorageEncryptionUnavailableError",
     "SyncConflictNotFoundError",
     "SyncDatasetNotFoundError",
     "SyncHeadConflictError",

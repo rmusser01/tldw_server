@@ -143,7 +143,11 @@ PERSONAL_CONTEXT_SYNC_DOMAINS: tuple[SyncDomain, ...] = (
     "personal_context.purge",
 )
 PERSONAL_CONTEXT_SYNC_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
-    domain: ["upsert", "tombstone"] for domain in PERSONAL_CONTEXT_SYNC_DOMAINS
+    "personal_context.manifest": ["upsert"],
+    "personal_context.scope": ["upsert"],
+    "personal_context.record": ["upsert", "tombstone"],
+    "personal_context.proposal": ["upsert"],
+    "personal_context.purge": ["tombstone"],
 }
 SYNC_V2_SUPPORTED_DOMAINS: list[SyncDomain] = (
     list(M1_SYNC_DOMAINS)

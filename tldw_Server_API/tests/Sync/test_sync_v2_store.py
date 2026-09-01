@@ -3045,6 +3045,18 @@ def test_postgres_personal_context_binding_cas_accepts_winner_and_rejects_stale(
             link_state="complete",
         )
 
+    with pytest.raises(SyncStoreError, match="personal_context_link_binding_stale"):
+        db.bind_personal_context_dataset(
+            dataset_id="dataset-1",
+            user_id="user-1",
+            expected_binding=v2,
+            profile_id="profile-1",
+            authority_id="authority-1",
+            integrity_key_id="personal-context-integrity-v2",
+            purge_generation=1,
+            link_state="complete",
+        )
+
     update_calls = [
         statement
         for statement, _params, _connection in backend.calls

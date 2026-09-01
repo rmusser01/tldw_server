@@ -13,6 +13,7 @@ from tldw_Server_API.app.core.Sync.v2.adapters import SyncAdapterRegistry
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.personal_context import (
     PersonalContextDomainAdapter,
 )
+from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
 from tldw_Server_API.app.core.Sync.v2.materializers.personal_context import (
     PersonalContextMaterializer,
 )
@@ -264,3 +265,25 @@ def test_conflict_fails_closed_when_profile_storage_key_is_unavailable(
     assert result.accepted == []
     assert len(result.rejected) == 1
     assert result.rejected[0].error_code == "personal_context_storage_unavailable"
+
+
+def test_generic_envelope_store_failure_is_not_mislabeled_as_key_unavailability(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, _target, _sqlite_path = _service(tmp_path)
+    payload = preference_record().model_dump(mode="json")
+    envelope = _envelope(payload, client_envelope_id="device-a:record:store-failure")
+
+    def fail_insert(_envelope: object) -> object:
+        raise SyncStoreError("injected generic store failure")
+
+    monkeypatch.setattr(service.store, "insert_envelope", fail_insert)
+
+    with pytest.raises(SyncStoreError, match="injected generic store failure"):
+        service.push(
+            user_id="user-a",
+            dataset_id=DATASET_ID,
+            device_id="device-a",
+            envelopes=[envelope],
+        )

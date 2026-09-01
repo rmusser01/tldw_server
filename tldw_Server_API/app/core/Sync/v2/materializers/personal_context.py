@@ -139,6 +139,8 @@ class PersonalContextMaterializer:
 
 
 def _parse_value(domain: str, payload: Mapping[str, Any]) -> Any:
+    """Parse a materializable canonical payload for the selected Sync domain."""
+
     model = _MODELS.get(domain)
     if model is not None:
         return model.model_validate(payload)

@@ -276,8 +276,11 @@ def _safe_sync_v2_http_error(exc: Exception, **context: object) -> HTTPException
                 validated = SyncPersonalContextBootstrapErrorDetail.model_validate(
                     {**detail, "attention": exc.attention}
                 )
-            except ValidationError:
-                pass
+            except ValidationError as validation_error:
+                logger.bind(
+                    reason_code=reason_code,
+                    exception_type=type(validation_error).__name__,
+                ).warning("Discarded invalid Personal Context attention metadata")
             else:
                 validated_attention = validated.attention
                 if validated_attention is not None:
@@ -883,12 +886,15 @@ def bootstrap_sync_v2_profile(
     response_model=SyncPersonalContextBootstrapResponse,
     responses={409: {"model": SyncPersonalContextBootstrapErrorResponse}},
     summary="Bootstrap canonical Personal Context for one registered device",
+    dependencies=[Depends(check_rate_limit)],
 )
 def bootstrap_sync_v2_personal_context(
     request: SyncPersonalContextBootstrapRequest,
     user: User = Depends(get_request_user),
     service: SyncV2Service = Depends(get_sync_v2_service),
-):
+) -> SyncPersonalContextBootstrapResponse:
+    """Return the canonical profile snapshot and wrapped Sync integrity key."""
+
     user_id = _sync_user_id(user)
     try:
         snapshot = service.bootstrap_personal_context(
@@ -924,12 +930,15 @@ def bootstrap_sync_v2_personal_context(
     "/personal-context/complete",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Record one device's completed Personal Context reconciliation",
+    dependencies=[Depends(check_rate_limit)],
 )
 def complete_sync_v2_personal_context(
     request: SyncPersonalContextLinkCompleteRequest,
     user: User = Depends(get_request_user),
     service: SyncV2Service = Depends(get_sync_v2_service),
 ) -> None:
+    """Commit one device's receipt for the exact reconciled profile snapshot."""
+
     user_id = _sync_user_id(user)
     try:
         service.complete_personal_context_link(

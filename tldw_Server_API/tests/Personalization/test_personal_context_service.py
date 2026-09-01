@@ -29,9 +29,13 @@ from tldw_Server_API.app.core.Personalization.personal_context_repository import
     PersonalContextRepository,
 )
 from tldw_Server_API.app.core.Personalization.personal_context_repository_models import (
+    ConcurrentProfileUpdateError,
     ProfileQuotaExceededError,
     ProfileSemanticKeyCollisionError,
     ProfileUnsupportedSchemaError,
+)
+from tldw_Server_API.app.core.Personalization.personal_context_runtime_policy import (
+    ServerRuntimePolicy,
 )
 from tldw_Server_API.app.core.Personalization.personal_context_service import (
     PersonalContextService,
@@ -144,6 +148,26 @@ def test_sync_bootstrap_plan_reserves_only_content_free_state_until_materialized
     assert materialized.scopes == first.scopes
     assert service.get_manifest() == first.manifest
     assert service.list_scopes() == first.scopes
+
+
+def test_sync_materialization_retry_rejects_changed_runtime_plan(
+    service: PersonalContextService,
+) -> None:
+    """An idempotent canonical retry must include the reviewed runtime plan."""
+
+    planned = service.plan_sync_bootstrap()
+    service._repository.materialize_sync_profile(
+        planned.manifest,
+        planned.scopes[0],
+    )
+
+    with pytest.raises(ConcurrentProfileUpdateError, match="reviewed profile plan changed"):
+        service._repository.materialize_sync_profile(
+            planned.manifest,
+            planned.scopes[0],
+            runtime_policy=ServerRuntimePolicy(enabled=True).model_dump(mode="json"),
+            runtime_version_id="runtime-version-changed",
+        )
 
 
 def test_cancelled_sync_plan_remains_absent_and_does_not_block_explicit_creation(

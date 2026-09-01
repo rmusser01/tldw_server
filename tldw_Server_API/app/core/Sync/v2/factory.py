@@ -21,6 +21,9 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import (
 )
 from tldw_Server_API.app.core.DB_Management.Personalization_DB import PersonalizationDB
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SYNC_DB_FILENAME, SyncDatabase
+from tldw_Server_API.app.core.Personalization.companion_user_ids import (
+    resolve_existing_companion_storage_user_id,
+)
 from tldw_Server_API.app.core.Personalization.personal_context_repository import (
     PersonalContextRepository,
 )
@@ -356,7 +359,7 @@ def _personal_context_key_service(
 def _personal_context_service_for_user(user_id: str) -> PersonalContextService:
     """Return the canonical service bound to one authenticated Sync owner."""
 
-    storage_user_id = _resolve_user_id_for_storage(user_id)
+    storage_user_id = resolve_existing_companion_storage_user_id(user_id)
     database = PersonalizationDB.for_user(storage_user_id)
     return PersonalContextService(PersonalContextRepository(database))
 

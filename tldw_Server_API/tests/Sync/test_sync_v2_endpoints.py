@@ -1368,6 +1368,31 @@ def test_attachment_bootstrap_diagnostics_enforces_ingress_rate_limit(
     assert response.status_code == 429
 
 
+@pytest.mark.parametrize(
+    "path",
+    ["/personal-context/bootstrap", "/personal-context/complete"],
+)
+def test_personal_context_mutation_routes_declare_rate_limit_dependency(
+    path: str,
+) -> None:
+    route = next(
+        item
+        for item in sync_endpoint.router.routes
+        if getattr(item, "path", None) == path
+        and "POST" in (getattr(item, "methods", set()) or set())
+    )
+    dependencies = {
+        dependency.call
+        for dependency in getattr(
+            getattr(route, "dependant", None),
+            "dependencies",
+            [],
+        )
+    }
+
+    assert check_rate_limit in dependencies
+
+
 def test_profile_bootstrap_and_status_expose_safe_attachment_progress(
     client: TestClient,
     sync_service: SyncV2Service,
@@ -3134,6 +3159,37 @@ def _registered_personal_context_device_payload(public_key: rsa.RSAPublicKey) ->
             ).decode("utf-8"),
         },
     }
+
+
+def test_personal_context_factory_uses_canonical_companion_storage_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Personal Context composition must use the same identity resolver as its API."""
+
+    seen: dict[str, object] = {}
+    database = object()
+    repository = object()
+    service = object()
+    sync_v2_factory._personal_context_service_for_user.cache_clear()
+    monkeypatch.setattr(
+        sync_v2_factory,
+        "resolve_existing_companion_storage_user_id",
+        lambda user_id: f"companion-{user_id}",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        sync_v2_factory.PersonalizationDB,
+        "for_user",
+        lambda user_id: seen.setdefault("user_id", user_id) and database,
+    )
+    monkeypatch.setattr(sync_v2_factory, "PersonalContextRepository", lambda value: repository)
+    monkeypatch.setattr(sync_v2_factory, "PersonalContextService", lambda value: service)
+
+    try:
+        assert sync_v2_factory._personal_context_service_for_user("42") is service
+        assert seen["user_id"] == "companion-42"
+    finally:
+        sync_v2_factory._personal_context_service_for_user.cache_clear()
 
 
 def _assert_personal_context_error_is_redacted(response, reason_code: str) -> None:
