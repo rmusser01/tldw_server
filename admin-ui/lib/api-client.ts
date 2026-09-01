@@ -146,6 +146,17 @@ const STRONG_WEBHOOK_ETAG = /^"admin-webhook-([1-9][0-9]*)-r([1-9][0-9]*)"$/;
 const GENERATED_IDEMPOTENCY_KEY = /^[0-9a-f]{32}$/;
 const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/;
 const UUID4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const WEBHOOK_SIGNING_SECRET = /^whsec_[0-9a-f]{64}$/;
+const CANONICAL_WEBHOOK_API_VERSION = '2026-07-01';
+const CANONICAL_WEBHOOK_EVENT_TYPES = [
+  'user.created',
+  'user.deleted',
+  'incident.created',
+  'incident.updated',
+  'incident.resolved',
+  'incident.notify',
+] as const;
+const CANONICAL_WEBHOOK_EVENT_TYPE_SET = new Set<string>(CANONICAL_WEBHOOK_EVENT_TYPES);
 
 const DELIVERY_RUNTIME_REASONS = [
   'mode_off',
@@ -242,12 +253,21 @@ const isNullableIntegerBetween = (
   maximum: number,
 ): value is number | null => value === null || isIntegerBetween(value, minimum, maximum);
 
+const isNullableIntegerAtLeast = (
+  value: unknown,
+  minimum: number,
+): value is number | null => value === null || isIntegerAtLeast(value, minimum);
+
 const isNullableIsoTimestamp = (value: unknown): value is string | null => (
   value === null || isIsoTimestamp(value)
 );
 
 const isOneOf = <T extends string>(value: unknown, allowed: readonly T[]): value is T => (
   typeof value === 'string' && allowed.includes(value as T)
+);
+
+const arraysEqual = <T>(left: readonly T[], right: readonly T[]): boolean => (
+  left.length === right.length && left.every((value, index) => value === right[index])
 );
 
 const isUuid4 = (value: unknown): value is string => (
@@ -277,13 +297,190 @@ const registrationIdentity = (value: unknown): { id: number; revision: number } 
   return { id: value.id, revision: value.revision };
 };
 
+const isWebhookRegistration = (value: unknown): value is WebhookRegistration => {
+  if (!isRecord(value) || !hasExactKeys(value, [
+    'id',
+    'description',
+    'target_display',
+    'target_hostname',
+    'event_types',
+    'active',
+    'timeout_seconds',
+    'revision',
+    'delivery_config_version',
+    'secret_version',
+    'secret_rotation_required',
+    'created_by',
+    'updated_by',
+    'created_at',
+    'updated_at',
+  ])) return false;
+  if (!Array.isArray(value.event_types) || value.event_types.length < 1) return false;
+  if (!value.event_types.every((eventType) => (
+    typeof eventType === 'string' && CANONICAL_WEBHOOK_EVENT_TYPE_SET.has(eventType)
+  ))) return false;
+  if (new Set(value.event_types).size !== value.event_types.length) return false;
+  try {
+    const display = new URL(value.target_display as string);
+    const displayHostname = display.hostname.replace(/^\[|\]$/gu, '');
+    if (display.origin !== value.target_display || displayHostname !== value.target_hostname) {
+      return false;
+    }
+  } catch {
+    return false;
+  }
+  return isIntegerAtLeast(value.id, 1)
+    && isBoundedString(value.description, 0, 500)
+    && isBoundedString(value.target_display, 1, 2_048)
+    && isBoundedString(value.target_hostname, 1, 253)
+    && typeof value.active === 'boolean'
+    && isIntegerBetween(value.timeout_seconds, 1, 30)
+    && isIntegerAtLeast(value.revision, 1)
+    && isIntegerAtLeast(value.delivery_config_version, 1)
+    && isIntegerAtLeast(value.secret_version, 1)
+    && typeof value.secret_rotation_required === 'boolean'
+    && isNullableIntegerAtLeast(value.created_by, 1)
+    && isNullableIntegerAtLeast(value.updated_by, 1)
+    && isIsoTimestamp(value.created_at)
+    && isIsoTimestamp(value.updated_at);
+};
+
+const isWebhookListResponse = (value: unknown): value is WebhookListResponse => (
+  isRecord(value)
+  && hasExactKeys(value, ['items', 'total', 'limit', 'offset'])
+  && Array.isArray(value.items)
+  && value.items.every(isWebhookRegistration)
+  && new Set(value.items.map((item) => item.id)).size === value.items.length
+  && isIntegerAtLeast(value.total, value.items.length)
+  && isIntegerBetween(value.limit, 1, 100)
+  && value.items.length <= value.limit
+  && isIntegerBetween(value.offset, 0, 1_000)
+);
+
+const isWebhookCatalog = (value: unknown): value is WebhookCatalog => (
+  isRecord(value)
+  && hasExactKeys(value, [
+    'api_version',
+    'events',
+    'registration_limit',
+    'active_limit',
+  ])
+  && value.api_version === CANONICAL_WEBHOOK_API_VERSION
+  && Array.isArray(value.events)
+  && value.events.length === CANONICAL_WEBHOOK_EVENT_TYPES.length
+  && value.events.every((item, index) => (
+    isRecord(item)
+    && hasExactKeys(item, ['event_type', 'description'])
+    && item.event_type === CANONICAL_WEBHOOK_EVENT_TYPES[index]
+    && isBoundedString(item.description, 1, 500)
+  ))
+  && isIntegerBetween(value.registration_limit, 1, 1_000)
+  && isIntegerBetween(value.active_limit, 1, value.registration_limit as number)
+);
+
+const canonicalizeWebhookEventTypes = (eventTypes: string[]): string[] => (
+  CANONICAL_WEBHOOK_EVENT_TYPES.filter((eventType) => eventTypes.includes(eventType))
+);
+
+const normalizedWebhookOrigin = (url: string): string | null => {
+  try {
+    const parsed = new URL(url);
+    const hostname = parsed.hostname.replace(/^\[|\]$/gu, '').replace(/\.$/u, '');
+    const host = hostname.includes(':') ? `[${hostname}]` : hostname;
+    return `${parsed.protocol}//${host}${parsed.port ? `:${parsed.port}` : ''}`;
+  } catch {
+    return null;
+  }
+};
+
+const registrationMatchesCreate = (
+  registration: WebhookRegistration,
+  body: WebhookCreateRequest,
+): boolean => {
+  const targetOrigin = normalizedWebhookOrigin(body.url);
+  if (targetOrigin === null) return false;
+  return registration.active === false
+    && registration.description === (body.description ?? '')
+    && registration.timeout_seconds === (body.timeout_seconds ?? 10)
+    && registration.target_display === targetOrigin
+    && arraysEqual(
+      registration.event_types,
+      canonicalizeWebhookEventTypes(body.event_types),
+    );
+};
+
+const registrationMatchesPatch = (
+  registration: WebhookRegistration,
+  body: WebhookPatchRequest,
+): boolean => {
+  if (body.description !== undefined && registration.description !== body.description) return false;
+  if (body.active !== undefined && registration.active !== body.active) return false;
+  if (
+    body.timeout_seconds !== undefined
+    && registration.timeout_seconds !== body.timeout_seconds
+  ) return false;
+  if (
+    body.event_types !== undefined
+    && !arraysEqual(
+      registration.event_types,
+      canonicalizeWebhookEventTypes(body.event_types),
+    )
+  ) return false;
+  if (body.url !== undefined) {
+    if (registration.target_display !== normalizedWebhookOrigin(body.url)) return false;
+  }
+  return true;
+};
+
+const requireWebhookRegistrationResponse = (
+  response: JsonResponse<unknown>,
+): JsonResponse<WebhookRegistration> => {
+  if (!isWebhookRegistration(response.data)) {
+    throw new WebhookContractError(
+      response.status,
+      'Webhook API returned an invalid registration response',
+      response.requestId,
+    );
+  }
+  return response as JsonResponse<WebhookRegistration>;
+};
+
+const isWebhookSecretResponse = (value: unknown): value is WebhookSecretResponse => (
+  isRecord(value)
+  && hasExactKeys(value, ['registration', 'signing_secret', 'replayed'])
+  && isWebhookRegistration(value.registration)
+  && typeof value.signing_secret === 'string'
+  && WEBHOOK_SIGNING_SECRET.test(value.signing_secret)
+  && typeof value.replayed === 'boolean'
+);
+
+const requireWebhookSecretResponse = (
+  response: JsonResponse<unknown>,
+): JsonResponse<WebhookSecretResponse> => {
+  if (!isWebhookSecretResponse(response.data)) {
+    throw new WebhookContractError(
+      response.status,
+      'Webhook API returned an invalid one-time-secret response',
+      response.requestId,
+    );
+  }
+  return response as JsonResponse<WebhookSecretResponse>;
+};
+
 export const requireStrongWebhookEtag = <T>(
   response: JsonResponse<T>,
   registration: unknown,
+  expectedWebhookId?: number,
 ): StrongWebhookResponse<T> => {
   const etag = parseStrongWebhookEtag(response.etag);
   const identity = registrationIdentity(registration);
-  if (!etag || !identity || etag.id !== identity.id || etag.revision !== identity.revision) {
+  if (
+    !etag
+    || !identity
+    || etag.id !== identity.id
+    || etag.revision !== identity.revision
+    || (expectedWebhookId !== undefined && identity.id !== expectedWebhookId)
+  ) {
     throw new WebhookContractError(
       response.status,
       'Webhook API returned a missing or mismatched strong ETag',
@@ -456,37 +653,55 @@ const getWebhookStatus = async (): Promise<WebhookStatus> => {
   return status;
 };
 
-const getCanonicalWebhooks = (
+const getCanonicalWebhooks = async (
   params: { limit?: number; offset?: number } = {},
 ): Promise<WebhookListResponse> => {
   const query = buildQueryString(params);
-  return requestJson<WebhookListResponse>(`/admin/webhooks${query ? `?${query}` : ''}`);
+  const response = await requestJson<unknown>(`/admin/webhooks${query ? `?${query}` : ''}`);
+  if (
+    !isWebhookListResponse(response)
+    || response.limit !== (params.limit ?? 50)
+    || response.offset !== (params.offset ?? 0)
+  ) {
+    throw new WebhookContractError(200, 'Webhook API returned an invalid registration list');
+  }
+  return response;
 };
 
 const getCanonicalWebhook = async (
   id: number,
 ): Promise<StrongWebhookResponse<WebhookRegistration>> => {
   const webhookId = requireWebhookId(id);
-  const response = requireStatus(
-    await requestJsonWithMetadata<WebhookRegistration>(`/admin/webhooks/${webhookId}`),
+  const response = requireWebhookRegistrationResponse(requireStatus(
+    await requestJsonWithMetadata<unknown>(`/admin/webhooks/${webhookId}`),
     200,
-  );
-  return requireStrongWebhookEtag(response, response.data);
+  ));
+  return requireStrongWebhookEtag(response, response.data, webhookId);
 };
 
 const createCanonicalWebhook = async (
   body: WebhookCreateRequest,
   key: string,
 ): Promise<StrongWebhookResponse<WebhookSecretResponse>> => {
-  const response = requireStatus(
-    await requestJsonWithMetadata<WebhookSecretResponse>('/admin/webhooks', {
+  const response = requireWebhookSecretResponse(requireStatus(
+    await requestJsonWithMetadata<unknown>('/admin/webhooks', {
       method: 'POST',
       headers: { 'Idempotency-Key': requireGeneratedIdempotencyKey(key) },
       body: JSON.stringify(body),
     }),
     201,
-  );
-  return requireStrongWebhookEtag(response, response.data?.registration);
+  ));
+  if (
+    response.data.replayed === false
+    && !registrationMatchesCreate(response.data.registration, body)
+  ) {
+    throw new WebhookContractError(
+      response.status,
+      'Webhook API returned a registration that does not match the create command',
+      response.requestId,
+    );
+  }
+  return requireStrongWebhookEtag(response, response.data.registration);
 };
 
 const updateCanonicalWebhook = async (
@@ -495,15 +710,22 @@ const updateCanonicalWebhook = async (
   etag: string,
 ): Promise<StrongWebhookResponse<WebhookRegistration>> => {
   const webhookId = requireWebhookId(id);
-  const response = requireStatus(
-    await requestJsonWithMetadata<WebhookRegistration>(`/admin/webhooks/${webhookId}`, {
+  const response = requireWebhookRegistrationResponse(requireStatus(
+    await requestJsonWithMetadata<unknown>(`/admin/webhooks/${webhookId}`, {
       method: 'PATCH',
       headers: { 'If-Match': requireCallerWebhookEtag(webhookId, etag) },
       body: JSON.stringify(body),
     }),
     200,
-  );
-  return requireStrongWebhookEtag(response, response.data);
+  ));
+  if (!registrationMatchesPatch(response.data, body)) {
+    throw new WebhookContractError(
+      response.status,
+      'Webhook API returned a registration that does not match the update command',
+      response.requestId,
+    );
+  }
+  return requireStrongWebhookEtag(response, response.data, webhookId);
 };
 
 const deleteCanonicalWebhook = async (
@@ -534,8 +756,8 @@ const rotateCanonicalWebhookSecret = async (
   key: string,
 ): Promise<StrongWebhookResponse<WebhookSecretResponse>> => {
   const webhookId = requireWebhookId(id);
-  const response = requireStatus(
-    await requestJsonWithMetadata<WebhookSecretResponse>(
+  const response = requireWebhookSecretResponse(requireStatus(
+    await requestJsonWithMetadata<unknown>(
       `/admin/webhooks/${webhookId}/rotate-secret`,
       {
         method: 'POST',
@@ -546,8 +768,12 @@ const rotateCanonicalWebhookSecret = async (
       },
     ),
     200,
+  ));
+  return requireStrongWebhookEtag(
+    response,
+    response.data.registration,
+    webhookId,
   );
-  return requireStrongWebhookEtag(response, response.data?.registration);
 };
 
 const isWebhookDeliveryAttempt = (value: unknown): value is WebhookDeliveryAttempt => {
@@ -765,7 +991,13 @@ const redeliverCanonicalWebhook = async (
 
 export const canonicalWebhookApi = Object.freeze({
   getWebhookStatus,
-  getWebhookCatalog: () => requestJson<WebhookCatalog>('/admin/webhooks/catalog'),
+  getWebhookCatalog: async (): Promise<WebhookCatalog> => {
+    const catalog = await requestJson<unknown>('/admin/webhooks/catalog');
+    if (!isWebhookCatalog(catalog)) {
+      throw new WebhookContractError(200, 'Webhook API returned an invalid event catalog');
+    }
+    return catalog;
+  },
   getWebhooks: getCanonicalWebhooks,
   getWebhook: getCanonicalWebhook,
   createWebhook: createCanonicalWebhook,
@@ -797,7 +1029,8 @@ const isIncidentWebhookNotifyResponse = (
   && isBoundedString(value.incident_id, 1, 256)
   && isUuid4(value.event_id)
   && value.event_type === 'incident.notify'
-  && isUuid4(value.command_id)
+  && typeof value.command_id === 'string'
+  && /^sha256:[0-9a-f]{64}$/.test(value.command_id)
   && value.accepted === true
   && typeof value.replayed === 'boolean'
 );
@@ -811,6 +1044,8 @@ const notifyIncidentWebhooks = async (
   if (
     !isBoundedString(normalizedIncidentId, 1, 256)
     || (body.narrative !== null && !isBoundedString(body.narrative, 0, 4_096))
+    || !Number.isSafeInteger(body.expected_resource_version)
+    || body.expected_resource_version < 1
   ) {
     throw new WebhookContractError(0, 'Incident webhook command is invalid');
   }
@@ -832,6 +1067,83 @@ const notifyIncidentWebhooks = async (
     throw new WebhookContractError(
       response.status,
       'Incident webhook API returned an invalid response',
+      response.requestId,
+    );
+  }
+  return response.data;
+};
+
+const isIncidentNotifyResponse = (value: unknown): value is IncidentNotifyResponse => {
+  if (!isRecord(value) || !hasExactKeys(value, [
+    'incident_id',
+    'command_id',
+    'replayed',
+    'notifications',
+  ])) return false;
+  if (
+    !isBoundedString(value.incident_id, 1, 256)
+    || typeof value.command_id !== 'string'
+    || !/^sha256:[0-9a-f]{64}$/.test(value.command_id)
+    || typeof value.replayed !== 'boolean'
+    || !Array.isArray(value.notifications)
+    || value.notifications.length > 100
+  ) return false;
+  const emails = new Set<string>();
+  for (const notification of value.notifications) {
+    if (!isRecord(notification) || !hasExactKeys(notification, [
+      'email',
+      'status',
+      'error',
+    ])) return false;
+    if (
+      !isBoundedString(notification.email, 3, 320)
+      || emails.has(notification.email)
+      || !isOneOf(notification.status, ['sent', 'failed', 'unknown'] as const)
+      || (
+        notification.error !== null
+        && !isBoundedString(notification.error, 1, 200)
+      )
+      || (notification.status === 'sent' && notification.error !== null)
+    ) return false;
+    emails.add(notification.email);
+  }
+  return true;
+};
+
+const notifyIncidentStakeholders = async (
+  incidentId: string,
+  body: { recipients: string[]; message?: string },
+  key: string,
+): Promise<IncidentNotifyResponse> => {
+  const normalizedIncidentId = incidentId.trim();
+  if (
+    !isBoundedString(normalizedIncidentId, 1, 256)
+    || !Array.isArray(body.recipients)
+    || body.recipients.length < 1
+    || body.recipients.length > 100
+    || !body.recipients.every((email) => isBoundedString(email, 3, 320))
+    || (body.message !== undefined && !isBoundedString(body.message, 0, 4_096))
+  ) {
+    throw new WebhookContractError(0, 'Incident stakeholder command is invalid');
+  }
+  const response = requireStatus(
+    await requestJsonWithMetadata<unknown>(
+      `/admin/incidents/${encodeURIComponent(normalizedIncidentId)}/notify`,
+      {
+        method: 'POST',
+        headers: { 'Idempotency-Key': requireGeneratedIdempotencyKey(key) },
+        body: JSON.stringify(body),
+      },
+    ),
+    200,
+  );
+  if (
+    !isIncidentNotifyResponse(response.data)
+    || response.data.incident_id !== normalizedIncidentId
+  ) {
+    throw new WebhookContractError(
+      response.status,
+      'Incident stakeholder API returned an invalid response',
       response.requestId,
     );
   }
@@ -1332,11 +1644,7 @@ export const api = {
     requestJson(`/admin/incidents/${encodeURIComponent(incidentId)}`, {
       method: 'DELETE',
     }),
-  notifyIncidentStakeholders: (incidentId: string, data: { recipients: string[]; message?: string }) =>
-    requestJson<IncidentNotifyResponse>(`/admin/incidents/${encodeURIComponent(incidentId)}/notify`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }),
+  notifyIncidentStakeholders,
   notifyIncidentWebhooks,
   getIncidentSlaMetrics: () =>
     requestJson<{

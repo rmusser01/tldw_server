@@ -377,6 +377,7 @@ class WebhookKeyRing:
         purpose: str,
         identity: Mapping[str, str | int],
         target_key_id: str,
+        target_identity: Mapping[str, str | int] | None = None,
     ) -> ProtectedValue:
         """Validate and re-encrypt a value to an explicit rotation target."""
         plaintext = self.decrypt_bytes(
@@ -386,7 +387,7 @@ class WebhookKeyRing:
         )
         return self._encrypt_bytes_to_key(
             purpose=purpose,
-            identity=identity,
+            identity=identity if target_identity is None else target_identity,
             plaintext=plaintext,
             key_id=target_key_id,
         )

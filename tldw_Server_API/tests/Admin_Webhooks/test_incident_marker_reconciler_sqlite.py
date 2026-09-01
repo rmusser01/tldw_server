@@ -399,7 +399,7 @@ async def test_corrupt_or_undecryptable_marker_fails_closed_without_file_mutatio
 
 
 @pytest.mark.unit
-async def test_existing_source_with_different_body_is_a_conflict_and_marker_remains(
+async def test_existing_source_conflict_is_retained_and_later_marker_reconciles(
     sqlite_repo: SQLiteRepositoryFixture,
     tmp_path: Path,
 ) -> None:
@@ -414,7 +414,14 @@ async def test_existing_source_with_different_body_is_a_conflict_and_marker_rema
         created_at=NOW,
         severity="high",
     )
-    _write_markers(store_path, [marker])
+    later_marker = _marker(
+        sqlite_repo.repository,
+        ring,
+        event_id=EVENT_IDS[2],
+        incident_id="incident-after-conflict",
+        created_at=NOW + timedelta(minutes=1),
+    )
+    _write_markers(store_path, [marker, later_marker])
     producer = AdminWebhookEventProducer(
         repository=sqlite_repo.repository,
         settings=_settings(),
@@ -448,14 +455,60 @@ async def test_existing_source_with_different_body_is_a_conflict_and_marker_rema
                 resolved_at=None,
             ),
         )
-    before = store_path.read_bytes()
-
     with pytest.raises(WebhookError) as exc_info:
         await _reconciler(sqlite_repo, ring, store_path).reconcile_once()
-
     assert exc_info.value.code is WebhookErrorCode.IDEMPOTENCY_CONFLICT
-    assert store_path.read_bytes() == before
-    assert _database_rows(sqlite_repo.path) == ([EVENT_IDS[1]], 0)
+    assert _stored_marker_records(store_path) == [marker.to_store_record()]
+    assert _database_rows(sqlite_repo.path) == ([EVENT_IDS[1], EVENT_IDS[2]], 0)
+
+
+@pytest.mark.unit
+async def test_rotation_start_after_capture_preserves_pending_marker(
+    sqlite_repo: SQLiteRepositoryFixture,
+    tmp_path: Path,
+) -> None:
+    ring = _ring()
+    store_path = tmp_path / "system_ops.json"
+    await _complete_migration(sqlite_repo.repository)
+    marker = _marker(
+        sqlite_repo.repository,
+        ring,
+        event_id=EVENT_IDS[0],
+        incident_id="incident-rotation-race",
+        created_at=NOW,
+    )
+    _write_markers(store_path, [marker])
+
+    def start_rotation_after_commit(point: IncidentReconcileCrashPoint) -> None:
+        if point is not IncidentReconcileCrashPoint.AFTER_DB_COMMIT_BEFORE_REMOVE:
+            return
+        with sqlite3.connect(sqlite_repo.path) as connection:
+            connection.execute(
+                """
+                UPDATE admin_webhook_migration_state
+                SET rotation_phase = 'rewriting',
+                    rotation_operation_id = 'rotation-reconcile-race',
+                    rotation_source_key_id = ?,
+                    rotation_target_key_id = 'key-2026-09',
+                    rotation_table_cursor = 'registration_targets',
+                    rotation_started_at = ?
+                WHERE singleton_id = 1
+                """,
+                (KEY_ID, NOW.isoformat()),
+            )
+
+    reconciler = _reconciler(
+        sqlite_repo,
+        ring,
+        store_path,
+        crash_injector=start_rotation_after_commit,
+    )
+    with pytest.raises(WebhookError) as exc_info:
+        await reconciler.reconcile_once()
+
+    assert exc_info.value.code is WebhookErrorCode.KEY_ROTATION_IN_PROGRESS
+    assert _stored_marker_records(store_path) == [marker.to_store_record()]
+    assert _database_rows(sqlite_repo.path) == ([EVENT_IDS[0]], 0)
 
 
 @pytest.mark.unit

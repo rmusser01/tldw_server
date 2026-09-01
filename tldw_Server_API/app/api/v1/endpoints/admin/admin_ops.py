@@ -27,8 +27,6 @@ from tldw_Server_API.app.api.v1.schemas.admin_schemas import (
     IncidentNotifyRequest,
     IncidentNotifyResponse,
     IncidentUpdateRequest,
-    IncidentWebhookNotifyRequest,
-    IncidentWebhookNotifyResponse,
     MaintenanceRotationRunCreateRequest,
     MaintenanceRotationRunCreateResponse,
     MaintenanceRotationRunItem,
@@ -96,9 +94,6 @@ from tldw_Server_API.app.services.admin_system_ops_service import (
 )
 from tldw_Server_API.app.services.admin_system_ops_service import (
     notify_incident_stakeholders as svc_notify_incident_stakeholders,
-)
-from tldw_Server_API.app.services.admin_system_ops_service import (
-    notify_incident_webhooks as svc_notify_incident_webhooks,
 )
 from tldw_Server_API.app.services.admin_system_ops_service import (
     record_health_snapshot as svc_record_health_snapshot,
@@ -803,6 +798,15 @@ async def notify_incident_stakeholders(
     incident_id: str,
     payload: IncidentNotifyRequest,
     request: Request,
+    idempotency_key: Annotated[
+        str,
+        Header(
+            alias="Idempotency-Key",
+            min_length=16,
+            max_length=255,
+            pattern=r"^[A-Za-z0-9._:-]{16,255}$",
+        ),
+    ],
     principal: AuthPrincipal = Depends(get_auth_principal),
 ) -> IncidentNotifyResponse:
     """Send email notifications to stakeholders about an incident."""
@@ -813,9 +817,11 @@ async def notify_incident_stakeholders(
     try:
         result = await svc_notify_incident_stakeholders(
             incident_id=incident_id,
-            recipients=payload.recipients,
+            recipients=[str(recipient) for recipient in payload.recipients],
             message=payload.message,
             actor=actor,
+            actor_id=principal.principal_id,
+            idempotency_key=idempotency_key,
             source_request_id=normalize_request_id(
                 getattr(request.state, "request_id", None)
             ),
@@ -835,65 +841,16 @@ async def notify_incident_stakeholders(
         resource_type="incident",
         resource_id=incident_id,
         action="incident.notify",
-        metadata={"recipient_count": len(payload.recipients)},
-    )
-    return IncidentNotifyResponse(**result)
-
-
-@router.post(
-    "/incidents/{incident_id}/notify-webhooks",
-    response_model=IncidentWebhookNotifyResponse,
-    status_code=202,
-)
-async def notify_incident_webhooks(
-    incident_id: str,
-    payload: IncidentWebhookNotifyRequest,
-    request: Request,
-    idempotency_key: Annotated[
-        str,
-        Header(
-            alias="Idempotency-Key",
-            min_length=16,
-            max_length=255,
-            pattern=r"^[A-Za-z0-9._:-]{16,255}$",
-        ),
-    ],
-    principal: AuthPrincipal = Depends(get_auth_principal),
-) -> IncidentWebhookNotifyResponse:
-    """Accept one durable, idempotent incident webhook notification."""
-    _require_platform_admin(principal)
-    try:
-        result = await svc_notify_incident_webhooks(
-            incident_id=incident_id,
-            narrative=payload.narrative,
-            actor_id=principal.principal_id,
-            idempotency_key=idempotency_key,
-            source_request_id=normalize_request_id(
-                getattr(request.state, "request_id", None)
-            ),
-        )
-    except ValueError as exc:
-        if str(exc) == "not_found":
-            raise HTTPException(status_code=404, detail="incident_not_found") from exc
-        raise HTTPException(status_code=422, detail="invalid_incident_notification") from exc
-    except WebhookError as exc:
-        raise HTTPException(status_code=exc.http_status, detail=exc.code.value) from exc
-
-    await _emit_admin_audit_event(
-        request,
-        principal,
-        event_type="ops.incident",
-        category="system",
-        resource_type="incident",
-        resource_id=incident_id,
-        action="incident.notify",
         metadata={
-            "event_id": result.event_id,
-            "command_id": result.command_id,
-            "replayed": result.replayed,
+            "recipient_count": len(payload.recipients),
+            "command_id": result["command_id"],
+            "replayed": result["replayed"],
+            "unknown_count": sum(
+                item["status"] == "unknown" for item in result["notifications"]
+            ),
         },
     )
-    return IncidentWebhookNotifyResponse(**result.__dict__)
+    return IncidentNotifyResponse(**result)
 
 
 # ---------------------------------------------------------------------------------------------------------------------

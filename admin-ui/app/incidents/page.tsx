@@ -24,8 +24,12 @@ import { Pagination } from '@/components/ui/pagination';
 import { useConfirm } from '@/components/ui/confirm-dialog';
 import { useToast } from '@/components/ui/toast';
 import { api } from '@/lib/api-client';
-import { generateIdempotencyKey } from '@/lib/idempotent-command';
-import { ApiError } from '@/lib/http';
+import {
+  createIdempotentCommand,
+  generateIdempotencyKey,
+  type IdempotentCommand,
+} from '@/lib/idempotent-command';
+import { ApiError, WebhookContractError } from '@/lib/http';
 import { formatDateTime } from '@/lib/format';
 import {
   addIncidentActionItem,
@@ -41,6 +45,7 @@ import {
 } from '@/lib/incident-workflow';
 import { useUrlPagination } from '@/lib/use-url-state';
 import { usePagedResource } from '@/lib/use-paged-resource';
+import { useSensitiveNavigationGuard } from '@/lib/use-sensitive-navigation-guard';
 import type { IncidentItem } from '@/types/incidents';
 import { AlertTriangle, Bell, ExternalLink, Mail, RefreshCw, Trash2 } from 'lucide-react';
 import { ExportMenu } from '@/components/ui/export-menu';
@@ -102,7 +107,18 @@ type IncidentAssignableUser = {
 type PendingIncidentWebhookCommand = {
   incidentId: string;
   narrative: string | null;
+  expectedResourceVersion: number;
   idempotencyKey: string;
+};
+
+type StakeholderNotificationCommandBody = {
+  incidentId: string;
+  recipients: string[];
+  message?: string;
+};
+
+type PendingStakeholderNotificationCommand = {
+  command: IdempotentCommand<IncidentNotifyResponse>;
 };
 
 const normalizeAssignableUsers = (payload: unknown): IncidentAssignableUser[] => {
@@ -162,6 +178,11 @@ function IncidentsPageContent() {
   const [notifyMessage, setNotifyMessage] = useState('');
   const [notifying, setNotifying] = useState(false);
   const [notifyResults, setNotifyResults] = useState<IncidentNotifyResponse | null>(null);
+  const [notifyCommandMessage, setNotifyCommandMessage] = useState('');
+  const [notifyRetryAvailable, setNotifyRetryAvailable] = useState(false);
+  const pendingStakeholderCommandRef = useRef<PendingStakeholderNotificationCommand | null>(null);
+  const activeStakeholderCommandRef = useRef<symbol | null>(null);
+  const stakeholderCommandGenerationRef = useRef(0);
   const [webhookNotifyIncident, setWebhookNotifyIncident] = useState<IncidentItem | null>(null);
   const [webhookNarrative, setWebhookNarrative] = useState('');
   const [webhookNarrativeReviewed, setWebhookNarrativeReviewed] = useState(false);
@@ -172,6 +193,14 @@ function IncidentsPageContent() {
   const pendingWebhookCommandRef = useRef<PendingIncidentWebhookCommand | null>(null);
   const activeWebhookCommandRef = useRef<symbol | null>(null);
   const webhookCommandGenerationRef = useRef(0);
+
+  useSensitiveNavigationGuard(
+    notifying || notifyRetryAvailable || webhookNotifying || webhookRetryAvailable,
+    () => showError(
+      'Navigation blocked',
+      'Finish or retry the active notification command before leaving this page.',
+    ),
+  );
 
   const params = useMemo(() => {
     const offset = Math.max(0, (page - 1) * pageSize);
@@ -232,11 +261,21 @@ function IncidentsPageContent() {
   }, [showError]);
 
   useEffect(() => {
-    const clearWebhookCommand = () => {
+    const clearIncidentCommands = () => {
+      stakeholderCommandGenerationRef.current += 1;
+      pendingStakeholderCommandRef.current = null;
+      activeStakeholderCommandRef.current = null;
       webhookCommandGenerationRef.current += 1;
       pendingWebhookCommandRef.current = null;
       activeWebhookCommandRef.current = null;
       flushSync(() => {
+        setNotifyIncidentId(null);
+        setNotifyRecipients('');
+        setNotifyMessage('');
+        setNotifying(false);
+        setNotifyResults(null);
+        setNotifyCommandMessage('');
+        setNotifyRetryAvailable(false);
         setWebhookNotifyIncident(null);
         setWebhookNarrative('');
         setWebhookNarrativeReviewed(false);
@@ -247,28 +286,21 @@ function IncidentsPageContent() {
       });
     };
     const handlePageShow = (event: PageTransitionEvent) => {
-      if (event.persisted) clearWebhookCommand();
+      if (event.persisted) clearIncidentCommands();
     };
-    window.addEventListener('pagehide', clearWebhookCommand);
+    window.addEventListener('pagehide', clearIncidentCommands);
     window.addEventListener('pageshow', handlePageShow);
     return () => {
-      window.removeEventListener('pagehide', clearWebhookCommand);
+      window.removeEventListener('pagehide', clearIncidentCommands);
       window.removeEventListener('pageshow', handlePageShow);
+      stakeholderCommandGenerationRef.current += 1;
+      pendingStakeholderCommandRef.current = null;
+      activeStakeholderCommandRef.current = null;
       webhookCommandGenerationRef.current += 1;
       pendingWebhookCommandRef.current = null;
       activeWebhookCommandRef.current = null;
     };
   }, []);
-
-  useEffect(() => {
-    if (!webhookRetryAvailable) return;
-    const preserveAmbiguousCommand = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-      event.returnValue = '';
-    };
-    window.addEventListener('beforeunload', preserveAmbiguousCommand);
-    return () => window.removeEventListener('beforeunload', preserveAmbiguousCommand);
-  }, [webhookRetryAvailable]);
 
   const setIncidentUpdating = useCallback((incidentId: string, isUpdating: boolean) => {
     setUpdatingIncidents((prev) => {
@@ -469,46 +501,127 @@ function IncidentsPageContent() {
     }
   };
 
+  const runStakeholderNotificationCommand = async (
+    pending: PendingStakeholderNotificationCommand,
+    retry: boolean,
+  ) => {
+    const generation = stakeholderCommandGenerationRef.current;
+    const token = Symbol('stakeholder-notification-command');
+    activeStakeholderCommandRef.current = token;
+    pendingStakeholderCommandRef.current = pending;
+    setNotifying(true);
+    setNotifyRetryAvailable(false);
+    setNotifyCommandMessage('');
+    try {
+      const result = retry ? await pending.command.retry() : await pending.command.run();
+      if (
+        stakeholderCommandGenerationRef.current !== generation
+        || activeStakeholderCommandRef.current !== token
+      ) return;
+      pendingStakeholderCommandRef.current = null;
+      setNotifyResults(result);
+      const sentCount = result.notifications.filter((n) => n.status === 'sent').length;
+      const unknownCount = result.notifications.filter((n) => n.status === 'unknown').length;
+      setNotifyCommandMessage(
+        unknownCount > 0
+          ? (
+            `${unknownCount} delivery outcome(s) are unknown and were not resent. `
+            + 'Confirm with the recipients before starting a new command.'
+          )
+          : result.replayed
+            ? 'Recovered the durable result from the original command.'
+            : '',
+      );
+      success(`Notification sent to ${sentCount}/${result.notifications.length} recipient(s)`);
+      await reload();
+    } catch (err: unknown) {
+      if (
+        stakeholderCommandGenerationRef.current !== generation
+        || activeStakeholderCommandRef.current !== token
+      ) return;
+      if (pending.command.canRetry) {
+        setNotifyRetryAvailable(true);
+        setNotifyCommandMessage(
+          'The command result is unknown. Retry the same command to recover its durable result.',
+        );
+      } else {
+        pendingStakeholderCommandRef.current = null;
+        const message = err instanceof Error && err.message
+          ? err.message
+          : 'Failed to send notifications';
+        showError(message);
+      }
+    } finally {
+      if (
+        stakeholderCommandGenerationRef.current === generation
+        && activeStakeholderCommandRef.current === token
+      ) {
+        activeStakeholderCommandRef.current = null;
+        setNotifying(false);
+      }
+    }
+  };
+
   const handleNotifyStakeholders = async () => {
-    if (!notifyIncidentId) return;
+    if (!notifyIncidentId || notifying || pendingStakeholderCommandRef.current) return;
     const emails = notifyRecipients
       .split(',')
-      .map((e) => e.trim())
+      .map((email) => email.trim())
       .filter(Boolean);
     if (emails.length === 0) {
       showError('At least one recipient email is required');
       return;
     }
-    try {
-      setNotifying(true);
-      const result = await api.notifyIncidentStakeholders(notifyIncidentId, {
-        recipients: emails,
-        ...(notifyMessage.trim() ? { message: notifyMessage.trim() } : {}),
-      });
-      setNotifyResults(result);
-      const sentCount = result.notifications.filter((n) => n.status === 'sent').length;
-      success(`Notification sent to ${sentCount}/${result.notifications.length} recipient(s)`);
-      await reload();
-    } catch (err: unknown) {
-      const message = err instanceof Error && err.message ? err.message : 'Failed to send notifications';
-      showError(message);
-    } finally {
-      setNotifying(false);
-    }
+    const body: StakeholderNotificationCommandBody = {
+      incidentId: notifyIncidentId,
+      recipients: emails,
+      ...(notifyMessage.trim() ? { message: notifyMessage.trim() } : {}),
+    };
+    const pending: PendingStakeholderNotificationCommand = {
+      command: createIdempotentCommand(
+        'notify_stakeholders',
+        body,
+        ({ body: commandBody, idempotencyKey }) => api.notifyIncidentStakeholders(
+          commandBody.incidentId,
+          {
+            recipients: [...commandBody.recipients],
+            ...(commandBody.message ? { message: commandBody.message } : {}),
+          },
+          idempotencyKey,
+        ),
+      ),
+    };
+    await runStakeholderNotificationCommand(pending, false);
+  };
+
+  const retryStakeholderNotificationCommand = async () => {
+    const pending = pendingStakeholderCommandRef.current;
+    if (pending) await runStakeholderNotificationCommand(pending, true);
   };
 
   const openNotifyDialog = (incidentId: string) => {
+    stakeholderCommandGenerationRef.current += 1;
+    pendingStakeholderCommandRef.current = null;
+    activeStakeholderCommandRef.current = null;
     setNotifyIncidentId(incidentId);
     setNotifyRecipients('');
     setNotifyMessage('');
     setNotifyResults(null);
+    setNotifyCommandMessage('');
+    setNotifyRetryAvailable(false);
   };
 
   const closeNotifyDialog = () => {
+    if (notifying || notifyRetryAvailable) return;
+    stakeholderCommandGenerationRef.current += 1;
+    pendingStakeholderCommandRef.current = null;
+    activeStakeholderCommandRef.current = null;
     setNotifyIncidentId(null);
     setNotifyRecipients('');
     setNotifyMessage('');
     setNotifyResults(null);
+    setNotifyCommandMessage('');
+    setNotifyRetryAvailable(false);
   };
 
   const openWebhookNotifyDialog = (incident: IncidentItem) => {
@@ -547,7 +660,10 @@ function IncidentsPageContent() {
     try {
       const result = await api.notifyIncidentWebhooks(
         pending.incidentId,
-        { narrative: pending.narrative },
+        {
+          narrative: pending.narrative,
+          expected_resource_version: pending.expectedResourceVersion,
+        },
         pending.idempotencyKey,
       );
       if (
@@ -568,7 +684,8 @@ function IncidentsPageContent() {
         || activeWebhookCommandRef.current !== token
       ) return;
       const ambiguous = err instanceof TypeError
-        || (err instanceof ApiError && [502, 504].includes(err.status))
+        || (err instanceof WebhookContractError && err.status >= 200 && err.status <= 299)
+        || (err instanceof ApiError && err.status >= 500 && err.status <= 599)
         || (err instanceof Error && ['AbortError', 'NetworkError'].includes(err.name));
       if (ambiguous) {
         setWebhookRetryAvailable(true);
@@ -599,6 +716,7 @@ function IncidentsPageContent() {
     await runWebhookNotifyCommand({
       incidentId: webhookNotifyIncident.id,
       narrative,
+      expectedResourceVersion: webhookNotifyIncident.version,
       idempotencyKey: generateIdempotencyKey(),
     });
   };
@@ -1206,7 +1324,8 @@ function IncidentsPageContent() {
                     placeholder="alice@example.com, bob@example.com"
                     value={notifyRecipients}
                     onChange={(e) => setNotifyRecipients(e.target.value)}
-                    disabled={notifying}
+                    disabled={notifying || notifyRetryAvailable || notifyResults !== null}
+                    maxLength={10_000}
                   />
                 </div>
                 <div className="space-y-1">
@@ -1218,25 +1337,45 @@ function IncidentsPageContent() {
                     placeholder="Optional custom message for stakeholders"
                     value={notifyMessage}
                     onChange={(e) => setNotifyMessage(e.target.value)}
-                    disabled={notifying}
+                    disabled={notifying || notifyRetryAvailable || notifyResults !== null}
+                    maxLength={4096}
                   />
                 </div>
+                {notifyCommandMessage ? (
+                  <Alert variant={notifyRetryAvailable ? 'destructive' : 'default'}>
+                    <AlertDescription>{notifyCommandMessage}</AlertDescription>
+                  </Alert>
+                ) : null}
                 <div className="flex justify-end gap-2">
-                  <Button variant="outline" onClick={closeNotifyDialog} disabled={notifying}>
-                    Cancel
-                  </Button>
                   <Button
-                    onClick={() => {
-                      void handleNotifyStakeholders();
-                    }}
-                    disabled={notifying}
-                    loading={notifying}
-                    loadingText="Sending..."
-                    data-testid="notify-send-button"
+                    variant="outline"
+                    onClick={closeNotifyDialog}
+                    disabled={notifying || notifyRetryAvailable}
                   >
-                    <Mail className="mr-2 h-4 w-4" />
-                    Send Notification
+                    {notifyResults ? 'Close' : 'Cancel'}
                   </Button>
+                  {notifyRetryAvailable ? (
+                    <Button
+                      onClick={() => { void retryStakeholderNotificationCommand(); }}
+                      loading={notifying}
+                      loadingText="Retrying..."
+                    >
+                      Retry same command
+                    </Button>
+                  ) : notifyResults === null ? (
+                    <Button
+                      onClick={() => {
+                        void handleNotifyStakeholders();
+                      }}
+                      disabled={notifying}
+                      loading={notifying}
+                      loadingText="Sending..."
+                      data-testid="notify-send-button"
+                    >
+                      <Mail className="mr-2 h-4 w-4" />
+                      Send Notification
+                    </Button>
+                  ) : null}
                 </div>
                 {notifyResults && (
                   <div className="space-y-2 rounded-md border p-3" data-testid="notify-results">
@@ -1279,7 +1418,7 @@ function IncidentsPageContent() {
                         setWebhookNarrativeReviewed(false);
                       }}
                       maxLength={4096}
-                      disabled={webhookNotifying || webhookNotifyResult !== null}
+                      disabled={webhookNotifying || webhookRetryAvailable || webhookNotifyResult !== null}
                     />
                     <p className="text-xs text-muted-foreground">
                       This text is delivered to configured receivers. Do not include secrets.
@@ -1325,7 +1464,7 @@ function IncidentsPageContent() {
                       id="incident-webhook-reviewed"
                       checked={webhookNarrativeReviewed}
                       onCheckedChange={(checked) => setWebhookNarrativeReviewed(Boolean(checked))}
-                      disabled={webhookNotifying || webhookNotifyResult !== null}
+                      disabled={webhookNotifying || webhookRetryAvailable || webhookNotifyResult !== null}
                     />
                     <Label htmlFor="incident-webhook-reviewed" className="font-normal leading-5">
                       I reviewed this narrative and the incident details above.

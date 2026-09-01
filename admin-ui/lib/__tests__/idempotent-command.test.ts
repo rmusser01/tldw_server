@@ -6,6 +6,7 @@ import {
   IdempotentCommandStateError,
   createIdempotentCommand,
 } from '../idempotent-command';
+import { ApiError, WebhookContractError } from '../http';
 
 const BODY = {
   url: 'https://receiver.example/hooks/private',
@@ -97,6 +98,21 @@ describe('idempotent command lifecycle', () => {
     expect(request.mock.calls[0]?.[0].idempotencyKey).toBe(
       request.mock.calls[1]?.[0].idempotencyKey,
     );
+  });
+
+  it.each([
+    new ApiError(503, 'Service unavailable'),
+    new WebhookContractError(201, 'Malformed committed response', 'request-create'),
+  ])('allows a same-key retry after an ambiguous API result', async (failure) => {
+    const request = vi.fn()
+      .mockRejectedValueOnce(failure)
+      .mockResolvedValueOnce({ ok: true });
+    const command = createIdempotentCommand('create', BODY, request);
+
+    await expect(command.run()).rejects.toBe(failure);
+    expect(command.canRetry).toBe(true);
+    await expect(command.retry()).resolves.toEqual({ ok: true });
+    expect(request.mock.calls[0]?.[0]).toBe(request.mock.calls[1]?.[0]);
   });
 
   it('clears retry eligibility after completion', async () => {

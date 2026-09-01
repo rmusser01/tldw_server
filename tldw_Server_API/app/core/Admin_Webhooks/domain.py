@@ -569,7 +569,7 @@ class ValidatedWebhookTarget:
     target_display: str
 
 
-_PENDING_MARKER_FIELDS = frozenset(
+_LEGACY_PENDING_MARKER_FIELDS = frozenset(
     {
         "event_id",
         "event_type",
@@ -587,9 +587,11 @@ _PENDING_MARKER_FIELDS = frozenset(
         "created_at",
     }
 )
+_PENDING_MARKER_FIELDS = _LEGACY_PENDING_MARKER_FIELDS | {"request_fingerprint"}
 _MARKER_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,255}$")
 _MARKER_COMPONENT_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
 _MARKER_REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+_MARKER_REQUEST_FINGERPRINT_PATTERN = re.compile(r"^hmac-sha256:[0-9a-f]{64}$")
 
 
 @dataclass(frozen=True)
@@ -609,6 +611,8 @@ class PendingIncidentWebhookMarker:
     body: ProtectedValue
     body_size_bytes: int
     created_at: datetime
+    request_fingerprint: str | None = None
+    uses_legacy_aad: bool = False
 
     def __post_init__(self) -> None:
         if _MARKER_ID_PATTERN.fullmatch(self.event_id) is None:
@@ -627,6 +631,15 @@ class PendingIncidentWebhookMarker:
             _MARKER_REQUEST_ID_PATTERN.fullmatch(self.source_request_id) is None
         ):
             raise ValueError("pending marker source request ID is invalid")
+        if self.request_fingerprint is not None and (
+            _MARKER_REQUEST_FINGERPRINT_PATTERN.fullmatch(
+                self.request_fingerprint
+            )
+            is None
+        ):
+            raise ValueError("pending marker request fingerprint is invalid")
+        if not isinstance(self.uses_legacy_aad, bool):
+            raise TypeError("pending marker legacy AAD flag must be boolean")
         if not isinstance(self.body, ProtectedValue):
             raise TypeError("pending marker body must be protected")
         if (
@@ -664,7 +677,12 @@ class PendingIncidentWebhookMarker:
         identity: dict[str, str | int] = {
             "event_id": self.event_id,
             "api_version": self.api_version,
+            "source_component": self.source_component,
         }
+        if self.source_request_id is not None:
+            identity["source_request_id"] = self.source_request_id
+        if self.request_fingerprint is not None:
+            identity["request_fingerprint"] = self.request_fingerprint
         if self.source_kind == "command":
             source_command_id = self.source_command_id
             if source_command_id is None:
@@ -685,6 +703,34 @@ class PendingIncidentWebhookMarker:
             )
         return identity
 
+    @property
+    def legacy_envelope_identity(self) -> Mapping[str, str | int]:
+        """Return the pre-authenticated-metadata AAD for legacy readback."""
+
+        identity: dict[str, str | int] = {
+            "event_id": self.event_id,
+            "api_version": self.api_version,
+        }
+        if self.source_kind == "command":
+            if self.source_command_id is None:
+                raise ValueError("pending command marker identity is invalid")
+            identity["source_command_id"] = self.source_command_id
+        else:
+            if (
+                self.aggregate_type is None
+                or self.aggregate_id is None
+                or self.aggregate_version is None
+            ):
+                raise ValueError("pending aggregate marker identity is invalid")
+            identity.update(
+                {
+                    "aggregate_type": self.aggregate_type,
+                    "aggregate_id": self.aggregate_id,
+                    "aggregate_version": self.aggregate_version,
+                }
+            )
+        return identity
+
     def to_store_record(self) -> dict[str, object]:
         """Return the exact structural representation persisted in system ops."""
         return {
@@ -698,6 +744,7 @@ class PendingIncidentWebhookMarker:
             "source_command_id": self.source_command_id,
             "source_component": self.source_component,
             "source_request_id": self.source_request_id,
+            "request_fingerprint": self.request_fingerprint,
             "body_ciphertext_json": self.body.ciphertext_json,
             "body_key_id": self.body.key_id,
             "body_size_bytes": self.body_size_bytes,
@@ -707,8 +754,12 @@ class PendingIncidentWebhookMarker:
     @classmethod
     def from_store_record(cls, value: object) -> PendingIncidentWebhookMarker:
         """Parse one exact marker record without permissive coercion."""
-        if not isinstance(value, dict) or set(value) != _PENDING_MARKER_FIELDS:
+        if not isinstance(value, dict) or set(value) not in {
+            _LEGACY_PENDING_MARKER_FIELDS,
+            _PENDING_MARKER_FIELDS,
+        }:
             raise ValueError("pending incident marker record is invalid")
+        uses_legacy_aad = set(value) == _LEGACY_PENDING_MARKER_FIELDS
 
         def optional_text(name: str) -> str | None:
             item = value[name]
@@ -754,6 +805,12 @@ class PendingIncidentWebhookMarker:
             ),
             body_size_bytes=value["body_size_bytes"],
             created_at=created_at,
+            request_fingerprint=(
+                optional_text("request_fingerprint")
+                if "request_fingerprint" in value
+                else None
+            ),
+            uses_legacy_aad=uses_legacy_aad,
         )
 
 

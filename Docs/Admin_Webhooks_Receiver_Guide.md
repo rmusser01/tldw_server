@@ -226,8 +226,9 @@ shape:
 }
 ```
 
-`narrative` is either `null` or the exact operator-reviewed string with a
-maximum length of 4,096 characters. It is not trimmed or rewritten. This is the
+`narrative` is either `null` or the operator-reviewed string with surrounding
+whitespace trimmed once and a maximum length of 4,096 characters. A string that
+is empty after trimming becomes `null`; internal content is not rewritten. This is the
 only routine incident event that may contain operator-authored free text.
 
 Incident events never include title, summary, tags, timeline messages,

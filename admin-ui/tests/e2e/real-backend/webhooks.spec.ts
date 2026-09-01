@@ -40,6 +40,16 @@ type DeliveryHistory = {
   items: Array<{ delivery: WebhookDelivery }>;
 };
 
+type Incident = {
+  created_at: string;
+  id: string;
+  resolved_at: string | null;
+  severity: string;
+  status: string;
+  updated_at: string;
+  version: number;
+};
+
 const readBody = async (request: IncomingMessage): Promise<Buffer> => {
   const chunks: Buffer[] = [];
   for await (const chunk of request) {
@@ -280,7 +290,8 @@ test('proves the canonical webhook lifecycle against the real backend and receiv
     }), { timeout: 30_000 }).toBe(true);
 
     await removeExistingRegistrations(page);
-    await page.goto('/webhooks');
+    await page.goto('/incidents');
+    await page.locator('a[href="/webhooks"]').first().click();
     await expect(page.getByRole('heading', { name: /^webhooks$/i })).toBeVisible();
     const runtime = page.getByLabel('Webhook delivery runtime');
     for (const readyState of [
@@ -302,7 +313,25 @@ test('proves the canonical webhook lifecycle against the real backend and receiv
     await createDialog.getByLabel(/timeout/i).fill('5');
     await createDialog.getByRole('checkbox', { name: /^user\.created\b/i }).click();
     await createDialog.getByRole('checkbox', { name: /^incident\.created\b/i }).click();
+    await createDialog.getByRole('checkbox', { name: /^incident\.notify\b/i }).click();
     await createDialog.getByRole('button', { name: /^create$/i }).click();
+    const secretDialog = page.getByRole('dialog', { name: /^signing secret$/i });
+    await expect(secretDialog).toBeVisible();
+    const navigationAllowed = await page.evaluate(() => {
+      const link = document.querySelector<HTMLAnchorElement>('a[href="/incidents"]');
+      if (!link) throw new Error('Incident navigation link is unavailable');
+      return link.dispatchEvent(new MouseEvent('click', {
+        bubbles: true,
+        cancelable: true,
+      }));
+    });
+    expect(navigationAllowed).toBe(false);
+    await expect(page).toHaveURL(/\/webhooks$/u);
+    await expect(secretDialog).toBeVisible();
+    await page.evaluate(() => history.back());
+    await page.waitForTimeout(100);
+    await expect(page).toHaveURL(/\/webhooks$/u);
+    await expect(secretDialog).toBeVisible();
     const initialSecret = await storeOneTimeSecret(page);
     receiver.setSigningSecret(initialSecret);
 
@@ -321,7 +350,7 @@ test('proves the canonical webhook lifecycle against the real backend and receiv
       is_active: true,
       is_verified: true,
     });
-    await postProxyJson(page, '/api/proxy/admin/incidents', {
+    const incident = await postProxyJson<Incident>(page, '/api/proxy/admin/incidents', {
       title: `Private beta webhook incident ${suffix}`,
       status: 'open',
       severity: 'high',
@@ -337,6 +366,52 @@ test('proves the canonical webhook lifecycle against the real backend and receiv
     ).toBe(2);
     expect(receiver.errors).toEqual([]);
 
+    await page.goto('/incidents');
+    await page.getByTestId(`incident-webhook-notify-${incident.id}`).click();
+    const notifyDialog = page.getByRole('dialog', { name: /notify webhook receivers/i });
+    const notifyPreview = notifyDialog.getByRole('region', { name: /outbound event preview/i });
+    await expect(notifyPreview).toContainText('incident.notify');
+    await expect(notifyPreview).toContainText(incident.id);
+    await expect(
+      notifyPreview.getByText('resource_version', { exact: true }).locator('xpath=following-sibling::dd[1]'),
+    ).toHaveText(String(incident.version));
+    await notifyDialog.getByLabel(/receiver narrative/i).fill(
+      '  Imports are delayed; no data loss is known.  ',
+    );
+    await notifyDialog.getByLabel(/i reviewed this narrative/i).check();
+    await notifyDialog.getByRole('button', { name: /send webhook notification/i }).click();
+    await expect(notifyDialog.getByText(/command accepted for durable delivery/i)).toBeVisible();
+    await expect.poll(
+      () => countReceiverCaptures(
+        receiver,
+        (capture) => capture.headers['x-tldw-webhook-event'] === 'incident.notify',
+      ),
+      { timeout: 30_000 },
+    ).toBe(1);
+    const notifyCapture = receiver.captures.find(
+      (capture) => capture.headers['x-tldw-webhook-event'] === 'incident.notify',
+    );
+    expect(Object.keys(notifyCapture?.payload ?? {}).sort()).toEqual([
+      'api_version',
+      'created_at',
+      'data',
+      'id',
+      'type',
+    ]);
+    expect(notifyCapture?.payload.data).toEqual({
+      created_at: incident.created_at,
+      incident_id: incident.id,
+      narrative: 'Imports are delayed; no data loss is known.',
+      resolved_at: incident.resolved_at,
+      resource_version: incident.version,
+      severity: incident.severity,
+      state: incident.status,
+      updated_at: incident.updated_at,
+    });
+
+    await page.goto('/webhooks');
+    await expect(registrationRow).toContainText('Active');
+
     const registrations = await fetchProxyJson<{ items: WebhookRegistration[] }>(
       page,
       '/api/proxy/admin/webhooks?limit=100&offset=0',
@@ -349,6 +424,7 @@ test('proves the canonical webhook lifecycle against the real backend and receiv
     const historyRegion = page.getByRole('region', { name: /delivery history/i });
     await expect(historyRegion.getByText('user.created', { exact: true })).toBeVisible();
     await expect(historyRegion.getByText('incident.created', { exact: true })).toBeVisible();
+    await expect(historyRegion.getByText('incident.notify', { exact: true })).toBeVisible();
     await expect(historyRegion.getByText(/attempt 1: succeeded/i).first()).toBeVisible();
 
     const automaticHistory = await fetchProxyJson<DeliveryHistory>(

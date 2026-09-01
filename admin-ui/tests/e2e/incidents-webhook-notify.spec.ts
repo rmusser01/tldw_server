@@ -82,7 +82,7 @@ test('previews and queues the exact public incident webhook command', async ({ p
         incident_id: INCIDENT.id,
         event_id: '22222222-2222-4222-8222-222222222222',
         event_type: 'incident.notify',
-        command_id: '33333333-3333-4333-8333-333333333333',
+        command_id: `sha256:${'3'.repeat(64)}`,
         accepted: true,
         replayed: false,
       }, 202);
@@ -116,6 +116,7 @@ test('previews and queues the exact public incident webhook command', async ({ p
   await expect(dialog.getByText(/command accepted for durable delivery/i)).toBeVisible();
   expect(commandBody).toEqual({
     narrative: 'Customer imports are delayed; no data loss is known.',
+    expected_resource_version: 7,
   });
   expect(idempotencyKey).toMatch(/^[0-9a-f]{32}$/);
 

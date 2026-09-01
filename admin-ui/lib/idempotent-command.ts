@@ -1,3 +1,5 @@
+import { ApiError, WebhookContractError } from './http';
+
 type CommandState = 'ready' | 'running' | 'retryable' | 'completed' | 'failed';
 
 export type IdempotentCommandRequest<TBody> = Readonly<{
@@ -40,11 +42,20 @@ const normalizeBody = <TBody>(body: TBody): Readonly<TBody> => {
 
 const isTransportFailure = (error: unknown): boolean => {
   if (error instanceof TypeError) return true;
-  return error instanceof Error
+  if (error instanceof Error
     && (
       error.name === 'AbortError'
       || error.name === 'NetworkError'
       || error.name === 'WebhookTransportError'
+    )) return true;
+  return error instanceof ApiError
+    && (
+      error.status >= 500
+      || (
+        error instanceof WebhookContractError
+        && error.status >= 200
+        && error.status < 300
+      )
     );
 };
 

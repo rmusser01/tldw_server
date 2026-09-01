@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import hmac
 import os
-from collections.abc import Callable, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from uuid import UUID, uuid4
 
 from .catalog import EVENT_API_VERSION
@@ -26,6 +26,8 @@ from .domain import (
 )
 from .events import (
     canonical_event_body,
+    decrypt_pending_incident_marker_body,
+    parse_canonical_event_body,
     prepare_event_insert,
     snapshot_json_object,
     verify_event_replay,
@@ -44,9 +46,7 @@ if TYPE_CHECKING:
 _INCIDENT_SEVERITIES = frozenset({"low", "medium", "high", "critical"})
 _INCIDENT_STATES = frozenset({"open", "investigating", "mitigating", "resolved"})
 _MAX_INCIDENT_NARRATIVE_LENGTH = 4096
-_ACTIVE_ROTATION_PHASES = frozenset(
-    {"rewriting", "verifying", "awaiting_primary_cutover"}
-)
+_ACTIVE_ROTATION_PHASES = frozenset({"rewriting", "verifying", "awaiting_primary_cutover"})
 
 
 def _positive_int(value: object, *, field_name: str) -> int:
@@ -362,11 +362,7 @@ def _validated_user_data(
     }
     if set(data) != expected_fields:
         raise ValueError("user event data is invalid")
-    builder = (
-        build_user_created_data
-        if event_type == "user.created"
-        else build_user_deleted_data
-    )
+    builder = build_user_created_data if event_type == "user.created" else build_user_deleted_data
     if data["status"] not in {"active", "inactive"}:
         raise ValueError("user event status is invalid")
     if event_type == "user.deleted" and data["status"] != "inactive":
@@ -408,11 +404,7 @@ def _validated_incident_data(
     if set(data) != expected_fields:
         raise ValueError("incident event data is invalid")
     resolved_value = data["resolved_at"]
-    resolved_at = (
-        _public_timestamp(resolved_value, field_name="resolved at")
-        if resolved_value is not None
-        else None
-    )
+    resolved_at = _public_timestamp(resolved_value, field_name="resolved at") if resolved_value is not None else None
     common = {
         "incident_id": data["incident_id"],
         "state": data["state"],
@@ -481,10 +473,7 @@ def _validate_source_coordinates(
         return
     if (
         source_kind is not EventSourceKind.COMMAND
-        or any(
-            coordinate is not None
-            for coordinate in (aggregate_type, aggregate_id, aggregate_version)
-        )
+        or any(coordinate is not None for coordinate in (aggregate_type, aggregate_id, aggregate_version))
         or source_command_id is None
     ):
         raise ValueError("command event source is invalid")
@@ -540,6 +529,21 @@ class AdminWebhookEventProducer:
             source_component=source_component,
             source_request_id=source_request_id,
         )
+
+    @asynccontextmanager
+    async def incident_marker_publication_guard(self) -> AsyncIterator[None]:
+        """Serialize marker publication with key-rotation activation."""
+
+        publication_error: Exception | None = None
+        async with self._repository.transaction() as tx:
+            state = await tx.lock_migration_state()
+            require_writable_event_ring(state, self._key_ring_result)
+            try:
+                yield
+            except Exception as exc:  # noqa: BLE001 - release the guard before preserving source errors.
+                publication_error = exc
+        if publication_error is not None:
+            raise publication_error.with_traceback(publication_error.__traceback__)
 
     async def capture_in_transaction(
         self,
@@ -601,8 +605,7 @@ class AdminWebhookEventProducer:
         result = await tx.capture_event_and_expand(
             prepared.event,
             self._delivery_id_factory,
-            preparation.created_at
-            + timedelta(seconds=self._settings.delivery_expiry_seconds),
+            preparation.created_at + timedelta(seconds=self._settings.delivery_expiry_seconds),
         )
         if not result.inserted:
             verify_event_replay(
@@ -622,6 +625,7 @@ class AdminWebhookEventProducer:
         aggregate_id: str | None,
         aggregate_version: str | None,
         source_command_id: str | None,
+        request_fingerprint: str | None = None,
         data: Mapping[str, object],
     ) -> PendingIncidentWebhookMarker:
         """Build one protected file marker after incident identity is known."""
@@ -655,7 +659,12 @@ class AdminWebhookEventProducer:
             identity: dict[str, str | int] = {
                 "event_id": preparation.event_id,
                 "api_version": EVENT_API_VERSION,
+                "source_component": preparation.source_component,
             }
+            if preparation.source_request_id is not None:
+                identity["source_request_id"] = preparation.source_request_id
+            if request_fingerprint is not None:
+                identity["request_fingerprint"] = request_fingerprint
             if source_kind is EventSourceKind.AGGREGATE:
                 if aggregate_type is None or aggregate_id is None or aggregate_version is None:
                     raise ValueError("aggregate event source is invalid")
@@ -689,6 +698,7 @@ class AdminWebhookEventProducer:
                 body=protected,
                 body_size_bytes=len(body),
                 created_at=preparation.created_at,
+                request_fingerprint=request_fingerprint,
             )
         except WebhookError:
             raise
@@ -701,42 +711,121 @@ class AdminWebhookEventProducer:
         self,
         marker: PendingIncidentWebhookMarker,
         *,
-        data: Mapping[str, object],
+        request_fingerprint: str,
+        incident_id: str,
+        narrative: str | None,
+        expected_resource_version: int,
     ) -> None:
-        """Require an existing pending marker to contain the requested body."""
+        """Require a pending command marker to match the stable request."""
 
         ring = self._key_ring_result.ring
         if ring is None:
             raise WebhookError(WebhookErrorCode.KEY_UNAVAILABLE)
         try:
-            validated = _validated_production_data(marker.event_type, data)
-            expected = canonical_event_body(
+            if marker.source_kind != EventSourceKind.COMMAND.value or (
+                marker.request_fingerprint is not None
+                and marker.request_fingerprint != request_fingerprint
+            ):
+                raise ValueError("pending command source is invalid")
+            plaintext, _ = decrypt_pending_incident_marker_body(ring, marker)
+            if marker.body_size_bytes != len(plaintext):
+                raise ValueError("pending command body size is invalid")
+            data = parse_canonical_event_body(
+                plaintext,
                 event_id=marker.event_id,
                 event_type=marker.event_type,
                 api_version=marker.api_version,
                 created_at=marker.created_at,
-                data=snapshot_json_object(validated),
             )
-            plaintext = ring.decrypt_bytes(
-                purpose=marker.envelope_purpose,
-                identity=marker.envelope_identity,
-                protected=marker.body,
-            )
+            validated = _validated_production_data(marker.event_type, data)
+            if (
+                validated["incident_id"] != incident_id
+                or validated["narrative"] != narrative
+                or validated["resource_version"] != expected_resource_version
+            ):
+                raise ValueError("pending command request is invalid")
         except (WebhookKeyError, TypeError, ValueError, OverflowError, RecursionError):
             raise WebhookError(WebhookErrorCode.IDEMPOTENCY_CONFLICT) from None
-        if (
-            marker.body_size_bytes != len(expected)
-            or marker.body_size_bytes != len(plaintext)
-            or not hmac.compare_digest(plaintext, expected)
-        ):
-            raise WebhookError(WebhookErrorCode.IDEMPOTENCY_CONFLICT)
+
+    async def capture_incident_marker(
+        self,
+        marker: PendingIncidentWebhookMarker,
+    ) -> EventCaptureResult:
+        """Capture one durable incident marker through canonical source arbitration."""
+
+        ring = self._key_ring_result.ring
+        if ring is None:
+            raise WebhookError(WebhookErrorCode.KEY_UNAVAILABLE)
+        try:
+            plaintext, _ = decrypt_pending_incident_marker_body(ring, marker)
+            if marker.body_size_bytes != len(plaintext):
+                raise ValueError("pending incident body size is invalid")
+            data = parse_canonical_event_body(
+                plaintext,
+                event_id=marker.event_id,
+                event_type=marker.event_type,
+                api_version=marker.api_version,
+                created_at=marker.created_at,
+            )
+            validated_data = _validated_production_data(marker.event_type, data)
+            source_kind = EventSourceKind(marker.source_kind)
+            preparation = ProductionEventPreparation(
+                event_id=marker.event_id,
+                created_at=marker.created_at,
+                source_component=marker.source_component,
+                source_request_id=marker.source_request_id,
+            )
+        except WebhookKeyError:
+            raise WebhookError(WebhookErrorCode.KEY_UNAVAILABLE) from None
+        except (TypeError, ValueError, OverflowError, RecursionError):
+            raise WebhookError(WebhookErrorCode.VALIDATION_FAILED) from None
+
+        try:
+            async with self._repository.transaction() as tx:
+                return await self.capture_in_transaction(
+                    preparation,
+                    tx=tx,
+                    event_type=marker.event_type,
+                    source_kind=source_kind,
+                    aggregate_type=marker.aggregate_type,
+                    aggregate_id=marker.aggregate_id,
+                    aggregate_version=marker.aggregate_version,
+                    source_command_id=marker.source_command_id,
+                    data=validated_data,
+                )
+        except WebhookError as exc:
+            if (
+                exc.code is not WebhookErrorCode.IDEMPOTENCY_CONFLICT
+                or marker.event_type != "incident.notify"
+                or marker.source_command_id is None
+            ):
+                raise
+            stored = await self.find_incident_command_replay(
+                event_type=marker.event_type,
+                source_command_id=marker.source_command_id,
+                incident_id=cast(str, validated_data["incident_id"]),
+                narrative=cast(str | None, validated_data["narrative"]),
+                expected_resource_version=cast(
+                    int,
+                    validated_data["resource_version"],
+                ),
+            )
+            if stored is None:
+                raise
+            from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
+                EventCaptureResult,
+            )
+
+            return EventCaptureResult(event=stored, deliveries=(), inserted=False)
 
     async def find_incident_command_replay(
         self,
         *,
         event_type: str,
         source_command_id: str,
-        data: Mapping[str, object],
+        incident_id: str,
+        narrative: str | None,
+        expected_resource_version: int,
     ) -> StoredWebhookEvent | None:
         """Return and verify an already-reconciled incident command event."""
 
@@ -750,27 +839,33 @@ class AdminWebhookEventProducer:
         if ring is None:
             raise WebhookError(WebhookErrorCode.KEY_UNAVAILABLE)
         try:
-            validated = _validated_production_data(event_type, data)
-            expected = canonical_event_body(
-                event_id=stored.id,
-                event_type=stored.event.event_type,
-                api_version=stored.event.api_version,
-                created_at=stored.event.created_at,
-                data=snapshot_json_object(validated),
-            )
             plaintext = ring.decrypt_event_body(
                 event_id=stored.id,
                 api_version=stored.event.api_version,
                 protected=stored.body,
             )
+            if stored.body_size_bytes != len(plaintext):
+                raise ValueError("stored command body size is invalid")
+            data = parse_canonical_event_body(
+                plaintext,
+                event_id=stored.id,
+                event_type=stored.event.event_type,
+                api_version=stored.event.api_version,
+                created_at=stored.event.created_at,
+            )
+            validated = _validated_production_data(event_type, data)
+            if (
+                validated["incident_id"] != incident_id
+                or validated["narrative"] != narrative
+                or validated["resource_version"] != expected_resource_version
+            ):
+                raise ValueError("stored command request is invalid")
         except (WebhookKeyError, TypeError, ValueError, OverflowError, RecursionError):
             raise WebhookError(WebhookErrorCode.IDEMPOTENCY_CONFLICT) from None
         if (
             stored.event.source_kind is not EventSourceKind.COMMAND
             or stored.source_command_id != source_command_id
-            or stored.body_size_bytes != len(expected)
-            or stored.body_size_bytes != len(plaintext)
-            or not hmac.compare_digest(plaintext, expected)
+            or stored.source_component != "admin_system_ops"
         ):
             raise WebhookError(WebhookErrorCode.IDEMPOTENCY_CONFLICT)
         return stored
@@ -787,15 +882,11 @@ def build_admin_webhook_event_producer(
         AdminWebhookRepository,
     )
 
-    settings = AdminWebhookSettings.from_environment(
-        os.environ if environ is None else environ
-    )
+    settings = AdminWebhookSettings.from_environment(os.environ if environ is None else environ)
     return AdminWebhookEventProducer(
         repository=AdminWebhookRepository(pool),
         settings=settings,
-        key_ring_result=load_webhook_key_ring(
-            os.environ if environ is None else environ
-        ),
+        key_ring_result=load_webhook_key_ring(os.environ if environ is None else environ),
         event_id_factory=lambda: str(uuid4()),
         delivery_id_factory=lambda: str(uuid4()),
         clock=lambda: datetime.now(timezone.utc),

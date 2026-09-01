@@ -2,6 +2,7 @@
 
 import { useEffect, useCallback, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { requestSensitiveNavigation } from './use-sensitive-navigation-guard';
 
 interface ShortcutConfig {
   key: string;
@@ -25,103 +26,106 @@ export function openShortcutsHelp(): void {
 export function useKeyboardShortcuts() {
   const router = useRouter();
   const [isHelpOpen, setIsHelpOpen] = useState(false);
+  const navigate = useCallback((path: string) => {
+    if (requestSensitiveNavigation(path)) router.push(path);
+  }, [router]);
 
   // Define shortcuts
   const shortcuts = useMemo<ShortcutConfig[]>(() => ([
     // Navigation shortcuts (g + key pattern)
     {
       key: 'g h',
-      action: () => router.push('/'),
+      action: () => navigate('/'),
       description: 'Go to Dashboard',
       category: 'Navigation',
     },
     {
       key: 'g u',
-      action: () => router.push('/users'),
+      action: () => navigate('/users'),
       description: 'Go to Users',
       category: 'Navigation',
     },
     {
       key: 'g o',
-      action: () => router.push('/organizations'),
+      action: () => navigate('/organizations'),
       description: 'Go to Organizations',
       category: 'Navigation',
     },
     {
       key: 'g t',
-      action: () => router.push('/teams'),
+      action: () => navigate('/teams'),
       description: 'Go to Teams',
       category: 'Navigation',
     },
     {
       key: 'g r',
-      action: () => router.push('/roles'),
+      action: () => navigate('/roles'),
       description: 'Go to Roles',
       category: 'Navigation',
     },
     {
       key: 'g a',
-      action: () => router.push('/audit'),
+      action: () => navigate('/audit'),
       description: 'Go to Audit Logs',
       category: 'Navigation',
     },
     {
       key: 'g m',
-      action: () => router.push('/monitoring'),
+      action: () => navigate('/monitoring'),
       description: 'Go to Monitoring',
       category: 'Navigation',
     },
     {
       key: 'g p',
-      action: () => router.push('/providers'),
+      action: () => navigate('/providers'),
       description: 'Go to Providers',
       category: 'Navigation',
     },
     {
       key: 'g c',
-      action: () => router.push('/config'),
+      action: () => navigate('/config'),
       description: 'Go to Configuration',
       category: 'Navigation',
     },
     {
       key: 'g s',
-      action: () => router.push('/security'),
+      action: () => navigate('/security'),
       description: 'Go to Security',
       category: 'Navigation',
     },
     {
       key: 'g b',
-      action: () => router.push('/budgets'),
+      action: () => navigate('/budgets'),
       description: 'Go to Budgets',
       category: 'Navigation',
     },
     {
       key: 'g j',
-      action: () => router.push('/jobs'),
+      action: () => navigate('/jobs'),
       description: 'Go to Jobs',
       category: 'Navigation',
     },
     {
       key: 'g i',
-      action: () => router.push('/incidents'),
+      action: () => navigate('/incidents'),
       description: 'Go to Incidents',
       category: 'Navigation',
     },
     {
       key: 'g d',
-      action: () => router.push('/data-ops'),
+      action: () => navigate('/data-ops'),
       description: 'Go to Data Ops',
       category: 'Navigation',
     },
     {
       key: 'g k',
-      action: () => router.push('/api-keys'),
+      action: () => navigate('/api-keys'),
       description: 'Go to API Keys',
       category: 'Navigation',
     },
     {
       key: 'g l',
-      action: () => router.push('/logs'),
+      action: () => navigate('/logs'),
       description: 'Go to Logs',
       category: 'Navigation',
     },
@@ -139,7 +143,7 @@ export function useKeyboardShortcuts() {
       description: 'Close dialogs',
       category: 'General',
     },
-  ]), [router]);
+  ]), [navigate]);
 
   // Track for "g" prefix shortcuts
   const [pendingPrefix, setPendingPrefix] = useState<string | null>(null);

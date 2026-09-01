@@ -512,6 +512,30 @@ describe('canonical webhook control plane page', () => {
     expect(screen.getByText(/response was recovered from the original command/i)).toBeInTheDocument();
   });
 
+  it.each([
+    new WebhookApiError(503, 'operation_failed', 'Service unavailable', 'request-create-503'),
+    new WebhookContractError(201, 'Malformed committed response', 'request-create-contract'),
+  ])('preserves a create command after an ambiguous API result', async (failure) => {
+    const user = userEvent.setup();
+    mocks.canonical.createWebhook
+      .mockRejectedValueOnce(failure)
+      .mockResolvedValueOnce(
+        strongResponse({ ...SECRET_RESPONSE, replayed: true }, '"admin-webhook-41-r2"', 201),
+      );
+    await renderReadyPage();
+
+    await submitCanonicalCreate(user);
+    const retry = await screen.findByRole('button', { name: /retry same command/i });
+    expect(screen.getByText(/result is ambiguous/i)).toBeInTheDocument();
+    await user.click(retry);
+    await screen.findByDisplayValue(SIGNING_SECRET);
+
+    expect(mocks.canonical.createWebhook).toHaveBeenCalledTimes(2);
+    expect(mocks.canonical.createWebhook.mock.calls[0]?.[1]).toBe(
+      mocks.canonical.createWebhook.mock.calls[1]?.[1],
+    );
+  });
+
   it('gates catalog/list while migration is incomplete', async () => {
     mocks.canonical.getWebhookStatus.mockResolvedValue({
       ...STATUS,
@@ -757,6 +781,24 @@ describe('canonical webhook control plane page', () => {
     window.dispatchEvent(event);
 
     expect(event.defaultPrevented).toBe(true);
+  });
+
+  it('blocks same-tab SPA navigation while a one-time secret is visible', async () => {
+    const user = userEvent.setup();
+    await renderReadyPage();
+    await submitCanonicalCreate(user);
+    await screen.findByDisplayValue(SIGNING_SECRET);
+    const link = document.createElement('a');
+    link.href = '/incidents';
+    document.body.append(link);
+
+    const allowed = link.dispatchEvent(new MouseEvent('click', {
+      bubbles: true,
+      cancelable: true,
+    }));
+
+    expect(allowed).toBe(false);
+    link.remove();
   });
 
   it('renders runtime readiness, backlog, and oldest-work age from canonical status', async () => {

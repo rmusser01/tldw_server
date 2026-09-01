@@ -178,6 +178,57 @@ async def _sync_system_role_membership(
     )
 
 
+async def _insert_user_deactivation_audit(
+    db,
+    *,
+    is_pg: bool,
+    actor_id: int | None,
+    target_user_id: int,
+    reason: str | None,
+) -> None:
+    """Insert the required account audit in the source mutation transaction."""
+
+    details = json.dumps(
+        {
+            "actor_id": actor_id,
+            "target_user_id": target_user_id,
+            "reason": reason,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    if is_pg:
+        await db.execute(
+            """
+            INSERT INTO audit_logs (
+                user_id, action, resource_type, resource_id, status, details
+            ) VALUES ($1, $2, $3, $4, $5, $6)
+            """,
+            actor_id,
+            "admin_user_deactivated",
+            "user_account",
+            target_user_id,
+            "success",
+            details,
+        )
+        return
+    await db.execute(
+        """
+        INSERT INTO audit_logs (
+            user_id, action, resource_type, resource_id, status, details
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            actor_id,
+            "admin_user_deactivated",
+            "user_account",
+            target_user_id,
+            "success",
+            details,
+        ),
+    )
+
+
 async def create_user(
     payload: AdminUserCreateRequest,
     principal: AuthPrincipal,
@@ -876,6 +927,13 @@ async def delete_user(
                         ),
                     ),
                 )
+            await _insert_user_deactivation_audit(
+                db,
+                is_pg=is_pg,
+                actor_id=principal.user_id,
+                target_user_id=user_id,
+                reason=reason,
+            )
         await _emit_admin_account_audit_event(
             actor_id=principal.user_id,
             target_user_id=user_id,

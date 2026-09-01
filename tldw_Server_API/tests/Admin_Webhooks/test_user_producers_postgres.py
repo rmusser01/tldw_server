@@ -296,6 +296,13 @@ async def test_postgres_deactivation_captures_user_and_delivery_atomically(
         "SELECT * FROM admin_webhook_deliveries WHERE event_id = ?",
         EVENT_ID,
     )
+    durable_audit = await pg_repo.pool.fetchrow(
+        """
+        SELECT user_id, resource_type, resource_id, status, details
+        FROM audit_logs
+        WHERE action = 'admin_user_deactivated'
+        """,
+    )
     assert not bool(
         await pg_repo.pool.fetchval(
             "SELECT is_active FROM users WHERE id = ?",
@@ -304,4 +311,14 @@ async def test_postgres_deactivation_captures_user_and_delivery_atomically(
     )
     assert event is not None and event["source_command_id"] == COMMAND_ID
     assert delivery is not None and int(delivery["webhook_id"]) == webhook_id
+    assert durable_audit is not None
+    assert int(durable_audit["user_id"]) == actor_id
+    assert durable_audit["resource_type"] == "user_account"
+    assert int(durable_audit["resource_id"]) == target_id
+    assert durable_audit["status"] == "success"
+    assert json.loads(durable_audit["details"]) == {
+        "actor_id": actor_id,
+        "target_user_id": target_id,
+        "reason": "Support case 123",
+    }
     assert len(emitted) == 1

@@ -6,6 +6,7 @@ from __future__ import annotations
 import base64
 import json
 import sqlite3
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -22,11 +23,22 @@ from tldw_Server_API.app.core.Admin_Webhooks.crypto import (
     WebhookKeyRingLoadResult,
 )
 from tldw_Server_API.app.core.Admin_Webhooks.domain import (
+    EventSourceKind,
     PendingIncidentWebhookMarker,
     WebhookError,
     WebhookErrorCode,
+    build_idempotency_scope,
+    canonical_request_hash,
+    idempotency_lookup_digest,
 )
-from tldw_Server_API.app.core.Admin_Webhooks.producer import AdminWebhookEventProducer
+from tldw_Server_API.app.core.Admin_Webhooks.incident_reconciler import (
+    PendingIncidentEventReconciler,
+)
+from tldw_Server_API.app.core.Admin_Webhooks.producer import (
+    AdminWebhookEventProducer,
+    ProductionEventPreparation,
+    build_incident_notify_data,
+)
 from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
     AdminWebhookRepository,
 )
@@ -143,10 +155,7 @@ def _configure_store(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
 
 def _markers(store_path: Path) -> list[PendingIncidentWebhookMarker]:
     store = json.loads(store_path.read_text(encoding="utf-8"))
-    return [
-        PendingIncidentWebhookMarker.from_store_record(record)
-        for record in store["webhook_pending_events"]
-    ]
+    return [PendingIncidentWebhookMarker.from_store_record(record) for record in store["webhook_pending_events"]]
 
 
 def _decrypt_marker(
@@ -448,6 +457,8 @@ async def test_stakeholder_email_preflights_marker_before_sending(
             recipients=["ops@example.com"],
             message="Investigating",
             actor="alice_admin",
+            actor_id="user:7",
+            idempotency_key="stakeholder-notify-preflight-0001",
             webhook_event_producer=unavailable_producer,
             source_request_id="request-stakeholder-notify",
         )
@@ -519,6 +530,7 @@ async def test_notify_command_replays_pending_marker_and_conflicts_on_new_narrat
     first = await system_ops.notify_incident_webhooks(
         incident_id=created["id"],
         narrative="Approved receiver narrative",
+        expected_resource_version=int(created["version"]),
         actor_id="user:7",
         idempotency_key="incident-notify-key-0001",
         source_request_id="request-notify-1",
@@ -527,6 +539,7 @@ async def test_notify_command_replays_pending_marker_and_conflicts_on_new_narrat
     replay = await system_ops.notify_incident_webhooks(
         incident_id=created["id"],
         narrative="Approved receiver narrative",
+        expected_resource_version=int(created["version"]),
         actor_id="user:7",
         idempotency_key="incident-notify-key-0001",
         source_request_id="request-notify-2",
@@ -544,6 +557,7 @@ async def test_notify_command_replays_pending_marker_and_conflicts_on_new_narrat
         await system_ops.notify_incident_webhooks(
             incident_id=created["id"],
             narrative="Different narrative",
+            expected_resource_version=int(created["version"]),
             actor_id="user:7",
             idempotency_key="incident-notify-key-0001",
             source_request_id="request-notify-3",
@@ -551,6 +565,70 @@ async def test_notify_command_replays_pending_marker_and_conflicts_on_new_narrat
         )
     assert exc_info.value.code is WebhookErrorCode.IDEMPOTENCY_CONFLICT
     assert len(_markers(store_path)) == 2
+
+
+@pytest.mark.unit
+async def test_notify_command_retains_marker_when_immediate_database_capture_fails(
+    sqlite_repo: SQLiteRepositoryFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    store_path = _configure_store(monkeypatch, tmp_path)
+    await _complete_migration(sqlite_repo.repository)
+    producer = _producer(
+        sqlite_repo.repository,
+        event_ids=[CREATE_EVENT_ID, NOTIFY_EVENT_ID, UPDATE_EVENT_ID],
+    )
+    created = await system_ops.create_incident(
+        title="Private title",
+        status="investigating",
+        severity="high",
+        summary="Private summary",
+        tags=[],
+        actor="alice_admin",
+        webhook_event_producer=producer,
+    )
+    original_capture = producer.capture_incident_marker
+
+    async def unavailable(_marker: PendingIncidentWebhookMarker) -> None:
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(producer, "capture_incident_marker", unavailable)
+    with pytest.raises(WebhookError) as exc_info:
+        await system_ops.notify_incident_webhooks(
+            incident_id=created["id"],
+            narrative="Approved receiver narrative",
+            expected_resource_version=int(created["version"]),
+            actor_id="user:7",
+            idempotency_key="incident-notify-key-deferred-capture-0001",
+            source_request_id="request-notify-deferred-1",
+            webhook_event_producer=producer,
+        )
+    assert exc_info.value.code is WebhookErrorCode.OPERATION_FAILED
+    assert any(marker.event_type == "incident.notify" for marker in _markers(store_path))
+
+    monkeypatch.setattr(producer, "capture_incident_marker", original_capture)
+    replay = await system_ops.notify_incident_webhooks(
+        incident_id=created["id"],
+        narrative="Approved receiver narrative",
+        expected_resource_version=int(created["version"]),
+        actor_id="user:7",
+        idempotency_key="incident-notify-key-deferred-capture-0001",
+        source_request_id="request-notify-deferred-2",
+        webhook_event_producer=producer,
+    )
+    assert replay.event_id == NOTIFY_EVENT_ID
+    assert replay.replayed is True
+    with sqlite3.connect(sqlite_repo.path) as connection:
+        event_count, stored_request_id = connection.execute(
+            """
+            SELECT COUNT(*), MAX(source_request_id)
+            FROM admin_webhook_events
+            WHERE event_type = 'incident.notify'
+            """,
+        ).fetchone()
+    assert event_count == 1
+    assert stored_request_id == "request-notify-deferred-1"
 
 
 @pytest.mark.unit
@@ -579,57 +657,28 @@ async def test_notify_command_replays_reconciled_database_event_without_new_mark
     first = await system_ops.notify_incident_webhooks(
         incident_id=created["id"],
         narrative="Approved receiver narrative",
+        expected_resource_version=int(created["version"]),
         actor_id="user:7",
         idempotency_key="incident-notify-key-0002",
         source_request_id="request-notify-db-1",
         webhook_event_producer=producer,
     )
-    notify_marker = next(
-        marker for marker in _markers(store_path) if marker.event_type == "incident.notify"
+    reconciler = PendingIncidentEventReconciler(
+        repository=sqlite_repo.repository,
+        key_ring_result=WebhookKeyRingLoadResult(
+            ring=ring,
+            code=WebhookKeyLoadCode.AVAILABLE,
+        ),
+        settings=_settings(),
+        delivery_id_factory=lambda: "20000000-0000-4000-8000-000000000097",
+        store_path=store_path,
     )
-    plaintext = ring.decrypt_bytes(
-        purpose=notify_marker.envelope_purpose,
-        identity=notify_marker.envelope_identity,
-        protected=notify_marker.body,
-    )
-    protected = ring.encrypt_event_body(
-        event_id=notify_marker.event_id,
-        api_version=notify_marker.api_version,
-        body=plaintext,
-    )
-    with sqlite3.connect(sqlite_repo.path) as connection:
-        connection.execute(
-            """
-            INSERT INTO admin_webhook_events (
-                id, event_type, api_version, source_kind, aggregate_type,
-                aggregate_id, aggregate_version, source_command_id,
-                source_component, source_request_id, body_ciphertext_json,
-                body_key_id, body_size_bytes, created_at
-            ) VALUES (?, ?, ?, 'command', NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                notify_marker.event_id,
-                notify_marker.event_type,
-                notify_marker.api_version,
-                notify_marker.source_command_id,
-                notify_marker.source_component,
-                notify_marker.source_request_id,
-                protected.ciphertext_json,
-                protected.key_id,
-                notify_marker.body_size_bytes,
-                notify_marker.created_at.isoformat(),
-            ),
-        )
-    with system_ops._locked_store(write=True, strict=True) as store:
-        store["webhook_pending_events"] = [
-            record
-            for record in store["webhook_pending_events"]
-            if record["event_id"] != notify_marker.event_id
-        ]
+    assert await reconciler.reconcile_once(limit=100) == 2
 
     replay = await system_ops.notify_incident_webhooks(
         incident_id=created["id"],
         narrative="Approved receiver narrative",
+        expected_resource_version=int(created["version"]),
         actor_id="user:7",
         idempotency_key="incident-notify-key-0002",
         source_request_id="request-notify-db-2",
@@ -640,18 +689,733 @@ async def test_notify_command_replays_reconciled_database_event_without_new_mark
     assert replay.replayed is True
     assert all(marker.event_type != "incident.notify" for marker in _markers(store_path))
     with sqlite3.connect(sqlite_repo.path) as connection:
-        event_count = connection.execute(
-            "SELECT COUNT(*) FROM admin_webhook_events WHERE event_type = 'incident.notify'",
-        ).fetchone()[0]
+        event_count, stored_request_id = connection.execute(
+            """
+            SELECT COUNT(*), MAX(source_request_id)
+            FROM admin_webhook_events
+            WHERE event_type = 'incident.notify'
+            """,
+        ).fetchone()
     assert event_count == 1
+    assert stored_request_id == "request-notify-db-1"
 
     with pytest.raises(WebhookError) as exc_info:
         await system_ops.notify_incident_webhooks(
             incident_id=created["id"],
             narrative="Different narrative",
+            expected_resource_version=int(created["version"]),
             actor_id="user:7",
             idempotency_key="incident-notify-key-0002",
             source_request_id="request-notify-db-3",
             webhook_event_producer=producer,
         )
     assert exc_info.value.code is WebhookErrorCode.IDEMPOTENCY_CONFLICT
+
+
+@pytest.mark.unit
+async def test_notify_command_replays_after_incident_changes_and_rejects_stale_new_preview(
+    sqlite_repo: SQLiteRepositoryFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _configure_store(monkeypatch, tmp_path)
+    await _complete_migration(sqlite_repo.repository)
+    producer = _producer(
+        sqlite_repo.repository,
+        event_ids=[
+            CREATE_EVENT_ID,
+            NOTIFY_EVENT_ID,
+            UPDATE_EVENT_ID,
+            REOPEN_EVENT_ID,
+            RESOLVE_EVENT_ID,
+        ],
+    )
+    created = await system_ops.create_incident(
+        title="Private title",
+        status="investigating",
+        severity="high",
+        summary="Private summary",
+        tags=[],
+        actor="alice_admin",
+        webhook_event_producer=producer,
+    )
+    expected_version = int(created["version"])
+    first = await system_ops.notify_incident_webhooks(
+        incident_id=created["id"],
+        narrative="Approved receiver narrative",
+        expected_resource_version=expected_version,
+        actor_id="user:7",
+        idempotency_key="incident-notify-key-mutation-0001",
+        source_request_id="request-notify-before-mutation",
+        webhook_event_producer=producer,
+    )
+    await system_ops.update_incident(
+        incident_id=created["id"],
+        title=None,
+        status=None,
+        severity="critical",
+        summary=None,
+        tags=None,
+        update_message=None,
+        actor="alice_admin",
+        webhook_event_producer=producer,
+    )
+
+    replay = await system_ops.notify_incident_webhooks(
+        incident_id=created["id"],
+        narrative="Approved receiver narrative",
+        expected_resource_version=expected_version,
+        actor_id="user:7",
+        idempotency_key="incident-notify-key-mutation-0001",
+        source_request_id="request-notify-after-mutation",
+        webhook_event_producer=producer,
+    )
+
+    assert replay.event_id == first.event_id
+    assert replay.replayed is True
+    with pytest.raises(WebhookError) as exc_info:
+        await system_ops.notify_incident_webhooks(
+            incident_id=created["id"],
+            narrative="Approved receiver narrative",
+            expected_resource_version=expected_version,
+            actor_id="user:7",
+            idempotency_key="incident-notify-key-stale-preview-0001",
+            source_request_id="request-notify-stale-preview",
+            webhook_event_producer=producer,
+        )
+    assert exc_info.value.code is WebhookErrorCode.PRECONDITION_FAILED
+
+
+@pytest.mark.unit
+async def test_notify_command_replays_after_incident_deletion(
+    sqlite_repo: SQLiteRepositoryFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    store_path = _configure_store(monkeypatch, tmp_path)
+    ring = _ring()
+    await _complete_migration(sqlite_repo.repository)
+    producer = _producer(
+        sqlite_repo.repository,
+        event_ids=[CREATE_EVENT_ID, NOTIFY_EVENT_ID, UPDATE_EVENT_ID],
+        ring=ring,
+    )
+    created = await system_ops.create_incident(
+        title="Private title",
+        status="investigating",
+        severity="high",
+        summary="Private summary",
+        tags=[],
+        actor="alice_admin",
+        webhook_event_producer=producer,
+    )
+    first = await system_ops.notify_incident_webhooks(
+        incident_id=created["id"],
+        narrative="Approved receiver narrative",
+        expected_resource_version=int(created["version"]),
+        actor_id="user:7",
+        idempotency_key="incident-notify-key-deletion-0001",
+        source_request_id="request-notify-before-deletion",
+        webhook_event_producer=producer,
+    )
+    reconciler = PendingIncidentEventReconciler(
+        repository=sqlite_repo.repository,
+        key_ring_result=WebhookKeyRingLoadResult(
+            ring=ring,
+            code=WebhookKeyLoadCode.AVAILABLE,
+        ),
+        settings=_settings(),
+        delivery_id_factory=lambda: "20000000-0000-4000-8000-000000000098",
+        store_path=store_path,
+    )
+    await reconciler.reconcile_once(limit=100)
+    system_ops.delete_incident(incident_id=created["id"])
+
+    replay = await system_ops.notify_incident_webhooks(
+        incident_id=created["id"],
+        narrative="Approved receiver narrative",
+        expected_resource_version=int(created["version"]),
+        actor_id="user:7",
+        idempotency_key="incident-notify-key-deletion-0001",
+        source_request_id="request-notify-after-deletion",
+        webhook_event_producer=producer,
+    )
+
+    assert replay.event_id == first.event_id
+    assert replay.replayed is True
+
+
+@pytest.mark.unit
+async def test_notify_marker_request_fingerprint_is_authenticated(
+    sqlite_repo: SQLiteRepositoryFixture,
+) -> None:
+    ring = _ring()
+    await _complete_migration(sqlite_repo.repository)
+    producer = _producer(
+        sqlite_repo.repository,
+        event_ids=[NOTIFY_EVENT_ID],
+        ring=ring,
+    )
+    scope = build_idempotency_scope(
+        actor_id="user:7",
+        operation="notify_incident",
+        route="/admin/incidents/inc-authenticated/notify-webhooks",
+    )
+    key = "incident-notify-key-authenticated-0001"
+    original_fingerprint = canonical_request_hash(
+        key,
+        scope=scope,
+        body={
+            "incident_id": "inc-authenticated",
+            "narrative": "Original narrative",
+            "expected_resource_version": 7,
+        },
+        conditional_version=7,
+    )
+    changed_fingerprint = canonical_request_hash(
+        key,
+        scope=scope,
+        body={
+            "incident_id": "inc-authenticated",
+            "narrative": "Changed narrative",
+            "expected_resource_version": 7,
+        },
+        conditional_version=7,
+    )
+    preparation = await producer.begin_capture(
+        source_component="admin_system_ops",
+        source_request_id="request-authenticated-marker",
+    )
+    assert preparation is not None
+    marker = producer.prepare_incident_marker(
+        preparation,
+        event_type="incident.notify",
+        source_kind=EventSourceKind.COMMAND,
+        aggregate_type=None,
+        aggregate_id=None,
+        aggregate_version=None,
+        source_command_id=idempotency_lookup_digest(key, scope),
+        request_fingerprint=original_fingerprint,
+        data=build_incident_notify_data(
+            incident_id="inc-authenticated",
+            state="investigating",
+            severity="high",
+            resource_version=7,
+            created_at=NOW,
+            updated_at=NOW,
+            resolved_at=None,
+            narrative="Original narrative",
+        ),
+    )
+    relabeled = replace(marker, request_fingerprint=changed_fingerprint)
+
+    with pytest.raises(WebhookError) as exc_info:
+        producer.verify_incident_marker_replay(
+            relabeled,
+            request_fingerprint=changed_fingerprint,
+            incident_id="inc-authenticated",
+            narrative="Changed narrative",
+            expected_resource_version=7,
+        )
+    assert exc_info.value.code is WebhookErrorCode.IDEMPOTENCY_CONFLICT
+
+    with pytest.raises(WebhookError) as source_exc:
+        producer.verify_incident_marker_replay(
+            replace(marker, source_request_id="request-relabeled-marker"),
+            request_fingerprint=original_fingerprint,
+            incident_id="inc-authenticated",
+            narrative="Original narrative",
+            expected_resource_version=7,
+        )
+    assert source_exc.value.code is WebhookErrorCode.IDEMPOTENCY_CONFLICT
+
+
+@pytest.mark.unit
+async def test_incident_publication_rechecks_rotation_after_preflight(
+    sqlite_repo: SQLiteRepositoryFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    store_path = _configure_store(monkeypatch, tmp_path)
+    await _complete_migration(sqlite_repo.repository)
+    producer = _producer(
+        sqlite_repo.repository,
+        event_ids=[CREATE_EVENT_ID],
+    )
+    original_begin = producer.begin_capture
+
+    async def begin_then_rotate(**kwargs):
+        preparation = await original_begin(**kwargs)
+        async with sqlite_repo.repository.transaction() as tx:
+            state = await tx.lock_migration_state()
+            await tx.compare_and_set_migration_state(
+                expected_revision=state.state_revision,
+                updates={
+                    "rotation_operation_id": "rotation-race-0001",
+                    "rotation_source_key_id": KEY_ID,
+                    "rotation_target_key_id": "key-2026-09",
+                    "rotation_phase": "rewriting",
+                    "rotation_table_cursor": "registration_targets",
+                    "rotation_started_at": NOW,
+                },
+                at=NOW,
+            )
+        return preparation
+
+    monkeypatch.setattr(producer, "begin_capture", begin_then_rotate)
+
+    with pytest.raises(WebhookError) as exc_info:
+        await system_ops.create_incident(
+            title="Rotation race",
+            status="investigating",
+            severity="high",
+            summary="Must not publish",
+            tags=[],
+            actor="alice_admin",
+            webhook_event_producer=producer,
+        )
+
+    assert exc_info.value.code is WebhookErrorCode.KEY_ROTATION_IN_PROGRESS
+    assert not store_path.exists()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("operation", ["update", "timeline", "notify"])
+async def test_existing_incident_marker_publications_recheck_rotation(
+    sqlite_repo: SQLiteRepositoryFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    operation: str,
+) -> None:
+    store_path = _configure_store(monkeypatch, tmp_path)
+    await _complete_migration(sqlite_repo.repository)
+    producer = _producer(
+        sqlite_repo.repository,
+        event_ids=[CREATE_EVENT_ID, UPDATE_EVENT_ID, NOTIFY_EVENT_ID],
+    )
+    created = await system_ops.create_incident(
+        title="Rotation race",
+        status="investigating",
+        severity="high",
+        summary="Must remain unchanged",
+        tags=[],
+        actor="alice_admin",
+        webhook_event_producer=producer,
+    )
+    before = store_path.read_bytes()
+    original_begin = producer.begin_capture
+
+    async def begin_then_rotate(**kwargs):
+        preparation = await original_begin(**kwargs)
+        async with sqlite_repo.repository.transaction() as tx:
+            state = await tx.lock_migration_state()
+            await tx.compare_and_set_migration_state(
+                expected_revision=state.state_revision,
+                updates={
+                    "rotation_operation_id": "rotation-race-0002",
+                    "rotation_source_key_id": KEY_ID,
+                    "rotation_target_key_id": "key-2026-09",
+                    "rotation_phase": "rewriting",
+                    "rotation_table_cursor": "registration_targets",
+                    "rotation_started_at": NOW,
+                },
+                at=NOW,
+            )
+        return preparation
+
+    monkeypatch.setattr(producer, "begin_capture", begin_then_rotate)
+
+    with pytest.raises(WebhookError) as exc_info:
+        if operation == "update":
+            await system_ops.update_incident(
+                incident_id=created["id"],
+                title=None,
+                status=None,
+                severity="critical",
+                summary=None,
+                tags=None,
+                update_message=None,
+                actor="alice_admin",
+                webhook_event_producer=producer,
+            )
+        elif operation == "timeline":
+            await system_ops.add_incident_event(
+                incident_id=created["id"],
+                message="Must not append",
+                actor="alice_admin",
+                webhook_event_producer=producer,
+            )
+        else:
+            await system_ops.notify_incident_webhooks(
+                incident_id=created["id"],
+                narrative="Must not publish",
+                expected_resource_version=int(created["version"]),
+                actor_id="user:7",
+                idempotency_key="incident-notify-key-rotation-race-0001",
+                source_request_id="request-notify-rotation-race",
+                webhook_event_producer=producer,
+            )
+
+    assert exc_info.value.code is WebhookErrorCode.KEY_ROTATION_IN_PROGRESS
+    assert store_path.read_bytes() == before
+
+
+@pytest.mark.unit
+async def test_legacy_notify_marker_replays_and_preserves_original_request_id(
+    sqlite_repo: SQLiteRepositoryFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    store_path = _configure_store(monkeypatch, tmp_path)
+    ring = _ring()
+    await _complete_migration(sqlite_repo.repository)
+    producer = _producer(
+        sqlite_repo.repository,
+        event_ids=[CREATE_EVENT_ID, UPDATE_EVENT_ID],
+        ring=ring,
+    )
+    created = await system_ops.create_incident(
+        title="Private title",
+        status="investigating",
+        severity="high",
+        summary="Private summary",
+        tags=[],
+        actor="alice_admin",
+        webhook_event_producer=producer,
+    )
+    key = "incident-notify-key-legacy-marker-0001"
+    scope = build_idempotency_scope(
+        actor_id="user:7",
+        operation="notify_incident",
+        route=f"/admin/incidents/{created['id']}/notify-webhooks",
+    )
+    fingerprint = canonical_request_hash(
+        key,
+        scope=scope,
+        body={
+            "incident_id": created["id"],
+            "narrative": "Legacy narrative",
+            "expected_resource_version": int(created["version"]),
+        },
+        conditional_version=int(created["version"]),
+    )
+    marker = producer.prepare_incident_marker(
+        ProductionEventPreparation(
+            event_id=NOTIFY_EVENT_ID,
+            created_at=NOW,
+            source_component="admin_system_ops",
+            source_request_id="request-legacy-original",
+        ),
+        event_type="incident.notify",
+        source_kind=EventSourceKind.COMMAND,
+        aggregate_type=None,
+        aggregate_id=None,
+        aggregate_version=None,
+        source_command_id=idempotency_lookup_digest(key, scope),
+        request_fingerprint=fingerprint,
+        data=system_ops._incident_webhook_data(
+            created,
+            event_type="incident.notify",
+            narrative="Legacy narrative",
+        ),
+    )
+    plaintext = ring.decrypt_bytes(
+        purpose=marker.envelope_purpose,
+        identity=marker.envelope_identity,
+        protected=marker.body,
+    )
+    legacy = replace(
+        marker,
+        request_fingerprint=None,
+        body=ring.encrypt_bytes(
+            purpose=marker.envelope_purpose,
+            identity=marker.legacy_envelope_identity,
+            plaintext=plaintext,
+        ),
+    )
+    legacy_record = legacy.to_store_record()
+    legacy_record.pop("request_fingerprint")
+    store = system_ops._load_store_strict(store_path)
+    store["webhook_pending_events"].append(legacy_record)
+    system_ops._atomic_write_store(store_path, store)
+
+    replay = await system_ops.notify_incident_webhooks(
+        incident_id=created["id"],
+        narrative="Legacy narrative",
+        expected_resource_version=int(created["version"]),
+        actor_id="user:7",
+        idempotency_key=key,
+        source_request_id="request-legacy-retry",
+        webhook_event_producer=producer,
+    )
+
+    assert replay.event_id == NOTIFY_EVENT_ID
+    assert replay.replayed is True
+    with sqlite3.connect(sqlite_repo.path) as connection:
+        stored_request_id = connection.execute(
+            "SELECT source_request_id FROM admin_webhook_events WHERE id = ?",
+            (NOTIFY_EVENT_ID,),
+        ).fetchone()[0]
+    assert stored_request_id == "request-legacy-original"
+
+
+@pytest.mark.unit
+async def test_current_marker_shape_cannot_use_legacy_aad_fallback(
+    sqlite_repo: SQLiteRepositoryFixture,
+) -> None:
+    ring = _ring()
+    await _complete_migration(sqlite_repo.repository)
+    producer = _producer(
+        sqlite_repo.repository,
+        event_ids=[NOTIFY_EVENT_ID],
+        ring=ring,
+    )
+    fingerprint = f"hmac-sha256:{'a' * 64}"
+    marker = producer.prepare_incident_marker(
+        ProductionEventPreparation(
+            event_id=NOTIFY_EVENT_ID,
+            created_at=NOW,
+            source_component="admin_system_ops",
+            source_request_id="request-current-shape",
+        ),
+        event_type="incident.notify",
+        source_kind=EventSourceKind.COMMAND,
+        aggregate_type=None,
+        aggregate_id=None,
+        aggregate_version=None,
+        source_command_id=f"sha256:{'b' * 64}",
+        request_fingerprint=fingerprint,
+        data=build_incident_notify_data(
+            incident_id="incident-current-shape",
+            state="investigating",
+            severity="high",
+            resource_version=7,
+            created_at=NOW,
+            updated_at=NOW,
+            resolved_at=None,
+            narrative="Approved narrative",
+        ),
+    )
+    plaintext = ring.decrypt_bytes(
+        purpose=marker.envelope_purpose,
+        identity=marker.envelope_identity,
+        protected=marker.body,
+    )
+    current_record_with_legacy_body = replace(
+        marker,
+        body=ring.encrypt_bytes(
+            purpose=marker.envelope_purpose,
+            identity=marker.legacy_envelope_identity,
+            plaintext=plaintext,
+        ),
+    ).to_store_record()
+    parsed = PendingIncidentWebhookMarker.from_store_record(
+        current_record_with_legacy_body
+    )
+
+    with pytest.raises(WebhookError) as exc_info:
+        producer.verify_incident_marker_replay(
+            parsed,
+            request_fingerprint=fingerprint,
+            incident_id="incident-current-shape",
+            narrative="Approved narrative",
+            expected_resource_version=7,
+        )
+
+    assert exc_info.value.code is WebhookErrorCode.IDEMPOTENCY_CONFLICT
+
+
+@pytest.mark.unit
+async def test_notify_reconciler_race_converges_identical_marker(
+    sqlite_repo: SQLiteRepositoryFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    store_path = _configure_store(monkeypatch, tmp_path)
+    ring = _ring()
+    await _complete_migration(sqlite_repo.repository)
+    primary = _producer(
+        sqlite_repo.repository,
+        event_ids=[CREATE_EVENT_ID, UPDATE_EVENT_ID],
+        ring=ring,
+    )
+    competitor = _producer(
+        sqlite_repo.repository,
+        event_ids=[NOTIFY_EVENT_ID],
+        ring=ring,
+    )
+    created = await system_ops.create_incident(
+        title="Private title",
+        status="investigating",
+        severity="high",
+        summary="Private summary",
+        tags=[],
+        actor="alice_admin",
+        webhook_event_producer=primary,
+    )
+    expected_version = int(created["version"])
+    key = "incident-notify-key-race-0001"
+    original_find = primary.find_incident_command_replay
+
+    competing_acceptance = None
+
+    async def reconcile_between_lookup_and_publication(**kwargs):
+        nonlocal competing_acceptance
+        result = await original_find(**kwargs)
+        if result is not None:
+            return result
+        competing_acceptance = await system_ops.notify_incident_webhooks(
+            incident_id=created["id"],
+            narrative="Approved receiver narrative",
+            expected_resource_version=expected_version,
+            actor_id="user:7",
+            idempotency_key=key,
+            source_request_id="request-racing-writer",
+            webhook_event_producer=competitor,
+        )
+        reconciler = PendingIncidentEventReconciler(
+            repository=sqlite_repo.repository,
+            key_ring_result=WebhookKeyRingLoadResult(
+                ring=ring,
+                code=WebhookKeyLoadCode.AVAILABLE,
+            ),
+            settings=_settings(),
+            delivery_id_factory=lambda: "20000000-0000-4000-8000-000000000099",
+            store_path=store_path,
+        )
+        assert await reconciler.reconcile_once(limit=100) == 2
+        return result
+
+    monkeypatch.setattr(
+        primary,
+        "find_incident_command_replay",
+        reconcile_between_lookup_and_publication,
+    )
+    accepted = await system_ops.notify_incident_webhooks(
+        incident_id=created["id"],
+        narrative="Approved receiver narrative",
+        expected_resource_version=expected_version,
+        actor_id="user:7",
+        idempotency_key=key,
+        source_request_id="request-racing-reader",
+        webhook_event_producer=primary,
+    )
+    assert competing_acceptance is not None
+    assert accepted.event_id == competing_acceptance.event_id
+    assert accepted.replayed is True
+    assert len(_markers(store_path)) == 1
+
+    reconciler = PendingIncidentEventReconciler(
+        repository=sqlite_repo.repository,
+        key_ring_result=WebhookKeyRingLoadResult(
+            ring=ring,
+            code=WebhookKeyLoadCode.AVAILABLE,
+        ),
+        settings=_settings(),
+        delivery_id_factory=lambda: "20000000-0000-4000-8000-000000000100",
+        store_path=store_path,
+    )
+    assert await reconciler.reconcile_once(limit=100) == 1
+    assert _markers(store_path) == []
+    with sqlite3.connect(sqlite_repo.path) as connection:
+        count, stored_request_id = connection.execute(
+            """
+            SELECT COUNT(*), MAX(source_request_id)
+            FROM admin_webhook_events
+            WHERE event_type = 'incident.notify'
+            """,
+        ).fetchone()
+    assert count == 1
+    assert stored_request_id == "request-racing-writer"
+
+
+@pytest.mark.unit
+async def test_notify_reconciler_conflicting_race_retains_losing_marker(
+    sqlite_repo: SQLiteRepositoryFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    store_path = _configure_store(monkeypatch, tmp_path)
+    ring = _ring()
+    await _complete_migration(sqlite_repo.repository)
+    primary = _producer(
+        sqlite_repo.repository,
+        event_ids=[CREATE_EVENT_ID, UPDATE_EVENT_ID],
+        ring=ring,
+    )
+    competitor = _producer(
+        sqlite_repo.repository,
+        event_ids=[NOTIFY_EVENT_ID],
+        ring=ring,
+    )
+    created = await system_ops.create_incident(
+        title="Private title",
+        status="investigating",
+        severity="high",
+        summary="Private summary",
+        tags=[],
+        actor="alice_admin",
+        webhook_event_producer=primary,
+    )
+    expected_version = int(created["version"])
+    key = "incident-notify-key-race-conflict-0001"
+    original_find = primary.find_incident_command_replay
+
+    async def reconcile_conflict_between_lookup_and_publication(**kwargs):
+        result = await original_find(**kwargs)
+        assert result is None
+        await system_ops.notify_incident_webhooks(
+            incident_id=created["id"],
+            narrative="Competing narrative",
+            expected_resource_version=expected_version,
+            actor_id="user:7",
+            idempotency_key=key,
+            source_request_id="request-conflicting-writer",
+            webhook_event_producer=competitor,
+        )
+        reconciler = PendingIncidentEventReconciler(
+            repository=sqlite_repo.repository,
+            key_ring_result=WebhookKeyRingLoadResult(
+                ring=ring,
+                code=WebhookKeyLoadCode.AVAILABLE,
+            ),
+            settings=_settings(),
+            delivery_id_factory=lambda: "20000000-0000-4000-8000-000000000101",
+            store_path=store_path,
+        )
+        await reconciler.reconcile_once(limit=100)
+        return result
+
+    monkeypatch.setattr(
+        primary,
+        "find_incident_command_replay",
+        reconcile_conflict_between_lookup_and_publication,
+    )
+    with pytest.raises(WebhookError) as exc_info:
+        await system_ops.notify_incident_webhooks(
+            incident_id=created["id"],
+            narrative="Primary narrative",
+            expected_resource_version=expected_version,
+            actor_id="user:7",
+            idempotency_key=key,
+            source_request_id="request-conflicting-reader",
+            webhook_event_producer=primary,
+        )
+    assert exc_info.value.code is WebhookErrorCode.IDEMPOTENCY_CONFLICT
+    markers = _markers(store_path)
+    assert len(markers) == 1
+    assert markers[0].source_request_id == "request-conflicting-reader"
+    reconciler = PendingIncidentEventReconciler(
+        repository=sqlite_repo.repository,
+        key_ring_result=WebhookKeyRingLoadResult(
+            ring=ring,
+            code=WebhookKeyLoadCode.AVAILABLE,
+        ),
+        settings=_settings(),
+        delivery_id_factory=lambda: "20000000-0000-4000-8000-000000000102",
+        store_path=store_path,
+    )
+    with pytest.raises(WebhookError) as reconcile_exc:
+        await reconciler.reconcile_once(limit=100)
+    assert reconcile_exc.value.code is WebhookErrorCode.IDEMPOTENCY_CONFLICT
+    assert _markers(store_path) == markers

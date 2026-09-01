@@ -104,6 +104,7 @@ the intended mode.
 | `GET /api/v1/admin/webhooks/{id}/deliveries` | normal admin auth | Sanitized durable delivery and attempt history. |
 | `POST /api/v1/admin/webhooks/{id}/deliveries/{delivery_id}/redeliver` | `If-Match`, `Idempotency-Key` | Persists one eligible manual redelivery command. |
 | `POST /api/v1/admin/incidents/{id}/notify-webhooks` | `Idempotency-Key` | Persists one durable incident notification event. |
+| `POST /api/v1/admin/incidents/{id}/notify` | `Idempotency-Key` | Separately persists and sends one at-most-once stakeholder-email command. |
 
 The catalog currently contains:
 
@@ -250,6 +251,16 @@ Common statuses are:
 
 Use the closed `error.code` and `request_id` for response handling and support
 correlation. Do not parse human-readable message text.
+
+Stakeholder email is not webhook delivery. Each recipient is durably claimed
+before the provider call; a crash after that boundary is reported as `unknown`
+and is never resent automatically. Only a literal provider result of `true` is
+recorded as sent. Exact command replays are retained for at least 30 days.
+When the 1,000-command store reaches capacity, only fully `sent`/`failed`
+commands older than 30 days are eligible for pruning; `pending` and `sending`
+commands are never pruned automatically. If no command is eligible, admission
+fails closed until an operator resolves capacity. Never reuse an idempotency
+key for a changed recipient list or message.
 
 ## Operator Checks
 

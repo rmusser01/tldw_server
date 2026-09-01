@@ -612,6 +612,9 @@ async def test_deactivation_commits_user_event_fanout_once_and_audits_afterward(
             "SELECT * FROM admin_webhook_deliveries WHERE event_id = ?",
             (DELETION_EVENT_ID,),
         ).fetchall()
+        durable_audits = connection.execute(
+            "SELECT * FROM audit_logs WHERE action = 'admin_user_deactivated'",
+        ).fetchall()
 
     assert result == {"message": f"User {target_user_id} has been deactivated"}
     assert repeated == result
@@ -621,6 +624,16 @@ async def test_deactivation_commits_user_event_fanout_once_and_audits_afterward(
     assert event["source_request_id"] == "request-delete-1"
     assert len(deliveries) == 1
     assert deliveries[0]["webhook_id"] == webhook_id
+    assert len(durable_audits) == 1
+    assert durable_audits[0]["user_id"] == actor_user_id
+    assert durable_audits[0]["resource_type"] == "user_account"
+    assert int(durable_audits[0]["resource_id"]) == target_user_id
+    assert durable_audits[0]["status"] == "success"
+    assert json.loads(durable_audits[0]["details"]) == {
+        "actor_id": actor_user_id,
+        "target_user_id": target_user_id,
+        "reason": "Support case 123",
+    }
     plaintext = ring.decrypt_event_body(
         event_id=event["id"],
         api_version=event["api_version"],
@@ -730,6 +743,104 @@ async def test_deactivation_fanout_failure_rolls_back_user_and_audit(
         assert connection.execute(
             "SELECT COUNT(*) FROM admin_webhook_deliveries",
         ).fetchone()[0] == 0
+    assert emitted_audits == []
+
+
+@pytest.mark.unit
+async def test_deactivation_audit_failure_rolls_back_user_and_webhook_event(
+    sqlite_repo: SQLiteRepositoryFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ring = _ring()
+    await _complete_migration(sqlite_repo.repository)
+    await _seed_matching_registration(
+        sqlite_repo.repository,
+        ring,
+        event_types=("user.deleted",),
+    )
+    actor_user_id = await _seed_admin_actor(sqlite_repo)
+    target_user_id = await _seed_user(
+        sqlite_repo,
+        uuid="00000000-0000-4000-8000-000000000044",
+        username="audit-rollback-target",
+        email="audit-rollback-target@example.com",
+        role="user",
+    )
+    producer = AdminWebhookEventProducer(
+        repository=sqlite_repo.repository,
+        settings=_webhook_settings(),
+        key_ring_result=WebhookKeyRingLoadResult(
+            ring=ring,
+            code=WebhookKeyLoadCode.AVAILABLE,
+        ),
+        event_id_factory=lambda: DELETION_EVENT_ID,
+        delivery_id_factory=lambda: DELETION_DELIVERY_ID,
+        clock=lambda: NOW,
+    )
+    emitted_audits: list[dict[str, object]] = []
+
+    async def _allow_scope(*_args, **_kwargs) -> None:
+        return None
+
+    async def _allow_reauth(*_args, **_kwargs) -> str:
+        return "Support case 123"
+
+    async def _fail_audit(*_args, **_kwargs) -> None:
+        raise RuntimeError("forced transactional audit failure")
+
+    async def _capture_audit(**kwargs) -> None:
+        emitted_audits.append(kwargs)
+
+    monkeypatch.setattr(
+        admin_users_service.admin_scope_service,
+        "enforce_admin_user_scope",
+        _allow_scope,
+    )
+    monkeypatch.setattr(
+        admin_users_service,
+        "verify_privileged_action",
+        _allow_reauth,
+    )
+    monkeypatch.setattr(
+        admin_users_service,
+        "_insert_user_deactivation_audit",
+        _fail_audit,
+    )
+    monkeypatch.setattr(
+        admin_users_service,
+        "_emit_admin_account_audit_event",
+        _capture_audit,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await admin_users_service.delete_user(
+            AuthPrincipal(
+                kind="user",
+                user_id=actor_user_id,
+                roles=["admin"],
+                permissions=["*"],
+                is_admin=True,
+            ),
+            target_user_id,
+            SimpleNamespace(reason="Support case 123", admin_password="AdminPass123!"),
+            password_service=object(),
+            db_pool=sqlite_repo.pool,
+            webhook_event_producer=producer,
+            command_id_factory=lambda: DELETION_COMMAND_ID,
+        )
+
+    assert exc_info.value.status_code == 500
+    with sqlite3.connect(sqlite_repo.path) as connection:
+        assert connection.execute(
+            "SELECT is_active FROM users WHERE id = ?",
+            (target_user_id,),
+        ).fetchone()[0] == 1
+        for table in (
+            "admin_webhook_events",
+            "admin_webhook_deliveries",
+            "audit_logs",
+        ):
+            assert connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
     assert emitted_audits == []
 
 

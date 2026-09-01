@@ -7,7 +7,7 @@ from collections.abc import Callable
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
 from .config import AdminWebhookSettings
@@ -18,7 +18,7 @@ from .domain import (
     WebhookError,
     WebhookErrorCode,
 )
-from .events import parse_canonical_event_body
+from .events import decrypt_pending_incident_marker_body, parse_canonical_event_body
 from .producer import AdminWebhookEventProducer, ProductionEventPreparation
 
 if TYPE_CHECKING:
@@ -98,7 +98,6 @@ class PendingIncidentEventReconciler:
         from tldw_Server_API.app.services import admin_system_ops_service as system_ops
 
         store_path = self._active_store_path()
-        expected_record = expected.to_store_record()
         with system_ops._STORE_LOCK, system_ops._store_file_lock(store_path=store_path):
             if not store_path.exists():
                 return
@@ -110,7 +109,7 @@ class PendingIncidentEventReconciler:
             for index, marker in enumerate(markers):
                 if marker.event_id != expected.event_id:
                     continue
-                if records[index] != expected_record:
+                if marker != expected:
                     raise WebhookError(WebhookErrorCode.PRECONDITION_FAILED)
                 del records[index]
                 self._crash(IncidentReconcileCrashPoint.AFTER_IN_MEMORY_REMOVE_BEFORE_SAVE)
@@ -125,11 +124,7 @@ class PendingIncidentEventReconciler:
         if ring is None:
             raise WebhookError(WebhookErrorCode.KEY_UNAVAILABLE)
         try:
-            plaintext = ring.decrypt_bytes(
-                purpose=marker.envelope_purpose,
-                identity=marker.envelope_identity,
-                protected=marker.body,
-            )
+            plaintext, _ = decrypt_pending_incident_marker_body(ring, marker)
             if len(plaintext) != marker.body_size_bytes:
                 raise ValueError("pending marker body size is invalid")
             return parse_canonical_event_body(
@@ -157,25 +152,54 @@ class PendingIncidentEventReconciler:
         except (TypeError, ValueError):
             raise WebhookError(WebhookErrorCode.VALIDATION_FAILED) from None
         self._crash(IncidentReconcileCrashPoint.BEFORE_DB_TRANSACTION)
-        async with self._repository.transaction() as tx:
-            result = await self._producer.capture_in_transaction(
-                preparation,
-                tx=tx,
+        try:
+            async with self._repository.transaction() as tx:
+                result = await self._producer.capture_in_transaction(
+                    preparation,
+                    tx=tx,
+                    event_type=marker.event_type,
+                    source_kind=source_kind,
+                    aggregate_type=marker.aggregate_type,
+                    aggregate_id=marker.aggregate_id,
+                    aggregate_version=marker.aggregate_version,
+                    source_command_id=marker.source_command_id,
+                    data=data,
+                )
+                self._crash(IncidentReconcileCrashPoint.AFTER_EVENT_INSERT)
+        except WebhookError as exc:
+            if (
+                exc.code is not WebhookErrorCode.IDEMPOTENCY_CONFLICT
+                or marker.event_type != "incident.notify"
+                or marker.source_command_id is None
+            ):
+                raise
+            stored = await self._producer.find_incident_command_replay(
                 event_type=marker.event_type,
-                source_kind=source_kind,
-                aggregate_type=marker.aggregate_type,
-                aggregate_id=marker.aggregate_id,
-                aggregate_version=marker.aggregate_version,
                 source_command_id=marker.source_command_id,
-                data=data,
+                incident_id=cast(str, data["incident_id"]),
+                narrative=cast(str | None, data["narrative"]),
+                expected_resource_version=cast(int, data["resource_version"]),
             )
-            self._crash(IncidentReconcileCrashPoint.AFTER_EVENT_INSERT)
-        if result.inserted and self._metrics is not None:
+            if stored is None:
+                raise
+            inserted = False
+            fanout_count = 0
+        else:
+            inserted = result.inserted
+            fanout_count = len(result.deliveries)
+        if inserted and self._metrics is not None:
             self._metrics.events_committed(
                 event_type=marker.event_type,
-                fanout_count=len(result.deliveries),
+                fanout_count=fanout_count,
             )
         self._crash(IncidentReconcileCrashPoint.AFTER_DB_COMMIT_BEFORE_REMOVE)
+
+    async def _remove_captured_marker(
+        self,
+        marker: PendingIncidentWebhookMarker,
+    ) -> None:
+        async with self._producer.incident_marker_publication_guard():
+            await asyncio.to_thread(self._remove_exact_sync, marker)
 
     async def reconcile_once(self, *, limit: int = 100) -> int:
         """Reconcile one deterministic bounded marker page."""
@@ -184,10 +208,19 @@ class PendingIncidentEventReconciler:
             raise ValueError("limit must be between 1 and 100")
         markers = await asyncio.to_thread(self._read_page_sync, limit)
         reconciled = 0
+        conflict_retained = False
         for marker in markers:
-            await self._capture_marker(marker)
-            await asyncio.to_thread(self._remove_exact_sync, marker)
+            try:
+                await self._capture_marker(marker)
+            except WebhookError as exc:
+                if exc.code is not WebhookErrorCode.IDEMPOTENCY_CONFLICT:
+                    raise
+                conflict_retained = True
+                continue
+            await self._remove_captured_marker(marker)
             reconciled += 1
+        if conflict_retained:
+            raise WebhookError(WebhookErrorCode.IDEMPOTENCY_CONFLICT)
         return reconciled
 
 

@@ -201,7 +201,7 @@ describe('canonical webhook API client', () => {
         requestId: 'request-create',
       })
       .mockResolvedValueOnce({
-        data: { ...REGISTRATION, revision: 3 },
+        data: { ...REGISTRATION, description: 'Updated', revision: 3 },
         status: 200,
         etag: '"admin-webhook-41-r3"',
         requestId: 'request-patch',
@@ -252,6 +252,200 @@ describe('canonical webhook API client', () => {
         },
       }),
     );
+  });
+
+  it.each([
+    [
+      'create without a signing secret',
+      'create',
+      { registration: REGISTRATION, replayed: false },
+      201,
+    ],
+    [
+      'create with a malformed replay flag',
+      'create',
+      { ...SECRET_RESPONSE, replayed: 'false' },
+      201,
+    ],
+    [
+      'rotation with a malformed signing secret',
+      'rotate',
+      { ...SECRET_RESPONSE, signing_secret: 'redacted' },
+      200,
+    ],
+    [
+      'rotation with an incomplete registration',
+      'rotate',
+      {
+        ...SECRET_RESPONSE,
+        registration: { id: REGISTRATION.id, revision: REGISTRATION.revision },
+      },
+      200,
+    ],
+  ])('rejects %s', async (_label, operation, data, status) => {
+    httpMocks.requestJsonWithMetadata.mockResolvedValue({
+      data,
+      status,
+      etag: '"admin-webhook-41-r2"',
+      requestId: 'request-secret-contract',
+    });
+
+    const request = operation === 'create'
+      ? api.createWebhook(CREATE_BODY, '0123456789abcdef0123456789abcdef')
+      : api.rotateWebhookSecret(
+        41,
+        '"admin-webhook-41-r2"',
+        '0123456789abcdef0123456789abcdef',
+      );
+
+    await expect(request).rejects.toBeInstanceOf(WebhookContractError);
+  });
+
+  it('rejects a self-consistent rotation response for a different registration', async () => {
+    httpMocks.requestJsonWithMetadata.mockResolvedValue({
+      data: {
+        ...SECRET_RESPONSE,
+        registration: { ...REGISTRATION, id: 42 },
+      },
+      status: 200,
+      etag: '"admin-webhook-42-r2"',
+      requestId: 'request-rotate-wrong-registration',
+    });
+
+    await expect(api.rotateWebhookSecret(
+      41,
+      '"admin-webhook-41-r2"',
+      '0123456789abcdef0123456789abcdef',
+    )).rejects.toBeInstanceOf(WebhookContractError);
+  });
+
+  it('rejects a registration containing an event outside the canonical catalog', async () => {
+    httpMocks.requestJsonWithMetadata.mockResolvedValue({
+      data: {
+        ...SECRET_RESPONSE,
+        registration: { ...REGISTRATION, event_types: ['catalog.only'] },
+      },
+      status: 201,
+      etag: '"admin-webhook-41-r2"',
+      requestId: 'request-create-invalid-event',
+    });
+
+    await expect(api.createWebhook(
+      CREATE_BODY,
+      '0123456789abcdef0123456789abcdef',
+    )).rejects.toBeInstanceOf(WebhookContractError);
+  });
+
+  it.each(['get', 'patch'])('rejects an invalid registration returned by %s', async (operation) => {
+    httpMocks.requestJsonWithMetadata.mockResolvedValue({
+      data: { ...REGISTRATION, event_types: ['catalog.only'] },
+      status: 200,
+      etag: '"admin-webhook-41-r2"',
+      requestId: `request-${operation}-invalid-registration`,
+    });
+
+    const request = operation === 'get'
+      ? canonicalWebhookApi.getWebhook(41)
+      : canonicalWebhookApi.updateWebhook(
+        41,
+        { description: 'Updated' },
+        '"admin-webhook-41-r2"',
+      );
+
+    await expect(request).rejects.toBeInstanceOf(WebhookContractError);
+  });
+
+  it('rejects an invalid registration in the list response', async () => {
+    httpMocks.requestJson.mockResolvedValue({
+      items: [{ ...REGISTRATION, signing_secret: `whsec_${'b'.repeat(64)}` }],
+      total: 1,
+      limit: 50,
+      offset: 0,
+    });
+
+    await expect(canonicalWebhookApi.getWebhooks()).rejects.toBeInstanceOf(
+      WebhookContractError,
+    );
+  });
+
+  it('rejects a catalog response containing an unknown event', async () => {
+    httpMocks.requestJson.mockResolvedValue({
+      api_version: '2026-07-01',
+      events: [{ event_type: 'catalog.only', description: 'Unknown' }],
+      registration_limit: 100,
+      active_limit: 25,
+    });
+
+    await expect(canonicalWebhookApi.getWebhookCatalog()).rejects.toBeInstanceOf(
+      WebhookContractError,
+    );
+  });
+
+  it('rejects a catalog response whose configured limits exceed the server maximum', async () => {
+    httpMocks.requestJson.mockResolvedValue({
+      api_version: '2026-07-01',
+      events: [
+        ['user.created', 'A user was created.'],
+        ['user.deleted', 'A user was deleted.'],
+        ['incident.created', 'An incident was created.'],
+        ['incident.updated', 'An incident was updated.'],
+        ['incident.resolved', 'An incident was resolved.'],
+        ['incident.notify', 'An incident notification was requested.'],
+      ].map(([event_type, description]) => ({ event_type, description })),
+      registration_limit: 1_001,
+      active_limit: 1_001,
+    });
+
+    await expect(canonicalWebhookApi.getWebhookCatalog()).rejects.toBeInstanceOf(
+      WebhookContractError,
+    );
+  });
+
+  it.each(['create', 'patch'])('accepts the server-normalized trailing-dot target after %s', async (
+    operation,
+  ) => {
+    if (operation === 'create') {
+      httpMocks.requestJsonWithMetadata.mockResolvedValue({
+        data: SECRET_RESPONSE,
+        status: 201,
+        etag: '"admin-webhook-41-r2"',
+        requestId: 'request-create-trailing-dot',
+      });
+      await expect(api.createWebhook(
+        { ...CREATE_BODY, url: 'https://receiver.example./hooks/private' },
+        '0123456789abcdef0123456789abcdef',
+      )).resolves.toMatchObject({ data: SECRET_RESPONSE });
+      return;
+    }
+
+    httpMocks.requestJsonWithMetadata.mockResolvedValue({
+      data: { ...REGISTRATION, revision: 3 },
+      status: 200,
+      etag: '"admin-webhook-41-r3"',
+      requestId: 'request-patch-trailing-dot',
+    });
+    await expect(api.updateWebhook(
+      41,
+      { url: 'https://receiver.example./hooks/private' },
+      '"admin-webhook-41-r2"',
+    )).resolves.toMatchObject({ data: { revision: 3 } });
+  });
+
+  it('rejects a valid create response that does not represent the submitted command', async () => {
+    httpMocks.requestJsonWithMetadata.mockResolvedValue({
+      data: {
+        ...SECRET_RESPONSE,
+        registration: { ...REGISTRATION, event_types: ['user.created'] },
+      },
+      status: 201,
+      etag: '"admin-webhook-41-r2"',
+      requestId: 'request-create-wrong-registration',
+    });
+
+    await expect(api.createWebhook(
+      CREATE_BODY,
+      '0123456789abcdef0123456789abcdef',
+    )).rejects.toBeInstanceOf(WebhookContractError);
   });
 
   it.each([
@@ -523,7 +717,7 @@ describe('incident webhook command client', () => {
         incident_id: 'inc-41',
         event_id: EVENT_ID,
         event_type: 'incident.notify',
-        command_id: '66666666-6666-4666-8666-666666666666',
+        command_id: `sha256:${'6'.repeat(64)}`,
         accepted: true,
         replayed: false,
       },
@@ -535,7 +729,10 @@ describe('incident webhook command client', () => {
 
     await expect(api.notifyIncidentWebhooks(
       'inc-41',
-      { narrative: 'Customer impact is limited to delayed imports.' },
+      {
+        narrative: 'Customer impact is limited to delayed imports.',
+        expected_resource_version: 7,
+      },
       '0123456789abcdef0123456789abcdef',
     )).resolves.toMatchObject({ accepted: true, replayed: false });
     expect(httpMocks.requestJsonWithMetadata).toHaveBeenCalledWith(
@@ -545,6 +742,7 @@ describe('incident webhook command client', () => {
         headers: { 'Idempotency-Key': '0123456789abcdef0123456789abcdef' },
         body: JSON.stringify({
           narrative: 'Customer impact is limited to delayed imports.',
+          expected_resource_version: 7,
         }),
       },
     );
@@ -568,7 +766,7 @@ describe('incident webhook command client', () => {
 
     await expect(api.notifyIncidentWebhooks(
       'inc-41',
-      { narrative: null },
+      { narrative: null, expected_resource_version: 7 },
       '0123456789abcdef0123456789abcdef',
     )).rejects.toBeInstanceOf(WebhookContractError);
   });
@@ -579,7 +777,7 @@ describe('incident webhook command client', () => {
         incident_id: 'inc-41',
         event_id: EVENT_ID,
         event_type: 'incident.notify',
-        command_id: '66666666-6666-4666-8666-666666666666',
+        command_id: `sha256:${'6'.repeat(64)}`,
         accepted: true,
         replayed: false,
       },
@@ -591,7 +789,84 @@ describe('incident webhook command client', () => {
 
     await expect(api.notifyIncidentWebhooks(
       'inc-41',
-      { narrative: null },
+      { narrative: null, expected_resource_version: 7 },
+      '0123456789abcdef0123456789abcdef',
+    )).rejects.toBeInstanceOf(WebhookContractError);
+  });
+});
+
+describe('incident stakeholder email command client', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('submits a durable stakeholder command with its idempotency key', async () => {
+    httpMocks.requestJsonWithMetadata.mockResolvedValue({
+      data: {
+        incident_id: 'inc-41',
+        command_id: `sha256:${'7'.repeat(64)}`,
+        replayed: false,
+        notifications: [
+          { email: 'ops@example.com', status: 'sent', error: null },
+        ],
+      },
+      status: 200,
+      etag: null,
+      requestId: 'request-stakeholder-notify',
+      retryAfterSeconds: null,
+    });
+
+    await expect(api.notifyIncidentStakeholders(
+      'inc-41',
+      { recipients: ['ops@example.com'], message: 'Investigating' },
+      '0123456789abcdef0123456789abcdef',
+    )).resolves.toMatchObject({
+      command_id: `sha256:${'7'.repeat(64)}`,
+      replayed: false,
+    });
+    expect(httpMocks.requestJsonWithMetadata).toHaveBeenCalledWith(
+      '/admin/incidents/inc-41/notify',
+      {
+        method: 'POST',
+        headers: { 'Idempotency-Key': '0123456789abcdef0123456789abcdef' },
+        body: JSON.stringify({
+          recipients: ['ops@example.com'],
+          message: 'Investigating',
+        }),
+      },
+    );
+  });
+
+  it.each([
+    {
+      incident_id: 'inc-41',
+      replayed: false,
+      notifications: [{ email: 'ops@example.com', status: 'sent', error: null }],
+    },
+    {
+      incident_id: 'inc-41',
+      command_id: `sha256:${'7'.repeat(64)}`,
+      replayed: 'false',
+      notifications: [{ email: 'ops@example.com', status: 'sent', error: null }],
+    },
+    {
+      incident_id: 'inc-41',
+      command_id: `sha256:${'7'.repeat(64)}`,
+      replayed: false,
+      notifications: [{ email: 'ops@example.com', status: 'sending', error: null }],
+    },
+  ])('rejects a malformed committed stakeholder response', async (data) => {
+    httpMocks.requestJsonWithMetadata.mockResolvedValue({
+      data,
+      status: 200,
+      etag: null,
+      requestId: 'request-stakeholder-notify',
+      retryAfterSeconds: null,
+    });
+
+    await expect(api.notifyIncidentStakeholders(
+      'inc-41',
+      { recipients: ['ops@example.com'] },
       '0123456789abcdef0123456789abcdef',
     )).rejects.toBeInstanceOf(WebhookContractError);
   });

@@ -9,8 +9,18 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-from .crypto import EVENT_BODY_MAX_BYTES, WebhookKeyError, WebhookKeyRing
-from .domain import EventSourceKind, WebhookError, WebhookErrorCode
+from .crypto import (
+    EVENT_BODY_MAX_BYTES,
+    WebhookKeyError,
+    WebhookKeyErrorCode,
+    WebhookKeyRing,
+)
+from .domain import (
+    EventSourceKind,
+    PendingIncidentWebhookMarker,
+    WebhookError,
+    WebhookErrorCode,
+)
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
@@ -20,6 +30,40 @@ if TYPE_CHECKING:
     )
 
 _MAX_JSON_DEPTH = 64
+
+
+def decrypt_pending_incident_marker_body(
+    ring: WebhookKeyRing,
+    marker: PendingIncidentWebhookMarker,
+) -> tuple[bytes, dict[str, str | int]]:
+    """Decrypt current marker AAD, with a bounded legacy-AAD fallback."""
+
+    current_identity = dict(marker.envelope_identity)
+    try:
+        return (
+            ring.decrypt_bytes(
+                purpose=marker.envelope_purpose,
+                identity=current_identity,
+                protected=marker.body,
+            ),
+            current_identity,
+        )
+    except WebhookKeyError as exc:
+        legacy_identity = dict(marker.legacy_envelope_identity)
+        if (
+            exc.code is not WebhookKeyErrorCode.CONTEXT_MISMATCH
+            or not marker.uses_legacy_aad
+            or legacy_identity == current_identity
+        ):
+            raise
+        return (
+            ring.decrypt_bytes(
+                purpose=marker.envelope_purpose,
+                identity=legacy_identity,
+                protected=marker.body,
+            ),
+            legacy_identity,
+        )
 
 
 @dataclass(frozen=True)
