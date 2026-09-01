@@ -18,12 +18,14 @@ from uuid import UUID
 
 from tldw_Server_API.app.core.exceptions import HTTPHopError
 from tldw_Server_API.app.core.Security.egress import (
+    evaluate_admin_webhook_e2e_loopback_policy,
     evaluate_platform_webhook_url_policy,
 )
 from tldw_Server_API.app.core.Security.http_hop import (
     HTTPHopLimits,
     NormalizedHTTPHopRequest,
     StatusOnlyHTTPHopResponse,
+    request_admin_webhook_e2e_loopback_status,
     request_http_hop_status,
 )
 
@@ -464,6 +466,7 @@ class DeliveryAttemptExecutor:
         egress: _Egress = request_http_hop_status,
         clock: _Clock | None = None,
         allow_http_dev: bool = False,
+        allow_e2e_loopback: bool = False,
     ) -> None:
         if not callable(egress):
             raise TypeError("egress must be callable")
@@ -474,9 +477,18 @@ class DeliveryAttemptExecutor:
             raise TypeError("clock must provide monotonic and utc_now")
         if not isinstance(allow_http_dev, bool):
             raise TypeError("allow_http_dev must be a boolean")
-        self._egress = egress
+        if not isinstance(allow_e2e_loopback, bool):
+            raise TypeError("allow_e2e_loopback must be a boolean")
+        if allow_e2e_loopback and not allow_http_dev:
+            raise ValueError("allow_e2e_loopback requires allow_http_dev")
+        self._egress = (
+            request_admin_webhook_e2e_loopback_status
+            if allow_e2e_loopback and egress is request_http_hop_status
+            else egress
+        )
         self._clock = clock or _SystemClock()
         self._allow_http_dev = allow_http_dev
+        self._allow_e2e_loopback = allow_e2e_loopback
 
     async def execute(
         self,
@@ -493,7 +505,11 @@ class DeliveryAttemptExecutor:
             return _failed_result(AttemptReasonCode.TARGET_INVALID)
 
         try:
-            policy = evaluate_platform_webhook_url_policy(target.url)
+            policy = (
+                evaluate_admin_webhook_e2e_loopback_policy(target.url)
+                if self._allow_e2e_loopback
+                else evaluate_platform_webhook_url_policy(target.url)
+            )
         except Exception:  # noqa: BLE001 - policy detail must not cross this boundary
             return _retry_result(request, reason=AttemptReasonCode.POLICY_ERROR)
         if policy.allowed is not True:

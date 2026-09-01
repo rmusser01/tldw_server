@@ -76,6 +76,7 @@ def test_settings_default_off_and_validate_bounds() -> None:
     assert settings.active_limit == 25
     assert settings.activation_max_backlog_age_seconds == 300
     assert settings.allow_http_dev is False
+    assert settings.allow_e2e_loopback is False
     assert settings.idempotency_ttl_seconds == 86_400
     assert settings.rollback_window_days == 7
 
@@ -302,6 +303,44 @@ def test_http_override_is_rejected_in_production() -> None:
             {
                 "ENVIRONMENT": "production",
                 "TLDW_ADMIN_WEBHOOKS_ALLOW_HTTP_DEV": "true",
+            }
+        )
+
+
+@pytest.mark.unit
+def test_e2e_loopback_requires_every_test_gate() -> None:
+    required = {
+        "TLDW_ADMIN_WEBHOOKS_E2E_LOOPBACK": "true",
+        "TLDW_ADMIN_WEBHOOKS_ALLOW_HTTP_DEV": "true",
+        "ENABLE_ADMIN_E2E_TEST_MODE": "true",
+        "TEST_MODE": "true",
+        "PYTEST_CURRENT_TEST": "admin-ui-real-backend-e2e",
+    }
+
+    settings = AdminWebhookSettings.from_environment(required)
+    assert settings.allow_e2e_loopback is True
+
+    for missing in required:
+        environ = dict(required)
+        environ.pop(missing)
+        if missing == "TLDW_ADMIN_WEBHOOKS_E2E_LOOPBACK":
+            assert AdminWebhookSettings.from_environment(environ).allow_e2e_loopback is False
+        else:
+            with pytest.raises(ValueError, match="E2E_LOOPBACK"):
+                AdminWebhookSettings.from_environment(environ)
+
+
+@pytest.mark.unit
+def test_e2e_loopback_is_rejected_in_production() -> None:
+    with pytest.raises(ValueError, match="production"):
+        AdminWebhookSettings.from_environment(
+            {
+                "ENVIRONMENT": "production",
+                "TLDW_ADMIN_WEBHOOKS_E2E_LOOPBACK": "true",
+                "TLDW_ADMIN_WEBHOOKS_ALLOW_HTTP_DEV": "true",
+                "ENABLE_ADMIN_E2E_TEST_MODE": "true",
+                "TEST_MODE": "true",
+                "PYTEST_CURRENT_TEST": "admin-ui-real-backend-e2e",
             }
         )
 

@@ -1184,6 +1184,7 @@ class LegacyImportService:
             target = validate_webhook_target(
                 url,
                 allow_http_dev=self._settings.allow_http_dev,
+                allow_e2e_loopback=self._settings.allow_e2e_loopback,
             )
         except WebhookError:
             raise _RecordIssue("target_rejected") from None

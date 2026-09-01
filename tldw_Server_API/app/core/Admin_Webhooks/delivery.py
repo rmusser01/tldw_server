@@ -674,6 +674,7 @@ class AdminWebhookDeliveryService:
         target = validate_webhook_target(
             target_url,
             allow_http_dev=settings.allow_http_dev,
+            allow_e2e_loopback=settings.allow_e2e_loopback,
         )
         if (
             target.hostname != current.target_hostname
@@ -1699,6 +1700,7 @@ async def get_admin_webhook_delivery_service() -> AdminWebhookDeliveryService:
         settings=settings,
         executor=DeliveryAttemptExecutor(
             allow_http_dev=settings.allow_http_dev,
+            allow_e2e_loopback=settings.allow_e2e_loopback,
         ),
         test_attempt_id_factory=lambda: str(uuid4()),
         test_token_factory=lambda: secrets.token_hex(32),

@@ -312,7 +312,11 @@ def _is_allowed_public_address(address: ipaddress.IPv4Address | ipaddress.IPv6Ad
     return True
 
 
-def _validate_resolved_ips(resolved_ips: Sequence[str]) -> tuple[str, ...]:
+def _validate_resolved_ips(
+    resolved_ips: Sequence[str],
+    *,
+    allow_e2e_loopback: bool = False,
+) -> tuple[str, ...]:
     """Validate the complete DNS answer set, preserving resolver order."""
     if isinstance(resolved_ips, (str, bytes)) or not resolved_ips:
         raise HTTPHopError("dns_resolution_failed", retryable=True)
@@ -329,7 +333,10 @@ def _validate_resolved_ips(resolved_ips: Sequence[str]) -> tuple[str, ...]:
         if address is None:
             raise HTTPHopError("dns_address_denied")
         canonical = address.compressed
-        if raw_ip != canonical or not _is_allowed_public_address(address):
+        e2e_loopback = allow_e2e_loopback and canonical == "127.0.0.1"
+        if raw_ip != canonical or not (
+            _is_allowed_public_address(address) or e2e_loopback
+        ):
             raise HTTPHopError("dns_address_denied")
         if canonical not in seen:
             seen.add(canonical)
@@ -352,6 +359,7 @@ async def _resolve_validated_ips(
     request: NormalizedHTTPHopRequest,
     *,
     resolver: _Resolver = _default_resolver,
+    allow_e2e_loopback: bool = False,
 ) -> tuple[str, ...]:
     """Resolve once and reject the complete answer set if any address is unsafe."""
     try:
@@ -359,7 +367,10 @@ async def _resolve_validated_ips(
     except ValueError:
         literal = None
     if literal is not None:
-        return _validate_resolved_ips((request.host,))
+        return _validate_resolved_ips(
+            (request.host,),
+            allow_e2e_loopback=allow_e2e_loopback,
+        )
 
     failure: HTTPHopError | None = None
     try:
@@ -375,7 +386,10 @@ async def _resolve_validated_ips(
         failure = HTTPHopError("dns_resolution_failed", retryable=True)
     if failure is not None:
         raise failure
-    return _validate_resolved_ips(resolved)
+    return _validate_resolved_ips(
+        resolved,
+        allow_e2e_loopback=allow_e2e_loopback,
+    )
 
 
 @dataclass(slots=True)
@@ -1230,8 +1244,12 @@ async def _execute_http_hop_mode(
     network_backend: httpcore.AsyncNetworkBackend,
     response_mode: Literal["bounded_body", "status_only"],
     clock: _Clock | None,
+    allow_e2e_loopback: bool = False,
 ) -> HTTPHopResponse | _StatusOnlyEvidence:
-    validated_ips = _validate_resolved_ips(resolved_ips)
+    validated_ips = _validate_resolved_ips(
+        resolved_ips,
+        allow_e2e_loopback=allow_e2e_loopback,
+    )
     failure: HTTPHopError | None = None
     try:
         return await _perform_http_hop(
@@ -1283,6 +1301,7 @@ async def _execute_http_hop_status(
     resolved_ips: Sequence[str],
     network_backend: httpcore.AsyncNetworkBackend,
     clock: _Clock,
+    allow_e2e_loopback: bool = False,
 ) -> _StatusOnlyEvidence:
     response = await _execute_http_hop_mode(
         request,
@@ -1290,6 +1309,7 @@ async def _execute_http_hop_status(
         network_backend=network_backend,
         response_mode="status_only",
         clock=clock,
+        allow_e2e_loopback=allow_e2e_loopback,
     )
     if not isinstance(response, _StatusOnlyEvidence):
         raise HTTPHopError("transport_error")
@@ -1331,6 +1351,7 @@ async def _request_http_hop_status(
     resolver: _Resolver,
     network_backend: httpcore.AsyncNetworkBackend,
     clock: _Clock,
+    allow_e2e_loopback: bool = False,
 ) -> StatusOnlyHTTPHopResponse:
     """Private deterministic status-only seam covered by the whole-hop deadline."""
     if not isinstance(request, NormalizedHTTPHopRequest):
@@ -1338,12 +1359,17 @@ async def _request_http_hop_status(
     started = _monotonic_now(clock)
 
     async def execute() -> _StatusOnlyEvidence:
-        resolved_ips = await _resolve_validated_ips(request, resolver=resolver)
+        resolved_ips = await _resolve_validated_ips(
+            request,
+            resolver=resolver,
+            allow_e2e_loopback=allow_e2e_loopback,
+        )
         return await _execute_http_hop_status(
             request,
             resolved_ips=resolved_ips,
             network_backend=network_backend,
             clock=clock,
+            allow_e2e_loopback=allow_e2e_loopback,
         )
 
     try:
@@ -1382,6 +1408,25 @@ async def request_http_hop_status(
         resolver=_default_resolver,
         network_backend=httpcore.AnyIOBackend(),
         clock=_SYSTEM_CLOCK,
+    )
+
+
+async def request_admin_webhook_e2e_loopback_status(
+    request: NormalizedHTTPHopRequest,
+) -> StatusOnlyHTTPHopResponse:
+    """Perform one status-only hop to the exact isolated admin E2E receiver."""
+    if (
+        not isinstance(request, NormalizedHTTPHopRequest)
+        or request.scheme != "http"
+        or request.host != "127.0.0.1"
+    ):
+        raise HTTPHopError("dns_address_denied")
+    return await _request_http_hop_status(
+        request,
+        resolver=_default_resolver,
+        network_backend=httpcore.AnyIOBackend(),
+        clock=_SYSTEM_CLOCK,
+        allow_e2e_loopback=True,
     )
 
 

@@ -802,6 +802,7 @@ class AdminWebhookControlPlane:
         target = validate_webhook_target(
             command.url,
             allow_http_dev=self._settings.allow_http_dev,
+            allow_e2e_loopback=self._settings.allow_e2e_loopback,
         )
         return _NormalizedCreate(
             description=description,
@@ -835,6 +836,7 @@ class AdminWebhookControlPlane:
             target = validate_webhook_target(
                 changes.url,
                 allow_http_dev=self._settings.allow_http_dev,
+                allow_e2e_loopback=self._settings.allow_e2e_loopback,
             )
         if changes.event_types is not OMITTED:
             if not isinstance(changes.event_types, tuple):

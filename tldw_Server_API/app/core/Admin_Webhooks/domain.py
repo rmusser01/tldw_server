@@ -16,6 +16,7 @@ from urllib.parse import SplitResult
 
 from tldw_Server_API.app.core.exceptions import WebhookError
 from tldw_Server_API.app.core.Security.egress import (
+    evaluate_admin_webhook_e2e_loopback_policy,
     evaluate_platform_webhook_url_policy,
 )
 
@@ -897,13 +898,18 @@ def validate_webhook_target(
     url: str,
     *,
     allow_http_dev: bool,
+    allow_e2e_loopback: bool = False,
 ) -> ValidatedWebhookTarget:
     """Apply strict syntax and central destination policy to a target URL."""
     parsed, normalized_host = _parse_and_normalize_target(url)
     scheme = parsed.scheme.lower()
     if scheme != "https" and not (scheme == "http" and allow_http_dev):
         raise WebhookError(WebhookErrorCode.VALIDATION_FAILED)
-    result = evaluate_platform_webhook_url_policy(url)
+    result = (
+        evaluate_admin_webhook_e2e_loopback_policy(url)
+        if allow_e2e_loopback
+        else evaluate_platform_webhook_url_policy(url)
+    )
     if not result.allowed:
         raise WebhookError(WebhookErrorCode.TARGET_REJECTED)
     return ValidatedWebhookTarget(

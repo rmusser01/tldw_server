@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import base64
 import importlib
+import json
+import sqlite3
+import tempfile
 from pathlib import Path
 
 import pytest
 import pytest_asyncio
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.core.Audit.unified_audit_service import shutdown_audit_service
@@ -12,12 +17,17 @@ from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
 from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
 from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 from tldw_Server_API.app.core.DB_Management.Users_DB import reset_users_db
+from tldw_Server_API.app.services.admin_e2e_support_service import (
+    _resolve_safe_backup_dir,
+)
 from tldw_Server_API.app.services.registration_service import reset_registration_service
 
 pytestmark = pytest.mark.integration
 
 ADMIN_E2E_SUPPORT_HEADER = 'X-TLDW-Admin-E2E-Key'
 ADMIN_E2E_SUPPORT_KEY = 'playwright-admin-e2e-support-key'
+ADMIN_E2E_WEBHOOK_KEY_ID = 'admin-e2e-primary'
+ADMIN_E2E_WEBHOOK_KEY = base64.b64encode(b'w' * 32).decode('ascii')
 
 
 def _set_fixture_password_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -26,6 +36,18 @@ def _set_fixture_password_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv('TLDW_ADMIN_E2E_SUPER_ADMIN_PASSWORD', 'AdminPass123!')
     monkeypatch.setenv('TLDW_ADMIN_E2E_MEMBER_PASSWORD', 'MemberPass123!')
     monkeypatch.setenv('TLDW_ADMIN_E2E_REQUESTER_PASSWORD', 'RequesterPass123!')
+
+
+def _set_webhook_runtime_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv('TLDW_ADMIN_WEBHOOKS_MODE', 'on')
+    monkeypatch.setenv(
+        'TLDW_ADMIN_WEBHOOK_KEYS_JSON',
+        json.dumps({ADMIN_E2E_WEBHOOK_KEY_ID: ADMIN_E2E_WEBHOOK_KEY}),
+    )
+    monkeypatch.setenv(
+        'TLDW_ADMIN_WEBHOOK_PRIMARY_KEY_ID',
+        ADMIN_E2E_WEBHOOK_KEY_ID,
+    )
 
 
 async def _reset_auth_runtime() -> None:
@@ -209,7 +231,7 @@ async def e2e_client_with_unsafe_backup_path(tmp_path, monkeypatch):
     jobs_db_path = tmp_path / 'jobs_with_unsafe_backup_path.db'
     monitoring_db_path = tmp_path / 'monitoring_with_unsafe_backup_path.db'
     user_db_base_dir = tmp_path / 'user_dbs'
-    unsafe_backup_root = Path.cwd() / 'unsafe-admin-e2e-backups'
+    unsafe_backup_root = Path.home() / 'unsafe-admin-e2e-backups'
     monkeypatch.setenv('AUTH_MODE', 'multi_user')
     monkeypatch.setenv('DATABASE_URL', f'sqlite:///{db_path}')
     monkeypatch.setenv('JOBS_DB_PATH', str(jobs_db_path))
@@ -267,6 +289,112 @@ def test_admin_e2e_routes_fail_closed_without_configured_support_key(
 
     assert response.status_code == 500
     assert response.json()['detail'] == 'admin_e2e_support_key_not_configured'
+
+
+def test_prepare_admin_webhooks_requires_on_mode(e2e_client):
+    response = e2e_client.post(
+        '/api/v1/test-support/admin-e2e/prepare-admin-webhooks',
+        headers=_admin_e2e_headers(),
+    )
+
+    assert response.status_code == 409
+    assert response.json()['detail'] == 'admin_e2e_webhook_mode_not_on'
+
+
+def test_prepare_admin_webhooks_requires_valid_key_ring(e2e_client, monkeypatch):
+    monkeypatch.setenv('TLDW_ADMIN_WEBHOOKS_MODE', 'on')
+    monkeypatch.delenv('TLDW_ADMIN_WEBHOOK_KEYS_JSON', raising=False)
+    monkeypatch.delenv('TLDW_ADMIN_WEBHOOK_PRIMARY_KEY_ID', raising=False)
+
+    response = e2e_client.post(
+        '/api/v1/test-support/admin-e2e/prepare-admin-webhooks',
+        headers=_admin_e2e_headers(),
+    )
+
+    assert response.status_code == 500
+    assert response.json()['detail'] == 'admin_e2e_webhook_key_unavailable'
+
+
+def test_prepare_admin_webhooks_completes_fresh_state_idempotently(
+    e2e_client,
+    monkeypatch,
+):
+    _set_webhook_runtime_env(monkeypatch)
+
+    first = e2e_client.post(
+        '/api/v1/test-support/admin-e2e/prepare-admin-webhooks',
+        headers=_admin_e2e_headers(),
+    )
+    second = e2e_client.post(
+        '/api/v1/test-support/admin-e2e/prepare-admin-webhooks',
+        headers=_admin_e2e_headers(),
+    )
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    assert first.json() == {
+        'ok': True,
+        'phase': 'complete',
+        'active_primary_key_id': ADMIN_E2E_WEBHOOK_KEY_ID,
+        'state_revision': 2,
+    }
+    assert second.json() == first.json()
+
+
+def test_prepare_admin_webhooks_rejects_completed_key_mismatch(
+    e2e_client,
+    monkeypatch,
+):
+    _set_webhook_runtime_env(monkeypatch)
+    prepared = e2e_client.post(
+        '/api/v1/test-support/admin-e2e/prepare-admin-webhooks',
+        headers=_admin_e2e_headers(),
+    )
+    assert prepared.status_code == 200, prepared.text
+
+    replacement_id = 'admin-e2e-replacement'
+    replacement_key = base64.b64encode(b'x' * 32).decode('ascii')
+    monkeypatch.setenv(
+        'TLDW_ADMIN_WEBHOOK_KEYS_JSON',
+        json.dumps({replacement_id: replacement_key}),
+    )
+    monkeypatch.setenv('TLDW_ADMIN_WEBHOOK_PRIMARY_KEY_ID', replacement_id)
+
+    mismatch = e2e_client.post(
+        '/api/v1/test-support/admin-e2e/prepare-admin-webhooks',
+        headers=_admin_e2e_headers(),
+    )
+
+    assert mismatch.status_code == 409
+    assert mismatch.json()['detail'] == 'admin_e2e_webhook_key_mismatch'
+
+
+def test_prepare_admin_webhooks_rejects_unrelated_completed_state(
+    e2e_client,
+    monkeypatch,
+    tmp_path,
+):
+    _set_webhook_runtime_env(monkeypatch)
+    prepared = e2e_client.post(
+        '/api/v1/test-support/admin-e2e/prepare-admin-webhooks',
+        headers=_admin_e2e_headers(),
+    )
+    assert prepared.status_code == 200, prepared.text
+
+    with sqlite3.connect(tmp_path / 'authnz_with_e2e.db') as connection:
+        connection.execute(
+            "UPDATE admin_webhook_migration_state "
+            "SET import_operation_id = ? WHERE singleton_id = 1",
+            ('whmig_' + ('d' * 32),),
+        )
+
+    mismatch = e2e_client.post(
+        '/api/v1/test-support/admin-e2e/prepare-admin-webhooks',
+        headers=_admin_e2e_headers(),
+    )
+
+    assert mismatch.status_code == 409
+    assert mismatch.json()['detail'] == 'admin_e2e_webhook_state_mismatch'
 
 
 def test_admin_e2e_seed_returns_stable_fixture_ids(e2e_client):
@@ -338,6 +466,16 @@ def test_admin_e2e_reset_rejects_unsafe_backup_paths(e2e_client_with_unsafe_back
 
     assert response.status_code == 500
     assert response.json()['detail'] == 'admin_e2e_backup_path_must_be_temp_scoped'
+
+
+def test_admin_e2e_backup_resolver_rejects_temp_root(monkeypatch):
+    monkeypatch.setenv('TLDW_DB_BACKUP_PATH', tempfile.gettempdir())
+
+    with pytest.raises(HTTPException) as exc_info:
+        _resolve_safe_backup_dir()
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == 'admin_e2e_backup_path_must_be_temp_scoped'
 
 
 def test_admin_e2e_bootstrap_jwt_session_returns_cookie_payload(e2e_client):

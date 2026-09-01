@@ -168,6 +168,7 @@ class _RefreshableJobsRuntime:
                         settings=self._settings,
                         executor=DeliveryAttemptExecutor(
                             allow_http_dev=self._settings.allow_http_dev,
+                            allow_e2e_loopback=self._settings.allow_e2e_loopback,
                         ),
                         token_factory=self._token_factory,
                         attempt_id_factory=lambda: str(uuid4()),

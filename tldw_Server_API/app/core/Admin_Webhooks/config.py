@@ -71,6 +71,7 @@ class AdminWebhookSettings:
     allow_http_dev: bool
     idempotency_ttl_seconds: int
     rollback_window_days: int
+    allow_e2e_loopback: bool = False
     delivery_claim_ttl_seconds: int = 60
     delivery_loop_interval_seconds: int = 1
     delivery_heartbeat_interval_seconds: int = 10
@@ -156,6 +157,21 @@ class AdminWebhookSettings:
         )
         if allow_http_dev and is_production_environment_mapping(environ):
             raise ValueError("Webhook HTTP development override is forbidden in production")
+        allow_e2e_loopback = _parse_strict_bool(
+            environ.get("TLDW_ADMIN_WEBHOOKS_E2E_LOOPBACK", "false"),
+            name="TLDW_ADMIN_WEBHOOKS_E2E_LOOPBACK",
+        )
+        if allow_e2e_loopback and (
+            not allow_http_dev
+            or environ.get("ENABLE_ADMIN_E2E_TEST_MODE", "").strip().lower() != "true"
+            or environ.get("TEST_MODE", "").strip().lower() != "true"
+            or environ.get("PYTEST_CURRENT_TEST", "").strip()
+            != "admin-ui-real-backend-e2e"
+            or is_production_environment_mapping(environ)
+        ):
+            raise ValueError(
+                "TLDW_ADMIN_WEBHOOKS_E2E_LOOPBACK requires the isolated admin real-backend test gates"
+            )
         rollback_window_days = _parse_bounded_positive_int(
             environ,
             "TLDW_ADMIN_WEBHOOK_ROLLBACK_WINDOW_DAYS",
@@ -203,6 +219,7 @@ class AdminWebhookSettings:
             allow_http_dev=allow_http_dev,
             idempotency_ttl_seconds=86_400,
             rollback_window_days=rollback_window_days,
+            allow_e2e_loopback=allow_e2e_loopback,
             delivery_claim_ttl_seconds=delivery_claim_ttl_seconds,
             delivery_loop_interval_seconds=delivery_loop_interval_seconds,
             delivery_heartbeat_interval_seconds=delivery_heartbeat_interval_seconds,
