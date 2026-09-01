@@ -2,6 +2,8 @@ import importlib
 import json
 import pytest
 import shutil
+import sqlite3
+import threading
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -11,6 +13,8 @@ import tldw_Server_API.app.core.Collections.reading_service as reading_service_m
 from tldw_Server_API.app.core.Collections.reading_importers import ReadingImportItem
 from tldw_Server_API.app.core.Collections.reading_service import ReadingService, _contains_html_tag
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.Web_Scraping.url_utils import normalize_for_crawl
 
@@ -85,6 +89,228 @@ async def test_reading_save_and_list(reading_env):
     items, count = coll_db.list_content_items(origin="reading", q="Reading")
     assert count >= 1
     assert any(it.title == "Reading Demo" for it in items)
+
+
+def test_reading_list_page_uses_one_snapshot_during_concurrent_insert(
+    reading_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Count, rows, and tags never straddle a concurrent Reading write."""
+    user_id = TEST_USER_ID + 40
+    coll_db = CollectionsDatabase.for_user(user_id)
+    for index in range(21):
+        coll_db.upsert_content_item(
+            origin="reading",
+            url=f"https://example.org/snapshot-{index}",
+            canonical_url=f"https://example.org/snapshot-{index}",
+            domain="example.org",
+            title=f"Snapshot {index:02d}",
+            summary=None,
+            content_hash=None,
+            word_count=None,
+            published_at=None,
+            status="saved",
+            tags=["before"],
+        )
+
+    before_rows, before_total = coll_db.list_content_items(
+        origin="reading",
+        page=1,
+        size=20,
+        sort="created_desc",
+    )
+    before_ids = tuple(row.id for row in before_rows)
+    assert before_total == 21
+
+    count_read = threading.Event()
+    first_write_attempt_done = threading.Event()
+    reader_done = threading.Event()
+    writer_errors: list[BaseException] = []
+    db_path = DatabasePaths.get_media_db_path(user_id)
+
+    def insert_newest_item() -> None:
+        if not count_read.wait(5):
+            writer_errors.append(AssertionError("reader did not reach count query"))
+            first_write_attempt_done.set()
+            return
+
+        params = (
+            str(user_id),
+            "reading",
+            "https://example.org/snapshot-new",
+            "https://example.org/snapshot-new",
+            "Snapshot newest",
+            "saved",
+            0,
+            "9999-01-01T00:00:00+00:00",
+            "9999-01-01T00:00:00+00:00",
+        )
+
+        def _insert(*, timeout: float) -> None:
+            with sqlite3.connect(db_path, isolation_level=None, timeout=timeout) as connection:
+                connection.execute(
+                    """
+                    INSERT INTO content_items (
+                        user_id, origin, url, canonical_url, title, status, favorite,
+                        created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    params,
+                )
+
+        try:
+            _insert(timeout=0.05)
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc).lower():
+                writer_errors.append(exc)
+            first_write_attempt_done.set()
+            if not reader_done.wait(5):
+                writer_errors.append(AssertionError("reader did not release its transaction"))
+                return
+            try:
+                _insert(timeout=5)
+            except BaseException as retry_exc:  # noqa: BLE001 - retained for the test thread
+                writer_errors.append(retry_exc)
+            return
+        except BaseException as exc:  # noqa: BLE001 - retained for the test thread
+            writer_errors.append(exc)
+        finally:
+            first_write_attempt_done.set()
+
+    original_execute = coll_db.backend.execute
+    intercepted_count = False
+
+    def interleaved_execute(query, params=None, connection=None, **kwargs):
+        nonlocal intercepted_count
+        result = original_execute(query, params, connection=connection, **kwargs)
+        if not intercepted_count and "SELECT COUNT(*) AS cnt" in query and "content_items" in query:
+            intercepted_count = True
+            count_read.set()
+            if not first_write_attempt_done.wait(5):
+                raise AssertionError("writer did not attempt the concurrent insert")
+        return result
+
+    writer = threading.Thread(target=insert_newest_item, daemon=True)
+    writer.start()
+    monkeypatch.setattr(coll_db.backend, "execute", interleaved_execute)
+    try:
+        rows, total = coll_db.list_content_items(
+            origin="reading",
+            page=1,
+            size=20,
+            sort="created_desc",
+        )
+    finally:
+        reader_done.set()
+        writer.join(timeout=5)
+
+    after_rows, after_total = coll_db.list_content_items(
+        origin="reading",
+        page=1,
+        size=20,
+        sort="created_desc",
+    )
+    after_ids = tuple(row.id for row in after_rows)
+
+    assert writer.is_alive() is False
+    assert writer_errors == []
+    assert after_total == 22
+    assert (total, tuple(row.id for row in rows)) in {
+        (21, before_ids),
+        (22, after_ids),
+    }
+
+
+def test_reading_list_snapshot_reuses_transaction_connection_for_tags(
+    reading_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The count, page, and tag reads all use one pinned connection."""
+    coll_db = CollectionsDatabase.for_user(TEST_USER_ID + 41)
+    coll_db.upsert_content_item(
+        origin="reading",
+        url="https://example.org/snapshot-tags",
+        canonical_url="https://example.org/snapshot-tags",
+        domain="example.org",
+        title="Snapshot tags",
+        summary=None,
+        content_hash=None,
+        word_count=None,
+        published_at=None,
+        status="saved",
+        tags=["snapshot"],
+    )
+
+    original_execute = coll_db.backend.execute
+    observed_connections: list[object | None] = []
+
+    def tracked_execute(query, params=None, connection=None, **kwargs):
+        normalized = " ".join(query.split())
+        if (
+            "SELECT COUNT(*) AS cnt" in normalized
+            or ("FROM content_items ci" in normalized and "LIMIT ? OFFSET ?" in normalized)
+            or "FROM content_item_tags cit" in normalized
+        ):
+            observed_connections.append(connection)
+        return original_execute(query, params, connection=connection, **kwargs)
+
+    monkeypatch.setattr(coll_db.backend, "execute", tracked_execute)
+
+    rows, total = coll_db.list_content_items(origin="reading", page=1, size=20)
+
+    assert total == 1
+    assert rows[0].tags == ["snapshot"]
+    assert len(observed_connections) == 3
+    assert observed_connections[0] is not None
+    assert all(connection is observed_connections[0] for connection in observed_connections)
+
+
+def test_reading_list_snapshot_requests_repeatable_read_on_postgres(
+    reading_env: Path,
+) -> None:
+    """PostgreSQL pages explicitly request one repeatable read snapshot."""
+    coll_db = CollectionsDatabase.for_user(TEST_USER_ID + 42)
+    coll_db.upsert_content_item(
+        origin="reading",
+        url="https://example.org/snapshot-postgres",
+        canonical_url="https://example.org/snapshot-postgres",
+        domain="example.org",
+        title="Snapshot postgres",
+        summary=None,
+        content_hash=None,
+        word_count=None,
+        published_at=None,
+        status="saved",
+        tags=[],
+    )
+    sqlite_backend = coll_db.backend
+
+    class PostgreSQLModeBackend:
+        backend_type = BackendType.POSTGRESQL
+
+        def __init__(self) -> None:
+            self.snapshot_statements: list[str] = []
+
+        def transaction(self, connection=None):
+            return sqlite_backend.transaction(connection)
+
+        def execute(self, query, params=None, connection=None, **kwargs):
+            normalized = " ".join(query.split())
+            if normalized == "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY":
+                self.snapshot_statements.append(normalized)
+                return sqlite_backend.execute("SELECT 1", connection=connection)
+            return sqlite_backend.execute(query, params, connection=connection, **kwargs)
+
+    proxy = PostgreSQLModeBackend()
+    coll_db._backend = proxy
+
+    rows, total = coll_db.list_content_items(origin="reading", page=1, size=20)
+
+    assert total == 1
+    assert rows[0].title == "Snapshot postgres"
+    assert proxy.snapshot_statements == [
+        "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY"
+    ]
 
 
 @pytest.mark.asyncio

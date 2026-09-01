@@ -2895,7 +2895,12 @@ class CollectionsDatabase:
                 # Ignore unique violations (already linked)
                 continue
 
-    def _fetch_tags_for_item_ids(self, item_ids: Iterable[int]) -> dict[int, list[str]]:
+    def _fetch_tags_for_item_ids(
+        self,
+        item_ids: Iterable[int],
+        *,
+        connection: Any | None = None,
+    ) -> dict[int, list[str]]:
         ids = [int(i) for i in set(item_ids or []) if i is not None]
         if not ids:
             return {}
@@ -2908,6 +2913,7 @@ class CollectionsDatabase:
             WHERE cit.item_id IN ({placeholders})
             """.format_map(locals()),  # nosec B608
             tuple(ids),
+            connection=connection,
         ).rows
         mapping: dict[int, list[str]] = {item_id: [] for item_id in ids}
         for row in rows:
@@ -4084,7 +4090,6 @@ class CollectionsDatabase:
             base_from = f"FROM content_items ci{joins_sql}"
             subquery = f"SELECT ci.id {base_from} WHERE {where_sql} {group_by} {having}"
             count_sql = f"SELECT COUNT(*) AS cnt FROM ({subquery}) AS subq"  # nosec B608
-            total = int(self.backend.execute(count_sql, tuple(clause_params)).scalar or 0)
 
             resolved_limit = limit if isinstance(limit, int) and limit > 0 else size
             resolved_offset = offset if isinstance(offset, int) and offset >= 0 else max(0, (page - 1) * size)
@@ -4117,9 +4122,30 @@ class CollectionsDatabase:
                 LIMIT ? OFFSET ?
             """
             row_params = tuple(clause_params + [resolved_limit, resolved_offset])
-            rows = self.backend.execute(rows_sql, row_params).rows
-            item_ids = [int(r.get("id")) for r in rows]
-            tags_map = self._fetch_tags_for_item_ids(item_ids)
+            with self.transaction() as connection:
+                if self.backend_type == BackendType.POSTGRESQL:
+                    self.backend.execute(
+                        "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY",
+                        connection=connection,
+                    )
+                total = int(
+                    self.backend.execute(
+                        count_sql,
+                        tuple(clause_params),
+                        connection=connection,
+                    ).scalar
+                    or 0
+                )
+                rows = self.backend.execute(
+                    rows_sql,
+                    row_params,
+                    connection=connection,
+                ).rows
+                item_ids = [int(r.get("id")) for r in rows]
+                tags_map = self._fetch_tags_for_item_ids(
+                    item_ids,
+                    connection=connection,
+                )
             content_rows = [self._row_to_content_item(r, tags_map.get(int(r.get("id")), [])) for r in rows]
             return content_rows, total
 
