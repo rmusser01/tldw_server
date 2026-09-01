@@ -2796,10 +2796,10 @@ class CollectionsDatabase:
     @staticmethod
     def _fts_query_string(query: str) -> str:
         """Build a simple FTS query string with prefix matches."""
-        tokens = [tok.strip() for tok in query.replace('"', " ").split() if tok.strip()]
+        tokens = re.findall(r"\w+", query, flags=re.UNICODE)
         if not tokens:
             return ""
-        return " AND ".join(f"{token}*" for token in tokens)
+        return " AND ".join(f'"{token}"*' for token in tokens)
 
     @staticmethod
     def _fts_query_candidates(query: str) -> list[str]:
@@ -2811,7 +2811,7 @@ class CollectionsDatabase:
         upper = raw.upper()
         raw_ops = {"AND", "OR", "NOT", "NEAR"}
         has_operator = any(op in upper.split() for op in raw_ops)
-        has_syntax = bool(re.search(r'[":*()]', raw))
+        has_syntax = bool(re.search(r'["*()]', raw))
         prefer_raw = has_operator or has_syntax
 
         candidates: list[str] = []
@@ -2822,8 +2822,6 @@ class CollectionsDatabase:
         else:
             if sanitized:
                 candidates.append(sanitized)
-            if raw and raw not in candidates:
-                candidates.append(raw)
         return [cand for cand in candidates if cand]
 
     @staticmethod
