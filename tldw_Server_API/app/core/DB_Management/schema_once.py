@@ -129,7 +129,11 @@ def ensure_once(
             different tables, so one caller's setup cannot satisfy another's.
         path: Filesystem path or SQLite URI of the database. When it cannot be
             resolved to a real file the call falls through to ``ensure`` every
-            time, which is the safe direction.
+            time, which is the safe direction. Note that a database which does
+            not exist yet cannot be identified, and it is usually ``ensure``
+            itself that creates the file -- so for a brand new database the
+            first call does not memoize, the second does, and verification
+            starts on the third.
         ensure: The idempotent schema routine to run. It must set up schema
             only; see the module docstring.
         verify: Cheap check that the schema really is present, run on every

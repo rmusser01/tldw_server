@@ -762,7 +762,10 @@ class CollectionsDatabase:
             "(?, ?, ?, ?, ?)",
             _COLLECTIONS_REQUIRED_TABLES,
         )
-        found = {row[0] for row in rows}
+        # QueryResult yields dict rows, so the column has to be named:
+        # row[0] raises KeyError, which ensure_once() swallows as "absent"
+        # and then replays the whole schema on every single call.
+        found = {row["name"] for row in rows}
         return found.issuperset(_COLLECTIONS_REQUIRED_TABLES)
 
     def _run_backend_bootstrap(self) -> None:
