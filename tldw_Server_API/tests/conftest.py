@@ -15,6 +15,7 @@ pytest_plugins = [
 
 from collections.abc import Callable
 import os
+from collections.abc import Iterator
 from pathlib import Path
 import sys
 try:
@@ -623,6 +624,29 @@ def pytest_collection_modifyitems(config, items):  # pragma: no cover - collecti
         except Exception:
             # Never break collection on marker inspection
             _ = None
+
+
+@pytest.fixture(autouse=True)
+def _keep_app_main_reloads_from_leaking() -> Iterator[None]:
+    """Undo any ``reload_app_main()`` the test performed.
+
+    The helper swaps ``sys.modules["tldw_Server_API.app.main"]`` for a freshly
+    imported module and never put the original back, so a single reload changed
+    what that name meant for every test after it. Modules that imported ``app``
+    at collection time kept the object they pinned, leaving the session with two
+    live apps and no way to tell which one a given piece of code was talking to.
+
+    That split is what made drain state leak: a lifespan exit drained a pinned
+    app while anything checking ``app.main`` saw the other one and reported
+    nothing wrong (#2585).
+
+    Tests that reload still get their reloaded app for the duration of the test.
+    They just do not hand it to everything downstream.
+    """
+    from tldw_Server_API.tests.helpers.app_main_state import app_main_isolated
+
+    with app_main_isolated():
+        yield
 
 
 @pytest.fixture(autouse=True)
