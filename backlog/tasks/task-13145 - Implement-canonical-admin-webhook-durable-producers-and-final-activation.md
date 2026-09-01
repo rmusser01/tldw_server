@@ -4,7 +4,7 @@ title: Implement canonical admin webhook durable producers and final activation
 status: In Progress
 assignee: []
 created_date: '2026-08-31 22:44'
-updated_date: '2026-09-01 16:00'
+updated_date: '2026-09-01 16:02'
 labels:
   - admin
   - webhooks
@@ -18,6 +18,7 @@ dependencies:
 references:
   - 'https://github.com/rmusser01/tldw_server/pull/2842'
   - 'https://github.com/rmusser01/tldw_server/pull/2846'
+  - 'https://github.com/rmusser01/tldw_server/pull/2855'
 documentation:
   - Docs/Design/2026-07-12-canonical-admin-outgoing-webhooks.md
   - >-
@@ -91,6 +92,8 @@ Pre-change baseline at 8cb4d2df: backend command completed with TLDW_TEST_NO_DOC
 2026-09-01 final defensive review remediation pending integration: A new independent full-diff review found five additional blockers and one self-review found two provider-contract defects. Every system-ops mutation now uses the strict bounded parser and cannot replace malformed durable state with defaults. Retained true incident-marker conflicts still allow later markers to reconcile but fail the iteration so runtime health degrades. Registration/ETag identity and the immutable six-event catalog are validated at the client boundary. Stakeholder email initializes its provider before claiming a recipient, records only literal `true` as sent, and prunes only fully terminal commands older than the 30-day replay window when the 1,000-command cap needs space; pending and unknown outcomes remain protected. A shared memory-only navigation guard covers unload, links, History/Navigation APIs, browser Back, and the global programmatic shortcut before `router.push`. A second review then found the shortcut gap and unchecked GET/PATCH/list/catalog response paths; both were reproduced with red tests and fixed with synchronous shortcut admission plus closed runtime response validators and create/PATCH request binding. The verification pass found and fixed two bounded edge cases as well: trailing-dot DNS targets now compare against the same normalized origin returned by the server, and catalog limits fail closed above the schema maximum of 1,000. Verification before integration: focused backend 164/164; focused UI 128/128; typecheck passed; full lint passed with 36 unrelated baseline warnings and zero errors; production build generated all 49 pages; mocked Chromium passed 1/1; the amended real-backend Chromium lifecycle passed 1/1 in 31.5s after proving link and Back blocking while the one-time secret remained visible; required PostgreSQL parity passed 79/79 with zero skips in 468.40s; changed-path Ruff, Python compilation, and diff whitespace passed. The first amended browser attempt was invalid because Playwright tried to physically click a sidebar link behind the correctly modal signing-secret overlay and timed out before dispatch; direct cancelable event dispatch replaced that harness mistake. The final read-only verification review found no remaining Critical, P1, or P2 correctness/security issue. No production activation occurred.
 
 2026-09-01 final integrated verification: Rebasing the complete eleven-commit branch onto observed origin/dev e3c198224bb63a995190863e9dcb9adbd95204b2 completed without conflicts; implementation head 1298ee5d0d9208e5b457c783d82e8f0110a11498 was eleven commits ahead and zero behind. Post-rebase UI verification passed 128/128 focused tests, typecheck, full lint with 36 unrelated warnings and zero errors, the 49-page production build, mocked Chromium 1/1, and the real-backend lifecycle 1/1 in 32.9s. Changed-path Ruff, production Python compilation, Bandit review, local Markdown links, and diff whitespace passed. The authoritative deterministic backend aggregate with seed 1831171713 then passed 1,201/1,201 with zero skips and 2,110 warnings in 1131.73s (0:18:51), including the available PostgreSQL fixture. Exact commands and chronological invalid attempts are recorded in Docs/Evidence/Admin_Webhooks_PR3_Verification.md. The branch is ready to publish for normal PR review and CI; no production activation occurred.
+
+2026-09-01 publication: Opened final implementation PR https://github.com/rmusser01/tldw_server/pull/2855 against dev with the complete validation, UX, risk, rollback, and no-production-activation record. Definition of Done item 6 is satisfied by this final summary and PR reference. Task status remains In Progress until review, CI, and merge complete.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
@@ -100,6 +103,6 @@ Pre-change baseline at 8cb4d2df: backend command completed with TLDW_TEST_NO_DOC
 - [x] #3 Documentation and release notes updated
 - [x] #4 Bandit and frontend static/build gates completed
 - [x] #5 Independent review findings resolved
-- [ ] #6 Final summary and PR link recorded
+- [x] #6 Final summary and PR link recorded
 - [x] #7 Known skips, blockers, and residual risks documented
 <!-- DOD:END -->

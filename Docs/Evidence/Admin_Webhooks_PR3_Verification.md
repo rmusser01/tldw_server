@@ -3,6 +3,7 @@
 ## Verification Identity
 
 - Branch: `codex/admin-webhooks-durable-producers-runtime`
+- Pull request: https://github.com/rmusser01/tldw_server/pull/2855
 - Final integrated implementation head:
   `1298ee5d0d9208e5b457c783d82e8f0110a11498`
 - Final branch merge base and observed `origin/dev`:
@@ -24,6 +25,9 @@ verification and rebase identities remain in their chronological sections.
 The complete eleven-commit branch rebased without conflicts onto the final
 observed `origin/dev` and became eleven commits ahead and zero behind. No
 production activation occurred.
+
+The verified branch was published as pull request
+https://github.com/rmusser01/tldw_server/pull/2855 for normal CI and review.
 
 ## Result Summary
 
