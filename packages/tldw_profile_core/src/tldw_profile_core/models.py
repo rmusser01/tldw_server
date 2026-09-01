@@ -5,8 +5,8 @@ from typing import Annotated, Literal
 from pydantic import AfterValidator, Field, StrictBool, model_validator
 
 from .canonical import (
-    Confidence,
     I_JSON_MAX_INTEGER,
+    Confidence,
     JsonInteger,
     PortableDateTime,
     VersionOne,
@@ -28,7 +28,6 @@ from .payloads import (
     reject_blank,
     reject_secret_material,
 )
-
 
 OpaqueId = Annotated[
     str, Field(min_length=1, max_length=128), AfterValidator(reject_blank)
