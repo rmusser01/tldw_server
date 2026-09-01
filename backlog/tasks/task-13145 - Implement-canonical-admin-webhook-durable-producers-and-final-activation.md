@@ -4,7 +4,7 @@ title: Implement canonical admin webhook durable producers and final activation
 status: To Do
 assignee: []
 created_date: '2026-08-31 22:44'
-updated_date: '2026-08-31 23:12'
+updated_date: '2026-09-01 00:12'
 labels:
   - admin
   - webhooks
@@ -17,6 +17,7 @@ dependencies:
   - TASK-13111
 references:
   - 'https://github.com/rmusser01/tldw_server/pull/2842'
+  - 'https://github.com/rmusser01/tldw_server/pull/2846'
 documentation:
   - Docs/Design/2026-07-12-canonical-admin-outgoing-webhooks.md
   - >-
@@ -58,6 +59,8 @@ Detailed TDD plan: Docs/superpowers/plans/2026-08-31-canonical-admin-webhook-dur
 
 <!-- SECTION:NOTES:BEGIN -->
 2026-08-31 planning: Inspected merged PR #2842 boundaries across canonical delivery/domain/repository/runtime, user registration/deactivation transactions, file-backed incidents, route selection, admin Webhooks UI, and incident notification UI. The executable PR 3 plan preserves status compatibility while deleting runtime selection, separates durable incident webhook notification from stakeholder email, requires pending-file and reconciled-DB idempotency checks, and splits activation into migrate-mode predeploy plus no-traffic on-canary live gates.
+
+Planning PR: https://github.com/rmusser01/tldw_server/pull/2846 at reviewed plan commit 62e4d6e9e5fe0badd84ff91bad8d78894c7a7594.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
