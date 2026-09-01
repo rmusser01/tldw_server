@@ -4,7 +4,7 @@ title: Implement canonical admin webhook durable producers and final activation
 status: In Progress
 assignee: []
 created_date: '2026-08-31 22:44'
-updated_date: '2026-09-01 06:34'
+updated_date: '2026-09-01 09:23'
 labels:
   - admin
   - webhooks
@@ -22,6 +22,8 @@ documentation:
   - Docs/Design/2026-07-12-canonical-admin-outgoing-webhooks.md
   - >-
     Docs/superpowers/plans/2026-08-31-canonical-admin-webhook-durable-producers-activation.md
+  - Docs/Admin_Webhooks_Receiver_Guide.md
+  - Docs/Evidence/Admin_Webhooks_PR3_Verification.md
 priority: high
 ---
 
@@ -40,7 +42,7 @@ Implement upstream PR 3 from the approved canonical outgoing-webhook design. Add
 - [x] #5 The final runtime mounts exactly one canonical route per method and path, removes temporary legacy compatibility handlers, and enables on mode only after complete schema, migration, key, Jobs, worker, reconciler, and backlog preflight.
 - [x] #6 The operational admin Webhooks UI uses only the canonical API and provides catalog-driven registration management, one-time secret handling, status, history, test, redelivery, rotation, disable, and deletion workflows without persisting secrets or replay keys.
 - [x] #7 SQLite and PostgreSQL producer, activation, security, admin UI, and controlled-receiver end-to-end gates pass with automatic delivery, duplicate, retry, signature, test-header, and manual-redelivery proof.
-- [ ] #8 Public receiver and operator documentation records event payloads, signing and deduplication, migration and key operations, rollout, disable, retention, forward-fix, rollback boundaries, and at-least-once unordered semantics.
+- [x] #8 Public receiver and operator documentation records event payloads, signing and deduplication, migration and key operations, rollout, disable, retention, forward-fix, rollback boundaries, and at-least-once unordered semantics.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -79,15 +81,17 @@ Pre-change baseline at 8cb4d2df: backend command completed with TLDW_TEST_NO_DOC
 2026-09-01 Tasks 6 and 7 complete pending commits: Replaced the admin Webhooks surface with a canonical-only status-first client and controller, strict closed response validation, full redacted delivery/attempt history, persisted test and same-command polling/retry, manual redelivery with changed-configuration confirmation, current-ETag lifecycle commands, and synchronous memory-only cleanup for secrets and idempotency keys. Added a distinct incident webhook notification command with the exact public payload preview, explicit acknowledgement, bounded normalized narrative, 202 acceptance metadata, ambiguous same-key retry, conflict handling, navigation protection, and pagehide cleanup; stakeholder email remains separate. Review found and fixed command-result masking, catalog/list failures being mislabeled as status failures, an inconsistent readiness contract, and stale async completion after pagehide. Fresh verification: focused Vitest matrix 111 passed in 4.90s; TypeScript typecheck passed; touched-file ESLint passed with zero warnings/errors; full admin-ui lint passed with zero errors and 36 unrelated baseline warnings; Next.js 16.2.2 production build passed and generated 49 pages including /webhooks and /incidents; combined Chromium acceptance flows passed 2/2 in 8.9s; git diff --check passed. A prior full admin-ui test run exposed one affected HTTP expectation, which was fixed and is included in the green focused matrix; the remaining repository baseline was 130 files passed, 18 unrelated files failed, 775 tests passed, 42 unrelated tests failed, and 3 unrelated snapshots failed across BYOK, resource governor, plans, monitoring, organizations, dashboard, stats, usage, and users. Bandit is not applicable to these frontend-only tasks. No image asset was needed for this dense operational admin surface. Backlog CLI/MCP writes are ambiguous because this repository contains two active TASK-13145 records; this canonical webhook task was therefore updated by exact path following the repository's documented duplicate-ID precedent, while the unrelated Personal Context task was left unchanged.
 
 2026-09-01 Task 8 complete pending commit: Added an in-memory controlled HTTPS receiver at the reviewed status-only transport seam and proved all six production events, exact-body HMAC signatures, canonical event/delivery identifiers and timestamps, duplicate receiver identity, the test header, historical-event/new-delivery manual redelivery, one 503 retry followed by success, and terminal 400 behavior. The controlled receiver matrix passed 6 tests across SQLite/PostgreSQL AuthNZ and all four AuthNZ/Jobs backend combinations with zero skips. The expanded producer/capture/expansion/recovery matrix passed 176 tests with zero skips. Added a strictly test-gated real-backend preparation endpoint and an exact `http://127.0.0.1` loopback transport exception requiring HTTP development mode, both admin E2E test gates, the dedicated pytest marker, and a non-production environment; credentials, fragments, localhost, IPv6 loopback, adjacent loopback, private targets, and normal public transport remain denied. The complete support/executor/SSRF/DNS/redirect/proxy/TLS/streaming transport matrix passed 506 tests in 70.72s. The canonical `bun run test:real-backend:webhooks` gate built 49 admin pages and passed the full repeat-run browser lifecycle 1/1 in 24.4s: create inactive, acknowledge one-time secret, enable, produce user and incident events, inspect persisted history, run test, redeliver, disable, rotate, and prove secret/URL redaction. Review found and fixed a backup-reset guard that could accept the temporary root itself, required the deterministic E2E migration identity before accepting a completed setup, preserved repeat-run behavior across host temp-path changes, and improved receiver diagnostics to fail immediately on contract rejection. Ruff, Python compilation, focused Bandit with zero findings, focused ESLint, TypeScript typecheck, and git diff --check passed. Broad Bandit still reports only pre-existing low-severity findings in older modified modules. No independent subagent reviewer was available in this environment; a complete diff self-review found no unresolved Task 8 correctness or security issue. Task 9 remains responsible for public receiver docs, runbooks, aggregate evidence, release notes, and the final release gate.
+
+2026-09-01 Task 9 complete pending commit and independent PR review: Added the public receiver guide with the exact six subscription schemas, reserved test schema/header, raw-body HMAC verification, timestamp/constant-time rules, event-versus-delivery deduplication, at-least-once unordered semantics, retry schedule, redelivery, and secret-rotation guidance. Updated control-plane, migration, key-rotation, delivery, and release docs with the canonical-only private-beta sequence, coordinated incident-marker backup/restore/readback, key-loss handling, dead-delivery inspection, safe disable, and the permanent forward-fix boundary after first canonical activity. Aggregate verification passed 1,169 tests with zero skips; the required PostgreSQL producer/recovery matrix passed 79 with zero skips; the final focused admin UI matrix passed 94; typecheck, lint, production build, changed-path Ruff, local doc links, and the real-backend browser lifecycle passed. Strict test doubles missed by Task 8 were corrected after deterministic RED evidence; no production behavior changed. Broad admin UI tests remain at an unrelated 131-file/778-test pass baseline with 17 files/41 tests failing, broad Ruff has 13 branch-unmodified admin endpoint errors, and Bandit has 11 reviewed Low findings with zero Medium/High. The complete command/output history, invalid sandbox/worktree attempts, and residual risks are recorded in Docs/Evidence/Admin_Webhooks_PR3_Verification.md. The branch is eight commits behind the observed origin/dev and must receive integration review plus repeat impacted gates before merge. No production activation occurred. No independent subagent reviewer was available, so DoD #5 and the final PR-link item remain open.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests and verification evidence recorded
-- [ ] #3 Documentation and release notes updated
-- [ ] #4 Bandit and frontend static/build gates completed
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests and verification evidence recorded
+- [x] #3 Documentation and release notes updated
+- [x] #4 Bandit and frontend static/build gates completed
 - [ ] #5 Independent review findings resolved
 - [ ] #6 Final summary and PR link recorded
-- [ ] #7 Known skips, blockers, and residual risks documented
+- [x] #7 Known skips, blockers, and residual risks documented
 <!-- DOD:END -->

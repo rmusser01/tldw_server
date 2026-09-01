@@ -104,6 +104,51 @@ acquisition gate reports `mode_off` or `mode_migrate` for those modes and
 reserved for a genuine delivery-health read failure; already loaded migration
 and key facts remain visible.
 
+## Private-Beta Activation Sequence
+
+Use one reviewed change record for the complete sequence. Do not enable
+canonical mode in a code deployment merely because the implementation tests
+pass.
+
+1. Record the application SHA, deployment, every process/node, AuthNZ and Jobs
+   backend identities, active `system_ops.json` path, key IDs, configured
+   limits, and provider backup references. Never record credentials or key
+   bytes.
+2. Drain mutation traffic and roll every process to `migrate`. Complete the
+   dry-run, approval, import, decrypt/readback, encrypted-backup readback, and
+   rollback-key checks in the migration runbook.
+3. Keep every imported registration inactive. Rotate each imported receiver
+   signing secret through the admin Web UI and store it in the receiver's
+   secret manager.
+4. Provision the exact dedicated key ring on every API, worker, and operator
+   process. Confirm the configured primary matches durable migration state.
+5. While all nodes remain in `migrate`, run
+   `tldw-admin-webhooks activation-check --phase predeploy`. Stop on any failed
+   schema, migration, key, AuthNZ, Jobs, queue, or job-type gate.
+6. Deploy exactly one no-traffic canary with mode `on`. Keep registrations
+   inactive and keep product mutation traffic away from the canary. Wait for
+   fresh ready worker, reconciler, and retention heartbeats.
+7. Run `tldw-admin-webhooks activation-check --phase live` against the canary.
+   Stop if the backlog age exceeds policy or any delivery capability is
+   unready.
+8. In the admin Web UI, create a new inactive controlled receiver registration,
+   store its one-time secret, and run the persisted test. Verify the signature,
+   test header, history row, and sanitized UI.
+9. Enable only that controlled registration. Send one controlled user mutation
+   and one controlled incident mutation, verify their automatic deliveries,
+   then perform one explicit manual redelivery. The redelivery must retain the
+   historical event ID and use a new delivery ID.
+10. Record the sanitized status, activation outputs, receiver evidence,
+    delivery-history outcomes, and operator/reviewer sign-off. Disable and
+    delete the controlled registration when the probe is complete.
+11. Expand `on` mode and normal traffic gradually. Recheck status and the live
+    activation gate after each deployment group before proceeding.
+
+The first canonical registration mutation, event capture, redelivery, or
+delivery attempt permanently crosses the structural rollback boundary. After
+that point, a failed rollout is mode `off` plus forward-fix; never restore or
+restart the legacy writer.
+
 ## Metrics And Triage
 
 All canonical families begin with `admin_webhooks_` and accept only closed,
@@ -202,6 +247,32 @@ inactive registration. A process loss closes a stale test as
 `test_attempt_interrupted`; an exact in-progress retry returns bounded `202`
 state rather than sending a second request.
 
+### Dead Delivery Inspection
+
+Use the admin Web UI delivery history or the canonical redacted history API.
+Record webhook ID, event type, event ID, delivery ID, delivery kind, terminal
+reason, status class, attempt numbers, and timestamps. Do not query encrypted
+payload, target, or secret columns for routine triage, and do not copy receiver
+response content into an incident record.
+
+Classify before taking action:
+
+- configuration lifecycle reasons (`canceled_*`, `superseded_config`) require
+  operator review of the current registration, not an automatic replay;
+- `target_invalid`, `target_rejected`, DNS, TLS, proxy, or SSRF reasons require
+  a configuration or policy forward-fix before a new command;
+- terminal receiver 4xx requires receiver/application correction;
+- `attempt_budget_exhausted`, `delivery_expired`, `outcome_unknown`, or
+  interrupted test evidence is ambiguous and must not be described as unsent;
+- key, migration, Jobs, or heartbeat failures require restoring platform
+  readiness before any redelivery decision.
+
+Manual redelivery is a new audited delivery command, not a state repair. Use it
+only after the root cause is corrected and the receiver's event-ID
+deduplication is confirmed. If configuration changed, require the UI's explicit
+changed-configuration confirmation. Never edit a dead row, reset an attempt
+counter, or requeue a Jobs row directly.
+
 ## Retention
 
 Terminal delivery metadata remains through 29 days, 23 hours, and 59 minutes
@@ -222,6 +293,12 @@ category drains. A failed transaction leaves its rows intact and publishes an
 unready retention heartbeat when the heartbeat store is reachable.
 
 ## Receiver Verification
+
+The complete public receiver contract is
+[Admin Webhooks Receiver Guide](Admin_Webhooks_Receiver_Guide.md). The minimum
+operational proof is exact-body HMAC verification, timestamp freshness,
+event-ID business deduplication, delivery-ID diagnostics, and explicit handling
+of the test header.
 
 The receiver must preserve the exact raw request body. Verify
 `X-TLDW-Webhook-Signature` with constant-time comparison against:
@@ -256,6 +333,12 @@ To stop new canonical acquisition, set mode to `off` through the normal reviewed
 configuration process and restart all nodes consistently. Expect final unready
 heartbeats; retain AuthNZ and Jobs data and every required encryption key. Do
 not delete pending dispositions or delivery rows manually.
+
+Where status and the Web UI remain available, disable active registrations
+before the global mode change to stop new fanout intentionally. Mode `off`
+preserves ordinary user and incident availability but does not capture new
+canonical webhook events. Record that delivery gap as part of the incident and
+do not later claim those source mutations were queued.
 
 Before the first canonical mutation or delivery, rollback may follow the
 separate migration runbook while its durable rollback conditions remain true.

@@ -535,7 +535,7 @@ async def test_fail_once_audit_error_is_preserved_across_postgres_transaction(
     monkeypatch.setattr(
         control_plane,
         "validate_webhook_target",
-        lambda url, *, allow_http_dev: ValidatedWebhookTarget(
+        lambda url, *, allow_http_dev, allow_e2e_loopback: ValidatedWebhookTarget(
             url=url,
             hostname="hooks.example.com",
             target_display="https://hooks.example.com",

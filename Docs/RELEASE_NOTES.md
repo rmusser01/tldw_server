@@ -4,6 +4,21 @@ This page is the release notes index placeholder for published versions.
 
 ## Unreleased
 
+### Canonical admin webhooks
+
+- Added the default-off canonical admin webhook control and delivery runtime,
+  six privacy-bounded durable user/incident event producers, encrypted incident
+  recovery markers, SQLite/PostgreSQL recovery parity, and the operational
+  admin Webhooks and incident-notification workflows.
+- Added canonical migration, key rotation, activation, delivery, retention,
+  controlled-receiver, and safe-disable procedures. Operators must complete the
+  documented `migrate` preflight and one no-traffic `on` canary before private-
+  beta activation; deployment does not enable the feature automatically.
+- Receiver delivery is explicitly at-least-once and unordered. Automatic
+  retries can repeat an event/delivery identity, and manual redelivery retains
+  the historical event ID with a new delivery ID. Receivers must verify the
+  exact-body HMAC and deduplicate business effects by event ID.
+
 ### Presentation Studio
 
 - Added standalone HTML + JavaScript presentations as a separately gated,

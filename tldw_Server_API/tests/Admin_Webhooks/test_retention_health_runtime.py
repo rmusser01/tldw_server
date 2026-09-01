@@ -676,6 +676,7 @@ async def test_runtime_recovers_after_jobs_constructor_fails_once(
         delivery_loop_interval_seconds=0.01,
         delivery_heartbeat_freshness_seconds=30,
         allow_http_dev=False,
+        allow_e2e_loopback=False,
     )
     manager_calls = 0
     worker_started = asyncio.Event()

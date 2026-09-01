@@ -316,8 +316,8 @@ async def test_production_composition_constructs_all_resources_in_on_mode(
         calls.append(("key_ring", key_result))
         return key_result
 
-    def _executor(*, allow_http_dev: bool) -> object:
-        calls.append(("executor", allow_http_dev))
+    def _executor(*, allow_http_dev: bool, allow_e2e_loopback: bool) -> object:
+        calls.append(("executor", (allow_http_dev, allow_e2e_loopback)))
         return executor
 
     def _metrics() -> object:
@@ -342,7 +342,7 @@ async def test_production_composition_constructs_all_resources_in_on_mode(
         ("pool", pool),
         ("repository", pool),
         ("key_ring", key_result),
-        ("executor", False),
+        ("executor", (False, False)),
         ("metrics", metrics),
     ]
     assert service._repository is repository

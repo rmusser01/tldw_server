@@ -117,6 +117,11 @@ The catalog currently contains:
 Wildcards and unknown events are rejected. Creation is always inactive.
 Timeouts are 1-30 seconds and default to 10.
 
+The public request envelope, exact event-specific payload schemas, signature
+algorithm, deduplication rules, and response behavior are defined in the
+[Admin Webhooks Receiver Guide](Admin_Webhooks_Receiver_Guide.md). Treat that
+guide and the catalog API version as one compatibility contract.
+
 ## Conditional Requests And Idempotency
 
 Registration ETags are strong and have this exact shape:
@@ -255,7 +260,15 @@ Before any canonical management session:
 2. Confirm `schema_ready=true` and migration phase `complete` before mode `on`.
 3. Confirm `key_state=available` and configured limits are not exceeded.
 4. Treat `delivery_capability_ready=false` as a hard live-activation stop.
-5. Use the migration and key-rotation runbooks for all offline state changes.
+5. Run `tldw-admin-webhooks activation-check --phase predeploy` while every
+   node remains in `migrate` before deploying an `on` canary.
+6. Run `tldw-admin-webhooks activation-check --phase live` only against the
+   no-traffic canary before enabling a registration or admitting producer
+   traffic.
+7. Use the migration and key-rotation runbooks for all offline state changes.
 
 See [Admin Webhooks Migration Runbook](Admin_Webhooks_Migration_Runbook.md) and
 [Admin Webhooks Key Rotation Runbook](Admin_Webhooks_Key_Rotation_Runbook.md).
+The complete private-beta rollout, controlled probes, dead-delivery triage, and
+safe-disable procedure are in the
+[Admin Webhooks Delivery Runbook](Admin_Webhooks_Delivery_Runbook.md).
