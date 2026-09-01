@@ -220,6 +220,39 @@ def test_capabilities_project_request_local_manage_authority(
     assert response.json()["manage_authorized"] is expected
 
 
+def test_unavailable_endpoint_capability_and_enabled_status_remain_typed(client) -> None:
+    test_client, api, _app = client
+    capability = api.capabilities()
+    capability.update(
+        {
+            "endpoint_display": None,
+            "indexing_available": False,
+            "unavailable_reason": "notes_semantic_endpoint_unavailable",
+            "resolved_dimensions": None,
+        }
+    )
+    resource = api.status()
+    resource.update(
+        {
+            "state": "needs_attention",
+            "detail_reason": "unavailable",
+            "desired_state": "enabled",
+        }
+    )
+    api.capabilities = lambda: capability
+    api.status = lambda: resource
+
+    capability_response = test_client.get(
+        "/api/v1/notes/graph/semantic-index/capabilities"
+    )
+    status_response = test_client.get("/api/v1/notes/graph/semantic-index")
+
+    assert capability_response.status_code == 200
+    assert capability_response.json()["endpoint_display"] is None
+    assert status_response.status_code == 200
+    assert status_response.json()["detail_reason"] == "unavailable"
+
+
 def test_enable_binds_capability_revision_and_returns_202(client) -> None:
     test_client, api, _app = client
     response = test_client.put(

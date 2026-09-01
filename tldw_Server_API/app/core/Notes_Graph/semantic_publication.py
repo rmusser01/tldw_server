@@ -8,7 +8,6 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Protocol
-from urllib.parse import urlsplit
 
 from tldw_Server_API.app.core.DB_Management.chacha.note_semantic_models import (
     SemanticChunkRecord,
@@ -20,28 +19,8 @@ from tldw_Server_API.app.core.DB_Management.chacha.note_semantic_models import (
 )
 
 from .semantic_content import SemanticChunkInput
+from .semantic_endpoint import canonical_semantic_endpoint_origin
 from .semantic_vectors import SemanticVector
-
-
-def _canonical_origin(value: object) -> str | None:
-    if not isinstance(value, str) or not value:
-        return None
-    try:
-        parsed = urlsplit(value)
-        if (
-            parsed.scheme not in {"http", "https"}
-            or not parsed.hostname
-            or parsed.username is not None
-            or parsed.password is not None
-            or parsed.path not in {"", "/"}
-            or parsed.query
-            or parsed.fragment
-        ):
-            return None
-        port = parsed.port
-    except ValueError:
-        return None
-    return f"{parsed.scheme}://{parsed.hostname.lower()}{f':{port}' if port is not None else ''}"
 
 
 def _redacted_repr(value: object) -> str:
@@ -70,7 +49,10 @@ class SemanticExecutionFence:
     vector_backend: str
 
     def __post_init__(self) -> None:
-        if _canonical_origin(self.endpoint_origin) != self.endpoint_origin:
+        if (
+            canonical_semantic_endpoint_origin(self.endpoint_origin)
+            != self.endpoint_origin
+        ):
             raise ValueError("notes_semantic_endpoint_origin_invalid")
         if self.credential_source not in {"user", "server_default"}:
             raise ValueError("notes_semantic_credential_scope_invalid")
@@ -247,7 +229,8 @@ def validate_execution_fence(
     if not current.endpoint_policy_allowed:
         raise SemanticIndexingError("notes_semantic_endpoint_policy_denied")
     if (
-        _canonical_origin(current.endpoint_origin) != current.endpoint_origin
+        canonical_semantic_endpoint_origin(current.endpoint_origin)
+        != current.endpoint_origin
         or current.endpoint_origin != fence.endpoint_origin
     ):
         raise SemanticIndexingError("notes_semantic_endpoint_origin_drift")

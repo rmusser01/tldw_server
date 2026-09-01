@@ -76,23 +76,24 @@ const hasCompleteConsentDisclosure = (
   const hasIdentity = [
     capability.provider_label,
     capability.model,
-    capability.storage_label,
-    capability.endpoint_display
+    capability.storage_label
   ].every((value) => value.trim().length > 0)
   const dimensionsAreCoherent =
     (capability.resolved_dimensions === null) ===
     capability.dimension_probe_required
   return Boolean(
     capability.indexing_available &&
-      hasIdentity &&
-      capability.storage_boundary !== "unavailable" &&
-      capability.unavailable_reason === null &&
-      dimensionsAreCoherent &&
-      capability.outbound_data_categories.length ===
-        NOTES_SEMANTIC_OUTBOUND_DATA_CATEGORIES.length &&
-      NOTES_SEMANTIC_OUTBOUND_DATA_CATEGORIES.every((category) =>
-        outbound.has(category)
-      )
+    hasIdentity &&
+    capability.endpoint_display !== null &&
+    capability.endpoint_display.trim().length > 0 &&
+    capability.storage_boundary !== "unavailable" &&
+    capability.unavailable_reason === null &&
+    dimensionsAreCoherent &&
+    capability.outbound_data_categories.length ===
+      NOTES_SEMANTIC_OUTBOUND_DATA_CATEGORIES.length &&
+    NOTES_SEMANTIC_OUTBOUND_DATA_CATEGORIES.every((category) =>
+      outbound.has(category)
+    )
   )
 }
 
@@ -108,8 +109,8 @@ const semanticManagementActions = ({
   if (!capability?.manage_authorized || !status) return []
   const cleanupBlocked = Boolean(
     status.cleanup_pending ||
-      status.detail_reason === "cleanup_pending" ||
-      status.detail_reason === "cleanup_stalled"
+    status.detail_reason === "cleanup_pending" ||
+    status.detail_reason === "cleanup_stalled"
   )
   if (cleanupBlocked) return []
   if (activeRun) {
@@ -635,12 +636,16 @@ const NotesGraphInspector: React.FC<NotesGraphInspectorProps> = ({
                   {t("notesSearch.semanticModel")}
                 </dt>
                 <dd className="break-words">{semanticCapabilities.model}</dd>
-                <dt className="font-medium text-text-muted">
-                  {t("notesSearch.semanticEndpoint")}
-                </dt>
-                <dd className="break-words">
-                  {semanticCapabilities.endpoint_display}
-                </dd>
+                {semanticCapabilities.endpoint_display ? (
+                  <>
+                    <dt className="font-medium text-text-muted">
+                      {t("notesSearch.semanticEndpoint")}
+                    </dt>
+                    <dd className="break-words">
+                      {semanticCapabilities.endpoint_display}
+                    </dd>
+                  </>
+                ) : null}
                 <dt className="font-medium text-text-muted">
                   {t("notesSearch.semanticExecutionBoundary")}
                 </dt>
@@ -1028,10 +1033,10 @@ const NotesGraphInspector: React.FC<NotesGraphInspectorProps> = ({
           {suggestions.map((item) => {
             const title =
               item.kind === "related_note"
-                ? item.target_title ?? t("notesSearch.graphSuggestedNote")
-                : item.display_tag ??
+                ? (item.target_title ?? t("notesSearch.graphSuggestedNote"))
+                : (item.display_tag ??
                   item.normalized_tag ??
-                  t("notesSearch.graphSuggestedTag")
+                  t("notesSearch.graphSuggestedTag"))
             const tagPrefix =
               item.kind === "tag"
                 ? t(

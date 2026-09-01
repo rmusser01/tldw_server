@@ -4,7 +4,7 @@ title: Implement Notes embedding index and semantic graph edges
 status: In Progress
 assignee: []
 created_date: '2026-08-27 02:20'
-updated_date: '2026-09-01 18:56'
+updated_date: '2026-09-01 19:47'
 labels:
   - notes
   - notes-graph
@@ -94,12 +94,16 @@ Approved executable plan: `Docs/superpowers/plans/2026-08-29-notes-semantic-inde
 2026-09-01 Task 11 second-review hardening complete pending commit: closed renewal admission gaps with full active-generation binding health and fresh rebuild recovery; blocked cross-backend renewal until old persisted-store cleanup is confirmed; enabled probe-eligible pending dimensions with pre-Note worker CAS; restored usable no-generation rebuild actions; and added strict endpoint/provider/model/storage consent identity with typed backend-delete guidance. Self-review also bound pending capability revisions to vector storage identity and aligned unavailable unresolved dimensions, IPv6 origins, and explicit default ports. Final verification: 313 focused/adjacent Python 3.11.13 backend tests, 76 focused frontend tests, and 126 adjacent Notes graph tests passed; TypeScript, canonical Prettier, locale duplicate/coverage, Ruff, Bandit zero findings, and git diff --check passed. Report: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-11-fix2-report.md. Known concerns: no live PostgreSQL/pgvector service run; glossary check references a missing repository glossary file.
 
 Additional Task 11 fix2 verification: the dedicated Notes semantic English-fallback locale contract passed (1/1).
+
+2026-09-01 Task 11 fix round 3 started from 2124c290a4. Correction: prior language claiming Task 11 complete/reviewed is superseded; this bounded capability-contract review-fix round is pending a clean re-review. Preserve Tasks 12-13 as outstanding.
+
+2026-09-01 Task 11 fix round 3 implementation and verification completed from 2124c290a4. Resolved public/projector capability-binding parity, canonical IPv6/IDN/redacted endpoint origins, and typed nullable endpoint-unavailable disclosure with Delete-only UI recovery. RED: backend 10 failed/1 passed; frontend 2 failed/71 passed. GREEN: backend 306 passed; frontend 226 passed; extension TypeScript, Ruff, Bandit zero findings, locale duplicate/coverage, formatting, and diff checks passed. This round remains pending clean re-review; do not treat Task 11 as complete/reviewed. Tasks 12-13 remain outstanding. Report: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-11-fix3-report.md.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-TASK-13134 remains In Progress with implementation Tasks 1 through 11 complete and reviewed. Tasks 12-13 remain: semantic graph visuals/evidence/manual conversion, then documentation and integrated release gates.
+TASK-13134 remains In Progress. Tasks 1-10 are complete and reviewed. Task 11 fix round 3 is implemented and verified but pending a clean re-review. Tasks 12-13 remain outstanding.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

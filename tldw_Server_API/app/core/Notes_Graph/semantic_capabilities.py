@@ -8,8 +8,8 @@ import re
 from dataclasses import asdict, dataclass, field
 from math import ceil
 from typing import Literal
-from urllib.parse import urlsplit
 
+from .semantic_endpoint import canonical_semantic_endpoint_origin
 from .semantic_settings import DEFAULT_SEMANTIC_INDEX_SETTINGS, SemanticIndexSettings
 
 ExecutionBoundary = Literal["local", "external", "unknown"]
@@ -149,18 +149,16 @@ def _safe_identifier(value: str | None, *, allowed: dict[str, str]) -> str:
 
 
 def _endpoint_display(endpoint_url: str | None) -> str | None:
-    if not endpoint_url:
-        return None
-    try:
-        parsed = urlsplit(endpoint_url)
-        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-            return None
-        port = parsed.port
-    except ValueError:
-        return None
-    hostname = parsed.hostname.lower()
-    display_host = f"[{hostname}]" if ":" in hostname else hostname
-    return f"{parsed.scheme}://{display_host}{f':{port}' if port is not None else ''}"
+    return canonical_semantic_endpoint_origin(endpoint_url)
+
+
+def semantic_capability_binding_matches(
+    persisted_hash: str | None,
+    current_hash: str | None,
+) -> bool:
+    """Match projector fail-safe semantics for unresolved live capabilities."""
+
+    return current_hash is None or current_hash == persisted_hash
 
 
 def _endpoint_origin_revision(endpoint_display: str | None) -> str:
@@ -245,7 +243,7 @@ def build_semantic_capabilities(
         or model_revision_invalid
     ):
         unavailable_reason = "notes_semantic_provider_unavailable"
-    elif execution_boundary == "external" and endpoint_display is None:
+    elif endpoint_display is None:
         unavailable_reason = "notes_semantic_endpoint_unavailable"
     elif not contract.provider_healthy:
         unavailable_reason = "notes_semantic_provider_unavailable"
@@ -299,4 +297,9 @@ def build_semantic_capabilities(
     )
 
 
-__all__ = ["SemanticCapabilities", "SemanticCapabilityContract", "build_semantic_capabilities"]
+__all__ = [
+    "SemanticCapabilities",
+    "SemanticCapabilityContract",
+    "build_semantic_capabilities",
+    "semantic_capability_binding_matches",
+]

@@ -34,6 +34,7 @@ from .graph_service import (
     _decode_cursor,
     bind_semantic_cursor,
 )
+from .semantic_capabilities import semantic_capability_binding_matches
 from .semantic_content import reconstruct_semantic_chunk
 from .semantic_scoring import (
     SemanticChunkCandidate,
@@ -405,7 +406,10 @@ class SemanticGraphProjector:
         except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
             logger.warning("Notes semantic capability projection failed")
         capability_hash = getattr(capabilities, "compatibility_hash", None)
-        if capability_hash is not None and capability_hash != config.compatibility_hash:
+        if not semantic_capability_binding_matches(
+            config.compatibility_hash,
+            capability_hash,
+        ):
             return self._status(
                 available=False,
                 state="unavailable",

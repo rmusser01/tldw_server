@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from uuid import UUID
 
 import pytest
 
+from tldw_Server_API.app.api.v1.schemas.notes_semantic_index import (
+    SemanticCapabilitiesResponse,
+    SemanticIndexStatusResponse,
+)
 from tldw_Server_API.app.core.DB_Management.chacha.note_semantic_models import (
     SemanticDesiredState,
     SemanticDimensionState,
@@ -522,6 +528,259 @@ def test_status_requires_complete_active_generation_binding(
         assert projected["state"] == "needs_attention"
         assert projected["detail_reason"] == "rebuild_required"
         assert projected["active_generation_usable"] is False
+    finally:
+        db.close_all_connections()
+
+
+@pytest.mark.parametrize(
+    "capabilities",
+    [
+        _capabilities(model="text-embedding-3-large", dimensions=3_072),
+        _capabilities(vector_backend="pgvector"),
+    ],
+    ids=["model", "backend"],
+)
+def test_status_suppresses_generation_when_current_capability_hash_drifts(
+    tmp_path,
+    jobs: JobManager,
+    monkeypatch: pytest.MonkeyPatch,
+    capabilities,
+) -> None:
+    db = CharactersRAGDB(
+        str(tmp_path / f"semantic-current-drift-{capabilities.vector_backend}.sqlite"),
+        client_id="owner-a",
+    )
+    try:
+        active = _align_active_generation_revision(db, _active_configuration(db))
+        api = SemanticIndexAPI(
+            note_db=db,
+            jobs=jobs,
+            owner_user_id="owner-a",
+            dataset_id="dataset-a",
+            capability_resolver=lambda: capabilities,
+            clock=lambda: NOW,
+        )
+
+        def stale_integrity_must_not_be_read(*_args, **_kwargs):
+            raise AssertionError("stale generation counts must be suppressed")
+
+        monkeypatch.setattr(
+            api._store,
+            "get_generation_integrity",
+            stale_integrity_must_not_be_read,
+        )
+
+        projected = api.status()
+
+        assert projected["state"] == "needs_attention"
+        assert projected["detail_reason"] == "stale_configuration"
+        assert projected["active_generation_id"] == active.active_generation_id
+        assert projected["active_generation_usable"] is False
+        assert projected["indexed_notes"] == 0
+        assert projected["published_chunks"] == 0
+    finally:
+        db.close_all_connections()
+
+
+def test_status_matches_projector_when_current_capability_hash_is_unresolved(
+    tmp_path,
+    jobs: JobManager,
+) -> None:
+    db = CharactersRAGDB(
+        str(tmp_path / "semantic-current-pending-capability.sqlite"),
+        client_id="owner-a",
+    )
+    try:
+        _align_active_generation_revision(db, _active_configuration(db))
+        capabilities = _capabilities(dimensions=None)
+        api = SemanticIndexAPI(
+            note_db=db,
+            jobs=jobs,
+            owner_user_id="owner-a",
+            dataset_id="dataset-a",
+            capability_resolver=lambda: capabilities,
+            clock=lambda: NOW,
+        )
+
+        projected = api.status()
+
+        assert capabilities.compatibility_hash is None
+        assert projected["detail_reason"] == "stale_configuration"
+        assert projected["active_generation_usable"] is True
+    finally:
+        db.close_all_connections()
+
+
+def test_api_produces_capability_drift_contract_consumed_by_ui(
+    tmp_path,
+    jobs: JobManager,
+) -> None:
+    db = CharactersRAGDB(
+        str(tmp_path / "semantic-api-ui-drift.sqlite"),
+        client_id="owner-a",
+    )
+    try:
+        _align_active_generation_revision(db, _active_configuration(db))
+        capabilities = _capabilities(
+            model="text-embedding-3-large",
+            dimensions=3_072,
+        )
+        api = SemanticIndexAPI(
+            note_db=db,
+            jobs=jobs,
+            owner_user_id="owner-a",
+            dataset_id="dataset-a",
+            capability_resolver=lambda: capabilities,
+            clock=lambda: NOW,
+        )
+        projected = api.status()
+        normalized_status = {
+            **projected,
+            "active_generation_id": "generation-from-api",
+        }
+        fixture_path = (
+            Path(__file__).resolve().parents[4]
+            / "apps/packages/ui/src/components/Notes/__tests__/fixtures"
+            / "semantic-capability-drift-api.json"
+        )
+        fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+
+        api_contract = json.loads(
+            json.dumps(
+                {
+                    "capabilities": {
+                        **api.capabilities(),
+                        "manage_authorized": True,
+                    },
+                    "status": normalized_status,
+                }
+            )
+        )
+
+        assert api_contract == fixture
+    finally:
+        db.close_all_connections()
+
+
+def test_endpoint_unavailable_existing_index_has_typed_capability_and_status(
+    tmp_path,
+    jobs: JobManager,
+) -> None:
+    db = CharactersRAGDB(
+        str(tmp_path / "semantic-endpoint-unavailable.sqlite"),
+        client_id="owner-a",
+    )
+    try:
+        _align_active_generation_revision(db, _active_configuration(db))
+        capabilities = _capabilities(endpoint_url="")
+        api = SemanticIndexAPI(
+            note_db=db,
+            jobs=jobs,
+            owner_user_id="owner-a",
+            dataset_id="dataset-a",
+            capability_resolver=lambda: capabilities,
+            clock=lambda: NOW,
+        )
+
+        disclosure = SemanticCapabilitiesResponse.model_validate(
+            {**api.capabilities(), "manage_authorized": True}
+        )
+        projected = SemanticIndexStatusResponse.model_validate(api.status())
+
+        assert disclosure.endpoint_display is None
+        assert disclosure.indexing_available is False
+        assert disclosure.unavailable_reason == "notes_semantic_endpoint_unavailable"
+        assert projected.desired_state == "enabled"
+        assert projected.state == "needs_attention"
+        assert projected.detail_reason == "unavailable"
+    finally:
+        db.close_all_connections()
+
+
+@pytest.mark.parametrize(
+    ("endpoint_url", "expected_origin"),
+    [
+        (
+            "https://user:secret@[2001:0db8::1]:8443/v1?token=secret",
+            "https://[2001:db8::1]:8443",
+        ),
+        (
+            "HTTPS://user:secret@BÜCHER.Example:8443/v1?token=secret",
+            "https://xn--bcher-kva.example:8443",
+        ),
+    ],
+    ids=["ipv6", "idn"],
+)
+def test_capability_origin_reaches_persisted_worker_pending_config(
+    tmp_path,
+    jobs: JobManager,
+    endpoint_url: str,
+    expected_origin: str,
+) -> None:
+    db = CharactersRAGDB(
+        str(tmp_path / f"semantic-worker-origin-{expected_origin[-4:]}.sqlite"),
+        client_id="owner-a",
+    )
+    try:
+        capabilities = _capabilities(endpoint_url=endpoint_url)
+        api = SemanticIndexAPI(
+            note_db=db,
+            jobs=jobs,
+            owner_user_id="owner-a",
+            dataset_id="dataset-a",
+            capability_resolver=lambda: capabilities,
+            clock=lambda: NOW,
+        )
+        disclosure = SemanticCapabilitiesResponse.model_validate(
+            {**api.capabilities(), "manage_authorized": True}
+        )
+        assert disclosure.endpoint_display == expected_origin
+        created = db.note_semantic_store.create_configuration(
+            dataset_id="dataset-a",
+            capability_revision=capabilities.capability_revision,
+            disclosure_hash=capabilities.disclosure_hash,
+            provider=capabilities.provider_label.lower(),
+            model=capabilities.model,
+            model_revision=capabilities.model_revision,
+            endpoint_origin_revision=capabilities.endpoint_origin_revision,
+            endpoint_origin_display=expected_origin,
+            data_boundary=capabilities.execution_boundary,
+            vector_backend=capabilities.vector_backend,
+            storage_boundary=capabilities.storage_boundary,
+            storage_label=capabilities.storage_label,
+            normalization_version="normalization-v1",
+            chunker_version="chunker-v1",
+            now=NOW,
+        )
+        enabled = db.note_semantic_store.enable_configuration(
+            dataset_id="dataset-a",
+            expected_configuration_revision=created.configuration_revision,
+            capability_revision=created.capability_revision or "",
+            now=NOW,
+        )
+        assert enabled is not None
+        generation = db.note_semantic_store.create_generation(
+            dataset_id="dataset-a",
+            configuration_revision=enabled.configuration_revision,
+            compatibility_hash=None,
+            dimension_state=SemanticDimensionState.PENDING,
+            dimensions=None,
+            root_job_id="6ec1dfbe-f86f-4d2b-93af-f88f64cd9701",
+            now=NOW,
+        )
+        runtime = ProductionSemanticRuntime(
+            db=db,
+            owner_user_id="owner-a",
+            dataset_id="dataset-a",
+            configuration_revision=enabled.configuration_revision,
+            generation_id=generation.id,
+            root_job_id=generation.root_job_id or "",
+            settings=SemanticIndexSettings(),
+        )
+
+        request = runtime._request()
+
+        assert request.embedding_config.endpoint_origin == expected_origin
     finally:
         db.close_all_connections()
 
@@ -1164,6 +1423,27 @@ def _active_configuration(
         now=NOW,
     )
     assert active is not None
+    return active
+
+
+def _align_active_generation_revision(
+    db: CharactersRAGDB,
+    active,
+):
+    """Mirror verified publication, which advances generation and config together."""
+
+    assert active.active_generation_id is not None
+    with db.transaction() as conn:
+        conn.execute(
+            "UPDATE note_semantic_generations SET configuration_revision=? "
+            "WHERE owner_user_id=? AND dataset_id=? AND id=?",
+            (
+                active.configuration_revision,
+                "owner-a",
+                "dataset-a",
+                active.active_generation_id,
+            ),
+        )
     return active
 
 

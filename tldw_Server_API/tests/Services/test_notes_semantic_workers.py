@@ -450,6 +450,7 @@ async def test_discovered_model_revision_survives_production_revalidation(
             endpoint_display="https://api.example.test",
             endpoint_origin_revision="origin-v1",
             indexing_available=True,
+            vector_backend="chromadb",
         )
         monkeypatch.setattr(notes_semantic_index_worker, "_build_vector_store", vectors)
         monkeypatch.setattr(notes_semantic_index_worker, "AuthnzUsersRepo", ActiveUsers)
@@ -761,6 +762,7 @@ async def test_revalidation_requires_authoritative_active_user(
         endpoint_display="https://api.example.test",
         endpoint_origin_revision="origin-v1",
         indexing_available=True,
+        vector_backend="chromadb",
     )
     capability_calls = 0
 
@@ -852,6 +854,7 @@ async def test_revalidation_projects_live_model_revision_and_rejects_drift(
         endpoint_display="https://api.example.test",
         endpoint_origin_revision="origin-v1",
         indexing_available=True,
+        vector_backend="chromadb",
     )
     monkeypatch.setattr(notes_semantic_index_worker, "AuthnzUsersRepo", ActiveUsers)
     monkeypatch.setattr(
@@ -937,6 +940,7 @@ async def test_revalidation_projects_pinned_durable_model_revision(
         endpoint_display="https://api.example.test",
         endpoint_origin_revision="origin-v1",
         indexing_available=True,
+        vector_backend="chromadb",
     )
     monkeypatch.setattr(notes_semantic_index_worker, "AuthnzUsersRepo", ActiveUsers)
     monkeypatch.setattr(

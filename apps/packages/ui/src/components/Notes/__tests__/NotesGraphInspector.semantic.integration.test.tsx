@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import NotesGraphInspector from "../NotesGraphInspector"
 import { useNotesSemanticIndex } from "../hooks/useNotesSemanticIndex"
+import capabilityDriftApi from "./fixtures/semantic-capability-drift-api.json"
 
 const mocks = vi.hoisted(() => ({
   capabilities: vi.fn(),
@@ -41,6 +42,7 @@ vi.mock("react-i18next", () => ({
         "notesSearch.semanticIndex": "Semantic index",
         "notesSearch.semanticState.ready": "Ready",
         "notesSearch.semanticState.updating": "Updating",
+        "notesSearch.semanticState.needs_attention": "Needs attention",
         "notesSearch.semanticProvider": "Provider",
         "notesSearch.semanticModel": "Model",
         "notesSearch.semanticExecutionBoundary": "Embedding execution",
@@ -56,9 +58,13 @@ vi.mock("react-i18next", () => ({
         "notesSearch.semanticProgress":
           "{{indexed}} of {{total}} Notes indexed",
         "notesSearch.semanticRebuild": "Rebuild index",
+        "notesSearch.semanticRenewConsent": "Review consent and rebuild",
         "notesSearch.semanticDelete": "Delete index",
+        "notesSearch.semanticShowEdges": "Show similar content",
         "notesSearch.semanticCancel": "Cancel indexing",
         "notesSearch.semanticDetail.building": "Indexing is in progress.",
+        "notesSearch.semanticDetail.stale_configuration":
+          "Configuration changed; review consent.",
         "notesSearch.semanticStatusAnnouncement":
           "Semantic index {{state}}. {{detail}}",
         "notesSearch.semanticTechnicalDetails": "Technical details",
@@ -236,5 +242,29 @@ describe("Notes semantic hook-to-inspector transition", () => {
     await waitFor(() =>
       expect(screen.getByText("5 of 12 Notes indexed")).toBeInTheDocument()
     )
+  })
+
+  it("consumes API-produced capability drift and suppresses semantic edges", async () => {
+    mocks.capabilities.mockResolvedValue(capabilityDriftApi.capabilities)
+    mocks.status.mockResolvedValue(capabilityDriftApi.status)
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } }
+    })
+    render(
+      <QueryClientProvider client={client}>
+        <Harness />
+      </QueryClientProvider>
+    )
+
+    fireEvent.click(await screen.findByRole("tab", { name: "Similar content" }))
+
+    expect(await screen.findByText("Needs attention")).toBeInTheDocument()
+    expect(
+      screen.queryByRole("checkbox", { name: "Show similar content" })
+    ).toBeNull()
+    expect(
+      screen.getByRole("button", { name: "Review consent and rebuild" })
+    ).toBeEnabled()
+    expect(screen.getByRole("button", { name: "Delete index" })).toBeEnabled()
   })
 })
