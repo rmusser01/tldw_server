@@ -24,6 +24,9 @@ from tldw_Server_API.app.core.Admin_Webhooks.domain import (
     DeliveryRuntimeReasonCode,
 )
 from tldw_Server_API.app.core.Admin_Webhooks.executor import DeliveryAttemptExecutor
+from tldw_Server_API.app.core.Admin_Webhooks.incident_reconciler import (
+    PendingIncidentEventReconciler,
+)
 from tldw_Server_API.app.core.Admin_Webhooks.observability import (
     AdminWebhookDeliveryCapability,
     AdminWebhookMetrics,
@@ -213,6 +216,7 @@ class _RuntimeComponents:
     retention_repository: AdminWebhookRepository
     capability: AdminWebhookDeliveryCapability
     jobs: _RefreshableJobsRuntime
+    incident_reconciler: PendingIncidentEventReconciler
     reconciler: AdminWebhookReconciler
     metrics: AdminWebhookMetrics
     reconciler_instance_id: str
@@ -303,6 +307,13 @@ async def _build_runtime_components() -> _RuntimeComponents:
         ),
         metrics=metrics,
     )
+    incident_reconciler = PendingIncidentEventReconciler(
+        repository=reconciler_repository,
+        key_ring_result=key_ring_result,
+        settings=settings,
+        delivery_id_factory=lambda: str(uuid4()),
+        metrics=metrics,
+    )
     return _RuntimeComponents(
         settings=settings,
         worker_repository=worker_repository,
@@ -310,6 +321,7 @@ async def _build_runtime_components() -> _RuntimeComponents:
         retention_repository=retention_repository,
         capability=capability,
         jobs=jobs,
+        incident_reconciler=incident_reconciler,
         reconciler=reconciler,
         metrics=metrics,
         reconciler_instance_id=str(uuid4()),
@@ -439,6 +451,7 @@ async def _run_reconciler_loop(
         while not stop_event.is_set():
             failed = False
             for operation in (
+                components.incident_reconciler.reconcile_once,
                 components.reconciler.reconcile_enqueue_once,
                 components.reconciler.reconcile_pending_dispositions_once,
                 components.reconciler.recover_stale_test_attempts_once,

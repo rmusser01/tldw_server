@@ -525,6 +525,69 @@ async def test_runtime_supervises_independent_loops_and_awaits_shutdown(
 
 
 @pytest.mark.unit
+async def test_incident_markers_run_before_delivery_repairs_and_fail_independently(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = importlib.import_module(
+        "tldw_Server_API.app.services.admin_webhook_delivery_runtime"
+    )
+    stop_event = asyncio.Event()
+    calls: list[str] = []
+    writes: list[RuntimeHeartbeatWrite] = []
+
+    class IncidentReconciler:
+        async def reconcile_once(self) -> None:
+            calls.append("incident_markers")
+            raise RuntimeError("bounded incident marker failure")
+
+    class DeliveryReconciler:
+        async def reconcile_enqueue_once(self) -> None:
+            calls.append("enqueue")
+
+        async def reconcile_pending_dispositions_once(self) -> None:
+            calls.append("dispositions")
+
+        async def recover_stale_test_attempts_once(self) -> None:
+            calls.append("stale_tests")
+
+        async def reconcile_expired_once(self) -> None:
+            calls.append("expiry")
+
+    class Repository:
+        async def upsert_runtime_heartbeat(
+            self,
+            write: RuntimeHeartbeatWrite,
+        ) -> None:
+            writes.append(write)
+
+    async def stop_after_iteration(_stop: asyncio.Event, _seconds: float) -> None:
+        stop_event.set()
+
+    monkeypatch.setattr(runtime, "_wait_interruptibly", stop_after_iteration)
+    components = SimpleNamespace(
+        incident_reconciler=IncidentReconciler(),
+        reconciler=DeliveryReconciler(),
+        reconciler_repository=Repository(),
+        reconciler_instance_id=canonical_uuid4("task-12-incident-reconciler"),
+        settings=SimpleNamespace(delivery_loop_interval_seconds=1),
+        clock=lambda: NOW,
+    )
+
+    await runtime._run_reconciler_loop(stop_event, components)
+
+    assert calls == [
+        "incident_markers",
+        "enqueue",
+        "dispositions",
+        "stale_tests",
+        "expiry",
+    ]
+    assert writes[0].ready is False
+    assert writes[0].reason_code is DeliveryRuntimeReasonCode.RECONCILER_UNAVAILABLE
+    assert writes[-1].ready is False
+
+
+@pytest.mark.unit
 async def test_worker_supervisor_uses_fresh_generation_after_sdk_exit() -> None:
     runtime = importlib.import_module("tldw_Server_API.app.services.admin_webhook_delivery_runtime")
     writes: list[RuntimeHeartbeatWrite] = []

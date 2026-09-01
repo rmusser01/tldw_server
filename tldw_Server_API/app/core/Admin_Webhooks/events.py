@@ -109,6 +109,55 @@ def canonical_event_body(
     return encoded
 
 
+def parse_canonical_event_body(
+    plaintext: bytes,
+    *,
+    event_id: str,
+    event_type: str,
+    api_version: str,
+    created_at: datetime,
+) -> dict[str, object]:
+    """Validate exact canonical event bytes and return detached public data."""
+
+    if (
+        not isinstance(plaintext, bytes)
+        or not plaintext
+        or len(plaintext) > EVENT_BODY_MAX_BYTES
+    ):
+        raise ValueError("event body is invalid")
+    try:
+        decoded = json.loads(plaintext)
+        if not isinstance(decoded, dict) or set(decoded) != {
+            "id",
+            "type",
+            "api_version",
+            "created_at",
+            "data",
+        }:
+            raise ValueError("event body is invalid")
+        if (
+            decoded["id"] != event_id
+            or decoded["type"] != event_type
+            or decoded["api_version"] != api_version
+            or decoded["created_at"] != _canonical_timestamp(created_at)
+            or not isinstance(decoded["data"], dict)
+        ):
+            raise ValueError("event body is invalid")
+        data = snapshot_json_object(decoded["data"])
+        expected = canonical_event_body(
+            event_id=event_id,
+            event_type=event_type,
+            api_version=api_version,
+            created_at=created_at,
+            data=data,
+        )
+    except (OverflowError, RecursionError, TypeError, UnicodeError, ValueError) as exc:
+        raise ValueError("event body is invalid") from exc
+    if not hmac.compare_digest(plaintext, expected):
+        raise ValueError("event body is invalid")
+    return data
+
+
 def prepare_event_insert(
     *,
     ring: WebhookKeyRing,
@@ -214,29 +263,21 @@ def validate_stored_event_body(
     if not isinstance(plaintext, bytes) or len(plaintext) != event.body_size_bytes:
         raise ValueError("persisted event body is invalid")
     try:
-        decoded = json.loads(plaintext)
-        if not isinstance(decoded, dict) or not isinstance(decoded.get("data"), dict):
-            raise ValueError("persisted event body is invalid")
-        data = snapshot_json_object(decoded["data"])
-        expected = canonical_event_body(
+        parse_canonical_event_body(
+            plaintext,
             event_id=event.event.id,
             event_type=event.event.event_type,
             api_version=event.event.api_version,
             created_at=event.event.created_at,
-            data=data,
         )
     except (OverflowError, RecursionError, TypeError, UnicodeError, ValueError) as exc:
         raise ValueError("persisted event body is invalid") from exc
-    if (
-        len(expected) != event.body_size_bytes
-        or not hmac.compare_digest(plaintext, expected)
-    ):
-        raise ValueError("persisted event body is invalid")
 
 
 __all__ = [
     "PreparedEventInsert",
     "canonical_event_body",
+    "parse_canonical_event_body",
     "prepare_event_insert",
     "snapshot_json_object",
     "validate_stored_event_body",
