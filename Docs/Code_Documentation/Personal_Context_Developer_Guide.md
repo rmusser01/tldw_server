@@ -166,11 +166,23 @@ acknowledgement-completion path.
 ## Privacy and diagnostics
 
 Treat canonical profile bodies, semantic keys, proposal content, exports, and
-key material as secrets. Keep plaintext out of logs, diagnostics, Sync outbox
-or routing metadata, exception text, temporary artifacts, and unencrypted test
-fixtures. Persist only the minimum opaque routing and version metadata needed
-by each store. Tombstones and terminal proposal receipts must remain
-content-free.
+key material as secrets. Never log canonical plaintext, durable at-rest
+ciphertext, key material, or raw cryptographic exception values. Never return
+internal ciphertext or raw cryptographic exception values. Authorized success
+responses and explicit exports may return only the requested canonical data;
+error and diagnostic boundaries translate cryptographic, key-custody,
+integrity, and storage failures into sanitized, stable, content-free error
+codes and messages without embedding raw exception values. An explicitly
+requested recovery export is a separate passphrase-encrypted export artifact,
+not exposure of internal at-rest ciphertext.
+
+Keep real or user-derived plaintext out of logs, diagnostics, Sync outbox or
+routing metadata, exception text, temporary artifacts, and unencrypted test
+fixtures. Deliberate synthetic canonical and conformance fixtures under Shared
+Core are permitted because they prove exact shared bytes; never populate them
+with production or user-derived content. Persist only the minimum opaque routing
+and version metadata needed by each store. Tombstones and terminal proposal
+receipts must remain content-free.
 
 ## Extension checklist
 
@@ -179,7 +191,7 @@ content-free.
 3. Preserve canonical identities and explicit syncability.
 4. Route through the owning service; never access profile tables directly.
 5. Enforce authority, scope, expiry, visibility, and secret-rejection rules.
-6. Keep plaintext out of logs, diagnostics, outbox metadata, and unencrypted fixtures.
+6. Keep plaintext, ciphertext, keys, and raw cryptographic exception values out of logs, diagnostics, and outbox metadata; never return internal ciphertext or raw cryptographic exception values; keep real or user-derived plaintext out of unencrypted fixtures, while permitting deliberate synthetic canonical/conformance fixtures in Shared Core.
 7. Add parity/conformance coverage in both repositories.
 8. Add peer-specific migration, repository, service, API/UI, and recovery tests.
 9. Update the governing ADR for storage, ownership, encryption, Sync, or authority changes.
@@ -191,8 +203,13 @@ content-free.
 | --- | --- |
 | `packages/tldw_profile_core/tests/tldw_profile_core/test_public_contract.py` | Direct Shared Core public models, canonical serialization, schema export, semantic validation, and tool contract. |
 | `tldw_Server_API/tests/Personalization/test_personal_context_contract.py` | Vendored package digest parity, supported Python floor, and cross-runtime canonical bytes/integrity fixture. This live suite, not a copied digest, is the compatibility authority. |
+| `tldw_Server_API/tests/Personalization/test_personal_context_auth_boundary.py` | Authentication before storage access and indistinguishable cross-user/unknown object responses. |
+| `tldw_Server_API/tests/Personalization/test_personal_context_crypto.py` | Fresh object keys and nonces, associated-data binding, exact key sizes, and sanitized authentication failures. |
 | `tldw_Server_API/tests/Personalization/test_personal_context_endpoints.py` | REST bounds, strict requests, typed conflicts, runtime, export confirmations, purge fencing, proposal pagination, and router registration. |
 | `tldw_Server_API/tests/Personalization/test_personal_context_key_custody.py` | Independent wrapped profile keys, strict root-key handling, fail-closed locking, and absence of unwrapped keys at rest. |
+| `tldw_Server_API/tests/Personalization/test_personal_context_repository.py` | Per-user schema and transactions, encrypted versions/heads, optimistic concurrency, content-free deletion, tamper detection, purge fences, and key rotation. |
+| `tldw_Server_API/tests/Personalization/test_personal_context_service.py` | Service-owned authority, lifecycle, bootstrap, inbound Sync application, quotas, proposal review, export, and purge behavior. |
+| `tldw_Server_API/tests/Personalization/test_personal_context_plaintext_canary.py` | Canonical bodies stay out of the database, sidecars, and logs; rejected content is shredded and integrity failures do not disclose plaintext. |
 | `tldw_Server_API/tests/Personalization/integration/test_personal_context_composed_app.py` | Production route composition, modeled responses, authentication, and rate limiting. |
 | `tldw_Server_API/tests/Sync/test_sync_v2_personal_context_bootstrap.py` | Capability/schema/quota gates, registered-device wrapping, stable reviewed bootstrap, binding, completion, pre-link upload blocking, idempotency, and privacy. |
 | `tldw_Server_API/tests/Sync/test_sync_v2_personal_context_materializer.py` | Authorized inbound projection through the owning service and content-free conflict/failure mapping. |
