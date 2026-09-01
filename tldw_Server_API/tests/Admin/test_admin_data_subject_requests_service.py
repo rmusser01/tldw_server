@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -81,35 +83,21 @@ async def test_list_data_subject_requests_passes_org_scope_to_repo(monkeypatch) 
 
 
 @pytest.mark.asyncio
-async def test_erase_notes_removes_graph_edges_before_notes(monkeypatch) -> None:
+async def test_erase_notes_returns_transactional_finalizer_count(monkeypatch) -> None:
     from tldw_Server_API.app.services import admin_data_subject_requests_service as service
-
-    events: list[str] = []
 
     class _Coordinator:
         async def erase(self):
-            events.append("semantic")
             return SimpleNamespace(deleted_notes=3)
-
-    def _hard_delete(_path, statements) -> int:
-        for sql, _params in statements:
-            if sql.startswith("DELETE FROM note_edges"):
-                events.append("note_edges")
-            elif sql.startswith("DELETE FROM note_wikilink_edges"):
-                events.append("note_wikilink_edges")
-            elif sql == "DELETE FROM notes":
-                events.append("notes")
-        return 6
 
     monkeypatch.setattr(
         service,
         "_build_notes_semantic_erasure_coordinator",
         lambda _user_id: _Coordinator(),
     )
-    monkeypatch.setattr(service, "_sqlite_hard_delete_sync", _hard_delete)
+    monkeypatch.setattr(service, "_notes_content_backend_is_postgres", lambda: True)
 
-    assert await service._erase_notes(7) == 6
-    assert events == ["semantic", "note_edges", "note_wikilink_edges", "notes"]
+    assert await service._erase_notes(7) == 3
 
 
 @pytest.mark.asyncio
@@ -130,16 +118,126 @@ async def test_erase_notes_does_not_delete_canonical_notes_after_semantic_failur
         "_build_notes_semantic_erasure_coordinator",
         lambda _user_id: _Coordinator(),
     )
-    monkeypatch.setattr(
-        service,
-        "_sqlite_hard_delete_sync",
-        lambda _path, _statements: calls.append("canonical"),
-    )
-
+    monkeypatch.setattr(service, "_notes_content_backend_is_postgres", lambda: True)
     with pytest.raises(RuntimeError, match="notes_semantic_erasure_timeout"):
         await service._erase_notes(7)
 
     assert calls == ["semantic"]
+
+
+@pytest.mark.asyncio
+async def test_erase_notes_does_not_create_missing_sqlite_database(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    from tldw_Server_API.app.services import admin_data_subject_requests_service as service
+
+    missing = tmp_path / "missing" / "ChaChaNotes.db"
+    monkeypatch.setattr(
+        service.DatabasePaths,
+        "get_chacha_db_path",
+        lambda _user_id: missing,
+    )
+    monkeypatch.setattr(service, "_notes_content_backend_is_postgres", lambda: False)
+    monkeypatch.setattr(
+        service,
+        "_build_notes_semantic_erasure_coordinator",
+        lambda _user_id: pytest.fail("missing SQLite database must not be opened"),
+    )
+
+    assert await service._erase_notes(7) == 0
+    assert not missing.exists()
+
+
+def test_existing_only_notes_database_does_not_recreate_unlinked_file(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    from configparser import ConfigParser
+
+    from tldw_Server_API.app.core.DB_Management.backends.sqlite_backend import (
+        SQLiteConnectionPool,
+    )
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+        CharactersRAGDB,
+        CharactersRAGDBError,
+    )
+
+    path = tmp_path / "ChaChaNotes.db"
+    path.touch()
+    original = SQLiteConnectionPool._create_connection
+
+    def _unlink_then_connect(pool):
+        path.unlink(missing_ok=True)
+        return original(pool)
+
+    monkeypatch.setattr(SQLiteConnectionPool, "_create_connection", _unlink_then_connect)
+
+    with pytest.raises(CharactersRAGDBError):
+        CharactersRAGDB(
+            path,
+            client_id="7",
+            config=ConfigParser(),
+            require_existing_sqlite=True,
+        )
+
+    assert not path.exists()
+
+
+@pytest.mark.asyncio
+async def test_notes_erasure_builder_releases_constructor_thread_connection(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    from configparser import ConfigParser
+
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+    from tldw_Server_API.app.services import admin_data_subject_requests_service as service
+
+    path = tmp_path / "ChaChaNotes.db"
+    seed = CharactersRAGDB(path, client_id="7", config=ConfigParser())
+    seed.close_all_connections()
+    monkeypatch.setattr(
+        service.DatabasePaths,
+        "get_chacha_db_path",
+        lambda _user_id: path,
+    )
+    original_close = CharactersRAGDB.close_connection
+    closed: list[CharactersRAGDB] = []
+
+    def _close(db: CharactersRAGDB) -> None:
+        closed.append(db)
+        original_close(db)
+
+    monkeypatch.setattr(CharactersRAGDB, "close_connection", _close)
+
+    coordinator = await asyncio.to_thread(
+        service._build_notes_semantic_erasure_coordinator,
+        7,
+    )
+
+    assert closed == [coordinator._db]
+    await coordinator.erase()
+
+
+@pytest.mark.asyncio
+async def test_erase_notes_maps_coordinator_construction_failure_to_stable_code(
+    monkeypatch,
+) -> None:
+    from tldw_Server_API.app.core.Notes_Graph.semantic_erasure import SemanticErasureError
+    from tldw_Server_API.app.services import admin_data_subject_requests_service as service
+
+    def _fail(_user_id: int):
+        raise RuntimeError("secret database connection detail")
+
+    monkeypatch.setattr(service, "_notes_content_backend_is_postgres", lambda: True)
+    monkeypatch.setattr(service, "_build_notes_semantic_erasure_coordinator", _fail)
+
+    with pytest.raises(SemanticErasureError) as exc_info:
+        await service._erase_notes(7)
+
+    assert exc_info.value.code == "notes_semantic_erasure_backend_unavailable"
+    assert "secret" not in str(exc_info.value)
 
 
 @pytest.mark.asyncio

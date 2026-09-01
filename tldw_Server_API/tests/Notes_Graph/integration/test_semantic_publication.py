@@ -1312,6 +1312,87 @@ def test_claim_lease_recovery_is_bounded_and_attempt_capped(
     ) == ()
 
 
+def test_exact_reclaimer_preserves_authorized_vector_write(
+    sqlite_db: CharactersRAGDB,
+) -> None:
+    db = sqlite_db
+    db.note_store.add_note("Title", "Body", note_id=NOTE_ID)
+    enabled, pending = _create_pending_generation(db)
+    resolved = db.note_semantic_store.resolve_generation_dimensions(
+        dataset_id=DATASET_ID,
+        generation_id=pending.id,
+        expected_configuration_revision=enabled.configuration_revision,
+        dimensions=2,
+        compatibility_hash="compatibility-v1",
+        now=NOW,
+    )
+    assert resolved is not None
+    chunks = build_semantic_chunks(
+        generation_id=pending.id,
+        note_id=NOTE_ID,
+        title="Title",
+        content="Body",
+        content_version=1,
+    )
+    assert db.note_semantic_store.seed_generation_snapshot(
+        dataset_id=DATASET_ID,
+        generation_id=pending.id,
+        expected_configuration_revision=resolved.configuration_revision,
+        generation_fencing_token=GENERATION_FENCE,
+        seeds=(
+            SemanticSnapshotSeed(
+                note_id=NOTE_ID,
+                content_version=1,
+                content_fingerprint=chunks[0].content_fingerprint,
+                state="pending",
+                planned_chunk_count=len(chunks),
+                error_code=None,
+            ),
+        ),
+        now=NOW,
+    )
+    claim = db.note_semantic_store.claim_work_batch(
+        dataset_id=DATASET_ID,
+        generation_id=pending.id,
+        kind="index_note",
+        limit=1,
+        now=NOW,
+    )[0]
+    assert db.note_semantic_store.authorize_note_vector_upsert(
+        owner_user_id=OWNER_ID,
+        dataset_id=DATASET_ID,
+        generation_id=pending.id,
+        generation_fencing_token=GENERATION_FENCE,
+        expected_configuration_revision=resolved.configuration_revision,
+        work_id=claim.id,
+        claim_token=claim.claim_token or "",
+        work_fencing_token=claim.fencing_token,
+        claimed_dirty_generation=claim.dirty_generation or 0,
+        note_id=NOTE_ID,
+        now=NOW,
+    )
+
+    assert db.note_semantic_store.reclaim_expired_work_claims(
+        dataset_id=DATASET_ID,
+        generation_id=pending.id,
+        kind="index_note",
+        expired_before=NOW + timedelta(hours=1),
+        limit=1,
+        now=NOW + timedelta(hours=1),
+    ) == 0
+    with db.transaction() as conn:
+        retained = conn.execute(
+            "SELECT claim_state,claim_token,error_code FROM note_semantic_work "
+            "WHERE owner_user_id=? AND dataset_id=? AND id=?",
+            (OWNER_ID, DATASET_ID, claim.id),
+        ).fetchone()
+    assert tuple(retained) == (
+        "claimed",
+        claim.claim_token,
+        "vector_side_effect_in_progress",
+    )
+
+
 def test_exact_claim_can_publish_per_note_failure_without_downgrading_systemic_failure(
     sqlite_db: CharactersRAGDB,
 ) -> None:
@@ -3076,6 +3157,149 @@ def test_snapshot_terminal_transition_rolls_back_when_cleanup_staging_conflicts(
     )
 
 
+@pytest.mark.parametrize("completion", ("release", "publish"))
+def test_authorized_active_claim_completion_retargets_staging_generation(
+    sqlite_db: CharactersRAGDB,
+    completion: str,
+) -> None:
+    db = sqlite_db
+    resolved, active, integrity = _prepare_ready_generation(db)
+    assert integrity.vector_ids
+    activated = db.note_semantic_store.activate_generation_verified(
+        dataset_id=DATASET_ID,
+        generation_id=active.id,
+        expected_configuration_revision=resolved.configuration_revision,
+        generation_fencing_token=GENERATION_FENCE,
+        expected_manifest_hash=integrity.manifest_hash,
+        expected_vector_ids=integrity.vector_ids,
+        expected_dimensions=2,
+        expected_compatibility_hash="compatibility-v1",
+        publication_receipt="active-before-rebuild",
+        now=NOW,
+    )
+    assert activated is not None
+    assert db.note_store.update_note(
+        NOTE_ID,
+        {"content": "Body v2"},
+        expected_version=1,
+        semantic_dataset_id=DATASET_ID,
+    )
+    work_now = _after_write()
+    active_claim = db.note_semantic_store.claim_work_batch(
+        dataset_id=DATASET_ID,
+        generation_id=active.id,
+        kind="index_note",
+        limit=1,
+        now=work_now,
+    )[0]
+    assert db.note_semantic_store.authorize_note_vector_upsert(
+        owner_user_id=OWNER_ID,
+        dataset_id=DATASET_ID,
+        generation_id=active.id,
+        generation_fencing_token=GENERATION_FENCE,
+        expected_configuration_revision=activated.configuration_revision,
+        work_id=active_claim.id,
+        claim_token=active_claim.claim_token or "",
+        work_fencing_token=active_claim.fencing_token,
+        claimed_dirty_generation=active_claim.dirty_generation or 0,
+        note_id=NOTE_ID,
+        now=work_now,
+    )
+    active_chunks_v2 = build_semantic_chunks(
+        generation_id=active.id,
+        note_id=NOTE_ID,
+        title="Title",
+        content="Body v2",
+        content_version=2,
+    )
+
+    staging_fence = "staging-generation-fence"
+    staging = db.note_semantic_store.create_generation(
+        dataset_id=DATASET_ID,
+        configuration_revision=activated.configuration_revision,
+        compatibility_hash="compatibility-v1",
+        dimension_state=SemanticDimensionState.RESOLVED,
+        dimensions=2,
+        root_job_id=staging_fence,
+        now=NOW + timedelta(seconds=2),
+    )
+    chunks_v2 = build_semantic_chunks(
+        generation_id=staging.id,
+        note_id=NOTE_ID,
+        title="Title",
+        content="Body v2",
+        content_version=2,
+    )
+    assert db.note_semantic_store.seed_generation_snapshot(
+        dataset_id=DATASET_ID,
+        generation_id=staging.id,
+        expected_configuration_revision=activated.configuration_revision,
+        generation_fencing_token=staging_fence,
+        seeds=(
+            SemanticSnapshotSeed(
+                note_id=NOTE_ID,
+                content_version=2,
+                content_fingerprint=chunks_v2[0].content_fingerprint,
+                state="pending",
+                planned_chunk_count=len(chunks_v2),
+                error_code=None,
+            ),
+        ),
+        now=NOW + timedelta(seconds=2),
+    )
+    assert db.note_store.update_note(
+        NOTE_ID,
+        {"content": "Body v3"},
+        expected_version=2,
+        semantic_dataset_id=DATASET_ID,
+    )
+    with db.transaction() as conn:
+        staging_state = conn.execute(
+            "SELECT dirty_generation FROM note_semantic_note_state WHERE "
+            "owner_user_id=? AND dataset_id=? AND generation_id=? AND note_id=?",
+            (OWNER_ID, DATASET_ID, staging.id, NOTE_ID),
+        ).fetchone()
+    assert staging_state is not None
+
+    if completion == "release":
+        assert db.note_semantic_store.release_work_claim(
+            dataset_id=DATASET_ID,
+            work_id=active_claim.id,
+            claim_token=active_claim.claim_token or "",
+            fencing_token=active_claim.fencing_token,
+            now=work_now + timedelta(seconds=3),
+        )
+    else:
+        assert db.note_semantic_store.publish_indexed_manifest(
+            owner_user_id=OWNER_ID,
+            dataset_id=DATASET_ID,
+            generation_id=active.id,
+            generation_fencing_token=GENERATION_FENCE,
+            expected_configuration_revision=activated.configuration_revision,
+            work_id=active_claim.id,
+            claim_token=active_claim.claim_token or "",
+            work_fencing_token=active_claim.fencing_token,
+            claimed_dirty_generation=active_claim.dirty_generation or 0,
+            content_version=2,
+            content_fingerprint=active_chunks_v2[0].content_fingerprint,
+            chunks=tuple(_chunk_record(chunk) for chunk in active_chunks_v2),
+            now=work_now + timedelta(seconds=3),
+        ) is not None
+    with db.transaction() as conn:
+        rearmed = conn.execute(
+            "SELECT generation_id,dirty_generation,claim_state,claim_token,error_code "
+            "FROM note_semantic_work WHERE owner_user_id=? AND dataset_id=? AND id=?",
+            (OWNER_ID, DATASET_ID, active_claim.id),
+        ).fetchone()
+    assert tuple(rearmed) == (
+        staging.id,
+        int(staging_state["dirty_generation"]),
+        "pending",
+        None,
+        None,
+    )
+
+
 @pytest.mark.asyncio
 async def test_high_priority_cleanup_source_waits_for_newer_reused_vector_publication(
     sqlite_db: CharactersRAGDB,
@@ -3384,6 +3608,24 @@ async def test_unpublished_cleanup_cannot_overlap_publication_work(
                 match="notes_semantic_note_claim_stale",
             ):
                 await operation
+            with db.transaction() as conn:
+                retained = conn.execute(
+                    "SELECT claim_state,claim_token,error_code FROM note_semantic_work "
+                    "WHERE owner_user_id=? AND dataset_id=? AND id=?",
+                    (OWNER_ID, DATASET_ID, work.id),
+                ).fetchone()
+            assert tuple(retained) == (
+                "claimed",
+                work.claim_token,
+                "vector_side_effect_in_progress",
+            )
+            assert db.note_semantic_store.release_work_claim(
+                dataset_id=DATASET_ID,
+                work_id=work.id,
+                claim_token=work.claim_token or "",
+                fencing_token=work.fencing_token,
+                now=NOW + timedelta(seconds=1),
+            )
         else:
             operation.cancel("cancel-after-upsert")
             with pytest.raises(asyncio.CancelledError, match="cancel-after-upsert"):

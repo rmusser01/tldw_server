@@ -425,6 +425,9 @@ async def test_cancelled_manifest_commit_is_drained_and_reports_truthful_result(
         def stage_obsolete_vector_cleanup(self, **kwargs):
             return len(kwargs["vector_ids"])
 
+        def authorize_note_vector_upsert(self, **_kwargs):
+            return True
+
         def _commit(self):
             self.calls += 1
             started.set()

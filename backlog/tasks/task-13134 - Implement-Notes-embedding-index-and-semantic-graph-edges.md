@@ -3,26 +3,21 @@ id: TASK-13134
 title: Implement Notes embedding index and semantic graph edges
 status: In Progress
 assignee: []
-created_date: 2026-08-27 02:20
-updated_date: 2026-08-31 18:48
+created_date: '2026-08-27 02:20'
+updated_date: '2026-09-01 15:44'
 labels:
-- notes
-- notes-graph
-- embeddings
-- second-brain
-- backend
+  - notes
+  - notes-graph
+  - embeddings
+  - second-brain
+  - backend
 dependencies:
-- TASK-13138
+  - TASK-13138
 documentation:
-- Docs/superpowers/specs/2026-08-29-notes-semantic-index-design.md
-- Docs/superpowers/plans/2026-08-29-notes-semantic-index-implementation-plan.md
+  - Docs/superpowers/specs/2026-08-29-notes-semantic-index-design.md
+  - >-
+    Docs/superpowers/plans/2026-08-29-notes-semantic-index-implementation-plan.md
 priority: medium
-modified_files:
-- tldw_Server_API/app/core/DB_Management/chacha/note_semantic_store.py
-- tldw_Server_API/app/core/Notes_Graph/semantic_erasure.py
-- tldw_Server_API/app/services/admin_data_subject_requests_service.py
-- tldw_Server_API/tests/Admin/test_admin_data_subject_requests_service.py
-- tldw_Server_API/tests/Notes_Graph/integration/test_semantic_erasure.py
 ---
 
 ## Description
@@ -48,6 +43,7 @@ Approved executable plan: `Docs/superpowers/plans/2026-08-29-notes-semantic-inde
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - 2026-08-29: Senior implementation-constraint review identified required spec corrections for user-scoped run APIs, semantic opt-in compatibility, evidence offsets, vector-only backend contracts, DSR erasure, graph admission/async composition, dimension and activation rules, cache freshness, and restore semantics.
 - Design specification: `Docs/superpowers/specs/2026-08-29-notes-semantic-index-design.md`
@@ -84,11 +80,18 @@ Approved executable plan: `Docs/superpowers/plans/2026-08-29-notes-semantic-inde
 2026-08-31 Task 9 complete: Added bounded async semantic scoring/projection at the nested Notes graph endpoint, owner/dataset/generation-scoped current-manifest reads, deterministic authority filtering and precedence composition, bounded evidence with response-cap omission markers, stable semantic cache/cursor binding, dynamic semantic graph rate accounting, and explicit conversion through the existing canonical Sync-aware manual-link path with durable content-free audit. Independent review completed with all findings resolved, including final semantic-binding race checks and synchronous audit flush. Verification: reviewed set 120 passed; complete Notes Graph suite 1012 passed with 6 optional live pgvector/PostgreSQL skips; manual-conversion integration 7 passed; Ruff, Bandit (zero findings), Python 3.10 compilation, and diff checks clean. Implementation commit: 9e675b83c5; report: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-9-report.md.
 2026-08-31 Task 10 complete: Added fail-closed Notes semantic DSR erasure with bounded maintenance-catalog discovery, revision fencing, exact ChromaDB/pgvector backend construction, synchronous cleanup draining, semantic-only v66/v67 final purge, and canonical edge/Note deletion ordering. RED: 5 failed, 9 passed. Final focused plus adjacent verification: 18 passed; Ruff clean; Bandit zero findings/errors at /tmp/bandit_task13134_task10.json; Python 3.10 compilation and staged/unstaged diff checks clean. Implementation commit: efd7f7829e; report: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-10-report.md. No live PostgreSQL/pgvector service or repository-wide pytest run was required for this focused task.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+2026-09-01 Task 10 hardening complete pending final independent review: preserved authorized vector-write fences across Note update, tombstone, and snapshot convergence; made stale release rearm the newest pending generation; routed all DSR cleanup store phases through one quiescent owned executor; closed constructor/vector-authority/exact worker connections without shutting shared PostgreSQL pools; retained existing-file-only SQLite mode=rw. Verification: 81 focused erasure/DSR/indexing tests and 128 adjacent publication/Jobs/lifecycle/store/property tests passed; Ruff, Bandit (0 findings/errors), and git diff --check clean. Report: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-10-report.md.
+
+2026-09-01 Task 10 hardening independently reviewed clean after all findings were resolved. SQLite DSR finalization now uses the per-user database file as the Notes/edge owner boundary and fails closed on foreign semantic-owner evidence; exact claim reclamation preserves authorized vector side effects; both release and successful publication atomically retarget active claims to the preferred pending staging generation. Final verification: 83 focused and 131 adjacent Python 3.11 tests passed; Ruff clean; Bandit 0 findings/errors; git diff --check clean. Report: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-10-report.md.
+<!-- SECTION:NOTES:END -->
+
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-TASK-13134 remains In Progress after implementation Tasks 1 through 9. Owner-scoped persistence and Note lifecycle hooks, capability/RBAC controls, canonical chunking and provider execution, vector-only ChromaDB/pgvector storage, fenced publication, bounded Jobs/API/recovery/maintenance orchestration, backward-compatible graph contracts, and reviewed async semantic graph projection with evidence and canonical manual conversion are complete. Task 10 semantic DSR/erasure integration is next, followed by the shared client/UI, visual evidence/conversion workflows, documentation, and integrated release gates.
+TASK-13134 remains In Progress with implementation Tasks 1 through 10 complete and independently reviewed. Tasks 11-13 remain: shared client/UI integration, visual evidence/conversion workflows, and documentation plus integrated release gates.
 <!-- SECTION:FINAL_SUMMARY:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed
