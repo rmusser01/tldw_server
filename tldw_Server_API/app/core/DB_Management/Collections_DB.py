@@ -7210,30 +7210,24 @@ class CollectionsDatabase:
             "pending",
             None,
         )
-        duplicate_dedupe_error = False
+        insert_error: DatabaseError | None = None
         try:
             res = self._execute_insert(q, params)
         except DatabaseError as exc:
-            duplicate_dedupe_error = bool(
-                dedupe_key
-                and (
-                    "unique constraint failed: user_notifications.user_id, user_notifications.dedupe_key"
-                    in str(exc).lower()
-                    or "duplicate key value violates unique constraint" in str(exc).lower()
-                    or "ux_user_notifications_user_dedupe" in str(exc).lower()
-                )
-            )
-            if not duplicate_dedupe_error:
+            if not dedupe_key:
                 raise
+            insert_error = exc
             res = None
         new_id = self._extract_lastrowid(res) if res is not None else None
-        if (duplicate_dedupe_error or not new_id) and dedupe_key:
+        if (insert_error is not None or not new_id) and dedupe_key:
             existing = self.backend.execute(
                 "SELECT * FROM user_notifications WHERE user_id = ? AND dedupe_key = ? ORDER BY id DESC LIMIT 1",
                 (self.user_id, dedupe_key),
             ).first
             if existing:
                 return self._notification_row_from_db(existing)
+        if insert_error is not None:
+            raise insert_error
         if not new_id:
             raise DatabaseError("Failed to create user notification")
         row = self.backend.execute(

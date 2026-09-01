@@ -12,7 +12,7 @@ build-backend = "setuptools.build_meta"
 name = "tldw-server"
 version = "0.1.41"
 description = "A comprehensive research assistant and media analysis platform - Too Long; Didn't Watch Server"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 readme = "README.md"
 # Use SPDX license expression as a string to avoid deprecation warnings.
 # Project is licensed under GPLv3.
@@ -82,6 +82,7 @@ dependencies = [
   "pyspellchecker>=0.7.2",
   "PyYAML>=6.0.0",
   "redis>=4.5.0",
+  "rfc8785==0.1.4",
   "rich>=13.0.0",
   "scikit-learn>=1.3.0",
   "scipy>=1.10.0",
@@ -496,12 +497,14 @@ tldw-admin-webhooks = "tldw_Server_API.cli.admin_webhooks_cli:main"
 include-package-data = false
 
 [tool.setuptools.packages.find]
-where = [".", "apps/mcp-unified/src"]
+where = [".", "apps/mcp-unified/src", "packages/tldw_profile_core/src"]
 include = [
   "tldw_Server_API",
   "tldw_Server_API.*",
   "mcp_unified",
   "mcp_unified.*",
+  "tldw_profile_core",
+  "tldw_profile_core.*",
 ]
 namespaces = false
 exclude = [
@@ -532,6 +535,14 @@ tldw_Server_API = [
 ]
 mcp_unified = ["docs/store/schema.sql"]
 
+[tool.setuptools.data-files]
+"share/tldw_profile_core/schemas" = [
+  "packages/tldw_profile_core/schemas/*.json",
+]
+"share/tldw_profile_core/fixtures/v1" = [
+  "packages/tldw_profile_core/fixtures/v1/*.json",
+]
+
 [tool.setuptools.exclude-package-data]
 tldw_Server_API = [
   "Config_Files/config.txt.backup_*",
@@ -549,7 +560,7 @@ tldw_Server_API = [
 # Tools - Tests
 ###########################
 [tool.pytest.ini_options]
-pythonpath = ["apps/mcp-unified/src"]
+pythonpath = ["apps/mcp-unified/src", "packages/tldw_profile_core/src"]
 filterwarnings = [
     "ignore::DeprecationWarning:pkg_resources:",
     "ignore::DeprecationWarning:speechbrain.pretrained:",
@@ -1800,7 +1811,7 @@ exclude = []
 known-first-party = ["tldw_Server_API"]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
 ignore_missing_imports = true

@@ -3,6 +3,7 @@
 These routers are force-included under MINIMAL_TEST_APP to keep lightweight
 integration tests working without importing the broader endpoint surface.
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -59,8 +60,7 @@ MINIMAL_REQUIRED_ROUTER_NAMES = (
     "workspace_eligibility",
 )
 MINIMAL_REQUIRED_ROUTER_OVERRIDES = {
-    name: RouterSpecOverride(skip_exceptions=REQUIRED_ROUTER_SKIP_EXCEPTIONS)
-    for name in MINIMAL_REQUIRED_ROUTER_NAMES
+    name: RouterSpecOverride(skip_exceptions=REQUIRED_ROUTER_SKIP_EXCEPTIONS) for name in MINIMAL_REQUIRED_ROUTER_NAMES
 }
 
 
@@ -273,10 +273,7 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
             skip_context="in minimal test app",
         ),
         ImportedRouterSpec(
-            import_path=(
-                "tldw_Server_API.app.api.v1.endpoints.prompt_studio."
-                "prompt_studio_websocket"
-            ),
+            import_path=("tldw_Server_API.app.api.v1.endpoints.prompt_studio.prompt_studio_websocket"),
             log_name="prompt_studio_websocket",
             tags=("prompt-studio",),
             skip_context="in minimal test app",
@@ -501,12 +498,14 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
     ):
         append_imported_router_spec(specs, workflow_spec)
 
-    specs.append(RouterSpec(
-        router=evaluations_router_factory,
-        prefix=f"{API_V1_PREFIX}",
-        tags=("evaluations",),
-        route_key="evaluations",
-    ))
+    specs.append(
+        RouterSpec(
+            router=evaluations_router_factory,
+            prefix=f"{API_V1_PREFIX}",
+            tags=("evaluations",),
+            route_key="evaluations",
+        )
+    )
 
     for experience_spec in (
         ImportedRouterSpec(
@@ -528,6 +527,14 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
             log_name="personalization",
             prefix=f"{API_V1_PREFIX}/personalization",
             tags=("personalization",),
+            skip_context=minimal_skip_context,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.personal_context",
+            log_name="personal-context",
+            prefix=f"{API_V1_PREFIX}/personal-context",
+            tags=("personal-context",),
+            route_key="personal-context",
             skip_context=minimal_skip_context,
         ),
         ImportedRouterSpec(

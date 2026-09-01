@@ -100,7 +100,7 @@ Good fit for:
 
 For user-facing workflows across setup, the WebUI, browser extension, local models, APIs, and administration, start with the [User Wiki](Docs/Wiki/User_Wiki.md). Contributors should start with the [Developer Wiki](Docs/Wiki/Developer_Wiki.md).
 
-After cloning, you can run the optional Makefile helper checks with `make quickstart-prereqs`, or verify Python 3.10+, ffmpeg, and Docker manually for your chosen profile. On a fresh checkout, the setup targets are still the source of truth because they create the lightweight setup environment they need.
+After cloning, you can run the optional Makefile helper checks with `make quickstart-prereqs`, or verify Python 3.11+, ffmpeg, and Docker manually for your chosen profile. On a fresh checkout, the setup targets are still the source of truth because they create the lightweight setup environment they need.
 
 2. **Follow your profile guide** end-to-end. It covers prepare, start, verify, first value, audio path, troubleshoot, and optional add-ons.
 
@@ -332,7 +332,7 @@ This helper checks your host Python and optional media tooling. If it reports mi
 
 If `make` is unavailable (common on Windows), run equivalent host checks manually:
 ```powershell
-py -3.12 --version  # or py -3.13 / -3.11 / -3.10
+py -3.12 --version  # or py -3.13 / -3.11
 ffmpeg -version
 docker --version    # only if using Docker paths
 ```
@@ -380,8 +380,8 @@ make verify-local-single
 # make quickstart-docker-webui  # same as make quickstart
 # make quickstart-docker        # Docker single-user API only
 # make quickstart-install       # local install only; does not start the server
-# If `python3` is older than 3.10 on your machine:
-# make install-local PYTHON=python3.13  # or python3.12 / python3.11 / python3.10
+# If `python3` is older than 3.11 on your machine:
+# make install-local PYTHON=python3.13  # or python3.12 / python3.11
 
 # Force a full image rebuild when needed:
 # make start-docker-single DOCKER_BUILD=true
@@ -424,8 +424,8 @@ Want a more advanced deployment?
 make install-local
 make setup-local-single
 make start-local-single
-# If `python3` is older than 3.10 on your machine:
-# make install-local PYTHON=python3.13  # or python3.12 / python3.11 / python3.10
+# If `python3` is older than 3.11 on your machine:
+# make install-local PYTHON=python3.13  # or python3.12 / python3.11
 ```
 
 These targets:
@@ -489,7 +489,7 @@ docker compose -f Dockerfiles/docker-compose.multi-user-postgres.yml up -d --bui
 <summary>Manual virtualenv, environment, auth, and startup steps</summary>
 
 Supported Python versions:
-- Minimum: Python 3.10+
+- Minimum: Python 3.11+
 - CI-tested: Python 3.11, 3.12, and 3.13
 - Recommended for local development: Python 3.12
 
@@ -517,11 +517,11 @@ Windows notes:
 1) **Create and activate a virtual environment**
 ```bash
 # macOS/Linux: choose a supported interpreter explicitly (3.12 recommended)
-python3.12 -m venv .venv  # or python3.13 / python3.11 / python3.10
+python3.12 -m venv .venv  # or python3.13 / python3.11
 source .venv/bin/activate
 
 # Windows (PowerShell)
-py -3.12 -m venv .venv  # or -3.13 / -3.11 / -3.10
+py -3.12 -m venv .venv  # or -3.13 / -3.11
 .venv\Scripts\Activate.ps1
 
 # Confirm venv interpreter version

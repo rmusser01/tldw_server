@@ -155,6 +155,62 @@ class ProfileTransactionError(RuntimeError):
     retry_after_seconds: int | None = None
 
 
+class PersonalContextError(RuntimeError):
+    """Base error for canonical Personal Context operations."""
+
+
+class ProfileStorageLockedError(PersonalContextError):
+    """Report unavailable or unauthenticated server profile key material."""
+
+
+class ProfileIntegrityError(PersonalContextError):
+    """Report canonical or encrypted object authentication failure."""
+
+
+class ProfileUnsupportedSchemaError(ProfileIntegrityError):
+    """Report authenticated profile data from an unsupported newer schema."""
+
+
+class ProfileAlreadyExistsError(PersonalContextError):
+    """Report an attempt to create a second profile in one user database."""
+
+
+class ProfileKeyAlreadyExistsError(PersonalContextError):
+    """Report an attempt to replace existing wrapped profile keys."""
+
+
+class ConcurrentProfileUpdateError(PersonalContextError):
+    """Report an optimistic object-head mismatch."""
+
+
+class ProfileSemanticKeyCollisionError(PersonalContextError):
+    """Report an active same-scope canonical semantic-key collision."""
+
+
+class ProfileQuotaExceededError(PersonalContextError):
+    """Report a bounded Personal Context operational quota violation."""
+
+
+class ProfileConflictError(PersonalContextError):
+    """Report a stale canonical or runtime version supplied by a caller."""
+
+
+class ProfileKeyCollisionError(PersonalContextError):
+    """Report an active same-scope semantic key collision."""
+
+
+class ProfileUnsupportedOperationError(PersonalContextError):
+    """Report an operation supported by another owner but not this server."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
+
+
+class ProfileNotFoundError(PersonalContextError, KeyError):
+    """Report that the authenticated user has no canonical profile."""
+
+
 class ProfileDatabaseBusy(ProfileTransactionError):
     """Raised when a profile transaction cannot acquire the database in time."""
 

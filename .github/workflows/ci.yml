@@ -104,8 +104,8 @@ jobs:
           ok = compileall.compile_dir('tldw_Server_API/app', force=True, quiet=1)
           sys.exit(0 if ok else 1)
           PY
-  preflight-python-310:
-    name: Governed Preflight (Python 3.10)
+  preflight-python-311:
+    name: Governed Preflight (Python 3.11)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -121,10 +121,10 @@ jobs:
         with:
           install-ffmpeg: 'false'
           install-portaudio: 'true'
-      - name: Setup Python 3.10 and dependencies
+      - name: Setup Python 3.11 and dependencies
         uses: ./.github/actions/setup-python-deps
         with:
-          python-version: '3.10'
+          python-version: '3.11'
           use-uv: 'true'
           enable-pip-cache: ${{ github.event_name != 'workflow_run' }}
           extras: dev
