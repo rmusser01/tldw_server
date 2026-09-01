@@ -101,7 +101,7 @@
 
 ### Task 5: Re-review, final CI, and merge
 
-- [ ] **Step 1:** Push the verified remediation and respond to every Cubic thread with evidence.
-- [ ] **Step 2:** Resolve only validated-and-fixed threads and confirm no actionable Qodo/Cubic thread remains.
-- [ ] **Step 3:** Rebase again if `dev` advances, rerun all required GitHub checks, and verify the exact head SHA.
+- [x] **Step 1:** Push the verified remediation and respond to every Cubic thread with evidence.
+- [x] **Step 2:** Resolve only validated-and-fixed threads and confirm no actionable Qodo/Cubic thread remains.
+- [x] **Step 3:** Rebase again if `dev` advances, rerun all required GitHub checks, and verify the exact head SHA.
 - [ ] **Step 4:** Merge PR #2839 using the repository's merge-commit convention and verify the merged state.
