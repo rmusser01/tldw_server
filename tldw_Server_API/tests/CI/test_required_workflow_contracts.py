@@ -166,6 +166,28 @@ def test_coverage_required_uses_documented_global_floor() -> None:
     assert "--cov-fail-under=12" in coverage_step["run"]
 
 
+def test_global_coverage_floor_measures_only_application_code() -> None:
+    """The floor is a percentage, so what is in the denominator decides it.
+
+    ``--cov=tldw_Server_API`` also measured ``tldw_Server_API/tests`` -- 229k
+    statements this selection never covers -- which quietly diluted the number.
+    Widening the scope back would move the percentage without anything about the
+    code changing.
+    """
+    workflow = _load(".github/workflows/coverage-required.yml")
+    steps = workflow["jobs"]["coverage-required"]["steps"]
+    run = _get_step(steps, "Run global coverage floor")["run"]
+
+    assert "--cov=tldw_Server_API/app" in run, (
+        "the global coverage floor no longer measures application code only. "
+        "Scoping it wider pulls the test suite into the denominator, which "
+        "changes the reported percentage without any change in what is tested."
+    )
+    assert "--cov=tldw_Server_API " not in run and not run.rstrip().endswith(
+        "--cov=tldw_Server_API"
+    ), "the unscoped --cov=tldw_Server_API target is back"
+
+
 def test_coverage_required_enforces_authnz_coverage_floor() -> None:
     workflow = _load(".github/workflows/coverage-required.yml")
     steps = workflow["jobs"]["coverage-required"]["steps"]
