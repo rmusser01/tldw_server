@@ -5,11 +5,11 @@
 - Branch: `codex/admin-webhooks-durable-producers-runtime`
 - Pull request: https://github.com/rmusser01/tldw_server/pull/2855
 - Final integrated implementation head:
-  `304a04a9da7dfd04d6f1d8e32878f4e22583ac4d`
+  `15ad4e76c05b09581d8133f8eb91ef8c9f466abf`
 - Final verified pre-evidence branch head:
-  `0525aff3b85fdb285bf6431100d75a727c05ac91`
+  `23f779bbf1c48fad98d810eedb4632c9a1710a19`
 - Final branch merge base and observed `origin/dev`:
-  `21c1acc5bbac2df7d53ce5b759b0c79ab3a260ba`
+  `56def76c50acb61152c11bfba70c3f09388db375`
 - Verification date: `2026-09-01`
 - Host: macOS 26.5.2 build 25F84, arm64
 - Project Python: 3.11.13
@@ -24,8 +24,8 @@
 The evidence-only update that records the final integrated gates necessarily
 follows the implementation head above and is not self-referential. Earlier
 verification and rebase identities remain in their chronological sections.
-The complete fourteen-commit PR branch rebased without conflicts onto the final
-observed `origin/dev` and became fourteen commits ahead and zero behind. No
+The complete fifteen-commit pre-evidence PR branch rebased without conflicts
+onto the final observed `origin/dev` and became fifteen commits ahead and zero behind. No
 production activation occurred.
 
 The verified branch was published as pull request
@@ -262,6 +262,17 @@ loopback permission against the live disposable fixture.
 
 Result: exit 0, `1,201 passed, 2,110 warnings in 1129.96s (0:18:49)`, zero
 skips. No production activation occurred.
+
+Before the force-push, `origin/dev` advanced again to
+`56def76c50acb61152c11bfba70c3f09388db375`. That delta changed only two
+Embeddings test-fixture files. All fifteen PR commits rebased without conflicts;
+the final implementation commit became
+`15ad4e76c05b09581d8133f8eb91ef8c9f466abf` and the pre-evidence branch head
+became `23f779bbf1c48fad98d810eedb4632c9a1710a19`, fifteen commits ahead and zero
+behind. Because no production or aggregate test path changed, the 1,201-test
+gate remained applicable. The four upstream `schema_once` caller regressions
+and one Embeddings import regression passed `5/5` in 0.74 seconds on the final
+tree, and the shard guard again reported zero newly uncovered files.
 
 ### Required PostgreSQL matrix
 

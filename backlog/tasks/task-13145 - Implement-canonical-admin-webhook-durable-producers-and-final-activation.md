@@ -4,7 +4,7 @@ title: Implement canonical admin webhook durable producers and final activation
 status: In Progress
 assignee: []
 created_date: '2026-08-31 22:44'
-updated_date: '2026-09-01 16:43'
+updated_date: '2026-09-01 16:47'
 labels:
   - admin
   - webhooks
@@ -98,6 +98,8 @@ Pre-change baseline at 8cb4d2df: backend command completed with TLDW_TEST_NO_DOC
 2026-09-01 PR CI remediation: The first Shard coverage guard run found that Task 5's newly extracted tldw_Server_API/tests/Admin/test_admin_ops_reports.py was not assigned to a CI shard. Added it beside the related admin reports test in all five duplicated backend shard matrices. The exact local guard now passes with 791 shards, 4,517 test files, 4 intentional ignores, the 130-file baseline, and zero newly uncovered files. The extracted reports test passes 29/29 with six warnings in 1.25s. This was CI coverage wiring, not a production behavior defect; PR #2855 remains unmerged and production remains unactivated.
 
 2026-09-01 post-publication base advance: While PR #2855 CI was running, origin/dev advanced by three commits to 21c1acc5bbac2df7d53ce5b759b0c79ab3a260ba. The changes were limited to schema_once verification and its Collections/Watchlists callers, but that is shared database infrastructure, so all fourteen branch commits were rebased without conflicts and the full gates were repeated. The shard guard passes against 4,518 test files with zero newly uncovered. A first guarded aggregate was invalid for release evidence because the disposable PostgreSQL fixture had disappeared and filesystem sandboxing denied two loopback binds: 1,040 passed, 159 skipped, and only the two PermissionError cases failed. The host-permitted required PostgreSQL matrix then passed 79/79 with zero skips and 160 warnings in 475.72s, recreating the fixture. The final host-permitted deterministic aggregate passed 1,201/1,201 with zero skips and 2,110 warnings in 1129.96s. Rebased implementation commit is 304a04a9da7dfd04d6f1d8e32878f4e22583ac4d; verified pre-evidence head is 0525aff3b85fdb285bf6431100d75a727c05ac91; the branch was fourteen commits ahead and zero behind. No production activation occurred.
+
+2026-09-01 final test-only base advance: Before force-push, origin/dev advanced again to 56def76c50acb61152c11bfba70c3f09388db375 with changes limited to two Embeddings test-fixture files. All fifteen PR commits rebased without conflicts. No production or 1,201-test aggregate path changed, so the fresh zero-skip aggregate remains applicable. On the final tree, the four upstream schema_once caller regressions and one Embeddings optional-dependency import regression passed 5/5 with two warnings in 0.74s, and the shard guard again passed with 4,518 test files and zero newly uncovered. Final implementation commit is 15ad4e76c05b09581d8133f8eb91ef8c9f466abf; verified pre-evidence head is 23f779bbf1c48fad98d810eedb4632c9a1710a19; the branch was fifteen commits ahead and zero behind. No production activation occurred.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
