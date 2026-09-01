@@ -2787,6 +2787,23 @@ class AdminWebhookRepository:
                 is_postgres=self.is_postgres,
             ).find_purge_eligible_registration_ids(now=now, limit=limit)
 
+    async def get_event_by_command_source(
+        self,
+        *,
+        event_type: str,
+        source_command_id: str,
+    ) -> StoredWebhookEvent | None:
+        """Read one immutable command event by its canonical source identity."""
+
+        async with self._read_connection() as connection:
+            return await AdminWebhookUnitOfWork(
+                connection,
+                is_postgres=self.is_postgres,
+            ).get_event_by_command_source(
+                event_type=event_type,
+                source_command_id=source_command_id,
+            )
+
 
 class AdminWebhookUnitOfWork(_ConnectionAdapter):
     """Transaction-bound operations shared by both supported database backends."""
@@ -2818,6 +2835,23 @@ class AdminWebhookUnitOfWork(_ConnectionAdapter):
                 """,
                 (event.event_type, event.source_command_id),
             )
+        return _stored_event_from_row(row) if row is not None else None
+
+    async def get_event_by_command_source(
+        self,
+        *,
+        event_type: str,
+        source_command_id: str,
+    ) -> StoredWebhookEvent | None:
+        """Read one command event without accepting nullable source ambiguity."""
+
+        event_columns = _EVENT_COLUMNS
+        query = (
+            "SELECT {event_columns} FROM admin_webhook_events "
+            "WHERE event_type = ? AND source_kind = 'command' "
+            "AND source_command_id = ?"
+        ).format_map(locals())
+        row = await self._fetchrow(query, (event_type, source_command_id))
         return _stored_event_from_row(row) if row is not None else None
 
     async def _automatic_deliveries(

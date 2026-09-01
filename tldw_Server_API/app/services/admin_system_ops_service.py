@@ -10,15 +10,43 @@ import stat
 import tempfile
 import time
 from contextlib import contextmanager, suppress
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Lock
-from typing import Any
+from typing import TYPE_CHECKING, Any, Callable
 from uuid import uuid4
 
 from loguru import logger
 
+from tldw_Server_API.app.core.Admin_Webhooks.catalog import EVENT_API_VERSION
+from tldw_Server_API.app.core.Admin_Webhooks.config import (
+    AdminWebhookMode,
+    AdminWebhookSettings,
+)
+from tldw_Server_API.app.core.Admin_Webhooks.domain import (
+    EventSourceKind,
+    PendingIncidentWebhookMarker,
+    WebhookError,
+    WebhookErrorCode,
+    build_idempotency_scope,
+    idempotency_lookup_digest,
+)
+from tldw_Server_API.app.core.Admin_Webhooks.producer import (
+    AdminWebhookEventProducer,
+    ProductionEventPreparation,
+    build_admin_webhook_event_producer,
+    build_incident_created_data,
+    build_incident_notify_data,
+    build_incident_resolved_data,
+    build_incident_updated_data,
+)
 from tldw_Server_API.app.core.Utils.Utils import get_database_dir
+
+if TYPE_CHECKING:
+    from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
+        StoredWebhookEvent,
+    )
 
 _FLAG_SCOPES = {"global", "org", "user"}
 _INCIDENT_STATUSES = {"open", "investigating", "mitigating", "resolved"}
@@ -118,11 +146,22 @@ def _store_file_lock(
 
 
 @contextmanager
-def _locked_store(write: bool = False):
+def _locked_store(
+    write: bool = False,
+    *,
+    strict: bool = False,
+    should_write: Callable[[], bool] | None = None,
+):
     with _STORE_LOCK, _store_file_lock():
-        store = _load_store()
+        if strict:
+            store = _load_store_strict(_STORE_PATH)
+            defaults = _default_store()
+            for key, value in defaults.items():
+                store.setdefault(key, value)
+        else:
+            store = _load_store()
         yield store
-        if write:
+        if write and (should_write is None or should_write()):
             _save_store(store)
 
 
@@ -188,6 +227,10 @@ def _normalize_incident_record(value: Any) -> dict[str, Any]:
         raise ValueError("invalid_incident")
 
     incident = dict(value)
+    version = incident.get("version", 1)
+    if isinstance(version, bool) or not isinstance(version, int) or version < 1:
+        raise ValueError("invalid_incident_version")
+    incident["version"] = version
     incident["assigned_to_user_id"] = (
         int(incident["assigned_to_user_id"]) if incident.get("assigned_to_user_id") is not None else None
     )
@@ -230,6 +273,185 @@ def _normalize_incident_record(value: Any) -> dict[str, Any]:
     )
 
     return incident
+
+
+def _incident_timestamp(value: object) -> datetime:
+    if not isinstance(value, str):
+        raise ValueError("invalid_incident_timestamp")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        raise ValueError("invalid_incident_timestamp") from None
+    if parsed.tzinfo is None:
+        raise ValueError("invalid_incident_timestamp")
+    return parsed.astimezone(timezone.utc)
+
+
+def _incident_webhook_data(
+    incident: dict[str, Any],
+    *,
+    event_type: str,
+    narrative: str | None = None,
+) -> dict[str, object]:
+    common = {
+        "incident_id": str(incident["id"]),
+        "state": str(incident["status"]),
+        "severity": str(incident["severity"]),
+        "resource_version": int(incident["version"]),
+        "created_at": _incident_timestamp(incident["created_at"]),
+        "updated_at": _incident_timestamp(incident["updated_at"]),
+        "resolved_at": (
+            _incident_timestamp(incident["resolved_at"])
+            if incident.get("resolved_at") is not None
+            else None
+        ),
+    }
+    if event_type == "incident.created":
+        return build_incident_created_data(**common)  # type: ignore[arg-type]
+    if event_type == "incident.updated":
+        return build_incident_updated_data(**common)  # type: ignore[arg-type]
+    if event_type == "incident.resolved":
+        if common["resolved_at"] is None:
+            raise ValueError("invalid_incident_timestamp")
+        return build_incident_resolved_data(**common)  # type: ignore[arg-type]
+    if event_type == "incident.notify":
+        return build_incident_notify_data(  # type: ignore[arg-type]
+            **common,
+            narrative=narrative,
+        )
+    raise ValueError("invalid_incident_event_type")
+
+
+def _pending_incident_markers(
+    store: dict[str, Any],
+) -> list[PendingIncidentWebhookMarker]:
+    raw_markers = store.get("webhook_pending_events", [])
+    if not isinstance(raw_markers, list):
+        raise ValueError("pending incident marker collection is invalid")
+    markers = [
+        PendingIncidentWebhookMarker.from_store_record(value)
+        for value in raw_markers
+    ]
+    if any(
+        marker.api_version != EVENT_API_VERSION
+        or marker.event_type
+        not in {
+            "incident.created",
+            "incident.updated",
+            "incident.resolved",
+            "incident.notify",
+        }
+        for marker in markers
+    ):
+        raise ValueError("pending incident marker catalog value is invalid")
+    if len({marker.event_id for marker in markers}) != len(markers):
+        raise ValueError("pending incident marker IDs are not unique")
+    source_keys = [
+        (
+            marker.event_type,
+            marker.source_kind,
+            marker.aggregate_type,
+            marker.aggregate_id,
+            marker.aggregate_version,
+            marker.source_command_id,
+        )
+        for marker in markers
+    ]
+    if len(set(source_keys)) != len(source_keys):
+        raise ValueError("pending incident marker sources are not unique")
+    return markers
+
+
+def _append_pending_incident_marker(
+    store: dict[str, Any],
+    marker: PendingIncidentWebhookMarker,
+) -> None:
+    markers = _pending_incident_markers(store)
+    if marker.event_id in {existing.event_id for existing in markers}:
+        raise WebhookError(WebhookErrorCode.IDEMPOTENCY_CONFLICT)
+    marker_source = (
+        marker.event_type,
+        marker.source_kind,
+        marker.aggregate_type,
+        marker.aggregate_id,
+        marker.aggregate_version,
+        marker.source_command_id,
+    )
+    if marker_source in {
+        (
+            existing.event_type,
+            existing.source_kind,
+            existing.aggregate_type,
+            existing.aggregate_id,
+            existing.aggregate_version,
+            existing.source_command_id,
+        )
+        for existing in markers
+    }:
+        raise WebhookError(WebhookErrorCode.IDEMPOTENCY_CONFLICT)
+    store.setdefault("webhook_pending_events", []).append(marker.to_store_record())
+
+
+async def _prepare_incident_capture(
+    *,
+    webhook_event_producer: AdminWebhookEventProducer | None,
+    source_request_id: str | None,
+    required: bool = False,
+) -> tuple[AdminWebhookEventProducer | None, ProductionEventPreparation | None]:
+    producer = webhook_event_producer
+    if producer is None:
+        settings = AdminWebhookSettings.from_environment(os.environ)
+        if settings.mode is not AdminWebhookMode.ON:
+            if required:
+                code = (
+                    WebhookErrorCode.MIGRATION_PENDING
+                    if settings.mode is AdminWebhookMode.MIGRATE
+                    else WebhookErrorCode.DISABLED
+                )
+                raise WebhookError(code)
+            return None, None
+        from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+
+        producer = build_admin_webhook_event_producer(await get_db_pool())
+    preparation = await producer.begin_capture(
+        source_component="admin_system_ops",
+        source_request_id=source_request_id,
+    )
+    if required and preparation is None:
+        raise WebhookError(WebhookErrorCode.DISABLED)
+    return producer, preparation
+
+
+def _aggregate_incident_marker(
+    producer: AdminWebhookEventProducer,
+    preparation: ProductionEventPreparation,
+    *,
+    incident: dict[str, Any],
+    event_type: str,
+) -> PendingIncidentWebhookMarker:
+    data = _incident_webhook_data(incident, event_type=event_type)
+    return producer.prepare_incident_marker(
+        preparation,
+        event_type=event_type,
+        source_kind=EventSourceKind.AGGREGATE,
+        aggregate_type="incident",
+        aggregate_id=str(incident["id"]),
+        aggregate_version=str(incident["version"]),
+        source_command_id=None,
+        data=data,
+    )
+
+
+@dataclass(frozen=True)
+class IncidentWebhookCommandAcceptance:
+    """Bounded acceptance metadata for a durable incident notify command."""
+
+    incident_id: str
+    event_id: str
+    event_type: str
+    command_id: str
+    accepted: bool
+    replayed: bool
 
 
 def _read_store_strict(
@@ -720,7 +942,7 @@ def list_incidents(
     return items, total
 
 
-def create_incident(
+async def create_incident(
     *,
     title: str,
     status: str | None,
@@ -728,6 +950,8 @@ def create_incident(
     summary: str | None,
     tags: list[str] | None,
     actor: str | None,
+    webhook_event_producer: AdminWebhookEventProducer | None = None,
+    source_request_id: str | None = None,
 ) -> dict[str, Any]:
     title_norm = (title or "").strip()
     if not title_norm:
@@ -738,6 +962,10 @@ def create_incident(
         raise ValueError("invalid_status")
     if severity_norm not in _INCIDENT_SEVERITIES:
         raise ValueError("invalid_severity")
+    producer, preparation = await _prepare_incident_capture(
+        webhook_event_producer=webhook_event_producer,
+        source_request_id=source_request_id,
+    )
     now = _now_iso()
     incident_id = f"inc_{uuid4().hex[:10]}"
     resolved_at = now if status_norm == "resolved" else None
@@ -750,6 +978,7 @@ def create_incident(
     acknowledged_at = now if status_norm != "open" else None
     incident = {
         "id": incident_id,
+        "version": 1,
         "title": title_norm,
         "status": status_norm,
         "severity": severity_norm,
@@ -768,12 +997,22 @@ def create_incident(
         "impact": None,
         "action_items": [],
     }
-    with _locked_store(write=True) as store:
+    with _locked_store(write=True, strict=preparation is not None) as store:
         store.setdefault("incidents", []).append(incident)
+        if producer is not None and preparation is not None:
+            _append_pending_incident_marker(
+                store,
+                _aggregate_incident_marker(
+                    producer,
+                    preparation,
+                    incident=incident,
+                    event_type="incident.created",
+                ),
+            )
     return _normalize_incident_record(incident)
 
 
-def update_incident(
+async def update_incident(
     *,
     incident_id: str,
     title: str | None,
@@ -789,10 +1028,29 @@ def update_incident(
     action_items: Any = _UNSET,
     update_message: str | None,
     actor: str | None,
+    webhook_event_producer: AdminWebhookEventProducer | None = None,
+    source_request_id: str | None = None,
 ) -> dict[str, Any]:
+    if status is not None and status.strip().lower() not in _INCIDENT_STATUSES:
+        raise ValueError("invalid_status")
+    if severity is not None and severity.strip().lower() not in _INCIDENT_SEVERITIES:
+        raise ValueError("invalid_severity")
+    producer, preparation = await _prepare_incident_capture(
+        webhook_event_producer=webhook_event_producer,
+        source_request_id=source_request_id,
+    )
     now = _now_iso()
     note = (update_message or "").strip() or None
-    with _locked_store(write=True) as store:
+    changed = False
+
+    def should_write() -> bool:
+        return changed
+
+    with _locked_store(
+        write=True,
+        strict=preparation is not None,
+        should_write=should_write,
+    ) as store:
         incidents = store.get("incidents", [])
         for index, incident in enumerate(incidents):
             if incident.get("id") != incident_id:
@@ -803,43 +1061,73 @@ def update_incident(
             updated_incident["timeline"] = list(current.get("timeline") or [])
             updated_incident["action_items"] = [dict(item) for item in current.get("action_items") or []]
             if title is not None:
-                updated_incident["title"] = title.strip() or current.get("title")
+                title_norm = title.strip() or current.get("title")
+                if title_norm != current.get("title"):
+                    updated_incident["title"] = title_norm
+                    changed = True
             if status is not None:
                 status_norm = status.strip().lower()
-                if status_norm not in _INCIDENT_STATUSES:
-                    raise ValueError("invalid_status")
-                if current.get("status") == "open" and status_norm != "open" and not current.get("acknowledged_at"):
-                    updated_incident["acknowledged_at"] = now
-                updated_incident["status"] = status_norm
-                updated_incident["resolved_at"] = now if status_norm == "resolved" else None
+                if status_norm != current.get("status"):
+                    if current.get("status") == "open" and status_norm != "open" and not current.get("acknowledged_at"):
+                        updated_incident["acknowledged_at"] = now
+                    updated_incident["status"] = status_norm
+                    updated_incident["resolved_at"] = now if status_norm == "resolved" else None
+                    changed = True
             if severity is not None:
                 severity_norm = severity.strip().lower()
-                if severity_norm not in _INCIDENT_SEVERITIES:
-                    raise ValueError("invalid_severity")
-                updated_incident["severity"] = severity_norm
+                if severity_norm != current.get("severity"):
+                    updated_incident["severity"] = severity_norm
+                    changed = True
             if summary is not None:
-                updated_incident["summary"] = summary.strip() or None
+                summary_norm = summary.strip() or None
+                if summary_norm != current.get("summary"):
+                    updated_incident["summary"] = summary_norm
+                    changed = True
             if tags is not None:
-                updated_incident["tags"] = tags
+                tags_norm = list(tags)
+                if tags_norm != current.get("tags"):
+                    updated_incident["tags"] = tags_norm
+                    changed = True
             if assigned_to_user_id is not _UNSET:
                 if assigned_to_user_id is None:
-                    updated_incident["assigned_to_user_id"] = None
-                    updated_incident["assigned_to_label"] = None
+                    if current.get("assigned_to_user_id") is not None or current.get("assigned_to_label") is not None:
+                        updated_incident["assigned_to_user_id"] = None
+                        updated_incident["assigned_to_label"] = None
+                        changed = True
                 else:
-                    updated_incident["assigned_to_user_id"] = int(assigned_to_user_id)
-                    updated_incident["assigned_to_label"] = (
+                    assignee_id = int(assigned_to_user_id)
+                    assignee_label = (
                         str(assigned_to_label).strip() or None
                         if assigned_to_label is not None and assigned_to_label is not _UNSET
                         else None
                     )
+                    if (
+                        assignee_id != current.get("assigned_to_user_id")
+                        or assignee_label != current.get("assigned_to_label")
+                    ):
+                        updated_incident["assigned_to_user_id"] = assignee_id
+                        updated_incident["assigned_to_label"] = assignee_label
+                        changed = True
             if root_cause is not _UNSET:
-                updated_incident["root_cause"] = str(root_cause).strip() or None if root_cause is not None else None
+                root_cause_norm = str(root_cause).strip() or None if root_cause is not None else None
+                if root_cause_norm != current.get("root_cause"):
+                    updated_incident["root_cause"] = root_cause_norm
+                    changed = True
             if impact is not _UNSET:
-                updated_incident["impact"] = str(impact).strip() or None if impact is not None else None
+                impact_norm = str(impact).strip() or None if impact is not None else None
+                if impact_norm != current.get("impact"):
+                    updated_incident["impact"] = impact_norm
+                    changed = True
             if runbook_url is not _UNSET:
-                updated_incident["runbook_url"] = str(runbook_url).strip() or None if runbook_url is not None else None
+                runbook_norm = str(runbook_url).strip() or None if runbook_url is not None else None
+                if runbook_norm != current.get("runbook_url"):
+                    updated_incident["runbook_url"] = runbook_norm
+                    changed = True
             if action_items is not _UNSET:
-                updated_incident["action_items"] = _normalize_incident_action_items(action_items)
+                normalized_actions = _normalize_incident_action_items(action_items)
+                if normalized_actions != current.get("action_items"):
+                    updated_incident["action_items"] = normalized_actions
+                    changed = True
             if note:
                 updated_incident.setdefault("timeline", []).append(
                     {
@@ -849,39 +1137,96 @@ def update_incident(
                         "actor": actor,
                     }
                 )
+                changed = True
+            if not changed:
+                return current
+            previous_status = str(current.get("status"))
+            updated_incident["version"] = int(current["version"]) + 1
             updated_incident["updated_at"] = now
             updated_incident["updated_by"] = actor
             incidents[index] = updated_incident
+            if producer is not None and preparation is not None:
+                event_type = (
+                    "incident.resolved"
+                    if previous_status != "resolved" and updated_incident.get("status") == "resolved"
+                    else "incident.updated"
+                )
+                _append_pending_incident_marker(
+                    store,
+                    _aggregate_incident_marker(
+                        producer,
+                        preparation,
+                        incident=updated_incident,
+                        event_type=event_type,
+                    ),
+                )
             return _normalize_incident_record(updated_incident)
     raise ValueError("not_found")
 
 
-def add_incident_event(
+def _add_incident_event_prepared(
     *,
     incident_id: str,
-    message: str,
+    note: str,
     actor: str | None,
+    producer: AdminWebhookEventProducer | None,
+    preparation: ProductionEventPreparation | None,
 ) -> dict[str, Any]:
-    note = (message or "").strip()
-    if not note:
-        raise ValueError("invalid_message")
     now = _now_iso()
-    with _locked_store(write=True) as store:
+    with _locked_store(write=True, strict=preparation is not None) as store:
         incidents = store.get("incidents", [])
-        for incident in incidents:
+        for index, incident in enumerate(incidents):
             if incident.get("id") != incident_id:
                 continue
+            updated_incident = _normalize_incident_record(incident)
             event = {
                 "id": f"evt_{uuid4().hex[:10]}",
                 "message": note,
                 "created_at": now,
                 "actor": actor,
             }
-            incident.setdefault("timeline", []).append(event)
-            incident["updated_at"] = now
-            incident["updated_by"] = actor
-            return _normalize_incident_record(incident)
+            updated_incident["timeline"] = list(updated_incident.get("timeline") or [])
+            updated_incident["timeline"].append(event)
+            updated_incident["version"] = int(updated_incident["version"]) + 1
+            updated_incident["updated_at"] = now
+            updated_incident["updated_by"] = actor
+            incidents[index] = updated_incident
+            if producer is not None and preparation is not None:
+                _append_pending_incident_marker(
+                    store,
+                    _aggregate_incident_marker(
+                        producer,
+                        preparation,
+                        incident=updated_incident,
+                        event_type="incident.updated",
+                    ),
+                )
+            return _normalize_incident_record(updated_incident)
     raise ValueError("not_found")
+
+
+async def add_incident_event(
+    *,
+    incident_id: str,
+    message: str,
+    actor: str | None,
+    webhook_event_producer: AdminWebhookEventProducer | None = None,
+    source_request_id: str | None = None,
+) -> dict[str, Any]:
+    note = (message or "").strip()
+    if not note:
+        raise ValueError("invalid_message")
+    producer, preparation = await _prepare_incident_capture(
+        webhook_event_producer=webhook_event_producer,
+        source_request_id=source_request_id,
+    )
+    return _add_incident_event_prepared(
+        incident_id=incident_id,
+        note=note,
+        actor=actor,
+        producer=producer,
+        preparation=preparation,
+    )
 
 
 def get_incident(*, incident_id: str) -> dict[str, Any]:
@@ -902,12 +1247,171 @@ def delete_incident(*, incident_id: str) -> None:
         store["incidents"] = remaining
 
 
-def notify_incident_stakeholders(
+def _incident_from_store(
+    store: dict[str, Any],
+    *,
+    incident_id: str,
+) -> dict[str, Any]:
+    for incident in store.get("incidents", []):
+        if incident.get("id") == incident_id:
+            return _normalize_incident_record(incident)
+    raise ValueError("not_found")
+
+
+def _pending_notify_replay(
+    store: dict[str, Any],
+    *,
+    producer: AdminWebhookEventProducer,
+    command_id: str,
+    data: dict[str, object],
+) -> PendingIncidentWebhookMarker | None:
+    for marker in _pending_incident_markers(store):
+        if marker.event_type == "incident.notify" and marker.source_command_id == command_id:
+            producer.verify_incident_marker_replay(marker, data=data)
+            return marker
+    return None
+
+
+def _notify_acceptance(
+    *,
+    incident_id: str,
+    event_id: str,
+    command_id: str,
+    replayed: bool,
+) -> IncidentWebhookCommandAcceptance:
+    return IncidentWebhookCommandAcceptance(
+        incident_id=incident_id,
+        event_id=event_id,
+        event_type="incident.notify",
+        command_id=command_id,
+        accepted=True,
+        replayed=replayed,
+    )
+
+
+async def notify_incident_webhooks(
+    *,
+    incident_id: str,
+    narrative: str | None,
+    actor_id: int | str,
+    idempotency_key: str,
+    source_request_id: str | None = None,
+    webhook_event_producer: AdminWebhookEventProducer | None = None,
+) -> IncidentWebhookCommandAcceptance:
+    """Persist or replay one explicit durable incident webhook command."""
+
+    narrative_norm = (narrative or "").strip() or None
+    scope = build_idempotency_scope(
+        actor_id=actor_id,
+        operation="notify_incident",
+        route=f"/admin/incidents/{incident_id}/notify-webhooks",
+    )
+    command_id = idempotency_lookup_digest(idempotency_key, scope)
+    producer, preparation = await _prepare_incident_capture(
+        webhook_event_producer=webhook_event_producer,
+        source_request_id=source_request_id,
+        required=True,
+    )
+    if producer is None or preparation is None:
+        raise WebhookError(WebhookErrorCode.DISABLED)
+
+    for _attempt in range(3):
+        with _locked_store(strict=True) as store:
+            incident = _incident_from_store(store, incident_id=incident_id)
+            data = _incident_webhook_data(
+                incident,
+                event_type="incident.notify",
+                narrative=narrative_norm,
+            )
+            pending = _pending_notify_replay(
+                store,
+                producer=producer,
+                command_id=command_id,
+                data=data,
+            )
+            if pending is not None:
+                return _notify_acceptance(
+                    incident_id=incident_id,
+                    event_id=pending.event_id,
+                    command_id=command_id,
+                    replayed=True,
+                )
+            observed_version = int(incident["version"])
+            observed_updated_at = str(incident["updated_at"])
+
+        reconciled: StoredWebhookEvent | None = await producer.find_incident_command_replay(
+            event_type="incident.notify",
+            source_command_id=command_id,
+            data=data,
+        )
+        if reconciled is not None:
+            return _notify_acceptance(
+                incident_id=incident_id,
+                event_id=reconciled.id,
+                command_id=command_id,
+                replayed=True,
+            )
+
+        publication = [False]
+
+        with _locked_store(
+            write=True,
+            strict=True,
+            should_write=lambda publication=publication: publication[0],
+        ) as store:
+            incident = _incident_from_store(store, incident_id=incident_id)
+            current_data = _incident_webhook_data(
+                incident,
+                event_type="incident.notify",
+                narrative=narrative_norm,
+            )
+            pending = _pending_notify_replay(
+                store,
+                producer=producer,
+                command_id=command_id,
+                data=current_data,
+            )
+            if pending is not None:
+                return _notify_acceptance(
+                    incident_id=incident_id,
+                    event_id=pending.event_id,
+                    command_id=command_id,
+                    replayed=True,
+                )
+            if (
+                int(incident["version"]) != observed_version
+                or str(incident["updated_at"]) != observed_updated_at
+            ):
+                continue
+            marker = producer.prepare_incident_marker(
+                preparation,
+                event_type="incident.notify",
+                source_kind=EventSourceKind.COMMAND,
+                aggregate_type=None,
+                aggregate_id=None,
+                aggregate_version=None,
+                source_command_id=command_id,
+                data=current_data,
+            )
+            _append_pending_incident_marker(store, marker)
+            publication[0] = True
+            return _notify_acceptance(
+                incident_id=incident_id,
+                event_id=marker.event_id,
+                command_id=command_id,
+                replayed=False,
+            )
+    raise WebhookError(WebhookErrorCode.OPERATION_FAILED)
+
+
+async def notify_incident_stakeholders(
     *,
     incident_id: str,
     recipients: list[str],
     message: str | None = None,
     actor: str | None = None,
+    webhook_event_producer: AdminWebhookEventProducer | None = None,
+    source_request_id: str | None = None,
 ) -> dict[str, Any]:
     """Send email notification to stakeholders about an incident.
 
@@ -918,10 +1422,12 @@ def notify_incident_stakeholders(
     Returns a dict with ``incident_id`` and a ``notifications`` list of
     per-recipient delivery outcomes.
     """
-    import asyncio
-
     from tldw_Server_API.app.core.AuthNZ.email_service import get_email_service
 
+    producer, preparation = await _prepare_incident_capture(
+        webhook_event_producer=webhook_event_producer,
+        source_request_id=source_request_id,
+    )
     incident = get_incident(incident_id=incident_id)
     email_service = get_email_service()
 
@@ -942,36 +1448,13 @@ def notify_incident_stakeholders(
         if not email_addr:
             continue
         try:
-            # EmailService.send_email is async; run it in a sync context.
-            try:
-                loop = asyncio.get_running_loop()
-            except RuntimeError:
-                loop = None
-            if loop and loop.is_running():
-                import concurrent.futures
-
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                    fut = pool.submit(
-                        asyncio.run,
-                        email_service.send_email(
-                            to_email=email_addr,
-                            subject=subject,
-                            html_body=f"<pre>{text_body}</pre>",
-                            text_body=text_body,
-                            _template="incident_notification",
-                        ),
-                    )
-                    fut.result(timeout=30)
-            else:
-                asyncio.run(
-                    email_service.send_email(
-                        to_email=email_addr,
-                        subject=subject,
-                        html_body=f"<pre>{text_body}</pre>",
-                        text_body=text_body,
-                        _template="incident_notification",
-                    )
-                )
+            await email_service.send_email(
+                to_email=email_addr,
+                subject=subject,
+                html_body=f"<pre>{text_body}</pre>",
+                text_body=text_body,
+                _template="incident_notification",
+            )
             results.append({"email": email_addr, "status": "sent"})
         except Exception as exc:  # noqa: BLE001
             logger.warning("Incident notification to {} failed: {}", email_addr, exc)
@@ -980,10 +1463,12 @@ def notify_incident_stakeholders(
     # Record notification in the incident timeline
     sent_count = sum(1 for r in results if r["status"] == "sent")
     total_count = len(results)
-    add_incident_event(
+    _add_incident_event_prepared(
         incident_id=incident_id,
-        message=f"Notification sent to {sent_count}/{total_count} stakeholder(s)",
+        note=f"Notification sent to {sent_count}/{total_count} stakeholder(s)",
         actor=actor or "system",
+        producer=producer,
+        preparation=preparation,
     )
 
     return {"incident_id": incident_id, "notifications": results}

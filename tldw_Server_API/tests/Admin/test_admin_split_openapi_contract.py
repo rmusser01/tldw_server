@@ -62,6 +62,7 @@ EXPECTED_SPLIT_ADMIN_OPERATIONS: set[tuple[str, str]] = {
     ("POST", "/api/v1/admin/incidents"),
     ("PATCH", "/api/v1/admin/incidents/{incident_id}"),
     ("POST", "/api/v1/admin/incidents/{incident_id}/events"),
+    ("POST", "/api/v1/admin/incidents/{incident_id}/notify-webhooks"),
     ("DELETE", "/api/v1/admin/incidents/{incident_id}"),
     ("POST", "/api/v1/admin/llm-usage/pricing/reload"),
     ("POST", "/api/v1/admin/chat/model-aliases/reload"),
@@ -153,6 +154,32 @@ def test_admin_split_openapi_schema_contracts(monkeypatch, tmp_path) -> None:
     monitoring_history_get = paths["/api/v1/admin/monitoring/alerts/history"]["get"]
     monitoring_history_schema = monitoring_history_get["responses"]["200"]["content"]["application/json"]["schema"]
     assert monitoring_history_schema["$ref"].endswith("/AdminAlertHistoryListResponse")
+
+    incident_notify = paths["/api/v1/admin/incidents/{incident_id}/notify-webhooks"]["post"]
+    idempotency_header = next(
+        parameter
+        for parameter in incident_notify["parameters"]
+        if parameter["in"] == "header" and parameter["name"] == "Idempotency-Key"
+    )
+    assert idempotency_header["required"] is True
+    assert idempotency_header["schema"]["minLength"] == 16
+    assert idempotency_header["schema"]["maxLength"] == 255
+    assert incident_notify["responses"]["202"]["content"]["application/json"]["schema"][
+        "$ref"
+    ].endswith("/IncidentWebhookNotifyResponse")
+
+    notify_request = spec["components"]["schemas"]["IncidentWebhookNotifyRequest"]
+    assert notify_request["properties"]["narrative"]["anyOf"][0]["maxLength"] == 4096
+    notify_response = spec["components"]["schemas"]["IncidentWebhookNotifyResponse"]
+    assert set(notify_response["properties"]) == {
+        "incident_id",
+        "event_id",
+        "event_type",
+        "command_id",
+        "accepted",
+        "replayed",
+    }
+    assert "webhooks_delivered" not in notify_response["properties"]
 
 
 def test_admin_root_module_has_no_route_handlers() -> None:

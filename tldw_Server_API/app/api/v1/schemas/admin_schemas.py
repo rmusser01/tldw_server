@@ -1415,6 +1415,7 @@ class IncidentActionItem(BaseModel):
 class IncidentItem(BaseModel):
     """Incident summary with timeline."""
     id: str
+    version: int = Field(ge=1)
     title: str
     status: Literal["open", "investigating", "mitigating", "resolved"]
     severity: Literal["low", "medium", "high", "critical"]
@@ -1518,15 +1519,30 @@ class IncidentNotifyRecipientResult(BaseModel):
 
 
 class IncidentNotifyResponse(BaseModel):
-    """Response from incident stakeholder notification.
-
-    Used by both the email notification endpoint (populates ``notifications``)
-    and the webhook dispatch endpoint (populates ``webhooks_delivered``).
-    """
+    """Response from a stakeholder email notification."""
     incident_id: str
     notifications: list[IncidentNotifyRecipientResult] = []
-    notified: bool = True
-    webhooks_delivered: int = 0
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class IncidentWebhookNotifyRequest(BaseModel):
+    """Explicit optional receiver narrative for a durable webhook command."""
+
+    narrative: str | None = Field(default=None, max_length=4096)
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class IncidentWebhookNotifyResponse(BaseModel):
+    """Bounded durable-command acceptance without delivery projections."""
+
+    incident_id: str
+    event_id: str
+    event_type: Literal["incident.notify"]
+    command_id: str
+    accepted: Literal[True]
+    replayed: bool
 
     model_config = ConfigDict(from_attributes=True)
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -17,8 +18,18 @@ from .crypto import (
     WebhookKeyRingLoadResult,
     load_webhook_key_ring,
 )
-from .domain import EventSourceKind, WebhookError, WebhookErrorCode
-from .events import prepare_event_insert, verify_event_replay
+from .domain import (
+    EventSourceKind,
+    PendingIncidentWebhookMarker,
+    WebhookError,
+    WebhookErrorCode,
+)
+from .events import (
+    canonical_event_body,
+    prepare_event_insert,
+    snapshot_json_object,
+    verify_event_replay,
+)
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
@@ -27,6 +38,7 @@ if TYPE_CHECKING:
         AdminWebhookUnitOfWork,
         EventCaptureResult,
         MigrationState,
+        StoredWebhookEvent,
     )
 
 _INCIDENT_SEVERITIES = frozenset({"low", "medium", "high", "critical"})
@@ -599,6 +611,169 @@ class AdminWebhookEventProducer:
                 prepared=prepared,
             )
         return result
+
+    def prepare_incident_marker(
+        self,
+        preparation: ProductionEventPreparation,
+        *,
+        event_type: str,
+        source_kind: EventSourceKind,
+        aggregate_type: str | None,
+        aggregate_id: str | None,
+        aggregate_version: str | None,
+        source_command_id: str | None,
+        data: Mapping[str, object],
+    ) -> PendingIncidentWebhookMarker:
+        """Build one protected file marker after incident identity is known."""
+
+        if not isinstance(preparation, ProductionEventPreparation):
+            raise TypeError("production event preparation is invalid")
+        if self._settings.mode is not AdminWebhookMode.ON:
+            raise WebhookError(WebhookErrorCode.DISABLED)
+        ring = self._key_ring_result.ring
+        if ring is None:
+            raise WebhookError(WebhookErrorCode.KEY_UNAVAILABLE)
+        try:
+            validated_data = _validated_production_data(event_type, data)
+            _validate_source_coordinates(
+                event_type=event_type,
+                source_kind=source_kind,
+                aggregate_type=aggregate_type,
+                aggregate_id=aggregate_id,
+                aggregate_version=aggregate_version,
+                source_command_id=source_command_id,
+                data=validated_data,
+            )
+            snapshot = snapshot_json_object(validated_data)
+            body = canonical_event_body(
+                event_id=preparation.event_id,
+                event_type=event_type,
+                api_version=EVENT_API_VERSION,
+                created_at=preparation.created_at,
+                data=snapshot,
+            )
+            identity: dict[str, str | int] = {
+                "event_id": preparation.event_id,
+                "api_version": EVENT_API_VERSION,
+            }
+            if source_kind is EventSourceKind.AGGREGATE:
+                if aggregate_type is None or aggregate_id is None or aggregate_version is None:
+                    raise ValueError("aggregate event source is invalid")
+                identity.update(
+                    {
+                        "aggregate_type": aggregate_type,
+                        "aggregate_id": aggregate_id,
+                        "aggregate_version": aggregate_version,
+                    }
+                )
+            else:
+                if source_command_id is None:
+                    raise ValueError("command event source is invalid")
+                identity["source_command_id"] = source_command_id
+            protected = ring.encrypt_bytes(
+                purpose="pending_incident.body",
+                identity=identity,
+                plaintext=body,
+            )
+            return PendingIncidentWebhookMarker(
+                event_id=preparation.event_id,
+                event_type=event_type,
+                api_version=EVENT_API_VERSION,
+                source_kind=source_kind.value,
+                aggregate_type=aggregate_type,
+                aggregate_id=aggregate_id,
+                aggregate_version=aggregate_version,
+                source_command_id=source_command_id,
+                source_component=preparation.source_component,
+                source_request_id=preparation.source_request_id,
+                body=protected,
+                body_size_bytes=len(body),
+                created_at=preparation.created_at,
+            )
+        except WebhookError:
+            raise
+        except WebhookKeyError:
+            raise WebhookError(WebhookErrorCode.KEY_UNAVAILABLE) from None
+        except (TypeError, ValueError, OverflowError, RecursionError):
+            raise WebhookError(WebhookErrorCode.VALIDATION_FAILED) from None
+
+    def verify_incident_marker_replay(
+        self,
+        marker: PendingIncidentWebhookMarker,
+        *,
+        data: Mapping[str, object],
+    ) -> None:
+        """Require an existing pending marker to contain the requested body."""
+
+        ring = self._key_ring_result.ring
+        if ring is None:
+            raise WebhookError(WebhookErrorCode.KEY_UNAVAILABLE)
+        try:
+            validated = _validated_production_data(marker.event_type, data)
+            expected = canonical_event_body(
+                event_id=marker.event_id,
+                event_type=marker.event_type,
+                api_version=marker.api_version,
+                created_at=marker.created_at,
+                data=snapshot_json_object(validated),
+            )
+            plaintext = ring.decrypt_bytes(
+                purpose=marker.envelope_purpose,
+                identity=marker.envelope_identity,
+                protected=marker.body,
+            )
+        except (WebhookKeyError, TypeError, ValueError, OverflowError, RecursionError):
+            raise WebhookError(WebhookErrorCode.IDEMPOTENCY_CONFLICT) from None
+        if (
+            marker.body_size_bytes != len(expected)
+            or marker.body_size_bytes != len(plaintext)
+            or not hmac.compare_digest(plaintext, expected)
+        ):
+            raise WebhookError(WebhookErrorCode.IDEMPOTENCY_CONFLICT)
+
+    async def find_incident_command_replay(
+        self,
+        *,
+        event_type: str,
+        source_command_id: str,
+        data: Mapping[str, object],
+    ) -> StoredWebhookEvent | None:
+        """Return and verify an already-reconciled incident command event."""
+
+        stored = await self._repository.get_event_by_command_source(
+            event_type=event_type,
+            source_command_id=source_command_id,
+        )
+        if stored is None:
+            return None
+        ring = self._key_ring_result.ring
+        if ring is None:
+            raise WebhookError(WebhookErrorCode.KEY_UNAVAILABLE)
+        try:
+            validated = _validated_production_data(event_type, data)
+            expected = canonical_event_body(
+                event_id=stored.id,
+                event_type=stored.event.event_type,
+                api_version=stored.event.api_version,
+                created_at=stored.event.created_at,
+                data=snapshot_json_object(validated),
+            )
+            plaintext = ring.decrypt_event_body(
+                event_id=stored.id,
+                api_version=stored.event.api_version,
+                protected=stored.body,
+            )
+        except (WebhookKeyError, TypeError, ValueError, OverflowError, RecursionError):
+            raise WebhookError(WebhookErrorCode.IDEMPOTENCY_CONFLICT) from None
+        if (
+            stored.event.source_kind is not EventSourceKind.COMMAND
+            or stored.source_command_id != source_command_id
+            or stored.body_size_bytes != len(expected)
+            or stored.body_size_bytes != len(plaintext)
+            or not hmac.compare_digest(plaintext, expected)
+        ):
+            raise WebhookError(WebhookErrorCode.IDEMPOTENCY_CONFLICT)
+        return stored
 
 
 def build_admin_webhook_event_producer(

@@ -44,7 +44,7 @@ def _configure_store(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[A
     return admin_system_ops_service, store_path
 
 
-def _create_incident(
+async def _create_incident(
     service: Any,
     *,
     title: str = "Queue backlog",
@@ -55,7 +55,7 @@ def _create_incident(
     actor: str = "alice_admin",
 ) -> dict[str, Any]:
     """Helper to create an incident with sensible defaults."""
-    return service.create_incident(
+    return await service.create_incident(
         title=title,
         status=status,
         severity=severity,
@@ -146,11 +146,11 @@ class TestIncidentSlaMetrics:
         assert inc_b["mtta_minutes"] == 20.0
         assert inc_b["mttr_minutes"] == 60.0
 
-    def test_sla_metrics_null_when_not_acknowledged(self, monkeypatch, tmp_path):
+    async def test_sla_metrics_null_when_not_acknowledged(self, monkeypatch, tmp_path):
         """Open incidents without acknowledged_at have null MTTA."""
         service, _ = _configure_store(monkeypatch, tmp_path)
 
-        service.create_incident(
+        await service.create_incident(
             title="New issue",
             status="open",
             severity="low",
@@ -238,10 +238,10 @@ class TestIncidentSlaMetrics:
 class TestIncidentNotifications:
     """Tests for notify_incident_stakeholders service function."""
 
-    def test_notify_sends_to_all_recipients(self, monkeypatch, tmp_path):
+    async def test_notify_sends_to_all_recipients(self, monkeypatch, tmp_path):
         """All recipients receive notification and timeline event is added."""
         service, _ = _configure_store(monkeypatch, tmp_path)
-        incident = _create_incident(service)
+        incident = await _create_incident(service)
 
         # Mock the email service so no real emails are sent
         mock_email_svc = mock.MagicMock()
@@ -252,7 +252,7 @@ class TestIncidentNotifications:
             lambda: mock_email_svc,
         )
 
-        result = service.notify_incident_stakeholders(
+        result = await service.notify_incident_stakeholders(
             incident_id=incident["id"],
             recipients=["alice@example.com", "bob@example.com", "carol@example.com"],
             message="Please review the incident.",
@@ -268,10 +268,10 @@ class TestIncidentNotifications:
         timeline_msgs = [e["message"] for e in updated["timeline"]]
         assert any("3/3" in msg for msg in timeline_msgs)
 
-    def test_notify_handles_partial_failure(self, monkeypatch, tmp_path):
+    async def test_notify_handles_partial_failure(self, monkeypatch, tmp_path):
         """When one send fails, results include both sent and failed entries."""
         service, _ = _configure_store(monkeypatch, tmp_path)
-        incident = _create_incident(service)
+        incident = await _create_incident(service)
 
         call_count = 0
 
@@ -289,7 +289,7 @@ class TestIncidentNotifications:
             lambda: mock_email_svc,
         )
 
-        result = service.notify_incident_stakeholders(
+        result = await service.notify_incident_stakeholders(
             incident_id=incident["id"],
             recipients=["ok1@example.com", "fail@example.com", "ok2@example.com"],
             actor="admin_user",
@@ -305,21 +305,21 @@ class TestIncidentNotifications:
         timeline_msgs = [e["message"] for e in updated["timeline"]]
         assert any("2/3" in msg for msg in timeline_msgs)
 
-    def test_notify_nonexistent_incident_raises(self, monkeypatch, tmp_path):
+    async def test_notify_nonexistent_incident_raises(self, monkeypatch, tmp_path):
         """Notifying a nonexistent incident raises ValueError."""
         service, _ = _configure_store(monkeypatch, tmp_path)
 
         with pytest.raises(ValueError, match="not_found"):
-            service.notify_incident_stakeholders(
+            await service.notify_incident_stakeholders(
                 incident_id="inc_does_not_exist",
                 recipients=["someone@example.com"],
                 actor="admin_user",
             )
 
-    def test_notify_empty_recipients_skipped(self, monkeypatch, tmp_path):
+    async def test_notify_empty_recipients_skipped(self, monkeypatch, tmp_path):
         """Blank recipient strings are skipped."""
         service, _ = _configure_store(monkeypatch, tmp_path)
-        incident = _create_incident(service)
+        incident = await _create_incident(service)
 
         mock_email_svc = mock.MagicMock()
         mock_email_svc.send_email = mock.AsyncMock(return_value=None)
@@ -329,7 +329,7 @@ class TestIncidentNotifications:
             lambda: mock_email_svc,
         )
 
-        result = service.notify_incident_stakeholders(
+        result = await service.notify_incident_stakeholders(
             incident_id=incident["id"],
             recipients=["", "  ", "valid@example.com"],
             actor="admin_user",

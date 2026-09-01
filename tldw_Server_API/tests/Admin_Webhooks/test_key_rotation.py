@@ -267,6 +267,8 @@ def _seed_pending_marker(path: Path, ring: WebhookKeyRing) -> None:
         aggregate_id=None,
         aggregate_version=None,
         source_command_id="incident-command-pending-1",
+        source_component="admin_system_ops",
+        source_request_id="request-pending-1",
         body=ring.encrypt_bytes(
             purpose="pending_incident.body",
             identity={
@@ -276,6 +278,7 @@ def _seed_pending_marker(path: Path, ring: WebhookKeyRing) -> None:
             },
             plaintext=b'{"incident_id":"incident-pending"}',
         ),
+        body_size_bytes=len(b'{"incident_id":"incident-pending"}'),
         created_at=NOW,
     )
     store = system_ops._default_store()
@@ -1049,6 +1052,49 @@ async def test_malformed_pending_marker_fails_without_file_or_cursor_publication
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    "failure",
+    ("duplicate_id", "identity_substitution", "key_loss"),
+)
+async def test_pending_marker_integrity_failure_never_drops_or_rewrites_records(
+    rotation: RotationFixture,
+    failure: str,
+) -> None:
+    store = system_ops._load_store_strict(rotation.store_path)
+    marker_record = dict(store["webhook_pending_events"][0])
+    if failure == "duplicate_id":
+        store["webhook_pending_events"] = [marker_record, dict(marker_record)]
+    elif failure == "identity_substitution":
+        marker_record["source_command_id"] = "incident-command-substituted-1"
+        store["webhook_pending_events"] = [marker_record]
+    else:
+        marker_record["body_key_id"] = "key-not-configured"
+        store["webhook_pending_events"] = [marker_record]
+    system_ops._atomic_write_store(rotation.store_path, store)
+    before = rotation.store_path.read_bytes()
+
+    await rotation.start()
+    with pytest.raises(WebhookError) as exc_info:
+        await rotation.service.resume(
+            OPERATION_ID,
+            operator_id=9,
+            request_id=f"rotation-resume-marker-{failure}",
+            audit_sink=rotation.audit_sink,
+        )
+
+    expected_code = (
+        WebhookErrorCode.PRECONDITION_FAILED
+        if failure == "duplicate_id"
+        else WebhookErrorCode.KEY_UNAVAILABLE
+    )
+    assert exc_info.value.code is expected_code
+    durable = await rotation.repository.get_migration_state()
+    assert durable.rotation_table_cursor == "pending_incident_markers"
+    assert durable.rotation_key_cursor is None
+    assert rotation.store_path.read_bytes() == before
+
+
+@pytest.mark.unit
 async def test_finalize_requires_source_key_and_repeats_full_readback(
     rotation: RotationFixture,
 ) -> None:
@@ -1132,11 +1178,14 @@ def test_pending_aggregate_marker_round_trips_exact_closed_shape() -> None:
         aggregate_id="incident-42",
         aggregate_version="7",
         source_command_id=None,
+        source_component="admin_system_ops",
+        source_request_id="request-pending-aggregate-1",
         body=ring.encrypt_bytes(
             purpose="pending_incident.body",
             identity=identity,
             plaintext=b'{"incident_id":"incident-42"}',
         ),
+        body_size_bytes=len(b'{"incident_id":"incident-42"}'),
         created_at=NOW,
     )
 

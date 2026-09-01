@@ -64,7 +64,7 @@ def test_canonical_selection_exposes_pr2_routes_only() -> None:
 
 
 @pytest.mark.unit
-def test_legacy_selection_excludes_canonical_catalog_and_rotation() -> None:
+def test_legacy_selection_excludes_canonical_catalog_rotation_and_incident_command() -> None:
     pairs = set(
         _pairs(
             _build(
@@ -80,7 +80,7 @@ def test_legacy_selection_excludes_canonical_catalog_and_rotation() -> None:
     assert ("GET", "/admin/webhooks") in pairs
     assert ("POST", "/admin/webhooks/{webhook_id}/test") in pairs
     assert ("GET", "/admin/webhooks/{webhook_id}/deliveries") in pairs
-    assert ("POST", "/admin/incidents/{incident_id}/notify-webhooks") in pairs
+    assert ("POST", "/admin/incidents/{incident_id}/notify-webhooks") not in pairs
     assert ("GET", "/admin/webhooks/catalog") not in pairs
     assert ("POST", "/admin/webhooks/{webhook_id}/rotate-secret") not in pairs
 

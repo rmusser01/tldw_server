@@ -19,7 +19,7 @@ from tldw_Server_API.app.core.Security.egress import (
     evaluate_platform_webhook_url_policy,
 )
 
-from .crypto import ProtectedValue
+from .crypto import EVENT_BODY_MAX_BYTES, ProtectedValue
 from .target import parse_webhook_target_url
 
 
@@ -539,13 +539,17 @@ _PENDING_MARKER_FIELDS = frozenset(
         "aggregate_id",
         "aggregate_version",
         "source_command_id",
+        "source_component",
+        "source_request_id",
         "body_ciphertext_json",
         "body_key_id",
+        "body_size_bytes",
         "created_at",
     }
 )
 _MARKER_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,255}$")
 _MARKER_COMPONENT_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
+_MARKER_REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 
 
 @dataclass(frozen=True)
@@ -560,7 +564,10 @@ class PendingIncidentWebhookMarker:
     aggregate_id: str | None
     aggregate_version: str | None
     source_command_id: str | None
+    source_component: str
+    source_request_id: str | None
     body: ProtectedValue
+    body_size_bytes: int
     created_at: datetime
 
     def __post_init__(self) -> None:
@@ -574,8 +581,20 @@ class PendingIncidentWebhookMarker:
             raise ValueError("pending marker API version is invalid")
         if self.source_kind not in {"aggregate", "command"}:
             raise ValueError("pending marker source kind is invalid")
+        if _MARKER_COMPONENT_PATTERN.fullmatch(self.source_component) is None:
+            raise ValueError("pending marker source component is invalid")
+        if self.source_request_id is not None and (
+            _MARKER_REQUEST_ID_PATTERN.fullmatch(self.source_request_id) is None
+        ):
+            raise ValueError("pending marker source request ID is invalid")
         if not isinstance(self.body, ProtectedValue):
             raise TypeError("pending marker body must be protected")
+        if (
+            isinstance(self.body_size_bytes, bool)
+            or not isinstance(self.body_size_bytes, int)
+            or not 1 <= self.body_size_bytes <= EVENT_BODY_MAX_BYTES
+        ):
+            raise ValueError("pending marker body size is invalid")
         if not isinstance(self.created_at, datetime) or self.created_at.tzinfo is None:
             raise ValueError("pending marker timestamp must be timezone-aware")
 
@@ -642,8 +661,11 @@ class PendingIncidentWebhookMarker:
             "aggregate_id": self.aggregate_id,
             "aggregate_version": self.aggregate_version,
             "source_command_id": self.source_command_id,
+            "source_component": self.source_component,
+            "source_request_id": self.source_request_id,
             "body_ciphertext_json": self.body.ciphertext_json,
             "body_key_id": self.body.key_id,
+            "body_size_bytes": self.body_size_bytes,
             "created_at": self.created_at.astimezone(timezone.utc).isoformat(),
         }
 
@@ -667,6 +689,7 @@ class PendingIncidentWebhookMarker:
             "event_type",
             "api_version",
             "source_kind",
+            "source_component",
             "body_ciphertext_json",
             "body_key_id",
             "created_at",
@@ -690,10 +713,13 @@ class PendingIncidentWebhookMarker:
             aggregate_id=optional_text("aggregate_id"),
             aggregate_version=optional_text("aggregate_version"),
             source_command_id=optional_text("source_command_id"),
+            source_component=required_text["source_component"],
+            source_request_id=optional_text("source_request_id"),
             body=ProtectedValue(
                 ciphertext_json=required_text["body_ciphertext_json"],
                 key_id=required_text["body_key_id"],
             ),
+            body_size_bytes=value["body_size_bytes"],
             created_at=created_at,
         )
 
