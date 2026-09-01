@@ -8668,6 +8668,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         backend: DatabaseBackend | None = None,
         config: ConfigParser | None = None,
         owner_user_id: str | None = None,
+        require_existing_sqlite: bool = False,
     ) -> None:
         """
         Initializes the CharactersRAGDB instance.
@@ -8683,6 +8684,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             owner_user_id: Canonical owner supplied by trusted dependency construction,
                            never request metadata. Defaults to the initial client_id
                            for standalone callers that already use it as their owner.
+            require_existing_sqlite: Open file-backed SQLite with ``mode=rw`` so
+                                     construction cannot create a missing database.
 
         Raises:
             ValueError: If `client_id` is empty or None.
@@ -8699,8 +8702,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         if not client_id:
             raise ValueError("Client ID cannot be empty or None.")  # noqa: TRY003
+        if not isinstance(require_existing_sqlite, bool):
+            raise ValueError("require_existing_sqlite must be a boolean.")  # noqa: TRY003
         self.client_id = client_id
         self._owner_user_id = str(client_id if owner_user_id is None else owner_user_id)
+        self._require_existing_sqlite = require_existing_sqlite
         self._local = threading.local()
         self._schema_lock = threading.RLock()
         self._bootstrapped_backend_targets: set[str] = set()
@@ -8782,6 +8788,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             self.is_memory_db = False
 
         if self.backend_type == BackendType.SQLITE and not self.is_memory_db:
+            if self._require_existing_sqlite and not self.db_path.is_file():
+                raise CharactersRAGDBError(  # noqa: TRY003
+                    "Existing SQLite database is required."
+                )
             db_parent = self.db_path.parent.resolve(strict=False)
             allowed_roots = self._sqlite_allowed_roots()
             if not any(self._path_is_within(db_parent, root) for root in allowed_roots):
@@ -8846,9 +8856,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._owner_managed_backend = False
                 return candidate, True
 
+        sqlite_path = self.db_path_str
+        if self._require_existing_sqlite and not self.is_memory_db:
+            sqlite_path = f"{self.db_path.as_uri()}?mode=rw"
         fallback_config = DatabaseConfig(
             backend_type=BackendType.SQLITE,
-            sqlite_path=self.db_path_str,
+            sqlite_path=sqlite_path,
         )
         if not self.is_memory_db:
             # Contract: default file-backed SQLite for CharactersRAGDB is intentionally

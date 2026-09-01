@@ -27,6 +27,11 @@ _ERROR_CODES = frozenset(
         "vector_failure",
         "permission_denied",
         "cleanup_failed",
+        "backend_unavailable",
+        "cleanup_unconfirmed",
+        "dataset_limit_exceeded",
+        "fence_lost",
+        "timeout",
     }
 )
 _AUDIT_EVENTS = frozenset(
