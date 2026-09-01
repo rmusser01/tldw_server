@@ -5,6 +5,8 @@ from __future__ import annotations
 from ipaddress import ip_address
 from urllib.parse import urlsplit
 
+from httpx import URL, InvalidURL
+
 
 def canonical_semantic_endpoint_origin(value: object) -> str | None:
     """Return one HTTP origin representation, or ``None`` when invalid."""
@@ -13,20 +15,22 @@ def canonical_semantic_endpoint_origin(value: object) -> str | None:
         return None
     try:
         parsed = urlsplit(value)
+        runtime_url = URL(value)
         scheme = parsed.scheme.lower()
-        hostname = parsed.hostname
+        parsed_hostname = parsed.hostname
+        raw_host = runtime_url.raw_host
+        hostname = raw_host.decode("ascii")
         port = parsed.port
-    except (UnicodeError, ValueError):
+    except (InvalidURL, UnicodeError, ValueError):
         return None
-    if scheme not in {"http", "https"} or not hostname:
+    if b"%" in raw_host:
+        return None
+    if scheme not in {"http", "https"} or runtime_url.scheme.lower() != scheme or not parsed_hostname or not hostname:
         return None
     try:
         address = ip_address(hostname)
     except ValueError:
-        try:
-            canonical_host = hostname.encode("idna").decode("ascii").lower()
-        except UnicodeError:
-            return None
+        canonical_host = hostname.lower()
         if not canonical_host:
             return None
         display_host = canonical_host

@@ -5,6 +5,7 @@ import threading
 from types import SimpleNamespace
 
 import pytest
+from httpx import URL
 
 import tldw_Server_API.app.core.Notes_Graph.semantic_embeddings as semantic_embeddings
 from tldw_Server_API.app.core.AuthNZ.byok_config import is_runtime_base_url_override
@@ -168,6 +169,42 @@ async def test_executor_resolves_only_explicit_durable_credentials_without_reque
     assert is_runtime_base_url_override(
         adapter.requests[0]["_runtime_base_url_override"]
     )
+
+
+@pytest.mark.asyncio
+async def test_executor_origin_matches_httpx_idna_runtime_target() -> None:
+    runtime_base_url = "https://faß.de:443/v1"
+    expected_origin = "https://xn--fa-hia.de:443"
+    adapter = RecordingAdapter(
+        {
+            "data": [{"index": 0, "embedding": [1.0, 2.0]}],
+            "model": "text-embedding-3-small",
+        }
+    )
+
+    async def resolver(provider: str, **kwargs: object) -> ResolvedByokCredentials:
+        del provider, kwargs
+        return _credentials(base_url=runtime_base_url)
+
+    executor = NotesEmbeddingExecutor(
+        config=_config(endpoint_origin=expected_origin),
+        user_id="7",
+        credential_resolver=resolver,
+        adapter_registry=Registry(adapter),
+    )
+
+    vectors = await executor.create(
+        ["public input"],
+        provider="openai",
+        model="text-embedding-3-small",
+        dimensions=2,
+    )
+
+    dispatched_base_url = adapter.requests[0]["base_url"]
+    assert vectors == [[1.0, 2.0]]
+    assert dispatched_base_url == runtime_base_url
+    assert URL(str(dispatched_base_url)).raw_host == b"xn--fa-hia.de"
+    assert executor.execution_identity().endpoint_origin == expected_origin
 
 
 @pytest.mark.asyncio

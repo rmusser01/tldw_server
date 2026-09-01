@@ -320,6 +320,20 @@ describe("Notes semantic index client", () => {
     expect(disclosure.endpoint_display).toBe("https://proxy.example.test:443")
   })
 
+  it("matches a canonical IDNA origin to the WHATWG runtime host", async () => {
+    const endpoint = "https://xn--fa-hia.de"
+    const runtimeUrl = new URL("https://faß.de/v1")
+    mocks.bgRequest.mockResolvedValueOnce({
+      ...capabilities(),
+      endpoint_display: endpoint
+    })
+
+    const disclosure = await getNotesSemanticCapabilities({})
+
+    expect(runtimeUrl.hostname).toBe("xn--fa-hia.de")
+    expect(disclosure.endpoint_display).toBe(endpoint)
+  })
+
   it.each(["https://[2001:db8::1]:8443", "https://xn--bcher-kva.example:8443"])(
     "accepts canonical IPv6 and IDN origin %s",
     async (endpoint) => {

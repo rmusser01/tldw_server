@@ -708,8 +708,16 @@ def test_endpoint_unavailable_existing_index_has_typed_capability_and_status(
             "HTTPS://user:secret@BÜCHER.Example:8443/v1?token=secret",
             "https://xn--bcher-kva.example:8443",
         ),
+        (
+            "HTTPS://user:secret@faß.de/v1?token=secret",
+            "https://xn--fa-hia.de",
+        ),
+        (
+            "HTTPS://user:secret@faß.de:443/v1?token=secret",
+            "https://xn--fa-hia.de:443",
+        ),
     ],
-    ids=["ipv6", "idn"],
+    ids=["ipv6", "idn", "idna-uts46", "idna-uts46-default-port"],
 )
 def test_capability_origin_reaches_persisted_worker_pending_config(
     tmp_path,
