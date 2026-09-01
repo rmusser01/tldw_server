@@ -52,6 +52,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from tldw_Server_API.app.core.DB_Management.schema_once import ensure_once
 from tldw_Server_API.app.core.config import load_comprehensive_config
 from tldw_Server_API.app.core.DB_Management.content_backend import (
     backend_target_key,
@@ -467,6 +468,18 @@ def _decorate_watchlists_public_operations(cls: type["WatchlistsDatabase"]) -> t
     return cls
 
 
+# Spans the whole of ensure_schema(): the first table it creates through the
+# last, so a partially built database fails verification.
+_WATCHLISTS_REQUIRED_TABLES = (
+    "sources",
+    "watchlists",
+    "scrape_jobs",
+    "scraped_items",
+    "feed_websub_subscriptions",
+    "deleted_jobs",
+)
+
+
 @_decorate_watchlists_public_operations
 class WatchlistsDatabase:
     # Keep track of schema initialization per DB path to avoid redundant ALTER checks/noise
@@ -533,10 +546,69 @@ class WatchlistsDatabase:
         self._backend_refresh_suspended = True
         try:
             self._backend = backend
-            self.ensure_schema()
+            self._ensure_schema_deduplicated()
         finally:
             self._backend_refresh_suspended = previous_suspend
         WatchlistsDatabase._schema_init_keys.add(db_key)
+
+    def _watchlists_schema_present(self) -> bool:
+        """Cheap check that this database still has the watchlists tables.
+
+        Checks a set spanning the whole of ``ensure_schema()`` rather than one
+        table, so a database holding only part of the schema is rebuilt instead
+        of being accepted. ``deleted_jobs`` is the last table the routine
+        creates, which makes it the strongest single signal that a previous run
+        got all the way through.
+
+        Failures propagate to :func:`ensure_once`, which logs them and rebuilds.
+        """
+        rows = self._backend.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name IN "
+            "(?, ?, ?, ?, ?, ?)",
+            _WATCHLISTS_REQUIRED_TABLES,
+        )
+        found = {row[0] for row in rows}
+        return found.issuperset(_WATCHLISTS_REQUIRED_TABLES)
+
+    def _ensure_schema_deduplicated(self) -> None:
+        """Ensure the schema, going through the process-wide memo when possible.
+
+        PostgreSQL has no ``sqlite_path`` for :func:`ensure_once` to identify the
+        database by, so it keeps using the class-level target-key memo; routing
+        it here anyway would fall through to the full DDL on every call.
+        """
+        if self._backend.backend_type == BackendType.POSTGRESQL:
+            self.ensure_schema()
+            return
+        ensure_once(
+            "watchlists",
+            getattr(getattr(self._backend, "config", None), "sqlite_path", None),
+            self.ensure_schema,
+            verify=self._watchlists_schema_present,
+        )
+
+    def ensure_schema_once(self) -> None:
+        """Ensure the schema, skipping the work when it is demonstrably present.
+
+        ``ensure_schema()`` issues roughly sixty DDL statements, and the FastAPI
+        dependency called it on every request.
+
+        The constructor's ``_schema_init_keys`` memo is not sufficient on its
+        own here: for SQLite its key is just the database path, so a database
+        deleted and recreated at that path (test fixtures do exactly this) keeps
+        a stale entry and the schema would be skipped when it no longer exists.
+        A catalogue lookup confirms the tables really are there, and is still far
+        cheaper than replaying the schema.
+
+        Construction goes through the same memo, so the first request for a
+        database does not run the setup twice.
+        """
+        if self._backend.backend_type == BackendType.POSTGRESQL:
+            self._ensure_schema_for_key(
+                self._backend, self._backend_target_key(self._backend)
+            )
+            return
+        self._ensure_schema_deduplicated()
 
     @contextlib.contextmanager
     def _operation_backend_pin(self) -> Generator[DatabaseBackend, None, None]:

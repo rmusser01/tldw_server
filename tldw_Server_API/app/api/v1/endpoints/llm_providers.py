@@ -1,6 +1,7 @@
 # llm_providers.py
 import asyncio
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
 import time
 from functools import partial
@@ -1026,9 +1027,14 @@ def parse_model_string(model_value: str) -> list[str]:
 
 
 # Local model discovery helpers (best-effort; cached to avoid hammering endpoints)
-LOCAL_MODEL_DISCOVERY_TIMEOUT = 3.0  # seconds
+LOCAL_MODEL_DISCOVERY_TIMEOUT = 1.5  # seconds
+# Local/LAN endpoints answer in milliseconds when present. This bound is only
+# ever paid in full by an endpoint that is configured but not listening, so it
+# is kept short: it is discovery, and a miss degrades to "no models found".
 LOCAL_MODEL_DISCOVERY_TTL = 300  # seconds
 _LOCAL_MODEL_CACHE: dict[str, tuple[float, ModelDiscoveryResult]] = {}
+# Upper bound on simultaneous discovery probes for one endpoint.
+_MODEL_DISCOVERY_MAX_PARALLEL_PROBES = 6
 OPENROUTER_MODEL_DISCOVERY_TIMEOUT = 5.0  # seconds
 _TRUE_VALUES = {"1", "true", "yes", "on"}
 
@@ -1174,7 +1180,9 @@ def discover_models_from_endpoint(
         "auth_failed": 3,
         "ready": 4,
     }
-    for url in candidates:
+    def _probe_candidate(url: str) -> ModelDiscoveryResult:
+        """Probe one candidate URL and classify the outcome."""
+        candidate_result = ModelDiscoveryResult("unreachable")
         try:
             resp = _http_fetch(
                 method="GET",
@@ -1222,11 +1230,40 @@ def discover_models_from_endpoint(
         except Exception:  # noqa: BLE001 - best-effort local discovery must fail open
             logger.debug("Model discovery endpoint query failed unexpectedly")
             candidate_result = ModelDiscoveryResult("unreachable")
+        return candidate_result
 
-        if precedence[candidate_result.status] > precedence[best_result.status]:
-            best_result = candidate_result
-        if best_result.status == "ready":
-            break
+    def _merge(result: ModelDiscoveryResult) -> None:
+        nonlocal best_result
+        if precedence[result.status] > precedence[best_result.status]:
+            best_result = result
+
+    # Candidates are probed concurrently. An endpoint that is not listening burns
+    # LOCAL_MODEL_DISCOVERY_TIMEOUT per candidate, so probing them in series cost
+    # timeout x len(candidates) on every call -- and failures are deliberately
+    # never cached, so that cost repeated on every request.
+    #
+    # Cancelling on the first "ready" only skips candidates that have not started
+    # yet, which is why it is worth doing at all: with more candidates than
+    # workers, the queued ones never run. Probes already in flight are still
+    # waited for -- the executor shuts down normally rather than abandoning
+    # threads -- so the floor is one probe's worth of time, bounded by
+    # LOCAL_MODEL_DISCOVERY_TIMEOUT, not the sum across candidates.
+    #
+    # A healthy endpoint does receive the extra candidate requests, but a "ready"
+    # result is cached for LOCAL_MODEL_DISCOVERY_TTL, so that happens at most
+    # once per TTL rather than per request.
+    if candidates:
+        with ThreadPoolExecutor(
+            max_workers=min(len(candidates), _MODEL_DISCOVERY_MAX_PARALLEL_PROBES),
+            thread_name_prefix="model-discovery",
+        ) as pool:
+            futures = [pool.submit(_probe_candidate, url) for url in candidates]
+            for future in as_completed(futures):
+                _merge(future.result())
+                if best_result.status == "ready":
+                    for pending in futures:
+                        pending.cancel()
+                    break
 
     if best_result.status in {"ready", "unsupported"}:
         _LOCAL_MODEL_CACHE[cache_key] = (now, best_result)

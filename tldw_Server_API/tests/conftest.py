@@ -627,14 +627,24 @@ def pytest_collection_modifyitems(config, items):  # pragma: no cover - collecti
 
 @pytest.fixture(autouse=True)
 def _reset_main_app_lifecycle_state_between_tests():
-    """Keep TestClient lifespan shutdown from leaking drain state across tests."""
+    """Keep TestClient lifespan shutdown from leaking drain state across tests.
+
+    Resets every app that has lifecycle state, not just the one the current
+    ``app.main`` module exports. Suites that reload ``app.main`` leave earlier
+    app objects live -- test modules that imported ``app`` at collection time
+    keep routing through the object they pinned -- and it is those pinned
+    objects a lifespan exit tends to drain. Resetting only the current one
+    leaves them draining, and ``DrainGateMiddleware`` then answers 503 to every
+    request through them.
+    """
 
     def _reset() -> None:
         try:
-            from tldw_Server_API.app.main import app as fastapi_app
-            from tldw_Server_API.app.services.app_lifecycle import reset_lifecycle_state
+            from tldw_Server_API.app.services.app_lifecycle import (
+                reset_all_lifecycle_states,
+            )
 
-            reset_lifecycle_state(fastapi_app)
+            reset_all_lifecycle_states()
         except Exception:
             _ = None
 
