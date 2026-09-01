@@ -266,6 +266,19 @@ def test_reading_list_snapshot_requests_repeatable_read_on_postgres(
             self.scope_query_open = True
             self.commits = 0
             self.rollbacks = 0
+            self._autocommit = False
+            self.autocommit_changes: list[bool] = []
+            self.snapshot_statements: list[str] = []
+            self.rollback_error = False
+
+        @property
+        def autocommit(self) -> bool:
+            return self._autocommit
+
+        @autocommit.setter
+        def autocommit(self, value: bool) -> None:
+            self._autocommit = value
+            self.autocommit_changes.append(value)
 
         def commit(self) -> None:
             self.commits += 1
@@ -273,6 +286,28 @@ def test_reading_list_snapshot_requests_repeatable_read_on_postgres(
 
         def rollback(self) -> None:
             self.rollbacks += 1
+            if self.rollback_error:
+                raise RuntimeError("cleanup failed")
+
+        def cursor(self):
+            connection = self
+
+            class Cursor:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, exc_type, exc, traceback):
+                    return None
+
+                def execute(self, query: str) -> None:
+                    normalized = " ".join(query.split())
+                    if connection.scope_query_open:
+                        raise RuntimeError("BEGIN before scope commit")
+                    if not connection.autocommit:
+                        raise RuntimeError("psycopg would emit a plain BEGIN first")
+                    connection.snapshot_statements.append(normalized)
+
+            return Cursor()
 
     class LifecyclePool:
         def __init__(self, connection: LifecycleConnection) -> None:
@@ -289,7 +324,6 @@ def test_reading_list_snapshot_requests_repeatable_read_on_postgres(
         backend_type = BackendType.POSTGRESQL
 
         def __init__(self) -> None:
-            self.snapshot_statements: list[str] = []
             self.connection = LifecycleConnection()
             self.pool = LifecyclePool(self.connection)
 
@@ -297,12 +331,6 @@ def test_reading_list_snapshot_requests_repeatable_read_on_postgres(
             return self.pool
 
         def execute(self, query, params=None, connection=None, **kwargs):
-            normalized = " ".join(query.split())
-            if normalized == "BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY":
-                if connection.scope_query_open:
-                    raise RuntimeError("SET TRANSACTION after scope query")
-                self.snapshot_statements.append(normalized)
-                return sqlite_backend.execute("SELECT 1")
             return sqlite_backend.execute(query, params, **kwargs)
 
     proxy = PostgreSQLModeBackend()
@@ -314,10 +342,19 @@ def test_reading_list_snapshot_requests_repeatable_read_on_postgres(
     assert rows[0].title == "Snapshot postgres"
     assert proxy.connection.commits == 1
     assert proxy.connection.rollbacks == 1
+    assert proxy.connection.autocommit_changes == [True, False]
+    assert proxy.connection.autocommit is False
     assert proxy.pool.returned == [proxy.connection]
-    assert proxy.snapshot_statements == [
+    assert proxy.connection.snapshot_statements == [
         "BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY"
     ]
+
+    proxy.connection.rollback_error = True
+    with pytest.raises(ValueError, match="primary failure"):
+        with coll_db._read_snapshot():
+            raise ValueError("primary failure")
+    assert proxy.connection.autocommit is False
+    assert proxy.pool.returned == [proxy.connection, proxy.connection]
 
 
 @pytest.mark.asyncio

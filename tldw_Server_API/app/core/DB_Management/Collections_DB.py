@@ -883,25 +883,52 @@ class CollectionsDatabase:
         backend = self.backend
         pool = backend.get_pool()
         connection = pool.get_connection()
+        previous_autocommit: bool | None = None
+        primary_failure: BaseException | None = None
         try:
             if backend.backend_type == BackendType.POSTGRESQL:
                 # Pool checkout applies session-scoped RLS settings using SQL,
                 # which starts an implicit transaction. Commit that setup
                 # before beginning the read transaction at its required
-                # isolation level.
+                # isolation level. Temporarily enabling autocommit prevents
+                # psycopg from emitting a plain BEGIN before our explicit one.
                 connection.commit()
-                backend.execute(
-                    "BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY",
-                    connection=connection,
-                )
+                previous_autocommit = bool(connection.autocommit)
+                connection.autocommit = True
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        "BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY"
+                    )
             else:
                 connection.execute("BEGIN DEFERRED")
             yield connection
+        except BaseException as exc:  # noqa: BLE001 - preserve primary failure
+            primary_failure = exc
+            raise
         finally:
+            cleanup_failure: BaseException | None = None
             try:
                 connection.rollback()
-            finally:
+            except BaseException as exc:  # noqa: BLE001 - preserve primary failure
+                cleanup_failure = exc
+            if previous_autocommit is not None:
+                try:
+                    connection.autocommit = previous_autocommit
+                except BaseException as exc:  # noqa: BLE001
+                    cleanup_failure = cleanup_failure or exc
+            try:
                 pool.return_connection(connection)
+            except BaseException as exc:  # noqa: BLE001
+                cleanup_failure = cleanup_failure or exc
+            if cleanup_failure is not None:
+                if primary_failure is not None:
+                    logger.bind(
+                        exception_type=type(cleanup_failure).__name__
+                    ).warning("Collections read snapshot cleanup failed")
+                elif not isinstance(cleanup_failure, Exception):
+                    raise cleanup_failure
+                else:
+                    raise DatabaseError("Collections read snapshot cleanup failed") from None
 
     def _execute_insert(self, query: str, params: tuple[Any, ...], connection: Any | None = None) -> Any:
         if self.backend.backend_type == BackendType.POSTGRESQL:
