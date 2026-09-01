@@ -4,7 +4,7 @@ title: Implement canonical admin webhook durable producers and final activation
 status: In Progress
 assignee: []
 created_date: '2026-08-31 22:44'
-updated_date: '2026-09-01 16:06'
+updated_date: '2026-09-01 16:43'
 labels:
   - admin
   - webhooks
@@ -96,6 +96,8 @@ Pre-change baseline at 8cb4d2df: backend command completed with TLDW_TEST_NO_DOC
 2026-09-01 publication: Opened final implementation PR https://github.com/rmusser01/tldw_server/pull/2855 against dev with the complete validation, UX, risk, rollback, and no-production-activation record. Definition of Done item 6 is satisfied by this final summary and PR reference. Task status remains In Progress until review, CI, and merge complete.
 
 2026-09-01 PR CI remediation: The first Shard coverage guard run found that Task 5's newly extracted tldw_Server_API/tests/Admin/test_admin_ops_reports.py was not assigned to a CI shard. Added it beside the related admin reports test in all five duplicated backend shard matrices. The exact local guard now passes with 791 shards, 4,517 test files, 4 intentional ignores, the 130-file baseline, and zero newly uncovered files. The extracted reports test passes 29/29 with six warnings in 1.25s. This was CI coverage wiring, not a production behavior defect; PR #2855 remains unmerged and production remains unactivated.
+
+2026-09-01 post-publication base advance: While PR #2855 CI was running, origin/dev advanced by three commits to 21c1acc5bbac2df7d53ce5b759b0c79ab3a260ba. The changes were limited to schema_once verification and its Collections/Watchlists callers, but that is shared database infrastructure, so all fourteen branch commits were rebased without conflicts and the full gates were repeated. The shard guard passes against 4,518 test files with zero newly uncovered. A first guarded aggregate was invalid for release evidence because the disposable PostgreSQL fixture had disappeared and filesystem sandboxing denied two loopback binds: 1,040 passed, 159 skipped, and only the two PermissionError cases failed. The host-permitted required PostgreSQL matrix then passed 79/79 with zero skips and 160 warnings in 475.72s, recreating the fixture. The final host-permitted deterministic aggregate passed 1,201/1,201 with zero skips and 2,110 warnings in 1129.96s. Rebased implementation commit is 304a04a9da7dfd04d6f1d8e32878f4e22583ac4d; verified pre-evidence head is 0525aff3b85fdb285bf6431100d75a727c05ac91; the branch was fourteen commits ahead and zero behind. No production activation occurred.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

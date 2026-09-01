@@ -5,9 +5,11 @@
 - Branch: `codex/admin-webhooks-durable-producers-runtime`
 - Pull request: https://github.com/rmusser01/tldw_server/pull/2855
 - Final integrated implementation head:
-  `1298ee5d0d9208e5b457c783d82e8f0110a11498`
+  `304a04a9da7dfd04d6f1d8e32878f4e22583ac4d`
+- Final verified pre-evidence branch head:
+  `0525aff3b85fdb285bf6431100d75a727c05ac91`
 - Final branch merge base and observed `origin/dev`:
-  `e3c198224bb63a995190863e9dcb9adbd95204b2`
+  `21c1acc5bbac2df7d53ce5b759b0c79ab3a260ba`
 - Verification date: `2026-09-01`
 - Host: macOS 26.5.2 build 25F84, arm64
 - Project Python: 3.11.13
@@ -22,8 +24,8 @@
 The evidence-only update that records the final integrated gates necessarily
 follows the implementation head above and is not self-referential. Earlier
 verification and rebase identities remain in their chronological sections.
-The complete eleven-commit branch rebased without conflicts onto the final
-observed `origin/dev` and became eleven commits ahead and zero behind. No
+The complete fourteen-commit PR branch rebased without conflicts onto the final
+observed `origin/dev` and became fourteen commits ahead and zero behind. No
 production activation occurred.
 
 The verified branch was published as pull request
@@ -37,6 +39,7 @@ https://github.com/rmusser01/tldw_server/pull/2855 for normal CI and review.
 | Post-rebase backend aggregate | PASS: 1,169 passed, 0 skipped, 2,064 warnings |
 | Post-review backend aggregate | PASS: 1,178 passed, 0 skipped, 2,070 warnings |
 | Final integrated backend aggregate | PASS: 1,201 passed, 0 skipped, 2,110 warnings |
+| Post-publication base-advance aggregate | PASS: 1,201 passed, 0 skipped, 2,110 warnings |
 | Final defensive-review backend matrix | PASS: 164 passed, 0 skipped |
 | Required PostgreSQL producer/recovery matrix | PASS: 79 passed, 0 skipped, 160 warnings |
 | Task 8 controlled receiver matrix | PASS: 6 passed, 0 skipped across all four backend combinations |
@@ -51,7 +54,7 @@ https://github.com/rmusser01/tldw_server/pull/2855 for normal CI and review.
 | Changed-path Ruff | PASS |
 | Broad planned Ruff scope | REVIEWED BASELINE: 13 errors in branch-unmodified admin files |
 | Bandit | REVIEWED: 11 Low, 0 Medium, 0 High |
-| CI shard coverage guard | PASS: 4,517 test files, 0 newly uncovered |
+| CI shard coverage guard | PASS: 4,518 test files, 0 newly uncovered |
 | Markdown local links and diff whitespace | PASS |
 
 ## Test-Contract Correction
@@ -243,6 +246,23 @@ Result: exit 0, `1,201 passed, 2,110 warnings in 1131.73s (0:18:51)`, zero
 skips. The available disposable PostgreSQL fixture executed the PostgreSQL
 cases rather than skipping them. No production activation occurred.
 
+### Post-publication base advance
+
+After PR #2855 opened, `origin/dev` advanced to
+`21c1acc5bbac2df7d53ce5b759b0c79ab3a260ba` with three shared database commits
+limited to `schema_once` verification and its Collections/Watchlists callers.
+All fourteen PR commits rebased without conflicts. The rebased implementation
+commit is `304a04a9da7dfd04d6f1d8e32878f4e22583ac4d`; the verified pre-evidence branch
+head is `0525aff3b85fdb285bf6431100d75a727c05ac91`, fourteen commits ahead and zero
+behind.
+
+The required PostgreSQL matrix first passed `79/79`, zero skips, 160 warnings
+in 475.72 seconds. The same complete aggregate and seed were then run with host
+loopback permission against the live disposable fixture.
+
+Result: exit 0, `1,201 passed, 2,110 warnings in 1129.96s (0:18:49)`, zero
+skips. No production activation occurred.
+
 ### Required PostgreSQL matrix
 
 ```bash
@@ -263,6 +283,9 @@ fixture, default image `postgres:18` and container identity
 `tldw_postgres_test`. The observed PostgreSQL server was 18.6
 (`Debian 18.6-1.pgdg13+2`). No DSN, username, password, port, or private database
 name is recorded.
+
+After the post-publication base advance, the enforced matrix passed again:
+`79 passed, 160 warnings in 475.72s (0:07:55)`, zero skips.
 
 ## Receiver And Browser Proof
 
@@ -398,6 +421,13 @@ failures or omitted from the historical record:
     beside the related admin reports coverage in all five duplicated backend
     matrices. The local guard then reported 4,517 test files and zero newly
     uncovered files, and the test itself passed 29/29.
+12. The first aggregate after `origin/dev` advanced intentionally retained the
+    no-auto-provision guard but ran before recreating the disposable PostgreSQL
+    fixture and without host loopback permission. It reported `1,040 passed,
+    159 skipped` plus the same two loopback-bind `PermissionError` failures as
+    earlier sandboxed attempts. The enforced PostgreSQL matrix then passed
+    79/79 and recreated the fixture; the host-permitted aggregate passed all
+    1,201 tests with zero skips as recorded above.
 
 ## Documentation And Release Decision
 
