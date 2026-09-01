@@ -418,12 +418,12 @@ git commit -m "docs: publish Personal Context guide navigation"
 Run:
 
 ```bash
+set -e -o pipefail
 git fetch origin dev
 git rebase origin/dev
 backlog task 13151 --plain
 rg -n "TASK-13151|Document Personal Context Profile server" \
   "backlog/tasks/task-13151 - Document-Personal-Context-Profile-server-operations-and-architecture.md"
-set -o pipefail
 profile_task_matches=$(
   {
     git for-each-ref --format='%(refname)' refs/heads refs/remotes |
@@ -570,6 +570,7 @@ Expected: selected tests pass.
 Run:
 
 ```bash
+set -e
 profile_operator_guide=Docs/User_Guides/Server/Personal_Context_Profile.md
 profile_developer_guide=Docs/Code_Documentation/Personal_Context_Developer_Guide.md
 profile_api_reference=Docs/API-related/Personal_Context_API.md
