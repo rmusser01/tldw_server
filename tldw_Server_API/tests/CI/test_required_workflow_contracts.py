@@ -166,6 +166,38 @@ def test_coverage_required_uses_documented_global_floor() -> None:
     assert "--cov-fail-under=12" in coverage_step["run"]
 
 
+def test_global_coverage_floor_measures_only_application_code() -> None:
+    """The floor is a percentage, so what is in the denominator decides it.
+
+    ``--cov=tldw_Server_API`` also measured ``tldw_Server_API/tests`` -- 229k
+    statements this selection never covers -- which quietly diluted the number.
+    Widening the scope back would move the percentage without anything about the
+    code changing, so the whole target set is checked rather than merely the
+    presence of the app target: adding a second ``--cov`` would dilute it just
+    as effectively.
+
+    Returns:
+        None.
+    """
+    workflow = _load(".github/workflows/coverage-required.yml")
+    steps = workflow["jobs"]["coverage-required"]["steps"]
+    run = _get_step(steps, "Run global coverage floor")["run"]
+
+    tokens = run.split()
+    targets = {
+        token.split("=", 1)[1] if "=" in token else tokens[index + 1]
+        for index, token in enumerate(tokens)
+        if token == "--cov" or token.startswith("--cov=")
+    }
+
+    assert targets == {"tldw_Server_API/app"}, (
+        f"the global coverage floor measures {sorted(targets)}, not application "
+        "code alone. Any extra target pulls more statements into the "
+        "denominator, which moves the reported percentage without any change in "
+        "what is actually tested."
+    )
+
+
 def test_coverage_required_enforces_authnz_coverage_floor() -> None:
     workflow = _load(".github/workflows/coverage-required.yml")
     steps = workflow["jobs"]["coverage-required"]["steps"]
