@@ -118,38 +118,71 @@ def test_a_reload_does_not_outlive_the_block_that_asked_for_it() -> None:
     )
 
 
-def test_every_test_is_wrapped_in_the_app_main_guard() -> None:
-    """The guard only helps if the root conftest actually applies it.
+PROBE = """\
+from tldw_Server_API.tests.helpers.app_main_state import (
+    import_app_main,
+    reload_app_main,
+    snapshot_app_main,
+)
 
-    Checks for the ``app_main_isolated()`` call inside the autouse fixture rather
-    than the name anywhere in the file, so an orphaned import cannot satisfy it.
+PINNED = import_app_main()
+
+
+def test_one_reloads_app_main():
+    assert reload_app_main() is not PINNED, "reload_app_main() did not reload"
+
+
+def test_two_still_sees_the_module_it_pinned():
+    assert snapshot_app_main() is PINNED, (
+        "a reload in an earlier test leaked into this one (#2585)"
+    )
+"""
+
+
+def test_a_reload_in_one_test_does_not_leak_into_the_next() -> None:
+    """The suite-wide property, proved by running it.
+
+    Asserting that the conftest fixture calls a particular helper would pass a
+    rename and fail a harmless refactor, and would say nothing about whether the
+    fixture is autouse -- dropping that decorator disables isolation everywhere
+    while every structural check still passes.
+
+    So this runs two tests in a real pytest session instead. The probe module
+    lives under tests/ so the root conftest applies to it, and is named with a
+    leading underscore so the outer run does not collect it.
     """
-    import ast
+    import subprocess
+    import sys
 
-    conftest = Path(__file__).resolve().parents[1] / "conftest.py"
-    tree = ast.parse(conftest.read_text(encoding="utf-8"))
+    probe = Path(__file__).parent / "_app_main_leak_probe.py"
+    probe.write_text(PROBE, encoding="utf-8")
+    try:
+        result = subprocess.run(
+            # no:randomly is load-bearing: pytest-randomly shuffles collection,
+            # and this probe means nothing unless the reload runs before the
+            # test that checks for it.
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                str(probe),
+                "-q",
+                "-p",
+                "no:cacheprovider",
+                "-p",
+                "no:randomly",
+            ],
+            capture_output=True,
+            text=True,
+            cwd=Path(__file__).resolve().parents[3],
+            timeout=600,
+        )
+    finally:
+        probe.unlink(missing_ok=True)
 
-    fixture = next(
-        (
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef)
-            and node.name == "_keep_app_main_reloads_from_leaking"
-        ),
-        None,
-    )
-    assert fixture is not None, (
-        "tests/conftest.py no longer defines _keep_app_main_reloads_from_leaking(), "
-        "so a reload in one test again changes what app.main means for every test "
-        "after it (#2585)."
-    )
-
-    called = {
-        node.func.id
-        for node in ast.walk(fixture)
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-    }
-    assert "app_main_isolated" in called, (
-        "the autouse fixture no longer calls app_main_isolated(), so reloads leak "
-        "again (#2585)."
+    assert result.returncode == 0, (
+        "a reload in one test leaked into the next, so app.main means different "
+        "things to different tests (#2585). Check that tests/conftest.py still "
+        "wraps every test in app_main_isolated() and that the fixture is "
+        f"autouse.\n\n{result.stdout[-3000:]}\n{result.stderr[-2000:]}"
     )

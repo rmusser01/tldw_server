@@ -15,6 +15,7 @@ pytest_plugins = [
 
 from collections.abc import Callable
 import os
+from collections.abc import Iterator
 from pathlib import Path
 import sys
 try:
@@ -626,7 +627,7 @@ def pytest_collection_modifyitems(config, items):  # pragma: no cover - collecti
 
 
 @pytest.fixture(autouse=True)
-def _keep_app_main_reloads_from_leaking():
+def _keep_app_main_reloads_from_leaking() -> Iterator[None]:
     """Undo any ``reload_app_main()`` the test performed.
 
     The helper swaps ``sys.modules["tldw_Server_API.app.main"]`` for a freshly

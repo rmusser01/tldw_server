@@ -96,6 +96,11 @@ def app_main_isolated() -> Iterator[None]:
     asked for it. Callers that want a reloaded app still get one; they just do
     not leave it behind. Restoring is skipped when nothing swapped, which is the
     overwhelmingly common case.
+
+    Yields:
+        None. The block runs with whatever module is current; on exit the module
+        that was current on entry is put back, or removed again if there was
+        none.
     """
     snapshot = snapshot_app_main()
     try:
