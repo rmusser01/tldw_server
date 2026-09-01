@@ -3,19 +3,20 @@ id: TASK-13134
 title: Implement Notes embedding index and semantic graph edges
 status: In Progress
 assignee: []
-created_date: 2026-08-27 02:20
-updated_date: 2026-09-01 20:22
+created_date: '2026-08-27 02:20'
+updated_date: '2026-09-01 20:34'
 labels:
-- notes
-- notes-graph
-- embeddings
-- second-brain
-- backend
+  - notes
+  - notes-graph
+  - embeddings
+  - second-brain
+  - backend
 dependencies:
-- TASK-13138
+  - TASK-13138
 documentation:
-- Docs/superpowers/specs/2026-08-29-notes-semantic-index-design.md
-- Docs/superpowers/plans/2026-08-29-notes-semantic-index-implementation-plan.md
+  - Docs/superpowers/specs/2026-08-29-notes-semantic-index-design.md
+  - >-
+    Docs/superpowers/plans/2026-08-29-notes-semantic-index-implementation-plan.md
 priority: medium
 ---
 
@@ -42,6 +43,7 @@ Approved executable plan: `Docs/superpowers/plans/2026-08-29-notes-semantic-inde
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - 2026-08-29: Senior implementation-constraint review identified required spec corrections for user-scoped run APIs, semantic opt-in compatibility, evidence offsets, vector-only backend contracts, DSR erasure, graph admission/async composition, dimension and activation rules, cache freshness, and restore semantics.
 - Design specification: `Docs/superpowers/specs/2026-08-29-notes-semantic-index-design.md`
@@ -99,11 +101,16 @@ Additional Task 11 fix2 verification: the dedicated Notes semantic English-fallb
 2026-09-01 Task 11 fix round 4 verification addendum: added the exact no-port `https://xn--fa-hia.de` regression alongside the explicit `:443` case. Final focused GREEN is 9 passed; final affected backend is 326 passed. Status is unchanged: pending clean re-review, TASK-13134 In Progress, Tasks 12-13 outstanding.
 2026-09-01 Task 11 fix round 4 final verification: percent-escaped malformed hosts now fail closed (RED 2 failed; GREEN 2 passed). Complete affected backend verification is 328 passed; frontend remains 227 passed. Fix round 4 is still pending clean re-review; TASK-13134 remains In Progress and Tasks 12-13 remain outstanding.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+2026-09-01 Task 11 final review complete: second-review consent/recovery hardening and follow-up capability-contract fixes are committed in 2124c290a4, 5fcad9fe92, and 10ef590047. Final scoped review found all issues addressed with no new Critical or Important breakage. Controller verification passed 306 backend and 226 frontend tests for fix round 3, plus 136 backend endpoint/runtime and 25 semantic-client tests for fix round 4; Python was 3.11.13. TASK-13134 remains In Progress for Tasks 12-13. Residual risk: no live PostgreSQL/pgvector or embedding-provider run in these UI/contract follow-ups.
+<!-- SECTION:NOTES:END -->
+
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-TASK-13134 remains In Progress. Tasks 1-10 are complete and reviewed. Task 11 fix round 4 is implemented and verified but pending a clean re-review. Tasks 12-13 remain outstanding.
+TASK-13134 remains In Progress. Implementation Tasks 1 through 11 are complete and independently reviewed. Tasks 12-13 remain: semantic graph visuals/evidence/manual conversion, then documentation and integrated release gates.
 <!-- SECTION:FINAL_SUMMARY:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed
