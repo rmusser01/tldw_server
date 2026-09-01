@@ -77,4 +77,4 @@
 - [x] **Step 2:** Replace direct `_run_article` and `_raw_failure_result` assertions with public API assertions using controlled dependency patching at the public boundary.
 - [x] **Step 3:** Run focused tests, the affected Wave 0 suite, compile/lint checks, and `git diff --check`.
 - [x] **Step 4:** Run Bandit over touched production paths and inspect the final diff for a surviving browser sink or compatibility regression.
-- [ ] **Step 5:** Update `TASK-13139.13`, commit and push, request Qodo follow-up, and merge only after current-dev, review, and CI gates pass.
+- [x] **Step 5:** Update `TASK-13139.13`, commit and push, request Qodo follow-up, and merge only after current-dev, review, and CI gates pass.
