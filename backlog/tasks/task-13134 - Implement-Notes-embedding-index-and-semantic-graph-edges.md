@@ -3,20 +3,19 @@ id: TASK-13134
 title: Implement Notes embedding index and semantic graph edges
 status: In Progress
 assignee: []
-created_date: '2026-08-27 02:20'
-updated_date: '2026-09-01 19:47'
+created_date: 2026-08-27 02:20
+updated_date: 2026-09-01 20:22
 labels:
-  - notes
-  - notes-graph
-  - embeddings
-  - second-brain
-  - backend
+- notes
+- notes-graph
+- embeddings
+- second-brain
+- backend
 dependencies:
-  - TASK-13138
+- TASK-13138
 documentation:
-  - Docs/superpowers/specs/2026-08-29-notes-semantic-index-design.md
-  - >-
-    Docs/superpowers/plans/2026-08-29-notes-semantic-index-implementation-plan.md
+- Docs/superpowers/specs/2026-08-29-notes-semantic-index-design.md
+- Docs/superpowers/plans/2026-08-29-notes-semantic-index-implementation-plan.md
 priority: medium
 ---
 
@@ -43,7 +42,6 @@ Approved executable plan: `Docs/superpowers/plans/2026-08-29-notes-semantic-inde
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - 2026-08-29: Senior implementation-constraint review identified required spec corrections for user-scoped run APIs, semantic opt-in compatibility, evidence offsets, vector-only backend contracts, DSR erasure, graph admission/async composition, dimension and activation rules, cache freshness, and restore semantics.
 - Design specification: `Docs/superpowers/specs/2026-08-29-notes-semantic-index-design.md`
@@ -79,7 +77,6 @@ Approved executable plan: `Docs/superpowers/plans/2026-08-29-notes-semantic-inde
 2026-08-31 Task 9 implementation resumed directly in the existing worktree. Approved five-file RED reproduced: four collection errors for missing semantic_scoring.py, semantic_projector.py, and SemanticProjectionChunk. Proceeding within the Task 9 async projection, evidence, endpoint, and manual-conversion scope.
 2026-08-31 Task 9 complete: Added bounded async semantic scoring/projection at the nested Notes graph endpoint, owner/dataset/generation-scoped current-manifest reads, deterministic authority filtering and precedence composition, bounded evidence with response-cap omission markers, stable semantic cache/cursor binding, dynamic semantic graph rate accounting, and explicit conversion through the existing canonical Sync-aware manual-link path with durable content-free audit. Independent review completed with all findings resolved, including final semantic-binding race checks and synchronous audit flush. Verification: reviewed set 120 passed; complete Notes Graph suite 1012 passed with 6 optional live pgvector/PostgreSQL skips; manual-conversion integration 7 passed; Ruff, Bandit (zero findings), Python 3.10 compilation, and diff checks clean. Implementation commit: 9e675b83c5; report: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-9-report.md.
 2026-08-31 Task 10 complete: Added fail-closed Notes semantic DSR erasure with bounded maintenance-catalog discovery, revision fencing, exact ChromaDB/pgvector backend construction, synchronous cleanup draining, semantic-only v66/v67 final purge, and canonical edge/Note deletion ordering. RED: 5 failed, 9 passed. Final focused plus adjacent verification: 18 passed; Ruff clean; Bandit zero findings/errors at /tmp/bandit_task13134_task10.json; Python 3.10 compilation and staged/unstaged diff checks clean. Implementation commit: efd7f7829e; report: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-10-report.md. No live PostgreSQL/pgvector service or repository-wide pytest run was required for this focused task.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 2026-09-01 Task 10 hardening complete pending final independent review: preserved authorized vector-write fences across Note update, tombstone, and snapshot convergence; made stale release rearm the newest pending generation; routed all DSR cleanup store phases through one quiescent owned executor; closed constructor/vector-authority/exact worker connections without shutting shared PostgreSQL pools; retained existing-file-only SQLite mode=rw. Verification: 81 focused erasure/DSR/indexing tests and 128 adjacent publication/Jobs/lifecycle/store/property tests passed; Ruff, Bandit (0 findings/errors), and git diff --check clean. Report: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-10-report.md.
 
@@ -98,14 +95,15 @@ Additional Task 11 fix2 verification: the dedicated Notes semantic English-fallb
 2026-09-01 Task 11 fix round 3 started from 2124c290a4. Correction: prior language claiming Task 11 complete/reviewed is superseded; this bounded capability-contract review-fix round is pending a clean re-review. Preserve Tasks 12-13 as outstanding.
 
 2026-09-01 Task 11 fix round 3 implementation and verification completed from 2124c290a4. Resolved public/projector capability-binding parity, canonical IPv6/IDN/redacted endpoint origins, and typed nullable endpoint-unavailable disclosure with Delete-only UI recovery. RED: backend 10 failed/1 passed; frontend 2 failed/71 passed. GREEN: backend 306 passed; frontend 226 passed; extension TypeScript, Ruff, Bandit zero findings, locale duplicate/coverage, formatting, and diff checks passed. This round remains pending clean re-review; do not treat Task 11 as complete/reviewed. Tasks 12-13 remain outstanding. Report: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-11-fix3-report.md.
-<!-- SECTION:NOTES:END -->
-
+2026-09-01 Task 11 fix round 4 implemented and verified from 5fcad9fe92: replaced legacy IDNA host mapping with httpx runtime raw_host normalization while preserving explicit default ports, IPv4/IPv6, and redacted origin disclosure. RED: 3 failed/4 passed; GREEN: focused 7 passed, affected backend 324 passed, frontend 227 passed; TypeScript, Ruff, formatting, Bandit zero findings, and diff checks passed. Fix round 4 remains pending clean re-review; TASK-13134 stays In Progress and Tasks 12-13 remain outstanding. Report: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-11-fix4-report.md.
+2026-09-01 Task 11 fix round 4 verification addendum: added the exact no-port `https://xn--fa-hia.de` regression alongside the explicit `:443` case. Final focused GREEN is 9 passed; final affected backend is 326 passed. Status is unchanged: pending clean re-review, TASK-13134 In Progress, Tasks 12-13 outstanding.
+2026-09-01 Task 11 fix round 4 final verification: percent-escaped malformed hosts now fail closed (RED 2 failed; GREEN 2 passed). Complete affected backend verification is 328 passed; frontend remains 227 passed. Fix round 4 is still pending clean re-review; TASK-13134 remains In Progress and Tasks 12-13 remain outstanding.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-TASK-13134 remains In Progress. Tasks 1-10 are complete and reviewed. Task 11 fix round 3 is implemented and verified but pending a clean re-review. Tasks 12-13 remain outstanding.
+TASK-13134 remains In Progress. Tasks 1-10 are complete and reviewed. Task 11 fix round 4 is implemented and verified but pending a clean re-review. Tasks 12-13 remain outstanding.
 <!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed

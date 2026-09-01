@@ -242,8 +242,16 @@ def test_capabilities_preserve_brackets_in_sanitized_ipv6_origin() -> None:
             "HTTPS://user:secret@BÜCHER.Example:8443/v1?token=secret",
             "https://xn--bcher-kva.example:8443",
         ),
+        (
+            "HTTPS://user:secret@faß.de/v1?token=secret",
+            "https://xn--fa-hia.de",
+        ),
+        (
+            "HTTPS://user:secret@faß.de:443/v1?token=secret",
+            "https://xn--fa-hia.de:443",
+        ),
     ],
-    ids=["ipv6", "idn"],
+    ids=["ipv6", "idn", "idna-uts46", "idna-uts46-default-port"],
 )
 def test_capability_origin_passes_public_schema_and_pending_worker_authority(
     endpoint_url: str,
@@ -268,6 +276,22 @@ def test_capability_origin_passes_public_schema_and_pending_worker_authority(
     assert capabilities.endpoint_display == expected_origin
     assert response.endpoint_display == expected_origin
     assert pending.endpoint_origin == expected_origin
+
+
+@pytest.mark.parametrize(
+    "endpoint_url",
+    ["https://exa mple.test/v1", "https://%65xample.test/v1"],
+)
+def test_capabilities_fail_closed_on_percent_encoded_runtime_host(
+    endpoint_url: str,
+) -> None:
+    capabilities = build_semantic_capabilities(
+        _contract(endpoint_url=endpoint_url)
+    )
+
+    assert capabilities.endpoint_display is None
+    assert capabilities.indexing_available is False
+    assert capabilities.unavailable_reason == "notes_semantic_endpoint_unavailable"
 
 
 def test_unknown_boundaries_fail_closed_and_request_credentials_are_not_durable() -> None:
