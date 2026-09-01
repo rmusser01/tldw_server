@@ -3,14 +3,10 @@
 ## Verification Identity
 
 - Branch: `codex/admin-webhooks-durable-producers-runtime`
-- Verified pre-documentation head:
-  `616ea4d5b6a1c0c98dd47a87a351ba5e47728d12`
-- Branch merge base:
-  `256ff515b3b3e3b6b624264ed67a12da2d74363b`
-- Observed `origin/dev` during final verification:
-  `2346700d0e64e2e7564853473dfea0b7f53928ab`
-- Post-rebase pre-evidence-update head:
-  `79ff79543a07c7758304d847a888fe47bafa1af0`
+- Final integrated implementation head:
+  `1298ee5d0d9208e5b457c783d82e8f0110a11498`
+- Final branch merge base and observed `origin/dev`:
+  `e3c198224bb63a995190863e9dcb9adbd95204b2`
 - Verification date: `2026-09-01`
 - Host: macOS 26.5.2 build 25F84, arm64
 - Project Python: 3.11.13
@@ -22,15 +18,12 @@
 - Aggregate pytest seed: `1831171713`
 - Required PostgreSQL pytest seed: `2138377250`
 
-The final documentation and four corrected strict test doubles were verified as
-an uncommitted working tree based on the head above. The Task 9 documentation
-commit necessarily follows this evidence file and is not self-referential.
-
-The observed `origin/dev` reference advanced independently during the initial
-verification. At that identity snapshot, the branch was eight commits behind
-and nine commits ahead. The completed branch was subsequently rebased without
-conflicts onto that exact `origin/dev` commit and became ten commits ahead and
-zero behind. No push or PR creation is part of this verification task.
+The evidence-only update that records the final integrated gates necessarily
+follows the implementation head above and is not self-referential. Earlier
+verification and rebase identities remain in their chronological sections.
+The complete eleven-commit branch rebased without conflicts onto the final
+observed `origin/dev` and became eleven commits ahead and zero behind. No
+production activation occurred.
 
 ## Result Summary
 
@@ -39,6 +32,7 @@ zero behind. No push or PR creation is part of this verification task.
 | Complete backend aggregate | PASS: 1,169 passed, 0 skipped, 2,064 warnings |
 | Post-rebase backend aggregate | PASS: 1,169 passed, 0 skipped, 2,064 warnings |
 | Post-review backend aggregate | PASS: 1,178 passed, 0 skipped, 2,070 warnings |
+| Final integrated backend aggregate | PASS: 1,201 passed, 0 skipped, 2,110 warnings |
 | Final defensive-review backend matrix | PASS: 164 passed, 0 skipped |
 | Required PostgreSQL producer/recovery matrix | PASS: 79 passed, 0 skipped, 160 warnings |
 | Task 8 controlled receiver matrix | PASS: 6 passed, 0 skipped across all four backend combinations |
@@ -231,6 +225,19 @@ zero skips. A prior sandboxed attempt reached `1,017 passed, 159 skipped` and
 failed only the two tests whose explicit loopback binds were denied; both passed
 immediately with loopback permission before the complete authoritative rerun.
 
+### Final integration aggregate
+
+The complete eleven-commit branch rebased without conflicts onto the final
+observed `origin/dev` commit
+`e3c198224bb63a995190863e9dcb9adbd95204b2`. The integrated implementation
+head became `1298ee5d0d9208e5b457c783d82e8f0110a11498`, eleven commits ahead and zero
+behind. The same deterministic aggregate command and seed recorded under
+Complete aggregate were then rerun against that exact integrated tree.
+
+Result: exit 0, `1,201 passed, 2,110 warnings in 1131.73s (0:18:51)`, zero
+skips. The available disposable PostgreSQL fixture executed the PostgreSQL
+cases rather than skipping them. No production activation occurred.
+
 ### Required PostgreSQL matrix
 
 ```bash
@@ -279,6 +286,11 @@ rotated, and proved secret/URL redaction. Test-only receiver addresses and key
 material are omitted.
 
 No production receiver was called and no production registration was enabled.
+
+After the final rebase and defensive-review remediation, the same real-backend
+gate passed again `1/1` in 32.9 seconds. That run additionally proved that
+cancelable in-app navigation and a real browser Back action retain the URL and
+one-time secret dialog before completing the signed receiver lifecycle.
 
 ## Admin UI Gates
 
