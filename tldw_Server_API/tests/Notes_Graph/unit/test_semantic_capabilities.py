@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
+from tldw_Server_API.app.api.v1.schemas.notes_semantic_index import (
+    SemanticCapabilitiesResponse,
+)
 from tldw_Server_API.app.core.Notes_Graph.semantic_capabilities import (
     SemanticCapabilityContract,
     build_semantic_capabilities,
@@ -30,6 +34,31 @@ def _contract(**overrides: object) -> SemanticCapabilityContract:
     }
     values.update(overrides)
     return SemanticCapabilityContract(**values)
+
+
+def _public_capability(**overrides: object) -> dict[str, object]:
+    values: dict[str, object] = {
+        "active_note_count": 1,
+        "estimated_chunk_count": 2,
+        "estimated_run_count": 1,
+        "provider_label": "OpenAI compatible",
+        "model": "embedding-model",
+        "endpoint_display": "https://embed.example.test:8443",
+        "execution_boundary": "external",
+        "storage_boundary": "local",
+        "storage_label": "ChromaDB",
+        "outbound_data_categories": ("note_content_chunks", "note_title"),
+        "capability_revision": "capability-v1",
+        "indexing_available": True,
+        "unavailable_reason": None,
+        "metric": "cosine",
+        "resolved_dimensions": 768,
+        "dimension_probe_required": False,
+        "renewal_requires_delete": False,
+        "manage_authorized": True,
+    }
+    values.update(overrides)
+    return values
 
 
 @pytest.mark.parametrize(
@@ -185,6 +214,20 @@ def test_capabilities_sanitize_endpoint_and_storage_provider_labels() -> None:
     assert "/path" not in capabilities.endpoint_display
 
 
+def test_capabilities_preserve_brackets_in_sanitized_ipv6_origin() -> None:
+    capabilities = build_semantic_capabilities(
+        _contract(
+            endpoint_url="https://user:secret@[2001:db8::1]:8443/path?token=secret"
+        )
+    )
+
+    assert capabilities.endpoint_display == "https://[2001:db8::1]:8443"
+    response = SemanticCapabilitiesResponse.model_validate(
+        _public_capability(endpoint_display=capabilities.endpoint_display)
+    )
+    assert response.endpoint_display == "https://[2001:db8::1]:8443"
+
+
 def test_unknown_boundaries_fail_closed_and_request_credentials_are_not_durable() -> None:
     capabilities = build_semantic_capabilities(
         _contract(
@@ -204,5 +247,96 @@ def test_capabilities_defer_compatibility_hash_until_dimensions_resolve() -> Non
     capabilities = build_semantic_capabilities(_contract(resolved_dimensions=None))
 
     assert capabilities.compatibility_hash is None
+    assert capabilities.vector_backend == "chromadb"
+    assert capabilities.dimension_probe_required is True
+    assert capabilities.indexing_available is True
+    assert capabilities.unavailable_reason is None
+
+
+def test_pending_dimension_capability_revision_binds_vector_storage_identity() -> None:
+    chromadb = build_semantic_capabilities(
+        _contract(vector_backend="chromadb", resolved_dimensions=None)
+    )
+    pgvector = build_semantic_capabilities(
+        _contract(vector_backend="pgvector", resolved_dimensions=None)
+    )
+
+    assert chromadb.compatibility_hash is None
+    assert pgvector.compatibility_hash is None
+    assert chromadb.disclosure_hash != pgvector.disclosure_hash
+    assert chromadb.capability_revision != pgvector.capability_revision
+
+
+def test_known_unsupported_pgvector_dimensions_remain_unavailable() -> None:
+    capabilities = build_semantic_capabilities(
+        _contract(vector_backend="pgvector", resolved_dimensions=3_072)
+    )
+
+    assert capabilities.vector_backend == "pgvector"
+    assert capabilities.dimension_probe_required is False
     assert capabilities.indexing_available is False
-    assert capabilities.unavailable_reason == "notes_semantic_dimensions_pending"
+    assert (
+        capabilities.unavailable_reason
+        == "notes_semantic_pgvector_dimensions_unsupported"
+    )
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["provider_label", "model", "storage_label", "endpoint_display"],
+)
+def test_public_capability_schema_rejects_blank_consent_identity(field: str) -> None:
+    with pytest.raises(ValidationError):
+        SemanticCapabilitiesResponse.model_validate(_public_capability(**{field: "  "}))
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    [
+        "https://user:secret@embed.example.test",
+        "https://embed.example.test/v1/embeddings",
+        "https://embed.example.test?token=secret",
+        "https://embed.example.test#secret",
+    ],
+)
+def test_public_capability_schema_rejects_unsanitized_endpoint(endpoint: str) -> None:
+    with pytest.raises(ValidationError):
+        SemanticCapabilitiesResponse.model_validate(
+            _public_capability(endpoint_display=endpoint)
+        )
+
+
+def test_public_capability_schema_requires_exact_outbound_and_dimension_identity() -> None:
+    with pytest.raises(ValidationError):
+        SemanticCapabilitiesResponse.model_validate(
+            _public_capability(outbound_data_categories=("note_title",))
+        )
+    with pytest.raises(ValidationError):
+        SemanticCapabilitiesResponse.model_validate(
+            _public_capability(
+                resolved_dimensions=None,
+                dimension_probe_required=False,
+            )
+        )
+
+    pending = SemanticCapabilitiesResponse.model_validate(
+        _public_capability(
+            resolved_dimensions=None,
+            dimension_probe_required=True,
+        )
+    )
+    assert pending.endpoint_display == "https://embed.example.test:8443"
+
+
+def test_public_capability_schema_accepts_unresolved_dimensions_when_unavailable() -> None:
+    unavailable = SemanticCapabilitiesResponse.model_validate(
+        _public_capability(
+            indexing_available=False,
+            unavailable_reason="notes_semantic_provider_unavailable",
+            resolved_dimensions=None,
+            dimension_probe_required=False,
+        )
+    )
+
+    assert unavailable.indexing_available is False
+    assert unavailable.dimension_probe_required is False

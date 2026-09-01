@@ -4,7 +4,7 @@ title: Implement Notes embedding index and semantic graph edges
 status: In Progress
 assignee: []
 created_date: '2026-08-27 02:20'
-updated_date: '2026-09-01 17:40'
+updated_date: '2026-09-01 18:56'
 labels:
   - notes
   - notes-graph
@@ -90,6 +90,10 @@ Approved executable plan: `Docs/superpowers/plans/2026-08-29-notes-semantic-inde
 2026-09-01 Task 11 review follow-up: moved stale semantic mutation-error clearing from the unrelated suggestion rejection reset into the confirmed semantic command path, so a later successful command clears prior recovery guidance. The primary setup disclosure now renders both sanitized vector-storage destination and localized local/remote boundary. RED: focused inspector suite failed 2/16 on the missing destination and stale alert. GREEN: exact Task 11 frontend 71/71, focused semantic inspector 16/16, adjacent suggestions inspector 16/16, extension TypeScript compile, and repository-pinned Prettier check passed.
 
 2026-09-01 Task 11 accepted-review hardening complete pending commit: blocked delete-cleanup cancellation in UI and core; added stale-configuration renewed consent through the existing nested PUT with owner/dataset/configuration CAS, active-generation preservation, rebuild admission, and receipt replay; reconciled scoped run/configuration/capability/writer conflicts and run 404s; projected live run state/progress; replaced lifecycle controls with a backend-valid state matrix; confined last-good fallback to ordinary edges; allowlisted complete consent disclosure and unknown-detail fallback; added backup-retention copy, focus handoff, and three-tab roving coverage; removed duplicated English semantic strings from non-English assets/mirrors under fallbackLng=en. RED evidence was recorded per finding in the Task 11 fix report. GREEN verification: 79 focused and 110 adjacent frontend tests; 89 focused and 141 adjacent Python 3.11 backend tests; TypeScript compile; canonical Prettier; locale sync, duplicate-key and coverage checks; Ruff; Bandit zero findings at /tmp/bandit_task13134_task11_fix.json; git diff --check. Report: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-11-fix-report.md.
+
+2026-09-01 Task 11 second-review hardening complete pending commit: closed renewal admission gaps with full active-generation binding health and fresh rebuild recovery; blocked cross-backend renewal until old persisted-store cleanup is confirmed; enabled probe-eligible pending dimensions with pre-Note worker CAS; restored usable no-generation rebuild actions; and added strict endpoint/provider/model/storage consent identity with typed backend-delete guidance. Self-review also bound pending capability revisions to vector storage identity and aligned unavailable unresolved dimensions, IPv6 origins, and explicit default ports. Final verification: 313 focused/adjacent Python 3.11.13 backend tests, 76 focused frontend tests, and 126 adjacent Notes graph tests passed; TypeScript, canonical Prettier, locale duplicate/coverage, Ruff, Bandit zero findings, and git diff --check passed. Report: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-11-fix2-report.md. Known concerns: no live PostgreSQL/pgvector service run; glossary check references a missing repository glossary file.
+
+Additional Task 11 fix2 verification: the dedicated Notes semantic English-fallback locale contract passed (1/1).
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

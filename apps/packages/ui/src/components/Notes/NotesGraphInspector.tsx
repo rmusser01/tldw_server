@@ -52,7 +52,8 @@ const SEMANTIC_DETAIL_REASONS = new Set([
   "consent_required",
   "cleanup_pending",
   "cleanup_stalled",
-  "unavailable"
+  "unavailable",
+  "rebuild_required"
 ])
 type SemanticAction =
   | "enable"
@@ -72,11 +73,21 @@ const hasCompleteConsentDisclosure = (
 ): boolean => {
   if (!capability) return false
   const outbound = new Set(capability.outbound_data_categories)
+  const hasIdentity = [
+    capability.provider_label,
+    capability.model,
+    capability.storage_label,
+    capability.endpoint_display
+  ].every((value) => value.trim().length > 0)
+  const dimensionsAreCoherent =
+    (capability.resolved_dimensions === null) ===
+    capability.dimension_probe_required
   return Boolean(
     capability.indexing_available &&
+      hasIdentity &&
       capability.storage_boundary !== "unavailable" &&
       capability.unavailable_reason === null &&
-      capability.resolved_dimensions !== null &&
+      dimensionsAreCoherent &&
       capability.outbound_data_categories.length ===
         NOTES_SEMANTIC_OUTBOUND_DATA_CATEGORIES.length &&
       NOTES_SEMANTIC_OUTBOUND_DATA_CATEGORIES.every((category) =>
@@ -111,7 +122,8 @@ const semanticManagementActions = ({
   if (status.desired_state === "disabled") {
     return status.state === "off" &&
       status.detail_reason === null &&
-      capabilityUsable
+      capabilityUsable &&
+      !capability.renewal_requires_delete
       ? ["enable"]
       : []
   }
@@ -119,11 +131,14 @@ const semanticManagementActions = ({
     status.detail_reason === "stale_configuration" ||
     status.detail_reason === "consent_required"
   ) {
-    return capabilityUsable ? ["renew", "deleteIndex"] : ["deleteIndex"]
+    return capabilityUsable && !capability.renewal_requires_delete
+      ? ["renew", "deleteIndex"]
+      : ["deleteIndex"]
   }
-  if (!capabilityUsable || status.detail_reason === "unavailable") {
+  if (!capabilityUsable) {
     return ["deleteIndex"]
   }
+  if (!status.active_generation_usable) return ["rebuild", "deleteIndex"]
   if (status.state === "ready") return ["rebuild", "deleteIndex"]
   if (
     status.state === "needs_attention" &&
@@ -150,6 +165,8 @@ const semanticMutationErrorKey = (error: unknown): string => {
     case "notes_semantic_run_revision_conflict":
     case "notes_semantic_active_generation_required":
       return "notesSearch.semanticError.refresh"
+    case "notes_semantic_backend_change_requires_delete":
+      return "notesSearch.semanticError.backendChangeRequiresDelete"
     case "notes_semantic_writer_conflict":
       return "notesSearch.semanticError.writerConflict"
     case "notes_semantic_quota_exceeded":
@@ -230,9 +247,11 @@ const NotesGraphInspector: React.FC<NotesGraphInspectorProps> = ({
         : "preparing"
       : semanticStatus?.state
   const semanticProgress = activeIndexingRun ?? semanticStatus
-  const semanticDetail = semanticStatus?.detail_reason
-    ? t(semanticDetailKey(semanticStatus.detail_reason))
-    : ""
+  const semanticDetail = semanticCapabilities?.renewal_requires_delete
+    ? t("notesSearch.semanticBackendChangeRequiresDelete")
+    : semanticStatus?.detail_reason
+      ? t(semanticDetailKey(semanticStatus.detail_reason))
+      : ""
   const semanticActions = new Set(
     semanticManagementActions({
       capability: semanticCapabilities,
@@ -240,12 +259,7 @@ const NotesGraphInspector: React.FC<NotesGraphInspectorProps> = ({
       activeRun: semanticActiveRun
     })
   )
-  const semanticEdgesUsable = Boolean(
-    semanticStatus &&
-      (semanticStatus.state === "ready" ||
-        semanticStatus.state === "updating" ||
-        semanticStatus.active_generation_id)
-  )
+  const semanticEdgesUsable = Boolean(semanticStatus?.active_generation_usable)
   const semanticAnnouncement = semanticStatus
     ? t("notesSearch.semanticStatusAnnouncement", {
         state: t(`notesSearch.semanticState.${semanticDisplayState}`),
@@ -622,6 +636,12 @@ const NotesGraphInspector: React.FC<NotesGraphInspectorProps> = ({
                 </dt>
                 <dd className="break-words">{semanticCapabilities.model}</dd>
                 <dt className="font-medium text-text-muted">
+                  {t("notesSearch.semanticEndpoint")}
+                </dt>
+                <dd className="break-words">
+                  {semanticCapabilities.endpoint_display}
+                </dd>
+                <dt className="font-medium text-text-muted">
                   {t("notesSearch.semanticExecutionBoundary")}
                 </dt>
                 <dd>
@@ -640,7 +660,7 @@ const NotesGraphInspector: React.FC<NotesGraphInspectorProps> = ({
                   )
                 </dd>
               </dl>
-              {semanticCapabilities.resolved_dimensions === null ? (
+              {semanticCapabilities.dimension_probe_required ? (
                 <p className="mt-4 text-sm text-text-muted">
                   {t("notesSearch.semanticDimensionProbeDisclosure")}
                 </p>

@@ -112,6 +112,7 @@ const capability = {
   estimated_run_count: 2,
   provider_label: "OpenAI",
   model: "text-embedding-3-small",
+  endpoint_display: "https://api.openai.com",
   execution_boundary: "external",
   storage_boundary: "local",
   storage_label: "ChromaDB",
@@ -121,6 +122,8 @@ const capability = {
   unavailable_reason: null,
   metric: "cosine",
   resolved_dimensions: 1536,
+  dimension_probe_required: false,
+  renewal_requires_delete: false,
   manage_authorized: true
 }
 
@@ -149,6 +152,7 @@ const status = (
   configuration_revision: 7,
   semantic_index_revision: 3,
   active_generation_id: "generation-a",
+  active_generation_usable: true,
   indexed_notes: state === "ready" ? 12 : 2,
   excluded_notes: 0,
   failed_notes: 0,

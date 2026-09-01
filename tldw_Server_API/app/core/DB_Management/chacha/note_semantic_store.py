@@ -49,6 +49,11 @@ class NoteSemanticStore:
     """Own semantic configuration, generation, manifest, and cleanup SQL."""
 
     _SAFE_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+    _SAFE_MODEL = re.compile(
+        r"^[A-Za-z0-9][A-Za-z0-9._-]*"
+        r"(?:/[A-Za-z0-9][A-Za-z0-9._-]*)?"
+        r"(?::[A-Za-z0-9][A-Za-z0-9._-]*)?$"
+    )
     _ERROR_CODE = re.compile(r"^[a-z][a-z0-9_:-]{0,127}$")
     _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
     _HEX_DIGEST = re.compile(r"^[0-9a-f]{64}$")
@@ -130,6 +135,13 @@ class NoteSemanticStore:
         normalized = str(value).strip()
         if cls._SAFE_TOKEN.fullmatch(normalized) is None:
             raise ValueError(f"notes_semantic_{field}_invalid")
+        return normalized
+
+    @classmethod
+    def _safe_model(cls, value: str) -> str:
+        normalized = str(value).strip()
+        if len(normalized) > 256 or cls._SAFE_MODEL.fullmatch(normalized) is None:
+            raise ValueError("notes_semantic_model_invalid")
         return normalized
 
     @classmethod
@@ -491,6 +503,28 @@ class NoteSemanticStore:
         if not isinstance(value, str) or cls._HEX_DIGEST.fullmatch(value) is None:
             raise ValueError(f"notes_semantic_{field}_invalid")
         return value
+
+    def get_operation_receipt(
+        self,
+        *,
+        dataset_id: str,
+        key_digest: str,
+        now: datetime,
+    ) -> SemanticOperationReceipt | None:
+        """Read one unexpired mutation receipt without changing durable state."""
+
+        dataset = self._scope(dataset_id)
+        key = self._hex_digest(key_digest, field="idempotency_digest")
+        timestamp = self._timestamp(now)
+        with self._db.transaction() as conn:
+            self._set_scope(conn, dataset)
+            row = conn.execute(
+                "SELECT * FROM note_semantic_operation_receipts "
+                "WHERE owner_user_id=? AND dataset_id=? AND key_digest=? "
+                "AND expires_at>?",
+                (self.owner_user_id, dataset, key, timestamp),
+            ).fetchone()
+        return None if row is None else self._operation_from_row(row)
 
     def begin_operation_receipt(
         self,
@@ -1427,7 +1461,7 @@ class NoteSemanticStore:
         params = (
             self.owner_user_id, dataset, self._safe_token(capability_revision, field="capability_revision"),
             self._safe_token(disclosure_hash, field="disclosure_hash"), self._safe_token(provider, field="provider"),
-            self._safe_token(model, field="model"), revision,
+            self._safe_model(model), revision,
             self._safe_token(endpoint_origin_revision, field="endpoint_origin_revision"),
             self._endpoint_origin_display(endpoint_origin_display), self._safe_token(data_boundary, field="data_boundary"),
             self._safe_token(vector_backend, field="vector_backend"), self._safe_token(storage_boundary, field="storage_boundary"),
@@ -1532,7 +1566,7 @@ class NoteSemanticStore:
         expected_configuration_revision: int,
         capability_revision: str,
         disclosure_hash: str,
-        compatibility_hash: str,
+        compatibility_hash: str | None,
         provider: str,
         model: str,
         model_revision: str | None,
@@ -1542,20 +1576,24 @@ class NoteSemanticStore:
         vector_backend: str,
         storage_boundary: str,
         storage_label: str,
-        resolved_dimensions: int,
+        resolved_dimensions: int | None,
         normalization_version: str,
         chunker_version: str,
         now: datetime,
+        activate_disabled: bool = False,
     ) -> SemanticIndexConfig | None:
-        """Renew an enabled configuration from one freshly disclosed capability."""
+        """Commit one disclosed capability, optionally re-enabling after cleanup."""
 
-        if (
-            type(expected_configuration_revision) is not int
-            or expected_configuration_revision < 0
-            or type(resolved_dimensions) is not int
-            or resolved_dimensions <= 0
-        ):
+        if type(expected_configuration_revision) is not int or expected_configuration_revision < 0:
             raise ValueError("notes_semantic_configuration_revision_invalid")
+        pending_dimensions = resolved_dimensions is None and compatibility_hash is None
+        resolved_dimension = (
+            type(resolved_dimensions) is int
+            and resolved_dimensions > 0
+            and compatibility_hash is not None
+        )
+        if not (pending_dimensions or resolved_dimension):
+            raise ValueError("notes_semantic_dimensions_invalid")
         dataset = self._scope(dataset_id)
         timestamp = self._timestamp(now)
         revision = (
@@ -1566,9 +1604,13 @@ class NoteSemanticStore:
         values = (
             self._safe_token(capability_revision, field="capability_revision"),
             self._safe_token(disclosure_hash, field="disclosure_hash"),
-            self._safe_token(compatibility_hash, field="compatibility_hash"),
+            (
+                None
+                if compatibility_hash is None
+                else self._safe_token(compatibility_hash, field="compatibility_hash")
+            ),
             self._safe_token(provider, field="provider"),
-            self._safe_token(model, field="model"),
+            self._safe_model(model),
             revision,
             self._safe_token(
                 endpoint_origin_revision,
@@ -1582,6 +1624,7 @@ class NoteSemanticStore:
                 storage_label.replace(" ", "_"),
                 field="storage_label",
             ),
+            "pending" if pending_dimensions else "resolved",
             resolved_dimensions,
             self._safe_token(
                 normalization_version,
@@ -1590,9 +1633,18 @@ class NoteSemanticStore:
             self._safe_token(chunker_version, field="chunker_version"),
             timestamp,
             timestamp,
+            timestamp,
             self.owner_user_id,
             dataset,
             expected_configuration_revision,
+            "disabled" if activate_disabled else "enabled",
+            "disabled" if activate_disabled else "enabled",
+            self.owner_user_id,
+            dataset,
+            self.owner_user_id,
+            dataset,
+            self.owner_user_id,
+            dataset,
         )
         with self._db.transaction() as conn:
             self._set_scope(conn, dataset)
@@ -1602,11 +1654,20 @@ class NoteSemanticStore:
                 "disclosure_hash=?,compatibility_hash=?,provider=?,model=?,"
                 "model_revision=?,endpoint_origin_revision=?,endpoint_origin_display=?,"
                 "data_boundary=?,vector_backend=?,storage_boundary=?,storage_label=?,"
-                "metric='cosine',dimension_state='resolved',dimensions=?,"
+                "metric='cosine',dimension_state=?,dimensions=?,"
                 "normalization_version=?,chunker_version=?,"
                 "configuration_revision=configuration_revision+1,consented_at=?,"
-                "updated_at=? WHERE owner_user_id=? AND dataset_id=? "
-                "AND configuration_revision=? AND desired_state='enabled'",
+                "updated_at=?,desired_state='enabled',"
+                "enabled_at=CASE WHEN desired_state='disabled' THEN ? ELSE enabled_at END "
+                "WHERE owner_user_id=? AND dataset_id=? AND configuration_revision=? "
+                "AND (active_generation_id IS NULL OR desired_state='enabled') "
+                "AND desired_state=? AND (?='enabled' OR (NOT EXISTS ("
+                "SELECT 1 FROM note_semantic_work WHERE owner_user_id=? AND dataset_id=? "
+                "AND claim_state IN ('pending','claimed','failed')) AND NOT EXISTS ("
+                "SELECT 1 FROM note_semantic_generations WHERE owner_user_id=? "
+                "AND dataset_id=? AND deleted_at IS NULL) AND NOT EXISTS ("
+                "SELECT 1 FROM note_semantic_obsolete_vectors WHERE owner_user_id=? "
+                "AND dataset_id=?))) ",
                 values,
             )
             if cursor.rowcount != 1:
@@ -1863,6 +1924,28 @@ class NoteSemanticStore:
                 "SELECT 1 FROM note_semantic_work "
                 "WHERE owner_user_id=? AND dataset_id=? AND kind='delete_generation' "
                 "AND claim_state IN ('pending','claimed','failed') LIMIT 1",
+                (self.owner_user_id, dataset),
+            ).fetchone()
+        return row is not None
+
+    def can_rebind_disabled_configuration(self, dataset_id: str) -> bool:
+        """Return whether prior semantic storage is confirmed clean."""
+
+        dataset = self._scope(dataset_id)
+        with self._db.transaction() as conn:
+            self._set_scope(conn, dataset)
+            row = conn.execute(
+                "SELECT 1 FROM note_semantic_index_configs c WHERE "
+                "c.owner_user_id=? AND c.dataset_id=? AND c.desired_state='disabled' "
+                "AND c.active_generation_id IS NULL AND NOT EXISTS ("
+                "SELECT 1 FROM note_semantic_work w WHERE w.owner_user_id=c.owner_user_id "
+                "AND w.dataset_id=c.dataset_id AND "
+                "w.claim_state IN ('pending','claimed','failed')) AND NOT EXISTS ("
+                "SELECT 1 FROM note_semantic_generations g WHERE "
+                "g.owner_user_id=c.owner_user_id AND g.dataset_id=c.dataset_id "
+                "AND g.deleted_at IS NULL) AND NOT EXISTS ("
+                "SELECT 1 FROM note_semantic_obsolete_vectors o WHERE "
+                "o.owner_user_id=c.owner_user_id AND o.dataset_id=c.dataset_id) LIMIT 1",
                 (self.owner_user_id, dataset),
             ).fetchone()
         return row is not None

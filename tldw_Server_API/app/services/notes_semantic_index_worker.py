@@ -410,7 +410,11 @@ class ProductionSemanticRuntime:
             ),
             dimensions=config.dimensions if config is not None else None,
             vector_backend=str(config.vector_backend or "") if config is not None else "",
-            vector_capable=current.indexing_available,
+            vector_capable=(
+                current.indexing_available
+                and config is not None
+                and current.vector_backend == config.vector_backend
+            ),
         )
 
     def _request(self) -> InitialGenerationRequest:

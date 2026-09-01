@@ -124,6 +124,7 @@ class SemanticCapabilities:
     execution_boundary: Literal["local", "external"]
     storage_boundary: Literal["local", "external", "unavailable"]
     storage_label: str
+    vector_backend: str
     outbound_data_categories: tuple[str, ...]
     durable_credential_available: bool
     compatibility_hash: str | None
@@ -131,6 +132,7 @@ class SemanticCapabilities:
     capability_revision: str
     metric: str
     resolved_dimensions: int | None
+    dimension_probe_required: bool
     effective_limits: SemanticIndexSettings
     indexing_available: bool
     unavailable_reason: str | None
@@ -156,7 +158,9 @@ def _endpoint_display(endpoint_url: str | None) -> str | None:
         port = parsed.port
     except ValueError:
         return None
-    return f"{parsed.scheme}://{parsed.hostname.lower()}{f':{port}' if port is not None else ''}"
+    hostname = parsed.hostname.lower()
+    display_host = f"[{hostname}]" if ":" in hostname else hostname
+    return f"{parsed.scheme}://{display_host}{f':{port}' if port is not None else ''}"
 
 
 def _endpoint_origin_revision(endpoint_display: str | None) -> str:
@@ -218,7 +222,9 @@ def build_semantic_capabilities(
             "model_revision": model_revision,
             "endpoint_origin_revision": endpoint_origin_revision,
             "execution_boundary": execution_boundary,
+            "vector_backend": backend_key,
             "storage_boundary": storage_boundary,
+            "storage_label": storage_label,
             "outbound_data_categories": outbound_categories,
         }
     )
@@ -227,8 +233,6 @@ def build_semantic_capabilities(
     unavailable_reason: str | None = None
     if not settings.indexing_enabled:
         unavailable_reason = "notes_semantic_indexing_disabled"
-    elif contract.resolved_dimensions is None:
-        unavailable_reason = "notes_semantic_dimensions_pending"
     elif contract.active_note_count > settings.max_active_notes:
         unavailable_reason = "notes_semantic_active_note_limit_exceeded"
     elif contract.metric != "cosine":
@@ -247,8 +251,15 @@ def build_semantic_capabilities(
         unavailable_reason = "notes_semantic_provider_unavailable"
     elif backend_key == "unavailable" or storage_boundary == "unavailable" or not contract.vector_storage_available:
         unavailable_reason = "notes_semantic_vector_storage_unavailable"
-    elif backend_key == "pgvector" and contract.resolved_dimensions not in settings.pgvector_allowed_dimensions:
+    elif (
+        backend_key == "pgvector"
+        and contract.resolved_dimensions is not None
+        and contract.resolved_dimensions not in settings.pgvector_allowed_dimensions
+    ):
         unavailable_reason = "notes_semantic_pgvector_dimensions_unsupported"
+    dimension_probe_required = (
+        contract.resolved_dimensions is None and unavailable_reason is None
+    )
     limits_payload = asdict(settings)
     limits_payload["pgvector_allowed_dimensions"] = sorted(
         settings.pgvector_allowed_dimensions
@@ -273,6 +284,7 @@ def build_semantic_capabilities(
         execution_boundary=execution_boundary,
         storage_boundary=storage_boundary,
         storage_label=storage_label,
+        vector_backend=backend_key,
         outbound_data_categories=outbound_categories,
         durable_credential_available=contract.credential_source == "durable",
         compatibility_hash=compatibility_hash,
@@ -280,6 +292,7 @@ def build_semantic_capabilities(
         capability_revision=capability_revision,
         metric=contract.metric,
         resolved_dimensions=contract.resolved_dimensions,
+        dimension_probe_required=dimension_probe_required,
         effective_limits=settings,
         indexing_available=unavailable_reason is None,
         unavailable_reason=unavailable_reason,

@@ -6652,5 +6652,17 @@
   },
   "notesSearch_semanticRenewStarted": {
     "message": "Consent renewed and semantic index rebuild started."
+  },
+  "notesSearch_semanticEndpoint": {
+    "message": "Endpoint destination"
+  },
+  "notesSearch_semanticDetail_rebuild_required": {
+    "message": "The current semantic index does not match this configuration. Rebuild it before using similar-content relationships."
+  },
+  "notesSearch_semanticBackendChangeRequiresDelete": {
+    "message": "Vector storage changed. Delete the existing index before setting it up again."
+  },
+  "notesSearch_semanticError_backendChangeRequiresDelete": {
+    "message": "Vector storage changed. Delete the existing index before setting it up again."
   }
 }

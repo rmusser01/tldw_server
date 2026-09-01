@@ -201,6 +201,47 @@ def test_renew_configuration_consent_updates_identity_under_cas_and_preserves_ac
     assert db.note_semantic_store.get_configuration(DATASET_ID) == renewed
 
 
+def test_renew_configuration_consent_can_atomically_restore_pending_dimensions(
+    db: CharactersRAGDB,
+) -> None:
+    resolved_config, generation = _create_resolved_generation(db)
+    active = db.note_semantic_store.activate_generation(
+        dataset_id=DATASET_ID,
+        generation_id=generation.id,
+        expected_configuration_revision=resolved_config.configuration_revision,
+        publication_receipt="receipt-pending-renewal",
+        now=NOW,
+    )
+    assert active is not None
+
+    renewed = db.note_semantic_store.renew_configuration_consent(
+        dataset_id=DATASET_ID,
+        expected_configuration_revision=active.configuration_revision,
+        capability_revision="capability-pending",
+        disclosure_hash="disclosure-pending",
+        compatibility_hash=None,
+        provider="provider-b",
+        model="model-b",
+        model_revision=None,
+        endpoint_origin_revision="origin-pending",
+        endpoint_origin_display="https://embeddings.example.test",
+        data_boundary="external",
+        vector_backend=active.vector_backend or "chromadb",
+        storage_boundary="local",
+        storage_label="chromadb",
+        resolved_dimensions=None,
+        normalization_version="normalization-v2",
+        chunker_version="chunker-v2",
+        now=NOW + timedelta(minutes=5),
+    )
+
+    assert renewed is not None
+    assert renewed.dimension_state is SemanticDimensionState.PENDING
+    assert renewed.dimensions is None
+    assert renewed.compatibility_hash is None
+    assert renewed.active_generation_id == active.active_generation_id
+
+
 @pytest.mark.parametrize("prior_state", ["pending", "completed"])
 @pytest.mark.parametrize("reuse_kind", ["exact_key", "same_fingerprint"])
 def test_expired_operation_receipts_do_not_block_key_or_fingerprint_reuse(
