@@ -1242,11 +1242,16 @@ def discover_models_from_endpoint(
     # timeout x len(candidates) on every call -- and failures are deliberately
     # never cached, so that cost repeated on every request.
     #
-    # Results are consumed as they complete and the loop stops on the first
-    # "ready", so a healthy endpoint still answers as fast as its quickest
-    # candidate. A healthy endpoint does receive the extra candidate requests,
-    # but a "ready" result is cached for LOCAL_MODEL_DISCOVERY_TTL, so that
-    # happens at most once per TTL rather than per request.
+    # Cancelling on the first "ready" only skips candidates that have not started
+    # yet, which is why it is worth doing at all: with more candidates than
+    # workers, the queued ones never run. Probes already in flight are still
+    # waited for -- the executor shuts down normally rather than abandoning
+    # threads -- so the floor is one probe's worth of time, bounded by
+    # LOCAL_MODEL_DISCOVERY_TIMEOUT, not the sum across candidates.
+    #
+    # A healthy endpoint does receive the extra candidate requests, but a "ready"
+    # result is cached for LOCAL_MODEL_DISCOVERY_TTL, so that happens at most
+    # once per TTL rather than per request.
     if candidates:
         with ThreadPoolExecutor(
             max_workers=min(len(candidates), _MODEL_DISCOVERY_MAX_PARALLEL_PROBES),

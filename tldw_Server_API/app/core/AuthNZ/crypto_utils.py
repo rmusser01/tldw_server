@@ -9,9 +9,10 @@ between JWTService, APIKeyManager, CSRF, and SessionManager.
 
 from __future__ import annotations
 
-import functools
 import hashlib
 import os
+import threading
+from collections import OrderedDict
 
 from loguru import logger
 
@@ -53,15 +54,36 @@ def _derive_hmac_kdf_salt(source: bytes) -> bytes:
 # The per-request secret -- the presented API key -- is the HMAC *message*, not
 # the KDF input, and is unaffected.
 #
-# Keying on the source bytes means a rotated or reconfigured secret is a
-# different key and misses the cache, so there is nothing to invalidate. The
-# bound keeps rotation or per-test settings churn from growing it without limit.
+# Entries are keyed by a fingerprint of the source rather than the source, so
+# the cache is not a second long-lived copy of the configured secret. A rotated
+# or reconfigured secret has a different fingerprint and misses the cache, so
+# there is nothing to invalidate; the bound keeps rotation or per-test settings
+# churn from growing the cache without limit.
 _HMAC_KEY_CACHE_MAXSIZE = 64
 
+_HMAC_KEY_CACHE: OrderedDict[tuple[bytes, bool], bytes] = OrderedDict()
+_HMAC_KEY_CACHE_LOCK = threading.Lock()
 
-@functools.lru_cache(maxsize=_HMAC_KEY_CACHE_MAXSIZE)
-def _derive_hmac_key_cached(source: bytes, legacy: bool) -> bytes:
-    return hashlib.pbkdf2_hmac(
+
+def _derive_hmac_key_from_source(source: bytes, *, legacy: bool = False) -> bytes:
+    """Return the stretched key for ``source``, deriving it at most once.
+
+    Args:
+        source: Secret material to stretch. Server configuration, never
+            caller-supplied input.
+        legacy: When True, use the fixed legacy salt instead of a per-secret one.
+
+    Returns:
+        The 32-byte derived key.
+    """
+    cache_key = (hashlib.sha256(source).digest(), legacy)
+    with _HMAC_KEY_CACHE_LOCK:
+        cached = _HMAC_KEY_CACHE.get(cache_key)
+        if cached is not None:
+            _HMAC_KEY_CACHE.move_to_end(cache_key)
+            return cached
+
+    derived = hashlib.pbkdf2_hmac(
         "sha256",
         source,
         _HMAC_KDF_SALT_LEGACY if legacy else _derive_hmac_kdf_salt(source),
@@ -69,14 +91,25 @@ def _derive_hmac_key_cached(source: bytes, legacy: bool) -> bytes:
         dklen=_HMAC_KDF_DKLEN,
     )
 
-
-def _derive_hmac_key_from_source(source: bytes, *, legacy: bool = False) -> bytes:
-    return _derive_hmac_key_cached(source, legacy)
+    with _HMAC_KEY_CACHE_LOCK:
+        _HMAC_KEY_CACHE[cache_key] = derived
+        _HMAC_KEY_CACHE.move_to_end(cache_key)
+        while len(_HMAC_KEY_CACHE) > _HMAC_KEY_CACHE_MAXSIZE:
+            _HMAC_KEY_CACHE.popitem(last=False)
+    return derived
 
 
 def reset_hmac_key_cache() -> None:
-    """Drop memoized derived keys. For tests that rotate secrets in place."""
-    _derive_hmac_key_cached.cache_clear()
+    """Drop memoized derived keys.
+
+    For tests that rotate a secret in place, and for anything that needs the
+    next derivation to start from scratch.
+
+    Returns:
+        None.
+    """
+    with _HMAC_KEY_CACHE_LOCK:
+        _HMAC_KEY_CACHE.clear()
 
 
 def derive_hmac_key_from_source(raw: str | bytes, *, legacy: bool = False) -> bytes:

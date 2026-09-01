@@ -16,6 +16,7 @@ which surfaced as ~29 unrelated Setup failures depending on suite order.
 
 from __future__ import annotations
 
+import ast
 import gc
 import weakref
 from pathlib import Path
@@ -24,13 +25,13 @@ import pytest
 from fastapi import FastAPI
 
 from tldw_Server_API.app.services.app_lifecycle import (
-    _LIFECYCLE_APPS,
     is_lifecycle_draining,
     mark_lifecycle_shutdown,
     reset_all_lifecycle_states,
 )
 
 ROOT_CONFTEST = Path(__file__).resolve().parents[1] / "conftest.py"
+FIXTURE_NAME = "_reset_main_app_lifecycle_state_between_tests"
 
 
 @pytest.mark.unit
@@ -68,7 +69,10 @@ def test_registry_does_not_keep_apps_alive() -> None:
     """Tracking apps must not turn every test app into a permanent leak."""
     app = FastAPI()
     mark_lifecycle_shutdown(app)
-    assert app in _LIFECYCLE_APPS
+    # Reaching it here proves it is tracked, so the collection check below is
+    # about a real entry rather than passing vacuously.
+    reset_all_lifecycle_states()
+    assert not is_lifecycle_draining(app)
     ref = weakref.ref(app)
 
     del app
@@ -79,11 +83,35 @@ def test_registry_does_not_keep_apps_alive() -> None:
 
 @pytest.mark.unit
 def test_root_fixture_resets_every_app_not_just_the_current_one() -> None:
-    """Guard the wiring: the semantics above only help if the fixture uses them."""
-    source = ROOT_CONFTEST.read_text(encoding="utf-8")
+    """Guard the wiring: the semantics above only help if the fixture calls them.
 
-    assert "reset_all_lifecycle_states" in source, (
-        f"{ROOT_CONFTEST.name} no longer resets every app with lifecycle state. "
+    Checks for the *call*, inside the fixture, rather than for the name
+    anywhere in the file -- an import left behind after the call was deleted
+    would satisfy a substring check while resetting nothing.
+    """
+    tree = ast.parse(ROOT_CONFTEST.read_text(encoding="utf-8"))
+
+    fixture = next(
+        (
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef)
+            and node.name == FIXTURE_NAME
+        ),
+        None,
+    )
+    assert fixture is not None, (
+        f"{ROOT_CONFTEST.name} no longer defines {FIXTURE_NAME}(), so nothing "
+        "clears drain state between tests."
+    )
+
+    called = {
+        node.func.id
+        for node in ast.walk(fixture)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    assert "reset_all_lifecycle_states" in called, (
+        f"{FIXTURE_NAME}() no longer calls reset_all_lifecycle_states(). "
         "Resetting only the app exported by app.main leaves apps pinned by "
         "earlier imports draining, which 503s unrelated tests downstream."
     )

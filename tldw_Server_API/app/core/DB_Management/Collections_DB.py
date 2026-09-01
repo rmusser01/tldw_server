@@ -630,6 +630,17 @@ def _decorate_collections_public_operations(cls: type["CollectionsDatabase"]) ->
     return cls
 
 
+# Spans the whole of ensure_schema(): the first table it creates through the
+# last, so a partially built database fails verification.
+_COLLECTIONS_REQUIRED_TABLES = (
+    "output_templates",
+    "outputs",
+    "reminder_tasks",
+    "file_artifacts",
+    "audio_studio_idempotency_keys",
+)
+
+
 @_decorate_collections_public_operations
 class CollectionsDatabase:
     """Adapter for Collections tables stored in the per-user Media DB."""
@@ -654,17 +665,22 @@ class CollectionsDatabase:
         if self._backend.backend_type == BackendType.POSTGRESQL:
             self._ensure_bootstrap_for_backend(self._backend)
         else:
-            # SQLite ran the full bootstrap on every construction -- roughly 85
-            # DDL statements, and this class is built per request. It is
+            # SQLite replayed the schema on every construction -- roughly 85 DDL
+            # statements, and this class is built per request. It is
             # de-duplicated on the database's *file identity* rather than the
             # Postgres target key, which for SQLite is just a path: a database
-            # deleted and recreated at that path must be bootstrapped again.
+            # deleted and recreated at that path must be set up again.
             ensure_once(
                 "collections",
                 getattr(getattr(self._backend, "config", None), "sqlite_path", None),
-                self._run_backend_bootstrap,
+                self.ensure_schema,
                 verify=self._collections_schema_present,
             )
+            # Deliberately outside the memo. This reconciles output templates
+            # against files that change on disk, so it has to keep running:
+            # "the tables exist" says nothing about whether their contents are
+            # current. Only the schema DDL above is safe to skip.
+            self._seed_watchlists_output_templates()
 
     @classmethod
     def for_user(cls, user_id: int | str) -> CollectionsDatabase:
@@ -728,24 +744,26 @@ class CollectionsDatabase:
         return getattr(self._local, "backend_pin", None)
 
     def _collections_schema_present(self) -> bool:
-        """Cheap check that bootstrap output still exists in this database.
+        """Cheap check that this database still has the collections tables.
 
         Test fixtures delete and recreate the database at a fixed path, and a
         filesystem may reuse the inode, so file identity alone can produce a
-        false memo hit. One catalogue lookup is enough to catch that, and is
-        still far cheaper than replaying the whole bootstrap.
+        false memo hit. A catalogue lookup catches that, and is still far
+        cheaper than replaying the whole schema.
+
+        Checks a set spanning the whole of ``ensure_schema()`` rather than one
+        table, so a database holding only part of the schema is rebuilt instead
+        of being accepted. ``audio_studio_idempotency_keys`` is the last table
+        the routine creates. Failures propagate to :func:`ensure_once`, which
+        logs them and rebuilds.
         """
-        try:
-            rows = self._backend.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
-                ("output_templates",),
-            )
-        except Exception:
-            return False
-        try:
-            return bool(list(rows))
-        except TypeError:
-            return bool(rows)
+        rows = self._backend.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name IN "
+            "(?, ?, ?, ?, ?)",
+            _COLLECTIONS_REQUIRED_TABLES,
+        )
+        found = {row[0] for row in rows}
+        return found.issuperset(_COLLECTIONS_REQUIRED_TABLES)
 
     def _run_backend_bootstrap(self) -> None:
         self.ensure_schema()

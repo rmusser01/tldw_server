@@ -1706,6 +1706,18 @@ def _idempotency_record_from_row(row: sqlite3.Row | None) -> IdempotencyRecordRo
     )
 
 
+# Every table ensure_schema() creates, so a partially built database fails
+# verification instead of being accepted from the memo.
+_SCHEDULED_TASKS_REQUIRED_TABLES = (
+    "scheduled_task_previews",
+    "scheduled_task_definitions",
+    "scheduled_task_audit_events",
+    "scheduled_task_idempotency",
+    "scheduled_task_runs",
+    "scheduled_task_results",
+)
+
+
 class ScheduledTasksDatabase:
     """SQLite repository for one user's Scheduled Tasks automation database."""
 
@@ -1717,6 +1729,22 @@ class ScheduledTasksDatabase:
         """Return the per-user Scheduled Tasks repository for ``user_id``."""
         user_dir = DatabasePaths.get_user_base_directory(user_id)
         return cls(user_dir / _SCHEDULED_TASKS_DB_NAME)
+
+    def schema_present(self) -> bool:
+        """Report whether this database still has the Scheduled Tasks tables.
+
+        Cheap enough to run in place of :meth:`ensure_schema` when that has
+        already run for this database in this process -- one catalogue query
+        against roughly 175 DDL statements. Checks every table the routine
+        creates, so a partially built database reports False and is rebuilt.
+        """
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name IN "
+                "(?, ?, ?, ?, ?, ?)",
+                _SCHEDULED_TASKS_REQUIRED_TABLES,
+            ).fetchall()
+        return {row[0] for row in rows}.issuperset(_SCHEDULED_TASKS_REQUIRED_TABLES)
 
     def ensure_schema(self) -> None:
         """Create Scheduled Tasks automation tables and indexes if needed."""
