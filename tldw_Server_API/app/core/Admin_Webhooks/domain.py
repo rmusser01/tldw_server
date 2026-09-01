@@ -11,7 +11,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import SplitResult
 
 from tldw_Server_API.app.core.exceptions import WebhookError
@@ -188,13 +188,9 @@ class DeliveryReasonCode(str, Enum):
     HTTP_HOP_PROTOCOL_ERROR = "http_hop_protocol_error"
     HTTP_HOP_RESPONSE_HEADERS_TOO_LARGE = "http_hop_response_headers_too_large"
     HTTP_HOP_RESPONSE_TOO_LARGE = "http_hop_response_too_large"
-    HTTP_HOP_DECOMPRESSED_RESPONSE_TOO_LARGE = (
-        "http_hop_decompressed_response_too_large"
-    )
+    HTTP_HOP_DECOMPRESSED_RESPONSE_TOO_LARGE = "http_hop_decompressed_response_too_large"
     HTTP_HOP_PARSER_INPUT_TOO_LARGE = "http_hop_parser_input_too_large"
-    HTTP_HOP_UNSUPPORTED_CONTENT_ENCODING = (
-        "http_hop_unsupported_content_encoding"
-    )
+    HTTP_HOP_UNSUPPORTED_CONTENT_ENCODING = "http_hop_unsupported_content_encoding"
     HTTP_HOP_INVALID_CONTENT_ENCODING = "http_hop_invalid_content_encoding"
     HTTP_HOP_TRANSPORT_ERROR = "http_hop_transport_error"
 
@@ -214,6 +210,31 @@ class DeliveryRuntimeReasonCode(str, Enum):
     RECONCILER_UNAVAILABLE = "reconciler_unavailable"
     RETENTION_UNAVAILABLE = "retention_unavailable"
     HEARTBEAT_STALE = "heartbeat_stale"
+
+
+class AdminWebhookActivationPhase(str, Enum):
+    """Closed two-phase activation check requested by an operator."""
+
+    PREDEPLOY = "predeploy"
+    LIVE = "live"
+
+
+class AdminWebhookActivationReasonCode(str, Enum):
+    """Closed reasons that can make an activation check fail."""
+
+    PHASE_MISMATCH = "phase_mismatch"
+    DATABASE_UNAVAILABLE = "database_unavailable"
+    SCHEMA_UNREADY = "schema_unready"
+    MIGRATION_PENDING = "migration_pending"
+    KEY_UNAVAILABLE = "key_unavailable"
+    KEY_CONFIGURATION_MISMATCH = "key_configuration_mismatch"
+    JOBS_UNAVAILABLE = "jobs_unavailable"
+    REGISTRATION_LIMIT_EXCEEDED = "registration_limit_exceeded"
+    ACTIVE_LIMIT_EXCEEDED = "active_limit_exceeded"
+    WORKER_UNAVAILABLE = "worker_unavailable"
+    RECONCILER_UNAVAILABLE = "reconciler_unavailable"
+    RETENTION_UNAVAILABLE = "retention_unavailable"
+    BACKLOG_AGE_EXCEEDED = "backlog_age_exceeded"
 
 
 class EventSourceKind(str, Enum):
@@ -302,8 +323,7 @@ class DeliveryHistoryItem:
         numbers = tuple(attempt.attempt_number for attempt in self.attempts)
         if (
             any(
-                not isinstance(attempt, WebhookDeliveryAttempt)
-                or attempt.delivery_id != self.delivery.id
+                not isinstance(attempt, WebhookDeliveryAttempt) or attempt.delivery_id != self.delivery.id
                 for attempt in self.attempts
             )
             or numbers != tuple(sorted(numbers))
@@ -381,10 +401,7 @@ class DeliveryBacklogCounts:
     retry_wait: int = 0
 
     def __post_init__(self) -> None:
-        if any(
-            isinstance(value, bool) or not isinstance(value, int) or value < 0
-            for value in self.__dict__.values()
-        ):
+        if any(isinstance(value, bool) or not isinstance(value, int) or value < 0 for value in self.__dict__.values()):
             raise ValueError("delivery backlog count is invalid")
 
 
@@ -482,13 +499,35 @@ class WebhookStatus:
     """Sanitized canonical control-plane and delivery status projection."""
 
     mode: str
-    route_selection: str
+    route_selection: Literal["canonical"]
     schema_ready: bool
     key_state: str
     delivery_capability_ready: bool
     delivery: DeliveryCapabilityStatus
     limits: WebhookLimits
     migration: WebhookMigrationSummary
+
+
+@dataclass(frozen=True)
+class AdminWebhookActivationCheck:
+    """Sanitized read-only result for one activation phase."""
+
+    phase: AdminWebhookActivationPhase
+    ready: bool
+    mode: str
+    schema_ready: bool
+    migration_complete: bool
+    key_ready: bool
+    jobs_ready: bool
+    limits_ready: bool
+    worker_ready: bool
+    reconciler_ready: bool
+    retention_ready: bool
+    runtime_ready: bool
+    backlog_age_ready: bool
+    oldest_nonterminal_age_seconds: int | None
+    max_backlog_age_seconds: int
+    reason_codes: tuple[AdminWebhookActivationReasonCode, ...]
 
 
 @dataclass(frozen=True)
@@ -605,8 +644,7 @@ class PendingIncidentWebhookMarker:
         )
         if self.source_kind == "aggregate":
             if self.source_command_id is not None or any(
-                value is None or _MARKER_ID_PATTERN.fullmatch(value) is None
-                for value in aggregate_values
+                value is None or _MARKER_ID_PATTERN.fullmatch(value) is None for value in aggregate_values
             ):
                 raise ValueError("pending aggregate marker identity is invalid")
         elif (
@@ -635,11 +673,7 @@ class PendingIncidentWebhookMarker:
             aggregate_type = self.aggregate_type
             aggregate_id = self.aggregate_id
             aggregate_version = self.aggregate_version
-            if (
-                aggregate_type is None
-                or aggregate_id is None
-                or aggregate_version is None
-            ):
+            if aggregate_type is None or aggregate_id is None or aggregate_version is None:
                 raise ValueError("pending aggregate marker identity is invalid")
             identity.update(
                 {
@@ -699,9 +733,7 @@ class PendingIncidentWebhookMarker:
                 raise ValueError("pending incident marker record is invalid")
             required_text[name] = item
         try:
-            created_at = datetime.fromisoformat(
-                required_text["created_at"].replace("Z", "+00:00")
-            )
+            created_at = datetime.fromisoformat(required_text["created_at"].replace("Z", "+00:00"))
         except ValueError:
             raise ValueError("pending incident marker record is invalid") from None
         return cls(
@@ -807,9 +839,7 @@ def idempotency_lookup_digest(
     """Return the domain-separated lookup digest for a raw command key."""
     key = validate_idempotency_key(idempotency_key)
     payload = _canonical_json_bytes({"scope": asdict(scope)})
-    digest = hashlib.sha256(
-        _LOOKUP_DOMAIN + payload + b"\x00" + key.encode("ascii")
-    ).hexdigest()
+    digest = hashlib.sha256(_LOOKUP_DOMAIN + payload + b"\x00" + key.encode("ascii")).hexdigest()
     return f"sha256:{digest}"
 
 

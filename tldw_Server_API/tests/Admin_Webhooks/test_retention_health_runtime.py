@@ -672,7 +672,6 @@ async def test_runtime_recovers_after_jobs_constructor_fails_once(
     )
     settings = SimpleNamespace(
         mode=runtime.AdminWebhookMode.ON,
-        route_selection=runtime.WebhookRouteSelection.CANONICAL,
         delivery_claim_ttl_seconds=60,
         delivery_loop_interval_seconds=0.01,
         delivery_heartbeat_freshness_seconds=30,

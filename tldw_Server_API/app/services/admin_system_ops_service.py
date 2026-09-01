@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import errno
-import hashlib
-import hmac
 import json
 import os
 import secrets
@@ -54,15 +52,6 @@ _INCIDENT_SEVERITIES = {"low", "medium", "high", "critical"}
 _INCIDENT_ACTION_ITEM_LIMIT = 25
 _INCIDENT_ACTION_ITEM_TEXT_MAX_LENGTH = 500
 _UNSET = object()
-
-_WEBHOOK_EVENTS = {
-    "user.created",
-    "user.deleted",
-    "incident.created",
-    "incident.updated",
-    "incident.resolved",
-}
-_WEBHOOK_MAX_URL_LENGTH = 2048
 
 _STORE_LOCK = Lock()
 _STORE_PATH = Path(get_database_dir()) / "system_ops.json"
@@ -181,8 +170,6 @@ def _default_store() -> dict[str, Any]:
         },
         "feature_flags": [],
         "incidents": [],
-        "webhooks": [],
-        "webhook_deliveries": [],
         "invitations": [],
         "dependency_health_history": [],
         "email_delivery_log": [],
@@ -537,8 +524,6 @@ def _load_store() -> dict[str, Any]:
     data.setdefault("maintenance", _default_store()["maintenance"])
     data.setdefault("feature_flags", [])
     data.setdefault("incidents", [])
-    data.setdefault("webhooks", [])
-    data.setdefault("webhook_deliveries", [])
     data.setdefault("invitations", [])
     data.setdefault("dependency_health_history", [])
     data.setdefault("email_delivery_log", [])
@@ -1472,270 +1457,6 @@ async def notify_incident_stakeholders(
     )
 
     return {"incident_id": incident_id, "notifications": results}
-
-
-# -----------------------------------------------------------------------------------------------------------------
-# Webhooks
-# -----------------------------------------------------------------------------------------------------------------
-
-
-def _normalize_webhook_record(value: Any) -> dict[str, Any]:
-    """Normalize a raw webhook dict from the store."""
-    if not isinstance(value, dict):
-        raise ValueError("invalid_webhook")
-    return {
-        "id": str(value.get("id") or ""),
-        "url": str(value.get("url") or ""),
-        "events": list(value.get("events") or []),
-        "enabled": bool(value.get("enabled", True)),
-        "created_at": value.get("created_at"),
-        "updated_at": value.get("updated_at"),
-    }
-
-
-def _redact_webhook(webhook: dict[str, Any]) -> dict[str, Any]:
-    """Return a copy of the webhook with the secret removed (for list responses)."""
-    result = dict(webhook)
-    result.pop("secret", None)
-    return result
-
-
-def list_webhooks() -> list[dict[str, Any]]:
-    """Return all webhooks with secrets redacted."""
-    with _locked_store() as store:
-        webhooks_raw = list(store.get("webhooks", []))
-    webhooks = []
-    for webhook in webhooks_raw:
-        try:
-            webhooks.append(_redact_webhook(_normalize_webhook_record(webhook)))
-        except ValueError:
-            continue
-    webhooks.sort(key=lambda item: item.get("created_at") or "")
-    return webhooks
-
-
-def create_webhook(
-    *,
-    url: str,
-    events: list[str],
-    enabled: bool = True,
-) -> dict[str, Any]:
-    """Create a new webhook and return it with the secret included (shown once)."""
-    url_norm = (url or "").strip()
-    if not url_norm:
-        raise ValueError("invalid_url")
-    if len(url_norm) > _WEBHOOK_MAX_URL_LENGTH:
-        raise ValueError("invalid_url")
-    if not url_norm.startswith(("http://", "https://")):
-        raise ValueError("invalid_url")
-
-    events_norm = sorted({e.strip().lower() for e in (events or []) if e and e.strip()})
-    if not events_norm:
-        raise ValueError("invalid_events")
-    invalid_events = set(events_norm) - _WEBHOOK_EVENTS
-    if invalid_events:
-        raise ValueError("invalid_events")
-
-    now = _now_iso()
-    webhook_id = f"wh_{uuid4().hex[:10]}"
-    secret = secrets.token_hex(32)
-    webhook = {
-        "id": webhook_id,
-        "url": url_norm,
-        "secret": secret,
-        "events": events_norm,
-        "enabled": bool(enabled),
-        "created_at": now,
-        "updated_at": now,
-    }
-    with _locked_store(write=True) as store:
-        store.setdefault("webhooks", []).append(webhook)
-    # Return with secret so caller can show it once
-    return dict(webhook)
-
-
-def update_webhook(
-    *,
-    webhook_id: str,
-    url: str | None = None,
-    events: list[str] | None = None,
-    enabled: bool | None = None,
-) -> dict[str, Any]:
-    """Update a webhook. Returns the webhook with secret redacted."""
-    now = _now_iso()
-    with _locked_store(write=True) as store:
-        webhooks = store.get("webhooks", [])
-        for webhook in webhooks:
-            if webhook.get("id") != webhook_id:
-                continue
-            if url is not None:
-                url_norm = url.strip()
-                if not url_norm:
-                    raise ValueError("invalid_url")
-                if len(url_norm) > _WEBHOOK_MAX_URL_LENGTH:
-                    raise ValueError("invalid_url")
-                if not url_norm.startswith(("http://", "https://")):
-                    raise ValueError("invalid_url")
-                webhook["url"] = url_norm
-            if events is not None:
-                events_norm = sorted({e.strip().lower() for e in events if e and e.strip()})
-                if not events_norm:
-                    raise ValueError("invalid_events")
-                invalid = set(events_norm) - _WEBHOOK_EVENTS
-                if invalid:
-                    raise ValueError("invalid_events")
-                webhook["events"] = events_norm
-            if enabled is not None:
-                webhook["enabled"] = bool(enabled)
-            webhook["updated_at"] = now
-            return _redact_webhook(_normalize_webhook_record(webhook))
-    raise ValueError("not_found")
-
-
-def delete_webhook(*, webhook_id: str) -> None:
-    """Delete a webhook by ID."""
-    with _locked_store(write=True) as store:
-        webhooks = store.get("webhooks", [])
-        remaining = [item for item in webhooks if item.get("id") != webhook_id]
-        if len(remaining) == len(webhooks):
-            raise ValueError("not_found")
-        store["webhooks"] = remaining
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Webhook Delivery Log
-# ──────────────────────────────────────────────────────────────────────────────
-
-_WEBHOOK_DELIVERIES_CAP = 1000
-
-
-def _get_webhook_with_secret(webhook_id: str) -> dict[str, Any]:
-    """Return a webhook record including its secret. Raises ValueError if not found."""
-    with _locked_store() as store:
-        for webhook in store.get("webhooks", []):
-            if webhook.get("id") == webhook_id:
-                return dict(webhook)
-    raise ValueError("not_found")
-
-
-def record_webhook_delivery(
-    *,
-    webhook_id: str,
-    event_type: str,
-    status_code: int | None,
-    response_time_ms: int | None,
-    success: bool,
-    error: str | None = None,
-    payload_preview: str | None = None,
-) -> dict[str, Any]:
-    """Append a delivery record for a webhook. Prunes oldest entries beyond cap."""
-    now = _now_iso()
-    record = {
-        "id": f"wd_{uuid4().hex[:12]}",
-        "webhook_id": str(webhook_id),
-        "event_type": str(event_type or ""),
-        "status_code": int(status_code) if status_code is not None else None,
-        "response_time_ms": int(response_time_ms) if response_time_ms is not None else None,
-        "success": bool(success),
-        "error": str(error)[:500] if error else None,
-        "attempted_at": now,
-        "payload_preview": str(payload_preview)[:500] if payload_preview else None,
-    }
-    with _locked_store(write=True) as store:
-        deliveries = store.setdefault("webhook_deliveries", [])
-        deliveries.append(record)
-        # Keep only the most recent entries per webhook (prune oldest)
-        wh_deliveries = [d for d in deliveries if d.get("webhook_id") == webhook_id]
-        if len(wh_deliveries) > _WEBHOOK_DELIVERIES_CAP:
-            excess = len(wh_deliveries) - _WEBHOOK_DELIVERIES_CAP
-            # Remove the oldest excess entries for this webhook
-            removed = 0
-            pruned: list[dict[str, Any]] = []
-            for d in deliveries:
-                if d.get("webhook_id") == webhook_id and removed < excess:
-                    removed += 1
-                    continue
-                pruned.append(d)
-            store["webhook_deliveries"] = pruned
-    return record
-
-
-def list_webhook_deliveries(
-    *,
-    webhook_id: str,
-    limit: int = 50,
-    offset: int = 0,
-) -> tuple[list[dict[str, Any]], int]:
-    """Return delivery records for a webhook, newest first."""
-    limit = max(1, min(limit, _WEBHOOK_DELIVERIES_CAP))
-    offset = max(0, int(offset))
-    with _locked_store() as store:
-        deliveries = store.get("webhook_deliveries", [])
-        wh_deliveries = [d for d in deliveries if d.get("webhook_id") == webhook_id]
-    # Sort newest first
-    wh_deliveries.sort(key=lambda d: d.get("attempted_at") or "", reverse=True)
-    total = len(wh_deliveries)
-    return wh_deliveries[offset: offset + limit], total
-
-
-def _create_webhook_http_client(*, timeout: float):
-    from tldw_Server_API.app.core.http_client import create_client
-
-    return create_client(timeout=timeout, http2=False)
-
-
-def send_test_webhook(*, webhook_id: str) -> dict[str, Any]:
-    """Send a test payload to a webhook URL with HMAC signing and record the delivery.
-
-    Returns the delivery record.
-    """
-    webhook = _get_webhook_with_secret(webhook_id)
-    url = webhook.get("url", "")
-    secret = webhook.get("secret", "")
-
-    test_payload = {
-        "event": "webhook.test",
-        "webhook_id": webhook_id,
-        "timestamp": _now_iso(),
-        "data": {"message": "This is a test delivery from the admin panel."},
-    }
-
-    body_bytes = json.dumps(test_payload, separators=(",", ":")).encode("utf-8")
-
-    headers: dict[str, str] = {"Content-Type": "application/json"}
-    if secret:
-        sig = hmac.new(secret.encode("utf-8"), body_bytes, hashlib.sha256).hexdigest()
-        headers["X-Webhook-Signature"] = f"sha256={sig}"
-
-    status_code: int | None = None
-    success = False
-    error_msg: str | None = None
-    start = time.monotonic()
-
-    try:
-        with _create_webhook_http_client(timeout=10.0) as client:
-            resp = client.post(url, content=body_bytes, headers=headers)
-            status_code = resp.status_code
-            success = 200 <= resp.status_code < 300
-            if not success:
-                error_msg = f"HTTP {resp.status_code}"
-    except _SYSTEM_OPS_NONCRITICAL_EXCEPTIONS as exc:
-        error_msg = str(exc)[:500]
-    except Exception as exc:
-        error_msg = str(exc)[:500]
-
-    elapsed_ms = int((time.monotonic() - start) * 1000)
-
-    delivery = record_webhook_delivery(
-        webhook_id=webhook_id,
-        event_type="webhook.test",
-        status_code=status_code,
-        response_time_ms=elapsed_ms,
-        success=success,
-        error=error_msg,
-        payload_preview=json.dumps(test_payload)[:500],
-    )
-    return delivery
 
 
 # ──────────────────────────────────────────────────────────────────────────────

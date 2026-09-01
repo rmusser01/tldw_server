@@ -70,7 +70,7 @@ def _registration(*, revision: int = 1) -> WebhookRegistration:
     )
 
 
-def _status(*, route_selection: str = "canonical") -> WebhookStatus:
+def _status() -> WebhookStatus:
     worker = DeliveryComponentStatus(
         component=DeliveryRuntimeComponent.WORKER,
         ready=False,
@@ -111,7 +111,7 @@ def _status(*, route_selection: str = "canonical") -> WebhookStatus:
     )
     return WebhookStatus(
         mode="on",
-        route_selection=route_selection,
+        route_selection="canonical",
         schema_ready=True,
         key_state="available",
         delivery_capability_ready=False,

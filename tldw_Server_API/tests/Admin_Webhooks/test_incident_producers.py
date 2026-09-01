@@ -15,7 +15,6 @@ from tldw_Server_API.app.core.Admin_Webhooks.catalog import EVENT_API_VERSION
 from tldw_Server_API.app.core.Admin_Webhooks.config import (
     AdminWebhookMode,
     AdminWebhookSettings,
-    WebhookRouteSelection,
 )
 from tldw_Server_API.app.core.Admin_Webhooks.crypto import (
     WebhookKeyLoadCode,
@@ -56,7 +55,6 @@ def _ring() -> WebhookKeyRing:
 def _settings(mode: AdminWebhookMode = AdminWebhookMode.ON) -> AdminWebhookSettings:
     return AdminWebhookSettings(
         mode=mode,
-        route_selection=WebhookRouteSelection.CANONICAL,
         registration_limit=100,
         active_limit=25,
         allow_http_dev=False,

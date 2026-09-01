@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-from collections.abc import Mapping
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -12,9 +11,7 @@ from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequireRole
 from tldw_Server_API.app.core.Admin_Webhooks.config import (
-    AdminWebhookMode,
     AdminWebhookSettings,
-    WebhookRouteSelection,
 )
 from tldw_Server_API.app.core.AuthNZ.alerting import (
     get_security_alert_dispatcher as _core_get_security_alert_dispatcher,
@@ -113,28 +110,6 @@ _authnz_migration_lock = asyncio.Lock()
 #######################################################################################################################
 # Router Configuration
 
-_CANONICAL_WEBHOOKS_OFF_WARNING = (
-    "Canonical admin webhook mode is off; historical webhook CRUD, test, "
-    "delivery, and incident-notify routes are disabled. Explicitly select "
-    "temporary compatibility or migration before use."
-)
-
-
-def _mount_admin_webhook_routes(
-    parent: APIRouter,
-    environ: Mapping[str, str],
-) -> AdminWebhookSettings:
-    """Mount status plus exactly one validated webhook route family."""
-    settings = AdminWebhookSettings.from_environment(environ)
-    parent.include_router(admin_webhooks_endpoints.status_router)
-    if settings.route_selection is WebhookRouteSelection.LEGACY:
-        parent.include_router(admin_ops_endpoints.legacy_webhooks_router)
-    else:
-        parent.include_router(admin_webhooks_endpoints.canonical_router)
-        if settings.mode is AdminWebhookMode.OFF:
-            logger.warning(_CANONICAL_WEBHOOKS_OFF_WARNING)
-    return settings
-
 router = APIRouter(
     prefix="/admin",
     tags=["admin"],
@@ -154,7 +129,9 @@ router.include_router(admin_rbac_endpoints.router)
 router.include_router(admin_rate_limits_endpoints.router)
 router.include_router(admin_data_ops_endpoints.router)
 router.include_router(admin_ops_endpoints.router)
-_ADMIN_WEBHOOK_SETTINGS = _mount_admin_webhook_routes(router, os.environ)
+_ADMIN_WEBHOOK_SETTINGS = AdminWebhookSettings.from_environment(os.environ)
+router.include_router(admin_webhooks_endpoints.status_router)
+router.include_router(admin_webhooks_endpoints.canonical_router)
 router.include_router(admin_system_endpoints.router)
 router.include_router(admin_usage_endpoints.router)
 router.include_router(admin_router_analytics_endpoints.router)

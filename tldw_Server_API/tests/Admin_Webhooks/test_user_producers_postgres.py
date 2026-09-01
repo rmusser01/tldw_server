@@ -14,7 +14,6 @@ import pytest
 from tldw_Server_API.app.core.Admin_Webhooks.config import (
     AdminWebhookMode,
     AdminWebhookSettings,
-    WebhookRouteSelection,
 )
 from tldw_Server_API.app.core.Admin_Webhooks.crypto import (
     ProtectedValue,
@@ -69,7 +68,6 @@ def _ring() -> WebhookKeyRing:
 def _settings() -> AdminWebhookSettings:
     return AdminWebhookSettings(
         mode=AdminWebhookMode.ON,
-        route_selection=WebhookRouteSelection.CANONICAL,
         registration_limit=100,
         active_limit=25,
         allow_http_dev=False,

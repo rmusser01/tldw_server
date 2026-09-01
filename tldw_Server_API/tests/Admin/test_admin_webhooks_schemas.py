@@ -86,17 +86,13 @@ def test_patch_requires_at_least_one_non_null_recognized_field() -> None:
         with pytest.raises(ValidationError):
             WebhookPatchRequest.model_validate(payload)
 
-    same_value_candidate = WebhookPatchRequest.model_validate(
-        {"description": "Incident receiver"}
-    )
+    same_value_candidate = WebhookPatchRequest.model_validate({"description": "Incident receiver"})
     assert same_value_candidate.model_fields_set == {"description"}
 
 
 @pytest.mark.unit
 def test_registration_response_is_redacted_and_uses_numeric_identity() -> None:
-    registration = AdminWebhookRegistrationResponse.model_validate(
-        _registration_payload()
-    )
+    registration = AdminWebhookRegistrationResponse.model_validate(_registration_payload())
 
     assert isinstance(registration.id, int)
     assert isinstance(registration.created_at, datetime)
@@ -145,9 +141,7 @@ def test_list_schema_uses_bounded_offset_metadata() -> None:
     assert response.offset == 0
 
     with pytest.raises(ValidationError):
-        WebhookListResponse.model_validate(
-            {"items": [], "total": 0, "limit": 101, "offset": 0}
-        )
+        WebhookListResponse.model_validate({"items": [], "total": 0, "limit": 101, "offset": 0})
 
 
 @pytest.mark.unit
@@ -159,6 +153,47 @@ def test_status_schema_exposes_rollback_state_without_artifact_paths() -> None:
             "schema_ready": True,
             "key_state": "available",
             "delivery_capability_ready": False,
+            "delivery": {
+                "canonical_schema_version": 1,
+                "schema_ready": True,
+                "delivery_schema_ready": True,
+                "migration_complete": True,
+                "key_ready": True,
+                "key_primary_match": True,
+                "jobs_database_ready": True,
+                "queue_ready": True,
+                "job_type_ready": True,
+                "jobs_backend": "sqlite",
+                "worker": {
+                    "component": "worker",
+                    "ready": False,
+                    "reason_code": "mode_migrate",
+                    "heartbeat_age_seconds": None,
+                },
+                "reconciler": {
+                    "component": "reconciler",
+                    "ready": False,
+                    "reason_code": "mode_migrate",
+                    "heartbeat_age_seconds": None,
+                },
+                "retention": {
+                    "component": "retention",
+                    "ready": False,
+                    "reason_code": "mode_migrate",
+                    "heartbeat_age_seconds": None,
+                },
+                "backlog": {
+                    "pending": 0,
+                    "enqueue_claimed": 0,
+                    "queued": 0,
+                    "processing": 0,
+                    "retry_wait": 0,
+                },
+                "oldest_nonterminal_age_seconds": None,
+                "acquisition_ready": False,
+                "acquisition_reason_code": "mode_migrate",
+                "delivery_capability_ready": False,
+            },
             "limits": {
                 "registrations": 100,
                 "active_registrations": 25,

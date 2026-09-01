@@ -17,7 +17,6 @@ from tldw_Server_API.app.core.Admin_Webhooks.catalog import (
 from tldw_Server_API.app.core.Admin_Webhooks.config import (
     AdminWebhookMode,
     AdminWebhookSettings,
-    WebhookRouteSelection,
     is_production_environment_mapping,
 )
 from tldw_Server_API.app.core.Admin_Webhooks.domain import (
@@ -72,9 +71,10 @@ def test_settings_default_off_and_validate_bounds() -> None:
     settings = AdminWebhookSettings.from_environment({})
 
     assert settings.mode is AdminWebhookMode.OFF
-    assert settings.route_selection is WebhookRouteSelection.CANONICAL
+    assert not hasattr(settings, "route_selection")
     assert settings.registration_limit == 100
     assert settings.active_limit == 25
+    assert settings.activation_max_backlog_age_seconds == 300
     assert settings.allow_http_dev is False
     assert settings.idempotency_ttl_seconds == 86_400
     assert settings.rollback_window_days == 7
@@ -225,10 +225,10 @@ def test_settings_reject_noncanonical_boolean(value: str) -> None:
         AdminWebhookSettings.from_environment({"TLDW_ADMIN_WEBHOOKS_LEGACY_COMPAT": value})
 
 
-@pytest.mark.parametrize("mode", ["migrate", "on"])
+@pytest.mark.parametrize("mode", ["off", "migrate", "on"])
 @pytest.mark.unit
-def test_legacy_compatibility_requires_off_mode(mode: str) -> None:
-    with pytest.raises(ValueError, match="requires canonical mode off"):
+def test_legacy_compatibility_true_is_no_longer_supported(mode: str) -> None:
+    with pytest.raises(ValueError, match="no longer supported"):
         AdminWebhookSettings.from_environment(
             {
                 "TLDW_ADMIN_WEBHOOKS_MODE": mode,
@@ -238,13 +238,13 @@ def test_legacy_compatibility_requires_off_mode(mode: str) -> None:
 
 
 @pytest.mark.unit
-def test_legacy_compatibility_selects_only_legacy_routes() -> None:
+def test_explicit_false_legacy_compatibility_value_is_tolerated() -> None:
     settings = AdminWebhookSettings.from_environment(
-        {"TLDW_ADMIN_WEBHOOKS_LEGACY_COMPAT": "true"}
+        {"TLDW_ADMIN_WEBHOOKS_LEGACY_COMPAT": "false"}
     )
 
     assert settings.mode is AdminWebhookMode.OFF
-    assert settings.route_selection is WebhookRouteSelection.LEGACY
+    assert not hasattr(settings, "route_selection")
 
 
 @pytest.mark.parametrize(
@@ -256,6 +256,8 @@ def test_legacy_compatibility_selects_only_legacy_routes() -> None:
         ("TLDW_ADMIN_WEBHOOK_ACTIVE_LIMIT", "1001"),
         ("TLDW_ADMIN_WEBHOOK_ROLLBACK_WINDOW_DAYS", "0"),
         ("TLDW_ADMIN_WEBHOOK_ROLLBACK_WINDOW_DAYS", "31"),
+        ("TLDW_ADMIN_WEBHOOK_ACTIVATION_MAX_BACKLOG_AGE_SECONDS", "0"),
+        ("TLDW_ADMIN_WEBHOOK_ACTIVATION_MAX_BACKLOG_AGE_SECONDS", "86401"),
     ],
 )
 @pytest.mark.unit
@@ -659,7 +661,6 @@ def test_each_webhook_pr_test_has_one_direct_accepted_marker() -> None:
         *sorted(Path(__file__).parent.glob("test_*.py")),
         tests_root / "Admin" / "test_admin_system_ops_service.py",
         tests_root / "Admin" / "test_admin_webhooks_schemas.py",
-        tests_root / "Admin" / "test_admin_webhooks_service.py",
         tests_root / "Admin" / "test_system_ops.py",
         tests_root / "Security" / "test_egress.py",
         tests_root / "Services" / "test_startup_auth.py",

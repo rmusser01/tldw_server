@@ -266,3 +266,37 @@ def test_canonical_models_do_not_rename_evaluation_webhook_schemas() -> None:
     ]["schema"] == {
         "$ref": "#/components/schemas/WebhookRegistrationResponse"
     }
+
+@pytest.mark.unit
+def test_openapi_uses_canonical_registration_shapes_and_integer_ids() -> None:
+    spec = _openapi()
+    schemas = spec["components"]["schemas"]
+    paths = spec["paths"]
+
+    create = schemas["WebhookCreateRequest"]
+    assert set(create["properties"]) == {
+        "description",
+        "event_types",
+        "timeout_seconds",
+        "url",
+    }
+    assert "events" not in create["properties"]
+    assert "enabled" not in create["properties"]
+    assert set(schemas["WebhookPatchRequest"]["properties"]) == {
+        "active",
+        "description",
+        "event_types",
+        "timeout_seconds",
+        "url",
+    }
+
+    parameters = paths["/api/v1/admin/webhooks/{webhook_id}"]["get"]["parameters"]
+    webhook_id = next(item for item in parameters if item["name"] == "webhook_id")
+    assert webhook_id["schema"]["type"] == "integer"
+    for legacy_name in (
+        "WebhookCreateResponse",
+        "WebhookDeliveryItem",
+        "WebhookItem",
+        "WebhookUpdateRequest",
+    ):
+        assert legacy_name not in schemas

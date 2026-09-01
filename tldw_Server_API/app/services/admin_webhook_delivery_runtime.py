@@ -16,7 +16,6 @@ from loguru import logger
 from tldw_Server_API.app.core.Admin_Webhooks.config import (
     AdminWebhookMode,
     AdminWebhookSettings,
-    WebhookRouteSelection,
 )
 from tldw_Server_API.app.core.Admin_Webhooks.crypto import load_webhook_key_ring
 from tldw_Server_API.app.core.Admin_Webhooks.domain import (
@@ -260,7 +259,7 @@ async def _supervise_loop(
 
 async def _build_runtime_components() -> _RuntimeComponents:
     settings = AdminWebhookSettings.from_environment(os.environ)
-    if settings.mode is not AdminWebhookMode.ON or settings.route_selection is not WebhookRouteSelection.CANONICAL:
+    if settings.mode is not AdminWebhookMode.ON:
         raise RuntimeError("canonical admin-webhook runtime mode is not enabled")
     pool = await get_db_pool()
     health_repository = AdminWebhookRepository(pool)

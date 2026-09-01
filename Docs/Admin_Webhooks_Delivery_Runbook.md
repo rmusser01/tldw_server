@@ -3,18 +3,16 @@
 ## Scope And Release State
 
 Canonical admin webhook delivery defaults to off. The supervised runtime starts
-only when both of these validated conditions hold:
-
-- `TLDW_ADMIN_WEBHOOKS_MODE=on`
-- `TLDW_ADMIN_WEBHOOKS_LEGACY_COMPAT=false`, which selects the canonical route
+only when `TLDW_ADMIN_WEBHOOKS_MODE=on`. Canonical routes are always mounted;
+mode controls whether their operations are available.
 
 The lifecycle task is named `admin_webhook_delivery_runtime_task`. It owns the
 canonical prepared worker, reconciler, and retention loops. It does not call or
 alias the legacy `jobs_webhooks_task` service.
 
-This PR 2 substrate is not a release activation. User and incident producers and
-the operational admin UI remain disconnected until PR 3. Do not enable canonical
-mode in deployment configuration until the PR 3 activation gate passes.
+Durable user and incident producers feed this runtime. Do not expand canonical
+`on` mode beyond the no-traffic canary until both activation phases and the
+controlled delivery probes pass.
 
 ## Configuration
 
@@ -36,6 +34,7 @@ Delivery settings are validated at process startup:
 | `TLDW_ADMIN_WEBHOOK_DELIVERY_LOOP_INTERVAL_SECONDS` | 1 | 1-60 |
 | `TLDW_ADMIN_WEBHOOK_DELIVERY_HEARTBEAT_INTERVAL_SECONDS` | 10 | 1-60 |
 | `TLDW_ADMIN_WEBHOOK_DELIVERY_HEARTBEAT_FRESHNESS_SECONDS` | 30 | 1-60 and greater than heartbeat interval |
+| `TLDW_ADMIN_WEBHOOK_ACTIVATION_MAX_BACKLOG_AGE_SECONDS` | 300 | 1-86400 |
 | `TLDW_ADMIN_WEBHOOK_REGISTRATION_LIMIT` | 100 | 1-1000 |
 | `TLDW_ADMIN_WEBHOOK_ACTIVE_LIMIT` | 25 | 1-1000 and no greater than registration limit |
 | `TLDW_ADMIN_WEBHOOKS_ALLOW_HTTP_DEV` | `false` | strict `true` or `false`; `true` is rejected in production |
@@ -58,6 +57,17 @@ If `JOBS_ALLOWED_JOB_TYPES` or
 contain `admin_webhook_delivery`.
 
 ## Readiness
+
+Use the read-only operator checks during rollout:
+
+```bash
+tldw-admin-webhooks activation-check --phase predeploy
+tldw-admin-webhooks activation-check --phase live
+```
+
+Run `predeploy` while every node remains in `migrate`. Run `live` only against
+the no-traffic `on` canary. Each command emits one sanitized JSON object and
+exits nonzero for a phase mismatch or failed gate.
 
 Inspect `GET /api/v1/admin/webhooks/status` as a platform administrator. The
 delivery object is sanitized: it contains no instance ID, URL, payload, secret,

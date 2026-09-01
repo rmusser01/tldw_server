@@ -433,7 +433,7 @@ class AdminWebhookStatusResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     mode: Literal["off", "migrate", "on"]
-    route_selection: Literal["canonical", "legacy"]
+    route_selection: Literal["canonical"]
     schema_ready: bool
     key_state: str = Field(min_length=1, max_length=128)
     delivery_capability_ready: bool

@@ -89,9 +89,8 @@ Choose one of these controlled states:
 
 - drain and stop every process that can write the legacy database or
   `system_ops.json`; or
-- roll every process to canonical selector mode `migrate` with
-  `TLDW_ADMIN_WEBHOOKS_LEGACY_COMPAT=false`, then keep product and operator
-  mutation traffic drained for the import.
+- roll every process to `TLDW_ADMIN_WEBHOOKS_MODE=migrate`, then keep product
+  and operator mutation traffic drained for the import.
 
 A single-node environment change is insufficient in a multi-process deployment.
 Old application nodes, CLI sessions, background workers, and admin sessions are
@@ -106,24 +105,10 @@ curl --fail-with-body --silent --show-error \
 ```
 
 Require `mode=migrate` and `route_selection=canonical` for a migrate rollout.
-Then prove the legacy-only routes are unreachable on each node:
-
-```bash
-curl --silent --output /dev/null --write-out '%{http_code}\n' \
-  -X POST -H "Authorization: Bearer ${ADMIN_TOKEN}" \
-  "${NODE_BASE}/api/v1/admin/webhooks/1/test"
-
-curl --silent --output /dev/null --write-out '%{http_code}\n' \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
-  "${NODE_BASE}/api/v1/admin/webhooks/1/deliveries"
-
-curl --silent --output /dev/null --write-out '%{http_code}\n' \
-  -X POST -H "Authorization: Bearer ${ADMIN_TOKEN}" \
-  "${NODE_BASE}/api/v1/admin/incidents/1/notify-webhooks"
-```
-
-Each must return 404 in canonical selection. Also verify there is no direct
-legacy database/file writer outside the HTTP processes. Record a signed
+Canonical routes are always mounted, so do not use 404 responses as a selector
+or compatibility probe. Mutations blocked by migrate mode return the canonical
+bounded mode error. Also verify there is no direct legacy database/file writer
+outside the HTTP processes. Record a signed
 operator acknowledgement that **all writers are quiesced**. The CLI's
 `--all-writers-quiesced` flag asserts this external fact; it cannot prove it.
 
@@ -250,8 +235,8 @@ Before admitting any canonical management traffic, record all of the following:
 4. The active strict `system_ops.json` snapshot is valid JSON and no longer has
    top-level `webhooks` or `webhook_deliveries`; unrelated top-level fields are
    unchanged.
-5. Legacy database rows remain intact; PR 1 does not drop or sanitize the legacy
-   table.
+5. Legacy database rows remain intact; the importer does not drop or sanitize
+   the legacy table.
 6. When backup artifacts apply, record owner/group/mode/size and the encrypted
    backup's SHA-256 without printing rollback-key content:
 
@@ -267,8 +252,9 @@ readback and canonical decrypt/readback. Preserve the command output, sanitized
 status, source mapping review, artifact metadata, and ciphertext digest as the
 migration evidence bundle.
 
-Do not switch mode to `on` merely because import passed. PR 1 has no delivery
-substrate and cannot pass the final activation gate.
+Do not switch mode to `on` merely because import passed. Provision the key ring
+and Jobs contract, rotate imported secrets, and pass the read-only
+`tldw-admin-webhooks activation-check --phase predeploy` gate first.
 
 ## 5. Structural File Recovery
 
@@ -280,8 +266,7 @@ first canonical activity. A favorable status display does not bypass the CLI.
 ### 5.1 Stop And Reconfirm
 
 1. Stop/quiesce every canonical and legacy writer on every node.
-2. Set `TLDW_ADMIN_WEBHOOKS_MODE=off` and
-   `TLDW_ADMIN_WEBHOOKS_LEGACY_COMPAT=false` everywhere; verify status per node.
+2. Set `TLDW_ADMIN_WEBHOOKS_MODE=off` everywhere; verify status per node.
 3. Capture a fresh database backup and a fresh hash/copy of the current active
    `system_ops.json`.
 4. Reconfirm `legacy_file_restore_permitted=true`, retained/unexpired artifacts,
@@ -373,8 +358,8 @@ makes its encrypted backup unusable but is not a claim of physical media erasure
 Stop the procedure and preserve evidence when any of these occurs:
 
 - any writer cannot be accounted for or quiesced;
-- any node reports a different mode or route selection;
-- a legacy-only route remains reachable;
+- any node reports a different mode;
+- any node reports a route selection other than `canonical`;
 - source fingerprints or the approved digest change;
 - unresolved records remain;
 - artifact ownership, mode, inode identity, or digest differs;

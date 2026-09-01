@@ -19,13 +19,6 @@ class AdminWebhookMode(str, Enum):
     ON = "on"
 
 
-class WebhookRouteSelection(str, Enum):
-    """Webhook route family selected for this process."""
-
-    CANONICAL = "canonical"
-    LEGACY = "legacy"
-
-
 _PRODUCTION_NAMES = frozenset({"prod", "production"})
 _TRUTHY_VALUES = frozenset({"1", "true", "yes", "y", "on"})
 _DECIMAL_PATTERN = re.compile(r"^[0-9]+$")
@@ -60,10 +53,7 @@ def _parse_bounded_positive_int(
 
 def is_production_environment_mapping(environ: Mapping[str, str]) -> bool:
     """Return whether a pure environment mapping denotes production."""
-    if any(
-        environ.get(name, "").strip().lower() in _TRUTHY_VALUES
-        for name in ("tldw_production", "TLDW_PRODUCTION")
-    ):
+    if any(environ.get(name, "").strip().lower() in _TRUTHY_VALUES for name in ("tldw_production", "TLDW_PRODUCTION")):
         return True
     return any(
         environ.get(name, "").strip().lower() in _PRODUCTION_NAMES
@@ -76,7 +66,6 @@ class AdminWebhookSettings:
     """Validated immutable settings used by the canonical webhook package."""
 
     mode: AdminWebhookMode
-    route_selection: WebhookRouteSelection
     registration_limit: int
     active_limit: int
     allow_http_dev: bool
@@ -86,6 +75,7 @@ class AdminWebhookSettings:
     delivery_loop_interval_seconds: int = 1
     delivery_heartbeat_interval_seconds: int = 10
     delivery_heartbeat_freshness_seconds: int = 30
+    activation_max_backlog_age_seconds: int = 300
 
     @property
     def delivery_retry_delays_seconds(self) -> tuple[int, int, int]:
@@ -137,14 +127,14 @@ class AdminWebhookSettings:
         try:
             mode = AdminWebhookMode(raw_mode)
         except ValueError as exc:
-            raise ValueError(
-                "TLDW_ADMIN_WEBHOOKS_MODE must be off, migrate, or on"
-            ) from exc
+            raise ValueError("TLDW_ADMIN_WEBHOOKS_MODE must be off, migrate, or on") from exc
 
         legacy = _parse_strict_bool(
             environ.get("TLDW_ADMIN_WEBHOOKS_LEGACY_COMPAT", "false"),
             name="TLDW_ADMIN_WEBHOOKS_LEGACY_COMPAT",
         )
+        if legacy:
+            raise ValueError("Legacy webhook compatibility is no longer supported")
         registration_limit = _parse_bounded_positive_int(
             environ,
             "TLDW_ADMIN_WEBHOOK_REGISTRATION_LIMIT",
@@ -158,9 +148,7 @@ class AdminWebhookSettings:
             1_000,
         )
         if active_limit > registration_limit:
-            raise ValueError(
-                "TLDW_ADMIN_WEBHOOK_ACTIVE_LIMIT cannot exceed registration limit"
-            )
+            raise ValueError("TLDW_ADMIN_WEBHOOK_ACTIVE_LIMIT cannot exceed registration limit")
 
         allow_http_dev = _parse_strict_bool(
             environ.get("TLDW_ADMIN_WEBHOOKS_ALLOW_HTTP_DEV", "false"),
@@ -168,9 +156,6 @@ class AdminWebhookSettings:
         )
         if allow_http_dev and is_production_environment_mapping(environ):
             raise ValueError("Webhook HTTP development override is forbidden in production")
-        if legacy and mode is not AdminWebhookMode.OFF:
-            raise ValueError("Legacy webhook compatibility requires canonical mode off")
-
         rollback_window_days = _parse_bounded_positive_int(
             environ,
             "TLDW_ADMIN_WEBHOOK_ROLLBACK_WINDOW_DAYS",
@@ -184,9 +169,7 @@ class AdminWebhookSettings:
             300,
         )
         if delivery_claim_ttl_seconds < 5:
-            raise ValueError(
-                "TLDW_ADMIN_WEBHOOK_DELIVERY_CLAIM_TTL_SECONDS must be between 5 and 300"
-            )
+            raise ValueError("TLDW_ADMIN_WEBHOOK_DELIVERY_CLAIM_TTL_SECONDS must be between 5 and 300")
         delivery_loop_interval_seconds = _parse_bounded_positive_int(
             environ,
             "TLDW_ADMIN_WEBHOOK_DELIVERY_LOOP_INTERVAL_SECONDS",
@@ -206,16 +189,15 @@ class AdminWebhookSettings:
             60,
         )
         if delivery_heartbeat_freshness_seconds <= delivery_heartbeat_interval_seconds:
-            raise ValueError(
-                "TLDW_ADMIN_WEBHOOK_DELIVERY_HEARTBEAT_FRESHNESS_SECONDS must exceed heartbeat interval"
-            )
+            raise ValueError("TLDW_ADMIN_WEBHOOK_DELIVERY_HEARTBEAT_FRESHNESS_SECONDS must exceed heartbeat interval")
+        activation_max_backlog_age_seconds = _parse_bounded_positive_int(
+            environ,
+            "TLDW_ADMIN_WEBHOOK_ACTIVATION_MAX_BACKLOG_AGE_SECONDS",
+            300,
+            86_400,
+        )
         return cls(
             mode=mode,
-            route_selection=(
-                WebhookRouteSelection.LEGACY
-                if legacy
-                else WebhookRouteSelection.CANONICAL
-            ),
             registration_limit=registration_limit,
             active_limit=active_limit,
             allow_http_dev=allow_http_dev,
@@ -225,4 +207,5 @@ class AdminWebhookSettings:
             delivery_loop_interval_seconds=delivery_loop_interval_seconds,
             delivery_heartbeat_interval_seconds=delivery_heartbeat_interval_seconds,
             delivery_heartbeat_freshness_seconds=delivery_heartbeat_freshness_seconds,
+            activation_max_backlog_age_seconds=(activation_max_backlog_age_seconds),
         )

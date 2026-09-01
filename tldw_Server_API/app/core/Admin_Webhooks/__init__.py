@@ -10,7 +10,6 @@ from .catalog import (
 from .config import (
     AdminWebhookMode,
     AdminWebhookSettings,
-    WebhookRouteSelection,
 )
 from .crypto import (
     EVENT_BODY_MAX_BYTES,
@@ -108,7 +107,6 @@ __all__ = [
     "WebhookEvent",
     "WebhookMigrationSummary",
     "WebhookRegistration",
-    "WebhookRouteSelection",
     "WebhookStatus",
     "WebhookKeyError",
     "WebhookKeyErrorCode",

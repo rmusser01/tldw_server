@@ -21,7 +21,6 @@ from tldw_Server_API.app.core.Admin_Webhooks.audit import MutationAudit
 from tldw_Server_API.app.core.Admin_Webhooks.config import (
     AdminWebhookMode,
     AdminWebhookSettings,
-    WebhookRouteSelection,
 )
 from tldw_Server_API.app.core.Admin_Webhooks.control_plane import (
     AdminWebhookControlPlane,
@@ -374,7 +373,6 @@ def _settings(
 ) -> AdminWebhookSettings:
     return AdminWebhookSettings(
         mode=mode,
-        route_selection=WebhookRouteSelection.CANONICAL,
         registration_limit=registration_limit,
         active_limit=active_limit,
         allow_http_dev=False,
