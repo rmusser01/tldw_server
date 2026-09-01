@@ -238,6 +238,30 @@ def test_enable_binds_capability_revision_and_returns_202(client) -> None:
     )
 
 
+def test_put_reuses_nested_enable_route_for_renewed_consent(client) -> None:
+    test_client, api, _app = client
+    capability_revision = f"sha256:{'b' * 64}"
+
+    response = test_client.put(
+        "/api/v1/notes/graph/semantic-index",
+        headers={"Idempotency-Key": "renew-consent-key"},
+        json={
+            "expected_revision": 9,
+            "capability_revision": capability_revision,
+        },
+    )
+
+    assert response.status_code == 202
+    assert api.calls[-1] == (
+        "enable",
+        {
+            "expected_revision": 9,
+            "capability_revision": capability_revision,
+            "idempotency_key": "renew-consent-key",
+        },
+    )
+
+
 def test_delete_and_cancel_return_202_with_revision_and_idempotency(client) -> None:
     test_client, api, _app = client
     deleted = test_client.request(

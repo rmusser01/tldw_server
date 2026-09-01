@@ -246,4 +246,41 @@ describe("Notes semantic index client", () => {
       })
     ).rejects.toMatchObject({ code: "notes_semantic_invalid_response" })
   })
+
+  it.each([
+    [
+      "unknown outbound data",
+      { outbound_data_categories: ["note_title", "raw_note_content"] }
+    ],
+    ["incomplete outbound data", { outbound_data_categories: ["note_title"] }],
+    ["unavailable storage", { storage_boundary: "unavailable" }],
+    [
+      "an unavailable reason",
+      { unavailable_reason: "notes_semantic_provider_unavailable" }
+    ],
+    ["unresolved dimensions", { resolved_dimensions: null }]
+  ])(
+    "rejects an available capability disclosure with %s",
+    async (_label, override) => {
+      mocks.bgRequest.mockResolvedValueOnce({
+        ...capabilities(),
+        ...override
+      })
+
+      await expect(getNotesSemanticCapabilities({})).rejects.toMatchObject({
+        code: "notes_semantic_invalid_response"
+      })
+    }
+  )
+
+  it("accepts only the complete allowlisted outbound category set", async () => {
+    mocks.bgRequest.mockResolvedValueOnce(capabilities())
+
+    const disclosure = await getNotesSemanticCapabilities({})
+
+    expect(disclosure.outbound_data_categories).toEqual([
+      "note_content_chunks",
+      "note_title"
+    ])
+  })
 })

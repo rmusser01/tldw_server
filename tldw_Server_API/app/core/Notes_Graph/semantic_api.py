@@ -559,11 +559,19 @@ class SemanticIndexAPI:
         capability_revision: str,
         idempotency_key: str,
     ) -> dict[str, Any]:
+        config = self._store.get_configuration(self._dataset_id)
         command_revision = 2 if expected_revision == 0 else expected_revision + 1
+        command_mode = (
+            "rebuild"
+            if expected_revision > 0
+            and config is not None
+            and config.desired_state is SemanticDesiredState.ENABLED
+            else "build"
+        )
         command = SemanticJobCommand(
             dataset_id=self._dataset_id,
             configuration_revision=command_revision,
-            mode="build",
+            mode=command_mode,
         )
         request_identity = {
             "action": "enable",
@@ -655,17 +663,47 @@ class SemanticIndexAPI:
             if enabled is None:
                 raise SemanticAPIError(409, "notes_semantic_configuration_revision_conflict")
             config = enabled
-        elif not committed_retry and (
-            capabilities is None
-            or not (
-                config.configuration_revision == command_revision
-                and config.capability_revision == capability_revision
-                and config.provider == capabilities.provider_label.lower()
-                and config.model == capabilities.model
-                and config.model_revision == capabilities.model_revision
+        elif not committed_retry:
+            if (
+                capabilities is None
+                or config.configuration_revision != expected_revision
+                or config.capability_revision == capabilities.capability_revision
+                or capabilities.compatibility_hash is None
+                or capabilities.resolved_dimensions is None
+                or capabilities.endpoint_display is None
+            ):
+                raise SemanticAPIError(
+                    409,
+                    "notes_semantic_configuration_revision_conflict",
+                )
+            renewed = self._store.renew_configuration_consent(
+                dataset_id=self._dataset_id,
+                expected_configuration_revision=expected_revision,
+                capability_revision=capabilities.capability_revision,
+                disclosure_hash=capabilities.disclosure_hash,
+                compatibility_hash=capabilities.compatibility_hash,
+                provider=capabilities.provider_label.lower(),
+                model=capabilities.model,
+                model_revision=capabilities.model_revision,
+                endpoint_origin_revision=capabilities.endpoint_origin_revision,
+                endpoint_origin_display=capabilities.endpoint_display,
+                data_boundary=capabilities.execution_boundary,
+                vector_backend=(
+                    os.getenv("NOTES_SEMANTIC_VECTOR_BACKEND") or "chromadb"
+                ).strip().lower(),
+                storage_boundary=capabilities.storage_boundary,
+                storage_label=capabilities.storage_label,
+                resolved_dimensions=capabilities.resolved_dimensions,
+                normalization_version=SEMANTIC_NORMALIZATION_VERSION,
+                chunker_version=SEMANTIC_CHUNKER_VERSION,
+                now=self._clock(),
             )
-        ):
-            raise SemanticAPIError(409, "notes_semantic_configuration_revision_conflict")
+            if renewed is None:
+                raise SemanticAPIError(
+                    409,
+                    "notes_semantic_configuration_revision_conflict",
+                )
+            config = renewed
 
         if config.configuration_revision != command_revision:
             raise SemanticAPIError(409, "notes_semantic_configuration_revision_conflict")
@@ -826,6 +864,8 @@ class SemanticIndexAPI:
         payload = job.get("payload") if isinstance(job, dict) else None
         if not isinstance(payload, dict) or payload.get("dataset_id") != self._dataset_id:
             raise SemanticAPIError(404, "notes_semantic_run_not_found")
+        if payload.get("mode") not in {"build", "rebuild", "retry_failed"}:
+            raise SemanticAPIError(422, "notes_semantic_invalid_request")
         if payload.get("configuration_revision") != expected_revision:
             raise SemanticAPIError(409, "notes_semantic_run_revision_conflict")
         request_identity = {

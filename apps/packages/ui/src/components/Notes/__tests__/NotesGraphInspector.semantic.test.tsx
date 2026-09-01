@@ -15,6 +15,7 @@ vi.mock("react-i18next", () => ({
     t: (key: string, options?: Record<string, unknown>) => {
       const labels: Record<string, string> = {
         "notesSearch.graphDetails": "Details",
+        "notesSearch.graphSuggestions": "Suggestions",
         "notesSearch.graphSimilarContent": "Similar content",
         "notesSearch.semanticIndex": "Semantic index",
         "notesSearch.semanticState.off": "Off",
@@ -43,6 +44,7 @@ vi.mock("react-i18next", () => ({
         "notesSearch.semanticRetry": "Retry failed Notes",
         "notesSearch.semanticCancel": "Cancel indexing",
         "notesSearch.semanticDelete": "Delete index",
+        "notesSearch.semanticRenewConsent": "Review consent and rebuild",
         "notesSearch.semanticDetail.building": "Indexing is in progress.",
         "notesSearch.semanticDetail.degraded":
           "Some Notes could not be indexed.",
@@ -54,6 +56,8 @@ vi.mock("react-i18next", () => ({
           "Vector cleanup is pending.",
         "notesSearch.semanticDetail.cleanup_stalled":
           "Vector cleanup needs attention.",
+        "notesSearch.semanticDetail.generic":
+          "Semantic index details changed. Review the current status.",
         "notesSearch.semanticUnavailable": "Semantic indexing is unavailable.",
         "notesSearch.semanticPermissionReadOnly":
           "You can view similar content but cannot manage this index.",
@@ -75,7 +79,17 @@ vi.mock("react-i18next", () => ({
         "notesSearch.semanticIndexRevision": "Semantic index revision",
         "notesSearch.semanticPublishedChunks": "Published chunks",
         "notesSearch.semanticError.refresh":
-          "Semantic index details changed. Refresh and try again."
+          "Semantic index details changed. Refresh and try again.",
+        "notesSearch.semanticStatusAnnouncement":
+          "Semantic index {{state}}. {{detail}}",
+        "notesSearch.semanticConfirm.renew.title":
+          "Review consent and rebuild?",
+        "notesSearch.semanticConfirm.renew.body":
+          "Review the current provider, model, data boundaries, and outbound data above before renewing consent.",
+        "notesSearch.semanticConfirm.renew.confirm":
+          "Renew consent and rebuild",
+        "notesSearch.semanticConfirm.deleteIndex.body":
+          "Published vectors and semantic relationships will be removed. Offline backups may retain derived vectors until normal backup retention expires."
       }
       const label = labels[key] ?? key
       return Object.entries(options ?? {}).reduce(
@@ -192,14 +206,14 @@ const renderInspector = (
   } = {}
 ) => {
   const onAnnounce = options.onAnnounce ?? vi.fn()
-  const view = render(
+  const element = (semanticValue: ReturnType<typeof semanticController>) => (
     <NotesGraphInspector
       graph={graph}
       selectedNodeId="note:source"
       suggestionsAuthorized={false}
       isOnline
       controller={suggestionController as never}
-      semanticController={semantic as never}
+      semanticController={semanticValue as never}
       semanticEnabled={options.semanticEnabled ?? false}
       onSemanticEnabledChange={vi.fn()}
       onSelectNode={vi.fn()}
@@ -207,8 +221,14 @@ const renderInspector = (
       onDecideSuggestion={vi.fn().mockResolvedValue(true)}
     />
   )
+  const view = render(element(semantic))
   fireEvent.click(screen.getByRole("tab", { name: "Similar content" }))
-  return { onAnnounce, ...view }
+  return {
+    onAnnounce,
+    rerenderSemantic: (next: ReturnType<typeof semanticController>) =>
+      view.rerender(element(next)),
+    ...view
+  }
 }
 
 describe("NotesGraphInspector semantic setup", () => {
@@ -343,6 +363,8 @@ describe("NotesGraphInspector semantic setup", () => {
             state: stateName,
             detail_reason: reason,
             desired_state: stateName === "off" ? "disabled" : "enabled",
+            active_generation_id:
+              stateName === "updating" ? "generation-a" : null,
             indexed_notes: 4,
             excluded_notes: 1,
             failed_notes: reason === "degraded" ? 2 : 0,
@@ -386,7 +408,7 @@ describe("NotesGraphInspector semantic setup", () => {
     expect(onAnnounce).toHaveBeenCalledWith("Semantic index deletion started.")
   })
 
-  it("confirms enablement and disables it while cleanup is pending", async () => {
+  it("confirms enablement and hides it while cleanup is pending", async () => {
     const semantic = semanticController()
     const { onAnnounce, unmount } = renderInspector(semantic)
 
@@ -404,8 +426,8 @@ describe("NotesGraphInspector semantic setup", () => {
       })
     )
     expect(
-      screen.getByRole("button", { name: "Enable semantic index" })
-    ).toBeDisabled()
+      screen.queryByRole("button", { name: "Enable semantic index" })
+    ).toBeNull()
   })
 
   it("renders and announces an actionable revision-conflict recovery", async () => {
@@ -464,7 +486,11 @@ describe("NotesGraphInspector semantic setup", () => {
       link: "/api/v1/notes/graph/semantic-index/runs/run-a"
     }
     const semantic = semanticController({
-      status: status({ state: "preparing", active_run: active }),
+      status: status({
+        state: "preparing",
+        desired_state: "enabled",
+        active_run: active
+      }),
       activeRun: active
     })
     const { onAnnounce } = renderInspector(semantic)
@@ -520,7 +546,399 @@ describe("NotesGraphInspector semantic setup", () => {
       screen.getByText("Semantic indexing is unavailable.")
     ).toBeInTheDocument()
     expect(
-      screen.getByRole("button", { name: "Enable semantic index" })
-    ).toBeDisabled()
+      screen.queryByRole("button", { name: "Enable semantic index" })
+    ).toBeNull()
+  })
+
+  it("uses the active indexing run for Updating state and current progress", () => {
+    const active = {
+      run_id: "run-progress",
+      mode: "rebuild",
+      status: "processing",
+      revision: 8,
+      indexed_notes: 5,
+      excluded_notes: 1,
+      failed_notes: 0,
+      pending_notes: 6,
+      published_chunks: 18,
+      cleanup_complete: false,
+      error_code: null,
+      link: "/api/v1/notes/graph/semantic-index/runs/run-progress"
+    }
+    renderInspector(
+      semanticController({
+        status: status({
+          state: "ready",
+          desired_state: "enabled",
+          active_generation_id: "generation-a",
+          indexed_notes: 12,
+          pending_notes: 0,
+          active_run: active
+        }),
+        activeRun: active
+      })
+    )
+
+    expect(screen.getByText("Updating")).toBeInTheDocument()
+    expect(screen.getByText("5 of 12 Notes indexed")).toBeInTheDocument()
+  })
+
+  it.each([
+    ["healthy Off", status(), capabilities(), null, ["Enable semantic index"]],
+    [
+      "cleanup-pending Off",
+      status({ detail_reason: "cleanup_pending", cleanup_pending: true }),
+      capabilities(),
+      null,
+      []
+    ],
+    [
+      "stalled cleanup",
+      status({
+        state: "needs_attention",
+        detail_reason: "cleanup_stalled",
+        cleanup_pending: true
+      }),
+      capabilities(),
+      null,
+      []
+    ],
+    [
+      "Ready",
+      status({
+        state: "ready",
+        desired_state: "enabled",
+        active_generation_id: "generation-a"
+      }),
+      capabilities(),
+      null,
+      ["Rebuild index", "Delete index"]
+    ],
+    [
+      "degraded",
+      status({
+        state: "needs_attention",
+        detail_reason: "degraded",
+        desired_state: "enabled",
+        active_generation_id: "generation-a",
+        failed_notes: 2
+      }),
+      capabilities(),
+      null,
+      ["Retry failed Notes", "Rebuild index", "Delete index"]
+    ],
+    [
+      "unavailable enabled index",
+      status({
+        state: "needs_attention",
+        detail_reason: "unavailable",
+        desired_state: "enabled",
+        active_generation_id: "generation-a"
+      }),
+      capabilities({
+        indexing_available: false,
+        unavailable_reason: "notes_semantic_provider_unavailable"
+      }),
+      null,
+      ["Delete index"]
+    ],
+    [
+      "stale configuration",
+      status({
+        state: "needs_attention",
+        detail_reason: "stale_configuration",
+        desired_state: "enabled",
+        active_generation_id: "generation-a"
+      }),
+      capabilities(),
+      null,
+      ["Review consent and rebuild", "Delete index"]
+    ],
+    [
+      "active rebuild",
+      status({
+        state: "updating",
+        detail_reason: "building",
+        desired_state: "enabled",
+        active_generation_id: "generation-a"
+      }),
+      capabilities(),
+      {
+        run_id: "run-rebuild",
+        mode: "rebuild",
+        status: "processing",
+        revision: 7,
+        indexed_notes: 3,
+        excluded_notes: 0,
+        failed_notes: 0,
+        pending_notes: 9,
+        published_chunks: 8,
+        cleanup_complete: false,
+        error_code: null,
+        link: "/api/v1/notes/graph/semantic-index/runs/run-rebuild"
+      },
+      ["Cancel indexing"]
+    ],
+    [
+      "delete cleanup",
+      status({
+        state: "off",
+        detail_reason: "cleanup_pending",
+        desired_state: "disabled",
+        cleanup_pending: true
+      }),
+      capabilities(),
+      {
+        run_id: "run-delete",
+        mode: "delete",
+        status: "processing",
+        revision: 8,
+        indexed_notes: 0,
+        excluded_notes: 0,
+        failed_notes: 0,
+        pending_notes: 0,
+        published_chunks: 0,
+        cleanup_complete: false,
+        error_code: null,
+        link: "/api/v1/notes/graph/semantic-index/runs/run-delete"
+      },
+      []
+    ]
+  ])(
+    "shows only backend-valid management actions for %s",
+    (
+      _label,
+      semanticStatus,
+      semanticCapability,
+      activeRun,
+      expectedActions
+    ) => {
+      renderInspector(
+        semanticController({
+          status: semanticStatus,
+          capabilities: semanticCapability,
+          activeRun
+        })
+      )
+      const actionNames = [
+        "Enable semantic index",
+        "Review consent and rebuild",
+        "Retry failed Notes",
+        "Rebuild index",
+        "Cancel indexing",
+        "Delete index"
+      ]
+
+      expect(
+        actionNames.filter((name) => screen.queryByRole("button", { name }))
+      ).toEqual(expectedActions)
+    }
+  )
+
+  it("renews stale consent through the enable command after fresh disclosure confirmation", async () => {
+    const semantic = semanticController({
+      status: status({
+        state: "needs_attention",
+        detail_reason: "stale_configuration",
+        desired_state: "enabled",
+        active_generation_id: "generation-a",
+        configuration_revision: 7
+      })
+    })
+    renderInspector(semantic)
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Review consent and rebuild" })
+    )
+    await waitFor(() => expect(semantic.enable).toHaveBeenCalledTimes(1))
+    expect(uiMocks.confirmDanger).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content:
+          "Review the current provider, model, data boundaries, and outbound data above before renewing consent."
+      })
+    )
+  })
+
+  it("hides enablement when a direct capability value lacks the complete consent disclosure", () => {
+    renderInspector(
+      semanticController({
+        capabilities: capabilities({
+          outbound_data_categories: ["note_title"]
+        })
+      })
+    )
+
+    expect(
+      screen.queryByRole("button", { name: "Enable semantic index" })
+    ).toBeNull()
+  })
+
+  it("uses one localized generic detail for unknown server reasons", () => {
+    const { onAnnounce } = renderInspector(
+      semanticController({
+        status: status({
+          state: "needs_attention",
+          detail_reason: "new_server_reason",
+          desired_state: "enabled"
+        })
+      })
+    )
+
+    expect(
+      screen.getByText(
+        "Semantic index details changed. Review the current status."
+      )
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/semanticDetail\.new_server_reason/)).toBeNull()
+    expect(onAnnounce).toHaveBeenCalledWith(
+      "Semantic index Needs attention. Semantic index details changed. Review the current status."
+    )
+  })
+
+  it("discloses normal backup retention in the actual delete confirmation", async () => {
+    const semantic = semanticController({
+      status: status({
+        state: "ready",
+        desired_state: "enabled",
+        active_generation_id: "generation-a"
+      })
+    })
+    renderInspector(semantic)
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete index" }))
+    await waitFor(() => expect(semantic.deleteIndex).toHaveBeenCalledTimes(1))
+    expect(uiMocks.confirmDanger).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content:
+          "Published vectors and semantic relationships will be removed. Offline backups may retain derived vectors until normal backup retention expires."
+      })
+    )
+  })
+
+  it("moves focus to the stable semantic heading after enable and cancel commands", async () => {
+    const enableSemantic = semanticController()
+    const first = renderInspector(enableSemantic)
+    const enableButton = screen.getByRole("button", {
+      name: "Enable semantic index"
+    })
+    enableButton.focus()
+    fireEvent.click(enableButton)
+    await waitFor(() => expect(enableSemantic.enable).toHaveBeenCalledTimes(1))
+    await waitFor(() =>
+      expect(
+        screen.getByRole("heading", { name: "Semantic index" })
+      ).toHaveFocus()
+    )
+    first.unmount()
+
+    const active = {
+      run_id: "run-focus",
+      mode: "rebuild",
+      status: "processing",
+      revision: 7,
+      indexed_notes: 3,
+      excluded_notes: 0,
+      failed_notes: 0,
+      pending_notes: 9,
+      published_chunks: 8,
+      cleanup_complete: false,
+      error_code: null,
+      link: "/api/v1/notes/graph/semantic-index/runs/run-focus"
+    }
+    const cancelSemantic = semanticController({
+      status: status({
+        state: "updating",
+        desired_state: "enabled",
+        active_generation_id: "generation-a",
+        active_run: active
+      }),
+      activeRun: active
+    })
+    renderInspector(cancelSemantic)
+    const cancelButton = screen.getByRole("button", {
+      name: "Cancel indexing"
+    })
+    cancelButton.focus()
+    fireEvent.click(cancelButton)
+    await waitFor(() => expect(cancelSemantic.cancel).toHaveBeenCalledTimes(1))
+    await waitFor(() =>
+      expect(
+        screen.getByRole("heading", { name: "Semantic index" })
+      ).toHaveFocus()
+    )
+  })
+
+  it("preserves focus when an active run becomes terminal and replaces its action", async () => {
+    const active = {
+      run_id: "run-terminal-focus",
+      mode: "rebuild",
+      status: "processing",
+      revision: 7,
+      indexed_notes: 10,
+      excluded_notes: 0,
+      failed_notes: 0,
+      pending_notes: 2,
+      published_chunks: 30,
+      cleanup_complete: false,
+      error_code: null,
+      link: "/api/v1/notes/graph/semantic-index/runs/run-terminal-focus"
+    }
+    const view = renderInspector(
+      semanticController({
+        status: status({
+          state: "updating",
+          desired_state: "enabled",
+          active_generation_id: "generation-a",
+          active_run: active
+        }),
+        activeRun: active
+      })
+    )
+    screen.getByRole("button", { name: "Cancel indexing" }).focus()
+
+    view.rerenderSemantic(
+      semanticController({
+        status: status({
+          state: "ready",
+          desired_state: "enabled",
+          active_generation_id: "generation-a"
+        })
+      })
+    )
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("heading", { name: "Semantic index" })
+      ).toHaveFocus()
+    )
+  })
+
+  it("supports roving keyboard focus across all three inspector tabs", () => {
+    render(
+      <NotesGraphInspector
+        graph={graph}
+        selectedNodeId="note:source"
+        suggestionsAuthorized
+        isOnline
+        controller={suggestionController as never}
+        semanticController={semanticController() as never}
+        semanticEnabled={false}
+        onSemanticEnabledChange={vi.fn()}
+        onSelectNode={vi.fn()}
+        onAnnounce={vi.fn()}
+        onDecideSuggestion={vi.fn().mockResolvedValue(true)}
+      />
+    )
+    const details = screen.getByRole("tab", { name: "Details" })
+    const suggestions = screen.getByRole("tab", { name: "Suggestions" })
+    const semantic = screen.getByRole("tab", { name: "Similar content" })
+    details.focus()
+
+    fireEvent.keyDown(details, { key: "ArrowRight" })
+    expect(suggestions).toHaveFocus()
+    fireEvent.keyDown(suggestions, { key: "ArrowRight" })
+    expect(semantic).toHaveFocus()
+    fireEvent.keyDown(semantic, { key: "ArrowRight" })
+    expect(details).toHaveFocus()
   })
 })

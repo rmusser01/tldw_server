@@ -119,6 +119,88 @@ def test_enable_disable_are_capability_and_revision_fenced(db: CharactersRAGDB) 
     assert disabled.desired_state.value == "disabled"
 
 
+def test_renew_configuration_consent_updates_identity_under_cas_and_preserves_active_generation(
+    db: CharactersRAGDB,
+) -> None:
+    resolved_config, generation = _create_resolved_generation(db)
+    active = db.note_semantic_store.activate_generation(
+        dataset_id=DATASET_ID,
+        generation_id=generation.id,
+        expected_configuration_revision=resolved_config.configuration_revision,
+        publication_receipt="receipt-renewal",
+        now=NOW,
+    )
+    assert active is not None
+    renewed_at = NOW + timedelta(minutes=5)
+
+    renewed = db.note_semantic_store.renew_configuration_consent(
+        dataset_id=DATASET_ID,
+        expected_configuration_revision=active.configuration_revision,
+        capability_revision="capability-v2",
+        disclosure_hash="disclosure-v2",
+        compatibility_hash="compatibility-v2",
+        provider="provider-b",
+        model="model-b",
+        model_revision="model-revision-v2",
+        endpoint_origin_revision="origin-v2",
+        endpoint_origin_display="https://embeddings.example.test",
+        data_boundary="external",
+        vector_backend="pgvector",
+        storage_boundary="local",
+        storage_label="pgvector",
+        resolved_dimensions=1536,
+        normalization_version="normalization-v2",
+        chunker_version="chunker-v2",
+        now=renewed_at,
+    )
+
+    assert renewed is not None
+    assert renewed.configuration_revision == active.configuration_revision + 1
+    assert renewed.desired_state.value == "enabled"
+    assert renewed.active_generation_id == active.active_generation_id
+    assert renewed.semantic_index_revision == active.semantic_index_revision
+    assert renewed.capability_revision == "capability-v2"
+    assert renewed.disclosure_hash == "disclosure-v2"
+    assert renewed.compatibility_hash == "compatibility-v2"
+    assert renewed.provider == "provider-b"
+    assert renewed.model == "model-b"
+    assert renewed.model_revision == "model-revision-v2"
+    assert renewed.endpoint_origin_revision == "origin-v2"
+    assert renewed.endpoint_origin_display == "https://embeddings.example.test"
+    assert renewed.data_boundary == "external"
+    assert renewed.vector_backend == "pgvector"
+    assert renewed.storage_boundary == "local"
+    assert renewed.storage_label == "pgvector"
+    assert renewed.dimension_state is SemanticDimensionState.RESOLVED
+    assert renewed.dimensions == 1536
+    assert renewed.normalization_version == "normalization-v2"
+    assert renewed.chunker_version == "chunker-v2"
+    assert renewed.consented_at == renewed_at.isoformat()
+    assert renewed.updated_at == renewed_at.isoformat()
+
+    assert db.note_semantic_store.renew_configuration_consent(
+        dataset_id=DATASET_ID,
+        expected_configuration_revision=active.configuration_revision,
+        capability_revision="capability-v3",
+        disclosure_hash="disclosure-v3",
+        compatibility_hash="compatibility-v3",
+        provider="provider-c",
+        model="model-c",
+        model_revision=None,
+        endpoint_origin_revision="origin-v3",
+        endpoint_origin_display="https://other.example.test",
+        data_boundary="external",
+        vector_backend="chromadb",
+        storage_boundary="local",
+        storage_label="chromadb",
+        resolved_dimensions=768,
+        normalization_version="normalization-v3",
+        chunker_version="chunker-v3",
+        now=renewed_at + timedelta(minutes=1),
+    ) is None
+    assert db.note_semantic_store.get_configuration(DATASET_ID) == renewed
+
+
 @pytest.mark.parametrize("prior_state", ["pending", "completed"])
 @pytest.mark.parametrize("reuse_kind", ["exact_key", "same_fingerprint"])
 def test_expired_operation_receipts_do_not_block_key_or_fingerprint_reuse(
