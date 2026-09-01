@@ -7,8 +7,7 @@ test fail (the "would have caught it" property).
 
 * #2580 — service/DB singleton caches registered against the wrong DB
 * #2581 — Embeddings drain singletons bleeding across suites
-* #2585 — reload_app_main() swapping the app-main module identity (STILL OPEN;
-          its meta-test is xfail-with-issue-link until the fix ships)
+* #2585 — reload_app_main() swapping the app-main module identity
 """
 from __future__ import annotations
 
@@ -87,34 +86,70 @@ async def test_chacha_db_cache_rebinds_to_new_base_dir_after_reset(
 
 
 # --------------------------------------------------------------------------- #
-# #2585 — reload_app_main() swaps sys.modules['...app.main'] identity (OPEN)
+# #2585 — reload_app_main() swaps sys.modules['...app.main'] identity
 # --------------------------------------------------------------------------- #
-@pytest.mark.xfail(
-    reason="#2585 open: reload_app_main() swaps the app-main module identity and "
-    "there is no autouse restore, so references held before a reload go stale. "
-    "Flip to strict (remove xfail) when #2585 ships.",
-    strict=False,
-)
-def test_app_main_identity_is_stable_across_a_reload() -> None:
-    """DESIRED invariant (currently failing → xfail): a test that reloads the app
-    main module should not leave a different module identity behind for code that
-    imported it earlier. Uses ``import_app_main()`` (never None) and restores in
-    ``finally`` so the meta-test never pollutes the rest of the session.
+def test_a_reload_does_not_outlive_the_block_that_asked_for_it() -> None:
+    """A reload is legitimate; leaving it behind for everyone else is not.
+
+    The earlier version of this test asserted ``reloaded is original``, which a
+    working reload can never satisfy -- reloading is *supposed* to produce a new
+    module. The invariant that actually protects the session is that the swap is
+    undone afterwards, so no later code sees a module identity it did not ask
+    for.
     """
     from tldw_Server_API.tests.helpers.app_main_state import (
+        app_main_isolated,
         import_app_main,
         reload_app_main,
-        restore_app_main,
+        snapshot_app_main,
     )
 
     original = import_app_main()
     assert original is not None
-    try:
+
+    with app_main_isolated():
         reloaded = reload_app_main()
-        # The hazard: a fresh module object. Asserting identity documents the fix
-        # target; while #2585 is open this fails and is xfail'd.
-        assert reloaded is original, (
-            "reload_app_main swapped the app-main module identity (#2585)"
-        )
-    finally:
-        restore_app_main(original)
+        assert reloaded is not original, "reload_app_main() did not reload anything"
+        assert snapshot_app_main() is reloaded, "the reload was not published"
+
+    assert snapshot_app_main() is original, (
+        "a reload outlived its block, so every later import of app.main resolves "
+        "to a module the rest of the session never saw (#2585)"
+    )
+
+
+def test_every_test_is_wrapped_in_the_app_main_guard() -> None:
+    """The guard only helps if the root conftest actually applies it.
+
+    Checks for the ``app_main_isolated()`` call inside the autouse fixture rather
+    than the name anywhere in the file, so an orphaned import cannot satisfy it.
+    """
+    import ast
+
+    conftest = Path(__file__).resolve().parents[1] / "conftest.py"
+    tree = ast.parse(conftest.read_text(encoding="utf-8"))
+
+    fixture = next(
+        (
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "_keep_app_main_reloads_from_leaking"
+        ),
+        None,
+    )
+    assert fixture is not None, (
+        "tests/conftest.py no longer defines _keep_app_main_reloads_from_leaking(), "
+        "so a reload in one test again changes what app.main means for every test "
+        "after it (#2585)."
+    )
+
+    called = {
+        node.func.id
+        for node in ast.walk(fixture)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    assert "app_main_isolated" in called, (
+        "the autouse fixture no longer calls app_main_isolated(), so reloads leak "
+        "again (#2585)."
+    )

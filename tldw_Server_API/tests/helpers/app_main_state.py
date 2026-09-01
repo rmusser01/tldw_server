@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import contextlib
 import importlib
 import sys
+from collections.abc import Iterator
 from types import ModuleType
-
 
 APP_PACKAGE_NAME = "tldw_Server_API.app"
 APP_MAIN_MODULE_NAME = "tldw_Server_API.app.main"
@@ -73,3 +74,32 @@ def reload_app_main() -> ModuleType:
     importlib.invalidate_caches()
     imported = importlib.import_module(APP_MAIN_MODULE_NAME)
     return set_app_main(imported)
+
+
+@contextlib.contextmanager
+def app_main_isolated() -> Iterator[None]:
+    """Confine an app-main reload to this block.
+
+    :func:`reload_app_main` replaces ``sys.modules[APP_MAIN_MODULE_NAME]`` with a
+    new module object holding a new FastAPI app. Modules that already ran
+    ``from ...main import app`` keep the object they pinned at import time, so
+    leaving the swap in place hands the rest of the session a split view: the
+    name resolves to one app while earlier importers hold another.
+
+    That is not hypothetical. A ``TestClient`` lifespan exit drains whichever app
+    object it was given, which tends to be a pinned one, while anything looking
+    at ``app.main`` sees the new app and reports nothing wrong -- and
+    ``DrainGateMiddleware`` answers 503 to every request through the drained one
+    for the rest of the process (#2585).
+
+    Restoring the original module on exit keeps a reload local to the code that
+    asked for it. Callers that want a reloaded app still get one; they just do
+    not leave it behind. Restoring is skipped when nothing swapped, which is the
+    overwhelmingly common case.
+    """
+    snapshot = snapshot_app_main()
+    try:
+        yield
+    finally:
+        if snapshot_app_main() is not snapshot:
+            restore_app_main(snapshot)

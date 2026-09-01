@@ -255,27 +255,24 @@ def regular_user():
 
 @pytest.fixture(autouse=True)
 def _reset_app_lifecycle_state():
-    """Clear stale drain state on THIS conftest's pinned ``app`` before each test.
+    """Clear stale lifecycle state on this conftest's pinned ``app``.
 
-    Why the root-conftest reset (tests/conftest.py,
-    _reset_main_app_lifecycle_state_between_tests) is not enough here,
-    verified empirically for issue #2581 (46F -> 0F with this fixture;
-    removing it reproduces the 46 failures):
+    Kept, but no longer for the reason it was written. It was added for #2581
+    (46F -> 0F) because ``reload_app_main()`` permanently swapped
+    ``sys.modules["tldw_Server_API.app.main"]``, so the root conftest's reset
+    landed on the new app while the drained original -- the one every pinned
+    test still routed through -- stayed drained and 503'd every request.
 
-    1. Test modules import ``app`` at collection time, pinning the ORIGINAL
-       app object (this conftest pins the same one at line 8).
-    2. ``test_backpressure_and_quotas.py`` calls ``reload_app_main()``, which
-       permanently replaces ``sys.modules['tldw_Server_API.app.main']`` with
-       a new module (new app object) and never restores the original.
-    3. A later ``with TestClient(app)`` lifespan exit marks the pinned
-       ORIGINAL app draining (mark_lifecycle_shutdown).
-    4. The root fixture re-imports ``app.main`` at reset time, so it resets
-       only the NEW app; the drained original — which every pinned test
-       still routes through — stays drained, and DrainGateMiddleware 503s
-       every request: {"status": "not_ready", "reason": "shutdown_in_progress"}.
+    Both halves of that are fixed now. The root reset covers every app that has
+    lifecycle state, not just the current module's, and reloads no longer outlive
+    the test that performed them (#2585). Removing this fixture leaves zero
+    ``shutdown_in_progress`` responses in a full Embeddings run.
 
-    This fixture resets the pinned original directly. The underlying
-    reload_app_main sys.modules leak is tracked in issue #2585.
+    It stays because removing it still perturbs four orchestrator-parity tests,
+    which fail with a provider-authentication error that has nothing to do with
+    lifecycle state and pass in isolation either way. That is an ordering
+    dependency somewhere else in this suite; until it is understood, dropping
+    this fixture would trade one known-good state for an unknown one.
     """
     from tldw_Server_API.app.services.app_lifecycle import reset_lifecycle_state
 
