@@ -68,7 +68,7 @@ export type NotesSemanticCapabilities = {
   estimated_run_count: number
   provider_label: string
   model: string
-  endpoint_display: string
+  endpoint_display: string | null
   execution_boundary: "external" | "local"
   storage_boundary: "external" | "local" | "unavailable"
   storage_label: string
@@ -233,7 +233,7 @@ const capabilitiesSchema: z.ZodType<NotesSemanticCapabilities> = z
     estimated_run_count: nonnegative,
     provider_label: boundedIdentity(128),
     model: boundedIdentity(256),
-    endpoint_display: endpointDisplaySchema,
+    endpoint_display: endpointDisplaySchema.nullable(),
     execution_boundary: z.enum(["external", "local"]),
     storage_boundary: z.enum(["external", "local", "unavailable"]),
     storage_label: boundedIdentity(128),
@@ -278,10 +278,31 @@ const capabilitiesSchema: z.ZodType<NotesSemanticCapabilities> = z
         message: "dimension disclosure is contradictory"
       })
     }
+    if (
+      capability.endpoint_display === null &&
+      (capability.indexing_available || capability.unavailable_reason === null)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["endpoint_display"],
+        message: "missing endpoint requires an unavailable capability"
+      })
+    }
+    if (
+      !capability.indexing_available &&
+      capability.unavailable_reason === null
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["unavailable_reason"],
+        message: "unavailable capability reason required"
+      })
+    }
     if (!capability.indexing_available) return
     if (
       capability.storage_boundary === "unavailable" ||
-      capability.unavailable_reason !== null
+      capability.unavailable_reason !== null ||
+      capability.endpoint_display === null
     ) {
       context.addIssue({
         code: "custom",

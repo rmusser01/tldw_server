@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from typing import Literal
-from urllib.parse import urlsplit
 
 from pydantic import (
     BaseModel,
@@ -11,6 +10,10 @@ from pydantic import (
     Field,
     field_validator,
     model_validator,
+)
+
+from tldw_Server_API.app.core.Notes_Graph.semantic_endpoint import (
+    canonical_semantic_endpoint_origin,
 )
 
 _SEMANTIC_OUTBOUND_CATEGORIES = {"note_content_chunks", "note_title"}
@@ -26,7 +29,7 @@ class SemanticCapabilitiesResponse(_StrictModel):
     estimated_run_count: int = Field(ge=0)
     provider_label: str = Field(min_length=1, max_length=128)
     model: str = Field(min_length=1, max_length=256)
-    endpoint_display: str = Field(min_length=1, max_length=512)
+    endpoint_display: str | None = Field(min_length=1, max_length=512)
     execution_boundary: Literal["external", "local"]
     storage_boundary: Literal["external", "local", "unavailable"]
     storage_label: str = Field(min_length=1, max_length=128)
@@ -52,30 +55,10 @@ class SemanticCapabilitiesResponse(_StrictModel):
 
     @field_validator("endpoint_display")
     @classmethod
-    def validate_endpoint_display(cls, value: str) -> str:
-        if value != value.strip():
-            raise ValueError("endpoint_display must be a sanitized origin")
-        try:
-            endpoint = urlsplit(value)
-            port = endpoint.port
-        except ValueError as exc:
-            raise ValueError("endpoint_display must be a sanitized origin") from exc
-        hostname = endpoint.hostname or ""
-        display_host = f"[{hostname}]" if ":" in hostname else hostname
-        expected = (
-            f"{endpoint.scheme}://{display_host}"
-            f"{f':{port}' if port is not None else ''}"
-        )
-        if (
-            endpoint.scheme not in {"http", "https"}
-            or not endpoint.hostname
-            or endpoint.username is not None
-            or endpoint.password is not None
-            or endpoint.path
-            or endpoint.query
-            or endpoint.fragment
-            or value != expected
-        ):
+    def validate_endpoint_display(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if canonical_semantic_endpoint_origin(value) != value:
             raise ValueError("endpoint_display must be a sanitized origin")
         return value
 
@@ -101,8 +84,13 @@ class SemanticCapabilitiesResponse(_StrictModel):
         if self.indexing_available and (
             self.storage_boundary == "unavailable"
             or self.unavailable_reason is not None
+            or self.endpoint_display is None
         ):
             raise ValueError("available capability disclosure is contradictory")
+        if not self.indexing_available and self.unavailable_reason is None:
+            raise ValueError("unavailable capability disclosure requires a reason")
+        if self.endpoint_display is None and self.unavailable_reason is None:
+            raise ValueError("missing endpoint disclosure requires an unavailable reason")
         return self
 
 

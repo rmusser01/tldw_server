@@ -11,7 +11,6 @@ import re
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
-from urllib.parse import urlsplit
 
 from tldw_Server_API.app.core.AuthNZ.byok_config import (
     PROVIDER_APP_CONFIG_KEYS,
@@ -33,6 +32,7 @@ from tldw_Server_API.app.core.LLM_Calls.embeddings_adapter_registry import (
 )
 
 from .semantic_content import SemanticChunkInput
+from .semantic_endpoint import canonical_semantic_endpoint_origin
 from .semantic_settings import DEFAULT_SEMANTIC_INDEX_SETTINGS, SemanticIndexSettings
 
 DIMENSION_PROBE_TEXT = "Public semantic embedding dimension probe."
@@ -64,19 +64,6 @@ class SemanticEmbeddingSystemError(RuntimeError):
         super().__init__(code)
 
 
-def _origin(value: str | None) -> str | None:
-    if not isinstance(value, str) or not value:
-        return None
-    try:
-        parsed = urlsplit(value)
-        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-            return None
-        port = parsed.port
-    except ValueError:
-        return None
-    return f"{parsed.scheme}://{parsed.hostname.lower()}{f':{port}' if port is not None else ''}"
-
-
 def _safe_revision(value: object) -> str | None:
     if not isinstance(value, str) or _REVISION_PATTERN.fullmatch(value) is None:
         return None
@@ -102,7 +89,11 @@ class PendingSemanticConfig:
             raise ValueError("model must be non-empty")
         if self.model_revision is not None and _safe_revision(self.model_revision) is None:
             raise ValueError("model_revision is invalid")
-        if self.endpoint_origin is not None and _origin(self.endpoint_origin) != self.endpoint_origin:
+        if (
+            self.endpoint_origin is not None
+            and canonical_semantic_endpoint_origin(self.endpoint_origin)
+            != self.endpoint_origin
+        ):
             raise ValueError("endpoint_origin must be a canonical HTTP origin")
         if self.credential_source not in {"user", "server_default"}:
             raise ValueError("credential_source must identify one durable scope")
@@ -265,7 +256,7 @@ class NotesEmbeddingExecutor:
         ):
             raise SemanticEmbeddingSystemError("durable_credentials_unavailable")
         resolved_base_url = _credential_base_url(credentials, provider)
-        endpoint_origin = _origin(resolved_base_url)
+        endpoint_origin = canonical_semantic_endpoint_origin(resolved_base_url)
         if endpoint_origin != self._config.endpoint_origin:
             raise SemanticEmbeddingSystemError("endpoint_origin_mismatch")
         if resolved_base_url is None:
@@ -432,7 +423,11 @@ def _normalize_base_url(value: object) -> str | None:
     if not isinstance(value, str):
         return None
     normalized = value.strip().rstrip("/")
-    return normalized if _origin(normalized) is not None else None
+    return (
+        normalized
+        if canonical_semantic_endpoint_origin(normalized) is not None
+        else None
+    )
 
 
 def _cache_key(

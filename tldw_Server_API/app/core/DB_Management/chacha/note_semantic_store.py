@@ -10,8 +10,8 @@ import uuid
 from collections.abc import Sequence
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urlsplit
 
+from ...Notes_Graph.semantic_endpoint import canonical_semantic_endpoint_origin
 from ..ChaChaNotes_DB import BackendConnectionWrapper, BackendType
 from .note_semantic_models import (
     SemanticChunkRecord,
@@ -161,20 +161,9 @@ class NoteSemanticStore:
 
     @staticmethod
     def _endpoint_origin_display(value: str) -> str:
-        parsed = urlsplit(str(value))
-        if (
-            parsed.scheme not in {"http", "https"}
-            or not parsed.hostname
-            or parsed.username is not None
-            or parsed.password is not None
-            or parsed.path not in {"", "/"}
-            or parsed.query
-            or parsed.fragment
-        ):
+        origin = canonical_semantic_endpoint_origin(value)
+        if origin is None or origin != value:
             raise ValueError("notes_semantic_endpoint_origin_display_invalid")
-        origin = f"{parsed.scheme}://{parsed.hostname.lower()}"
-        if parsed.port is not None:
-            origin = f"{origin}:{parsed.port}"
         return origin
 
     @staticmethod

@@ -26,6 +26,7 @@ from .semantic_capabilities import (
     SemanticCapabilities,
     SemanticCapabilityContract,
     build_semantic_capabilities,
+    semantic_capability_binding_matches,
 )
 from .semantic_content import (
     SEMANTIC_CHUNKER_VERSION,
@@ -401,7 +402,12 @@ class SemanticIndexAPI:
                 raise
             return _active_note_count(self._note_db)
 
-    def _active_generation_usable(self, config: SemanticIndexConfig) -> bool:
+    def _active_generation_usable(
+        self,
+        config: SemanticIndexConfig,
+        *,
+        current_compatibility_hash: str | None,
+    ) -> bool:
         generation_id = config.active_generation_id
         if generation_id is None:
             return False
@@ -421,6 +427,10 @@ class SemanticIndexAPI:
             and config.dimension_state is SemanticDimensionState.RESOLVED
             and generation.dimensions == config.dimensions
             and bool(config.compatibility_hash)
+            and semantic_capability_binding_matches(
+                config.compatibility_hash,
+                current_compatibility_hash,
+            )
         )
 
     def _integrity(
@@ -428,6 +438,7 @@ class SemanticIndexAPI:
         config: SemanticIndexConfig,
         *,
         active_generation_usable: bool,
+        active_note_count: int | None,
     ) -> dict[str, int]:
         generation_id = config.active_generation_id
         if generation_id is None or not active_generation_usable:
@@ -435,7 +446,11 @@ class SemanticIndexAPI:
                 "indexed_notes": 0,
                 "excluded_notes": 0,
                 "failed_notes": 0,
-                "pending_notes": self._current_active_note_count(),
+                "pending_notes": (
+                    active_note_count
+                    if active_note_count is not None
+                    else self._current_active_note_count()
+                ),
                 "published_chunks": 0,
             }
         try:
@@ -448,7 +463,11 @@ class SemanticIndexAPI:
                 "indexed_notes": 0,
                 "excluded_notes": 0,
                 "failed_notes": 0,
-                "pending_notes": self._current_active_note_count(),
+                "pending_notes": (
+                    active_note_count
+                    if active_note_count is not None
+                    else self._current_active_note_count()
+                ),
                 "published_chunks": 0,
             }
         return {
@@ -523,17 +542,29 @@ class SemanticIndexAPI:
                 "cleanup_pending": cleanup_pending,
                 "active_run": self._run_response(active_job) if active_job else None,
             }
-        active_generation_usable = self._active_generation_usable(config)
-        counts = self._integrity(
-            config,
-            active_generation_usable=active_generation_usable,
-        )
         try:
             capabilities = self._capabilities()
         except SemanticAPIError as exc:
             if exc.code != "notes_semantic_provider_unavailable":
                 raise
             capabilities = None
+        active_generation_usable = self._active_generation_usable(
+            config,
+            current_compatibility_hash=(
+                capabilities.compatibility_hash
+                if capabilities is not None
+                else None
+            ),
+        )
+        counts = self._integrity(
+            config,
+            active_generation_usable=active_generation_usable,
+            active_note_count=(
+                capabilities.active_note_count
+                if capabilities is not None
+                else None
+            ),
+        )
         state, reason = derive_semantic_state(
             SemanticStatusFacts(
                 desired_state=config.desired_state.value,

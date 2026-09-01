@@ -595,6 +595,37 @@ describe("NotesGraphInspector semantic setup", () => {
     ).toBeNull()
   })
 
+  it("keeps an endpoint-unavailable enabled index typed and Delete-only", () => {
+    renderInspector(
+      semanticController({
+        capabilities: capabilities({
+          endpoint_display: null,
+          indexing_available: false,
+          unavailable_reason: "notes_semantic_endpoint_unavailable",
+          resolved_dimensions: null,
+          dimension_probe_required: false
+        }),
+        status: status({
+          state: "needs_attention",
+          detail_reason: "unavailable",
+          desired_state: "enabled",
+          active_generation_id: "generation-a"
+        })
+      })
+    )
+
+    expect(
+      screen.getByText("Semantic indexing is unavailable.")
+    ).toBeInTheDocument()
+    expect(screen.queryByText("Embedding destination")).toBeNull()
+    expect(screen.getByRole("button", { name: "Delete index" })).toBeEnabled()
+    expect(
+      screen.queryByRole("button", {
+        name: /Enable semantic index|Review consent and rebuild|Rebuild index/
+      })
+    ).toBeNull()
+  })
+
   it("uses the active indexing run for Updating state and current progress", () => {
     const active = {
       run_id: "run-progress",

@@ -10,6 +10,9 @@ from tldw_Server_API.app.core.Notes_Graph.semantic_capabilities import (
     SemanticCapabilityContract,
     build_semantic_capabilities,
 )
+from tldw_Server_API.app.core.Notes_Graph.semantic_embeddings import (
+    PendingSemanticConfig,
+)
 from tldw_Server_API.app.core.Notes_Graph.semantic_settings import SemanticIndexSettings
 
 pytestmark = pytest.mark.unit
@@ -228,6 +231,45 @@ def test_capabilities_preserve_brackets_in_sanitized_ipv6_origin() -> None:
     assert response.endpoint_display == "https://[2001:db8::1]:8443"
 
 
+@pytest.mark.parametrize(
+    ("endpoint_url", "expected_origin"),
+    [
+        (
+            "https://user:secret@[2001:0db8::1]:8443/v1?token=secret",
+            "https://[2001:db8::1]:8443",
+        ),
+        (
+            "HTTPS://user:secret@BÜCHER.Example:8443/v1?token=secret",
+            "https://xn--bcher-kva.example:8443",
+        ),
+    ],
+    ids=["ipv6", "idn"],
+)
+def test_capability_origin_passes_public_schema_and_pending_worker_authority(
+    endpoint_url: str,
+    expected_origin: str,
+) -> None:
+    capabilities = build_semantic_capabilities(
+        _contract(endpoint_url=endpoint_url)
+    )
+    response = SemanticCapabilitiesResponse.model_validate(
+        _public_capability(endpoint_display=capabilities.endpoint_display)
+    )
+    pending = PendingSemanticConfig(
+        provider="openai",
+        model=response.model,
+        model_revision=None,
+        endpoint_origin=response.endpoint_display,
+        credential_source="server_default",
+        consented=True,
+        dimensions=response.resolved_dimensions,
+    )
+
+    assert capabilities.endpoint_display == expected_origin
+    assert response.endpoint_display == expected_origin
+    assert pending.endpoint_origin == expected_origin
+
+
 def test_unknown_boundaries_fail_closed_and_request_credentials_are_not_durable() -> None:
     capabilities = build_semantic_capabilities(
         _contract(
@@ -340,3 +382,32 @@ def test_public_capability_schema_accepts_unresolved_dimensions_when_unavailable
 
     assert unavailable.indexing_available is False
     assert unavailable.dimension_probe_required is False
+
+
+def test_public_capability_schema_accepts_missing_endpoint_only_when_unavailable() -> None:
+    unavailable = SemanticCapabilitiesResponse.model_validate(
+        _public_capability(
+            endpoint_display=None,
+            indexing_available=False,
+            unavailable_reason="notes_semantic_endpoint_unavailable",
+            resolved_dimensions=None,
+            dimension_probe_required=False,
+        )
+    )
+
+    assert unavailable.endpoint_display is None
+
+    with pytest.raises(ValidationError):
+        SemanticCapabilitiesResponse.model_validate(
+            _public_capability(endpoint_display=None)
+        )
+    with pytest.raises(ValidationError):
+        SemanticCapabilitiesResponse.model_validate(
+            _public_capability(
+                endpoint_display=None,
+                indexing_available=False,
+                unavailable_reason=None,
+                resolved_dimensions=None,
+                dimension_probe_required=False,
+            )
+        )

@@ -11,6 +11,8 @@ import {
 } from "@/services/note-semantic-index"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+import capabilityDriftApi from "../../../components/Notes/__tests__/fixtures/semantic-capability-drift-api.json"
+
 const mocks = vi.hoisted(() => ({ bgRequest: vi.fn() }))
 
 vi.mock("@/services/background-proxy", () => ({ bgRequest: mocks.bgRequest }))
@@ -266,6 +268,7 @@ describe("Notes semantic index client", () => {
     ["blank model", { model: "" }],
     ["blank storage", { storage_label: "\t" }],
     ["blank endpoint", { endpoint_display: "" }],
+    ["a missing endpoint", { endpoint_display: null }],
     [
       "a path-bearing endpoint",
       {
@@ -315,6 +318,61 @@ describe("Notes semantic index client", () => {
     const disclosure = await getNotesSemanticCapabilities({})
 
     expect(disclosure.endpoint_display).toBe("https://proxy.example.test:443")
+  })
+
+  it.each(["https://[2001:db8::1]:8443", "https://xn--bcher-kva.example:8443"])(
+    "accepts canonical IPv6 and IDN origin %s",
+    async (endpoint) => {
+      mocks.bgRequest.mockResolvedValueOnce({
+        ...capabilities(),
+        endpoint_display: endpoint
+      })
+
+      const disclosure = await getNotesSemanticCapabilities({})
+
+      expect(disclosure.endpoint_display).toBe(endpoint)
+    }
+  )
+
+  it("accepts a missing endpoint only for a typed unavailable capability", async () => {
+    mocks.bgRequest
+      .mockResolvedValueOnce({
+        ...capabilities(),
+        endpoint_display: null,
+        indexing_available: false,
+        unavailable_reason: "notes_semantic_endpoint_unavailable",
+        resolved_dimensions: null,
+        dimension_probe_required: false
+      })
+      .mockResolvedValueOnce({
+        ...capabilities(),
+        endpoint_display: null,
+        indexing_available: false,
+        unavailable_reason: null,
+        resolved_dimensions: null,
+        dimension_probe_required: false
+      })
+
+    await expect(getNotesSemanticCapabilities({})).resolves.toMatchObject({
+      endpoint_display: null,
+      unavailable_reason: "notes_semantic_endpoint_unavailable"
+    })
+    await expect(getNotesSemanticCapabilities({})).rejects.toMatchObject({
+      code: "notes_semantic_invalid_response"
+    })
+  })
+
+  it("accepts the backend-produced capability drift contract", async () => {
+    mocks.bgRequest
+      .mockResolvedValueOnce(capabilityDriftApi.capabilities)
+      .mockResolvedValueOnce(capabilityDriftApi.status)
+
+    await expect(getNotesSemanticCapabilities({})).resolves.toEqual(
+      capabilityDriftApi.capabilities
+    )
+    await expect(getNotesSemanticStatus({})).resolves.toEqual(
+      capabilityDriftApi.status
+    )
   })
 
   it("accepts unresolved dimensions when another capability check is unavailable", async () => {
