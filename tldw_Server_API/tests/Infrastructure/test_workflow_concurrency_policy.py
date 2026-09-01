@@ -37,15 +37,41 @@ TARGET_WORKFLOWS = (
     "sbom.yml",
 )
 
-# Whatever else the expression falls back to, the PR number is what makes runs
-# for the same PR collapse. Without it they never group and nothing cancels.
-REQUIRED_KEY = "github.event.pull_request.number"
+# How each trigger names the pull request a run belongs to. These are GitHub's
+# own event paths, not a style choice -- there is one way to reach the PR number
+# from each event -- but which ones a workflow *needs* is read from its triggers
+# rather than assumed, so dropping a trigger drops its requirement too.
+#
+# The distinction matters: on a workflow_run trigger there is no
+# github.event.pull_request, so a group keyed only on that form degrades to the
+# ref and stops collapsing anything.
+PR_IDENTITY_BY_TRIGGER = {
+    "pull_request": "github.event.pull_request.number",
+    "workflow_run": "github.event.workflow_run.pull_requests[0].number",
+}
+
+
+def _workflow(name: str) -> dict:
+    with (WORKFLOWS_DIR / name).open("r", encoding="utf-8") as handle:
+        return yaml.safe_load(handle)
+
+
+def _triggers(name: str) -> set[str]:
+    """Return the workflow's trigger names.
+
+    ``on`` is a YAML 1.1 boolean, so PyYAML parses the key as ``True``.
+    """
+    workflow = _workflow(name)
+    on = workflow.get("on", workflow.get(True))
+    if isinstance(on, dict):
+        return set(on)
+    if isinstance(on, list):
+        return set(on)
+    return {on} if on else set()
 
 
 def _concurrency(name: str) -> dict:
-    with (WORKFLOWS_DIR / name).open("r", encoding="utf-8") as handle:
-        workflow = yaml.safe_load(handle)
-    concurrency = workflow.get("concurrency")
+    concurrency = _workflow(name).get("concurrency")
     assert isinstance(concurrency, dict), f"{name} is missing a concurrency block"
     return concurrency
 
@@ -74,13 +100,25 @@ def test_required_workflow_cancels_superseded_runs(name: str) -> None:
 @pytest.mark.unit
 @pytest.mark.parametrize("name", TARGET_WORKFLOWS)
 def test_required_workflow_groups_on_the_pull_request(name: str) -> None:
-    """A group that does not key on the PR never collapses anything."""
+    """A group that does not key on the PR never collapses anything.
+
+    Checked per trigger the workflow actually declares, so a workflow that only
+    ever runs on ``pull_request`` is not asked for the ``workflow_run`` form.
+    """
+    triggers = _triggers(name)
     group = _concurrency(name).get("group", "")
 
-    assert REQUIRED_KEY in group, (
-        f"{name} has concurrency group {group!r}, which does not reference "
-        f"{REQUIRED_KEY}. Runs for the same pull request will not group, so "
-        f"none of them cancel."
+    missing = {
+        trigger: token
+        for trigger, token in PR_IDENTITY_BY_TRIGGER.items()
+        if trigger in triggers and token not in group
+    }
+    assert not missing, (
+        f"{name} triggers on {sorted(missing)} but its concurrency group "
+        f"{group!r} has no way to identify the pull request on "
+        f"{'that trigger' if len(missing) == 1 else 'those triggers'}:\n"
+        + "\n".join(f"  {trigger}: expected {token}" for trigger, token in sorted(missing.items()))
+        + "\nRuns arriving that way fall back to the ref and never collapse."
     )
 
 
