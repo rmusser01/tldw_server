@@ -105,6 +105,37 @@ def test_web_browser_transport_mode_missing_setting_returns_auto(
     assert config_mod.web_browser_transport_mode() == "auto"
 
 
+@pytest.mark.parametrize(
+    "resolver_name",
+    ["web_browser_transport_mode", "web_outbound_policy_mode"],
+)
+def test_browser_admission_config_resolvers_preserve_load_failure_sentinel(
+    monkeypatch: pytest.MonkeyPatch,
+    resolver_name: str,
+) -> None:
+    """Do not turn an unreadable browser-admission config into permissive defaults."""
+    monkeypatch.delenv("WEB_BROWSER_TRANSPORT_MODE", raising=False)
+    monkeypatch.delenv("WEB_OUTBOUND_POLICY_MODE", raising=False)
+    config_mod = importlib.import_module("tldw_Server_API.app.core.config")
+    monkeypatch.setattr(
+        config_mod,
+        "load_comprehensive_config",
+        lambda: (_ for _ in ()).throw(OSError("config unavailable")),
+    )
+
+    assert getattr(config_mod, resolver_name)() == ""
+
+
+def test_web_outbound_policy_mode_malformed_value_preserves_invalid_sentinel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep malformed outbound policy distinguishable at browser admission."""
+    monkeypatch.setenv("WEB_OUTBOUND_POLICY_MODE", "permissive-secret-value")
+    config_mod = importlib.import_module("tldw_Server_API.app.core.config")
+
+    assert config_mod.web_outbound_policy_mode() == ""
+
+
 @pytest.mark.parametrize("source", ["env", "config"])
 def test_web_browser_transport_mode_malformed_value_fails_closed(
     monkeypatch: pytest.MonkeyPatch,

@@ -2687,13 +2687,19 @@ def rag_low_confidence_behavior(default: str = "continue") -> str:
     return s if s in ("continue", "ask", "decline") else default
 
 
-def web_outbound_policy_mode(default: str = "compat") -> str:
+def web_outbound_policy_mode(
+    default: str = "compat",
+    *,
+    environment: Mapping[str, str] | None = None,
+) -> str:
     """Return the web outbound-policy mode with env-over-config precedence.
 
-    Accepted values are ``compat`` and ``strict``. Invalid or missing values
-    fall back to ``default``.
+    Accepted values are ``compat`` and ``strict``. Missing values use
+    ``default``; malformed values and configuration-load failures preserve an
+    empty sentinel so browser admission can fail closed.
     """
-    v = os.getenv("WEB_OUTBOUND_POLICY_MODE")
+    env = os.environ if environment is None else environment
+    v = env.get("WEB_OUTBOUND_POLICY_MODE")
     if v is None:
         try:
             cp = load_comprehensive_config()
@@ -2712,14 +2718,19 @@ def web_outbound_policy_mode(default: str = "compat") -> str:
                         v = candidate
                         break
         except _CONFIG_NONCRITICAL_EXCEPTIONS:
-            v = default
+            return ""
     s = str(v).strip().lower()
-    return s if s in ("compat", "strict") else default
+    return s if s in ("compat", "strict") else ""
 
 
-def web_browser_transport_mode(default: str = "auto") -> str:
+def web_browser_transport_mode(
+    default: str = "auto",
+    *,
+    environment: Mapping[str, str] | None = None,
+) -> str:
     """Resolve a transport mode, returning an empty invalid sentinel if malformed."""
-    value = os.getenv("WEB_BROWSER_TRANSPORT_MODE")
+    env = os.environ if environment is None else environment
+    value = env.get("WEB_BROWSER_TRANSPORT_MODE")
     if value is None:
         try:
             config = load_comprehensive_config()
@@ -2737,7 +2748,7 @@ def web_browser_transport_mode(default: str = "auto") -> str:
                         value = candidate
                         break
         except _CONFIG_NONCRITICAL_EXCEPTIONS:
-            value = default
+            return ""
         if value is None:
             value = default
     normalized = str(value).strip().lower()
@@ -4845,8 +4856,8 @@ def load_and_log_configs(
         web_scraper_respect_robots = _as_bool(
             _env_or_cfg('WEB_SCRAPER_RESPECT_ROBOTS', 'Web-Scraper', 'web_scraper_respect_robots', 'true'), True
         )
-        web_outbound_policy_mode_value = web_outbound_policy_mode()
-        web_browser_transport_mode_value = web_browser_transport_mode()
+        web_outbound_policy_mode_value = web_outbound_policy_mode(environment=env)
+        web_browser_transport_mode_value = web_browser_transport_mode(environment=env)
         # Optional scorers configuration
         web_crawl_enable_keyword = _as_bool(
             _env_or_cfg('WEB_CRAWL_ENABLE_KEYWORD_SCORER', 'Web-Scraper', 'web_crawl_enable_keyword_scorer', 'false'), False

@@ -12,7 +12,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, Mock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from hypothesis import HealthCheck, given, settings
@@ -44,9 +44,9 @@ async def test_legacy_recursive_scrape_denies_transport_before_playwright_start(
         auth_mode="single_user",
         outbound_policy_mode="compat",
     )
-    launcher = Mock(side_effect=AssertionError("Playwright must not start"))
+    guarded_browser = Mock(side_effect=AssertionError("browser must not be built"))
     monkeypatch.setattr(legacy, "default_browser_transport_decision", lambda: denied, raising=False)
-    monkeypatch.setattr(legacy, "async_playwright", launcher)
+    monkeypatch.setattr(legacy, "GuardedArticleBrowser", guarded_browser)
 
     results = await legacy.recursive_scrape(
         URL,
@@ -64,7 +64,7 @@ async def test_legacy_recursive_scrape_denies_transport_before_playwright_start(
             "capability": denied.to_capability_metadata(),
         }
     ]
-    launcher.assert_not_called()
+    guarded_browser.assert_not_called()
 
 
 @pytest.mark.unit
@@ -110,22 +110,16 @@ async def test_legacy_recursive_scrape_stops_when_transport_is_denied_mid_run(
         outbound_policy_mode="strict",
     )
     decision_provider = Mock(side_effect=[allowed, denied])
-    context = SimpleNamespace(
-        new_page=AsyncMock(side_effect=AssertionError("link page must not be created")),
-        add_cookies=AsyncMock(return_value=None),
-    )
-    browser = SimpleNamespace(
-        new_context=AsyncMock(return_value=context),
-        close=AsyncMock(return_value=None),
-    )
-    playwright = SimpleNamespace(
-        chromium=SimpleNamespace(launch=AsyncMock(return_value=browser))
-    )
-    manager = MagicMock()
-    manager.__aenter__ = AsyncMock(return_value=playwright)
-    manager.__aexit__ = AsyncMock(return_value=None)
+    acquire = AsyncMock(side_effect=AssertionError("browser must not acquire"))
+
+    class GuardedBrowser:
+        """Expose an acquisition double without launching Playwright."""
+
+        def __init__(self, **_kwargs: object) -> None:
+            self.acquire = acquire
+
     monkeypatch.setattr(legacy, "default_browser_transport_decision", decision_provider)
-    monkeypatch.setattr(legacy, "async_playwright", Mock(return_value=manager))
+    monkeypatch.setattr(legacy, "GuardedArticleBrowser", GuardedBrowser)
 
     results = await legacy.recursive_scrape(
         URL,
@@ -143,8 +137,113 @@ async def test_legacy_recursive_scrape_stops_when_transport_is_denied_mid_run(
             "capability": denied.to_capability_metadata(),
         }
     ]
-    context.new_page.assert_not_awaited()
+    acquire.assert_not_awaited()
     assert decision_provider.call_count == 2
+
+
+@pytest.mark.unit
+async def test_legacy_article_scrape_uses_guarded_browser_instead_of_caller_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Never navigate through an ungoverned caller-supplied Playwright context."""
+    allowed = decide_browser_transport(
+        configured_mode="auto",
+        auth_mode="single_user",
+        outbound_policy_mode="compat",
+    )
+    caller_context = SimpleNamespace(
+        new_page=AsyncMock(side_effect=AssertionError("unguarded context used"))
+    )
+    browser_instances: list[object] = []
+
+    class GuardedBrowser:
+        """Record canonical guarded-browser construction and acquisition."""
+
+        def __init__(self, **kwargs: object) -> None:
+            self.kwargs = kwargs
+            self.calls: list[str] = []
+            browser_instances.append(self)
+
+        async def acquire(self, url: str, _profile: object) -> str:
+            """Return deterministic rendered HTML for the public helper."""
+            self.calls.append(url)
+            return "<html><head><title>Guarded</title></head><body>Safe body</body></html>"
+
+    monkeypatch.setattr(legacy, "default_browser_transport_decision", lambda: allowed)
+    monkeypatch.setattr(legacy, "GuardedArticleBrowser", GuardedBrowser, raising=False)
+    monkeypatch.setattr(
+        legacy,
+        "extract_article_with_pipeline",
+        lambda *_args, **_kwargs: {
+            "title": "N/A",
+            "content": "Safe body",
+            "extraction_successful": True,
+        },
+    )
+    monkeypatch.setattr(legacy, "convert_html_to_markdown", lambda value: value)
+
+    result = await legacy.scrape_article_async(caller_context, URL)
+
+    caller_context.new_page.assert_not_awaited()
+    assert len(browser_instances) == 1
+    assert browser_instances[0].calls == [URL]
+    assert type(browser_instances[0].kwargs["egress_guard"]).__name__ == "DefaultProbeEgressGuard"
+    assert result["title"] == "Guarded"
+
+
+@pytest.mark.unit
+async def test_legacy_recursive_scrape_discovers_links_from_guarded_html(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Any,
+) -> None:
+    """Reuse guarded rendered HTML for crawl discovery without a second raw page."""
+    allowed = decide_browser_transport(
+        configured_mode="url_guarded",
+        auth_mode="single_user",
+        outbound_policy_mode="compat",
+    )
+    child_url = "https://example.com/article/next"
+    acquired: list[str] = []
+
+    class GuardedBrowser:
+        """Return a two-page same-origin crawl graph."""
+
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        async def acquire(self, url: str, _profile: object) -> str:
+            """Record one guarded acquisition and return its rendered page."""
+            acquired.append(url)
+            if url == URL:
+                return '<html><body><a href="/article/next">Next</a></body></html>'
+            assert url == child_url
+            return "<html><body>Done</body></html>"
+
+    monkeypatch.setattr(legacy, "default_browser_transport_decision", lambda: allowed)
+    monkeypatch.setattr(legacy, "GuardedArticleBrowser", GuardedBrowser)
+    monkeypatch.setattr(
+        legacy,
+        "extract_article_with_pipeline",
+        lambda _html, url, **_kwargs: {
+            "url": url,
+            "title": "Article",
+            "content": "body",
+            "extraction_successful": True,
+        },
+    )
+    monkeypatch.setattr(legacy, "convert_html_to_markdown", lambda value: value)
+
+    results = await legacy.recursive_scrape(
+        URL,
+        max_pages=2,
+        max_depth=1,
+        delay=0,
+        resume_file=str(tmp_path / "progress.json"),
+    )
+
+    assert acquired == [URL, child_url]
+    assert [result["url"] for result in results] == [URL, child_url]
+    assert all("_discovered_links" not in result for result in results)
 
 
 def _result(

@@ -182,6 +182,18 @@ def test_rejects_unsupported_case_kind() -> None:
         validate_fixture_suite(suite)
 
 
+def test_rejects_empty_extraction_ground_truth() -> None:
+    """Reject extraction fixtures that can score extracted-nothing as perfect."""
+    suite = _suite()
+    cases = suite["cases"]
+    assert isinstance(cases, list)
+    cases[0]["expected"]["text"] = ""
+    cases[0]["observed"]["text"] = ""
+
+    with pytest.raises(FixtureValidationError, match="expected.text must be non-empty"):
+        validate_fixture_suite(suite)
+
+
 @pytest.mark.parametrize(
     ("case_index", "section", "field"),
     [
@@ -303,6 +315,42 @@ def test_report_is_sorted_and_stable_across_calls() -> None:
     ]
     assert serialize_report(first) == serialize_report(second)
     assert serialize_report(first).endswith("\n")
+
+
+def test_summary_mean_uses_raw_case_scores_before_rounding() -> None:
+    """Round the arithmetic mean rather than averaging emitted case metrics."""
+    suite = _suite()
+    cases = suite["cases"]
+    assert isinstance(cases, list)
+    search = copy.deepcopy(cases[1])
+    search["id"] = "one-of-three"
+    search["input"]["provider_results"] = [
+        {"provider": str(index), "url": f"https://{index}.test/", "title": str(index)}
+        for index in range(3)
+    ]
+    search["expected"]["ordered_urls"] = [
+        "https://0.test/",
+        "https://1.test/",
+        "https://2.test/",
+    ]
+    search["observed"]["ordered_urls"] = [
+        "https://0.test/",
+        "https://x.test/",
+        "https://y.test/",
+    ]
+    no_matches = copy.deepcopy(search)
+    no_matches["id"] = "zero-of-three"
+    no_matches["observed"]["ordered_urls"] = [
+        "https://x.test/",
+        "https://y.test/",
+        "https://z.test/",
+    ]
+    suite["cases"] = [search, no_matches]
+
+    report = evaluate_fixture_suite(suite)
+
+    assert [case["score"] for case in report["cases"]] == [0.333333, 0.0]
+    assert report["summary"]["mean_case_score"] == 0.166667
 
 
 def test_algorithm_versions_exactly_match_the_v1_contract() -> None:

@@ -11,6 +11,7 @@ import sys
 import threading
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -491,35 +492,20 @@ def test_phase4b_crawl_bound_article_helper_keeps_its_async_surface_and_canonica
     assert "run_extraction_in_thread" in _called_names(helper)
 
 
-def test_phase4b_crawl_bound_article_helper_forwards_to_canonical_extraction_and_closes_page(
+def test_phase4b_crawl_bound_article_helper_forwards_guarded_html_to_canonical_extraction(
     monkeypatch,
 ) -> None:
     from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as article
 
-    class Page:
-        closed = False
+    acquire = AsyncMock(
+        return_value="<html><head><title>Browser title</title></head><article>Body</article></html>"
+    )
 
-        async def goto(self, url: str) -> None:
-            assert url == "https://example.com/article"
+    class GuardedBrowser:
+        """Provide deterministic rendered HTML without a native browser."""
 
-        async def wait_for_load_state(self, state: str) -> None:
-            assert state == "networkidle"
-
-        async def title(self) -> str:
-            return "Browser title"
-
-        async def content(self) -> str:
-            return "<article>Body</article>"
-
-        async def close(self) -> None:
-            self.closed = True
-
-    class Context:
-        def __init__(self) -> None:
-            self.page = Page()
-
-        async def new_page(self) -> Page:
-            return self.page
+        def __init__(self, **_kwargs: object) -> None:
+            self.acquire = acquire
 
     calls: list[tuple[str, str, dict[str, bool]]] = []
     event_loop_thread = threading.get_ident()
@@ -532,46 +518,48 @@ def test_phase4b_crawl_bound_article_helper_forwards_to_canonical_extraction_and
 
     monkeypatch.setattr(article, "extract_article_with_pipeline", extract)
     monkeypatch.setattr(article, "convert_html_to_markdown", lambda content: f"markdown:{content}")
-    context = Context()
+    monkeypatch.setattr(article, "GuardedArticleBrowser", GuardedBrowser)
 
     result = asyncio.run(
-        article.scrape_article_async(context, "https://example.com/article", allow_llm_extraction=False)
+        article.scrape_article_async(None, "https://example.com/article", allow_llm_extraction=False)
     )
 
-    assert calls == [("<article>Body</article>", "https://example.com/article", {"allow_llm_extraction": False})]
+    assert calls == [
+        (
+            "<html><head><title>Browser title</title></head><article>Body</article></html>",
+            "https://example.com/article",
+            {"allow_llm_extraction": False},
+        )
+    ]
     assert extraction_threads and extraction_threads[0] != event_loop_thread
     assert result == {"title": "Browser title", "content": "markdown:Body", "extraction_successful": True}
-    assert context.page.closed is True
+    acquire.assert_awaited_once()
 
 
-def test_phase4b_crawl_bound_article_helper_returns_legacy_failure_shape_and_closes_page(monkeypatch) -> None:
+def test_phase4b_crawl_bound_article_helper_returns_sanitized_guarded_failure(monkeypatch) -> None:
     from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as article
 
-    class Page:
-        closed = False
+    class GuardedBrowser:
+        """Raise the canonical bounded browser failure."""
 
-        async def goto(self, _url: str) -> None:
-            raise RuntimeError("legacy failure")
+        def __init__(self, **_kwargs: object) -> None:
+            pass
 
-        async def close(self) -> None:
-            self.closed = True
+        async def acquire(self, _url: str, _profile: object) -> str:
+            raise article.ArticleFailure("browser_error", "navigation")
 
-    class Context:
-        def __init__(self) -> None:
-            self.page = Page()
-
-        async def new_page(self) -> Page:
-            return self.page
-
-    context = Context()
-    result = asyncio.run(article.scrape_article_async(context, "https://example.com/article"))
+    monkeypatch.setattr(article, "GuardedArticleBrowser", GuardedBrowser)
+    result = asyncio.run(article.scrape_article_async(None, "https://example.com/article"))
 
     assert result == {
         "url": "https://example.com/article",
+        "title": "N/A",
+        "author": "N/A",
+        "date": "N/A",
+        "content": "",
         "extraction_successful": False,
-        "error": "legacy failure",
+        "error": "browser_error",
     }
-    assert context.page.closed is True
 
 
 def test_phase4b_handler_import_is_lazy_and_cycle_free() -> None:

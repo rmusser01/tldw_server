@@ -78,3 +78,30 @@
 - [x] **Step 3:** Run focused tests, the affected Wave 0 suite, compile/lint checks, and `git diff --check`.
 - [x] **Step 4:** Run Bandit over touched production paths and inspect the final diff for a surviving browser sink or compatibility regression.
 - [x] **Step 5:** Update `TASK-13139.13`, commit and push, request Qodo follow-up, and merge only after current-dev, review, and CI gates pass.
+
+### Task 4: Remediate post-CI Cubic findings
+
+**Files:**
+- Modify: `tldw_Server_API/app/core/Web_Scraping/Article_Extractor_Lib.py`
+- Modify: `tldw_Server_API/app/core/Web_Scraping/browser_transport.py`
+- Modify: `tldw_Server_API/app/core/config.py`
+- Modify: `tldw_Server_API/app/core/Evaluations/web_retrieval_quality.py`
+- Test: `tldw_Server_API/tests/Web_Scraping/`
+- Modify: affected plan, Backlog, design, and ADR source/published mirrors
+
+**Interfaces:**
+- Consumes: the existing guarded article-browser adapter, injected configuration environment, and deterministic fixture schema.
+- Produces: guarded legacy browser acquisition, invalid config sentinels, raw-score summary aggregation, non-empty extraction truth, and consistent architecture/audit records.
+
+- [x] **Step 1:** Add focused failing regressions for legacy guarded acquisition, config-load failure, environment injection, raw-score aggregation, and empty extraction truth.
+- [x] **Step 2:** Run the focused tests and confirm they fail for the reviewed reasons.
+- [x] **Step 3:** Route legacy acquisition through `GuardedArticleBrowser`; fail closed on configuration errors; preserve the supplied environment mapping; and correct quality validation/aggregation.
+- [x] **Step 4:** Remove raw AGPL source references, reconcile the plan and commit audit, and move browser admission into a dedicated ADR with synchronized published mirrors.
+- [x] **Step 5:** Run focused tests, Ruff, Bandit, diff/parity checks, and review the complete patch.
+
+### Task 5: Re-review, final CI, and merge
+
+- [ ] **Step 1:** Push the verified remediation and respond to every Cubic thread with evidence.
+- [ ] **Step 2:** Resolve only validated-and-fixed threads and confirm no actionable Qodo/Cubic thread remains.
+- [ ] **Step 3:** Rebase again if `dev` advances, rerun all required GitHub checks, and verify the exact head SHA.
+- [ ] **Step 4:** Merge PR #2839 using the repository's merge-commit convention and verify the merged state.

@@ -59,6 +59,8 @@ Stealth waits are configurable via `STEALTH_WAIT_MS` if present; otherwise defau
 
 ### Browser transport admission
 
+The durable admission and attestation decision is recorded in [ADR-042](../ADR/042-browser-transport-admission-and-attestation.md); it composes with the central outbound egress policy in ADR-026 without changing that ADR's scope.
+
 URL-policy checks resolve and validate a destination before dispatch, and Playwright routes re-check navigation redirects, frames, subresources, HTTP requests, and WebSockets. Those checks remain necessary, but they do not pin Chromium's DNS result or verify the connected peer. Browser escalation therefore uses this additional admission decision:
 
 | Configured mode | Runtime profile | Attestation | Result |

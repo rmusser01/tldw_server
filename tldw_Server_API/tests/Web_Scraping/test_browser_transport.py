@@ -198,8 +198,12 @@ def test_default_decision_uses_injected_auth_environment(monkeypatch: pytest.Mon
         fromlist=["browser_transport"],
     )
     monkeypatch.setenv("AUTH_MODE", "multi_user")
-    monkeypatch.setattr(module, "web_browser_transport_mode", lambda: "auto")
-    monkeypatch.setattr(module, "web_outbound_policy_mode", lambda: "compat")
+    monkeypatch.setattr(
+        module, "web_browser_transport_mode", lambda **_kwargs: "auto"
+    )
+    monkeypatch.setattr(
+        module, "web_outbound_policy_mode", lambda **_kwargs: "compat"
+    )
 
     decision = default_browser_transport_decision(
         environ={"AUTH_MODE": "single_user"}
@@ -207,6 +211,37 @@ def test_default_decision_uses_injected_auth_environment(monkeypatch: pytest.Mon
 
     assert decision.allowed is True
     assert decision.reason == "browser_transport_allowed_legacy"
+
+
+def test_default_decision_injects_one_environment_into_all_profile_resolvers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Resolve auth, transport, and outbound policy from one immutable mapping."""
+    module = __import__(
+        "tldw_Server_API.app.core.Web_Scraping.browser_transport",
+        fromlist=["browser_transport"],
+    )
+    supplied = {
+        "AUTH_MODE": "single_user",
+        "WEB_BROWSER_TRANSPORT_MODE": "auto",
+        "WEB_OUTBOUND_POLICY_MODE": "compat",
+    }
+    seen: list[object] = []
+    monkeypatch.setattr(
+        module,
+        "web_browser_transport_mode",
+        lambda *, environment: seen.append(environment) or environment["WEB_BROWSER_TRANSPORT_MODE"],
+    )
+    monkeypatch.setattr(
+        module,
+        "web_outbound_policy_mode",
+        lambda *, environment: seen.append(environment) or environment["WEB_OUTBOUND_POLICY_MODE"],
+    )
+
+    decision = default_browser_transport_decision(environ=supplied)
+
+    assert decision.allowed is True
+    assert seen == [supplied, supplied]
 
 
 def test_default_decision_uses_canonical_auth_config_when_env_is_absent(
@@ -233,8 +268,12 @@ def test_default_decision_uses_canonical_auth_config_when_env_is_absent(
         lambda: _ConfigStub(),
         raising=False,
     )
-    monkeypatch.setattr(module, "web_browser_transport_mode", lambda: "auto")
-    monkeypatch.setattr(module, "web_outbound_policy_mode", lambda: "compat")
+    monkeypatch.setattr(
+        module, "web_browser_transport_mode", lambda **_kwargs: "auto"
+    )
+    monkeypatch.setattr(
+        module, "web_outbound_policy_mode", lambda **_kwargs: "compat"
+    )
 
     decision = default_browser_transport_decision(environ={})
 
@@ -250,8 +289,12 @@ def test_default_decision_rejects_explicit_invalid_auth_environment(
         "tldw_Server_API.app.core.Web_Scraping.browser_transport",
         fromlist=["browser_transport"],
     )
-    monkeypatch.setattr(module, "web_browser_transport_mode", lambda: "auto")
-    monkeypatch.setattr(module, "web_outbound_policy_mode", lambda: "compat")
+    monkeypatch.setattr(
+        module, "web_browser_transport_mode", lambda **_kwargs: "auto"
+    )
+    monkeypatch.setattr(
+        module, "web_outbound_policy_mode", lambda **_kwargs: "compat"
+    )
 
     decision = default_browser_transport_decision(
         environ={"AUTH_MODE": "not-a-supported-profile"}
@@ -272,7 +315,7 @@ def test_default_decision_fails_closed_when_config_resolution_errors(
     monkeypatch.setattr(
         module,
         "web_browser_transport_mode",
-        lambda: (_ for _ in ()).throw(RuntimeError("config unavailable")),
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("config unavailable")),
     )
 
     decision = default_browser_transport_decision(
@@ -295,7 +338,7 @@ def test_default_decision_logs_sanitized_config_resolution_failure(
     monkeypatch.setattr(
         module,
         "web_browser_transport_mode",
-        lambda: (_ for _ in ()).throw(RuntimeError(secret)),
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError(secret)),
     )
     records: list[dict[str, object]] = []
     sink_id = logger.add(lambda message: records.append(message.record))

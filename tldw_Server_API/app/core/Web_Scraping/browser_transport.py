@@ -142,8 +142,8 @@ def default_browser_transport_decision(
     """Resolve the default profile without importing or initializing AuthNZ."""
     environment = os.environ if environ is None else environ
     try:
-        configured_mode: object = web_browser_transport_mode()
-        outbound_mode: object = web_outbound_policy_mode()
+        configured_mode: object = web_browser_transport_mode(environment=environment)
+        outbound_mode: object = web_outbound_policy_mode(environment=environment)
         auth_mode: object = _effective_auth_mode(environment)
     except Exception as exc:  # noqa: BLE001 - configuration errors must fail closed
         logger.bind(

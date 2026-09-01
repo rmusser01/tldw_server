@@ -109,15 +109,16 @@ def validate_fixture_suite(value: Mapping[str, Any]) -> dict[str, Any]:
 def evaluate_fixture_suite(value: Mapping[str, Any]) -> dict[str, Any]:
     """Validate and score a fixture using only deterministic local operations."""
     suite = validate_fixture_suite(value)
-    case_reports = sorted(
+    evaluated_cases = sorted(
         (_evaluate_case(case) for case in suite["cases"]),
-        key=lambda case: case["id"],
+        key=lambda evaluated: evaluated[0]["id"],
     )
+    case_reports = [report for report, _raw_score in evaluated_cases]
     total_characters = sum(case["budget"]["characters"] for case in case_reports)
     total_utf8_bytes = sum(case["budget"]["utf8_bytes"] for case in case_reports)
     mean_case_score = (
-        statistics.mean(case["score"] for case in case_reports)
-        if case_reports
+        statistics.mean(raw_score for _report, raw_score in evaluated_cases)
+        if evaluated_cases
         else 0.0
     )
 
@@ -215,7 +216,11 @@ def _validate_extraction(
             "url": _require_url(input_value["url"], f"{context}.input.url"),
             "html": _require_string(input_value["html"], f"{context}.input.html"),
         },
-        {"text": _require_string(expected["text"], f"{context}.expected.text")},
+        {
+            "text": _require_nonempty_string(
+                expected["text"], f"{context}.expected.text"
+            )
+        },
         {
             "text": _require_string(observed["text"], f"{context}.observed.text"),
             "output_text": _require_string(
@@ -349,7 +354,7 @@ def _validate_provenance(
     )
 
 
-def _evaluate_case(case: Mapping[str, Any]) -> dict[str, Any]:
+def _evaluate_case(case: Mapping[str, Any]) -> tuple[dict[str, Any], float]:
     """Score one normalized case and attach its output budget."""
     evaluators = {
         "extraction": _score_extraction,
@@ -359,13 +364,16 @@ def _evaluate_case(case: Mapping[str, Any]) -> dict[str, Any]:
     }
     metrics, score = evaluators[case["kind"]](case)
     output_text = case["observed"]["output_text"]
-    return {
-        "id": case["id"],
-        "kind": case["kind"],
-        "score": _round_metric(score),
-        "metrics": metrics,
-        "budget": _output_budget(output_text),
-    }
+    return (
+        {
+            "id": case["id"],
+            "kind": case["kind"],
+            "score": _round_metric(score),
+            "metrics": metrics,
+            "budget": _output_budget(output_text),
+        },
+        score,
+    )
 
 
 def _score_extraction(case: Mapping[str, Any]) -> tuple[dict[str, Any], float]:

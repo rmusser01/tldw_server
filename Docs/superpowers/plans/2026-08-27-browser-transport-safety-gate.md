@@ -251,7 +251,7 @@ In `test_outbound_policy.py`, cover:
 - `[Web-Scraper] web_browser_transport_mode` is used when env is absent;
 - legacy `[Web-Scraping]` remains readable;
 - missing setting returns `auto`;
-- malformed env or config returns `disabled`, not `auto`;
+- malformed env or config returns an empty invalid sentinel, not `auto` or the valid `disabled` mode;
 - `default_browser_transport_decision(environ={"AUTH_MODE": ...})` uses the supplied environment mapping while outbound/config helpers are monkeypatched, so tests do not mutate AuthNZ global settings.
 
 - [ ] **Step 4: Run the focused tests and confirm red**
@@ -283,7 +283,7 @@ def web_browser_transport_mode(default: str = "auto") -> str:
     """Resolve auto|disabled|url_guarded|attested_proxy, failing closed when malformed."""
 ```
 
-Read `WEB_BROWSER_TRANSPORT_MODE`, then `[Web-Scraper]`, then legacy `[Web-Scraping]`. Return `disabled` for any non-empty unsupported value. Add the resolved value as `web_browser_transport_mode` inside the existing `web_scraper` result mapping from `load_and_log_configs()`.
+Read `WEB_BROWSER_TRANSPORT_MODE`, then `[Web-Scraper]`, then legacy `[Web-Scraping]`. Return an empty invalid sentinel for any non-empty unsupported value so the decision layer reports `browser_transport_config_invalid`; do not collapse malformed input into the valid `disabled` mode. Add the resolved value as `web_browser_transport_mode` inside the existing `web_scraper` result mapping from `load_and_log_configs()`.
 
 Add to `config.txt` immediately after `web_outbound_policy_mode`:
 
