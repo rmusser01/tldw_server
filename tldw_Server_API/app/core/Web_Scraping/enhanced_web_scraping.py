@@ -55,6 +55,11 @@ from tldw_Server_API.app.core.Security.safe_pickle import safe_pickle_loads
 from tldw_Server_API.app.core.testing import is_truthy
 from tldw_Server_API.app.core.Utils.Utils import get_database_dir
 from tldw_Server_API.app.core.Web_Scraping import preflight as preflight_facade
+from tldw_Server_API.app.core.Web_Scraping.browser_transport import (
+    browser_transport_failure_result,
+    default_browser_transport_decision,
+    resolve_browser_transport_decision,
+)
 from tldw_Server_API.app.core.Web_Scraping.content import convert_html_to_markdown
 from tldw_Server_API.app.core.Web_Scraping.extraction import extract_article_with_pipeline
 from tldw_Server_API.app.core.Web_Scraping.extraction_async import run_extraction_in_thread
@@ -1239,24 +1244,34 @@ class EnhancedWebScraper:
         """Start the scraper"""
         await self.job_queue.start()
 
-        try:
-            # Initialize Playwright
-            self._playwright = await async_playwright().start()
-            self._browser = await self._playwright.chromium.launch(
-                headless=True,
-                args=['--no-sandbox', '--disable-setuid-sandbox']
-            )
-            logger.info("Playwright browser initialized successfully")
-        except ImportError:
-            logger.warning("Playwright not installed. Run: pip install playwright && playwright install chromium")
-            logger.warning("Web scraping will proceed without JavaScript rendering support")
-            self._playwright = None
-            self._browser = None
-        except _WEBSCRAPE_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"Failed to initialize Playwright browser: {e}")
-            logger.warning("Web scraping will proceed without JavaScript rendering support")
-            self._playwright = None
-            self._browser = None
+        transport = resolve_browser_transport_decision(
+            default_browser_transport_decision,
+            component="enhanced_web_scraper",
+        )
+        if not transport.allowed:
+            logger.bind(
+                component="enhanced_web_scraper",
+                operation="start_browser",
+                reason=transport.reason,
+            ).warning("Playwright browser startup skipped by transport policy.")
+        else:
+            try:
+                self._playwright = await async_playwright().start()
+                self._browser = await self._playwright.chromium.launch(
+                    headless=True,
+                    args=['--no-sandbox', '--disable-setuid-sandbox']
+                )
+                logger.info("Playwright browser initialized successfully")
+            except ImportError:
+                logger.warning("Playwright not installed. Run: pip install playwright && playwright install chromium")
+                logger.warning("Web scraping will proceed without JavaScript rendering support")
+                self._playwright = None
+                self._browser = None
+            except _WEBSCRAPE_NONCRITICAL_EXCEPTIONS as e:
+                logger.error(f"Failed to initialize Playwright browser: {e}")
+                logger.warning("Web scraping will proceed without JavaScript rendering support")
+                self._playwright = None
+                self._browser = None
 
         # Ensure dedup flush on process exit
         atexit.register(lambda: self.deduplicator.flush())
@@ -1572,6 +1587,12 @@ class EnhancedWebScraper:
         allow_llm_extraction: bool = True,
     ) -> dict[str, Any]:
         """Scrape using Playwright for JavaScript-heavy sites"""
+        transport = resolve_browser_transport_decision(
+            default_browser_transport_decision,
+            component="enhanced_web_scraper",
+        )
+        if not transport.allowed:
+            return browser_transport_failure_result(url, transport)
         # Fallback gracefully if browser isn't initialized
         if not self._browser:
             return await self._scrape_with_trafilatura(

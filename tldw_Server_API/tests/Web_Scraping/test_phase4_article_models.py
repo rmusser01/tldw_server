@@ -203,6 +203,7 @@ def test_public_failure_codes_match_the_approved_contract() -> None:
                 "provider_error",
                 "fetch_error",
                 "browser_error",
+                "browser_transport_unavailable",
                 "response_too_large",
                 "extraction_error",
             }
@@ -237,3 +238,64 @@ def test_unknown_article_failure_code_is_sanitized_without_a_url_or_error_text()
     assert result["error"] == "extraction_error"
     assert "url" not in result
     assert "token" not in str(result)
+
+
+def test_browser_transport_failure_snapshots_exact_bounded_capability() -> None:
+    capability: dict[str, object] = {
+        "name": "safe_browser_transport",
+        "available": False,
+        "configured_mode": "auto",
+        "effective_mode": "disabled",
+        "dns_peer_attested": False,
+        "reason": "browser_transport_unattested",
+    }
+    failure = ArticleFailure(
+        "browser_transport_unavailable",
+        "browser_transport_unattested",
+        capability=capability,
+    )
+    capability["reason"] = "secret-mutated-reason"
+
+    assert article_failure_result(failure) == {
+        "title": "N/A",
+        "author": "N/A",
+        "date": "N/A",
+        "content": "",
+        "extraction_successful": False,
+        "error": "browser_transport_unavailable",
+        "capability": {
+            "name": "safe_browser_transport",
+            "available": False,
+            "configured_mode": "auto",
+            "effective_mode": "disabled",
+            "dns_peer_attested": False,
+            "reason": "browser_transport_unattested",
+        },
+    }
+
+
+def test_invalid_browser_transport_capability_is_replaced_fail_closed() -> None:
+    result = article_failure_result(
+        ArticleFailure(
+            "browser_transport_unavailable",
+            "browser_transport_unattested",
+            capability={
+                "name": "safe_browser_transport",
+                "available": False,
+                "configured_mode": ["secret"],
+                "effective_mode": "disabled",
+                "dns_peer_attested": False,
+                "reason": "browser_transport_unattested",
+            },
+        )
+    )
+
+    assert result["capability"] == {
+        "name": "safe_browser_transport",
+        "available": False,
+        "configured_mode": "disabled",
+        "effective_mode": "disabled",
+        "dns_peer_attested": False,
+        "reason": "browser_transport_config_invalid",
+    }
+    assert "secret" not in str(result)

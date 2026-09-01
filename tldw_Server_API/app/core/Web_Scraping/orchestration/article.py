@@ -246,8 +246,9 @@ def _policy_blocked_result(url: str, decision: Any) -> dict[str, Any]:
     }
 
 
-def _failure_result(url: str, code: str) -> dict[str, Any]:
-    return {"url": url, **article_failure_result(ArticleFailure(code, "article"))}
+def _failure_result(url: str, failure: ArticleFailure | str) -> dict[str, Any]:
+    captured = failure if isinstance(failure, ArticleFailure) else ArticleFailure(failure, "article")
+    return {"url": url, **article_failure_result(captured)}
 
 
 def _attach_preflight(result: Mapping[str, Any], payload: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -724,7 +725,7 @@ async def _run_article(
         )
         _record_counter(dependencies, "scrape_fetch_total", {"backend": _PLAYWRIGHT, "outcome": "error"})
         _log_failure(dependencies, exc, code=exc.code, stage=exc.stage, url=url)
-        return _attach_preflight(_failure_result(url, exc.code), preflight_payload)
+        return _attach_preflight(_failure_result(url, exc), preflight_payload)
     except Exception as exc:  # noqa: BLE001 - guard boundary must be stable
         _record_histogram(
             dependencies,
@@ -988,7 +989,7 @@ async def _run_blocking_article(
         except asyncio.CancelledError:
             raise
         except ArticleFailure as exc:
-            return _attach_preflight(_failure_result(url, exc.code), prepared.preflight_payload)
+            return _attach_preflight(_failure_result(url, exc), prepared.preflight_payload)
         except Exception:  # noqa: BLE001 - guarded browser failures are stable
             return _attach_preflight(_failure_result(url, "browser_error"), prepared.preflight_payload)
 
@@ -1010,9 +1011,14 @@ async def _run_blocking_article(
         return _attach_preflight(_blocking_failure_result(url), prepared.preflight_payload)
 
 
-def _raw_failure_result(url: str, code: str) -> dict[str, Any]:
+def _raw_failure_result(url: str, failure: ArticleFailure | str) -> dict[str, Any]:
+    code = failure.code if isinstance(failure, ArticleFailure) else failure
     safe_code = code if type(code) is str and code in PUBLIC_FAILURE_CODES else "browser_error"
-    return {"url": url, "extraction_successful": False, "error": safe_code}
+    result: dict[str, Any] = {"url": url, "extraction_successful": False, "error": safe_code}
+    if safe_code == "browser_transport_unavailable":
+        captured = failure if isinstance(failure, ArticleFailure) else ArticleFailure(failure, "article")
+        result["capability"] = article_failure_result(captured)["capability"]
+    return result
 
 
 async def _run_raw_browser_article(
@@ -1039,7 +1045,7 @@ async def _run_raw_browser_article(
     except asyncio.CancelledError:
         raise
     except ArticleFailure as exc:
-        return _raw_failure_result(url, exc.code)
+        return _raw_failure_result(url, exc)
     except Exception:  # noqa: BLE001 - direct browser details must not escape this API
         return _raw_failure_result(url, "browser_error")
 

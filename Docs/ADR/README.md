@@ -73,3 +73,4 @@ Small bug fixes, local implementation details, product copy, temporary experimen
 | [ADR-039](039-canonical-notes-task-sync-and-derived-checklist-projections.md) | Accepted | Synchronize mutable Notes tasks and immutable activity while keeping Markdown checklists and read state derived. |
 | [ADR-040](040-synchronized-moodboards-and-studio-authority.md) | Proposed | Synchronize moodboards, explicit placements, and accepted Studio sidecars while retaining existing product authority and derived smart matches. |
 | [ADR-041](041-scheduled-agent-execution-feasibility.md) | Accepted | Keep Scheduled Agent execution fail-closed until exact deployment certification and the separate execution stack are both ready. |
+| [ADR-042](042-browser-transport-admission-and-attestation.md) | Accepted | Admit browser retrieval only through URL-guarded single-user compatibility or a complete governed-transport attestation. |

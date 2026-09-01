@@ -1516,6 +1516,10 @@ web_scraper_ua_mode = fixed
 web_scraper_respect_robots = True
 # Shared outbound safety mode for scraping and websearch data-plane callers: compat|strict
 web_outbound_policy_mode = compat
+# Browser transport admission: auto|disabled|url_guarded|attested_proxy
+# auto allows legacy URL-guarded Playwright only in single_user + compat mode.
+# attested_proxy still requires a concrete in-process governed transport attestation.
+web_browser_transport_mode = auto
 web_scraper_preflight_analyzers = False
 web_scraper_preflight_timeout_s = 0
 web_scraper_preflight_scan_depth = default

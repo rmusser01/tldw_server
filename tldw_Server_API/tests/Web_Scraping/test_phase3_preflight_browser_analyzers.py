@@ -679,12 +679,24 @@ async def test_browser_analyzer_timeout_shapes_are_deliberately_preserved(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("error_code", ["unavailable", "missing_dependency"])
+@pytest.mark.parametrize(
+    "error_code",
+    [
+        "unavailable",
+        "missing_dependency",
+        "browser_transport_disabled",
+        "browser_transport_unattested",
+        "browser_transport_config_invalid",
+    ],
+)
 async def test_probe_unavailable_maps_to_stable_capability_result(error_code: str) -> None:
     analyzers = _canonical_analyzers()
-    expected_message = (
-        "Probe dependency is unavailable." if error_code == "missing_dependency" else "Probe capability is unavailable."
-    )
+    if error_code == "missing_dependency":
+        expected_message = "Probe dependency is unavailable."
+    elif error_code == "unavailable":
+        expected_message = "Probe capability is unavailable."
+    else:
+        expected_message = "Safe browser transport is unavailable."
 
     for call in analyzers:
         context = fake_context(

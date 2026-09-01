@@ -1576,6 +1576,7 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_embeddings_abtest_*.py
           - name: product-evaluations-core
             paths: >-
+              tldw_Server_API/tests/Evaluations/test_article_extraction_benchmark.py
               tldw_Server_API/tests/Evaluations/test_benchmark_*.py
               tldw_Server_API/tests/Evaluations/test_circuit_breaker.py
               tldw_Server_API/tests/Evaluations/test_connection_pool.py
@@ -3062,6 +3063,7 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_embeddings_abtest_*.py
           - name: product-evaluations-core
             paths: >-
+              tldw_Server_API/tests/Evaluations/test_article_extraction_benchmark.py
               tldw_Server_API/tests/Evaluations/test_benchmark_*.py
               tldw_Server_API/tests/Evaluations/test_circuit_breaker.py
               tldw_Server_API/tests/Evaluations/test_connection_pool.py
@@ -4419,6 +4421,7 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_embeddings_abtest_*.py
           - name: product-evaluations-core
             paths: >-
+              tldw_Server_API/tests/Evaluations/test_article_extraction_benchmark.py
               tldw_Server_API/tests/Evaluations/test_benchmark_*.py
               tldw_Server_API/tests/Evaluations/test_circuit_breaker.py
               tldw_Server_API/tests/Evaluations/test_connection_pool.py
@@ -5699,6 +5702,7 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_embeddings_abtest_*.py
           - name: product-evaluations-core
             paths: >-
+              tldw_Server_API/tests/Evaluations/test_article_extraction_benchmark.py
               tldw_Server_API/tests/Evaluations/test_benchmark_*.py
               tldw_Server_API/tests/Evaluations/test_circuit_breaker.py
               tldw_Server_API/tests/Evaluations/test_connection_pool.py
@@ -6985,6 +6989,7 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_embeddings_abtest_*.py
           - name: product-evaluations-core
             paths: >-
+              tldw_Server_API/tests/Evaluations/test_article_extraction_benchmark.py
               tldw_Server_API/tests/Evaluations/test_benchmark_*.py
               tldw_Server_API/tests/Evaluations/test_circuit_breaker.py
               tldw_Server_API/tests/Evaluations/test_connection_pool.py

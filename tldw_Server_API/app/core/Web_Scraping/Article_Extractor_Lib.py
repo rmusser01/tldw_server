@@ -31,13 +31,12 @@ from urllib.robotparser import RobotFileParser
 
 # pandas is imported inside parse_csv_urls; at module scope it cost ~0.35 s in
 # every process that registers the media router.
-
 # External Libraries
 from bs4 import BeautifulSoup
 from defusedxml import ElementTree as xET
 from defusedxml import minidom
 from defusedxml.common import DefusedXmlException
-from playwright.async_api import TimeoutError, async_playwright
+from playwright.async_api import TimeoutError
 from tqdm import tqdm
 
 from tldw_Server_API.app.core.DB_Management.DB_Manager import ingest_article_to_db
@@ -51,6 +50,11 @@ from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 from tldw_Server_API.app.core.Metrics import increment_counter
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
 from tldw_Server_API.app.core.Utils.Utils import logging
+from tldw_Server_API.app.core.Web_Scraping.browser_transport import (
+    browser_transport_failure_result,
+    default_browser_transport_decision,
+    resolve_browser_transport_decision,
+)
 from tldw_Server_API.app.core.Web_Scraping.content import (
     ContentMetadataHandler,
     convert_html_to_markdown,
@@ -77,9 +81,19 @@ from tldw_Server_API.app.core.Web_Scraping.filters import (
     FilterChain,
     URLPatternFilter,
 )
+from tldw_Server_API.app.core.Web_Scraping.orchestration.article_browser import (
+    GuardedArticleBrowser,
+)
+from tldw_Server_API.app.core.Web_Scraping.orchestration.article_models import (
+    ArticleFailure,
+    DirectBrowserProfile,
+    article_failure_result,
+)
 from tldw_Server_API.app.core.Web_Scraping.outbound_policy import decide_web_outbound_policy_sync
+from tldw_Server_API.app.core.Web_Scraping.policy import DefaultProbeEgressGuard
 from tldw_Server_API.app.core.Web_Scraping.runtime import (
     PolicyDecision,
+    RuntimeRequestContext,
 )
 from tldw_Server_API.app.core.Web_Scraping.selectors import (
     clear_selector_caches as _clear_selector_caches,
@@ -109,6 +123,44 @@ _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS = (
     json.JSONDecodeError,
     DefusedXmlException,
 )
+
+_LEGACY_BROWSER_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/58.0.3029.110 Safari/537.3"
+)
+
+
+class _LegacyGuardedBrowserSession:
+    """Carry the canonical guarded adapter and immutable legacy profile."""
+
+    def __init__(
+        self,
+        *,
+        user_agent: str,
+        custom_cookies: Optional[list[dict[str, Any]]],
+        include_links: bool,
+    ) -> None:
+        self._browser = GuardedArticleBrowser(
+            egress_guard=DefaultProbeEgressGuard(),
+            context=RuntimeRequestContext(
+                source="legacy_article_extractor",
+                stage="browser_navigation",
+            ),
+        )
+        self._profile = DirectBrowserProfile(
+            user_agent=user_agent,
+            custom_cookies=tuple(custom_cookies or ()),
+            retries=1,
+            timeout_ms=60_000,
+            stealth_enabled=False,
+            stealth_wait_ms=0,
+        )
+        self.include_links = bool(include_links)
+
+    async def acquire(self, url: str) -> str:
+        """Acquire rendered HTML through the canonical guarded browser."""
+        return await self._browser.acquire(url, self._profile)
 
 get_extraction_cache_stats = _get_extraction_cache_stats
 clear_selector_caches = _clear_selector_caches
@@ -1154,11 +1206,24 @@ async def recursive_scrape(
         max_depth: int,
         delay: float = 1.0,
         resume_file: str = 'scrape_progress.json',
-        user_agent: str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3",
+        user_agent: str = _LEGACY_BROWSER_USER_AGENT,
         custom_cookies: Optional[list[dict[str, Any]]] = None,
         progress_callback: Optional[callable] = None,
         allow_llm_extraction: bool = True,
 ) -> list[dict]:
+    transport = resolve_browser_transport_decision(
+        default_browser_transport_decision,
+        component="legacy_article_extractor",
+    )
+    if not transport.allowed:
+        return [browser_transport_failure_result(base_url, transport)]
+
+    browser_session = _LegacyGuardedBrowserSession(
+        user_agent=user_agent,
+        custom_cookies=custom_cookies,
+        include_links=True,
+    )
+
     async def save_progress():
         temp_file = resume_file + ".tmp"
         with open(temp_file, 'w') as f:
@@ -1188,66 +1253,53 @@ async def recursive_scrape(
         pages_scraped = 0
 
     try:
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            context = await browser.new_context(user_agent=user_agent)
+        while to_visit and pages_scraped < max_pages:
+            current_url, current_depth = to_visit.pop(0)
 
-            # Set custom cookies if provided
-            if custom_cookies:
-                await context.add_cookies(custom_cookies)
+            if current_url in visited or current_depth > max_depth:
+                continue
+
+            visited.add(current_url)
+
+            if progress_callback:
+                progress_callback(
+                    f"Scraping page {pages_scraped + 1}/{max_pages}: {current_url}"
+                )
 
             try:
-                while to_visit and pages_scraped < max_pages:
-                    current_url, current_depth = to_visit.pop(0)
+                await asyncio.sleep(random.uniform(delay * 0.8, delay * 1.2))  # nosec B311
 
-                    if current_url in visited or current_depth > max_depth:
-                        continue
+                article_data = await scrape_article_async(
+                    browser_session,
+                    current_url,
+                    allow_llm_extraction=allow_llm_extraction,
+                )
+                discovered_links = article_data.pop("_discovered_links", [])
 
-                    visited.add(current_url)
+                if article_data.get("error") == "browser_transport_unavailable":
+                    scraped_articles.append(article_data)
+                    break
 
-                    # Update progress if callback provided
-                    if progress_callback:
-                        progress_callback(f"Scraping page {pages_scraped + 1}/{max_pages}: {current_url}")
+                if article_data and article_data['extraction_successful']:
+                    scraped_articles.append(article_data)
+                    pages_scraped += 1
 
-                    try:
-                        await asyncio.sleep(random.uniform(delay * 0.8, delay * 1.2))  # nosec B311
+                if current_depth < max_depth:
+                    for link in discovered_links:
+                        child_url = urljoin(base_url, link)
+                        if (
+                            is_valid_url(child_url)
+                            and child_url.startswith(base_url)
+                            and child_url not in visited
+                            and should_scrape_url(child_url)
+                        ):
+                            to_visit.append((child_url, current_depth + 1))
 
-                        article_data = await scrape_article_async(
-                            context,
-                            current_url,
-                            allow_llm_extraction=allow_llm_extraction,
-                        )
+            except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS as e:
+                logging.error(f"Error scraping {current_url}: {str(e)}")
 
-                        if article_data and article_data['extraction_successful']:
-                            scraped_articles.append(article_data)
-                            pages_scraped += 1
-
-                        # If we haven't reached max depth, add child links to to_visit
-                        if current_depth < max_depth:
-                            page = await context.new_page()
-                            await page.goto(current_url)
-                            await page.wait_for_load_state("networkidle")
-
-                            links = await page.eval_on_selector_all('a[href]',
-                                                                    "(elements) => elements.map(el => el.href)")
-                            for link in links:
-                                child_url = urljoin(base_url, link)
-                                if is_valid_url(child_url) and child_url.startswith(
-                                        base_url) and child_url not in visited and should_scrape_url(child_url):
-                                    to_visit.append((child_url, current_depth + 1))
-
-                            await page.close()
-
-                    except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS as e:
-                        logging.error(f"Error scraping {current_url}: {str(e)}")
-
-                    # Save progress periodically (e.g., every 10 pages)
-                    if pages_scraped % 10 == 0:
-                        await save_progress()
-
-            finally:
-                await browser.close()
-
+            if pages_scraped % 10 == 0:
+                await save_progress()
     finally:
         # These statements are now guaranteed to be reached after the scraping is done
         await save_progress()
@@ -1268,13 +1320,32 @@ async def scrape_article_async(
     *,
     allow_llm_extraction: bool = True,
 ) -> dict[str, Any]:
-    page = await context.new_page()
-    try:
-        await page.goto(url)
-        await page.wait_for_load_state("networkidle")
+    """Acquire through the guarded adapter and run the canonical extraction pipeline.
 
-        title = await page.title()
-        content = await page.content()
+    ``context`` is retained for compatibility but raw Playwright contexts are
+    never trusted or navigated. Recursive crawling supplies the internal
+    guarded session so custom cookies and link discovery remain request scoped.
+    """
+    transport = resolve_browser_transport_decision(
+        default_browser_transport_decision,
+        component="legacy_article_extractor",
+    )
+    if not transport.allowed:
+        return browser_transport_failure_result(url, transport)
+
+    browser_session = (
+        context
+        if isinstance(context, _LegacyGuardedBrowserSession)
+        else _LegacyGuardedBrowserSession(
+            user_agent=_LEGACY_BROWSER_USER_AGENT,
+            custom_cookies=None,
+            include_links=False,
+        )
+    )
+    try:
+        content = await browser_session.acquire(url)
+        soup = BeautifulSoup(content, "html.parser")
+        title = soup.title.get_text(strip=True) if soup.title else "N/A"
 
         article_data = await run_extraction_in_thread(
             extract_article_with_pipeline,
@@ -1287,7 +1358,22 @@ async def scrape_article_async(
                 article_data["title"] = title
             if article_data.get("content"):
                 article_data["content"] = convert_html_to_markdown(article_data["content"])
+        if browser_session.include_links:
+            base_element = soup.select_one("base[href]")
+            document_base = (
+                urljoin(url, str(base_element["href"]))
+                if base_element is not None
+                else url
+            )
+            article_data["_discovered_links"] = [
+                urljoin(document_base, str(link["href"]))
+                for link in soup.select("a[href]")
+                if link.get("href") is not None
+            ]
         return article_data
+    except ArticleFailure as failure:
+        result = article_failure_result(failure)
+        return {"url": url, **result}
     except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS as e:
         logging.error(f"Error scraping article {url}: {str(e)}")
         return {
@@ -1295,8 +1381,7 @@ async def scrape_article_async(
             'extraction_successful': False,
             'error': str(e)
         }
-    finally:
-        await page.close()
+
 
 def should_scrape_url(url: str) -> bool:
     """Deprecated: use FilterChain externally where possible.

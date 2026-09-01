@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from tldw_Server_API.app.core.Web_Scraping import preflight as preflight_facade
+from tldw_Server_API.app.core.Web_Scraping.browser_transport import decide_browser_transport
 from tldw_Server_API.app.core.Web_Scraping.contracts import (
     PreflightAdvice,
     PreflightResult,
@@ -161,6 +162,66 @@ def install_enhanced_defaults(
         playwright=playwright,
         beautifulsoup=beautifulsoup,
     )
+
+
+@pytest.mark.unit
+async def test_enhanced_start_skips_playwright_when_transport_is_denied(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A denied transport must prevent Playwright startup entirely."""
+    from tldw_Server_API.app.core.Web_Scraping import enhanced_web_scraping as enhanced
+
+    scraper = enhanced.EnhancedWebScraper(config={})
+    denied = decide_browser_transport(
+        configured_mode="disabled",
+        auth_mode="single_user",
+        outbound_policy_mode="compat",
+    )
+    playwright_factory = Mock(side_effect=AssertionError("Playwright must not start"))
+    monkeypatch.setattr(scraper.job_queue, "start", AsyncMock(return_value=None))
+    monkeypatch.setattr(enhanced, "default_browser_transport_decision", lambda: denied, raising=False)
+    monkeypatch.setattr(enhanced, "async_playwright", playwright_factory)
+
+    await scraper.start()
+
+    playwright_factory.assert_not_called()
+    assert scraper._playwright is None
+    assert scraper._browser is None
+
+
+@pytest.mark.unit
+async def test_enhanced_public_scrape_denies_playwright_before_context_creation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The public scrape contract must gate a pre-initialized browser too."""
+    harness = install_enhanced_defaults(monkeypatch, backend="playwright")
+    denied = decide_browser_transport(
+        configured_mode="auto",
+        auth_mode="multi_user",
+        outbound_policy_mode="strict",
+    )
+    browser = SimpleNamespace(
+        new_context=AsyncMock(side_effect=AssertionError("context must not be created"))
+    )
+    harness.scraper._browser = browser
+    real_playwright_scrape = harness.enhanced.EnhancedWebScraper._scrape_with_playwright.__get__(
+        harness.scraper
+    )
+    monkeypatch.setattr(harness.scraper, "_scrape_with_playwright", real_playwright_scrape)
+    monkeypatch.setattr(
+        harness.enhanced,
+        "default_browser_transport_decision",
+        lambda: denied,
+        raising=False,
+    )
+
+    result = await harness.scraper.scrape_article(URL)
+
+    assert result["error"] == "browser_transport_unavailable"
+    assert result["extraction_successful"] is False
+    assert result["capability"] == denied.to_capability_metadata()
+    assert result["preflight_analysis"]["analysis"] == ANALYSIS
+    browser.new_context.assert_not_awaited()
 
 
 @pytest.mark.unit

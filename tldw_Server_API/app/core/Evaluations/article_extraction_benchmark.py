@@ -61,11 +61,18 @@ class ArticleExtractionBenchmarkEvaluator:
         dataset_root: Path,
         extractor: Callable[[str, str], str] | None = None,
         n_bootstrap: int = 1000,
+        bootstrap_seed: int = 0,
     ) -> None:
+        if type(n_bootstrap) is not int or n_bootstrap <= 0:
+            raise ValueError("n_bootstrap must be a positive integer")
+        if type(bootstrap_seed) is not int:
+            raise ValueError("bootstrap_seed must be an integer")
+
         self.dataset_root = Path(dataset_root)
         self.html_dir = self.dataset_root / "html"
         self.ground_truth_path = self.dataset_root / "ground-truth.json"
         self.n_bootstrap = n_bootstrap
+        self.bootstrap_seed = bootstrap_seed
         self.extractor = extractor or self._default_extractor
 
         if not self.html_dir.exists():
@@ -117,7 +124,12 @@ class ArticleExtractionBenchmarkEvaluator:
             )
             logger.info("Saved predictions to {path}", path=output_predictions_path)
 
-        metrics = evaluate_metrics(ground_truth, predictions, self.n_bootstrap)
+        metrics = evaluate_metrics(
+            ground_truth,
+            predictions,
+            self.n_bootstrap,
+            bootstrap_seed=self.bootstrap_seed,
+        )
         logger.info(
             (
                 "Benchmark complete - F1: {f1:.3f} (± {f1_std:.3f}), "
@@ -170,7 +182,13 @@ def evaluate_metrics(
     ground_truth: dict[str, dict[str, str]],
     prediction: dict[str, dict[str, str]],
     n_bootstrap: int,
+    *,
+    bootstrap_seed: int = 0,
 ) -> dict[str, Any]:
+    if type(n_bootstrap) is not int or n_bootstrap <= 0:
+        raise ValueError("n_bootstrap must be a positive integer")
+    if type(bootstrap_seed) is not int:
+        raise ValueError("bootstrap_seed must be an integer")
     if ground_truth.keys() != prediction.keys():
         raise ValueError("Prediction keys do not match ground truth")
 
@@ -188,8 +206,13 @@ def evaluate_metrics(
     bootstrap_values: dict[str, list[float]] = {}
     n_items = len(tp_fp_fns)
     indices_range = range(n_items)
+    # Bootstrap resampling is deterministic evaluation, never security-sensitive.
+    rng = random.Random(bootstrap_seed)  # nosec B311
     for _ in range(n_bootstrap):
-        indices = [random.randint(0, n_items - 1) for _ in indices_range]
+        indices = [
+            rng.randint(0, n_items - 1)
+            for _ in indices_range
+        ]
         sample_tp_fp_fns = [tp_fp_fns[i] for i in indices]
         sample_metrics = metrics_from_tp_fp_fns(sample_tp_fp_fns)
         for key, value in sample_metrics.items():

@@ -494,6 +494,7 @@ async def test_runner_maps_browser_and_extraction_boundaries_to_stable_errors() 
     browser_result = await _run_article(URL, None, True, dependencies=browser_harness.dependencies)
 
     assert browser_result["error"] == "browser_error"
+    assert "capability" not in browser_result
     assert browser_harness.logs == [
         {
             "exception_type": "RuntimeError",
@@ -518,12 +519,140 @@ async def test_runner_maps_browser_and_extraction_boundaries_to_stable_errors() 
 
 
 @pytest.mark.asyncio
-async def test_runner_falls_back_after_js_required_and_records_bounded_metric() -> None:
-    from tldw_Server_API.app.core.Web_Scraping.orchestration.article import _run_article
+@pytest.mark.unit
+async def test_runner_preserves_exact_browser_transport_denial_capability(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Expose only bounded transport-denial capability through the public API."""
+    from tldw_Server_API.app.core.Web_Scraping.orchestration import article as canonical
+
+    failure = ArticleFailure(
+        "browser_transport_unavailable",
+        "browser_transport_unattested",
+        capability={
+            "name": "safe_browser_transport",
+            "available": False,
+            "configured_mode": "auto",
+            "effective_mode": "disabled",
+            "dns_peer_attested": False,
+            "reason": "browser_transport_unattested",
+        },
+    )
+    harness = _harness(backend="playwright", browser_outcomes=[failure])
+    monkeypatch.setattr(
+        canonical,
+        "_build_default_dependencies",
+        lambda _cookies: harness.dependencies,
+    )
+
+    result = await canonical.scrape_article(URL)
+
+    assert result == {
+        "url": URL,
+        "title": "N/A",
+        "author": "N/A",
+        "date": "N/A",
+        "content": "",
+        "extraction_successful": False,
+        "error": "browser_transport_unavailable",
+        "capability": {
+            "name": "safe_browser_transport",
+            "available": False,
+            "configured_mode": "auto",
+            "effective_mode": "disabled",
+            "dns_peer_attested": False,
+            "reason": "browser_transport_unattested",
+        },
+        "preflight_analysis": {"analysis": {"results": {}}},
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_strict_profile_http_success_never_consults_browser(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep successful governed HTTP retrieval independent of browser policy."""
+    from tldw_Server_API.app.core.Web_Scraping.orchestration import article as canonical
+
+    harness = _harness(
+        config={
+            "web_scraper": {
+                "web_outbound_policy_mode": "strict",
+                "web_browser_transport_mode": "disabled",
+            }
+        },
+        browser_outcomes=[AssertionError("browser must not be called")],
+    )
+    monkeypatch.setattr(
+        canonical,
+        "_build_default_dependencies",
+        lambda _cookies: harness.dependencies,
+    )
+
+    result = await canonical.scrape_article(URL)
+
+    assert result["extraction_successful"] is True
+    assert harness.browser.calls == []
+
+
+@pytest.mark.unit
+def test_raw_browser_transport_denial_retains_only_bounded_capability(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Bound raw browser denial metadata at the public synchronous contract."""
+    from tldw_Server_API.app.core.Web_Scraping.orchestration import article as canonical
+
+    failure = ArticleFailure(
+        "browser_transport_unavailable",
+        "browser_transport_unattested",
+        capability={
+            "name": "safe_browser_transport",
+            "available": False,
+            "configured_mode": "auto",
+            "effective_mode": "disabled",
+            "dns_peer_attested": False,
+            "reason": "browser_transport_unattested",
+        },
+    )
+    harness = _harness(backend="playwright", browser_outcomes=[failure])
+    monkeypatch.setattr(
+        canonical,
+        "_build_default_dependencies",
+        lambda _cookies: harness.dependencies,
+    )
+
+    assert canonical.scrape_article_sync(URL) == {
+        "url": URL,
+        "extraction_successful": False,
+        "error": "browser_transport_unavailable",
+        "capability": {
+            "name": "safe_browser_transport",
+            "available": False,
+            "configured_mode": "auto",
+            "effective_mode": "disabled",
+            "dns_peer_attested": False,
+            "reason": "browser_transport_unattested",
+        },
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_runner_falls_back_after_js_required_and_records_bounded_metric(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Record one bounded reason when the public API escalates for JavaScript."""
+    from tldw_Server_API.app.core.Web_Scraping.orchestration import article as canonical
 
     harness = _harness()
     harness.dependencies = dataclasses.replace(harness.dependencies, js_required=lambda *_args, **_kwargs: True)
-    result = await _run_article(URL, None, True, dependencies=harness.dependencies)
+    monkeypatch.setattr(
+        canonical,
+        "_build_default_dependencies",
+        lambda _cookies: harness.dependencies,
+    )
+    result = await canonical.scrape_article(URL)
 
     assert result["extraction_successful"] is True
     assert ("scrape_playwright_fallback_total", {"reason": "js_required"}) in harness.metrics
@@ -1105,10 +1234,26 @@ def test_public_coroutine_is_a_direct_canonical_export_with_exact_signature() ->
     assert legacy.scrape_article is canonical is scrape_article
     assert legacy._js_required is _js_required
     assert inspect.iscoroutinefunction(canonical)
-    assert (
-        str(inspect.signature(canonical))
-        == "(url: str, custom_cookies: list[dict[str, Any]] | None = None, *, allow_llm_extraction: bool = True) -> dict[str, typing.Any]"
-    )
+    signature = inspect.signature(canonical)
+    parameters = tuple(signature.parameters.values())
+    assert [parameter.name for parameter in parameters] == [
+        "url",
+        "custom_cookies",
+        "allow_llm_extraction",
+    ]
+    assert [parameter.kind for parameter in parameters] == [
+        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        inspect.Parameter.KEYWORD_ONLY,
+    ]
+    assert parameters[0].default is inspect.Parameter.empty
+    assert parameters[1].default is None
+    assert parameters[2].default is True
+    resolved = inspect.get_annotations(canonical, eval_str=True)
+    assert resolved["url"] is str
+    assert resolved["custom_cookies"] == list[dict[str, Any]] | None
+    assert resolved["allow_llm_extraction"] is bool
+    assert resolved["return"] == dict[str, Any]
 
 
 def test_orchestration_never_recovers_cancelled_error_in_exception_tuples() -> None:
