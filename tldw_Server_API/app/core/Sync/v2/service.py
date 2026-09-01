@@ -3,6 +3,7 @@ from __future__ import annotations
 """Business service for Sync v2 protocol operations."""
 
 import base64
+import binascii
 import hashlib
 import hmac
 import inspect
@@ -11,9 +12,11 @@ import os
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
+from typing import Literal
 from uuid import RFC_4122, UUID, uuid4
 
 from loguru import logger
+from tldw_profile_core import SERIALIZED_SCHEMA_VERSION
 
 from tldw_Server_API.app.core.Notes.attachment_policy import (
     NoteAttachmentPolicyError,
@@ -37,6 +40,7 @@ from .adapters import (
 from .attachment_refs_v2 import parse_attachment_ref_v2_payload
 from .blob_store import LocalSyncBlobStore, SyncBlobStoreError
 from .errors import (
+    PersonalContextStorageEncryptionUnavailableError,
     SyncHeadConflictError,
     SyncIdempotencyConflictError,
     SyncInvalidDomainError,
@@ -57,6 +61,7 @@ from .models import (
     NOTES_ORGANIZATION_DOMAINS,
     NOTES_TASK_SYNC_DOMAINS,
     NOTES_TASK_SYNC_OPERATIONS,
+    PERSONAL_CONTEXT_SYNC_DOMAINS,
     SYNC_REBASE_REQUIRED_AFTER_CONFLICT_RESOLUTION,
     SYNC_V2_ENCRYPTION_POLICIES,
     SYNC_V2_KNOWN_DOMAINS,
@@ -139,6 +144,7 @@ from .notes_task_readiness import (
     redact_notes_task_server_metadata,
 )
 from .profile import (
+    PersonalContextBootstrap,
     SyncNotesAttachmentBootstrapDiagnostics,
     SyncProfileStatus,
     SyncRecoveryActionDescriptor,
@@ -171,6 +177,7 @@ SYNC_PULL_TOKEN_MAX_ENCODED_BYTES = 32_768
 SYNC_PULL_TOKEN_MAX_DECODED_BYTES = 24_576
 SYNC_PULL_TOKEN_MAX_STREAMS = 800
 SYNC_PULL_TOKEN_VERSION = 1
+SYNC_PULL_TOKEN_CLOCK_SKEW_SECONDS = 300
 SYNC_RETENTION_BINDING_PAGE_SIZE = 1000
 
 SYNC_DATASET_RECOVERY_KEY_PURPOSE = "dataset_recovery"
@@ -590,6 +597,47 @@ def _atomic_negotiation_patch(
 
 
 @dataclass(frozen=True, slots=True)
+class PersonalContextSyncCapabilities:
+    """Bounded Personal Context contract advertised through Sync v2."""
+
+    available: bool = False
+    blockers: tuple[str, ...] = ("personal_context_profile_key_unavailable",)
+    authorization_policy: Literal["server_trusted_v1"] = "server_trusted_v1"
+    min_schema_version: int = 1
+    max_schema_version: int = 1
+    integrity_algorithm: Literal["hmac-sha256-v1"] = "hmac-sha256-v1"
+    integrity_key_distribution: Literal["wrapped-bootstrap-v1"] = "wrapped-bootstrap-v1"
+    privacy_cleanup_ack: Literal["personal-context-cleanup-v1"] = "personal-context-cleanup-v1"
+    purge_generation: Literal["personal-context-purge-v1"] = "personal-context-purge-v1"
+    max_record_bytes: int = 16_384
+    max_search_results: int = 20
+    max_proposals_per_turn: int = 5
+    max_proposals_per_session: int = 25
+    max_unresolved_proposals: int = 200
+
+
+def personal_context_sync_capabilities_from_env() -> PersonalContextSyncCapabilities:
+    """Return fail-closed Personal Context readiness from shared schema and key custody."""
+
+    blockers: list[str] = []
+    if SERIALIZED_SCHEMA_VERSION != 1:
+        blockers.append("personal_context_schema_unsupported")
+
+    encoded_key = os.getenv("TLDW_PERSONAL_CONTEXT_MASTER_KEY", "").strip()
+    try:
+        master_key = base64.b64decode(encoded_key, validate=True)
+    except (binascii.Error, ValueError):
+        master_key = b""
+    if len(master_key) != 32:
+        blockers.append("personal_context_profile_key_unavailable")
+
+    return PersonalContextSyncCapabilities(
+        available=not blockers,
+        blockers=tuple(blockers),
+    )
+
+
+@dataclass(frozen=True, slots=True)
 class SyncV2Settings:
     """Server settings surfaced through Sync v2 capabilities."""
 
@@ -619,6 +667,9 @@ class SyncV2Settings:
     server_trusted_encryption: SyncV2ServerTrustedEncryptionStatus = field(
         default_factory=server_trusted_encryption_status_from_env
     )
+    personal_context: PersonalContextSyncCapabilities = field(
+        default_factory=personal_context_sync_capabilities_from_env
+    )
     restore_manifest_scan_limit: int = 10_000
     restore_preview_candidate_limit: int = 50_000
     restore_preview_action_limit: int = 10_000
@@ -635,6 +686,7 @@ class SyncV2Capabilities:
     encryption: dict[str, object]
     blob_transfer: dict[str, object]
     encryption_policies: list[EncryptionPolicy]
+    personal_context: PersonalContextSyncCapabilities
     max_batch_size: int
     max_envelope_payload_bytes: int
     max_attachment_bytes: int
@@ -1070,6 +1122,10 @@ class SyncV2Service:
         notes_attachment_bootstrapper: object | None = None,
         notes_task_bootstrapper: object | None = None,
         notes_task_activity_bootstrapper: object | None = None,
+        personal_context_service_resolver: Callable[[str], object] | None = None,
+        personal_context_key_wrapper: Callable[..., str] | None = None,
+        personal_context_key_fingerprint: Callable[..., str] | None = None,
+        personal_context_authority_id: str = "tldw-server",
     ) -> None:
         self.store = store
         self.adapters = adapters
@@ -1084,6 +1140,12 @@ class SyncV2Service:
         self.notes_attachment_bootstrapper = notes_attachment_bootstrapper
         self.notes_task_bootstrapper = notes_task_bootstrapper
         self.notes_task_activity_bootstrapper = notes_task_activity_bootstrapper
+        self.personal_context_service_resolver = personal_context_service_resolver
+        self.personal_context_key_wrapper = personal_context_key_wrapper
+        self.personal_context_key_fingerprint = personal_context_key_fingerprint
+        self.personal_context_authority_id = (
+            str(personal_context_authority_id).strip() or "tldw-server"
+        )
 
     def _notes_task_domains_ready(self, dataset: SyncDataset | None) -> bool:
         """Return the single service-level task/activity activation predicate."""
@@ -1120,6 +1182,28 @@ class SyncV2Service:
         except Exception:  # noqa: BLE001 - malformed product authority fails closed.
             return False
 
+    def _personal_context_domains_ready(
+        self,
+        dataset: SyncDataset | None = None,
+    ) -> bool:
+        """Return whether every Personal Context domain has a usable v1 path."""
+
+        for domain in PERSONAL_CONTEXT_SYNC_DOMAINS:
+            if not self.adapters.has_domain(domain):
+                return False
+            adapter = self.adapters.get(domain)
+            if (
+                not self.adapters.supports_version(domain, 1)
+                or not getattr(adapter, "storage_encryption_ready", False)
+                or getattr(self.materializers.get(domain), "domain", None) != domain
+            ):
+                return False
+            if dataset is not None:
+                key_custody_ready = getattr(adapter, "key_custody_ready", None)
+                if not callable(key_custody_ready) or not key_custody_ready(dataset):
+                    return False
+        return True
+
     def capabilities(
         self,
         *,
@@ -1147,6 +1231,9 @@ class SyncV2Service:
                 getattr(attachment_adapter, "v2_writes_enabled", False)
             )
         notes_task_ready = self._notes_task_domains_ready(dataset)
+        personal_context_transport_ready = self._personal_context_domains_ready(
+            dataset if self.settings.personal_context.available else None
+        )
         private_dormant_domains = {
             *NOTES_MOODBOARD_STUDIO_DOMAINS,
             *NOTES_TASK_SYNC_DOMAINS,
@@ -1190,6 +1277,36 @@ class SyncV2Service:
                 "used_blob_bytes": self.settings.used_blob_bytes,
             }
         warnings = list(self.settings.server_trusted_encryption.warnings)
+        personal_context = self.settings.personal_context
+        if not personal_context_transport_ready:
+            personal_context = replace(
+                personal_context,
+                available=False,
+                blockers=tuple(
+                    dict.fromkeys(
+                        (
+                            *personal_context.blockers,
+                            "personal_context_transport_unavailable",
+                        )
+                    )
+                ),
+            )
+        if (
+            "server_trusted_v1" not in self.settings.encryption_policies
+            or not self.settings.server_trusted_encryption.ready
+        ):
+            personal_context = replace(
+                personal_context,
+                available=False,
+                blockers=tuple(
+                    dict.fromkeys(
+                        (
+                            *personal_context.blockers,
+                            "personal_context_server_trusted_unavailable",
+                        )
+                    )
+                ),
+            )
         compatibility_flags: dict[str, bool] = {}
         if "client_private_v1" in self.settings.encryption_policies:
             compatibility_flags["server_frontend_client_private_mutation"] = False
@@ -1205,6 +1322,7 @@ class SyncV2Service:
             encryption=self.settings.server_trusted_encryption.encryption,
             blob_transfer=blob_transfer,
             encryption_policies=list(self.settings.encryption_policies),
+            personal_context=personal_context,
             max_batch_size=self.settings.max_batch_size,
             max_envelope_payload_bytes=self.settings.max_envelope_payload_bytes,
             max_attachment_bytes=self.settings.max_attachment_bytes,
@@ -1218,12 +1336,14 @@ class SyncV2Service:
             ),
             supported_adapter_versions=sync_v2_server_supported_adapter_versions(
                 notes_task_sync_ready=notes_task_ready,
+                personal_context_sync_ready=personal_context_transport_ready,
             ),
             writable_adapter_versions=sync_v2_dataset_writable_adapter_versions(
                 dataset,
                 notes_attachment_sync_enabled=attachment_v2_writes_enabled,
                 supports_attachments=self.settings.supports_attachments,
                 notes_task_sync_ready=notes_task_ready,
+                personal_context_sync_ready=personal_context.available,
             ),
             quota=quota,
             supports_attachments=self.settings.supports_attachments,
@@ -2035,12 +2155,17 @@ class SyncV2Service:
             "notes_attachment_v2",
             "default_personal",
             "client_family",
+            "personal_context",
             *NOTES_MOODBOARD_STUDIO_SERVER_METADATA_KEYS,
             *NOTES_TASK_SERVER_METADATA_KEYS,
         }
         if (
             requested_domains.intersection(
-                {*NOTES_ORGANIZATION_DOMAINS, *NOTES_LINK_DOMAINS}
+                {
+                    *NOTES_ORGANIZATION_DOMAINS,
+                    *NOTES_LINK_DOMAINS,
+                    *PERSONAL_CONTEXT_SYNC_DOMAINS,
+                }
             )
             or reserved_metadata.intersection(requested_metadata)
         ):
@@ -2216,6 +2341,43 @@ class SyncV2Service:
             client_version=client_version,
             client_instance=dict(client_instance or {}),
             requested_domains=requested_domains,
+        )
+
+    def bootstrap_personal_context(
+        self,
+        *,
+        user_id: str,
+        device_id: str,
+        required_schema_version: int | None = None,
+        required_quotas: Mapping[str, int] | None = None,
+        expected_purge_generation: int | None = None,
+    ) -> PersonalContextBootstrap:
+        """Return an authenticated device's canonical first-link snapshot."""
+
+        return self._profile_manager().bootstrap_personal_context(
+            user_id=user_id,
+            device_id=device_id,
+            authority_id=self.personal_context_authority_id,
+            required_schema_version=required_schema_version,
+            required_quotas=required_quotas,
+            expected_purge_generation=expected_purge_generation,
+        )
+
+    def complete_personal_context_link(
+        self,
+        *,
+        user_id: str,
+        device_id: str,
+        dataset_id: str,
+        bootstrap_cursor: str,
+    ) -> None:
+        """Open the narrow post-review Personal Context push transition."""
+
+        self._profile_manager().complete_personal_context_link(
+            user_id=user_id,
+            device_id=device_id,
+            dataset_id=dataset_id,
+            bootstrap_cursor=bootstrap_cursor,
         )
 
     def profile_status(
@@ -2959,6 +3121,17 @@ class SyncV2Service:
                     )
                 )
                 continue
+            if envelope.domain in PERSONAL_CONTEXT_SYNC_DOMAINS and not _personal_context_link_is_complete(
+                self.store, dataset, user_id=user_id, device_id=device_id
+            ):
+                rejected.append(
+                    SyncPushRejected(
+                        client_envelope_id=envelope.client_envelope_id,
+                        error_code="personal_context_link_incomplete",
+                        message="Personal Context reconciliation is not complete",
+                    )
+                )
+                continue
             if has_guard_required_routing_key(envelope.routing_metadata):
                 rejected.append(
                     SyncPushRejected(
@@ -3144,12 +3317,39 @@ class SyncV2Service:
                             retryable=True,
                         )
                     )
+                except PersonalContextStorageEncryptionUnavailableError:
+                    rejected.append(
+                        SyncPushRejected(
+                            client_envelope_id=envelope.client_envelope_id,
+                            error_code="personal_context_storage_unavailable",
+                            message=(
+                                "Personal Context storage encryption is unavailable"
+                            ),
+                            retryable=True,
+                        )
+                    )
                 if stop_on_conflict:
                     stopped_after_conflict = True
                 continue
 
             try:
-                inserted = self.store.insert_envelope(replace(envelope, status="accepted"))
+                storage_envelope = self._protect_personal_context_for_storage(
+                    dataset,
+                    replace(envelope, status="accepted"),
+                )
+            except PersonalContextStorageEncryptionUnavailableError:
+                rejected.append(
+                    SyncPushRejected(
+                        client_envelope_id=envelope.client_envelope_id,
+                        error_code="personal_context_storage_unavailable",
+                        message="Personal Context storage encryption is unavailable",
+                        retryable=True,
+                    )
+                )
+                continue
+
+            try:
+                inserted = self.store.insert_envelope(storage_envelope)
             except SyncInvalidDomainError:
                 rejected.append(
                     SyncPushRejected(
@@ -3194,6 +3394,17 @@ class SyncV2Service:
                             client_envelope_id=envelope.client_envelope_id,
                             error_code="sync_projection_busy",
                             message="Projection is busy; retry later",
+                            retryable=True,
+                        )
+                    )
+                except PersonalContextStorageEncryptionUnavailableError:
+                    rejected.append(
+                        SyncPushRejected(
+                            client_envelope_id=envelope.client_envelope_id,
+                            error_code="personal_context_storage_unavailable",
+                            message=(
+                                "Personal Context storage encryption is unavailable"
+                            ),
                             retryable=True,
                         )
                     )
@@ -3269,7 +3480,9 @@ class SyncV2Service:
 
         selected_domains = self._selected_pull_domains(dataset, device, domains)
         streams = self._pull_adapter_streams(device, selected_domains)
-        if any(adapter_version != 1 for _domain, adapter_version in streams):
+        if any(adapter_version != 1 for _domain, adapter_version in streams) or (
+            isinstance(cursor, str) and "." in cursor
+        ):
             return self._pull_versioned(
                 dataset=dataset,
                 device=device,
@@ -3290,7 +3503,10 @@ class SyncV2Service:
             adapter_versions=[1],
         )
 
-        page = visible[:page_limit]
+        page = [
+            self._restore_personal_context_from_storage(dataset, envelope)
+            for envelope in visible[:page_limit]
+        ]
         has_visible_lookahead = len(visible) > page_limit
         has_more = has_visible_lookahead or len(raw_envelopes) > page_limit
         if has_visible_lookahead and page:
@@ -5413,13 +5629,24 @@ class SyncV2Service:
                 envelope.domain,
                 envelope.object_id,
             )
+            if current is not None:
+                current = self._restore_personal_context_from_storage(
+                    dataset,
+                    current,
+                )
             context = SyncAdapterContext(
                 prior_envelopes=(current,) if current is not None else (),
-                get_head=lambda domain, object_id: self.store.get_current_head(
-                    dataset.dataset_id, domain, object_id
+                get_head=lambda domain, object_id: self._restore_personal_context_optional_head(
+                    dataset,
+                    self.store.get_current_head(
+                        dataset.dataset_id, domain, object_id
+                    ),
                 ),
-                list_heads=lambda domain: self._list_current_heads_for_adapter(
-                    dataset.dataset_id, domain
+                list_heads=lambda domain: tuple(
+                    self._restore_personal_context_from_storage(dataset, item)
+                    for item in self._list_current_heads_for_adapter(
+                        dataset.dataset_id, domain
+                    )
                 ),
                 supports_attachments=self.settings.supports_attachments,
             )
@@ -5430,6 +5657,60 @@ class SyncV2Service:
             )
         adapter = self.adapters.get(envelope.domain)
         return _call_adapter_evaluate(adapter, envelope, dataset=dataset, context=context)
+
+    def _protect_personal_context_for_storage(
+        self,
+        dataset: SyncDataset,
+        envelope: SyncEnvelopeCreate,
+    ) -> SyncEnvelopeCreate:
+        """Encrypt Personal Context bodies before generic Sync persistence."""
+
+        if envelope.domain not in PERSONAL_CONTEXT_SYNC_DOMAINS:
+            return envelope
+        adapter = self.adapters.get(envelope.domain)
+        protector = getattr(adapter, "protect_for_storage", None)
+        if protector is None:
+            raise PersonalContextStorageEncryptionUnavailableError(
+                "Personal Context storage encryption is unavailable"
+            )
+        try:
+            return protector(envelope, dataset=dataset)
+        except (KeyError, RuntimeError, TypeError, ValueError) as exc:
+            raise PersonalContextStorageEncryptionUnavailableError(
+                "Personal Context storage encryption is unavailable"
+            ) from exc
+
+    def _restore_personal_context_from_storage(
+        self,
+        dataset: SyncDataset,
+        envelope: SyncEnvelope,
+    ) -> SyncEnvelope:
+        """Restore one authenticated Personal Context body for use or delivery."""
+
+        if envelope.domain not in PERSONAL_CONTEXT_SYNC_DOMAINS:
+            return envelope
+        adapter = self.adapters.get(envelope.domain)
+        restorer = getattr(adapter, "restore_from_storage", None)
+        if restorer is None:
+            raise SyncStoreError("Personal Context stored envelope is unavailable")
+        try:
+            restored = restorer(envelope, dataset=dataset)
+        except (KeyError, RuntimeError, TypeError, ValueError) as exc:
+            raise SyncStoreError(
+                "Personal Context stored envelope is unavailable"
+            ) from exc
+        if not isinstance(restored, SyncEnvelope):
+            raise SyncStoreError("Personal Context stored envelope is unavailable")
+        return restored
+
+    def _restore_personal_context_optional_head(
+        self,
+        dataset: SyncDataset,
+        envelope: SyncEnvelope | None,
+    ) -> SyncEnvelope | None:
+        if envelope is None:
+            return None
+        return self._restore_personal_context_from_storage(dataset, envelope)
 
     def _list_current_heads_for_adapter(
         self,
@@ -7414,7 +7695,11 @@ class SyncV2Service:
         store: SyncV2Store | None = None,
     ) -> SyncPushConflict:
         active_store = store or self.store
-        inserted = active_store.insert_envelope(replace(envelope, status="conflict"))
+        storage_envelope = self._protect_personal_context_for_storage(
+            dataset,
+            replace(envelope, status="conflict"),
+        )
+        inserted = active_store.insert_envelope(storage_envelope)
         existing = active_store.get_unresolved_conflict_for_envelope(
             dataset.dataset_id,
             local_envelope_id=envelope.client_envelope_id,
@@ -7523,12 +7808,21 @@ class SyncV2Service:
                     message=_safe_projection_error_message(exc),
                 )
         try:
+            clear_envelope = envelope
+            if envelope.domain in PERSONAL_CONTEXT_SYNC_DOMAINS:
+                dataset = store.get_dataset(envelope.dataset_id)
+                if dataset is None:
+                    raise SyncStoreError("Sync dataset was not found")
+                clear_envelope = self._restore_personal_context_from_storage(
+                    dataset,
+                    envelope,
+                )
             if guarded_mutation is None:
-                result = materializer.apply(envelope, store=store)
+                result = materializer.apply(clear_envelope, store=store)
             else:
                 guarded_mutation.require_identity(envelope.domain, envelope.object_id)
                 result = materializer.apply(
-                    envelope,
+                    clear_envelope,
                     store=store,
                     guarded_mutation=guarded_mutation,
                 )
@@ -7867,14 +8161,20 @@ class SyncV2Service:
         device_id: str,
         version_set: Mapping[SyncDomain, Sequence[int]],
         watermarks: Mapping[tuple[SyncDomain, int], int],
+        ttl_seconds: int | None = None,
     ) -> str:
         now = _parse_sync_timestamp(self.clock()) or datetime.now(timezone.utc)
+        token_ttl = (
+            self.settings.pull_token_ttl_seconds
+            if ttl_seconds is None
+            else ttl_seconds
+        )
         payload = {
             "v": SYNC_PULL_TOKEN_VERSION,
             "dataset_id": dataset_id,
             "device_id": device_id,
             "iat": int(now.timestamp()),
-            "exp": int(now.timestamp()) + self.settings.pull_token_ttl_seconds,
+            "exp": int(now.timestamp()) + token_ttl,
             "vs": [
                 [domain, list(versions)]
                 for domain, versions in sorted(version_set.items())
@@ -7941,8 +8241,16 @@ class SyncV2Service:
         if payload.get("vs") != expected_version_set:
             raise SyncStoreError("sync_pull_restart_required")
         now = _parse_sync_timestamp(self.clock()) or datetime.now(timezone.utc)
+        iat = payload.get("iat")
         exp = payload.get("exp")
-        if isinstance(exp, bool) or not isinstance(exp, int) or exp < int(now.timestamp()):
+        if (
+            isinstance(iat, bool)
+            or not isinstance(iat, int)
+            or iat > int(now.timestamp()) + SYNC_PULL_TOKEN_CLOCK_SKEW_SECONDS
+            or isinstance(exp, bool)
+            or not isinstance(exp, int)
+            or exp < int(now.timestamp()) - SYNC_PULL_TOKEN_CLOCK_SKEW_SECONDS
+        ):
             raise SyncStoreError("sync_pull_token_invalid")
         raw_watermarks = payload.get("wm")
         if not isinstance(raw_watermarks, list):
@@ -8030,6 +8338,14 @@ class SyncV2Service:
             notes_link_bootstrapper=self.notes_link_bootstrapper,
             notes_attachment_bootstrapper=self.notes_attachment_bootstrapper,
         )
+
+    def _personal_context_service_for_user(self, user_id: str) -> object:
+        """Resolve the canonical Personal Context service after Sync auth checks."""
+
+        resolver = self.personal_context_service_resolver
+        if resolver is not None:
+            return resolver(user_id)
+        raise SyncStoreError("personal_context_key_custody_unavailable")
 
     def _update_cursors(
         self,
@@ -8669,6 +8985,29 @@ def _device_requested_domains(device: SyncDevice) -> list[SyncDomain]:
     return [item for item in requested if item in known]
 
 
+def _personal_context_link_is_complete(
+    store: SyncV2Store, dataset: SyncDataset, *, user_id: str, device_id: str
+) -> bool:
+    """Return whether reviewed first-link reconciliation admitted profile writes."""
+
+    state = dataset.metadata.get("personal_context")
+    if not isinstance(state, Mapping):
+        return False
+    return (
+        isinstance(state.get("profile_id"), str)
+        and isinstance(state.get("integrity_key_id"), str)
+        and isinstance(state.get("purge_generation"), int)
+        and store.has_personal_context_link_receipt(
+            user_id=user_id,
+            dataset_id=dataset.dataset_id,
+            device_id=device_id,
+            profile_id=state["profile_id"],
+            integrity_key_id=state["integrity_key_id"],
+            purge_generation=state["purge_generation"],
+        )
+    )
+
+
 def _call_adapter_evaluate(
     adapter: SyncDomainAdapter,
     envelope: SyncEnvelopeCreate,
@@ -8692,6 +9031,7 @@ def _evaluate_accepts_context(evaluate: Callable[..., object]) -> bool:
 
 
 __all__ = [
+    "PersonalContextSyncCapabilities",
     "SyncDatasetEnrollment",
     "SyncDiagnosticsBlobHealth",
     "SyncDiagnosticsDevice",
@@ -8719,4 +9059,5 @@ __all__ = [
     "SyncV2Capabilities",
     "SyncV2Service",
     "SyncV2Settings",
+    "personal_context_sync_capabilities_from_env",
 ]

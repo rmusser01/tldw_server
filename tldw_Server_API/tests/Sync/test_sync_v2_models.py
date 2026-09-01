@@ -47,6 +47,13 @@ NOTES_ORGANIZATION_DOMAINS = (
     "notes.folder_link",
 )
 NOTES_LINK_DOMAINS = ["notes.link"]
+PERSONAL_CONTEXT_DOMAINS = [
+    "personal_context.manifest",
+    "personal_context.scope",
+    "personal_context.record",
+    "personal_context.proposal",
+    "personal_context.purge",
+]
 SUPPORTED_DOMAINS = (
     M1_DOMAINS
     + WORKSPACE_DOMAINS
@@ -54,6 +61,7 @@ SUPPORTED_DOMAINS = (
     + MEDIA_DOMAINS
     + list(NOTES_ORGANIZATION_DOMAINS)
     + NOTES_LINK_DOMAINS
+    + PERSONAL_CONTEXT_DOMAINS
 )
 
 
@@ -122,6 +130,11 @@ def test_capabilities_advertise_personal_and_workspace_domains_with_server_trust
         "notes.folder": ["upsert", "tombstone"],
         "notes.folder_link": ["upsert", "tombstone"],
         "notes.link": ["upsert", "tombstone"],
+        "personal_context.manifest": ["upsert"],
+        "personal_context.scope": ["upsert"],
+        "personal_context.record": ["upsert", "tombstone"],
+        "personal_context.proposal": ["upsert"],
+        "personal_context.purge": ["tombstone"],
     }
     assert capabilities.encryption["policy"] == "server_trusted_v1"
     assert capabilities.encryption["ready"] is True
@@ -148,6 +161,73 @@ def test_capabilities_advertise_personal_and_workspace_domains_with_server_trust
         },
     }
     assert "client_private_v1" not in capabilities.model_dump_json()
+
+
+def test_personal_context_capability_contract_is_typed_and_bounded() -> None:
+    capabilities = SyncCapabilitiesResponse()
+
+    assert set(PERSONAL_CONTEXT_DOMAINS).issubset(capabilities.domains)
+    assert capabilities.personal_context.model_dump() == {
+        "available": False,
+        "blockers": ["personal_context_profile_key_unavailable"],
+        "authorization_policy": "server_trusted_v1",
+        "min_schema_version": 1,
+        "max_schema_version": 1,
+        "integrity_algorithm": "hmac-sha256-v1",
+        "integrity_key_distribution": "wrapped-bootstrap-v1",
+        "privacy_cleanup_ack": "personal-context-cleanup-v1",
+        "purge_generation": "personal-context-purge-v1",
+        "max_record_bytes": 16_384,
+        "max_search_results": 20,
+        "max_proposals_per_turn": 5,
+        "max_proposals_per_session": 25,
+        "max_unresolved_proposals": 200,
+    }
+    assert all(
+        capabilities.supported_adapter_versions[domain] == []
+        for domain in PERSONAL_CONTEXT_DOMAINS
+    )
+
+
+def test_personal_context_domains_match_core_and_api_literals() -> None:
+    expected = tuple(PERSONAL_CONTEXT_DOMAINS)
+
+    assert expected == core_sync_models.PERSONAL_CONTEXT_SYNC_DOMAINS
+    assert expected == api_sync_models.PERSONAL_CONTEXT_SYNC_DOMAINS
+    assert set(expected).issubset(core_sync_models.SyncDomain.__args__)
+    assert set(expected).issubset(api_sync_models.SyncDomain.__args__)
+    assert core_sync_models.PERSONAL_CONTEXT_SYNC_OPERATIONS == {
+        "personal_context.manifest": ["upsert"],
+        "personal_context.scope": ["upsert"],
+        "personal_context.record": ["upsert", "tombstone"],
+        "personal_context.proposal": ["upsert"],
+        "personal_context.purge": ["tombstone"],
+    }
+    assert api_sync_models.PERSONAL_CONTEXT_SYNC_OPERATIONS == (
+        core_sync_models.PERSONAL_CONTEXT_SYNC_OPERATIONS
+    )
+
+
+@pytest.mark.parametrize(
+    ("domain", "operations"),
+    [
+        ("personal_context.manifest", {"upsert"}),
+        ("personal_context.scope", {"upsert"}),
+        ("personal_context.record", {"upsert", "tombstone"}),
+        ("personal_context.proposal", {"upsert"}),
+        ("personal_context.purge", {"tombstone"}),
+    ],
+)
+def test_personal_context_schema_is_discoverable(
+    domain: str,
+    operations: set[str],
+) -> None:
+    schema = core_sync_models.sync_v2_domain_schemas()[domain]
+
+    assert schema["schema_version"] == 1
+    assert schema["encryption_policy"] == "server_trusted_v1"
+    assert operations.issubset(schema)
+    assert SyncCapabilitiesResponse().domain_schemas[domain] == schema
 
 
 @pytest.mark.parametrize("domain", NOTES_ORGANIZATION_DOMAINS)
@@ -758,6 +838,27 @@ def test_sync_envelope_accepts_m1_fields_and_legacy_transition_aliases():
     assert envelope.payload_clear == envelope.payload
     assert envelope.client_sequence == 17
     assert envelope.encryption_metadata == {"policy": "server_trusted_v1"}
+
+
+@pytest.mark.parametrize(("value", "expected_type"), [("version-1", str), (1, int)])
+def test_sync_envelope_entity_version_preserves_wire_type(
+    value: object,
+    expected_type: type,
+) -> None:
+    api_envelope = SyncV2Envelope.model_validate(
+        _m1_envelope_payload(entity_version=value)
+    )
+
+    assert type(api_envelope.entity_version) is expected_type
+    assert type(_core_envelope_from_api(api_envelope).entity_version) is expected_type
+
+
+@pytest.mark.parametrize("value", [True, 1.0])
+def test_sync_envelope_entity_version_rejects_coercible_non_wire_types(
+    value: object,
+) -> None:
+    with pytest.raises(ValidationError):
+        SyncV2Envelope.model_validate(_m1_envelope_payload(entity_version=value))
 
 
 def test_core_sync_mutation_group_metadata_round_trips() -> None:

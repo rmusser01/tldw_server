@@ -41,6 +41,11 @@ SyncDomain = Literal[
     "notes.moodboard",
     "notes.moodboard_note",
     "notes.studio_document",
+    "personal_context.manifest",
+    "personal_context.scope",
+    "personal_context.record",
+    "personal_context.proposal",
+    "personal_context.purge",
 ]
 SyncOperation = Literal["upsert", "append", "tombstone"]
 DatasetScopeType = Literal["personal", "workspace"]
@@ -167,6 +172,20 @@ MEDIA_SYNC_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
     "media.keyword": ["upsert", "tombstone"],
     "media.keyword_link": ["upsert", "tombstone"],
 }
+PERSONAL_CONTEXT_SYNC_DOMAINS: tuple[SyncDomain, ...] = (
+    "personal_context.manifest",
+    "personal_context.scope",
+    "personal_context.record",
+    "personal_context.proposal",
+    "personal_context.purge",
+)
+PERSONAL_CONTEXT_SYNC_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
+    "personal_context.manifest": ["upsert"],
+    "personal_context.scope": ["upsert"],
+    "personal_context.record": ["upsert", "tombstone"],
+    "personal_context.proposal": ["upsert"],
+    "personal_context.purge": ["tombstone"],
+}
 SYNC_V2_SUPPORTED_DOMAINS: list[SyncDomain] = (
     list(M1_SYNC_DOMAINS)
     + list(WORKSPACE_SYNC_DOMAINS)
@@ -174,6 +193,7 @@ SYNC_V2_SUPPORTED_DOMAINS: list[SyncDomain] = (
     + list(MEDIA_SYNC_DOMAINS)
     + list(NOTES_ORGANIZATION_DOMAINS)
     + list(NOTES_LINK_DOMAINS)
+    + list(PERSONAL_CONTEXT_SYNC_DOMAINS)
 )
 SYNC_V2_SUPPORTED_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
     **M1_SYNC_OPERATIONS,
@@ -182,6 +202,7 @@ SYNC_V2_SUPPORTED_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
     **MEDIA_SYNC_OPERATIONS,
     **NOTES_ORGANIZATION_SYNC_OPERATIONS,
     **NOTES_LINK_SYNC_OPERATIONS,
+    **PERSONAL_CONTEXT_SYNC_OPERATIONS,
 }
 SYNC_V2_KNOWN_DOMAINS: tuple[SyncDomain, ...] = (
     *SYNC_V2_SUPPORTED_DOMAINS,
@@ -272,6 +293,13 @@ def _discoverable_pydantic_object_schema(model: type[Any]) -> dict[str, object]:
 def sync_v2_domain_schemas() -> dict[SyncDomain, dict[str, object]]:
     """Return client-discoverable payload contracts for versioned Sync domains."""
 
+    from tldw_profile_core import (
+        ProfileManifest,
+        ProfileProposal,
+        ProfileRecord,
+        ProfileScope,
+    )
+
     from .attachment_refs_v2 import (
         AttachmentRefV2Payload,
         AttachmentRefV2TombstonePayload,
@@ -349,6 +377,16 @@ def sync_v2_domain_schemas() -> dict[SyncDomain, dict[str, object]]:
     attachment_ref_tombstone = _discoverable_pydantic_object_schema(
         AttachmentRefV2TombstonePayload
     )
+    personal_context_purge_schema = {
+        "type": "object",
+        "required": ["schema_version", "profile_id", "purge_generation"],
+        "properties": {
+            "schema_version": {"const": 1},
+            "profile_id": {"type": "string", "minLength": 1},
+            "purge_generation": {"type": "integer", "minimum": 1},
+        },
+        "additionalProperties": False,
+    }
     return {
         "attachment.ref": {
             "schema_version": 2,
@@ -464,6 +502,32 @@ def sync_v2_domain_schemas() -> dict[SyncDomain, dict[str, object]]:
                 "constraints": notes_link_constraints,
             },
         },
+        "personal_context.manifest": {
+            "schema_version": 1,
+            "encryption_policy": DEFAULT_M1_ENCRYPTION_POLICY,
+            "upsert": ProfileManifest.model_json_schema(),
+        },
+        "personal_context.scope": {
+            "schema_version": 1,
+            "encryption_policy": DEFAULT_M1_ENCRYPTION_POLICY,
+            "upsert": ProfileScope.model_json_schema(),
+        },
+        "personal_context.record": {
+            "schema_version": 1,
+            "encryption_policy": DEFAULT_M1_ENCRYPTION_POLICY,
+            "upsert": ProfileRecord.model_json_schema(),
+            "tombstone": ProfileRecord.model_json_schema(),
+        },
+        "personal_context.proposal": {
+            "schema_version": 1,
+            "encryption_policy": DEFAULT_M1_ENCRYPTION_POLICY,
+            "upsert": ProfileProposal.model_json_schema(),
+        },
+        "personal_context.purge": {
+            "schema_version": 1,
+            "encryption_policy": DEFAULT_M1_ENCRYPTION_POLICY,
+            "tombstone": personal_context_purge_schema,
+        },
     }
 
 
@@ -542,6 +606,7 @@ def sync_v2_advertised_domain_schemas(
 def sync_v2_server_supported_adapter_versions(
     *,
     notes_task_sync_ready: bool = False,
+    personal_context_sync_ready: bool = False,
 ) -> dict[SyncDomain, list[int]]:
     """Return bounded server-supported versions independently of writability."""
 
@@ -550,7 +615,14 @@ def sync_v2_server_supported_adapter_versions(
         *(NOTES_TASK_SYNC_DOMAINS if notes_task_sync_ready else ()),
     ]
     return {
-        domain: ([1, 2] if domain == "attachment.ref" else [1])
+        domain: (
+            []
+            if domain in PERSONAL_CONTEXT_SYNC_DOMAINS
+            and not personal_context_sync_ready
+            else [1, 2]
+            if domain == "attachment.ref"
+            else [1]
+        )
         for domain in domains
     }
 
@@ -561,6 +633,7 @@ def sync_v2_dataset_writable_adapter_versions(
     notes_attachment_sync_enabled: bool = False,
     supports_attachments: bool = False,
     notes_task_sync_ready: bool = False,
+    personal_context_sync_ready: bool = False,
 ) -> dict[SyncDomain, list[int]]:
     """Return versions writable under one authoritative dataset/settings gate."""
 
@@ -572,6 +645,8 @@ def sync_v2_dataset_writable_adapter_versions(
         return versions
     enrolled = set(dataset.domains)
     for domain in SYNC_V2_SUPPORTED_DOMAINS:
+        if domain in PERSONAL_CONTEXT_SYNC_DOMAINS and not personal_context_sync_ready:
+            continue
         if domain in enrolled and domain != "attachment.ref":
             versions[domain] = [1]
     if sync_v2_attachment_ref_v2_is_writable(
@@ -2034,6 +2109,8 @@ __all__ = [
     "NOTES_NOTE_TITLE_MAX_CHARS",
     "MEDIA_SYNC_DOMAINS",
     "MEDIA_SYNC_OPERATIONS",
+    "PERSONAL_CONTEXT_SYNC_DOMAINS",
+    "PERSONAL_CONTEXT_SYNC_OPERATIONS",
     "STRICT_ENCRYPTION_POLICIES",
     "SOURCE_CACHE_SYNC_DOMAINS",
     "SOURCE_CACHE_SYNC_OPERATIONS",

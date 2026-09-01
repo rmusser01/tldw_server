@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import inspect
+import json
 import sqlite3
 import subprocess
 import sys
@@ -46,6 +47,7 @@ from tldw_Server_API.app.core.Sync.v2.errors import (
     SyncStoreError,
 )
 from tldw_Server_API.app.core.Sync.v2.models import (
+    PERSONAL_CONTEXT_SYNC_DOMAINS,
     SyncAttachmentCreate,
     SyncAttachmentRevisionBinding,
     SyncAttachmentRevisionBindingCreate,
@@ -251,6 +253,144 @@ class _PostgresDeviceLockBackend:
             self.row["last_seen_at"] = params[5]
             return QueryResult(rows=[], rowcount=1)
         return QueryResult(rows=[], rowcount=1)
+
+
+class _PostgresPersonalContextReceiptBackend:
+    config = DatabaseConfig(backend_type=BackendType.POSTGRESQL)
+
+    def __init__(self, *, stale_binding: bool = False) -> None:
+        self.calls: list[tuple[str, tuple[Any, ...] | None, Any]] = []
+        integrity_key_id = (
+            "personal-context-integrity-vstale"
+            if stale_binding
+            else "personal-context-integrity-v1"
+        )
+        self.dataset_row = {
+            "dataset_id": "dataset-1",
+            "owner_user_id": "user-1",
+            "metadata_json": json.dumps(
+                {
+                    "personal_context": {
+                        "profile_id": "profile-1",
+                        "integrity_key_id": integrity_key_id,
+                        "purge_generation": 0,
+                    }
+                }
+            ),
+        }
+
+    @contextmanager
+    def transaction(self, connection=None):
+        yield connection or object()
+
+    def execute(
+        self,
+        statement: str,
+        params: tuple[Any, ...] | None = None,
+        connection: Any = None,
+    ) -> QueryResult:
+        normalized = " ".join(statement.split())
+        self.calls.append((normalized, params, connection))
+        if normalized.startswith("SELECT * FROM sync_datasets"):
+            return QueryResult(rows=[dict(self.dataset_row)], rowcount=1)
+        return QueryResult(rows=[], rowcount=1)
+
+
+class _PostgresPersonalContextBindingBackend:
+    config = DatabaseConfig(backend_type=BackendType.POSTGRESQL)
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, tuple[Any, ...] | None, Any]] = []
+        self.dataset_row = {
+            "dataset_id": "dataset-1",
+            "owner_user_id": "user-1",
+            "scope_type": "personal",
+            "encryption_policy": "server_trusted_v1",
+            "domain_set_json": json.dumps(["notes.note"]),
+            "metadata_json": json.dumps(
+                {
+                    "ordinary_update": "keep",
+                    "personal_context": {
+                        "profile_id": "profile-1",
+                        "authority_id": "authority-1",
+                        "integrity_key_id": "personal-context-integrity-v1",
+                        "purge_generation": 0,
+                        "link_state": "complete",
+                    },
+                }
+            ),
+            "workspace_id": None,
+            "created_at": "2026-05-10T00:00:00+00:00",
+            "updated_at": "2026-05-10T00:00:00+00:00",
+            "archived_at": None,
+        }
+
+    @contextmanager
+    def transaction(self, connection=None):
+        yield connection or object()
+
+    def execute(
+        self,
+        statement: str,
+        params: tuple[Any, ...] | None = None,
+        connection: Any = None,
+    ) -> QueryResult:
+        normalized = " ".join(statement.split())
+        self.calls.append((normalized, params, connection))
+        if normalized.startswith("SELECT * FROM sync_datasets"):
+            return QueryResult(rows=[dict(self.dataset_row)], rowcount=1)
+        if normalized.startswith("UPDATE sync_datasets"):
+            assert params is not None
+            self.dataset_row["domain_set_json"] = params[0]
+            self.dataset_row["metadata_json"] = params[1]
+            self.dataset_row["updated_at"] = params[2]
+            return QueryResult(rows=[], rowcount=1)
+        return QueryResult(rows=[], rowcount=1)
+
+
+class _PostgresPersonalContextTransportSnapshotBackend:
+    config = DatabaseConfig(backend_type=BackendType.POSTGRESQL)
+
+    def __init__(self, *, projection_debt: int = 0) -> None:
+        self.calls: list[tuple[str, tuple[Any, ...] | None, Any]] = []
+        self.projection_debt = projection_debt
+
+    @contextmanager
+    def transaction(self, connection=None):
+        yield connection or object()
+
+    def execute(
+        self,
+        statement: str,
+        params: tuple[Any, ...] | None = None,
+        connection: Any = None,
+    ) -> QueryResult:
+        normalized = " ".join(statement.split())
+        self.calls.append((normalized, params, connection))
+        if normalized.startswith("SELECT * FROM sync_datasets"):
+            return QueryResult(
+                rows=[
+                    {
+                        "dataset_id": "dataset-1",
+                        "owner_user_id": "user-1",
+                        "domain_set_json": json.dumps(PERSONAL_CONTEXT_SYNC_DOMAINS),
+                    }
+                ],
+                rowcount=1,
+            )
+        if normalized.startswith("SELECT domain, adapter_version"):
+            return QueryResult(
+                rows=[
+                    {
+                        "domain": "personal_context.record",
+                        "adapter_version": 1,
+                        "watermark": 17,
+                        "projection_debt": self.projection_debt,
+                    }
+                ],
+                rowcount=1,
+            )
+        return QueryResult(rows=[], rowcount=0)
 
 
 def _inject_postgres_mutation_group_race(
@@ -2703,6 +2843,229 @@ def test_postgres_device_upsert_locks_existing_row_before_update() -> None:
     assert first_select.endswith("FOR UPDATE")
 
 
+def test_postgres_personal_context_receipt_locks_binding_before_upsert() -> None:
+    """The receipt CAS holds the dataset lock through its durable upsert."""
+
+    backend = _PostgresPersonalContextReceiptBackend()
+    db = SyncDatabase.__new__(SyncDatabase)
+    db.backend = cast(Any, backend)
+
+    db.complete_personal_context_link_receipt(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        profile_id="profile-1",
+        integrity_key_id="personal-context-integrity-v1",
+        purge_generation=0,
+        bootstrap_cursor="bootstrap-a",
+    )
+
+    statements = [statement for statement, _params, _connection in backend.calls]
+    lock_index = next(
+        index
+        for index, statement in enumerate(statements)
+        if statement.startswith("SELECT * FROM sync_datasets")
+    )
+    upsert_index = next(
+        index
+        for index, statement in enumerate(statements)
+        if statement.startswith("INSERT INTO sync_personal_context_link_receipts")
+    )
+    assert statements[lock_index].endswith("FOR UPDATE")
+    assert lock_index < upsert_index
+    assert len({connection for _statement, _params, connection in backend.calls}) == 1
+
+
+def test_postgres_personal_context_transport_snapshot_locks_before_watermark_read() -> None:
+    """The executed PG contract holds one dataset lock through boundary capture."""
+
+    backend = _PostgresPersonalContextTransportSnapshotBackend()
+    db = SyncDatabase.__new__(SyncDatabase)
+    db.backend = cast(Any, backend)
+    streams = [(domain, 1) for domain in PERSONAL_CONTEXT_SYNC_DOMAINS]
+
+    with db.personal_context_transport_snapshot(
+        "dataset-1",
+        owner_user_id="user-1",
+        streams=streams,
+    ) as watermarks:
+        assert watermarks[("personal_context.record", 1)] == 17
+        assert all(stream in watermarks for stream in streams)
+
+    statements = [statement for statement, _params, _connection in backend.calls]
+    lock_index = next(
+        index
+        for index, statement in enumerate(statements)
+        if statement.startswith("SELECT * FROM sync_datasets")
+    )
+    watermark_index = next(
+        index
+        for index, statement in enumerate(statements)
+        if statement.startswith("SELECT domain, adapter_version")
+    )
+    assert statements[lock_index].endswith("FOR UPDATE")
+    assert lock_index < watermark_index
+    assert len({connection for _statement, _params, connection in backend.calls}) == 1
+
+
+def test_postgres_personal_context_transport_snapshot_rejects_projection_debt() -> None:
+    """The locked PG watermark read fails closed over unfinished projection."""
+
+    backend = _PostgresPersonalContextTransportSnapshotBackend(projection_debt=1)
+    db = SyncDatabase.__new__(SyncDatabase)
+    db.backend = cast(Any, backend)
+
+    with pytest.raises(SyncStoreError, match="personal_context_projection_incomplete"):
+        with db.personal_context_transport_snapshot(
+            "dataset-1",
+            owner_user_id="user-1",
+            streams=[(domain, 1) for domain in PERSONAL_CONTEXT_SYNC_DOMAINS],
+        ):
+            pytest.fail("unsafe snapshot unexpectedly opened")
+
+
+def test_postgres_personal_context_receipt_rejects_transition_observed_under_lock() -> None:
+    """A binding changed before lock acquisition cannot receive a stale receipt."""
+
+    backend = _PostgresPersonalContextReceiptBackend(stale_binding=True)
+    db = SyncDatabase.__new__(SyncDatabase)
+    db.backend = cast(Any, backend)
+
+    with pytest.raises(SyncStoreError, match="personal_context_link_binding_stale"):
+        db.complete_personal_context_link_receipt(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            device_id="device-1",
+            profile_id="profile-1",
+            integrity_key_id="personal-context-integrity-v1",
+            purge_generation=0,
+            bootstrap_cursor="bootstrap-a",
+        )
+
+    assert not any(
+        statement.startswith("INSERT INTO sync_personal_context_link_receipts")
+        for statement, _params, _connection in backend.calls
+    )
+
+
+def test_postgres_personal_context_binding_locks_and_merges_current_dataset() -> None:
+    """The narrow binding mutation locks and preserves ordinary locked-row state."""
+
+    backend = _PostgresPersonalContextBindingBackend()
+    db = SyncDatabase.__new__(SyncDatabase)
+    db.backend = cast(Any, backend)
+
+    updated = db.bind_personal_context_dataset(
+        dataset_id="dataset-1",
+        user_id="user-1",
+        expected_binding={
+            "profile_id": "profile-1",
+            "authority_id": "authority-1",
+            "integrity_key_id": "personal-context-integrity-v1",
+            "purge_generation": 0,
+            "link_state": "complete",
+        },
+        profile_id="profile-1",
+        authority_id="authority-1",
+        integrity_key_id="personal-context-integrity-v2",
+        purge_generation=1,
+        link_state="complete",
+    )
+
+    statements = [statement for statement, _params, _connection in backend.calls]
+    lock_index = next(
+        index
+        for index, statement in enumerate(statements)
+        if statement.startswith("SELECT * FROM sync_datasets")
+    )
+    update_index = next(
+        index
+        for index, statement in enumerate(statements)
+        if statement.startswith("UPDATE sync_datasets")
+    )
+    assert statements[lock_index].endswith("FOR UPDATE")
+    assert lock_index < update_index
+    assert len({connection for _statement, _params, connection in backend.calls}) == 1
+    assert updated.metadata["ordinary_update"] == "keep"
+    assert updated.metadata["personal_context"] == {
+        "profile_id": "profile-1",
+        "authority_id": "authority-1",
+        "integrity_key_id": "personal-context-integrity-v2",
+        "purge_generation": 1,
+        "link_state": "complete",
+    }
+    assert set(PERSONAL_CONTEXT_SYNC_DOMAINS).issubset(updated.domains)
+
+
+def test_postgres_personal_context_binding_cas_accepts_winner_and_rejects_stale() -> None:
+    """The PostgreSQL transaction contract preserves full binding CAS semantics."""
+
+    backend = _PostgresPersonalContextBindingBackend()
+    db = SyncDatabase.__new__(SyncDatabase)
+    db.backend = cast(Any, backend)
+    v1 = {
+        "profile_id": "profile-1",
+        "authority_id": "authority-1",
+        "integrity_key_id": "personal-context-integrity-v1",
+        "purge_generation": 0,
+        "link_state": "complete",
+    }
+    v2 = {**v1, "integrity_key_id": "personal-context-integrity-v2", "purge_generation": 2}
+
+    db.bind_personal_context_dataset(
+        dataset_id="dataset-1",
+        user_id="user-1",
+        expected_binding=v1,
+        profile_id="profile-1",
+        authority_id="authority-1",
+        integrity_key_id="personal-context-integrity-v2",
+        purge_generation=2,
+        link_state="complete",
+    )
+    winner = db.bind_personal_context_dataset(
+        dataset_id="dataset-1",
+        user_id="user-1",
+        expected_binding=None,
+        profile_id="profile-1",
+        authority_id="authority-1",
+        integrity_key_id="personal-context-integrity-v2",
+        purge_generation=2,
+        link_state="complete",
+    )
+
+    with pytest.raises(SyncStoreError, match="personal_context_link_binding_stale"):
+        db.bind_personal_context_dataset(
+            dataset_id="dataset-1",
+            user_id="user-1",
+            expected_binding=v1,
+            profile_id="profile-1",
+            authority_id="authority-1",
+            integrity_key_id="personal-context-integrity-v1",
+            purge_generation=0,
+            link_state="complete",
+        )
+
+    with pytest.raises(SyncStoreError, match="personal_context_link_binding_stale"):
+        db.bind_personal_context_dataset(
+            dataset_id="dataset-1",
+            user_id="user-1",
+            expected_binding=v2,
+            profile_id="profile-1",
+            authority_id="authority-1",
+            integrity_key_id="personal-context-integrity-v2",
+            purge_generation=1,
+            link_state="complete",
+        )
+
+    update_calls = [
+        statement
+        for statement, _params, _connection in backend.calls
+        if statement.startswith("UPDATE sync_datasets")
+    ]
+    assert len(update_calls) == 1
+    assert winner.metadata["personal_context"] == v2
+
+
 def test_device_upsert_rejects_cross_user_takeover(sync_store: SyncV2Store):
     sync_store.upsert_device(_device(device_id="device-shared", user_id="user-1"))
 
@@ -3701,6 +4064,66 @@ def test_dataset_reenrollment_preserves_server_owned_task_readiness_metadata(
 
     assert overwritten.metadata == {"label": "after", **server_metadata}
     assert erased.metadata == server_metadata
+
+
+def test_dataset_reenrollment_preserves_personal_context_domains_and_metadata(
+    sync_store: SyncV2Store,
+) -> None:
+    """Generic dataset rewrites cannot erase server-owned Personal Context state."""
+
+    binding = {
+        "profile_id": "profile-1",
+        "authority_id": "authority-a",
+        "integrity_key_id": "personal-context-integrity-v1",
+        "purge_generation": 0,
+        "link_state": "complete",
+    }
+    sync_store.enroll_dataset(
+        _dataset(
+            domains=["notes.note", *PERSONAL_CONTEXT_SYNC_DOMAINS],
+            metadata={"label": "before", "personal_context": binding},
+        )
+    )
+
+    reenrolled = sync_store.enroll_dataset(
+        _dataset(domains=["notes.note"], metadata={"label": "old-client"})
+    )
+    attempted_overwrite = sync_store.enroll_dataset(
+        _dataset(
+            domains=["notes.note"],
+            metadata={
+                "label": "overwrite-attempt",
+                "personal_context": {"profile_id": "attacker"},
+            },
+        )
+    )
+
+    assert set(PERSONAL_CONTEXT_SYNC_DOMAINS).issubset(reenrolled.domains)
+    assert reenrolled.metadata["personal_context"] == binding
+    assert set(PERSONAL_CONTEXT_SYNC_DOMAINS).issubset(attempted_overwrite.domains)
+    assert attempted_overwrite.metadata["personal_context"] == binding
+
+
+def test_personal_context_receipt_lookup_surfaces_storage_failure(
+    sync_store: SyncV2Store,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An outage is not downgraded into a false link-incomplete instruction."""
+
+    def fail_lookup(*_args: object, **_kwargs: object):
+        raise SyncStoreError("receipt storage unavailable")
+
+    monkeypatch.setattr(sync_store.db, "execute", fail_lookup)
+
+    with pytest.raises(SyncStoreError, match="receipt storage unavailable"):
+        sync_store.has_personal_context_link_receipt(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            device_id="device-1",
+            profile_id="profile-1",
+            integrity_key_id="personal-context-integrity-v1",
+            purge_generation=0,
+        )
 
 
 @pytest.mark.parametrize(

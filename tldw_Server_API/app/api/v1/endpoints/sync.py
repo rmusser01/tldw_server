@@ -77,6 +77,11 @@ from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
     SyncKeyRotationPreviewRequest,
     SyncKeyRotationResponse,
     SyncNotesAttachmentBootstrapDiagnosticsResponse,
+    SyncPersonalContextBootstrapErrorDetail,
+    SyncPersonalContextBootstrapErrorResponse,
+    SyncPersonalContextBootstrapRequest,
+    SyncPersonalContextBootstrapResponse,
+    SyncPersonalContextLinkCompleteRequest,
     SyncProfileBootstrapRequest,
     SyncProfileBootstrapResponse,
     SyncProfileResponse,
@@ -119,6 +124,7 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     SyncDeviceDomainAckCreate,
     SyncEnvelopeCreate,
 )
+from tldw_Server_API.app.core.Sync.v2.profile import PersonalContextBootstrapError
 from tldw_Server_API.app.core.Sync.v2.security import (
     server_trusted_encryption_status_from_env,
 )
@@ -190,6 +196,96 @@ def _safe_sync_v2_http_error(exc: Exception, **context: object) -> HTTPException
                 "message": "Sync domain is not valid for the requested dataset.",
             },
         )
+    if isinstance(exc, PersonalContextBootstrapError):
+        personal_context_errors = {
+            "personal_context_bootstrap_unavailable": (
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "Personal Context bootstrap is unavailable.",
+            ),
+            "personal_context_device_unavailable": (
+                status.HTTP_404_NOT_FOUND,
+                "Requested Sync device was not found or is not accessible.",
+            ),
+            "personal_context_authority_invalid": (
+                status.HTTP_400_BAD_REQUEST,
+                "Personal Context authority identifier is invalid.",
+            ),
+            "personal_context_capability_unavailable": (
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "Personal Context bootstrap capability is unavailable.",
+            ),
+            "personal_context_schema_incompatible": (
+                status.HTTP_409_CONFLICT,
+                "Personal Context schema is incompatible with this server.",
+            ),
+            "personal_context_quota_incompatible": (
+                status.HTTP_409_CONFLICT,
+                "Personal Context quotas are incompatible with this server.",
+            ),
+            "personal_context_key_custody_unavailable": (
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "Personal Context key custody is unavailable.",
+            ),
+            "personal_context_snapshot_unavailable": (
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "Personal Context bootstrap snapshot is unavailable.",
+            ),
+            "personal_context_snapshot_unstable": (
+                status.HTTP_409_CONFLICT,
+                "Personal Context changed during bootstrap; retry the request.",
+            ),
+            "personal_context_projection_incomplete": (
+                status.HTTP_409_CONFLICT,
+                "Personal Context Sync projection is incomplete; repair Sync and retry bootstrap.",
+            ),
+            "personal_context_purge_generation_stale": (
+                status.HTTP_409_CONFLICT,
+                "Personal Context purge generation is stale.",
+            ),
+            "personal_context_link_unavailable": (
+                status.HTTP_409_CONFLICT,
+                "Personal Context bootstrap link is unavailable.",
+            ),
+            "personal_context_link_binding_stale": (
+                status.HTTP_409_CONFLICT,
+                "Personal Context bootstrap link binding is stale.",
+            ),
+            "personal_context_bootstrap_cursor_stale": (
+                status.HTTP_409_CONFLICT,
+                "Personal Context bootstrap cursor is stale.",
+            ),
+            "personal_context_authority_mismatch": (
+                status.HTTP_409_CONFLICT,
+                "Personal Context authority does not match the existing profile.",
+            ),
+        }
+        reason_code = exc.reason_code
+        status_code, message = personal_context_errors.get(
+            reason_code,
+            (
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+                "Personal Context bootstrap failed.",
+            ),
+        )
+        detail: dict[str, object] = {
+            "error_code": reason_code,
+            "message": message,
+        }
+        if exc.attention is not None:
+            try:
+                validated = SyncPersonalContextBootstrapErrorDetail.model_validate(
+                    {**detail, "attention": exc.attention}
+                )
+            except ValidationError as validation_error:
+                logger.bind(
+                    reason_code=reason_code,
+                    exception_type=type(validation_error).__name__,
+                ).warning("Discarded invalid Personal Context attention metadata")
+            else:
+                validated_attention = validated.attention
+                if validated_attention is not None:
+                    detail["attention"] = validated_attention.model_dump(mode="json")
+        return HTTPException(status_code=status_code, detail=detail)
     if isinstance(exc, SyncStoreError):
         lowered = str(exc).lower()
         notes_task_activation_errors = {
@@ -783,6 +879,78 @@ def bootstrap_sync_v2_profile(
             mode=request.mode,
         ) from exc
     return _api_bootstrap_profile_from_core(profile)
+
+
+@router.post(
+    "/personal-context/bootstrap",
+    response_model=SyncPersonalContextBootstrapResponse,
+    responses={409: {"model": SyncPersonalContextBootstrapErrorResponse}},
+    summary="Bootstrap canonical Personal Context for one registered device",
+    dependencies=[Depends(check_rate_limit)],
+)
+def bootstrap_sync_v2_personal_context(
+    request: SyncPersonalContextBootstrapRequest,
+    user: User = Depends(get_request_user),
+    service: SyncV2Service = Depends(get_sync_v2_service),
+) -> SyncPersonalContextBootstrapResponse:
+    """Return the canonical profile snapshot and wrapped Sync integrity key."""
+
+    user_id = _sync_user_id(user)
+    try:
+        snapshot = service.bootstrap_personal_context(
+            user_id=user_id,
+            device_id=request.device_id,
+            required_schema_version=request.required_schema_version,
+            required_quotas=request.required_quotas,
+            expected_purge_generation=request.expected_purge_generation,
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc, user_id=user_id, device_id=request.device_id
+        ) from exc
+    return SyncPersonalContextBootstrapResponse(
+        dataset_id=snapshot.dataset_id,
+        authority_id=snapshot.authority_id,
+        manifest=snapshot.manifest.model_dump(mode="json"),
+        scopes=[item.model_dump(mode="json") for item in snapshot.scopes],
+        records=[item.model_dump(mode="json") for item in snapshot.records],
+        proposals=[item.model_dump(mode="json") for item in snapshot.proposals],
+        purge_generation=snapshot.purge_generation,
+        schema_version=snapshot.schema_version,
+        quotas=snapshot.quotas,
+        cursor=snapshot.cursor,
+        sync_transport_cursor=snapshot.sync_transport_cursor,
+        integrity_key_id=snapshot.integrity_key.integrity_key_id,
+        key_record_id=snapshot.integrity_key.key_record_id,
+        wrapped_key_blob=snapshot.integrity_key.wrapped_key_blob,
+    )
+
+
+@router.post(
+    "/personal-context/complete",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Record one device's completed Personal Context reconciliation",
+    dependencies=[Depends(check_rate_limit)],
+)
+def complete_sync_v2_personal_context(
+    request: SyncPersonalContextLinkCompleteRequest,
+    user: User = Depends(get_request_user),
+    service: SyncV2Service = Depends(get_sync_v2_service),
+) -> None:
+    """Commit one device's receipt for the exact reconciled profile snapshot."""
+
+    user_id = _sync_user_id(user)
+    try:
+        service.complete_personal_context_link(
+            user_id=user_id,
+            device_id=request.device_id,
+            dataset_id=request.dataset_id,
+            bootstrap_cursor=request.bootstrap_cursor,
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc, user_id=user_id, dataset_id=request.dataset_id, device_id=request.device_id
+        ) from exc
 
 
 @router.post(

@@ -2,18 +2,34 @@ from __future__ import annotations
 
 """Sync v2 service composition helpers shared by HTTP and non-HTTP entrypoints."""
 
+import hashlib
+import hmac
 import os
+from base64 import urlsafe_b64encode
 from collections.abc import Mapping
 from functools import lru_cache
 from pathlib import Path
 from urllib.parse import urlparse
+
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import (
     DatabasePaths,
     _resolve_user_id_for_storage,
 )
+from tldw_Server_API.app.core.DB_Management.Personalization_DB import PersonalizationDB
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SYNC_DB_FILENAME, SyncDatabase
+from tldw_Server_API.app.core.Personalization.companion_user_ids import (
+    resolve_existing_companion_storage_user_id,
+)
+from tldw_Server_API.app.core.Personalization.personal_context_repository import (
+    PersonalContextRepository,
+)
+from tldw_Server_API.app.core.Personalization.personal_context_service import (
+    PersonalContextService,
+)
 from tldw_Server_API.app.core.Utils.path_utils import safe_join
 
 from .adapters import StaticSyncAdapter, SyncAdapterRegistry
@@ -25,6 +41,7 @@ from .domain_adapters.notes_link import NotesLinkDomainAdapter
 from .domain_adapters.notes_organization import NotesOrganizationDomainAdapter
 from .domain_adapters.notes_task import NotesTaskDomainAdapter
 from .domain_adapters.notes_task_activity import NotesTaskActivityDomainAdapter
+from .domain_adapters.personal_context import PersonalContextDomainAdapter
 from .domain_adapters.source_cache import SourceCacheAdapter
 from .domain_adapters.workspaces import WorkspacesDomainAdapter
 from .materializers import (
@@ -37,6 +54,7 @@ from .materializers import (
     NotesOrganizationMaterializer,
     NotesTaskActivityMaterializer,
     NotesTaskMaterializer,
+    PersonalContextMaterializer,
     SourceCacheMaterializer,
     SyncMaterializer,
 )
@@ -44,6 +62,7 @@ from .models import (
     M1_SYNC_DOMAINS,
     MEDIA_SYNC_DOMAINS,
     NOTES_ORGANIZATION_DOMAINS,
+    PERSONAL_CONTEXT_SYNC_DOMAINS,
     SOURCE_CACHE_SYNC_DOMAINS,
     WORKSPACE_SYNC_DOMAINS,
     SyncDomain,
@@ -54,7 +73,11 @@ from .notes_organization_bootstrap import NotesOrganizationBootstrapper
 from .notes_task_activity_bootstrap import NotesTaskActivityBootstrapper
 from .notes_task_bootstrap import NotesTaskBootstrapper
 from .security import server_trusted_encryption_status_from_env
-from .service import SyncV2Service, SyncV2Settings
+from .service import (
+    SyncV2Service,
+    SyncV2Settings,
+    personal_context_sync_capabilities_from_env,
+)
 from .store import SyncV2Store
 
 
@@ -85,6 +108,14 @@ def default_sync_v2_registry() -> SyncAdapterRegistry:
         + [NotesLinkDomainAdapter()]
         + [NotesTaskDomainAdapter()]
         + [NotesTaskActivityDomainAdapter()]
+        + [
+            PersonalContextDomainAdapter(
+                domain=domain,
+                integrity_key_resolver=_personal_context_integrity_key,
+                encryption_key_resolver=_personal_context_encryption_key,
+            )
+            for domain in PERSONAL_CONTEXT_SYNC_DOMAINS
+        ]
     )
 
 
@@ -115,6 +146,13 @@ def sync_v2_service_for_user(user_id: str) -> SyncV2Service:
             domain: NotesOrganizationMaterializer(note_db, domain)
             for domain in NOTES_ORGANIZATION_DOMAINS
         },
+        **{
+            domain: PersonalContextMaterializer(
+                domain=domain,
+                service_resolver=_personal_context_service_for_user,
+            )
+            for domain in PERSONAL_CONTEXT_SYNC_DOMAINS
+        },
     }
     _validate_notes_organization_components(
         adapters=adapters,
@@ -130,6 +168,10 @@ def sync_v2_service_for_user(user_id: str) -> SyncV2Service:
         adapters=adapters,
         materializers=materializers,
     )
+    _validate_personal_context_components(
+        adapters=adapters,
+        materializers=materializers,
+    )
     return SyncV2Service(
         store=store,
         adapters=adapters,
@@ -142,6 +184,12 @@ def sync_v2_service_for_user(user_id: str) -> SyncV2Service:
         notes_attachment_bootstrapper=NotesAttachmentBootstrapper(note_db),
         notes_task_bootstrapper=NotesTaskBootstrapper(note_db),
         notes_task_activity_bootstrapper=NotesTaskActivityBootstrapper(note_db),
+        personal_context_service_resolver=_personal_context_service_for_user,
+        personal_context_key_wrapper=_wrap_personal_context_integrity_key,
+        personal_context_key_fingerprint=_personal_context_wrapping_key_fingerprint,
+        personal_context_authority_id=os.getenv(
+            "SYNC_V2_PERSONAL_CONTEXT_AUTHORITY_ID", "tldw-server"
+        ),
     )
 
 
@@ -212,6 +260,110 @@ def _validate_notes_task_components(
         )
 
 
+def _validate_personal_context_components(
+    *,
+    adapters: SyncAdapterRegistry,
+    materializers: Mapping[SyncDomain, SyncMaterializer],
+) -> None:
+    """Fail closed when a Personal Context domain is only partially wired."""
+
+    for domain in PERSONAL_CONTEXT_SYNC_DOMAINS:
+        adapter = adapters.get(domain)
+        materializer = materializers.get(domain)
+        if not isinstance(adapter, PersonalContextDomainAdapter):
+            raise RuntimeError(
+                f"Personal Context Sync domain has no strict adapter: {domain}"
+            )
+        if (
+            not isinstance(materializer, PersonalContextMaterializer)
+            or materializer.domain != domain
+        ):
+            raise RuntimeError(
+                f"Personal Context Sync domain has no service materializer: {domain}"
+            )
+
+
+def _wrap_personal_context_integrity_key(
+    *, device: object, integrity_key: bytes, integrity_key_id: str
+) -> str:
+    """Encrypt the integrity key to the registered device RSA public key."""
+
+    capabilities = getattr(device, "capabilities", {})
+    public_key_pem = (
+        capabilities.get("personal_context_wrapping_public_key")
+        if isinstance(capabilities, Mapping)
+        else None
+    )
+    if not isinstance(public_key_pem, str) or not public_key_pem.strip():
+        raise ValueError("personal_context_device_key_unavailable")
+    public_key = serialization.load_pem_public_key(public_key_pem.encode("utf-8"))
+    if not isinstance(public_key, rsa.RSAPublicKey) or public_key.key_size < 2048:
+        raise ValueError("personal_context_device_key_invalid")
+    label = f"personal-context:{integrity_key_id}".encode()
+    ciphertext = public_key.encrypt(
+        integrity_key,
+        padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=label,
+        ),
+    )
+    return "rsa-oaep-sha256:" + urlsafe_b64encode(ciphertext).decode("ascii")
+
+
+def _personal_context_wrapping_key_fingerprint(*, device: object) -> str:
+    """Return the SHA-256 fingerprint of the registered device wrapping key."""
+
+    capabilities = getattr(device, "capabilities", {})
+    value = capabilities.get("personal_context_wrapping_public_key") if isinstance(capabilities, Mapping) else None
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("personal_context_device_key_unavailable")
+    public_key = serialization.load_pem_public_key(value.encode("utf-8"))
+    encoded = public_key.public_bytes(
+        serialization.Encoding.DER,
+        serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _personal_context_integrity_key(dataset: object, key_id: str) -> bytes:
+    """Resolve the enrolled profile's actual canonical integrity key."""
+
+    service, profile_id = _personal_context_key_service(dataset)
+    actual_key_id, key = service.sync_integrity_key(profile_id)
+    if not hmac.compare_digest(actual_key_id, key_id):
+        raise RuntimeError("Personal Context integrity key is unavailable")
+    return key
+
+
+def _personal_context_encryption_key(dataset: object) -> tuple[bytes, int]:
+    """Resolve the enrolled profile's actual canonical encryption key."""
+
+    service, profile_id = _personal_context_key_service(dataset)
+    return service.sync_encryption_key(profile_id)
+
+
+def _personal_context_key_service(
+    dataset: object,
+) -> tuple[PersonalContextService, str]:
+    owner_user_id = str(getattr(dataset, "owner_user_id", "")).strip()
+    metadata = getattr(dataset, "metadata", {})
+    state = metadata.get("personal_context") if isinstance(metadata, Mapping) else None
+    profile_id = state.get("profile_id") if isinstance(state, Mapping) else None
+    if not owner_user_id or not isinstance(profile_id, str) or not profile_id:
+        raise RuntimeError("Personal Context key custody is unavailable")
+    return _personal_context_service_for_user(owner_user_id), profile_id
+
+
+@lru_cache(maxsize=256)
+def _personal_context_service_for_user(user_id: str) -> PersonalContextService:
+    """Return the canonical service bound to one authenticated Sync owner."""
+
+    storage_user_id = resolve_existing_companion_storage_user_id(user_id)
+    database = PersonalizationDB.for_user(storage_user_id)
+    return PersonalContextService(PersonalContextRepository(database))
+
+
 def sync_v2_storage_exists_for_user(user_id: str) -> bool:
     """Return whether durable Sync v2 storage already exists for a user."""
 
@@ -262,6 +414,7 @@ def _sync_v2_settings_from_env() -> SyncV2Settings:
         max_active_blob_uploads=_sync_v2_positive_int_env("SYNC_V2_MAX_ACTIVE_BLOB_UPLOADS", default=8),
         user_blob_quota_bytes=_sync_v2_optional_positive_int_env("SYNC_V2_USER_BLOB_QUOTA_BYTES"),
         server_trusted_encryption=server_trusted_encryption_status_from_env(),
+        personal_context=personal_context_sync_capabilities_from_env(),
     )
 
 

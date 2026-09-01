@@ -11,9 +11,11 @@ from tldw_profile_core import (
     ProfileControls,
     ProfileProposal,
     ProfileProvenance,
+    ProfileRecord,
     ProposalOperation,
     ProposalState,
     RecordState,
+    ScopeKind,
     SemanticKey,
     SyncMode,
 )
@@ -27,9 +29,13 @@ from tldw_Server_API.app.core.Personalization.personal_context_repository import
     PersonalContextRepository,
 )
 from tldw_Server_API.app.core.Personalization.personal_context_repository_models import (
+    ConcurrentProfileUpdateError,
     ProfileQuotaExceededError,
     ProfileSemanticKeyCollisionError,
     ProfileUnsupportedSchemaError,
+)
+from tldw_Server_API.app.core.Personalization.personal_context_runtime_policy import (
+    ServerRuntimePolicy,
 )
 from tldw_Server_API.app.core.Personalization.personal_context_service import (
     PersonalContextService,
@@ -93,6 +99,300 @@ def _create_ready_profile(service: PersonalContextService):
     manifest = service.create_profile()
     scope = service.list_scopes()[0]
     return manifest, scope
+
+
+def test_sync_bootstrap_snapshot_reads_manifest_heads_and_key_in_one_service_call(
+    service: PersonalContextService,
+):
+    manifest, _scope = _create_ready_profile(service)
+
+    snapshot = service.sync_bootstrap_snapshot()
+
+    assert snapshot.manifest == manifest
+    assert snapshot.scopes
+    assert snapshot.integrity_key_id.startswith("personal-context-integrity-v")
+    assert len(snapshot.integrity_key) == 32
+    assert snapshot.cursor.startswith("personal-context-bootstrap-v1:")
+
+
+def test_sync_bootstrap_plan_reserves_only_content_free_state_until_materialized(
+    service: PersonalContextService,
+) -> None:
+    """Planning is stable while canonical manifest/scope replicas remain absent."""
+
+    first = service.plan_sync_bootstrap()
+    retry = service.plan_sync_bootstrap()
+
+    assert retry == first
+    assert first.materialized is False
+    assert first.records == ()
+    assert first.proposals == ()
+    assert len(first.scopes) == 1
+    assert first.scopes[0].kind is ScopeKind.GLOBAL
+    assert service._repository.profile_ids() == ()
+    with service._repository.database.transaction() as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM personal_context_object_versions"
+        ).fetchone()[0] == 0
+        assert connection.execute(
+            "SELECT COUNT(*) FROM personal_context_object_heads"
+        ).fetchone()[0] == 0
+
+    materialized = service.materialize_sync_bootstrap(
+        profile_id=first.manifest.profile_id,
+        bootstrap_cursor=first.cursor,
+    )
+
+    assert materialized.materialized is True
+    assert materialized.manifest == first.manifest
+    assert materialized.scopes == first.scopes
+    assert service.get_manifest() == first.manifest
+    assert service.list_scopes() == first.scopes
+
+
+def test_sync_materialization_retry_rejects_changed_runtime_plan(
+    service: PersonalContextService,
+) -> None:
+    """An idempotent canonical retry must include the reviewed runtime plan."""
+
+    planned = service.plan_sync_bootstrap()
+    service._repository.materialize_sync_profile(
+        planned.manifest,
+        planned.scopes[0],
+    )
+
+    with pytest.raises(ConcurrentProfileUpdateError, match="reviewed profile plan changed"):
+        service._repository.materialize_sync_profile(
+            planned.manifest,
+            planned.scopes[0],
+            runtime_policy=ServerRuntimePolicy(enabled=True).model_dump(mode="json"),
+            runtime_version_id="runtime-version-changed",
+        )
+
+
+def test_cancelled_sync_plan_remains_absent_and_does_not_block_explicit_creation(
+    service: PersonalContextService,
+) -> None:
+    """A content-free reservation is not reported as damage or a canonical profile."""
+
+    planned = service.plan_sync_bootstrap()
+
+    assert service.status().state is ProfileOperationalState.ABSENT
+    created = service.create_profile(runtime_enabled=False)
+
+    assert created == planned.manifest
+    assert service.list_scopes() == planned.scopes
+
+
+def test_concurrent_sync_plans_and_materialization_converge_on_exact_objects(
+    service: PersonalContextService,
+) -> None:
+    """Real SQLite reservation/materialization transactions admit one exact plan."""
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first, second = tuple(
+            executor.map(lambda _index: service.plan_sync_bootstrap(), range(2))
+        )
+    assert second == first
+    assert service._repository.profile_ids() == ()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        completed = tuple(
+            executor.map(
+                lambda _index: service.materialize_sync_bootstrap(
+                    profile_id=first.manifest.profile_id,
+                    bootstrap_cursor=first.cursor,
+                ),
+                range(2),
+            )
+        )
+
+    assert completed[0] == completed[1]
+    assert completed[0].manifest == first.manifest
+    assert completed[0].scopes == first.scopes
+
+
+def test_sync_bootstrap_cursor_changes_when_only_integrity_key_changes(
+    service: PersonalContextService,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A key transition invalidates an otherwise identical bootstrap snapshot."""
+
+    manifest, _scope = _create_ready_profile(service)
+    first = service.sync_bootstrap_snapshot()
+    original_snapshot = service._repository.sync_bootstrap_snapshot
+
+    def transitioned_snapshot(profile_id: str):
+        snapshot = original_snapshot(profile_id)
+        return (*snapshot[:4], "personal-context-integrity-v2", b"b" * 32)
+
+    monkeypatch.setattr(
+        service._repository,
+        "sync_bootstrap_snapshot",
+        transitioned_snapshot,
+    )
+    second = service.sync_bootstrap_snapshot()
+
+    assert second.manifest == manifest
+    assert second.integrity_key_id == "personal-context-integrity-v2"
+    assert second.cursor != first.cursor
+
+
+def _pending_proposal_for_scope(
+    service: PersonalContextService,
+    *,
+    profile_id: str,
+    scope_id: str,
+    proposal_id: str,
+) -> ProfileProposal:
+    proposed = service.build_manual_record(
+        scope_id=scope_id,
+        payload=_payload("structured"),
+        semantic_key=SemanticKey(namespace="preference", subject="answer.layout"),
+        controls=_controls(),
+    )
+    return ProfileProposal(
+        proposal_id=proposal_id,
+        profile_id=profile_id,
+        scope_id=scope_id,
+        operation=ProposalOperation.CREATE,
+        target_record_id=None,
+        base_version_id=None,
+        proposed_record=proposed,
+        provenance=ProfileProvenance(
+            source=ProvenanceSource.AGENT,
+            actor=ActorType.AGENT,
+            reason_code="conversation_learning",
+        ),
+        confidence=0.8,
+        created_at=NOW,
+        expires_at=NOW + timedelta(days=90),
+    )
+
+
+def test_sync_apply_accepts_exact_terminal_proposal_receipts(
+    service: PersonalContextService,
+) -> None:
+    manifest, scope = _create_ready_profile(service)
+    pending = _pending_proposal_for_scope(
+        service,
+        profile_id=manifest.profile_id,
+        scope_id=scope.scope_id,
+        proposal_id="proposal-synced",
+    )
+    service.apply_sync_object(
+        domain="personal_context.proposal",
+        value=pending,
+        actor_type="sync",
+        actor_id="device-a",
+    )
+    terminal = pending.model_copy(
+        update={
+            "state": ProposalState.REJECTED,
+            "proposed_record": None,
+            "confidence": None,
+        }
+    )
+
+    service.apply_sync_object(
+        domain="personal_context.proposal",
+        value=terminal,
+        actor_type="sync",
+        actor_id="device-a",
+    )
+
+    assert service._repository.get_proposal(
+        manifest.profile_id, terminal.proposal_id
+    ) == terminal
+
+    receipt_only = terminal.model_copy(update={"proposal_id": "proposal-receipt-only"})
+    service.apply_sync_object(
+        domain="personal_context.proposal",
+        value=receipt_only,
+        actor_type="sync",
+        actor_id="device-b",
+    )
+    assert service._repository.get_proposal(
+        manifest.profile_id, receipt_only.proposal_id
+    ) == receipt_only
+
+
+def test_sync_apply_accepts_content_free_orphan_tombstone(
+    service: PersonalContextService,
+) -> None:
+    manifest, scope = _create_ready_profile(service)
+    tombstone = ProfileRecord(
+        profile_id=manifest.profile_id,
+        record_id="record-orphan",
+        scope_id=scope.scope_id,
+        kind="preference",
+        payload=None,
+        semantic_key=None,
+        state=RecordState.DELETED,
+        controls=_controls(),
+        provenance=ProfileProvenance(
+            source=ProvenanceSource.MANUAL,
+            actor=ActorType.USER,
+            reason_code="settings_delete",
+        ),
+        version_id="record-tombstone-v2",
+        parent_version_id="record-unsent-v1",
+        created_at=NOW,
+        updated_at=NOW,
+    )
+
+    applied = service.apply_sync_object(
+        domain="personal_context.record",
+        value=tombstone,
+        actor_type="sync",
+        actor_id="device-a",
+    )
+
+    assert applied == tombstone
+    assert service._repository.get_record(
+        manifest.profile_id, tombstone.record_id
+    ) == tombstone
+
+
+def test_sync_apply_rejects_immutable_scope_and_record_rewrites(
+    service: PersonalContextService,
+) -> None:
+    manifest, scope = _create_ready_profile(service)
+    record = service.build_manual_record(
+        scope_id=scope.scope_id,
+        payload=_payload(),
+        semantic_key=_semantic_key(),
+        controls=_controls(),
+    )
+    service.create_record(record)
+    rewritten_record = record.model_copy(
+        update={
+            "version_id": "record-rewritten",
+            "parent_version_id": record.version_id,
+            "created_at": NOW - timedelta(days=1),
+        }
+    )
+
+    with pytest.raises(ProfileConflictError):
+        service.apply_sync_object(
+            domain="personal_context.record",
+            value=rewritten_record,
+            actor_type="sync",
+            actor_id="device-a",
+        )
+
+    rewritten_scope = scope.model_copy(
+        update={"kind": ScopeKind.WORKSPACE, "version_id": "scope-rewritten"}
+    )
+    with pytest.raises(ProfileConflictError):
+        service.apply_sync_object(
+            domain="personal_context.scope",
+            value=rewritten_scope,
+            actor_type="sync",
+            actor_id="device-a",
+        )
 
 
 def test_profile_creation_is_absent_then_disabled_until_runtime_enabled(
