@@ -78,8 +78,9 @@ rg -n "TASK-13151|Document Personal Context Profile server" \
 gh api -X GET repos/rmusser01/tldw_chatbook/contents/Docs/superpowers/specs/2026-08-31-personal-context-documentation-design.md \
   -f ref=dev
 sed -n '1,240p' backlog/docs/lessons-testing-evidence.md
-sed -n '1,220p' backlog/docs/lessons-backlog-hygiene.md
 ```
+
+The Backlog hygiene lesson is not present in this server tree. It was consulted read-only from the source Chatbook checkout at `/Users/macbook-dev/Documents/GitHub/tldw_chatbook/backlog/docs/lessons-backlog-hygiene.md`; it is recorded here as execution evidence, not as an in-repository command.
 
 Expected: TASK-13151 resolves to this documentation file and is assigned to `@codex`; the reviewed specification on Chatbook `dev` returns file metadata; no duplicate task ID appears. Repeat the task-resolution check after every rebase. Backlog MCP is not available in this repository, so use the Backlog CLI throughout.
 
@@ -207,7 +208,7 @@ Then add these server-specific notes:
 
 - [ ] **Step 5: Document export, local removal, and purge accurately**
 
-Explain export confirmations/sensitivity; Chatbook ownership of local-copy removal; server rejection of `local_copy`; and `POST /purge` requiring `DELETE EVERYWHERE`, advancing a server-local fence, removing canonical bodies/runtime state, blocking mutations, and remaining `purge_pending`. State that the protocol purge domain exists but the endpoint does not publish it and acknowledgement completion is not wired. Do not promise reconnecting devices clears the state.
+Explain export confirmations/sensitivity; Chatbook ownership of local-copy removal; server rejection of `local_copy`; and `POST /purge` requiring `DELETE EVERYWHERE`, advancing a server-local fence, removing canonical bodies/runtime state, blocking mutations, and remaining `purge_pending`. Include the exact sentence `The server purge endpoint does not publish the protocol purge envelope, and acknowledgement completion is not wired.` Do not promise reconnecting devices clears the state.
 
 - [ ] **Step 6: Add troubleshooting**
 
@@ -229,8 +230,15 @@ Run:
 
 ```bash
 test -f Docs/API-related/Personal_Context_API.md
-rg -n "does not provide|not currently published|does not publish|purge_pending|not wired" \
-  Docs/User_Guides/Server/Personal_Context_Profile.md
+profile_operator_guide=Docs/User_Guides/Server/Personal_Context_Profile.md
+rg -Fq '<!-- shared-personal-context-contract:start -->' "$profile_operator_guide"
+rg -Fq '<!-- shared-personal-context-contract:end -->' "$profile_operator_guide"
+rg -Fq 'Ordinary server REST record/proposal mutations are not currently published to linked Chatbook clients.' \
+  "$profile_operator_guide"
+rg -Fq 'The server purge endpoint does not publish the protocol purge envelope, and acknowledgement completion is not wired.' \
+  "$profile_operator_guide"
+rg -Fq 'First-link semantic collision' "$profile_operator_guide"
+rg -Fq 'Post-link semantic collision' "$profile_operator_guide"
 git diff --check -- Docs/User_Guides/Server/Personal_Context_Profile.md
 git add Docs/User_Guides/Server/Personal_Context_Profile.md
 git commit -m "docs: add Personal Context server operator guide"
@@ -280,7 +288,12 @@ Sync/bootstrap:
 
 `capability negotiation -> registered device -> reviewed Chatbook plan -> snapshot/wrapped integrity key -> completion -> inbound validation/materialization`
 
-Name all five domains and state current gaps: no REST mutation publication, no dedicated post-link resolver, and no purge envelope production/distribution/acknowledgement completion.
+Name all five domains. Repeat the approved shared-contract statement between the exact `<!-- shared-personal-context-contract:start -->` and `<!-- shared-personal-context-contract:end -->` markers. Include these exact current-limit statements so validation can fail closed:
+
+- `REST edits are not published to linked clients.`
+- `Server purge does not publish the protocol purge envelope, and acknowledgement completion is absent.`
+- `Reviewed first-link reconciliation handles first-link semantic collisions before completion.`
+- `No dedicated post-link semantic-collision resolver exists.`
 
 Repeat the full boundary matrix in developer terms so every shared and peer-local category is explicit:
 
@@ -338,9 +351,19 @@ test -f tldw_Server_API/app/core/DB_Management/Personal_Context_Key_Store.py
 test -f tldw_Server_API/app/core/Personalization/personal_context_service.py
 test -f tldw_Server_API/app/core/Sync/v2/domain_adapters/personal_context.py
 test -f tldw_Server_API/tests/Sync/test_sync_v2_personal_context_transport.py
-rg -n "not currently published|does not publish|no dedicated|acknowledgement" \
-  Docs/Code_Documentation/Personal_Context_Developer_Guide.md \
-  Docs/API-related/Personal_Context_API.md
+profile_developer_guide=Docs/Code_Documentation/Personal_Context_Developer_Guide.md
+profile_api_reference=Docs/API-related/Personal_Context_API.md
+rg -Fq '<!-- shared-personal-context-contract:start -->' "$profile_developer_guide"
+rg -Fq '<!-- shared-personal-context-contract:end -->' "$profile_developer_guide"
+rg -Fq 'REST edits are not published to linked clients.' "$profile_developer_guide"
+rg -Fq 'Server purge does not publish the protocol purge envelope, and acknowledgement completion is absent.' \
+  "$profile_developer_guide"
+rg -Fq 'Reviewed first-link reconciliation handles first-link semantic collisions before completion.' \
+  "$profile_developer_guide"
+rg -Fq 'No dedicated post-link semantic-collision resolver exists.' "$profile_developer_guide"
+rg -Fq 'REST edits are not published to linked clients.' "$profile_api_reference"
+rg -Fq 'Server purge does not publish the protocol purge envelope and remains pending because acknowledgement completion is absent.' \
+  "$profile_api_reference"
 git diff --check -- Docs/Code_Documentation/Personal_Context_Developer_Guide.md Docs/API-related/Personal_Context_API.md
 git add Docs/Code_Documentation/Personal_Context_Developer_Guide.md Docs/API-related/Personal_Context_API.md
 git commit -m "docs: document Personal Context server internals"
@@ -400,24 +423,84 @@ git rebase origin/dev
 backlog task 13151 --plain
 rg -n "TASK-13151|Document Personal Context Profile server" \
   "backlog/tasks/task-13151 - Document-Personal-Context-Profile-server-operations-and-architecture.md"
+set -o pipefail
 profile_task_matches=$(
   {
     git for-each-ref --format='%(refname)' refs/heads refs/remotes |
       while IFS= read -r profile_ref; do
-        git grep -l '^id: TASK-13151$' "$profile_ref" -- 'backlog/tasks/*.md' 2>/dev/null || true
+        if profile_ref_match=$(git grep -l '^id: TASK-13151$' "$profile_ref" -- 'backlog/tasks/*.md' 2>/dev/null); then
+          printf '%s\n' "$profile_ref_match"
+        else
+          profile_ref_status=$?
+          test "$profile_ref_status" -eq 1 || exit "$profile_ref_status"
+        fi
       done | sed 's/^[^:]*://'
     git worktree list --porcelain |
       awk '$1 == "worktree" { sub(/^worktree /, ""); print }' |
       while IFS= read -r profile_worktree; do
-        rg -l '^id: TASK-13151$' "$profile_worktree/backlog/tasks" 2>/dev/null || true
+        # Old or prunable worktrees without a Backlog task directory cannot hold this task.
+        if [ ! -d "$profile_worktree/backlog/tasks" ]; then
+          continue
+        fi
+        if profile_worktree_match=$(rg -l '^id: TASK-13151$' "$profile_worktree/backlog/tasks" 2>/dev/null); then
+          printf '%s\n' "$profile_worktree_match"
+        else
+          profile_worktree_status=$?
+          test "$profile_worktree_status" -eq 1 || exit "$profile_worktree_status"
+        fi
       done
   } | awk -F/ '{ print $NF }' | sort -u
-)
+) || {
+  echo "TASK-13151 collision sweep failed"
+  exit 1
+}
 printf '%s\n' "$profile_task_matches"
 test "$profile_task_matches" = "task-13151 - Document-Personal-Context-Profile-server-operations-and-architecture.md"
+
+# Re-inventory merged behavior after the rebase and before generating docs.
+rg -q '^version = "0\.1\.0"$' packages/tldw_profile_core/pyproject.toml
+rg -q '^EXPECTED_CONTRACT_DIGEST = "[0-9a-f]{64}"$' \
+  tldw_Server_API/tests/Personalization/test_personal_context_contract.py
+rg -q '^def test_server_pins_exact_chatbook_profile_core_contract' \
+  tldw_Server_API/tests/Personalization/test_personal_context_contract.py
+test "$(rg -c '^@router\.(get|post|patch|delete)' tldw_Server_API/app/api/v1/endpoints/personal_context.py)" -eq 19
+for profile_rest_handler in create_record update_record create_proposal purge_profile; do
+  rg -q "^def ${profile_rest_handler}\\(" \
+    tldw_Server_API/app/api/v1/endpoints/personal_context.py
+done
+for profile_domain in \
+  personal_context.manifest \
+  personal_context.scope \
+  personal_context.record \
+  personal_context.proposal \
+  personal_context.purge; do
+  rg -Fq "\"$profile_domain\"" tldw_Server_API/app/core/Sync/v2/models.py
+done
+rg -q '^    def bootstrap_personal_context\(' tldw_Server_API/app/core/Sync/v2/profile.py
+rg -q '^class PersonalContextMaterializer' \
+  tldw_Server_API/app/core/Sync/v2/materializers/personal_context.py
+rg -Fq 'PURGE_PENDING = "purge_pending"' \
+  tldw_Server_API/app/core/Personalization/personal_context_service.py
+if rg -n 'publish|outbox|enqueue|append_envelope|create_envelope' \
+  tldw_Server_API/app/api/v1/endpoints/personal_context.py \
+  tldw_Server_API/app/core/Sync/v2/profile.py \
+  tldw_Server_API/app/core/Sync/v2/domain_adapters/personal_context.py \
+  tldw_Server_API/app/core/Sync/v2/materializers/personal_context.py; then
+  echo "Unexpected Personal Context REST-to-Sync publication seam"
+  exit 1
+fi
+if rg -n 'complete_.*purge|purge.*acknowledg|acknowledg.*purge' \
+  tldw_Server_API/app/api/v1/endpoints/personal_context.py \
+  tldw_Server_API/app/core/Personalization/personal_context_service.py \
+  tldw_Server_API/app/core/Sync/v2/profile.py \
+  tldw_Server_API/app/core/Sync/v2/domain_adapters/personal_context.py \
+  tldw_Server_API/app/core/Sync/v2/materializers/personal_context.py; then
+  echo "Unexpected Personal Context purge acknowledgement completion seam"
+  exit 1
+fi
 ```
 
-Expected: the branch is based on current `origin/dev`, and TASK-13151 still resolves to the intended task after the rebase. There must be no later rebase after the task is marked Done.
+Expected: the branch is based on current `origin/dev`; TASK-13151 still resolves uniquely; Shared Core, REST, Sync bootstrap/inbound, and purge boundaries still match the guides' source claims. Any new REST publication or purge-completion seam stops execution for re-inventory. There must be no later rebase after the task is marked Done.
 
 - [ ] **Step 2: Refresh and stage the curated tree**
 
@@ -442,11 +525,20 @@ Expected: no unstaged generated diff and no whitespace errors in the staged gene
 
 - [ ] **Step 4: Run public/private and strict MkDocs checks**
 
-Run:
+Run Steps 4 and 5 in the same shell. Select the checked host interpreter first, fall back to the worktree virtual environment, and fail if neither exists:
 
 ```bash
-/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python Helper_Scripts/docs/check_public_private_boundary.py
-/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m mkdocs build --strict -f Docs/mkdocs.yml
+profile_python=/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python
+if [ ! -x "$profile_python" ]; then
+  profile_python=.venv/bin/python
+fi
+if [ ! -x "$profile_python" ]; then
+  echo "No executable project Python found at the host or worktree virtual environment"
+  exit 1
+fi
+printf 'Using project Python: %s\n' "$profile_python"
+"$profile_python" Helper_Scripts/docs/check_public_private_boundary.py
+"$profile_python" -m mkdocs build --strict -f Docs/mkdocs.yml
 ```
 
 Expected: boundary check reports OK; MkDocs builds with zero warnings.
@@ -456,7 +548,11 @@ Expected: boundary check reports OK; MkDocs builds with zero warnings.
 Run:
 
 ```bash
-/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest -q \
+test -x "${profile_python:-}" || {
+  echo "profile_python is unavailable; run Task 5 Step 4 in this shell first"
+  exit 1
+}
+"$profile_python" -m pytest -q \
   packages/tldw_profile_core/tests/tldw_profile_core/test_public_contract.py \
   tldw_Server_API/tests/Personalization/test_personal_context_contract.py \
   tldw_Server_API/tests/Personalization/test_personal_context_endpoints.py \
@@ -474,10 +570,28 @@ Expected: selected tests pass.
 Run:
 
 ```bash
-rg -n "not currently published|does not publish|no dedicated Personal Context|not wired" \
-  Docs/User_Guides/Server/Personal_Context_Profile.md \
-  Docs/Code_Documentation/Personal_Context_Developer_Guide.md \
-  Docs/API-related/Personal_Context_API.md
+profile_operator_guide=Docs/User_Guides/Server/Personal_Context_Profile.md
+profile_developer_guide=Docs/Code_Documentation/Personal_Context_Developer_Guide.md
+profile_api_reference=Docs/API-related/Personal_Context_API.md
+for profile_shared_doc in "$profile_operator_guide" "$profile_developer_guide"; do
+  rg -Fq '<!-- shared-personal-context-contract:start -->' "$profile_shared_doc"
+  rg -Fq '<!-- shared-personal-context-contract:end -->' "$profile_shared_doc"
+done
+rg -Fq 'Ordinary server REST record/proposal mutations are not currently published to linked Chatbook clients.' \
+  "$profile_operator_guide"
+rg -Fq 'The server purge endpoint does not publish the protocol purge envelope, and acknowledgement completion is not wired.' \
+  "$profile_operator_guide"
+rg -Fq 'First-link semantic collision' "$profile_operator_guide"
+rg -Fq 'Post-link semantic collision' "$profile_operator_guide"
+rg -Fq 'REST edits are not published to linked clients.' "$profile_developer_guide"
+rg -Fq 'Server purge does not publish the protocol purge envelope, and acknowledgement completion is absent.' \
+  "$profile_developer_guide"
+rg -Fq 'Reviewed first-link reconciliation handles first-link semantic collisions before completion.' \
+  "$profile_developer_guide"
+rg -Fq 'No dedicated post-link semantic-collision resolver exists.' "$profile_developer_guide"
+rg -Fq 'REST edits are not published to linked clients.' "$profile_api_reference"
+rg -Fq 'Server purge does not publish the protocol purge envelope and remains pending because acknowledgement completion is absent.' \
+  "$profile_api_reference"
 for profile_label in \
   "Profile locked" \
   "Offline or queued" \
@@ -506,6 +620,33 @@ elif [ "$profile_link_guard_status" -gt 1 ]; then
 else
   echo "Published docs contain no source-only relative links"
 fi
+profile_changed_paths=$(
+  {
+    git diff --name-only origin/dev...HEAD
+    git diff --name-only
+    git diff --cached --name-only
+  } | sed '/^$/d' | sort -u
+)
+profile_unexpected_paths=$(
+  printf '%s\n' "$profile_changed_paths" | awk '
+    $0 == "Docs/API-related/API_README.md" { next }
+    $0 == "Docs/API-related/Personal_Context_API.md" { next }
+    $0 == "Docs/Code_Documentation/Personal_Context_Developer_Guide.md" { next }
+    $0 == "Docs/Code_Documentation/index.md" { next }
+    $0 == "Docs/User_Guides/Server/Personal_Context_Profile.md" { next }
+    $0 == "Docs/User_Guides/index.md" { next }
+    $0 == "Docs/mkdocs.yml" { next }
+    $0 == "Docs/superpowers/plans/2026-09-01-personal-context-documentation-server.md" { next }
+    $0 == "backlog/tasks/task-13151 - Document-Personal-Context-Profile-server-operations-and-architecture.md" { next }
+    index($0, "Docs/Published/") == 1 { next }
+    NF { print }
+  '
+)
+if [ -n "$profile_unexpected_paths" ]; then
+  printf 'Unexpected changed paths:\n%s\n' "$profile_unexpected_paths"
+  exit 1
+fi
+printf 'Allowed changed paths:\n%s\n' "$profile_changed_paths"
 git diff --check origin/dev...HEAD
 git diff --check --cached
 git status --short
@@ -513,7 +654,7 @@ git diff --stat origin/dev...HEAD
 git diff --stat --cached
 ```
 
-Expected: limitations and all seven failure states are explicit; the expected no-match source-link guard succeeds; only task/plan/canonical/generated docs changed.
+Expected: each guide independently proves its required shared-contract and current-limit claims; the API independently proves REST publication and purge limits; all seven operator failure states are explicit; the expected no-match source-link guard succeeds; and the allowed-path assertion accepts only task/plan/canonical/generated docs.
 
 - [ ] **Step 7: Commit generated output and recheck the committed diff**
 
@@ -535,13 +676,14 @@ Expected: generated output is committed and the worktree is clean before task cl
 
 - [ ] **Step 1: Complete all ACs and DoD items, record evidence, and mark Done as the final repository mutation**
 
-Run, replacing the bracketed evidence with the exact commands and results from Task 5:
+Run, replacing the bracketed evidence with the exact commands and results from Task 5. If any skip or blocker exists, replace `Known skips/blockers: none` with the actual list before running the second command that checks DoD item 6:
 
 ```bash
 backlog task edit 13151 \
+  --notes "Implemented the server Personal Context operator and developer guides, corrected API Sync wording, added discovery/navigation, regenerated published docs, and documented the exact shared-contract block, full boundary matrix, seven failure states, current limitations, and ten-item extension checklist. Verification: [exact Task 5 results]. ADR required: no. ADR path: backlog/decisions/002-personal-context-profile-authority-sync-and-encryption.md. Reason: documentation only; the existing Personal Context authority, Sync, and encryption ADR applies. Bandit: not applicable because only documentation and task metadata changed. Lessons learned: [record a genuine lesson with its incident, or state none]. Known skips/blockers: none."
+backlog task edit 13151 \
   --check-ac 1 --check-ac 2 --check-ac 3 --check-ac 4 --check-ac 5 --check-ac 6 \
   --check-dod 1 --check-dod 2 --check-dod 3 --check-dod 4 --check-dod 5 --check-dod 6 \
-  --notes "Implemented the server Personal Context operator and developer guides, corrected API Sync wording, added discovery/navigation, regenerated published docs, and documented the exact shared-contract block, full boundary matrix, seven failure states, current limitations, and ten-item extension checklist. Verification: [exact Task 5 results]. ADR required: no. ADR path: backlog/decisions/002-personal-context-profile-authority-sync-and-encryption.md. Reason: documentation only; the existing Personal Context authority, Sync, and encryption ADR applies. Bandit: not applicable because only documentation and task metadata changed. Lessons learned: [record a genuine lesson with its incident, or state none]." \
   --final-summary "Published accurate Personal Context operator, API, architecture, Sync-boundary, and troubleshooting documentation with reproducible generated output." \
   -s Done
 backlog task 13151 --plain
