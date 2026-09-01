@@ -153,6 +153,40 @@ def test_docs_info_attests_reading_snapshot_pages(monkeypatch, tmp_path: Path) -
     assert response["capabilities"]["hasReadingSnapshotPagesV1"] is True
 
 
+def test_docs_info_attests_reading_snapshot_without_config(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("TLDW_CONFIG_PATH", str(tmp_path / "missing-config.txt"))
+
+    safe_config = config_info.load_safe_config()
+    response = asyncio.run(config_info.get_documentation_config())
+
+    assert safe_config["capabilities"]["hasReadingSnapshotPagesV1"] is True
+    assert safe_config["supported_features"]["hasReadingSnapshotPagesV1"] is True
+    assert response["capabilities"]["hasReadingSnapshotPagesV1"] is True
+    assert response["supported_features"]["hasReadingSnapshotPagesV1"] is True
+
+
+def test_docs_info_retains_reading_snapshot_when_dynamic_capabilities_fail(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "config.txt"
+    _write_minimal_config(config_path)
+    monkeypatch.setenv("TLDW_CONFIG_PATH", str(config_path))
+
+    def fail_route_lookup(*_args, **_kwargs):
+        raise RuntimeError("dynamic-capability-failure")
+
+    monkeypatch.setattr(config_mod, "route_enabled", fail_route_lookup)
+
+    safe_config = config_info.load_safe_config()
+
+    assert safe_config["capabilities"] == {"hasReadingSnapshotPagesV1": True}
+    assert safe_config["supported_features"] == {"hasReadingSnapshotPagesV1": True}
+
+
 def test_docs_info_exposes_audio_capabilities_from_audio_and_websocket_routes(
     monkeypatch, tmp_path: Path
 ) -> None:

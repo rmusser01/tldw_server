@@ -16,15 +16,15 @@
 
 **Status:** Complete
 
-**Success criteria:** A controlled concurrent writer can produce only a wholly pre-write or wholly post-write page, and tag hydration uses that same transaction.
+**Success criteria:** A controlled concurrent SQLite writer can commit while the reader retains a wholly pre-write snapshot; PostgreSQL ends the pool's scope-setup transaction before beginning `REPEATABLE READ READ ONLY`; tag hydration uses the same read connection.
 
-**Tests:** Add a deterministic `threading.Event` regression to `tldw_Server_API/tests/Collections/test_reading_service.py`; run the focused list/snapshot tests before and after the minimum transaction change.
+**Tests:** Add a deterministic `threading.Event` SQLite regression and a PostgreSQL pool-lifecycle proxy to `tldw_Server_API/tests/Collections/test_reading_service.py`; run the focused list/snapshot tests before and after the minimum read-snapshot change.
 
 ## Stage 2: Exact docs-info attestation
 
 **Status:** Complete
 
-**Success criteria:** Both `capabilities` and `supported_features` expose literal `hasReadingSnapshotPagesV1: true`, with the existing Reading List endpoint and response unchanged.
+**Success criteria:** Both `capabilities` and `supported_features` expose literal `hasReadingSnapshotPagesV1: true` for normal, missing-config, and unrelated dynamic-capability-failure paths, with the existing Reading List endpoint and response unchanged.
 
 **Tests:** Add and witness a failing focused test in `tldw_Server_API/tests/Config/test_docs_info_capabilities.py`, then run both focused server files.
 

@@ -123,15 +123,14 @@ def test_reading_list_page_uses_one_snapshot_during_concurrent_insert(
     assert before_total == 21
 
     count_read = threading.Event()
-    first_write_attempt_done = threading.Event()
-    reader_done = threading.Event()
+    writer_committed = threading.Event()
     writer_errors: list[BaseException] = []
     db_path = DatabasePaths.get_media_db_path(user_id)
 
     def insert_newest_item() -> None:
         if not count_read.wait(5):
             writer_errors.append(AssertionError("reader did not reach count query"))
-            first_write_attempt_done.set()
+            writer_committed.set()
             return
 
         params = (
@@ -146,8 +145,8 @@ def test_reading_list_page_uses_one_snapshot_during_concurrent_insert(
             "9999-01-01T00:00:00+00:00",
         )
 
-        def _insert(*, timeout: float) -> None:
-            with sqlite3.connect(db_path, isolation_level=None, timeout=timeout) as connection:
+        try:
+            with sqlite3.connect(db_path, isolation_level=None, timeout=1) as connection:
                 connection.execute(
                     """
                     INSERT INTO content_items (
@@ -157,25 +156,10 @@ def test_reading_list_page_uses_one_snapshot_during_concurrent_insert(
                     """,
                     params,
                 )
-
-        try:
-            _insert(timeout=0.05)
-        except sqlite3.OperationalError as exc:
-            if "locked" not in str(exc).lower():
-                writer_errors.append(exc)
-            first_write_attempt_done.set()
-            if not reader_done.wait(5):
-                writer_errors.append(AssertionError("reader did not release its transaction"))
-                return
-            try:
-                _insert(timeout=5)
-            except BaseException as retry_exc:  # noqa: BLE001 - retained for the test thread
-                writer_errors.append(retry_exc)
-            return
         except BaseException as exc:  # noqa: BLE001 - retained for the test thread
             writer_errors.append(exc)
         finally:
-            first_write_attempt_done.set()
+            writer_committed.set()
 
     original_execute = coll_db.backend.execute
     intercepted_count = False
@@ -186,23 +170,20 @@ def test_reading_list_page_uses_one_snapshot_during_concurrent_insert(
         if not intercepted_count and "SELECT COUNT(*) AS cnt" in query and "content_items" in query:
             intercepted_count = True
             count_read.set()
-            if not first_write_attempt_done.wait(5):
-                raise AssertionError("writer did not attempt the concurrent insert")
+            if not writer_committed.wait(5):
+                raise AssertionError("writer did not commit the concurrent insert")
         return result
 
     writer = threading.Thread(target=insert_newest_item, daemon=True)
     writer.start()
     monkeypatch.setattr(coll_db.backend, "execute", interleaved_execute)
-    try:
-        rows, total = coll_db.list_content_items(
-            origin="reading",
-            page=1,
-            size=20,
-            sort="created_desc",
-        )
-    finally:
-        reader_done.set()
-        writer.join(timeout=5)
+    rows, total = coll_db.list_content_items(
+        origin="reading",
+        page=1,
+        size=20,
+        sort="created_desc",
+    )
+    writer.join(timeout=5)
 
     after_rows, after_total = coll_db.list_content_items(
         origin="reading",
@@ -210,15 +191,10 @@ def test_reading_list_page_uses_one_snapshot_during_concurrent_insert(
         size=20,
         sort="created_desc",
     )
-    after_ids = tuple(row.id for row in after_rows)
-
     assert writer.is_alive() is False
     assert writer_errors == []
     assert after_total == 22
-    assert (total, tuple(row.id for row in rows)) in {
-        (21, before_ids),
-        (22, after_ids),
-    }
+    assert (total, tuple(row.id for row in rows)) == (21, before_ids)
 
 
 def test_reading_list_snapshot_reuses_transaction_connection_for_tags(
@@ -285,21 +261,49 @@ def test_reading_list_snapshot_requests_repeatable_read_on_postgres(
     )
     sqlite_backend = coll_db.backend
 
+    class LifecycleConnection:
+        def __init__(self) -> None:
+            self.scope_query_open = True
+            self.commits = 0
+            self.rollbacks = 0
+
+        def commit(self) -> None:
+            self.commits += 1
+            self.scope_query_open = False
+
+        def rollback(self) -> None:
+            self.rollbacks += 1
+
+    class LifecyclePool:
+        def __init__(self, connection: LifecycleConnection) -> None:
+            self.connection = connection
+            self.returned: list[LifecycleConnection] = []
+
+        def get_connection(self) -> LifecycleConnection:
+            return self.connection
+
+        def return_connection(self, connection: LifecycleConnection) -> None:
+            self.returned.append(connection)
+
     class PostgreSQLModeBackend:
         backend_type = BackendType.POSTGRESQL
 
         def __init__(self) -> None:
             self.snapshot_statements: list[str] = []
+            self.connection = LifecycleConnection()
+            self.pool = LifecyclePool(self.connection)
 
-        def transaction(self, connection=None):
-            return sqlite_backend.transaction(connection)
+        def get_pool(self):
+            return self.pool
 
         def execute(self, query, params=None, connection=None, **kwargs):
             normalized = " ".join(query.split())
-            if normalized == "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY":
+            if normalized == "BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY":
+                if connection.scope_query_open:
+                    raise RuntimeError("SET TRANSACTION after scope query")
                 self.snapshot_statements.append(normalized)
-                return sqlite_backend.execute("SELECT 1", connection=connection)
-            return sqlite_backend.execute(query, params, connection=connection, **kwargs)
+                return sqlite_backend.execute("SELECT 1")
+            return sqlite_backend.execute(query, params, **kwargs)
 
     proxy = PostgreSQLModeBackend()
     coll_db._backend = proxy
@@ -308,8 +312,11 @@ def test_reading_list_snapshot_requests_repeatable_read_on_postgres(
 
     assert total == 1
     assert rows[0].title == "Snapshot postgres"
+    assert proxy.connection.commits == 1
+    assert proxy.connection.rollbacks == 1
+    assert proxy.pool.returned == [proxy.connection]
     assert proxy.snapshot_statements == [
-        "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY"
+        "BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY"
     ]
 
 
@@ -771,19 +778,32 @@ async def test_reading_save_sanitizes_html_content(reading_env, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_reading_search_handles_punctuation(reading_env):
-    service = ReadingService(TEST_USER_ID + 7)
+@pytest.mark.parametrize(
+    ("query", "user_offset"),
+    [
+        ("C++/Rust: Intro? [Guide]", 7),
+        ("C++/Rust (Intro)", 8),
+        ('C++/Rust "Intro"', 9),
+        ("C++/Rust Intro*", 10),
+    ],
+)
+async def test_reading_search_handles_punctuation(
+    reading_env,
+    query: str,
+    user_offset: int,
+):
+    service = ReadingService(TEST_USER_ID + user_offset)
     saved = await service.save_url(
-        url="https://example.org/punct",
+        url=f"https://example.org/punct-{user_offset}",
         tags=["c++", "rust"],
         status="saved",
         favorite=False,
-        title_override="C++/Rust: Intro? [Guide]",
+        title_override=query,
         content_override="Content about C++ and Rust.",
     )
 
-    coll_db = CollectionsDatabase.for_user(TEST_USER_ID + 7)
-    items, total = coll_db.list_content_items(origin="reading", q="C++/Rust: Intro? [Guide]")
+    coll_db = CollectionsDatabase.for_user(TEST_USER_ID + user_offset)
+    items, total = coll_db.list_content_items(origin="reading", q=query)
     assert total >= 1
     assert any(item.id == saved.item.id for item in items)
 

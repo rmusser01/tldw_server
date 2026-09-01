@@ -877,6 +877,32 @@ class CollectionsDatabase:
             else:
                 self._local.backend_pin = previous_backend
 
+    @contextlib.contextmanager
+    def _read_snapshot(self) -> Generator[Any, None, None]:
+        """Yield one non-blocking, cross-statement read snapshot."""
+        backend = self.backend
+        pool = backend.get_pool()
+        connection = pool.get_connection()
+        try:
+            if backend.backend_type == BackendType.POSTGRESQL:
+                # Pool checkout applies session-scoped RLS settings using SQL,
+                # which starts an implicit transaction. Commit that setup
+                # before beginning the read transaction at its required
+                # isolation level.
+                connection.commit()
+                backend.execute(
+                    "BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY",
+                    connection=connection,
+                )
+            else:
+                connection.execute("BEGIN DEFERRED")
+            yield connection
+        finally:
+            try:
+                connection.rollback()
+            finally:
+                pool.return_connection(connection)
+
     def _execute_insert(self, query: str, params: tuple[Any, ...], connection: Any | None = None) -> Any:
         if self.backend.backend_type == BackendType.POSTGRESQL:
             prepared_query, prepared_params = prepare_backend_statement(
@@ -2803,26 +2829,12 @@ class CollectionsDatabase:
 
     @staticmethod
     def _fts_query_candidates(query: str) -> list[str]:
-        """Generate FTS query candidates, preferring safe variants when needed."""
+        """Generate one parser-safe natural-language FTS query."""
         raw = (query or "").strip()
         if not raw:
             return []
         sanitized = CollectionsDatabase._fts_query_string(raw)
-        upper = raw.upper()
-        raw_ops = {"AND", "OR", "NOT", "NEAR"}
-        has_operator = any(op in upper.split() for op in raw_ops)
-        has_syntax = bool(re.search(r'["*()]', raw))
-        prefer_raw = has_operator or has_syntax
-
-        candidates: list[str] = []
-        if prefer_raw:
-            candidates.append(raw)
-            if sanitized and sanitized != raw:
-                candidates.append(sanitized)
-        else:
-            if sanitized:
-                candidates.append(sanitized)
-        return [cand for cand in candidates if cand]
+        return [sanitized] if sanitized else []
 
     @staticmethod
     def _is_unique_violation(exc: Exception) -> bool:
@@ -4120,12 +4132,7 @@ class CollectionsDatabase:
                 LIMIT ? OFFSET ?
             """
             row_params = tuple(clause_params + [resolved_limit, resolved_offset])
-            with self.transaction() as connection:
-                if self.backend_type == BackendType.POSTGRESQL:
-                    self.backend.execute(
-                        "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY",
-                        connection=connection,
-                    )
+            with self._read_snapshot() as connection:
                 total = int(
                     self.backend.execute(
                         count_sql,

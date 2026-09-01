@@ -58,6 +58,7 @@ from tldw_Server_API.app.services.worker_startup_policy import should_start_inpr
 
 router = APIRouter()
 _DOCS_API_KEY_PLACEHOLDER = "YOUR_API_KEY"
+_SHIPPED_CAPABILITIES = {"hasReadingSnapshotPagesV1": True}
 
 
 def get_config_path() -> Path:
@@ -84,7 +85,9 @@ def load_safe_config() -> dict:
         logger.warning("Config file not found")
         return {
             "configured": False,
-            "message": "Configuration file not found"
+            "message": "Configuration file not found",
+            "capabilities": dict(_SHIPPED_CAPABILITIES),
+            "supported_features": dict(_SHIPPED_CAPABILITIES),
         }
 
     config = configparser.ConfigParser()
@@ -147,18 +150,19 @@ def load_safe_config() -> dict:
     # FFmpeg availability (needed by clients to gate video/audio ingestion UX)
     safe_config["ffmpeg_available"] = shutil.which("ffmpeg") is not None
 
-    # Feature flags / capabilities (safe to expose)
+    # Feature flags / capabilities (safe to expose). Shipped, unconditional
+    # guarantees remain present even if unrelated dynamic derivation fails.
+    caps = dict(_SHIPPED_CAPABILITIES)
     try:
         has_media_routes = bool(config_mod.route_enabled("media", default_stable=True))
         has_audio_http = bool(config_mod.route_enabled("audio", default_stable=True))
         has_audio_websocket = bool(config_mod.route_enabled("audio-websocket", default_stable=True))
-        caps = {
-            "personalization": bool(config_mod.legacy_get("PERSONALIZATION_ENABLED", True))
-            and bool(config_mod.route_enabled("personalization", default_stable=False)),
-            "persona": bool(config_mod.legacy_get("PERSONA_ENABLED", True))
-            and bool(config_mod.route_enabled("persona", default_stable=True)),
-            "hasReadingSnapshotPagesV1": True,
-        }
+        caps["personalization"] = bool(
+            config_mod.legacy_get("PERSONALIZATION_ENABLED", True)
+        ) and bool(config_mod.route_enabled("personalization", default_stable=False))
+        caps["persona"] = bool(
+            config_mod.legacy_get("PERSONA_ENABLED", True)
+        ) and bool(config_mod.route_enabled("persona", default_stable=True))
         caps["hasSlides"] = bool(config_mod.route_enabled("slides", default_stable=True))
         caps["hasPresentationStudio"] = bool(caps["hasSlides"])
         caps["hasPresentationRender"] = bool(caps["hasPresentationStudio"]) and bool(
@@ -186,11 +190,11 @@ def load_safe_config() -> dict:
         )
         caps["hasDurableMediaCollections"] = has_media_routes
         caps["hasKnowledgeQaMediaScope"] = has_media_routes
-        # expose both for backward-compat and forward-looking UI
-        safe_config["supported_features"] = caps
-        safe_config["capabilities"] = caps
     except Exception:
         logger.debug("Failed to derive safe capability flags")
+    # Expose both for backward-compat and forward-looking UI.
+    safe_config["supported_features"] = caps
+    safe_config["capabilities"] = caps
 
     return safe_config
 
