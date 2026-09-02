@@ -58,10 +58,18 @@ keys, runtime policy, and peer-local receipts. Recovery export requires
 
 The server refuses `local_copy` deletion with
 `server_local_copy_unsupported`; removing a device copy is a Chatbook-owned
-operation. Global deletion requires `DELETE EVERYWHERE` and the current purge
-generation. It advances the generation barrier transactionally, removes
-readable canonical bodies and server-local runtime state, and leaves the
-profile in `purge_pending` until synchronization acknowledgment is implemented.
+operation. Chatbook's **Remove local profile** deletes canonical
+`PersonalContextRepository` state but does not delete the server copy,
+unregister the device, or clear separate `SyncStateRepository` artifacts,
+staged encrypted envelopes, or dataset staging keys. Its recovery export has no
+shipped import/restore caller, and **Finish secure removal** retries canonical
+profile-key cleanup only.
+
+Global deletion requires `DELETE EVERYWHERE` and the current purge generation.
+It advances the generation barrier transactionally, removes readable canonical
+bodies and server-local runtime state, and leaves the profile in
+`purge_pending`. The endpoint does not publish a `personal_context.purge`
+envelope, and synchronization acknowledgement completion is not implemented.
 All profile mutations return HTTP 409 with
 `detail.code = "profile_purge_pending"` while that barrier is pending.
 
@@ -72,12 +80,42 @@ canonical `PersonalContextService` and encrypted repository. Sync device
 registration, capability negotiation, bootstrap, and reviewed link completion
 remain under `/api/v1/sync` rather than `/api/v1/personal-context`.
 
-The shipped Sync V2 path supports capability negotiation, registered-device
-bootstrap, reviewed Chatbook link completion, and inbound Chatbook-originated
-manifest, scope, record, and proposal domains. Sync V2 also validates and
-materializes the `personal_context.purge` protocol domain, but the current
-linked flow has no end-to-end purge producer.
+The shipped first-link path supports capability negotiation, registered-device
+bootstrap, a content-free reviewed reconciliation plan, link completion, and
+publication of the resulting eligible Chatbook/server snapshot. Before
+approval, bootstrap exchanges authentication/capability,
+device-registration/public-key, display, schema/quota, and purge-generation
+metadata. It also returns the server's current Sync-eligible canonical
+snapshot, including record and proposal content, which Chatbook holds
+transiently in memory. Durable review state and the visible plan remain
+content-free, and no local Chatbook record or proposal content uploads before
+approval.
 
-REST edits are not published to linked clients.
+After successful reviewed first linking, the peers have the same canonical
+identities and bytes only for that resulting eligible snapshot. Later syncable
+Chatbook mutations create encrypted local outbox entries, but no shipped
+startup, background, Settings, or other production caller runs an ongoing
+Personal Context sync cycle. **Overview → Manual Sync** invokes only Notes and
+Chat, so those later entries remain queued locally.
+
+The transport can validate and materialize inbound Chatbook-originated
+`personal_context.manifest`, `personal_context.scope`,
+`personal_context.record`, `personal_context.proposal`, and content-free
+`personal_context.purge` envelopes. This is protocol capability, not a shipped
+ongoing client lifecycle. The current products do not provide a dedicated
+Personal Context queue/status or post-link conflict-resolution surface.
+
+REST edits are not published to linked clients. They change the server copy
+without appending a Personal Context Sync entry, so post-link edits can make the
+peers diverge in either direction.
 
 Server purge does not publish the protocol purge envelope and remains pending because acknowledgement completion is absent.
+
+## Transport deployment boundary
+
+Deploy non-loopback API access behind authenticated HTTPS. This is an operator
+requirement, not a Personal Context API enforcement rule. Chatbook accepts
+server URLs using HTTP or HTTPS. Its runtime TLS verification defaults on but
+can use a custom CA or be disabled through Network settings; **Test Connection**
+always uses default httpx verification instead of that saved custom/off runtime
+policy.
