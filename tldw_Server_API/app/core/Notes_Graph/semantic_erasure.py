@@ -20,8 +20,9 @@ from tldw_Server_API.app.core.DB_Management.chacha.note_semantic_models import (
 )
 
 from .semantic_observability import (
-    build_semantic_audit_event,
-    build_semantic_metric_event,
+    emit_semantic_audit_event,
+    record_semantic_cleanup_metrics,
+    record_semantic_dsr_metrics,
 )
 from .semantic_publication import (
     SemanticPublicationService,
@@ -108,43 +109,37 @@ class _QuiescentCleanupVectors:
         generation_id: str,
         vector_ids: tuple[str, ...],
     ) -> Any:
-        return await run_quiescent_operation(
-            _resolve(
-                self._delegate.delete_ids(dataset_id, generation_id, vector_ids)
-            )
-        )
+        return await run_quiescent_operation(_resolve(self._delegate.delete_ids(dataset_id, generation_id, vector_ids)))
 
     async def delete_generation(self, dataset_id: str, generation_id: str) -> Any:
-        return await run_quiescent_operation(
-            _resolve(self._delegate.delete_generation(dataset_id, generation_id))
-        )
+        return await run_quiescent_operation(_resolve(self._delegate.delete_generation(dataset_id, generation_id)))
 
 
 def _metric(*, status: str, backend: str, error_code: str) -> None:
-    event = build_semantic_metric_event(
-        operation="cleanup",
+    normalized_backend = backend if backend in _SUPPORTED_BACKENDS else "unavailable"
+    record_semantic_dsr_metrics(status=status, backend=normalized_backend)
+    record_semantic_cleanup_metrics(
         status=status,
-        backend=backend if backend in _SUPPORTED_BACKENDS else "unavailable",
-        error_code=error_code,
-        value=1,
+        backend=normalized_backend,
+        backlog=0 if status == "success" else 1,
+        retries=0 if status == "success" else 1,
+        oldest_age_seconds=0,
     )
+    if status != "success":
+        logger.bind(error_code=error_code).debug("Notes semantic erasure cleanup requires retry")
+
+
+async def _audit(*, owner_user_id: str, status: str, reason: str) -> None:
     try:
-        from tldw_Server_API.app.core.Metrics.metrics_manager import increment_counter
-
-        increment_counter(event.name, event.value, dict(event.labels))
-    except Exception:  # noqa: BLE001 - erasure must not depend on metrics availability
-        logger.debug("Notes semantic erasure metric emission unavailable")
-
-
-def _audit(*, status: str, reason: str) -> None:
-    event = build_semantic_audit_event(
-        event="cleanup_completion",
-        status=status,
-        reason=reason,
-    )
-    logger.bind(semantic_event=event.event, **dict(event.fields)).info(
-        "Notes semantic erasure cleanup"
-    )
+        await emit_semantic_audit_event(
+            owner_user_id=owner_user_id,
+            dataset_id="all",
+            event="dsr_cleanup",
+            status=status,
+            reason=reason,
+        )
+    except Exception:  # noqa: BLE001 - erasure state remains authoritative
+        logger.warning("Notes semantic erasure audit persistence failed")
 
 
 def _mapped_error(exc: SemanticIndexingError) -> SemanticErasureError:
@@ -190,9 +185,7 @@ class SemanticErasureCoordinator:
             raise ValueError("notes_semantic_erasure_poll_interval_invalid")
         if lease_seconds is None:
             try:
-                lease_seconds = int(
-                    os.getenv("NOTES_SEMANTIC_LEASE_SECONDS", "180") or "180"
-                )
+                lease_seconds = int(os.getenv("NOTES_SEMANTIC_LEASE_SECONDS", "180") or "180")
             except (TypeError, ValueError):
                 lease_seconds = 86_400
         if type(lease_seconds) is not int or not 1 <= lease_seconds <= 86_400:
@@ -307,9 +300,7 @@ class SemanticErasureCoordinator:
             after_dataset_id=after,
         )
         if overflow:
-            raise SemanticErasureError(
-                "notes_semantic_erasure_dataset_limit_exceeded"
-            )
+            raise SemanticErasureError("notes_semantic_erasure_dataset_limit_exceeded")
         return tuple(datasets)
 
     async def _fence_dataset(self, dataset_id: str) -> str | None:
@@ -323,9 +314,7 @@ class SemanticErasureCoordinator:
             backend_name = str(config.vector_backend or "").strip().lower()
             self._current_backend = backend_name
             if backend_name not in _SUPPORTED_BACKENDS:
-                raise SemanticErasureError(
-                    "notes_semantic_erasure_backend_unavailable"
-                )
+                raise SemanticErasureError("notes_semantic_erasure_backend_unavailable")
             disabled = await self._store_call(
                 self._store.disable_and_schedule_cleanup,
                 dataset_id=dataset_id,
@@ -395,9 +384,7 @@ class SemanticErasureCoordinator:
                 while True:
                     steps += 1
                     if steps > self._max_cleanup_steps:
-                        raise SemanticErasureError(
-                            "notes_semantic_erasure_cleanup_failed"
-                        )
+                        raise SemanticErasureError("notes_semantic_erasure_cleanup_failed")
                     if await publication.cleanup_generation(
                         claim,
                         before_side_effect=self._check_deadline,
@@ -420,9 +407,7 @@ class SemanticErasureCoordinator:
                 except asyncio.CancelledError:
                     pass
                 except Exception as release_exc:
-                    raise SemanticErasureError(
-                        "notes_semantic_erasure_cleanup_failed"
-                    ) from release_exc
+                    raise SemanticErasureError("notes_semantic_erasure_cleanup_failed") from release_exc
                 raise
 
     async def _erase(self) -> SemanticErasureResult:
@@ -447,7 +432,13 @@ class SemanticErasureCoordinator:
         )
         for backend_name in dataset_backends.values() or ["unavailable"]:
             _metric(status="success", backend=backend_name, error_code="none")
-        _audit(status="success", reason="none")
+        await _resolve(
+            _audit(
+                owner_user_id=self._owner_user_id,
+                status="success",
+                reason="none",
+            )
+        )
         return SemanticErasureResult(
             datasets=len(datasets),
             cleaned_generations=cleaned_generations,
@@ -467,9 +458,7 @@ class SemanticErasureCoordinator:
         except SemanticIndexingError as exc:
             error = _mapped_error(exc)
         except SemanticVectorError:
-            error = SemanticErasureError(
-                "notes_semantic_erasure_backend_unavailable"
-            )
+            error = SemanticErasureError("notes_semantic_erasure_backend_unavailable")
         except Exception:  # noqa: BLE001 - DSR receives only a bounded failure code
             error = SemanticErasureError("notes_semantic_erasure_cleanup_failed")
         finally:
@@ -504,7 +493,13 @@ class SemanticErasureCoordinator:
                     self._executor = None
         reason = error.code.removeprefix("notes_semantic_erasure_")
         _metric(status="failed", backend=self._current_backend, error_code=reason)
-        _audit(status="failed", reason=reason)
+        await _resolve(
+            _audit(
+                owner_user_id=self._owner_user_id,
+                status="failed",
+                reason=reason,
+            )
+        )
         raise error
 
 

@@ -7,6 +7,7 @@ import contextlib
 import hashlib
 import json
 import os
+import time
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
@@ -50,6 +51,14 @@ from tldw_Server_API.app.core.Notes_Graph.semantic_jobs import (
     SemanticJobCancelled,
     SemanticJobHandler,
     SemanticJobsError,
+)
+from tldw_Server_API.app.core.Notes_Graph.semantic_observability import (
+    emit_semantic_audit_event,
+    record_semantic_build_metrics,
+    record_semantic_cancellation,
+    record_semantic_cleanup_metrics,
+    record_semantic_denial,
+    record_semantic_failure,
 )
 from tldw_Server_API.app.core.Notes_Graph.semantic_publication import (
     SemanticAuthorityState,
@@ -376,22 +385,15 @@ class ProductionSemanticRuntime:
                 str(self._store.owner_user_id) == self._owner_user_id
                 and generation is not None
                 and generation.owner_user_id == self._owner_user_id
-                and generation.state
-                in {SemanticGenerationState.STAGING, SemanticGenerationState.ACTIVE}
+                and generation.state in {SemanticGenerationState.STAGING, SemanticGenerationState.ACTIVE}
             ),
             semantic_manage_allowed=manage_allowed,
-            desired_enabled=(
-                config is not None and config.desired_state.value == "enabled"
-            ),
+            desired_enabled=(config is not None and config.desired_state.value == "enabled"),
             owner_user_id=self._owner_user_id,
             dataset_id=self._dataset_id,
             generation_id=generation.id if generation is not None else "missing",
-            generation_fencing_token=(
-                str(generation.root_job_id or "") if generation is not None else ""
-            ),
-            configuration_revision=(
-                config.configuration_revision if config is not None else -1
-            ),
+            generation_fencing_token=(str(generation.root_job_id or "") if generation is not None else ""),
+            configuration_revision=(config.configuration_revision if config is not None else -1),
             capability_revision=current.capability_revision,
             disclosure_hash=current.disclosure_hash,
             provider=current.provider_label.lower(),
@@ -399,21 +401,19 @@ class ProductionSemanticRuntime:
             model_revision=(
                 current.model_revision
                 if current.model_revision is not None
-                else config.model_revision if config is not None else None
+                else config.model_revision
+                if config is not None
+                else None
             ),
             endpoint_origin=current.endpoint_display or "",
             credential_source="server_default",
             endpoint_origin_revision=current.endpoint_origin_revision,
             endpoint_policy_allowed=current.endpoint_display is not None,
-            compatibility_hash=(
-                config.compatibility_hash if config is not None else None
-            ),
+            compatibility_hash=(config.compatibility_hash if config is not None else None),
             dimensions=config.dimensions if config is not None else None,
             vector_backend=str(config.vector_backend or "") if config is not None else "",
             vector_capable=(
-                current.indexing_available
-                and config is not None
-                and current.vector_backend == config.vector_backend
+                current.indexing_available and config is not None and current.vector_backend == config.vector_backend
             ),
         )
 
@@ -474,6 +474,7 @@ class ProductionSemanticRuntime:
         mode = str(kwargs["mode"])
         cancellation_requested = kwargs["cancellation_requested"]
         if mode != "delete" and not self._settings.indexing_enabled:
+            record_semantic_denial("kill_switch")
             raise SemanticIndexingError("notes_semantic_indexing_disabled")
         if await cancellation_requested():
             raise SemanticJobCancelled()
@@ -601,18 +602,14 @@ async def build_production_runtime(**kwargs: Any) -> ProductionSemanticRuntime:
                     kwargs["root_job_id"],
                 )
                 if generation is None:
-                    raise SemanticIndexingError(
-                        "notes_semantic_generation_recovery_failed"
-                    ) from None
+                    raise SemanticIndexingError("notes_semantic_generation_recovery_failed") from None
             except (OSError, RuntimeError, TypeError, ValueError):
                 generation = db.note_semantic_store.get_generation_by_root_job_id(
                     kwargs["dataset_id"],
                     kwargs["root_job_id"],
                 )
                 if generation is None:
-                    raise SemanticIndexingError(
-                        "notes_semantic_generation_recovery_failed"
-                    ) from None
+                    raise SemanticIndexingError("notes_semantic_generation_recovery_failed") from None
         desired_state = getattr(config.desired_state, "value", config.desired_state)
         exact_admission = (
             desired_state == "enabled"
@@ -629,10 +626,7 @@ async def build_production_runtime(**kwargs: Any) -> ProductionSemanticRuntime:
             and config.compatibility_hash == generation.compatibility_hash
             and config.model_revision == generation.model_revision
         )
-        if (
-            generation.root_job_id != kwargs["root_job_id"]
-            or not (exact_admission or exact_dimension_transition)
-        ):
+        if generation.root_job_id != kwargs["root_job_id"] or not (exact_admission or exact_dimension_transition):
             raise SemanticIndexingError("notes_semantic_configuration_drift")
         kwargs["generation_id"] = generation.id
         kwargs["configuration_revision"] = config.configuration_revision
@@ -663,13 +657,7 @@ async def _cancellation_requested(job: dict[str, Any], *, jobs: JobManager) -> b
         domain=JOB_DOMAIN,
         owner_user_id=str(job.get("owner_user_id") or ""),
     )
-    return bool(
-        current
-        and (
-            current.get("status") == "cancelled"
-            or current.get("cancel_requested_at")
-        )
-    )
+    return bool(current and (current.get("status") == "cancelled" or current.get("cancel_requested_at")))
 
 
 async def handle_notes_semantic_index_job(
@@ -681,9 +669,37 @@ async def handle_notes_semantic_index_job(
     """Execute one semantic root Job against its owner-bound database."""
 
     owner = str(job.get("owner_user_id") or "")
+    raw_payload = job.get("payload")
+    payload: dict[str, Any] = raw_payload if isinstance(raw_payload, dict) else {}
+    dataset_id = str(payload.get("dataset_id") or "")
+    mode = str(payload.get("mode") or "build")
+    operation = mode if mode in {"build", "rebuild", "maintain", "retry_failed", "delete"} else "build"
+    started = time.perf_counter()
+    backend = "unavailable"
     db = None
+
+    def record_terminal(status: str) -> None:
+        record_semantic_build_metrics(
+            operation=operation,
+            status=status,
+            backend=backend,
+            duration_seconds=time.perf_counter() - started,
+            counts={
+                "indexed": 0,
+                "excluded": 0,
+                "failed": 0,
+                "dirty": 0,
+                "pending": 0,
+                "chunks": 0,
+            },
+        )
+
     try:
         db = await _open_owner_database(owner)
+        config = db.note_semantic_store.get_configuration(dataset_id)
+        configured_backend = str(getattr(config, "vector_backend", "") or "")
+        if configured_backend in {"chromadb", "pgvector"}:
+            backend = configured_backend
         settings = load_semantic_settings()
         handler = SemanticJobHandler(
             runtime_factory=lambda **kwargs: build_production_runtime(
@@ -693,11 +709,71 @@ async def handle_notes_semantic_index_job(
             ),
             settings=settings,
         )
-        return await handler.handle(
+        result = await handler.handle(
             job,
             cancellation_requested=lambda: _cancellation_requested(job, jobs=jobs),
         )
+        cleanup_complete = bool(result.get("cleanup_complete"))
+        status = (
+            "degraded"
+            if int(result.get("excluded_notes") or 0)
+            or int(result.get("failed_notes") or 0)
+            or (mode == "delete" and not cleanup_complete)
+            else "success"
+        )
+        counts = {
+            "indexed": int(result.get("indexed_notes") or 0),
+            "excluded": int(result.get("excluded_notes") or 0),
+            "failed": int(result.get("failed_notes") or 0),
+            "dirty": 0,
+            "pending": 0,
+            "chunks": int(result.get("published_chunks") or 0),
+        }
+        record_semantic_build_metrics(
+            operation=operation,
+            status=status,
+            backend=backend,
+            duration_seconds=time.perf_counter() - started,
+            counts=counts,
+        )
+        if counts["failed"]:
+            record_semantic_failure(
+                component="provider",
+                category="execution",
+                backend=backend,
+            )
+        if mode == "delete":
+            record_semantic_cleanup_metrics(
+                status=status,
+                backend=backend,
+                backlog=0 if cleanup_complete else 1,
+                retries=0,
+                oldest_age_seconds=0,
+            )
+        if mode != "delete" or cleanup_complete:
+            try:
+                await emit_semantic_audit_event(
+                    owner_user_id=owner,
+                    dataset_id=dataset_id,
+                    event=(
+                        "cleanup_completion"
+                        if mode == "delete"
+                        else "incremental_publication"
+                        if mode in {"maintain", "retry_failed"}
+                        else "generation_publication"
+                    ),
+                    status=status,
+                    reason=("note_failed" if counts["failed"] else "note_excluded" if counts["excluded"] else "none"),
+                    generation_id=(str(payload.get("generation_id")) if payload.get("generation_id") else None),
+                    run_id=str(job.get("uuid") or "") or None,
+                    counts=counts,
+                )
+            except Exception:  # noqa: BLE001 - publication is already authoritative
+                logger.warning("Notes semantic worker audit persistence failed")
+        return result
     except SemanticJobCancelled:
+        record_terminal("cancelled")
+        record_semantic_cancellation(operation)
         if all(job.get(key) is not None for key in ("id", "uuid", "lease_id")):
             await asyncio.to_thread(
                 jobs.finalize_cancelled,
@@ -709,19 +785,44 @@ async def handle_notes_semantic_index_job(
             )
         raise
     except SemanticJobsError as exc:
+        record_terminal("failed")
+        record_semantic_failure(
+            component="provider",
+            category="unavailable",
+            backend=backend,
+        )
         raise SemanticIndexingError(exc.code) from None
-    except SemanticIndexingError:
+    except SemanticIndexingError as exc:
+        record_terminal("failed")
+        category = (
+            "configuration"
+            if "configuration" in exc.code or "capability" in exc.code
+            else "fence"
+            if "fence" in exc.code
+            else "unavailable"
+            if "unavailable" in exc.code
+            else "execution"
+        )
+        record_semantic_failure(
+            component="provider" if "provider" in exc.code else "vector",
+            category=category,
+            backend=backend,
+        )
         raise
     except Exception:  # noqa: BLE001 - WorkerSDK receives only an allowlisted code
+        record_terminal("failed")
+        record_semantic_failure(
+            component="vector",
+            category="unknown",
+            backend=backend,
+        )
         raise SemanticIndexingError("notes_semantic_worker_runtime_failed") from None
     finally:
         if db is not None:
             try:
                 await asyncio.to_thread(_close_database, db)
             except Exception:  # noqa: BLE001 - WorkerSDK receives only a stable code
-                raise SemanticIndexingError(
-                    "notes_semantic_worker_runtime_failed"
-                ) from None
+                raise SemanticIndexingError("notes_semantic_worker_runtime_failed") from None
 
 
 def _build_sdk(*, jobs: JobManager, config: WorkerConfig) -> WorkerSDK:
@@ -733,10 +834,7 @@ async def _run_worker(
     stop_event: asyncio.Event | None,
     handler: Any,
 ) -> None:
-    worker_id = (
-        os.getenv("NOTES_SEMANTIC_WORKER_ID")
-        or f"notes-semantic-worker-{os.getpid()}"
-    ).strip()
+    worker_id = (os.getenv("NOTES_SEMANTIC_WORKER_ID") or f"notes-semantic-worker-{os.getpid()}").strip()
     jobs = JobManager()
     sdk = _build_sdk(jobs=jobs, config=build_worker_config(worker_id=worker_id))
     watcher: asyncio.Task[None] | None = None

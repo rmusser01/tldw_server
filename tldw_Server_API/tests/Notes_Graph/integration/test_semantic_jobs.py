@@ -248,8 +248,7 @@ def test_backend_change_requires_delete_without_mutating_configuration(
         assert unchanged.vector_backend == persisted_backend
         with db.transaction() as conn:
             receipt_count = conn.execute(
-                "SELECT COUNT(*) AS count FROM note_semantic_operation_receipts "
-                "WHERE owner_user_id=? AND dataset_id=?",
+                "SELECT COUNT(*) AS count FROM note_semantic_operation_receipts WHERE owner_user_id=? AND dataset_id=?",
                 ("owner-a", "dataset-a"),
             ).fetchone()
         assert receipt_count is not None
@@ -261,7 +260,7 @@ def test_backend_change_requires_delete_without_mutating_configuration(
 @pytest.mark.parametrize(
     "capability_overrides",
     [
-        {"provider": "cohere"},
+        {"provider": "google"},
         {"model": "text-embedding-3-large", "dimensions": 3_072},
         {"endpoint_url": "https://embedding-proxy.example.test/v1"},
     ],
@@ -381,9 +380,7 @@ async def test_backend_change_delete_uses_persisted_store_and_confirms_absence(
         assert selected_backends == [persisted_backend]
         assert physical_generations == set()
         assert result["cleanup_complete"] is True
-        deleted_generation = db.note_semantic_store.get_generation(
-            "dataset-a", generation_id
-        )
+        deleted_generation = db.note_semantic_store.get_generation("dataset-a", generation_id)
         assert deleted_generation is not None
         assert deleted_generation.deleted_at is not None
     finally:
@@ -682,9 +679,7 @@ def test_endpoint_unavailable_existing_index_has_typed_capability_and_status(
             clock=lambda: NOW,
         )
 
-        disclosure = SemanticCapabilitiesResponse.model_validate(
-            {**api.capabilities(), "manage_authorized": True}
-        )
+        disclosure = SemanticCapabilitiesResponse.model_validate({**api.capabilities(), "manage_authorized": True})
         projected = SemanticIndexStatusResponse.model_validate(api.status())
 
         assert disclosure.endpoint_display is None
@@ -739,9 +734,7 @@ def test_capability_origin_reaches_persisted_worker_pending_config(
             capability_resolver=lambda: capabilities,
             clock=lambda: NOW,
         )
-        disclosure = SemanticCapabilitiesResponse.model_validate(
-            {**api.capabilities(), "manage_authorized": True}
-        )
+        disclosure = SemanticCapabilitiesResponse.model_validate({**api.capabilities(), "manage_authorized": True})
         assert disclosure.endpoint_display == expected_origin
         created = db.note_semantic_store.create_configuration(
             dataset_id="dataset-a",
@@ -1658,9 +1651,9 @@ def test_generation_root_job_recovery_and_disable_cleanup_are_durable(tmp_path) 
         )
         assert disabled is not None
         assert disabled.active_generation_id is None
-        assert db.note_semantic_store.get_generation(
-            "dataset-a", generation.id
-        ).state is SemanticGenerationState.RETIRED
+        assert (
+            db.note_semantic_store.get_generation("dataset-a", generation.id).state is SemanticGenerationState.RETIRED
+        )
         cleanup = db.note_semantic_store.claim_work(
             dataset_id="dataset-a",
             now=NOW,
@@ -1712,22 +1705,31 @@ def test_exhausted_cleanup_projects_attention_and_can_be_rearmed(
             assert retried is not None
             moment += timedelta(seconds=2)
 
-        assert db.note_semantic_store.claim_generation_cleanup_batch(
-            dataset_id="dataset-a",
-            limit=1,
-            now=moment,
-        ) == ()
-        assert db.note_semantic_store.has_stalled_cleanup(
-            "dataset-a",
-            expired_before=moment,
-        ) is True
+        assert (
+            db.note_semantic_store.claim_generation_cleanup_batch(
+                dataset_id="dataset-a",
+                limit=1,
+                now=moment,
+            )
+            == ()
+        )
+        assert (
+            db.note_semantic_store.has_stalled_cleanup(
+                "dataset-a",
+                expired_before=moment,
+            )
+            is True
+        )
         assert _semantic_api(db, jobs).status()["state"] == "needs_attention"
 
-        assert db.note_semantic_store.rearm_exhausted_generation_cleanup(
-            dataset_id="dataset-a",
-            limit=1,
-            now=moment,
-        ) == 1
+        assert (
+            db.note_semantic_store.rearm_exhausted_generation_cleanup(
+                dataset_id="dataset-a",
+                limit=1,
+                now=moment,
+            )
+            == 1
+        )
         rearmed = db.note_semantic_store.claim_generation_cleanup_batch(
             dataset_id="dataset-a",
             limit=1,
@@ -1777,18 +1779,24 @@ def test_repeated_cleanup_lease_expiry_can_be_rearmed(
             assert reclaimed == 1
             moment += timedelta(seconds=3)
 
-        assert db.note_semantic_store.rearm_exhausted_generation_cleanup(
-            dataset_id="dataset-a",
-            limit=1,
-            now=moment,
-        ) == 1
-        assert len(
-            db.note_semantic_store.claim_generation_cleanup_batch(
+        assert (
+            db.note_semantic_store.rearm_exhausted_generation_cleanup(
                 dataset_id="dataset-a",
                 limit=1,
                 now=moment,
             )
-        ) == 1
+            == 1
+        )
+        assert (
+            len(
+                db.note_semantic_store.claim_generation_cleanup_batch(
+                    dataset_id="dataset-a",
+                    limit=1,
+                    now=moment,
+                )
+            )
+            == 1
+        )
     finally:
         db.close_all_connections()
 
@@ -1806,10 +1814,13 @@ def test_http_admission_does_not_create_a_post_admission_ghost_generation(
             idempotency_key="worker-owned-generation",
         )
 
-        assert db.note_semantic_store.get_generation_by_root_job_id(
-            "dataset-a",
-            admitted["run"]["run_id"],
-        ) is None
+        assert (
+            db.note_semantic_store.get_generation_by_root_job_id(
+                "dataset-a",
+                admitted["run"]["run_id"],
+            )
+            is None
+        )
     finally:
         db.close_all_connections()
 
@@ -2136,10 +2147,13 @@ async def test_committed_cancel_intent_blocks_late_worker_generation_creation(
         run_id = enabled["run"]["run_id"]
         config = db.note_semantic_store.get_configuration("dataset-a")
         assert config is not None
-        assert db.note_semantic_store.get_generation_by_root_job_id(
-            "dataset-a",
-            run_id,
-        ) is None
+        assert (
+            db.note_semantic_store.get_generation_by_root_job_id(
+                "dataset-a",
+                run_id,
+            )
+            is None
+        )
 
         cancelled = api.cancel_run(
             run_id=UUID(run_id),
@@ -2160,10 +2174,13 @@ async def test_committed_cancel_intent_blocks_late_worker_generation_creation(
                 mode="build",
             )
 
-        assert db.note_semantic_store.get_generation_by_root_job_id(
-            "dataset-a",
-            run_id,
-        ) is None
+        assert (
+            db.note_semantic_store.get_generation_by_root_job_id(
+                "dataset-a",
+                run_id,
+            )
+            is None
+        )
         current = db.note_semantic_store.get_configuration("dataset-a")
         assert current is not None
         assert current.active_generation_id is None
@@ -2340,11 +2357,14 @@ def test_root_cancellation_conflicts_when_activation_already_committed(
             )
 
         assert exc_info.value.code == "notes_semantic_run_revision_conflict"
-        assert SemanticJobCoordinator(
-            jobs=jobs,
-            owner_user_id="owner-a",
-            clock=lambda: NOW,
-        ).get_job_for_run(run_id)["status"] == "queued"
+        assert (
+            SemanticJobCoordinator(
+                jobs=jobs,
+                owner_user_id="owner-a",
+                clock=lambda: NOW,
+            ).get_job_for_run(run_id)["status"]
+            == "queued"
+        )
     finally:
         db.close_all_connections()
 

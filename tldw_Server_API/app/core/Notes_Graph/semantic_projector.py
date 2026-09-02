@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import inspect
+import time
 from collections import Counter
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
@@ -34,8 +35,17 @@ from .graph_service import (
     _decode_cursor,
     bind_semantic_cursor,
 )
-from .semantic_capabilities import semantic_capability_binding_matches
+from .semantic_capabilities import (
+    semantic_capability_binding_matches,
+    semantic_provider_label,
+)
 from .semantic_content import reconstruct_semantic_chunk
+from .semantic_observability import (
+    record_semantic_denial,
+    record_semantic_failure,
+    record_semantic_health_metrics,
+    record_semantic_query_metrics,
+)
 from .semantic_scoring import (
     SemanticChunkCandidate,
     SemanticNoteMatch,
@@ -353,6 +363,7 @@ class SemanticGraphProjector:
         effective_top_k: int,
     ) -> _SemanticBinding | SemanticGraphStatus:
         if not self._settings.indexing_enabled:
+            record_semantic_denial("kill_switch")
             return self._status(
                 available=False,
                 state="unavailable",
@@ -364,6 +375,7 @@ class SemanticGraphProjector:
             )
         config = await asyncio.to_thread(self._store.get_configuration, self._dataset_id)
         if config is None or _enum_value(config.desired_state) != "enabled":
+            record_semantic_denial("configuration")
             return self._status(
                 available=False,
                 state="off",
@@ -375,6 +387,7 @@ class SemanticGraphProjector:
             )
         generation_id = getattr(config, "active_generation_id", None)
         if not generation_id:
+            record_semantic_denial("configuration")
             return self._status(
                 available=False,
                 state="preparing",
@@ -390,6 +403,7 @@ class SemanticGraphProjector:
             generation_id,
         )
         if not self._binding_is_current(config, generation):
+            record_semantic_denial("configuration")
             return self._status(
                 available=False,
                 state="unavailable",
@@ -410,6 +424,7 @@ class SemanticGraphProjector:
             config.compatibility_hash,
             capability_hash,
         ):
+            record_semantic_denial("configuration")
             return self._status(
                 available=False,
                 state="unavailable",
@@ -431,10 +446,33 @@ class SemanticGraphProjector:
             state = "updating"
         else:
             state = "ready"
+        persisted_capability_revision = getattr(config, "capability_revision", None)
+        current_capability_revision = getattr(capabilities, "capability_revision", None)
+        configuration_stale = bool(
+            persisted_capability_revision and current_capability_revision != persisted_capability_revision
+        )
         maintenance_reason = (
-            getattr(capabilities, "unavailable_reason", None)
+            "stale_configuration"
+            if configuration_stale
+            else getattr(capabilities, "unavailable_reason", None)
             if capabilities is not None and not bool(getattr(capabilities, "indexing_available", True))
             else None
+        )
+        if configuration_stale:
+            state = "needs_attention"
+            record_semantic_denial("configuration")
+        elif maintenance_reason is not None:
+            record_semantic_denial("capability")
+        record_semantic_health_metrics(
+            backend=str(getattr(config, "vector_backend", "unavailable")),
+            counts={
+                "indexed": int(integrity.indexed_note_count),
+                "excluded": int(integrity.excluded_note_count),
+                "failed": int(integrity.failed_note_count),
+                "dirty": int(integrity.pending_note_count),
+                "pending": int(integrity.pending_note_count),
+            },
+            stale_generations=1 if configuration_stale else 0,
         )
         status = self._status(
             available=True,
@@ -445,10 +483,8 @@ class SemanticGraphProjector:
             effective_threshold=effective_threshold,
             effective_top_k=effective_top_k,
         )
-        provider_label = str(
-            getattr(capabilities, "provider_label", None) or getattr(config, "provider", None) or "unavailable"
-        )
-        model_label = str(getattr(capabilities, "model", None) or getattr(config, "model", None) or "unavailable")
+        provider_label = semantic_provider_label(getattr(config, "provider", None))
+        model_label = str(getattr(config, "model", None) or "unavailable")
         return _SemanticBinding(
             config=config,
             generation=generation,
@@ -492,8 +528,15 @@ class SemanticGraphProjector:
             config.active_generation_id,
             config.semantic_index_revision,
             config.configuration_revision,
+            getattr(config, "capability_revision", None),
+            getattr(config, "disclosure_hash", None),
             config.compatibility_hash,
+            getattr(config, "provider", None),
+            getattr(config, "model", None),
             config.model_revision,
+            getattr(config, "endpoint_origin_revision", None),
+            getattr(config, "data_boundary", None),
+            getattr(config, "storage_boundary", None),
             config.normalization_version,
             config.chunker_version,
             generation.id,
@@ -568,8 +611,13 @@ class SemanticGraphProjector:
             "generation_id": str(generation.id),
             "semantic_index_revision": int(config.semantic_index_revision),
             "configuration_revision": int(config.configuration_revision),
+            "capability_revision": str(getattr(config, "capability_revision", "")),
+            "disclosure_hash": str(getattr(config, "disclosure_hash", "")),
             "compatibility_hash": str(config.compatibility_hash),
+            "provider": str(getattr(config, "provider", "")),
+            "model": str(getattr(config, "model", "")),
             "model_revision": config.model_revision,
+            "endpoint_origin_revision": str(getattr(config, "endpoint_origin_revision", "")),
             "normalization_version": str(config.normalization_version),
             "chunker_version": str(config.chunker_version),
             "query_identity": identity,
@@ -649,6 +697,9 @@ class SemanticGraphProjector:
         tuple[SemanticNoteMatch, ...],
         dict[str, SemanticProjectionChunk],
         set[str],
+        int,
+        int,
+        int,
     ]:
         generation_id = str(binding.generation.id)
         visible_source_ids = await self._visible_ids(generation_id, focus_note_id)
@@ -664,7 +715,7 @@ class SemanticGraphProjector:
         }
         ordered_source_ids = tuple(vector_id for vector_id in source_ids if vector_id in source_by_id)
         if not ordered_source_ids:
-            return (), source_by_id, truncations
+            return (), source_by_id, truncations, 0, 0, 0
 
         vectors = await self._vector_store()
         fetched = tuple(await vectors.fetch(self._dataset_id, generation_id, ordered_source_ids))
@@ -677,7 +728,7 @@ class SemanticGraphProjector:
             fetched_by_id[vector_id] for vector_id in ordered_source_ids if vector_id in fetched_by_id
         )
         if not ordered_vectors:
-            return (), source_by_id, truncations
+            return (), source_by_id, truncations, 0, 0, 0
 
         batches = tuple(
             await vectors.query(
@@ -766,7 +817,14 @@ class SemanticGraphProjector:
         )
         if candidates_truncated:
             truncations.add("semantic_candidates")
-        return ranked, current_by_id, truncations
+        return (
+            ranked,
+            current_by_id,
+            truncations,
+            len(raw_pairs),
+            len(candidates),
+            len(ranked),
+        )
 
     async def _authoritative_manual_pairs(
         self,
@@ -901,6 +959,7 @@ class SemanticGraphProjector:
             return ordinary
         threshold, top_k = self._effective_controls(request)
         if str(getattr(user, "id_str", "")) != self._owner_user_id:
+            record_semantic_denial("permission")
             return ordinary.model_copy(
                 update={
                     "semantic_status": self._status(
@@ -1005,13 +1064,32 @@ class SemanticGraphProjector:
             if await asyncio.to_thread(self._projection_revisions) != projection_revisions:
                 raise SemanticProjectionError("notes_semantic_projection_binding_changed")
             manual_pairs = await self._authoritative_manual_pairs(request.center_note_id)
-            matches, chunks, truncations = await self._query_current_matches(
-                binding=binding,
-                focus_note_id=request.center_note_id,
-                threshold=threshold,
-                top_k=top_k,
-                request=request,
-            )
+            query_started = time.perf_counter()
+            try:
+                (
+                    matches,
+                    chunks,
+                    truncations,
+                    candidate_count,
+                    filtered_count,
+                    admitted_count,
+                ) = await self._query_current_matches(
+                    binding=binding,
+                    focus_note_id=request.center_note_id,
+                    threshold=threshold,
+                    top_k=top_k,
+                    request=request,
+                )
+            except Exception:
+                record_semantic_query_metrics(
+                    status="failed",
+                    backend=str(binding.config.vector_backend),
+                    duration_seconds=time.perf_counter() - query_started,
+                    candidate_count=0,
+                    filtered_count=0,
+                    admitted_count=0,
+                )
+                raise
             if await asyncio.to_thread(self._projection_revisions) != projection_revisions:
                 raise SemanticProjectionError("notes_semantic_projection_binding_changed")
             await self._assert_binding_current(
@@ -1043,6 +1121,15 @@ class SemanticGraphProjector:
                 admitted_targets = {edge.target for edge in composed.edges if edge.type is EdgeType.semantic}
                 if len(admitted_targets) < len(semantic_nodes):
                     truncations.add("semantic_nodes")
+            record_semantic_query_metrics(
+                status="success",
+                backend=str(binding.config.vector_backend),
+                duration_seconds=time.perf_counter() - query_started,
+                candidate_count=candidate_count,
+                filtered_count=filtered_count,
+                admitted_count=admitted_count,
+                truncations=tuple(sorted(truncations)),
+            )
             status = binding.status.model_copy(update={"truncated_by": sorted(truncations)})
             stable = composed.model_copy(
                 update={
@@ -1064,12 +1151,28 @@ class SemanticGraphProjector:
             else:
                 reason = "vector_unavailable"
             logger.warning("Notes semantic projection failed code={}", exc.code)
+            record_semantic_failure(
+                component="vector",
+                category=(
+                    "configuration"
+                    if exc.code == "notes_semantic_projection_binding_changed"
+                    else "invalid_response"
+                    if exc.code == "notes_semantic_vector_result_invalid"
+                    else "unavailable"
+                ),
+                backend=(str(binding.config.vector_backend) if binding is not None else "unavailable"),
+            )
         except Exception as exc:  # noqa: BLE001 - semantic reads fail open by contract.
             logger.warning(
                 "Notes semantic projection failed error_type={}",
                 type(exc).__name__,
             )
             reason = "vector_unavailable"
+            record_semantic_failure(
+                component="vector",
+                category="execution",
+                backend=(str(binding.config.vector_backend) if binding is not None else "unavailable"),
+            )
         if binding is not None:
             unavailable_status = binding.status.model_copy(
                 update={
@@ -1123,12 +1226,28 @@ class SemanticGraphProjector:
         if not {source_note_id, target_note_id} <= current_note_ids:
             raise SemanticProjectionError("notes_semantic_conversion_owner_mismatch")
         try:
-            matches, _chunks, _truncations = await self._query_current_matches(
+            (
+                matches,
+                _chunks,
+                truncations,
+                candidate_count,
+                filtered_count,
+                admitted_count,
+            ) = await self._query_current_matches(
                 binding=binding_or_status,
                 focus_note_id=source_note_id,
                 threshold=threshold,
                 top_k=top_k,
                 request=None,
+            )
+            record_semantic_query_metrics(
+                status="success",
+                backend=str(binding_or_status.config.vector_backend),
+                duration_seconds=0,
+                candidate_count=candidate_count,
+                filtered_count=filtered_count,
+                admitted_count=admitted_count,
+                truncations=tuple(sorted(truncations)),
             )
         except SemanticProjectionError:
             raise

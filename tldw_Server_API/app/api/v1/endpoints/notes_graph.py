@@ -60,6 +60,9 @@ from tldw_Server_API.app.core.Notes_Graph.semantic_api import (
     load_semantic_settings,
     resolve_semantic_capabilities,
 )
+from tldw_Server_API.app.core.Notes_Graph.semantic_observability import (
+    emit_semantic_audit_event,
+)
 from tldw_Server_API.app.core.Notes_Graph.semantic_projector import (
     SemanticGraphProjector,
     SemanticProjectionError,
@@ -88,8 +91,7 @@ def _semantic_edge_requested(request: Request) -> bool:
 
 def _semantic_graph_query_present(request: Request) -> bool:
     return _semantic_edge_requested(request) or any(
-        key in request.query_params
-        for key in ("semantic_top_k", "semantic_threshold")
+        key in request.query_params for key in ("semantic_top_k", "semantic_threshold")
     )
 
 
@@ -135,20 +137,14 @@ class _NotesGraphRoute(APIRoute):
                 return await original(request)
             except RequestValidationError as exc:
                 if request.method == "GET" and self.path.endswith("/graph"):
-                    if (
-                        _semantic_graph_query_present(request)
-                        and _is_semantic_graph_validation_error(exc)
-                    ):
+                    if _semantic_graph_query_present(request) and _is_semantic_graph_validation_error(exc):
                         raise _invalid_semantic_graph_request() from exc
                     invalid_edge_type = _invalid_edge_type(request)
                     if invalid_edge_type is not None:
                         valid = [edge_type.value for edge_type in EdgeType]
                         raise HTTPException(
                             status_code=status.HTTP_400_BAD_REQUEST,
-                            detail=(
-                                f"Invalid edge_type: '{invalid_edge_type}'. "
-                                f"Valid: {valid}"
-                            ),
+                            detail=(f"Invalid edge_type: '{invalid_edge_type}'. Valid: {valid}"),
                         ) from exc
                 raise
 
@@ -165,11 +161,7 @@ async def _enforce_graph_request_rate_limit(
 ) -> None:
     """Charge exactly one ordinary or semantic graph-read resource."""
 
-    resource = (
-        "notes.graph.semantic.read"
-        if _semantic_edge_requested(request)
-        else "notes.graph.read"
-    )
+    resource = "notes.graph.semantic.read" if _semantic_edge_requested(request) else "notes.graph.read"
     await enforce_rbac_rate_limit(request, resource, db_pool)
 
 
@@ -247,35 +239,19 @@ async def _audit_semantic_conversion(
     target_note_id: str,
     generation_id: str,
     result: str,
+    dataset_id: str = "notes",
 ) -> None:
     """Emit a bounded content-free conversion audit record."""
 
-    from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import (
-        get_or_create_audit_service_for_user_id_optional,
+    await emit_semantic_audit_event(
+        owner_user_id=actor_user_id,
+        dataset_id=dataset_id,
+        event="manual_conversion",
+        status="success" if result == "created" else "failed",
+        generation_id=generation_id,
+        source_note_id=source_note_id,
+        target_note_id=target_note_id,
     )
-    from tldw_Server_API.app.core.Audit.unified_audit_service import (
-        AuditContext,
-        AuditEventCategory,
-        AuditEventType,
-    )
-
-    audit_service = await get_or_create_audit_service_for_user_id_optional(
-        actor_user_id
-    )
-    await audit_service.log_event(
-        event_type=AuditEventType.DATA_UPDATE,
-        category=AuditEventCategory.DATA_MODIFICATION,
-        context=AuditContext(user_id=actor_user_id),
-        resource_type="notes_semantic_relationship",
-        resource_id=source_note_id,
-        action="notes_semantic.manual_conversion",
-        result=result,
-        metadata={
-            "target_note_id": target_note_id,
-            "generation_id": generation_id,
-        },
-    )
-    await audit_service.flush(raise_on_failure=True)
 
 
 def _link_response(link: NotesLink) -> dict[str, object]:
@@ -395,12 +371,8 @@ def _has_existing_manual_link(
 
     expected_pair = {source_note_id, target_note_id}
     return any(
-        link.type == "manual"
-        and not link.deleted
-        and {link.source_note_id, link.target_note_id} == expected_pair
-        for link in db.notes_link_store.list_for_notes(
-            [source_note_id, target_note_id]
-        )
+        link.type == "manual" and not link.deleted and {link.source_note_id, link.target_note_id} == expected_pair
+        for link in db.notes_link_store.list_for_notes([source_note_id, target_note_id])
     )
 
 
@@ -475,10 +447,7 @@ def _suggestions_authorized(principal: AuthPrincipal | None) -> bool:
 
     if principal_has_admin_bypass_claims(principal):
         return True
-    permissions = {
-        str(permission).strip()
-        for permission in (getattr(principal, "permissions", None) or ())
-    }
+    permissions = {str(permission).strip() for permission in (getattr(principal, "permissions", None) or ())}
     return NOTES_GRAPH_SUGGEST in permissions
 
 
@@ -487,10 +456,7 @@ def _manual_link_authorized(principal: AuthPrincipal | None) -> bool:
 
     if principal_has_admin_bypass_claims(principal):
         return True
-    permissions = {
-        str(permission).strip()
-        for permission in (getattr(principal, "permissions", None) or ())
-    }
+    permissions = {str(permission).strip() for permission in (getattr(principal, "permissions", None) or ())}
     return NOTES_GRAPH_WRITE in permissions
 
 
@@ -499,7 +465,8 @@ def _manual_link_authorized(principal: AuthPrincipal | None) -> bool:
     summary="Fetch a graph of notes and related entities",
     description=(
         "Returns a bounded subgraph of notes, tags, and sources based on filters.\n\n"
-        "- Honors enum edge_types: manual, wikilink, backlink, tag_membership, source_membership.\n"
+        "- Honors enum edge_types: manual, wikilink, backlink, tag_membership, "
+        "source_membership, semantic.\n"
         "- Uses BFS with deterministic ordering; see Docs/Design/Graphing-Notes-PRD.md §21 for cursor details.\n\n"
         "Example response (default format) matches the NoteGraphResponse schema.\n\n"
         "Cytoscape example (when format=cytoscape) is documented in Docs/Design/Graphing-Notes-PRD.md (§9, §14)."
@@ -515,7 +482,7 @@ def _manual_link_authorized(principal: AuthPrincipal | None) -> bool:
             {
                 "lang": "python",
                 "label": "urllib",
-                "source": "import json\nfrom urllib.parse import urlencode\nfrom urllib.request import Request, urlopen\n\nparams = {\n    \"center_note_id\": \"note:123\",\n    \"radius\": 1,\n    \"edge_types\": \"manual,wikilink,tag_membership\",\n}\nurl = \"http://127.0.0.1:8000/api/v1/notes/graph?\" + urlencode(params)\nreq = Request(url, headers={\"Authorization\": \"Bearer <token>\"})\nwith urlopen(req) as resp:\n    print(json.load(resp))",
+                "source": 'import json\nfrom urllib.parse import urlencode\nfrom urllib.request import Request, urlopen\n\nparams = {\n    "center_note_id": "note:123",\n    "radius": 1,\n    "edge_types": "manual,wikilink,tag_membership",\n}\nurl = "http://127.0.0.1:8000/api/v1/notes/graph?" + urlencode(params)\nreq = Request(url, headers={"Authorization": "Bearer <token>"})\nwith urlopen(req) as resp:\n    print(json.load(resp))',
             },
         ]
     },
@@ -763,9 +730,7 @@ async def get_note_neighbors(
 )
 async def create_manual_link(
     note_id: str,
-    link: NoteLinkCreate = Body(
-        ..., example={"to_note_id": "note:456", "directed": False, "weight": 1.0}
-    ),
+    link: NoteLinkCreate = Body(..., example={"to_note_id": "note:456", "directed": False, "weight": 1.0}),
     current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     _: None = Depends(rbac_rate_limit("notes.graph.write")),
@@ -852,6 +817,7 @@ async def create_manual_link(
                     target_note_id=to_note_id,
                     generation_id=conversion.generation_id,
                     result="created",
+                    dataset_id=dataset_key,
                 )
             except Exception:  # noqa: BLE001 - the link is already authoritative.
                 logger.warning("Notes semantic conversion audit emission failed")
@@ -875,9 +841,7 @@ async def create_manual_link(
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail={
-                        "error_code": (
-                            "notes_semantic_conversion_manual_link_exists"
-                        ),
+                        "error_code": ("notes_semantic_conversion_manual_link_exists"),
                         "message": "A manual Notes link already exists.",
                     },
                 ) from exc
@@ -925,9 +889,7 @@ async def list_manual_links(
         page = links[:limit]
         next_cursor = None
         if has_more and page:
-            next_cursor = encode_notes_link_cursor(
-                payload={**binding, "last_id": page[-1].edge_id}
-            )
+            next_cursor = encode_notes_link_cursor(payload={**binding, "last_id": page[-1].edge_id})
         return {
             "links": [_link_summary(link) for link in page],
             "has_more": has_more,
@@ -1009,11 +971,7 @@ async def update_manual_link(
             raise NotesLinkResourceNotFoundError()
         weight = mutation.weight if "weight" in mutation.model_fields_set else current.weight
         label = mutation.label if "label" in mutation.model_fields_set else current.label
-        properties = (
-            mutation.properties
-            if "properties" in mutation.model_fields_set
-            else dict(current.properties)
-        )
+        properties = mutation.properties if "properties" in mutation.model_fields_set else dict(current.properties)
         if coordinator is not None:
             updated = coordinator.update(
                 edge_id=normalized_edge_id,
@@ -1051,19 +1009,12 @@ async def update_manual_link(
 @router.delete(
     "/links/{edge_id}",
     summary="Delete a manual link",
-    description=(
-        "Deletes a manual link by id.\n"
-        "See Docs/Design/Graphing-Notes-PRD.md (§9)."
-    ),
+    description=("Deletes a manual link by id.\nSee Docs/Design/Graphing-Notes-PRD.md (§9)."),
     tags=["notes", "notes-graph"],
     responses={
         200: {
             "description": "Deletion result",
-            "content": {
-                "application/json": {
-                    "example": {"deleted": True, "edge_id": "e:1"}
-                }
-            },
+            "content": {"application/json": {"example": {"deleted": True, "edge_id": "e:1"}}},
         }
     },
     openapi_extra={

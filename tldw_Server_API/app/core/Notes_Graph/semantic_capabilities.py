@@ -5,9 +5,10 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from math import ceil
-from typing import Literal
+from typing import Any, Literal
 
 from .semantic_endpoint import canonical_semantic_endpoint_origin
 from .semantic_settings import DEFAULT_SEMANTIC_INDEX_SETTINGS, SemanticIndexSettings
@@ -16,15 +17,43 @@ ExecutionBoundary = Literal["local", "external", "unknown"]
 StorageBoundary = Literal["local", "external", "unavailable", "unknown"]
 CredentialSource = Literal["durable", "request", "none"]
 
-_PROVIDER_LABELS = {
-    "anthropic": "Anthropic",
-    "cohere": "Cohere",
-    "google": "Google",
-    "mistral": "Mistral",
-    "openai": "OpenAI",
-    "openrouter": "OpenRouter",
-    "voyage": "Voyage",
+
+@dataclass(frozen=True, slots=True)
+class SemanticProviderPolicy:
+    """Executable Notes adapter and endpoint policy."""
+
+    label: str
+    config_section: str
+    default_base_url: str
+
+
+_PROVIDER_CATALOG = {
+    "google": SemanticProviderPolicy(
+        label="Google",
+        config_section="google_api",
+        default_base_url="https://generativelanguage.googleapis.com/v1",
+    ),
+    "huggingface": SemanticProviderPolicy(
+        label="HuggingFace",
+        config_section="huggingface_api",
+        default_base_url="https://api-inference.huggingface.co/models",
+    ),
+    "openai": SemanticProviderPolicy(
+        label="OpenAI",
+        config_section="openai_api",
+        default_base_url="https://api.openai.com/v1",
+    ),
 }
+_PROVIDER_LABELS = {provider: policy.label for provider, policy in _PROVIDER_CATALOG.items()}
+_ENDPOINT_FIELDS = (
+    "base_url",
+    "api_base_url",
+    "api_base",
+    "api_url",
+    "api_ip",
+    "endpoint",
+    "runtime_endpoint",
+)
 _STORAGE_LABELS = {"chromadb": "ChromaDB", "pgvector": "pgvector"}
 _OUTBOUND_DATA_CATEGORIES = frozenset({"note_content_chunks", "note_title"})
 _UNAVAILABLE_ENDPOINT_FACTS = b'{"configured":false}'
@@ -148,6 +177,62 @@ def _safe_identifier(value: str | None, *, allowed: dict[str, str]) -> str:
     return normalized if normalized in allowed else "unavailable"
 
 
+def semantic_provider_policy(provider: str | None) -> SemanticProviderPolicy | None:
+    """Return the closed Notes policy for one normalized provider."""
+
+    normalized = provider.strip().lower() if isinstance(provider, str) else ""
+    return _PROVIDER_CATALOG.get(normalized)
+
+
+def semantic_provider_label(provider: str | None) -> str:
+    """Return the public label for persisted provider authority."""
+
+    policy = semantic_provider_policy(provider)
+    return policy.label if policy is not None else "unavailable"
+
+
+def semantic_provider_is_registered(
+    provider: str | None,
+    registry: Any,
+) -> bool:
+    """Bind Notes admission to the executable production adapter registry."""
+
+    policy = semantic_provider_policy(provider)
+    if policy is None:
+        return False
+    normalized = str(provider).strip().lower()
+    registered = getattr(registry, "has_adapter", None)
+    if callable(registered):
+        try:
+            return bool(registered(normalized))
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            return False
+    specs = getattr(registry, "_adapter_specs", None)
+    return isinstance(specs, Mapping) and normalized in specs
+
+
+def resolve_semantic_provider_endpoint(
+    provider: str | None,
+    *,
+    configured_url: object = None,
+    app_config: Mapping[str, object] | None = None,
+) -> str | None:
+    """Resolve the exact adapter base URL under the closed endpoint policy."""
+
+    policy = semantic_provider_policy(provider)
+    if policy is None:
+        return None
+    candidates: list[object] = [configured_url]
+    section = app_config.get(policy.config_section) if app_config is not None else None
+    if isinstance(section, Mapping):
+        candidates.extend(section.get(field_name) for field_name in _ENDPOINT_FIELDS)
+    candidates.append(policy.default_base_url)
+    for candidate in candidates:
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip().rstrip("/")
+    return None
+
+
 def _endpoint_display(endpoint_url: str | None) -> str | None:
     return canonical_semantic_endpoint_origin(endpoint_url)
 
@@ -191,9 +276,7 @@ def build_semantic_capabilities(
     safe_model = _safe_model_label(contract.model)
     model = safe_model or "unconfigured"
     model_revision = _safe_model_label(contract.model_revision)
-    model_revision_invalid = (
-        contract.model_revision is not None and model_revision is None
-    )
+    model_revision_invalid = contract.model_revision is not None and model_revision is None
     endpoint_display = _endpoint_display(contract.endpoint_url)
     endpoint_origin_revision = _endpoint_origin_revision(endpoint_display)
     execution_boundary = _execution_boundary(contract.execution_boundary)
@@ -237,11 +320,7 @@ def build_semantic_capabilities(
         unavailable_reason = "notes_semantic_metric_unsupported"
     elif contract.credential_source != "durable":
         unavailable_reason = "notes_semantic_durable_credentials_unavailable"
-    elif (
-        provider_key == "unavailable"
-        or safe_model is None
-        or model_revision_invalid
-    ):
+    elif provider_key == "unavailable" or safe_model is None or model_revision_invalid:
         unavailable_reason = "notes_semantic_provider_unavailable"
     elif endpoint_display is None:
         unavailable_reason = "notes_semantic_endpoint_unavailable"
@@ -255,13 +334,9 @@ def build_semantic_capabilities(
         and contract.resolved_dimensions not in settings.pgvector_allowed_dimensions
     ):
         unavailable_reason = "notes_semantic_pgvector_dimensions_unsupported"
-    dimension_probe_required = (
-        contract.resolved_dimensions is None and unavailable_reason is None
-    )
+    dimension_probe_required = contract.resolved_dimensions is None and unavailable_reason is None
     limits_payload = asdict(settings)
-    limits_payload["pgvector_allowed_dimensions"] = sorted(
-        settings.pgvector_allowed_dimensions
-    )
+    limits_payload["pgvector_allowed_dimensions"] = sorted(settings.pgvector_allowed_dimensions)
     capability_revision = _canonical_hash(
         {
             "compatibility_hash": compatibility_hash,
@@ -301,5 +376,9 @@ __all__ = [
     "SemanticCapabilities",
     "SemanticCapabilityContract",
     "build_semantic_capabilities",
+    "resolve_semantic_provider_endpoint",
     "semantic_capability_binding_matches",
+    "semantic_provider_is_registered",
+    "semantic_provider_label",
+    "semantic_provider_policy",
 ]

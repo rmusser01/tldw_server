@@ -44,6 +44,10 @@ from tldw_Server_API.app.core.Notes_Graph.semantic_api import (
     SemanticAPIError,
     build_notes_semantic_api,
 )
+from tldw_Server_API.app.core.Notes_Graph.semantic_observability import (
+    emit_semantic_audit_event,
+    record_semantic_denial,
+)
 from tldw_Server_API.app.core.Sync.v2.notes_link_coordinator import (
     NotesLinkDatasetConflictError,
     NotesLinkSyncInactiveDatasetError,
@@ -67,10 +71,7 @@ SEMANTIC_ERROR_MESSAGES = {
     "notes_semantic_run_revision_conflict": "The semantic run changed; refresh and retry.",
     "notes_semantic_writer_conflict": "Another semantic index operation is already active.",
 }
-_ERROR_RESPONSES = {
-    code: {"model": SemanticHTTPErrorResponse}
-    for code in (403, 404, 409, 422, 429, 503)
-}
+_ERROR_RESPONSES = {code: {"model": SemanticHTTPErrorResponse} for code in (403, 404, 409, 422, 429, 503)}
 
 
 def _invalid_request() -> HTTPException:
@@ -97,13 +98,12 @@ class _SemanticAPIRoute(APIRoute):
             except HTTPException as exc:
                 if exc.status_code != status.HTTP_403_FORBIDDEN:
                     raise
+                record_semantic_denial("permission")
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail={
                         "error_code": "notes_semantic_permission_denied",
-                        "message": SEMANTIC_ERROR_MESSAGES[
-                            "notes_semantic_permission_denied"
-                        ],
+                        "message": SEMANTIC_ERROR_MESSAGES["notes_semantic_permission_denied"],
                     },
                     headers=exc.headers,
                 ) from exc
@@ -185,11 +185,7 @@ def _required_idempotency_key(value: str | None) -> str:
 
 
 def _http_error(exc: SemanticAPIError) -> HTTPException:
-    code = (
-        exc.code
-        if exc.code in SEMANTIC_ERROR_MESSAGES
-        else "notes_semantic_provider_unavailable"
-    )
+    code = exc.code if exc.code in SEMANTIC_ERROR_MESSAGES else "notes_semantic_provider_unavailable"
     status_code = exc.status_code if code == exc.code else 503
     return HTTPException(
         status_code=status_code,
@@ -201,7 +197,44 @@ async def _call(operation: Callable[[], _T]) -> _T:
     try:
         return await run_in_threadpool(operation)
     except SemanticAPIError as exc:
+        denial = {
+            "notes_semantic_backend_change_requires_delete": "configuration",
+            "notes_semantic_capability_revision_conflict": "capability",
+            "notes_semantic_configuration_revision_conflict": "configuration",
+            "notes_semantic_provider_unavailable": "capability",
+        }.get(exc.code)
+        if denial is not None:
+            record_semantic_denial(denial)
         raise _http_error(exc) from exc
+
+
+def _run_id(resource: dict[str, Any]) -> str | None:
+    run = resource.get("run")
+    if isinstance(run, dict):
+        value = run.get("run_id")
+        return value if isinstance(value, str) and value else None
+    value = resource.get("run_id")
+    return value if isinstance(value, str) and value else None
+
+
+async def _audit_command(
+    *,
+    api: Any,
+    event: str,
+    resource: dict[str, Any],
+) -> None:
+    """Durably audit an accepted command without changing its HTTP semantics."""
+
+    try:
+        await emit_semantic_audit_event(
+            owner_user_id=str(api.owner_user_id),
+            dataset_id=str(getattr(api, "_dataset_id", "notes")),
+            event=event,
+            status="success",
+            run_id=_run_id(resource),
+        )
+    except Exception:  # noqa: BLE001 - committed state remains authoritative
+        logger.warning("Notes semantic command audit persistence failed")
 
 
 @router.get(
@@ -280,6 +313,11 @@ async def enable_semantic_index(
             idempotency_key=_required_idempotency_key(idempotency_key),
         )
     )
+    await _audit_command(
+        api=api,
+        event="enable" if body.expected_revision == 0 else "consent_renewal",
+        resource=mutation,
+    )
     return SemanticIndexMutationResponse.model_validate(mutation, from_attributes=True)
 
 
@@ -308,6 +346,8 @@ async def disable_semantic_index(
             idempotency_key=_required_idempotency_key(idempotency_key),
         )
     )
+    await _audit_command(api=api, event="disable", resource=mutation)
+    await _audit_command(api=api, event="delete_request", resource=mutation)
     return SemanticIndexMutationResponse.model_validate(mutation, from_attributes=True)
 
 
@@ -336,6 +376,11 @@ async def create_semantic_run(
             expected_revision=body.expected_revision,
             idempotency_key=_required_idempotency_key(idempotency_key),
         )
+    )
+    await _audit_command(
+        api=api,
+        event="rebuild" if body.mode == "rebuild" else "retry",
+        resource=run,
     )
     return SemanticRunResponse.model_validate(run, from_attributes=True)
 
@@ -388,6 +433,7 @@ async def cancel_semantic_run(
             idempotency_key=_required_idempotency_key(idempotency_key),
         )
     )
+    await _audit_command(api=api, event="cancel", resource=mutation)
     return SemanticIndexMutationResponse.model_validate(mutation, from_attributes=True)
 
 

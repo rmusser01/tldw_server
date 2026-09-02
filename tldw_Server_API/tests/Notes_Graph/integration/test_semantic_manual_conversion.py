@@ -65,12 +65,9 @@ def _activate_notes_link_sync(
     note_ids: tuple[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    store = SyncV2Store(
-        SyncDatabase(sqlite_path=tmp_path / "sync.db", user_id="1")
-    )
+    store = SyncV2Store(SyncDatabase(sqlite_path=tmp_path / "sync.db", user_id="1"))
     registry = SyncAdapterRegistry(
-        [StaticSyncAdapter(domain=domain) for domain in M1_SYNC_DOMAINS]
-        + [NotesLinkDomainAdapter()]
+        [StaticSyncAdapter(domain=domain) for domain in M1_SYNC_DOMAINS] + [NotesLinkDomainAdapter()]
     )
     service = SyncV2Service(
         store=store,
@@ -142,8 +139,7 @@ def _activate_notes_link_sync(
         ready_verifier=lambda: True,
     )
     monkeypatch.setattr(
-        "tldw_Server_API.app.core.Sync.v2.notes_link_coordinator."
-        "get_active_server_origin_sync_service_for_user",
+        "tldw_Server_API.app.core.Sync.v2.notes_link_coordinator.get_active_server_origin_sync_service_for_user",
         lambda user_id: service if user_id == "1" else None,
     )
 
@@ -190,8 +186,11 @@ async def test_semantic_conversion_audit_uses_durable_content_free_record(
     assert event["resource_type"] == "notes_semantic_relationship"
     assert event["resource_id"] == "note-source"
     assert event["action"] == "notes_semantic.manual_conversion"
-    assert event["result"] == "created"
+    assert event["result"] == "success"
     assert event["metadata"] == {
+        "semantic_event": "manual_conversion",
+        "status": "success",
+        "reason": "none",
         "target_note_id": "note-target",
         "generation_id": "generation-a",
     }
@@ -257,6 +256,7 @@ def test_valid_semantic_conversion_uses_existing_link_writer_and_omits_context(
             "target_note_id": target,
             "generation_id": "generation-a",
             "result": "created",
+            "dataset_id": "legacy:1",
         }
     ]
 
@@ -291,9 +291,7 @@ def test_existing_manual_link_returns_typed_semantic_conversion_conflict(
     )
 
     assert response.status_code == 409, response.text
-    assert response.json()["detail"]["error_code"] == (
-        "notes_semantic_conversion_manual_link_exists"
-    )
+    assert response.json()["detail"]["error_code"] == ("notes_semantic_conversion_manual_link_exists")
     assert len(projector.calls) == 1
 
 
@@ -340,9 +338,7 @@ def test_active_sync_duplicate_returns_typed_semantic_conversion_conflict(
     )
 
     assert response.status_code == 409, response.text
-    assert response.json()["detail"]["error_code"] == (
-        "notes_semantic_conversion_manual_link_exists"
-    )
+    assert response.json()["detail"]["error_code"] == ("notes_semantic_conversion_manual_link_exists")
     assert len(projector.calls) == 1
 
 
@@ -398,9 +394,7 @@ def test_stale_semantic_generation_wins_over_existing_manual_link_refresh(
         headers=_headers(),
     )
     assert created.status_code == 200, created.text
-    projector = _ConversionProjector(
-        "notes_semantic_conversion_generation_stale"
-    )
+    projector = _ConversionProjector("notes_semantic_conversion_generation_stale")
     monkeypatch.setattr(
         endpoint,
         "_build_semantic_graph_projector",
@@ -417,9 +411,7 @@ def test_stale_semantic_generation_wins_over_existing_manual_link_refresh(
     )
 
     assert response.status_code == 409, response.text
-    assert response.json()["detail"]["error_code"] == (
-        "notes_semantic_conversion_generation_stale"
-    )
+    assert response.json()["detail"]["error_code"] == ("notes_semantic_conversion_generation_stale")
 
 
 def test_semantic_conversion_audit_failure_preserves_committed_manual_link(

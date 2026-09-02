@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 from pydantic import ValidationError
 
 from tldw_Server_API.app.api.v1.schemas.notes_semantic_index import (
     SemanticCapabilitiesResponse,
 )
+from tldw_Server_API.app.core.Notes_Graph import semantic_api
 from tldw_Server_API.app.core.Notes_Graph.semantic_capabilities import (
     SemanticCapabilityContract,
     build_semantic_capabilities,
@@ -16,6 +19,87 @@ from tldw_Server_API.app.core.Notes_Graph.semantic_embeddings import (
 from tldw_Server_API.app.core.Notes_Graph.semantic_settings import SemanticIndexSettings
 
 pytestmark = pytest.mark.unit
+
+
+@pytest.mark.parametrize(
+    ("provider", "expected_label", "expected_endpoint"),
+    [
+        ("openai", "OpenAI", "https://api.openai.com"),
+        ("google", "Google", "https://generativelanguage.googleapis.com"),
+        ("huggingface", "HuggingFace", "https://api-inference.huggingface.co"),
+    ],
+)
+def test_production_capabilities_admit_every_executable_semantic_provider(
+    monkeypatch: pytest.MonkeyPatch,
+    provider: str,
+    expected_label: str,
+    expected_endpoint: str,
+) -> None:
+    provider_config = SimpleNamespace(
+        api_key="configured",
+        api_url=None,
+        enabled=True,
+    )
+    config = SimpleNamespace(
+        default_provider=provider,
+        default_model=(
+            "Qwen/Qwen3-Embedding-0.6B"
+            if provider == "huggingface"
+            else "text-embedding-004"
+            if provider == "google"
+            else "text-embedding-3-small"
+        ),
+        get_provider=lambda name: provider_config if name == provider else None,
+    )
+    monkeypatch.setattr(semantic_api, "get_config", lambda: config)
+    monkeypatch.setattr(semantic_api, "loaded_config_data", {})
+
+    capabilities = semantic_api.resolve_semantic_capabilities(
+        SimpleNamespace(),
+        settings=SemanticIndexSettings(),
+    )
+
+    assert capabilities.provider_label == expected_label
+    assert capabilities.endpoint_display == expected_endpoint
+    assert capabilities.indexing_available is True
+
+
+@pytest.mark.parametrize(
+    "provider",
+    [
+        "anthropic",
+        "cohere",
+        "mistral",
+        "openrouter",
+        "voyage",
+        "mlx",
+        "unknown-provider",
+    ],
+)
+def test_production_capabilities_reject_non_executable_semantic_providers(
+    monkeypatch: pytest.MonkeyPatch,
+    provider: str,
+) -> None:
+    provider_config = SimpleNamespace(
+        api_key="configured",
+        api_url="https://embeddings.example/v1",
+        enabled=True,
+    )
+    config = SimpleNamespace(
+        default_provider=provider,
+        default_model="embedding-model",
+        get_provider=lambda name: provider_config if name == provider else None,
+    )
+    monkeypatch.setattr(semantic_api, "get_config", lambda: config)
+
+    capabilities = semantic_api.resolve_semantic_capabilities(
+        SimpleNamespace(),
+        settings=SemanticIndexSettings(),
+    )
+
+    assert capabilities.provider_label == "unavailable"
+    assert capabilities.indexing_available is False
+    assert capabilities.unavailable_reason == "notes_semantic_provider_unavailable"
 
 
 def _contract(**overrides: object) -> SemanticCapabilityContract:
@@ -105,12 +189,8 @@ def test_disclosure_hash_changes_for_disclosure_identity(
 
 
 def test_credential_rotation_does_not_change_semantic_identity() -> None:
-    baseline = build_semantic_capabilities(
-        _contract(credential_rotation_revision="rotation-2026-08-01")
-    )
-    rotated = build_semantic_capabilities(
-        _contract(credential_rotation_revision="rotation-2026-08-29")
-    )
+    baseline = build_semantic_capabilities(_contract(credential_rotation_revision="rotation-2026-08-01"))
+    rotated = build_semantic_capabilities(_contract(credential_rotation_revision="rotation-2026-08-29"))
 
     assert baseline.compatibility_hash == rotated.compatibility_hash
     assert baseline.disclosure_hash == rotated.disclosure_hash
@@ -128,9 +208,7 @@ def test_credential_rotation_revision_rejects_secret_shaped_values() -> None:
 
 def test_model_and_revision_are_independent_identity_fields() -> None:
     baseline = build_semantic_capabilities(_contract())
-    changed_model = build_semantic_capabilities(
-        _contract(model="text-embedding-3-large", model_revision="2026-08-01")
-    )
+    changed_model = build_semantic_capabilities(_contract(model="text-embedding-3-large", model_revision="2026-08-01"))
     changed_revision = build_semantic_capabilities(
         _contract(model="text-embedding-3-small", model_revision="2026-08-02")
     )
@@ -219,9 +297,7 @@ def test_capabilities_sanitize_endpoint_and_storage_provider_labels() -> None:
 
 def test_capabilities_preserve_brackets_in_sanitized_ipv6_origin() -> None:
     capabilities = build_semantic_capabilities(
-        _contract(
-            endpoint_url="https://user:secret@[2001:db8::1]:8443/path?token=secret"
-        )
+        _contract(endpoint_url="https://user:secret@[2001:db8::1]:8443/path?token=secret")
     )
 
     assert capabilities.endpoint_display == "https://[2001:db8::1]:8443"
@@ -257,9 +333,7 @@ def test_capability_origin_passes_public_schema_and_pending_worker_authority(
     endpoint_url: str,
     expected_origin: str,
 ) -> None:
-    capabilities = build_semantic_capabilities(
-        _contract(endpoint_url=endpoint_url)
-    )
+    capabilities = build_semantic_capabilities(_contract(endpoint_url=endpoint_url))
     response = SemanticCapabilitiesResponse.model_validate(
         _public_capability(endpoint_display=capabilities.endpoint_display)
     )
@@ -285,9 +359,7 @@ def test_capability_origin_passes_public_schema_and_pending_worker_authority(
 def test_capabilities_fail_closed_on_percent_encoded_runtime_host(
     endpoint_url: str,
 ) -> None:
-    capabilities = build_semantic_capabilities(
-        _contract(endpoint_url=endpoint_url)
-    )
+    capabilities = build_semantic_capabilities(_contract(endpoint_url=endpoint_url))
 
     assert capabilities.endpoint_display is None
     assert capabilities.indexing_available is False
@@ -320,12 +392,8 @@ def test_capabilities_defer_compatibility_hash_until_dimensions_resolve() -> Non
 
 
 def test_pending_dimension_capability_revision_binds_vector_storage_identity() -> None:
-    chromadb = build_semantic_capabilities(
-        _contract(vector_backend="chromadb", resolved_dimensions=None)
-    )
-    pgvector = build_semantic_capabilities(
-        _contract(vector_backend="pgvector", resolved_dimensions=None)
-    )
+    chromadb = build_semantic_capabilities(_contract(vector_backend="chromadb", resolved_dimensions=None))
+    pgvector = build_semantic_capabilities(_contract(vector_backend="pgvector", resolved_dimensions=None))
 
     assert chromadb.compatibility_hash is None
     assert pgvector.compatibility_hash is None
@@ -334,17 +402,12 @@ def test_pending_dimension_capability_revision_binds_vector_storage_identity() -
 
 
 def test_known_unsupported_pgvector_dimensions_remain_unavailable() -> None:
-    capabilities = build_semantic_capabilities(
-        _contract(vector_backend="pgvector", resolved_dimensions=3_072)
-    )
+    capabilities = build_semantic_capabilities(_contract(vector_backend="pgvector", resolved_dimensions=3_072))
 
     assert capabilities.vector_backend == "pgvector"
     assert capabilities.dimension_probe_required is False
     assert capabilities.indexing_available is False
-    assert (
-        capabilities.unavailable_reason
-        == "notes_semantic_pgvector_dimensions_unsupported"
-    )
+    assert capabilities.unavailable_reason == "notes_semantic_pgvector_dimensions_unsupported"
 
 
 @pytest.mark.parametrize(
@@ -367,16 +430,12 @@ def test_public_capability_schema_rejects_blank_consent_identity(field: str) -> 
 )
 def test_public_capability_schema_rejects_unsanitized_endpoint(endpoint: str) -> None:
     with pytest.raises(ValidationError):
-        SemanticCapabilitiesResponse.model_validate(
-            _public_capability(endpoint_display=endpoint)
-        )
+        SemanticCapabilitiesResponse.model_validate(_public_capability(endpoint_display=endpoint))
 
 
 def test_public_capability_schema_requires_exact_outbound_and_dimension_identity() -> None:
     with pytest.raises(ValidationError):
-        SemanticCapabilitiesResponse.model_validate(
-            _public_capability(outbound_data_categories=("note_title",))
-        )
+        SemanticCapabilitiesResponse.model_validate(_public_capability(outbound_data_categories=("note_title",)))
     with pytest.raises(ValidationError):
         SemanticCapabilitiesResponse.model_validate(
             _public_capability(
@@ -422,9 +481,7 @@ def test_public_capability_schema_accepts_missing_endpoint_only_when_unavailable
     assert unavailable.endpoint_display is None
 
     with pytest.raises(ValidationError):
-        SemanticCapabilitiesResponse.model_validate(
-            _public_capability(endpoint_display=None)
-        )
+        SemanticCapabilitiesResponse.model_validate(_public_capability(endpoint_display=None))
     with pytest.raises(ValidationError):
         SemanticCapabilitiesResponse.model_validate(
             _public_capability(
