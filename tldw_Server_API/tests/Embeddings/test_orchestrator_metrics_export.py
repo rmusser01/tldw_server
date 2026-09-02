@@ -1,4 +1,5 @@
 import re
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -47,8 +48,23 @@ def test_summary_failure_increments_counter(disable_heavy_startup, admin_user, m
 
 @pytest.mark.unit
 def test_sse_disconnect_increments_counter(
-    disable_heavy_startup, admin_user, redis_client, monkeypatch
-):
+    disable_heavy_startup: object,
+    admin_user: object,
+    redis_client,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Closing an SSE stream must be counted as a disconnect.
+
+    Args:
+        disable_heavy_startup: Requested for its side effect.
+        admin_user: Requested for its side effect -- the metrics read at the end
+            goes over HTTP and 401s without these auth overrides.
+        redis_client: Shared fake Redis, also used to drive the coroutine.
+        monkeypatch: Points the Redis factory at that fake.
+
+    Returns:
+        None.
+    """
      # Call the endpoint function directly and close its generator to trigger disconnect accounting
     from tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced import orchestrator_events
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User

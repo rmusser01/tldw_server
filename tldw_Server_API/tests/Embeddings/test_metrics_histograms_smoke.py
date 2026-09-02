@@ -1,8 +1,21 @@
-import os
+import pytest
 from fastapi.testclient import TestClient
 
 
-def test_metrics_exposes_new_histograms(admin_user, monkeypatch):
+@pytest.mark.unit
+def test_metrics_exposes_new_histograms(
+    admin_user: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Importing BaseWorker must register its histograms on the default registry.
+
+    Args:
+        admin_user: Requested for its side effect -- /api/v1/metrics/text
+            requires authentication and returns 401 without these overrides.
+        monkeypatch: Used to trim startup work.
+
+    Returns:
+        None.
+    """
 
 
      # Reduce startup work

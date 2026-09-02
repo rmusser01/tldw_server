@@ -215,11 +215,11 @@ def redis_client():
 # Lightweight app client + auth fixtures for property/unit tests in this package
 @pytest.fixture
 def test_client(disable_heavy_startup):
-    _overrides_before = dict(app.dependency_overrides)
     """Minimal TestClient with CSRF and auth header set.
 
     Scope: function - keeps isolation across property-based runs.
     """
+    _overrides_before = dict(app.dependency_overrides)
     try:
         csrf = "test-csrf"
         with TestClient(app) as client:
