@@ -209,7 +209,7 @@ const runSchema = z.strictObject({
   link: nonempty
 })
 
-const statusSchema: z.ZodType<NotesSemanticIndexStatus> = z.strictObject({
+const statusSchema = z.strictObject({
   state: z.enum(["off", "preparing", "ready", "updating", "needs_attention"]),
   detail_reason: nonempty.nullable(),
   desired_state: z.enum(["enabled", "disabled"]),
@@ -226,7 +226,7 @@ const statusSchema: z.ZodType<NotesSemanticIndexStatus> = z.strictObject({
   active_run: runSchema.nullable()
 })
 
-const capabilitiesSchema: z.ZodType<NotesSemanticCapabilities> = z
+const capabilitiesSchema = z
   .strictObject({
     active_note_count: nonnegative,
     estimated_chunk_count: nonnegative,
@@ -311,7 +311,7 @@ const capabilitiesSchema: z.ZodType<NotesSemanticCapabilities> = z
     }
   })
 
-const mutationSchema: z.ZodType<NotesSemanticMutation> = z.strictObject({
+const mutationSchema = z.strictObject({
   resource: statusSchema,
   run: runSchema
 })
@@ -332,6 +332,11 @@ const parseResponse = <T>(schema: z.ZodType<T>, value: unknown): T => {
   if (!parsed.success) throw invalidResponse()
   return parsed.data
 }
+
+// The package compiles without strictNullChecks, which makes Zod object outputs
+// appear optional. Runtime validation remains authoritative for these public types.
+const parseResponseAs = <T>(schema: z.ZodType, value: unknown): T =>
+  parseResponse(schema, value) as T
 
 const record = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" && !Array.isArray(value)
@@ -385,7 +390,7 @@ export const getNotesSemanticCapabilities = async (
   input: DatasetScope
 ): Promise<NotesSemanticCapabilities> => {
   const parsed = parseInput(datasetSchema, input)
-  return parseResponse(
+  return parseResponseAs<NotesSemanticCapabilities>(
     capabilitiesSchema,
     await request<unknown>({
       path: queryPath(
@@ -401,7 +406,7 @@ export const getNotesSemanticStatus = async (
   input: DatasetScope
 ): Promise<NotesSemanticIndexStatus> => {
   const parsed = parseInput(datasetSchema, input)
-  return parseResponse(
+  return parseResponseAs<NotesSemanticIndexStatus>(
     statusSchema,
     await request<unknown>({
       path: queryPath("/api/v1/notes/graph/semantic-index", parsed.datasetId),
@@ -427,7 +432,7 @@ export const enableNotesSemanticIndex = async (
     }),
     input
   )
-  return parseResponse(
+  return parseResponseAs<NotesSemanticMutation>(
     mutationSchema,
     await request<unknown>({
       path: queryPath("/api/v1/notes/graph/semantic-index", parsed.datasetId),
@@ -452,7 +457,7 @@ export const deleteNotesSemanticIndex = async (
     }),
     input
   )
-  return parseResponse(
+  return parseResponseAs<NotesSemanticMutation>(
     mutationSchema,
     await request<unknown>({
       path: queryPath("/api/v1/notes/graph/semantic-index", parsed.datasetId),
@@ -475,7 +480,7 @@ export const createNotesSemanticRun = async (
     }),
     input
   )
-  return parseResponse(
+  return parseResponseAs<NotesSemanticRun>(
     runSchema,
     await request<unknown>({
       path: queryPath(
@@ -502,7 +507,7 @@ export const getNotesSemanticRun = async (
     z.strictObject({ datasetId: datasetInput.optional(), runId: inputText }),
     input
   )
-  return parseResponse(
+  return parseResponseAs<NotesSemanticRun>(
     runSchema,
     await request<unknown>({
       path: queryPath(
@@ -526,7 +531,7 @@ export const cancelNotesSemanticRun = async (
     }),
     input
   )
-  return parseResponse(
+  return parseResponseAs<NotesSemanticMutation>(
     mutationSchema,
     await request<unknown>({
       path: queryPath(
