@@ -75,12 +75,16 @@ class PreparedEventInsert:
 
 
 def _canonical_timestamp(value: datetime) -> str:
+    """Return one timezone-aware timestamp in canonical UTC form."""
+
     if not isinstance(value, datetime) or value.tzinfo is None:
         raise ValueError("created_at must be timezone-aware")
     return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _validate_json_value(value: object, *, depth: int = 0) -> None:
+    """Reject non-JSON values, non-finite numbers, and excessive nesting."""
+
     if depth > _MAX_JSON_DEPTH:
         raise ValueError("event data nesting is invalid")
     if value is None or isinstance(value, (str, bool, int)):

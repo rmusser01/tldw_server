@@ -199,6 +199,45 @@ def test_activation_check_requires_explicit_phase() -> None:
 
 
 @pytest.mark.unit
+def test_activation_check_logs_unexpected_failure_with_exception_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    failure = RuntimeError("private activation failure")
+    observed: dict[str, object] = {}
+
+    class BoundLogger:
+        def error(self, message: str, *values: object) -> None:
+            observed["message"] = message
+            observed["values"] = values
+
+    class Logger:
+        def opt(self, *, exception: BaseException) -> BoundLogger:
+            observed["exception"] = exception
+            return BoundLogger()
+
+    async def fail_activation_check(**_kwargs: object) -> AdminWebhookActivationCheck:
+        raise failure
+
+    settings = admin_webhooks.AdminWebhookSettings.from_environment({})
+    monkeypatch.setattr(
+        admin_webhooks.AdminWebhookSettings,
+        "from_environment",
+        lambda _env: settings,
+    )
+    monkeypatch.setattr(admin_webhooks, "_with_activation_check", fail_activation_check)
+    monkeypatch.setattr(admin_webhooks, "logger", Logger(), raising=False)
+
+    result = admin_webhooks._run_activation_check(AdminWebhookActivationPhase.LIVE)
+
+    assert result.ready is False
+    assert observed == {
+        "exception": failure,
+        "message": "Admin webhook activation check failed phase={}",
+        "values": ("live",),
+    }
+
+
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_activation_jobs_probe_is_read_only_and_does_not_create_missing_database(
     monkeypatch,

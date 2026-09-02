@@ -88,7 +88,9 @@ const installGlobalGuard = (): (() => void) => {
     ...(state !== null && typeof state === 'object' ? state : {}),
     [HISTORY_GUARD_KEY]: marker,
   });
-  originalPushState.call(history, stateWithMarker(history.state), '', window.location.href);
+  const protectedUrl = window.location.href;
+  const protectedState = stateWithMarker(history.state);
+  originalPushState.call(history, protectedState, '', protectedUrl);
 
   const guardedPushState: History['pushState'] = function guardedPushState(
     this: History,
@@ -122,9 +124,9 @@ const installGlobalGuard = (): (() => void) => {
     event.stopImmediatePropagation();
     originalPushState.call(
       history,
-      stateWithMarker(event.state),
+      protectedState,
       '',
-      window.location.href,
+      protectedUrl,
     );
     notifyBlocked();
   };

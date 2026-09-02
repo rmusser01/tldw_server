@@ -95,6 +95,9 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import (
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.services.admin_system_ops_service import (
+    IncidentWebhookCommandAcceptance,
+)
+from tldw_Server_API.app.services.admin_system_ops_service import (
     notify_incident_webhooks as svc_notify_incident_webhooks,
 )
 
@@ -618,37 +621,36 @@ async def notify_incident_webhooks(
         ),
     ],
     principal: AuthPrincipal = Depends(get_auth_principal),
+    _rate_limit: None = Depends(_enforce_admin_webhook_rate_limit),
 ) -> IncidentWebhookNotifyResponse:
     """Accept one durable, idempotent incident webhook notification."""
 
     _require_platform_admin(principal)
-    try:
-        result = await svc_notify_incident_webhooks(
-            incident_id=incident_id,
-            narrative=payload.narrative,
-            expected_resource_version=payload.expected_resource_version,
-            actor_id=principal.principal_id,
-            idempotency_key=idempotency_key,
-            source_request_id=_request_id(request),
-        )
-    except ValueError as exc:
-        if str(exc) == "not_found":
-            raise WebhookError(WebhookErrorCode.NOT_FOUND) from exc
-        raise WebhookError(WebhookErrorCode.VALIDATION_FAILED) from exc
 
-    await _emit_admin_audit_event(
-        request,
-        principal,
-        event_type="ops.incident",
-        category="system",
-        resource_type="incident",
-        resource_id=incident_id,
-        action="incident.notify",
-        metadata={
-            "event_id": result.event_id,
-            "command_id": result.command_id,
-            "replayed": result.replayed,
-        },
+    async def audit_sink(result: IncidentWebhookCommandAcceptance) -> None:
+        await _emit_admin_audit_event(
+            request,
+            principal,
+            event_type="ops.incident",
+            category="system",
+            resource_type="incident",
+            resource_id=incident_id,
+            action="incident.notify",
+            metadata={
+                "event_id": result.event_id,
+                "command_id": result.command_id,
+                "replayed": result.replayed,
+            },
+        )
+
+    result = await svc_notify_incident_webhooks(
+        incident_id=incident_id,
+        narrative=payload.narrative,
+        expected_resource_version=payload.expected_resource_version,
+        actor_id=principal.principal_id,
+        idempotency_key=idempotency_key,
+        source_request_id=_request_id(request),
+        audit_sink=audit_sink,
     )
     return IncidentWebhookNotifyResponse.model_validate(result)
 

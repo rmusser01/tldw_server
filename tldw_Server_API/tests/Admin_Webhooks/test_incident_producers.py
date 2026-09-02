@@ -3,9 +3,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -568,6 +571,135 @@ async def test_notify_command_replays_pending_marker_and_conflicts_on_new_narrat
 
 
 @pytest.mark.unit
+async def test_notify_command_completes_audit_before_returning(
+    sqlite_repo: SQLiteRepositoryFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _configure_store(monkeypatch, tmp_path)
+    await _complete_migration(sqlite_repo.repository)
+    producer = _producer(
+        sqlite_repo.repository,
+        event_ids=[CREATE_EVENT_ID, NOTIFY_EVENT_ID],
+    )
+    created = await system_ops.create_incident(
+        title="Private title",
+        status="investigating",
+        severity="high",
+        summary="Private summary",
+        tags=[],
+        actor="alice_admin",
+        webhook_event_producer=producer,
+    )
+    audited: list[system_ops.IncidentWebhookCommandAcceptance] = []
+
+    async def audit_sink(
+        acceptance: system_ops.IncidentWebhookCommandAcceptance,
+    ) -> None:
+        audited.append(acceptance)
+
+    result = await system_ops.notify_incident_webhooks(
+        incident_id=created["id"],
+        narrative="Approved receiver narrative",
+        expected_resource_version=int(created["version"]),
+        actor_id="user:7",
+        idempotency_key="incident-notify-key-audit-0001",
+        source_request_id="request-notify-audit-1",
+        webhook_event_producer=producer,
+        audit_sink=audit_sink,
+    )
+
+    assert audited == [result]
+
+
+@pytest.mark.unit
+async def test_notify_command_raises_typed_not_found_for_missing_incident(
+    sqlite_repo: SQLiteRepositoryFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _configure_store(monkeypatch, tmp_path)
+    await _complete_migration(sqlite_repo.repository)
+    producer = _producer(sqlite_repo.repository, event_ids=[NOTIFY_EVENT_ID])
+
+    with pytest.raises(WebhookError) as exc_info:
+        await system_ops.notify_incident_webhooks(
+            incident_id="inc-missing",
+            narrative="Approved receiver narrative",
+            expected_resource_version=1,
+            actor_id="user:7",
+            idempotency_key="incident-notify-key-missing-0001",
+            source_request_id="request-notify-missing-1",
+            webhook_event_producer=producer,
+        )
+
+    assert exc_info.value.code is WebhookErrorCode.NOT_FOUND
+
+
+@pytest.mark.unit
+async def test_async_incident_mutations_lock_store_off_event_loop(
+    sqlite_repo: SQLiteRepositoryFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _configure_store(monkeypatch, tmp_path)
+    await _complete_migration(sqlite_repo.repository)
+    producer = _producer(
+        sqlite_repo.repository,
+        event_ids=[CREATE_EVENT_ID, UPDATE_EVENT_ID, REOPEN_EVENT_ID, NOTIFY_EVENT_ID],
+    )
+    original_locked_store = system_ops._locked_store
+
+    @contextmanager
+    def require_worker_thread(*args: object, **kwargs: object) -> Iterator[dict[str, object]]:
+        with pytest.raises(RuntimeError, match="no running event loop"):
+            asyncio.get_running_loop()
+        with original_locked_store(*args, **kwargs) as store:
+            yield store
+
+    monkeypatch.setattr(system_ops, "_locked_store", require_worker_thread)
+    created = await system_ops.create_incident(
+        title="Private title",
+        status="investigating",
+        severity="high",
+        summary="Private summary",
+        tags=[],
+        actor="alice_admin",
+        webhook_event_producer=producer,
+    )
+    updated = await system_ops.update_incident(
+        incident_id=created["id"],
+        title=None,
+        status=None,
+        severity="critical",
+        summary=None,
+        tags=None,
+        update_message=None,
+        actor="alice_admin",
+        webhook_event_producer=producer,
+    )
+    timeline = await system_ops.add_incident_event(
+        incident_id=created["id"],
+        message="Operator note",
+        actor="alice_admin",
+        webhook_event_producer=producer,
+    )
+    accepted = await system_ops.notify_incident_webhooks(
+        incident_id=created["id"],
+        narrative="Approved receiver narrative",
+        expected_resource_version=int(timeline["version"]),
+        actor_id="user:7",
+        idempotency_key="incident-notify-key-thread-0001",
+        source_request_id="request-notify-thread-1",
+        webhook_event_producer=producer,
+    )
+
+    assert updated["severity"] == "critical"
+    assert timeline["timeline"][-1]["message"] == "Operator note"
+    assert accepted.accepted is True
+
+
+@pytest.mark.unit
 async def test_notify_command_retains_marker_when_immediate_database_capture_fails(
     sqlite_repo: SQLiteRepositoryFixture,
     monkeypatch: pytest.MonkeyPatch,
@@ -590,10 +722,24 @@ async def test_notify_command_retains_marker_when_immediate_database_capture_fai
     )
     original_capture = producer.capture_incident_marker
 
+    failure = RuntimeError("database unavailable")
+    observed_log: dict[str, object] = {}
+
+    class BoundLogger:
+        def warning(self, message: str, *values: object) -> None:
+            observed_log["message"] = message
+            observed_log["values"] = values
+
+    class Logger:
+        def opt(self, *, exception: BaseException) -> BoundLogger:
+            observed_log["exception"] = exception
+            return BoundLogger()
+
     async def unavailable(_marker: PendingIncidentWebhookMarker) -> None:
-        raise RuntimeError("database unavailable")
+        raise failure
 
     monkeypatch.setattr(producer, "capture_incident_marker", unavailable)
+    monkeypatch.setattr(system_ops, "logger", Logger())
     with pytest.raises(WebhookError) as exc_info:
         await system_ops.notify_incident_webhooks(
             incident_id=created["id"],
@@ -606,6 +752,18 @@ async def test_notify_command_retains_marker_when_immediate_database_capture_fai
         )
     assert exc_info.value.code is WebhookErrorCode.OPERATION_FAILED
     assert any(marker.event_type == "incident.notify" for marker in _markers(store_path))
+    assert observed_log == {
+        "exception": failure,
+        "message": (
+            "Deferred incident webhook marker capture operation={} event_id={} source_request_id={} error_type={}"
+        ),
+        "values": (
+            "incident.notify",
+            NOTIFY_EVENT_ID,
+            "request-notify-deferred-1",
+            "RuntimeError",
+        ),
+    }
 
     monkeypatch.setattr(producer, "capture_incident_marker", original_capture)
     replay = await system_ops.notify_incident_webhooks(

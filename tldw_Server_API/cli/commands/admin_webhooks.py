@@ -17,6 +17,7 @@ from urllib.parse import quote
 
 import aiosqlite
 import click
+from loguru import logger
 
 from tldw_Server_API.app.core.Admin_Webhooks.audit import (
     emit_mandatory_webhook_operation_audit,
@@ -316,7 +317,11 @@ def _run_activation_check(
         raise click.ClickException("admin_webhook_configuration_invalid") from None
     try:
         return asyncio.run(_with_activation_check(phase=phase, settings=settings))
-    except Exception:  # noqa: BLE001 - unavailable state is closed and sanitized
+    except Exception as exc:  # noqa: BLE001 - unavailable state is closed and sanitized
+        logger.opt(exception=exc).error(
+            "Admin webhook activation check failed phase={}",
+            phase.value,
+        )
         return _closed_activation_check(phase=phase, settings=settings)
 
 

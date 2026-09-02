@@ -410,10 +410,12 @@ def _client(
     delivery_service = _FakeDeliveryService()
     mandatory_audit = AsyncMock()
     read_audit = AsyncMock()
+    rate_limit = AsyncMock()
     monkeypatch.setattr(admin_webhooks, "get_admin_webhook_control_plane", AsyncMock(return_value=service))
     monkeypatch.setattr(admin_webhooks, "_require_platform_admin", require_platform_admin)
     monkeypatch.setattr(admin_webhooks, "emit_mandatory_webhook_audit", mandatory_audit)
     monkeypatch.setattr(admin_webhooks, "_emit_admin_audit_event", read_audit)
+    monkeypatch.setattr(admin_webhooks, "check_rate_limit", rate_limit)
     app.dependency_overrides[admin_webhooks.get_auth_principal] = auth_dependency
     if hasattr(admin_webhooks, "get_admin_webhook_delivery_service"):
         app.dependency_overrides[admin_webhooks.get_admin_webhook_delivery_service] = lambda: delivery_service
@@ -1367,7 +1369,7 @@ def test_incident_notify_uses_canonical_route_and_preserves_backend_command_id(
 
     async def notify(**kwargs):
         observed.update(kwargs)
-        return SimpleNamespace(
+        result = SimpleNamespace(
             incident_id="inc-41",
             event_id="88888888-8888-4888-8888-888888888888",
             event_type="incident.notify",
@@ -1375,6 +1377,8 @@ def test_incident_notify_uses_canonical_route_and_preserves_backend_command_id(
             accepted=True,
             replayed=False,
         )
+        await kwargs["audit_sink"](result)
+        return result
 
     monkeypatch.setattr(
         admin_webhooks,
@@ -1394,7 +1398,40 @@ def test_incident_notify_uses_canonical_route_and_preserves_backend_command_id(
     assert response.json()["command_id"] == "sha256:" + ("6" * 64)
     assert observed["expected_resource_version"] == 7
     assert observed["source_request_id"] == REQUEST_ID
+    assert callable(observed["audit_sink"])
     read_audit.assert_awaited_once()
+
+
+@pytest.mark.unit
+def test_incident_notify_stops_at_explicit_rate_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = AsyncMock()
+    client, _, _, read_audit = _client(monkeypatch)
+    monkeypatch.setattr(admin_webhooks, "svc_notify_incident_webhooks", service)
+    monkeypatch.setattr(
+        admin_webhooks,
+        "check_rate_limit",
+        AsyncMock(
+            side_effect=HTTPException(
+                status_code=429,
+                detail="limiter-internal-canary",
+                headers={"Retry-After": "17"},
+            )
+        ),
+    )
+
+    response = client.post(
+        "/api/v1/admin/incidents/inc-41/notify-webhooks",
+        headers={"Idempotency-Key": IDEMPOTENCY_KEY},
+        json={"narrative": "safe", "expected_resource_version": 7},
+    )
+
+    assert response.status_code == 429
+    assert response.headers["retry-after"] == "17"
+    assert response.json()["error"]["code"] == "authentication_rate_limited"
+    service.assert_not_awaited()
+    read_audit.assert_not_awaited()
 
 
 @pytest.mark.unit
@@ -1469,7 +1506,7 @@ def test_incident_notify_rejects_coerced_resource_versions(
             "Admin webhooks are disabled",
         ),
         (
-            ValueError("not_found"),
+            WebhookError(WebhookErrorCode.NOT_FOUND),
             404,
             "admin_webhook_not_found",
             "Webhook resource was not found",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import errno
 import html
 import json
@@ -8,7 +9,7 @@ import secrets
 import stat
 import tempfile
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable
 from contextlib import asynccontextmanager, contextmanager, suppress
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -177,6 +178,7 @@ def _default_store() -> dict[str, Any]:
         },
         "feature_flags": [],
         "incidents": [],
+        "webhook_quarantined_events": [],
         "incident_stakeholder_notification_commands": [],
         "invitations": [],
         "dependency_health_history": [],
@@ -560,6 +562,7 @@ def _load_store() -> dict[str, Any]:
     data.setdefault("maintenance", _default_store()["maintenance"])
     data.setdefault("feature_flags", [])
     data.setdefault("incidents", [])
+    data.setdefault("webhook_quarantined_events", [])
     data.setdefault("incident_stakeholder_notification_commands", [])
     data.setdefault("invitations", [])
     data.setdefault("dependency_health_history", [])
@@ -1020,19 +1023,35 @@ async def create_incident(
         "action_items": [],
     }
     async with _incident_marker_publication_guard(producer, preparation):
-        with _locked_store(write=True, strict=preparation is not None) as store:
-            store.setdefault("incidents", []).append(incident)
-            if producer is not None and preparation is not None:
-                _append_pending_incident_marker(
-                    store,
-                    _aggregate_incident_marker(
-                        producer,
-                        preparation,
-                        incident=incident,
-                        event_type="incident.created",
-                    ),
-                )
+        await asyncio.to_thread(
+            _create_incident_store,
+            incident=incident,
+            producer=producer,
+            preparation=preparation,
+        )
     return _normalize_incident_record(incident)
+
+
+def _create_incident_store(
+    *,
+    incident: dict[str, Any],
+    producer: AdminWebhookEventProducer | None,
+    preparation: ProductionEventPreparation | None,
+) -> None:
+    """Persist one incident and its prepared marker in one locked write."""
+
+    with _locked_store(write=True, strict=preparation is not None) as store:
+        store.setdefault("incidents", []).append(incident)
+        if producer is not None and preparation is not None:
+            _append_pending_incident_marker(
+                store,
+                _aggregate_incident_marker(
+                    producer,
+                    preparation,
+                    incident=incident,
+                    event_type="incident.created",
+                ),
+            )
 
 
 async def update_incident(
@@ -1063,7 +1082,8 @@ async def update_incident(
         source_request_id=source_request_id,
     )
     async with _incident_marker_publication_guard(producer, preparation):
-        return _update_incident_store(
+        return await asyncio.to_thread(
+            _update_incident_store,
             incident_id=incident_id,
             title=title,
             status=status,
@@ -1234,39 +1254,57 @@ async def _add_incident_event_prepared(
     producer: AdminWebhookEventProducer | None,
     preparation: ProductionEventPreparation | None,
 ) -> dict[str, Any]:
-    now = _now_iso()
     async with _incident_marker_publication_guard(producer, preparation):
-        with _locked_store(write=True, strict=preparation is not None) as store:
-            incidents = store.get("incidents", [])
-            for index, incident in enumerate(incidents):
-                if incident.get("id") != incident_id:
-                    continue
-                updated_incident = _normalize_incident_record(incident)
-                event = {
-                    "id": f"evt_{uuid4().hex[:10]}",
-                    "message": note,
-                    "created_at": now,
-                    "actor": actor,
-                }
-                updated_incident["timeline"] = list(
-                    updated_incident.get("timeline") or []
+        return await asyncio.to_thread(
+            _add_incident_event_store,
+            incident_id=incident_id,
+            note=note,
+            actor=actor,
+            producer=producer,
+            preparation=preparation,
+        )
+
+
+def _add_incident_event_store(
+    *,
+    incident_id: str,
+    note: str,
+    actor: str | None,
+    producer: AdminWebhookEventProducer | None,
+    preparation: ProductionEventPreparation | None,
+) -> dict[str, Any]:
+    """Persist one timeline event and its prepared marker atomically."""
+
+    now = _now_iso()
+    with _locked_store(write=True, strict=preparation is not None) as store:
+        incidents = store.get("incidents", [])
+        for index, incident in enumerate(incidents):
+            if incident.get("id") != incident_id:
+                continue
+            updated_incident = _normalize_incident_record(incident)
+            event = {
+                "id": f"evt_{uuid4().hex[:10]}",
+                "message": note,
+                "created_at": now,
+                "actor": actor,
+            }
+            updated_incident["timeline"] = list(updated_incident.get("timeline") or [])
+            updated_incident["timeline"].append(event)
+            updated_incident["version"] = int(updated_incident["version"]) + 1
+            updated_incident["updated_at"] = now
+            updated_incident["updated_by"] = actor
+            incidents[index] = updated_incident
+            if producer is not None and preparation is not None:
+                _append_pending_incident_marker(
+                    store,
+                    _aggregate_incident_marker(
+                        producer,
+                        preparation,
+                        incident=updated_incident,
+                        event_type="incident.updated",
+                    ),
                 )
-                updated_incident["timeline"].append(event)
-                updated_incident["version"] = int(updated_incident["version"]) + 1
-                updated_incident["updated_at"] = now
-                updated_incident["updated_by"] = actor
-                incidents[index] = updated_incident
-                if producer is not None and preparation is not None:
-                    _append_pending_incident_marker(
-                        store,
-                        _aggregate_incident_marker(
-                            producer,
-                            preparation,
-                            incident=updated_incident,
-                            event_type="incident.updated",
-                        ),
-                    )
-                return _normalize_incident_record(updated_incident)
+            return _normalize_incident_record(updated_incident)
     raise ValueError("not_found")
 
 
@@ -1317,10 +1355,23 @@ def _incident_from_store(
     *,
     incident_id: str,
 ) -> dict[str, Any]:
+    incident = _find_incident_in_store(store, incident_id=incident_id)
+    if incident is not None:
+        return incident
+    raise ValueError("not_found")
+
+
+def _find_incident_in_store(
+    store: dict[str, Any],
+    *,
+    incident_id: str,
+) -> dict[str, Any] | None:
+    """Return one normalized incident without encoding absence as exception text."""
+
     for incident in store.get("incidents", []):
         if incident.get("id") == incident_id:
             return _normalize_incident_record(incident)
-    raise ValueError("not_found")
+    return None
 
 
 def _pending_notify_replay(
@@ -1344,6 +1395,101 @@ def _pending_notify_replay(
             )
             return marker
     return None
+
+
+def _read_notify_command_state(
+    *,
+    producer: AdminWebhookEventProducer,
+    command_id: str,
+    request_fingerprint: str,
+    incident_id: str,
+    narrative: str | None,
+    expected_resource_version: int,
+) -> tuple[
+    PendingIncidentWebhookMarker | None,
+    dict[str, Any] | None,
+    int | None,
+    str | None,
+]:
+    """Read one command replay or incident snapshot under the store lock."""
+
+    with _locked_store(strict=True) as store:
+        pending = _pending_notify_replay(
+            store,
+            producer=producer,
+            command_id=command_id,
+            request_fingerprint=request_fingerprint,
+            incident_id=incident_id,
+            narrative=narrative,
+            expected_resource_version=expected_resource_version,
+        )
+        if pending is not None:
+            return pending, None, None, None
+        incident = _find_incident_in_store(store, incident_id=incident_id)
+        if incident is None:
+            return None, None, None, None
+        return (
+            None,
+            incident,
+            int(incident["version"]),
+            str(incident["updated_at"]),
+        )
+
+
+def _publish_notify_marker(
+    *,
+    producer: AdminWebhookEventProducer,
+    preparation: ProductionEventPreparation,
+    command_id: str,
+    request_fingerprint: str,
+    incident_id: str,
+    narrative: str | None,
+    expected_resource_version: int,
+    observed_version: int,
+    observed_updated_at: str,
+) -> tuple[PendingIncidentWebhookMarker | None, bool, bool]:
+    """Publish one notify marker, or report that the incident changed."""
+
+    published = [False]
+    with _locked_store(
+        write=True,
+        strict=True,
+        should_write=lambda published=published: published[0],
+    ) as store:
+        pending = _pending_notify_replay(
+            store,
+            producer=producer,
+            command_id=command_id,
+            request_fingerprint=request_fingerprint,
+            incident_id=incident_id,
+            narrative=narrative,
+            expected_resource_version=expected_resource_version,
+        )
+        if pending is not None:
+            return pending, False, False
+        incident = _find_incident_in_store(store, incident_id=incident_id)
+        if incident is None:
+            raise WebhookError(WebhookErrorCode.NOT_FOUND)
+        if int(incident["version"]) != observed_version or str(incident["updated_at"]) != observed_updated_at:
+            return None, False, True
+        pending = producer.prepare_incident_marker(
+            preparation,
+            event_type="incident.notify",
+            source_kind=EventSourceKind.COMMAND,
+            aggregate_type=None,
+            aggregate_id=None,
+            aggregate_version=None,
+            source_command_id=command_id,
+            request_fingerprint=request_fingerprint,
+            data=_incident_webhook_data(
+                incident,
+                event_type="incident.notify",
+                narrative=narrative,
+            ),
+        )
+        _append_pending_incident_marker(store, pending)
+        published[0] = True
+        return pending, True, False
 
 
 def _notify_acceptance(
@@ -1378,8 +1524,11 @@ async def _capture_notify_marker_acceptance(
     except WebhookError:
         raise
     except Exception as exc:  # noqa: BLE001 - durable marker preserves retry after DB failure.
-        logger.warning(
-            "Deferred incident webhook marker capture after {}",
+        logger.opt(exception=exc).warning(
+            "Deferred incident webhook marker capture operation={} event_id={} source_request_id={} error_type={}",
+            marker.event_type,
+            marker.event_id,
+            marker.source_request_id,
             type(exc).__name__,
         )
         raise WebhookError(WebhookErrorCode.OPERATION_FAILED) from None
@@ -1392,7 +1541,7 @@ async def _capture_notify_marker_acceptance(
         )
 
 
-async def notify_incident_webhooks(
+async def _notify_incident_webhooks(
     *,
     incident_id: str,
     narrative: str | None,
@@ -1436,27 +1585,15 @@ async def notify_incident_webhooks(
         raise WebhookError(WebhookErrorCode.DISABLED)
 
     for _attempt in range(3):
-        pending: PendingIncidentWebhookMarker | None = None
-        incident: dict[str, Any] | None = None
-        with _locked_store(strict=True) as store:
-            pending = _pending_notify_replay(
-                store,
-                producer=producer,
-                command_id=command_id,
-                request_fingerprint=request_fingerprint,
-                incident_id=incident_id,
-                narrative=narrative_norm,
-                expected_resource_version=expected_resource_version,
-            )
-            if pending is None:
-                try:
-                    incident = _incident_from_store(store, incident_id=incident_id)
-                except ValueError as exc:
-                    if str(exc) != "not_found":
-                        raise
-            if incident is not None:
-                observed_version = int(incident["version"])
-                observed_updated_at = str(incident["updated_at"])
+        pending, incident, observed_version, observed_updated_at = await asyncio.to_thread(
+            _read_notify_command_state,
+            producer=producer,
+            command_id=command_id,
+            request_fingerprint=request_fingerprint,
+            incident_id=incident_id,
+            narrative=narrative_norm,
+            expected_resource_version=expected_resource_version,
+        )
 
         if pending is not None:
             return await _capture_notify_marker_acceptance(
@@ -1482,52 +1619,27 @@ async def notify_incident_webhooks(
                 replayed=True,
             )
         if incident is None:
-            raise ValueError("not_found")
+            raise WebhookError(WebhookErrorCode.NOT_FOUND)
+        if observed_version is None or observed_updated_at is None:
+            raise WebhookError(WebhookErrorCode.OPERATION_FAILED)
         if observed_version != expected_resource_version:
             raise WebhookError(WebhookErrorCode.PRECONDITION_FAILED)
 
-        publication = [False]
-
         async with _incident_marker_publication_guard(producer, preparation):
-            with _locked_store(
-                write=True,
-                strict=True,
-                should_write=lambda publication=publication: publication[0],
-            ) as store:
-                pending = _pending_notify_replay(
-                    store,
-                    producer=producer,
-                    command_id=command_id,
-                    request_fingerprint=request_fingerprint,
-                    incident_id=incident_id,
-                    narrative=narrative_norm,
-                    expected_resource_version=expected_resource_version,
-                )
-                if pending is None:
-                    incident = _incident_from_store(store, incident_id=incident_id)
-                    current_data = _incident_webhook_data(
-                        incident,
-                        event_type="incident.notify",
-                        narrative=narrative_norm,
-                    )
-                    if (
-                        int(incident["version"]) != observed_version
-                        or str(incident["updated_at"]) != observed_updated_at
-                    ):
-                        continue
-                    pending = producer.prepare_incident_marker(
-                        preparation,
-                        event_type="incident.notify",
-                        source_kind=EventSourceKind.COMMAND,
-                        aggregate_type=None,
-                        aggregate_id=None,
-                        aggregate_version=None,
-                        source_command_id=command_id,
-                        request_fingerprint=request_fingerprint,
-                        data=current_data,
-                    )
-                    _append_pending_incident_marker(store, pending)
-                    publication[0] = True
+            pending, published, incident_changed = await asyncio.to_thread(
+                _publish_notify_marker,
+                producer=producer,
+                preparation=preparation,
+                command_id=command_id,
+                request_fingerprint=request_fingerprint,
+                incident_id=incident_id,
+                narrative=narrative_norm,
+                expected_resource_version=expected_resource_version,
+                observed_version=observed_version,
+                observed_updated_at=observed_updated_at,
+            )
+        if incident_changed:
+            continue
         if pending is None:
             raise WebhookError(WebhookErrorCode.OPERATION_FAILED)
         return await _capture_notify_marker_acceptance(
@@ -1535,9 +1647,40 @@ async def notify_incident_webhooks(
             marker=pending,
             incident_id=incident_id,
             command_id=command_id,
-            replayed_when_inserted=not publication[0],
+            replayed_when_inserted=not published,
         )
     raise WebhookError(WebhookErrorCode.OPERATION_FAILED)
+
+
+async def notify_incident_webhooks(
+    *,
+    incident_id: str,
+    narrative: str | None,
+    expected_resource_version: int,
+    actor_id: int | str,
+    idempotency_key: str,
+    source_request_id: str | None = None,
+    webhook_event_producer: AdminWebhookEventProducer | None = None,
+    audit_sink: Callable[
+        [IncidentWebhookCommandAcceptance],
+        Awaitable[None],
+    ]
+    | None = None,
+) -> IncidentWebhookCommandAcceptance:
+    """Complete one durable incident notify command and its audit sink."""
+
+    result = await _notify_incident_webhooks(
+        incident_id=incident_id,
+        narrative=narrative,
+        expected_resource_version=expected_resource_version,
+        actor_id=actor_id,
+        idempotency_key=idempotency_key,
+        source_request_id=source_request_id,
+        webhook_event_producer=webhook_event_producer,
+    )
+    if audit_sink is not None:
+        await audit_sink(result)
+    return result
 
 
 def _normalize_stakeholder_notification_request(

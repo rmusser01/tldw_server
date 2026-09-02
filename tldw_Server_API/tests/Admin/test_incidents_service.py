@@ -6,6 +6,8 @@ from typing import Any
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 
 def _configure_store(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[Any, Path]:
     from tldw_Server_API.app.services import admin_system_ops_service
@@ -26,7 +28,10 @@ async def _create_incident(service: Any) -> dict[str, Any]:
     )
 
 
-async def test_create_incident_includes_authoritative_workflow_defaults(monkeypatch, tmp_path):
+async def test_create_incident_includes_authoritative_workflow_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     service, _ = _configure_store(monkeypatch, tmp_path)
 
     incident = await service.create_incident(
@@ -45,7 +50,10 @@ async def test_create_incident_includes_authoritative_workflow_defaults(monkeypa
     assert incident["action_items"] == []
 
 
-async def test_list_incidents_backfills_missing_authoritative_workflow_fields(monkeypatch, tmp_path):
+async def test_list_incidents_backfills_missing_authoritative_workflow_fields(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     service, store_path = _configure_store(monkeypatch, tmp_path)
 
     store_path.write_text(
@@ -113,7 +121,10 @@ async def test_list_incidents_backfills_missing_authoritative_workflow_fields(mo
     assert persisted["incidents"][0]["version"] == 2
 
 
-async def test_update_incident_persists_assignment_and_can_clear_it(monkeypatch, tmp_path):
+async def test_update_incident_persists_assignment_and_can_clear_it(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     service, _ = _configure_store(monkeypatch, tmp_path)
     incident = await _create_incident(service)
 
@@ -152,7 +163,10 @@ async def test_update_incident_persists_assignment_and_can_clear_it(monkeypatch,
     assert cleared["timeline"][-1]["message"] == "Assignment cleared"
 
 
-async def test_update_incident_persists_postmortem_fields_and_normalizes_blank_action_items(monkeypatch, tmp_path):
+async def test_update_incident_persists_postmortem_fields_and_normalizes_blank_action_items(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     service, _ = _configure_store(monkeypatch, tmp_path)
     incident = await _create_incident(service)
 
@@ -181,7 +195,10 @@ async def test_update_incident_persists_postmortem_fields_and_normalizes_blank_a
     assert updated["timeline"][-1]["message"] == "Post-mortem updated"
 
 
-async def test_update_incident_distinguishes_omitted_fields_from_explicit_null(monkeypatch, tmp_path):
+async def test_update_incident_distinguishes_omitted_fields_from_explicit_null(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     service, _ = _configure_store(monkeypatch, tmp_path)
     incident = await _create_incident(service)
 
@@ -234,7 +251,10 @@ async def test_update_incident_distinguishes_omitted_fields_from_explicit_null(m
     assert cleared["action_items"] == []
 
 
-async def test_update_incident_does_not_append_timeline_or_persist_workflow_on_failed_validation(monkeypatch, tmp_path):
+async def test_update_incident_does_not_append_timeline_or_persist_workflow_on_failed_validation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     service, _ = _configure_store(monkeypatch, tmp_path)
     incident = await _create_incident(service)
 

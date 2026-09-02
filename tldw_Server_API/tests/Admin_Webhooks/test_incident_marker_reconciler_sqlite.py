@@ -116,6 +116,10 @@ def _stored_marker_records(path: Path) -> list[dict[str, object]]:
     return json.loads(path.read_text(encoding="utf-8"))["webhook_pending_events"]
 
 
+def _stored_quarantine_records(path: Path) -> list[dict[str, object]]:
+    return json.loads(path.read_text(encoding="utf-8"))["webhook_quarantined_events"]
+
+
 def _database_rows(path: Path) -> tuple[list[str], int]:
     with sqlite3.connect(path) as connection:
         event_ids = [
@@ -332,7 +336,7 @@ async def test_in_flight_marker_replacement_is_preserved(
     "corruption",
     ["shape", "oversized", "ciphertext", "canonical_body", "source"],
 )
-async def test_corrupt_or_undecryptable_marker_fails_closed_without_file_mutation(
+async def test_corrupt_marker_is_quarantined_without_starving_later_work(
     sqlite_repo: SQLiteRepositoryFixture,
     tmp_path: Path,
     corruption: str,
@@ -388,14 +392,27 @@ async def test_corrupt_or_undecryptable_marker_fails_closed_without_file_mutatio
         )
         record["body_ciphertext_json"] = protected.ciphertext_json
         record["body_key_id"] = protected.key_id
-    _write_markers(store_path, [record])
-    before = store_path.read_bytes()
+    later_marker = _marker(
+        sqlite_repo.repository,
+        ring,
+        event_id=EVENT_IDS[1],
+        incident_id="incident-after-poison",
+        created_at=NOW + timedelta(minutes=1),
+    )
+    _write_markers(store_path, [record, later_marker])
 
-    with pytest.raises((ValueError, WebhookError)):
+    with pytest.raises(WebhookError) as exc_info:
         await _reconciler(sqlite_repo, ring, store_path).reconcile_once()
 
-    assert store_path.read_bytes() == before
-    assert _database_rows(sqlite_repo.path) == ([], 0)
+    assert exc_info.value.code is WebhookErrorCode.VALIDATION_FAILED
+    assert _stored_marker_records(store_path) == []
+    quarantine = _stored_quarantine_records(store_path)
+    assert len(quarantine) == 1
+    assert quarantine[0]["marker"] == record
+    assert quarantine[0]["reason_code"] == WebhookErrorCode.VALIDATION_FAILED.value
+    assert isinstance(quarantine[0]["quarantined_at"], str)
+    assert _database_rows(sqlite_repo.path) == ([EVENT_IDS[1]], 0)
+    assert await _reconciler(sqlite_repo, ring, store_path).reconcile_once() == 0
 
 
 @pytest.mark.unit
