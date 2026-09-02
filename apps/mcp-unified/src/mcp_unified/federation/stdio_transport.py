@@ -642,6 +642,10 @@ def create_external_transport(
     """Create a package-owned external transport for a supported server definition."""
     if server.transport == "stdio":
         return StdioExternalTransport(server, process_policy=process_policy)
+    if server.transport in ("streamable_http", "sse"):
+        from mcp_unified.federation.http_transport import create_http_external_transport
+
+        return create_http_external_transport(server)
     raise StdioExternalTransportError(
         "External server transport is not supported by the package factory",
         reason_code="unsupported_transport",

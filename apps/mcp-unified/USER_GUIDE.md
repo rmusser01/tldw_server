@@ -57,7 +57,7 @@ python -m pip install "mcp-unified[gateway]"
 Downstream applications should use a compatible-minor pin:
 
 ```bash
-python -m pip install "mcp-unified[gateway]~=0.2.1"
+python -m pip install "mcp-unified[gateway]~=0.3.0"
 ```
 
 From the repository root, when testing unpublished changes:
@@ -775,6 +775,32 @@ mcp-unified-gateway list-external-servers \
 
 The registry alone does not grant execution authority. A profile must also
 allow the server/tool path, and any required credentials must be granted.
+
+### Remote (URL-based) external servers
+
+Hosted MCP servers are registered the same way with a URL-based transport
+instead of a command. `streamable_http` targets a Streamable HTTP endpoint
+(one URL, JSON or SSE-framed responses, `mcp-session-id` session handling);
+`sse` targets the legacy HTTP+SSE pairing (persistent event stream plus a
+POST message endpoint).
+
+```json
+{
+  "id": "linear",
+  "name": "Linear MCP",
+  "transport": "streamable_http",
+  "url": "https://mcp.linear.app/mcp",
+  "headers": {"Authorization": "Bearer <token>"},
+  "enabled": true
+}
+```
+
+`headers` are static headers sent on every request (typically authorization).
+Per-call brokered credentials merge their `headers` into each tool call;
+brokered `env` values have no HTTP equivalent and are ignored. Connection
+failures map to distinct reason codes (`auth_required`, `tls_failed`,
+`connect_failed`, `request_timeout`, `connection_closed`) so downstream
+clients can surface honest readiness states.
 
 ## 5. Add Credential Grants
 
