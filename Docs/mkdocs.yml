@@ -118,6 +118,7 @@ nav:
           - GPU or Accelerated Audio Setup: Getting_Started/First_Time_Audio_Setup_GPU_Accelerated.md
       - Admin and Operations:
           - Authentication Setup: User_Guides/Server/Authentication_Setup.md
+          - Personal Context Profile: User_Guides/Server/Personal_Context_Profile.md
           - Production Hardening: User_Guides/Server/Production_Hardening_Checklist.md
           - Organizations and Sharing: User_Guides/Server/Organizations_and_Sharing.md
           - BYOK User Guide: User_Guides/Server/BYOK_User_Guide.md
@@ -143,12 +144,14 @@ nav:
           - API Documentation Index: API-related/API_README.md
           - API Design: API-related/API_Design.md
           - API Tag Index: API-related/API_Tags_Index.md
+          - Personal Context API: API-related/Personal_Context_API.md
           - Providers API: API-related/Providers_API_Documentation.md
           - Character Chat Sessions API: API-related/Character_Chat_Sessions_API.md
           - Tools API: API-related/Tools_API_Documentation.md
           - Storage API: API-related/Storage_API_Documentation.md
       - Backend Code Guides:
           - Chat Developer Guide: Code_Documentation/Chat_Developer_Guide.md
+          - Personal Context Developer Guide: Code_Documentation/Personal_Context_Developer_Guide.md
           - Character Chat Code Guide: Code_Documentation/Guides/Character_Chat_Code_Guide.md
           - RAG Developer Guide: Code_Documentation/RAG-Developer-Guide.md
           - Embeddings Developer Guide: Code_Documentation/Embeddings-Developer-Guide.md
