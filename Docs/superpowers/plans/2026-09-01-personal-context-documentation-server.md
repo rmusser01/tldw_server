@@ -676,7 +676,7 @@ Expected: generated output is committed and the worktree is clean before task cl
 
 - Modify: `backlog/tasks/task-13151 - Document-Personal-Context-Profile-server-operations-and-architecture.md`
 
-- [ ] **Step 1: Complete all ACs and DoD items, record evidence, and mark Done as the final repository mutation**
+- [x] **Step 1: Complete all ACs and DoD items, record evidence, and mark Done as the final repository mutation**
 
 Run, replacing the bracketed evidence with the exact commands and results from Task 5. If any skip or blocker exists, replace `Known skips/blockers: none` with the actual list before running the second command that checks DoD item 6:
 
