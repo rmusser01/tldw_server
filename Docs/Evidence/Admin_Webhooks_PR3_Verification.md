@@ -500,6 +500,53 @@ shared-core public contract matrix passed 19/19 with six warnings in 14.22
 seconds. The verified pre-evidence implementation head remained nineteen
 commits ahead and zero behind. No production activation occurred.
 
+## CI Path Classification And Shard Contract Correction
+
+After the fingerprint correction, workflow run
+https://github.com/rmusser01/tldw_server/actions/runs/33589092145 passed every
+required gate except upstream frontend unit shards 1 and 5. Retrying only the
+failed jobs produced failures in the same shards but attributed regressions to
+different unchanged tests. Exact-base replay also retained 36 and 16 baseline
+failures respectively, while full-context base comparison changed those
+counts. This was evidence of the shared Vitest ratchet's existing nondeterminism,
+not a branch runtime-frontend regression. A local serial rerun of the three
+first-attempt files passed all 85 tests.
+
+The path classifier treated the generated
+`apps/tldw-frontend/lib/api/openapi.fingerprint.json` metadata as executable
+upstream frontend code and therefore selected all runtime unit shards. The
+classifier now excludes that exact metadata path from upstream runtime and E2E
+selection while preserving admin UI selection and all backend/API gates.
+Regression tests first failed on the old behavior, then passed 14/14 after the
+change, including fingerprint-only and fingerprint-plus-admin-UI cases.
+
+The expanded CI contract run then exposed two branch-owned backend shard
+omissions. All five repeated matrices still referenced the deleted
+`test_admin_ops_webhooks_reports.py`, and six new activation/backup tests in
+`test_admin_e2e_support_api.py` had no node-id assignment. The stale path was
+removed and the six tests were assigned to `admin-e2e-reset-backups` in every
+matrix. The final classifier, required-gate detector, frontend workflow,
+backend workflow, and license-first contract matrix passed 79/79:
+
+```bash
+PYTHONPATH=. /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python \
+  -m pytest -q \
+  tldw_Server_API/tests/CI/test_path_classifier.py \
+  tldw_Server_API/tests/CI/test_detect_required_gate_changes_action.py \
+  tldw_Server_API/tests/CI/test_frontend_required_workflow.py \
+  tldw_Server_API/tests/CI/test_required_workflow_contracts.py \
+  tldw_Server_API/tests/CI/test_license_first_workflow_contracts.py
+```
+
+Before publication, `origin/dev` advanced by two commits to
+`5fdd610df6e458957a34d07c5c5ac2a4b5d28d9f`; the only upstream file change
+removed an obsolete Embeddings test fixture. All 21 branch commits rebased
+without conflicts. The same 79-test CI contract matrix, Ruff lint/format
+checks, and branch diff whitespace check passed on the rebased tree. The branch
+was 21 commits ahead and zero behind before this evidence amendment.
+
+No production activation occurred.
+
 ## Static And Security Gates
 
 The plan's broad Ruff command returned 13 errors exclusively in admin endpoint

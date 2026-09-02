@@ -44,6 +44,29 @@ def test_admin_ui_change_enables_frontend_without_e2e() -> None:
     assert flags["e2e_changed"] is False
 
 
+def test_openapi_fingerprint_change_skips_frontend_runtime_gates() -> None:
+    flags = classify_paths(["apps/tldw-frontend/lib/api/openapi.fingerprint.json"])
+    assert flags["backend_changed"] is False
+    assert flags["coverage_required"] is False
+    assert flags["frontend_changed"] is False
+    assert flags["tldw_frontend_changed"] is False
+    assert flags["admin_ui_changed"] is False
+    assert flags["e2e_changed"] is False
+
+
+def test_openapi_fingerprint_does_not_hide_admin_ui_changes() -> None:
+    flags = classify_paths(
+        [
+            "apps/tldw-frontend/lib/api/openapi.fingerprint.json",
+            "admin-ui/app/monitoring/page.tsx",
+        ]
+    )
+    assert flags["frontend_changed"] is True
+    assert flags["tldw_frontend_changed"] is False
+    assert flags["admin_ui_changed"] is True
+    assert flags["e2e_changed"] is False
+
+
 @pytest.mark.parametrize(
     ("path", "backend_changed", "tldw_frontend_changed", "admin_ui_changed"),
     (
@@ -94,9 +117,7 @@ def test_shared_vitest_guardrail_selects_every_consuming_gate(
 ) -> None:
     flags = classify_paths([path])
     assert flags["backend_changed"] is backend_changed
-    assert flags["frontend_changed"] is (
-        tldw_frontend_changed or admin_ui_changed
-    )
+    assert flags["frontend_changed"] is (tldw_frontend_changed or admin_ui_changed)
     assert flags["tldw_frontend_changed"] is tldw_frontend_changed
     assert flags["admin_ui_changed"] is admin_ui_changed
     assert flags["e2e_changed"] is tldw_frontend_changed

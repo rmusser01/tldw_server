@@ -863,6 +863,12 @@ jobs:
               tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_reset_clears_backup_schedules
               tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_reset_clears_monitoring_authority_state
               tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_run_due_backup_schedules_processes_scheduled_run
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_prepare_admin_webhooks_requires_on_mode
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_prepare_admin_webhooks_requires_valid_key_ring
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_prepare_admin_webhooks_completes_fresh_state_idempotently
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_prepare_admin_webhooks_rejects_completed_key_mismatch
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_prepare_admin_webhooks_rejects_unrelated_completed_state
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_backup_resolver_rejects_temp_root
           - name: admin-g-i
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_g*.py
@@ -894,7 +900,6 @@ jobs:
           - name: admin-ops-webhooks-orgs
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_ops_reports.py
-              tldw_Server_API/tests/Admin/test_admin_ops_webhooks_reports.py
               tldw_Server_API/tests/Admin/test_admin_orgs_*.py
           - name: admin-profiles-rate-registration
             paths: >-
@@ -2351,6 +2356,12 @@ jobs:
               tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_reset_clears_backup_schedules
               tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_reset_clears_monitoring_authority_state
               tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_run_due_backup_schedules_processes_scheduled_run
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_prepare_admin_webhooks_requires_on_mode
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_prepare_admin_webhooks_requires_valid_key_ring
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_prepare_admin_webhooks_completes_fresh_state_idempotently
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_prepare_admin_webhooks_rejects_completed_key_mismatch
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_prepare_admin_webhooks_rejects_unrelated_completed_state
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_backup_resolver_rejects_temp_root
           - name: admin-g-i
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_g*.py
@@ -2382,7 +2393,6 @@ jobs:
           - name: admin-ops-webhooks-orgs
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_ops_reports.py
-              tldw_Server_API/tests/Admin/test_admin_ops_webhooks_reports.py
               tldw_Server_API/tests/Admin/test_admin_orgs_*.py
           - name: admin-profiles-rate-registration
             paths: >-
@@ -3710,6 +3720,12 @@ jobs:
               tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_reset_clears_backup_schedules
               tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_reset_clears_monitoring_authority_state
               tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_run_due_backup_schedules_processes_scheduled_run
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_prepare_admin_webhooks_requires_on_mode
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_prepare_admin_webhooks_requires_valid_key_ring
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_prepare_admin_webhooks_completes_fresh_state_idempotently
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_prepare_admin_webhooks_rejects_completed_key_mismatch
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_prepare_admin_webhooks_rejects_unrelated_completed_state
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_backup_resolver_rejects_temp_root
           - name: admin-g-i
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_g*.py
@@ -3741,7 +3757,6 @@ jobs:
           - name: admin-ops-webhooks-orgs
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_ops_reports.py
-              tldw_Server_API/tests/Admin/test_admin_ops_webhooks_reports.py
               tldw_Server_API/tests/Admin/test_admin_orgs_*.py
           - name: admin-profiles-rate-registration
             paths: >-
@@ -4992,6 +5007,12 @@ jobs:
               tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_reset_clears_backup_schedules
               tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_reset_clears_monitoring_authority_state
               tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_run_due_backup_schedules_processes_scheduled_run
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_prepare_admin_webhooks_requires_on_mode
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_prepare_admin_webhooks_requires_valid_key_ring
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_prepare_admin_webhooks_completes_fresh_state_idempotently
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_prepare_admin_webhooks_rejects_completed_key_mismatch
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_prepare_admin_webhooks_rejects_unrelated_completed_state
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_backup_resolver_rejects_temp_root
           - name: admin-g-i
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_g*.py
@@ -5023,7 +5044,6 @@ jobs:
           - name: admin-ops-webhooks-orgs
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_ops_reports.py
-              tldw_Server_API/tests/Admin/test_admin_ops_webhooks_reports.py
               tldw_Server_API/tests/Admin/test_admin_orgs_*.py
           - name: admin-profiles-rate-registration
             paths: >-
@@ -6280,6 +6300,12 @@ jobs:
               tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_reset_clears_backup_schedules
               tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_reset_clears_monitoring_authority_state
               tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_run_due_backup_schedules_processes_scheduled_run
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_prepare_admin_webhooks_requires_on_mode
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_prepare_admin_webhooks_requires_valid_key_ring
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_prepare_admin_webhooks_completes_fresh_state_idempotently
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_prepare_admin_webhooks_rejects_completed_key_mismatch
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_prepare_admin_webhooks_rejects_unrelated_completed_state
+              tldw_Server_API/tests/Admin/test_admin_e2e_support_api.py::test_admin_e2e_backup_resolver_rejects_temp_root
           - name: admin-g-i
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_g*.py
@@ -6311,7 +6337,6 @@ jobs:
           - name: admin-ops-webhooks-orgs
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_ops_reports.py
-              tldw_Server_API/tests/Admin/test_admin_ops_webhooks_reports.py
               tldw_Server_API/tests/Admin/test_admin_orgs_*.py
           - name: admin-profiles-rate-registration
             paths: >-
