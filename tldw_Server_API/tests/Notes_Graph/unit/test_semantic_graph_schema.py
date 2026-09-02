@@ -68,6 +68,18 @@ def test_omitted_edge_types_resolve_to_the_frozen_legacy_set() -> None:
     assert frozenset(schemas.EdgeType) != schemas.LEGACY_EDGE_TYPES
 
 
+def test_graph_response_defaults_manual_link_authority_to_false() -> None:
+    response = schemas.NoteGraphResponse(
+        limits=schemas.GraphLimits(max_nodes=20, max_edges=20, max_degree=20),
+        active_note_count=0,
+        all_notes_note_cap=20,
+        all_notes_eligible=True,
+    )
+
+    assert response.manual_link_authorized is False
+    assert response.model_dump(mode="json")["manual_link_authorized"] is False
+
+
 def test_explicit_edge_types_are_sorted_and_deduplicated_for_identity() -> None:
     request = schemas.NoteGraphRequest(
         edge_types="semantic,manual,semantic,backlink,manual"

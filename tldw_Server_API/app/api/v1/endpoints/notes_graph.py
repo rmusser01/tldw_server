@@ -463,6 +463,18 @@ def _suggestions_authorized(principal: AuthPrincipal | None) -> bool:
     return NOTES_GRAPH_SUGGEST in permissions
 
 
+def _manual_link_authorized(principal: AuthPrincipal | None) -> bool:
+    """Return request-local manual-link authority from verified claims."""
+
+    if principal_has_admin_bypass_claims(principal):
+        return True
+    permissions = {
+        str(permission).strip()
+        for permission in (getattr(principal, "permissions", None) or ())
+    }
+    return NOTES_GRAPH_WRITE in permissions
+
+
 @router.get(
     "/graph",
     summary="Fetch a graph of notes and related entities",
@@ -525,7 +537,10 @@ async def get_notes_graph(
             )
             graph = await projector.project(req, graph, user=current_user)
         graph = graph.model_copy(
-            update={"suggestions_authorized": _suggestions_authorized(principal)}
+            update={
+                "suggestions_authorized": _suggestions_authorized(principal),
+                "manual_link_authorized": _manual_link_authorized(principal),
+            }
         )
         if req.format == GraphFormat.cytoscape:
             formatted = to_cytoscape(graph)
@@ -534,6 +549,8 @@ async def get_notes_graph(
                     "active_note_count": graph.active_note_count,
                     "all_notes_note_cap": graph.all_notes_note_cap,
                     "all_notes_eligible": graph.all_notes_eligible,
+                    "suggestions_authorized": graph.suggestions_authorized,
+                    "manual_link_authorized": graph.manual_link_authorized,
                 }
             )
             return formatted

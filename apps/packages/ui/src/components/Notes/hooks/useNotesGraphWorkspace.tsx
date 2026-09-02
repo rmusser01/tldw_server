@@ -4,6 +4,7 @@ import {
   type NotesGraphEdgeType,
   type NotesGraphNode,
   type NotesGraphResponse,
+  createSemanticManualLink,
   fetchNotesGraph
 } from "@/services/note-graph-suggestions"
 import {
@@ -15,6 +16,7 @@ import {
 } from "@tanstack/react-query"
 import * as React from "react"
 
+import { normalizeGraphNoteId } from "../notes-manager-utils"
 import { useNotesSemanticIndex } from "./useNotesSemanticIndex"
 
 const ORDINARY_EDGE_TYPES: NotesGraphEdgeType[] = [
@@ -212,12 +214,13 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
   const maxNodes = options.maxNodes ?? 120
   const maxEdges = options.maxEdges ?? 480
   const semanticEnabled = visibleEdgeTypes.has("semantic")
+  const semanticQueryEnabled = semanticEnabled && Boolean(centerNoteId)
   const requestedEdgeTypes = React.useMemo<NotesGraphEdgeType[]>(
     () =>
-      semanticEnabled
+      semanticQueryEnabled
         ? [...ORDINARY_EDGE_TYPES, "semantic"]
         : [...ORDINARY_EDGE_TYPES],
-    [semanticEnabled]
+    [semanticQueryEnabled]
   )
   const canRequest = Boolean(
     authorityScope &&
@@ -239,10 +242,10 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
         radius,
         maxNodes,
         maxEdges,
-        semanticEnabled,
+        semanticQueryEnabled,
         requestedEdgeTypes,
-        semanticThreshold,
-        semanticTopK
+        semanticQueryEnabled ? semanticThreshold : null,
+        semanticQueryEnabled ? semanticTopK : null
       ] as const,
     [
       authorityScope,
@@ -254,7 +257,7 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
       options.datasetId,
       radius,
       requestedEdgeTypes,
-      semanticEnabled,
+      semanticQueryEnabled,
       semanticThreshold,
       semanticTopK
     ]
@@ -266,17 +269,18 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
       requestKey: QueryKey,
       signal: AbortSignal
     ) => {
+      const includeSemantic = semanticQueryEnabled && pageParam === undefined
       try {
         return await fetchNotesGraph({
           centerNoteId,
           datasetId: options.datasetId,
           radius,
-          edgeTypes: requestedEdgeTypes,
+          edgeTypes: includeSemantic ? requestedEdgeTypes : ORDINARY_EDGE_TYPES,
           maxNodes,
           maxEdges,
           cursor: pageParam,
-          semanticThreshold: semanticEnabled ? semanticThreshold : undefined,
-          semanticTopK: semanticEnabled ? semanticTopK : undefined
+          semanticThreshold: includeSemantic ? semanticThreshold : undefined,
+          semanticTopK: includeSemantic ? semanticTopK : undefined
         })
       } catch (error) {
         if (isPermissionError(error) && !signal.aborted) {
@@ -316,7 +320,7 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
       queryClient,
       radius,
       requestedEdgeTypes,
-      semanticEnabled,
+      semanticQueryEnabled,
       semanticThreshold,
       semanticTopK
     ]
@@ -375,7 +379,7 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
     identity: string
     graph: NotesGraphResponse
   } | null>(null)
-  if (currentGraph && !semanticEnabled) {
+  if (currentGraph && !semanticQueryEnabled) {
     lastGoodGraph.current = {
       identity: fallbackIdentity,
       graph: {
@@ -527,6 +531,33 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
     return aggregatePages(queryClient.getQueryData<GraphInfiniteData>(queryKey))
   }, [authorityScope, canRequest, graph, graphQuery, queryClient, queryKey])
 
+  const createManualLink = React.useCallback(
+    async (edge: NotesGraphEdge): Promise<boolean> => {
+      if (
+        edge.type !== "semantic" ||
+        !edge.evidence ||
+        graph?.manual_link_authorized !== true
+      ) {
+        return false
+      }
+      const idempotencyKey =
+        globalThis.crypto?.randomUUID?.() ??
+        `semantic-${Date.now()}-${Math.random().toString(16).slice(2)}`
+      await createSemanticManualLink({
+        sourceNoteId: normalizeGraphNoteId(edge.source),
+        targetNoteId: normalizeGraphNoteId(edge.target),
+        datasetId: options.datasetId,
+        generationId: edge.evidence.generation_id,
+        idempotencyKey
+      })
+      await queryClient.invalidateQueries({
+        queryKey: notesGraphWorkspaceQueryKey
+      })
+      return true
+    },
+    [graph?.manual_link_authorized, options.datasetId, queryClient]
+  )
+
   return {
     graph,
     graphQuery,
@@ -561,7 +592,12 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
             NOTES_GRAPH_SEMANTIC_MAX_TOP_K,
             Math.max(1, Math.trunc(next))
           )
-        )
+        ),
+      focusRequired: semanticEnabled && !centerNoteId,
+      reset: () => {
+        setSemanticTopK(DEFAULT_SEMANTIC_TOP_K)
+        setSemanticThreshold(DEFAULT_SEMANTIC_THRESHOLD)
+      }
     },
     semanticIndex,
     allNotes,
@@ -576,6 +612,7 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
     showAllNotes,
     refresh,
     isPermissionDenied,
+    createManualLink,
     isOffline: !options.isOnline,
     isLoading: Boolean(authorityScope && graphQuery.isLoading && !graph),
     error: graphQuery.error

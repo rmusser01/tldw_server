@@ -4,7 +4,7 @@ title: Implement Notes embedding index and semantic graph edges
 status: In Progress
 assignee: []
 created_date: '2026-08-27 02:20'
-updated_date: '2026-09-01 20:34'
+updated_date: '2026-09-02 01:34'
 labels:
   - notes
   - notes-graph
@@ -103,6 +103,10 @@ Additional Task 11 fix2 verification: the dedicated Notes semantic English-fallb
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 2026-09-01 Task 11 final review complete: second-review consent/recovery hardening and follow-up capability-contract fixes are committed in 2124c290a4, 5fcad9fe92, and 10ef590047. Final scoped review found all issues addressed with no new Critical or Important breakage. Controller verification passed 306 backend and 226 frontend tests for fix round 3, plus 136 backend endpoint/runtime and 25 semantic-client tests for fix round 4; Python was 3.11.13. TASK-13134 remains In Progress for Tasks 12-13. Residual risk: no live PostgreSQL/pgvector or embedding-provider run in these UI/contract follow-ups.
+
+2026-09-01 Task 12 started from 12ca27770f. Existing-code review confirmed semantic query state and canonical conversion path. Contract correction: suggestions_authorized is insufficient because it proves notes.graph.suggest only; Task 12 will add request-local manual_link_authorized from verified notes.graph.write authority, retain nested POST enforcement, and add no permissions/root semantic API.
+
+2026-09-01 Task 12 implementation complete pending independent review: added opt-in focused Similar content controls, grouped manual/wikilink/semantic relationship presentation with preserved edge identities, compact and full semantic evidence views, request-local notes.graph.write conversion authority, and canonical nested Sync-aware manual-link conversion. Review hardening prevents inactive All-notes preference refetches and fails stale conversion conflicts closed. Verification: focused shared frontend 80 passed; WebUI E2E 2 passed; packaged-extension E2E 1 passed; extension compile passed; backend schema/endpoint 27 passed on Python 3.11.13; Ruff, Bandit zero findings, locale, scoped formatting, screenshots, and diff checks passed. Report: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-12-report.md. TASK-13134 remains In Progress because Task 13 is outstanding.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

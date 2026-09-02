@@ -12,6 +12,7 @@ import {
   cancelNotesGraphSuggestionRun,
   createNotesGraphSuggestionCommand,
   createNotesGraphSuggestionRun,
+  createSemanticManualLink,
   fetchNotesGraph,
   getNotesGraphSuggestionCapabilities,
   getNotesGraphSuggestionRun,
@@ -664,6 +665,72 @@ describe("Notes graph suggestion client", () => {
       code: "notes_graph_invalid_request"
     })
     expect(mocks.bgRequest).not.toHaveBeenCalled()
+  })
+
+  it("strictly parses manual-link authority and defaults missing legacy responses to false", async () => {
+    const base = {
+      nodes: [],
+      edges: [],
+      truncated: false,
+      truncated_by: [],
+      has_more: false,
+      cursor: null,
+      limits: { max_nodes: 120, max_edges: 480, max_degree: 40 },
+      radius_cap_applied: false,
+      active_note_count: 0,
+      all_notes_note_cap: 100,
+      all_notes_eligible: true
+    }
+    mocks.bgRequest
+      .mockResolvedValueOnce(base)
+      .mockResolvedValueOnce({ ...base, manual_link_authorized: true })
+      .mockResolvedValueOnce({ ...base, manual_link_authorized: "yes" })
+
+    await expect(fetchNotesGraph({})).resolves.toMatchObject({
+      manual_link_authorized: false
+    })
+    await expect(fetchNotesGraph({})).resolves.toMatchObject({
+      manual_link_authorized: true
+    })
+    await expect(fetchNotesGraph({})).rejects.toMatchObject({
+      code: "notes_graph_invalid_response"
+    })
+  })
+
+  it("converts a semantic relationship through the canonical nested link route", async () => {
+    mocks.bgRequest.mockResolvedValueOnce({
+      status: "created",
+      edge: {
+        edge_id: "manual:a:b",
+        from_note_id: "a",
+        to_note_id: "b"
+      }
+    })
+
+    await createSemanticManualLink({
+      sourceNoteId: "a",
+      targetNoteId: "b",
+      datasetId: "dataset-a",
+      generationId: "generation-a",
+      idempotencyKey: "semantic-conversion-a"
+    })
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith({
+      path: "/api/v1/notes/a/links",
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Idempotency-Key": "semantic-conversion-a"
+      },
+      body: {
+        to_note_id: "b",
+        directed: false,
+        weight: 1,
+        dataset_id: "dataset-a",
+        idempotency_key: "semantic-conversion-a",
+        semantic_conversion: { generation_id: "generation-a" }
+      }
+    })
   })
 
   it("rejects a fabricated target title on a tag suggestion", async () => {
