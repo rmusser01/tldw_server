@@ -3,19 +3,20 @@ id: TASK-13134
 title: Implement Notes embedding index and semantic graph edges
 status: In Progress
 assignee: []
-created_date: 2026-08-27 02:20
-updated_date: 2026-09-02 02:57
+created_date: '2026-08-27 02:20'
+updated_date: '2026-09-02 03:03'
 labels:
-- notes
-- notes-graph
-- embeddings
-- second-brain
-- backend
+  - notes
+  - notes-graph
+  - embeddings
+  - second-brain
+  - backend
 dependencies:
-- TASK-13138
+  - TASK-13138
 documentation:
-- Docs/superpowers/specs/2026-08-29-notes-semantic-index-design.md
-- Docs/superpowers/plans/2026-08-29-notes-semantic-index-implementation-plan.md
+  - Docs/superpowers/specs/2026-08-29-notes-semantic-index-design.md
+  - >-
+    Docs/superpowers/plans/2026-08-29-notes-semantic-index-implementation-plan.md
 priority: medium
 ---
 
@@ -42,6 +43,7 @@ Approved executable plan: `Docs/superpowers/plans/2026-08-29-notes-semantic-inde
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - 2026-08-29: Senior implementation-constraint review identified required spec corrections for user-scoped run APIs, semantic opt-in compatibility, evidence offsets, vector-only backend contracts, DSR erasure, graph admission/async composition, dimension and activation rules, cache freshness, and restore semantics.
 - Design specification: `Docs/superpowers/specs/2026-08-29-notes-semantic-index-design.md`
@@ -109,11 +111,16 @@ Additional Task 11 fix2 verification: the dedicated Notes semantic English-fallb
 ['Task 12 Fix Round 2 started at clean HEAD a735e797ae. Scope: add an active-Sync coordinator duplicate-conversion regression and nullable semantic effective-control regressions, then apply the minimal endpoint/hook fixes and run affected Task 12 verification.']
 ['2026-09-01 Task 12 fix round 2 complete and verified from a735e797ae: active-Sync logical duplicate conversions now return the exact typed existing-manual-link conflict only after fresh semantic validation and confirmed live unordered-pair state; unrelated preflight failures remain closed. Nullable response-effective controls preserve current values, still clamp response max_top_k, and do not loop. RED: frontend 3 failed/32 passed; backend behavioral RED 1 failed/9 passed. GREEN: focused frontend 65 passed, focused conversion 11 passed, affected frontend 92 passed, affected backend 38 passed; extension compile, scoped Prettier, Ruff, Bandit zero findings, and diff checks passed. Report: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-12-report.md. TASK-13134 remains In Progress for Task 13.']
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+2026-09-01 Task 12 final review complete: implementation aac96ca7e6 plus hardening a735e797ae and 729e8c0adc are independently reviewed clean. All six Important and three Minor findings are resolved, including active-Sync duplicate reconciliation and nullable effective-control handling. Final reviewed verification: 92 affected frontend tests, 38 affected backend tests on Python 3.11.13, 4 WebUI E2E cases, 1 packaged-extension E2E case, extension compile, locale, scoped formatting, Ruff, Bandit zero findings, and diff checks. TASK-13134 remains In Progress for Task 13.
+<!-- SECTION:NOTES:END -->
+
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-TASK-13134 remains In Progress. Tasks 1 through 11 are complete and independently reviewed. Task 12 implementation plus fix rounds 1 and 2 are implemented and verified pending clean re-review; Task 13 documentation and integrated release gates remain outstanding.
+TASK-13134 remains In Progress. Implementation Tasks 1 through 12 are complete and independently reviewed. Task 13 remains: operator/user documentation, integrated backend/frontend/build/E2E/security gates, final whole-branch review, and final task metadata.
 <!-- SECTION:FINAL_SUMMARY:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed
