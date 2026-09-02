@@ -1527,6 +1527,102 @@ describe("useNotesGraphWorkspace", () => {
     )
   })
 
+  it.each([
+    {
+      name: "both effective values are absent",
+      status: {
+        effective_top_k: null,
+        effective_threshold: null,
+        max_top_k: 50
+      },
+      expectedTopK: 10,
+      expectedThreshold: 0.75,
+      expectedSemanticRequests: 1
+    },
+    {
+      name: "both effective values are absent and max top-k is lower",
+      status: {
+        effective_top_k: null,
+        effective_threshold: null,
+        max_top_k: 4
+      },
+      expectedTopK: 4,
+      expectedThreshold: 0.75,
+      expectedSemanticRequests: 2
+    },
+    {
+      name: "only effective top-k is absent",
+      status: {
+        effective_top_k: null,
+        effective_threshold: 0.82,
+        max_top_k: 50
+      },
+      expectedTopK: 10,
+      expectedThreshold: 0.82,
+      expectedSemanticRequests: 2
+    },
+    {
+      name: "only effective threshold is absent",
+      status: {
+        effective_top_k: 7,
+        effective_threshold: null,
+        max_top_k: 50
+      },
+      expectedTopK: 7,
+      expectedThreshold: 0.75,
+      expectedSemanticRequests: 2
+    }
+  ])(
+    "preserves current semantic controls when $name",
+    async ({
+      status,
+      expectedTopK,
+      expectedThreshold,
+      expectedSemanticRequests
+    }) => {
+      mocks.fetchNotesGraph.mockImplementation(
+        (input: { edgeTypes?: string[] }) =>
+          Promise.resolve(
+            graph({
+              semantic_status: input.edgeTypes?.includes("semantic")
+                ? semanticStatus(status)
+                : undefined
+            })
+          )
+      )
+      const client = new QueryClient({
+        defaultOptions: { queries: { retry: false } }
+      })
+      const { result } = renderHook(
+        () =>
+          useNotesGraphWorkspace({
+            authorityScope: "authority-a",
+            enabled: true,
+            isOnline: true,
+            initialFocusNoteId: "note:a"
+          }),
+        { wrapper: wrapper(client) }
+      )
+      await flush()
+      act(() => result.current.semantic.setEnabled(true))
+      await flush()
+
+      expect(result.current.semantic.topK).toBe(expectedTopK)
+      expect(result.current.semantic.threshold).toBe(expectedThreshold)
+      expect(result.current.semantic.maxTopK).toBe(status.max_top_k)
+      const semanticRequests = mocks.fetchNotesGraph.mock.calls.filter(
+        ([input]) => input.edgeTypes?.includes("semantic")
+      )
+      expect(semanticRequests).toHaveLength(expectedSemanticRequests)
+      expect(semanticRequests.at(-1)?.[0]).toEqual(
+        expect.objectContaining({
+          semanticTopK: expectedTopK,
+          semanticThreshold: expectedThreshold
+        })
+      )
+    }
+  )
+
   it("preserves Similar content in All notes but requests only ordinary first-page edges", async () => {
     mocks.fetchNotesGraph.mockResolvedValue(graph())
     const client = new QueryClient({

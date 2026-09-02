@@ -859,7 +859,10 @@ async def create_manual_link(
     except HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001 - map the closed link error contract.
-        if link.semantic_conversion is not None and isinstance(exc, ConflictError):
+        if link.semantic_conversion is not None and isinstance(
+            exc,
+            (ConflictError, NotesLinkPreflightError),
+        ):
             try:
                 manual_link_exists = _has_existing_manual_link(
                     db,
