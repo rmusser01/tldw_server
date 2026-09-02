@@ -135,11 +135,13 @@ mapping metadata with the new scope. The Sync apply path can accept a canonical
 workspace scope without creating or guessing that peer-local mapping. Such an
 unbound scope remains canonical storage. `workspace_id_for_scope()` can resolve
 stored mapping metadata for API or extension use, but no shipped canonical
-Personal Context server runtime or context-injection consumer currently calls it. There is
-no current API for mapping an existing inbound scope; future integration work
-must add an explicit mapping workflow rather than infer one from canonical scope
-identity. The legacy `load_companion_context()` builder has no production caller,
-reads separate companion data, and is not a canonical Personal Context consumer.
+Personal Context server runtime or context-injection consumer currently calls
+it. There is no current API for mapping an existing inbound scope; future
+integration work must add an explicit mapping workflow rather than infer one
+from canonical scope identity. The legacy `load_companion_context()` builder is
+called by the legacy Companion and Persona endpoints, reads separate companion
+tables, and is not a canonical Personal Context consumer. Those callers do not
+establish a canonical Personal Context runtime or context-injection path.
 
 Both plaintext and recovery exports serialize the same narrow snapshot shape:
 the current manifest, selected scopes, and records. Recovery mode includes all
