@@ -21,6 +21,7 @@ from tldw_Server_API.app.core.DB_Management.chacha.note_semantic_models import (
 
 from .semantic_observability import (
     emit_semantic_audit_event,
+    record_semantic_cleanup_retry,
     record_semantic_dsr_metrics,
 )
 from .semantic_publication import (
@@ -337,20 +338,36 @@ class SemanticErasureCoordinator:
             self._check_deadline()
             now = self._clock()
             expired_before = now - timedelta(seconds=self._lease_seconds)
-            await self._store_call(
-                self._store.reclaim_expired_dataset_work,
-                dataset_id=dataset_id,
-                expired_before=expired_before,
-                limit=100,
-                now=now,
+            reclaimed_work = int(
+                await self._store_call(
+                    self._store.reclaim_expired_dataset_work,
+                    dataset_id=dataset_id,
+                    expired_before=expired_before,
+                    limit=100,
+                    now=now,
+                )
             )
-            await self._store_call(
-                self._store.reclaim_expired_obsolete_vector_claims,
-                dataset_id=dataset_id,
-                expired_before=expired_before,
-                limit=self._settings.max_cleanup_vectors_per_run,
-                now=now,
+            if reclaimed_work:
+                record_semantic_cleanup_retry(
+                    status="failed",
+                    backend=backend_name,
+                    count=reclaimed_work,
+                )
+            reclaimed_vectors = int(
+                await self._store_call(
+                    self._store.reclaim_expired_obsolete_vector_claims,
+                    dataset_id=dataset_id,
+                    expired_before=expired_before,
+                    limit=self._settings.max_cleanup_vectors_per_run,
+                    now=now,
+                )
             )
+            if reclaimed_vectors:
+                record_semantic_cleanup_retry(
+                    status="failed",
+                    backend=backend_name,
+                    count=reclaimed_vectors,
+                )
             await self._store_call(
                 self._store.rearm_exhausted_generation_cleanup,
                 dataset_id=dataset_id,

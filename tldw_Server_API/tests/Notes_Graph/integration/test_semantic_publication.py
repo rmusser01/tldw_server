@@ -2219,6 +2219,60 @@ def test_obsolete_vector_ledger_claim_retry_and_hard_delete_survival(
     ) == vector_ids
 
 
+def test_partial_obsolete_vector_retry_returns_exact_committed_transition_count(
+    sqlite_db: CharactersRAGDB,
+) -> None:
+    db = sqlite_db
+    _enabled, pending = _create_pending_generation(db)
+    vector_ids = ("partial-vector-a", "partial-vector-b")
+    assert (
+        db.note_semantic_store.stage_obsolete_vector_cleanup(
+            dataset_id=DATASET_ID,
+            generation_id=pending.id,
+            vector_ids=vector_ids,
+            source_kind="unpublished",
+            note_id=NOTE_ID,
+            dirty_generation=1,
+            now=NOW,
+        )
+        == 2
+    )
+    claim = db.note_semantic_store.claim_obsolete_vector_cleanup_batch(
+        dataset_id=DATASET_ID,
+        limit=2,
+        now=NOW,
+    )
+    assert claim is not None
+    with db.transaction() as conn:
+        conn.execute(
+            "UPDATE note_semantic_obsolete_vectors SET claim_token=? WHERE id=?",
+            ("other-claim", claim.ledger_ids[1]),
+        )
+
+    committed = db.note_semantic_store.retry_obsolete_vector_cleanup(
+        dataset_id=DATASET_ID,
+        ledger_ids=claim.ledger_ids,
+        claim_token=claim.claim_token,
+        error_code="backend_unavailable",
+        retry_at=NOW + timedelta(minutes=1),
+        now=NOW,
+    )
+    no_op = db.note_semantic_store.retry_obsolete_vector_cleanup(
+        dataset_id=DATASET_ID,
+        ledger_ids=claim.ledger_ids,
+        claim_token=claim.claim_token,
+        error_code="backend_unavailable",
+        retry_at=NOW + timedelta(minutes=1),
+        now=NOW,
+    )
+
+    with db.transaction() as conn:
+        rows = conn.execute("SELECT id,attempt_count FROM note_semantic_obsolete_vectors ORDER BY id").fetchall()
+    assert committed == 1
+    assert no_op == 0
+    assert sorted(int(row["attempt_count"]) for row in rows) == [0, 1]
+
+
 def test_cleanup_ledger_never_claims_an_id_in_the_current_manifest(
     sqlite_db: CharactersRAGDB,
 ) -> None:
@@ -4013,6 +4067,53 @@ async def test_store_publication_sql_has_live_postgres_parity(
             DATASET_ID, pending.id, NOTE_ID
         ) == ()
         assert _generation_count_snapshot(db, pending.id) == ((1, 0), (1, 0))
+    finally:
+        db.close_all_connections()
+        backend.get_pool().close_all()
+
+
+def test_postgres_partial_obsolete_retry_returns_committed_count(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = CharactersRAGDB(":memory:", client_id=OWNER_ID, backend=backend)
+    try:
+        _enabled, pending = _create_pending_generation(db)
+        assert (
+            db.note_semantic_store.stage_obsolete_vector_cleanup(
+                dataset_id=DATASET_ID,
+                generation_id=pending.id,
+                vector_ids=("partial-pg-a", "partial-pg-b"),
+                source_kind="unpublished",
+                note_id=NOTE_ID,
+                dirty_generation=1,
+                now=NOW,
+            )
+            == 2
+        )
+        claim = db.note_semantic_store.claim_obsolete_vector_cleanup_batch(
+            dataset_id=DATASET_ID,
+            limit=2,
+            now=NOW,
+        )
+        assert claim is not None
+        with db.transaction() as conn:
+            conn.execute(
+                "UPDATE note_semantic_obsolete_vectors SET claim_token=? WHERE id=?",
+                ("other-pg-claim", claim.ledger_ids[1]),
+            )
+
+        assert (
+            db.note_semantic_store.retry_obsolete_vector_cleanup(
+                dataset_id=DATASET_ID,
+                ledger_ids=claim.ledger_ids,
+                claim_token=claim.claim_token,
+                error_code="backend_unavailable",
+                retry_at=NOW + timedelta(minutes=1),
+                now=NOW,
+            )
+            == 1
+        )
     finally:
         db.close_all_connections()
         backend.get_pool().close_all()

@@ -1034,11 +1034,11 @@ class NoteSemanticStore:
         error_code: str,
         retry_at: datetime,
         now: datetime,
-    ) -> bool:
+    ) -> int:
         dataset = self._scope(dataset_id)
         ids = tuple(ledger_ids)
         if not ids or len(ids) != len(set(ids)) or not claim_token:
-            return False
+            return 0
         retry_timestamp = self._timestamp(retry_at)
         now_timestamp = self._timestamp(now)
         if retry_at <= now:
@@ -1065,7 +1065,7 @@ class NoteSemanticStore:
                     ),
                 )
                 updated += cursor.rowcount
-        return updated == len(ids)
+        return updated
 
     def release_obsolete_vector_claim(
         self,

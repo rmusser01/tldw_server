@@ -81,3 +81,59 @@ async def test_authnz_users_repo_create_does_not_inspect_or_mutate_schema(
 
     assert user_id > 0
     assert schema_queries == []
+
+
+@pytest.mark.asyncio
+async def test_semantic_health_user_keyset_uses_id_to_break_created_at_ties(
+    tmp_path,
+    monkeypatch,
+):
+    import sqlite3
+    from datetime import datetime, timezone
+
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+    from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
+
+    db_path = tmp_path / "semantic_health_users.db"
+    monkeypatch.setenv("AUTH_MODE", "multi_user")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    reset_settings()
+    await reset_db_pool()
+    pool = await get_db_pool()
+    users_db = UsersDB(pool)
+    await users_db.initialize()
+    users = [
+        await users_db.create_user(
+            username=f"semantic_health_{index}",
+            email=f"semantic_health_{index}@example.com",
+            password_hash="hash",
+        )
+        for index in range(3)
+    ]
+    tied = datetime(2026, 9, 2, 12, 0, tzinfo=timezone.utc)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE users SET created_at=? WHERE id IN (?,?,?)",
+            (
+                tied.replace(tzinfo=None).isoformat(sep=" "),
+                *(int(user["id"]) for user in users),
+            ),
+        )
+    repo = AuthnzUsersRepo(db_pool=pool)
+
+    first = await repo.list_users_for_semantic_health_sweep(
+        after_created_at=None,
+        after_id=None,
+        limit=2,
+    )
+    second = await repo.list_users_for_semantic_health_sweep(
+        after_created_at=first[-1]["created_at"],
+        after_id=first[-1]["id"],
+        limit=2,
+    )
+
+    expected = sorted((int(user["id"]) for user in users), reverse=True)
+    assert [row["id"] for row in (*first, *second)] == expected
+    assert all(row["created_at"] == tied for row in (*first, *second))

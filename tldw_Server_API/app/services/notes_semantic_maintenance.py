@@ -191,12 +191,19 @@ class _ProductionScope:
 
     def reclaim_expired(self, *, limit: int, now: datetime) -> int:
         lease_seconds = int(os.getenv("NOTES_SEMANTIC_LEASE_SECONDS", "180") or "180")
-        return self._store.reclaim_expired_dataset_work(
+        reclaimed = self._store.reclaim_expired_dataset_work(
             dataset_id=self._dataset_id,
             expired_before=now - timedelta(seconds=max(lease_seconds, 1)),
             limit=min(limit, 256),
             now=now,
         )
+        if reclaimed:
+            record_semantic_cleanup_retry(
+                status="failed",
+                backend=self._metric_backend(),
+                count=reclaimed,
+            )
+        return reclaimed
 
     def claim_dirty(self, *, limit: int, now: datetime) -> tuple[_DirtyClaim, ...]:
         del now
@@ -422,18 +429,69 @@ class _MaintenanceRunner:
         try:
             state = await asyncio.to_thread(self._jobs.get_notes_semantic_health_sweep)
             revision = int(state["revision"])
-            owner_offset = int(state["owner_offset"])
+            after_owner_created_at = state["after_owner_created_at"]
+            after_owner_id = state["after_owner_id"]
             after_dataset_id = state["after_dataset_id"]
-            accumulated = deserialize_semantic_health_snapshots(str(state["totals_json"]))
-            users, total = await self._users_repo.list_users(
-                offset=owner_offset,
-                limit=1,
-            )
+            try:
+                if (after_owner_created_at is None) != (after_owner_id is None):
+                    raise ValueError("notes_semantic_health_owner_cursor_invalid")
+                if after_owner_id is not None and (
+                    isinstance(after_owner_id, bool)
+                    or not isinstance(after_owner_id, int)
+                    or after_owner_id <= 0
+                    or not isinstance(after_owner_created_at, datetime)
+                    or after_owner_created_at.tzinfo is None
+                    or after_owner_created_at.utcoffset() is None
+                ):
+                    raise ValueError("notes_semantic_health_owner_cursor_invalid")
+                if after_dataset_id is not None and (
+                    after_owner_id is None
+                    or not isinstance(after_dataset_id, str)
+                    or not after_dataset_id
+                    or len(after_dataset_id.encode("utf-8")) > 256
+                ):
+                    raise ValueError("notes_semantic_health_dataset_cursor_invalid")
+                accumulated = deserialize_semantic_health_snapshots(str(state["totals_json"]))
+            except (TypeError, ValueError):
+                await asyncio.to_thread(
+                    self._jobs.checkpoint_notes_semantic_health_sweep,
+                    expected_revision=revision,
+                    after_owner_created_at=None,
+                    after_owner_id=None,
+                    after_dataset_id=None,
+                    totals_json="[]",
+                    completed=False,
+                    now=now,
+                )
+                logger.warning("Notes semantic health checkpoint was reset safely")
+                return
+            if after_dataset_id is not None:
+                existing = await self._users_repo.get_user_by_id(int(after_owner_id))
+                if existing is None:
+                    await asyncio.to_thread(
+                        self._jobs.checkpoint_notes_semantic_health_sweep,
+                        expected_revision=revision,
+                        after_owner_created_at=after_owner_created_at,
+                        after_owner_id=after_owner_id,
+                        after_dataset_id=None,
+                        totals_json=serialize_semantic_health_snapshots(accumulated),
+                        completed=False,
+                        now=now,
+                    )
+                    return
+                users = [{"id": after_owner_id, "created_at": after_owner_created_at}]
+            else:
+                users = await self._users_repo.list_users_for_semantic_health_sweep(
+                    after_created_at=after_owner_created_at,
+                    after_id=after_owner_id,
+                    limit=1,
+                )
             if not users:
                 committed = await asyncio.to_thread(
                     self._jobs.checkpoint_notes_semantic_health_sweep,
                     expected_revision=revision,
-                    owner_offset=owner_offset,
+                    after_owner_created_at=after_owner_created_at,
+                    after_owner_id=after_owner_id,
                     after_dataset_id=None,
                     totals_json=serialize_semantic_health_snapshots(accumulated),
                     completed=True,
@@ -442,10 +500,21 @@ class _MaintenanceRunner:
                 if committed:
                     record_semantic_aggregate_metrics(snapshots=accumulated, now=now)
                 return
-            owner = str(users[0].get("id") or "")
-            if not owner:
+            owner_row = users[0]
+            owner_id = owner_row.get("id")
+            owner_created_at = owner_row.get("created_at")
+            if (
+                isinstance(owner_id, bool)
+                or not isinstance(owner_id, int)
+                or owner_id <= 0
+                or not isinstance(owner_created_at, datetime)
+                or owner_created_at.tzinfo is None
+                or owner_created_at.utcoffset() is None
+            ):
                 logger.warning("Notes semantic health owner was invalid")
                 return
+            owner = str(owner_id)
+            owner_created_at = owner_created_at.astimezone(timezone.utc)
             db = None
             try:
                 db = await _open_owner_database(owner)
@@ -473,20 +542,17 @@ class _MaintenanceRunner:
                     await asyncio.to_thread(_close_database, db)
             totals = aggregate_semantic_health_snapshots((*accumulated, *snapshots))
             owner_complete = len(datasets) < requested
-            next_owner_offset = owner_offset + int(owner_complete)
-            completed = owner_complete and next_owner_offset >= total
             next_dataset_id = None if owner_complete else datasets[-1]
-            committed = await asyncio.to_thread(
+            await asyncio.to_thread(
                 self._jobs.checkpoint_notes_semantic_health_sweep,
                 expected_revision=revision,
-                owner_offset=next_owner_offset,
+                after_owner_created_at=owner_created_at,
+                after_owner_id=owner_id,
                 after_dataset_id=next_dataset_id,
                 totals_json=serialize_semantic_health_snapshots(totals),
-                completed=completed,
+                completed=False,
                 now=now,
             )
-            if committed and completed:
-                record_semantic_aggregate_metrics(snapshots=totals, now=now)
         except _MAINTENANCE_ERRORS:
             logger.warning("Notes semantic health aggregation failed safely")
 

@@ -155,7 +155,7 @@ class SemanticPublicationStore(Protocol):
 
     def release_obsolete_vector_claim(self, **kwargs: Any) -> bool: ...
 
-    def retry_obsolete_vector_cleanup(self, **kwargs: Any) -> bool: ...
+    def retry_obsolete_vector_cleanup(self, **kwargs: Any) -> int: ...
 
     def rearm_exhausted_obsolete_vector_cleanup(self, **kwargs: Any) -> int: ...
 
@@ -405,7 +405,7 @@ class SemanticPublicationService:
     async def _retry_obsolete_claim(self, claim: Any, *, error_code: str) -> bool:
         now = self._clock()
         delay_seconds = min(300, 2 ** min(int(claim.attempt_count), 8))
-        committed = bool(
+        committed = int(
             await self._store_transaction(
                 self._store.retry_obsolete_vector_cleanup,
                 dataset_id=claim.dataset_id,
@@ -416,9 +416,15 @@ class SemanticPublicationService:
                 now=now,
             )
         )
+        if not 0 <= committed <= len(claim.ledger_ids):
+            raise SemanticIndexingError("notes_semantic_cleanup_retry_result_invalid")
         if committed:
-            record_semantic_cleanup_retry(status="failed", backend=self._backend)
-        return committed
+            record_semantic_cleanup_retry(
+                status="failed",
+                backend=self._backend,
+                count=committed,
+            )
+        return committed == len(claim.ledger_ids)
 
     async def _claim_obsolete_batch(
         self,

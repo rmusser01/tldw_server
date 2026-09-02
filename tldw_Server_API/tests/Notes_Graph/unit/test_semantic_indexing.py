@@ -616,8 +616,8 @@ async def test_cleanup_retry_counter_increments_only_after_committed_retry(
     class Store:
         committed = True
 
-        def retry_obsolete_vector_cleanup(self, **_kwargs: object) -> bool:
-            return self.committed
+        def retry_obsolete_vector_cleanup(self, **_kwargs: object) -> int:
+            return int(self.committed)
 
     store = Store()
     monkeypatch.setattr(
@@ -651,7 +651,44 @@ async def test_cleanup_retry_counter_increments_only_after_committed_retry(
         error_code="vector_backend_failure",
     )
 
-    assert events == [{"status": "failed", "backend": "chromadb"}]
+    assert events == [{"status": "failed", "backend": "chromadb", "count": 1}]
+
+
+@pytest.mark.asyncio
+async def test_partial_obsolete_retry_counts_committed_rows_but_remains_incomplete(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[dict[str, object]] = []
+
+    class Store:
+        def retry_obsolete_vector_cleanup(self, **_kwargs: object) -> int:
+            return 1
+
+    monkeypatch.setattr(
+        semantic_publication,
+        "record_semantic_cleanup_retry",
+        lambda **kwargs: events.append(dict(kwargs)),
+    )
+    service = SemanticPublicationService(
+        store=Store(),
+        vectors=SimpleNamespace(),
+        revalidate=lambda _fence: _authority(),
+        clock=lambda: NOW,
+        receipt_factory=lambda: "receipt-a",
+        backend="pgvector",
+    )
+    claim = SimpleNamespace(
+        dataset_id="dataset-a",
+        ledger_ids=("ledger-a", "ledger-b"),
+        claim_token="claim-a",
+        attempt_count=0,
+    )
+
+    assert not await service._retry_obsolete_claim(
+        claim,
+        error_code="vector_backend_failure",
+    )
+    assert events == [{"status": "failed", "backend": "pgvector", "count": 1}]
 
 
 def test_metric_backend_failure_does_not_change_semantic_behavior(
