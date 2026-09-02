@@ -377,6 +377,68 @@ def test_sqlite_semantic_health_checkpoint_persists_exact_owner_keyset_cursor(
     }
 
 
+@pytest.mark.parametrize(
+    "after_owner_id",
+    (True, False, 2.5, "2", "2_0", 0, -1),
+    ids=("true", "false", "real", "numeric-text", "numeric-like-text", "zero", "negative"),
+)
+def test_sqlite_semantic_health_checkpoint_rejects_non_exact_owner_cursor(
+    tmp_path,
+    after_owner_id: object,
+) -> None:
+    manager = JobManager(tmp_path / "semantic_health_invalid_owner_write.db")
+
+    with pytest.raises(ValueError):
+        manager.checkpoint_notes_semantic_health_sweep(
+            expected_revision=0,
+            after_owner_id=after_owner_id,  # type: ignore[arg-type]
+            after_dataset_id=None,
+            totals_json=_complete_semantic_health_totals(),
+            completed=False,
+            now=NOW,
+        )
+
+
+@pytest.mark.parametrize(
+    "after_dataset_id",
+    ("   ", " dataset-a", "dataset-a ", "\tdataset-a", "dataset-a\n"),
+    ids=("whitespace", "leading-space", "trailing-space", "leading-tab", "trailing-newline"),
+)
+def test_sqlite_semantic_health_checkpoint_rejects_noncanonical_dataset_cursor(
+    tmp_path,
+    after_dataset_id: str,
+) -> None:
+    manager = JobManager(tmp_path / "semantic_health_invalid_dataset_write.db")
+
+    with pytest.raises(ValueError):
+        manager.checkpoint_notes_semantic_health_sweep(
+            expected_revision=0,
+            after_owner_id=1,
+            after_dataset_id=after_dataset_id,
+            totals_json=_complete_semantic_health_totals(),
+            completed=False,
+            now=NOW,
+        )
+
+
+@pytest.mark.parametrize(
+    "after_owner_id",
+    (2.5, "2_0", "true", sqlite3.Binary(b"2"), 0, -1),
+    ids=("real", "numeric-text", "boolean-like", "blob", "zero", "negative"),
+)
+def test_sqlite_semantic_health_schema_rejects_invalid_owner_cursor_storage(
+    tmp_path,
+    after_owner_id: object,
+) -> None:
+    db_path = ensure_jobs_tables(tmp_path / "semantic_health_owner_storage.db")
+
+    with sqlite3.connect(db_path) as conn, pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            "UPDATE notes_semantic_health_sweep SET after_owner_id=? WHERE singleton_id=1",
+            (after_owner_id,),
+        )
+
+
 def test_sqlite_schema_persists_owner_scoped_idempotency_receipts(tmp_path):
     db_path = ensure_jobs_tables(tmp_path / "jobs_receipts.db")
     conn = sqlite3.connect(db_path)
