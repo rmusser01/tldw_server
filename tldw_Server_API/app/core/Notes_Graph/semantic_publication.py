@@ -20,6 +20,7 @@ from tldw_Server_API.app.core.DB_Management.chacha.note_semantic_models import (
 
 from .semantic_content import SemanticChunkInput
 from .semantic_endpoint import canonical_semantic_endpoint_origin
+from .semantic_observability import record_semantic_cleanup_retry
 from .semantic_vectors import SemanticVector
 
 
@@ -358,6 +359,7 @@ class SemanticPublicationService:
         max_cleanup_vectors: int = 10_000,
         max_vectors_per_publication: int = 200,
         store_call: Callable[..., Awaitable[Any]] | None = None,
+        backend: str = "unavailable",
     ) -> None:
         if (
             type(max_cleanup_vectors) is not int
@@ -366,6 +368,8 @@ class SemanticPublicationService:
             or max_vectors_per_publication <= 0
         ):
             raise ValueError("notes_semantic_publication_limit_invalid")
+        if backend not in {"chromadb", "pgvector", "unavailable"}:
+            raise ValueError("notes_semantic_vector_backend_invalid")
         self._store = store
         self._vectors = vectors
         self._revalidate = revalidate
@@ -374,6 +378,7 @@ class SemanticPublicationService:
         self._max_cleanup_vectors = max_cleanup_vectors
         self._max_vectors_per_publication = max_vectors_per_publication
         self._store_call = store_call
+        self._backend = backend
 
     async def _store_transaction(
         self,
@@ -400,7 +405,7 @@ class SemanticPublicationService:
     async def _retry_obsolete_claim(self, claim: Any, *, error_code: str) -> bool:
         now = self._clock()
         delay_seconds = min(300, 2 ** min(int(claim.attempt_count), 8))
-        return bool(
+        committed = bool(
             await self._store_transaction(
                 self._store.retry_obsolete_vector_cleanup,
                 dataset_id=claim.dataset_id,
@@ -411,6 +416,9 @@ class SemanticPublicationService:
                 now=now,
             )
         )
+        if committed:
+            record_semantic_cleanup_retry(status="failed", backend=self._backend)
+        return committed
 
     async def _claim_obsolete_batch(
         self,

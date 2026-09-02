@@ -19,7 +19,11 @@ from tldw_Server_API.app.core.DB_Management.chacha.note_semantic_models import (
     SemanticWorkItem,
     SemanticWorkKind,
 )
-from tldw_Server_API.app.core.Notes_Graph import semantic_indexing, semantic_observability
+from tldw_Server_API.app.core.Notes_Graph import (
+    semantic_indexing,
+    semantic_observability,
+    semantic_publication,
+)
 from tldw_Server_API.app.core.Notes_Graph.semantic_content import build_semantic_chunks
 from tldw_Server_API.app.core.Notes_Graph.semantic_embeddings import (
     PendingSemanticConfig,
@@ -339,6 +343,10 @@ def test_operational_metrics_use_only_closed_low_cardinality_labels(
         retries=1,
         oldest_age_seconds=30.0,
     )
+    semantic_observability.record_semantic_cleanup_retry(
+        status="failed",
+        backend="pgvector",
+    )
     semantic_observability.record_semantic_denial("kill_switch")
     semantic_observability.record_semantic_cancellation("rebuild")
     semantic_observability.record_semantic_failure(
@@ -361,6 +369,7 @@ def test_operational_metrics_use_only_closed_low_cardinality_labels(
         "notes_semantic_query_stage_total",
         "notes_semantic_truncations_total",
         "notes_semantic_cleanup_backlog",
+        "notes_semantic_cleanup_retry_backlog",
         "notes_semantic_cleanup_retries_total",
         "notes_semantic_cleanup_oldest_age_seconds",
         "notes_semantic_denials_total",
@@ -413,6 +422,32 @@ def test_build_completion_does_not_overwrite_global_health_gauges(
         "notes_semantic_build_duration_seconds",
         "notes_semantic_builds_total",
     ]
+
+
+def test_dsr_completion_does_not_overwrite_global_health_gauges(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    counters: list[str] = []
+    gauges: list[str] = []
+    monkeypatch.setattr(semantic_observability, "_ensure_metrics_registered", lambda: None)
+    monkeypatch.setattr(
+        semantic_observability,
+        "increment_counter",
+        lambda name, value=1, labels=None: counters.append(name),
+    )
+    monkeypatch.setattr(
+        semantic_observability,
+        "set_gauge",
+        lambda name, value, labels=None: gauges.append(name),
+    )
+
+    semantic_observability.record_semantic_dsr_metrics(
+        status="success",
+        backend="chromadb",
+    )
+
+    assert counters == ["notes_semantic_dsr_total"]
+    assert gauges == []
 
 
 def test_authoritative_health_aggregates_multi_dataset_state_cleanup_and_age(
@@ -498,8 +533,8 @@ def test_authoritative_health_aggregates_multi_dataset_state_cleanup_and_age(
     assert gauge("notes_semantic_cleanup_backlog", {"backend": "chromadb"}) == 2
     assert (
         gauge(
-            "notes_semantic_cleanup_retries_total",
-            {"status": "failed", "backend": "chromadb"},
+            "notes_semantic_cleanup_retry_backlog",
+            {"backend": "chromadb"},
         )
         == 3
     )
@@ -507,6 +542,116 @@ def test_authoritative_health_aggregates_multi_dataset_state_cleanup_and_age(
     assert gauge("notes_semantic_cleanup_backlog", {"backend": "pgvector"}) == 1
     assert gauge("notes_semantic_cleanup_oldest_age_seconds", {"backend": "pgvector"}) == 60
     assert gauge("notes_semantic_cleanup_backlog", {"backend": "unavailable"}) == 0
+
+
+def test_cleanup_retry_total_is_event_counter_and_backlog_is_resettable_gauge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    definitions = {definition.name: definition for definition in semantic_observability._METRIC_DEFINITIONS}
+    assert definitions["notes_semantic_cleanup_retries_total"].type.value == "counter"
+    assert definitions["notes_semantic_cleanup_retry_backlog"].type.value == "gauge"
+
+    counters: list[tuple[str, float, dict[str, str]]] = []
+    gauges: list[tuple[str, float, dict[str, str]]] = []
+    monkeypatch.setattr(semantic_observability, "_ensure_metrics_registered", lambda: None)
+    monkeypatch.setattr(
+        semantic_observability,
+        "increment_counter",
+        lambda name, value=1, labels=None: counters.append((name, float(value), dict(labels or {}))),
+    )
+    monkeypatch.setattr(
+        semantic_observability,
+        "set_gauge",
+        lambda name, value, labels=None: gauges.append((name, float(value), dict(labels or {}))),
+    )
+
+    semantic_observability.record_semantic_cleanup_metrics(
+        status="failed",
+        backend="chromadb",
+        backlog=4,
+        retries=7,
+        oldest_age_seconds=30,
+    )
+    semantic_observability.record_semantic_cleanup_metrics(
+        status="success",
+        backend="chromadb",
+        backlog=0,
+        retries=0,
+        oldest_age_seconds=0,
+    )
+    semantic_observability.record_semantic_cleanup_retry(
+        status="failed",
+        backend="chromadb",
+    )
+    semantic_observability.record_semantic_cleanup_retry(
+        status="failed",
+        backend="chromadb",
+    )
+
+    assert counters == [
+        (
+            "notes_semantic_cleanup_retries_total",
+            1.0,
+            {"status": "failed", "backend": "chromadb"},
+        ),
+        (
+            "notes_semantic_cleanup_retries_total",
+            1.0,
+            {"status": "failed", "backend": "chromadb"},
+        ),
+    ]
+    assert [
+        value
+        for name, value, labels in gauges
+        if name == "notes_semantic_cleanup_retry_backlog" and labels == {"backend": "chromadb"}
+    ] == [7.0, 0.0]
+
+
+@pytest.mark.asyncio
+async def test_cleanup_retry_counter_increments_only_after_committed_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[dict[str, str]] = []
+
+    class Store:
+        committed = True
+
+        def retry_obsolete_vector_cleanup(self, **_kwargs: object) -> bool:
+            return self.committed
+
+    store = Store()
+    monkeypatch.setattr(
+        semantic_publication,
+        "record_semantic_cleanup_retry",
+        lambda **kwargs: events.append(dict(kwargs)),
+        raising=False,
+    )
+    service = SemanticPublicationService(
+        store=store,
+        vectors=SimpleNamespace(),
+        revalidate=lambda _fence: _authority(),
+        clock=lambda: NOW,
+        receipt_factory=lambda: "receipt-a",
+        backend="chromadb",
+    )
+    claim = SimpleNamespace(
+        dataset_id="dataset-a",
+        ledger_ids=("ledger-a",),
+        claim_token="claim-a",
+        attempt_count=0,
+    )
+
+    assert await service._retry_obsolete_claim(
+        claim,
+        error_code="vector_backend_failure",
+    )
+    store.committed = False
+    assert not await service._retry_obsolete_claim(
+        claim,
+        error_code="vector_backend_failure",
+    )
+
+    assert events == [{"status": "failed", "backend": "chromadb"}]
 
 
 def test_metric_backend_failure_does_not_change_semantic_behavior(

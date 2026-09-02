@@ -329,6 +329,7 @@ class SemanticErasureCoordinator:
             receipt_factory=lambda: str(uuid4()),
             max_cleanup_vectors=self._settings.max_cleanup_vectors_per_run,
             store_call=self._store_call,
+            backend=backend_name,
         )
         cleaned = 0
         steps = 0

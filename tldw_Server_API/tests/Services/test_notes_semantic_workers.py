@@ -219,6 +219,58 @@ async def test_dataset_maintenance_does_not_publish_global_cleanup_gauges(
 
 
 @pytest.mark.asyncio
+async def test_generation_cleanup_retry_counter_records_only_committed_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[dict[str, str]] = []
+
+    class Store:
+        committed = True
+
+        def get_configuration(self, _dataset_id: str):
+            return SimpleNamespace(vector_backend="chromadb")
+
+        def retry_work(self, **_kwargs: object):
+            return SimpleNamespace() if self.committed else None
+
+    class Runtime:
+        async def cleanup_claim(self, _claim: object) -> bool:
+            return False
+
+    store = Store()
+    scope = notes_semantic_maintenance._ProductionScope(
+        db=SimpleNamespace(note_semantic_store=store),
+        jobs=SimpleNamespace(),
+        owner_user_id="owner-a",
+        dataset_id="dataset-a",
+        settings=SemanticIndexSettings(),
+    )
+
+    async def runtime(_generation_id: str):
+        return Runtime()
+
+    monkeypatch.setattr(scope, "_runtime", runtime)
+    monkeypatch.setattr(
+        notes_semantic_maintenance,
+        "record_semantic_cleanup_retry",
+        lambda **kwargs: events.append(dict(kwargs)),
+        raising=False,
+    )
+    claim = SimpleNamespace(
+        id="cleanup-a",
+        generation_id="generation-a",
+        claim_token="claim-a",
+        attempt_count=0,
+    )
+
+    assert not await scope.cleanup_claim(claim)
+    store.committed = False
+    assert not await scope.cleanup_claim(claim)
+
+    assert events == [{"status": "failed", "backend": "chromadb"}]
+
+
+@pytest.mark.asyncio
 async def test_worker_records_terminal_metrics_and_publication_audit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1382,6 +1434,7 @@ async def test_production_maintenance_audits_confirmed_cleanup(
 @pytest.mark.asyncio
 async def test_no_work_owner_discovery_is_bounded_and_continues_fairly(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
 ) -> None:
     class Users:
         def __init__(self) -> None:
@@ -1409,7 +1462,7 @@ async def test_no_work_owner_discovery_is_bounded_and_continues_fairly(
 
     monkeypatch.setattr(notes_semantic_maintenance, "_open_owner_database", open_database)
     runner = notes_semantic_maintenance._MaintenanceRunner(
-        jobs=SimpleNamespace(),
+        jobs=JobManager(tmp_path / "fair-health-jobs.db"),
         users_repo=users,
         settings=SemanticIndexSettings(),
     )
@@ -1428,6 +1481,7 @@ async def test_no_work_owner_discovery_is_bounded_and_continues_fairly(
 @pytest.mark.asyncio
 async def test_complete_health_sweep_aggregates_all_owners_and_rebuilds_after_restart(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
 ) -> None:
     def snapshot(
         backend: str,
@@ -1537,21 +1591,31 @@ async def test_complete_health_sweep_aggregates_all_owners_and_rebuilds_after_re
         raising=False,
     )
 
-    async def complete_one_sweep(runner) -> tuple[SimpleNamespace, ...]:
+    jobs = JobManager(tmp_path / "semantic-health-jobs.db")
+
+    async def complete_one_sweep() -> tuple[SimpleNamespace, ...]:
         for _ in range(6):
-            await runner.run_pass(now=NOW, limit=2)
+            runner = notes_semantic_maintenance._MaintenanceRunner(
+                jobs=JobManager(jobs.db_path),
+                users_repo=Users(),
+                settings=SemanticIndexSettings(),
+            )
+            await runner._run_health_sweep_page(now=NOW, limit=2)
             if observations:
                 return observations[-1]
         raise AssertionError("bounded health sweep did not converge")
 
     first_runner = notes_semantic_maintenance._MaintenanceRunner(
-        jobs=SimpleNamespace(),
+        jobs=jobs,
         users_repo=Users(),
         settings=SemanticIndexSettings(),
     )
-    await first_runner.run_pass(now=NOW, limit=2)
+    await first_runner._run_health_sweep_page(now=NOW, limit=2)
     assert observations == []
-    first = await complete_one_sweep(first_runner)
+    persisted = JobManager(jobs.db_path).get_notes_semantic_health_sweep()
+    assert persisted["owner_offset"] == 0
+    assert persisted["after_dataset_id"] == "dataset-b"
+    first = await complete_one_sweep()
 
     chromadb = next(value for value in first if value.backend == "chromadb")
     pgvector = next(value for value in first if value.backend == "pgvector")
@@ -1562,13 +1626,13 @@ async def test_complete_health_sweep_aggregates_all_owners_and_rebuilds_after_re
 
     observations.clear()
     restarted = notes_semantic_maintenance._MaintenanceRunner(
-        jobs=SimpleNamespace(),
+        jobs=JobManager(jobs.db_path),
         users_repo=Users(),
         settings=SemanticIndexSettings(),
     )
-    await restarted.run_pass(now=NOW, limit=2)
+    await restarted._run_health_sweep_page(now=NOW, limit=2)
     assert observations == []
-    rebuilt = await complete_one_sweep(restarted)
+    rebuilt = await complete_one_sweep()
 
     assert rebuilt == first
 
@@ -1576,6 +1640,7 @@ async def test_complete_health_sweep_aggregates_all_owners_and_rebuilds_after_re
 @pytest.mark.asyncio
 async def test_health_sweep_bounds_empty_owner_database_scans(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
 ) -> None:
     opened: list[str] = []
     observations: list[tuple[object, ...]] = []
@@ -1609,7 +1674,7 @@ async def test_health_sweep_bounds_empty_owner_database_scans(
         lambda *, snapshots, now: observations.append(tuple(snapshots)),
     )
     runner = notes_semantic_maintenance._MaintenanceRunner(
-        jobs=SimpleNamespace(),
+        jobs=JobManager(tmp_path / "empty-health-jobs.db"),
         users_repo=Users(),
         settings=SemanticIndexSettings(),
     )
@@ -1623,6 +1688,7 @@ async def test_health_sweep_bounds_empty_owner_database_scans(
 @pytest.mark.asyncio
 async def test_health_sweep_uses_unfiltered_authority_cursor_across_empty_dataset(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
 ) -> None:
     observations: list[tuple[object, ...]] = []
 
@@ -1681,7 +1747,7 @@ async def test_health_sweep_uses_unfiltered_authority_cursor_across_empty_datase
         lambda *, snapshots, now: observations.append(tuple(snapshots)),
     )
     runner = notes_semantic_maintenance._MaintenanceRunner(
-        jobs=SimpleNamespace(),
+        jobs=JobManager(tmp_path / "cursor-health-jobs.db"),
         users_repo=Users(),
         settings=SemanticIndexSettings(),
     )

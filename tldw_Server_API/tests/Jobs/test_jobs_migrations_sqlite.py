@@ -4,6 +4,7 @@ import importlib
 import json
 import math
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -147,6 +148,73 @@ def _insert_legacy_canonical_archive(
             _LEGACY_APPLIED_AT,
         ),
     )
+
+NOW = datetime(2026, 9, 2, 12, 0, tzinfo=timezone.utc)
+
+
+def test_sqlite_semantic_health_sweep_checkpoint_is_durable_and_cas_fenced(
+    tmp_path,
+):
+    db_path = ensure_jobs_tables(tmp_path / "jobs_semantic_health.db")
+    with sqlite3.connect(db_path) as conn:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(notes_semantic_health_sweep)").fetchall()}
+        assert columns == {
+            "singleton_id",
+            "revision",
+            "owner_offset",
+            "after_dataset_id",
+            "totals_json",
+            "updated_at",
+            "last_completed_at",
+        }
+        assert conn.execute(
+            "SELECT singleton_id,revision,owner_offset,after_dataset_id,totals_json FROM notes_semantic_health_sweep"
+        ).fetchone() == (1, 0, 0, None, "[]")
+
+    totals = json.dumps([{"backend": "chromadb", "indexed_notes": 2}])
+    manager = JobManager(db_path)
+    assert manager.checkpoint_notes_semantic_health_sweep(
+        expected_revision=0,
+        owner_offset=1,
+        after_dataset_id="dataset-a",
+        totals_json=totals,
+        completed=False,
+        now=NOW,
+    )
+
+    restarted = JobManager(db_path)
+    assert restarted.get_notes_semantic_health_sweep() == {
+        "revision": 1,
+        "owner_offset": 1,
+        "after_dataset_id": "dataset-a",
+        "totals_json": totals,
+        "updated_at": NOW,
+        "last_completed_at": None,
+    }
+    assert not restarted.checkpoint_notes_semantic_health_sweep(
+        expected_revision=0,
+        owner_offset=9,
+        after_dataset_id=None,
+        totals_json="[]",
+        completed=False,
+        now=NOW,
+    )
+    assert restarted.checkpoint_notes_semantic_health_sweep(
+        expected_revision=1,
+        owner_offset=9,
+        after_dataset_id=None,
+        totals_json=totals,
+        completed=True,
+        now=NOW,
+    )
+    assert restarted.get_notes_semantic_health_sweep() == {
+        "revision": 2,
+        "owner_offset": 0,
+        "after_dataset_id": None,
+        "totals_json": "[]",
+        "updated_at": NOW,
+        "last_completed_at": NOW,
+    }
 
 
 def test_sqlite_schema_persists_owner_scoped_idempotency_receipts(tmp_path):

@@ -30,8 +30,11 @@ from tldw_Server_API.app.core.Notes_Graph.semantic_jobs import (
 )
 from tldw_Server_API.app.core.Notes_Graph.semantic_observability import (
     aggregate_semantic_health_snapshots,
+    deserialize_semantic_health_snapshots,
     emit_semantic_audit_event,
     record_semantic_aggregate_metrics,
+    record_semantic_cleanup_retry,
+    serialize_semantic_health_snapshots,
 )
 from tldw_Server_API.app.core.Notes_Graph.semantic_settings import SemanticIndexSettings
 from tldw_Server_API.app.services.notes_semantic_index_worker import (
@@ -325,7 +328,7 @@ class _ProductionScope:
                 self._settings.retry_max_backoff_seconds,
                 self._settings.retry_backoff_seconds * (2 ** min(int(getattr(claim, "attempt_count", 0)), 8)),
             )
-            self._store.retry_work(
+            retried = self._store.retry_work(
                 dataset_id=self._dataset_id,
                 work_id=str(getattr(claim, "id", "")),
                 expected_claim_token=getattr(claim, "claim_token", None),
@@ -333,6 +336,11 @@ class _ProductionScope:
                 retry_at=now + timedelta(seconds=delay),
                 now=now,
             )
+            if retried is not None:
+                record_semantic_cleanup_retry(
+                    status="failed",
+                    backend=self._metric_backend(),
+                )
             return False
         if confirmed:
             try:
@@ -348,7 +356,7 @@ class _ProductionScope:
             return True
         if not isinstance(claim, _ObsoleteCleanupClaim):
             now = datetime.now(timezone.utc)
-            self._store.retry_work(
+            retried = self._store.retry_work(
                 dataset_id=self._dataset_id,
                 work_id=str(getattr(claim, "id", "")),
                 expected_claim_token=getattr(claim, "claim_token", None),
@@ -356,7 +364,20 @@ class _ProductionScope:
                 retry_at=now + timedelta(seconds=self._settings.retry_backoff_seconds),
                 now=now,
             )
+            if retried is not None:
+                record_semantic_cleanup_retry(
+                    status="failed",
+                    backend=self._metric_backend(),
+                )
         return False
+
+    def _metric_backend(self) -> str:
+        try:
+            config = self._store.get_configuration(self._dataset_id)
+        except _MAINTENANCE_ERRORS:
+            return "unavailable"
+        backend = str(getattr(config, "vector_backend", "") or "")
+        return backend if backend in {"chromadb", "pgvector"} else "unavailable"
 
     def health_snapshot(self) -> Any:
         """Read current capability drift and persisted backend health together."""
@@ -392,46 +413,49 @@ class _MaintenanceRunner:
         self._users_repo = users_repo
         self._settings = settings
         self._owner_offset = 0
-        self._health_owner_offset = 0
-        self._health_after_dataset_id: str | None = None
-        self._health_snapshots: tuple[Any, ...] = ()
         self._single_slot_health_turn = False
-
-    def _reset_health_sweep(self) -> None:
-        self._health_owner_offset = 0
-        self._health_after_dataset_id = None
-        self._health_snapshots = ()
 
     async def _run_health_sweep_page(self, *, now: datetime, limit: int) -> None:
         """Advance one bounded full-store sweep and publish only complete totals."""
 
-        remaining = min(limit, 100)
-        while remaining > 0:
+        requested = min(limit, 100)
+        try:
+            state = await asyncio.to_thread(self._jobs.get_notes_semantic_health_sweep)
+            revision = int(state["revision"])
+            owner_offset = int(state["owner_offset"])
+            after_dataset_id = state["after_dataset_id"]
+            accumulated = deserialize_semantic_health_snapshots(str(state["totals_json"]))
             users, total = await self._users_repo.list_users(
-                offset=self._health_owner_offset,
+                offset=owner_offset,
                 limit=1,
             )
             if not users:
-                record_semantic_aggregate_metrics(snapshots=self._health_snapshots, now=now)
-                self._reset_health_sweep()
+                committed = await asyncio.to_thread(
+                    self._jobs.checkpoint_notes_semantic_health_sweep,
+                    expected_revision=revision,
+                    owner_offset=owner_offset,
+                    after_dataset_id=None,
+                    totals_json=serialize_semantic_health_snapshots(accumulated),
+                    completed=True,
+                    now=now,
+                )
+                if committed:
+                    record_semantic_aggregate_metrics(snapshots=accumulated, now=now)
                 return
             owner = str(users[0].get("id") or "")
             if not owner:
                 logger.warning("Notes semantic health owner was invalid")
-                self._reset_health_sweep()
                 return
             db = None
-            requested = remaining
             try:
                 db = await _open_owner_database(owner)
                 datasets = await asyncio.to_thread(
                     db.note_semantic_store.list_observability_dataset_ids,
                     limit=requested,
-                    after_dataset_id=self._health_after_dataset_id,
+                    after_dataset_id=after_dataset_id,
                 )
-                snapshot_values = []
-                for dataset_id in datasets:
-                    snapshot_values.append(
+                snapshots = tuple(
+                    [
                         await asyncio.to_thread(
                             _ProductionScope(
                                 db=db,
@@ -441,27 +465,30 @@ class _MaintenanceRunner:
                                 settings=self._settings,
                             ).health_snapshot
                         )
-                    )
-                snapshots = tuple(snapshot_values)
-            except _MAINTENANCE_ERRORS:
-                logger.warning("Notes semantic health aggregation failed safely")
-                self._reset_health_sweep()
-                return
+                        for dataset_id in datasets
+                    ]
+                )
             finally:
                 if db is not None:
                     await asyncio.to_thread(_close_database, db)
-            if snapshots:
-                self._health_snapshots = aggregate_semantic_health_snapshots((*self._health_snapshots, *snapshots))
-                self._health_after_dataset_id = datasets[-1]
-            remaining -= max(1, len(snapshots))
-            if len(datasets) == requested:
-                return
-            self._health_owner_offset += 1
-            self._health_after_dataset_id = None
-            if self._health_owner_offset >= total:
-                record_semantic_aggregate_metrics(snapshots=self._health_snapshots, now=now)
-                self._reset_health_sweep()
-                return
+            totals = aggregate_semantic_health_snapshots((*accumulated, *snapshots))
+            owner_complete = len(datasets) < requested
+            next_owner_offset = owner_offset + int(owner_complete)
+            completed = owner_complete and next_owner_offset >= total
+            next_dataset_id = None if owner_complete else datasets[-1]
+            committed = await asyncio.to_thread(
+                self._jobs.checkpoint_notes_semantic_health_sweep,
+                expected_revision=revision,
+                owner_offset=next_owner_offset,
+                after_dataset_id=next_dataset_id,
+                totals_json=serialize_semantic_health_snapshots(totals),
+                completed=completed,
+                now=now,
+            )
+            if committed and completed:
+                record_semantic_aggregate_metrics(snapshots=totals, now=now)
+        except _MAINTENANCE_ERRORS:
+            logger.warning("Notes semantic health aggregation failed safely")
 
     async def run_pass(
         self,

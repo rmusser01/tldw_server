@@ -26,6 +26,7 @@ from tldw_Server_API.app.core.Jobs.pg_migrations import (
 )
 
 pytestmark = [pytest.mark.pg_jobs]
+NOW = datetime(2026, 9, 2, 12, 0, tzinfo=timezone.utc)
 
 _LEGACY_DELIVERY_ID = "00000000-0000-4000-8000-000000000001"
 _LEGACY_ATTEMPT_ID = "00000000-0000-4000-8000-000000000002"
@@ -165,6 +166,54 @@ def test_pg_archive_upgrade_accepts_name_only_description_columns() -> None:
             return ()
 
     jobs_pg_migrations._upgrade_legacy_admin_webhook_archives_pg(_Cursor())
+
+
+def test_pg_semantic_health_sweep_checkpoint_migrates_and_survives_restart(
+    jobs_pg_dsn,
+):
+    ensure_jobs_tables_pg(jobs_pg_dsn)
+    with psycopg.connect(jobs_pg_dsn, autocommit=True) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema=current_schema() "
+                "AND table_name='notes_semantic_health_sweep'"
+            )
+            assert {row[0] for row in cur.fetchall()} == {
+                "singleton_id",
+                "revision",
+                "owner_offset",
+                "after_dataset_id",
+                "totals_json",
+                "updated_at",
+                "last_completed_at",
+            }
+            cur.execute(
+                "UPDATE notes_semantic_health_sweep SET revision=0,owner_offset=0,"
+                "after_dataset_id=NULL,totals_json='[]',updated_at=%s,"
+                "last_completed_at=NULL WHERE singleton_id=1",
+                (NOW,),
+            )
+
+    totals = json.dumps([{"backend": "pgvector", "failed_notes": 3}])
+    manager = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
+    assert manager.checkpoint_notes_semantic_health_sweep(
+        expected_revision=0,
+        owner_offset=2,
+        after_dataset_id="dataset-z",
+        totals_json=totals,
+        completed=False,
+        now=NOW,
+    )
+
+    restarted = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
+    state = restarted.get_notes_semantic_health_sweep()
+    assert state["revision"] == 1
+    assert state["owner_offset"] == 2
+    assert state["after_dataset_id"] == "dataset-z"
+    assert json.loads(state["totals_json"]) == json.loads(totals)
+    assert state["updated_at"] == NOW
+    assert state["last_completed_at"] is None
 
 
 def test_pg_schema_persists_owner_scoped_idempotency_receipts(jobs_pg_dsn):

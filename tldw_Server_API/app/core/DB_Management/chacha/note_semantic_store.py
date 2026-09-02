@@ -2089,15 +2089,31 @@ class NoteSemanticStore:
         with self._db.transaction() as conn:
             self._set_scope(conn, dataset)
             config_row = conn.execute(
-                "SELECT active_generation_id,capability_revision,vector_backend "
+                "SELECT active_generation_id,capability_revision,vector_backend,"
+                "configuration_revision "
                 "FROM note_semantic_index_configs WHERE owner_user_id=? AND dataset_id=?",
                 (self.owner_user_id, dataset),
             ).fetchone()
             config = None if config_row is None else self._record(config_row)
             active_generation_id = None if config is None else config["active_generation_id"]
+            observed_generation_id = active_generation_id
+            if config is not None:
+                working_row = conn.execute(
+                    "SELECT id FROM note_semantic_generations WHERE owner_user_id=? "
+                    "AND dataset_id=? AND configuration_revision=? AND deleted_at IS NULL "
+                    "AND state IN ('staging','failed') ORDER BY "
+                    "CASE WHEN state='staging' THEN 0 ELSE 1 END,created_at DESC,id DESC LIMIT 1",
+                    (
+                        self.owner_user_id,
+                        dataset,
+                        int(config["configuration_revision"]),
+                    ),
+                ).fetchone()
+                if working_row is not None:
+                    observed_generation_id = str(self._record(working_row)["id"])
 
             indexed = excluded = failed = pending = dirty = 0
-            if active_generation_id is not None:
+            if observed_generation_id is not None:
                 counts_row = conn.execute(
                     "SELECT "
                     "COALESCE(SUM(CASE WHEN state='indexed' THEN 1 ELSE 0 END),0) AS indexed,"
@@ -2106,7 +2122,7 @@ class NoteSemanticStore:
                     "COALESCE(SUM(CASE WHEN state='pending' THEN 1 ELSE 0 END),0) AS pending "
                     "FROM note_semantic_note_state WHERE owner_user_id=? AND dataset_id=? "
                     "AND generation_id=?",
-                    (self.owner_user_id, dataset, active_generation_id),
+                    (self.owner_user_id, dataset, observed_generation_id),
                 ).fetchone()
                 counts = self._record(counts_row)
                 indexed = int(counts["indexed"])
@@ -2117,9 +2133,34 @@ class NoteSemanticStore:
                     "SELECT COUNT(DISTINCT note_id) AS dirty FROM note_semantic_work "
                     "WHERE owner_user_id=? AND dataset_id=? AND generation_id=? "
                     "AND kind='index_note' AND claim_state IN ('pending','claimed','failed')",
-                    (self.owner_user_id, dataset, active_generation_id),
+                    (self.owner_user_id, dataset, observed_generation_id),
                 ).fetchone()
                 dirty = int(self._record(dirty_row)["dirty"])
+
+            stale_row = conn.execute(
+                "SELECT COUNT(*) AS stale FROM note_semantic_generations WHERE "
+                "owner_user_id=? AND dataset_id=? AND deleted_at IS NULL AND "
+                "state IN ('retired','failed','deleting')",
+                (self.owner_user_id, dataset),
+            ).fetchone()
+            stale = int(self._record(stale_row)["stale"])
+            capability_stale = bool(
+                current_capability_revision is not None
+                and config is not None
+                and config["capability_revision"] != current_capability_revision
+            )
+            if capability_stale:
+                current_stale_row = conn.execute(
+                    "SELECT COUNT(*) AS stale FROM note_semantic_generations WHERE "
+                    "owner_user_id=? AND dataset_id=? AND configuration_revision=? "
+                    "AND deleted_at IS NULL AND state IN ('active','staging')",
+                    (
+                        self.owner_user_id,
+                        dataset,
+                        int(config["configuration_revision"]),
+                    ),
+                ).fetchone()
+                stale += int(self._record(current_stale_row)["stale"])
 
             cleanup_row = conn.execute(
                 "SELECT COUNT(*) AS backlog,COALESCE(SUM(attempt_count),0) AS retries,"
@@ -2138,12 +2179,6 @@ class NoteSemanticStore:
 
         configured_backend = None if config is None else str(config["vector_backend"] or "")
         backend = configured_backend if configured_backend in {"chromadb", "pgvector"} else "unavailable"
-        stale = int(
-            active_generation_id is not None
-            and current_capability_revision is not None
-            and config is not None
-            and config["capability_revision"] != current_capability_revision
-        )
         return SemanticHealthSnapshot(
             backend=backend,
             indexed_notes=indexed,
