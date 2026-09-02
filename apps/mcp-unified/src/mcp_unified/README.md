@@ -105,7 +105,7 @@ python -m pip install "mcp-unified[gateway]"
 Downstream applications should use a compatible-minor pin:
 
 ```bash
-python -m pip install "mcp-unified[gateway]~=0.2.1"
+python -m pip install "mcp-unified[gateway]~=0.3.0"
 ```
 
 For development tooling, install the optional development extras:
