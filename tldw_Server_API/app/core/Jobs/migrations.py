@@ -584,7 +584,7 @@ INSERT OR IGNORE INTO slides_standalone_reconciliation(singleton_id) VALUES (1);
 CREATE TABLE IF NOT EXISTS notes_semantic_health_sweep (
   singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
   revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
-  after_owner_id INTEGER CHECK (
+  after_owner_id CHECK (
     after_owner_id IS NULL OR
     (TYPEOF(after_owner_id) = 'integer' AND after_owner_id > 0)
   ),

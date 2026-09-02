@@ -423,8 +423,16 @@ def test_sqlite_semantic_health_checkpoint_rejects_noncanonical_dataset_cursor(
 
 @pytest.mark.parametrize(
     "after_owner_id",
-    (2.5, "2_0", "true", sqlite3.Binary(b"2"), 0, -1),
-    ids=("real", "numeric-text", "boolean-like", "blob", "zero", "negative"),
+    (2.5, "2", "2_0", "true", sqlite3.Binary(b"2"), 0, -1),
+    ids=(
+        "real",
+        "numeric-text",
+        "numeric-like-text",
+        "boolean-like",
+        "blob",
+        "zero",
+        "negative",
+    ),
 )
 def test_sqlite_semantic_health_schema_rejects_invalid_owner_cursor_storage(
     tmp_path,
