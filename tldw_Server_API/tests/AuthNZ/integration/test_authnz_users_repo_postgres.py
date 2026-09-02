@@ -82,7 +82,7 @@ async def test_concurrent_user_reads_do_not_run_schema_ddl_postgres(
 
 
 @pytest.mark.asyncio
-async def test_semantic_health_user_keyset_orders_postgres_created_at_ties(
+async def test_semantic_health_user_keyset_ignores_postgres_nullable_mutable_timestamps(
     isolated_test_environment,
 ):
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
@@ -106,26 +106,39 @@ async def test_semantic_health_user_keyset_orders_postgres_created_at_ties(
     tied = datetime(2026, 9, 2, 12, 0, tzinfo=timezone.utc)
     gateway = VersionedUserWriteGateway("postgres")
     async with pool.transaction() as conn:
-        for user in users:
+        for index, user in enumerate(users):
             await gateway.execute_update(
                 conn,
                 user_id=int(user["id"]),
                 profile_visible_fields=("username",),
                 statement="UPDATE users SET created_at=$1,username=username WHERE id=$2",
-                parameters=(tied, int(user["id"])),
+                parameters=(None if index == 0 else tied, int(user["id"])),
             )
     repo = AuthnzUsersRepo(db_pool=pool)
 
     first = await repo.list_users_for_semantic_health_sweep(
-        after_created_at=None,
         after_id=None,
-        limit=2,
+        limit=1,
     )
+    inserted = await users_db.create_user(
+        username="semantic_health_pg_late",
+        email="semantic_health_pg_late@example.com",
+        password_hash="hash",
+    )
+    async with pool.transaction() as conn:
+        for user in users[:-1]:
+            await gateway.execute_update(
+                conn,
+                user_id=int(user["id"]),
+                profile_visible_fields=("username",),
+                statement="UPDATE users SET created_at=$1,username=username WHERE id=$2",
+                parameters=(datetime(1999, 1, 1, tzinfo=timezone.utc), int(user["id"])),
+            )
     second = await repo.list_users_for_semantic_health_sweep(
-        after_created_at=first[-1]["created_at"],
         after_id=first[-1]["id"],
-        limit=2,
+        limit=10,
     )
 
     expected = sorted((int(user["id"]) for user in users), reverse=True)
     assert [row["id"] for row in (*first, *second)] == expected
+    assert int(inserted["id"]) not in {row["id"] for row in (*first, *second)}

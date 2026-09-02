@@ -61,3 +61,27 @@ def parse_notes_semantic_health_totals(value: str) -> tuple[dict[str, object], .
     if payload and backends != NOTES_SEMANTIC_HEALTH_BACKENDS:
         raise ValueError("semantic health totals must contain every backend")
     return tuple(validated)
+
+
+def validate_notes_semantic_health_checkpoint(
+    *,
+    after_owner_id: object,
+    after_dataset_id: object,
+    totals_json: str,
+) -> tuple[dict[str, object], ...]:
+    """Validate one coherent reset or in-progress health sweep checkpoint."""
+
+    totals = parse_notes_semantic_health_totals(totals_json)
+    if after_owner_id is None:
+        if after_dataset_id is not None or totals:
+            raise ValueError("semantic health initial checkpoint must be empty")
+        return totals
+    if isinstance(after_owner_id, bool) or not isinstance(after_owner_id, int) or after_owner_id <= 0:
+        raise ValueError("semantic health owner id must be positive")
+    if not totals:
+        raise ValueError("semantic health in-progress checkpoint requires totals")
+    if after_dataset_id is not None and (
+        not isinstance(after_dataset_id, str) or not after_dataset_id or len(after_dataset_id.encode("utf-8")) > 256
+    ):
+        raise ValueError("semantic health dataset cursor must be bounded")
+    return totals

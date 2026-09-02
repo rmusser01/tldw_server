@@ -84,7 +84,7 @@ async def test_authnz_users_repo_create_does_not_inspect_or_mutate_schema(
 
 
 @pytest.mark.asyncio
-async def test_semantic_health_user_keyset_uses_id_to_break_created_at_ties(
+async def test_semantic_health_user_keyset_ignores_mutable_timestamps(
     tmp_path,
     monkeypatch,
 ):
@@ -124,16 +124,57 @@ async def test_semantic_health_user_keyset_uses_id_to_break_created_at_ties(
     repo = AuthnzUsersRepo(db_pool=pool)
 
     first = await repo.list_users_for_semantic_health_sweep(
-        after_created_at=None,
         after_id=None,
-        limit=2,
+        limit=1,
     )
+    inserted = await users_db.create_user(
+        username="semantic_health_late",
+        email="semantic_health_late@example.com",
+        password_hash="hash",
+    )
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("DELETE FROM users WHERE id=?", (first[0]["id"],))
+        conn.execute(
+            "UPDATE users SET created_at=? WHERE id<?",
+            ("1999-01-01 00:00:00", first[0]["id"]),
+        )
     second = await repo.list_users_for_semantic_health_sweep(
-        after_created_at=first[-1]["created_at"],
         after_id=first[-1]["id"],
-        limit=2,
+        limit=10,
     )
 
     expected = sorted((int(user["id"]) for user in users), reverse=True)
     assert [row["id"] for row in (*first, *second)] == expected
-    assert all(row["created_at"] == tied for row in (*first, *second))
+    assert int(inserted["id"]) not in {row["id"] for row in (*first, *second)}
+
+
+@pytest.mark.asyncio
+async def test_semantic_health_user_keyset_includes_legacy_null_timestamps(tmp_path):
+    import sqlite3
+
+    from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
+
+    db_path = tmp_path / "semantic_health_nullable_users.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("CREATE TABLE users(id INTEGER PRIMARY KEY, created_at TIMESTAMP)")
+        conn.executemany(
+            "INSERT INTO users(id,created_at) VALUES (?,?)",
+            ((1, None), (2, "2026-09-02 12:00:00"), (3, None)),
+        )
+
+    class SQLitePool:
+        pool = None
+
+        async def fetchall(self, query: str, *args: object):
+            with sqlite3.connect(db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                return conn.execute(query, args).fetchall()
+
+    repo = AuthnzUsersRepo(db_pool=SQLitePool())
+    first = await repo.list_users_for_semantic_health_sweep(after_id=None, limit=2)
+    second = await repo.list_users_for_semantic_health_sweep(
+        after_id=first[-1]["id"],
+        limit=2,
+    )
+
+    assert [row["id"] for row in (*first, *second)] == [3, 2, 1]

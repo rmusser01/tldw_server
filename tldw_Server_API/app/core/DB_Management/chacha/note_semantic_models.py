@@ -284,3 +284,11 @@ class SemanticHealthSnapshot:
     cleanup_backlog: int = 0
     cleanup_retries: int = 0
     oldest_cleanup_created_at: datetime | str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SemanticWorkReclaimResult:
+    """Exact committed lease-expiry transitions for one dataset."""
+
+    total_transitions: int
+    cleanup_transitions: int

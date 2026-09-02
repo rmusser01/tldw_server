@@ -7,6 +7,7 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -366,12 +367,21 @@ async def test_dsr_reclaims_emit_each_committed_retry_once_with_actual_backend(
         vector_id="obsolete-vector",
     )
     events: list[dict[str, object]] = []
-    work_counts = iter((2, 0, 0))
+    work_counts = iter(
+        (
+            SimpleNamespace(total_transitions=2, cleanup_transitions=1),
+            SimpleNamespace(total_transitions=0, cleanup_transitions=0),
+            SimpleNamespace(total_transitions=0, cleanup_transitions=0),
+        )
+    )
     vector_counts = iter((3, 0, 0))
     monkeypatch.setattr(
         db.note_semantic_store,
         "reclaim_expired_dataset_work",
-        lambda **_kwargs: next(work_counts, 0),
+        lambda **_kwargs: next(
+            work_counts,
+            SimpleNamespace(total_transitions=0, cleanup_transitions=0),
+        ),
     )
     monkeypatch.setattr(
         db.note_semantic_store,
@@ -394,7 +404,7 @@ async def test_dsr_reclaims_emit_each_committed_retry_once_with_actual_backend(
     ).erase()
 
     assert events == [
-        {"status": "failed", "backend": "chromadb", "count": 2},
+        {"status": "failed", "backend": "chromadb", "count": 1},
         {"status": "failed", "backend": "chromadb", "count": 3},
     ]
 
@@ -934,7 +944,8 @@ async def test_expired_prewrite_claim_cannot_publish_after_dsr_finalizes(
         limit=10,
         now=NOW + timedelta(seconds=2),
     )
-    assert reclaimed == 1
+    assert reclaimed.total_transitions == 1
+    assert reclaimed.cleanup_transitions == 0
 
     result = await SemanticErasureCoordinator(
         db=db,

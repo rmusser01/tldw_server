@@ -33,6 +33,7 @@ from .note_semantic_models import (
     SemanticWorkClaimState,
     SemanticWorkItem,
     SemanticWorkKind,
+    SemanticWorkReclaimResult,
 )
 
 if TYPE_CHECKING:
@@ -2478,7 +2479,7 @@ class NoteSemanticStore:
         expired_before: datetime,
         limit: int,
         now: datetime,
-    ) -> int:
+    ) -> SemanticWorkReclaimResult:
         """Boundedly reclaim expired semantic claims across one dataset."""
 
         dataset = self._scope(dataset_id)
@@ -2501,12 +2502,12 @@ class NoteSemanticStore:
                 (self.owner_user_id, dataset, expired, limit),
             ).fetchall()
             reclaimed = 0
+            cleanup_reclaimed = 0
             for row in rows:
                 record = self._record(row)
                 if (
                     str(record["kind"]) == SemanticWorkKind.INDEX_NOTE.value
-                    and str(record.get("error_code") or "")
-                    == self._VECTOR_SIDE_EFFECT_IN_PROGRESS
+                    and str(record.get("error_code") or "") == self._VECTOR_SIDE_EFFECT_IN_PROGRESS
                 ):
                     # Once physical publication starts, lease expiry cannot prove that
                     # the vector writer has stopped. Its worker must drain and release.
@@ -2527,8 +2528,17 @@ class NoteSemanticStore:
                         self._MAX_WORK_ATTEMPTS,
                     ),
                 )
-                reclaimed += cursor.rowcount
-        return reclaimed
+                committed = int(cursor.rowcount)
+                reclaimed += committed
+                if str(record["kind"]) in {
+                    SemanticWorkKind.DELETE_NOTE_VECTORS.value,
+                    SemanticWorkKind.DELETE_GENERATION.value,
+                }:
+                    cleanup_reclaimed += committed
+        return SemanticWorkReclaimResult(
+            total_transitions=reclaimed,
+            cleanup_transitions=cleanup_reclaimed,
+        )
 
     def authorize_note_vector_upsert(
         self,

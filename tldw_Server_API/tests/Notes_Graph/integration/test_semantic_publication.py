@@ -19,6 +19,8 @@ from tldw_Server_API.app.core.DB_Management.chacha.note_semantic_models import (
     SemanticGenerationState,
     SemanticManifestPublication,
     SemanticSnapshotSeed,
+    SemanticWorkItem,
+    SemanticWorkKind,
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.Notes_Graph import semantic_indexing
@@ -2273,6 +2275,121 @@ def test_partial_obsolete_vector_retry_returns_exact_committed_transition_count(
     assert sorted(int(row["attempt_count"]) for row in rows) == [0, 1]
 
 
+def _claim_expired_dataset_work(
+    db: CharactersRAGDB,
+    kinds: tuple[SemanticWorkKind, ...],
+) -> tuple[SemanticWorkItem, ...]:
+    _enabled, pending = _create_pending_generation(db)
+    with db.transaction() as conn:
+        db.note_semantic_store._set_scope(conn, DATASET_ID)
+        for index, kind in enumerate(kinds):
+            db.note_semantic_store._enqueue_work(
+                conn,
+                dataset=DATASET_ID,
+                kind=kind,
+                note_id=None if kind is SemanticWorkKind.DELETE_GENERATION else f"reclaim-note-{index}",
+                generation_id=pending.id,
+                dirty_generation=None if kind is SemanticWorkKind.DELETE_GENERATION else 1,
+                now=NOW,
+            )
+    claims = []
+    if SemanticWorkKind.DELETE_GENERATION in kinds:
+        claims.extend(
+            db.note_semantic_store.claim_generation_cleanup_batch(
+                dataset_id=DATASET_ID,
+                limit=1,
+                now=NOW,
+            )
+        )
+    for kind in kinds:
+        if kind is SemanticWorkKind.DELETE_GENERATION:
+            continue
+        claims.extend(
+            db.note_semantic_store.claim_work_batch(
+                dataset_id=DATASET_ID,
+                generation_id=pending.id,
+                kind=kind,
+                limit=1,
+                now=NOW,
+            )
+        )
+    assert len(claims) == len(kinds)
+    return tuple(claims)
+
+
+@pytest.mark.parametrize(
+    ("kinds", "cleanup_transitions"),
+    [
+        ((SemanticWorkKind.INDEX_NOTE,), 0),
+        (
+            (
+                SemanticWorkKind.DELETE_NOTE_VECTORS,
+                SemanticWorkKind.DELETE_GENERATION,
+            ),
+            2,
+        ),
+        (
+            (
+                SemanticWorkKind.INDEX_NOTE,
+                SemanticWorkKind.DELETE_NOTE_VECTORS,
+                SemanticWorkKind.DELETE_GENERATION,
+            ),
+            2,
+        ),
+    ],
+    ids=("index-only", "cleanup-only", "mixed"),
+)
+def test_sqlite_dataset_reclaim_reports_total_and_cleanup_transitions(
+    sqlite_db: CharactersRAGDB,
+    kinds: tuple[SemanticWorkKind, ...],
+    cleanup_transitions: int,
+) -> None:
+    _claim_expired_dataset_work(sqlite_db, kinds)
+
+    result = sqlite_db.note_semantic_store.reclaim_expired_dataset_work(
+        dataset_id=DATASET_ID,
+        expired_before=NOW + timedelta(seconds=1),
+        limit=10,
+        now=NOW + timedelta(seconds=2),
+    )
+
+    assert result.total_transitions == len(kinds)
+    assert result.cleanup_transitions == cleanup_transitions
+    no_op = sqlite_db.note_semantic_store.reclaim_expired_dataset_work(
+        dataset_id=DATASET_ID,
+        expired_before=NOW + timedelta(seconds=1),
+        limit=10,
+        now=NOW + timedelta(seconds=3),
+    )
+    assert (no_op.total_transitions, no_op.cleanup_transitions) == (0, 0)
+
+
+def test_sqlite_dataset_reclaim_reports_only_committed_partial_transitions(
+    sqlite_db: CharactersRAGDB,
+) -> None:
+    claims = _claim_expired_dataset_work(
+        sqlite_db,
+        (
+            SemanticWorkKind.DELETE_NOTE_VECTORS,
+            SemanticWorkKind.DELETE_GENERATION,
+        ),
+    )
+    with sqlite_db.transaction() as conn:
+        conn.execute(
+            "UPDATE note_semantic_work SET attempt_count=5 WHERE id=?",
+            (claims[0].id,),
+        )
+
+    result = sqlite_db.note_semantic_store.reclaim_expired_dataset_work(
+        dataset_id=DATASET_ID,
+        expired_before=NOW + timedelta(seconds=1),
+        limit=10,
+        now=NOW + timedelta(seconds=2),
+    )
+
+    assert (result.total_transitions, result.cleanup_transitions) == (1, 1)
+
+
 def test_cleanup_ledger_never_claims_an_id_in_the_current_manifest(
     sqlite_db: CharactersRAGDB,
 ) -> None:
@@ -4114,6 +4231,34 @@ def test_postgres_partial_obsolete_retry_returns_committed_count(
             )
             == 1
         )
+    finally:
+        db.close_all_connections()
+        backend.get_pool().close_all()
+
+
+def test_postgres_dataset_reclaim_reports_mixed_total_and_cleanup_transitions(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = CharactersRAGDB(":memory:", client_id=OWNER_ID, backend=backend)
+    try:
+        _claim_expired_dataset_work(
+            db,
+            (
+                SemanticWorkKind.INDEX_NOTE,
+                SemanticWorkKind.DELETE_NOTE_VECTORS,
+                SemanticWorkKind.DELETE_GENERATION,
+            ),
+        )
+
+        result = db.note_semantic_store.reclaim_expired_dataset_work(
+            dataset_id=DATASET_ID,
+            expired_before=NOW + timedelta(seconds=1),
+            limit=10,
+            now=NOW + timedelta(seconds=2),
+        )
+
+        assert (result.total_transitions, result.cleanup_transitions) == (3, 2)
     finally:
         db.close_all_connections()
         backend.get_pool().close_all()
