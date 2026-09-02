@@ -41,6 +41,7 @@ type NotesGraphInspectorProps = {
   onSelectNode: (nodeId: string) => void
   onSelectEdge?: (edgeId: string) => void
   onCreateManualLink?: NotesGraphManualLinkHandler
+  manualLinkPendingEdgeIds?: ReadonlySet<string>
   onAnnounce: (message: string) => void
   onDecideSuggestion: NotesGraphSuggestionDecisionHandler
 }
@@ -203,6 +204,7 @@ const NotesGraphInspector: React.FC<NotesGraphInspectorProps> = ({
   onSelectNode,
   onSelectEdge,
   onCreateManualLink,
+  manualLinkPendingEdgeIds,
   onAnnounce,
   onDecideSuggestion
 }) => {
@@ -567,6 +569,9 @@ const NotesGraphInspector: React.FC<NotesGraphInspectorProps> = ({
                 manualLinkAuthorized={manualLinkAuthorized}
                 isOnline={isOnline}
                 hasManualRelationship={selectedPairHasManual}
+                manualLinkPending={manualLinkPendingEdgeIds?.has(
+                  selectedSemanticEdge.id
+                )}
                 onCreateManualLink={onCreateManualLink}
                 showHeading={false}
               />

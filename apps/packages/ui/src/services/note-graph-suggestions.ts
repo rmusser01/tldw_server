@@ -43,6 +43,8 @@ const ERROR_MESSAGES = {
     "The idempotency key was reused for another request.",
   notes_graph_suggestion_not_found:
     "The requested Notes graph resource was not found.",
+  notes_semantic_conversion_manual_link_exists:
+    "A manual link already exists; refreshing the Notes graph.",
   notes_graph_suggestions_disabled: "Notes graph suggestions are disabled.",
   notes_graph_suggestions_unavailable:
     "Notes graph suggestions are temporarily unavailable.",

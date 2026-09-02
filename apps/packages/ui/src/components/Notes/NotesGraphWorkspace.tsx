@@ -1,7 +1,4 @@
-import {
-  NOTES_GRAPH_SEMANTIC_MAX_TOP_K,
-  type NotesGraphEdge
-} from "@/services/note-graph-suggestions"
+import type { NotesGraphEdge } from "@/services/note-graph-suggestions"
 import { Tooltip } from "antd"
 import { PanelLeftOpen } from "lucide-react"
 import React from "react"
@@ -362,7 +359,7 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
           semanticEnabled={workspace.semantic.enabled}
           semanticFocusRequired={workspace.semantic.focusRequired}
           semanticTopK={workspace.semantic.topK}
-          semanticMaxTopK={workspace.graph?.semantic_status?.max_top_k ?? NOTES_GRAPH_SEMANTIC_MAX_TOP_K}
+          semanticMaxTopK={workspace.semantic.maxTopK}
           semanticThreshold={workspace.semantic.threshold}
           canExpand={workspace.canExpand}
           isRefreshing={workspace.graphQuery.isFetching}
@@ -488,6 +485,8 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
                 onSelectEdge={setSelectedEdgeId}
                 onCreateManualLink={handleCreateManualLink}
                 onDecideSuggestion={handleSuggestionDecision}
+                manualLinkPendingEdgeIds={workspace.manualLinkPendingEdgeIds}
+                queryIdentity={workspace.queryIdentity}
               />
             )}
           </div>
@@ -510,6 +509,7 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
               onSelectNode={handleFocusNode}
               onSelectEdge={setSelectedEdgeId}
               onCreateManualLink={handleCreateManualLink}
+              manualLinkPendingEdgeIds={workspace.manualLinkPendingEdgeIds}
               onAnnounce={announce}
               onDecideSuggestion={handleSuggestionDecision}
             />

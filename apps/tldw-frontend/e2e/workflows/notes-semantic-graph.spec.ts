@@ -478,6 +478,59 @@ const hideNextDevPortal = async (page: Page) => {
   });
 };
 
+const measureSemanticContrast = async (page: Page, target: 'indicator' | 'evidenceText') =>
+  page.evaluate((contrastTarget) => {
+    const parseRgb = (value: string): [number, number, number] => {
+      const channels = value
+        .match(/[\d.]+/g)
+        ?.slice(0, 3)
+        .map(Number);
+      if (!channels || channels.length !== 3) {
+        throw new Error(`Unable to parse browser color: ${value}`);
+      }
+      return channels as [number, number, number];
+    };
+    const luminance = ([red, green, blue]: [number, number, number]) => {
+      const linear = [red, green, blue].map((channel) => {
+        const normalized = channel / 255;
+        return normalized <= 0.04045 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
+      });
+      return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+    };
+    const contrast = (foreground: string, background: string) => {
+      const foregroundLuminance = luminance(parseRgb(foreground));
+      const backgroundLuminance = luminance(parseRgb(background));
+      return (
+        (Math.max(foregroundLuminance, backgroundLuminance) + 0.05) /
+        (Math.min(foregroundLuminance, backgroundLuminance) + 0.05)
+      );
+    };
+    const effectiveBackground = (element: Element) => {
+      let current: Element | null = element.parentElement;
+      while (current) {
+        const color = getComputedStyle(current).backgroundColor;
+        if (color !== 'rgba(0, 0, 0, 0)' && color !== 'transparent') {
+          return color;
+        }
+        current = current.parentElement;
+      }
+      return getComputedStyle(document.body).backgroundColor;
+    };
+    const element = document.querySelector(
+      contrastTarget === 'indicator'
+        ? '[data-testid="notes-graph-semantic-legend-swatch"]'
+        : '[data-testid="notes-graph-semantic-treatment-label"]'
+    );
+    if (!element) {
+      throw new Error(`Semantic ${contrastTarget} contrast target is missing.`);
+    }
+    const style = getComputedStyle(element);
+    return contrast(
+      contrastTarget === 'indicator' ? style.borderTopColor : style.color,
+      effectiveBackground(element)
+    );
+  }, target);
+
 test.describe('Notes semantic graph', () => {
   test('enables, inspects, converts, and keeps ordinary fallback available', async ({
     authedPage: page,
@@ -572,8 +625,31 @@ test.describe('Notes semantic graph', () => {
     await page.getByRole('slider', { name: 'Minimum passage similarity' }).press('ArrowRight');
     await expect(page.getByTestId('notes-graph-degraded-state')).toBeVisible();
     await expect(page.getByTestId('notes-graph-primary-view')).toBeVisible();
+    await expect(
+      relationships.getByRole('button', { name: 'Manual links', exact: true })
+    ).toBeVisible();
     expect(fixture.calls.some((call) => call.includes('/api/v1/jobs'))).toBe(false);
   });
+
+  for (const theme of ['light', 'dark'] as const) {
+    test(`meets semantic treatment contrast in ${theme} mode`, async ({ authedPage: page }) => {
+      await page.addInitScript((requestedTheme) => {
+        localStorage.setItem('theme', requestedTheme);
+        localStorage.setItem('tldw:themePreset', 'default');
+      }, theme);
+      const fixture = new SemanticGraphFixture('ready');
+      await page.setViewportSize({ width: 1440, height: 1000 });
+      await openGraph(page, fixture);
+      await page.getByRole('checkbox', { name: 'Similar content', exact: true }).check();
+      const indicatorContrast = await measureSemanticContrast(page, 'indicator');
+      await page.getByRole('button', { name: 'Relationships', exact: true }).click();
+      await expect(page.getByTestId('notes-graph-semantic-evidence-toggle')).toBeVisible();
+      const evidenceTextContrast = await measureSemanticContrast(page, 'evidenceText');
+
+      expect(indicatorContrast).toBeGreaterThanOrEqual(3);
+      expect(evidenceTextContrast).toBeGreaterThanOrEqual(4.5);
+    });
+  }
 
   test('cancels a rebuild and deletes the semantic index through nested routes', async ({
     authedPage: page,
