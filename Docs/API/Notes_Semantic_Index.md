@@ -379,7 +379,7 @@ Nested semantic-index errors use:
 
 | HTTP | Stable conditions and codes |
 | --- | --- |
-| `403` | Required graph-read or semantic-manage permission is missing. |
+| `403` | `notes_semantic_permission_denied`: `Permission to access the Notes semantic index is required.` Required graph-read or semantic-manage permission or token scope is missing. |
 | `404` | `notes_semantic_dataset_not_found`, `notes_semantic_run_not_found`, or a foreign owner/dataset resource. |
 | `409` | `notes_semantic_capability_revision_conflict`, `notes_semantic_configuration_revision_conflict`, `notes_semantic_run_revision_conflict`, `notes_semantic_idempotency_conflict`, `notes_semantic_writer_conflict`, `notes_semantic_active_generation_required`, or `notes_semantic_backend_change_requires_delete`. |
 | `422` | `notes_semantic_invalid_request`, including malformed/blank idempotency, invalid revisions, modes, or semantic controls. |

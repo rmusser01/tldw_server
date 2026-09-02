@@ -1157,18 +1157,39 @@ def test_notes_attachment_download_openapi_documents_file_response() -> None:
 
 
 @pytest.mark.integration
-def test_notes_semantic_index_openapi_documents_only_nested_stable_contracts() -> None:
-    from tldw_Server_API.app.api.v1.endpoints.notes_semantic_index import (
-        router as notes_semantic_index_router,
-    )
-    from tldw_Server_API.app.main import OPENAPI_TAGS
-
-    app = FastAPI(openapi_tags=OPENAPI_TAGS)
-    app.include_router(notes_semantic_index_router, prefix="/api/v1/notes")
-    openapi_spec = app.openapi()
+def test_notes_semantic_index_openapi_documents_only_nested_stable_contracts(
+    openapi_spec: dict[str, Any],
+) -> None:
     paths = openapi_spec["paths"]
     semantic_paths = {path for path in paths if "semantic-index" in path}
+    nested_root = "/api/v1/notes/graph/semantic-index"
+    semantic_aliases = {
+        path
+        for path in semantic_paths
+        if path != nested_root and not path.startswith(f"{nested_root}/")
+    }
+    feature_jobs_paths = {
+        path
+        for path in paths
+        if "job" in path.lower()
+        and ("semantic-index" in path.lower() or "notes-semantic" in path.lower())
+    }
+
+    assert semantic_aliases == set()
+    assert feature_jobs_paths == set()
     assert semantic_paths == set(NOTES_SEMANTIC_INDEX_OPERATIONS)
+    semantic_operations = {
+        (path, method)
+        for path in semantic_paths
+        for method in paths[path]
+        if method in HTTP_METHODS
+    }
+    expected_operations = {
+        (path, method)
+        for path, methods in NOTES_SEMANTIC_INDEX_OPERATIONS.items()
+        for method in methods
+    }
+    assert semantic_operations == expected_operations
 
     for path, methods in NOTES_SEMANTIC_INDEX_OPERATIONS.items():
         for method, (success_status, response_model) in methods.items():

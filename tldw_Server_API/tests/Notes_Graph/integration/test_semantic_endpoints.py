@@ -437,19 +437,43 @@ def test_quota_rejection_is_typed_429(client) -> None:
     }
 
 
-def test_manage_permission_failure_is_403(client) -> None:
+@pytest.mark.parametrize("denial_source", ["permission", "token-scope"])
+def test_manage_permission_failure_is_typed_403(client, denial_source: str) -> None:
     test_client, _api, app = client
 
     def forbidden():
-        raise HTTPException(status_code=403, detail="forbidden")
+        raise HTTPException(
+            status_code=403,
+            detail="sensitive generic auth detail",
+            headers={"WWW-Authenticate": 'Bearer scope="notes"'},
+        )
 
-    app.dependency_overrides[endpoint.require_semantic_manage] = forbidden
+    if denial_source == "permission":
+        app.dependency_overrides[endpoint.require_semantic_manage] = forbidden
+    else:
+        scope_dependency = next(
+            dependency.call
+            for route in endpoint.router.routes
+            if route.path == "/graph/semantic-index/runs"
+            for dependency in route.dependant.dependencies
+            if getattr(dependency.call, "_tldw_token_scope", False)
+        )
+        app.dependency_overrides[scope_dependency] = forbidden
+
     response = test_client.post(
         "/api/v1/notes/graph/semantic-index/runs",
         headers={"Idempotency-Key": "forbidden"},
         json={"mode": "rebuild", "expected_revision": 9},
     )
+
     assert response.status_code == 403
+    assert response.json() == {
+        "detail": {
+            "error_code": "notes_semantic_permission_denied",
+            "message": "Permission to access the Notes semantic index is required.",
+        }
+    }
+    assert response.headers["www-authenticate"] == 'Bearer scope="notes"'
 
 
 @pytest.mark.asyncio

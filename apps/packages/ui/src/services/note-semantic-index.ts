@@ -62,72 +62,6 @@ export const NOTES_SEMANTIC_OUTBOUND_DATA_CATEGORIES = [
 export type NotesSemanticOutboundDataCategory =
   (typeof NOTES_SEMANTIC_OUTBOUND_DATA_CATEGORIES)[number]
 
-export type NotesSemanticCapabilities = {
-  active_note_count: number
-  estimated_chunk_count: number
-  estimated_run_count: number
-  provider_label: string
-  model: string
-  endpoint_display: string | null
-  execution_boundary: "external" | "local"
-  storage_boundary: "external" | "local" | "unavailable"
-  storage_label: string
-  outbound_data_categories: NotesSemanticOutboundDataCategory[]
-  capability_revision: string
-  indexing_available: boolean
-  unavailable_reason: string | null
-  metric: "cosine"
-  resolved_dimensions: number | null
-  dimension_probe_required: boolean
-  renewal_requires_delete: boolean
-  manage_authorized: boolean
-}
-
-export type NotesSemanticRunStatus =
-  | "queued"
-  | "processing"
-  | "completed"
-  | "failed"
-  | "cancelled"
-  | "quarantined"
-
-export type NotesSemanticRun = {
-  run_id: string
-  mode: string
-  status: NotesSemanticRunStatus
-  revision: number
-  indexed_notes: number
-  excluded_notes: number
-  failed_notes: number
-  pending_notes: number
-  published_chunks: number
-  cleanup_complete: boolean
-  error_code: string | null
-  link: string
-}
-
-export type NotesSemanticIndexStatus = {
-  state: "off" | "preparing" | "ready" | "updating" | "needs_attention"
-  detail_reason: string | null
-  desired_state: "enabled" | "disabled"
-  configuration_revision: number
-  semantic_index_revision: number
-  active_generation_id: string | null
-  active_generation_usable: boolean
-  indexed_notes: number
-  excluded_notes: number
-  failed_notes: number
-  pending_notes: number
-  published_chunks: number
-  cleanup_pending: boolean
-  active_run: NotesSemanticRun | null
-}
-
-export type NotesSemanticMutation = {
-  resource: NotesSemanticIndexStatus
-  run: NotesSemanticRun
-}
-
 type DatasetScope = { datasetId?: string }
 type IdempotentCommand = DatasetScope & { idempotencyKey: string }
 
@@ -316,6 +250,22 @@ const mutationSchema = z.strictObject({
   run: runSchema
 })
 
+type RequiredOutput<T> = T extends null | undefined
+  ? T
+  : T extends readonly (infer Item)[]
+    ? RequiredOutput<Item>[]
+    : T extends object
+      ? { [Key in keyof T]-?: RequiredOutput<T[Key]> }
+      : T
+
+type SchemaOutput<Schema extends z.ZodType> = RequiredOutput<z.output<Schema>>
+
+export type NotesSemanticCapabilities = SchemaOutput<typeof capabilitiesSchema>
+export type NotesSemanticRun = SchemaOutput<typeof runSchema>
+export type NotesSemanticRunStatus = NotesSemanticRun["status"]
+export type NotesSemanticIndexStatus = SchemaOutput<typeof statusSchema>
+export type NotesSemanticMutation = SchemaOutput<typeof mutationSchema>
+
 const invalidRequest = () =>
   new NotesSemanticClientError(422, "notes_semantic_invalid_request")
 const invalidResponse = () =>
@@ -327,16 +277,14 @@ const parseInput = <T>(schema: z.ZodType<T>, value: unknown): T => {
   return parsed.data
 }
 
-const parseResponse = <T>(schema: z.ZodType<T>, value: unknown): T => {
+const parseResponse = <Schema extends z.ZodType>(
+  schema: Schema,
+  value: unknown
+): SchemaOutput<Schema> => {
   const parsed = schema.safeParse(value)
   if (!parsed.success) throw invalidResponse()
-  return parsed.data
+  return parsed.data as SchemaOutput<Schema>
 }
-
-// The package compiles without strictNullChecks, which makes Zod object outputs
-// appear optional. Runtime validation remains authoritative for these public types.
-const parseResponseAs = <T>(schema: z.ZodType, value: unknown): T =>
-  parseResponse(schema, value) as T
 
 const record = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" && !Array.isArray(value)
@@ -390,7 +338,7 @@ export const getNotesSemanticCapabilities = async (
   input: DatasetScope
 ): Promise<NotesSemanticCapabilities> => {
   const parsed = parseInput(datasetSchema, input)
-  return parseResponseAs<NotesSemanticCapabilities>(
+  return parseResponse(
     capabilitiesSchema,
     await request<unknown>({
       path: queryPath(
@@ -406,7 +354,7 @@ export const getNotesSemanticStatus = async (
   input: DatasetScope
 ): Promise<NotesSemanticIndexStatus> => {
   const parsed = parseInput(datasetSchema, input)
-  return parseResponseAs<NotesSemanticIndexStatus>(
+  return parseResponse(
     statusSchema,
     await request<unknown>({
       path: queryPath("/api/v1/notes/graph/semantic-index", parsed.datasetId),
@@ -432,7 +380,7 @@ export const enableNotesSemanticIndex = async (
     }),
     input
   )
-  return parseResponseAs<NotesSemanticMutation>(
+  return parseResponse(
     mutationSchema,
     await request<unknown>({
       path: queryPath("/api/v1/notes/graph/semantic-index", parsed.datasetId),
@@ -457,7 +405,7 @@ export const deleteNotesSemanticIndex = async (
     }),
     input
   )
-  return parseResponseAs<NotesSemanticMutation>(
+  return parseResponse(
     mutationSchema,
     await request<unknown>({
       path: queryPath("/api/v1/notes/graph/semantic-index", parsed.datasetId),
@@ -480,7 +428,7 @@ export const createNotesSemanticRun = async (
     }),
     input
   )
-  return parseResponseAs<NotesSemanticRun>(
+  return parseResponse(
     runSchema,
     await request<unknown>({
       path: queryPath(
@@ -507,7 +455,7 @@ export const getNotesSemanticRun = async (
     z.strictObject({ datasetId: datasetInput.optional(), runId: inputText }),
     input
   )
-  return parseResponseAs<NotesSemanticRun>(
+  return parseResponse(
     runSchema,
     await request<unknown>({
       path: queryPath(
@@ -531,7 +479,7 @@ export const cancelNotesSemanticRun = async (
     }),
     input
   )
-  return parseResponseAs<NotesSemanticMutation>(
+  return parseResponse(
     mutationSchema,
     await request<unknown>({
       path: queryPath(

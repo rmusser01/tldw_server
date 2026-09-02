@@ -1,5 +1,12 @@
+import { readFileSync } from "node:fs"
+import { resolve } from "node:path"
+
 import {
   NotesSemanticClientError,
+  type NotesSemanticCapabilities,
+  type NotesSemanticIndexStatus,
+  type NotesSemanticMutation,
+  type NotesSemanticRun,
   cancelNotesSemanticRun,
   createNotesSemanticCommand,
   createNotesSemanticRun,
@@ -9,7 +16,7 @@ import {
   getNotesSemanticRun,
   getNotesSemanticStatus
 } from "@/services/note-semantic-index"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest"
 
 import capabilityDriftApi from "../../../components/Notes/__tests__/fixtures/semantic-capability-drift-api.json"
 
@@ -72,6 +79,27 @@ const capabilities = () => ({
 
 describe("Notes semantic index client", () => {
   beforeEach(() => vi.resetAllMocks())
+
+  it("keeps public response types coupled to their Zod schemas", () => {
+    const source = readFileSync(
+      resolve(process.cwd(), "src/services/note-semantic-index.ts"),
+      "utf8"
+    )
+
+    expect(source).not.toMatch(/parseResponseAs\s*=\s*<T>/)
+    expectTypeOf(getNotesSemanticCapabilities).returns.toEqualTypeOf<
+      Promise<NotesSemanticCapabilities>
+    >()
+    expectTypeOf(getNotesSemanticStatus).returns.toEqualTypeOf<
+      Promise<NotesSemanticIndexStatus>
+    >()
+    expectTypeOf(createNotesSemanticRun).returns.toEqualTypeOf<
+      Promise<NotesSemanticRun>
+    >()
+    expectTypeOf(enableNotesSemanticIndex).returns.toEqualTypeOf<
+      Promise<NotesSemanticMutation>
+    >()
+  })
 
   it("uses only the seven nested Notes semantic routes with dataset authority", async () => {
     mocks.bgRequest

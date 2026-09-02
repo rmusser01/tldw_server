@@ -60,6 +60,7 @@ SEMANTIC_ERROR_MESSAGES = {
     "notes_semantic_idempotency_conflict": "The idempotency key was reused for another request.",
     "notes_semantic_invalid_request": "The semantic index request is invalid.",
     "notes_semantic_jobs_unavailable": "Semantic indexing is temporarily unavailable.",
+    "notes_semantic_permission_denied": "Permission to access the Notes semantic index is required.",
     "notes_semantic_provider_unavailable": "Semantic indexing is temporarily unavailable.",
     "notes_semantic_quota_exceeded": "The semantic indexing quota has been reached.",
     "notes_semantic_run_not_found": "The requested semantic run was not found.",
@@ -83,7 +84,7 @@ def _invalid_request() -> HTTPException:
 
 
 class _SemanticAPIRoute(APIRoute):
-    """Translate framework validation failures into the feature error shape."""
+    """Translate framework validation and permission failures to feature errors."""
 
     def get_route_handler(self) -> Callable[[Request], Any]:
         original = super().get_route_handler()
@@ -93,6 +94,19 @@ class _SemanticAPIRoute(APIRoute):
                 return await original(request)
             except RequestValidationError as exc:
                 raise _invalid_request() from exc
+            except HTTPException as exc:
+                if exc.status_code != status.HTTP_403_FORBIDDEN:
+                    raise
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail={
+                        "error_code": "notes_semantic_permission_denied",
+                        "message": SEMANTIC_ERROR_MESSAGES[
+                            "notes_semantic_permission_denied"
+                        ],
+                    },
+                    headers=exc.headers,
+                ) from exc
 
         return handler
 
