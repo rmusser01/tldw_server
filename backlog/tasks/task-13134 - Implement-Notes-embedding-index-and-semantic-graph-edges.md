@@ -4,7 +4,7 @@ title: Implement Notes embedding index and semantic graph edges
 status: In Progress
 assignee: []
 created_date: '2026-08-27 02:20'
-updated_date: '2026-09-02 16:07'
+updated_date: '2026-09-02 16:24'
 labels:
   - notes
   - notes-graph
@@ -141,6 +141,8 @@ Touched tracked files: tldw_Server_API/app/core/DB_Management/chacha/note_semant
 RED: seven mutation-focused cases => 7 failed, 2 warnings in 7.64s before production changes. GREEN: same selector => 7 passed, 2 warnings in 7.40s; final targeted rerun => 4 passed, 2 warnings in 6.61s. Complete directly affected SQLite files => 139 passed, 2 warnings in 28.68s. PostgreSQL Jobs migration file => 23 skipped because it runs only in jobs-suite CI. Expanded backend semantic matrix => 1311 passed, 6 skipped, 35 warnings in 504.91s. Ruff check passed all 15 touched Python files; six whole-file and nine changed-range Ruff format checks passed without legacy churn. Scoped semantic_observability mypy passed; broader JobManager/maintenance audit retains 184 existing errors in two legacy files after the two new CAS return diagnostics were fixed. Bandit scanned all ten touched production Python paths: 0 findings across 23,355 LOC. git diff --check passed. Frontend/docs/locale gates were not applicable because public contracts did not change.
 
 Touched tracked files: tldw_Server_API/app/core/DB_Management/chacha/note_semantic_store.py; app/core/Jobs/manager.py; app/core/Jobs/migrations.py; app/core/Jobs/pg_migrations.py; app/core/Notes_Graph/semantic_erasure.py; semantic_indexing.py; semantic_observability.py; semantic_publication.py; app/services/notes_semantic_index_worker.py; notes_semantic_maintenance.py; tests/Jobs/test_jobs_migrations_postgres.py; test_jobs_migrations_sqlite.py; tests/Notes_Graph/unit/test_semantic_indexing.py; test_semantic_store.py; tests/Services/test_notes_semantic_workers.py. Ignored report: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/residual-fix-report.md. Planned single commit subject: fix(notes): harden semantic health aggregation (TASK-13134); final SHA is reported after commit because a commit cannot contain its own final object ID. No PR exists and none was created, pushed, merged, or rebased. Status remains In Progress pending independent re-review; acceptance criteria and Definition of Done remain unchecked.
+
+2026-09-02 residual-fix round 1 scoped re-review of dca595ce02..735d0518fe remains blocked. Durable CAS and counter/gauge type separation are improved, but two load-bearing defects remain: (1) the health checkpoint stores an offset into the mutable users list ordered by created_at, so concurrent insertion/deletion can shift pages, skip an unhealthy owner, and still publish a complete aggregate; checkpoint validation also accepts sparse totals that strict deserialization rejects, which can wedge future sweeps; (2) cleanup retry event accounting is incomplete because partial batched obsolete-vector CAS updates and expired generation/vector claim reclaims, including DSR reclaim, can increment durable attempt counts without incrementing notes_semantic_cleanup_retries_total. No new breakage or out-of-scope findings were reported. Per the bounded residual-cycle breaker, no second fix wave was dispatched. TASK-13134 remains In Progress with acceptance and DoD unchecked, no PR exists, and the branch is not merge-ready. Review artifact: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/residual-fix-review.md.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
