@@ -235,6 +235,7 @@ class ProductionSemanticRuntime:
             receipt_factory=lambda: str(uuid4()),
             max_cleanup_vectors=self._settings.max_cleanup_vectors_per_run,
             max_vectors_per_publication=self._settings.max_chunks_per_note,
+            backend=self._vector_backend(),
         )
         embedder = NotesSemanticEmbedder(
             dimension_cas=lambda _pending, _resolved: True,
@@ -256,6 +257,7 @@ class ProductionSemanticRuntime:
             settings=self._settings,
             clock=lambda: datetime.now(timezone.utc),
             receipt_factory=lambda: str(uuid4()),
+            backend=self._vector_backend(),
         )
 
     async def _ensure_services(self) -> None:

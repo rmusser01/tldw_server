@@ -264,6 +264,7 @@ class SemanticGenerationBuilder:
         settings: SemanticIndexSettings = DEFAULT_SEMANTIC_INDEX_SETTINGS,
         clock: Callable[[], datetime],
         receipt_factory: Callable[[], str],
+        backend: str = "unavailable",
     ) -> None:
         self._store = store
         self._note_reader = note_reader
@@ -281,6 +282,7 @@ class SemanticGenerationBuilder:
             receipt_factory=receipt_factory,
             max_cleanup_vectors=settings.max_cleanup_vectors_per_run,
             max_vectors_per_publication=settings.max_chunks_per_note,
+            backend=backend,
         )
 
     async def build_initial_generation(

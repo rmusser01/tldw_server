@@ -515,6 +515,20 @@ CREATE TABLE IF NOT EXISTS slides_standalone_reconciliation (
 INSERT INTO slides_standalone_reconciliation(singleton_id) VALUES (1)
 ON CONFLICT (singleton_id) DO NOTHING;
 
+-- Durable, content-free cursor and partial totals for the bounded Notes
+-- semantic health sweep. Metrics are emitted only after a complete sweep.
+CREATE TABLE IF NOT EXISTS notes_semantic_health_sweep (
+  singleton_id SMALLINT PRIMARY KEY CHECK (singleton_id = 1),
+  revision BIGINT NOT NULL DEFAULT 0 CHECK (revision >= 0),
+  owner_offset BIGINT NOT NULL DEFAULT 0 CHECK (owner_offset >= 0),
+  after_dataset_id TEXT,
+  totals_json TEXT NOT NULL DEFAULT '[]' CHECK (LENGTH(totals_json) <= 65536),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_completed_at TIMESTAMPTZ
+);
+INSERT INTO notes_semantic_health_sweep(singleton_id) VALUES (1)
+ON CONFLICT (singleton_id) DO NOTHING;
+
 -- Job dependencies (DAG edges)
 CREATE TABLE IF NOT EXISTS job_dependencies (
   job_uuid TEXT NOT NULL,

@@ -899,6 +899,138 @@ class JobManager:
         return cur
 
     @staticmethod
+    def _normalize_notes_semantic_health_sweep_row(row: Any) -> dict[str, Any]:
+        data = dict(row)
+        data.pop("singleton_id", None)
+        data["revision"] = int(data.get("revision") or 0)
+        data["owner_offset"] = int(data.get("owner_offset") or 0)
+        for field_name in ("updated_at", "last_completed_at"):
+            value = _parse_dt(data.get(field_name))
+            if value is not None:
+                value = value.replace(tzinfo=_tz.utc) if value.tzinfo is None else value.astimezone(_tz.utc)
+            data[field_name] = value
+        return data
+
+    @staticmethod
+    def _validate_notes_semantic_health_totals(totals_json: str) -> None:
+        if not isinstance(totals_json, str) or len(totals_json) > 65_536:
+            raise ValueError("semantic health totals must be bounded JSON")
+        try:
+            totals = json.loads(totals_json)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("semantic health totals must be valid JSON") from exc
+        if not isinstance(totals, list) or len(totals) > 3:
+            raise ValueError("semantic health totals must contain bounded backends")
+        count_fields = {
+            "indexed_notes",
+            "excluded_notes",
+            "failed_notes",
+            "dirty_notes",
+            "pending_notes",
+            "stale_generations",
+            "cleanup_backlog",
+            "cleanup_retries",
+        }
+        allowed_fields = count_fields | {
+            "backend",
+            "oldest_cleanup_created_at",
+        }
+        for total in totals:
+            if not isinstance(total, dict) or not set(total) <= allowed_fields:
+                raise ValueError("semantic health totals contain unsupported fields")
+            if total.get("backend") not in {"chromadb", "pgvector", "unavailable"}:
+                raise ValueError("semantic health totals contain an invalid backend")
+            for field_name in count_fields & set(total):
+                value = total[field_name]
+                if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                    raise ValueError("semantic health totals contain an invalid count")
+            oldest = total.get("oldest_cleanup_created_at")
+            if oldest is not None and (not isinstance(oldest, str) or len(oldest) > 64):
+                raise ValueError("semantic health totals contain an invalid timestamp")
+
+    def get_notes_semantic_health_sweep(self) -> dict[str, Any]:
+        """Read the durable singleton cursor for Notes semantic health aggregation."""
+
+        conn = self._connect()
+        try:
+            if self.backend == "postgres":
+                with conn, self._pg_cursor(conn) as cur:
+                    cur.execute("SELECT * FROM notes_semantic_health_sweep WHERE singleton_id=1")
+                    row = cur.fetchone()
+            else:
+                row = conn.execute("SELECT * FROM notes_semantic_health_sweep WHERE singleton_id=1").fetchone()
+            if row is None:
+                raise RuntimeError("Notes semantic health sweep singleton is missing")
+            return self._normalize_notes_semantic_health_sweep_row(row)
+        finally:
+            conn.close()
+
+    def checkpoint_notes_semantic_health_sweep(
+        self,
+        *,
+        expected_revision: int,
+        owner_offset: int,
+        after_dataset_id: str | None,
+        totals_json: str,
+        completed: bool,
+        now: datetime,
+    ) -> bool:
+        """CAS one content-free partial page or reset one completed sweep."""
+
+        if isinstance(expected_revision, bool) or not isinstance(expected_revision, int) or expected_revision < 0:
+            raise ValueError("semantic health revision must be nonnegative")
+        if isinstance(owner_offset, bool) or not isinstance(owner_offset, int) or owner_offset < 0:
+            raise ValueError("semantic health owner offset must be nonnegative")
+        if after_dataset_id is not None and (
+            not isinstance(after_dataset_id, str) or not after_dataset_id or len(after_dataset_id.encode("utf-8")) > 256
+        ):
+            raise ValueError("semantic health dataset cursor must be bounded")
+        self._validate_notes_semantic_health_totals(totals_json)
+        now_utc = _require_aware_utc(now, field_name="now")
+        next_owner_offset = 0 if completed else owner_offset
+        next_dataset_id = None if completed else after_dataset_id
+        next_totals = "[]" if completed else totals_json
+        conn = self._connect()
+        try:
+            if self.backend == "postgres":
+                with conn, self._pg_cursor(conn) as cur:
+                    cur.execute(
+                        "UPDATE notes_semantic_health_sweep SET revision=revision+1,"
+                        "owner_offset=%s,after_dataset_id=%s,totals_json=%s,updated_at=%s,"
+                        "last_completed_at=CASE WHEN %s THEN %s ELSE last_completed_at END "
+                        "WHERE singleton_id=1 AND revision=%s",
+                        (
+                            next_owner_offset,
+                            next_dataset_id,
+                            next_totals,
+                            now_utc,
+                            completed,
+                            now_utc,
+                            expected_revision,
+                        ),
+                    )
+                    return bool(cur.rowcount == 1)
+            with conn:
+                result = conn.execute(
+                    "UPDATE notes_semantic_health_sweep SET revision=revision+1,"
+                    "owner_offset=?,after_dataset_id=?,totals_json=?,updated_at=?,"
+                    "last_completed_at=CASE WHEN ? THEN ? ELSE last_completed_at END "
+                    "WHERE singleton_id=1 AND revision=?",
+                    (
+                        next_owner_offset,
+                        next_dataset_id,
+                        next_totals,
+                        _sqlite_utc(now_utc),
+                        int(completed),
+                        _sqlite_utc(now_utc),
+                        expected_revision,
+                    ),
+                )
+                return bool(result.rowcount == 1)
+        finally:
+            conn.close()
+
+    @staticmethod
     def _normalize_slides_reconciliation_row(row: Any) -> dict[str, Any]:
         data = dict(row)
         for field_name in (

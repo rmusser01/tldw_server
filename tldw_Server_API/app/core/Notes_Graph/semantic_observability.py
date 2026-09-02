@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -165,9 +166,15 @@ _METRIC_DEFINITIONS = (
     ),
     MetricDefinition(
         name="notes_semantic_cleanup_retries_total",
-        type=MetricType.GAUGE,
-        description="Current Notes semantic cleanup retry total",
+        type=MetricType.COUNTER,
+        description="Notes semantic cleanup retry events",
         labels=["status", "backend"],
+    ),
+    MetricDefinition(
+        name="notes_semantic_cleanup_retry_backlog",
+        type=MetricType.GAUGE,
+        description="Current Notes semantic cleanup retry backlog",
+        labels=["backend"],
     ),
     MetricDefinition(
         name="notes_semantic_cleanup_oldest_age_seconds",
@@ -362,7 +369,13 @@ def record_semantic_health_metrics(
             bounded_counts.get(state, 0),
             {"state": state, "backend": backend},
         )
-    denominator = sum(bounded_counts.get(state, 0) for state in ("indexed", "excluded", "failed", "pending"))
+    tracked = sum(bounded_counts.get(state, 0) for state in ("indexed", "excluded", "failed", "pending"))
+    denominator = max(
+        tracked,
+        bounded_counts.get("indexed", 0) + bounded_counts.get("dirty", 0),
+    )
+    if denominator == 0 and stale_generations:
+        denominator = 1
     coverage = bounded_counts.get("indexed", 0) / denominator if denominator else 1.0
     _metric_call(
         set_gauge,
@@ -439,26 +452,31 @@ def record_semantic_cleanup_metrics(
         {"backend": backend},
     )
     retry_count = _count(retries, "retries")
-    for other_status in ("success", "degraded", "failed"):
-        if other_status == status:
-            continue
-        _metric_call(
-            set_gauge,
-            "notes_semantic_cleanup_retries_total",
-            0,
-            {"status": other_status, "backend": backend},
-        )
     _metric_call(
         set_gauge,
-        "notes_semantic_cleanup_retries_total",
+        "notes_semantic_cleanup_retry_backlog",
         retry_count,
-        {"status": status, "backend": backend},
+        {"backend": backend},
     )
     _metric_call(
         set_gauge,
         "notes_semantic_cleanup_oldest_age_seconds",
         _number(oldest_age_seconds, "oldest_age"),
         {"backend": backend},
+    )
+
+
+def record_semantic_cleanup_retry(*, status: str, backend: str) -> None:
+    """Increment the cleanup retry event counter after one durable transition."""
+
+    _metric_call(
+        increment_counter,
+        "notes_semantic_cleanup_retries_total",
+        1,
+        {
+            "status": _member(status, _STATUSES, "status"),
+            "backend": _backend(backend),
+        },
     )
 
 
@@ -516,6 +534,75 @@ def aggregate_semantic_health_snapshots(
         )
         for backend, total in totals.items()
     )
+
+
+def serialize_semantic_health_snapshots(snapshots: Sequence[object]) -> str:
+    """Serialize only bounded aggregate fields for a durable partial sweep."""
+
+    payload = [
+        {
+            "backend": snapshot.backend,
+            "indexed_notes": snapshot.indexed_notes,
+            "excluded_notes": snapshot.excluded_notes,
+            "failed_notes": snapshot.failed_notes,
+            "dirty_notes": snapshot.dirty_notes,
+            "pending_notes": snapshot.pending_notes,
+            "stale_generations": snapshot.stale_generations,
+            "cleanup_backlog": snapshot.cleanup_backlog,
+            "cleanup_retries": snapshot.cleanup_retries,
+            "oldest_cleanup_created_at": (
+                snapshot.oldest_cleanup_created_at.isoformat()
+                if isinstance(snapshot.oldest_cleanup_created_at, datetime)
+                else snapshot.oldest_cleanup_created_at
+            ),
+        }
+        for snapshot in aggregate_semantic_health_snapshots(snapshots)
+    ]
+    return json.dumps(payload, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
+
+
+def deserialize_semantic_health_snapshots(value: str) -> tuple[SemanticHealthSnapshot, ...]:
+    """Restore a validated content-free aggregate persisted by the sweep."""
+
+    try:
+        payload = json.loads(value)
+    except (TypeError, ValueError) as exc:
+        raise SemanticObservationError("notes_semantic_observation_snapshot_invalid") from exc
+    if not isinstance(payload, list) or len(payload) > len(_BACKENDS):
+        raise SemanticObservationError("notes_semantic_observation_snapshot_invalid")
+    snapshots: list[SemanticHealthSnapshot] = []
+    for item in payload:
+        if not isinstance(item, dict):
+            raise SemanticObservationError("notes_semantic_observation_snapshot_invalid")
+        expected = {
+            "backend",
+            "indexed_notes",
+            "excluded_notes",
+            "failed_notes",
+            "dirty_notes",
+            "pending_notes",
+            "stale_generations",
+            "cleanup_backlog",
+            "cleanup_retries",
+            "oldest_cleanup_created_at",
+        }
+        if set(item) != expected:
+            raise SemanticObservationError("notes_semantic_observation_snapshot_invalid")
+        snapshots.append(
+            SemanticHealthSnapshot(
+                backend=_backend(item["backend"]),
+                indexed_notes=_count(item["indexed_notes"], "indexed_notes"),
+                excluded_notes=_count(item["excluded_notes"], "excluded_notes"),
+                failed_notes=_count(item["failed_notes"], "failed_notes"),
+                dirty_notes=_count(item["dirty_notes"], "dirty_notes"),
+                pending_notes=_count(item["pending_notes"], "pending_notes"),
+                stale_generations=_count(item["stale_generations"], "stale_generations"),
+                cleanup_backlog=_count(item["cleanup_backlog"], "cleanup_backlog"),
+                cleanup_retries=_count(item["cleanup_retries"], "cleanup_retries"),
+                oldest_cleanup_created_at=_cleanup_timestamp(item["oldest_cleanup_created_at"]),
+            )
+        )
+    return tuple(snapshots)
 
 
 def record_semantic_aggregate_metrics(
@@ -673,10 +760,13 @@ __all__ = [
     "record_semantic_build_metrics",
     "record_semantic_cancellation",
     "record_semantic_cleanup_metrics",
+    "record_semantic_cleanup_retry",
     "record_semantic_denial",
     "record_semantic_dsr_metrics",
     "record_semantic_failure",
     "record_semantic_aggregate_metrics",
     "record_semantic_health_metrics",
     "record_semantic_query_metrics",
+    "deserialize_semantic_health_snapshots",
+    "serialize_semantic_health_snapshots",
 ]

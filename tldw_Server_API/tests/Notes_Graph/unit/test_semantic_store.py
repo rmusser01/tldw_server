@@ -1013,6 +1013,73 @@ def test_observability_snapshot_reads_authoritative_note_and_cleanup_state(
     assert snapshot.oldest_cleanup_created_at == oldest
 
 
+def test_observability_snapshot_counts_initial_staging_generation(
+    db: CharactersRAGDB,
+) -> None:
+    _config, generation = _create_resolved_generation(db)
+    for note_id in ("note-a", "note-b"):
+        db.add_note(note_id, "content", note_id=note_id)
+        db.note_semantic_store.record_note_dirty(
+            dataset_id=DATASET_ID,
+            generation_id=generation.id,
+            note_id=note_id,
+            content_version=1,
+            content_fingerprint=CONTENT_V1,
+            now=NOW,
+        )
+
+    snapshot = db.note_semantic_store.get_observability_snapshot(
+        DATASET_ID,
+        current_capability_revision="capability-v1",
+    )
+
+    assert snapshot.indexed_notes == 0
+    assert snapshot.failed_notes == 0
+    assert snapshot.pending_notes == 2
+    assert snapshot.dirty_notes == 2
+    assert snapshot.stale_generations == 0
+
+
+def test_observability_snapshot_counts_failed_generation_before_activation(
+    db: CharactersRAGDB,
+) -> None:
+    _config, generation = _create_resolved_generation(db)
+    for note_id in ("note-a", "note-b"):
+        db.add_note(note_id, "content", note_id=note_id)
+        db.note_semantic_store.record_note_dirty(
+            dataset_id=DATASET_ID,
+            generation_id=generation.id,
+            note_id=note_id,
+            content_version=1,
+            content_fingerprint=CONTENT_V1,
+            now=NOW,
+        )
+    with db.transaction() as conn:
+        conn.execute(
+            "UPDATE note_semantic_generations SET state='failed',"
+            "terminal_error_code='provider_failure' WHERE owner_user_id=? "
+            "AND dataset_id=? AND id=?",
+            ("owner-a", DATASET_ID, generation.id),
+        )
+        conn.execute(
+            "UPDATE note_semantic_note_state SET state='failed',"
+            "error_code='provider_failure' WHERE owner_user_id=? AND dataset_id=? "
+            "AND generation_id=? AND note_id='note-a'",
+            ("owner-a", DATASET_ID, generation.id),
+        )
+
+    snapshot = db.note_semantic_store.get_observability_snapshot(
+        DATASET_ID,
+        current_capability_revision="capability-v1",
+    )
+
+    assert snapshot.indexed_notes == 0
+    assert snapshot.failed_notes == 1
+    assert snapshot.pending_notes == 1
+    assert snapshot.dirty_notes == 2
+    assert snapshot.stale_generations == 1
+
+
 def test_observability_dataset_listing_pages_raw_scope_authority(
     db: CharactersRAGDB,
 ) -> None:

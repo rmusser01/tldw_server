@@ -579,6 +579,19 @@ CREATE TABLE IF NOT EXISTS slides_standalone_reconciliation (
 );
 INSERT OR IGNORE INTO slides_standalone_reconciliation(singleton_id) VALUES (1);
 
+-- Durable, content-free cursor and partial totals for the bounded Notes
+-- semantic health sweep. Metrics are emitted only after a complete sweep.
+CREATE TABLE IF NOT EXISTS notes_semantic_health_sweep (
+  singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+  revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
+  owner_offset INTEGER NOT NULL DEFAULT 0 CHECK (owner_offset >= 0),
+  after_dataset_id TEXT,
+  totals_json TEXT NOT NULL DEFAULT '[]' CHECK (LENGTH(totals_json) <= 65536),
+  updated_at TEXT NOT NULL DEFAULT (DATETIME('now')),
+  last_completed_at TEXT
+);
+INSERT OR IGNORE INTO notes_semantic_health_sweep(singleton_id) VALUES (1);
+
 -- Append-only outbox for job events (CDC/event bus)
 CREATE TABLE IF NOT EXISTS job_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
