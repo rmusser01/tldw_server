@@ -23,6 +23,10 @@ from tldw_Server_API.app.core.Notes_Graph.semantic_jobs import (
     SemanticJobCancelled,
     SemanticJobHandler,
 )
+from tldw_Server_API.app.core.Notes_Graph.semantic_observability import (
+    aggregate_semantic_health_snapshots,
+    serialize_semantic_health_snapshots,
+)
 from tldw_Server_API.app.core.Notes_Graph.semantic_publication import (
     revalidate_execution_fence,
 )
@@ -271,14 +275,29 @@ async def test_generation_cleanup_retry_counter_records_only_committed_retry(
     assert events == [{"status": "failed", "backend": "chromadb"}]
 
 
-def test_expired_maintenance_reclaims_emit_exact_committed_retry_count(
+@pytest.mark.parametrize(
+    ("total_transitions", "cleanup_transitions", "expected_events"),
+    [
+        (3, 2, [{"status": "failed", "backend": "pgvector", "count": 2}]),
+        (1, 0, []),
+        (2, 2, [{"status": "failed", "backend": "pgvector", "count": 2}]),
+    ],
+    ids=("mixed", "index-only", "cleanup-only"),
+)
+def test_expired_maintenance_reclaims_emit_only_cleanup_retry_transitions(
     monkeypatch: pytest.MonkeyPatch,
+    total_transitions: int,
+    cleanup_transitions: int,
+    expected_events: list[dict[str, object]],
 ) -> None:
     events: list[dict[str, object]] = []
 
     class Store:
-        def reclaim_expired_dataset_work(self, **_kwargs: object) -> int:
-            return 2
+        def reclaim_expired_dataset_work(self, **_kwargs: object):
+            return SimpleNamespace(
+                total_transitions=total_transitions,
+                cleanup_transitions=cleanup_transitions,
+            )
 
         def get_configuration(self, _dataset_id: str):
             return SimpleNamespace(vector_backend="pgvector")
@@ -296,8 +315,8 @@ def test_expired_maintenance_reclaims_emit_exact_committed_retry_count(
         lambda **kwargs: events.append(dict(kwargs)),
     )
 
-    assert scope.reclaim_expired(limit=10, now=NOW) == 2
-    assert events == [{"status": "failed", "backend": "pgvector", "count": 2}]
+    assert scope.reclaim_expired(limit=10, now=NOW) == total_transitions
+    assert events == expected_events
 
 
 @pytest.mark.asyncio
@@ -307,7 +326,7 @@ async def test_health_sweep_owner_keyset_survives_churn_without_partial_publicat
     tmp_path,
     churn: str,
 ) -> None:
-    def owner(owner_id: int, created_at: datetime) -> dict[str, object]:
+    def owner(owner_id: int, created_at: datetime | None) -> dict[str, object]:
         return {"id": owner_id, "created_at": created_at}
 
     records = [
@@ -318,20 +337,17 @@ async def test_health_sweep_owner_keyset_survives_churn_without_partial_publicat
 
     class Users:
         async def list_users(self, *, offset: int, limit: int):
-            ordered = sorted(records, key=lambda row: (row["created_at"], row["id"]), reverse=True)
+            ordered = sorted(records, key=lambda row: row["id"], reverse=True)
             return ordered[offset : offset + limit], len(ordered)
 
         async def list_users_for_semantic_health_sweep(
             self,
             *,
-            after_created_at: datetime | None,
             after_id: int | None,
             limit: int,
         ):
-            ordered = sorted(records, key=lambda row: (row["created_at"], row["id"]), reverse=True)
-            if after_created_at is not None and after_id is not None:
-                ordered = [row for row in ordered if (row["created_at"], row["id"]) < (after_created_at, after_id)]
-            return ordered[:limit]
+            ordered = sorted(records, key=lambda row: row["id"], reverse=True)
+            return [row for row in ordered if after_id is None or row["id"] < after_id][:limit]
 
         async def get_user_by_id(self, user_id: int):
             return next((row for row in records if row["id"] == user_id), None)
@@ -389,6 +405,8 @@ async def test_health_sweep_owner_keyset_survives_churn_without_partial_publicat
         records[:] = [row for row in records if row["id"] != 3]
     else:
         records.append(owner(4, NOW + timedelta(minutes=1)))
+    for record in records:
+        record["created_at"] = None
 
     for _ in range(2):
         await notes_semantic_maintenance._MaintenanceRunner(
@@ -411,7 +429,13 @@ async def test_health_sweep_owner_keyset_survives_churn_without_partial_publicat
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "corruption",
-    ("totals", "owner-timestamp", "owner-id", "dataset-id"),
+    (
+        "totals",
+        "totals-without-owner",
+        "owner-without-totals",
+        "owner-id",
+        "dataset-id",
+    ),
 )
 async def test_corrupt_health_checkpoint_resets_without_partial_publication(
     monkeypatch: pytest.MonkeyPatch,
@@ -425,27 +449,30 @@ async def test_corrupt_health_checkpoint_resets_without_partial_publication(
             return []
 
     jobs = JobManager(tmp_path / "semantic-health-corrupt.db")
+    valid_totals = serialize_semantic_health_snapshots(aggregate_semantic_health_snapshots(()))
     with sqlite3.connect(jobs.db_path) as conn:
         if corruption == "totals":
             conn.execute(
                 "UPDATE notes_semantic_health_sweep SET totals_json=? WHERE singleton_id=1",
                 ('{"backend":"chromadb"}',),
             )
-        elif corruption == "owner-timestamp":
+        elif corruption == "totals-without-owner":
             conn.execute(
-                "UPDATE notes_semantic_health_sweep SET after_owner_created_at=?,after_owner_id=1 WHERE singleton_id=1",
-                ("not-a-timestamp",),
+                "UPDATE notes_semantic_health_sweep SET totals_json=? WHERE singleton_id=1",
+                (valid_totals,),
             )
+        elif corruption == "owner-without-totals":
+            conn.execute("UPDATE notes_semantic_health_sweep SET after_owner_id=1 WHERE singleton_id=1")
         elif corruption == "owner-id":
             conn.execute(
-                "UPDATE notes_semantic_health_sweep SET after_owner_created_at=?,after_owner_id=? WHERE singleton_id=1",
-                (NOW.isoformat(), "not-an-id"),
+                "UPDATE notes_semantic_health_sweep SET after_owner_id=?,totals_json=? WHERE singleton_id=1",
+                ("not-an-id", valid_totals),
             )
         else:
             conn.execute(
-                "UPDATE notes_semantic_health_sweep SET after_owner_created_at=?,"
-                "after_owner_id=1,after_dataset_id='' WHERE singleton_id=1",
-                (NOW.isoformat(),),
+                "UPDATE notes_semantic_health_sweep SET after_owner_id=1,"
+                "after_dataset_id='',totals_json=? WHERE singleton_id=1",
+                (valid_totals,),
             )
     monkeypatch.setattr(
         notes_semantic_maintenance,
@@ -1688,7 +1715,6 @@ async def test_no_work_owner_discovery_is_bounded_and_continues_fairly(
         async def list_users_for_semantic_health_sweep(
             self,
             *,
-            after_created_at: datetime | None,
             after_id: int | None,
             limit: int,
         ) -> list[dict[str, object]]:
@@ -1782,22 +1808,16 @@ async def test_complete_health_sweep_aggregates_all_owners_and_rebuilds_after_re
     }
 
     class Users:
-        users = [
-            {"id": 1, "created_at": NOW},
-            {"id": 2, "created_at": NOW - timedelta(minutes=1)},
-        ]
+        users = [{"id": 1}, {"id": 2}]
 
         async def list_users_for_semantic_health_sweep(
             self,
             *,
-            after_created_at: datetime | None,
             after_id: int | None,
             limit: int,
         ):
-            users = self.users
-            if after_created_at is not None and after_id is not None:
-                users = [user for user in users if (user["created_at"], user["id"]) < (after_created_at, after_id)]
-            return users[:limit]
+            users = sorted(self.users, key=lambda user: user["id"], reverse=True)
+            return [user for user in users if after_id is None or user["id"] < after_id][:limit]
 
         async def get_user_by_id(self, user_id: int):
             return next((user for user in self.users if user["id"] == user_id), None)
@@ -1878,9 +1898,8 @@ async def test_complete_health_sweep_aggregates_all_owners_and_rebuilds_after_re
     await first_runner._run_health_sweep_page(now=NOW, limit=2)
     assert observations == []
     persisted = JobManager(jobs.db_path).get_notes_semantic_health_sweep()
-    assert persisted["after_owner_id"] == 1
-    assert persisted["after_owner_created_at"] == NOW
-    assert persisted["after_dataset_id"] == "dataset-b"
+    assert persisted["after_owner_id"] == 2
+    assert persisted["after_dataset_id"] is None
     first = await complete_one_sweep()
 
     chromadb = next(value for value in first if value.backend == "chromadb")
@@ -1912,23 +1931,16 @@ async def test_health_sweep_bounds_empty_owner_database_scans(
     observations: list[tuple[object, ...]] = []
 
     class Users:
-        users = [
-            {"id": 1, "created_at": NOW},
-            {"id": 2, "created_at": NOW - timedelta(minutes=1)},
-            {"id": 3, "created_at": NOW - timedelta(minutes=2)},
-        ]
+        users = [{"id": 1}, {"id": 2}, {"id": 3}]
 
         async def list_users_for_semantic_health_sweep(
             self,
             *,
-            after_created_at: datetime | None,
             after_id: int | None,
             limit: int,
         ):
-            users = self.users
-            if after_created_at is not None and after_id is not None:
-                users = [user for user in users if (user["created_at"], user["id"]) < (after_created_at, after_id)]
-            return users[:limit]
+            users = sorted(self.users, key=lambda user: user["id"], reverse=True)
+            return [user for user in users if after_id is None or user["id"] < after_id][:limit]
 
         async def get_user_by_id(self, user_id: int):
             return next((user for user in self.users if user["id"] == user_id), None)
@@ -1964,7 +1976,7 @@ async def test_health_sweep_bounds_empty_owner_database_scans(
 
     await runner._run_health_sweep_page(now=NOW, limit=1)
 
-    assert opened == ["1"]
+    assert opened == ["3"]
     assert observations == []
 
 
@@ -1976,19 +1988,15 @@ async def test_health_sweep_uses_unfiltered_authority_cursor_across_empty_datase
     observations: list[tuple[object, ...]] = []
 
     class Users:
-        users = [{"id": 1, "created_at": NOW}]
+        users = [{"id": 1}]
 
         async def list_users_for_semantic_health_sweep(
             self,
             *,
-            after_created_at: datetime | None,
             after_id: int | None,
             limit: int,
         ):
-            users = self.users
-            if after_created_at is not None and after_id is not None:
-                users = [user for user in users if (user["created_at"], user["id"]) < (after_created_at, after_id)]
-            return users[:limit]
+            return [user for user in self.users if after_id is None or user["id"] < after_id][:limit]
 
         async def get_user_by_id(self, user_id: int):
             return next((user for user in self.users if user["id"] == user_id), None)

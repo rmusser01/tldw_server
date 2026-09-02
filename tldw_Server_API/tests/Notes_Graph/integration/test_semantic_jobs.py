@@ -1776,7 +1776,8 @@ def test_repeated_cleanup_lease_expiry_can_be_rearmed(
                 limit=1,
                 now=moment + timedelta(seconds=2),
             )
-            assert reclaimed == 1
+            assert reclaimed.total_transitions == 1
+            assert reclaimed.cleanup_transitions == 1
             moment += timedelta(seconds=3)
 
         assert (

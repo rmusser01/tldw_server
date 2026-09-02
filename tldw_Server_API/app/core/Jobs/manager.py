@@ -70,7 +70,7 @@ from .migrations import (
     slides_archive_projection_ready_sqlite,
     slides_archive_values_equal,
 )
-from .notes_semantic_health import parse_notes_semantic_health_totals
+from .notes_semantic_health import validate_notes_semantic_health_checkpoint
 from .operations.contracts import (
     ADMIN_WEBHOOK_DELIVERY_DOMAIN,
     ADMIN_WEBHOOK_DELIVERY_JOB_TYPE,
@@ -909,16 +909,12 @@ class JobManager:
             with contextlib.suppress(TypeError, ValueError):
                 owner_id = int(owner_id)
         data["after_owner_id"] = owner_id
-        for field_name in ("after_owner_created_at", "updated_at", "last_completed_at"):
+        for field_name in ("updated_at", "last_completed_at"):
             value = _parse_dt(data.get(field_name))
             if value is not None:
                 value = value.replace(tzinfo=_tz.utc) if value.tzinfo is None else value.astimezone(_tz.utc)
             data[field_name] = value
         return data
-
-    @staticmethod
-    def _validate_notes_semantic_health_totals(totals_json: str) -> None:
-        parse_notes_semantic_health_totals(totals_json)
 
     def get_notes_semantic_health_sweep(self) -> dict[str, Any]:
         """Read the durable singleton cursor for Notes semantic health aggregation."""
@@ -941,7 +937,6 @@ class JobManager:
         self,
         *,
         expected_revision: int,
-        after_owner_created_at: datetime | None,
         after_owner_id: int | None,
         after_dataset_id: str | None,
         totals_json: str,
@@ -952,44 +947,28 @@ class JobManager:
 
         if isinstance(expected_revision, bool) or not isinstance(expected_revision, int) or expected_revision < 0:
             raise ValueError("semantic health revision must be nonnegative")
-        if (after_owner_created_at is None) != (after_owner_id is None):
-            raise ValueError("semantic health owner cursor must be complete")
-        if after_owner_id is not None and (
-            isinstance(after_owner_id, bool) or not isinstance(after_owner_id, int) or after_owner_id <= 0
-        ):
-            raise ValueError("semantic health owner id must be positive")
-        owner_created_at = (
-            None
-            if after_owner_created_at is None
-            else _require_aware_utc(after_owner_created_at, field_name="after_owner_created_at")
+        validate_notes_semantic_health_checkpoint(
+            after_owner_id=after_owner_id,
+            after_dataset_id=after_dataset_id,
+            totals_json=totals_json,
         )
-        if after_dataset_id is not None and (
-            not isinstance(after_dataset_id, str) or not after_dataset_id or len(after_dataset_id.encode("utf-8")) > 256
-        ):
-            raise ValueError("semantic health dataset cursor must be bounded")
-        if after_dataset_id is not None and after_owner_id is None:
-            raise ValueError("semantic health dataset cursor requires an owner cursor")
-        self._validate_notes_semantic_health_totals(totals_json)
+        if completed and after_owner_id is not None:
+            raise ValueError("completed semantic health checkpoint must be reset")
         now_utc = _require_aware_utc(now, field_name="now")
-        next_owner_created_at = None if completed else owner_created_at
-        next_owner_id = None if completed else after_owner_id
-        next_dataset_id = None if completed else after_dataset_id
-        next_totals = "[]" if completed else totals_json
         conn = self._connect()
         try:
             if self.backend == "postgres":
                 with conn, self._pg_cursor(conn) as cur:
                     cur.execute(
                         "UPDATE notes_semantic_health_sweep SET revision=revision+1,"
-                        "after_owner_created_at=%s,after_owner_id=%s,after_dataset_id=%s,"
+                        "after_owner_id=%s,after_dataset_id=%s,"
                         "totals_json=%s,updated_at=%s,"
                         "last_completed_at=CASE WHEN %s THEN %s ELSE last_completed_at END "
                         "WHERE singleton_id=1 AND revision=%s",
                         (
-                            next_owner_created_at,
-                            next_owner_id,
-                            next_dataset_id,
-                            next_totals,
+                            after_owner_id,
+                            after_dataset_id,
+                            totals_json,
                             now_utc,
                             completed,
                             now_utc,
@@ -1000,15 +979,14 @@ class JobManager:
             with conn:
                 result = conn.execute(
                     "UPDATE notes_semantic_health_sweep SET revision=revision+1,"
-                    "after_owner_created_at=?,after_owner_id=?,after_dataset_id=?,"
+                    "after_owner_id=?,after_dataset_id=?,"
                     "totals_json=?,updated_at=?,"
                     "last_completed_at=CASE WHEN ? THEN ? ELSE last_completed_at END "
                     "WHERE singleton_id=1 AND revision=?",
                     (
-                        None if next_owner_created_at is None else _sqlite_utc(next_owner_created_at),
-                        next_owner_id,
-                        next_dataset_id,
-                        next_totals,
+                        after_owner_id,
+                        after_dataset_id,
+                        totals_json,
                         _sqlite_utc(now_utc),
                         int(completed),
                         _sqlite_utc(now_utc),

@@ -338,20 +338,18 @@ class SemanticErasureCoordinator:
             self._check_deadline()
             now = self._clock()
             expired_before = now - timedelta(seconds=self._lease_seconds)
-            reclaimed_work = int(
-                await self._store_call(
-                    self._store.reclaim_expired_dataset_work,
-                    dataset_id=dataset_id,
-                    expired_before=expired_before,
-                    limit=100,
-                    now=now,
-                )
+            reclaimed_work = await self._store_call(
+                self._store.reclaim_expired_dataset_work,
+                dataset_id=dataset_id,
+                expired_before=expired_before,
+                limit=100,
+                now=now,
             )
-            if reclaimed_work:
+            if reclaimed_work.cleanup_transitions:
                 record_semantic_cleanup_retry(
                     status="failed",
                     backend=backend_name,
-                    count=reclaimed_work,
+                    count=reclaimed_work.cleanup_transitions,
                 )
             reclaimed_vectors = int(
                 await self._store_call(

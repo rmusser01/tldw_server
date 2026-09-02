@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import contextlib
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from typing import Any
 
 from loguru import logger
@@ -364,32 +363,14 @@ class AuthnzUsersRepo:
             logger.error(f"AuthnzUsersRepo.list_users failed: {exc}")
             raise
 
-    @staticmethod
-    def _semantic_health_created_at(value: object) -> datetime:
-        if isinstance(value, datetime):
-            parsed = value
-        elif isinstance(value, str):
-            try:
-                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-            except ValueError as exc:
-                raise DatabaseError("Invalid users.created_at cursor") from exc
-        else:
-            raise DatabaseError("Invalid users.created_at cursor")
-        if parsed.tzinfo is None or parsed.utcoffset() is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
-        return parsed.astimezone(timezone.utc)
-
     async def list_users_for_semantic_health_sweep(
         self,
         *,
-        after_created_at: datetime | None,
         after_id: int | None,
         limit: int,
     ) -> list[dict[str, Any]]:
         """List one stable keyset page for the private semantic health sweep."""
 
-        if (after_created_at is None) != (after_id is None):
-            raise ValueError("semantic health owner cursor must be complete")
         if type(limit) is not int or not 1 <= limit <= 100:
             raise ValueError("semantic health owner limit must be bounded")
         if after_id is not None and (type(after_id) is not int or after_id <= 0):
@@ -397,25 +378,15 @@ class AuthnzUsersRepo:
         db = await self._users_db()
         params: list[object] = []
         where_clause = ""
-        if after_created_at is not None:
-            cursor = self._semantic_health_created_at(after_created_at)
-            cursor_value: object = cursor
-            if not db._using_postgres_backend():
-                cursor_value = cursor.replace(tzinfo=None).isoformat(sep=" ")
-            where_clause = " WHERE (created_at < ? OR (created_at = ? AND id < ?))"
-            params.extend((cursor_value, cursor_value, after_id))
+        if after_id is not None:
+            where_clause = " WHERE id < ?"
+            params.append(after_id)
         rows = await db.db_pool.fetchall(
-            f"SELECT id,created_at FROM users{where_clause} ORDER BY created_at DESC,id DESC LIMIT ?",  # nosec B608
+            f"SELECT id FROM users{where_clause} ORDER BY id DESC LIMIT ?",  # nosec B608
             *params,
             limit,
         )
-        return [
-            {
-                "id": int(dict(row)["id"]),
-                "created_at": self._semantic_health_created_at(dict(row)["created_at"]),
-            }
-            for row in rows
-        ]
+        return [{"id": int(dict(row)["id"])} for row in rows]
 
     async def ensure_single_user_admin_user(
         self,

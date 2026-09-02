@@ -16,6 +16,9 @@ from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
 )
 from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
 from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Jobs.notes_semantic_health import (
+    validate_notes_semantic_health_checkpoint,
+)
 from tldw_Server_API.app.core.Notes_Graph.semantic_api import (
     load_semantic_settings,
     resolve_semantic_capabilities,
@@ -197,13 +200,13 @@ class _ProductionScope:
             limit=min(limit, 256),
             now=now,
         )
-        if reclaimed:
+        if reclaimed.cleanup_transitions:
             record_semantic_cleanup_retry(
                 status="failed",
                 backend=self._metric_backend(),
-                count=reclaimed,
+                count=reclaimed.cleanup_transitions,
             )
-        return reclaimed
+        return reclaimed.total_transitions
 
     def claim_dirty(self, *, limit: int, now: datetime) -> tuple[_DirtyClaim, ...]:
         del now
@@ -429,34 +432,19 @@ class _MaintenanceRunner:
         try:
             state = await asyncio.to_thread(self._jobs.get_notes_semantic_health_sweep)
             revision = int(state["revision"])
-            after_owner_created_at = state["after_owner_created_at"]
             after_owner_id = state["after_owner_id"]
             after_dataset_id = state["after_dataset_id"]
             try:
-                if (after_owner_created_at is None) != (after_owner_id is None):
-                    raise ValueError("notes_semantic_health_owner_cursor_invalid")
-                if after_owner_id is not None and (
-                    isinstance(after_owner_id, bool)
-                    or not isinstance(after_owner_id, int)
-                    or after_owner_id <= 0
-                    or not isinstance(after_owner_created_at, datetime)
-                    or after_owner_created_at.tzinfo is None
-                    or after_owner_created_at.utcoffset() is None
-                ):
-                    raise ValueError("notes_semantic_health_owner_cursor_invalid")
-                if after_dataset_id is not None and (
-                    after_owner_id is None
-                    or not isinstance(after_dataset_id, str)
-                    or not after_dataset_id
-                    or len(after_dataset_id.encode("utf-8")) > 256
-                ):
-                    raise ValueError("notes_semantic_health_dataset_cursor_invalid")
+                validate_notes_semantic_health_checkpoint(
+                    after_owner_id=after_owner_id,
+                    after_dataset_id=after_dataset_id,
+                    totals_json=str(state["totals_json"]),
+                )
                 accumulated = deserialize_semantic_health_snapshots(str(state["totals_json"]))
             except (TypeError, ValueError):
                 await asyncio.to_thread(
                     self._jobs.checkpoint_notes_semantic_health_sweep,
                     expected_revision=revision,
-                    after_owner_created_at=None,
                     after_owner_id=None,
                     after_dataset_id=None,
                     totals_json="[]",
@@ -471,7 +459,6 @@ class _MaintenanceRunner:
                     await asyncio.to_thread(
                         self._jobs.checkpoint_notes_semantic_health_sweep,
                         expected_revision=revision,
-                        after_owner_created_at=after_owner_created_at,
                         after_owner_id=after_owner_id,
                         after_dataset_id=None,
                         totals_json=serialize_semantic_health_snapshots(accumulated),
@@ -479,10 +466,9 @@ class _MaintenanceRunner:
                         now=now,
                     )
                     return
-                users = [{"id": after_owner_id, "created_at": after_owner_created_at}]
+                users = [{"id": after_owner_id}]
             else:
                 users = await self._users_repo.list_users_for_semantic_health_sweep(
-                    after_created_at=after_owner_created_at,
                     after_id=after_owner_id,
                     limit=1,
                 )
@@ -490,10 +476,9 @@ class _MaintenanceRunner:
                 committed = await asyncio.to_thread(
                     self._jobs.checkpoint_notes_semantic_health_sweep,
                     expected_revision=revision,
-                    after_owner_created_at=after_owner_created_at,
-                    after_owner_id=after_owner_id,
+                    after_owner_id=None,
                     after_dataset_id=None,
-                    totals_json=serialize_semantic_health_snapshots(accumulated),
+                    totals_json="[]",
                     completed=True,
                     now=now,
                 )
@@ -502,19 +487,10 @@ class _MaintenanceRunner:
                 return
             owner_row = users[0]
             owner_id = owner_row.get("id")
-            owner_created_at = owner_row.get("created_at")
-            if (
-                isinstance(owner_id, bool)
-                or not isinstance(owner_id, int)
-                or owner_id <= 0
-                or not isinstance(owner_created_at, datetime)
-                or owner_created_at.tzinfo is None
-                or owner_created_at.utcoffset() is None
-            ):
+            if isinstance(owner_id, bool) or not isinstance(owner_id, int) or owner_id <= 0:
                 logger.warning("Notes semantic health owner was invalid")
                 return
             owner = str(owner_id)
-            owner_created_at = owner_created_at.astimezone(timezone.utc)
             db = None
             try:
                 db = await _open_owner_database(owner)
@@ -546,7 +522,6 @@ class _MaintenanceRunner:
             await asyncio.to_thread(
                 self._jobs.checkpoint_notes_semantic_health_sweep,
                 expected_revision=revision,
-                after_owner_created_at=owner_created_at,
                 after_owner_id=owner_id,
                 after_dataset_id=next_dataset_id,
                 totals_json=serialize_semantic_health_snapshots(totals),

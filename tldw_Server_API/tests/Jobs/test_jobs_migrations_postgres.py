@@ -182,7 +182,6 @@ def test_pg_semantic_health_sweep_checkpoint_is_durable_and_survives_restart(
             assert {row[0] for row in cur.fetchall()} == {
                 "singleton_id",
                 "revision",
-                "after_owner_created_at",
                 "after_owner_id",
                 "after_dataset_id",
                 "totals_json",
@@ -190,8 +189,8 @@ def test_pg_semantic_health_sweep_checkpoint_is_durable_and_survives_restart(
                 "last_completed_at",
             }
             cur.execute(
-                "UPDATE notes_semantic_health_sweep SET revision=0,after_owner_created_at=NULL,"
-                "after_owner_id=NULL,after_dataset_id=NULL,totals_json='[]',updated_at=%s,"
+                "UPDATE notes_semantic_health_sweep SET revision=0,after_owner_id=NULL,"
+                "after_dataset_id=NULL,totals_json='[]',updated_at=%s,"
                 "last_completed_at=NULL WHERE singleton_id=1",
                 (NOW,),
             )
@@ -216,7 +215,6 @@ def test_pg_semantic_health_sweep_checkpoint_is_durable_and_survives_restart(
     manager = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
     assert manager.checkpoint_notes_semantic_health_sweep(
         expected_revision=0,
-        after_owner_created_at=NOW,
         after_owner_id=2,
         after_dataset_id="dataset-z",
         totals_json=totals,
@@ -227,12 +225,62 @@ def test_pg_semantic_health_sweep_checkpoint_is_durable_and_survives_restart(
     restarted = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
     state = restarted.get_notes_semantic_health_sweep()
     assert state["revision"] == 1
-    assert state["after_owner_created_at"] == NOW
     assert state["after_owner_id"] == 2
     assert state["after_dataset_id"] == "dataset-z"
     assert json.loads(state["totals_json"]) == json.loads(totals)
     assert state["updated_at"] == NOW
     assert state["last_completed_at"] is None
+
+    with pytest.raises(ValueError):
+        restarted.checkpoint_notes_semantic_health_sweep(
+            expected_revision=1,
+            after_owner_id=None,
+            after_dataset_id=None,
+            totals_json=totals,
+            completed=False,
+            now=NOW,
+        )
+    with pytest.raises(ValueError):
+        restarted.checkpoint_notes_semantic_health_sweep(
+            expected_revision=1,
+            after_owner_id=2,
+            after_dataset_id=None,
+            totals_json="[]",
+            completed=False,
+            now=NOW,
+        )
+    with pytest.raises(ValueError):
+        restarted.checkpoint_notes_semantic_health_sweep(
+            expected_revision=1,
+            after_owner_id=None,
+            after_dataset_id="dataset-z",
+            totals_json="[]",
+            completed=False,
+            now=NOW,
+        )
+    assert not restarted.checkpoint_notes_semantic_health_sweep(
+        expected_revision=0,
+        after_owner_id=9,
+        after_dataset_id=None,
+        totals_json=totals,
+        completed=False,
+        now=NOW,
+    )
+    assert restarted.get_notes_semantic_health_sweep()["revision"] == 1
+    assert restarted.checkpoint_notes_semantic_health_sweep(
+        expected_revision=1,
+        after_owner_id=None,
+        after_dataset_id=None,
+        totals_json="[]",
+        completed=True,
+        now=NOW,
+    )
+    completed = restarted.get_notes_semantic_health_sweep()
+    assert completed["revision"] == 2
+    assert completed["after_owner_id"] is None
+    assert completed["after_dataset_id"] is None
+    assert completed["totals_json"] == "[]"
+    assert completed["last_completed_at"] == NOW
 
 
 def test_pg_schema_persists_owner_scoped_idempotency_receipts(jobs_pg_dsn):

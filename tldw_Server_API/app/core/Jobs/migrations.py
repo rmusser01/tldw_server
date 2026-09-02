@@ -584,13 +584,11 @@ INSERT OR IGNORE INTO slides_standalone_reconciliation(singleton_id) VALUES (1);
 CREATE TABLE IF NOT EXISTS notes_semantic_health_sweep (
   singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
   revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
-  after_owner_created_at TEXT,
   after_owner_id INTEGER CHECK (after_owner_id IS NULL OR after_owner_id > 0),
   after_dataset_id TEXT,
   totals_json TEXT NOT NULL DEFAULT '[]' CHECK (LENGTH(totals_json) <= 65536),
   updated_at TEXT NOT NULL DEFAULT (DATETIME('now')),
-  last_completed_at TEXT,
-  CHECK ((after_owner_created_at IS NULL) = (after_owner_id IS NULL))
+  last_completed_at TEXT
 );
 INSERT OR IGNORE INTO notes_semantic_health_sweep(singleton_id) VALUES (1);
 

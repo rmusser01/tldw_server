@@ -3,21 +3,38 @@ id: TASK-13134
 title: Implement Notes embedding index and semantic graph edges
 status: In Progress
 assignee: []
-created_date: '2026-08-27 02:20'
-updated_date: '2026-09-02 20:11'
+created_date: 2026-08-27 02:20
+updated_date: 2026-09-02 21:14
 labels:
-  - notes
-  - notes-graph
-  - embeddings
-  - second-brain
-  - backend
+- notes
+- notes-graph
+- embeddings
+- second-brain
+- backend
 dependencies:
-  - TASK-13138
+- TASK-13138
 documentation:
-  - Docs/superpowers/specs/2026-08-29-notes-semantic-index-design.md
-  - >-
-    Docs/superpowers/plans/2026-08-29-notes-semantic-index-implementation-plan.md
+- Docs/superpowers/specs/2026-08-29-notes-semantic-index-design.md
+- Docs/superpowers/plans/2026-08-29-notes-semantic-index-implementation-plan.md
 priority: medium
+modified_files:
+- tldw_Server_API/app/core/AuthNZ/repos/users_repo.py
+- tldw_Server_API/app/core/DB_Management/chacha/note_semantic_models.py
+- tldw_Server_API/app/core/DB_Management/chacha/note_semantic_store.py
+- tldw_Server_API/app/core/Jobs/manager.py
+- tldw_Server_API/app/core/Jobs/migrations.py
+- tldw_Server_API/app/core/Jobs/notes_semantic_health.py
+- tldw_Server_API/app/core/Jobs/pg_migrations.py
+- tldw_Server_API/app/core/Notes_Graph/semantic_erasure.py
+- tldw_Server_API/app/services/notes_semantic_maintenance.py
+- tldw_Server_API/tests/AuthNZ/integration/test_authnz_users_repo_postgres.py
+- tldw_Server_API/tests/AuthNZ_SQLite/test_authnz_users_repo_sqlite.py
+- tldw_Server_API/tests/Jobs/test_jobs_migrations_postgres.py
+- tldw_Server_API/tests/Jobs/test_jobs_migrations_sqlite.py
+- tldw_Server_API/tests/Notes_Graph/integration/test_semantic_erasure.py
+- tldw_Server_API/tests/Notes_Graph/integration/test_semantic_jobs.py
+- tldw_Server_API/tests/Notes_Graph/integration/test_semantic_publication.py
+- tldw_Server_API/tests/Services/test_notes_semantic_workers.py
 ---
 
 ## Description
@@ -44,7 +61,6 @@ Approved executable plan: `Docs/superpowers/plans/2026-08-29-notes-semantic-inde
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - 2026-08-29: Senior implementation-constraint review identified required spec corrections for user-scoped run APIs, semantic opt-in compatibility, evidence offsets, vector-only backend contracts, DSR erasure, graph admission/async composition, dimension and activation rules, cache freshness, and restore semantics.
 - Design specification: `Docs/superpowers/specs/2026-08-29-notes-semantic-index-design.md`
 - 2026-08-29: Addressed all implementation-constraint review findings in the design: nested run APIs, frozen legacy defaults, field-relative code-point evidence, dedicated ChromaDB/pgvector semantic storage, fail-closed DSR erasure, bounded first-page async projection, dimension preflight and activation gates, fresh status projection, and explicit Sync/full-restore behavior.
@@ -110,7 +126,6 @@ Additional Task 11 fix2 verification: the dedicated Notes semantic English-fallb
 ['2026-09-01 Task 12 fix round 1 complete and verified: ordinary fallback now preserves manual links from successful semantic responses; response-effective controls, capped-edge conversion, per-edge single-flight/idempotency, typed existing-link refresh, backlink-inclusive structural grouping, full localized provenance, reactive canvas i18n, pagination identity reset, and real light/dark browser contrast coverage are implemented. RED: shared UI 12 failed/76 passed, backend 1 failed/8 passed, browser contrast 2 failed. GREEN: shared UI 88 passed, backend endpoint/schema 36 passed, WebUI E2E 4 passed, extension E2E 1 passed, compile/locale/scoped formatting/Ruff/Bandit/diff checks passed. Report: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-12-report.md. TASK-13134 remains In Progress for Task 13.']
 ['Task 12 Fix Round 2 started at clean HEAD a735e797ae. Scope: add an active-Sync coordinator duplicate-conversion regression and nullable semantic effective-control regressions, then apply the minimal endpoint/hook fixes and run affected Task 12 verification.']
 ['2026-09-01 Task 12 fix round 2 complete and verified from a735e797ae: active-Sync logical duplicate conversions now return the exact typed existing-manual-link conflict only after fresh semantic validation and confirmed live unordered-pair state; unrelated preflight failures remain closed. Nullable response-effective controls preserve current values, still clamp response max_top_k, and do not loop. RED: frontend 3 failed/32 passed; backend behavioral RED 1 failed/9 passed. GREEN: focused frontend 65 passed, focused conversion 11 passed, affected frontend 92 passed, affected backend 38 passed; extension compile, scoped Prettier, Ruff, Bandit zero findings, and diff checks passed. Report: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-12-report.md. TASK-13134 remains In Progress for Task 13.']
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 2026-09-01 Task 12 final review complete: implementation aac96ca7e6 plus hardening a735e797ae and 729e8c0adc are independently reviewed clean. All six Important and three Minor findings are resolved, including active-Sync duplicate reconciliation and nullable effective-control handling. Final reviewed verification: 92 affected frontend tests, 38 affected backend tests on Python 3.11.13, 4 WebUI E2E cases, 1 packaged-extension E2E case, extension compile, locale, scoped formatting, Ruff, Bandit zero findings, and diff checks. TASK-13134 remains In Progress for Task 13.
 
@@ -145,6 +160,10 @@ Touched tracked files: tldw_Server_API/app/core/DB_Management/chacha/note_semant
 2026-09-02 residual-fix round 1 scoped re-review of dca595ce02..735d0518fe remains blocked. Durable CAS and counter/gauge type separation are improved, but two load-bearing defects remain: (1) the health checkpoint stores an offset into the mutable users list ordered by created_at, so concurrent insertion/deletion can shift pages, skip an unhealthy owner, and still publish a complete aggregate; checkpoint validation also accepts sparse totals that strict deserialization rejects, which can wedge future sweeps; (2) cleanup retry event accounting is incomplete because partial batched obsolete-vector CAS updates and expired generation/vector claim reclaims, including DSR reclaim, can increment durable attempt counts without incrementing notes_semantic_cleanup_retries_total. No new breakage or out-of-scope findings were reported. Per the bounded residual-cycle breaker, no second fix wave was dispatched. TASK-13134 remains In Progress with acceptance and DoD unchecked, no PR exists, and the branch is not merge-ready. Review artifact: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/residual-fix-review.md.
 
 2026-09-02 residual-fix2 cycle completed from clean HEAD 7e54531620701a06966c7c7c4884796b690716b9. Replaced mutable owner-offset health traversal with a durable created_at/id keyset plus dataset cursor in the existing Jobs singleton/CAS; each bounded pass resumes from durable totals, malformed cursor/totals reset safely, exact shared validation guarantees accepted checkpoints deserialize, and only the winning complete CAS publishes global gauges. Changed obsolete-vector retry to return exact committed transitions and emit notes_semantic_cleanup_retries_total by that count even for partial batches; ordinary maintenance and DSR expired work/vector reclaims now emit each committed attempt_count increment once with the actual backend. Zero/no-op CAS and rearm paths do not count; the separate cleanup retry backlog gauge remains decreasing.\n\nStrict RED: initial mutation selector 9 failed; real SQLite partial-CAS regression failed False == 1; added malformed dataset-cursor regression failed with revision 0 instead of reset revision 1. GREEN: expanded focused selector 14 passed; corrupted-state selector 4 passed; corrected cross-backend selector 4 passed. Complete directly affected SQLite/live PostgreSQL files with RUN_JOBS=1: 274 passed, 14 warnings. Established expanded semantic matrix: 1323 passed, 6 established optional pgvector-extension skips. Ruff check passed all 18 touched Python files; whole-file/changed-range format checks passed; scoped mypy passed the new validator; Bandit exited 0 with no findings over all ten touched production paths; git diff --check passed. Frontend/docs/locale checks not applicable because public contracts were unchanged.\n\nTouched tracked files: app/core/AuthNZ/repos/users_repo.py; app/core/DB_Management/chacha/note_semantic_store.py; app/core/Jobs/{manager.py,migrations.py,notes_semantic_health.py,pg_migrations.py}; app/core/Notes_Graph/{semantic_erasure.py,semantic_observability.py,semantic_publication.py}; app/services/notes_semantic_maintenance.py; tests/AuthNZ/integration/test_authnz_users_repo_postgres.py; tests/AuthNZ_SQLite/test_authnz_users_repo_sqlite.py; tests/Jobs/{test_jobs_migrations_postgres.py,test_jobs_migrations_sqlite.py}; tests/Notes_Graph/integration/{test_semantic_erasure.py,test_semantic_publication.py}; tests/Notes_Graph/unit/test_semantic_indexing.py; tests/Services/test_notes_semantic_workers.py. Ignored report: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/residual-fix2-report.md. Planned single commit subject: fix(notes): stabilize health sweep retry accounting (TASK-13134); final SHA is assigned after this tracked Backlog update is committed. No PR exists and none was created, pushed, merged, or rebased. TASK-13134 remains In Progress with acceptance criteria and Definition of Done unchecked pending independent review.
+
+2026-09-02 residual-fix2 review round 1 implemented from clean HEAD 82d0d30208c19e94d79f77087b6a9f7b11bf767b. Replaced nullable/mutable created_at owner authority with durable primary-key-only id DESC traversal; removed the unshipped timestamp cursor from SQLite/PostgreSQL Jobs schema and checkpoint contracts; centralized coherent reset/in-progress checkpoint validation on writes and reads with CAS reset of corrupt rows; and split dataset lease-reclaim results into exact total committed transitions and exact cleanup-kind transitions so ordinary index_note recovery does not increment notes_semantic_cleanup_retries_total. Existing partial obsolete-vector, generation/vector reclaim, DSR, bounded one-owner work, process restart, insertion/deletion, and CAS-only publication behavior remains covered. No public/root API or identifier metric label was added.
+
+Strict RED: 29 selected cases produced 28 failed/1 passed before production edits. Final verification on Python 3.11.13: 255 directly affected SQLite/live-PostgreSQL tests passed; the strengthened live PostgreSQL checkpoint/CAS selector passed; and the expanded TASK-13134 backend semantic matrix passed 1,331 with 6 established optional-pgvector skips. Ruff lint and scoped formatting passed without retained legacy churn; scoped mypy passed 2 helper/contract files; Bandit returned 0 findings and 0 errors over 9 production paths; git diff --check passed. Detailed ignored report: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/residual-fix2-report.md. No PR was created; no push, rebase, merge, worktree deletion, or subagent dispatch occurred. TASK-13134 remains In Progress with acceptance criteria and Definition of Done unchecked pending re-review.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
