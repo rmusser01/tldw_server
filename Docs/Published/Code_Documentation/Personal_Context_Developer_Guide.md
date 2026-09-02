@@ -128,6 +128,25 @@ proposal mutations change the canonical server copy, but no server-origin
 publisher currently appends those edits to the linked Personal Context Sync
 streams.
 
+`POST /scopes/workspace` is stricter than inbound canonical scope
+materialization. The REST path proves that the authenticated user owns the
+server workspace and atomically stores encrypted `WorkspaceRuntimePolicy`
+mapping metadata with the new scope. The Sync apply path can accept a canonical
+workspace scope without creating or guessing that peer-local mapping. Such an
+unbound scope remains canonical storage but `workspace_id_for_scope()` cannot
+make it available to server runtime selection. There is no current API for
+mapping an existing inbound scope; future integration work must add an explicit
+mapping workflow rather than infer one from canonical scope identity.
+
+Both plaintext and recovery exports serialize the same narrow snapshot shape:
+the current manifest, selected scopes, and records. Recovery mode includes all
+current scopes and records, then passphrase-encrypts that snapshot. Neither mode
+includes proposals, runtime policy, encrypted local workspace mappings, keys,
+receipts, Sync state, or other operational state. No supported server API, CLI,
+or production caller imports or restores the recovery envelope. Treat it as a
+protected export artifact, not a complete or directly restorable profile
+backup.
+
 ## Sync and bootstrap flow
 
 `capability negotiation -> registered device -> bootstrap snapshot/wrapped integrity key -> content-free reviewed Chatbook plan -> approval/completion -> first-link publication`
@@ -185,16 +204,28 @@ completion is absent.
 The `personal_context.purge` domain, adapter validation, and inbound service
 projection exist. The REST purge endpoint only advances the server-local
 canonical generation fence, deletes readable server bodies and runtime state,
-blocks later mutations, and leaves the profile in `purge_pending`. There is no
+and leaves the profile in `purge_pending`. A mutation returns
+`profile_purge_pending` only after authentication, request validation, ownership
+or object resolution, and entry into the existing-profile writable boundary.
+Manifest recreation is unsupported because surviving profile state prevents a
+replacement, while earlier gates may return their own errors. There is no
 shipped server producer/distributor for a purge envelope and no device
 acknowledgement-completion path.
 
 ## Future-client integration boundaries
 
 A future client must not infer a complete lifecycle from the presence of Sync
-domains or bootstrap endpoints. It must implement an explicit ongoing caller,
-durable queue/status UX, conflict handling, server-origin publication policy,
-and purge acknowledgement before documenting post-link convergence.
+domains or bootstrap endpoints. Client work owns capability negotiation and
+incompatibility handling, an explicit ongoing Personal Context caller, durable
+queue/status UX, and conflict review/resolution UX.
+
+Companion server work separately owns publishing server-origin REST mutations,
+producing and distributing purge envelopes, and tracking device
+acknowledgements. Completing the purge acknowledgement lifecycle is shared
+cross-peer work: clients must consume and acknowledge the barrier, while the
+server must aggregate those acknowledgements and finish the lifecycle. Neither
+side should document post-link convergence or completed purge until its own
+responsibilities and the shared handshake are implemented and verified.
 
 Chatbook's current interview boundary is also relevant to compatible clients.
 Fixed mode generates questions locally and makes no model call; its encrypted
@@ -229,7 +260,10 @@ error and diagnostic boundaries translate cryptographic, key-custody,
 integrity, and storage failures into sanitized, stable, content-free error
 codes and messages without embedding raw exception values. An explicitly
 requested recovery export is a separate passphrase-encrypted export artifact,
-not exposure of internal at-rest ciphertext.
+not exposure of internal at-rest ciphertext. It contains only the current
+manifest, scopes, and records; excludes proposals, runtime policy, local
+workspace mappings, and other operational state; and has no supported server
+import or restore path.
 
 Keep real or user-derived plaintext out of logs, diagnostics, Sync outbox or
 routing metadata, exception text, temporary artifacts, and unencrypted test

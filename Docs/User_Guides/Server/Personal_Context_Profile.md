@@ -74,6 +74,12 @@ reference](../../API-related/Personal_Context_API.md).
 4. Inspect `GET /api/v1/personal-context/manifest`. If a server-side profile is
    intentionally needed and none exists, `POST /api/v1/personal-context/manifest`
    creates the one allowed manifest and its required global scope.
+   `POST /api/v1/personal-context/scopes/workspace` requires an existing
+   user-owned server workspace and creates encrypted server-local mapping
+   metadata for the new canonical scope. A canonical workspace scope received
+   through Sync can exist without that mapping and is unavailable to server
+   runtime selection. No current API maps an existing inbound scope; do not
+   assume runtime access until a supported mapping workflow is added.
 5. In Chatbook, create or unlock the profile through **Settings → Data &
    Privacy → My Profile**. Then activate and authenticate the server through
    **Settings → Overview → Advanced / Diagnostics → Switch Source / Server**.
@@ -147,6 +153,13 @@ RECOVERY` and enforces a minimum of 12 characters. That is only the validation
 minimum, not a strength recommendation: use a long, unique passphrase and store
 it separately from the exported envelope.
 
+The server recovery export contains only the current canonical manifest,
+scopes, and records. It excludes proposals, runtime policy, encrypted
+server-local workspace mappings, keys, receipts, Sync state, and other
+operational state. The server has no supported import or restore workflow for
+this envelope, so do not treat it as a complete or directly restorable profile
+backup.
+
 Removing a local Chatbook copy is owned by Chatbook. **Remove local profile**
 deletes canonical `PersonalContextRepository` content, including that
 repository's encrypted objects and heads, canonical `encrypted_outbox`,
@@ -167,8 +180,13 @@ registration. The server rejects purge requests with `mode: local_copy` as
 `POST /api/v1/personal-context/purge` is a global, currently incomplete
 operation. It requires `mode: everywhere`, the current purge generation, and
 the exact confirmation `DELETE EVERYWHERE`. It advances a server-local purge
-fence, removes canonical bodies and server runtime state, blocks further
-profile mutations, and leaves the profile in `purge_pending`.
+fence, removes canonical bodies and server runtime state, and leaves the profile
+in `purge_pending`. Mutations that reach the existing-profile writable boundary
+are then rejected with `profile_purge_pending`.
+
+Manifest recreation is not a supported recovery path. Authentication, request
+validation, ownership, or object lookup can fail before the writable-profile
+check, so not every rejected request returns `profile_purge_pending`.
 
 The `personal_context.purge` protocol domain exists.
 
@@ -190,7 +208,7 @@ server has no completion path for that state.
 | **First-link semantic collision** | Different local and server record identities describe the same scope, kind, namespace, and subject during linking. | Use the content-free IDs, versions, outcomes, and local/server choices in the reviewed plan to select which canonical lineage remains active. | The plan does not display profile values, and this resolver is available only during first linking. |
 | **Post-link semantic collision** | Different record identities describe the same semantic key after linking. | Preserve both peer copies. | No ongoing Personal Context cycle or dedicated status/resolver is currently shipped. |
 | **Local removal incomplete or residual state** | Canonical repository rows were removed, but canonical profile-key cleanup may have failed; separate Sync state and dataset staging keys may remain. | Use **Finish secure removal** only for canonical profile-key cleanup. Preserve residual state until a supported cleanup path exists. | The action does not clear separate Sync state, staging keys, the server copy, or device registration, and the recovery export cannot currently be restored in the app. |
-| **Purge pending** | The server purge fence advanced and ordinary profile mutations are blocked. | Preserve operational evidence and treat the profile as non-writable; do not recreate it or assume reconnecting clients will finish deletion. | The current server has no purge acknowledgement-completion path, and reconnecting devices does not clear the state. |
+| **Purge pending** | The server purge fence advanced; mutations that reach the existing-profile writable boundary are rejected. | Preserve operational evidence and treat the profile as non-writable; manifest recreation is unsupported, and reconnecting clients do not finish deletion. | Earlier authentication, validation, ownership, or lookup errors may occur instead of `profile_purge_pending`; the current server has no purge acknowledgement-completion path. |
 
 Additional checks:
 

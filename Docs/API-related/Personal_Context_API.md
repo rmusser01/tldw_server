@@ -10,8 +10,11 @@ profile lookup or decryption.
 - Each authenticated user has at most one profile manifest.
 - Canonical records use the shared `tldw_profile_core` schemas and the same
   immutable IDs and versions used by Chatbook.
-- Workspace scopes require access to the matching user-owned server workspace.
-  Workspace identifiers and labels remain encrypted server-local metadata.
+- `POST /scopes/workspace` requires access to the matching user-owned server
+  workspace and creates encrypted server-local workspace mapping metadata with
+  the canonical scope. A canonical workspace scope received through Sync may be
+  stored without that mapping and remains unavailable to server runtime
+  selection until it is mapped separately.
 - Server records must be syncable. `device_only` records belong to Chatbook and
   are rejected by this API.
 - Record and scope writes advance the manifest revision transactionally.
@@ -50,11 +53,16 @@ accepted or rejected.
 
 ## Export and deletion
 
-Plaintext export requires the exact confirmation `EXPORT PLAINTEXT`. It may
-select global or workspace scopes and includes user-only records, but excludes
-keys, runtime policy, and peer-local receipts. Recovery export requires
-`EXPORT RECOVERY` plus a passphrase of at least twelve characters and returns a
-`scrypt-aes-256-gcm` envelope.
+Plaintext export requires the exact confirmation `EXPORT PLAINTEXT` and may
+select global or workspace scopes. Recovery export requires `EXPORT RECOVERY`
+plus a passphrase of at least twelve characters and returns a
+`scrypt-aes-256-gcm` envelope containing all current scopes. Both modes contain
+only the current canonical manifest, selected scopes, and records; they can
+include user-only records. They exclude proposals, runtime policy, encrypted
+server-local workspace mappings, keys, receipts, Sync state, and other
+operational state. No supported server API, CLI, or application workflow imports
+or restores a recovery envelope. It is not a complete or directly restorable
+profile backup.
 
 The server refuses `local_copy` deletion with
 `server_local_copy_unsupported`; removing a device copy is a Chatbook-owned
@@ -70,8 +78,13 @@ It advances the generation barrier transactionally, removes readable canonical
 bodies and server-local runtime state, and leaves the profile in
 `purge_pending`. The endpoint does not publish a `personal_context.purge`
 envelope, and synchronization acknowledgement completion is not implemented.
-All profile mutations return HTTP 409 with
-`detail.code = "profile_purge_pending"` while that barrier is pending.
+Mutations that authenticate, validate, resolve their owned objects, and reach
+the existing-profile writable boundary return HTTP 409 with
+`detail.code = "profile_purge_pending"`. Manifest recreation is unsupported:
+surviving profile state prevents `POST /manifest` from creating a replacement.
+Other authentication, request-validation, ownership, or lookup errors can occur
+first, so not every request rejected while the barrier exists returns
+`profile_purge_pending`.
 
 ## REST and Sync-v2 boundary
 
@@ -79,6 +92,14 @@ The authenticated REST API and Sync V2 are separate surfaces over the same
 canonical `PersonalContextService` and encrypted repository. Sync device
 registration, capability negotiation, bootstrap, and reviewed link completion
 remain under `/api/v1/sync` rather than `/api/v1/personal-context`.
+
+API-created workspace scopes and Sync-received workspace scopes also differ at
+the server-local runtime boundary. `POST /scopes/workspace` proves ownership and
+atomically stores encrypted mapping metadata. Inbound Sync materializes the
+canonical scope but does not invent a server workspace binding; an unbound scope
+cannot be selected by server runtime. No current API maps an existing inbound
+scope; integrations must not assume runtime access until a supported mapping
+workflow is added.
 
 The shipped first-link path supports capability negotiation, registered-device
 bootstrap, a content-free reviewed reconciliation plan, link completion, and
