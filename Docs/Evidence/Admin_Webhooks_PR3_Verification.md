@@ -3,14 +3,19 @@
 ## Verification Identity
 
 - Branch: `codex/admin-webhooks-durable-producers-runtime`
+- Recovery branch: `codex/admin-webhooks-durable-producers-runtime-recovery`
 - Pull request: https://github.com/rmusser01/tldw_server/pull/2855
+- Post-recovery worker-liveness implementation head:
+  `007799f2503e0040b4c541621f601393ae16e465`
+- Post-recovery observed `origin/dev`:
+  `b579bdea7dec75f89d2ecf025a4065051426ae0a`
 - Final integrated implementation head:
   `ecd801b6889f93def9e2a9e3b82a2e0ac63a8c8f`
 - Final verified pre-evidence branch head:
   `ecd801b6889f93def9e2a9e3b82a2e0ac63a8c8f`
 - Final branch merge base and observed `origin/dev`:
   `c85fb8db6b6efc338162276a52a193fc5d2d0ce5`
-- Verification date: `2026-09-01`
+- Verification dates: `2026-09-01` through `2026-09-02`
 - Host: macOS 26.5.2 build 25F84, arm64
 - Project Python: 3.11.13
 - Pytest: 8.4.1
@@ -51,6 +56,9 @@ https://github.com/rmusser01/tldw_server/pull/2855 for normal CI and review.
 | Post-review changed UI matrix | PASS: 128 passed |
 | Final Qodo-remediation UI matrix | PASS: 121 passed across 7 files |
 | Final real-backend browser lifecycle | PASS: 1 passed, including guarded link and Back navigation |
+| Post-recovery worker runtime/control-plane matrix | PASS: 82 passed, 0 skipped, 4 warnings |
+| Post-recovery full real-backend browser matrix | PASS: JWT 24 passed/1 intentional skip; single-user 1 passed/24 intentional skips |
+| Post-recovery independent re-review | PASS: no remaining Critical, P1, or P2 findings |
 | Admin UI TypeScript typecheck | PASS |
 | OpenAPI drift correction | PASS: 2,067 paths, 3,122 schemas, SHA `72a49730dfab...` |
 | Generated frontend OpenAPI declaration | PASS: generated and focused `tsc` check exited 0 |
@@ -603,6 +611,81 @@ The explicit Python and `PYTHONPATH` values are local isolated-worktree
 prerequisites. CI installs the current project under Python 3.12 and sets
 `TLDW_ADMIN_E2E_PYTHON=python`. No production webhook mode, key, transport, or
 activation setting changed.
+
+## Post-Recovery Worker Liveness Remediation
+
+The first complete browser rerun after the full-suite environment correction
+exposed two separate test-path problems before finding a production liveness
+defect. Synthetic `HTMLAnchorElement.click()` activation could remain on
+`/incidents`; replacing it with the rendered link's physical Playwright
+interaction passed the isolated lifecycle while the document sentinel still
+proved same-document navigation. A later run reached registration activation
+but received 503. The backend audit row identified the exact closed reason as
+`admin_webhook_delivery_unavailable`, excluding authentication, ETag, and audit
+failures. A clean recovered-worktree run then rendered `Worker heartbeat stale
+(10s)` while the other canonical runtime components remained ready.
+
+Runtime logs showed idle delivery acquisition at progressively increasing
+intervals: approximately 2, 4, 8, 16, and 30 seconds. `WorkerSDK.run_prepared`
+invoked the worker heartbeat only through its pre-acquisition guard, while the
+runtime configured a 30-second maximum empty-queue backoff. That equaled the
+production default freshness window and exceeded the E2E freshness window, so
+a healthy idle worker could report stale. A readiness poll immediately before
+the privileged Enable command was retained for bounded startup diagnostics,
+but was not accepted as proof of continuous worker health.
+
+An initial TDD regression failed with `backoff_max_seconds` 30 instead of the
+configured heartbeat interval 7. Review of `WorkerSDK` then exposed the
+additional valid-configuration edge where its base backoff 11 would normalize
+a requested maximum 7 back to 11. Although clamping both values passed the
+focused and browser gates, independent review correctly found that tying
+acquisition polling to heartbeat cadence still allowed probe/write time to
+consume narrow freshness margins and did not prove health during an active
+handler. That partial implementation was replaced before commit.
+
+The final runtime owns a supervised heartbeat task independent of acquisition
+backoff and handler execution. Each iteration subtracts capability-probe and
+heartbeat-write time from the next wait, and the persisted timestamp is
+captured after the capability probe. The prepared worker continues to use its
+existing fail-closed pre-acquisition guard, so a failed heartbeat write still
+prevents new acquisition. The sibling heartbeat task is canceled and consumed
+with the worker and stop tasks, and the existing terminal unavailable
+heartbeat remains the final shutdown write.
+
+The final deterministic regression uses the real `WorkerSDK` with an empty
+queue and a 30-second maximum backoff. Against the prior implementation it
+failed because zero independent heartbeat waits occurred instead of three.
+With the final implementation it passed and proved three ready heartbeats while
+the real worker remained inside that maximum idle wait. The full runtime file
+passed 16/16; the expanded runtime, mode, and control-plane matrix passed 82/82
+with four warnings in 17.42 seconds.
+
+The exact final browser tree rebuilt all 49 admin pages and passed:
+
+- JWT project: 24 passed, 1 intentionally inapplicable test skipped in 1.4
+  minutes, including the complete signed webhook lifecycle;
+- single-user project: 1 passed, 24 intentionally inapplicable tests skipped in
+  13.7 seconds.
+
+Focused environment/navigation tests passed 9/9. The CI classifier/workflow
+contract matrix passed 79/79. Admin TypeScript passed; full ESLint reported the
+established 36 warnings and zero errors; changed-path Ruff, Python compilation,
+focused Bandit, and diff whitespace passed. The final independent re-review
+reported no remaining Critical, P1, or P2 issue and confirmed the same sibling
+task covers cooperatively scheduled active handlers. A handler or synchronous
+acquisition that blocks the entire event loop longer than the freshness window
+can still delay all asyncio tasks; this is a general runtime-blocking risk, not
+the empty-queue backoff defect fixed here.
+
+During this work, the original local worktree lost its gitdir metadata and was
+reported as prunable by the parent repository. Work resumed from committed head
+`d0ad929c57834beb51c842bb4105e62aa320b1cd` in
+`/private/tmp/tldw-server-admin-webhooks-delivery-substrate-recovered`; no
+uncommitted bytes were copied from the damaged checkout, and that directory was
+left untouched for explicit operator disposition. The recovered branch was 22
+commits ahead and zero behind observed `origin/dev` before this implementation
+commit. PR #2855 remained open and unmerged throughout this remediation. No
+production activation, deployment, key change, or data mutation occurred.
 
 ## Static And Security Gates
 
