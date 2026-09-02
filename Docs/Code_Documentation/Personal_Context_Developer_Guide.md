@@ -2,10 +2,12 @@
 
 Personal Context is one canonical profile contract implemented by Chatbook and
 tldw_server. The server is an authenticated home peer: it owns an encrypted
-canonical copy for each user, exposes REST operations, publishes the reviewed
-first-link snapshot, and can validate/materialize Personal Context Sync V2
-envelopes. The shipped Chatbook does not invoke that transport for later profile
-mutations. The [Personal Context API
+canonical copy for each user, exposes REST operations, and participates in
+reviewed first-link convergence by returning the bootstrap snapshot, accepting
+and materializing Chatbook's approved first-link envelopes, and recording link
+completion. Its transport can validate and materialize later Personal Context
+Sync V2 envelopes, but the shipped Chatbook does not invoke that transport for
+later profile mutations. The [Personal Context API
 reference](../API-related/Personal_Context_API.md) lists the REST surface; the
 [operator guide](../User_Guides/Server/Personal_Context_Profile.md) covers
 deployment and recovery workflows.
