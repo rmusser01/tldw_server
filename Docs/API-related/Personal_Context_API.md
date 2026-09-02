@@ -10,8 +10,13 @@ profile lookup or decryption.
 - Each authenticated user has at most one profile manifest.
 - Canonical records use the shared `tldw_profile_core` schemas and the same
   immutable IDs and versions used by Chatbook.
-- Workspace scopes require access to the matching user-owned server workspace.
-  Workspace identifiers and labels remain encrypted server-local metadata.
+- `POST /scopes/workspace` requires access to the matching user-owned server
+  workspace and creates encrypted server-local workspace mapping metadata with
+  the canonical scope. A canonical workspace scope received through Sync may be
+  stored without that mapping and remain unbound. The stored mapping is
+  resolvable for API or extension use, but no shipped canonical Personal Context
+  server runtime or context-injection consumer currently calls
+  `workspace_id_for_scope()` to use it.
 - Server records must be syncable. `device_only` records belong to Chatbook and
   are rejected by this API.
 - Record and scope writes advance the manifest revision transactionally.
@@ -50,20 +55,39 @@ accepted or rejected.
 
 ## Export and deletion
 
-Plaintext export requires the exact confirmation `EXPORT PLAINTEXT`. It may
-select global or workspace scopes and includes user-only records, but excludes
-keys, runtime policy, and peer-local receipts. Recovery export requires
-`EXPORT RECOVERY` plus a passphrase of at least twelve characters and returns a
-`scrypt-aes-256-gcm` envelope.
+Plaintext export requires the exact confirmation `EXPORT PLAINTEXT` and may
+select global or workspace scopes. Recovery export requires `EXPORT RECOVERY`
+plus a passphrase of at least twelve characters and returns a
+`scrypt-aes-256-gcm` envelope containing all current scopes. Both modes contain
+only the current canonical manifest, selected scopes, and records; they can
+include user-only records. They exclude proposals, runtime policy, encrypted
+server-local workspace mappings, keys, receipts, Sync state, and other
+operational state. No supported server API, CLI, or application workflow imports
+or restores a recovery envelope. It is not a complete or directly restorable
+profile backup.
 
 The server refuses `local_copy` deletion with
 `server_local_copy_unsupported`; removing a device copy is a Chatbook-owned
-operation. Global deletion requires `DELETE EVERYWHERE` and the current purge
-generation. It advances the generation barrier transactionally, removes
-readable canonical bodies and server-local runtime state, and leaves the
-profile in `purge_pending` until synchronization acknowledgment is implemented.
-All profile mutations return HTTP 409 with
-`detail.code = "profile_purge_pending"` while that barrier is pending.
+operation. Chatbook's **Remove local profile** deletes canonical
+`PersonalContextRepository` state but does not delete the server copy,
+unregister the device, or clear separate `SyncStateRepository` artifacts,
+staged encrypted envelopes, or dataset staging keys. Its recovery export has no
+shipped import/restore caller, and **Finish secure removal** retries canonical
+profile-key cleanup only.
+
+Global deletion requires `DELETE EVERYWHERE` and the current purge generation.
+It advances the generation barrier transactionally and retains the advanced
+readable manifest head/version as the purge fence while deleting non-manifest
+canonical heads and bodies plus server-local runtime state. The profile remains in
+`purge_pending`. The endpoint does not publish a `personal_context.purge`
+envelope, and synchronization acknowledgement completion is not implemented.
+Mutations that authenticate, validate, resolve their owned objects, and reach
+the existing-profile writable boundary return HTTP 409 with
+`detail.code = "profile_purge_pending"`. Manifest recreation is unsupported:
+surviving profile state prevents `POST /manifest` from creating a replacement.
+Other authentication, request-validation, ownership, or lookup errors can occur
+first, so not every request rejected while the barrier exists returns
+`profile_purge_pending`.
 
 ## REST and Sync-v2 boundary
 
@@ -72,12 +96,51 @@ canonical `PersonalContextService` and encrypted repository. Sync device
 registration, capability negotiation, bootstrap, and reviewed link completion
 remain under `/api/v1/sync` rather than `/api/v1/personal-context`.
 
-The shipped Sync V2 path supports capability negotiation, registered-device
-bootstrap, reviewed Chatbook link completion, and inbound Chatbook-originated
-manifest, scope, record, and proposal domains. Sync V2 also validates and
-materializes the `personal_context.purge` protocol domain, but the current
-linked flow has no end-to-end purge producer.
+API-created workspace scopes and Sync-received workspace scopes also differ at
+the peer-local mapping boundary. `POST /scopes/workspace` proves ownership and
+atomically stores encrypted mapping metadata that APIs or extensions can
+resolve. Inbound Sync materializes the canonical scope but does not invent a
+server workspace binding, so that scope can remain unbound. No current API maps
+an existing inbound scope, and no shipped canonical Personal Context server
+runtime or context-injection consumer currently calls `workspace_id_for_scope()`
+to use this mapping.
 
-REST edits are not published to linked clients.
+The shipped first-link path supports capability negotiation, registered-device
+bootstrap, a content-free reviewed reconciliation plan, link completion, and
+publication of the resulting eligible Chatbook/server snapshot. Before
+approval, bootstrap exchanges authentication/capability,
+device-registration/public-key, display, schema/quota, and purge-generation
+metadata. It also returns the server's current Sync-eligible canonical
+snapshot, including record and proposal content, which Chatbook holds
+transiently in memory. Durable review state and the visible plan remain
+content-free, and no local Chatbook record or proposal content uploads before
+approval.
+
+After successful reviewed first linking, the peers have the same canonical
+identities and bytes only for that resulting eligible snapshot. Later syncable
+Chatbook mutations create encrypted local outbox entries, but no shipped
+startup, background, Settings, or other production caller runs an ongoing
+Personal Context sync cycle. **Overview → Manual Sync** invokes only Notes and
+Chat, so those later entries remain queued locally.
+
+The transport can validate and materialize inbound Chatbook-originated
+`personal_context.manifest`, `personal_context.scope`,
+`personal_context.record`, `personal_context.proposal`, and content-free
+`personal_context.purge` envelopes. This is protocol capability, not a shipped
+ongoing client lifecycle. The current products do not provide a dedicated
+Personal Context queue/status or post-link conflict-resolution surface.
+
+REST edits are not published to linked clients. They change the server copy
+without appending a Personal Context Sync entry, so post-link edits can make the
+peers diverge in either direction.
 
 Server purge does not publish the protocol purge envelope and remains pending because acknowledgement completion is absent.
+
+## Transport deployment boundary
+
+Deploy non-loopback API access behind authenticated HTTPS. This is an operator
+requirement, not a Personal Context API enforcement rule. Chatbook accepts
+server URLs using HTTP or HTTPS. Its runtime TLS verification defaults on but
+can use a custom CA or be disabled through Network settings; **Test Connection**
+always uses default httpx verification instead of that saved custom/off runtime
+policy.
