@@ -353,6 +353,53 @@ async def test_erasure_fences_cleans_and_purges_only_semantic_state(
 
 
 @pytest.mark.asyncio
+async def test_dsr_reclaims_emit_each_committed_retry_once_with_actual_backend(
+    db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db.note_store.add_note("Private", "Body", note_id=NOTE_ID)
+    generation = _create_resolved_generation(db, backend="chromadb")
+    _insert_obsolete_vector(
+        db,
+        dataset_id=DATASET_ID,
+        generation_id=generation.id,
+        vector_id="obsolete-vector",
+    )
+    events: list[dict[str, object]] = []
+    work_counts = iter((2, 0, 0))
+    vector_counts = iter((3, 0, 0))
+    monkeypatch.setattr(
+        db.note_semantic_store,
+        "reclaim_expired_dataset_work",
+        lambda **_kwargs: next(work_counts, 0),
+    )
+    monkeypatch.setattr(
+        db.note_semantic_store,
+        "reclaim_expired_obsolete_vector_claims",
+        lambda **_kwargs: next(vector_counts, 0),
+    )
+    from tldw_Server_API.app.core.Notes_Graph import semantic_erasure
+
+    monkeypatch.setattr(
+        semantic_erasure,
+        "record_semantic_cleanup_retry",
+        lambda **kwargs: events.append(dict(kwargs)),
+        raising=False,
+    )
+
+    await SemanticErasureCoordinator(
+        db=db,
+        vector_store_factory=lambda _backend: RecordingVectors([]),
+        timeout_seconds=1,
+    ).erase()
+
+    assert events == [
+        {"status": "failed", "backend": "chromadb", "count": 2},
+        {"status": "failed", "backend": "chromadb", "count": 3},
+    ]
+
+
+@pytest.mark.asyncio
 async def test_configless_obsolete_state_fails_closed_and_is_not_purged(
     db: CharactersRAGDB,
 ) -> None:

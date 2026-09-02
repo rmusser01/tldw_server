@@ -16,6 +16,10 @@ from loguru import logger
 from tldw_Server_API.app.core.DB_Management.chacha.note_semantic_models import (
     SemanticHealthSnapshot,
 )
+from tldw_Server_API.app.core.Jobs.notes_semantic_health import (
+    NOTES_SEMANTIC_HEALTH_BACKENDS,
+    parse_notes_semantic_health_totals,
+)
 from tldw_Server_API.app.core.Metrics import (
     MetricDefinition,
     MetricType,
@@ -32,7 +36,7 @@ class SemanticObservationError(ValueError):
 
 _OPERATIONS = frozenset({"initial_build", "incremental_update", "tombstone", "cleanup", "activation"})
 _STATUSES = frozenset({"success", "degraded", "failed", "cancelled", "denied", "stale"})
-_BACKENDS = frozenset({"chromadb", "pgvector", "unavailable"})
+_BACKENDS = NOTES_SEMANTIC_HEALTH_BACKENDS
 _ERROR_CODES = frozenset(
     {
         "none",
@@ -466,13 +470,13 @@ def record_semantic_cleanup_metrics(
     )
 
 
-def record_semantic_cleanup_retry(*, status: str, backend: str) -> None:
-    """Increment the cleanup retry event counter after one durable transition."""
+def record_semantic_cleanup_retry(*, status: str, backend: str, count: int = 1) -> None:
+    """Increment the cleanup retry event counter by committed transitions."""
 
     _metric_call(
         increment_counter,
         "notes_semantic_cleanup_retries_total",
-        1,
+        _count(count, "retries"),
         {
             "status": _member(status, _STATUSES, "status"),
             "backend": _backend(backend),
@@ -565,29 +569,11 @@ def deserialize_semantic_health_snapshots(value: str) -> tuple[SemanticHealthSna
     """Restore a validated content-free aggregate persisted by the sweep."""
 
     try:
-        payload = json.loads(value)
-    except (TypeError, ValueError) as exc:
+        payload = parse_notes_semantic_health_totals(value)
+    except ValueError as exc:
         raise SemanticObservationError("notes_semantic_observation_snapshot_invalid") from exc
-    if not isinstance(payload, list) or len(payload) > len(_BACKENDS):
-        raise SemanticObservationError("notes_semantic_observation_snapshot_invalid")
     snapshots: list[SemanticHealthSnapshot] = []
     for item in payload:
-        if not isinstance(item, dict):
-            raise SemanticObservationError("notes_semantic_observation_snapshot_invalid")
-        expected = {
-            "backend",
-            "indexed_notes",
-            "excluded_notes",
-            "failed_notes",
-            "dirty_notes",
-            "pending_notes",
-            "stale_generations",
-            "cleanup_backlog",
-            "cleanup_retries",
-            "oldest_cleanup_created_at",
-        }
-        if set(item) != expected:
-            raise SemanticObservationError("notes_semantic_observation_snapshot_invalid")
         snapshots.append(
             SemanticHealthSnapshot(
                 backend=_backend(item["backend"]),

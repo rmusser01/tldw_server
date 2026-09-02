@@ -168,7 +168,7 @@ def test_pg_archive_upgrade_accepts_name_only_description_columns() -> None:
     jobs_pg_migrations._upgrade_legacy_admin_webhook_archives_pg(_Cursor())
 
 
-def test_pg_semantic_health_sweep_checkpoint_migrates_and_survives_restart(
+def test_pg_semantic_health_sweep_checkpoint_is_durable_and_survives_restart(
     jobs_pg_dsn,
 ):
     ensure_jobs_tables_pg(jobs_pg_dsn)
@@ -182,24 +182,42 @@ def test_pg_semantic_health_sweep_checkpoint_migrates_and_survives_restart(
             assert {row[0] for row in cur.fetchall()} == {
                 "singleton_id",
                 "revision",
-                "owner_offset",
+                "after_owner_created_at",
+                "after_owner_id",
                 "after_dataset_id",
                 "totals_json",
                 "updated_at",
                 "last_completed_at",
             }
             cur.execute(
-                "UPDATE notes_semantic_health_sweep SET revision=0,owner_offset=0,"
-                "after_dataset_id=NULL,totals_json='[]',updated_at=%s,"
+                "UPDATE notes_semantic_health_sweep SET revision=0,after_owner_created_at=NULL,"
+                "after_owner_id=NULL,after_dataset_id=NULL,totals_json='[]',updated_at=%s,"
                 "last_completed_at=NULL WHERE singleton_id=1",
                 (NOW,),
             )
 
-    totals = json.dumps([{"backend": "pgvector", "failed_notes": 3}])
+    totals = json.dumps(
+        [
+            {
+                "backend": backend,
+                "indexed_notes": 0,
+                "excluded_notes": 0,
+                "failed_notes": 3 if backend == "pgvector" else 0,
+                "dirty_notes": 0,
+                "pending_notes": 0,
+                "stale_generations": 0,
+                "cleanup_backlog": 0,
+                "cleanup_retries": 0,
+                "oldest_cleanup_created_at": None,
+            }
+            for backend in ("chromadb", "pgvector", "unavailable")
+        ]
+    )
     manager = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
     assert manager.checkpoint_notes_semantic_health_sweep(
         expected_revision=0,
-        owner_offset=2,
+        after_owner_created_at=NOW,
+        after_owner_id=2,
         after_dataset_id="dataset-z",
         totals_json=totals,
         completed=False,
@@ -209,7 +227,8 @@ def test_pg_semantic_health_sweep_checkpoint_migrates_and_survives_restart(
     restarted = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
     state = restarted.get_notes_semantic_health_sweep()
     assert state["revision"] == 1
-    assert state["owner_offset"] == 2
+    assert state["after_owner_created_at"] == NOW
+    assert state["after_owner_id"] == 2
     assert state["after_dataset_id"] == "dataset-z"
     assert json.loads(state["totals_json"]) == json.loads(totals)
     assert state["updated_at"] == NOW

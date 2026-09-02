@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -268,6 +269,245 @@ async def test_generation_cleanup_retry_counter_records_only_committed_retry(
     assert not await scope.cleanup_claim(claim)
 
     assert events == [{"status": "failed", "backend": "chromadb"}]
+
+
+def test_expired_maintenance_reclaims_emit_exact_committed_retry_count(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[dict[str, object]] = []
+
+    class Store:
+        def reclaim_expired_dataset_work(self, **_kwargs: object) -> int:
+            return 2
+
+        def get_configuration(self, _dataset_id: str):
+            return SimpleNamespace(vector_backend="pgvector")
+
+    scope = notes_semantic_maintenance._ProductionScope(
+        db=SimpleNamespace(note_semantic_store=Store()),
+        jobs=SimpleNamespace(),
+        owner_user_id="owner-a",
+        dataset_id="dataset-a",
+        settings=SemanticIndexSettings(),
+    )
+    monkeypatch.setattr(
+        notes_semantic_maintenance,
+        "record_semantic_cleanup_retry",
+        lambda **kwargs: events.append(dict(kwargs)),
+    )
+
+    assert scope.reclaim_expired(limit=10, now=NOW) == 2
+    assert events == [{"status": "failed", "backend": "pgvector", "count": 2}]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("churn", ("delete", "insert"))
+async def test_health_sweep_owner_keyset_survives_churn_without_partial_publication(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+    churn: str,
+) -> None:
+    def owner(owner_id: int, created_at: datetime) -> dict[str, object]:
+        return {"id": owner_id, "created_at": created_at}
+
+    records = [
+        owner(3, NOW),
+        owner(2, NOW - timedelta(minutes=1)),
+        owner(1, NOW - timedelta(minutes=2)),
+    ]
+
+    class Users:
+        async def list_users(self, *, offset: int, limit: int):
+            ordered = sorted(records, key=lambda row: (row["created_at"], row["id"]), reverse=True)
+            return ordered[offset : offset + limit], len(ordered)
+
+        async def list_users_for_semantic_health_sweep(
+            self,
+            *,
+            after_created_at: datetime | None,
+            after_id: int | None,
+            limit: int,
+        ):
+            ordered = sorted(records, key=lambda row: (row["created_at"], row["id"]), reverse=True)
+            if after_created_at is not None and after_id is not None:
+                ordered = [row for row in ordered if (row["created_at"], row["id"]) < (after_created_at, after_id)]
+            return ordered[:limit]
+
+        async def get_user_by_id(self, user_id: int):
+            return next((row for row in records if row["id"] == user_id), None)
+
+    class Store:
+        def __init__(self, owner_id: str) -> None:
+            self.owner_id = owner_id
+
+        def list_observability_dataset_ids(self, *, limit: int, after_dataset_id=None):
+            del after_dataset_id
+            return (f"dataset-{self.owner_id}",)[:limit]
+
+        def get_observability_snapshot(self, _dataset_id: str, *, current_capability_revision: str):
+            assert current_capability_revision == "capability-current"
+            return SimpleNamespace(
+                backend="chromadb",
+                indexed_notes=int(self.owner_id in {"1", "3"}),
+                excluded_notes=0,
+                failed_notes=int(self.owner_id == "2"),
+                dirty_notes=0,
+                pending_notes=0,
+                stale_generations=0,
+                cleanup_backlog=0,
+                cleanup_retries=0,
+                oldest_cleanup_created_at=None,
+            )
+
+    async def open_database(owner_id: str):
+        return SimpleNamespace(
+            note_semantic_store=Store(owner_id),
+            release_context_connection=lambda: None,
+        )
+
+    observations: list[tuple[object, ...]] = []
+    monkeypatch.setattr(notes_semantic_maintenance, "_open_owner_database", open_database)
+    monkeypatch.setattr(
+        notes_semantic_maintenance,
+        "resolve_semantic_capabilities",
+        lambda _db, *, settings: SimpleNamespace(capability_revision="capability-current"),
+    )
+    monkeypatch.setattr(
+        notes_semantic_maintenance,
+        "record_semantic_aggregate_metrics",
+        lambda *, snapshots, now: observations.append(tuple(snapshots)),
+    )
+    jobs = JobManager(tmp_path / f"semantic-health-{churn}.db")
+
+    await notes_semantic_maintenance._MaintenanceRunner(
+        jobs=jobs,
+        users_repo=Users(),
+        settings=SemanticIndexSettings(),
+    )._run_health_sweep_page(now=NOW, limit=2)
+    assert observations == []
+    if churn == "delete":
+        records[:] = [row for row in records if row["id"] != 3]
+    else:
+        records.append(owner(4, NOW + timedelta(minutes=1)))
+
+    for _ in range(2):
+        await notes_semantic_maintenance._MaintenanceRunner(
+            jobs=JobManager(jobs.db_path),
+            users_repo=Users(),
+            settings=SemanticIndexSettings(),
+        )._run_health_sweep_page(now=NOW, limit=2)
+        assert observations == []
+    await notes_semantic_maintenance._MaintenanceRunner(
+        jobs=JobManager(jobs.db_path),
+        users_repo=Users(),
+        settings=SemanticIndexSettings(),
+    )._run_health_sweep_page(now=NOW, limit=2)
+
+    assert len(observations) == 1
+    chromadb = next(value for value in observations[0] if value.backend == "chromadb")
+    assert (chromadb.indexed_notes, chromadb.failed_notes) == (2, 1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "corruption",
+    ("totals", "owner-timestamp", "owner-id", "dataset-id"),
+)
+async def test_corrupt_health_checkpoint_resets_without_partial_publication(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+    corruption: str,
+) -> None:
+    observations: list[tuple[object, ...]] = []
+
+    class Users:
+        async def list_users_for_semantic_health_sweep(self, **_kwargs: object):
+            return []
+
+    jobs = JobManager(tmp_path / "semantic-health-corrupt.db")
+    with sqlite3.connect(jobs.db_path) as conn:
+        if corruption == "totals":
+            conn.execute(
+                "UPDATE notes_semantic_health_sweep SET totals_json=? WHERE singleton_id=1",
+                ('{"backend":"chromadb"}',),
+            )
+        elif corruption == "owner-timestamp":
+            conn.execute(
+                "UPDATE notes_semantic_health_sweep SET after_owner_created_at=?,after_owner_id=1 WHERE singleton_id=1",
+                ("not-a-timestamp",),
+            )
+        elif corruption == "owner-id":
+            conn.execute(
+                "UPDATE notes_semantic_health_sweep SET after_owner_created_at=?,after_owner_id=? WHERE singleton_id=1",
+                (NOW.isoformat(), "not-an-id"),
+            )
+        else:
+            conn.execute(
+                "UPDATE notes_semantic_health_sweep SET after_owner_created_at=?,"
+                "after_owner_id=1,after_dataset_id='' WHERE singleton_id=1",
+                (NOW.isoformat(),),
+            )
+    monkeypatch.setattr(
+        notes_semantic_maintenance,
+        "record_semantic_aggregate_metrics",
+        lambda *, snapshots, now: observations.append(tuple(snapshots)),
+    )
+
+    await notes_semantic_maintenance._MaintenanceRunner(
+        jobs=jobs,
+        users_repo=Users(),
+        settings=SemanticIndexSettings(),
+    )._run_health_sweep_page(now=NOW, limit=2)
+
+    assert observations == []
+    reset = JobManager(jobs.db_path).get_notes_semantic_health_sweep()
+    assert (reset["revision"], reset["totals_json"]) == (1, "[]")
+    await notes_semantic_maintenance._MaintenanceRunner(
+        jobs=JobManager(jobs.db_path),
+        users_repo=Users(),
+        settings=SemanticIndexSettings(),
+    )._run_health_sweep_page(now=NOW, limit=2)
+    assert len(observations) == 1
+
+
+@pytest.mark.asyncio
+async def test_stale_health_sweep_cas_loser_cannot_publish(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    observations: list[tuple[object, ...]] = []
+
+    class Users:
+        async def list_users_for_semantic_health_sweep(self, **_kwargs: object):
+            return []
+
+    authority = JobManager(tmp_path / "semantic-health-cas.db")
+    stale_state = authority.get_notes_semantic_health_sweep()
+
+    class Jobs:
+        def get_notes_semantic_health_sweep(self):
+            return dict(stale_state)
+
+        def checkpoint_notes_semantic_health_sweep(self, **kwargs: object):
+            return authority.checkpoint_notes_semantic_health_sweep(**kwargs)
+
+    monkeypatch.setattr(
+        notes_semantic_maintenance,
+        "record_semantic_aggregate_metrics",
+        lambda *, snapshots, now: observations.append(tuple(snapshots)),
+    )
+    runners = [
+        notes_semantic_maintenance._MaintenanceRunner(
+            jobs=Jobs(),
+            users_repo=Users(),
+            settings=SemanticIndexSettings(),
+        )
+        for _ in range(2)
+    ]
+
+    await asyncio.gather(*(runner._run_health_sweep_page(now=NOW, limit=2) for runner in runners))
+
+    assert len(observations) == 1
 
 
 @pytest.mark.asyncio
@@ -1445,6 +1685,15 @@ async def test_no_work_owner_discovery_is_bounded_and_continues_fairly(
             end = min(offset + limit, 50)
             return ([{"id": value + 1} for value in range(offset, end)], 50)
 
+        async def list_users_for_semantic_health_sweep(
+            self,
+            *,
+            after_created_at: datetime | None,
+            after_id: int | None,
+            limit: int,
+        ) -> list[dict[str, object]]:
+            return []
+
     class Store:
         def list_maintenance_dataset_ids(self, *, limit: int):
             assert limit <= 4
@@ -1474,7 +1723,7 @@ async def test_no_work_owner_discovery_is_bounded_and_continues_fairly(
 
     assert first_pass_opened <= 4
     assert len(opened) - first_pass_opened <= 4
-    assert first_pass_calls == 2
+    assert first_pass_calls == 1
     assert users.calls[first_pass_calls][0] > 0
 
 
@@ -1533,9 +1782,25 @@ async def test_complete_health_sweep_aggregates_all_owners_and_rebuilds_after_re
     }
 
     class Users:
-        async def list_users(self, *, offset: int, limit: int):
-            users = [{"id": 1}, {"id": 2}]
-            return users[offset : offset + limit], len(users)
+        users = [
+            {"id": 1, "created_at": NOW},
+            {"id": 2, "created_at": NOW - timedelta(minutes=1)},
+        ]
+
+        async def list_users_for_semantic_health_sweep(
+            self,
+            *,
+            after_created_at: datetime | None,
+            after_id: int | None,
+            limit: int,
+        ):
+            users = self.users
+            if after_created_at is not None and after_id is not None:
+                users = [user for user in users if (user["created_at"], user["id"]) < (after_created_at, after_id)]
+            return users[:limit]
+
+        async def get_user_by_id(self, user_id: int):
+            return next((user for user in self.users if user["id"] == user_id), None)
 
     class Store:
         def __init__(self, values: dict[str, SimpleNamespace]) -> None:
@@ -1613,7 +1878,8 @@ async def test_complete_health_sweep_aggregates_all_owners_and_rebuilds_after_re
     await first_runner._run_health_sweep_page(now=NOW, limit=2)
     assert observations == []
     persisted = JobManager(jobs.db_path).get_notes_semantic_health_sweep()
-    assert persisted["owner_offset"] == 0
+    assert persisted["after_owner_id"] == 1
+    assert persisted["after_owner_created_at"] == NOW
     assert persisted["after_dataset_id"] == "dataset-b"
     first = await complete_one_sweep()
 
@@ -1646,9 +1912,26 @@ async def test_health_sweep_bounds_empty_owner_database_scans(
     observations: list[tuple[object, ...]] = []
 
     class Users:
-        async def list_users(self, *, offset: int, limit: int):
-            users = [{"id": 1}, {"id": 2}, {"id": 3}]
-            return users[offset : offset + limit], len(users)
+        users = [
+            {"id": 1, "created_at": NOW},
+            {"id": 2, "created_at": NOW - timedelta(minutes=1)},
+            {"id": 3, "created_at": NOW - timedelta(minutes=2)},
+        ]
+
+        async def list_users_for_semantic_health_sweep(
+            self,
+            *,
+            after_created_at: datetime | None,
+            after_id: int | None,
+            limit: int,
+        ):
+            users = self.users
+            if after_created_at is not None and after_id is not None:
+                users = [user for user in users if (user["created_at"], user["id"]) < (after_created_at, after_id)]
+            return users[:limit]
+
+        async def get_user_by_id(self, user_id: int):
+            return next((user for user in self.users if user["id"] == user_id), None)
 
     class Store:
         def list_observability_dataset_ids(
@@ -1693,9 +1976,22 @@ async def test_health_sweep_uses_unfiltered_authority_cursor_across_empty_datase
     observations: list[tuple[object, ...]] = []
 
     class Users:
-        async def list_users(self, *, offset: int, limit: int):
-            users = [{"id": 1}]
-            return users[offset : offset + limit], len(users)
+        users = [{"id": 1, "created_at": NOW}]
+
+        async def list_users_for_semantic_health_sweep(
+            self,
+            *,
+            after_created_at: datetime | None,
+            after_id: int | None,
+            limit: int,
+        ):
+            users = self.users
+            if after_created_at is not None and after_id is not None:
+                users = [user for user in users if (user["created_at"], user["id"]) < (after_created_at, after_id)]
+            return users[:limit]
+
+        async def get_user_by_id(self, user_id: int):
+            return next((user for user in self.users if user["id"] == user_id), None)
 
     class Store:
         def list_observability_dataset_ids(
@@ -1752,7 +2048,7 @@ async def test_health_sweep_uses_unfiltered_authority_cursor_across_empty_datase
         settings=SemanticIndexSettings(),
     )
 
-    for _ in range(3):
+    for _ in range(4):
         await runner._run_health_sweep_page(now=NOW, limit=1)
 
     assert len(observations) == 1

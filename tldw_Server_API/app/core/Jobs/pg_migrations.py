@@ -520,11 +520,13 @@ ON CONFLICT (singleton_id) DO NOTHING;
 CREATE TABLE IF NOT EXISTS notes_semantic_health_sweep (
   singleton_id SMALLINT PRIMARY KEY CHECK (singleton_id = 1),
   revision BIGINT NOT NULL DEFAULT 0 CHECK (revision >= 0),
-  owner_offset BIGINT NOT NULL DEFAULT 0 CHECK (owner_offset >= 0),
+  after_owner_created_at TIMESTAMPTZ,
+  after_owner_id BIGINT CHECK (after_owner_id IS NULL OR after_owner_id > 0),
   after_dataset_id TEXT,
   totals_json TEXT NOT NULL DEFAULT '[]' CHECK (LENGTH(totals_json) <= 65536),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  last_completed_at TIMESTAMPTZ
+  last_completed_at TIMESTAMPTZ,
+  CHECK ((after_owner_created_at IS NULL) = (after_owner_id IS NULL))
 );
 INSERT INTO notes_semantic_health_sweep(singleton_id) VALUES (1)
 ON CONFLICT (singleton_id) DO NOTHING;
