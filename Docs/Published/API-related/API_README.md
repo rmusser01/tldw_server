@@ -8,7 +8,7 @@ Generative endpoints follow openai API spec where possible.
 See [API Design](API_Design.md) for more details.
 
 See also:
-- `Docs/API-related/Personal_Context_API.md` for the authenticated canonical profile API shared with Chatbook.
+- Personal Context: [API reference](Personal_Context_API.md), [operator guide](../User_Guides/Server/Personal_Context_Profile.md), and [developer guide](../Code_Documentation/Personal_Context_Developer_Guide.md).
 - `Docs/Code_Documentation/Ingestion_Pipeline_Audio.md` for the audio processing endpoint (`POST /api/v1/media/process-audios`).
 - `Docs/API-related/Email_Processing_API.md` for the email processing endpoint (`POST /api/v1/media/process-emails`) and email ingestion via `/media/add`.
 - `Docs/API-related/Reminder_Notifications_API.md` for reminder tasks, inbox notifications, SSE stream, and related env flags.
