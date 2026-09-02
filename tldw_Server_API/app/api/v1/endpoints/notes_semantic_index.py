@@ -68,7 +68,7 @@ SEMANTIC_ERROR_MESSAGES = {
 }
 _ERROR_RESPONSES = {
     code: {"model": SemanticHTTPErrorResponse}
-    for code in (404, 409, 422, 429, 503)
+    for code in (403, 404, 409, 422, 429, 503)
 }
 
 

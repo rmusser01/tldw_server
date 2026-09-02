@@ -148,6 +148,19 @@ NOTES_CSV_EXPORT_PATHS = (
     "/api/v1/notes/export.csv",
 )
 NOTES_ATTACHMENT_DOWNLOAD_PATH = "/api/v1/notes/{note_id}/attachments/{file_name}"
+NOTES_SEMANTIC_INDEX_OPERATIONS = {
+    "/api/v1/notes/graph/semantic-index/capabilities": {"get": ("200", "SemanticCapabilitiesResponse")},
+    "/api/v1/notes/graph/semantic-index": {
+        "get": ("200", "SemanticIndexStatusResponse"),
+        "put": ("202", "SemanticIndexMutationResponse"),
+        "delete": ("202", "SemanticIndexMutationResponse"),
+    },
+    "/api/v1/notes/graph/semantic-index/runs": {"post": ("202", "SemanticRunResponse")},
+    "/api/v1/notes/graph/semantic-index/runs/{run_id}": {"get": ("200", "SemanticRunResponse")},
+    "/api/v1/notes/graph/semantic-index/runs/{run_id}/cancel": {
+        "post": ("202", "SemanticIndexMutationResponse")
+    },
+}
 CONNECTOR_PROVIDER_WEBHOOK_PATH = "/api/v1/connectors/providers/{provider}/webhook"
 WORKFLOW_ARTIFACT_DOWNLOAD_PATH = "/api/v1/workflows/artifacts/{artifact_id}/download"
 WORKFLOW_RUN_ARTIFACTS_DOWNLOAD_PATH = "/api/v1/workflows/runs/{run_id}/artifacts/download"
@@ -1141,6 +1154,41 @@ def test_notes_attachment_download_openapi_documents_file_response() -> None:
     operation = app.openapi()["paths"][NOTES_ATTACHMENT_DOWNLOAD_PATH]["get"]
 
     _assert_file_response_content(operation, {"application/octet-stream"})
+
+
+@pytest.mark.integration
+def test_notes_semantic_index_openapi_documents_only_nested_stable_contracts() -> None:
+    from tldw_Server_API.app.api.v1.endpoints.notes_semantic_index import (
+        router as notes_semantic_index_router,
+    )
+    from tldw_Server_API.app.main import OPENAPI_TAGS
+
+    app = FastAPI(openapi_tags=OPENAPI_TAGS)
+    app.include_router(notes_semantic_index_router, prefix="/api/v1/notes")
+    openapi_spec = app.openapi()
+    paths = openapi_spec["paths"]
+    semantic_paths = {path for path in paths if "semantic-index" in path}
+    assert semantic_paths == set(NOTES_SEMANTIC_INDEX_OPERATIONS)
+
+    for path, methods in NOTES_SEMANTIC_INDEX_OPERATIONS.items():
+        for method, (success_status, response_model) in methods.items():
+            operation = paths[path][method]
+            assert {"notes", "notes-semantic-index"} <= set(operation["tags"])
+            success_schema = operation["responses"][success_status]["content"][
+                "application/json"
+            ]["schema"]
+            assert success_schema["$ref"].endswith(f"/{response_model}")
+            for error_status in ("403", "404", "409", "422", "429", "503"):
+                error_schema = operation["responses"][error_status]["content"][
+                    "application/json"
+                ]["schema"]
+                assert error_schema["$ref"].endswith("/SemanticHTTPErrorResponse")
+
+    tags = {tag["name"]: tag for tag in openapi_spec["tags"]}
+    semantic_tag = tags["notes-semantic-index"]
+    assert semantic_tag["externalDocs"]["url"].endswith(
+        "/docs-static/API/Notes_Semantic_Index.md"
+    )
 
 
 @pytest.mark.integration

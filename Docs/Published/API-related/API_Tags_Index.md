@@ -106,6 +106,7 @@ Use this page when you are deciding which API area to explore first. Use the lin
 |--------|---------------------|-------------|------|
 | `notes` | Create, search, organize, graph, and manage notebook-style notes. | Personal knowledge bases, source-linked notes, task-backed notes. | Live OpenAPI |
 | `notes-graph` | Explore graph relationships between notes, tags, and sources. | Knowledge graph views, relationship discovery, backlink analysis. | Live OpenAPI |
+| `notes-semantic-index` | Manage the consented Notes semantic index and inspect similar-content graph edges. | Semantic index setup, status, rebuilds, cleanup, and grounded related-Note review. | [Semantic index API](../../API/Notes_Semantic_Index.md) / [User guide](../User_Guides/WebUI_Extension/Notes_Semantic_Graph.md) |
 | `prompts` | Manage prompt library entries, imports, exports, and metadata. | Reusable prompt catalogs, prompt sharing, assistant presets. | Live OpenAPI |
 | `prompt-studio` | Build, test, compare, and optimize prompts as reusable projects and runs. | Prompt engineering workflows, test cases, prompt optimization. | [Prompt Studio API](Prompt_Studio_API.md) |
 | `chatbooks` | Import and export chatbooks, OpenWebUI data, related attachments, and OpenWebUI attachment hydration preview/job endpoints. | Backup/restore, migration, portable conversation bundles. | [Chatbook API](Chatbook_API_Documentation.md) |
