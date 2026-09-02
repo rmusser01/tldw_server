@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from tldw_Server_API.app.api.v1.schemas.notes_semantic_index import (
     SemanticCapabilitiesResponse,
 )
+from tldw_Server_API.app.core.AuthNZ import byok_helpers, byok_runtime
 from tldw_Server_API.app.core.Notes_Graph import semantic_api
 from tldw_Server_API.app.core.Notes_Graph.semantic_capabilities import (
     SemanticCapabilityContract,
@@ -19,6 +20,29 @@ from tldw_Server_API.app.core.Notes_Graph.semantic_embeddings import (
 from tldw_Server_API.app.core.Notes_Graph.semantic_settings import SemanticIndexSettings
 
 pytestmark = pytest.mark.unit
+
+
+def _production_embedding_config(
+    provider: str,
+    *,
+    simplified_api_key: str | None = None,
+    simplified_api_url: str | None = None,
+) -> SimpleNamespace:
+    models = {
+        "google": "text-embedding-004",
+        "huggingface": "Qwen/Qwen3-Embedding-0.6B",
+        "openai": "text-embedding-3-small",
+    }
+    provider_config = SimpleNamespace(
+        api_key=simplified_api_key,
+        api_url=simplified_api_url,
+        enabled=True,
+    )
+    return SimpleNamespace(
+        default_provider=provider,
+        default_model=models[provider],
+        get_provider=lambda name: provider_config if name == provider else None,
+    )
 
 
 @pytest.mark.parametrize(
@@ -35,24 +59,23 @@ def test_production_capabilities_admit_every_executable_semantic_provider(
     expected_label: str,
     expected_endpoint: str,
 ) -> None:
-    provider_config = SimpleNamespace(
-        api_key="configured",
-        api_url=None,
-        enabled=True,
+    sections = {
+        "google": "google_api",
+        "huggingface": "huggingface_api",
+        "openai": "openai_api",
+    }
+    snapshot = {sections[provider]: {"api_key": "configured"}}
+    monkeypatch.setattr(
+        semantic_api,
+        "get_config",
+        lambda: _production_embedding_config(provider),
     )
-    config = SimpleNamespace(
-        default_provider=provider,
-        default_model=(
-            "Qwen/Qwen3-Embedding-0.6B"
-            if provider == "huggingface"
-            else "text-embedding-004"
-            if provider == "google"
-            else "text-embedding-3-small"
-        ),
-        get_provider=lambda name: provider_config if name == provider else None,
+    monkeypatch.setattr(
+        semantic_api,
+        "load_server_config_snapshot",
+        lambda: snapshot,
+        raising=False,
     )
-    monkeypatch.setattr(semantic_api, "get_config", lambda: config)
-    monkeypatch.setattr(semantic_api, "loaded_config_data", {})
 
     capabilities = semantic_api.resolve_semantic_capabilities(
         SimpleNamespace(),
@@ -62,6 +85,129 @@ def test_production_capabilities_admit_every_executable_semantic_provider(
     assert capabilities.provider_label == expected_label
     assert capabilities.endpoint_display == expected_endpoint
     assert capabilities.indexing_available is True
+
+
+@pytest.mark.parametrize(
+    ("provider", "environment_key"),
+    [
+        ("openai", "OPENAI_API_KEY"),
+        ("google", "GOOGLE_API_KEY"),
+        ("google", "GEMINI_API_KEY"),
+        ("huggingface", "HUGGINGFACE_API_KEY"),
+        ("huggingface", "HF_TOKEN"),
+    ],
+)
+def test_production_capabilities_match_executor_environment_credential_aliases(
+    monkeypatch: pytest.MonkeyPatch,
+    provider: str,
+    environment_key: str,
+) -> None:
+    for aliases in byok_helpers.PROVIDER_RUNTIME_ENV_CONFIG_KEYS.values():
+        for names in aliases.values():
+            for name in names:
+                monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv(environment_key, "snapshot-credential")
+    monkeypatch.setattr(byok_helpers, "load_and_log_configs", lambda **_kwargs: {})
+    snapshot = byok_helpers.load_server_config_snapshot()
+    fallback = byok_runtime.resolve_static_server_fallback_from_snapshot(
+        provider,
+        snapshot,
+    )
+    monkeypatch.setattr(
+        semantic_api,
+        "get_config",
+        lambda: _production_embedding_config(provider),
+    )
+    monkeypatch.setattr(
+        semantic_api,
+        "load_server_config_snapshot",
+        lambda: snapshot,
+        raising=False,
+    )
+
+    capabilities = semantic_api.resolve_semantic_capabilities(
+        SimpleNamespace(),
+        settings=SemanticIndexSettings(),
+    )
+
+    assert fallback.api_key == "snapshot-credential"
+    assert capabilities.durable_credential_available is True
+    assert capabilities.indexing_available is True
+
+
+@pytest.mark.parametrize(
+    ("provider", "section"),
+    [
+        ("openai", "openai_api"),
+        ("google", "google_api"),
+        ("huggingface", "huggingface_api"),
+    ],
+)
+def test_production_capabilities_use_executor_config_file_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+    provider: str,
+    section: str,
+) -> None:
+    snapshot = {
+        section: {
+            "api_key": "config-file-credential",
+            "api_base_url": "https://snapshot.example.test/v1",
+        }
+    }
+    monkeypatch.setattr(
+        semantic_api,
+        "get_config",
+        lambda: _production_embedding_config(
+            provider,
+            simplified_api_url="https://simplified.example.test/v1",
+        ),
+    )
+    monkeypatch.setattr(
+        semantic_api,
+        "load_server_config_snapshot",
+        lambda: snapshot,
+        raising=False,
+    )
+
+    capabilities = semantic_api.resolve_semantic_capabilities(
+        SimpleNamespace(),
+        settings=SemanticIndexSettings(),
+    )
+
+    assert capabilities.endpoint_display == "https://snapshot.example.test"
+    assert capabilities.durable_credential_available is True
+    assert capabilities.indexing_available is True
+
+
+@pytest.mark.parametrize("provider", ["openai", "google", "huggingface"])
+def test_production_capabilities_reject_simplified_only_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+    provider: str,
+) -> None:
+    monkeypatch.setattr(
+        semantic_api,
+        "get_config",
+        lambda: _production_embedding_config(
+            provider,
+            simplified_api_key="simplified-only-credential",
+            simplified_api_url="https://simplified.example.test/v1",
+        ),
+    )
+    monkeypatch.setattr(
+        semantic_api,
+        "load_server_config_snapshot",
+        lambda: {},
+        raising=False,
+    )
+
+    capabilities = semantic_api.resolve_semantic_capabilities(
+        SimpleNamespace(),
+        settings=SemanticIndexSettings(),
+    )
+
+    assert capabilities.durable_credential_available is False
+    assert capabilities.indexing_available is False
+    assert capabilities.unavailable_reason == "notes_semantic_durable_credentials_unavailable"
 
 
 @pytest.mark.parametrize(
@@ -91,6 +237,12 @@ def test_production_capabilities_reject_non_executable_semantic_providers(
         get_provider=lambda name: provider_config if name == provider else None,
     )
     monkeypatch.setattr(semantic_api, "get_config", lambda: config)
+    monkeypatch.setattr(
+        semantic_api,
+        "load_server_config_snapshot",
+        lambda: (_ for _ in ()).throw(AssertionError("credentials must not be read")),
+        raising=False,
+    )
 
     capabilities = semantic_api.resolve_semantic_capabilities(
         SimpleNamespace(),

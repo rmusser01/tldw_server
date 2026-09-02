@@ -12,7 +12,13 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
-from tldw_Server_API.app.core.config import loaded_config_data
+from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
+    is_provider_allowlisted,
+    load_server_config_snapshot,
+)
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
+    resolve_static_server_fallback_from_snapshot,
+)
 from tldw_Server_API.app.core.DB_Management.chacha.note_semantic_models import (
     SemanticDesiredState,
     SemanticDimensionState,
@@ -146,7 +152,6 @@ def resolve_semantic_capabilities(
     config = get_config()
     provider = str(config.default_provider or "").strip().lower()
     model = str(config.default_model or "").strip()
-    provider_config = config.get_provider(provider)
     provider_policy = semantic_provider_policy(provider)
     provider_registered = semantic_provider_is_registered(
         provider,
@@ -154,14 +159,21 @@ def resolve_semantic_capabilities(
     )
     endpoint = None
     credential_available = False
-    if provider_config is not None:
-        endpoint = provider_config.api_url
-        credential_available = bool(provider_config.api_key)
-    endpoint = resolve_semantic_provider_endpoint(
-        provider,
-        configured_url=endpoint,
-        app_config=loaded_config_data,
-    )
+    provider_allowlisted = False
+    if provider_policy is not None and provider_registered:
+        try:
+            provider_allowlisted = is_provider_allowlisted(provider)
+            snapshot = load_server_config_snapshot()
+            fallback = resolve_static_server_fallback_from_snapshot(provider, snapshot)
+            endpoint = resolve_semantic_provider_endpoint(
+                provider,
+                app_config=fallback.app_config,
+            )
+            credential_available = bool(fallback.api_key)
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+            provider_allowlisted = False
+    else:
+        endpoint = resolve_semantic_provider_endpoint(provider)
     backend = (os.getenv("NOTES_SEMANTIC_VECTOR_BACKEND") or "chromadb").strip().lower()
     dimensions = _KNOWN_DIMENSIONS.get(model)
     if dimensions is None:
@@ -181,12 +193,7 @@ def resolve_semantic_capabilities(
         normalization_version=SEMANTIC_NORMALIZATION_VERSION,
         chunker_version=SEMANTIC_CHUNKER_VERSION,
         credential_source="durable" if credential_available else "none",
-        provider_healthy=(
-            provider_policy is not None
-            and provider_registered
-            and provider_config is not None
-            and provider_config.enabled
-        ),
+        provider_healthy=(provider_policy is not None and provider_registered and provider_allowlisted),
         vector_storage_available=backend in {"chromadb", "pgvector"},
         active_note_count=_active_note_count(note_db),
     )

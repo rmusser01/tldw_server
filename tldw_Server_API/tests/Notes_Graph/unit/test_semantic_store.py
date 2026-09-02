@@ -908,6 +908,126 @@ def test_tombstones_queue_coalesced_cleanup_with_bounded_retry(db: CharactersRAG
     assert db.note_semantic_store.claim_work(dataset_id=DATASET_ID, now=NOW) is None
 
 
+def test_observability_snapshot_reads_authoritative_note_and_cleanup_state(
+    db: CharactersRAGDB,
+) -> None:
+    _config, generation = _create_resolved_generation(db)
+    for note_id in ("note-a", "note-b", "note-c"):
+        db.add_note(note_id, "content", note_id=note_id)
+        db.note_semantic_store.record_note_dirty(
+            dataset_id=DATASET_ID,
+            generation_id=generation.id,
+            note_id=note_id,
+            content_version=1,
+            content_fingerprint=CONTENT_V1,
+            now=NOW,
+        )
+
+    oldest = (NOW - timedelta(minutes=5)).isoformat()
+    with db.transaction() as conn:
+        conn.execute(
+            "UPDATE note_semantic_generations SET state='active' WHERE owner_user_id=? AND dataset_id=? AND id=?",
+            ("owner-a", DATASET_ID, generation.id),
+        )
+        conn.execute(
+            "UPDATE note_semantic_index_configs SET active_generation_id=? WHERE owner_user_id=? AND dataset_id=?",
+            (generation.id, "owner-a", DATASET_ID),
+        )
+        conn.execute(
+            "UPDATE note_semantic_note_state SET state='indexed' "
+            "WHERE owner_user_id=? AND dataset_id=? AND generation_id=? AND note_id='note-a'",
+            ("owner-a", DATASET_ID, generation.id),
+        )
+        conn.execute(
+            "UPDATE note_semantic_note_state SET state='failed' "
+            "WHERE owner_user_id=? AND dataset_id=? AND generation_id=? AND note_id='note-b'",
+            ("owner-a", DATASET_ID, generation.id),
+        )
+        conn.execute(
+            "UPDATE note_semantic_work SET claim_state='completed' "
+            "WHERE owner_user_id=? AND dataset_id=? AND generation_id=? AND note_id='note-a'",
+            ("owner-a", DATASET_ID, generation.id),
+        )
+        conn.execute(
+            "UPDATE note_semantic_work SET claim_state='failed',attempt_count=2 "
+            "WHERE owner_user_id=? AND dataset_id=? AND generation_id=? AND note_id='note-b'",
+            ("owner-a", DATASET_ID, generation.id),
+        )
+        conn.execute(
+            "INSERT INTO note_semantic_work("
+            "id,owner_user_id,dataset_id,kind,note_id,generation_id,dirty_generation,"
+            "fencing_token,claim_state,attempt_count,next_eligible_at,created_at,updated_at"
+            ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                "cleanup-work",
+                "owner-a",
+                DATASET_ID,
+                "delete_note_vectors",
+                "cleanup-note",
+                generation.id,
+                1,
+                "cleanup-fence",
+                "failed",
+                2,
+                oldest,
+                oldest,
+                oldest,
+            ),
+        )
+        conn.execute(
+            "INSERT INTO note_semantic_obsolete_vectors("
+            "id,owner_user_id,dataset_id,generation_id,vector_id,note_id,source_kind,"
+            "dirty_generation,claim_state,attempt_count,next_eligible_at,created_at,updated_at"
+            ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                "obsolete-vector",
+                "owner-a",
+                DATASET_ID,
+                generation.id,
+                "vector-a",
+                "note-a",
+                "manifest_replace",
+                1,
+                "failed",
+                3,
+                NOW.isoformat(),
+                NOW.isoformat(),
+                NOW.isoformat(),
+            ),
+        )
+
+    snapshot = db.note_semantic_store.get_observability_snapshot(
+        DATASET_ID,
+        current_capability_revision="capability-v2",
+    )
+
+    assert snapshot.backend == "chromadb"
+    assert snapshot.indexed_notes == 1
+    assert snapshot.excluded_notes == 0
+    assert snapshot.failed_notes == 1
+    assert snapshot.pending_notes == 1
+    assert snapshot.dirty_notes == 2
+    assert snapshot.stale_generations == 1
+    assert snapshot.cleanup_backlog == 2
+    assert snapshot.cleanup_retries == 5
+    assert snapshot.oldest_cleanup_created_at == oldest
+
+
+def test_observability_dataset_listing_pages_raw_scope_authority(
+    db: CharactersRAGDB,
+) -> None:
+    _create_config(db)
+
+    assert db.note_semantic_store.list_observability_dataset_ids(limit=1) == (DATASET_ID,)
+    assert (
+        db.note_semantic_store.list_observability_dataset_ids(
+            limit=1,
+            after_dataset_id=DATASET_ID,
+        )
+        == ()
+    )
+
+
 def test_owner_bound_store_hides_foreign_owner_rows(db: CharactersRAGDB) -> None:
     _create_config(db)
     foreign = CharactersRAGDB(db.db_path_str, client_id="owner-b")

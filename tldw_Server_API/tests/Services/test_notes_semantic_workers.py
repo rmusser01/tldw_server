@@ -196,7 +196,7 @@ async def test_maintenance_shares_one_bounded_claim_budget_and_coalesces_dirty_w
 
 
 @pytest.mark.asyncio
-async def test_maintenance_records_cleanup_backlog_retry_and_age_metrics(
+async def test_dataset_maintenance_does_not_publish_global_cleanup_gauges(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     observations: list[dict[str, object]] = []
@@ -215,15 +215,7 @@ async def test_maintenance_records_cleanup_backlog_retry_and_age_metrics(
     result = await coordinator.run_pass(now=NOW, limit=10)
 
     assert result.cleanup_confirmed == 2
-    assert observations == [
-        {
-            "status": "success",
-            "backend": "unavailable",
-            "backlog": 0,
-            "retries": 0,
-            "oldest_age_seconds": 0.0,
-        }
-    ]
+    assert observations == []
 
 
 @pytest.mark.asyncio
@@ -411,6 +403,7 @@ async def test_worker_does_not_audit_incomplete_cleanup_as_completed(
         notes_semantic_index_worker,
         "record_semantic_cleanup_metrics",
         lambda **kwargs: cleanup_metrics.append(dict(kwargs)),
+        raising=False,
     )
     monkeypatch.setattr(notes_semantic_index_worker, "emit_semantic_audit_event", capture_audit)
 
@@ -425,8 +418,7 @@ async def test_worker_does_not_audit_incomplete_cleanup_as_completed(
     )
 
     assert result["cleanup_complete"] is False
-    assert cleanup_metrics[0]["status"] == "degraded"
-    assert cleanup_metrics[0]["backlog"] == 1
+    assert cleanup_metrics == []
     assert audits == []
 
 
@@ -1429,8 +1421,277 @@ async def test_no_work_owner_discovery_is_bounded_and_continues_fairly(
 
     assert first_pass_opened <= 4
     assert len(opened) - first_pass_opened <= 4
-    assert first_pass_calls == 1
+    assert first_pass_calls == 2
     assert users.calls[first_pass_calls][0] > 0
+
+
+@pytest.mark.asyncio
+async def test_complete_health_sweep_aggregates_all_owners_and_rebuilds_after_restart(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def snapshot(
+        backend: str,
+        *,
+        indexed: int,
+        failed: int = 0,
+        pending: int = 0,
+        stale: int = 0,
+        cleanup: int = 0,
+        retries: int = 0,
+        oldest: datetime | None = None,
+    ) -> SimpleNamespace:
+        return SimpleNamespace(
+            backend=backend,
+            indexed_notes=indexed,
+            excluded_notes=0,
+            failed_notes=failed,
+            dirty_notes=pending,
+            pending_notes=pending,
+            stale_generations=stale,
+            cleanup_backlog=cleanup,
+            cleanup_retries=retries,
+            oldest_cleanup_created_at=oldest,
+        )
+
+    owner_snapshots = {
+        "1": {
+            "dataset-a": snapshot("chromadb", indexed=10),
+            "dataset-b": snapshot(
+                "chromadb",
+                indexed=1,
+                failed=2,
+                pending=1,
+                stale=1,
+                cleanup=2,
+                retries=4,
+                oldest=NOW - timedelta(minutes=5),
+            ),
+        },
+        "2": {
+            "dataset-c": snapshot(
+                "pgvector",
+                indexed=3,
+                cleanup=1,
+                retries=1,
+                oldest=NOW - timedelta(minutes=2),
+            ),
+        },
+    }
+
+    class Users:
+        async def list_users(self, *, offset: int, limit: int):
+            users = [{"id": 1}, {"id": 2}]
+            return users[offset : offset + limit], len(users)
+
+    class Store:
+        def __init__(self, values: dict[str, SimpleNamespace]) -> None:
+            self.values = values
+
+        def list_observability_dataset_ids(
+            self,
+            *,
+            limit: int,
+            after_dataset_id: str | None = None,
+        ) -> tuple[str, ...]:
+            dataset_ids = sorted(self.values)
+            if after_dataset_id is not None:
+                dataset_ids = [value for value in dataset_ids if value > after_dataset_id]
+            return tuple(dataset_ids[:limit])
+
+        def get_observability_snapshot(
+            self,
+            dataset_id: str,
+            *,
+            current_capability_revision: str | None,
+        ) -> SimpleNamespace:
+            assert current_capability_revision == "capability-current"
+            return self.values[dataset_id]
+
+    async def open_database(owner: str):
+        return SimpleNamespace(
+            owner=owner,
+            note_semantic_store=Store(owner_snapshots[owner]),
+            release_context_connection=lambda: None,
+        )
+
+    class Coordinator:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        async def run_pass(self, **_kwargs: object):
+            return notes_semantic_maintenance.SemanticMaintenanceResult(0, 0, 0, 0)
+
+    observations: list[tuple[SimpleNamespace, ...]] = []
+    monkeypatch.setattr(notes_semantic_maintenance, "_open_owner_database", open_database)
+    monkeypatch.setattr(notes_semantic_maintenance, "SemanticMaintenanceCoordinator", Coordinator)
+    monkeypatch.setattr(
+        notes_semantic_maintenance,
+        "resolve_semantic_capabilities",
+        lambda _db, *, settings: SimpleNamespace(capability_revision="capability-current"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        notes_semantic_maintenance,
+        "record_semantic_aggregate_metrics",
+        lambda *, snapshots, now: observations.append(tuple(snapshots)),
+        raising=False,
+    )
+
+    async def complete_one_sweep(runner) -> tuple[SimpleNamespace, ...]:
+        for _ in range(6):
+            await runner.run_pass(now=NOW, limit=2)
+            if observations:
+                return observations[-1]
+        raise AssertionError("bounded health sweep did not converge")
+
+    first_runner = notes_semantic_maintenance._MaintenanceRunner(
+        jobs=SimpleNamespace(),
+        users_repo=Users(),
+        settings=SemanticIndexSettings(),
+    )
+    await first_runner.run_pass(now=NOW, limit=2)
+    assert observations == []
+    first = await complete_one_sweep(first_runner)
+
+    chromadb = next(value for value in first if value.backend == "chromadb")
+    pgvector = next(value for value in first if value.backend == "pgvector")
+    assert (chromadb.indexed_notes, chromadb.failed_notes, chromadb.pending_notes) == (11, 2, 1)
+    assert (chromadb.stale_generations, chromadb.cleanup_backlog, chromadb.cleanup_retries) == (1, 2, 4)
+    assert chromadb.oldest_cleanup_created_at == NOW - timedelta(minutes=5)
+    assert (pgvector.cleanup_backlog, pgvector.cleanup_retries) == (1, 1)
+
+    observations.clear()
+    restarted = notes_semantic_maintenance._MaintenanceRunner(
+        jobs=SimpleNamespace(),
+        users_repo=Users(),
+        settings=SemanticIndexSettings(),
+    )
+    await restarted.run_pass(now=NOW, limit=2)
+    assert observations == []
+    rebuilt = await complete_one_sweep(restarted)
+
+    assert rebuilt == first
+
+
+@pytest.mark.asyncio
+async def test_health_sweep_bounds_empty_owner_database_scans(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    opened: list[str] = []
+    observations: list[tuple[object, ...]] = []
+
+    class Users:
+        async def list_users(self, *, offset: int, limit: int):
+            users = [{"id": 1}, {"id": 2}, {"id": 3}]
+            return users[offset : offset + limit], len(users)
+
+    class Store:
+        def list_observability_dataset_ids(
+            self,
+            *,
+            limit: int,
+            after_dataset_id: str | None = None,
+        ) -> tuple[str, ...]:
+            del limit, after_dataset_id
+            return ()
+
+    async def open_database(owner: str):
+        opened.append(owner)
+        return SimpleNamespace(
+            note_semantic_store=Store(),
+            release_context_connection=lambda: None,
+        )
+
+    monkeypatch.setattr(notes_semantic_maintenance, "_open_owner_database", open_database)
+    monkeypatch.setattr(
+        notes_semantic_maintenance,
+        "record_semantic_aggregate_metrics",
+        lambda *, snapshots, now: observations.append(tuple(snapshots)),
+    )
+    runner = notes_semantic_maintenance._MaintenanceRunner(
+        jobs=SimpleNamespace(),
+        users_repo=Users(),
+        settings=SemanticIndexSettings(),
+    )
+
+    await runner._run_health_sweep_page(now=NOW, limit=1)
+
+    assert opened == ["1"]
+    assert observations == []
+
+
+@pytest.mark.asyncio
+async def test_health_sweep_uses_unfiltered_authority_cursor_across_empty_dataset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observations: list[tuple[object, ...]] = []
+
+    class Users:
+        async def list_users(self, *, offset: int, limit: int):
+            users = [{"id": 1}]
+            return users[offset : offset + limit], len(users)
+
+    class Store:
+        def list_observability_dataset_ids(
+            self,
+            *,
+            limit: int,
+            after_dataset_id: str | None = None,
+        ) -> tuple[str, ...]:
+            dataset_ids = ("dataset-empty", "dataset-unhealthy")
+            if after_dataset_id is not None:
+                dataset_ids = tuple(value for value in dataset_ids if value > after_dataset_id)
+            return dataset_ids[:limit]
+
+        def get_observability_snapshot(
+            self,
+            dataset_id: str,
+            *,
+            current_capability_revision: str | None,
+        ) -> SimpleNamespace:
+            assert current_capability_revision == "capability-current"
+            return SimpleNamespace(
+                backend="chromadb" if dataset_id == "dataset-unhealthy" else "unavailable",
+                indexed_notes=0,
+                excluded_notes=0,
+                failed_notes=int(dataset_id == "dataset-unhealthy"),
+                dirty_notes=0,
+                pending_notes=0,
+                stale_generations=0,
+                cleanup_backlog=0,
+                cleanup_retries=0,
+                oldest_cleanup_created_at=None,
+            )
+
+    async def open_database(_owner: str):
+        return SimpleNamespace(
+            note_semantic_store=Store(),
+            release_context_connection=lambda: None,
+        )
+
+    monkeypatch.setattr(notes_semantic_maintenance, "_open_owner_database", open_database)
+    monkeypatch.setattr(
+        notes_semantic_maintenance,
+        "resolve_semantic_capabilities",
+        lambda _db, *, settings: SimpleNamespace(capability_revision="capability-current"),
+    )
+    monkeypatch.setattr(
+        notes_semantic_maintenance,
+        "record_semantic_aggregate_metrics",
+        lambda *, snapshots, now: observations.append(tuple(snapshots)),
+    )
+    runner = notes_semantic_maintenance._MaintenanceRunner(
+        jobs=SimpleNamespace(),
+        users_repo=Users(),
+        settings=SemanticIndexSettings(),
+    )
+
+    for _ in range(3):
+        await runner._run_health_sweep_page(now=NOW, limit=1)
+
+    assert len(observations) == 1
+    unhealthy = next(value for value in observations[0] if value.backend == "chromadb")
+    assert unhealthy.failed_notes == 1
 
 
 @pytest.mark.asyncio
