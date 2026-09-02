@@ -5,11 +5,11 @@
 - Branch: `codex/admin-webhooks-durable-producers-runtime`
 - Pull request: https://github.com/rmusser01/tldw_server/pull/2855
 - Final integrated implementation head:
-  `4a65f68c659ca0dd8260523d30448693d2b2d385`
+  `ecd801b6889f93def9e2a9e3b82a2e0ac63a8c8f`
 - Final verified pre-evidence branch head:
-  `4a65f68c659ca0dd8260523d30448693d2b2d385`
+  `ecd801b6889f93def9e2a9e3b82a2e0ac63a8c8f`
 - Final branch merge base and observed `origin/dev`:
-  `8140c679f3ea0334cea2dc1be32feb5b80e22ebe`
+  `c85fb8db6b6efc338162276a52a193fc5d2d0ce5`
 - Verification date: `2026-09-01`
 - Host: macOS 26.5.2 build 25F84, arm64
 - Project Python: 3.11.13
@@ -24,9 +24,9 @@
 The evidence-only update that records the final integrated gates necessarily
 follows the implementation head above and is not self-referential. Earlier
 verification and rebase identities remain in their chronological sections.
-The complete seventeen-commit pre-evidence PR branch rebased without conflicts
-onto the final observed `origin/dev` and became seventeen commits ahead and
-zero behind. No production activation occurred.
+The complete nineteen-commit pre-evidence PR branch rebased without conflicts
+onto the final observed `origin/dev` and became nineteen commits ahead and zero
+behind. No production activation occurred.
 
 The verified branch was published as pull request
 https://github.com/rmusser01/tldw_server/pull/2855 for normal CI and review.
@@ -51,7 +51,9 @@ https://github.com/rmusser01/tldw_server/pull/2855 for normal CI and review.
 | Post-review changed UI matrix | PASS: 128 passed |
 | Final Qodo-remediation UI matrix | PASS: 121 passed across 7 files |
 | Final real-backend browser lifecycle | PASS: 1 passed, including guarded link and Back navigation |
-| TypeScript typecheck | PASS |
+| Admin UI TypeScript typecheck | PASS |
+| OpenAPI drift correction | PASS: 2,067 paths, 3,122 schemas, SHA `72a49730dfab...` |
+| Generated frontend OpenAPI declaration | PASS: generated and focused `tsc` check exited 0 |
 | ESLint | PASS with 36 unrelated warnings and 0 errors |
 | Next.js production build | PASS: 49 pages, including `/webhooks` and `/incidents` |
 | Changed-path Ruff | PASS |
@@ -438,6 +440,66 @@ real-backend lifecycle above is the authoritative browser proof.
 No production activation, migration, receiver enrollment, or traffic change
 was performed as part of review remediation.
 
+## CI OpenAPI Artifact Correction
+
+The first post-Qodo `backend-required` CI run failed only the committed OpenAPI
+drift gate:
+https://github.com/rmusser01/tldw_server/actions/runs/33578798713/job/100088605503.
+The checked-in fingerprint described 2,066 paths and 3,120 schemas with SHA
+`1a9cad1bded6eac428093e0c222fa941bf645dada6f51ebf890df28183f94cfa`;
+the branch contract contained 2,067 paths and 3,122 schemas with SHA
+`72a49730dfab56021a5892747fbb2d1ce4f319a4730bb1ae44d24814e27f4e31`.
+
+Canonical export inspection confirmed that the complete delta is the intended
+`POST /api/v1/admin/incidents/{incident_id}/notify-webhooks` operation plus
+`IncidentWebhookNotifyRequest` and `IncidentWebhookNotifyResponse`. The route
+requires the bounded `Idempotency-Key`, closed request body, and expected 202
+response schema. The refreshed fingerprint is committed at
+`ecd801b6889f93def9e2a9e3b82a2e0ac63a8c8f` after the final rebase.
+
+The canonical schema, fingerprint, and ignored frontend declaration were
+regenerated with the repository exporter and `openapi-typescript`. Verification
+then completed as follows:
+
+```bash
+PYTHONPATH=.:packages/tldw_profile_core/src \
+  /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python \
+  Helper_Scripts/export_openapi_schema.py \
+  --out apps/tldw-frontend/lib/api/generated/openapi.json \
+  --fingerprint apps/tldw-frontend/lib/api/openapi.fingerprint.json
+
+cd apps/tldw-frontend
+bun x openapi-typescript \
+  lib/api/generated/openapi.json \
+  -o lib/api/generated/schema.d.ts
+```
+
+- OpenAPI drift check: exit 0, fingerprint matches the checked-in snapshot.
+- Focused OpenAPI tests: 12 passed, 6 warnings in 13.23 seconds.
+- Generated declaration check: focused `tsc --noEmit --skipLibCheck` exited 0.
+- Tracked delta: only the three fingerprint values changed before this evidence
+  update; the full OpenAPI JSON and generated declaration remain ignored build
+  artifacts.
+
+The whole upstream frontend `bun run typecheck` is not represented as a green
+gate for this correction. This isolated worktree has no installed workspace
+dependencies; temporarily exposing the primary checkout's app dependencies
+still left shared `packages/ui` dependencies unresolved and also surfaced
+unrelated existing script-test type errors. The generated declaration was
+therefore checked directly with the installed TypeScript compiler. The already
+recorded admin UI typecheck remains green. No production activation occurred.
+
+After the artifact correction was first pushed, `origin/dev` advanced to
+`c85fb8db6b6efc338162276a52a193fc5d2d0ce5` through Personal Context
+documentation and exact shared-core/Chatbook byte-parity PRs. The only source
+change was import ordering and a blank line in the shared profile model; the
+upstream PR explicitly preserved schemas and runtime behavior. All twenty PR
+commits rebased without conflicts. On the rebased tree, the OpenAPI drift check
+still matched and the combined webhook OpenAPI, server Personal Context, and
+shared-core public contract matrix passed 19/19 with six warnings in 14.22
+seconds. The verified pre-evidence implementation head remained nineteen
+commits ahead and zero behind. No production activation occurred.
+
 ## Static And Security Gates
 
 The plan's broad Ruff command returned 13 errors exclusively in admin endpoint
@@ -512,6 +574,22 @@ failures or omitted from the historical record:
     earlier sandboxed attempts. The enforced PostgreSQL matrix then passed
     79/79 and recreated the fixture; the host-permitted aggregate passed all
     1,201 tests with zero skips as recorded above.
+13. The first local fingerprint command omitted the linked package source from
+    `PYTHONPATH` and failed during import with
+    `ModuleNotFoundError: tldw_profile_core`; no artifact was written by that
+    attempt.
+14. The first direct schema-export attempt was launched from the frontend
+    directory with a root-relative script path, and the next attempt omitted
+    creation of the ignored output directory. Both failed before writing the
+    schema. The corrected root command above completed successfully.
+15. The first `bun x openapi-typescript` attempt was denied access to Bun's
+    sandbox-external temporary directory. The approved host-permitted rerun
+    generated the declaration and exited 0.
+16. The first whole-frontend typecheck found no `cross-env` because the isolated
+    worktree has no dependency install. A temporary app dependency link allowed
+    the command to start, but shared workspace packages remained unresolved and
+    unrelated baseline script-test errors were reported. The link was removed;
+    the focused generated-declaration check above exited 0.
 
 ## Documentation And Release Decision
 
