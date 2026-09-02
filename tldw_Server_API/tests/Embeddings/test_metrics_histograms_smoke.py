@@ -2,7 +2,7 @@ import os
 from fastapi.testclient import TestClient
 
 
-def test_metrics_exposes_new_histograms(monkeypatch):
+def test_metrics_exposes_new_histograms(admin_user, monkeypatch):
 
 
      # Reduce startup work

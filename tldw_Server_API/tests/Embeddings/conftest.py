@@ -215,6 +215,7 @@ def redis_client():
 # Lightweight app client + auth fixtures for property/unit tests in this package
 @pytest.fixture
 def test_client(disable_heavy_startup):
+    _overrides_before = dict(app.dependency_overrides)
     """Minimal TestClient with CSRF and auth header set.
 
     Scope: function - keeps isolation across property-based runs.
@@ -229,9 +230,14 @@ def test_client(disable_heavy_startup):
             client.headers["Authorization"] = f"Bearer {get_settings().SINGLE_USER_API_KEY}"
             yield client
     finally:
-        # Ensure dependency overrides do not leak across tests
+        # Restore, do not clear. These overrides live on the shared global app,
+        # so clear() removed entries this fixture never installed -- including
+        # the auth overrides another fixture had put there for the running test.
+        # Whichever test asked for ambient authentication next then got a 401,
+        # which is why the victim moved around between runs.
         try:
             app.dependency_overrides.clear()
+            app.dependency_overrides.update(_overrides_before)
         except Exception:
             _ = None
 

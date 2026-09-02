@@ -46,7 +46,9 @@ def test_summary_failure_increments_counter(disable_heavy_startup, admin_user, m
 
 
 @pytest.mark.unit
-def test_sse_disconnect_increments_counter(disable_heavy_startup, redis_client, monkeypatch):
+def test_sse_disconnect_increments_counter(
+    disable_heavy_startup, admin_user, redis_client, monkeypatch
+):
      # Call the endpoint function directly and close its generator to trigger disconnect accounting
     from tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced import orchestrator_events
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
