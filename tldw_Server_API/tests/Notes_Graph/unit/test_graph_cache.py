@@ -51,7 +51,7 @@ class TestGraphCache:
     def test_stats(self):
         cache = GraphCache(ttl_seconds=60, max_keys=100)
         cache.put("k1", 1)
-        cache.get("k1")       # hit
+        cache.get("k1")  # hit
         cache.get("missing")  # miss
         s = cache.stats()
         assert s["size"] == 1
@@ -92,15 +92,9 @@ class TestMakeCacheKey:
             "query_params": {"radius": 1},
         }
         original = GraphCache.make_revision_key(**common)
-        assert original != GraphCache.make_revision_key(
-            **{**common, "dataset_id": "dataset-2"}
-        )
-        assert original != GraphCache.make_revision_key(
-            **{**common, "graph_revision": 8}
-        )
-        assert original != GraphCache.make_revision_key(
-            **{**common, "parser_version": 3}
-        )
+        assert original != GraphCache.make_revision_key(**{**common, "dataset_id": "dataset-2"})
+        assert original != GraphCache.make_revision_key(**{**common, "graph_revision": 8})
+        assert original != GraphCache.make_revision_key(**{**common, "parser_version": 3})
 
     def test_ordinary_revision_key_is_independent_of_semantic_revisions(self):
         ordinary = {
@@ -141,14 +135,34 @@ class TestMakeCacheKey:
             ("generation_id", "generation-2"),
             ("semantic_index_revision", 10),
             ("configuration_revision", 6),
+            ("capability_revision", "capability-2"),
+            ("disclosure_hash", "disclosure-2"),
             ("compatibility_hash", "compatibility-2"),
+            ("provider", "google"),
+            ("model", "embedding-model-2"),
             ("model_revision", "model-revision-2"),
+            ("endpoint_origin_revision", "endpoint-2"),
             ("normalization_version", "normalization-v2"),
             ("chunker_version", "chunker-v2"),
         ):
-            assert original != GraphCache.make_semantic_revision_key(
-                **{**common, field: value}
-            )
+            assert original != GraphCache.make_semantic_revision_key(**{**common, field: value})
+
+    def test_semantic_key_helpers_remain_compatible_with_legacy_callers(self):
+        legacy = _semantic_key_values()
+        for field in (
+            "capability_revision",
+            "disclosure_hash",
+            "provider",
+            "model",
+            "endpoint_origin_revision",
+        ):
+            legacy.pop(field)
+
+        revision_key = GraphCache.make_semantic_revision_key(**legacy)
+        cursor_binding = GraphCache.make_semantic_cursor_binding(**_semantic_binding_values(legacy))
+
+        assert revision_key
+        assert cursor_binding
 
     @pytest.mark.parametrize(
         ("request_updates", "identity_updates"),
@@ -190,16 +204,10 @@ class TestMakeCacheKey:
         )
 
         original_key = GraphCache.make_semantic_revision_key(**common)
-        changed_key = GraphCache.make_semantic_revision_key(
-            **{**common, "query_identity": changed_identity}
-        )
-        original_binding = GraphCache.make_semantic_cursor_binding(
-            **_semantic_binding_values(common)
-        )
+        changed_key = GraphCache.make_semantic_revision_key(**{**common, "query_identity": changed_identity})
+        original_binding = GraphCache.make_semantic_cursor_binding(**_semantic_binding_values(common))
         changed_binding = GraphCache.make_semantic_cursor_binding(
-            **_semantic_binding_values(
-                {**common, "query_identity": changed_identity}
-            )
+            **_semantic_binding_values({**common, "query_identity": changed_identity})
         )
 
         assert changed_key != original_key
@@ -215,9 +223,7 @@ class TestMakeCacheKey:
                 ]
             }
         )
-        canonical = _semantic_query_identity(
-            request_updates={"edge_types": [EdgeType.manual, EdgeType.semantic]}
-        )
+        canonical = _semantic_query_identity(request_updates={"edge_types": [EdgeType.manual, EdgeType.semantic]})
 
         assert identity == canonical
         with pytest.raises(FrozenInstanceError):
@@ -255,17 +261,11 @@ class TestMakeCacheKey:
         common = _semantic_key_values()
         assert GraphCache.make_semantic_revision_key(
             **{**common, "query_identity": default_request}
-        ) != GraphCache.make_semantic_revision_key(
-            **{**common, "query_identity": explicitly_bounded_request}
-        )
+        ) != GraphCache.make_semantic_revision_key(**{**common, "query_identity": explicitly_bounded_request})
         assert GraphCache.make_semantic_cursor_binding(
-            **_semantic_binding_values(
-                {**common, "query_identity": default_request}
-            )
+            **_semantic_binding_values({**common, "query_identity": default_request})
         ) != GraphCache.make_semantic_cursor_binding(
-            **_semantic_binding_values(
-                {**common, "query_identity": explicitly_bounded_request}
-            )
+            **_semantic_binding_values({**common, "query_identity": explicitly_bounded_request})
         )
 
     def test_semantic_helpers_reject_untyped_query_identity(self):
@@ -384,8 +384,13 @@ def _semantic_key_values() -> dict[str, object]:
         "generation_id": "generation-1",
         "semantic_index_revision": 9,
         "configuration_revision": 5,
+        "capability_revision": "capability-1",
+        "disclosure_hash": "disclosure-1",
         "compatibility_hash": "compatibility-1",
+        "provider": "openai",
+        "model": "embedding-model-1",
         "model_revision": "model-revision-1",
+        "endpoint_origin_revision": "endpoint-1",
         "normalization_version": "normalization-v1",
         "chunker_version": "chunker-v1",
         "query_identity": _semantic_query_identity(),

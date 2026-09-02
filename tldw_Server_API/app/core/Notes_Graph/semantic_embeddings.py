@@ -13,7 +13,6 @@ from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 
 from tldw_Server_API.app.core.AuthNZ.byok_config import (
-    PROVIDER_APP_CONFIG_KEYS,
     runtime_base_url_override_provenance,
 )
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
@@ -31,6 +30,10 @@ from tldw_Server_API.app.core.LLM_Calls.embeddings_adapter_registry import (
     get_embeddings_registry,
 )
 
+from .semantic_capabilities import (
+    resolve_semantic_provider_endpoint,
+    semantic_provider_policy,
+)
 from .semantic_content import SemanticChunkInput
 from .semantic_endpoint import canonical_semantic_endpoint_origin
 from .semantic_settings import DEFAULT_SEMANTIC_INDEX_SETTINGS, SemanticIndexSettings
@@ -91,17 +94,14 @@ class PendingSemanticConfig:
             raise ValueError("model_revision is invalid")
         if (
             self.endpoint_origin is not None
-            and canonical_semantic_endpoint_origin(self.endpoint_origin)
-            != self.endpoint_origin
+            and canonical_semantic_endpoint_origin(self.endpoint_origin) != self.endpoint_origin
         ):
             raise ValueError("endpoint_origin must be a canonical HTTP origin")
         if self.credential_source not in {"user", "server_default"}:
             raise ValueError("credential_source must identify one durable scope")
         if type(self.consented) is not bool:
             raise TypeError("consented must be a boolean")
-        if self.dimensions is not None and (
-            type(self.dimensions) is not int or self.dimensions <= 0
-        ):
+        if self.dimensions is not None and (type(self.dimensions) is not int or self.dimensions <= 0):
             raise ValueError("dimensions must be a positive integer or None")
 
 
@@ -236,6 +236,8 @@ class NotesEmbeddingExecutor:
             raise SemanticEmbeddingSystemError("provider_model_drift")
         if dimensions != self._config.dimensions:
             raise SemanticEmbeddingSystemError("dimension_mismatch")
+        if semantic_provider_policy(provider) is None:
+            raise SemanticEmbeddingSystemError("provider_unavailable")
         adapter = self._adapter_registry.get_adapter(provider)
         if adapter is None or not callable(getattr(adapter, "embed", None)):
             raise SemanticEmbeddingSystemError("provider_unavailable")
@@ -262,10 +264,7 @@ class NotesEmbeddingExecutor:
         if resolved_base_url is None:
             raise SemanticEmbeddingSystemError("endpoint_origin_mismatch")
         previous_identity = self._identity
-        if (
-            previous_identity.endpoint_base_url is not None
-            and resolved_base_url != previous_identity.endpoint_base_url
-        ):
+        if previous_identity.endpoint_base_url is not None and resolved_base_url != previous_identity.endpoint_base_url:
             raise SemanticEmbeddingSystemError("endpoint_identity_mismatch")
 
         app_config = copy.deepcopy(credentials.app_config or {})
@@ -309,19 +308,12 @@ class NotesEmbeddingExecutor:
             )
             if vectors is None:
                 raise SemanticEmbeddingSystemError("invalid_vectors")
-            actual_revision = _safe_revision(
-                response.get("model_revision") or response.get("model_digest")
-            )
+            actual_revision = _safe_revision(response.get("model_revision") or response.get("model_digest"))
             if actual_revision is None:
-                capabilities = (
-                    adapter.capabilities()
-                    if callable(getattr(adapter, "capabilities", None))
-                    else {}
-                )
+                capabilities = adapter.capabilities() if callable(getattr(adapter, "capabilities", None)) else {}
                 if isinstance(capabilities, dict):
                     actual_revision = _safe_revision(
-                        capabilities.get("model_revision")
-                        or capabilities.get("model_digest")
+                        capabilities.get("model_revision") or capabilities.get("model_digest")
                     )
             if (
                 self._config.model_revision is not None
@@ -407,27 +399,18 @@ def _credential_base_url(
     normalized = _normalize_base_url(direct)
     if normalized is not None:
         return normalized
-    app_config = credentials.app_config or {}
-    section_name = PROVIDER_APP_CONFIG_KEYS.get(provider)
-    section = app_config.get(section_name) if section_name else None
-    if isinstance(section, dict):
-        for field_name in _ENDPOINT_FIELDS:
-            candidate = section.get(field_name)
-            normalized = _normalize_base_url(candidate)
-            if normalized is not None:
-                return normalized
-    return None
+    resolved = resolve_semantic_provider_endpoint(
+        provider,
+        app_config=credentials.app_config or {},
+    )
+    return _normalize_base_url(resolved)
 
 
 def _normalize_base_url(value: object) -> str | None:
     if not isinstance(value, str):
         return None
     normalized = value.strip().rstrip("/")
-    return (
-        normalized
-        if canonical_semantic_endpoint_origin(normalized) is not None
-        else None
-    )
+    return normalized if canonical_semantic_endpoint_origin(normalized) is not None else None
 
 
 def _cache_key(
@@ -437,9 +420,7 @@ def _cache_key(
     dimensions: int | None,
     backend_identity: str | None,
 ) -> str:
-    material = "\x1f".join(
-        (provider, model, str(dimensions or ""), backend_identity or "", text)
-    )
+    material = "\x1f".join((provider, model, str(dimensions or ""), backend_identity or "", text))
     return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
 
@@ -584,9 +565,7 @@ class NotesSemanticEmbedder:
     def __init__(
         self,
         *,
-        orchestrator_factory: Callable[
-            [PendingSemanticConfig | ResolvedSemanticConfig, str], NotesEmbeddingRuntime
-        ]
+        orchestrator_factory: Callable[[PendingSemanticConfig | ResolvedSemanticConfig, str], NotesEmbeddingRuntime]
         | None = None,
         dimension_cas: DimensionCas | None = None,
         usage_logger: UsageLogger = _default_usage_logger,
@@ -637,10 +616,7 @@ class NotesSemanticEmbedder:
             dimensions = len(vectors[0])
             identity = runtime.execution_identity()
             _validate_runtime_identity(identity, config)
-            model_revision = (
-                _safe_revision(getattr(identity, "model_revision", None))
-                or config.model_revision
-            )
+            model_revision = _safe_revision(getattr(identity, "model_revision", None)) or config.model_revision
         except asyncio.CancelledError as cancellation:
             await self._finalize_provider_usage(
                 runtime=runtime,
@@ -728,18 +704,13 @@ class NotesSemanticEmbedder:
                     if type(request_count) is not int or request_count != 1:
                         raise SemanticEmbeddingSystemError("provider_usage_unavailable")
                     provider_request_count += request_count
-                actual_revision = _safe_revision(
-                    getattr(identity, "model_revision", None)
-                )
+                actual_revision = _safe_revision(getattr(identity, "model_revision", None))
                 if config.model_revision is None:
                     if discovered_revision is None:
                         discovered_revision = actual_revision
                     elif actual_revision != discovered_revision:
                         raise SemanticEmbeddingSystemError("model_revision_drift")
-                elif (
-                    actual_revision is not None
-                    and actual_revision != config.model_revision
-                ):
+                elif actual_revision is not None and actual_revision != config.model_revision:
                     raise SemanticEmbeddingSystemError("model_revision_drift")
                 model_revision = actual_revision or model_revision
             except asyncio.CancelledError as cancellation:
@@ -766,16 +737,14 @@ class NotesSemanticEmbedder:
                 )
                 raise
             else:
-                provider_prompt_tokens, provider_total_tokens = (
-                    await self._finalize_provider_usage(
-                        runtime=runtime,
-                        result=result,
-                        before_sequence=before_sequence,
-                        config=config,
-                        user_id=user_id,
-                        operation="notes_semantic_embeddings",
-                        succeeded=True,
-                    )
+                provider_prompt_tokens, provider_total_tokens = await self._finalize_provider_usage(
+                    runtime=runtime,
+                    result=result,
+                    before_sequence=before_sequence,
+                    config=config,
+                    user_id=user_id,
+                    operation="notes_semantic_embeddings",
+                    succeeded=True,
                 )
             vectors.extend(batch_vectors)
             prompt_tokens += provider_prompt_tokens
@@ -955,11 +924,7 @@ def _validate_execution_result(
     result: Any,
     config: PendingSemanticConfig | ResolvedSemanticConfig,
 ) -> None:
-    if (
-        result.provider != config.provider
-        or result.model != config.model
-        or result.fallback_from is not None
-    ):
+    if result.provider != config.provider or result.model != config.model or result.fallback_from is not None:
         raise SemanticEmbeddingSystemError("provider_model_drift")
 
 

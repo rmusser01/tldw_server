@@ -49,15 +49,15 @@ class SemanticGraphQueryIdentity:
         canonical_edge_types = tuple(sorted(set(self.edge_types)))
         if self.edge_types != canonical_edge_types or "semantic" not in self.edge_types:
             raise ValueError("edge_types must be canonical and include semantic")
-        if type(self.semantic_threshold) is not float or not math.isfinite(
-            self.semantic_threshold
-        ) or not 0.0 <= self.semantic_threshold <= 1.0:
+        if (
+            type(self.semantic_threshold) is not float
+            or not math.isfinite(self.semantic_threshold)
+            or not 0.0 <= self.semantic_threshold <= 1.0
+        ):
             raise ValueError("semantic_threshold must be a finite float from 0 to 1")
         if (
             type(self.semantic_top_k) is not int
-            or not 1
-            <= self.semantic_top_k
-            <= DEFAULT_SEMANTIC_INDEX_SETTINGS.max_query_neighbors
+            or not 1 <= self.semantic_top_k <= DEFAULT_SEMANTIC_INDEX_SETTINGS.max_query_neighbors
         ):
             raise ValueError("semantic_top_k must be a bounded positive integer")
         for field_name, value, minimum in (
@@ -106,27 +106,15 @@ class SemanticGraphQueryIdentity:
             raise ValueError("Semantic query identity requires semantic edge type")
         if not request.center_note_id:
             raise ValueError("Semantic query identity requires a focus note")
-        if (
-            request.semantic_threshold is not None
-            and request.semantic_threshold != semantic_threshold
-        ):
+        if request.semantic_threshold is not None and request.semantic_threshold != semantic_threshold:
             raise ValueError("effective semantic threshold does not match the request")
-        if (
-            request.semantic_top_k is not None
-            and request.semantic_top_k != semantic_top_k
-        ):
+        if request.semantic_top_k is not None and request.semantic_top_k != semantic_top_k:
             raise ValueError("effective semantic top_k does not match the request")
-        time_range = (
-            request.time_range.model_dump(mode="json")
-            if request.time_range is not None
-            else {}
-        )
+        time_range = request.time_range.model_dump(mode="json") if request.time_range is not None else {}
         return cls(
             focus_note_id=request.center_note_id,
             radius=request.radius,
-            edge_types=tuple(
-                edge_type.value for edge_type in request.resolved_edge_types
-            ),
+            edge_types=tuple(edge_type.value for edge_type in request.resolved_edge_types),
             tag=request.tag,
             source=request.source,
             time_range_start=time_range.get("start"),
@@ -181,8 +169,13 @@ def _semantic_revision_payload(
     generation_id: str,
     semantic_index_revision: int,
     configuration_revision: int,
+    capability_revision: str,
+    disclosure_hash: str,
     compatibility_hash: str,
+    provider: str,
+    model: str,
     model_revision: str | None,
+    endpoint_origin_revision: str,
     normalization_version: str,
     chunker_version: str,
     query_identity: SemanticGraphQueryIdentity,
@@ -198,8 +191,13 @@ def _semantic_revision_payload(
         "generation_id": generation_id,
         "semantic_index_revision": semantic_index_revision,
         "configuration_revision": configuration_revision,
+        "capability_revision": capability_revision,
+        "disclosure_hash": disclosure_hash,
         "compatibility_hash": compatibility_hash,
+        "provider": provider,
+        "model": model,
         "model_revision": model_revision,
+        "endpoint_origin_revision": endpoint_origin_revision,
         "normalization_version": normalization_version,
         "chunker_version": chunker_version,
         "query": query_identity.as_payload(),
@@ -280,6 +278,11 @@ class GraphCache:
         normalization_version: str,
         chunker_version: str,
         query_identity: SemanticGraphQueryIdentity,
+        capability_revision: str = "",
+        disclosure_hash: str = "",
+        provider: str = "",
+        model: str = "",
+        endpoint_origin_revision: str = "",
     ) -> str:
         """Build the stable outer key for a final semantic projection."""
 
@@ -292,8 +295,13 @@ class GraphCache:
                 generation_id=generation_id,
                 semantic_index_revision=semantic_index_revision,
                 configuration_revision=configuration_revision,
+                capability_revision=capability_revision,
+                disclosure_hash=disclosure_hash,
                 compatibility_hash=compatibility_hash,
+                provider=provider,
+                model=model,
                 model_revision=model_revision,
+                endpoint_origin_revision=endpoint_origin_revision,
                 normalization_version=normalization_version,
                 chunker_version=chunker_version,
                 query_identity=query_identity,
@@ -314,6 +322,11 @@ class GraphCache:
         normalization_version: str,
         chunker_version: str,
         query_identity: SemanticGraphQueryIdentity,
+        capability_revision: str = "",
+        disclosure_hash: str = "",
+        provider: str = "",
+        model: str = "",
+        endpoint_origin_revision: str = "",
     ) -> str:
         """Hash the immutable semantic request identity carried by cursors."""
 
@@ -324,8 +337,13 @@ class GraphCache:
             generation_id=generation_id,
             semantic_index_revision=semantic_index_revision,
             configuration_revision=configuration_revision,
+            capability_revision=capability_revision,
+            disclosure_hash=disclosure_hash,
             compatibility_hash=compatibility_hash,
+            provider=provider,
+            model=model,
             model_revision=model_revision,
+            endpoint_origin_revision=endpoint_origin_revision,
             normalization_version=normalization_version,
             chunker_version=chunker_version,
             query_identity=query_identity,

@@ -23,6 +23,8 @@ from tldw_Server_API.app.core.Sync.v2.notes_link_coordinator import (
 
 
 class _FakeAPI:
+    owner_user_id = "owner-a"
+
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, object]]] = []
         self.failures: dict[str, SemanticAPIError] = {}
@@ -212,9 +214,7 @@ def test_capabilities_project_request_local_manage_authority(
     test_client, _api, app = client
     app.dependency_overrides[endpoint.require_semantic_read] = lambda: principal
 
-    response = test_client.get(
-        "/api/v1/notes/graph/semantic-index/capabilities"
-    )
+    response = test_client.get("/api/v1/notes/graph/semantic-index/capabilities")
 
     assert response.status_code == 200
     assert response.json()["manage_authorized"] is expected
@@ -242,9 +242,7 @@ def test_unavailable_endpoint_capability_and_enabled_status_remain_typed(client)
     api.capabilities = lambda: capability
     api.status = lambda: resource
 
-    capability_response = test_client.get(
-        "/api/v1/notes/graph/semantic-index/capabilities"
-    )
+    capability_response = test_client.get("/api/v1/notes/graph/semantic-index/capabilities")
     status_response = test_client.get("/api/v1/notes/graph/semantic-index")
 
     assert capability_response.status_code == 200
@@ -298,6 +296,100 @@ def test_put_reuses_nested_enable_route_for_renewed_consent(client) -> None:
             "idempotency_key": "renew-consent-key",
         },
     )
+
+
+def test_every_semantic_command_emits_its_durable_audit_event(
+    client,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    test_client, _api, _app = client
+    events: list[dict[str, object]] = []
+
+    async def capture(**kwargs: object) -> None:
+        events.append(dict(kwargs))
+
+    monkeypatch.setattr(
+        endpoint,
+        "emit_semantic_audit_event",
+        capture,
+        raising=False,
+    )
+
+    requests = (
+        (
+            "PUT",
+            "/api/v1/notes/graph/semantic-index",
+            {"expected_revision": 0, "capability_revision": f"sha256:{'a' * 64}"},
+        ),
+        (
+            "PUT",
+            "/api/v1/notes/graph/semantic-index",
+            {"expected_revision": 9, "capability_revision": f"sha256:{'b' * 64}"},
+        ),
+        (
+            "POST",
+            "/api/v1/notes/graph/semantic-index/runs",
+            {"mode": "rebuild", "expected_revision": 9},
+        ),
+        (
+            "POST",
+            "/api/v1/notes/graph/semantic-index/runs",
+            {"mode": "retry_failed", "expected_revision": 9},
+        ),
+        (
+            "POST",
+            f"/api/v1/notes/graph/semantic-index/runs/{RUN_ID}/cancel",
+            {"expected_revision": 9},
+        ),
+        (
+            "DELETE",
+            "/api/v1/notes/graph/semantic-index",
+            {"expected_revision": 9},
+        ),
+    )
+    for index, (method, path, body) in enumerate(requests):
+        response = test_client.request(
+            method,
+            path,
+            headers={"Idempotency-Key": f"audit-{index}"},
+            json=body,
+        )
+        assert response.status_code == 202
+
+    assert [event["event"] for event in events] == [
+        "enable",
+        "consent_renewal",
+        "rebuild",
+        "retry",
+        "cancel",
+        "disable",
+        "delete_request",
+    ]
+    assert all(event["owner_user_id"] == "owner-a" for event in events)
+
+
+def test_committed_command_remains_accepted_when_audit_backend_fails(
+    client,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    test_client, api, _app = client
+
+    async def unavailable(**_kwargs: object) -> None:
+        raise RuntimeError("audit unavailable")
+
+    monkeypatch.setattr(endpoint, "emit_semantic_audit_event", unavailable)
+
+    response = test_client.put(
+        "/api/v1/notes/graph/semantic-index",
+        headers={"Idempotency-Key": "audit-failure"},
+        json={
+            "expected_revision": 0,
+            "capability_revision": "sha256:" + "a" * 64,
+        },
+    )
+
+    assert response.status_code == 202
+    assert api.calls[-1][0] == "enable"
 
 
 def test_delete_and_cancel_return_202_with_revision_and_idempotency(client) -> None:
@@ -378,9 +470,7 @@ def test_invalid_mode_and_revision_return_typed_422(client) -> None:
 def test_foreign_run_is_404_and_conflicts_are_typed(client) -> None:
     test_client, api, _app = client
     api.failures["get_run"] = SemanticAPIError(404, "notes_semantic_run_not_found")
-    missing = test_client.get(
-        "/api/v1/notes/graph/semantic-index/runs/16f923f0-cfc5-455b-bc44-df610b433991"
-    )
+    missing = test_client.get("/api/v1/notes/graph/semantic-index/runs/16f923f0-cfc5-455b-bc44-df610b433991")
     api.failures["create_run"] = SemanticAPIError(409, "notes_semantic_writer_conflict")
     conflict = test_client.post(
         "/api/v1/notes/graph/semantic-index/runs",

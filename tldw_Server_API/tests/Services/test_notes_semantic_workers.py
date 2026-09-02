@@ -196,6 +196,272 @@ async def test_maintenance_shares_one_bounded_claim_budget_and_coalesces_dirty_w
 
 
 @pytest.mark.asyncio
+async def test_maintenance_records_cleanup_backlog_retry_and_age_metrics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observations: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        notes_semantic_maintenance,
+        "record_semantic_cleanup_metrics",
+        lambda **kwargs: observations.append(dict(kwargs)),
+        raising=False,
+    )
+    scope = _Scope("dataset-a", dirty=0, failed=0, cleanup=2)
+    coordinator = notes_semantic_maintenance.SemanticMaintenanceCoordinator(
+        scopes=(scope,),
+        indexing_enabled=False,
+    )
+
+    result = await coordinator.run_pass(now=NOW, limit=10)
+
+    assert result.cleanup_confirmed == 2
+    assert observations == [
+        {
+            "status": "success",
+            "backend": "unavailable",
+            "backlog": 0,
+            "retries": 0,
+            "oldest_age_seconds": 0.0,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_worker_records_terminal_metrics_and_publication_audit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    metrics: list[dict[str, object]] = []
+    failures: list[dict[str, object]] = []
+    audits: list[dict[str, object]] = []
+
+    class Handler:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        async def handle(self, _job: dict[str, object], **_kwargs: object):
+            return {
+                "state": "completed",
+                "indexed_notes": 4,
+                "excluded_notes": 1,
+                "failed_notes": 1,
+                "published_chunks": 8,
+                "cleanup_complete": True,
+                "error_code": None,
+            }
+
+    db = SimpleNamespace(
+        note_semantic_store=SimpleNamespace(
+            get_configuration=lambda _dataset_id: SimpleNamespace(vector_backend="chromadb")
+        )
+    )
+    monkeypatch.setattr(notes_semantic_index_worker, "SemanticJobHandler", Handler)
+
+    async def open_database(_owner: str):
+        return db
+
+    monkeypatch.setattr(
+        notes_semantic_index_worker,
+        "_open_owner_database",
+        open_database,
+    )
+    monkeypatch.setattr(
+        notes_semantic_index_worker,
+        "_close_database",
+        lambda _db: None,
+    )
+    monkeypatch.setattr(
+        notes_semantic_index_worker,
+        "record_semantic_build_metrics",
+        lambda **kwargs: metrics.append(dict(kwargs)),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        notes_semantic_index_worker,
+        "record_semantic_failure",
+        lambda **kwargs: failures.append(dict(kwargs)),
+        raising=False,
+    )
+
+    async def capture_audit(**kwargs: object) -> None:
+        audits.append(dict(kwargs))
+
+    monkeypatch.setattr(
+        notes_semantic_index_worker,
+        "emit_semantic_audit_event",
+        capture_audit,
+        raising=False,
+    )
+    job = {
+        "owner_user_id": "owner-a",
+        "uuid": "run-a",
+        "payload": {
+            "dataset_id": "dataset-a",
+            "mode": "rebuild",
+        },
+    }
+
+    result = await notes_semantic_index_worker.handle_notes_semantic_index_job(
+        job,
+        jobs=SimpleNamespace(),
+        worker_id="worker-a",
+    )
+
+    assert result["state"] == "completed"
+    assert metrics[0]["operation"] == "rebuild"
+    assert metrics[0]["status"] == "degraded"
+    assert metrics[0]["counts"]["indexed"] == 4
+    assert failures == [
+        {
+            "component": "provider",
+            "category": "execution",
+            "backend": "chromadb",
+        }
+    ]
+    assert audits[0]["event"] == "generation_publication"
+    assert audits[0]["run_id"] == "run-a"
+
+
+@pytest.mark.asyncio
+async def test_worker_records_failed_build_terminal_metric(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    metrics: list[dict[str, object]] = []
+
+    class Handler:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        async def handle(self, _job: dict[str, object], **_kwargs: object):
+            raise SemanticIndexingError("notes_semantic_provider_unavailable")
+
+    db = SimpleNamespace(
+        note_semantic_store=SimpleNamespace(
+            get_configuration=lambda _dataset_id: SimpleNamespace(vector_backend="chromadb")
+        )
+    )
+
+    async def open_database(_owner: str):
+        return db
+
+    monkeypatch.setattr(notes_semantic_index_worker, "SemanticJobHandler", Handler)
+    monkeypatch.setattr(notes_semantic_index_worker, "_open_owner_database", open_database)
+    monkeypatch.setattr(notes_semantic_index_worker, "_close_database", lambda _db: None)
+    monkeypatch.setattr(
+        notes_semantic_index_worker,
+        "record_semantic_build_metrics",
+        lambda **kwargs: metrics.append(dict(kwargs)),
+    )
+
+    with pytest.raises(SemanticIndexingError):
+        await notes_semantic_index_worker.handle_notes_semantic_index_job(
+            {
+                "owner_user_id": "owner-a",
+                "uuid": "run-a",
+                "payload": {"dataset_id": "dataset-a", "mode": "build"},
+            },
+            jobs=SimpleNamespace(),
+            worker_id="worker-a",
+        )
+
+    assert len(metrics) == 1
+    assert metrics[0]["operation"] == "build"
+    assert metrics[0]["status"] == "failed"
+    assert metrics[0]["backend"] == "chromadb"
+
+
+@pytest.mark.asyncio
+async def test_worker_does_not_audit_incomplete_cleanup_as_completed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cleanup_metrics: list[dict[str, object]] = []
+    audits: list[dict[str, object]] = []
+
+    class Handler:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        async def handle(self, _job: dict[str, object], **_kwargs: object):
+            return {
+                "state": "completed",
+                "indexed_notes": 0,
+                "excluded_notes": 0,
+                "failed_notes": 0,
+                "published_chunks": 0,
+                "cleanup_complete": False,
+                "error_code": "notes_semantic_cleanup_unconfirmed",
+            }
+
+    db = SimpleNamespace(
+        note_semantic_store=SimpleNamespace(
+            get_configuration=lambda _dataset_id: SimpleNamespace(vector_backend="chromadb")
+        )
+    )
+
+    async def open_database(_owner: str):
+        return db
+
+    async def capture_audit(**kwargs: object) -> None:
+        audits.append(dict(kwargs))
+
+    monkeypatch.setattr(notes_semantic_index_worker, "SemanticJobHandler", Handler)
+    monkeypatch.setattr(notes_semantic_index_worker, "_open_owner_database", open_database)
+    monkeypatch.setattr(notes_semantic_index_worker, "_close_database", lambda _db: None)
+    monkeypatch.setattr(notes_semantic_index_worker, "record_semantic_build_metrics", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        notes_semantic_index_worker,
+        "record_semantic_cleanup_metrics",
+        lambda **kwargs: cleanup_metrics.append(dict(kwargs)),
+    )
+    monkeypatch.setattr(notes_semantic_index_worker, "emit_semantic_audit_event", capture_audit)
+
+    result = await notes_semantic_index_worker.handle_notes_semantic_index_job(
+        {
+            "owner_user_id": "owner-a",
+            "uuid": "run-a",
+            "payload": {"dataset_id": "dataset-a", "mode": "delete"},
+        },
+        jobs=SimpleNamespace(),
+        worker_id="worker-a",
+    )
+
+    assert result["cleanup_complete"] is False
+    assert cleanup_metrics[0]["status"] == "degraded"
+    assert cleanup_metrics[0]["backlog"] == 1
+    assert audits == []
+
+
+@pytest.mark.asyncio
+async def test_runtime_records_kill_switch_denial(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    denials: list[str] = []
+    monkeypatch.setattr(
+        notes_semantic_index_worker,
+        "record_semantic_denial",
+        denials.append,
+        raising=False,
+    )
+    runtime = notes_semantic_index_worker.ProductionSemanticRuntime(
+        db=SimpleNamespace(note_semantic_store=SimpleNamespace()),
+        owner_user_id="owner-a",
+        dataset_id="dataset-a",
+        configuration_revision=1,
+        generation_id="generation-a",
+        root_job_id="run-a",
+        settings=SemanticIndexSettings(indexing_enabled=False),
+    )
+
+    with pytest.raises(SemanticIndexingError) as exc_info:
+        await runtime.execute(
+            mode="build",
+            cancellation_requested=lambda: False,
+        )
+
+    assert exc_info.value.failure_code == "notes_semantic_indexing_disabled"
+    assert denials == ["kill_switch"]
+
+
+@pytest.mark.asyncio
 async def test_failed_notes_retry_separately_and_cleanup_requires_confirmation() -> None:
     scope = _Scope("dataset-a", dirty=0, failed=2, cleanup=2)
     coordinator = notes_semantic_maintenance.SemanticMaintenanceCoordinator(
@@ -479,9 +745,7 @@ async def test_discovered_model_revision_survives_production_revalidation(
 
         assert first.model_revision == "model-digest-a"
         assert later.model_revision == "model-digest-a"
-        assert db.note_semantic_store.get_configuration("dataset-a").model_revision == (
-            "model-digest-a"
-        )
+        assert db.note_semantic_store.get_configuration("dataset-a").model_revision == ("model-digest-a")
     finally:
         db.close_all_connections()
 
@@ -979,6 +1243,7 @@ async def test_worker_sanitizes_secret_bearing_dependency_failures(
 ) -> None:
     secret = "postgresql://user:password@private/db?token=super-secret"  # nosec B105
     closed: list[bool] = []
+
     def release_database():
         closed.append(True)
         if stage == "release":
@@ -1077,6 +1342,49 @@ async def test_cleanup_backend_failure_retries_exact_claim_with_sanitized_code(
     assert retries[0]["expected_claim_token"] == "claim-a"
     assert retries[0]["error_code"] == "notes_semantic_cleanup_failed"
     assert "super-secret" not in repr(retries)
+
+
+@pytest.mark.asyncio
+async def test_production_maintenance_audits_confirmed_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    audits: list[dict[str, object]] = []
+    scope = notes_semantic_maintenance._ProductionScope(
+        db=SimpleNamespace(note_semantic_store=SimpleNamespace()),
+        jobs=SimpleNamespace(),
+        owner_user_id="owner-a",
+        dataset_id="dataset-a",
+        settings=SemanticIndexSettings(),
+    )
+
+    class Runtime:
+        async def cleanup_claim(self, _claim):
+            return True
+
+    async def runtime(_generation_id: str):
+        return Runtime()
+
+    async def capture_audit(**kwargs: object) -> None:
+        audits.append(dict(kwargs))
+
+    monkeypatch.setattr(scope, "_runtime", runtime)
+    monkeypatch.setattr(
+        notes_semantic_maintenance,
+        "emit_semantic_audit_event",
+        capture_audit,
+        raising=False,
+    )
+
+    assert await scope.cleanup_claim(SimpleNamespace(generation_id="generation-a")) is True
+    assert audits == [
+        {
+            "owner_user_id": "owner-a",
+            "dataset_id": "dataset-a",
+            "event": "cleanup_completion",
+            "status": "success",
+            "generation_id": "generation-a",
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -1284,14 +1592,17 @@ def test_terminal_maintenance_predecessor_admits_one_new_active_retry(
             worker_id="maintenance-test-worker",
         )
         assert acquired is not None
-        assert jobs.fail_job(
-            acquired["id"],
-            error="notes_semantic_worker_runtime_failed",
-            retryable=False,
-            worker_id=acquired["worker_id"],
-            lease_id=acquired["lease_id"],
-            error_code="notes_semantic_worker_runtime_failed",
-        ) is True
+        assert (
+            jobs.fail_job(
+                acquired["id"],
+                error="notes_semantic_worker_runtime_failed",
+                retryable=False,
+                worker_id=acquired["worker_id"],
+                lease_id=acquired["lease_id"],
+                error_code="notes_semantic_worker_runtime_failed",
+            )
+            is True
+        )
     monkeypatch.setattr(jobs, "list_jobs", lambda **_kwargs: ())
 
     assert scope.admit(mode=mode, claim=claim) is True
@@ -1306,11 +1617,14 @@ def test_terminal_maintenance_predecessor_admits_one_new_active_retry(
     assert second_pass[0]["status"] == "queued"
 
     scope.admit(mode=mode, claim=claim)
-    assert len(
-        JobManager.list_jobs(
-            jobs,
-            domain=JOB_DOMAIN,
-            owner_user_id="owner-a",
-            limit=10,
+    assert (
+        len(
+            JobManager.list_jobs(
+                jobs,
+                domain=JOB_DOMAIN,
+                owner_user_id="owner-a",
+                limit=10,
+            )
         )
-    ) == 2
+        == 2
+    )

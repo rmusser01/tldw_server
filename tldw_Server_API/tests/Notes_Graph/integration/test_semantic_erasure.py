@@ -348,12 +348,8 @@ async def test_erasure_fences_cleans_and_purges_only_semantic_state(
     assert db.note_semantic_store.get_configuration(DATASET_ID) is None
     with db.transaction() as conn:
         assert conn.execute("SELECT COUNT(*) FROM notes").fetchone()[0] == 0
-        assert conn.execute(
-            "SELECT COUNT(*) FROM note_semantic_obsolete_vectors"
-        ).fetchone()[0] == 0
-        assert conn.execute(
-            "SELECT COUNT(*) FROM note_semantic_operation_receipts"
-        ).fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM note_semantic_obsolete_vectors").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM note_semantic_operation_receipts").fetchone()[0] == 0
 
 
 @pytest.mark.asyncio
@@ -380,8 +376,7 @@ async def test_configless_obsolete_state_fails_closed_and_is_not_purged(
     assert config.dataset_id == DATASET_ID
     with db.transaction() as conn:
         conn.execute(
-            "DELETE FROM note_semantic_index_configs "
-            "WHERE owner_user_id=? AND dataset_id=?",
+            "DELETE FROM note_semantic_index_configs WHERE owner_user_id=? AND dataset_id=?",
             (OWNER_ID, DATASET_ID),
         )
     _insert_receipt(db, dataset_id=DATASET_ID)
@@ -405,12 +400,8 @@ async def test_configless_obsolete_state_fails_closed_and_is_not_purged(
     assert exc_info.value.code == "notes_semantic_erasure_cleanup_failed"
     assert db.note_store.get_note_by_id(NOTE_ID) is not None
     with db.transaction() as conn:
-        assert conn.execute(
-            "SELECT COUNT(*) FROM note_semantic_obsolete_vectors"
-        ).fetchone()[0] == 1
-        assert conn.execute(
-            "SELECT COUNT(*) FROM note_semantic_operation_receipts"
-        ).fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM note_semantic_obsolete_vectors").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM note_semantic_operation_receipts").fetchone()[0] == 1
 
 
 @pytest.mark.asyncio
@@ -467,10 +458,12 @@ async def test_sqlite_erasure_fails_closed_on_unscoped_semantic_owner_state(
 
     assert db.note_store.get_note_by_id(NOTE_ID) is not None
     with db.transaction() as conn:
-        assert conn.execute(
-            "SELECT COUNT(*) FROM note_semantic_operation_receipts WHERE "
-            "owner_user_id='capture-client'"
-        ).fetchone()[0] == 1
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM note_semantic_operation_receipts WHERE owner_user_id='capture-client'"
+            ).fetchone()[0]
+            == 1
+        )
 
 
 @pytest.mark.asyncio
@@ -510,9 +503,7 @@ async def test_configless_receipt_only_state_fails_closed(db: CharactersRAGDB) -
     assert exc_info.value.code == "notes_semantic_erasure_cleanup_failed"
     assert db.note_store.get_note_by_id(NOTE_ID) is not None
     with db.transaction() as conn:
-        assert conn.execute(
-            "SELECT COUNT(*) FROM note_semantic_operation_receipts"
-        ).fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM note_semantic_operation_receipts").fetchone()[0] == 1
 
 
 def test_final_owner_erasure_rejects_pending_cleanup(
@@ -584,13 +575,11 @@ async def test_vector_backend_failure_is_bounded_and_retains_retry_identity(
     audits: list[tuple[str, str]] = []
     monkeypatch.setattr(
         "tldw_Server_API.app.core.Notes_Graph.semantic_erasure._metric",
-        lambda *, status, backend, error_code: observations.append(
-            (status, backend, error_code)
-        ),
+        lambda *, status, backend, error_code: observations.append((status, backend, error_code)),
     )
     monkeypatch.setattr(
         "tldw_Server_API.app.core.Notes_Graph.semantic_erasure._audit",
-        lambda *, status, reason: audits.append((status, reason)),
+        lambda *, owner_user_id, status, reason: audits.append((status, reason)),
     )
 
     async def _vectors_for_backend(_backend_name: str):
@@ -711,8 +700,7 @@ async def test_valid_in_flight_cleanup_claim_is_not_stolen_before_timeout(
     assert current is not None
     with db.transaction() as conn:
         row = conn.execute(
-            "SELECT claim_state,claim_token FROM note_semantic_work "
-            "WHERE owner_user_id=? AND dataset_id=? AND id=?",
+            "SELECT claim_state,claim_token FROM note_semantic_work WHERE owner_user_id=? AND dataset_id=? AND id=?",
             (OWNER_ID, DATASET_ID, claimed.id),
         ).fetchone()
     assert tuple(row) == ("claimed", claimed.claim_token)
@@ -780,10 +768,7 @@ async def test_dsr_disable_before_vector_authorization_prevents_upsert(
                 fence,
                 claim,
                 chunks,
-                tuple(
-                    SemanticVector(chunk.vector_id, tuple(1.0 for _ in range(768)))
-                    for chunk in chunks
-                ),
+                tuple(SemanticVector(chunk.vector_id, tuple(1.0 for _ in range(768))) for chunk in chunks),
                 before_side_effect=_pause_before_upsert,
             )
         finally:
@@ -820,11 +805,14 @@ async def test_dsr_disable_before_vector_authorization_prevents_upsert(
                 (claim.id,),
             ).fetchone()
         assert tuple(live) == ("claimed", claim.claim_token)
-        assert db.note_semantic_store.claim_generation_cleanup_batch(
-            dataset_id=DATASET_ID,
-            limit=1,
-            now=NOW,
-        ) == ()
+        assert (
+            db.note_semantic_store.claim_generation_cleanup_batch(
+                dataset_id=DATASET_ID,
+                limit=1,
+                now=NOW,
+            )
+            == ()
+        )
         allow_upsert.set()
         with pytest.raises(SemanticIndexingError):
             await writer
@@ -879,10 +867,7 @@ async def test_expired_prewrite_claim_cannot_publish_after_dsr_finalizes(
                 fence,
                 claim,
                 chunks,
-                tuple(
-                    SemanticVector(chunk.vector_id, tuple(1.0 for _ in range(768)))
-                    for chunk in chunks
-                ),
+                tuple(SemanticVector(chunk.vector_id, tuple(1.0 for _ in range(768))) for chunk in chunks),
                 before_side_effect=_pause_before_authorization,
             )
         finally:
@@ -955,10 +940,7 @@ async def test_cancelled_vector_upsert_drains_before_claim_release_and_erasure(
                 fence,
                 claim,
                 chunks,
-                tuple(
-                    SemanticVector(chunk.vector_id, tuple(1.0 for _ in range(768)))
-                    for chunk in chunks
-                ),
+                tuple(SemanticVector(chunk.vector_id, tuple(1.0 for _ in range(768))) for chunk in chunks),
             )
         finally:
             db.note_semantic_store.release_work_claim(
@@ -1033,10 +1015,7 @@ async def test_note_mutation_cannot_remove_authorized_vector_write_fence(
                 fence,
                 claim,
                 chunks,
-                tuple(
-                    SemanticVector(chunk.vector_id, tuple(1.0 for _ in range(768)))
-                    for chunk in chunks
-                ),
+                tuple(SemanticVector(chunk.vector_id, tuple(1.0 for _ in range(768))) for chunk in chunks),
             )
         finally:
             db.note_semantic_store.release_work_claim(
@@ -1119,9 +1098,7 @@ async def test_committed_owner_finalizer_wins_over_parent_cancellation(
         return original(**kwargs)
 
     monkeypatch.setattr(db.note_semantic_store, "finalize_owner_erasure", _finalize)
-    task = asyncio.create_task(
-        SemanticErasureCoordinator(db=db, timeout_seconds=1).erase()
-    )
+    task = asyncio.create_task(SemanticErasureCoordinator(db=db, timeout_seconds=1).erase())
     assert await asyncio.to_thread(entered.wait, 1)
     task.cancel()
     await asyncio.sleep(0)

@@ -67,6 +67,14 @@ class ProviderRegistry:
         return self.adapter
 
 
+class AnyProviderRegistry:
+    def __init__(self, adapter: object) -> None:
+        self.adapter = adapter
+
+    def get_adapter(self, _provider: str) -> object:
+        return self.adapter
+
+
 def _credentials(
     *,
     source: str = "server_default",
@@ -166,9 +174,7 @@ async def test_executor_resolves_only_explicit_durable_credentials_without_reque
     ]
     assert executor.execution_identity().model_revision == "response-revision"
     assert adapter.requests[0]["base_url"] == "https://api.openai.com/v1"
-    assert is_runtime_base_url_override(
-        adapter.requests[0]["_runtime_base_url_override"]
-    )
+    assert is_runtime_base_url_override(adapter.requests[0]["_runtime_base_url_override"])
 
 
 @pytest.mark.asyncio
@@ -304,6 +310,112 @@ async def test_executor_request_is_accepted_by_real_provider_adapter(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "provider",
+    [
+        "anthropic",
+        "cohere",
+        "mistral",
+        "openrouter",
+        "voyage",
+        "mlx",
+        "unknown-provider",
+    ],
+)
+async def test_executor_rejects_every_provider_outside_the_semantic_catalog(
+    provider: str,
+) -> None:
+    resolver_called = False
+
+    async def resolver(_provider: str, **_kwargs: object) -> ResolvedByokCredentials:
+        nonlocal resolver_called
+        resolver_called = True
+        return _credentials(provider=provider)
+
+    executor = NotesEmbeddingExecutor(
+        config=_config(
+            provider=provider,
+            model="embedding-model",
+            endpoint_origin="https://embeddings.example",
+        ),
+        user_id="7",
+        credential_resolver=resolver,
+        adapter_registry=AnyProviderRegistry(
+            RecordingAdapter(
+                {
+                    "data": [{"index": 0, "embedding": [1.0, 2.0]}],
+                    "model": "embedding-model",
+                }
+            )
+        ),
+    )
+
+    with pytest.raises(SemanticEmbeddingSystemError, match="provider_unavailable"):
+        await executor.create(
+            ["input"],
+            provider=provider,
+            model="embedding-model",
+            dimensions=2,
+        )
+
+    assert resolver_called is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("provider", "base_url", "endpoint_origin"),
+    [
+        ("openai", "https://api.openai.com/v1", "https://api.openai.com"),
+        (
+            "google",
+            "https://generativelanguage.googleapis.com/v1",
+            "https://generativelanguage.googleapis.com",
+        ),
+        (
+            "huggingface",
+            "https://api-inference.huggingface.co/models",
+            "https://api-inference.huggingface.co",
+        ),
+    ],
+)
+async def test_executor_admits_every_provider_in_the_semantic_catalog(
+    provider: str,
+    base_url: str,
+    endpoint_origin: str,
+) -> None:
+    adapter = RecordingAdapter(
+        {
+            "data": [{"index": 0, "embedding": [1.0, 2.0]}],
+            "model": "embedding-model",
+        }
+    )
+
+    async def resolver(_provider: str, **_kwargs: object) -> ResolvedByokCredentials:
+        return _credentials(provider=provider, base_url=base_url)
+
+    executor = NotesEmbeddingExecutor(
+        config=_config(
+            provider=provider,
+            model="embedding-model",
+            endpoint_origin=endpoint_origin,
+        ),
+        user_id="7",
+        credential_resolver=resolver,
+        adapter_registry=ProviderRegistry(provider, adapter),
+    )
+
+    vectors = await executor.create(
+        ["input"],
+        provider=provider,
+        model="embedding-model",
+        dimensions=2,
+    )
+
+    assert vectors == [[1.0, 2.0]]
+    assert adapter.requests[0]["base_url"] == base_url
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("source", ["request", "user"])
 async def test_executor_rejects_request_only_or_wrong_durable_source(source: str) -> None:
     async def resolver(provider: str, **kwargs: object) -> ResolvedByokCredentials:
@@ -339,9 +451,7 @@ async def test_executor_rejects_endpoint_and_model_drift() -> None:
         adapter_registry=Registry(RecordingAdapter({})),
     )
     with pytest.raises(SemanticEmbeddingSystemError, match="endpoint_origin_mismatch"):
-        await endpoint_executor.create(
-            ["input"], provider="openai", model="text-embedding-3-small", dimensions=2
-        )
+        await endpoint_executor.create(["input"], provider="openai", model="text-embedding-3-small", dimensions=2)
 
     async def resolver(provider: str, **kwargs: object) -> ResolvedByokCredentials:
         del provider, kwargs
@@ -361,9 +471,7 @@ async def test_executor_rejects_endpoint_and_model_drift() -> None:
         ),
     )
     with pytest.raises(SemanticEmbeddingSystemError, match="provider_model_drift"):
-        await model_executor.create(
-            ["input"], provider="openai", model="text-embedding-3-small", dimensions=2
-        )
+        await model_executor.create(["input"], provider="openai", model="text-embedding-3-small", dimensions=2)
 
 
 @pytest.mark.asyncio
@@ -450,6 +558,7 @@ async def test_executor_allows_key_rotation_at_exact_normalized_endpoint() -> No
         "https://api.openai.com/v1",
     ]
 
+
 @pytest.mark.asyncio
 async def test_executor_rejects_unavailable_pinned_provider() -> None:
     executor = NotesEmbeddingExecutor(
@@ -460,9 +569,7 @@ async def test_executor_rejects_unavailable_pinned_provider() -> None:
     )
 
     with pytest.raises(SemanticEmbeddingSystemError, match="provider_unavailable"):
-        await executor.create(
-            ["input"], provider="openai", model="text-embedding-3-small", dimensions=2
-        )
+        await executor.create(["input"], provider="openai", model="text-embedding-3-small", dimensions=2)
 
 
 @pytest.mark.asyncio
@@ -478,9 +585,7 @@ async def test_executor_maps_credential_and_provider_failures_to_content_free_co
         adapter_registry=Registry(RecordingAdapter({})),
     )
     with pytest.raises(SemanticEmbeddingSystemError, match="durable_credentials_unavailable") as exc_info:
-        await credential_executor.create(
-            ["input"], provider="openai", model="text-embedding-3-small", dimensions=2
-        )
+        await credential_executor.create(["input"], provider="openai", model="text-embedding-3-small", dimensions=2)
     assert "credential-shaped" not in str(exc_info.value)
 
     async def resolver(provider: str, **kwargs: object) -> ResolvedByokCredentials:
@@ -494,9 +599,7 @@ async def test_executor_maps_credential_and_provider_failures_to_content_free_co
         adapter_registry=Registry(FailingAdapter({})),
     )
     with pytest.raises(SemanticEmbeddingSystemError, match="provider_execution_failed") as exc_info:
-        await provider_executor.create(
-            ["input"], provider="openai", model="text-embedding-3-small", dimensions=2
-        )
+        await provider_executor.create(["input"], provider="openai", model="text-embedding-3-small", dimensions=2)
     assert "credential-shaped" not in str(exc_info.value)
 
 
@@ -559,9 +662,7 @@ async def test_real_google_batch_result_count_is_validated_by_notes_executor(
             dimensions=2,
         )
 
-    assert calls == [
-        "https://embeddings.example/v1/models/text-embedding-004:batchEmbedContents"
-    ]
+    assert calls == ["https://embeddings.example/v1/models/text-embedding-004:batchEmbedContents"]
 
 
 @pytest.mark.asyncio
@@ -749,9 +850,7 @@ async def test_cancelled_real_google_batch_records_failure_without_later_post(
         release_request.set()
 
     assert await asyncio.to_thread(client_closed.wait, 10)
-    assert calls == [
-        "https://embeddings.example/v1/models/text-embedding-004:batchEmbedContents"
-    ]
+    assert calls == ["https://embeddings.example/v1/models/text-embedding-004:batchEmbedContents"]
     assert len(usage_calls) == 1
     assert usage_calls[0]["status"] == 502
     assert usage_calls[0]["usage_metadata"] == {

@@ -18,7 +18,7 @@ from tldw_Server_API.app.core.DB_Management.chacha.note_semantic_models import (
     SemanticWorkItem,
     SemanticWorkKind,
 )
-from tldw_Server_API.app.core.Notes_Graph import semantic_indexing
+from tldw_Server_API.app.core.Notes_Graph import semantic_indexing, semantic_observability
 from tldw_Server_API.app.core.Notes_Graph.semantic_content import build_semantic_chunks
 from tldw_Server_API.app.core.Notes_Graph.semantic_embeddings import (
     PendingSemanticConfig,
@@ -246,8 +246,8 @@ def test_observability_rejects_unbounded_or_identifier_fields(builder, kwargs) -
         builder(**kwargs)
 
 
-@pytest.mark.parametrize("value", [-1, 1.5, math.inf, -math.inf, math.nan, True])
-def test_total_metric_requires_finite_non_negative_integer_increment(value) -> None:
+@pytest.mark.parametrize("value", [-1, math.inf, -math.inf, math.nan, True])
+def test_total_metric_requires_finite_non_negative_value(value) -> None:
     with pytest.raises(SemanticObservationError, match="notes_semantic_observation_value_invalid"):
         build_semantic_metric_event(
             operation="cleanup",
@@ -255,6 +255,172 @@ def test_total_metric_requires_finite_non_negative_integer_increment(value) -> N
             backend="chromadb",
             value=value,
         )
+
+
+def test_total_metric_accepts_finite_non_negative_float() -> None:
+    event = build_semantic_metric_event(
+        operation="cleanup",
+        status="success",
+        backend="chromadb",
+        value=1.5,
+    )
+
+    assert event.value == 1.5
+
+
+def test_operational_metrics_use_only_closed_low_cardinality_labels(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, float, dict[str, str]]] = []
+    monkeypatch.setattr(
+        semantic_observability,
+        "_ensure_metrics_registered",
+        lambda: None,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        semantic_observability,
+        "increment_counter",
+        lambda name, value=1, labels=None: calls.append((name, float(value), dict(labels or {}))),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        semantic_observability,
+        "observe_histogram",
+        lambda name, value, labels=None: calls.append((name, float(value), dict(labels or {}))),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        semantic_observability,
+        "set_gauge",
+        lambda name, value, labels=None: calls.append((name, float(value), dict(labels or {}))),
+        raising=False,
+    )
+
+    semantic_observability.record_semantic_build_metrics(
+        operation="rebuild",
+        status="degraded",
+        backend="chromadb",
+        duration_seconds=1.25,
+        counts={"indexed": 4, "excluded": 1, "failed": 1, "dirty": 2, "pending": 3},
+        stale_generations=1,
+    )
+    semantic_observability.record_semantic_query_metrics(
+        status="success",
+        backend="chromadb",
+        duration_seconds=0.05,
+        candidate_count=8,
+        filtered_count=5,
+        admitted_count=2,
+        truncations=("semantic_candidates",),
+    )
+    semantic_observability.record_semantic_cleanup_metrics(
+        status="failed",
+        backend="pgvector",
+        backlog=3,
+        retries=1,
+        oldest_age_seconds=30.0,
+    )
+    semantic_observability.record_semantic_denial("kill_switch")
+    semantic_observability.record_semantic_cancellation("rebuild")
+    semantic_observability.record_semantic_failure(
+        component="provider",
+        category="unavailable",
+        backend="chromadb",
+    )
+    semantic_observability.record_semantic_dsr_metrics(
+        status="success",
+        backend="chromadb",
+    )
+
+    names = {name for name, _value, _labels in calls}
+    assert {
+        "notes_semantic_build_duration_seconds",
+        "notes_semantic_note_count",
+        "notes_semantic_coverage_ratio",
+        "notes_semantic_stale_generations",
+        "notes_semantic_query_duration_seconds",
+        "notes_semantic_query_stage_total",
+        "notes_semantic_truncations_total",
+        "notes_semantic_cleanup_backlog",
+        "notes_semantic_cleanup_retries_total",
+        "notes_semantic_cleanup_oldest_age_seconds",
+        "notes_semantic_denials_total",
+        "notes_semantic_cancellations_total",
+        "notes_semantic_failures_total",
+        "notes_semantic_dsr_total",
+    } <= names
+    serialized = repr(calls)
+    for forbidden in (
+        "owner-a",
+        "dataset-a",
+        "generation-a",
+        "run-a",
+        "https://",
+        "api_key",
+    ):
+        assert forbidden not in serialized
+
+
+def test_metric_backend_failure_does_not_change_semantic_behavior(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unavailable(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("metrics unavailable")
+
+    monkeypatch.setattr(semantic_observability, "_ensure_metrics_registered", lambda: None)
+    monkeypatch.setattr(semantic_observability, "increment_counter", unavailable)
+    monkeypatch.setattr(semantic_observability, "observe_histogram", unavailable)
+    monkeypatch.setattr(semantic_observability, "set_gauge", unavailable)
+
+    semantic_observability.record_semantic_build_metrics(
+        operation="build",
+        status="success",
+        backend="chromadb",
+        duration_seconds=0.5,
+        counts={"indexed": 1, "excluded": 0, "failed": 0, "dirty": 0, "pending": 0},
+    )
+
+
+@pytest.mark.asyncio
+async def test_semantic_audit_uses_unified_durable_flush() -> None:
+    calls: list[dict[str, object]] = []
+    flushes: list[bool] = []
+
+    class AuditService:
+        async def log_event(self, **kwargs: object) -> str:
+            calls.append(dict(kwargs))
+            return "event-a"
+
+        async def flush(self, *, raise_on_failure: bool = False) -> bool:
+            flushes.append(raise_on_failure)
+            return True
+
+    await semantic_observability.emit_semantic_audit_event(
+        owner_user_id="owner-a",
+        dataset_id="dataset-a",
+        event="generation_publication",
+        status="degraded",
+        reason="note_failed",
+        generation_id="generation-a",
+        run_id="run-a",
+        counts={"indexed": 4, "failed": 1},
+        audit_service=AuditService(),
+    )
+
+    assert len(calls) == 1
+    assert calls[0]["action"] == "notes_semantic.generation_publication"
+    assert calls[0]["resource_id"] == "dataset-a"
+    assert calls[0]["metadata"] == {
+        "semantic_event": "generation_publication",
+        "status": "degraded",
+        "reason": "note_failed",
+        "indexed": 4,
+        "failed": 1,
+        "generation_id": "generation-a",
+        "run_id": "run-a",
+    }
+    assert flushes == [True]
 
 
 def test_generation_cleanup_capacity_must_cover_the_run_chunk_cap() -> None:
@@ -501,8 +667,7 @@ class _SnapshotReader:
 
     async def list_note_versions(self, owner_user_id, dataset_id, *, limit):
         return tuple(
-            NoteVersionRef(snapshot.note_id, snapshot.content_version)
-            for snapshot in self.snapshots.values()
+            NoteVersionRef(snapshot.note_id, snapshot.content_version) for snapshot in self.snapshots.values()
         )[:limit]
 
     async def read_note_version(
@@ -799,9 +964,7 @@ async def test_note_publication_is_fenced_before_vector_or_database_side_effects
             _fence(),
             _claimed_work(SemanticWorkKind.INDEX_NOTE),
             chunks,
-            tuple(
-                SemanticVector(chunk.vector_id, (1.0, 2.0)) for chunk in chunks
-            ),
+            tuple(SemanticVector(chunk.vector_id, (1.0, 2.0)) for chunk in chunks),
             before_side_effect=cancel,
         )
 

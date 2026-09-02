@@ -155,7 +155,7 @@ This is a content-free preflight; it does not invoke the embedding provider.
   "active_note_count": 42,
   "estimated_chunk_count": 84,
   "estimated_run_count": 1,
-  "provider_label": "openai",
+  "provider_label": "OpenAI",
   "model": "text-embedding-3-small",
   "endpoint_display": "https://api.openai.com",
   "execution_boundary": "external",
@@ -312,7 +312,7 @@ typed evidence:
     "configuration_revision": 4,
     "normalization_version": "...",
     "chunker_version": "...",
-    "provider_label": "openai",
+    "provider_label": "OpenAI",
     "model_label": "text-embedding-3-small",
     "model_revision": null,
     "excerpt_pairs": []

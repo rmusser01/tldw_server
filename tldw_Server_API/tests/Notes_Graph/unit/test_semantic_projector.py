@@ -21,6 +21,7 @@ from tldw_Server_API.app.api.v1.schemas.notes_graph import (
 from tldw_Server_API.app.core.DB_Management.chacha.note_semantic_models import (
     SemanticProjectionChunk,
 )
+from tldw_Server_API.app.core.Notes_Graph import semantic_projector
 from tldw_Server_API.app.core.Notes_Graph.graph_cache import GraphCache
 from tldw_Server_API.app.core.Notes_Graph.graph_service import (
     SemanticGraphCandidateResult,
@@ -106,6 +107,8 @@ class _Store:
             desired_state=SimpleNamespace(value="enabled"),
             configuration_revision=7,
             semantic_index_revision=11,
+            capability_revision="capability-v1",
+            disclosure_hash="disclosure-v1",
             compatibility_hash="sha256:" + "a" * 64,
             provider="openai",
             model="text-embedding-3-small",
@@ -289,12 +292,123 @@ def _ordinary_response(*, cursor: str | None = None) -> NoteGraphResponse:
 def _capabilities(store: _Store):
     return SimpleNamespace(
         compatibility_hash=store.config.compatibility_hash,
+        capability_revision=store.config.capability_revision,
         indexing_available=True,
         unavailable_reason=None,
         provider_label="OpenAI",
         model=store.config.model,
         model_revision=store.config.model_revision,
     )
+
+
+@pytest.mark.asyncio
+async def test_disclosure_only_drift_keeps_active_vectors_readable_but_pauses_updates(
+    projection_parts,
+) -> None:
+    _source, _target, store, vectors = projection_parts
+    projector, _graph_service, _factory_calls = _projector(
+        store=store,
+        vectors=vectors,
+        ordinary=_ordinary_response(),
+    )
+    projector._capability_resolver = lambda: SimpleNamespace(
+        compatibility_hash=store.config.compatibility_hash,
+        capability_revision="capability-v2",
+        indexing_available=True,
+        unavailable_reason=None,
+        provider_label="OpenAI",
+        model=store.config.model,
+        model_revision=store.config.model_revision,
+    )
+    request = NoteGraphRequest(
+        center_note_id="focus-note",
+        edge_types=[EdgeType.semantic],
+    )
+
+    result = await projector.project(
+        request,
+        _ordinary_response(),
+        user=SimpleNamespace(id_str="owner-a"),
+    )
+
+    assert any(edge.type is EdgeType.semantic for edge in result.edges)
+    assert result.semantic_status is not None
+    assert result.semantic_status.available is True
+    assert result.semantic_status.state == "needs_attention"
+    assert result.semantic_status.detail_reason == "stale_configuration"
+
+
+@pytest.mark.asyncio
+async def test_unresolved_live_capability_preserves_persisted_vector_provenance(
+    projection_parts,
+) -> None:
+    _source, _target, store, vectors = projection_parts
+    projector, _graph_service, _factory_calls = _projector(
+        store=store,
+        vectors=vectors,
+        ordinary=_ordinary_response(),
+    )
+    projector._capability_resolver = lambda: SimpleNamespace(
+        compatibility_hash=None,
+        capability_revision="capability-unresolved",
+        indexing_available=False,
+        unavailable_reason="notes_semantic_provider_unavailable",
+        provider_label="unavailable",
+        model="unconfigured",
+        model_revision=None,
+    )
+    request = NoteGraphRequest(
+        center_note_id="focus-note",
+        edge_types=[EdgeType.semantic],
+    )
+
+    result = await projector.project(
+        request,
+        _ordinary_response(),
+        user=SimpleNamespace(id_str="owner-a"),
+    )
+
+    semantic_edge = next(edge for edge in result.edges if edge.type is EdgeType.semantic)
+    assert semantic_edge.evidence is not None
+    assert semantic_edge.evidence.provider_label == "OpenAI"
+    assert semantic_edge.evidence.model_label == "text-embedding-3-small"
+    assert result.semantic_status is not None
+    assert result.semantic_status.available is True
+    assert result.semantic_status.state == "needs_attention"
+    assert result.semantic_status.detail_reason == "stale_configuration"
+
+
+@pytest.mark.asyncio
+async def test_capability_authority_revision_change_cannot_reuse_semantic_cache(
+    projection_parts,
+) -> None:
+    _source, _target, store, vectors = projection_parts
+    cache = GraphCache(ttl_seconds=60, max_keys=10)
+    projector, _graph_service, _factory_calls = _projector(
+        store=store,
+        vectors=vectors,
+        ordinary=_ordinary_response(),
+        cache=cache,
+    )
+    request = NoteGraphRequest(
+        center_note_id="focus-note",
+        edge_types=[EdgeType.semantic],
+    )
+
+    await projector.project(
+        request,
+        _ordinary_response(),
+        user=SimpleNamespace(id_str="owner-a"),
+    )
+    store.config.capability_revision = "capability-v2"
+    store.config.disclosure_hash = "disclosure-v2"
+    await projector.project(
+        request,
+        _ordinary_response(),
+        user=SimpleNamespace(id_str="owner-a"),
+    )
+
+    assert len(vectors.query_calls) == 2
 
 
 def _projector(
@@ -385,6 +499,43 @@ async def test_projector_queries_once_revalidates_after_io_and_builds_current_ev
     assert len(store.load_calls) >= 2
     assert store.filter_calls[0]["tag"] == "tag:research"
     assert store.filter_calls[0]["source"] == "source:web"
+
+
+@pytest.mark.asyncio
+async def test_projector_records_bounded_query_counts_and_latency(
+    projection_parts,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _source, _target, store, vectors = projection_parts
+    observations: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        semantic_projector,
+        "record_semantic_query_metrics",
+        lambda **kwargs: observations.append(dict(kwargs)),
+        raising=False,
+    )
+    projector, _graph_service, _factory_calls = _projector(
+        store=store,
+        vectors=vectors,
+        ordinary=_ordinary_response(),
+    )
+
+    result = await projector.project(
+        NoteGraphRequest(
+            center_note_id="focus-note",
+            edge_types=[EdgeType.semantic],
+        ),
+        _ordinary_response(),
+        user=SimpleNamespace(id_str="owner-a"),
+    )
+
+    assert any(edge.type is EdgeType.semantic for edge in result.edges)
+    assert len(observations) == 1
+    assert observations[0]["status"] == "success"
+    assert observations[0]["candidate_count"] == 1
+    assert observations[0]["filtered_count"] == 1
+    assert observations[0]["admitted_count"] == 1
+    assert float(observations[0]["duration_seconds"]) >= 0
 
 
 @pytest.mark.asyncio

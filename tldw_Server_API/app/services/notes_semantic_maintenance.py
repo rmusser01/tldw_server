@@ -25,6 +25,10 @@ from tldw_Server_API.app.core.Notes_Graph.semantic_jobs import (
     SemanticJobsError,
     semantic_writer_scope,
 )
+from tldw_Server_API.app.core.Notes_Graph.semantic_observability import (
+    emit_semantic_audit_event,
+    record_semantic_cleanup_metrics,
+)
 from tldw_Server_API.app.core.Notes_Graph.semantic_settings import SemanticIndexSettings
 from tldw_Server_API.app.services.notes_semantic_index_worker import (
     build_production_runtime,
@@ -65,6 +69,8 @@ class SemanticMaintenanceCoordinator:
         if type(limit) is not int or not 1 <= limit <= 100:
             raise ValueError("notes_semantic_maintenance_limit_invalid")
         claimed = dirty_admitted = failed_retries = cleanup_confirmed = 0
+        cleanup_claimed = cleanup_retries = 0
+        cleanup_ages: list[float] = []
         dirty_keys: set[tuple[object, object, object, object]] = set()
         for scope in self._scopes:
             remaining = limit - claimed
@@ -111,9 +117,22 @@ class SemanticMaintenanceCoordinator:
                 if len(cleanup) > remaining:
                     raise RuntimeError("notes_semantic_maintenance_budget_invalid")
                 claimed += len(cleanup)
+                cleanup_claimed += len(cleanup)
                 for claim in cleanup:
+                    created_at = getattr(claim, "created_at", None)
+                    if isinstance(created_at, datetime):
+                        cleanup_ages.append(max(0.0, (now - created_at).total_seconds()))
                     if await scope.cleanup_claim(claim):
                         cleanup_confirmed += 1
+                    else:
+                        cleanup_retries += 1
+        record_semantic_cleanup_metrics(
+            status="failed" if cleanup_retries else "success",
+            backend="unavailable",
+            backlog=max(0, cleanup_claimed - cleanup_confirmed),
+            retries=cleanup_retries,
+            oldest_age_seconds=max(cleanup_ages, default=0.0),
+        )
         return SemanticMaintenanceResult(
             claimed=claimed,
             dirty_admitted=dirty_admitted,
@@ -236,9 +255,7 @@ class _ProductionScope:
             dataset_id=self._dataset_id,
             limit=min(remaining, 100),
         )
-        return generation_claims + tuple(
-            _ObsoleteCleanupClaim(generation_id=value) for value in obsolete
-        )
+        return generation_claims + tuple(_ObsoleteCleanupClaim(generation_id=value) for value in obsolete)
 
     def admit(self, *, mode: str, claim: Any) -> bool:
         config = self._store.get_configuration(self._dataset_id)
@@ -301,21 +318,23 @@ class _ProductionScope:
 
     async def cleanup_claim(self, claim: Any) -> bool:
         generation_id = str(getattr(claim, "generation_id", "") or "")
+        confirmed = False
         try:
             runtime = await self._runtime(generation_id)
             if isinstance(claim, _ObsoleteCleanupClaim):
-                return await runtime.cleanup_obsolete_generation()
-            for _ in range(self._settings.max_retries + 1):
-                if await runtime.cleanup_claim(claim):
-                    return True
+                confirmed = await runtime.cleanup_obsolete_generation()
+            else:
+                for _ in range(self._settings.max_retries + 1):
+                    if await runtime.cleanup_claim(claim):
+                        confirmed = True
+                        break
         except Exception:  # noqa: BLE001 - persist only a bounded failure code
             if isinstance(claim, _ObsoleteCleanupClaim):
                 return False
             now = datetime.now(timezone.utc)
             delay = min(
                 self._settings.retry_max_backoff_seconds,
-                self._settings.retry_backoff_seconds
-                * (2 ** min(int(getattr(claim, "attempt_count", 0)), 8)),
+                self._settings.retry_backoff_seconds * (2 ** min(int(getattr(claim, "attempt_count", 0)), 8)),
             )
             self._store.retry_work(
                 dataset_id=self._dataset_id,
@@ -326,6 +345,18 @@ class _ProductionScope:
                 now=now,
             )
             return False
+        if confirmed:
+            try:
+                await emit_semantic_audit_event(
+                    owner_user_id=self._owner_user_id,
+                    dataset_id=self._dataset_id,
+                    event="cleanup_completion",
+                    status="success",
+                    generation_id=generation_id,
+                )
+            except Exception:  # noqa: BLE001 - cleanup is already authoritative
+                logger.warning("Notes semantic cleanup audit persistence failed")
+            return True
         if not isinstance(claim, _ObsoleteCleanupClaim):
             now = datetime.now(timezone.utc)
             self._store.retry_work(
@@ -425,9 +456,7 @@ class _MaintenanceRunner:
                     claimed=aggregate.claimed + result.claimed,
                     dirty_admitted=aggregate.dirty_admitted + result.dirty_admitted,
                     failed_retries=aggregate.failed_retries + result.failed_retries,
-                    cleanup_confirmed=(
-                        aggregate.cleanup_confirmed + result.cleanup_confirmed
-                    ),
+                    cleanup_confirmed=(aggregate.cleanup_confirmed + result.cleanup_confirmed),
                 )
             except _MAINTENANCE_ERRORS:
                 logger.warning("Notes semantic owner maintenance failed safely")
