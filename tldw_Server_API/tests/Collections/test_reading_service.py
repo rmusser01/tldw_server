@@ -1,20 +1,30 @@
+from __future__ import annotations
+
 import importlib
 import json
-import pytest
 import shutil
+import sqlite3
+import threading
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlencode
 
-from hypothesis import given, settings as hyp_settings, strategies as st
+import pytest
+from hypothesis import given
+from hypothesis import settings as hyp_settings
+from hypothesis import strategies as st
 
 import tldw_Server_API.app.core.Collections.reading_service as reading_service_module
 from tldw_Server_API.app.core.Collections.reading_importers import ReadingImportItem
 from tldw_Server_API.app.core.Collections.reading_service import ReadingService, _contains_html_tag
-from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.config import settings
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
+from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Web_Scraping.url_utils import normalize_for_crawl
 
 TEST_USER_ID = 456
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture()
@@ -85,6 +95,360 @@ async def test_reading_save_and_list(reading_env):
     items, count = coll_db.list_content_items(origin="reading", q="Reading")
     assert count >= 1
     assert any(it.title == "Reading Demo" for it in items)
+
+
+def test_reading_list_page_uses_one_snapshot_during_concurrent_insert(
+    reading_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Count, rows, and tags never straddle a concurrent Reading write."""
+    user_id = TEST_USER_ID + 40
+    coll_db = CollectionsDatabase.for_user(user_id)
+    for index in range(21):
+        coll_db.upsert_content_item(
+            origin="reading",
+            url=f"https://example.org/snapshot-{index}",
+            canonical_url=f"https://example.org/snapshot-{index}",
+            domain="example.org",
+            title=f"Snapshot {index:02d}",
+            summary=None,
+            content_hash=None,
+            word_count=None,
+            published_at=None,
+            status="saved",
+            tags=["before"],
+        )
+
+    before_rows, before_total = coll_db.list_content_items(
+        origin="reading",
+        page=1,
+        size=20,
+        sort="created_desc",
+    )
+    before_ids = tuple(row.id for row in before_rows)
+    assert before_total == 21
+
+    count_read = threading.Event()
+    writer_committed = threading.Event()
+    writer_errors: list[BaseException] = []
+    db_path = DatabasePaths.get_media_db_path(user_id)
+    with sqlite3.connect(db_path) as setup_connection:
+        setup_connection.execute("PRAGMA journal_mode=WAL")
+
+    def insert_newest_item() -> None:
+        if not count_read.wait(5):
+            writer_errors.append(AssertionError("reader did not reach count query"))
+            writer_committed.set()
+            return
+
+        params = (
+            str(user_id),
+            "reading",
+            "https://example.org/snapshot-new",
+            "https://example.org/snapshot-new",
+            "Snapshot newest",
+            "saved",
+            0,
+            "9999-01-01T00:00:00+00:00",
+            "9999-01-01T00:00:00+00:00",
+        )
+
+        try:
+            with sqlite3.connect(db_path, isolation_level=None, timeout=1) as connection:
+                connection.execute(
+                    """
+                    INSERT INTO content_items (
+                        user_id, origin, url, canonical_url, title, status, favorite,
+                        created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    params,
+                )
+        except BaseException as exc:  # noqa: BLE001 - retained for the test thread
+            writer_errors.append(exc)
+        finally:
+            writer_committed.set()
+
+    original_execute = coll_db.backend.execute
+    intercepted_count = False
+
+    def interleaved_execute(
+        query: str,
+        params: Any = None,
+        connection: Any = None,
+        **kwargs: Any,
+    ) -> Any:
+        """Pause after count so the writer commits between page reads."""
+        nonlocal intercepted_count
+        result = original_execute(query, params, connection=connection, **kwargs)
+        if not intercepted_count and "SELECT COUNT(*) AS cnt" in query and "content_items" in query:
+            intercepted_count = True
+            count_read.set()
+            if not writer_committed.wait(5):
+                raise AssertionError("writer did not commit the concurrent insert")
+        return result
+
+    writer = threading.Thread(target=insert_newest_item, daemon=True)
+    writer.start()
+    monkeypatch.setattr(coll_db.backend, "execute", interleaved_execute)
+    rows, total = coll_db.list_content_items(
+        origin="reading",
+        page=1,
+        size=20,
+        sort="created_desc",
+    )
+    writer.join(timeout=5)
+
+    after_rows, after_total = coll_db.list_content_items(
+        origin="reading",
+        page=1,
+        size=20,
+        sort="created_desc",
+    )
+    assert writer.is_alive() is False
+    assert writer_errors == []
+    assert after_total == 22
+    assert (total, tuple(row.id for row in rows)) == (21, before_ids)
+
+
+def test_reading_list_snapshot_preserves_outer_sqlite_transaction(
+    reading_env: Path,
+) -> None:
+    """A nested public list read must not own or roll back its caller's write."""
+    coll_db = CollectionsDatabase.for_user(TEST_USER_ID + 43)
+    url = "https://example.org/outer-transaction"
+
+    with coll_db.transaction():
+        coll_db.upsert_content_item(
+            origin="reading",
+            url=url,
+            canonical_url=url,
+            domain="example.org",
+            title="Outer transaction",
+            summary=None,
+            content_hash=None,
+            word_count=None,
+            published_at=None,
+            status="saved",
+            favorite=False,
+            tags=[],
+        )
+
+        rows, total = coll_db.list_content_items(origin="reading", page=1, size=20)
+
+        assert total == 1
+        assert rows[0].title == "Outer transaction"
+
+    persisted, persisted_total = coll_db.list_content_items(
+        origin="reading",
+        page=1,
+        size=20,
+    )
+    assert persisted_total == 1
+    assert persisted[0].url == url
+
+
+def test_reading_list_snapshot_reuses_transaction_connection_for_tags(
+    reading_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The count, page, and tag reads all use one pinned connection."""
+    coll_db = CollectionsDatabase.for_user(TEST_USER_ID + 41)
+    coll_db.upsert_content_item(
+        origin="reading",
+        url="https://example.org/snapshot-tags",
+        canonical_url="https://example.org/snapshot-tags",
+        domain="example.org",
+        title="Snapshot tags",
+        summary=None,
+        content_hash=None,
+        word_count=None,
+        published_at=None,
+        status="saved",
+        tags=["snapshot"],
+    )
+
+    original_execute = coll_db.backend.execute
+    observed_connections: list[object | None] = []
+
+    def tracked_execute(
+        query: str,
+        params: Any = None,
+        connection: Any = None,
+        **kwargs: Any,
+    ) -> Any:
+        """Record the connection used by each snapshot query."""
+        normalized = " ".join(query.split())
+        if (
+            "SELECT COUNT(*) AS cnt" in normalized
+            or ("FROM content_items ci" in normalized and "LIMIT ? OFFSET ?" in normalized)
+            or "FROM content_item_tags cit" in normalized
+        ):
+            observed_connections.append(connection)
+        return original_execute(query, params, connection=connection, **kwargs)
+
+    monkeypatch.setattr(coll_db.backend, "execute", tracked_execute)
+
+    rows, total = coll_db.list_content_items(origin="reading", page=1, size=20)
+
+    assert total == 1
+    assert rows[0].tags == ["snapshot"]
+    assert len(observed_connections) == 3
+    assert observed_connections[0] is not None
+    assert all(connection is observed_connections[0] for connection in observed_connections)
+
+
+def test_reading_list_snapshot_requests_repeatable_read_on_postgres(
+    reading_env: Path,
+) -> None:
+    """PostgreSQL pages explicitly request one repeatable read snapshot."""
+    coll_db = CollectionsDatabase.for_user(TEST_USER_ID + 42)
+    coll_db.upsert_content_item(
+        origin="reading",
+        url="https://example.org/snapshot-postgres",
+        canonical_url="https://example.org/snapshot-postgres",
+        domain="example.org",
+        title="Snapshot postgres",
+        summary=None,
+        content_hash=None,
+        word_count=None,
+        published_at=None,
+        status="saved",
+        tags=[],
+    )
+    sqlite_backend = coll_db.backend
+
+    class LifecycleConnection:
+        """Record PostgreSQL-style snapshot lifecycle calls."""
+
+        def __init__(self) -> None:
+            """Initialize lifecycle counters and failure controls."""
+            self.scope_query_open = True
+            self.commits = 0
+            self.rollbacks = 0
+            self._autocommit = False
+            self.autocommit_changes: list[bool] = []
+            self.snapshot_statements: list[str] = []
+            self.rollback_error = False
+
+        @property
+        def autocommit(self) -> bool:
+            """Return the simulated autocommit state."""
+            return self._autocommit
+
+        @autocommit.setter
+        def autocommit(self, value: bool) -> None:
+            """Record each simulated autocommit transition."""
+            self._autocommit = value
+            self.autocommit_changes.append(value)
+
+        def commit(self) -> None:
+            """Record scope-query transaction cleanup."""
+            self.commits += 1
+            self.scope_query_open = False
+
+        def rollback(self) -> None:
+            """Record snapshot rollback or raise the controlled cleanup error."""
+            self.rollbacks += 1
+            if self.rollback_error:
+                raise RuntimeError("cleanup failed")
+
+        def cursor(self) -> Any:
+            """Return a minimal cursor that records the explicit BEGIN."""
+            connection = self
+
+            class Cursor:
+                """Implement the cursor context used by the snapshot helper."""
+
+                def __enter__(self) -> Cursor:
+                    """Enter the simulated cursor context."""
+                    return self
+
+                def __exit__(
+                    self,
+                    exc_type: Any,
+                    exc: Any,
+                    traceback: Any,
+                ) -> None:
+                    """Exit the simulated cursor context."""
+                    return None
+
+                def execute(self, query: str) -> None:
+                    """Validate and record the explicit snapshot statement."""
+                    normalized = " ".join(query.split())
+                    if connection.scope_query_open:
+                        raise RuntimeError("BEGIN before scope commit")
+                    if not connection.autocommit:
+                        raise RuntimeError("psycopg would emit a plain BEGIN first")
+                    connection.snapshot_statements.append(normalized)
+
+            return Cursor()
+
+    class LifecyclePool:
+        """Return one instrumented connection and record its release."""
+
+        def __init__(self, connection: LifecycleConnection) -> None:
+            """Initialize the pool around the instrumented connection."""
+            self.connection = connection
+            self.returned: list[LifecycleConnection] = []
+
+        def get_connection(self) -> LifecycleConnection:
+            """Return the instrumented connection."""
+            return self.connection
+
+        def return_connection(self, connection: LifecycleConnection) -> None:
+            """Record that the snapshot returned its connection."""
+            self.returned.append(connection)
+
+    class PostgreSQLModeBackend:
+        """Proxy SQLite queries through a PostgreSQL lifecycle surface."""
+
+        backend_type = BackendType.POSTGRESQL
+
+        def __init__(self) -> None:
+            """Initialize the proxy connection, pool, and failure control."""
+            self.connection = LifecycleConnection()
+            self.pool = LifecyclePool(self.connection)
+            self.fail_execute = False
+
+        def get_pool(self) -> LifecyclePool:
+            """Return the instrumented lifecycle pool."""
+            return self.pool
+
+        def execute(
+            self,
+            query: str,
+            params: Any = None,
+            connection: Any = None,
+            **kwargs: Any,
+        ) -> Any:
+            """Delegate data reads or raise the controlled primary failure."""
+            if self.fail_execute:
+                raise ValueError("primary failure")
+            return sqlite_backend.execute(query, params, **kwargs)
+
+    proxy = PostgreSQLModeBackend()
+    coll_db._backend = proxy
+
+    rows, total = coll_db.list_content_items(origin="reading", page=1, size=20)
+
+    assert total == 1
+    assert rows[0].title == "Snapshot postgres"
+    assert proxy.connection.commits == 1
+    assert proxy.connection.rollbacks == 1
+    assert proxy.connection.autocommit_changes == [True, False]
+    assert proxy.connection.autocommit is False
+    assert proxy.pool.returned == [proxy.connection]
+    assert proxy.connection.snapshot_statements == [
+        "BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY"
+    ]
+
+    proxy.fail_execute = True
+    proxy.connection.rollback_error = True
+    with pytest.raises(ValueError, match="primary failure"):
+        coll_db.list_content_items(origin="reading", page=1, size=20)
+    assert proxy.connection.autocommit is False
+    assert proxy.pool.returned == [proxy.connection, proxy.connection]
 
 
 @pytest.mark.asyncio
@@ -545,19 +909,32 @@ async def test_reading_save_sanitizes_html_content(reading_env, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_reading_search_handles_punctuation(reading_env):
-    service = ReadingService(TEST_USER_ID + 7)
+@pytest.mark.parametrize(
+    ("query", "user_offset"),
+    [
+        ("C++/Rust: Intro? [Guide]", 7),
+        ("C++/Rust (Intro)", 8),
+        ('C++/Rust "Intro"', 9),
+        ("C++/Rust Intro*", 10),
+    ],
+)
+async def test_reading_search_handles_punctuation(
+    reading_env,
+    query: str,
+    user_offset: int,
+):
+    service = ReadingService(TEST_USER_ID + user_offset)
     saved = await service.save_url(
-        url="https://example.org/punct",
+        url=f"https://example.org/punct-{user_offset}",
         tags=["c++", "rust"],
         status="saved",
         favorite=False,
-        title_override="C++/Rust: Intro? [Guide]",
+        title_override=query,
         content_override="Content about C++ and Rust.",
     )
 
-    coll_db = CollectionsDatabase.for_user(TEST_USER_ID + 7)
-    items, total = coll_db.list_content_items(origin="reading", q="C++/Rust: Intro? [Guide]")
+    coll_db = CollectionsDatabase.for_user(TEST_USER_ID + user_offset)
+    items, total = coll_db.list_content_items(origin="reading", q=query)
     assert total >= 1
     assert any(item.id == saved.item.id for item in items)
 

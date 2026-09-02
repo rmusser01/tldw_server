@@ -877,6 +877,65 @@ class CollectionsDatabase:
             else:
                 self._local.backend_pin = previous_backend
 
+    @contextlib.contextmanager
+    def _read_snapshot(self) -> Generator[Any, None, None]:
+        """Yield one non-blocking, cross-statement read snapshot."""
+        backend = self.backend
+        pool = backend.get_pool()
+        connection = pool.get_connection()
+        previous_autocommit: bool | None = None
+        primary_failure: BaseException | None = None
+        owns_snapshot = True
+        try:
+            if backend.backend_type == BackendType.POSTGRESQL:
+                # Pool checkout applies session-scoped RLS settings using SQL,
+                # which starts an implicit transaction. Commit that setup
+                # before beginning the read transaction at its required
+                # isolation level. Temporarily enabling autocommit prevents
+                # psycopg from emitting a plain BEGIN before our explicit one.
+                connection.commit()
+                previous_autocommit = bool(connection.autocommit)
+                connection.autocommit = True
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        "BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY"
+                    )
+            else:
+                owns_snapshot = not bool(
+                    getattr(connection, "in_transaction", False)
+                )
+                if owns_snapshot:
+                    connection.execute("BEGIN DEFERRED")
+            yield connection
+        except BaseException as exc:  # noqa: BLE001 - preserve primary failure
+            primary_failure = exc
+            raise
+        finally:
+            cleanup_failure: BaseException | None = None
+            if owns_snapshot:
+                try:
+                    connection.rollback()
+                except BaseException as exc:  # noqa: BLE001 - preserve primary failure
+                    cleanup_failure = exc
+            if previous_autocommit is not None:
+                try:
+                    connection.autocommit = previous_autocommit
+                except BaseException as exc:  # noqa: BLE001
+                    cleanup_failure = cleanup_failure or exc
+            try:
+                pool.return_connection(connection)
+            except BaseException as exc:  # noqa: BLE001
+                cleanup_failure = cleanup_failure or exc
+            if cleanup_failure is not None:
+                if primary_failure is not None:
+                    logger.bind(
+                        exception_type=type(cleanup_failure).__name__
+                    ).warning("Collections read snapshot cleanup failed")
+                elif not isinstance(cleanup_failure, Exception):
+                    raise cleanup_failure
+                else:
+                    raise DatabaseError("Collections read snapshot cleanup failed") from None
+
     def _execute_insert(self, query: str, params: tuple[Any, ...], connection: Any | None = None) -> Any:
         if self.backend.backend_type == BackendType.POSTGRESQL:
             prepared_query, prepared_params = prepare_backend_statement(
@@ -2796,35 +2855,19 @@ class CollectionsDatabase:
     @staticmethod
     def _fts_query_string(query: str) -> str:
         """Build a simple FTS query string with prefix matches."""
-        tokens = [tok.strip() for tok in query.replace('"', " ").split() if tok.strip()]
+        tokens = re.findall(r"\w+", query, flags=re.UNICODE)
         if not tokens:
             return ""
-        return " AND ".join(f"{token}*" for token in tokens)
+        return " AND ".join(f'"{token}"*' for token in tokens)
 
     @staticmethod
     def _fts_query_candidates(query: str) -> list[str]:
-        """Generate FTS query candidates, preferring safe variants when needed."""
+        """Generate one parser-safe natural-language FTS query."""
         raw = (query or "").strip()
         if not raw:
             return []
         sanitized = CollectionsDatabase._fts_query_string(raw)
-        upper = raw.upper()
-        raw_ops = {"AND", "OR", "NOT", "NEAR"}
-        has_operator = any(op in upper.split() for op in raw_ops)
-        has_syntax = bool(re.search(r'[":*()]', raw))
-        prefer_raw = has_operator or has_syntax
-
-        candidates: list[str] = []
-        if prefer_raw:
-            candidates.append(raw)
-            if sanitized and sanitized != raw:
-                candidates.append(sanitized)
-        else:
-            if sanitized:
-                candidates.append(sanitized)
-            if raw and raw not in candidates:
-                candidates.append(raw)
-        return [cand for cand in candidates if cand]
+        return [sanitized] if sanitized else []
 
     @staticmethod
     def _is_unique_violation(exc: Exception) -> bool:
@@ -2895,7 +2938,12 @@ class CollectionsDatabase:
                 # Ignore unique violations (already linked)
                 continue
 
-    def _fetch_tags_for_item_ids(self, item_ids: Iterable[int]) -> dict[int, list[str]]:
+    def _fetch_tags_for_item_ids(
+        self,
+        item_ids: Iterable[int],
+        *,
+        connection: Any | None = None,
+    ) -> dict[int, list[str]]:
         ids = [int(i) for i in set(item_ids or []) if i is not None]
         if not ids:
             return {}
@@ -2908,6 +2956,7 @@ class CollectionsDatabase:
             WHERE cit.item_id IN ({placeholders})
             """.format_map(locals()),  # nosec B608
             tuple(ids),
+            connection=connection,
         ).rows
         mapping: dict[int, list[str]] = {item_id: [] for item_id in ids}
         for row in rows:
@@ -4084,7 +4133,6 @@ class CollectionsDatabase:
             base_from = f"FROM content_items ci{joins_sql}"
             subquery = f"SELECT ci.id {base_from} WHERE {where_sql} {group_by} {having}"
             count_sql = f"SELECT COUNT(*) AS cnt FROM ({subquery}) AS subq"  # nosec B608
-            total = int(self.backend.execute(count_sql, tuple(clause_params)).scalar or 0)
 
             resolved_limit = limit if isinstance(limit, int) and limit > 0 else size
             resolved_offset = offset if isinstance(offset, int) and offset >= 0 else max(0, (page - 1) * size)
@@ -4117,9 +4165,25 @@ class CollectionsDatabase:
                 LIMIT ? OFFSET ?
             """
             row_params = tuple(clause_params + [resolved_limit, resolved_offset])
-            rows = self.backend.execute(rows_sql, row_params).rows
-            item_ids = [int(r.get("id")) for r in rows]
-            tags_map = self._fetch_tags_for_item_ids(item_ids)
+            with self._read_snapshot() as connection:
+                total = int(
+                    self.backend.execute(
+                        count_sql,
+                        tuple(clause_params),
+                        connection=connection,
+                    ).scalar
+                    or 0
+                )
+                rows = self.backend.execute(
+                    rows_sql,
+                    row_params,
+                    connection=connection,
+                ).rows
+                item_ids = [int(r.get("id")) for r in rows]
+                tags_map = self._fetch_tags_for_item_ids(
+                    item_ids,
+                    connection=connection,
+                )
             content_rows = [self._row_to_content_item(r, tags_map.get(int(r.get("id")), [])) for r in rows]
             return content_rows, total
 
