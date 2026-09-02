@@ -4,7 +4,7 @@
 
 tldw_server is the authenticated home peer and canonical server copy of a
 Personal Context Profile. [Chatbook is the current full profile editing and
-interview interface](https://github.com/rmusser01/tldw_chatbook/blob/dev/Docs/User_Guide/settings/personal-context-profile.md).
+interview interface](https://github.com/rmusser01/tldw_chatbook/blob/dev/Docs%2FUser_Guide%2Fsettings%2Fpersonal-context-profile.md).
 The server does not currently provide a complete standalone profile editor.
 
 A standalone Chatbook profile and an existing server profile are independent

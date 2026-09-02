@@ -162,21 +162,21 @@ git commit -m "docs: plan server Personal Context guides"
 
 - Create: `Docs/User_Guides/Server/Personal_Context_Profile.md`
 
-- [ ] **Step 1: Write purpose and product boundaries**
+- [x] **Step 1: Write purpose and product boundaries**
 
 State that tldw_server is the authenticated home peer/canonical server copy, Chatbook is the current full editing/interview UI, no complete standalone server profile editor exists, and standalone peers become one canonical linked profile only after reviewed reconciliation and link completion. Link:
 
 `https://github.com/rmusser01/tldw_chatbook/blob/dev/Docs/User_Guide/settings/personal-context-profile.md`
 
-- [ ] **Step 2: Document prerequisites and safe key setup**
+- [x] **Step 2: Document prerequisites and safe key setup**
 
 Cover successful API-key/JWT authentication; `TLDW_PERSONAL_CONTEXT_MASTER_KEY` as strict base64 for exactly 32 bytes; secure backup before profile creation; fail-closed behavior for missing/malformed/changed keys; and one manifest per authenticated user's `Personalization.db`. Include a standard-library generation example but no fixed key and no advice to commit it.
 
-- [ ] **Step 3: Add setup and status workflow**
+- [x] **Step 3: Add setup and status workflow**
 
 Document configuration before start, server status/capability confirmation, manifest inspection/creation when needed, reviewed linking from Chatbook before upload, and Chatbook editing for changes expected to use current linked Sync. Link endpoint details to `../../API-related/Personal_Context_API.md`.
 
-- [ ] **Step 4: Add current sync/non-sync matrix**
+- [x] **Step 4: Add current sync/non-sync matrix**
 
 Include this deliberately identical shared-contract block, with the markers retained so Chatbook can check it automatically:
 
@@ -206,11 +206,11 @@ Then add these server-specific notes:
 - The home server wraps its Sync integrity key for authenticated registered Chatbook devices; this is not at-rest key sharing.
 - Ordinary server REST record/proposal mutations are not currently published to linked Chatbook clients.
 
-- [ ] **Step 5: Document export, local removal, and purge accurately**
+- [x] **Step 5: Document export, local removal, and purge accurately**
 
 Explain export confirmations/sensitivity; Chatbook ownership of local-copy removal; server rejection of `local_copy`; and `POST /purge` requiring `DELETE EVERYWHERE`, advancing a server-local fence, removing canonical bodies/runtime state, blocking mutations, and remaining `purge_pending`. Include the exact sentence `The server purge endpoint does not publish the protocol purge envelope, and acknowledgement completion is not wired.` Do not promise reconnecting devices clears the state.
 
-- [ ] **Step 6: Add troubleshooting**
+- [x] **Step 6: Add troubleshooting**
 
 Use these exact seven failure-state labels and give a cause, safe next action, and current product limit for each:
 
@@ -224,7 +224,7 @@ Use these exact seven failure-state labels and give a cause, safe next action, a
 
 Also cover authentication failure, missing/changed key, schema/quota incompatibility, and a REST edit absent from Chatbook. Explicitly state when no resolver or completion path exists.
 
-- [ ] **Step 7: Validate and commit**
+- [x] **Step 7: Validate and commit**
 
 Run:
 
@@ -251,14 +251,14 @@ git commit -m "docs: add Personal Context server operator guide"
 - Create: `Docs/Code_Documentation/Personal_Context_Developer_Guide.md`
 - Modify: `Docs/API-related/Personal_Context_API.md`
 
-- [ ] **Step 1: Write contract, ownership, and crypto sections**
+- [x] **Step 1: Write contract, ownership, and crypto sections**
 
 Cover `tldw-profile-core==0.1.0`, parity/digest authority, separate Sync envelopes, authenticated per-user `Personalization.db`, root/profile/object key hierarchy, fail-closed locked state, and peer-local at-rest keys versus wrapped server-owned Sync integrity key. Use stable GitHub links for source-only documents:
 
 - `https://github.com/rmusser01/tldw_server/blob/dev/Docs/Design/2026-08-30-personal-context-profile-server-design.md`
 - `https://github.com/rmusser01/tldw_server/blob/dev/backlog/decisions/002-personal-context-profile-authority-sync-and-encryption.md`
 
-- [ ] **Step 2: Add exact component map**
+- [x] **Step 2: Add exact component map**
 
 Document:
 
@@ -278,7 +278,7 @@ Document:
 
 State that endpoints, agents, Sync, and future publishers never access profile tables directly.
 
-- [ ] **Step 3: Document REST and Sync separately**
+- [x] **Step 3: Document REST and Sync separately**
 
 REST:
 
@@ -306,7 +306,7 @@ Repeat the full boundary matrix in developer terms so every shared and peer-loca
 | Exact canonical object identities, versions, and bytes for eligible shared objects | Local undo history, caches, ciphertext, database row identities, and other operational metadata |
 | — | Conflict-review objects and acknowledgement tracking |
 
-- [ ] **Step 4: Add the complete extension checklist and test map**
+- [x] **Step 4: Add the complete extension checklist and test map**
 
 Include all ten checklist items:
 
@@ -332,7 +332,7 @@ Map these exact suites:
 - `tldw_Server_API/tests/Sync/test_sync_v2_personal_context_materializer.py`
 - `tldw_Server_API/tests/Sync/test_sync_v2_personal_context_transport.py`
 
-- [ ] **Step 5: Correct the API Sync boundary**
+- [x] **Step 5: Correct the API Sync boundary**
 
 Replace the blanket closing statement with `REST and Sync-v2 boundary`:
 
@@ -341,7 +341,7 @@ Replace the blanket closing statement with `REST and Sync-v2 boundary`:
 - REST edits are not published to linked clients.
 - Server purge does not publish the protocol purge envelope and remains pending because acknowledgement completion is absent.
 
-- [ ] **Step 6: Validate and commit**
+- [x] **Step 6: Validate and commit**
 
 Run:
 
@@ -379,20 +379,20 @@ git commit -m "docs: document Personal Context server internals"
 - Modify: `Docs/mkdocs.yml`
 - Inspect: `Docs/Code_Documentation/README.md`
 
-- [ ] **Step 1: Add discovery links**
+- [x] **Step 1: Add discovery links**
 
 - Add Personal Context to user common workflows and troubleshooting.
 - Add `Personal Context Profile: Personal_Context_Developer_Guide.md` under Chat & Knowledge.
 - Replace the code-formatted API path with relative links to the API, operator, and developer guides.
 - Leave `Docs/Code_Documentation/README.md` unchanged unless its organization clearly requires an entry; record the decision.
 
-- [ ] **Step 2: Add concise MkDocs entries**
+- [x] **Step 2: Add concise MkDocs entries**
 
 - User Wiki > Admin and Operations: `Personal Context Profile`.
 - Developer Wiki > API and Contracts: `Personal Context API`.
 - Developer Wiki > Backend Code Guides: `Personal Context Developer Guide`.
 
-- [ ] **Step 3: Validate and commit**
+- [x] **Step 3: Validate and commit**
 
 Run:
 
@@ -413,7 +413,7 @@ git commit -m "docs: publish Personal Context guide navigation"
 - Generate: `Docs/Published/**`
 - Verify: all changed canonical docs
 
-- [ ] **Step 1: Perform the final rebase before generation and task closeout**
+- [x] **Step 1: Perform the final rebase before generation and task closeout**
 
 Run:
 
@@ -502,7 +502,7 @@ fi
 
 Expected: the branch is based on current `origin/dev`; TASK-13151 still resolves uniquely; Shared Core, REST, Sync bootstrap/inbound, and purge boundaries still match the guides' source claims. Any new REST publication or purge-completion seam stops execution for re-inventory. There must be no later rebase after the task is marked Done.
 
-- [ ] **Step 2: Refresh and stage the curated tree**
+- [x] **Step 2: Refresh and stage the curated tree**
 
 Run:
 
@@ -511,7 +511,7 @@ bash Helper_Scripts/refresh_docs_published.sh
 git add Docs/Published
 ```
 
-- [ ] **Step 3: Prove a second refresh is idempotent**
+- [x] **Step 3: Prove a second refresh is idempotent**
 
 Run:
 
@@ -523,7 +523,7 @@ git diff --check --cached
 
 Expected: no unstaged generated diff and no whitespace errors in the staged generated output.
 
-- [ ] **Step 4: Run public/private and strict MkDocs checks**
+- [x] **Step 4: Run public/private and strict MkDocs checks**
 
 Run Steps 4 and 5 in the same shell. Select the checked host interpreter first, fall back to the worktree virtual environment, and fail if neither exists:
 
@@ -537,13 +537,14 @@ if [ ! -x "$profile_python" ]; then
   exit 1
 fi
 printf 'Using project Python: %s\n' "$profile_python"
+"$profile_python" Helper_Scripts/docs/check_top_guides_docs_path_hygiene.py
 "$profile_python" Helper_Scripts/docs/check_public_private_boundary.py
 "$profile_python" -m mkdocs build --strict -f Docs/mkdocs.yml
 ```
 
 Expected: boundary check reports OK; MkDocs builds with zero warnings.
 
-- [ ] **Step 5: Run targeted Shared Core, endpoint, custody, composed-app, bootstrap, materializer, and transport tests**
+- [x] **Step 5: Run targeted Shared Core, endpoint, custody, composed-app, bootstrap, materializer, and transport tests**
 
 Run:
 
@@ -565,7 +566,7 @@ test -x "${profile_python:-}" || {
 
 Expected: selected tests pass.
 
-- [ ] **Step 6: Run claim, failure-state, source-link, and diff guards**
+- [x] **Step 6: Run claim, failure-state, source-link, and diff guards**
 
 Run:
 
@@ -657,7 +658,7 @@ git diff --stat --cached
 
 Expected: each guide independently proves its required shared-contract and current-limit claims; the API independently proves REST publication and purge limits; all seven operator failure states are explicit; the expected no-match source-link guard succeeds; and the allowed-path assertion accepts only task/plan/canonical/generated docs.
 
-- [ ] **Step 7: Commit generated output and recheck the committed diff**
+- [x] **Step 7: Commit generated output and recheck the committed diff**
 
 Run:
 
