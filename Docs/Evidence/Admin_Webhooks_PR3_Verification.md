@@ -547,6 +547,63 @@ was 21 commits ahead and zero behind before this evidence amendment.
 
 No production activation occurred.
 
+## Admin UI Full-Suite CI Correction
+
+The replacement frontend workflow run
+https://github.com/rmusser01/tldw_server/actions/runs/33595968940 confirmed the
+path-classifier correction: `Detect Gate Changes` passed and all upstream
+runtime frontend unit shards were skipped, while the admin UI aggregate still
+ran. Its only failure was the real-backend webhook lifecycle, which reached the
+test-only preparation endpoint with the backend default
+`TLDW_ADMIN_WEBHOOKS_MODE=off`. The standalone webhook script supplied the
+required canonical runtime variables, but the full `bun run test:real-backend`
+script did not.
+
+A regression test first proved that the managed JWT project's backend
+environment omitted all seven webhook runtime values. The shared managed
+backend builder now supplies deterministic, test-only mode, loopback, signing
+key, and heartbeat defaults for `chromium-real-jwt`; explicit caller overrides
+remain authoritative, and the single-user and externally managed backend paths
+are unchanged. Regression coverage now also proves conflicting ambient values
+are replaced, explicit caller overrides win, and the single-user project keeps
+its ambient webhook values. The focused environment and navigation-guard
+tests passed 9/9, and TypeScript, changed-path ESLint, and diff whitespace
+checks passed.
+
+The full-suite rerun also exposed a deterministic test setup race in the
+canonical lifecycle. A physical Playwright click could occur before the
+Incidents-to-Webhooks client route was ready, while direct navigation created a
+cross-document history entry and therefore did not exercise the intended
+same-document Back guard. The final test waits for the Incidents heading,
+activates the rendered Webhooks link through the DOM, asserts the resulting URL
+and heading, verifies a document-scoped sentinel survived the transition, and
+retains the existing real Back-navigation protection proof. Replacing the SPA
+activation with a full document load made the new assertion fail with the
+sentinel missing; restoring SPA activation passed the isolated canonical
+lifecycle 1/1 in 37.1 seconds.
+
+The complete CI-equivalent browser command then rebuilt all 49 admin pages and
+passed both managed projects:
+
+```bash
+cd admin-ui
+PYTHONPATH=.:packages/tldw_profile_core/src \
+  TLDW_ADMIN_E2E_PYTHON=/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python \
+  bun run test:real-backend
+```
+
+- JWT project: 24 passed and 1 intentionally inapplicable test skipped in 1.8
+  minutes, including the canonical webhook lifecycle.
+- Single-user project: 1 passed and 24 intentionally inapplicable tests skipped
+  in 13.9 seconds.
+- Both managed backend and UI processes stopped; ports 8101, 8102, 3101, and
+  3102 were no longer listening.
+
+The explicit Python and `PYTHONPATH` values are local isolated-worktree
+prerequisites. CI installs the current project under Python 3.12 and sets
+`TLDW_ADMIN_E2E_PYTHON=python`. No production webhook mode, key, transport, or
+activation setting changed.
+
 ## Static And Security Gates
 
 The plan's broad Ruff command returned 13 errors exclusively in admin endpoint

@@ -4,7 +4,7 @@ title: Implement canonical admin webhook durable producers and final activation
 status: In Progress
 assignee: []
 created_date: '2026-08-31 22:44'
-updated_date: '2026-09-02 05:44'
+updated_date: '2026-09-02 06:45'
 labels:
   - admin
   - webhooks
@@ -108,6 +108,10 @@ Pre-change baseline at 8cb4d2df: backend command completed with TLDW_TEST_NO_DOC
 2026-09-01 CI path/shard remediation: Workflow run 33589092145 passed all required gates except upstream frontend unit shards 1 and 5; a failed-job retry produced different unchanged-test regressions in the same shards, and the three first-attempt files passed 85/85 locally. Root cause was generated OpenAPI fingerprint metadata being classified as executable upstream frontend. Added an exact non-runtime exclusion with RED/GREEN fingerprint-only and fingerprint-plus-admin-UI coverage. Broader CI contract verification also found and fixed two branch-owned backend shard omissions: removed the deleted test_admin_ops_webhooks_reports.py path and assigned six new admin webhook activation/backup tests in all five matrices. Final classifier/workflow contract matrix passed 79/79; git diff --check passed. Evidence: Docs/Evidence/Admin_Webhooks_PR3_Verification.md. PR #2855 remains unmerged and production remains unactivated.
 
 2026-09-01 final CI-remediation integration: origin/dev advanced to 5fdd610df6e458957a34d07c5c5ac2a4b5d28d9f with only an obsolete Embeddings test-fixture removal. All 21 branch commits rebased without conflicts. On the rebased tree, the 79-test classifier/workflow contract matrix, Ruff lint/format checks, and branch diff whitespace check passed. The branch was 21 commits ahead and zero behind before the evidence amendment.
+
+2026-09-01 admin UI full-suite CI remediation: Replacement frontend workflow run 33595968940 proved the OpenAPI fingerprint classifier correction: Detect Gate Changes passed, upstream runtime frontend unit shards were skipped, and the admin UI aggregate still ran. The remaining deterministic failure was the full real-backend suite launching the managed JWT backend with TLDW_ADMIN_WEBHOOKS_MODE=off, because only the standalone webhook script supplied the seven test runtime variables. Added RED/GREEN coverage for buildBackendEnv and deterministic test-only webhook mode, loopback, signing-key, and heartbeat defaults for the managed chromium-real-jwt backend; explicit overrides remain last, and single-user/external paths are unchanged. The full run then exposed an incidental Incidents-to-Webhooks setup race. The canonical E2E now waits for the Incidents page, activates the rendered link through the DOM, asserts the Webhooks URL and heading, and retains the same-document Back guard proof. Verification: focused environment/guard tests 7/7; TypeScript, changed-path ESLint, and diff checks passed; isolated canonical lifecycle 1/1 in 33.1s; complete bun run test:real-backend passed JWT 24 with 1 intentional skip in 1.8m and single-user 1 with 24 intentional skips in 13.9s. All four temporary ports were closed. Evidence: Docs/Evidence/Admin_Webhooks_PR3_Verification.md. PR #2855 remains unmerged and production remains unactivated.
+
+2026-09-01 independent review follow-up for the admin UI full-suite CI remediation: reviewer found no Critical/P1 issues and identified one P2 verification gap plus one P3 coverage gap. Added a document-scoped sentinel proving the Incidents-to-Webhooks transition remains same-document; the mutation test replaced SPA activation with a full document load and failed with the sentinel missing, while the restored path passed the canonical lifecycle 1/1 in 37.1s. Expanded backend-environment coverage proves conflicting ambient values are replaced, explicit overrides win, and the single-user project remains isolated. Final focused environment and navigation-guard matrix passed 9/9. No production activation occurred.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

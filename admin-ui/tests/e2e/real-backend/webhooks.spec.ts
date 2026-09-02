@@ -291,8 +291,21 @@ test('proves the canonical webhook lifecycle against the real backend and receiv
 
     await removeExistingRegistrations(page);
     await page.goto('/incidents');
-    await page.locator('a[href="/webhooks"]').first().click();
+    await expect(page.getByRole('heading', { name: /^incidents$/i })).toBeVisible();
+    const documentSentinel = 'incidents-to-webhooks-same-document';
+    await page.evaluate((sentinel) => {
+      (window as Window & { __tldwAdminE2EDocumentSentinel?: string })
+        .__tldwAdminE2EDocumentSentinel = sentinel;
+    }, documentSentinel);
+    await page.locator('a[href="/webhooks"]').first().evaluate((link: HTMLAnchorElement) => {
+      link.click();
+    });
+    await expect(page).toHaveURL(/\/webhooks$/u);
     await expect(page.getByRole('heading', { name: /^webhooks$/i })).toBeVisible();
+    await expect.poll(() => page.evaluate(() => (
+      (window as Window & { __tldwAdminE2EDocumentSentinel?: string })
+        .__tldwAdminE2EDocumentSentinel
+    ))).toBe(documentSentinel);
     const runtime = page.getByLabel('Webhook delivery runtime');
     for (const readyState of [
       'Signing key ready',
