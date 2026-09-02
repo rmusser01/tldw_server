@@ -1,11 +1,11 @@
 ---
 id: TASK-13151
 title: Document Personal Context Profile server operations and architecture
-status: In Progress
+status: Done
 assignee:
   - '@codex'
 created_date: '2026-09-01 14:47'
-updated_date: '2026-09-02 08:51'
+updated_date: '2026-09-02 11:28'
 labels: []
 dependencies: []
 references:
@@ -28,8 +28,8 @@ Publish accurate server operator and developer documentation for the canonical P
 - [x] #4 User, developer, and API indexes plus MkDocs navigation make the guides discoverable and cross-link stable Chatbook documentation.
 - [x] #5 Generated published documentation is reproducible and strict MkDocs, endpoint, custody, bootstrap, materializer, composed-app, contract, link, and diff checks pass after the final rebase.
 - [x] #6 Offline/queued, locked, incompatible, version-conflict, first-link semantic-collision, post-link semantic-collision, and purge-pending guidance is explicit and consistent with Chatbook.
-- [ ] #7 Server guides and API limit cross-peer convergence to the eligible snapshot from successful user-approved first-link reconciliation, distinguish protocol capability from the absent ongoing Personal Context client caller, state that Manual Sync is Notes/Chat only, and state that server REST mutations are not published back.
-- [ ] #8 Server guides disclose pre-approval bootstrap metadata and transient remote-content download, adaptive interview egress/disclosure timing, Chatbook HTTP/TLS probe-runtime differences, partial local-removal and recovery limits, and incomplete purge distribution/acknowledgement without inventing unsupported recovery controls.
+- [x] #7 Server guides and API limit cross-peer convergence to the eligible snapshot from successful user-approved first-link reconciliation, distinguish protocol capability from the absent ongoing Personal Context client caller, state that Manual Sync is Notes/Chat only, and state that server REST mutations are not published back.
+- [x] #8 Server guides disclose pre-approval bootstrap metadata and transient remote-content download, adaptive interview egress/disclosure timing, Chatbook HTTP/TLS probe-runtime differences, partial local-removal and recovery limits, and incomplete purge distribution/acknowledgement without inventing unsupported recovery controls.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -67,14 +67,22 @@ create documentation for personal context injection info sync
 Documenting all major changes and enabling easier integration with future clients
 
 TASK-13151 remains In Progress pending PR creation and closeout.
+
+PR #2860 closeout: origin/dev remained b579bdea7dec75f89d2ecf025a4065051426ae0a, so no rebase was required and the reviewed guide content was preserved. Review evidence for PR head b50b5950ec6b009939ca76570796e66685523995: all checks completed with only SUCCESS, SKIPPED, or NEUTRAL conclusions and every required gate succeeded; CodeQL, Ubuntu/macOS E2E, onboarding/UX, pre-commit, lint/type, documentation gate, builds, and license checks succeeded; Qodo reported zero bugs, rule violations, or requirement gaps and no material issues; GraphQL reviewThreads was empty; and the exact requester-authored Change summary was present in the PR body/comment. Final local verification: strict MkDocs passed; the focused eight-file Personal Context suite passed all 78 tests with 4 warnings in 20.55s; path-hygiene and public/private-boundary checks passed; canonical/generated and exact Chatbook shared-block parity, semantic/stale/source-link, seven-path range-scope, whitespace/diff, unique TASK-13151 ID, and clean-tree checks passed. The task-only closeout commit advances the PR head beyond the reviewed b50b5950ec6b009939ca76570796e66685523995, so GitHub checks must rerun on the new head before merge.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Closed the Personal Context server documentation correction for PR #2860. The operator, API, and developer guides and their generated Published copies now accurately document reviewed first-link convergence, the absent ongoing client lifecycle, bootstrap and interview privacy boundaries, peer-local mapping/runtime limits, recovery/removal boundaries, and incomplete purge behavior. Independent specification and quality review approved the result; required GitHub gates succeeded on reviewed head b50b5950ec6b009939ca76570796e66685523995, Qodo found no bugs, rule violations, requirement gaps, or material issues, and all review threads were resolved. Final local strict documentation, 78 focused tests, parity, semantic, link, scope, task-ID, and diff checks passed.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
+- [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
