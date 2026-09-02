@@ -254,52 +254,6 @@ def regular_user():
 
 
 @pytest.fixture(autouse=True)
-def _reset_app_lifecycle_state():
-    """Clear stale lifecycle state on this conftest's pinned ``app``.
-
-    Kept, but no longer for the reason it was written. It was added for #2581
-    (46F -> 0F) because ``reload_app_main()`` permanently swapped
-    ``sys.modules["tldw_Server_API.app.main"]``, so the root conftest's reset
-    landed on the new app while the drained original -- the one every pinned
-    test still routed through -- stayed drained and 503'd every request.
-
-    Both halves of that are fixed now. The root reset covers every app that has
-    lifecycle state, not just the current module's, and reloads no longer outlive
-    the test that performed them (#2585). Removing this fixture leaves zero
-    ``shutdown_in_progress`` responses in a full Embeddings run.
-
-    What it masked has shrunk to one test. The four orchestrator-parity failures
-    it used to hide were a separate leak -- test_embeddings_optional_deps_import
-    re-imported Embeddings_Create with its optional dependencies blocked and left
-    the degraded module in sys.modules -- and that is fixed at the source now.
-
-    Removing this fixture still costs exactly one test:
-
-        test_orchestrator_summary_endpoint_unauthorized   401 != 403
-
-    which is not a lifecycle failure either. The log shows AuthNZ settings being
-    re-initialized mid-run in multi_user mode, so the request arrives
-    unauthenticated (401) instead of authenticated-but-forbidden (403) -- an
-    auth-settings ordering dependency, a third class again. Run the file alone
-    and it passes.
-
-    Measured on a full Embeddings run with collection order pinned
-    (-p no:randomly), so the numbers are comparable:
-
-        dev, before the optional-deps fix          7 failed
-        with the fix, this fixture kept            3 failed
-        with the fix, this fixture removed         4 failed
-
-    The remaining three are pre-existing metrics failures unrelated to any of
-    this. So the fixture stays until the auth-settings dependency is understood.
-    """
-    from tldw_Server_API.app.services.app_lifecycle import reset_lifecycle_state
-
-    reset_lifecycle_state(app)
-    yield
-
-
-@pytest.fixture(autouse=True)
 def _sanitize_jsonschema_module(monkeypatch):
     """Ensure sys.modules['jsonschema'] is a proper ModuleType when present.
 
