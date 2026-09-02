@@ -4,7 +4,7 @@ title: Implement Notes embedding index and semantic graph edges
 status: In Progress
 assignee: []
 created_date: 2026-08-27 02:20
-updated_date: 2026-09-02 02:29
+updated_date: 2026-09-02 02:57
 labels:
 - notes
 - notes-graph
@@ -106,11 +106,13 @@ Additional Task 11 fix2 verification: the dedicated Notes semantic English-fallb
 2026-09-01 Task 12 implementation complete pending independent review: added opt-in focused Similar content controls, grouped manual/wikilink/semantic relationship presentation with preserved edge identities, compact and full semantic evidence views, request-local notes.graph.write conversion authority, and canonical nested Sync-aware manual-link conversion. Review hardening prevents inactive All-notes preference refetches and fails stale conversion conflicts closed. Verification: focused shared frontend 80 passed; WebUI E2E 2 passed; packaged-extension E2E 1 passed; extension compile passed; backend schema/endpoint 27 passed on Python 3.11.13; Ruff, Bandit zero findings, locale, scoped formatting, screenshots, and diff checks passed. Report: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-12-report.md. TASK-13134 remains In Progress because Task 13 is outstanding.
 2026-09-01 Task 12 fix round 1 started from aac96ca7e6. Scope: resolve all six Important and three Minor review findings with focused RED/GREEN coverage, preserve nested graph/manual-link contracts, and keep TASK-13134 In Progress for Task 13.
 ['2026-09-01 Task 12 fix round 1 complete and verified: ordinary fallback now preserves manual links from successful semantic responses; response-effective controls, capped-edge conversion, per-edge single-flight/idempotency, typed existing-link refresh, backlink-inclusive structural grouping, full localized provenance, reactive canvas i18n, pagination identity reset, and real light/dark browser contrast coverage are implemented. RED: shared UI 12 failed/76 passed, backend 1 failed/8 passed, browser contrast 2 failed. GREEN: shared UI 88 passed, backend endpoint/schema 36 passed, WebUI E2E 4 passed, extension E2E 1 passed, compile/locale/scoped formatting/Ruff/Bandit/diff checks passed. Report: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-12-report.md. TASK-13134 remains In Progress for Task 13.']
+['Task 12 Fix Round 2 started at clean HEAD a735e797ae. Scope: add an active-Sync coordinator duplicate-conversion regression and nullable semantic effective-control regressions, then apply the minimal endpoint/hook fixes and run affected Task 12 verification.']
+['2026-09-01 Task 12 fix round 2 complete and verified from a735e797ae: active-Sync logical duplicate conversions now return the exact typed existing-manual-link conflict only after fresh semantic validation and confirmed live unordered-pair state; unrelated preflight failures remain closed. Nullable response-effective controls preserve current values, still clamp response max_top_k, and do not loop. RED: frontend 3 failed/32 passed; backend behavioral RED 1 failed/9 passed. GREEN: focused frontend 65 passed, focused conversion 11 passed, affected frontend 92 passed, affected backend 38 passed; extension compile, scoped Prettier, Ruff, Bandit zero findings, and diff checks passed. Report: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-12-report.md. TASK-13134 remains In Progress for Task 13.']
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-TASK-13134 remains In Progress. Tasks 1 through 11 are complete and independently reviewed. Task 12 implementation and fix round 1 are verified pending clean re-review; Task 13 documentation and integrated release gates remain outstanding.
+TASK-13134 remains In Progress. Tasks 1 through 11 are complete and independently reviewed. Task 12 implementation plus fix rounds 1 and 2 are implemented and verified pending clean re-review; Task 13 documentation and integrated release gates remain outstanding.
 <!-- SECTION:FINAL_SUMMARY:END -->
 ## Definition of Done
 <!-- DOD:BEGIN -->

@@ -346,6 +346,14 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
     threshold: number
     maxTopK: number
   } | null>(null)
+  const semanticControlValues = React.useRef({
+    topK: semanticTopK,
+    threshold: semanticThreshold
+  })
+  semanticControlValues.current = {
+    topK: semanticTopK,
+    threshold: semanticThreshold
+  }
   const responseSemanticStatus = currentGraph?.semantic_status
   const responseMaxTopK = Math.max(
     1,
@@ -361,13 +369,17 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
       : NOTES_GRAPH_SEMANTIC_MAX_TOP_K
   React.useEffect(() => {
     if (!semanticQueryEnabled || !responseSemanticStatus) return
-    const effectiveTopK = boundSemanticTopK(
-      responseSemanticStatus.effective_top_k,
-      semanticMaxTopK
-    )
-    const effectiveThreshold = boundSemanticThreshold(
-      responseSemanticStatus.effective_threshold
-    )
+    const effectiveTopK =
+      typeof responseSemanticStatus.effective_top_k === "number"
+        ? boundSemanticTopK(
+            responseSemanticStatus.effective_top_k,
+            semanticMaxTopK
+          )
+        : boundSemanticTopK(semanticControlValues.current.topK, semanticMaxTopK)
+    const effectiveThreshold =
+      typeof responseSemanticStatus.effective_threshold === "number"
+        ? boundSemanticThreshold(responseSemanticStatus.effective_threshold)
+        : semanticControlValues.current.threshold
     if (semanticControlDefaults.current?.identity !== fallbackIdentity) {
       semanticControlDefaults.current = {
         identity: fallbackIdentity,
