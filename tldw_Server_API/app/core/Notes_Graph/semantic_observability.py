@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from threading import Lock
 from types import MappingProxyType
 from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.DB_Management.chacha.note_semantic_models import (
+    SemanticHealthSnapshot,
+)
 from tldw_Server_API.app.core.Metrics import (
     MetricDefinition,
     MetricType,
@@ -161,14 +165,14 @@ _METRIC_DEFINITIONS = (
     ),
     MetricDefinition(
         name="notes_semantic_cleanup_retries_total",
-        type=MetricType.COUNTER,
-        description="Notes semantic cleanup retries",
+        type=MetricType.GAUGE,
+        description="Current Notes semantic cleanup retry total",
         labels=["status", "backend"],
     ),
     MetricDefinition(
         name="notes_semantic_cleanup_oldest_age_seconds",
         type=MetricType.GAUGE,
-        description="Age of the oldest claimed Notes semantic cleanup item",
+        description="Age of the oldest pending Notes semantic cleanup item",
         unit="s",
         labels=["backend"],
     ),
@@ -204,6 +208,19 @@ class SemanticMetricEvent:
 class SemanticAuditEvent:
     event: str
     fields: Mapping[str, str | int]
+
+
+@dataclass(slots=True)
+class _SemanticHealthTotal:
+    indexed_notes: int = 0
+    excluded_notes: int = 0
+    failed_notes: int = 0
+    dirty_notes: int = 0
+    pending_notes: int = 0
+    stale_generations: int = 0
+    cleanup_backlog: int = 0
+    cleanup_retries: int = 0
+    oldest_cleanup_created_at: datetime | None = None
 
 
 def _member(value: object, allowed: frozenset[str], field: str) -> str:
@@ -305,7 +322,6 @@ def record_semantic_build_metrics(
     backend: str,
     duration_seconds: int | float,
     counts: Mapping[str, int],
-    stale_generations: int = 0,
 ) -> None:
     """Record one terminal build/update result without identifier labels."""
 
@@ -313,9 +329,10 @@ def record_semantic_build_metrics(
     status = _member(status, _STATUSES, "status")
     backend = _backend(backend)
     duration = _number(duration_seconds, "duration")
-    bounded_counts = {key: _count(value, key) for key, value in counts.items() if key in _COUNT_FIELDS}
-    if len(bounded_counts) != len(counts):
-        raise SemanticObservationError("notes_semantic_observation_count_invalid")
+    for key, value in counts.items():
+        if key not in _COUNT_FIELDS:
+            raise SemanticObservationError("notes_semantic_observation_count_invalid")
+        _count(value, key)
     labels = {"operation": operation, "status": status, "backend": backend}
     _metric_call(
         observe_histogram,
@@ -324,11 +341,6 @@ def record_semantic_build_metrics(
         labels,
     )
     _metric_call(increment_counter, "notes_semantic_builds_total", 1, labels)
-    record_semantic_health_metrics(
-        backend=backend,
-        counts=bounded_counts,
-        stale_generations=stale_generations,
-    )
 
 
 def record_semantic_health_metrics(
@@ -427,26 +439,116 @@ def record_semantic_cleanup_metrics(
         {"backend": backend},
     )
     retry_count = _count(retries, "retries")
-    if retry_count:
+    for other_status in ("success", "degraded", "failed"):
+        if other_status == status:
+            continue
         _metric_call(
-            increment_counter,
-            "notes_semantic_cleanup_retries_total",
-            retry_count,
-            {"status": status, "backend": backend},
-        )
-    else:
-        _metric_call(
-            increment_counter,
+            set_gauge,
             "notes_semantic_cleanup_retries_total",
             0,
-            {"status": status, "backend": backend},
+            {"status": other_status, "backend": backend},
         )
+    _metric_call(
+        set_gauge,
+        "notes_semantic_cleanup_retries_total",
+        retry_count,
+        {"status": status, "backend": backend},
+    )
     _metric_call(
         set_gauge,
         "notes_semantic_cleanup_oldest_age_seconds",
         _number(oldest_age_seconds, "oldest_age"),
         {"backend": backend},
     )
+
+
+def _cleanup_timestamp(value: object) -> datetime | None:
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    else:
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return None
+    return parsed.astimezone(timezone.utc)
+
+
+def aggregate_semantic_health_snapshots(
+    snapshots: Sequence[object],
+) -> tuple[SemanticHealthSnapshot, ...]:
+    """Aggregate persisted dataset snapshots into one row per bounded backend."""
+
+    totals = {backend: _SemanticHealthTotal() for backend in sorted(_BACKENDS)}
+    for snapshot in snapshots:
+        backend = _backend(str(getattr(snapshot, "backend", "unavailable")))
+        total = totals[backend]
+        total.indexed_notes += _count(getattr(snapshot, "indexed_notes", 0), "indexed_notes")
+        total.excluded_notes += _count(getattr(snapshot, "excluded_notes", 0), "excluded_notes")
+        total.failed_notes += _count(getattr(snapshot, "failed_notes", 0), "failed_notes")
+        total.dirty_notes += _count(getattr(snapshot, "dirty_notes", 0), "dirty_notes")
+        total.pending_notes += _count(getattr(snapshot, "pending_notes", 0), "pending_notes")
+        total.stale_generations += _count(
+            getattr(snapshot, "stale_generations", 0),
+            "stale_generations",
+        )
+        total.cleanup_backlog += _count(getattr(snapshot, "cleanup_backlog", 0), "cleanup_backlog")
+        total.cleanup_retries += _count(getattr(snapshot, "cleanup_retries", 0), "cleanup_retries")
+        oldest = _cleanup_timestamp(getattr(snapshot, "oldest_cleanup_created_at", None))
+        current_oldest = total.oldest_cleanup_created_at
+        if oldest is not None and (current_oldest is None or oldest < current_oldest):
+            total.oldest_cleanup_created_at = oldest
+    return tuple(
+        SemanticHealthSnapshot(
+            backend=backend,
+            indexed_notes=total.indexed_notes,
+            excluded_notes=total.excluded_notes,
+            failed_notes=total.failed_notes,
+            dirty_notes=total.dirty_notes,
+            pending_notes=total.pending_notes,
+            stale_generations=total.stale_generations,
+            cleanup_backlog=total.cleanup_backlog,
+            cleanup_retries=total.cleanup_retries,
+            oldest_cleanup_created_at=total.oldest_cleanup_created_at,
+        )
+        for backend, total in totals.items()
+    )
+
+
+def record_semantic_aggregate_metrics(
+    *,
+    snapshots: Sequence[object],
+    now: datetime,
+) -> None:
+    """Publish one complete backend-health snapshot after a bounded store sweep."""
+
+    if not isinstance(now, datetime) or now.tzinfo is None or now.utcoffset() is None:
+        raise SemanticObservationError("notes_semantic_observation_timestamp_invalid")
+    observed_at = now.astimezone(timezone.utc)
+    for snapshot in aggregate_semantic_health_snapshots(snapshots):
+        record_semantic_health_metrics(
+            backend=snapshot.backend,
+            counts={
+                "indexed": snapshot.indexed_notes,
+                "excluded": snapshot.excluded_notes,
+                "failed": snapshot.failed_notes,
+                "dirty": snapshot.dirty_notes,
+                "pending": snapshot.pending_notes,
+            },
+            stale_generations=snapshot.stale_generations,
+        )
+        oldest = _cleanup_timestamp(snapshot.oldest_cleanup_created_at)
+        age = 0.0 if oldest is None else max(0.0, (observed_at - oldest).total_seconds())
+        record_semantic_cleanup_metrics(
+            status="failed" if snapshot.cleanup_retries else "success",
+            backend=snapshot.backend,
+            backlog=snapshot.cleanup_backlog,
+            retries=snapshot.cleanup_retries,
+            oldest_age_seconds=age,
+        )
 
 
 def record_semantic_denial(reason: str) -> None:
@@ -564,6 +666,7 @@ __all__ = [
     "SemanticAuditEvent",
     "SemanticMetricEvent",
     "SemanticObservationError",
+    "aggregate_semantic_health_snapshots",
     "build_semantic_audit_event",
     "build_semantic_metric_event",
     "emit_semantic_audit_event",
@@ -573,6 +676,7 @@ __all__ = [
     "record_semantic_denial",
     "record_semantic_dsr_metrics",
     "record_semantic_failure",
+    "record_semantic_aggregate_metrics",
     "record_semantic_health_metrics",
     "record_semantic_query_metrics",
 ]

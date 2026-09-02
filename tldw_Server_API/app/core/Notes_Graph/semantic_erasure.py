@@ -21,7 +21,6 @@ from tldw_Server_API.app.core.DB_Management.chacha.note_semantic_models import (
 
 from .semantic_observability import (
     emit_semantic_audit_event,
-    record_semantic_cleanup_metrics,
     record_semantic_dsr_metrics,
 )
 from .semantic_publication import (
@@ -118,13 +117,6 @@ class _QuiescentCleanupVectors:
 def _metric(*, status: str, backend: str, error_code: str) -> None:
     normalized_backend = backend if backend in _SUPPORTED_BACKENDS else "unavailable"
     record_semantic_dsr_metrics(status=status, backend=normalized_backend)
-    record_semantic_cleanup_metrics(
-        status=status,
-        backend=normalized_backend,
-        backlog=0 if status == "success" else 1,
-        retries=0 if status == "success" else 1,
-        oldest_age_seconds=0,
-    )
     if status != "success":
         logger.bind(error_code=error_code).debug("Notes semantic erasure cleanup requires retry")
 

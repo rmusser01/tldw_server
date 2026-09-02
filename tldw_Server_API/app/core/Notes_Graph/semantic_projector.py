@@ -43,7 +43,6 @@ from .semantic_content import reconstruct_semantic_chunk
 from .semantic_observability import (
     record_semantic_denial,
     record_semantic_failure,
-    record_semantic_health_metrics,
     record_semantic_query_metrics,
 )
 from .semantic_scoring import (
@@ -462,18 +461,8 @@ class SemanticGraphProjector:
             state = "needs_attention"
             record_semantic_denial("configuration")
         elif maintenance_reason is not None:
+            state = "needs_attention"
             record_semantic_denial("capability")
-        record_semantic_health_metrics(
-            backend=str(getattr(config, "vector_backend", "unavailable")),
-            counts={
-                "indexed": int(integrity.indexed_note_count),
-                "excluded": int(integrity.excluded_note_count),
-                "failed": int(integrity.failed_note_count),
-                "dirty": int(integrity.pending_note_count),
-                "pending": int(integrity.pending_note_count),
-            },
-            stale_generations=1 if configuration_stale else 0,
-        )
         status = self._status(
             available=True,
             state=state,

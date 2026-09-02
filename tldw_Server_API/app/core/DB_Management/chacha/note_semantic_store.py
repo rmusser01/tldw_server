@@ -20,6 +20,7 @@ from .note_semantic_models import (
     SemanticGeneration,
     SemanticGenerationIntegrity,
     SemanticGenerationState,
+    SemanticHealthSnapshot,
     SemanticIndexConfig,
     SemanticIndexingError,
     SemanticManifestPublication,
@@ -2056,6 +2057,105 @@ class NoteSemanticStore:
                 ):
                     datasets.append(dataset)
         return tuple(datasets)
+
+    def list_observability_dataset_ids(
+        self,
+        *,
+        limit: int,
+        after_dataset_id: str | None = None,
+    ) -> tuple[str, ...]:
+        """Page raw owner dataset authority for complete health aggregation."""
+
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise ValueError("notes_semantic_maintenance_limit_invalid")
+        after = "" if after_dataset_id is None else self._scope(after_dataset_id)
+        with self._db.transaction() as conn:
+            rows = conn.execute(
+                "SELECT dataset_id FROM note_task_scope_authority "
+                "WHERE owner_user_id=? AND dataset_id>? ORDER BY dataset_id LIMIT ?",
+                (self.owner_user_id, after, limit),
+            ).fetchall()
+        return tuple(str(self._record(row)["dataset_id"]) for row in rows)
+
+    def get_observability_snapshot(
+        self,
+        dataset_id: str,
+        *,
+        current_capability_revision: str | None,
+    ) -> SemanticHealthSnapshot:
+        """Read one authoritative owner/dataset health snapshot from durable state."""
+
+        dataset = self._scope(dataset_id)
+        with self._db.transaction() as conn:
+            self._set_scope(conn, dataset)
+            config_row = conn.execute(
+                "SELECT active_generation_id,capability_revision,vector_backend "
+                "FROM note_semantic_index_configs WHERE owner_user_id=? AND dataset_id=?",
+                (self.owner_user_id, dataset),
+            ).fetchone()
+            config = None if config_row is None else self._record(config_row)
+            active_generation_id = None if config is None else config["active_generation_id"]
+
+            indexed = excluded = failed = pending = dirty = 0
+            if active_generation_id is not None:
+                counts_row = conn.execute(
+                    "SELECT "
+                    "COALESCE(SUM(CASE WHEN state='indexed' THEN 1 ELSE 0 END),0) AS indexed,"
+                    "COALESCE(SUM(CASE WHEN state='excluded' THEN 1 ELSE 0 END),0) AS excluded,"
+                    "COALESCE(SUM(CASE WHEN state='failed' THEN 1 ELSE 0 END),0) AS failed,"
+                    "COALESCE(SUM(CASE WHEN state='pending' THEN 1 ELSE 0 END),0) AS pending "
+                    "FROM note_semantic_note_state WHERE owner_user_id=? AND dataset_id=? "
+                    "AND generation_id=?",
+                    (self.owner_user_id, dataset, active_generation_id),
+                ).fetchone()
+                counts = self._record(counts_row)
+                indexed = int(counts["indexed"])
+                excluded = int(counts["excluded"])
+                failed = int(counts["failed"])
+                pending = int(counts["pending"])
+                dirty_row = conn.execute(
+                    "SELECT COUNT(DISTINCT note_id) AS dirty FROM note_semantic_work "
+                    "WHERE owner_user_id=? AND dataset_id=? AND generation_id=? "
+                    "AND kind='index_note' AND claim_state IN ('pending','claimed','failed')",
+                    (self.owner_user_id, dataset, active_generation_id),
+                ).fetchone()
+                dirty = int(self._record(dirty_row)["dirty"])
+
+            cleanup_row = conn.execute(
+                "SELECT COUNT(*) AS backlog,COALESCE(SUM(attempt_count),0) AS retries,"
+                "MIN(created_at) AS oldest_created_at FROM ("
+                "SELECT attempt_count,created_at FROM note_semantic_work "
+                "WHERE owner_user_id=? AND dataset_id=? "
+                "AND kind IN ('delete_note_vectors','delete_generation') "
+                "AND claim_state IN ('pending','claimed','failed') UNION ALL "
+                "SELECT attempt_count,created_at FROM note_semantic_obsolete_vectors "
+                "WHERE owner_user_id=? AND dataset_id=? "
+                "AND claim_state IN ('pending','claimed','failed')"
+                ") AS cleanup",
+                (self.owner_user_id, dataset, self.owner_user_id, dataset),
+            ).fetchone()
+            cleanup = self._record(cleanup_row)
+
+        configured_backend = None if config is None else str(config["vector_backend"] or "")
+        backend = configured_backend if configured_backend in {"chromadb", "pgvector"} else "unavailable"
+        stale = int(
+            active_generation_id is not None
+            and current_capability_revision is not None
+            and config is not None
+            and config["capability_revision"] != current_capability_revision
+        )
+        return SemanticHealthSnapshot(
+            backend=backend,
+            indexed_notes=indexed,
+            excluded_notes=excluded,
+            failed_notes=failed,
+            dirty_notes=dirty,
+            pending_notes=pending,
+            stale_generations=stale,
+            cleanup_backlog=int(cleanup["backlog"]),
+            cleanup_retries=int(cleanup["retries"]),
+            oldest_cleanup_created_at=self._read_iso(cleanup["oldest_created_at"]),
+        )
 
     def finalize_owner_erasure(self, *, dataset_ids: Sequence[str]) -> int:
         """Atomically remove confirmed semantic state and owner Notes.

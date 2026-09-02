@@ -268,3 +268,19 @@ class SemanticGenerationIntegrity:
     @property
     def degraded(self) -> bool:
         return self.excluded_note_count > 0 or self.failed_note_count > 0
+
+
+@dataclass(frozen=True, slots=True)
+class SemanticHealthSnapshot:
+    """Persisted dataset health projected without owner or dataset labels."""
+
+    backend: str
+    indexed_notes: int = 0
+    excluded_notes: int = 0
+    failed_notes: int = 0
+    dirty_notes: int = 0
+    pending_notes: int = 0
+    stale_generations: int = 0
+    cleanup_backlog: int = 0
+    cleanup_retries: int = 0
+    oldest_cleanup_created_at: datetime | str | None = None

@@ -7,6 +7,7 @@ import math
 import threading
 import time
 from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -50,6 +51,7 @@ from tldw_Server_API.app.core.Notes_Graph.semantic_vectors import SemanticVector
 pytestmark = pytest.mark.unit
 GENERATION_FENCE = "-".join(("job", "fence", "a"))
 STALE_GENERATION_FENCE = "-".join(("stale", "fence"))
+NOW = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
 
 
 def _fence() -> SemanticExecutionFence:
@@ -303,7 +305,23 @@ def test_operational_metrics_use_only_closed_low_cardinality_labels(
         backend="chromadb",
         duration_seconds=1.25,
         counts={"indexed": 4, "excluded": 1, "failed": 1, "dirty": 2, "pending": 3},
-        stale_generations=1,
+    )
+    semantic_observability.record_semantic_aggregate_metrics(
+        snapshots=(
+            SimpleNamespace(
+                backend="chromadb",
+                indexed_notes=4,
+                excluded_notes=1,
+                failed_notes=1,
+                dirty_notes=2,
+                pending_notes=3,
+                stale_generations=1,
+                cleanup_backlog=0,
+                cleanup_retries=0,
+                oldest_cleanup_created_at=None,
+            ),
+        ),
+        now=NOW,
     )
     semantic_observability.record_semantic_query_metrics(
         status="success",
@@ -360,6 +378,135 @@ def test_operational_metrics_use_only_closed_low_cardinality_labels(
         "api_key",
     ):
         assert forbidden not in serialized
+
+
+def test_build_completion_does_not_overwrite_global_health_gauges(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(semantic_observability, "_ensure_metrics_registered", lambda: None)
+    monkeypatch.setattr(
+        semantic_observability,
+        "increment_counter",
+        lambda name, value=1, labels=None: calls.append(name),
+    )
+    monkeypatch.setattr(
+        semantic_observability,
+        "observe_histogram",
+        lambda name, value, labels=None: calls.append(name),
+    )
+    monkeypatch.setattr(
+        semantic_observability,
+        "set_gauge",
+        lambda name, value, labels=None: calls.append(name),
+    )
+
+    semantic_observability.record_semantic_build_metrics(
+        operation="build",
+        status="success",
+        backend="chromadb",
+        duration_seconds=0.5,
+        counts={"indexed": 20, "excluded": 0, "failed": 0, "dirty": 0, "pending": 0},
+    )
+
+    assert calls == [
+        "notes_semantic_build_duration_seconds",
+        "notes_semantic_builds_total",
+    ]
+
+
+def test_authoritative_health_aggregates_multi_dataset_state_cleanup_and_age(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, float, dict[str, str]]] = []
+    monkeypatch.setattr(semantic_observability, "_ensure_metrics_registered", lambda: None)
+    monkeypatch.setattr(
+        semantic_observability,
+        "increment_counter",
+        lambda name, value=1, labels=None: calls.append((name, float(value), dict(labels or {}))),
+    )
+    monkeypatch.setattr(
+        semantic_observability,
+        "set_gauge",
+        lambda name, value, labels=None: calls.append((name, float(value), dict(labels or {}))),
+    )
+    snapshots = (
+        SimpleNamespace(
+            backend="chromadb",
+            indexed_notes=9,
+            excluded_notes=0,
+            failed_notes=0,
+            dirty_notes=0,
+            pending_notes=0,
+            stale_generations=0,
+            cleanup_backlog=0,
+            cleanup_retries=0,
+            oldest_cleanup_created_at=None,
+        ),
+        SimpleNamespace(
+            backend="chromadb",
+            indexed_notes=1,
+            excluded_notes=1,
+            failed_notes=1,
+            dirty_notes=2,
+            pending_notes=1,
+            stale_generations=1,
+            cleanup_backlog=2,
+            cleanup_retries=3,
+            oldest_cleanup_created_at=NOW - timedelta(seconds=120),
+        ),
+        SimpleNamespace(
+            backend="pgvector",
+            indexed_notes=2,
+            excluded_notes=0,
+            failed_notes=0,
+            dirty_notes=0,
+            pending_notes=0,
+            stale_generations=0,
+            cleanup_backlog=1,
+            cleanup_retries=1,
+            oldest_cleanup_created_at=(NOW - timedelta(seconds=60)).isoformat(),
+        ),
+    )
+
+    semantic_observability.record_semantic_aggregate_metrics(
+        snapshots=snapshots,
+        now=NOW,
+    )
+
+    def gauge(name: str, labels: dict[str, str]) -> float:
+        matches = [value for metric, value, actual in calls if metric == name and actual == labels]
+        assert len(matches) == 1
+        return matches[0]
+
+    assert (
+        gauge(
+            "notes_semantic_note_count",
+            {"state": "indexed", "backend": "chromadb"},
+        )
+        == 10
+    )
+    assert (
+        gauge(
+            "notes_semantic_note_count",
+            {"state": "failed", "backend": "chromadb"},
+        )
+        == 1
+    )
+    assert gauge("notes_semantic_coverage_ratio", {"backend": "chromadb"}) == pytest.approx(10 / 13)
+    assert gauge("notes_semantic_stale_generations", {"backend": "chromadb"}) == 1
+    assert gauge("notes_semantic_cleanup_backlog", {"backend": "chromadb"}) == 2
+    assert (
+        gauge(
+            "notes_semantic_cleanup_retries_total",
+            {"status": "failed", "backend": "chromadb"},
+        )
+        == 3
+    )
+    assert gauge("notes_semantic_cleanup_oldest_age_seconds", {"backend": "chromadb"}) == 120
+    assert gauge("notes_semantic_cleanup_backlog", {"backend": "pgvector"}) == 1
+    assert gauge("notes_semantic_cleanup_oldest_age_seconds", {"backend": "pgvector"}) == 60
+    assert gauge("notes_semantic_cleanup_backlog", {"backend": "unavailable"}) == 0
 
 
 def test_metric_backend_failure_does_not_change_semantic_behavior(

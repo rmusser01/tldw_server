@@ -56,7 +56,6 @@ from tldw_Server_API.app.core.Notes_Graph.semantic_observability import (
     emit_semantic_audit_event,
     record_semantic_build_metrics,
     record_semantic_cancellation,
-    record_semantic_cleanup_metrics,
     record_semantic_denial,
     record_semantic_failure,
 )
@@ -741,14 +740,6 @@ async def handle_notes_semantic_index_job(
                 component="provider",
                 category="execution",
                 backend=backend,
-            )
-        if mode == "delete":
-            record_semantic_cleanup_metrics(
-                status=status,
-                backend=backend,
-                backlog=0 if cleanup_complete else 1,
-                retries=0,
-                oldest_age_seconds=0,
             )
         if mode != "delete" or cleanup_complete:
             try:

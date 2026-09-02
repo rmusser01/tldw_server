@@ -318,10 +318,10 @@ def build_semantic_capabilities(
         unavailable_reason = "notes_semantic_active_note_limit_exceeded"
     elif contract.metric != "cosine":
         unavailable_reason = "notes_semantic_metric_unsupported"
-    elif contract.credential_source != "durable":
-        unavailable_reason = "notes_semantic_durable_credentials_unavailable"
     elif provider_key == "unavailable" or safe_model is None or model_revision_invalid:
         unavailable_reason = "notes_semantic_provider_unavailable"
+    elif contract.credential_source != "durable":
+        unavailable_reason = "notes_semantic_durable_credentials_unavailable"
     elif endpoint_display is None:
         unavailable_reason = "notes_semantic_endpoint_unavailable"
     elif not contract.provider_healthy:

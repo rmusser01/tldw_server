@@ -16,7 +16,10 @@ from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
 )
 from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
 from tldw_Server_API.app.core.Jobs.manager import JobManager
-from tldw_Server_API.app.core.Notes_Graph.semantic_api import load_semantic_settings
+from tldw_Server_API.app.core.Notes_Graph.semantic_api import (
+    load_semantic_settings,
+    resolve_semantic_capabilities,
+)
 from tldw_Server_API.app.core.Notes_Graph.semantic_jobs import (
     JOB_DOMAIN,
     JOB_TYPE,
@@ -26,8 +29,9 @@ from tldw_Server_API.app.core.Notes_Graph.semantic_jobs import (
     semantic_writer_scope,
 )
 from tldw_Server_API.app.core.Notes_Graph.semantic_observability import (
+    aggregate_semantic_health_snapshots,
     emit_semantic_audit_event,
-    record_semantic_cleanup_metrics,
+    record_semantic_aggregate_metrics,
 )
 from tldw_Server_API.app.core.Notes_Graph.semantic_settings import SemanticIndexSettings
 from tldw_Server_API.app.services.notes_semantic_index_worker import (
@@ -69,8 +73,6 @@ class SemanticMaintenanceCoordinator:
         if type(limit) is not int or not 1 <= limit <= 100:
             raise ValueError("notes_semantic_maintenance_limit_invalid")
         claimed = dirty_admitted = failed_retries = cleanup_confirmed = 0
-        cleanup_claimed = cleanup_retries = 0
-        cleanup_ages: list[float] = []
         dirty_keys: set[tuple[object, object, object, object]] = set()
         for scope in self._scopes:
             remaining = limit - claimed
@@ -117,22 +119,9 @@ class SemanticMaintenanceCoordinator:
                 if len(cleanup) > remaining:
                     raise RuntimeError("notes_semantic_maintenance_budget_invalid")
                 claimed += len(cleanup)
-                cleanup_claimed += len(cleanup)
                 for claim in cleanup:
-                    created_at = getattr(claim, "created_at", None)
-                    if isinstance(created_at, datetime):
-                        cleanup_ages.append(max(0.0, (now - created_at).total_seconds()))
                     if await scope.cleanup_claim(claim):
                         cleanup_confirmed += 1
-                    else:
-                        cleanup_retries += 1
-        record_semantic_cleanup_metrics(
-            status="failed" if cleanup_retries else "success",
-            backend="unavailable",
-            backlog=max(0, cleanup_claimed - cleanup_confirmed),
-            retries=cleanup_retries,
-            oldest_age_seconds=max(cleanup_ages, default=0.0),
-        )
         return SemanticMaintenanceResult(
             claimed=claimed,
             dirty_admitted=dirty_admitted,
@@ -369,6 +358,15 @@ class _ProductionScope:
             )
         return False
 
+    def health_snapshot(self) -> Any:
+        """Read current capability drift and persisted backend health together."""
+
+        capabilities = resolve_semantic_capabilities(self._db, settings=self._settings)
+        return self._store.get_observability_snapshot(
+            self._dataset_id,
+            current_capability_revision=capabilities.capability_revision,
+        )
+
 
 async def _open_owner_database(owner_user_id: str) -> Any:
     user_id = int(owner_user_id)
@@ -394,6 +392,76 @@ class _MaintenanceRunner:
         self._users_repo = users_repo
         self._settings = settings
         self._owner_offset = 0
+        self._health_owner_offset = 0
+        self._health_after_dataset_id: str | None = None
+        self._health_snapshots: tuple[Any, ...] = ()
+        self._single_slot_health_turn = False
+
+    def _reset_health_sweep(self) -> None:
+        self._health_owner_offset = 0
+        self._health_after_dataset_id = None
+        self._health_snapshots = ()
+
+    async def _run_health_sweep_page(self, *, now: datetime, limit: int) -> None:
+        """Advance one bounded full-store sweep and publish only complete totals."""
+
+        remaining = min(limit, 100)
+        while remaining > 0:
+            users, total = await self._users_repo.list_users(
+                offset=self._health_owner_offset,
+                limit=1,
+            )
+            if not users:
+                record_semantic_aggregate_metrics(snapshots=self._health_snapshots, now=now)
+                self._reset_health_sweep()
+                return
+            owner = str(users[0].get("id") or "")
+            if not owner:
+                logger.warning("Notes semantic health owner was invalid")
+                self._reset_health_sweep()
+                return
+            db = None
+            requested = remaining
+            try:
+                db = await _open_owner_database(owner)
+                datasets = await asyncio.to_thread(
+                    db.note_semantic_store.list_observability_dataset_ids,
+                    limit=requested,
+                    after_dataset_id=self._health_after_dataset_id,
+                )
+                snapshot_values = []
+                for dataset_id in datasets:
+                    snapshot_values.append(
+                        await asyncio.to_thread(
+                            _ProductionScope(
+                                db=db,
+                                jobs=self._jobs,
+                                owner_user_id=owner,
+                                dataset_id=dataset_id,
+                                settings=self._settings,
+                            ).health_snapshot
+                        )
+                    )
+                snapshots = tuple(snapshot_values)
+            except _MAINTENANCE_ERRORS:
+                logger.warning("Notes semantic health aggregation failed safely")
+                self._reset_health_sweep()
+                return
+            finally:
+                if db is not None:
+                    await asyncio.to_thread(_close_database, db)
+            if snapshots:
+                self._health_snapshots = aggregate_semantic_health_snapshots((*self._health_snapshots, *snapshots))
+                self._health_after_dataset_id = datasets[-1]
+            remaining -= max(1, len(snapshots))
+            if len(datasets) == requested:
+                return
+            self._health_owner_offset += 1
+            self._health_after_dataset_id = None
+            if self._health_owner_offset >= total:
+                record_semantic_aggregate_metrics(snapshots=self._health_snapshots, now=now)
+                self._reset_health_sweep()
+                return
 
     async def run_pass(
         self,
@@ -402,8 +470,15 @@ class _MaintenanceRunner:
         limit: int,
     ) -> SemanticMaintenanceResult:
         aggregate = SemanticMaintenanceResult(0, 0, 0, 0)
+        if limit == 1 and self._single_slot_health_turn:
+            self._single_slot_health_turn = False
+            await self._run_health_sweep_page(now=now, limit=1)
+            return aggregate
+        if limit == 1:
+            self._single_slot_health_turn = True
         discovery_used = 0
-        page_limit = min(limit, 100)
+        maintenance_limit = max(1, limit - 1)
+        page_limit = min(maintenance_limit, 100)
         users, total = await self._users_repo.list_users(
             offset=self._owner_offset,
             limit=page_limit,
@@ -413,7 +488,7 @@ class _MaintenanceRunner:
             users, total = await self._users_repo.list_users(offset=0, limit=page_limit)
         processed_users = 0
         for user in users:
-            if discovery_used + aggregate.claimed >= limit:
+            if discovery_used + aggregate.claimed >= maintenance_limit:
                 break
             discovery_used += 1
             processed_users += 1
@@ -423,7 +498,7 @@ class _MaintenanceRunner:
             db = None
             try:
                 db = await _open_owner_database(owner)
-                remaining = limit - discovery_used - aggregate.claimed
+                remaining = maintenance_limit - discovery_used - aggregate.claimed
                 dataset_limit = min(remaining // 2, 100)
                 if dataset_limit <= 0:
                     continue
@@ -432,7 +507,7 @@ class _MaintenanceRunner:
                     limit=dataset_limit,
                 )
                 discovery_used += min(len(datasets), remaining)
-                remaining = limit - discovery_used - aggregate.claimed
+                remaining = maintenance_limit - discovery_used - aggregate.claimed
                 if remaining <= 0:
                     continue
                 scopes = tuple(
@@ -467,6 +542,8 @@ class _MaintenanceRunner:
             self._owner_offset = (self._owner_offset + max(processed_users, 1)) % total
         else:
             self._owner_offset = 0
+        if limit > 1:
+            await self._run_health_sweep_page(now=now, limit=1)
         return aggregate
 
 

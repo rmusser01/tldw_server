@@ -338,6 +338,76 @@ async def test_disclosure_only_drift_keeps_active_vectors_readable_but_pauses_up
     assert result.semantic_status.detail_reason == "stale_configuration"
 
 
+@pytest.mark.parametrize(
+    "unavailable_reason",
+    [
+        "notes_semantic_provider_unavailable",
+        "notes_semantic_vector_storage_unavailable",
+    ],
+)
+@pytest.mark.asyncio
+async def test_same_revision_capability_pause_keeps_vectors_readable_but_is_not_ready(
+    projection_parts,
+    unavailable_reason: str,
+) -> None:
+    _source, _target, store, vectors = projection_parts
+    projector, _graph_service, _factory_calls = _projector(
+        store=store,
+        vectors=vectors,
+        ordinary=_ordinary_response(),
+    )
+    projector._capability_resolver = lambda: SimpleNamespace(
+        compatibility_hash=store.config.compatibility_hash,
+        capability_revision=store.config.capability_revision,
+        indexing_available=False,
+        unavailable_reason=unavailable_reason,
+        provider_label="unavailable",
+        model="unconfigured",
+        model_revision=None,
+    )
+
+    result = await projector.project(
+        NoteGraphRequest(
+            center_note_id="focus-note",
+            edge_types=[EdgeType.semantic],
+        ),
+        _ordinary_response(),
+        user=SimpleNamespace(id_str="owner-a"),
+    )
+
+    assert any(edge.type is EdgeType.semantic for edge in result.edges)
+    assert result.semantic_status is not None
+    assert result.semantic_status.available is True
+    assert result.semantic_status.state == "needs_attention"
+    assert result.semantic_status.detail_reason == unavailable_reason
+
+
+@pytest.mark.asyncio
+async def test_current_capability_with_complete_integrity_is_ready(
+    projection_parts,
+) -> None:
+    _source, _target, store, vectors = projection_parts
+    projector, _graph_service, _factory_calls = _projector(
+        store=store,
+        vectors=vectors,
+        ordinary=_ordinary_response(),
+    )
+
+    result = await projector.project(
+        NoteGraphRequest(
+            center_note_id="focus-note",
+            edge_types=[EdgeType.semantic],
+        ),
+        _ordinary_response(),
+        user=SimpleNamespace(id_str="owner-a"),
+    )
+
+    assert any(edge.type is EdgeType.semantic for edge in result.edges)
+    assert result.semantic_status is not None
+    assert result.semantic_status.state == "ready"
+    assert result.semantic_status.detail_reason is None
+
+
 @pytest.mark.asyncio
 async def test_unresolved_live_capability_preserves_persisted_vector_provenance(
     projection_parts,
@@ -536,6 +606,38 @@ async def test_projector_records_bounded_query_counts_and_latency(
     assert observations[0]["filtered_count"] == 1
     assert observations[0]["admitted_count"] == 1
     assert float(observations[0]["duration_seconds"]) >= 0
+
+
+@pytest.mark.asyncio
+async def test_graph_request_does_not_publish_global_health_gauges(
+    projection_parts,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _source, _target, store, vectors = projection_parts
+    observations: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        semantic_projector,
+        "record_semantic_health_metrics",
+        lambda **kwargs: observations.append(dict(kwargs)),
+        raising=False,
+    )
+    projector, _graph_service, _factory_calls = _projector(
+        store=store,
+        vectors=vectors,
+        ordinary=_ordinary_response(),
+    )
+
+    result = await projector.project(
+        NoteGraphRequest(
+            center_note_id="focus-note",
+            edge_types=[EdgeType.semantic],
+        ),
+        _ordinary_response(),
+        user=SimpleNamespace(id_str="owner-a"),
+    )
+
+    assert any(edge.type is EdgeType.semantic for edge in result.edges)
+    assert observations == []
 
 
 @pytest.mark.asyncio
