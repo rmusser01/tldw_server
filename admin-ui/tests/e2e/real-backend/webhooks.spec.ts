@@ -208,6 +208,20 @@ const postProxyJson = async <T>(page: Page, path: string, body: unknown): Promis
   { requestPath: path, requestBody: body },
 ) as Promise<T>;
 
+const waitForDeliveryCapability = async (page: Page): Promise<void> => {
+  await expect.poll(async () => page.evaluate(async () => {
+    const response = await fetch('/api/proxy/admin/webhooks/status', {
+      credentials: 'include',
+    });
+    const body = await response.json().catch(() => null) as {
+      delivery_capability_ready?: boolean;
+    } | null;
+    return response.ok && body?.delivery_capability_ready === true
+      ? 'ready'
+      : `${response.status}:${JSON.stringify(body)}`;
+  }), { timeout: 30_000 }).toBe('ready');
+};
+
 const removeExistingRegistrations = async (page: Page): Promise<void> => {
   await page.evaluate(async () => {
     const listResponse = await fetch('/api/proxy/admin/webhooks?limit=100&offset=0', {
@@ -283,11 +297,7 @@ test('proves the canonical webhook lifecycle against the real backend and receiv
     );
     await seededSession.as('admin', 'jwt_admin');
 
-    await expect.poll(async () => page.evaluate(async () => {
-      const response = await fetch('/api/proxy/admin/webhooks/status', { credentials: 'include' });
-      const body = await response.json().catch(() => null) as { delivery_capability_ready?: boolean } | null;
-      return response.ok && body?.delivery_capability_ready === true;
-    }), { timeout: 30_000 }).toBe(true);
+    await waitForDeliveryCapability(page);
 
     await removeExistingRegistrations(page);
     await page.goto('/incidents');
@@ -297,9 +307,10 @@ test('proves the canonical webhook lifecycle against the real backend and receiv
       (window as Window & { __tldwAdminE2EDocumentSentinel?: string })
         .__tldwAdminE2EDocumentSentinel = sentinel;
     }, documentSentinel);
-    await page.locator('a[href="/webhooks"]').first().evaluate((link: HTMLAnchorElement) => {
-      link.click();
-    });
+    const webhooksLink = page.locator('a[href="/webhooks"]').first();
+    await webhooksLink.scrollIntoViewIfNeeded();
+    await webhooksLink.hover();
+    await webhooksLink.click();
     await expect(page).toHaveURL(/\/webhooks$/u);
     await expect(page.getByRole('heading', { name: /^webhooks$/i })).toBeVisible();
     await expect.poll(() => page.evaluate(() => (
@@ -351,6 +362,7 @@ test('proves the canonical webhook lifecycle against the real backend and receiv
     const registrationRow = page.getByRole('row').filter({ hasText: description });
     await expect(registrationRow).toContainText('Inactive');
     await expect(page.getByText(receiver.url, { exact: true })).toHaveCount(0);
+    await waitForDeliveryCapability(page);
     await registrationRow.getByRole('button', { name: /^enable$/i }).click();
     await approvePrivilegedAction(page, /^enable webhook$/i, /^enable webhook$/i);
     await expect(registrationRow).toContainText('Active');

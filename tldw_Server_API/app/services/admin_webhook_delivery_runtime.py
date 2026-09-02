@@ -360,10 +360,9 @@ async def _worker_pre_acquire(
     components: object,
     instance_id: str | None = None,
 ) -> bool:
-    now = components.clock()
     worker_instance_id = instance_id or components.worker_instance_id
     try:
-        status = await components.capability.status(now)
+        status = await components.capability.status(components.clock())
         ready = bool(status.acquisition_ready)
         reason = status.acquisition_reason_code
     except Exception:  # noqa: BLE001 - acquisition is fail-closed
@@ -376,9 +375,25 @@ async def _worker_pre_acquire(
         instance_id=worker_instance_id,
         ready=ready,
         reason_code=None if ready else reason,
-        now=now,
+        now=components.clock(),
     )
     return ready and heartbeat_written
+
+
+async def _run_worker_heartbeat_loop(
+    stop_event: asyncio.Event,
+    components: object,
+    instance_id: str,
+) -> None:
+    """Refresh worker health independently of polling and handler execution."""
+
+    loop = asyncio.get_running_loop()
+    interval = float(components.settings.delivery_heartbeat_interval_seconds)
+    while not stop_event.is_set():
+        started_at = loop.time()
+        await _worker_pre_acquire(components, instance_id)
+        delay = max(0.0, interval - (loop.time() - started_at))
+        await _wait_interruptibly(stop_event, delay)
 
 
 async def _run_worker_loop(
@@ -394,13 +409,20 @@ async def _run_worker_loop(
             await _worker_pre_acquire(components, worker_instance_id)
             return
         if generation.worker_sdk is None or generation.worker_handler is None:
-            while not stop_event.is_set():
-                await _worker_pre_acquire(components, worker_instance_id)
-                await _wait_interruptibly(
-                    stop_event,
-                    components.settings.delivery_loop_interval_seconds,
-                )
+            await _run_worker_heartbeat_loop(
+                stop_event,
+                components,
+                worker_instance_id,
+            )
             return
+        heartbeat_task = asyncio.create_task(
+            _run_worker_heartbeat_loop(
+                stop_event,
+                components,
+                worker_instance_id,
+            ),
+            name="admin_webhook_delivery_worker_heartbeat",
+        )
         run_task = asyncio.create_task(
             generation.worker_sdk.run_prepared(
                 handler=generation.worker_handler,
@@ -420,16 +442,24 @@ async def _run_worker_loop(
         )
         try:
             done, _pending = await asyncio.wait(
-                {run_task, stop_task},
+                {heartbeat_task, run_task, stop_task},
                 return_when=asyncio.FIRST_COMPLETED,
             )
             if run_task in done:
                 await run_task
+            if heartbeat_task in done:
+                await heartbeat_task
         finally:
             generation.worker_sdk.stop()
             if not stop_task.done():
                 stop_task.cancel()
-            await asyncio.gather(stop_task, return_exceptions=True)
+            if not heartbeat_task.done():
+                heartbeat_task.cancel()
+            await asyncio.gather(
+                heartbeat_task,
+                stop_task,
+                return_exceptions=True,
+            )
             if not run_task.done():
                 await run_task
     finally:
