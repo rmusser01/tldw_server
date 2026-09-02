@@ -13,8 +13,10 @@ profile lookup or decryption.
 - `POST /scopes/workspace` requires access to the matching user-owned server
   workspace and creates encrypted server-local workspace mapping metadata with
   the canonical scope. A canonical workspace scope received through Sync may be
-  stored without that mapping and remains unavailable to server runtime
-  selection until it is mapped separately.
+  stored without that mapping and remain unbound. The stored mapping is
+  resolvable for API or extension use, but no shipped canonical Personal Context
+  server runtime or context-injection consumer currently calls
+  `workspace_id_for_scope()` to use it.
 - Server records must be syncable. `device_only` records belong to Chatbook and
   are rejected by this API.
 - Record and scope writes advance the manifest revision transactionally.
@@ -74,8 +76,9 @@ shipped import/restore caller, and **Finish secure removal** retries canonical
 profile-key cleanup only.
 
 Global deletion requires `DELETE EVERYWHERE` and the current purge generation.
-It advances the generation barrier transactionally, removes readable canonical
-bodies and server-local runtime state, and leaves the profile in
+It advances the generation barrier transactionally and retains the advanced
+readable manifest head/version as the purge fence while deleting non-manifest
+canonical heads and bodies plus server-local runtime state. The profile remains in
 `purge_pending`. The endpoint does not publish a `personal_context.purge`
 envelope, and synchronization acknowledgement completion is not implemented.
 Mutations that authenticate, validate, resolve their owned objects, and reach
@@ -94,12 +97,13 @@ registration, capability negotiation, bootstrap, and reviewed link completion
 remain under `/api/v1/sync` rather than `/api/v1/personal-context`.
 
 API-created workspace scopes and Sync-received workspace scopes also differ at
-the server-local runtime boundary. `POST /scopes/workspace` proves ownership and
-atomically stores encrypted mapping metadata. Inbound Sync materializes the
-canonical scope but does not invent a server workspace binding; an unbound scope
-cannot be selected by server runtime. No current API maps an existing inbound
-scope; integrations must not assume runtime access until a supported mapping
-workflow is added.
+the peer-local mapping boundary. `POST /scopes/workspace` proves ownership and
+atomically stores encrypted mapping metadata that APIs or extensions can
+resolve. Inbound Sync materializes the canonical scope but does not invent a
+server workspace binding, so that scope can remain unbound. No current API maps
+an existing inbound scope, and no shipped canonical Personal Context server
+runtime or context-injection consumer currently calls `workspace_id_for_scope()`
+to use this mapping.
 
 The shipped first-link path supports capability negotiation, registered-device
 bootstrap, a content-free reviewed reconciliation plan, link completion, and

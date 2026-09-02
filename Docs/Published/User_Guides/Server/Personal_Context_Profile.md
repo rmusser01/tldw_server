@@ -76,10 +76,11 @@ reference](../../API-related/Personal_Context_API.md).
    creates the one allowed manifest and its required global scope.
    `POST /api/v1/personal-context/scopes/workspace` requires an existing
    user-owned server workspace and creates encrypted server-local mapping
-   metadata for the new canonical scope. A canonical workspace scope received
-   through Sync can exist without that mapping and is unavailable to server
-   runtime selection. No current API maps an existing inbound scope; do not
-   assume runtime access until a supported mapping workflow is added.
+   metadata for the new canonical scope that APIs or extensions can resolve.
+   A canonical workspace scope received through Sync can remain unbound. No
+   current API maps an existing inbound scope, and no shipped canonical
+   Personal Context server runtime or context-injection consumer currently
+   calls `workspace_id_for_scope()` to use this mapping.
 5. In Chatbook, create or unlock the profile through **Settings → Data &
    Privacy → My Profile**. Then activate and authenticate the server through
    **Settings → Overview → Advanced / Diagnostics → Switch Source / Server**.
@@ -179,10 +180,11 @@ registration. The server rejects purge requests with `mode: local_copy` as
 
 `POST /api/v1/personal-context/purge` is a global, currently incomplete
 operation. It requires `mode: everywhere`, the current purge generation, and
-the exact confirmation `DELETE EVERYWHERE`. It advances a server-local purge
-fence, removes canonical bodies and server runtime state, and leaves the profile
-in `purge_pending`. Mutations that reach the existing-profile writable boundary
-are then rejected with `profile_purge_pending`.
+the exact confirmation `DELETE EVERYWHERE`. It advances the server-local purge
+fence and retains the advanced readable manifest head/version as that fence. It
+deletes non-manifest canonical heads and bodies plus server runtime state and
+leaves the profile in `purge_pending`. Mutations that reach the existing-profile
+writable boundary are then rejected with `profile_purge_pending`.
 
 Manifest recreation is not a supported recovery path. Authentication, request
 validation, ownership, or object lookup can fail before the writable-profile

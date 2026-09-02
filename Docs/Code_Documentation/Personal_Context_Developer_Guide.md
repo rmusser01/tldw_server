@@ -103,7 +103,7 @@ All paths below are relative to the repository root.
 | `tldw_Server_API/app/core/DB_Management/Personal_Context_Repository.py` | Real canonical object SQL owner, including encryption, version/head CAS, semantic uniqueness, key rotation, and purge fencing. |
 | `tldw_Server_API/app/core/Personalization/personal_context_service.py` | Canonical authenticated business boundary for reads, mutations, bootstrap snapshots, inbound Sync projection, exports, and purge. |
 | `tldw_Server_API/app/core/Personalization/personal_context_export.py` | Explicit-confirmation plaintext export and passphrase-encrypted recovery export helpers. |
-| `tldw_Server_API/app/core/Personalization/personal_context_runtime_policy.py` | Encrypted server-local runtime enablement and workspace mapping models. |
+| `tldw_Server_API/app/core/Personalization/personal_context_runtime_policy.py` | Encrypted peer-local enablement and workspace mapping metadata models; their presence does not imply a shipped runtime consumer. |
 | `tldw_Server_API/app/core/Sync/v2/profile.py` | Capability-gated bootstrap, dataset binding, registered-device integrity-key wrapping, and reviewed link completion. |
 | `tldw_Server_API/app/core/Sync/v2/domain_adapters/personal_context.py` | Whole-object transport validation, HMAC verification, lineage checks, and encryption before Sync persistence. |
 | `tldw_Server_API/app/core/Sync/v2/materializers/personal_context.py` | Inbound accepted-envelope projection through the authenticated owner service, with content-free failure/conflict outcomes. |
@@ -133,10 +133,13 @@ materialization. The REST path proves that the authenticated user owns the
 server workspace and atomically stores encrypted `WorkspaceRuntimePolicy`
 mapping metadata with the new scope. The Sync apply path can accept a canonical
 workspace scope without creating or guessing that peer-local mapping. Such an
-unbound scope remains canonical storage but `workspace_id_for_scope()` cannot
-make it available to server runtime selection. There is no current API for
-mapping an existing inbound scope; future integration work must add an explicit
-mapping workflow rather than infer one from canonical scope identity.
+unbound scope remains canonical storage. `workspace_id_for_scope()` can resolve
+stored mapping metadata for API or extension use, but no shipped canonical
+Personal Context server runtime or context-injection consumer currently calls it. There is
+no current API for mapping an existing inbound scope; future integration work
+must add an explicit mapping workflow rather than infer one from canonical scope
+identity. The legacy `load_companion_context()` builder has no production caller,
+reads separate companion data, and is not a canonical Personal Context consumer.
 
 Both plaintext and recovery exports serialize the same narrow snapshot shape:
 the current manifest, selected scopes, and records. Recovery mode includes all
@@ -203,8 +206,9 @@ completion is absent.
 
 The `personal_context.purge` domain, adapter validation, and inbound service
 projection exist. The REST purge endpoint only advances the server-local
-canonical generation fence, deletes readable server bodies and runtime state,
-and leaves the profile in `purge_pending`. A mutation returns
+canonical generation fence, retains the advanced readable manifest head/version
+as that fence, deletes non-manifest canonical heads and bodies plus runtime
+state, and leaves the profile in `purge_pending`. A mutation returns
 `profile_purge_pending` only after authentication, request validation, ownership
 or object resolution, and entry into the existing-profile writable boundary.
 Manifest recreation is unsupported because surviving profile state prevents a
