@@ -904,11 +904,6 @@ class JobManager:
         data = dict(row)
         data.pop("singleton_id", None)
         data["revision"] = int(data.get("revision") or 0)
-        owner_id = data.get("after_owner_id")
-        if owner_id is not None:
-            with contextlib.suppress(TypeError, ValueError):
-                owner_id = int(owner_id)
-        data["after_owner_id"] = owner_id
         for field_name in ("updated_at", "last_completed_at"):
             value = _parse_dt(data.get(field_name))
             if value is not None:

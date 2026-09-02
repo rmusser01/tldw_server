@@ -451,6 +451,7 @@ async def test_corrupt_health_checkpoint_resets_without_partial_publication(
     jobs = JobManager(tmp_path / "semantic-health-corrupt.db")
     valid_totals = serialize_semantic_health_snapshots(aggregate_semantic_health_snapshots(()))
     with sqlite3.connect(jobs.db_path) as conn:
+        conn.execute("PRAGMA ignore_check_constraints=ON")
         if corruption == "totals":
             conn.execute(
                 "UPDATE notes_semantic_health_sweep SET totals_json=? WHERE singleton_id=1",
@@ -494,6 +495,108 @@ async def test_corrupt_health_checkpoint_resets_without_partial_publication(
         users_repo=Users(),
         settings=SemanticIndexSettings(),
     )._run_health_sweep_page(now=NOW, limit=2)
+    assert len(observations) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("after_owner_id", "after_dataset_id", "storage_class"),
+    (
+        (2.5, None, "real"),
+        ("2_0", None, "text"),
+        ("true", None, "text"),
+        (sqlite3.Binary(b"2"), None, "blob"),
+        (0, None, "integer"),
+        (-1, None, "integer"),
+        (1, "   ", "integer"),
+        (1, " dataset-a", "integer"),
+        (1, "dataset-a ", "integer"),
+    ),
+    ids=(
+        "owner-real",
+        "owner-numeric-text",
+        "owner-boolean-like",
+        "owner-blob",
+        "owner-zero",
+        "owner-negative",
+        "dataset-whitespace",
+        "dataset-leading-space",
+        "dataset-trailing-space",
+    ),
+)
+async def test_raw_corrupt_health_cursor_resets_before_owner_access(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+    after_owner_id: object,
+    after_dataset_id: str | None,
+    storage_class: str,
+) -> None:
+    observations: list[tuple[object, ...]] = []
+    owner_accesses: list[str] = []
+
+    class Users:
+        async def list_users_for_semantic_health_sweep(self, **_kwargs: object):
+            owner_accesses.append("list")
+            return []
+
+        async def get_user_by_id(self, _user_id: int):
+            owner_accesses.append("get")
+            return {"id": 1}
+
+    class Store:
+        def list_observability_dataset_ids(self, **_kwargs: object):
+            owner_accesses.append("dataset")
+            return ()
+
+    async def open_database(_owner: str):
+        owner_accesses.append("open")
+        return SimpleNamespace(
+            note_semantic_store=Store(),
+            release_context_connection=lambda: None,
+        )
+
+    jobs = JobManager(tmp_path / "semantic-health-raw-corrupt.db")
+    valid_totals = serialize_semantic_health_snapshots(aggregate_semantic_health_snapshots(()))
+    with sqlite3.connect(jobs.db_path) as conn:
+        conn.execute("PRAGMA ignore_check_constraints=ON")
+        conn.execute(
+            "UPDATE notes_semantic_health_sweep SET after_owner_id=?,"
+            "after_dataset_id=?,totals_json=? WHERE singleton_id=1",
+            (after_owner_id, after_dataset_id, valid_totals),
+        )
+        assert conn.execute(
+            "SELECT typeof(after_owner_id) FROM notes_semantic_health_sweep WHERE singleton_id=1"
+        ).fetchone() == (storage_class,)
+
+    monkeypatch.setattr(notes_semantic_maintenance, "_open_owner_database", open_database)
+    monkeypatch.setattr(
+        notes_semantic_maintenance,
+        "record_semantic_aggregate_metrics",
+        lambda *, snapshots, now: observations.append(tuple(snapshots)),
+    )
+
+    await notes_semantic_maintenance._MaintenanceRunner(
+        jobs=jobs,
+        users_repo=Users(),
+        settings=SemanticIndexSettings(),
+    )._run_health_sweep_page(now=NOW, limit=2)
+
+    assert owner_accesses == []
+    assert observations == []
+    reset = JobManager(jobs.db_path).get_notes_semantic_health_sweep()
+    assert (reset["revision"], reset["after_owner_id"], reset["after_dataset_id"], reset["totals_json"]) == (
+        1,
+        None,
+        None,
+        "[]",
+    )
+
+    await notes_semantic_maintenance._MaintenanceRunner(
+        jobs=JobManager(jobs.db_path),
+        users_repo=Users(),
+        settings=SemanticIndexSettings(),
+    )._run_health_sweep_page(now=NOW, limit=2)
+    assert owner_accesses == ["list"]
     assert len(observations) == 1
 
 

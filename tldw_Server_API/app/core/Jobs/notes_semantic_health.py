@@ -76,12 +76,15 @@ def validate_notes_semantic_health_checkpoint(
         if after_dataset_id is not None or totals:
             raise ValueError("semantic health initial checkpoint must be empty")
         return totals
-    if isinstance(after_owner_id, bool) or not isinstance(after_owner_id, int) or after_owner_id <= 0:
+    if type(after_owner_id) is not int or after_owner_id <= 0:
         raise ValueError("semantic health owner id must be positive")
     if not totals:
         raise ValueError("semantic health in-progress checkpoint requires totals")
     if after_dataset_id is not None and (
-        not isinstance(after_dataset_id, str) or not after_dataset_id or len(after_dataset_id.encode("utf-8")) > 256
+        not isinstance(after_dataset_id, str)
+        or not after_dataset_id
+        or after_dataset_id != after_dataset_id.strip()
+        or len(after_dataset_id.encode("utf-8")) > 256
     ):
-        raise ValueError("semantic health dataset cursor must be bounded")
+        raise ValueError("semantic health dataset cursor must be canonical and bounded")
     return totals
