@@ -1,3 +1,7 @@
+import {
+  NOTES_GRAPH_SEMANTIC_MAX_TOP_K,
+  type NotesGraphEdge
+} from "@/services/note-graph-suggestions"
 import { Tooltip } from "antd"
 import { PanelLeftOpen } from "lucide-react"
 import React from "react"
@@ -95,6 +99,9 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
   const [viewMode, setViewMode] = React.useState<"canvas" | "relationships">(
     "canvas"
   )
+  const [selectedEdgeId, setSelectedEdgeId] = React.useState<string | null>(
+    null
+  )
   const [announcement, setAnnouncement] = React.useState({
     id: 0,
     message: ""
@@ -123,6 +130,14 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
     maxEdges,
     semanticManagementEnabled: true
   })
+  React.useEffect(() => {
+    if (
+      selectedEdgeId &&
+      !workspace.graph?.edges.some((edge) => edge.id === selectedEdgeId)
+    ) {
+      setSelectedEdgeId(null)
+    }
+  }, [selectedEdgeId, workspace.graph])
   const loadedNodeIds = React.useMemo(
     () => new Set(workspace.graph?.nodes.map((node) => node.id) ?? []),
     [workspace.graph]
@@ -167,6 +182,7 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
 
   const handleSelectNode = React.useCallback(
     (nodeId: string) => {
+      setSelectedEdgeId(null)
       setStoredSelection({
         authorityScope,
         controlledNodeId: normalizedSelectedId,
@@ -230,6 +246,20 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
       }
     },
     [announce, suggestions, t]
+  )
+  const handleCreateManualLink = React.useCallback(
+    async (edge: NotesGraphEdge) => {
+      try {
+        const succeeded = await workspace.createManualLink(edge)
+        if (!succeeded) throw new Error("manual link conversion unavailable")
+        announce(t("option:notesSearch.graphManualLinkCreated"))
+        return true
+      } catch {
+        announce(t("option:notesSearch.graphManualLinkFailed"))
+        return false
+      }
+    },
+    [announce, t, workspace]
   )
   const focusCurrent = React.useCallback(() => {
     const current = normalizeGraphNoteId(selectedNoteId)
@@ -307,6 +337,17 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
         allNotes={workspace.allNotes}
         visibleEdgeTypes={workspace.visibleEdgeTypes}
         showProvisional={showProvisional}
+        semanticAvailable={Boolean(
+          workspace.semanticIndex?.status?.active_generation_usable
+        )}
+        semanticEnabled={workspace.semantic.enabled}
+        semanticFocusRequired={workspace.semantic.focusRequired}
+        semanticTopK={workspace.semantic.topK}
+        semanticMaxTopK={
+          workspace.graph?.semantic_status?.max_top_k ??
+          NOTES_GRAPH_SEMANTIC_MAX_TOP_K
+        }
+        semanticThreshold={workspace.semantic.threshold}
         canExpand={workspace.canExpand}
         isRefreshing={workspace.graphQuery.isFetching}
         onSearchChange={workspace.setSearch}
@@ -319,6 +360,10 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
         onShowAllNotes={workspace.showAllNotes}
         onToggleEdgeType={workspace.toggleEdgeType}
         onToggleProvisional={() => setShowProvisional((visible) => !visible)}
+        onSemanticEnabledChange={workspace.semantic.setEnabled}
+        onSemanticTopKChange={workspace.semantic.setTopK}
+        onSemanticThresholdChange={workspace.semantic.setThreshold}
+        onSemanticReset={workspace.semantic.reset}
         onFocusCurrent={focusCurrent}
         onExpand={() => {
           void workspace.expand()
@@ -394,6 +439,7 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
                   }
                   showProvisional={suggestionsAuthorized && showProvisional}
                   onSelectNode={handleSelectNode}
+                  onSelectEdge={setSelectedEdgeId}
                 />
               </div>
             ) : (
@@ -406,6 +452,9 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
                 }
                 suggestions={suggestions.suggestions ?? []}
                 suggestionsAuthorized={suggestionsAuthorized}
+                manualLinkAuthorized={
+                  workspace.graph.manual_link_authorized === true
+                }
                 isOnline={isOnline}
                 canAccept={Boolean(
                   suggestions.capabilities?.allowed_actions.includes(
@@ -418,6 +467,8 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
                   ) && !isDecisionPending
                 )}
                 onSelectNode={handleFocusNode}
+                onSelectEdge={setSelectedEdgeId}
+                onCreateManualLink={handleCreateManualLink}
                 onDecideSuggestion={handleSuggestionDecision}
               />
             )}
@@ -428,13 +479,19 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
             <NotesGraphInspector
               graph={workspace.graph}
               selectedNodeId={currentSelectedNodeId}
+              selectedEdgeId={selectedEdgeId}
               suggestionsAuthorized={suggestionsAuthorized}
+              manualLinkAuthorized={
+                workspace.graph.manual_link_authorized === true
+              }
               isOnline={isOnline}
               controller={suggestions}
               semanticController={workspace.semanticIndex}
               semanticEnabled={workspace.semantic?.enabled ?? false}
               onSemanticEnabledChange={workspace.semantic?.setEnabled}
               onSelectNode={handleFocusNode}
+              onSelectEdge={setSelectedEdgeId}
+              onCreateManualLink={handleCreateManualLink}
               onAnnounce={announce}
               onDecideSuggestion={handleSuggestionDecision}
             />

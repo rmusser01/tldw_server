@@ -1,5 +1,6 @@
 import React from 'react'
 import { Modal, Input } from 'antd'
+import type { NotesGraphEdge } from '@/services/note-graph-suggestions'
 import type { NotesTitleSuggestStrategy, NotesNotebookSetting } from '@/services/settings/ui-settings'
 import { createSafeStorage } from '@/utils/safe-storage'
 import type { NotesStudioHandwritingMode, NotesStudioTemplateType } from './notes-studio-types'
@@ -251,6 +252,8 @@ export const getNotesGraphEdgeLabel = (rawType: string | null | undefined): stri
       return 'Tag'
     case 'source_membership':
       return 'Source'
+    case 'semantic':
+      return 'Similar content'
     default:
       return 'Connection'
   }
@@ -288,9 +291,62 @@ export const formatGraphEdgeTypeLabel = (edgeType: string | null | undefined): s
       return 'Tag'
     case 'source_membership':
       return 'Source'
+    case 'semantic':
+      return 'Similar content'
     default:
       return 'Connection'
   }
+}
+
+const GROUPED_NOTE_EDGE_TYPES = new Set(['manual', 'wikilink', 'semantic'])
+const GRAPH_EDGE_TYPE_ORDER: Record<string, number> = {
+  manual: 0,
+  wikilink: 1,
+  semantic: 2,
+  backlink: 3,
+  tag_membership: 4,
+  source_membership: 5
+}
+
+export type NotesGraphEdgeGroup = {
+  id: string
+  source: string
+  target: string
+  edges: NotesGraphEdge[]
+}
+
+export const groupNotesGraphEdgesByPair = (
+  edges: readonly NotesGraphEdge[]
+): NotesGraphEdgeGroup[] => {
+  const groups = new Map<string, NotesGraphEdgeGroup>()
+  edges.forEach((edge) => {
+    const canGroup =
+      GROUPED_NOTE_EDGE_TYPES.has(edge.type) &&
+      edge.source.startsWith('note:') &&
+      edge.target.startsWith('note:')
+    const pair = [edge.source, edge.target].sort()
+    const key = canGroup ? `pair:${pair[0]}:${pair[1]}` : `edge:${edge.id}`
+    const current = groups.get(key)
+    if (current) {
+      current.edges.push(edge)
+      return
+    }
+    groups.set(key, {
+      id: key,
+      source: canGroup ? pair[0] : edge.source,
+      target: canGroup ? pair[1] : edge.target,
+      edges: [edge]
+    })
+  })
+  return Array.from(groups.values()).map((group) => ({
+    ...group,
+    edges: [...group.edges].sort(
+      (left, right) =>
+        (GRAPH_EDGE_TYPE_ORDER[left.type] ?? 99) -
+          (GRAPH_EDGE_TYPE_ORDER[right.type] ?? 99) ||
+        left.id.localeCompare(right.id)
+    )
+  }))
 }
 
 const SOURCE_LABEL_BY_TYPE: Record<string, string> = {

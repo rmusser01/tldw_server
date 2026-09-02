@@ -6,11 +6,13 @@ import { getComputedTokens } from "@/themes/runtime-tokens"
 import cytoscape, { type Core, type ElementDefinition } from "cytoscape"
 import dagre from "cytoscape-dagre"
 import React from "react"
+import { useTranslation } from "react-i18next"
 
 import type { ProvisionalNotesGraphOverlay } from "./hooks/useNotesGraphSuggestions"
 import type { NotesGraphLayout } from "./hooks/useNotesGraphWorkspace"
 import {
   getNotesGraphEdgeLabel,
+  groupNotesGraphEdgesByPair,
   normalizeGraphNoteId
 } from "./notes-manager-utils"
 
@@ -32,6 +34,7 @@ type NotesGraphCanvasProps = {
   provisionalOverlays: ProvisionalNotesGraphOverlay[]
   showProvisional: boolean
   onSelectNode: (nodeId: string) => void
+  onSelectEdge?: (edgeId: string) => void
 }
 
 const layoutOptions = (layout: NotesGraphLayout) =>
@@ -58,7 +61,8 @@ const NotesGraphCanvas = React.forwardRef<
       visibleEdgeTypes,
       provisionalOverlays,
       showProvisional,
-      onSelectNode
+      onSelectNode,
+      onSelectEdge
     },
     ref
   ) => {
@@ -67,9 +71,12 @@ const NotesGraphCanvas = React.forwardRef<
     const focusNoteIdRef = React.useRef(focusNoteId)
     const selectedNodeIdRef = React.useRef(selectedNodeId)
     const onSelectNodeRef = React.useRef(onSelectNode)
+    const onSelectEdgeRef = React.useRef(onSelectEdge)
+    const { t } = useTranslation("option")
     focusNoteIdRef.current = focusNoteId
     selectedNodeIdRef.current = selectedNodeId
     onSelectNodeRef.current = onSelectNode
+    onSelectEdgeRef.current = onSelectEdge
 
     const syncNodeState = React.useCallback((cy: Core) => {
       if (typeof cy.$id !== "function") return
@@ -115,15 +122,42 @@ const NotesGraphCanvas = React.forwardRef<
         data: { ...node }
       }))
 
-      graph.edges.forEach((edge) => {
-        if (!visibleEdgeTypes.has(edge.type)) return
+      groupNotesGraphEdgesByPair(
+        graph.edges.filter((edge) => visibleEdgeTypes.has(edge.type))
+      ).forEach((group) => {
+        const edgeTypes = group.edges.map((edge) => edge.type)
+        const edgeIds = group.edges.map((edge) => edge.id)
+        const manual = group.edges.find((edge) => edge.type === "manual")
+        const semantic = group.edges.find((edge) => edge.type === "semantic")
+        const representative = manual ?? group.edges[0]
+        const displayTypes = manual
+          ? group.edges.filter((edge) => edge.type !== "semantic")
+          : group.edges
+        const displayLabel =
+          displayTypes.length === 1 && semantic && !manual
+            ? `${semantic.evidence?.similarity.toFixed(3) ?? semantic.weight?.toFixed(3) ?? ""} ${t(
+                "notesSearch.graphPassageSimilarityShort",
+                { defaultValue: "passage similarity" }
+              )}`
+            : displayTypes
+                .map(
+                  (edge) =>
+                    edge.label?.trim() || getNotesGraphEdgeLabel(edge.type)
+                )
+                .join(" · ")
         elements.push({
           data: {
-            ...edge,
-            directed: String(edge.directed),
-            displayLabel:
-              edge.label?.trim() || getNotesGraphEdgeLabel(edge.type)
-          }
+            ...representative,
+            id: group.id,
+            source: representative.source,
+            target: representative.target,
+            directed: String(representative.directed),
+            displayLabel,
+            edgeIds,
+            edgeTypes,
+            primaryEdgeId: representative.id
+          },
+          classes: semantic && !manual ? "semantic" : undefined
         })
       })
 
@@ -214,6 +248,14 @@ const NotesGraphCanvas = React.forwardRef<
             }
           },
           {
+            selector: "edge.semantic",
+            style: {
+              "line-color": tokens.accent,
+              "line-style": "dotted",
+              width: 2
+            }
+          },
+          {
             selector: 'edge[directed="true"]',
             style: { "target-arrow-shape": "triangle" }
           },
@@ -247,6 +289,11 @@ const NotesGraphCanvas = React.forwardRef<
         if (event.target.hasClass("provisional")) return
         onSelectNodeRef.current(event.target.id())
       })
+      cy.on("tap", "edge", (event) => {
+        if (event.target.hasClass("provisional")) return
+        const edgeId = event.target.data("primaryEdgeId")
+        if (typeof edgeId === "string") onSelectEdgeRef.current?.(edgeId)
+      })
       cy.on("mouseover", "node", (event) =>
         event.target.addClass("graph-label-hovered")
       )
@@ -276,13 +323,49 @@ const NotesGraphCanvas = React.forwardRef<
     }, [focusNoteId, selectedNodeId, syncNodeState])
 
     return (
-      <div
-        ref={containerRef}
-        className="h-full w-full bg-bg"
-        data-testid="notes-graph-canvas"
-        role="img"
-        aria-label="Notes graph canvas"
-      />
+      <div className="relative h-full min-w-0">
+        <div
+          ref={containerRef}
+          className="h-full w-full bg-bg"
+          data-testid="notes-graph-canvas"
+          role="img"
+          aria-label={t("notesSearch.graphCanvasAria", {
+            defaultValue: "Notes graph canvas"
+          })}
+        />
+        <ul
+          data-testid="notes-graph-edge-legend"
+          aria-label={t("notesSearch.graphEdgeLegend", {
+            defaultValue: "Relationship legend"
+          })}
+          className="absolute bottom-2 left-2 flex max-w-[calc(100%-1rem)] flex-wrap gap-x-3 gap-y-1 border border-border bg-elevated px-2 py-1 text-xs text-text shadow-sm motion-reduce:transition-none">
+          <li className="flex items-center gap-1.5">
+            <span
+              className="w-5 border-t-2 border-text-muted"
+              aria-hidden="true"
+            />
+            {t("notesSearch.graphLegendAuthoritative", {
+              defaultValue: "Authoritative"
+            })}
+          </li>
+          <li className="flex items-center gap-1.5">
+            <span
+              className="w-5 border-t-2 border-dotted border-accent"
+              aria-hidden="true"
+            />
+            {t("notesSearch.graphSimilarContent", {
+              defaultValue: "Similar content"
+            })}
+          </li>
+          <li className="flex items-center gap-1.5">
+            <span
+              className="w-5 border-t-2 border-dashed border-warn"
+              aria-hidden="true"
+            />
+            {t("notesSearch.graphSuggestions", { defaultValue: "Suggestions" })}
+          </li>
+        </ul>
+      </div>
     )
   }
 )

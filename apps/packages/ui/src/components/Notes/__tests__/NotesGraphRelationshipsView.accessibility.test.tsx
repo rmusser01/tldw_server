@@ -4,6 +4,7 @@ import React from "react"
 import { describe, expect, it, vi } from "vitest"
 
 import NotesGraphRelationshipsView, {
+  NotesSemanticRelationshipDetails,
   buildNotesGraphRelationshipGroups
 } from "../NotesGraphRelationshipsView"
 
@@ -20,6 +21,19 @@ vi.mock("react-i18next", () => ({
         "notesSearch.graphStrongMatch": "Strong match",
         "notesSearch.graphSourceEvidence": "Source evidence",
         "notesSearch.graphTargetEvidence": "Target evidence",
+        "notesSearch.graphSimilarContent": "Similar content",
+        "notesSearch.graphPassageSimilarity": "Passage similarity: {{value}}",
+        "notesSearch.graphSimilarityBand.high": "High similarity",
+        "notesSearch.graphSemanticProviderModel": "{{provider}} / {{model}}",
+        "notesSearch.graphSemanticVersions":
+          "Source v{{source}}, target v{{target}}",
+        "notesSearch.graphSemanticGeneration": "Generation {{generation}}",
+        "notesSearch.graphEvidenceOmitted":
+          "Evidence omitted by response limit",
+        "notesSearch.graphCreateManualLink": "Create manual link",
+        "notesSearch.graphEdgeType.manual": "Manual link",
+        "notesSearch.graphEdgeType.wikilink": "Note link",
+        "notesSearch.graphEdgeType.semantic": "Similar content",
         "notesSearch.graphNextPage": "Next page",
         "notesSearch.graphPreviousPage": "Previous page",
         "notesSearch.graphAcceptSuggestion": "Accept {{title}}",
@@ -426,5 +440,204 @@ describe("NotesGraphRelationshipsView", () => {
     )
     expect(decide).toHaveBeenNthCalledWith(1, "accept", "s1")
     expect(decide).toHaveBeenNthCalledWith(2, "reject", "s1")
+  })
+
+  it("groups parallel relationship types while preserving semantic evidence and conversion", async () => {
+    const convert = vi.fn().mockResolvedValue(true)
+    const onSelectEdge = vi.fn()
+    const semantic = {
+      id: "semantic:a:b",
+      source: "note:a",
+      target: "note:b",
+      type: "semantic" as const,
+      directed: false,
+      weight: 0.8765,
+      label: null,
+      evidence: {
+        similarity: 0.8765,
+        qualitative_band: "high" as const,
+        source_note_id: "note:a",
+        target_note_id: "note:b",
+        source_content_version: 4,
+        target_content_version: 7,
+        generation_id: "generation-a",
+        semantic_index_revision: 9,
+        configuration_revision: 3,
+        normalization_version: "normalize-v1",
+        chunker_version: "chunk-v1",
+        provider_label: "Local provider",
+        model_label: "Embedding model",
+        model_revision: "model-r2",
+        excerpt_pairs: [
+          {
+            source: {
+              field: "content" as const,
+              start_code_point: 0,
+              end_code_point: 12,
+              text: "Source match"
+            },
+            target: {
+              field: "content" as const,
+              start_code_point: 0,
+              end_code_point: 12,
+              text: "Target match"
+            }
+          }
+        ]
+      }
+    }
+    const parallel = {
+      ...graph,
+      edges: [
+        {
+          id: "manual:a:b",
+          source: "note:a",
+          target: "note:b",
+          type: "manual" as const,
+          directed: false,
+          weight: 1,
+          label: null
+        },
+        {
+          id: "wikilink:a:b",
+          source: "note:a",
+          target: "note:b",
+          type: "wikilink" as const,
+          directed: false,
+          weight: 1,
+          label: null
+        },
+        semantic
+      ],
+      manual_link_authorized: true
+    }
+    const groups = buildNotesGraphRelationshipGroups({
+      graph: parallel,
+      selectedNodeId: "note:a",
+      provisionalOverlays: [],
+      suggestions: []
+    })
+    const beta = groups
+      .flatMap((group) => group.rows)
+      .find((row) => row.counterpart.id === "note:b")
+    expect(beta?.edgeIds).toEqual([
+      "manual:a:b",
+      "wikilink:a:b",
+      "semantic:a:b"
+    ])
+    expect(beta?.edgeTypes).toEqual(["manual", "wikilink", "semantic"])
+
+    const { unmount } = render(
+      <NotesGraphRelationshipsView
+        graph={parallel}
+        selectedNodeId="note:a"
+        provisionalOverlays={[]}
+        suggestions={[]}
+        suggestionsAuthorized={false}
+        manualLinkAuthorized
+        isOnline
+        onSelectNode={vi.fn()}
+        onSelectEdge={onSelectEdge}
+        onCreateManualLink={convert}
+      />
+    )
+
+    expect(screen.getAllByTestId("notes-graph-relationship-row")).toHaveLength(
+      1
+    )
+    expect(screen.getByText("Source match")).not.toBeVisible()
+    const disclosure = screen.getByTestId(
+      "notes-graph-semantic-evidence-toggle"
+    )
+    expect(disclosure).toHaveTextContent("High similarity")
+    expect(disclosure).toHaveTextContent("Passage similarity: 0.8765")
+    fireEvent.click(disclosure)
+    expect(screen.getByText("Local provider / Embedding model")).toBeVisible()
+    expect(screen.getByText("Source match")).toBeVisible()
+    expect(screen.getByText("Target match")).toBeVisible()
+    fireEvent.click(screen.getByRole("button", { name: "Similar content" }))
+    expect(onSelectEdge).toHaveBeenCalledWith("semantic:a:b")
+    expect(
+      screen.queryByRole("button", { name: "Create manual link" })
+    ).not.toBeInTheDocument()
+
+    unmount()
+    const semanticOnly = render(
+      <NotesGraphRelationshipsView
+        graph={{ ...parallel, edges: [semantic] }}
+        selectedNodeId="note:a"
+        provisionalOverlays={[]}
+        suggestions={[]}
+        suggestionsAuthorized={false}
+        manualLinkAuthorized
+        isOnline
+        onSelectNode={vi.fn()}
+        onSelectEdge={vi.fn()}
+        onCreateManualLink={convert}
+      />
+    )
+    fireEvent.click(screen.getByTestId("notes-graph-semantic-evidence-toggle"))
+    const convertButton = screen.getByRole("button", {
+      name: "Create manual link"
+    })
+    convertButton.focus()
+    fireEvent.click(convertButton)
+    expect(convert).toHaveBeenCalledWith(semantic, convertButton)
+
+    semanticOnly.unmount()
+    const detailsTab = document.createElement("button")
+    detailsTab.id = "notes-graph-details-tab"
+    document.body.append(detailsTab)
+    render(
+      <NotesSemanticRelationshipDetails
+        edge={semantic}
+        manualLinkAuthorized
+        isOnline
+        hasManualRelationship={false}
+        onCreateManualLink={convert}
+      />
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Create manual link" }))
+    await waitFor(() => expect(detailsTab).toHaveFocus())
+    detailsTab.remove()
+  })
+
+  it("hides conversion for readers and explains omitted semantic evidence", () => {
+    render(
+      <NotesGraphRelationshipsView
+        graph={{
+          ...graph,
+          manual_link_authorized: false,
+          edges: [
+            {
+              id: "semantic:omitted",
+              source: "note:a",
+              target: "note:b",
+              type: "semantic",
+              directed: false,
+              weight: 0.8,
+              label: null,
+              evidence_omitted: "response_byte_cap"
+            }
+          ]
+        }}
+        selectedNodeId="note:a"
+        provisionalOverlays={[]}
+        suggestions={[]}
+        suggestionsAuthorized={false}
+        manualLinkAuthorized={false}
+        isOnline
+        onSelectNode={vi.fn()}
+        onSelectEdge={vi.fn()}
+      />
+    )
+    expect(
+      screen.getByText("Evidence omitted by response limit")
+    ).not.toBeVisible()
+    fireEvent.click(screen.getByTestId("notes-graph-semantic-evidence-toggle"))
+    expect(screen.getByText("Evidence omitted by response limit")).toBeVisible()
+    expect(
+      screen.queryByRole("button", { name: "Create manual link" })
+    ).not.toBeInTheDocument()
   })
 })

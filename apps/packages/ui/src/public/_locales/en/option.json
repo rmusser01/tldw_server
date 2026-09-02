@@ -6664,5 +6664,86 @@
   },
   "notesSearch_semanticError_backendChangeRequiresDelete": {
     "message": "Vector storage changed. Delete the existing index before setting it up again."
+  },
+  "notesSearch_graphEdgeType_semantic": {
+    "message": "Similar content"
+  },
+  "notesSearch_graphCanvasAria": {
+    "message": "Notes relationship graph"
+  },
+  "notesSearch_graphEdgeLegend": {
+    "message": "Relationship line styles"
+  },
+  "notesSearch_graphLegendAuthoritative": {
+    "message": "Authoritative"
+  },
+  "notesSearch_graphPassageSimilarityShort": {
+    "message": "passage similarity"
+  },
+  "notesSearch_graphSemanticNeighbors": {
+    "message": "Neighbors"
+  },
+  "notesSearch_graphSemanticThreshold": {
+    "message": "Minimum passage similarity"
+  },
+  "notesSearch_graphSemanticReset": {
+    "message": "Reset Similar content controls"
+  },
+  "notesSearch_graphSemanticFocusRequired": {
+    "message": "Focus a Note to load similar content."
+  },
+  "notesSearch_graphPassageSimilarity": {
+    "message": "Passage similarity: {{value}}"
+  },
+  "notesSearch_graphSimilarityBand_low": {
+    "message": "Low similarity"
+  },
+  "notesSearch_graphSimilarityBand_moderate": {
+    "message": "Moderate similarity"
+  },
+  "notesSearch_graphSimilarityBand_high": {
+    "message": "High similarity"
+  },
+  "notesSearch_graphSimilarityBand_very_high": {
+    "message": "Very high similarity"
+  },
+  "notesSearch_graphSemanticProvider": {
+    "message": "Provider and model"
+  },
+  "notesSearch_graphSemanticProviderModel": {
+    "message": "{{provider}} / {{model}}"
+  },
+  "notesSearch_graphSemanticFreshness": {
+    "message": "Content freshness"
+  },
+  "notesSearch_graphSemanticVersions": {
+    "message": "Source v{{source}}, target v{{target}}"
+  },
+  "notesSearch_graphSemanticGenerationLabel": {
+    "message": "Generation"
+  },
+  "notesSearch_graphSemanticGeneration": {
+    "message": "Generation {{generation}}"
+  },
+  "notesSearch_graphSemanticIndexVersion": {
+    "message": "Index versions"
+  },
+  "notesSearch_graphSemanticIndexVersionValue": {
+    "message": "Index {{index}}, configuration {{configuration}}"
+  },
+  "notesSearch_graphEvidenceOmitted": {
+    "message": "Matched excerpts were omitted because the graph response reached its evidence limit."
+  },
+  "notesSearch_graphSemanticTruncated": {
+    "message": "Some similar relationships or matched excerpts were omitted because the graph reached a server limit."
+  },
+  "notesSearch_graphCreateManualLink": {
+    "message": "Create manual link"
+  },
+  "notesSearch_graphManualLinkCreated": {
+    "message": "Manual link created."
+  },
+  "notesSearch_graphManualLinkFailed": {
+    "message": "The manual link could not be created. Try again."
   }
 }

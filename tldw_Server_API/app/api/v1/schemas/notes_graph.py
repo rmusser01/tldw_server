@@ -243,6 +243,7 @@ class NoteGraphResponse(BaseModel):
     all_notes_note_cap: int = Field(..., ge=1)
     all_notes_eligible: bool
     suggestions_authorized: bool = False
+    manual_link_authorized: bool = False
     semantic_status: SemanticGraphStatus | None = None
 
     @model_serializer(mode="wrap")
@@ -298,6 +299,7 @@ class NoteGraphResponse(BaseModel):
                 "all_notes_note_cap": 100,
                 "all_notes_eligible": True,
                 "suggestions_authorized": False,
+                "manual_link_authorized": False,
             }
         }
     )

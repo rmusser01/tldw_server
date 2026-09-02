@@ -225,6 +225,7 @@ export type NotesGraphResponse = {
   all_notes_note_cap: number
   all_notes_eligible: boolean
   suggestions_authorized?: boolean
+  manual_link_authorized: boolean
   semantic_status?: NotesSemanticGraphStatus
 }
 
@@ -239,6 +240,23 @@ export type FetchNotesGraphInput = {
   cursor?: string
   semanticTopK?: number
   semanticThreshold?: number
+}
+
+export type CreateSemanticManualLinkInput = {
+  sourceNoteId: string
+  targetNoteId: string
+  datasetId?: string
+  generationId: string
+  idempotencyKey: string
+}
+
+export type NotesManualLinkMutationResponse = {
+  status: "created"
+  edge: {
+    edge_id: string
+    from_note_id: string
+    to_note_id: string
+  }
 }
 
 export type NotesGraphSuggestionCapabilityLimits = {
@@ -769,6 +787,7 @@ const graphResponseSchema = z
     all_notes_note_cap: z.number().int().min(1),
     all_notes_eligible: z.boolean(),
     suggestions_authorized: z.boolean().optional(),
+    manual_link_authorized: z.boolean().optional().default(false),
     semantic_status: semanticGraphStatusSchema.optional()
   })
   .superRefine((value, context) => {
@@ -841,6 +860,49 @@ export const fetchNotesGraph = async (
     method: "GET"
   })
   return normalizeGraph(payload)
+}
+
+const manualLinkMutationSchema = z.object({
+  status: z.literal("created"),
+  edge: z.object({
+    edge_id: idSchema,
+    from_note_id: idSchema,
+    to_note_id: idSchema
+  })
+})
+
+export const createSemanticManualLink = async (
+  input: CreateSemanticManualLinkInput
+): Promise<NotesManualLinkMutationResponse> => {
+  const parsed = parseInput(
+    z.strictObject({
+      sourceNoteId: inputIdSchema,
+      targetNoteId: inputIdSchema,
+      datasetId: datasetIdSchema.optional(),
+      generationId: boundedInputTextSchema(256),
+      idempotencyKey: boundedInputTextSchema(128)
+    }),
+    input
+  )
+  return parseResponseAs<NotesManualLinkMutationResponse>(
+    manualLinkMutationSchema,
+    await request<unknown>({
+      path: toAllowedPath(`/api/v1/notes/${pathId(parsed.sourceNoteId)}/links`),
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Idempotency-Key": parsed.idempotencyKey
+      },
+      body: {
+        to_note_id: parsed.targetNoteId,
+        directed: false,
+        weight: 1,
+        dataset_id: parsed.datasetId,
+        idempotency_key: parsed.idempotencyKey,
+        semantic_conversion: { generation_id: parsed.generationId }
+      }
+    })
+  )
 }
 
 const capabilitySchema = z.strictObject({

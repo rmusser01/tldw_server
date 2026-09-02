@@ -16,6 +16,7 @@ from tldw_Server_API.app.api.v1.schemas.notes_graph import (
     SemanticEdgeEvidence,
     SemanticGraphStatus,
 )
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.Notes_Graph.semantic_projector import (
     SemanticProjectionError,
 )
@@ -122,7 +123,35 @@ def test_ordinary_graph_does_not_build_semantic_runtime(
     )
 
     assert response.status_code == 200, response.text
-    assert "semantic_status" not in response.json()
+    body = response.json()
+    assert "semantic_status" not in body
+    assert body["suggestions_authorized"] is False
+    assert body["manual_link_authorized"] is True
+
+
+@pytest.mark.parametrize(
+    ("roles", "permissions", "suggestions_authorized", "manual_link_authorized"),
+    [
+        ([], ["notes.graph.suggest"], True, False),
+        ([], ["notes.graph.write"], False, True),
+        (["admin"], [], True, True),
+    ],
+)
+def test_graph_authority_bits_are_derived_from_distinct_verified_claims(
+    roles: list[str],
+    permissions: list[str],
+    suggestions_authorized: bool,
+    manual_link_authorized: bool,
+) -> None:
+    principal = AuthPrincipal(
+        kind="user",
+        user_id=7,
+        roles=roles,
+        permissions=permissions,
+    )
+
+    assert endpoint._suggestions_authorized(principal) is suggestions_authorized
+    assert endpoint._manual_link_authorized(principal) is manual_link_authorized
 
 
 def test_semantic_graph_is_awaited_and_rate_limited_only_when_requested(

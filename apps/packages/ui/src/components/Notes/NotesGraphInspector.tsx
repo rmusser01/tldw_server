@@ -1,6 +1,7 @@
 import IconButton from "@/components/Common/IconButton"
 import { useConfirmDanger } from "@/components/Common/confirm-danger"
 import type {
+  NotesGraphEdge,
   NotesGraphResponse,
   NotesGraphSuggestion
 } from "@/services/note-graph-suggestions"
@@ -16,23 +17,30 @@ import React from "react"
 import { useTranslation } from "react-i18next"
 
 import {
+  type NotesGraphManualLinkHandler,
   type NotesGraphSuggestionDecisionHandler,
   NotesGraphSuggestionReviewRow,
+  NotesSemanticRelationshipDetails,
   buildNotesGraphRelationshipGroups
 } from "./NotesGraphRelationshipsView"
 import type { NotesGraphSuggestionsController } from "./hooks/useNotesGraphSuggestions"
 import type { NotesSemanticIndexController } from "./hooks/useNotesSemanticIndex"
+import { getNotesGraphEdgeLabel } from "./notes-manager-utils"
 
 type NotesGraphInspectorProps = {
   graph: NotesGraphResponse
   selectedNodeId: string | null
+  selectedEdgeId?: string | null
   suggestionsAuthorized: boolean
+  manualLinkAuthorized?: boolean
   isOnline: boolean
   controller: NotesGraphSuggestionsController
   semanticController?: NotesSemanticIndexController
   semanticEnabled?: boolean
   onSemanticEnabledChange?: (enabled: boolean) => void
   onSelectNode: (nodeId: string) => void
+  onSelectEdge?: (edgeId: string) => void
+  onCreateManualLink?: NotesGraphManualLinkHandler
   onAnnounce: (message: string) => void
   onDecideSuggestion: NotesGraphSuggestionDecisionHandler
 }
@@ -83,17 +91,17 @@ const hasCompleteConsentDisclosure = (
     capability.dimension_probe_required
   return Boolean(
     capability.indexing_available &&
-    hasIdentity &&
-    capability.endpoint_display !== null &&
-    capability.endpoint_display.trim().length > 0 &&
-    capability.storage_boundary !== "unavailable" &&
-    capability.unavailable_reason === null &&
-    dimensionsAreCoherent &&
-    capability.outbound_data_categories.length ===
-      NOTES_SEMANTIC_OUTBOUND_DATA_CATEGORIES.length &&
-    NOTES_SEMANTIC_OUTBOUND_DATA_CATEGORIES.every((category) =>
-      outbound.has(category)
-    )
+      hasIdentity &&
+      capability.endpoint_display !== null &&
+      capability.endpoint_display.trim().length > 0 &&
+      capability.storage_boundary !== "unavailable" &&
+      capability.unavailable_reason === null &&
+      dimensionsAreCoherent &&
+      capability.outbound_data_categories.length ===
+        NOTES_SEMANTIC_OUTBOUND_DATA_CATEGORIES.length &&
+      NOTES_SEMANTIC_OUTBOUND_DATA_CATEGORIES.every((category) =>
+        outbound.has(category)
+      )
   )
 }
 
@@ -109,8 +117,8 @@ const semanticManagementActions = ({
   if (!capability?.manage_authorized || !status) return []
   const cleanupBlocked = Boolean(
     status.cleanup_pending ||
-    status.detail_reason === "cleanup_pending" ||
-    status.detail_reason === "cleanup_stalled"
+      status.detail_reason === "cleanup_pending" ||
+      status.detail_reason === "cleanup_stalled"
   )
   if (cleanupBlocked) return []
   if (activeRun) {
@@ -184,13 +192,17 @@ const semanticMutationErrorKey = (error: unknown): string => {
 const NotesGraphInspector: React.FC<NotesGraphInspectorProps> = ({
   graph,
   selectedNodeId,
+  selectedEdgeId = null,
   suggestionsAuthorized,
+  manualLinkAuthorized = false,
   isOnline,
   controller,
   semanticController,
   semanticEnabled = false,
   onSemanticEnabledChange,
   onSelectNode,
+  onSelectEdge,
+  onCreateManualLink,
   onAnnounce,
   onDecideSuggestion
 }) => {
@@ -216,6 +228,26 @@ const NotesGraphInspector: React.FC<NotesGraphInspectorProps> = ({
   const menuItemRef = React.useRef<HTMLButtonElement | null>(null)
   const selectedNode =
     graph.nodes.find((node) => node.id === selectedNodeId) ?? null
+  const selectedEdge =
+    graph.edges.find((edge) => edge.id === selectedEdgeId) ?? null
+  const selectedSemanticEdge =
+    selectedEdge?.type === "semantic" ? selectedEdge : null
+  const selectedEdgeNodes = selectedSemanticEdge
+    ? [
+        graph.nodes.find((node) => node.id === selectedSemanticEdge.source),
+        graph.nodes.find((node) => node.id === selectedSemanticEdge.target)
+      ]
+    : []
+  const selectedPairHasManual = selectedSemanticEdge
+    ? graph.edges.some(
+        (edge) =>
+          edge.type === "manual" &&
+          ((edge.source === selectedSemanticEdge.source &&
+            edge.target === selectedSemanticEdge.target) ||
+            (edge.source === selectedSemanticEdge.target &&
+              edge.target === selectedSemanticEdge.source))
+      )
+    : false
   const suggestions = controller.suggestions ?? []
   const capabilities = controller.capabilities ?? null
   const activeRun = controller.activeRun ?? null
@@ -232,6 +264,10 @@ const NotesGraphInspector: React.FC<NotesGraphInspectorProps> = ({
   React.useEffect(() => {
     if (!semanticController && tab === "semantic") setTab("details")
   }, [semanticController, tab])
+
+  React.useEffect(() => {
+    if (selectedEdgeId) setTab("details")
+  }, [selectedEdgeId])
 
   const semanticStatus = semanticController?.status ?? null
   const semanticCapabilities = semanticController?.capabilities ?? null
@@ -515,7 +551,32 @@ const NotesGraphInspector: React.FC<NotesGraphInspectorProps> = ({
           role="tabpanel"
           aria-labelledby="notes-graph-details-tab"
           className="p-3">
-          {selectedNode ? (
+          {selectedSemanticEdge ? (
+            <div className="min-w-0">
+              <h2 className="break-words text-base font-semibold">
+                {t("notesSearch.graphSimilarContent")}
+              </h2>
+              <p className="mt-1 break-words text-sm text-text-muted">
+                {selectedEdgeNodes
+                  .map((node) => node?.label ?? "")
+                  .filter(Boolean)
+                  .join(" / ")}
+              </p>
+              <NotesSemanticRelationshipDetails
+                edge={selectedSemanticEdge}
+                manualLinkAuthorized={manualLinkAuthorized}
+                isOnline={isOnline}
+                hasManualRelationship={selectedPairHasManual}
+                onCreateManualLink={onCreateManualLink}
+                showHeading={false}
+              />
+              {graph.semantic_status?.truncated_by.length ? (
+                <p className="mt-3 break-words text-xs text-warn" role="status">
+                  {t("notesSearch.graphSemanticTruncated")}
+                </p>
+              ) : null}
+            </div>
+          ) : selectedNode ? (
             <>
               <h2 className="break-words text-base font-semibold">
                 {selectedNode.label}
@@ -557,13 +618,29 @@ const NotesGraphInspector: React.FC<NotesGraphInspectorProps> = ({
                         {t(`notesSearch.graphRelationshipGroup.${group.id}`)}
                       </h4>
                       {group.rows.map((row) => (
-                        <button
-                          key={row.id}
-                          type="button"
-                          className="block min-h-11 w-full break-words text-left text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
-                          onClick={() => onSelectNode(row.counterpart.id)}>
-                          {row.counterpart.label}
-                        </button>
+                        <div key={row.id} className="border-b border-border/60">
+                          <button
+                            type="button"
+                            className="block min-h-11 w-full break-words text-left text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+                            onClick={() => onSelectNode(row.counterpart.id)}>
+                            {row.counterpart.label}
+                          </button>
+                          <div className="flex min-w-0 flex-wrap gap-1 pb-2">
+                            {row.edges.map((edge: NotesGraphEdge) => (
+                              <button
+                                key={edge.id}
+                                type="button"
+                                className="min-h-9 border border-border bg-surface px-2 text-xs focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+                                onClick={() => onSelectEdge?.(edge.id)}>
+                                {t(`notesSearch.graphEdgeType.${edge.type}`, {
+                                  defaultValue: getNotesGraphEdgeLabel(
+                                    edge.type
+                                  )
+                                })}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
                       ))}
                     </div>
                   ))
@@ -1033,10 +1110,10 @@ const NotesGraphInspector: React.FC<NotesGraphInspectorProps> = ({
           {suggestions.map((item) => {
             const title =
               item.kind === "related_note"
-                ? (item.target_title ?? t("notesSearch.graphSuggestedNote"))
-                : (item.display_tag ??
+                ? item.target_title ?? t("notesSearch.graphSuggestedNote")
+                : item.display_tag ??
                   item.normalized_tag ??
-                  t("notesSearch.graphSuggestedTag"))
+                  t("notesSearch.graphSuggestedTag")
             const tagPrefix =
               item.kind === "tag"
                 ? t(
