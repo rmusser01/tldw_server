@@ -138,10 +138,10 @@ stored mapping metadata for API or extension use, but no shipped canonical
 Personal Context server runtime or context-injection consumer currently calls
 it. There is no current API for mapping an existing inbound scope; future
 integration work must add an explicit mapping workflow rather than infer one
-from canonical scope identity. The legacy `load_companion_context()` builder is
-called by the legacy Companion and Persona endpoints, reads separate companion
-tables, and is not a canonical Personal Context consumer. Those callers do not
-establish a canonical Personal Context runtime or context-injection path.
+from canonical scope identity. The `load_companion_context()` builder and its
+Companion and Persona endpoint callers use the separate companion system and
+tables. They are not canonical Personal Context consumers and do not establish
+a canonical Personal Context runtime or context-injection path.
 
 Both plaintext and recovery exports serialize the same narrow snapshot shape:
 the current manifest, selected scopes, and records. Recovery mode includes all
