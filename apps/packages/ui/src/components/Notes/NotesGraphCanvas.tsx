@@ -11,7 +11,6 @@ import { useTranslation } from "react-i18next"
 import type { ProvisionalNotesGraphOverlay } from "./hooks/useNotesGraphSuggestions"
 import type { NotesGraphLayout } from "./hooks/useNotesGraphWorkspace"
 import {
-  getNotesGraphEdgeLabel,
   groupNotesGraphEdgesByPair,
   normalizeGraphNoteId
 } from "./notes-manager-utils"
@@ -72,11 +71,13 @@ const NotesGraphCanvas = React.forwardRef<
     const selectedNodeIdRef = React.useRef(selectedNodeId)
     const onSelectNodeRef = React.useRef(onSelectNode)
     const onSelectEdgeRef = React.useRef(onSelectEdge)
-    const { t } = useTranslation("option")
+    const { t, i18n } = useTranslation("option")
+    const translationRef = React.useRef(t)
     focusNoteIdRef.current = focusNoteId
     selectedNodeIdRef.current = selectedNodeId
     onSelectNodeRef.current = onSelectNode
     onSelectEdgeRef.current = onSelectEdge
+    translationRef.current = t
 
     const syncNodeState = React.useCallback((cy: Core) => {
       if (typeof cy.$id !== "function") return
@@ -118,6 +119,7 @@ const NotesGraphCanvas = React.forwardRef<
       if (!containerRef.current) return
 
       const tokens = getComputedTokens()
+      const translate = translationRef.current
       const elements: ElementDefinition[] = graph.nodes.map((node) => ({
         data: { ...node }
       }))
@@ -128,21 +130,27 @@ const NotesGraphCanvas = React.forwardRef<
         const edgeTypes = group.edges.map((edge) => edge.type)
         const edgeIds = group.edges.map((edge) => edge.id)
         const manual = group.edges.find((edge) => edge.type === "manual")
+        const structural =
+          manual ??
+          group.edges.find(
+            (edge) => edge.type === "wikilink" || edge.type === "backlink"
+          )
         const semantic = group.edges.find((edge) => edge.type === "semantic")
-        const representative = manual ?? group.edges[0]
+        const representative = structural ?? semantic ?? group.edges[0]
         const displayTypes = manual
           ? group.edges.filter((edge) => edge.type !== "semantic")
           : group.edges
         const displayLabel =
           displayTypes.length === 1 && semantic && !manual
-            ? `${semantic.evidence?.similarity.toFixed(3) ?? semantic.weight?.toFixed(3) ?? ""} ${t(
+            ? `${semantic.evidence?.similarity.toFixed(3) ?? semantic.weight?.toFixed(3) ?? ""} ${translate(
                 "notesSearch.graphPassageSimilarityShort",
                 { defaultValue: "passage similarity" }
               )}`
             : displayTypes
                 .map(
                   (edge) =>
-                    edge.label?.trim() || getNotesGraphEdgeLabel(edge.type)
+                    edge.label?.trim() ||
+                    translate(`notesSearch.graphEdgeType.${edge.type}`)
                 )
                 .join(" · ")
         elements.push({
@@ -157,7 +165,7 @@ const NotesGraphCanvas = React.forwardRef<
             edgeTypes,
             primaryEdgeId: representative.id
           },
-          classes: semantic && !manual ? "semantic" : undefined
+          classes: semantic && !structural ? "semantic" : undefined
         })
       })
 
@@ -174,7 +182,7 @@ const NotesGraphCanvas = React.forwardRef<
             data: {
               ...overlay.edge,
               directed: "false",
-              displayLabel: "Suggestion"
+              displayLabel: translate("notesSearch.graphSuggestions")
             },
             classes: "provisional"
           })
@@ -250,7 +258,7 @@ const NotesGraphCanvas = React.forwardRef<
           {
             selector: "edge.semantic",
             style: {
-              "line-color": tokens.accent,
+              "line-color": tokens.primary,
               "line-style": "dotted",
               width: 2
             }
@@ -310,6 +318,8 @@ const NotesGraphCanvas = React.forwardRef<
       }
     }, [
       graph,
+      i18n.language,
+      i18n.resolvedLanguage,
       layout,
       provisionalOverlays,
       showProvisional,
@@ -350,7 +360,8 @@ const NotesGraphCanvas = React.forwardRef<
           </li>
           <li className="flex items-center gap-1.5">
             <span
-              className="w-5 border-t-2 border-dotted border-accent"
+              data-testid="notes-graph-semantic-legend-swatch"
+              className="w-5 border-t-2 border-dotted border-primary"
               aria-hidden="true"
             />
             {t("notesSearch.graphSimilarContent", {

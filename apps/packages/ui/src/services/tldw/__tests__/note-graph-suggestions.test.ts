@@ -733,6 +733,31 @@ describe("Notes graph suggestion client", () => {
     })
   })
 
+  it("preserves the typed existing-manual-link conversion conflict", async () => {
+    mocks.bgRequest.mockRejectedValueOnce({
+      status: 409,
+      details: {
+        detail: {
+          error_code: "notes_semantic_conversion_manual_link_exists",
+          message: "A manual Notes link already exists."
+        }
+      }
+    })
+
+    const error = await createSemanticManualLink({
+      sourceNoteId: "a",
+      targetNoteId: "b",
+      generationId: "generation-a",
+      idempotencyKey: "semantic-conversion-a"
+    }).catch((value) => value)
+
+    expect(error).toBeInstanceOf(NotesGraphSuggestionClientError)
+    expect(error).toMatchObject({
+      status: 409,
+      code: "notes_semantic_conversion_manual_link_exists"
+    })
+  })
+
   it("rejects a fabricated target title on a tag suggestion", async () => {
     mocks.bgRequest.mockResolvedValueOnce({
       items: [

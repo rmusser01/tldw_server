@@ -4,6 +4,7 @@ import {
   type NotesGraphEdgeType,
   type NotesGraphNode,
   type NotesGraphResponse,
+  NotesGraphSuggestionClientError,
   createSemanticManualLink,
   fetchNotesGraph
 } from "@/services/note-graph-suggestions"
@@ -26,6 +27,12 @@ const ORDINARY_EDGE_TYPES: NotesGraphEdgeType[] = [
 ]
 const DEFAULT_SEMANTIC_THRESHOLD = 0.75
 const DEFAULT_SEMANTIC_TOP_K = 10
+
+const boundSemanticThreshold = (value: number): number =>
+  Math.min(1, Math.max(0, value))
+
+const boundSemanticTopK = (value: number, maxTopK: number): number =>
+  Math.min(maxTopK, Math.max(1, Math.trunc(value)))
 
 export const notesGraphWorkspaceQueryKey = ["notes-graph-workspace"] as const
 
@@ -323,7 +330,7 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
     identity: string
     graph: NotesGraphResponse
   } | null>(null)
-  if (currentGraph && !semanticQueryEnabled) {
+  if (currentGraph) {
     lastGoodGraph.current = {
       identity: fallbackIdentity,
       graph: {
@@ -333,6 +340,60 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
       }
     }
   }
+  const semanticControlDefaults = React.useRef<{
+    identity: string
+    topK: number
+    threshold: number
+    maxTopK: number
+  } | null>(null)
+  const responseSemanticStatus = currentGraph?.semantic_status
+  const responseMaxTopK = Math.max(
+    1,
+    Math.min(
+      NOTES_GRAPH_SEMANTIC_MAX_TOP_K,
+      responseSemanticStatus?.max_top_k ?? NOTES_GRAPH_SEMANTIC_MAX_TOP_K
+    )
+  )
+  const semanticMaxTopK = responseSemanticStatus
+    ? responseMaxTopK
+    : semanticControlDefaults.current?.identity === fallbackIdentity
+      ? semanticControlDefaults.current.maxTopK
+      : NOTES_GRAPH_SEMANTIC_MAX_TOP_K
+  React.useEffect(() => {
+    if (!semanticQueryEnabled || !responseSemanticStatus) return
+    const effectiveTopK = boundSemanticTopK(
+      responseSemanticStatus.effective_top_k,
+      semanticMaxTopK
+    )
+    const effectiveThreshold = boundSemanticThreshold(
+      responseSemanticStatus.effective_threshold
+    )
+    if (semanticControlDefaults.current?.identity !== fallbackIdentity) {
+      semanticControlDefaults.current = {
+        identity: fallbackIdentity,
+        topK: effectiveTopK,
+        threshold: effectiveThreshold,
+        maxTopK: semanticMaxTopK
+      }
+    } else {
+      semanticControlDefaults.current.topK = boundSemanticTopK(
+        semanticControlDefaults.current.topK,
+        semanticMaxTopK
+      )
+      semanticControlDefaults.current.maxTopK = semanticMaxTopK
+    }
+    setSemanticTopK((current) =>
+      current === effectiveTopK ? current : effectiveTopK
+    )
+    setSemanticThreshold((current) =>
+      current === effectiveThreshold ? current : effectiveThreshold
+    )
+  }, [
+    fallbackIdentity,
+    responseSemanticStatus,
+    semanticMaxTopK,
+    semanticQueryEnabled
+  ])
   const graph =
     currentGraph ??
     (lastGoodGraph.current?.identity === fallbackIdentity
@@ -464,31 +525,75 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
     return aggregatePages(queryClient.getQueryData<GraphInfiniteData>(queryKey))
   }, [enabled, graph, graphQuery, queryClient, queryKey])
 
+  const manualLinkInFlight = React.useRef(new Map<string, Promise<boolean>>())
+  const [manualLinkPendingEdgeIds, setManualLinkPendingEdgeIds] =
+    React.useState<ReadonlySet<string>>(() => new Set())
   const createManualLink = React.useCallback(
-    async (edge: NotesGraphEdge): Promise<boolean> => {
+    (edge: NotesGraphEdge): Promise<boolean> => {
+      const pending = manualLinkInFlight.current.get(edge.id)
+      if (pending) return pending
+      const responseEdge = currentGraph?.edges.find(
+        (candidate) => candidate.id === edge.id && candidate.type === "semantic"
+      )
+      const generationId = currentGraph?.semantic_status?.generation_id
       if (
         edge.type !== "semantic" ||
-        !edge.evidence ||
-        graph?.manual_link_authorized !== true
+        !responseEdge ||
+        !generationId ||
+        currentGraph?.manual_link_authorized !== true ||
+        (responseEdge.evidence
+          ? responseEdge.evidence.generation_id !== generationId
+          : responseEdge.evidence_omitted !== "response_byte_cap")
       ) {
-        return false
+        return Promise.resolve(false)
       }
       const idempotencyKey =
         globalThis.crypto?.randomUUID?.() ??
         `semantic-${Date.now()}-${Math.random().toString(16).slice(2)}`
-      await createSemanticManualLink({
-        sourceNoteId: normalizeGraphNoteId(edge.source),
-        targetNoteId: normalizeGraphNoteId(edge.target),
-        datasetId: options.datasetId,
-        generationId: edge.evidence.generation_id,
-        idempotencyKey
+      const conversion = (async () => {
+        try {
+          await createSemanticManualLink({
+            sourceNoteId: normalizeGraphNoteId(responseEdge.source),
+            targetNoteId: normalizeGraphNoteId(responseEdge.target),
+            datasetId: options.datasetId,
+            generationId,
+            idempotencyKey
+          })
+        } catch (error) {
+          if (
+            !(
+              error instanceof NotesGraphSuggestionClientError &&
+              error.code === "notes_semantic_conversion_manual_link_exists"
+            )
+          ) {
+            throw error
+          }
+        }
+        await queryClient.invalidateQueries({
+          queryKey: notesGraphWorkspaceQueryKey
+        })
+        return true
+      })()
+      manualLinkInFlight.current.set(edge.id, conversion)
+      setManualLinkPendingEdgeIds((current) => {
+        const next = new Set(current)
+        next.add(edge.id)
+        return next
       })
-      await queryClient.invalidateQueries({
-        queryKey: notesGraphWorkspaceQueryKey
-      })
-      return true
+      const clearPending = () => {
+        if (manualLinkInFlight.current.get(edge.id) === conversion) {
+          manualLinkInFlight.current.delete(edge.id)
+          setManualLinkPendingEdgeIds((current) => {
+            const next = new Set(current)
+            next.delete(edge.id)
+            return next
+          })
+        }
+      }
+      void conversion.then(clearPending, clearPending)
+      return conversion
     },
-    [graph?.manual_link_authorized, options.datasetId, queryClient]
+    [currentGraph, options.datasetId, queryClient]
   )
 
   return {
@@ -517,18 +622,22 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
       },
       threshold: semanticThreshold,
       setThreshold: (next: number) =>
-        setSemanticThreshold(Math.min(1, Math.max(0, next))),
-      topK: semanticTopK,
+        setSemanticThreshold(boundSemanticThreshold(next)),
+      topK: boundSemanticTopK(semanticTopK, semanticMaxTopK),
+      maxTopK: semanticMaxTopK,
       setTopK: (next: number) =>
-        setSemanticTopK(
-          Math.min(
-            NOTES_GRAPH_SEMANTIC_MAX_TOP_K,
-            Math.max(1, Math.trunc(next))
-          )
-        ),
+        setSemanticTopK(boundSemanticTopK(next, semanticMaxTopK)),
       focusRequired: semanticEnabled && !centerNoteId,
       reset: () => {
-        setSemanticTopK(DEFAULT_SEMANTIC_TOP_K)
+        const defaults = semanticControlDefaults.current
+        if (defaults?.identity === fallbackIdentity) {
+          setSemanticTopK(boundSemanticTopK(defaults.topK, semanticMaxTopK))
+          setSemanticThreshold(boundSemanticThreshold(defaults.threshold))
+          return
+        }
+        setSemanticTopK(
+          boundSemanticTopK(DEFAULT_SEMANTIC_TOP_K, semanticMaxTopK)
+        )
         setSemanticThreshold(DEFAULT_SEMANTIC_THRESHOLD)
       }
     },
@@ -545,6 +654,8 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
     showAllNotes,
     refresh,
     createManualLink,
+    manualLinkPendingEdgeIds,
+    queryIdentity,
     isOffline: !options.isOnline,
     isLoading: Boolean(authorityScope && graphQuery.isLoading && !graph),
     error: graphQuery.error

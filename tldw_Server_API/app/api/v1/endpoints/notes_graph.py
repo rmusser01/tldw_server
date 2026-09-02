@@ -385,6 +385,25 @@ def _link_error(exc: Exception) -> HTTPException:
     return HTTPException(status_code=500, detail="Notes link operation failed")
 
 
+def _has_existing_manual_link(
+    db: CharactersRAGDB,
+    *,
+    source_note_id: str,
+    target_note_id: str,
+) -> bool:
+    """Confirm that a duplicate conversion already has an authoritative link."""
+
+    expected_pair = {source_note_id, target_note_id}
+    return any(
+        link.type == "manual"
+        and not link.deleted
+        and {link.source_note_id, link.target_note_id} == expected_pair
+        for link in db.notes_link_store.list_for_notes(
+            [source_note_id, target_note_id]
+        )
+    )
+
+
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -840,6 +859,25 @@ async def create_manual_link(
     except HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001 - map the closed link error contract.
+        if link.semantic_conversion is not None and isinstance(exc, ConflictError):
+            try:
+                manual_link_exists = _has_existing_manual_link(
+                    db,
+                    source_note_id=from_note_id,
+                    target_note_id=to_note_id,
+                )
+            except (CharactersRAGDBError, InputError):
+                manual_link_exists = False
+            if manual_link_exists:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "error_code": (
+                            "notes_semantic_conversion_manual_link_exists"
+                        ),
+                        "message": "A manual Notes link already exists.",
+                    },
+                ) from exc
         raise _link_error(exc) from exc
 
 

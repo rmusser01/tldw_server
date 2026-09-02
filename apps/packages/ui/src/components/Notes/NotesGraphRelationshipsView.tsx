@@ -79,6 +79,9 @@ export const buildNotesGraphRelationshipGroups = ({
   groupNotesGraphEdgesByPair(visibleEdges).forEach((edgeGroup) => {
     const representative =
       edgeGroup.edges.find((edge) => edge.type === "manual") ??
+      edgeGroup.edges.find(
+        (edge) => edge.type === "wikilink" || edge.type === "backlink"
+      ) ??
       edgeGroup.edges[0]
     const counterpartId =
       representative.source === selectedNodeId
@@ -162,6 +165,7 @@ type SemanticRelationshipDetailsProps = {
   manualLinkAuthorized: boolean
   isOnline: boolean
   hasManualRelationship: boolean
+  manualLinkPending?: boolean
   onCreateManualLink?: NotesGraphManualLinkHandler
   showHeading?: boolean
 }
@@ -173,6 +177,7 @@ export const NotesSemanticRelationshipDetails: React.FC<
   manualLinkAuthorized,
   isOnline,
   hasManualRelationship,
+  manualLinkPending = false,
   onCreateManualLink,
   showHeading = true
 }) => {
@@ -233,6 +238,19 @@ export const NotesSemanticRelationshipDetails: React.FC<
                 configuration: evidence.configuration_revision
               })}
             </dd>
+            <dt>{t("notesSearch.graphSemanticModelRevision")}</dt>
+            <dd className="break-words text-text">
+              {evidence.model_revision ??
+                t("notesSearch.graphSemanticVersionUnavailable")}
+            </dd>
+            <dt>{t("notesSearch.graphSemanticNormalizationVersion")}</dt>
+            <dd className="break-words text-text">
+              {evidence.normalization_version}
+            </dd>
+            <dt>{t("notesSearch.graphSemanticChunkerVersion")}</dt>
+            <dd className="break-words text-text">
+              {evidence.chunker_version}
+            </dd>
           </dl>
           {evidence.excerpt_pairs.slice(0, 3).map((pair, index) => (
             <div
@@ -263,13 +281,13 @@ export const NotesSemanticRelationshipDetails: React.FC<
         </p>
       ) : null}
       {manualLinkAuthorized &&
-      evidence &&
+      (evidence || edge.evidence_omitted === "response_byte_cap") &&
       !hasManualRelationship &&
       onCreateManualLink ? (
         <button
           type="button"
           className="mt-3 min-h-11 border border-border bg-primary px-3 text-sm text-primary-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:opacity-50"
-          disabled={!isOnline}
+          disabled={!isOnline || manualLinkPending}
           onClick={(event) => {
             const origin = event.currentTarget
             void onCreateManualLink(edge, origin).then((succeeded) => {
@@ -413,6 +431,8 @@ type NotesGraphRelationshipsViewProps = BuildGroupsInput & {
   onSelectEdge?: (edgeId: string) => void
   onCreateManualLink?: NotesGraphManualLinkHandler
   onDecideSuggestion?: NotesGraphSuggestionDecisionHandler
+  manualLinkPendingEdgeIds?: ReadonlySet<string>
+  queryIdentity?: string
 }
 
 const NotesGraphRelationshipsView: React.FC<
@@ -431,7 +451,9 @@ const NotesGraphRelationshipsView: React.FC<
   onSelectNode,
   onSelectEdge,
   onCreateManualLink,
-  onDecideSuggestion
+  onDecideSuggestion,
+  manualLinkPendingEdgeIds,
+  queryIdentity
 }) => {
   const { t } = useTranslation("option")
   const groups = React.useMemo(
@@ -475,6 +497,13 @@ const NotesGraphRelationshipsView: React.FC<
   const rootRef = React.useRef<HTMLElement | null>(null)
   const firstRowRef = React.useRef<HTMLDivElement | null>(null)
   const previousPageRef = React.useRef(safePage)
+  const edgeFilterIdentity = React.useMemo(
+    () =>
+      Array.from(visibleEdgeTypes ?? [])
+        .sort()
+        .join(","),
+    [visibleEdgeTypes]
+  )
 
   const decide = async (
     action: "accept" | "reject",
@@ -515,7 +544,10 @@ const NotesGraphRelationshipsView: React.FC<
     })
   }
 
-  React.useEffect(() => setPage(0), [selectedNodeId])
+  React.useEffect(
+    () => setPage(0),
+    [edgeFilterIdentity, queryIdentity, selectedNodeId]
+  )
   React.useEffect(() => {
     const changed = previousPageRef.current !== safePage
     previousPageRef.current = safePage
@@ -647,7 +679,9 @@ const NotesGraphRelationshipsView: React.FC<
                                 <summary
                                   data-testid="notes-graph-semantic-evidence-toggle"
                                   className="min-h-11 cursor-pointer py-2 pl-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">
-                                  <span className="font-semibold">
+                                  <span
+                                    data-testid="notes-graph-semantic-treatment-label"
+                                    className="font-semibold">
                                     {t("notesSearch.graphSimilarContent")}
                                   </span>
                                   <span className="ml-2 text-text-muted">
@@ -676,6 +710,9 @@ const NotesGraphRelationshipsView: React.FC<
                                     isOnline={isOnline}
                                     hasManualRelationship={row.edgeTypes.includes(
                                       "manual"
+                                    )}
+                                    manualLinkPending={manualLinkPendingEdgeIds?.has(
+                                      edge.id
                                     )}
                                     onCreateManualLink={onCreateManualLink}
                                     showHeading={false}

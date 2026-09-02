@@ -144,6 +144,79 @@ def test_valid_semantic_conversion_uses_existing_link_writer_and_omits_context(
     ]
 
 
+def test_existing_manual_link_returns_typed_semantic_conversion_conflict(
+    client_and_db,
+    monkeypatch,
+) -> None:
+    client, _db = client_and_db
+    source = _create_note(client, "Source", "source body")
+    target = _create_note(client, "Target", "target body")
+    created = client.post(
+        f"/api/v1/notes/{source}/links",
+        json={"to_note_id": target, "directed": False, "weight": 1.0},
+        headers=_headers(),
+    )
+    assert created.status_code == 200, created.text
+    projector = _ConversionProjector()
+    monkeypatch.setattr(
+        endpoint,
+        "_build_semantic_graph_projector",
+        lambda **_kwargs: projector,
+    )
+
+    response = client.post(
+        f"/api/v1/notes/{source}/links",
+        json={
+            "to_note_id": target,
+            "semantic_conversion": {"generation_id": "generation-a"},
+        },
+        headers=_headers(),
+    )
+
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"]["error_code"] == (
+        "notes_semantic_conversion_manual_link_exists"
+    )
+    assert len(projector.calls) == 1
+
+
+def test_stale_semantic_generation_wins_over_existing_manual_link_refresh(
+    client_and_db,
+    monkeypatch,
+) -> None:
+    client, _db = client_and_db
+    source = _create_note(client, "Source", "source body")
+    target = _create_note(client, "Target", "target body")
+    created = client.post(
+        f"/api/v1/notes/{source}/links",
+        json={"to_note_id": target, "directed": False, "weight": 1.0},
+        headers=_headers(),
+    )
+    assert created.status_code == 200, created.text
+    projector = _ConversionProjector(
+        "notes_semantic_conversion_generation_stale"
+    )
+    monkeypatch.setattr(
+        endpoint,
+        "_build_semantic_graph_projector",
+        lambda **_kwargs: projector,
+    )
+
+    response = client.post(
+        f"/api/v1/notes/{source}/links",
+        json={
+            "to_note_id": target,
+            "semantic_conversion": {"generation_id": "generation-a"},
+        },
+        headers=_headers(),
+    )
+
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"]["error_code"] == (
+        "notes_semantic_conversion_generation_stale"
+    )
+
+
 def test_semantic_conversion_audit_failure_preserves_committed_manual_link(
     client_and_db,
     monkeypatch,

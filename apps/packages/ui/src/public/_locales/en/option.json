@@ -6745,5 +6745,17 @@
   },
   "notesSearch_graphManualLinkFailed": {
     "message": "The manual link could not be created. Try again."
+  },
+  "notesSearch_graphSemanticModelRevision": {
+    "message": "Model revision"
+  },
+  "notesSearch_graphSemanticNormalizationVersion": {
+    "message": "Normalization version"
+  },
+  "notesSearch_graphSemanticChunkerVersion": {
+    "message": "Chunker version"
+  },
+  "notesSearch_graphSemanticVersionUnavailable": {
+    "message": "Unavailable"
   }
 }

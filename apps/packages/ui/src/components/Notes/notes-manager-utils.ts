@@ -298,12 +298,17 @@ export const formatGraphEdgeTypeLabel = (edgeType: string | null | undefined): s
   }
 }
 
-const GROUPED_NOTE_EDGE_TYPES = new Set(['manual', 'wikilink', 'semantic'])
+const GROUPED_NOTE_EDGE_TYPES = new Set([
+  'manual',
+  'wikilink',
+  'backlink',
+  'semantic'
+])
 const GRAPH_EDGE_TYPE_ORDER: Record<string, number> = {
   manual: 0,
   wikilink: 1,
-  semantic: 2,
-  backlink: 3,
+  backlink: 2,
+  semantic: 3,
   tag_membership: 4,
   source_membership: 5
 }

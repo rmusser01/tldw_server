@@ -28,6 +28,10 @@ vi.mock("react-i18next", () => ({
         "notesSearch.graphSemanticVersions":
           "Source v{{source}}, target v{{target}}",
         "notesSearch.graphSemanticGeneration": "Generation {{generation}}",
+        "notesSearch.graphSemanticModelRevision": "Model revision",
+        "notesSearch.graphSemanticNormalizationVersion":
+          "Normalization version",
+        "notesSearch.graphSemanticChunkerVersion": "Chunker version",
         "notesSearch.graphEvidenceOmitted":
           "Evidence omitted by response limit",
         "notesSearch.graphCreateManualLink": "Create manual link",
@@ -120,9 +124,10 @@ describe("NotesGraphRelationshipsView", () => {
       ])
     ).toEqual([
       ["outgoing", ["Charlie"]],
-      ["incoming", ["Beta"]],
-      ["connected", ["Beta"]]
+      ["incoming", ["Beta"]]
     ])
+    expect(groups[1]?.rows[0]?.edgeIds).toEqual(["a", "u"])
+    expect(groups[1]?.rows[0]?.edgeTypes).toEqual(["manual", "backlink"])
   })
 
   it("uses group-relative set positions across pagination boundaries", async () => {
@@ -158,10 +163,11 @@ describe("NotesGraphRelationshipsView", () => {
         }))
       ]
     }
-    render(
+    const { rerender } = render(
       <NotesGraphRelationshipsView
         graph={manyGraph}
         selectedNodeId="note:a"
+        queryIdentity="query-a"
         provisionalOverlays={[]}
         suggestions={[]}
         suggestionsAuthorized={false}
@@ -197,6 +203,55 @@ describe("NotesGraphRelationshipsView", () => {
       expect(
         screen.getAllByTestId("notes-graph-relationship-row")[0]
       ).toHaveFocus()
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Next page" }))
+    rerender(
+      <NotesGraphRelationshipsView
+        graph={manyGraph}
+        selectedNodeId="note:a"
+        queryIdentity="query-b"
+        provisionalOverlays={[]}
+        suggestions={[]}
+        suggestionsAuthorized={false}
+        isOnline
+        onSelectNode={onSelectNode}
+      />
+    )
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Node 000" })).toBeVisible()
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Next page" }))
+    rerender(
+      <NotesGraphRelationshipsView
+        graph={manyGraph}
+        selectedNodeId="note:a"
+        queryIdentity="query-b"
+        visibleEdgeTypes={new Set(["wikilink"])}
+        provisionalOverlays={[]}
+        suggestions={[]}
+        suggestionsAuthorized={false}
+        isOnline
+        onSelectNode={onSelectNode}
+      />
+    )
+    expect(screen.queryByRole("button", { name: "Next page" })).toBeNull()
+    rerender(
+      <NotesGraphRelationshipsView
+        graph={manyGraph}
+        selectedNodeId="note:a"
+        queryIdentity="query-b"
+        visibleEdgeTypes={new Set(["manual"])}
+        provisionalOverlays={[]}
+        suggestions={[]}
+        suggestionsAuthorized={false}
+        isOnline
+        onSelectNode={onSelectNode}
+      />
+    )
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Node 000" })).toBeVisible()
     )
   })
 
@@ -553,6 +608,12 @@ describe("NotesGraphRelationshipsView", () => {
     expect(disclosure).toHaveTextContent("Passage similarity: 0.8765")
     fireEvent.click(disclosure)
     expect(screen.getByText("Local provider / Embedding model")).toBeVisible()
+    expect(screen.getByText("Model revision")).toBeVisible()
+    expect(screen.getByText("model-r2")).toBeVisible()
+    expect(screen.getByText("Normalization version")).toBeVisible()
+    expect(screen.getByText("normalize-v1")).toBeVisible()
+    expect(screen.getByText("Chunker version")).toBeVisible()
+    expect(screen.getByText("chunk-v1")).toBeVisible()
     expect(screen.getByText("Source match")).toBeVisible()
     expect(screen.getByText("Target match")).toBeVisible()
     fireEvent.click(screen.getByRole("button", { name: "Similar content" }))
@@ -602,24 +663,29 @@ describe("NotesGraphRelationshipsView", () => {
     detailsTab.remove()
   })
 
-  it("hides conversion for readers and explains omitted semantic evidence", () => {
-    render(
+  it("hides capped conversion for readers but permits writers with fresh graph authority", () => {
+    const convert = vi.fn().mockResolvedValue(true)
+    const omittedGraph = {
+      ...graph,
+      manual_link_authorized: true,
+      edges: [
+        {
+          id: "semantic:omitted",
+          source: "note:a",
+          target: "note:b",
+          type: "semantic" as const,
+          directed: false,
+          weight: 0.8,
+          label: null,
+          evidence_omitted: "response_byte_cap" as const
+        }
+      ]
+    }
+    const { unmount } = render(
       <NotesGraphRelationshipsView
         graph={{
-          ...graph,
-          manual_link_authorized: false,
-          edges: [
-            {
-              id: "semantic:omitted",
-              source: "note:a",
-              target: "note:b",
-              type: "semantic",
-              directed: false,
-              weight: 0.8,
-              label: null,
-              evidence_omitted: "response_byte_cap"
-            }
-          ]
+          ...omittedGraph,
+          manual_link_authorized: false
         }}
         selectedNodeId="note:a"
         provisionalOverlays={[]}
@@ -639,5 +705,47 @@ describe("NotesGraphRelationshipsView", () => {
     expect(
       screen.queryByRole("button", { name: "Create manual link" })
     ).not.toBeInTheDocument()
+
+    unmount()
+    const writer = render(
+      <NotesGraphRelationshipsView
+        graph={omittedGraph}
+        selectedNodeId="note:a"
+        provisionalOverlays={[]}
+        suggestions={[]}
+        suggestionsAuthorized={false}
+        manualLinkAuthorized
+        manualLinkPendingEdgeIds={new Set(["semantic:omitted"])}
+        isOnline
+        onSelectNode={vi.fn()}
+        onSelectEdge={vi.fn()}
+        onCreateManualLink={convert}
+      />
+    )
+    fireEvent.click(screen.getByTestId("notes-graph-semantic-evidence-toggle"))
+    expect(
+      screen.getByRole("button", { name: "Create manual link" })
+    ).toBeDisabled()
+
+    writer.rerender(
+      <NotesGraphRelationshipsView
+        graph={omittedGraph}
+        selectedNodeId="note:a"
+        provisionalOverlays={[]}
+        suggestions={[]}
+        suggestionsAuthorized={false}
+        manualLinkAuthorized
+        manualLinkPendingEdgeIds={new Set()}
+        isOnline
+        onSelectNode={vi.fn()}
+        onSelectEdge={vi.fn()}
+        onCreateManualLink={convert}
+      />
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Create manual link" }))
+    expect(convert).toHaveBeenCalledWith(
+      omittedGraph.edges[0],
+      expect.any(HTMLButtonElement)
+    )
   })
 })

@@ -17,6 +17,7 @@ type CytoscapeTestEvent = {
 
 type CytoscapeTestElement = {
   data: Record<string, unknown>
+  classes?: string
   selectable?: boolean
 }
 
@@ -92,12 +93,45 @@ const { cyHandlers, mockCytoscapeFactory, mockCyInstance, resetCyState } =
     }
   })
 
+const translationState = vi.hoisted(() => ({ language: "en" }))
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (
       key: string,
       options?: string | { defaultValue?: string; [key: string]: unknown }
-    ) => (typeof options === "string" ? options : options?.defaultValue ?? key)
+    ) => {
+      const labels: Record<string, Record<string, string>> = {
+        en: {
+          "notesSearch.graphEdgeType.manual": "Manual link",
+          "notesSearch.graphEdgeType.wikilink": "Note link",
+          "notesSearch.graphEdgeType.backlink": "Backlink",
+          "notesSearch.graphEdgeType.semantic": "Similar content",
+          "notesSearch.graphPassageSimilarityShort": "passage similarity",
+          "notesSearch.graphSuggestions": "Suggestions"
+        },
+        fr: {
+          "notesSearch.graphEdgeType.manual": "Lien manuel",
+          "notesSearch.graphEdgeType.wikilink": "Lien de note",
+          "notesSearch.graphEdgeType.backlink": "Lien retour",
+          "notesSearch.graphEdgeType.semantic": "Contenu similaire",
+          "notesSearch.graphPassageSimilarityShort": "similarite de passage",
+          "notesSearch.graphSuggestions": "Suggestions FR"
+        }
+      }
+      return (
+        labels[translationState.language]?.[key] ??
+        (typeof options === "string" ? options : options?.defaultValue ?? key)
+      )
+    },
+    i18n: {
+      get resolvedLanguage() {
+        return translationState.language
+      },
+      get language() {
+        return translationState.language
+      }
+    }
   })
 }))
 
@@ -218,6 +252,7 @@ describe("NotesGraphCanvas graph view", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     resetCyState()
+    translationState.language = "en"
   })
 
   it("preserves the Cytoscape lifecycle, readable labels, zoom, fit, and note selection", async () => {
@@ -630,6 +665,112 @@ describe("NotesGraphCanvas graph view", () => {
     expect(
       mockCytoscapeFactory.mock.calls[0][0].elements[3].data.displayLabel
     ).toBe("0.875 passage similarity")
+  })
+
+  it("groups backlinks with structural and semantic Note edges using structural precedence", async () => {
+    const semantic = {
+      ...graph.edges[0],
+      id: "edge:semantic",
+      type: "semantic" as const,
+      weight: 0.875,
+      evidence: {
+        similarity: 0.875,
+        qualitative_band: "high" as const,
+        source_note_id: "note:a",
+        target_note_id: "note:b",
+        source_content_version: 1,
+        target_content_version: 1,
+        generation_id: "generation-a",
+        semantic_index_revision: 1,
+        configuration_revision: 1,
+        normalization_version: "normalize-v1",
+        chunker_version: "chunk-v1",
+        provider_label: "Provider",
+        model_label: "Model",
+        model_revision: null,
+        excerpt_pairs: []
+      }
+    }
+    const backlink = {
+      ...graph.edges[0],
+      id: "edge:backlink",
+      source: "note:b",
+      target: "note:a",
+      type: "backlink" as const
+    }
+    render(
+      <NotesGraphCanvas
+        graph={{
+          ...graph,
+          edges: [graph.edges[1], backlink, semantic]
+        }}
+        layout="dagre"
+        focusNoteId="a"
+        selectedNodeId={null}
+        visibleEdgeTypes={new Set(["wikilink", "backlink", "semantic"])}
+        provisionalOverlays={[]}
+        showProvisional={false}
+        onSelectNode={vi.fn()}
+      />
+    )
+    await waitFor(() => expect(mockCytoscapeFactory).toHaveBeenCalled())
+
+    const edges = mockCytoscapeFactory.mock.calls[0][0].elements.filter(
+      (element) => element.data.edgeIds
+    )
+    expect(edges).toHaveLength(1)
+    expect(edges[0].data.edgeIds).toEqual([
+      "edge:wikilink",
+      "edge:backlink",
+      "edge:semantic"
+    ])
+    expect(edges[0].data.edgeTypes).toEqual([
+      "wikilink",
+      "backlink",
+      "semantic"
+    ])
+    expect(edges[0].classes).not.toBe("semantic")
+  })
+
+  it("rebuilds grouped labels from i18n when the language changes", async () => {
+    const { rerender } = render(
+      <NotesGraphCanvas
+        graph={graph}
+        layout="dagre"
+        focusNoteId="a"
+        selectedNodeId={null}
+        visibleEdgeTypes={new Set(["manual", "wikilink"])}
+        provisionalOverlays={[]}
+        showProvisional={false}
+        onSelectNode={vi.fn()}
+      />
+    )
+    await waitFor(() => expect(mockCytoscapeFactory).toHaveBeenCalledTimes(1))
+    expect(
+      mockCytoscapeFactory.mock.calls[0][0].elements.find(
+        (element) => element.data.edgeIds
+      )?.data.displayLabel
+    ).toBe("Manual link · Note link")
+
+    translationState.language = "fr"
+    rerender(
+      <NotesGraphCanvas
+        graph={graph}
+        layout="dagre"
+        focusNoteId="a"
+        selectedNodeId={null}
+        visibleEdgeTypes={new Set(["manual", "wikilink"])}
+        provisionalOverlays={[]}
+        showProvisional={false}
+        onSelectNode={vi.fn()}
+      />
+    )
+    await waitFor(() => expect(mockCytoscapeFactory).toHaveBeenCalledTimes(2))
+    expect(
+      mockCytoscapeFactory.mock.calls[1][0].elements.find(
+        (element) => element.data.edgeIds
+      )?.data.displayLabel
+    ).toBe("Lien manuel · Lien de note")
   })
 })
 

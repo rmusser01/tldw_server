@@ -3,20 +3,19 @@ id: TASK-13134
 title: Implement Notes embedding index and semantic graph edges
 status: In Progress
 assignee: []
-created_date: '2026-08-27 02:20'
-updated_date: '2026-09-02 01:34'
+created_date: 2026-08-27 02:20
+updated_date: 2026-09-02 02:29
 labels:
-  - notes
-  - notes-graph
-  - embeddings
-  - second-brain
-  - backend
+- notes
+- notes-graph
+- embeddings
+- second-brain
+- backend
 dependencies:
-  - TASK-13138
+- TASK-13138
 documentation:
-  - Docs/superpowers/specs/2026-08-29-notes-semantic-index-design.md
-  - >-
-    Docs/superpowers/plans/2026-08-29-notes-semantic-index-implementation-plan.md
+- Docs/superpowers/specs/2026-08-29-notes-semantic-index-design.md
+- Docs/superpowers/plans/2026-08-29-notes-semantic-index-implementation-plan.md
 priority: medium
 ---
 
@@ -43,7 +42,6 @@ Approved executable plan: `Docs/superpowers/plans/2026-08-29-notes-semantic-inde
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - 2026-08-29: Senior implementation-constraint review identified required spec corrections for user-scoped run APIs, semantic opt-in compatibility, evidence offsets, vector-only backend contracts, DSR erasure, graph admission/async composition, dimension and activation rules, cache freshness, and restore semantics.
 - Design specification: `Docs/superpowers/specs/2026-08-29-notes-semantic-index-design.md`
@@ -100,21 +98,20 @@ Additional Task 11 fix2 verification: the dedicated Notes semantic English-fallb
 2026-09-01 Task 11 fix round 4 implemented and verified from 5fcad9fe92: replaced legacy IDNA host mapping with httpx runtime raw_host normalization while preserving explicit default ports, IPv4/IPv6, and redacted origin disclosure. RED: 3 failed/4 passed; GREEN: focused 7 passed, affected backend 324 passed, frontend 227 passed; TypeScript, Ruff, formatting, Bandit zero findings, and diff checks passed. Fix round 4 remains pending clean re-review; TASK-13134 stays In Progress and Tasks 12-13 remain outstanding. Report: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-11-fix4-report.md.
 2026-09-01 Task 11 fix round 4 verification addendum: added the exact no-port `https://xn--fa-hia.de` regression alongside the explicit `:443` case. Final focused GREEN is 9 passed; final affected backend is 326 passed. Status is unchanged: pending clean re-review, TASK-13134 In Progress, Tasks 12-13 outstanding.
 2026-09-01 Task 11 fix round 4 final verification: percent-escaped malformed hosts now fail closed (RED 2 failed; GREEN 2 passed). Complete affected backend verification is 328 passed; frontend remains 227 passed. Fix round 4 is still pending clean re-review; TASK-13134 remains In Progress and Tasks 12-13 remain outstanding.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 2026-09-01 Task 11 final review complete: second-review consent/recovery hardening and follow-up capability-contract fixes are committed in 2124c290a4, 5fcad9fe92, and 10ef590047. Final scoped review found all issues addressed with no new Critical or Important breakage. Controller verification passed 306 backend and 226 frontend tests for fix round 3, plus 136 backend endpoint/runtime and 25 semantic-client tests for fix round 4; Python was 3.11.13. TASK-13134 remains In Progress for Tasks 12-13. Residual risk: no live PostgreSQL/pgvector or embedding-provider run in these UI/contract follow-ups.
 
 2026-09-01 Task 12 started from 12ca27770f. Existing-code review confirmed semantic query state and canonical conversion path. Contract correction: suggestions_authorized is insufficient because it proves notes.graph.suggest only; Task 12 will add request-local manual_link_authorized from verified notes.graph.write authority, retain nested POST enforcement, and add no permissions/root semantic API.
 
 2026-09-01 Task 12 implementation complete pending independent review: added opt-in focused Similar content controls, grouped manual/wikilink/semantic relationship presentation with preserved edge identities, compact and full semantic evidence views, request-local notes.graph.write conversion authority, and canonical nested Sync-aware manual-link conversion. Review hardening prevents inactive All-notes preference refetches and fails stale conversion conflicts closed. Verification: focused shared frontend 80 passed; WebUI E2E 2 passed; packaged-extension E2E 1 passed; extension compile passed; backend schema/endpoint 27 passed on Python 3.11.13; Ruff, Bandit zero findings, locale, scoped formatting, screenshots, and diff checks passed. Report: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-12-report.md. TASK-13134 remains In Progress because Task 13 is outstanding.
-<!-- SECTION:NOTES:END -->
-
+2026-09-01 Task 12 fix round 1 started from aac96ca7e6. Scope: resolve all six Important and three Minor review findings with focused RED/GREEN coverage, preserve nested graph/manual-link contracts, and keep TASK-13134 In Progress for Task 13.
+['2026-09-01 Task 12 fix round 1 complete and verified: ordinary fallback now preserves manual links from successful semantic responses; response-effective controls, capped-edge conversion, per-edge single-flight/idempotency, typed existing-link refresh, backlink-inclusive structural grouping, full localized provenance, reactive canvas i18n, pagination identity reset, and real light/dark browser contrast coverage are implemented. RED: shared UI 12 failed/76 passed, backend 1 failed/8 passed, browser contrast 2 failed. GREEN: shared UI 88 passed, backend endpoint/schema 36 passed, WebUI E2E 4 passed, extension E2E 1 passed, compile/locale/scoped formatting/Ruff/Bandit/diff checks passed. Report: .superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-12-report.md. TASK-13134 remains In Progress for Task 13.']
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-TASK-13134 remains In Progress. Implementation Tasks 1 through 11 are complete and independently reviewed. Tasks 12-13 remain: semantic graph visuals/evidence/manual conversion, then documentation and integrated release gates.
+TASK-13134 remains In Progress. Tasks 1 through 11 are complete and independently reviewed. Task 12 implementation and fix round 1 are verified pending clean re-review; Task 13 documentation and integrated release gates remain outstanding.
 <!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed
