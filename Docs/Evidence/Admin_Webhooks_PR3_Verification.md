@@ -5,11 +5,11 @@
 - Branch: `codex/admin-webhooks-durable-producers-runtime`
 - Pull request: https://github.com/rmusser01/tldw_server/pull/2855
 - Final integrated implementation head:
-  `15ad4e76c05b09581d8133f8eb91ef8c9f466abf`
+  `4a65f68c659ca0dd8260523d30448693d2b2d385`
 - Final verified pre-evidence branch head:
-  `23f779bbf1c48fad98d810eedb4632c9a1710a19`
+  `4a65f68c659ca0dd8260523d30448693d2b2d385`
 - Final branch merge base and observed `origin/dev`:
-  `56def76c50acb61152c11bfba70c3f09388db375`
+  `8140c679f3ea0334cea2dc1be32feb5b80e22ebe`
 - Verification date: `2026-09-01`
 - Host: macOS 26.5.2 build 25F84, arm64
 - Project Python: 3.11.13
@@ -24,9 +24,9 @@
 The evidence-only update that records the final integrated gates necessarily
 follows the implementation head above and is not self-referential. Earlier
 verification and rebase identities remain in their chronological sections.
-The complete fifteen-commit pre-evidence PR branch rebased without conflicts
-onto the final observed `origin/dev` and became fifteen commits ahead and zero behind. No
-production activation occurred.
+The complete seventeen-commit pre-evidence PR branch rebased without conflicts
+onto the final observed `origin/dev` and became seventeen commits ahead and
+zero behind. No production activation occurred.
 
 The verified branch was published as pull request
 https://github.com/rmusser01/tldw_server/pull/2855 for normal CI and review.
@@ -40,6 +40,8 @@ https://github.com/rmusser01/tldw_server/pull/2855 for normal CI and review.
 | Post-review backend aggregate | PASS: 1,178 passed, 0 skipped, 2,070 warnings |
 | Final integrated backend aggregate | PASS: 1,201 passed, 0 skipped, 2,110 warnings |
 | Post-publication base-advance aggregate | PASS: 1,201 passed, 0 skipped, 2,110 warnings |
+| Final Qodo-remediation backend aggregate | PASS: 1,206 passed, 0 skipped, 2,116 warnings |
+| Final Qodo-remediation focused backend | PASS: 113 passed, 0 skipped, 6 warnings |
 | Final defensive-review backend matrix | PASS: 164 passed, 0 skipped |
 | Required PostgreSQL producer/recovery matrix | PASS: 79 passed, 0 skipped, 160 warnings |
 | Task 8 controlled receiver matrix | PASS: 6 passed, 0 skipped across all four backend combinations |
@@ -47,6 +49,7 @@ https://github.com/rmusser01/tldw_server/pull/2855 for normal CI and review.
 | Task 8 security/support union | PASS: 506 passed |
 | Final admin UI webhook/incident unit matrix | PASS: 94 passed |
 | Post-review changed UI matrix | PASS: 128 passed |
+| Final Qodo-remediation UI matrix | PASS: 121 passed across 7 files |
 | Final real-backend browser lifecycle | PASS: 1 passed, including guarded link and Back navigation |
 | TypeScript typecheck | PASS |
 | ESLint | PASS with 36 unrelated warnings and 0 errors |
@@ -54,6 +57,7 @@ https://github.com/rmusser01/tldw_server/pull/2855 for normal CI and review.
 | Changed-path Ruff | PASS |
 | Broad planned Ruff scope | REVIEWED BASELINE: 13 errors in branch-unmodified admin files |
 | Bandit | REVIEWED: 11 Low, 0 Medium, 0 High |
+| Final Qodo-remediation Bandit scope | PASS: 0 findings across 4,978 production LOC |
 | CI shard coverage guard | PASS: 4,518 test files, 0 newly uncovered |
 | Markdown local links and diff whitespace | PASS |
 
@@ -364,6 +368,75 @@ unrelated snapshots failed. None of the failing files is in the PR 3 admin UI
 diff. The focused webhook/incident matrix, typecheck, lint, build, and real
 backend lifecycle are green. This baseline is not represented as a passing
 whole-repository test gate.
+
+## Qodo Review Remediation
+
+Qodo reported eleven actionable findings after publication: nine Medium and
+two High. Each finding was validated against the branch before implementation.
+The final remediation commit is
+`4a65f68c659ca0dd8260523d30448693d2b2d385` after the conflict-free rebase
+onto `origin/dev` `8140c679f3ea0334cea2dc1be32feb5b80e22ebe`.
+
+The two High findings were resolved as follows:
+
+- Permanently malformed, catalog-invalid, duplicate, or cryptographically
+  corrupt incident markers are now atomically moved from
+  `webhook_pending_events` to `webhook_quarantined_events`. Later valid markers
+  reconcile in the same pass, and the pass then reports
+  `VALIDATION_FAILED` so runtime health degrades visibly. Missing and unknown
+  keys remain retryable and are not quarantined.
+- The shared sensitive-navigation guard now captures the protected URL and
+  state when installed. A blocked browser Back operation restores that exact
+  snapshot instead of preserving the destination URL.
+
+The nine Medium findings were resolved as follows:
+
+- incident notify now uses the canonical admin-webhook rate limiter;
+- the service owns completion of the mandatory audit sink before returning;
+- blocking incident store reads and writes run through `asyncio.to_thread`;
+- activation-check exceptions retain phase and stack context in operator logs
+  while CLI output remains closed and sanitized;
+- deferred marker-capture logs include operation, event ID, request ID, error
+  type, and exception context without payload or secret material;
+- incident absence uses typed `WebhookError(NOT_FOUND)` rather than exception
+  string inspection;
+- the two event validation helpers now document their closed contracts; and
+- legacy async incident tests now have explicit unit markers, argument types,
+  and return annotations.
+
+Regression tests were written before the implementation changes and failed for
+the intended missing rate-limit, audit-ordering, event-loop lock, typed-error,
+structured-log, poison-marker, and Back-restoration behavior. Final focused
+backend verification passed 113 tests with six warnings. The focused admin UI
+matrix passed 121 tests across seven files; typecheck passed, full lint returned
+zero errors and the established 36 unrelated warnings, and the production build
+generated all 49 pages.
+
+Because `origin/dev` advanced with Reading List snapshot and shared Collections
+schema-bootstrap changes, all seventeen PR commits were rebased and the
+database-sensitive gates were repeated. The required PostgreSQL producer and
+recovery matrix passed 79/79 with zero skips and 160 warnings in 483.09 seconds.
+The deterministic impacted aggregate with seed `1831171713` passed 1,206/1,206
+with zero skips and 2,116 warnings in 1,167.09 seconds. The final real-backend
+browser lifecycle rebuilt the UI and passed 1/1 in 31.6 seconds.
+
+Changed-path Ruff, Python compilation, the CI shard guard, both committed and
+worktree diff checks, and focused Bandit passed. Bandit reported zero findings
+across 4,978 lines of the five Qodo-remediated production Python files. The
+previous complete-branch Bandit classification remains 11 reviewed Low, zero
+Medium, and zero High because it covers older branch modules outside this
+focused remediation scope.
+
+The broad admin UI baseline remains unrelated and red: the latest diagnostic
+run passed 133 files and 807 tests while 17 files and 41 tests failed in the
+previously identified navigation metadata, BYOK, plans, resource governor,
+snapshot, and other non-webhook areas. It is not represented as a passing gate.
+One mocked Chromium webhook test also timed out before navigation because its
+stale event-catalog fixture rendered no event checkboxes; the canonical
+real-backend lifecycle above is the authoritative browser proof.
+
+No production activation, migration, receiver enrollment, or traffic change
+was performed as part of review remediation.
 
 ## Static And Security Gates
 
