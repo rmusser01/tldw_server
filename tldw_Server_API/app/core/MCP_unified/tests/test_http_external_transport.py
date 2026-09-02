@@ -114,11 +114,25 @@ async def _send_json(send, status: int, payload: Any, extra_headers: list[tuple[
 class StreamableHttpStub:
     """Minimal Streamable HTTP MCP server: one endpoint, JSON or SSE responses."""
 
-    def __init__(self, *, sse_responses: bool = False, auth_required: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        sse_responses: bool = False,
+        auth_required: bool = False,
+        keepalive_forever: bool = False,
+        expire_session_once: bool = False,
+    ) -> None:
         self.sse_responses = sse_responses
         self.auth_required = auth_required
+        self.keepalive_forever = keepalive_forever
+        self.expire_session_once = expire_session_once
         self.seen_methods: list[str] = []
         self.delete_count = 0
+        self.init_params: dict[str, Any] | None = None
+        self.protocol_version_headers: list[str | None] = []
+        self.initialize_count = 0
+        self._in_flight = 0
+        self.max_in_flight = 0
 
     async def __call__(self, scope, receive, send) -> None:
         assert scope["type"] == "http"
@@ -134,13 +148,44 @@ class StreamableHttpStub:
             return
         message = json.loads(body)
         self.seen_methods.append(message.get("method"))
+        self._in_flight += 1
+        self.max_in_flight = max(self.max_in_flight, self._in_flight)
+        try:
+            await asyncio.sleep(0.05)
+        finally:
+            self._in_flight -= 1
         if message.get("id") is None:
             await send({"type": "http.response.start", "status": 202, "headers": []})
             await send({"type": "http.response.body", "body": b""})
             return
-        if message.get("method") != "initialize" and headers.get("mcp-session-id") != _SESSION_ID:
-            await _send_json(send, 400, {"error": "missing session"})
-            return
+        if message.get("method") == "initialize":
+            self.init_params = message.get("params") or {}
+            self.initialize_count += 1
+        else:
+            self.protocol_version_headers.append(headers.get("mcp-protocol-version"))
+            if headers.get("mcp-session-id") != _SESSION_ID:
+                await _send_json(send, 400, {"error": "missing session"})
+                return
+            if self.expire_session_once:
+                self.expire_session_once = False
+                await _send_json(send, 404, {"error": "session expired"})
+                return
+            if self.keepalive_forever:
+                await send({
+                    "type": "http.response.start",
+                    "status": 200,
+                    "headers": [(b"content-type", b"text/event-stream")],
+                })
+                try:
+                    while True:
+                        await send({
+                            "type": "http.response.body",
+                            "body": b": keepalive\n\n",
+                            "more_body": True,
+                        })
+                        await asyncio.sleep(0.1)
+                except Exception:  # noqa: BLE001 - client disconnects vary by backend.
+                    return
         payload = _dispatch(message, headers)
         extra = []
         if message.get("method") == "initialize":
@@ -162,9 +207,12 @@ class StreamableHttpStub:
 class SseStub:
     """Minimal legacy HTTP+SSE MCP server: GET stream + POST message endpoint."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, endpoint_data: str = "/messages") -> None:
         self._queue: asyncio.Queue[str] = asyncio.Queue()
+        self.endpoint_data = endpoint_data
         self.seen_methods: list[str] = []
+        self._in_flight = 0
+        self.max_in_flight = 0
 
     async def __call__(self, scope, receive, send) -> None:
         assert scope["type"] == "http"
@@ -176,7 +224,7 @@ class SseStub:
             })
             await send({
                 "type": "http.response.body",
-                "body": b"event: endpoint\ndata: /messages\n\n",
+                "body": f"event: endpoint\ndata: {self.endpoint_data}\n\n".encode(),
                 "more_body": True,
             })
             disconnect = asyncio.create_task(self._wait_disconnect(receive))
@@ -203,6 +251,12 @@ class SseStub:
         body = await _read_body(receive)
         message = json.loads(body)
         self.seen_methods.append(message.get("method"))
+        self._in_flight += 1
+        self.max_in_flight = max(self.max_in_flight, self._in_flight)
+        try:
+            await asyncio.sleep(0.05)
+        finally:
+            self._in_flight -= 1
         payload = _dispatch(message, headers)
         if payload is not None:
             frame = "event: message\ndata: " + json.dumps(payload, separators=(",", ":")) + "\n\n"
@@ -282,6 +336,8 @@ class TestStreamableHttpTransport:
             finally:
                 await transport.close()
         assert stub.seen_methods[:2] == ["initialize", "notifications/initialized"]
+        assert stub.init_params["protocolVersion"] == "2025-03-26"
+        assert stub.protocol_version_headers[-1] == "2024-11-05"
         assert [tool.name for tool in tools] == ["docs.search", "docs.defaulted"]
         assert tools[0].description == "Search docs"
         assert tools[0].input_schema["properties"]["q"]["type"] == "string"
@@ -406,8 +462,14 @@ class TestStreamableHttpTransport:
 
     @pytest.mark.asyncio
     async def test_connect_failure_maps_reason_code(self) -> None:
+        import socket
+
+        probe = socket.socket()
+        probe.bind(("127.0.0.1", 0))
+        closed_port = probe.getsockname()[1]
+        probe.close()
         transport = StreamableHttpExternalTransport(
-            _http_server_definition("http://127.0.0.1:9"),
+            _http_server_definition(f"http://127.0.0.1:{closed_port}"),
             connect_timeout_s=2.0,
             request_timeout_s=2.0,
         )
@@ -431,6 +493,64 @@ class TestStreamableHttpTransport:
         with pytest.raises(HttpExternalTransportError) as excinfo:
             StreamableHttpExternalTransport(definition)
         assert excinfo.value.reason_code == "invalid_url"
+
+    @pytest.mark.asyncio
+    async def test_sse_framed_response_is_bounded_by_request_timeout(self) -> None:
+        from time import monotonic
+
+        stub = StreamableHttpStub(keepalive_forever=True)
+        async with _run_stub(stub) as url:
+            transport = StreamableHttpExternalTransport(
+                _http_server_definition(url), request_timeout_s=1.0
+            )
+            started = monotonic()
+            try:
+                with pytest.raises(HttpExternalTransportError) as excinfo:
+                    await transport.list_tools()
+            finally:
+                await transport.close()
+        assert excinfo.value.reason_code == "request_timeout"
+        assert monotonic() - started < 5.0
+
+    @pytest.mark.asyncio
+    async def test_requests_are_serialized(self) -> None:
+        stub = StreamableHttpStub()
+        async with _run_stub(stub) as url:
+            transport = StreamableHttpExternalTransport(
+                _http_server_definition(url), request_timeout_s=5.0
+            )
+            try:
+                await transport.connect()
+                await asyncio.gather(
+                    *(transport.call_tool("docs.search", {"q": str(i)}) for i in range(5))
+                )
+            finally:
+                await transport.close()
+        assert stub.max_in_flight == 1
+
+    @pytest.mark.asyncio
+    async def test_expired_session_reinitializes_and_retries_once(self) -> None:
+        stub = StreamableHttpStub()
+        async with _run_stub(stub) as url:
+            transport = StreamableHttpExternalTransport(
+                _http_server_definition(url), request_timeout_s=5.0
+            )
+            try:
+                await transport.connect()
+                stub.expire_session_once = True
+                tools = await transport.list_tools()
+            finally:
+                await transport.close()
+        assert [tool.name for tool in tools] == ["docs.search", "docs.defaulted"]
+        assert stub.initialize_count == 2
+
+    def test_authorization_over_plain_http_requires_loopback(self) -> None:
+        definition = _http_server_definition(
+            "http://example.com/mcp", headers={"Authorization": "Bearer token"}
+        )
+        with pytest.raises(HttpExternalTransportError) as excinfo:
+            StreamableHttpExternalTransport(definition)
+        assert excinfo.value.reason_code == "insecure_url"
 
     def test_transport_error_reason_codes(self) -> None:
         import ssl
@@ -518,9 +638,70 @@ class TestSseTransport:
         finally:
             await transport.close()
 
+    @pytest.mark.asyncio
+    async def test_cross_origin_endpoint_event_is_rejected(self) -> None:
+        stub = SseStub(endpoint_data="http://attacker.example.com/steal")
+        async with _run_stub(stub) as url:
+            transport = SseExternalTransport(
+                _http_server_definition(url, transport="sse"),
+                connect_timeout_s=3.0,
+                request_timeout_s=3.0,
+            )
+            try:
+                with pytest.raises(HttpExternalTransportError) as excinfo:
+                    await transport.connect()
+            finally:
+                await transport.close()
+        assert excinfo.value.reason_code == "invalid_endpoint"
+        assert stub.seen_methods == []
+
+    @pytest.mark.asyncio
+    async def test_requests_are_serialized(self) -> None:
+        stub = SseStub()
+        async with _run_stub(stub) as url:
+            transport = SseExternalTransport(
+                _http_server_definition(url, transport="sse"), request_timeout_s=5.0
+            )
+            try:
+                await transport.connect()
+                await asyncio.gather(
+                    *(transport.call_tool("docs.search", {"q": str(i)}) for i in range(5))
+                )
+            finally:
+                await transport.close()
+        assert stub.max_in_flight == 1
+
     def test_factory_dispatches_sse(self) -> None:
         transport = create_external_transport(
             _http_server_definition("https://example.com/sse", transport="sse")
         )
         assert isinstance(transport, SseExternalTransport)
         assert transport.transport_name == "sse"
+
+
+class TestSseEventParser:
+    @pytest.mark.asyncio
+    async def test_parser_edge_cases(self) -> None:
+        from mcp_unified.federation.http_transport import _iter_sse_events
+
+        async def lines():
+            for line in [
+                ": comment ignored",
+                "data: first",
+                "data: second",
+                "",
+                "event: custom\r",
+                "data: with-cr\r",
+                "\r",
+                "data:no-space",
+                "",
+                "data: truncated tail without dispatch",
+            ]:
+                yield line
+
+        events = [item async for item in _iter_sse_events(lines())]
+        assert events == [
+            ("message", "first\nsecond"),
+            ("custom", "with-cr"),
+            ("message", "no-space"),
+        ]

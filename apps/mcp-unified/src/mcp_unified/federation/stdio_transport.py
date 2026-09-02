@@ -27,6 +27,7 @@ from mcp_unified.federation.resource_payloads import (
     normalize_external_resource_list,
     normalize_external_resource_read,
 )
+from mcp_unified.federation.transports import ExternalFederationTransport
 from mcp_unified.storage.models import ExternalServerDefinition
 
 _MCP_PROTOCOL_VERSION = "2024-11-05"
@@ -638,7 +639,7 @@ def create_external_transport(
     server: ExternalServerDefinition,
     *,
     process_policy: StdioProcessPolicy | Mapping[str, Any] | None = None,
-) -> StdioExternalTransport:
+) -> ExternalFederationTransport:
     """Create a package-owned external transport for a supported server definition."""
     if server.transport == "stdio":
         return StdioExternalTransport(server, process_policy=process_policy)

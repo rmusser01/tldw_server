@@ -802,6 +802,12 @@ failures map to distinct reason codes (`auth_required`, `tls_failed`,
 `connect_failed`, `request_timeout`, `connection_closed`) so downstream
 clients can surface honest readiness states.
 
+Notes: URL transports are currently registry-only — the YAML/JSON config-file
+registry (`ExternalServerRegistryConfig`) still declares only `stdio` and
+`websocket`. Management responses redact `headers` values (`"***"`); rotate a
+token by patching `headers` with the new value. Credential headers over plain
+`http://` are refused for non-loopback hosts.
+
 ## 5. Add Credential Grants
 
 Credential grants are metadata that bind a profile, external server, credential

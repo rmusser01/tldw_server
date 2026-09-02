@@ -26,12 +26,19 @@ from mcp_unified.federation.resource_payloads import (
 from mcp_unified.storage.models import ExternalServerDefinition
 
 _MCP_PROTOCOL_VERSION = "2024-11-05"
+_MCP_PROTOCOL_VERSION_STREAMABLE = "2025-03-26"
 _CLIENT_INFO = {"name": "mcp_unified_external_federation", "version": "0.1.0"}
 _DEFAULT_CONNECT_TIMEOUT_S = 30.0
 _DEFAULT_REQUEST_TIMEOUT_S = 30.0
 _DEFAULT_HEALTH_TIMEOUT_S = 5.0
+_DEFAULT_CLOSE_TIMEOUT_S = 5.0
 _SESSION_HEADER = "mcp-session-id"
+_PROTOCOL_VERSION_HEADER = "mcp-protocol-version"
 _ACCEPT_BOTH = "application/json, text/event-stream"
+_SENSITIVE_HEADER_NAMES = frozenset(
+    {"authorization", "proxy-authorization", "cookie", "x-api-key", "api-key"}
+)
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 
 
 class HttpExternalTransportError(RuntimeError):
@@ -146,8 +153,6 @@ async def _iter_sse_events(lines: AsyncIterator[str]) -> AsyncIterator[tuple[str
             event = value
         elif field == "data":
             data_lines.append(value)
-    if data_lines:
-        yield event, "\n".join(data_lines)
 
 
 class _HttpExternalTransportBase:
@@ -181,10 +186,19 @@ class _HttpExternalTransportBase:
         self._static_headers = {
             str(k): str(v) for k, v in (self._server.headers or {}).items()
         }
+        if scheme == "http":
+            host = (urlsplit(url).hostname or "").lower()
+            sensitive = {name.lower() for name in self._static_headers}
+            if sensitive & _SENSITIVE_HEADER_NAMES and host not in _LOOPBACK_HOSTS:
+                raise self._error(
+                    "Credential headers over plain http are only allowed to loopback",
+                    reason_code="insecure_url",
+                )
         self._connect_timeout_s = self._positive_timeout(connect_timeout_s, "connect_timeout_s")
         self._request_timeout_s = self._positive_timeout(request_timeout_s, "request_timeout_s")
         self._health_timeout_s = self._positive_timeout(health_timeout_s, "health_timeout_s")
         self._connect_lock = asyncio.Lock()
+        self._request_lock = asyncio.Lock()
         self._next_request_id = 1
         self._initialized = False
 
@@ -320,6 +334,7 @@ class StreamableHttpExternalTransport(_HttpExternalTransportBase):
         )
         self._client: httpx.AsyncClient | None = None
         self._session_id: str | None = None
+        self._protocol_version: str | None = None
 
     async def connect(self) -> None:
         """Initialize an MCP session against the configured endpoint."""
@@ -335,15 +350,21 @@ class StreamableHttpExternalTransport(_HttpExternalTransportBase):
                 )
             )
             try:
-                await self._request(
+                response = await self._request(
                     "initialize",
                     {
-                        "protocolVersion": _MCP_PROTOCOL_VERSION,
+                        "protocolVersion": _MCP_PROTOCOL_VERSION_STREAMABLE,
                         "capabilities": {},
                         "clientInfo": _CLIENT_INFO,
                     },
                     timeout_s=self._connect_timeout_s,
                 )
+                result = response.get("result")
+                negotiated = (
+                    result.get("protocolVersion") if isinstance(result, dict) else None
+                )
+                if isinstance(negotiated, str) and negotiated.strip():
+                    self._protocol_version = negotiated.strip()
                 await self._notify("notifications/initialized", {})
             except Exception:
                 await self._close_client()
@@ -371,7 +392,8 @@ class StreamableHttpExternalTransport(_HttpExternalTransportBase):
         if not checks["initialized"]:
             return checks
         try:
-            await self._request("ping", {}, timeout_s=self._health_timeout_s)
+            async with self._request_lock:
+                await self._request("ping", {}, timeout_s=self._health_timeout_s)
         except HttpExternalTransportError:
             self._initialized = False
             checks["connected"] = False
@@ -380,14 +402,16 @@ class StreamableHttpExternalTransport(_HttpExternalTransportBase):
 
     async def list_tools(self) -> list[ExternalToolDefinition]:
         """Discover and normalize upstream MCP tool definitions."""
-        await self._ensure_connected()
-        response = await self._request("tools/list", {})
+        async with self._request_lock:
+            await self._ensure_connected()
+            response = await self._request("tools/list", {})
         return _normalize_tool_definitions(response.get("result"))
 
     async def list_resources(self) -> list[dict[str, Any]]:
         """Discover and normalize upstream MCP resource descriptors."""
-        await self._ensure_connected()
-        response = await self._request("resources/list", {})
+        async with self._request_lock:
+            await self._ensure_connected()
+            response = await self._request("resources/list", {})
         return normalize_external_resource_list(response.get("result"))
 
     async def read_resource(self, uri: str, *, context: Any = None) -> dict[str, Any]:
@@ -401,8 +425,9 @@ class StreamableHttpExternalTransport(_HttpExternalTransportBase):
             The normalized ``resources/read`` result payload.
         """
         del context
-        await self._ensure_connected()
-        response = await self._request("resources/read", {"uri": uri})
+        async with self._request_lock:
+            await self._ensure_connected()
+            response = await self._request("resources/read", {"uri": uri})
         return normalize_external_resource_read(response.get("result"))
 
     async def call_tool(
@@ -428,33 +453,34 @@ class StreamableHttpExternalTransport(_HttpExternalTransportBase):
             returned as ``is_error`` results rather than raised.
         """
         del context
-        await self._ensure_connected()
-        params: dict[str, Any] = {
-            "name": tool_name,
-            "arguments": deepcopy(arguments or {}),
-        }
-        response = await self._request(
-            "tools/call",
-            params,
-            raise_on_error=False,
-            extra_headers=self._runtime_auth_headers(runtime_auth),
-        )
+        async with self._request_lock:
+            await self._ensure_connected()
+            params: dict[str, Any] = {
+                "name": tool_name,
+                "arguments": deepcopy(arguments or {}),
+            }
+            response = await self._request(
+                "tools/call",
+                params,
+                raise_on_error=False,
+                extra_headers=self._runtime_auth_headers(runtime_auth),
+            )
         return self._tool_call_result(tool_name, response)
 
     async def _ensure_connected(self) -> None:
         if not self._initialized or self._client is None:
             await self.connect()
 
-    def _base_headers(self, extra_headers: dict[str, str] | None) -> dict[str, str]:
-        headers = {
-            "accept": _ACCEPT_BOTH,
-            "content-type": "application/json",
-            **self._static_headers,
-        }
+    def _base_headers(self, extra_headers: dict[str, str] | None) -> httpx.Headers:
+        headers = httpx.Headers(self._static_headers)
+        headers["accept"] = _ACCEPT_BOTH
+        headers["content-type"] = "application/json"
         if self._session_id:
             headers[_SESSION_HEADER] = self._session_id
-        if extra_headers:
-            headers.update(extra_headers)
+        if self._protocol_version:
+            headers[_PROTOCOL_VERSION_HEADER] = self._protocol_version
+        for name, value in (extra_headers or {}).items():
+            headers[name] = value
         return headers
 
     async def _request(
@@ -465,6 +491,7 @@ class StreamableHttpExternalTransport(_HttpExternalTransportBase):
         timeout_s: float | None = None,
         raise_on_error: bool = True,
         extra_headers: dict[str, str] | None = None,
+        _retried: bool = False,
     ) -> dict[str, Any]:
         client = self._require_client(method)
         request_id = self._take_request_id()
@@ -475,31 +502,32 @@ class StreamableHttpExternalTransport(_HttpExternalTransportBase):
             "params": deepcopy(params or {}),
         }
         encoded = self._encode_payload(payload, method)
+        effective_timeout = timeout_s or self._request_timeout_s
         try:
-            async with client.stream(
-                "POST",
-                self._url,
-                content=encoded,
-                headers=self._base_headers(extra_headers),
-                timeout=timeout_s or self._request_timeout_s,
-            ) as response:
-                if response.status_code == 404 and self._session_id:
-                    self._session_id = None
-                    self._initialized = False
-                if response.status_code >= 400:
-                    raise self._status_error(response.status_code, method)
-                session_id = response.headers.get(_SESSION_HEADER)
-                if session_id:
-                    self._session_id = session_id
-                content_type = response.headers.get("content-type", "")
-                if content_type.startswith("text/event-stream"):
-                    result = await self._read_sse_response(
-                        response, request_id, method
-                    )
-                else:
-                    body = await response.aread()
-                    result = self._decode_json_response(body, method)
-        except HttpExternalTransportError:
+            result = await asyncio.wait_for(
+                self._send_request(
+                    client, encoded, request_id, method, extra_headers, effective_timeout
+                ),
+                timeout=effective_timeout,
+            )
+        except asyncio.TimeoutError as exc:
+            raise self._error(
+                f"External HTTP request timed out for method '{method}'",
+                reason_code="request_timeout",
+                method=method,
+            ) from exc
+        except HttpExternalTransportError as exc:
+            if exc.reason_code == "session_expired" and not _retried:
+                self._initialized = False
+                await self.connect()
+                return await self._request(
+                    method,
+                    params,
+                    timeout_s=timeout_s,
+                    raise_on_error=raise_on_error,
+                    extra_headers=extra_headers,
+                    _retried=True,
+                )
             raise
         except httpx.HTTPError as exc:
             raise self._transport_error(exc, method) from exc
@@ -511,6 +539,42 @@ class StreamableHttpExternalTransport(_HttpExternalTransportBase):
                 method=method,
             )
         return result
+
+    async def _send_request(
+        self,
+        client: httpx.AsyncClient,
+        encoded: bytes,
+        request_id: int,
+        method: str,
+        extra_headers: dict[str, str] | None,
+        effective_timeout: float,
+    ) -> dict[str, Any]:
+        async with client.stream(
+            "POST",
+            self._url,
+            content=encoded,
+            headers=self._base_headers(extra_headers),
+            timeout=effective_timeout,
+        ) as response:
+            if response.status_code == 404 and self._session_id:
+                self._session_id = None
+                self._initialized = False
+                raise self._error(
+                    "External HTTP session expired",
+                    reason_code="session_expired",
+                    method=method,
+                    details={"status": 404},
+                )
+            if response.status_code >= 400:
+                raise self._status_error(response.status_code, method)
+            session_id = response.headers.get(_SESSION_HEADER)
+            if session_id:
+                self._session_id = session_id
+            content_type = response.headers.get("content-type", "")
+            if content_type.startswith("text/event-stream"):
+                return await self._read_sse_response(response, request_id, method)
+            body = await response.aread()
+            return self._decode_json_response(body, method)
 
     async def _read_sse_response(
         self, response: httpx.Response, request_id: int, method: str
@@ -587,7 +651,7 @@ class StreamableHttpExternalTransport(_HttpExternalTransportBase):
                 await client.delete(
                     self._url,
                     headers={**self._static_headers, _SESSION_HEADER: self._session_id},
-                    timeout=self._request_timeout_s,
+                    timeout=_DEFAULT_CLOSE_TIMEOUT_S,
                 )
         self._session_id = None
         with contextlib.suppress(Exception):
@@ -655,7 +719,18 @@ class SseExternalTransport(_HttpExternalTransportBase):
                     self._read_endpoint_event(),
                     timeout=self._connect_timeout_s,
                 )
-                self._endpoint_url = urljoin(str(response.url), endpoint)
+                endpoint_url = urljoin(str(response.url), endpoint)
+                stream_parts = urlsplit(str(response.url))
+                endpoint_parts = urlsplit(endpoint_url)
+                if (
+                    endpoint_parts.scheme != stream_parts.scheme
+                    or endpoint_parts.netloc != stream_parts.netloc
+                ):
+                    raise self._error(
+                        "External SSE endpoint event points outside the stream origin",
+                        reason_code="invalid_endpoint",
+                    )
+                self._endpoint_url = endpoint_url
                 self._reader_task = asyncio.create_task(self._pump_events())
                 await self._request(
                     "initialize",
@@ -706,7 +781,8 @@ class SseExternalTransport(_HttpExternalTransportBase):
             self._initialized = False
             return checks
         try:
-            await self._request("ping", {}, timeout_s=self._health_timeout_s)
+            async with self._request_lock:
+                await self._request("ping", {}, timeout_s=self._health_timeout_s)
         except HttpExternalTransportError:
             self._initialized = False
             checks["connected"] = False
@@ -715,14 +791,16 @@ class SseExternalTransport(_HttpExternalTransportBase):
 
     async def list_tools(self) -> list[ExternalToolDefinition]:
         """Discover and normalize upstream MCP tool definitions."""
-        await self._ensure_connected()
-        response = await self._request("tools/list", {})
+        async with self._request_lock:
+            await self._ensure_connected()
+            response = await self._request("tools/list", {})
         return _normalize_tool_definitions(response.get("result"))
 
     async def list_resources(self) -> list[dict[str, Any]]:
         """Discover and normalize upstream MCP resource descriptors."""
-        await self._ensure_connected()
-        response = await self._request("resources/list", {})
+        async with self._request_lock:
+            await self._ensure_connected()
+            response = await self._request("resources/list", {})
         return normalize_external_resource_list(response.get("result"))
 
     async def read_resource(self, uri: str, *, context: Any = None) -> dict[str, Any]:
@@ -736,8 +814,9 @@ class SseExternalTransport(_HttpExternalTransportBase):
             The normalized ``resources/read`` result payload.
         """
         del context
-        await self._ensure_connected()
-        response = await self._request("resources/read", {"uri": uri})
+        async with self._request_lock:
+            await self._ensure_connected()
+            response = await self._request("resources/read", {"uri": uri})
         return normalize_external_resource_read(response.get("result"))
 
     async def call_tool(
@@ -763,17 +842,18 @@ class SseExternalTransport(_HttpExternalTransportBase):
             returned as ``is_error`` results rather than raised.
         """
         del context
-        await self._ensure_connected()
-        params: dict[str, Any] = {
-            "name": tool_name,
-            "arguments": deepcopy(arguments or {}),
-        }
-        response = await self._request(
-            "tools/call",
-            params,
-            raise_on_error=False,
-            extra_headers=self._runtime_auth_headers(runtime_auth),
-        )
+        async with self._request_lock:
+            await self._ensure_connected()
+            params: dict[str, Any] = {
+                "name": tool_name,
+                "arguments": deepcopy(arguments or {}),
+            }
+            response = await self._request(
+                "tools/call",
+                params,
+                raise_on_error=False,
+                extra_headers=self._runtime_auth_headers(runtime_auth),
+            )
         return self._tool_call_result(tool_name, response)
 
     async def _ensure_connected(self) -> None:

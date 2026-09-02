@@ -729,3 +729,66 @@ async def test_gateway_external_registry_delete_ungranted_server_succeeds_and_au
         "external_server.deleted"
     ]
     assert audit_store.events[0].payload == {"server_id": "search"}
+
+
+@pytest.mark.asyncio
+async def test_gateway_external_registry_redacts_header_values_in_responses() -> None:
+    store = InMemoryExternalRegistryStore()
+    manager = _manager(store)
+
+    created = await manager.create_server(
+        _server(
+            id="linear",
+            transport="streamable_http",
+            url="https://mcp.linear.example.test/mcp",
+            headers={"Authorization": "Bearer secret-token"},
+        )
+    )
+    assert created["server"]["headers"] == {"Authorization": "***"}
+
+    shown = await manager.show_server("linear")
+    assert shown["server"]["headers"] == {"Authorization": "***"}
+
+    listed = await manager.list_servers()
+    assert listed["servers"][0]["headers"] == {"Authorization": "***"}
+
+    stored = await store.get_server("linear")
+    assert stored.headers == {"Authorization": "Bearer secret-token"}
+
+
+@pytest.mark.asyncio
+async def test_gateway_external_registry_patches_headers() -> None:
+    store = InMemoryExternalRegistryStore(
+        [
+            _server(
+                id="linear",
+                transport="streamable_http",
+                url="https://mcp.linear.example.test/mcp",
+                headers={"Authorization": "Bearer old-token"},
+            )
+        ]
+    )
+    manager = _manager(store)
+
+    payload = await manager.patch_server(
+        "linear", {"headers": {"Authorization": "Bearer new-token"}}
+    )
+    assert payload["server"]["headers"] == {"Authorization": "***"}
+
+    stored = await store.get_server("linear")
+    assert stored.headers == {"Authorization": "Bearer new-token"}
+
+
+@pytest.mark.asyncio
+async def test_gateway_external_registry_rejects_enabled_http_transport_non_http_url() -> None:
+    manager = _manager(InMemoryExternalRegistryStore())
+
+    with pytest.raises(GatewayExternalRegistryManagementError) as excinfo:
+        await manager.create_server(
+            _server(
+                id="bad",
+                transport="streamable_http",
+                url="wss://bad.example.test/mcp",
+            )
+        )
+    assert excinfo.value.reason_code == "invalid_external_server_request"
