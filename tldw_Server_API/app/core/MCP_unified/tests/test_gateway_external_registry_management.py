@@ -792,3 +792,19 @@ async def test_gateway_external_registry_rejects_enabled_http_transport_non_http
             )
         )
     assert excinfo.value.reason_code == "invalid_external_server_request"
+
+
+def test_patch_request_model_accepts_http_transports_and_headers() -> None:
+    """The FastAPI patch body must expose the new URL transports and headers so rotation works end to end."""
+    from mcp_unified.gateway.fastapi import PatchExternalServerRequest
+
+    request = PatchExternalServerRequest.model_validate(
+        {
+            "transport": "streamable_http",
+            "url": "https://mcp.linear.example.test/mcp",
+            "headers": {"Authorization": "Bearer rotated"},
+        }
+    )
+    assert request.transport == "streamable_http"
+    assert request.headers == {"Authorization": "Bearer rotated"}
+    assert PatchExternalServerRequest.model_validate({"transport": "sse"}).transport == "sse"

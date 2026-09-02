@@ -13,6 +13,7 @@ from typing import Any
 from urllib.parse import urljoin, urlsplit
 
 import httpx
+from loguru import logger
 
 from mcp_unified.federation.models import (
     BrokeredExternalCredential,
@@ -186,10 +187,11 @@ class _HttpExternalTransportBase:
         self._static_headers = {
             str(k): str(v) for k, v in (self._server.headers or {}).items()
         }
-        if scheme == "http":
-            host = (urlsplit(url).hostname or "").lower()
+        host = (urlsplit(url).hostname or "").lower()
+        self._plain_http_non_loopback = scheme == "http" and host not in _LOOPBACK_HOSTS
+        if self._plain_http_non_loopback:
             sensitive = {name.lower() for name in self._static_headers}
-            if sensitive & _SENSITIVE_HEADER_NAMES and host not in _LOOPBACK_HOSTS:
+            if sensitive & _SENSITIVE_HEADER_NAMES:
                 raise self._error(
                     "Credential headers over plain http are only allowed to loopback",
                     reason_code="insecure_url",
@@ -203,6 +205,7 @@ class _HttpExternalTransportBase:
         self._initialized = False
 
     def _take_request_id(self) -> int:
+        """Return the next monotonically increasing JSON-RPC request id."""
         request_id = self._next_request_id
         self._next_request_id += 1
         return request_id
@@ -215,6 +218,7 @@ class _HttpExternalTransportBase:
         method: str | None = None,
         details: dict[str, Any] | None = None,
     ) -> HttpExternalTransportError:
+        """Build a reason-coded transport error bound to this server id."""
         return HttpExternalTransportError(
             message,
             reason_code=reason_code,
@@ -224,6 +228,7 @@ class _HttpExternalTransportBase:
         )
 
     def _status_error(self, status: int, method: str | None) -> HttpExternalTransportError:
+        """Map an HTTP error status to a reason-coded transport error."""
         if status in (401, 403):
             return self._error(
                 "External HTTP server requires authorization",
@@ -241,22 +246,44 @@ class _HttpExternalTransportBase:
     def _transport_error(
         self, exc: httpx.HTTPError, method: str | None
     ) -> HttpExternalTransportError:
+        """Map an httpx transport failure to a reason-coded transport error."""
         return self._error(
             "External HTTP request failed",
             reason_code=_reason_code_for_transport_error(exc),
             method=method,
         )
 
-    @staticmethod
     def _runtime_auth_headers(
+        self,
         runtime_auth: BrokeredExternalCredential | None,
     ) -> dict[str, str]:
+        """Return brokered per-call headers, refusing credentials over plain http.
+
+        Args:
+            runtime_auth: Optional brokered credential resolved for this call.
+
+        Returns:
+            Header names/values to merge into the outgoing request.
+
+        Raises:
+            HttpExternalTransportError: ``insecure_url`` when a credential
+                header would be sent over plain http to a non-loopback host.
+        """
         if runtime_auth is None or not runtime_auth.headers:
             return {}
-        return {str(k): str(v) for k, v in runtime_auth.headers.items()}
+        headers = {str(k): str(v) for k, v in runtime_auth.headers.items()}
+        if self._plain_http_non_loopback:
+            sensitive = {name.lower() for name in headers}
+            if sensitive & _SENSITIVE_HEADER_NAMES:
+                raise self._error(
+                    "Brokered credential headers over plain http are only allowed to loopback",
+                    reason_code="insecure_url",
+                )
+        return headers
 
     @classmethod
     def _positive_timeout(cls, value: float, field_name: str) -> float:
+        """Validate that a timeout value is a finite positive number."""
         try:
             timeout = float(value)
         except (TypeError, ValueError) as exc:
@@ -273,6 +300,7 @@ class _HttpExternalTransportBase:
 
     @staticmethod
     def _encode_payload(payload: dict[str, Any], method: str) -> bytes:
+        """Encode a JSON-RPC payload, rejecting non-serializable requests."""
         try:
             return json.dumps(payload, separators=(",", ":")).encode("utf-8")
         except (TypeError, ValueError) as exc:
@@ -285,6 +313,7 @@ class _HttpExternalTransportBase:
     def _tool_call_result(
         self, tool_name: str, response: dict[str, Any]
     ) -> ExternalToolCallResult:
+        """Normalize a JSON-RPC tool response into an ExternalToolCallResult."""
         error = response.get("error")
         if isinstance(error, dict):
             message = error.get("message")
@@ -373,7 +402,7 @@ class StreamableHttpExternalTransport(_HttpExternalTransportBase):
 
     async def close(self) -> None:
         """Terminate the MCP session and release the HTTP client."""
-        async with self._connect_lock:
+        async with self._request_lock, self._connect_lock:
             await self._close_client()
 
     async def health_check(self) -> dict[str, bool]:
@@ -453,6 +482,7 @@ class StreamableHttpExternalTransport(_HttpExternalTransportBase):
             returned as ``is_error`` results rather than raised.
         """
         del context
+        extra_headers = self._runtime_auth_headers(runtime_auth)
         async with self._request_lock:
             await self._ensure_connected()
             params: dict[str, Any] = {
@@ -463,15 +493,17 @@ class StreamableHttpExternalTransport(_HttpExternalTransportBase):
                 "tools/call",
                 params,
                 raise_on_error=False,
-                extra_headers=self._runtime_auth_headers(runtime_auth),
+                extra_headers=extra_headers,
             )
         return self._tool_call_result(tool_name, response)
 
     async def _ensure_connected(self) -> None:
+        """Connect (or reconnect) if the transport is not initialized."""
         if not self._initialized or self._client is None:
             await self.connect()
 
     def _base_headers(self, extra_headers: dict[str, str] | None) -> httpx.Headers:
+        """Build request headers: static first, protocol values winning, extras last."""
         headers = httpx.Headers(self._static_headers)
         headers["accept"] = _ACCEPT_BOTH
         headers["content-type"] = "application/json"
@@ -493,6 +525,7 @@ class StreamableHttpExternalTransport(_HttpExternalTransportBase):
         extra_headers: dict[str, str] | None = None,
         _retried: bool = False,
     ) -> dict[str, Any]:
+        """Send one JSON-RPC request and return the correlated response payload."""
         client = self._require_client(method)
         request_id = self._take_request_id()
         payload = {
@@ -549,6 +582,7 @@ class StreamableHttpExternalTransport(_HttpExternalTransportBase):
         extra_headers: dict[str, str] | None,
         effective_timeout: float,
     ) -> dict[str, Any]:
+        """POST one encoded request and read its JSON or SSE-framed response."""
         async with client.stream(
             "POST",
             self._url,
@@ -574,11 +608,19 @@ class StreamableHttpExternalTransport(_HttpExternalTransportBase):
             if content_type.startswith("text/event-stream"):
                 return await self._read_sse_response(response, request_id, method)
             body = await response.aread()
-            return self._decode_json_response(body, method)
+            payload = self._decode_json_response(body, method)
+            if payload.get("id") != request_id:
+                raise self._error(
+                    "External HTTP response id does not match the request",
+                    reason_code="invalid_response",
+                    method=method,
+                )
+            return payload
 
     async def _read_sse_response(
         self, response: httpx.Response, request_id: int, method: str
     ) -> dict[str, Any]:
+        """Read an SSE-framed POST response until the matching id arrives."""
         async for _event, data in _iter_sse_events(response.aiter_lines()):
             try:
                 payload = json.loads(data)
@@ -593,6 +635,7 @@ class StreamableHttpExternalTransport(_HttpExternalTransportBase):
         )
 
     def _decode_json_response(self, body: bytes, method: str) -> dict[str, Any]:
+        """Decode a JSON response body into a JSON-RPC object."""
         try:
             payload = json.loads(body.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -610,6 +653,7 @@ class StreamableHttpExternalTransport(_HttpExternalTransportBase):
         return payload
 
     async def _notify(self, method: str, params: dict[str, Any]) -> None:
+        """POST one JSON-RPC notification, accepting any 2xx response."""
         client = self._require_client(method)
         payload = {
             "jsonrpc": "2.0",
@@ -630,6 +674,7 @@ class StreamableHttpExternalTransport(_HttpExternalTransportBase):
             raise self._status_error(response.status_code, method)
 
     def _require_client(self, method: str) -> httpx.AsyncClient:
+        """Return the live HTTP client or raise not_connected."""
         client = self._client
         if client is None:
             raise self._error(
@@ -640,6 +685,7 @@ class StreamableHttpExternalTransport(_HttpExternalTransportBase):
         return client
 
     async def _close_client(self) -> None:
+        """Send session DELETE (bounded), close the client, and reset state."""
         client = self._client
         self._client = None
         self._initialized = False
@@ -761,7 +807,7 @@ class SseExternalTransport(_HttpExternalTransportBase):
 
     async def close(self) -> None:
         """Close the SSE stream, fail pending requests, and release the client."""
-        async with self._connect_lock:
+        async with self._request_lock, self._connect_lock:
             await self._teardown()
 
     async def health_check(self) -> dict[str, bool]:
@@ -842,6 +888,7 @@ class SseExternalTransport(_HttpExternalTransportBase):
             returned as ``is_error`` results rather than raised.
         """
         del context
+        extra_headers = self._runtime_auth_headers(runtime_auth)
         async with self._request_lock:
             await self._ensure_connected()
             params: dict[str, Any] = {
@@ -852,18 +899,21 @@ class SseExternalTransport(_HttpExternalTransportBase):
                 "tools/call",
                 params,
                 raise_on_error=False,
-                extra_headers=self._runtime_auth_headers(runtime_auth),
+                extra_headers=extra_headers,
             )
         return self._tool_call_result(tool_name, response)
 
     async def _ensure_connected(self) -> None:
+        """Connect (or reconnect) if the transport is not initialized."""
         if not self._initialized or not self._reader_alive():
             await self.connect()
 
     def _reader_alive(self) -> bool:
+        """Return whether the background stream reader task is running."""
         return self._reader_task is not None and not self._reader_task.done()
 
     async def _read_endpoint_event(self) -> str:
+        """Consume stream events until the endpoint event arrives."""
         events = self._events
         if events is None:
             raise self._error(
@@ -879,6 +929,7 @@ class SseExternalTransport(_HttpExternalTransportBase):
         )
 
     async def _pump_events(self) -> None:
+        """Route streamed JSON-RPC responses to their pending futures."""
         events = self._events
         if events is None:
             return
@@ -893,13 +944,18 @@ class SseExternalTransport(_HttpExternalTransportBase):
                 future = self._pending.pop(payload.get("id"), None)
                 if future is not None and not future.done():
                     future.set_result(payload)
-        except Exception:  # noqa: BLE001 - stream teardown races vary by backend.
-            pass
+        except Exception as exc:  # noqa: BLE001 - stream teardown races vary by backend.
+            logger.debug(
+                "External SSE stream reader ended for server {server_id}: {error_type}",
+                server_id=self.server_id,
+                error_type=type(exc).__name__,
+            )
         finally:
             self._initialized = False
             self._fail_pending("connection_closed")
 
     def _fail_pending(self, reason_code: str) -> None:
+        """Fail every pending request future with a reason-coded error."""
         pending = list(self._pending.values())
         self._pending.clear()
         for future in pending:
@@ -920,6 +976,7 @@ class SseExternalTransport(_HttpExternalTransportBase):
         raise_on_error: bool = True,
         extra_headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
+        """Send one JSON-RPC request and return the correlated response payload."""
         request_id = self._take_request_id()
         future: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
         self._pending[request_id] = future
@@ -929,10 +986,15 @@ class SseExternalTransport(_HttpExternalTransportBase):
             "method": method,
             "params": deepcopy(params or {}),
         }
-        try:
+
+        async def _round_trip() -> dict[str, Any]:
+            """POST the payload, then await the stream-correlated response."""
             await self._post_payload(payload, method, extra_headers)
+            return await future
+
+        try:
             response = await asyncio.wait_for(
-                future, timeout=timeout_s or self._request_timeout_s
+                _round_trip(), timeout=timeout_s or self._request_timeout_s
             )
         except asyncio.TimeoutError as exc:
             raise self._error(
@@ -952,6 +1014,7 @@ class SseExternalTransport(_HttpExternalTransportBase):
         return response
 
     async def _post_notification(self, method: str, params: dict[str, Any]) -> None:
+        """POST one JSON-RPC notification to the message endpoint."""
         payload = {
             "jsonrpc": "2.0",
             "method": method,
@@ -965,6 +1028,7 @@ class SseExternalTransport(_HttpExternalTransportBase):
         method: str,
         extra_headers: dict[str, str] | None,
     ) -> None:
+        """POST one JSON-RPC payload to the resolved message endpoint."""
         client = self._client
         endpoint = self._endpoint_url
         if client is None or endpoint is None:
@@ -993,6 +1057,7 @@ class SseExternalTransport(_HttpExternalTransportBase):
             raise self._status_error(response.status_code, method)
 
     async def _teardown(self) -> None:
+        """Cancel the reader, close stream and client, and fail pending requests."""
         reader_task = self._reader_task
         self._reader_task = None
         if reader_task is not None:
