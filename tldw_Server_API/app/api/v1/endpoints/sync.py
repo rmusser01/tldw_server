@@ -51,6 +51,7 @@ from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
     SyncBlobUploadCreateRequest,
     SyncBlobUploadSessionResponse,
     SyncCapabilitiesResponse,
+    SyncConflictListResponse,
     SyncConflictRecord,
     SyncConflictResolveRejectedItem,
     SyncConflictResolveRequest,
@@ -127,6 +128,9 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     SyncDeviceBlobIdAckCreate,
     SyncDeviceDomainAckCreate,
     SyncEnvelopeCreate,
+)
+from tldw_Server_API.app.core.Sync.v2.personal_context_ongoing_contract import (
+    PersonalContextExchangeProof,
 )
 from tldw_Server_API.app.core.Sync.v2.profile import PersonalContextBootstrapError
 from tldw_Server_API.app.core.Sync.v2.security import (
@@ -627,11 +631,26 @@ def _api_capabilities_from_core(capabilities: Any) -> SyncCapabilitiesResponse:
 def _validate_personal_context_query_proof(
     activation_epoch: str | None,
     continuity_token: str | None,
-) -> None:
+) -> PersonalContextExchangeProof | None:
     """Reject incomplete version-one exchange proofs before service access."""
 
     if (activation_epoch is None) == (continuity_token is None):
-        return
+        if activation_epoch is None:
+            return None
+        try:
+            return PersonalContextExchangeProof(
+                ongoing_sync_version=1,
+                activation_epoch=activation_epoch,
+                continuity_token=continuity_token,
+            )
+        except ValidationError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "error_code": "personal_context_exchange_invalid",
+                    "message": "Personal Context exchange proof is invalid.",
+                },
+            ) from exc
     raise HTTPException(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         detail={
@@ -1714,7 +1733,7 @@ def pull_sync_v2_envelopes(
 
 @router.get(
     "/conflicts",
-    response_model=list[SyncConflictRecord],
+    response_model=list[SyncConflictRecord] | SyncConflictListResponse,
     summary="List Sync v2 conflicts",
 )
 def list_sync_v2_conflicts(
@@ -1726,7 +1745,7 @@ def list_sync_v2_conflicts(
     user: User = Depends(get_request_user),
     service: SyncV2Service = Depends(get_sync_v2_service),
 ):
-    _validate_personal_context_query_proof(
+    personal_context_exchange = _validate_personal_context_query_proof(
         personal_context_activation_epoch,
         personal_context_continuity_token,
     )
@@ -1743,7 +1762,14 @@ def list_sync_v2_conflicts(
             dataset_id=dataset_id,
             conflict_status=conflict_status,
         ) from exc
-    return [_api_conflict_from_core(conflict) for conflict in conflicts]
+    api_conflicts = [_api_conflict_from_core(conflict) for conflict in conflicts]
+    if personal_context_exchange is None:
+        return api_conflicts
+    return SyncConflictListResponse(
+        dataset_id=dataset_id,
+        conflicts=api_conflicts,
+        personal_context_exchange=personal_context_exchange,
+    )
 
 
 @router.post(
@@ -1775,6 +1801,7 @@ def resolve_sync_v2_conflicts(
                 resolution_envelope=resolution_envelope,
                 resolved_by_device_id=request.device_id,
                 notes=None,
+                require_personal_context_conflict=request.personal_context_exchange is not None,
             )
         except Exception as exc:
             logger.bind(
@@ -1810,6 +1837,7 @@ def resolve_sync_v2_conflicts(
         server_cursor=max(server_cursors, default=None),
         resolved=resolved,
         rejected=rejected,
+        personal_context_exchange=request.personal_context_exchange,
     )
 
 

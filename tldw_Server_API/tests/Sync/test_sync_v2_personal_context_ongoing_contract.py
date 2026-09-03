@@ -16,6 +16,7 @@ from tldw_Server_API.app.core.Sync.v2.personal_context_ongoing_contract import (
     PersonalContextExchangeProof,
     PersonalContextPurgeReceipt,
     PersonalContextRelayContinuation,
+    export_personal_context_ongoing_contract,
     validate_client_personal_context_metadata,
 )
 
@@ -91,6 +92,22 @@ def test_contract_identifiers_are_strict_bounded_and_content_free() -> None:
             }
         )
     with pytest.raises(ValueError):
+        PersonalContextExchangeProof.model_validate(
+            {
+                "ongoing_sync_version": 1,
+                "activation_epoch": "!" + "a" * 16,
+                "continuity_token": "continuity_0123456789abcdef",
+            }
+        )
+    with pytest.raises(ValueError):
+        PersonalContextExchangeProof.model_validate(
+            {
+                "ongoing_sync_version": 1,
+                "activation_epoch": "a" * 257,
+                "continuity_token": "continuity_0123456789abcdef",
+            }
+        )
+    with pytest.raises(ValueError):
         PersonalContextRelayContinuation.model_validate(
             {
                 "state": "complete",
@@ -124,6 +141,14 @@ def test_activation_and_purge_receipts_require_strict_safe_values() -> None:
     assert receipt.state == "prepared"
 
     with pytest.raises(ValueError):
+        PersonalContextActivationReceipt.model_validate(
+            {
+                **receipt.model_dump(),
+                "baseline_digest": "!" + "a" * 64,
+            }
+        )
+
+    with pytest.raises(ValueError):
         PersonalContextPurgeReceipt.model_validate(
             {
                 "request_id": "request_0123456789abcdef",
@@ -149,6 +174,12 @@ def test_contract_endpoint_map_is_complete_and_versioned() -> None:
         "conflict_resolve": ("POST", "/api/v1/sync/conflicts/resolve"),
         "purge": ("POST", "/api/v1/sync/personal-context/purge"),
     }
+
+
+def test_contract_export_includes_cleanup_acknowledgement_root() -> None:
+    contract = export_personal_context_ongoing_contract()
+
+    assert "PersonalContextCleanupAck" in contract["$defs"]
 
 
 def test_contract_generator_writes_reproducible_schema_and_manifest(tmp_path: Path) -> None:

@@ -1199,6 +1199,101 @@ def test_conflict_list_page_is_bounded_to_twenty_items(client: TestClient) -> No
     assert response.status_code == 422
 
 
+def test_version_one_conflict_list_returns_proof_bearing_wrapper(
+    client: TestClient,
+    sync_service: SyncV2Service,
+) -> None:
+    sync_service.register_device(
+        user_id="user-1",
+        device_id="device-1",
+        display_name="Trusted laptop",
+        client_type="chatbook",
+    )
+    sync_service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.note"],
+    )
+    legacy_response = client.get(
+        "/api/v1/sync/conflicts",
+        params={"dataset_id": "dataset-1"},
+    )
+    response = client.get(
+        "/api/v1/sync/conflicts",
+        params={
+            "dataset_id": "dataset-1",
+            "personal_context_activation_epoch": "epoch_0123456789abcdef",
+            "personal_context_continuity_token": "continuity_0123456789abcdef",
+        },
+    )
+
+    assert legacy_response.status_code == 200
+    assert legacy_response.json() == []
+    assert response.status_code == 200
+    assert response.json() == {
+        "dataset_id": "dataset-1",
+        "conflicts": [],
+        "personal_context_exchange": {
+            "ongoing_sync_version": 1,
+            "activation_epoch": "epoch_0123456789abcdef",
+            "continuity_token": "continuity_0123456789abcdef",
+        },
+    }
+
+
+def test_personal_context_skip_rejects_non_personal_context_stored_conflict(
+    client: TestClient,
+    sync_service: SyncV2Service,
+) -> None:
+    sync_service.register_device(
+        user_id="user-1",
+        device_id="device-1",
+        display_name="Trusted laptop",
+        client_type="chatbook",
+    )
+    sync_service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.note"],
+    )
+    sync_service.store.insert_conflict(
+        SyncConflictCreate(
+            conflict_id="conflict-non-personal-context",
+            dataset_id="dataset-1",
+            domain="notes.note",
+            object_id="note-1",
+            conflict_type="revision_mismatch",
+        )
+    )
+
+    response = client.post(
+        "/api/v1/sync/conflicts/resolve",
+        json={
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "personal_context_exchange": {
+                "ongoing_sync_version": 1,
+                "activation_epoch": "epoch_0123456789abcdef",
+                "continuity_token": "continuity_0123456789abcdef",
+            },
+            "resolutions": [
+                {
+                    "conflict_id": "conflict-non-personal-context",
+                    "action": "skip",
+                    "expected_local_envelope_id": "local_0123456789abcdef",
+                    "expected_remote_envelope_id": "remote_0123456789abcdef",
+                    "idempotency_key": "resolve_0123456789abcdef",
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["resolved"] == []
+    assert response.json()["rejected"][0]["conflict_id"] == "conflict-non-personal-context"
+    assert sync_service.store.get_conflict("conflict-non-personal-context").status == "unresolved"
+
+
 def test_background_sync_policy_lease_and_status_endpoints(
     client: TestClient,
     sync_service: SyncV2Service,

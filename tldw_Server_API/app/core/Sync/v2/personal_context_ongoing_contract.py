@@ -6,7 +6,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, model_validator
 
-_OPAQUE_TOKEN = r"[A-Za-z0-9._~-]{16,256}"  # nosec B105
+_OPAQUE_TOKEN = r"^[A-Za-z0-9._~-]{16,256}$"  # nosec B105
+_SHA256_DIGEST = r"^[0-9a-f]{64}$"
 
 PERSONAL_CONTEXT_ONGOING_ENDPOINTS = {
     "capabilities": ("GET", "/api/v1/sync/capabilities"),
@@ -29,8 +30,8 @@ class PersonalContextExchangeProof(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
     ongoing_sync_version: Literal[1]
-    activation_epoch: StrictStr = Field(pattern=_OPAQUE_TOKEN)
-    continuity_token: StrictStr = Field(pattern=_OPAQUE_TOKEN)
+    activation_epoch: StrictStr = Field(min_length=16, max_length=256, pattern=_OPAQUE_TOKEN)
+    continuity_token: StrictStr = Field(min_length=16, max_length=256, pattern=_OPAQUE_TOKEN)
 
 
 class PersonalContextAuthorityMetadata(BaseModel):
@@ -77,7 +78,11 @@ class PersonalContextActivationReceipt(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
     activation_id: StrictStr = Field(min_length=16, max_length=128)
-    baseline_digest: StrictStr = Field(pattern=r"[0-9a-f]{64}")
+    baseline_digest: StrictStr = Field(
+        min_length=64,
+        max_length=64,
+        pattern=_SHA256_DIGEST,
+    )
     purge_generation: StrictInt = Field(ge=0)
     publication_watermark: StrictInt = Field(ge=0)
     home_server_cursor: StrictInt = Field(ge=0)
@@ -125,6 +130,7 @@ def export_personal_context_ongoing_contract() -> dict[str, object]:
 
     from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
         PersonalContextSyncCapabilitiesResponse,
+        SyncConflictListResponse,
         SyncConflictResolveRequest,
         SyncConflictResolveResponse,
         SyncPersonalContextActivationAcknowledgeRequest,
@@ -139,6 +145,7 @@ def export_personal_context_ongoing_contract() -> dict[str, object]:
     )
 
     model_classes = (
+        PersonalContextCleanupAck,
         PersonalContextSyncCapabilitiesResponse,
         SyncPersonalContextBootstrapRequest,
         SyncPersonalContextBootstrapResponse,
@@ -147,6 +154,7 @@ def export_personal_context_ongoing_contract() -> dict[str, object]:
         SyncPushRequest,
         SyncPushResponse,
         SyncPullResponse,
+        SyncConflictListResponse,
         SyncConflictResolveRequest,
         SyncConflictResolveResponse,
         SyncPersonalContextPurgeRequest,

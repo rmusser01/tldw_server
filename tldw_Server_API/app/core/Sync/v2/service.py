@@ -4972,12 +4972,15 @@ class SyncV2Service:
         resolved_by_envelope_id: str | None = None,
         resolved_by_device_id: str | None = None,
         notes: str | None = None,
+        require_personal_context_conflict: bool = False,
     ) -> SyncConflict:
         conflict = self.store.get_conflict(conflict_id)
         if conflict is None:
             raise SyncStoreError("Sync conflict was not found or is not accessible")
         if dataset_id is not None and conflict.dataset_id != dataset_id:
             raise SyncStoreError("Sync conflict was not found or is not accessible")
+        if require_personal_context_conflict and not conflict.domain.startswith("personal_context."):
+            raise SyncStoreError("Personal Context conflict identity is not valid for this conflict")
         try:
             dataset = self._require_dataset_access(user_id=user_id, dataset_id=conflict.dataset_id)
         except SyncStoreError as exc:

@@ -19,12 +19,13 @@ from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
     SyncBlobUploadCreateRequest,
     SyncBlobUploadSessionResponse,
     SyncCapabilitiesResponse,
+    SyncConflictListResponse,
     SyncConflictResolveRequest,
-    SyncPersonalContextActivationAcknowledgeRequest,
-    SyncPersonalContextPurgeRequest,
     SyncDatasetEnrollRequest,
     SyncKeyRecoveryBundleRecord,
     SyncKeyRecoveryBundleRequest,
+    SyncPersonalContextActivationAcknowledgeRequest,
+    SyncPersonalContextPurgeRequest,
     SyncPushRequest,
     SyncPushResponse,
     SyncRestoreCompletenessResponse,
@@ -1313,6 +1314,34 @@ def test_conflict_resolution_request_rejects_skip_with_resolution_envelope():
         )
 
 
+def test_conflict_resolution_rejects_client_home_authority_claim() -> None:
+    with pytest.raises(ValidationError, match="home authority"):
+        SyncConflictResolveRequest.model_validate(
+            {
+                "dataset_id": "dataset-1",
+                "device_id": "device-1",
+                "resolutions": [
+                    {
+                        "conflict_id": "conflict-1",
+                        "action": "duplicate_rename",
+                        "resolution_envelope": _m1_envelope_payload(
+                            client_envelope_id="env-resolution-home-authority",
+                            domain="personal_context.record",
+                            object_id="note-copy",
+                            authority={
+                                "role": "home_authority",
+                                "publication_batch_id": "batch_0123456789abcdef",
+                                "profile_publication_sequence": 1,
+                                "batch_ordinal": 0,
+                                "batch_size": 1,
+                            },
+                        ),
+                    }
+                ],
+            }
+        )
+
+
 def test_conflict_batch_endpoint_resolves_locked_m1_request_shape():
     from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User
     from tldw_Server_API.app.api.v1.endpoints.sync import resolve_sync_v2_conflicts
@@ -1559,6 +1588,23 @@ def test_ongoing_exchange_shapes_are_available_on_sync_boundaries() -> None:
     assert response.personal_context_exchange == push.personal_context_exchange
 
 
+def test_personal_context_conflict_list_response_requires_a_proof() -> None:
+    proof = _ongoing_exchange_proof()
+    response = SyncConflictListResponse.model_validate(
+        {
+            "dataset_id": "dataset-1",
+            "conflicts": [],
+            "personal_context_exchange": proof,
+        }
+    )
+
+    assert response.personal_context_exchange.ongoing_sync_version == 1
+    with pytest.raises(ValidationError):
+        SyncConflictListResponse.model_validate(
+            {"dataset_id": "dataset-1", "conflicts": []}
+        )
+
+
 def test_personal_context_conflict_exchange_requires_protected_candidates() -> None:
     proof = _ongoing_exchange_proof()
     request = SyncConflictResolveRequest.model_validate(
@@ -1615,6 +1661,13 @@ def test_ongoing_activation_and_purge_requests_are_strict() -> None:
 
     assert acknowledgment.personal_context_exchange.ongoing_sync_version == 1
     assert purge.expected_purge_generation == 0
+    with pytest.raises(ValidationError):
+        SyncPersonalContextActivationAcknowledgeRequest.model_validate(
+            {
+                **acknowledgment.model_dump(),
+                "baseline_digest": "!" + "a" * 64,
+            }
+        )
     with pytest.raises(ValidationError):
         SyncPersonalContextPurgeRequest.model_validate(
             {

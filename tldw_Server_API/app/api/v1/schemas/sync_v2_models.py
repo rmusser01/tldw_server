@@ -1356,7 +1356,11 @@ class SyncPersonalContextActivationAcknowledgeRequest(BaseModel):
     dataset_id: StrictStr = Field(min_length=1, max_length=128)
     device_id: StrictStr = Field(min_length=1, max_length=128)
     activation_id: StrictStr = Field(min_length=16, max_length=128)
-    baseline_digest: StrictStr = Field(pattern=r"[0-9a-f]{64}")
+    baseline_digest: StrictStr = Field(
+        min_length=64,
+        max_length=64,
+        pattern=r"^[0-9a-f]{64}$",
+    )
     local_receipt_id: StrictStr = Field(min_length=16, max_length=128)
     personal_context_exchange: PersonalContextExchangeProof
 
@@ -2293,6 +2297,14 @@ class SyncConflictResolution(BaseModel):
             raise ValueError("duplicate_rename requires a resolution_envelope")
         if self.action == "skip" and self.resolution_envelope is not None:
             raise ValueError("skip must not include a resolution_envelope")
+        if self.resolution_envelope is not None:
+            authority = self.resolution_envelope.authority
+            if authority is not None:
+                if not self.resolution_envelope.domain.startswith("personal_context."):
+                    raise ValueError(
+                        "Personal Context authority metadata requires a Personal Context envelope"
+                    )
+                validate_client_personal_context_metadata(authority)
         return self
 
     model_config = ConfigDict(extra="forbid")
@@ -2330,6 +2342,16 @@ class SyncConflictResolveRequest(BaseModel):
             ):
                 raise ValueError("Personal Context conflict fields are forbidden for non-Personal-Context conflicts")
         return self
+
+
+class SyncConflictListResponse(BaseModel):
+    """Proof-bearing version-one response for a Personal Context conflict list."""
+
+    dataset_id: str
+    conflicts: list[SyncConflictRecord] = Field(default_factory=list, max_length=20)
+    personal_context_exchange: PersonalContextExchangeProof
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class SyncConflictResolveResolvedItem(BaseModel):
@@ -2531,6 +2553,7 @@ __all__ = [
     "SyncNotesAttachmentReplaceIntent",
     "SyncCapabilitiesResponse",
     "SyncConflictRecord",
+    "SyncConflictListResponse",
     "SyncConflictResolution",
     "SyncConflictResolveRequest",
     "SyncConflictResolveResolvedItem",
