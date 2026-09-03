@@ -1,10 +1,10 @@
 ---
 id: TASK-13134
 title: Implement Notes embedding index and semantic graph edges
-status: In Progress
+status: Done
 assignee: []
 created_date: 2026-08-27 02:20
-updated_date: 2026-09-03 00:40
+updated_date: 2026-09-03 02:08
 labels:
 - notes
 - notes-graph
@@ -60,6 +60,7 @@ Approved executable plan: `Docs/superpowers/plans/2026-08-29-notes-semantic-inde
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - 2026-08-29: Senior implementation-constraint review identified required spec corrections for user-scoped run APIs, semantic opt-in compatibility, evidence offsets, vector-only backend contracts, DSR erasure, graph admission/async composition, dimension and activation rules, cache freshness, and restore semantics.
 - Design specification: `Docs/superpowers/specs/2026-08-29-notes-semantic-index-design.md`
@@ -168,11 +169,16 @@ Strict RED: 29 selected cases produced 28 failed/1 passed before production edit
 Residual-fix2 review round 3 implemented from clean HEAD `3b66e1de7d`. Removed SQLite affinity from the private unshipped `after_owner_id` checkpoint column while retaining the exact integer-storage and positive-value `CHECK`, so bound numeric TEXT `"2"` is rejected. Strict RED: `1 failed`; focused GREEN: `9 passed`. Directly affected SQLite/live PostgreSQL suite: `283 passed`. Expanded TASK-13134 matrix: `1,340 passed` with `6` established optional-pgvector skips. Ruff lint and changed-block formatting passed; Bandit found `0` issues; `git diff --check` passed. Scoped mypy retains seven pre-existing `migrations.py` errors outside the DDL-only change. PostgreSQL `BIGINT`/SQL/parameter ordering are unchanged. TASK-13134 remains In Progress with acceptance criteria and Definition of Done unchecked pending re-review.
 2026-09-02 final residual-fix2 re-review of `3b66e1de7d..927eff064f` found no Critical, Important, or Minor issues and declared the complete residual series merge-ready. Direct SQLite probes reject bound numeric TEXT `"2"`, accept integer `2`, preserve forced raw corruption for CAS reset, and retain REAL/BLOB/zero/negative/boolean rejection. Independent focused verification passed `72` Python 3.11.13 tests including live PostgreSQL. Fresh controller verification on committed HEAD passed all `283` directly affected SQLite/live-PostgreSQL tests; `git diff --check` and tracked worktree state were clean. Earlier expanded verification passed `1,340` tests with the same `6` optional pgvector-extension skips. Accepted residual risks are the process-local Prometheus commit-to-emission crash window and environment-gated optional pgvector cases; durable attempt counts and rebuilt gauges remain authoritative. No PR, push, rebase, merge, or worktree deletion was performed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+2026-09-02 PR 2862 finalization: rebased onto current dev, resolved all Qodo review findings and inline threads, corrected CI shard coverage, frontend test/i18n regressions, OpenAPI fingerprint drift, and the canonical published-docs link. Final GitHub validation on rebased HEAD b0512f33e0: 55 checks passed, 31 intentionally skipped, 0 failed; zero unresolved review threads; branch 0 commits behind origin/dev. Merge remains gated only on the repository-required human-authored Change summary.
+<!-- SECTION:NOTES:END -->
+
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Implemented the complete opt-in, owner- and dataset-scoped Notes embedding lifecycle and semantic Notes Graph edge type across backend, WebUI, and browser extension. The work includes bounded Jobs-backed indexing/reindexing, lifecycle invalidation and cleanup, ChromaDB/pgvector storage, nested Notes APIs, provenance/evidence, explicit semantic-to-manual conversion, DSR/RBAC/Sync handling, operator documentation, and authoritative low-cardinality health telemetry. Final hardening replaced mutable health traversal with durable ID-keyset/CAS checkpoints, enforced canonical corruption-safe checkpoint state, and made cleanup retry accounting exact and cleanup-specific. All scoped reviews are clean. Final controller verification passed `283` directly affected SQLite/live-PostgreSQL tests; the expanded semantic matrix passed `1,340` with `6` documented optional pgvector skips. Ruff, scoped formatting/type checks, Bandit with zero findings, and diff checks passed. Known unrelated legacy mypy/frontend baselines and the accepted process-local Prometheus crash window are documented in the task reports.
 <!-- SECTION:FINAL_SUMMARY:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed
