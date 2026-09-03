@@ -50,7 +50,10 @@ source-publication batch atomically in `Personalization.db`. Both relay entry
 points share a recoverable profile lease, claim the earliest incomplete batch,
 and publish its semantic envelopes before its manifest under the trusted
 `server-origin`-style home-authority pseudodevice. That identity is not an
-ordinary registered-device row and cannot be submitted by a client.
+ordinary registered-device row and cannot be submitted by a client. A later
+batch may proceed only after earlier sequences are complete, covered by an
+activation baseline, or terminalized by a purge-generation fence; corrupt
+ordinary batches are never skipped.
 
 After activation, client-authored Personal Context envelopes are durable
 ingress only and never pull-visible. They count as accepted only when canonical
@@ -62,10 +65,13 @@ may pass immutable ingress independently of client delivered/application
 checkpoints.
 
 Existing-link activation is a journal across Personalization, Sync, and
-Chatbook SyncState. A prepared exact-head baseline and watermark,
+Chatbook SyncState. A prepared exact-head baseline and whole-batch watermark,
 deterministic Sync installation receipt, client installation, and per-device
 acknowledgment replay independently by activation ID and digest. No
-cross-database atomicity is claimed. Baseline installation is a
+cross-database atomicity is claimed. After receipt verification, a leased
+Personalization CAS marks every source batch through the watermark
+`covered_by_activation` and advances a compact content-free covered-through
+ledger before encrypted row bodies are compacted. Baseline installation is a
 reconcile/rebase that preserves every unaccepted local head and outbox row.
 
 Ongoing synchronization is event-driven and uses bounded persisted retry. It

@@ -309,8 +309,13 @@ ordinal, so replay cannot create a second logical publication.
 Both after-commit and pull-time relay acquire the same recoverable per-profile
 lease and claim only the earliest incomplete `profile_publication_sequence`.
 A later batch cannot stage any row until every earlier batch is durably
-complete or was terminalized by an explicit generation fence. A corrupt batch
-blocks later batches with Attention; ordinary relay never skips it.
+`complete`, durably `covered_by_activation`, or terminalized by an explicit
+purge-generation fence. The activation-covered state is bound to an activation
+ID, baseline digest, and verified Sync installation receipt. A compact,
+content-free `activation_covered_through_sequence` ledger preserves that
+terminal proof after encrypted source-row bodies are shredded. A corrupt
+ordinary batch blocks later batches with Attention; ordinary relay never skips
+it.
 
 Within the claimed batch, relay walks ordinal order. It may acknowledge rows
 individually, but it cannot stage the manifest until every semantic sibling is
@@ -329,12 +334,14 @@ equality check rather than a second mutation.
 Before a profile has an activated ongoing-sync link, the outbox still records
 publication state. It may compact superseded entries to the latest canonical
 head per object. Activation preparation atomically stores an encrypted exact-
-head baseline, its digest and ID, and the current source-publication watermark
-in `Personalization.db`:
+head baseline, its digest and ID, and a source-publication watermark at the end
+of the latest fully committed `profile_publication_sequence` in
+`Personalization.db`. The watermark is always a whole-batch boundary and never
+splits a publication batch:
 
-- Source entries at or below the watermark are represented by the baseline
+- Source batches at or below the watermark are represented by the baseline
   snapshot and are not replayed individually after the baseline is installed
-  durably in Sync.
+  durably in Sync and those batches are marked `covered_by_activation`.
 - Entries after the watermark are relayed normally.
 - A server edit racing activation is therefore included either in the
   baseline or in the post-watermark stream, never lost between them.
@@ -381,12 +388,17 @@ activation-apply receipt written with the local canonical baseline.
 Server preparation progresses independently:
 
 1. `prepared`: the server commits an encrypted exact-head baseline, digest,
-   purge generation, and source watermark in one Personalization transaction.
+   purge generation, and whole-batch source watermark in one Personalization
+   transaction. The watermark cannot cut through a publication batch.
 2. `installed`: deterministic baseline authority envelopes and their receipt
    are durable in Sync. The server verifies that receipt before advancing its
-   Personalization journal. Only now may source rows at or below the watermark
-   be compacted; the baseline stays pinned until applicable devices acknowledge
-   or expire.
+   Personalization journal. Under the shared profile lease, one Personalization
+   CAS binds the activation ID, baseline digest, and verified receipt; marks
+   every incomplete source batch through the exact watermark
+   `covered_by_activation`; and advances the content-free
+   `activation_covered_through_sequence` ledger. Only after that commit may the
+   covered encrypted source-row bodies be compacted. The baseline stays pinned
+   until applicable devices acknowledge or expire.
 3. `active_for_device`: Sync holds the ordinary device's activation
    acknowledgment, and the server journal has verified that exact receipt.
 
@@ -982,6 +994,10 @@ failure and restart at every cross-database boundary:
 - Two after-commit/pull-time relay attempts interleave across consecutive
   batches; the shared lease and earliest-incomplete rule preserve global
   profile publication order across every restart point.
+- Activation chooses only a whole-batch publication watermark. Restarts between
+  baseline installation, the `covered_by_activation` CAS, encrypted source-row
+  compaction, and the first post-watermark relay preserve the covered-through
+  terminal proof and resume at the next sequence.
 - Sync authority-envelope durability before source acknowledgment.
 - Push-conflict authority-candidate creation before response and Chatbook pin;
   pull-conflict pin before cursor advancement.
@@ -1088,7 +1104,9 @@ and configuration were unchanged.
 - Existing links complete the journaled activation state machine without
   losing a server mutation racing the activation baseline or an unaccepted
   local edit made before/during installation; source compaction cannot precede
-  durable baseline installation.
+  durable baseline installation and the durable whole-batch
+  `covered_by_activation` transition. Compaction preserves content-free proof
+  that global publication ordering may continue at the next sequence.
 - Capability downgrade preserves queued work and checkpoints, and restoration
   requires a new baseline unless the same durably issued epoch/token proves
   uninterrupted publication journaling on every version-1 exchange.
