@@ -20,8 +20,8 @@ Context Profile contract. The server extends each authenticated user's existing
 a second profile database or use Sync V2 as live canonical storage.
 
 The shared v1 contract is pinned to `tldw-profile-core==0.1.0`, source commit
-`fcb54d736aff7145bf91421fa5f57cf2c5e0ed6d`, and contract digest
-`a1e0868dcd873a0c94eb0405934983466ceed68fced4b749489226d9932a5e9b`.
+`d95ba31c18e5667fdaab6266873b336518b0da9a`, and contract digest
+`421672c5cc0e43481280b3cf5a5a63fe01f44bf33255353e1cd9a6dbc2f2e7d0`.
 Conformance tests enforce the same schema, fixtures, canonical bytes, and
 integrity tags in both applications. The server's supported runtime floor is
 Python 3.11, matching the pinned contract.
@@ -45,17 +45,32 @@ accepted and republished by the server. Device-only-only commits create no
 Sync outbox rows.
 
 Every direct server semantic mutation commits canonical state, the manifest
-advance, and encrypted source-publication rows atomically in
-`Personalization.db`. Idempotent relay publishes deterministic envelopes under
-a reserved home-authority device identity only after that commit. Pull performs
-mandatory recovery relay, and a durable activation baseline plus publication
-watermark protects existing links from races during upgrade.
+advance, and an encrypted ordinal source-publication batch atomically in
+`Personalization.db`. Idempotent relay publishes semantic envelopes before the
+batch manifest under the trusted `server-origin`-style home-authority
+pseudodevice. That identity is not an ordinary registered-device row and cannot
+be submitted by a client.
+
+After activation, client-authored Personal Context envelopes are durable
+ingress only and never pull-visible. They count as accepted only when canonical
+application and the source-publication batch commit. A replay receipt in that
+Personalization transaction bridges later Sync apply-status terminalization, so
+an interruption cannot create a second canonical mutation or manifest advance.
+Only `applied` home-authority publications are egress.
+
+Existing-link activation is a journal across Personalization, Sync, and
+Chatbook SyncState. A prepared exact-head baseline and watermark,
+deterministic Sync installation receipt, client installation, and per-device
+acknowledgment replay independently by activation ID and digest. No
+cross-database atomicity is claimed.
 
 Ongoing synchronization is event-driven and uses bounded persisted retry. It
 extends the existing Sync V2 push, pull, and batched conflict-resolution
 contracts rather than creating a parallel transport, permanent poll, or push
 channel. Conflict candidates remain encrypted and pinned before cursor
-advancement; only the affected object freezes.
+advancement. Ordinary conflicts freeze one object; key collisions freeze both
+object IDs and only their contested semantic-key slot. Push conflicts attach a
+deterministic authority candidate before they are reported.
 
 ## Context
 
@@ -100,8 +115,16 @@ operator expectations while allowing a fenced migration from legacy tables.
 - Links created before ongoing synchronization require an explicit activation
   baseline and canonical home-manifest checkpoint; capability advertisement
   alone does not activate them.
-- Cross-database publication is journaled, not atomic. A source row is
-  acknowledged only after its deterministic envelope is durable in Sync V2.
+- A capability downgrade preserves the paused link and queued state. Resuming
+  requires proof of the same activation epoch and publication-continuity token
+  or a fresh activation baseline.
+- Cross-database delivery is journaled, not atomic: ingress replay receipts
+  bridge Sync to Personalization, source rows are acknowledged only after
+  deterministic envelopes are durable in Sync V2, and ordered batches keep a
+  manifest behind its semantic siblings.
+- Restrictive canonical state propagates immediately, while content-free,
+  version-bound local and server cleanup acknowledgments keep cleanup visibly
+  incomplete until derived artifacts are safe.
 - The server-generated OpenAPI/JSON Schema fragment is the wire-contract
   authority for Personal Context capability, conflict, and server-origin
   extensions; Chatbook vendors it with source commit and checksum.
