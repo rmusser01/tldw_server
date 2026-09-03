@@ -144,8 +144,12 @@ profile is globally "up to date" merely because one request succeeded.
 - Server publication batches have durable order. Every semantic authority
   envelope is durable before the batch's manifest envelope can become visible.
 - Applying an inbound Sync object does not create an outbound echo.
-- Cursor advancement occurs only across a consecutive prefix of safely applied,
-  already-current, or durably conflict-pinned envelopes.
+- A server scan watermark may pass immutable rows conclusively classified as
+  permanent non-egress, including client ingress. The delivered/application
+  checkpoint advances only across a consecutive prefix of authority envelopes
+  that are safely applied, already-current, opaquely retained, or durably
+  conflict-pinned. Those are separate facts and are never inferred from one
+  another.
 - No workflow relies on a process-local callback, timer, or service instance
   as its sole durable record of work.
 
@@ -261,6 +265,8 @@ Personal Context link state gains durable operational facts:
 - `last_success_at`
 - `last_error_code`
 - `retry_not_before`
+- retry-budget generation, zero-based attempt index, and
+  `idle`/`active`/`exhausted` state
 - `next_activity_check_at`
 - content-free activity work generation and last-attempted generation
 - negotiated `ongoing_sync_version`
@@ -291,19 +297,25 @@ actionable condition so restarts do not repeat the same alert.
 ### Server Personalization database
 
 Every canonical server mutation writes encrypted source publication entries in
-the same transaction. Each transaction receives a durable
-`publication_batch_id`; each row has `batch_ordinal`, `batch_size`, and a
-content-free semantic, manifest, or purge-barrier role. Semantic rows precede
-the manifest, while a purge barrier is the final permissible row for its
-generation. Source entries carry enough opaque routing and encrypted canonical
-material to deterministically build Sync envelopes after commit. Egress
-envelope IDs derive from the batch ID and ordinal, so replay cannot create a
-second logical publication.
+the same transaction. It atomically allocates a monotonic per-profile
+`profile_publication_sequence` and a durable `publication_batch_id`; each row
+has `batch_ordinal`, `batch_size`, and a content-free semantic, manifest, or
+purge-barrier role. Semantic rows precede the manifest, while a purge barrier
+is the final permissible row for its generation. Source entries carry enough
+opaque routing and encrypted canonical material to deterministically build
+Sync envelopes after commit. Egress envelope IDs derive from the batch ID and
+ordinal, so replay cannot create a second logical publication.
 
-Relay walks a batch in ordinal order. It may acknowledge rows individually,
-but it cannot stage the manifest until every semantic sibling is verified
-durable in Sync. A restart resumes the same deterministic batch at its first
-unacknowledged ordinal. Home-authority egress is inserted as already
+Both after-commit and pull-time relay acquire the same recoverable per-profile
+lease and claim only the earliest incomplete `profile_publication_sequence`.
+A later batch cannot stage any row until every earlier batch is durably
+complete or was terminalized by an explicit generation fence. A corrupt batch
+blocks later batches with Attention; ordinary relay never skips it.
+
+Within the claimed batch, relay walks ordinal order. It may acknowledge rows
+individually, but it cannot stage the manifest until every semantic sibling is
+verified durable in Sync. A restart resumes the same deterministic batch at its
+first unacknowledged ordinal. Home-authority egress is inserted as already
 canonically applied transport; it is not materialized back into
 `Personalization.db` as another mutation or revision.
 
@@ -387,9 +399,9 @@ Chatbook progresses `required → prepared → installed → acknowledged → ac
    and digest and saved the encrypted baseline in its existing protected
    first-link staging area, independent of its ordinary pull cursor.
 3. `installed` means one local Personal Context transaction revalidated and
-   applied that exact baseline and wrote the activation-apply receipt. SyncState
-   then records the home checkpoint; on a crash between databases it recovers
-   only from the exact local receipt rather than applying again.
+   reconciled that exact baseline and wrote the activation-apply receipt.
+   SyncState then records the home checkpoint; on a crash between databases it
+   recovers only from the exact local receipt rather than applying again.
 4. `acknowledged` means the server has durably recorded this ordinary device's
    acknowledgment and returned a matching receipt.
 5. `active` means Chatbook has verified and stored that receipt. Post-watermark
@@ -402,6 +414,43 @@ recreates a baseline under the same ID with different bytes. An edit racing
 preparation is either in the prepared snapshot or receives a post-watermark
 publication. A newly linked device receives a current baseline rather than
 depending on historical source rows.
+
+Local activation installation is a dedicated reconcile/rebase transaction,
+not a wholesale replacement. For each baseline object it:
+
+- Installs the authority version as the local head when no unaccepted local
+  head exists.
+- Marks an identical local head as acknowledged without creating a version.
+- Retains a divergent unaccepted local head as the active local edit, stores
+  the baseline version as its last acknowledged home base, and preserves the
+  immutable outbox snapshot and original base metadata.
+- Preserves local-only objects and every `device_only` object unchanged.
+- Advances the home manifest checkpoint without treating any preserved local
+  semantic head or derivative manifest barrier as accepted.
+
+The transaction re-reads local heads before commit, so an edit made during
+download/staging is classified by the same rules rather than overwritten. A
+preserved divergent edit later pushes against its original acknowledged base
+and either succeeds or creates an explicit conflict. Activation never retires
+or rewrites it merely because the server baseline installed.
+
+The activation epoch and publication-continuity token are random opaque values
+stored durably in `Personalization.db` and bound to the activated profile,
+purge generation, and installed baseline. The token remains valid only while
+every canonical mutation is committed with a complete source-publication batch.
+If publication journaling is unavailable, the server must either fence
+canonical Personal Context writes or invalidate the token and advance the
+activation epoch in the same canonical transaction before accepting a write.
+A downgrade or rollback path that cannot enforce one of those choices may not
+write a linked canonical profile.
+
+Every version-1 push, pull, conflict-list, and conflict-resolution request
+carries the expected activation epoch and continuity token. The server
+validates them before mutation or delivery and echoes the current pair in its
+response. Chatbook validates that echo before accepting a push result, applying
+an envelope, resolving a conflict, or advancing either watermark. A mismatch
+returns `personal_context_activation_required` and cannot partially advance
+client state.
 
 An authenticated downgrade from version `1` to `0`, a blocker response, or a
 Personal Context response reporting capability mismatch immediately pauses
@@ -491,27 +540,41 @@ Context pull pages, initially 10. It must not emulate draining by repeatedly
 rerunning the complete push phase. If more pull pages remain, it yields and
 schedules one follow-up run rather than monopolizing the event loop.
 
-For each page, Chatbook processes envelopes in server-cursor order. A cursor may
-advance through an envelope only when it is:
+For each page, Chatbook processes delivered authority envelopes in server-
+cursor order. The opaque pull cursor maintains two distinct notions:
+
+- A server scan watermark may advance across client ingress after its immutable
+  ingress role is validated, even though no client receives or stores it.
+
+The delivered/application checkpoint advances across an authority envelope
+only when it is:
 
 - Validated and applied.
 - Already represented by the same canonical head.
 - Retained opaquely under the negotiated unknown-version rules.
 - Converted into a durable conflict whose shared candidate envelope is pinned.
 
+Classification as ingress is permanent. Canonical acceptance never mutates an
+ingress row into egress; it creates a new deterministic home-authority envelope
+at a later server cursor. The scan watermark can therefore pass hidden ingress
+before or between visible authority rows without losing a future canonical
+publication. Neither server scan progress nor a returned raw cursor is treated
+as proof that Chatbook applied authority data.
+
 The server's Personal Context pull filter returns only `applied`
 home-authority egress after activation. Client ingress and any authority row
 whose canonical receipt is not verified remain invisible regardless of their
 generic envelope acceptance state. Receiving a repeated authority envelope for
 an already-current canonical version is an idempotent no-op that may advance
-the cursor.
+the delivered/application checkpoint.
 
 An authentication, decryption, integrity, manifest, generation, or purge
 failure stops profile-wide advancement. An authenticated but invalid canonical
 object may be quarantined as a per-object condition only when the server cursor
 can still be recovered without accepting bad content; otherwise advancement
-stops. The implementation must never advance past an unretained envelope that
-would be required for later review or recovery.
+stops. The delivered/application checkpoint must never advance past an
+unretained authority envelope that would be required for later review or
+recovery.
 
 ### Manifest rebasing
 
@@ -569,6 +632,24 @@ Reconnection and **Sync now** re-arm ordinary transient failures. A server
 `Retry-After` or equivalent rate-limit window is persisted as
 `retry_not_before` and survives restart. Manual sync does not bypass that
 server instruction.
+
+Retry-budget transitions are atomic in SyncState:
+
+- A strong wake with a new wake/work generation increments
+  `retry_budget_generation`, sets `retry_attempt_index = 0`, and moves the
+  budget to `active`. Replaying the same trigger generation cannot reset it a
+  second time. An active server `Retry-After` remains the earliest permitted
+  attempt even after this reset.
+- Each transient failure uses the delay at the current zero-based attempt
+  index, persists the next index and `retry_not_before`, and stays `active`.
+  After the final five-minute slot is consumed without success, it becomes
+  `exhausted` and has no scheduled timer.
+- A successful fully drained check moves the budget to `idle`, resets the index
+  to zero, clears ordinary retry/error timing, and records the completed work
+  and activity generations.
+- A restart loads these exact fields. It resumes one due `active` attempt,
+  waits for a future `retry_not_before`, or leaves an `exhausted` budget idle;
+  startup alone does not alter the generation or index.
 
 The coordinator does not install a permanent poll, long poll, socket, or timer
 that lives for the process lifetime.
@@ -815,7 +896,8 @@ serialization and one recoverable per-profile relay lease:
    source row is terminal. Sync rejects any older-generation authority envelope
    presented after that point, regardless of server cursor.
 5. Devices erase their replicas when they receive the barrier. The server
-   retains only the minimal content-free acknowledgment ledger.
+   crypto-shreds readable Personal Context Sync history and retains only the
+   minimal content-free acknowledgment ledger.
 
 A new profile cannot be created from the old link until the initiating device
 has received acknowledgment. The purge request and barrier are idempotent under
@@ -876,6 +958,9 @@ relay-pending, and relay-poisoned.
 - Chatbook sends the authoritative batch endpoint and server action names.
 - Reserved authority identity cannot be registered or submitted by a client,
   and only applied authority envelopes pass the Personal Context egress filter.
+- Pagination with ingress before and between authority rows advances the scan
+  watermark while delivering every authority row exactly once and preserving
+  the independent application checkpoint.
 - Client ingress, ordered publication batches, activation receipts, continuity
   tokens, expected conflict candidates, and purge generations round-trip
   without changing canonical bytes.
@@ -894,6 +979,9 @@ failure and restart at every cross-database boundary:
   terminalization; replay proves no second manifest advance or batch.
 - Each partial semantic ordinal of a server publication batch before its
   manifest; restart preserves order and deterministic envelope IDs.
+- Two after-commit/pull-time relay attempts interleave across consecutive
+  batches; the shared lease and earliest-incomplete rule preserve global
+  profile publication order across every restart point.
 - Sync authority-envelope durability before source acknowledgment.
 - Push-conflict authority-candidate creation before response and Chatbook pin;
   pull-conflict pin before cursor advancement.
@@ -904,7 +992,10 @@ failure and restart at every cross-database boundary:
 - Every ordering of old-generation ingress insertion, canonical
   materialization, authority publication, purge commit, and barrier relay.
 - Every activation transition around baseline preparation, Sync installation,
-  local install, acknowledgment, and post-watermark publication.
+  local reconcile/rebase, acknowledgment, and post-watermark publication,
+  including a local edit before and during installation.
+- Every persisted retry slot and the exhausted state immediately before and
+  after restart.
 
 Every case must converge without duplicate semantic mutations, lost edits,
 cursor skipping, or plaintext fallback.
@@ -929,8 +1020,12 @@ A two-Chatbook-device and one-server matrix covers:
 - Throttled activity discovery in a long-lived connection, with context
   construction remaining nonblocking and exhausted budgets not storming.
 - Existing-link activation while a server edit races the baseline.
+- Existing-link activation with local pending edits before preparation and
+  another edit during client staging; neither head nor outbox item is retired.
 - Capability downgrade and restoration with both continuous and changed
   activation epochs.
+- A direct server edit during version `0`, covering the journal-preserved token
+  path and the invalidated-token/fresh-baseline path.
 - Remove-local-copy behavior and delete-everywhere generation fencing.
 
 ### UI and accessibility
@@ -981,20 +1076,26 @@ and configuration were unchanged.
   revision, or publication batch.
 - Every authority publication batch makes all semantic envelopes durable before
   its manifest becomes pull-visible, including after a partial-batch crash.
+- Consecutive publication batches become egress in monotonic per-profile order
+  even when both relay entry points interleave and restart.
 - Manifest sequencing cannot retire or overwrite an unaccepted semantic edit.
 - Conflicts retain and deliver both encrypted candidates, freeze only the exact
   object or contested key slot, and resolve through the authoritative batched
   server contract plus a dedicated local resolution transaction.
-- Pull cursors never advance past an object that was neither safely handled nor
-  durably retained.
+- Pull scan watermarks may pass only immutable permanent non-egress rows;
+  delivered/application checkpoints never advance past authority data that was
+  neither safely handled nor durably retained.
 - Existing links complete the journaled activation state machine without
-  losing a server mutation racing the activation baseline; source compaction
-  cannot precede durable baseline installation.
+  losing a server mutation racing the activation baseline or an unaccepted
+  local edit made before/during installation; source compaction cannot precede
+  durable baseline installation.
 - Capability downgrade preserves queued work and checkpoints, and restoration
-  requires a new baseline unless continuity is proved.
+  requires a new baseline unless the same durably issued epoch/token proves
+  uninterrupted publication journaling on every version-1 exchange.
 - Automatic retries stop after the bounded sequence and restart only for a
   defined strong trigger; throttled activity reads do not create request-path
-  I/O or retry storms, and server retry windows survive process restart.
+  I/O or retry storms, and the exact budget generation, attempt index,
+  exhausted state, and server retry window survive process restart.
 - **Settings → My Profile** reports accurate queued/syncing/retrying/attention,
   privacy-cleanup, last-attempt, last-success, deduplicated pending, and
   workspace-mapping state.

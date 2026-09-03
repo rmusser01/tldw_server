@@ -45,24 +45,28 @@ accepted and republished by the server. Device-only-only commits create no
 Sync outbox rows.
 
 Every direct server semantic mutation commits canonical state, the manifest
-advance, and an encrypted ordinal source-publication batch atomically in
-`Personalization.db`. Idempotent relay publishes semantic envelopes before the
-batch manifest under the trusted `server-origin`-style home-authority
-pseudodevice. That identity is not an ordinary registered-device row and cannot
-be submitted by a client.
+advance, a monotonic per-profile publication sequence, and an encrypted ordinal
+source-publication batch atomically in `Personalization.db`. Both relay entry
+points share a recoverable profile lease, claim the earliest incomplete batch,
+and publish its semantic envelopes before its manifest under the trusted
+`server-origin`-style home-authority pseudodevice. That identity is not an
+ordinary registered-device row and cannot be submitted by a client.
 
 After activation, client-authored Personal Context envelopes are durable
 ingress only and never pull-visible. They count as accepted only when canonical
 application and the source-publication batch commit. A replay receipt in that
 Personalization transaction bridges later Sync apply-status terminalization, so
 an interruption cannot create a second canonical mutation or manifest advance.
-Only `applied` home-authority publications are egress.
+Only `applied` home-authority publications are egress; server scan watermarks
+may pass immutable ingress independently of client delivered/application
+checkpoints.
 
 Existing-link activation is a journal across Personalization, Sync, and
 Chatbook SyncState. A prepared exact-head baseline and watermark,
 deterministic Sync installation receipt, client installation, and per-device
 acknowledgment replay independently by activation ID and digest. No
-cross-database atomicity is claimed.
+cross-database atomicity is claimed. Baseline installation is a
+reconcile/rebase that preserves every unaccepted local head and outbox row.
 
 Ongoing synchronization is event-driven and uses bounded persisted retry. It
 extends the existing Sync V2 push, pull, and batched conflict-resolution
@@ -116,8 +120,9 @@ operator expectations while allowing a fenced migration from legacy tables.
   baseline and canonical home-manifest checkpoint; capability advertisement
   alone does not activate them.
 - A capability downgrade preserves the paused link and queued state. Resuming
-  requires proof of the same activation epoch and publication-continuity token
-  or a fresh activation baseline.
+  requires a durably issued activation epoch and publication-continuity token
+  proving that every intervening canonical write remained journaled, or a fresh
+  activation baseline. Every version-1 exchange validates and echoes that pair.
 - Cross-database delivery is journaled, not atomic: ingress replay receipts
   bridge Sync to Personalization, source rows are acknowledged only after
   deterministic envelopes are durable in Sync V2, and ordered batches keep a
