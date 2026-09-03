@@ -4,7 +4,7 @@ title: Add atomic revision-guarded hard delete for Reading items
 status: To Do
 assignee: []
 created_date: '2026-09-03 02:27'
-updated_date: '2026-09-03 02:29'
+updated_date: '2026-09-03 02:41'
 labels:
   - collections
   - reading-list
@@ -22,7 +22,17 @@ priority: high
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Add a positive, monotonically increasing integer `revision` to persisted Reading items and every Reading summary/detail response. Every item-owned mutation that can change the user's deletion decision increments that revision, including metadata/status/tag changes and capture-owned content changes. The permanent-delete request accepts `expected_revision` and enforces the authenticated user, item, and revision predicate in the same transaction as child cleanup and deletion. Stale preconditions conflict without deletion; missing items remain distinct. Delete capture-owned children/artifacts but never linked external Media or Notes. Advertise exact `hasReadingOptimisticDeletesV1=true` only when the complete atomic contract is active.
+Add a positive, monotonically increasing integer `revision` to persisted Reading items and every
+Reading summary/detail response. Every item-owned mutation that can change the user's deletion
+decision increments that revision, including metadata/status/tag changes and capture-owned content
+changes. The permanent-delete request accepts `expected_revision` and enforces `WHERE id = ? AND
+user_id = ? AND revision = ?` or its backend-equivalent in the same transaction as child cleanup
+and deletion. A stale precondition returns a documented 409/412 conflict without deleting the item;
+missing items remain distinct. The operation removes capture-owned children and artifacts but does
+not delete linked external Media or Notes. Docs-info advertises exact
+`hasReadingOptimisticDeletesV1=true` only when the response token and atomic mutation are active.
+SQLite/PostgreSQL migration, concurrent mutation/delete, authorization, conflict, cascade, and
+diagnostic-privacy behavior are covered.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria

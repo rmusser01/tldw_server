@@ -4,7 +4,7 @@ title: Add Server-native Reading export re-import
 status: To Do
 assignee: []
 created_date: '2026-09-03 02:33'
-updated_date: '2026-09-03 02:34'
+updated_date: '2026-09-03 02:41'
 labels:
   - collections
   - reading-list
@@ -22,7 +22,17 @@ priority: medium
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Retain Pocket JSON and Instapaper CSV import, then admit versioned Server-native JSONL/ZIP artifacts produced by S5a. Portable fields are submitted URL, title, summary, freeform note, status, favorite, tags, published/read timestamps, optional sanitized text/clean HTML, and capture-owned highlights. Exclude database/user IDs, authoritative created/updated timestamps, Media/linked-Note identities, generated audio, offline/archive files, and internal metadata. Allocate new identities and canonicalize URLs. On canonical collision preserve existing scalar/state/content, union tags, and add only nonduplicate capture-owned highlights by stable fingerprint. Re-import is idempotent. Advertise exact `hasReadingNativeImportV1=true` only with this versioned field/collision contract.
+Retain Pocket JSON and Instapaper CSV import, then add Server-native JSONL/ZIP admission for
+artifacts produced by S5a. The portable schema includes submitted URL, title, summary, freeform
+note, status, favorite, tags, published/read timestamps, optional sanitized text/clean HTML, and
+capture-owned highlights. It excludes database/user IDs, authoritative created/updated timestamps,
+Media and linked-Note identities, generated audio, offline/archive files, and internal metadata.
+Import allocates new identities, recomputes canonical URLs, and records source timestamps only as
+bounded import provenance. On a canonical-URL collision it preserves existing scalar/state/content
+fields, unions tags, and adds only nonduplicate capture-owned highlights using a documented stable
+fingerprint. Importing into an empty authority reproduces every portable field; repeated import is
+idempotent and never creates another capture or highlight. Docs-info advertises exact
+`hasReadingNativeImportV1=true` only when this versioned field and collision contract is active.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria

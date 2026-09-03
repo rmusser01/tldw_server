@@ -4,7 +4,7 @@ title: Add complete restart-safe Reading export jobs
 status: To Do
 assignee: []
 created_date: '2026-09-03 02:32'
-updated_date: '2026-09-03 02:33'
+updated_date: '2026-09-03 02:41'
 labels:
   - collections
   - reading-list
@@ -21,7 +21,21 @@ priority: medium
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Keep the existing page-scoped streaming export unchanged and add one cohesive Server-native export-job aggregate: authenticated create/history/detail/download/cleanup routes, coherent complete-scope evaluation, restart-truthful job state, a private managed artifact, idempotent request key, retention/cleanup, and the versioned portable-schema manifest needed to identify a complete artifact. These pieces are inseparable for a truthful complete job and form one reviewable PR. Exclude re-import parsing/merge, generic account backup, Chatbook UI, Local behavior, and additional export formats. Advertise exact `hasReadingExportJobsV1=true` only with the full lifecycle.
+Keep the current page-scoped streaming `/reading/export` route and response unchanged for existing
+clients. Add asynchronous, user-scoped export-job routes that evaluate one explicit filter scope
+coherently, write every matching item exactly once to a private managed artifact, expose bounded job
+history/detail, and support authorized download and confirmed cleanup. Interruption is restart-safe
+and never publishes a partial artifact as complete. A caller-generated export request key prevents
+duplicate artifacts after a lost create response; reusing a key with a different normalized scope or
+content payload returns a bounded conflict. Each artifact carries the versioned Server-native
+portable-schema identifier and manifest consumed by S5b. Docs-info advertises exact
+`hasReadingExportJobsV1=true` only when complete-scope export, job lifecycle, artifact retention,
+and cleanup guarantees are active.
+
+S5a is one reviewable Server PR boundary because its routes, job state, managed store,
+request-key idempotency, private artifact lifecycle, and portable manifest form one new
+Server-native export-job aggregate; none is truthful or independently useful without the others.
+It excludes re-import, generic backup, UI work, Local behavior, and additional export formats.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria

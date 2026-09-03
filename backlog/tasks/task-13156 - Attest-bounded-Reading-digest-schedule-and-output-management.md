@@ -4,7 +4,7 @@ title: Attest bounded Reading digest schedule and output management
 status: To Do
 assignee: []
 created_date: '2026-09-03 02:31'
-updated_date: '2026-09-03 02:32'
+updated_date: '2026-09-03 02:41'
 labels:
   - collections
   - reading-list
@@ -21,7 +21,17 @@ priority: medium
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Keep existing digest routes/shapes unchanged and add an exact bounded schedule-page route beside the bare-list route; retain the output-page envelope. Use deterministic ordering and user scoping. Create accepts a user-scoped `client_request_id`: identical key/payload returns the original schedule, mismatched payload conflicts, and exact key lookup reconciles lost responses. Preserve last status/run/next-run/output history as the only run evidence. Document refresh-based reconciliation for uncertain update/delete outcomes and separate worker availability. Advertise exact `hasReadingDigestManagementV1=true` only with these additive guarantees.
+Keep all existing digest routes and response shapes unchanged. Add an exact bounded schedule-page
+route beside the current bare-list route; the existing output-page route retains its envelope. Both
+use deterministic ordering and user scoping. Schedule creation accepts a caller-generated,
+user-scoped `client_request_id`: repeating the same key and normalized payload returns the original
+schedule, while reusing it with a different payload fails with a bounded conflict. Exact lookup by
+that key lets a client reconcile a lost create response. Preserve schedule `last_status`,
+`last_run_at`, `next_run_at`, and output history as the only run evidence; do not invent a distinct
+run-history API. Update/delete responses remain non-optimistic and are documented for refresh-based
+reconciliation after transport uncertainty. Docs-info advertises exact
+`hasReadingDigestManagementV1=true` only when these additive guarantees are active and configured
+scheduler/worker availability is reported separately.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria

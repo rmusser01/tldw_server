@@ -4,7 +4,7 @@ title: Establish safe Collections output-template ownership and deletion
 status: To Do
 assignee: []
 created_date: '2026-09-03 02:30'
-updated_date: '2026-09-03 02:31'
+updated_date: '2026-09-03 02:41'
 labels:
   - collections
   - output-templates
@@ -21,7 +21,16 @@ priority: medium
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Keep the existing `/outputs/templates` API, define the exact template types governed by Collections, and record the current live reference owner: Reading digest schedules. Historical rendered outputs are self-contained and do not block deletion. Update/delete remain user-scoped; deletion refuses a template referenced by a Reading digest schedule unless removed or reassigned. Record a source-level branch-base reference inventory; another live owner requires acceptance-criteria revision before implementation, not silent scope expansion. Advertise exact `hasCollectionsOutputTemplateManagementV1=true` only when bounded paging, CRUD, reference-safe deletion, and the ownership set are active.
+Keep the existing `/outputs/templates` API but define which template types are governed by the
+Collections umbrella and expose the current live reference owner: Reading digest schedules.
+Historical rendered outputs do not block deletion because they are self-contained. Update and
+delete remain user-scoped; deletion refuses a template referenced by a Reading digest schedule
+unless that reference is first removed or reassigned. The task records a source-level reference
+inventory at its branch base; finding another live owner requires updating the task acceptance
+criteria before implementation rather than silently expanding scope. The API returns bounded
+conflict reasons without leaking another user's objects. Docs-info advertises exact
+`hasCollectionsOutputTemplateManagementV1=true` only when bounded paging, CRUD, reference-safe
+deletion, and the documented ownership set are active. Existing template rendering remains intact.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria

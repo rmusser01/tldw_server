@@ -4,7 +4,7 @@ title: Add coherent scoped tag and domain aggregates for Reading items
 status: To Do
 assignee: []
 created_date: '2026-09-03 02:29'
-updated_date: '2026-09-03 02:30'
+updated_date: '2026-09-03 02:41'
 labels:
   - collections
   - reading-list
@@ -22,7 +22,17 @@ priority: medium
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Expose bounded, deterministic, fully pageable tag and domain aggregate results for an explicitly documented Reading scope. Use distinct `capture_q` and `facet_q` parameters. Aggregate rows and exact totals use one snapshot with accepted capture search/status/favorite/date/tag/domain filters and self-excluding facet semantics. Results are user-scoped, normalize values with a stable tie-break order, and reveal neither capture content nor sensitive URL components. Advertise exact `hasReadingAggregateFacetsV1=true` only with the complete SQLite/PostgreSQL contract.
+Expose bounded, deterministic, fully pageable tag and domain aggregate results for an explicitly
+documented Reading scope. It uses distinct `capture_q` and `facet_q` parameters so facet-value
+search never means filtering only already-loaded pages and cannot be confused with capture search.
+Aggregate rows and exact aggregate totals are evaluated in one snapshot with the accepted capture
+search/status/favorite/date/tag/domain filters. The contract
+uses self-excluding semantics: the requested facet ignores that facet's active filter while retaining
+all other scope filters, allowing the user to change it without losing alternatives. Normalized
+value plus stable tie-break ordering makes every matching value reachable. Results are user-scoped
+and exclude capture content and sensitive URL components. Docs-info advertises exact
+`hasReadingAggregateFacetsV1=true` only when the endpoint and its SQLite/PostgreSQL snapshot
+guarantees are active.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
