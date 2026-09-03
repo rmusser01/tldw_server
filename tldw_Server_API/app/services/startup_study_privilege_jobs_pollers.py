@@ -88,6 +88,26 @@ def provide_study_privilege_jobs_worker_specs(
             ),
         ),
         stop_event_worker_spec(
+            name="notes_semantic_index_jobs_task",
+            worker_service=_run_notes_semantic_index_worker_service,
+            category="jobs",
+            phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+            enabled=lambda context: _notes_graph_worker_enabled(
+                context,
+                "NOTES_SEMANTIC_INDEX_WORKER_ENABLED",
+            ),
+        ),
+        stop_event_worker_spec(
+            name="notes_semantic_maintenance_task",
+            worker_service=_run_notes_semantic_maintenance_service,
+            category="jobs",
+            phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+            enabled=lambda context: _notes_graph_worker_enabled(
+                context,
+                "NOTES_SEMANTIC_MAINTENANCE_ENABLED",
+            ),
+        ),
+        stop_event_worker_spec(
             name="privilege_snapshot_task",
             worker_service=_run_privilege_snapshot_worker_service,
             category="jobs",
@@ -325,6 +345,22 @@ def _run_notes_graph_suggestions_maintenance_service(stop_event: Any) -> Any:
     )
 
     return run_notes_graph_suggestions_maintenance(stop_event)
+
+
+def _run_notes_semantic_index_worker_service(stop_event: Any) -> Any:
+    from tldw_Server_API.app.services.notes_semantic_index_worker import (
+        run_notes_semantic_index_worker,
+    )
+
+    return run_notes_semantic_index_worker(stop_event)
+
+
+def _run_notes_semantic_maintenance_service(stop_event: Any) -> Any:
+    from tldw_Server_API.app.services.notes_semantic_maintenance import (
+        run_notes_semantic_maintenance,
+    )
+
+    return run_notes_semantic_maintenance(stop_event)
 
 
 def _run_privilege_snapshot_worker_service(stop_event: Any) -> Any:

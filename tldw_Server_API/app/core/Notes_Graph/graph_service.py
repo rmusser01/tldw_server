@@ -8,6 +8,7 @@ import json
 import os
 import time
 from collections import deque
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from loguru import logger
@@ -29,6 +30,9 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     InputError,
 )
 from tldw_Server_API.app.core.Notes_Graph.graph_cache import GraphCache
+from tldw_Server_API.app.core.Notes_Graph.semantic_settings import (
+    DEFAULT_SEMANTIC_INDEX_SETTINGS,
+)
 
 # ---------------------------------------------------------------------------
 # Config constants (env-overridable, matching PRD §11)
@@ -78,10 +82,21 @@ _SOURCE_CAP = 50
 _CURSOR_MAX_ENCODED_BYTES = 8 * 1024
 _CURSOR_MAX_DECODED_BYTES = 4 * 1024
 _LINK_CURSOR_MAX_BYTES = 4 * 1024
+_SEMANTIC_ADMISSION_ALLOWANCE = DEFAULT_SEMANTIC_INDEX_SETTINGS.max_query_neighbors
 
 
 class GraphProjectionNotReadyError(InputError):
     """Raised when a derived graph read would observe an incomplete projection."""
+
+
+@dataclass(frozen=True, slots=True)
+class SemanticGraphCandidateResult:
+    """Internal first-page graph result for the asynchronous semantic projector."""
+
+    public_graph: NoteGraphResponse
+    candidate_nodes: tuple[GraphNode, ...]
+    candidate_edges: tuple[GraphEdge, ...]
+    candidate_limits: GraphLimits
 
 
 # ---------------------------------------------------------------------------
@@ -118,6 +133,7 @@ def _encode_cursor(
     graph_revision: int | None = None,
     parser_version: int | None = None,
     request_hash: str | None = None,
+    semantic_binding: str | None = None,
 ) -> str:
     payload_data: dict[str, object] = {
         "layer": layer,
@@ -135,6 +151,8 @@ def _encode_cursor(
                 "request": request_hash,
             }
         )
+        if semantic_binding is not None:
+            payload_data["semantic"] = semantic_binding
     payload = json.dumps(payload_data, sort_keys=True, separators=(",", ":")).encode()
     if len(payload) > _CURSOR_MAX_DECODED_BYTES:
         raise InputError("Graph cursor payload is too large")
@@ -151,6 +169,7 @@ def _decode_cursor(
     expected_graph_revision: int | None = None,
     expected_parser_version: int | None = None,
     expected_request_hash: str | None = None,
+    expected_semantic_binding: str | None = None,
 ) -> dict | None:
     if not raw:
         return None
@@ -180,19 +199,67 @@ def _decode_cursor(
         raise InputError("Invalid graph cursor")
     if not isinstance(payload["last_id"], str):
         raise InputError("Invalid graph cursor")
-    expected = {
+    ordinary_expected = {
         "dataset": expected_dataset_hash,
         "revision": expected_graph_revision,
         "parser": expected_parser_version,
         "request": expected_request_hash,
     }
-    if any(value is not None for value in expected.values()):
+    if any(value is not None for value in ordinary_expected.values()):
         if payload.get("v") != 1 or any(
             payload.get(field) != value
-            for field, value in expected.items()
+            for field, value in ordinary_expected.items()
         ):
             raise InputError("Graph cursor is stale or mismatched")
+    if expected_semantic_binding is not None and (
+        payload.get("v") != 1
+        or payload.get("semantic") != expected_semantic_binding
+    ):
+        raise InputError("Graph cursor is stale or mismatched")
     return payload
+
+
+def bind_semantic_cursor(
+    raw: str | None,
+    *,
+    semantic_binding: str,
+) -> str | None:
+    """Attach an immutable semantic binding to an ordinary graph cursor."""
+
+    if raw is None:
+        return None
+    if not semantic_binding:
+        raise InputError("Graph semantic cursor binding is invalid")
+    payload = _decode_cursor(raw)
+    if payload is None or payload.get("v") != 1:
+        raise InputError("Graph cursor is stale or mismatched")
+    if "semantic" in payload:
+        raise InputError("Graph cursor already carries a semantic binding")
+    for field in ("dataset", "revision", "parser", "request"):
+        if payload.get(field) is None:
+            raise InputError("Graph cursor is stale or mismatched")
+    return _encode_cursor(
+        payload["layer"],
+        payload["pos"],
+        payload["last_id"],
+        payload["neighbor_pos"],
+        dataset_hash=payload["dataset"],
+        graph_revision=payload["revision"],
+        parser_version=payload["parser"],
+        request_hash=payload["request"],
+        semantic_binding=semantic_binding,
+    )
+
+
+def _ordinary_cursor_cache_identity(raw: str | None) -> dict[str, object] | None:
+    """Return the canonical cursor payload without outer semantic state."""
+
+    payload = _decode_cursor(raw)
+    if payload is None:
+        return None
+    ordinary_payload = dict(payload)
+    ordinary_payload.pop("semantic", None)
+    return ordinary_payload
 
 
 def encode_notes_link_cursor(*, payload: dict[str, object]) -> str:
@@ -311,11 +378,93 @@ class NoteGraphService:
     # Main entry
     # ------------------------------------------------------------------
 
-    def generate_graph(self, req: NoteGraphRequest) -> NoteGraphResponse:
+    def generate_graph(
+        self,
+        req: NoteGraphRequest,
+    ) -> NoteGraphResponse:
         """Build and return a bounded note graph."""
-        t0 = time.monotonic()
 
-        wanted = set(req.edge_types) if req.edge_types else set(EdgeType)
+        return self._generate_graph(req)
+
+    def generate_semantic_candidates(
+        self,
+        req: NoteGraphRequest,
+        *,
+        additional_nodes: int,
+        additional_edges: int,
+    ) -> SemanticGraphCandidateResult:
+        """Return an ordinary public page plus a bounded first-page candidate pool."""
+
+        if not req.semantic_requested:
+            raise InputError("Semantic candidates require semantic in edge_types")
+        if not req.center_note_id:
+            raise InputError("Semantic candidates require a current center note")
+        if req.cursor is not None:
+            raise InputError("Semantic candidates are available only on the first page")
+        node_allowance = self._bounded_semantic_allowance(
+            additional_nodes,
+            "node",
+        )
+        edge_allowance = self._bounded_semantic_allowance(
+            additional_edges,
+            "edge",
+        )
+
+        initial_identity = self._semantic_candidate_projection_identity()
+        public_graph = self.generate_graph(req)
+        candidate_max_nodes = min(
+            public_graph.limits.max_nodes + node_allowance,
+            _PROJECTION_QUERY_MAX_NOTES,
+        )
+        candidate_max_edges = public_graph.limits.max_edges + edge_allowance
+        candidate_graph = self._generate_graph(
+            req,
+            max_nodes_override=candidate_max_nodes,
+            max_edges_override=candidate_max_edges,
+        )
+        if self._semantic_candidate_projection_identity() != initial_identity:
+            raise GraphProjectionNotReadyError(
+                "Notes graph projection changed during semantic candidate generation"
+            )
+        return SemanticGraphCandidateResult(
+            public_graph=public_graph,
+            candidate_nodes=tuple(candidate_graph.nodes),
+            candidate_edges=tuple(candidate_graph.edges),
+            candidate_limits=candidate_graph.limits,
+        )
+
+    def _semantic_candidate_projection_identity(self) -> tuple[int, int, str, int]:
+        projection_store = self._projection_store()
+        if projection_store is None:
+            return (0, 1, "ready", 0)
+        status = projection_store.get_projection_status()
+        return (
+            projection_store.get_revision(),
+            status.parser_version,
+            status.rebuild_state,
+            projection_store.count_dirty(),
+        )
+
+    @staticmethod
+    def _bounded_semantic_allowance(value: int, kind: str) -> int:
+        if type(value) is not int or value < 0:
+            raise InputError(
+                f"Semantic candidate {kind} allowance must be a non-negative integer"
+            )
+        return min(value, _SEMANTIC_ADMISSION_ALLOWANCE)
+
+    def _generate_graph(
+        self,
+        req: NoteGraphRequest,
+        *,
+        max_nodes_override: int | None = None,
+        max_edges_override: int | None = None,
+    ) -> NoteGraphResponse:
+        """Build one ordinary graph traversal under explicit internal caps."""
+
+        t0 = time.monotonic()
+        resolved_edge_types = req.resolved_edge_types
+        wanted = set(resolved_edge_types) - {EdgeType.semantic}
         projection_store = self._projection_store()
         if projection_store is None:
             graph_revision = 0
@@ -333,13 +482,30 @@ class NoteGraphService:
                 )
 
         # 1. Resolve effective limits before any graph expansion work.
-        eff_max_nodes, eff_max_edges, eff_max_degree, radius_cap_applied = self._resolve_effective_limits(req)
+        resolved_max_nodes, resolved_max_edges, eff_max_degree, radius_cap_applied = (
+            self._resolve_effective_limits(req)
+        )
+        eff_max_nodes = (
+            resolved_max_nodes
+            if max_nodes_override is None
+            else min(max_nodes_override, _PROJECTION_QUERY_MAX_NOTES)
+        )
+        eff_max_edges = (
+            resolved_max_edges
+            if max_edges_override is None
+            else max_edges_override
+        )
         active_note_count = self._db.count_user_notes(include_deleted=False)
         all_notes_note_cap = min(max(1, ALL_NOTES_NOTE_CAP()), eff_max_nodes)
+        ordinary_edge_types = [
+            edge_type.value
+            for edge_type in resolved_edge_types
+            if edge_type != EdgeType.semantic
+        ]
         normalized_query = {
             "center": req.center_note_id,
             "radius": req.radius,
-            "edge_types": [e.value for e in req.edge_types] if req.edge_types else None,
+            "edge_types": ordinary_edge_types if req.edge_types else None,
             "tag": req.tag,
             "source": req.source,
             "time_range": req.time_range.model_dump(mode="json") if req.time_range else None,
@@ -367,7 +533,10 @@ class NoteGraphService:
                 dataset_id=self._dataset_id,
                 graph_revision=graph_revision,
                 parser_version=parser_version,
-                query_params={**normalized_query, "cursor": req.cursor},
+                query_params={
+                    **normalized_query,
+                    "cursor": _ordinary_cursor_cache_identity(req.cursor),
+                },
             )
             cached = self._cache.get(cache_key)
             if cached is not None:

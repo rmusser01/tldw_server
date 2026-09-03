@@ -8,6 +8,7 @@ from loguru import logger
 
 from tldw_Server_API.app.core.http_client import create_client
 from tldw_Server_API.app.core.LLM_Calls.payload_utils import (
+    EMBEDDING_REDIRECT_STATUS_CODES,
     encode_google_model_path,
     resolve_runtime_embedding_base_url,
 )
@@ -97,8 +98,13 @@ class GoogleEmbeddingsAdapter(EmbeddingsProvider):
         if inputs is None or not model:
             raise ValueError("Embeddings: 'input' and 'model' are required")
 
-        if self._use_native_http():
-            # Use single embedContent for 1 input; loop for multiple
+        credentials_resolved = request.get("credentials_resolved") is True
+        dimensions = request.get("dimensions")
+        if credentials_resolved and dimensions is not None and (
+            type(dimensions) is not int or dimensions <= 0
+        ):
+            raise ValueError("Embeddings: 'dimensions' must be a positive integer")
+        if credentials_resolved or self._use_native_http():
             base = resolve_runtime_embedding_base_url(request, provider=self.name) or self._base_url()
             try:
                 model_path = encode_google_model_path(model)
@@ -112,11 +118,59 @@ class GoogleEmbeddingsAdapter(EmbeddingsProvider):
             headers = {"Content-Type": "application/json"}
             if api_key:
                 headers["x-goog-api-key"] = str(api_key)
-            allow_query_key_fallback = self._allow_query_key_fallback(base, api_key)
+            allow_query_key_fallback = (
+                False
+                if credentials_resolved
+                else self._allow_query_key_fallback(base, api_key)
+            )
             provider_error: Exception | None = None
             try:
-                with create_client(timeout=timeout or 60.0) as client:
+                client_options: dict[str, Any] = {"timeout": timeout or 60.0}
+                if credentials_resolved:
+                    client_options["follow_redirects"] = False
+                with create_client(**client_options) as client:
                     if isinstance(inputs, list):
+                        if credentials_resolved:
+                            model_resource = f"models/{model_path}"
+                            url = f"{base}/{model_resource}:batchEmbedContents"
+                            payload = {
+                                "requests": [
+                                    {
+                                        "model": model_resource,
+                                        "content": {"parts": [{"text": text}]},
+                                        **(
+                                            {
+                                                "embedContentConfig": {
+                                                    "outputDimensionality": dimensions
+                                                }
+                                            }
+                                            if dimensions is not None
+                                            else {}
+                                        ),
+                                    }
+                                    for text in inputs
+                                ]
+                            }
+                            resp = self._post_embedding(
+                                client,
+                                url=url,
+                                headers=headers,
+                                payload=payload,
+                                api_key=api_key,
+                                allow_query_key_fallback=False,
+                            )
+                            if (
+                                getattr(resp, "status_code", None)
+                                in EMBEDDING_REDIRECT_STATUS_CODES
+                            ):
+                                raise RuntimeError(
+                                    "Embedding provider redirected the request"
+                                )
+                            if hasattr(resp, "raise_for_status"):
+                                resp.raise_for_status()
+                            normalized = self._normalize(resp.json(), multi=True)
+                            normalized["model"] = model
+                            return normalized
                         out: list[dict[str, Any]] = []
                         for idx, text in enumerate(inputs):
                             url = f"{base}/models/{model_path}:embedContent"
@@ -129,6 +183,8 @@ class GoogleEmbeddingsAdapter(EmbeddingsProvider):
                                 api_key=api_key,
                                 allow_query_key_fallback=allow_query_key_fallback,
                             )
+                            if getattr(resp, "status_code", None) in EMBEDDING_REDIRECT_STATUS_CODES:
+                                raise RuntimeError("Embedding provider redirected the request")
                             if hasattr(resp, "raise_for_status"):
                                 resp.raise_for_status()
                             data = resp.json()
@@ -136,7 +192,18 @@ class GoogleEmbeddingsAdapter(EmbeddingsProvider):
                         return {"data": out, "object": "list", "model": model}
                     else:
                         url = f"{base}/models/{model_path}:embedContent"
-                        payload = {"content": {"parts": [{"text": inputs}]}}
+                        payload = {
+                            "content": {"parts": [{"text": inputs}]},
+                            **(
+                                {
+                                    "embedContentConfig": {
+                                        "outputDimensionality": dimensions
+                                    }
+                                }
+                                if credentials_resolved and dimensions is not None
+                                else {}
+                            ),
+                        }
                         resp = self._post_embedding(
                             client,
                             url=url,
@@ -145,6 +212,8 @@ class GoogleEmbeddingsAdapter(EmbeddingsProvider):
                             api_key=api_key,
                             allow_query_key_fallback=allow_query_key_fallback,
                         )
+                        if getattr(resp, "status_code", None) in EMBEDDING_REDIRECT_STATUS_CODES:
+                            raise RuntimeError("Embedding provider redirected the request")
                         if hasattr(resp, "raise_for_status"):
                             resp.raise_for_status()
                         data = resp.json()

@@ -2675,6 +2675,7 @@ def create_client(
     http3: bool = False,  # placeholder for future
     headers: dict[str, str] | None = None,
     transport: httpx.BaseTransport | None = None,
+    follow_redirects: bool = False,
     enforce_tls_min_version: bool = ENFORCE_TLS_MIN,
     tls_min_version: str = TLS_MIN_VERSION,
     cert_pinning: dict[str, set[str]] | None = None,
@@ -2712,6 +2713,7 @@ def create_client(
         "proxies": proxies,
         "headers": hdrs,
         "transport": transport,
+        "follow_redirects": follow_redirects,
     }
     kwargs["event_hooks"] = {"response": [_capture_error_body_hook]}
     lim = limits or _httpx_limits_default()

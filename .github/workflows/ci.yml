@@ -722,10 +722,13 @@ jobs:
               tldw_Server_API/tests/VN_Policy
               tldw_Server_API/tests/scripts
           - name: gap-verified-5
+            postgres_image: pgvector/pgvector:pg18
+            pgvector_required: '1'
             paths: >-
               tldw_Server_API/tests/Agent_Orchestration
               tldw_Server_API/tests/Chat_Workflows
               tldw_Server_API/tests/Notes_Graph
+              tldw_Server_API/tests/Services/test_notes_semantic_workers.py
               tldw_Server_API/tests/Slides              tldw_Server_API/tests/Text2SQL
               tldw_Server_API/tests/wizard
           - name: gap-verified-6
@@ -1851,7 +1854,7 @@ jobs:
               tldw_Server_API/tests/integration
     services:
       postgres:
-        image: mirror.gcr.io/library/postgres:18-bookworm
+        image: ${{ matrix.shard.postgres_image || 'mirror.gcr.io/library/postgres:18-bookworm' }}
         env:
           POSTGRES_USER: tldw_user
           POSTGRES_PASSWORD: TestPassword123!
@@ -1878,6 +1881,7 @@ jobs:
       TEST_DB_PASSWORD: TestPassword123!
       TEST_DB_NAME: tldw_test
       TLDW_TEST_POSTGRES_REQUIRED: '1'
+      TLDW_TEST_PGVECTOR_REQUIRED: ${{ matrix.shard.pgvector_required || '0' }}
       REDIS_URL: redis://127.0.0.1:6379/0
       EMBEDDINGS_REDIS_URL: redis://127.0.0.1:6379/0
       WORKFLOWS_EGRESS_ALLOWLIST: "93.184.216.34,does-not-resolve.invalid,example.com"
@@ -2213,6 +2217,7 @@ jobs:
               tldw_Server_API/tests/Agent_Orchestration
               tldw_Server_API/tests/Chat_Workflows
               tldw_Server_API/tests/Notes_Graph
+              tldw_Server_API/tests/Services/test_notes_semantic_workers.py
               tldw_Server_API/tests/Slides              tldw_Server_API/tests/Text2SQL
               tldw_Server_API/tests/wizard
           - name: gap-verified-6

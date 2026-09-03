@@ -2,6 +2,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 
+import httpx
 import pytest
 
 
@@ -100,6 +101,376 @@ def test_google_embeddings_adapter_native_http_multi(monkeypatch):
         assert isinstance(out, dict)
         embs = [d["embedding"] for d in out.get("data", [])]
         assert embs == [[0.1, 0.2], [0.3, 0.4]]
+        assert calls["i"] == 2
+
+
+@pytest.mark.unit
+def test_resolved_google_list_uses_one_pinned_batch_request_without_redirects(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("LLM_EMBEDDINGS_NATIVE_HTTP_GOOGLE", raising=False)
+    monkeypatch.setenv("GOOGLE_GEMINI_BASE_URL", "https://ambient-attacker.example/v1")
+
+    import tldw_Server_API.app.core.LLM_Calls.providers.google_embeddings_adapter as module
+    from tldw_Server_API.app.core.AuthNZ.byok_config import (
+        runtime_base_url_override_provenance,
+    )
+    from tldw_Server_API.app.core.LLM_Calls.providers.google_embeddings_adapter import (
+        GoogleEmbeddingsAdapter,
+    )
+
+    client_options: list[dict[str, object]] = []
+    requests: list[tuple[str, dict[str, object]]] = []
+
+    class Response:
+        status_code = 200
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {
+                "embeddings": [
+                    {"values": [0.1, 0.2]},
+                    {"values": [0.3, 0.4]},
+                ]
+            }
+
+    class Client:
+        def __enter__(self) -> "Client":
+            return self
+
+        def __exit__(self, *_args: object) -> bool:
+            return False
+
+        def post(self, url: str, **kwargs: object) -> Response:
+            requests.append((url, kwargs))
+            return Response()
+
+    def create_client(**kwargs: object) -> Client:
+        client_options.append(kwargs)
+        return Client()
+
+    monkeypatch.setattr(module, "create_client", create_client)
+
+    result = GoogleEmbeddingsAdapter().embed(
+        {
+            "input": ["note one", "note two"],
+            "model": "text-embedding-004",
+            "dimensions": 2,
+            "api_key": "trusted-key",
+            "base_url": "https://pinned-google.example/v1",
+            "credentials_resolved": True,
+            "_runtime_base_url_override": runtime_base_url_override_provenance(),
+        }
+    )
+
+    assert [item["embedding"] for item in result["data"]] == [
+        [0.1, 0.2],
+        [0.3, 0.4],
+    ]
+    assert client_options == [{"timeout": 60.0, "follow_redirects": False}]
+    assert requests == [
+        (
+            "https://pinned-google.example/v1/models/text-embedding-004:batchEmbedContents",
+            {
+                "headers": {
+                    "Content-Type": "application/json",
+                    "x-goog-api-key": "trusted-key",
+                },
+                "json": {
+                    "requests": [
+                        {
+                            "model": "models/text-embedding-004",
+                            "content": {"parts": [{"text": "note one"}]},
+                            "embedContentConfig": {"outputDimensionality": 2},
+                        },
+                        {
+                            "model": "models/text-embedding-004",
+                            "content": {"parts": [{"text": "note two"}]},
+                            "embedContentConfig": {"outputDimensionality": 2},
+                        },
+                    ]
+                },
+            },
+        )
+    ]
+    assert "ambient-attacker" not in repr(requests)
+
+
+@pytest.mark.unit
+def test_resolved_google_scalar_uses_nested_dimension_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("LLM_EMBEDDINGS_NATIVE_HTTP_GOOGLE", raising=False)
+
+    import tldw_Server_API.app.core.LLM_Calls.providers.google_embeddings_adapter as module
+    from tldw_Server_API.app.core.AuthNZ.byok_config import (
+        runtime_base_url_override_provenance,
+    )
+    from tldw_Server_API.app.core.LLM_Calls.providers.google_embeddings_adapter import (
+        GoogleEmbeddingsAdapter,
+    )
+
+    payloads: list[dict[str, object]] = []
+
+    class Response:
+        status_code = 200
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {"embedding": {"values": [0.1, 0.2, 0.3]}}
+
+    class Client:
+        def __enter__(self) -> "Client":
+            return self
+
+        def __exit__(self, *_args: object) -> bool:
+            return False
+
+        def post(self, _url: str, **kwargs: object) -> Response:
+            payloads.append(kwargs["json"])
+            return Response()
+
+    monkeypatch.setattr(module, "create_client", lambda **_kwargs: Client())
+
+    result = GoogleEmbeddingsAdapter().embed(
+        {
+            "input": "note text",
+            "model": "text-embedding-004",
+            "dimensions": 3,
+            "api_key": "trusted-key",
+            "base_url": "https://pinned-google.example/v1",
+            "credentials_resolved": True,
+            "_runtime_base_url_override": runtime_base_url_override_provenance(),
+        }
+    )
+
+    assert result["data"][0]["embedding"] == [0.1, 0.2, 0.3]
+    assert payloads == [
+        {
+            "content": {"parts": [{"text": "note text"}]},
+            "embedContentConfig": {"outputDimensionality": 3},
+        }
+    ]
+    assert "outputDimensionality" not in payloads[0]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("inputs", ["probe text", ["probe one", "probe two"]])
+def test_resolved_google_probe_omits_dimension_config(
+    monkeypatch: pytest.MonkeyPatch,
+    inputs: str | list[str],
+) -> None:
+    monkeypatch.delenv("LLM_EMBEDDINGS_NATIVE_HTTP_GOOGLE", raising=False)
+
+    import tldw_Server_API.app.core.LLM_Calls.providers.google_embeddings_adapter as module
+    from tldw_Server_API.app.core.AuthNZ.byok_config import (
+        runtime_base_url_override_provenance,
+    )
+    from tldw_Server_API.app.core.LLM_Calls.providers.google_embeddings_adapter import (
+        GoogleEmbeddingsAdapter,
+    )
+
+    payloads: list[dict[str, object]] = []
+
+    class Response:
+        status_code = 200
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            if isinstance(inputs, list):
+                return {"embeddings": [{"values": [0.1, 0.2]} for _ in inputs]}
+            return {"embedding": {"values": [0.1, 0.2]}}
+
+    class Client:
+        def __enter__(self) -> "Client":
+            return self
+
+        def __exit__(self, *_args: object) -> bool:
+            return False
+
+        def post(self, _url: str, **kwargs: object) -> Response:
+            payloads.append(kwargs["json"])
+            return Response()
+
+    monkeypatch.setattr(module, "create_client", lambda **_kwargs: Client())
+
+    assert GoogleEmbeddingsAdapter().embed(
+        {
+            "input": inputs,
+            "model": "text-embedding-004",
+            "dimensions": None,
+            "api_key": "trusted-key",
+            "base_url": "https://pinned-google.example/v1",
+            "credentials_resolved": True,
+            "_runtime_base_url_override": runtime_base_url_override_provenance(),
+        }
+    )["data"]
+
+    assert "outputDimensionality" not in payloads[0]
+    requests = payloads[0].get("requests")
+    if isinstance(requests, list):
+        assert all("embedContentConfig" not in request for request in requests)
+    else:
+        assert "embedContentConfig" not in payloads[0]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("dimensions", [True, False, 0, -1, 1.5, "2"])
+def test_resolved_google_rejects_invalid_dimensions_before_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+    dimensions: object,
+) -> None:
+    monkeypatch.delenv("LLM_EMBEDDINGS_NATIVE_HTTP_GOOGLE", raising=False)
+
+    import tldw_Server_API.app.core.LLM_Calls.providers.google_embeddings_adapter as module
+    from tldw_Server_API.app.core.AuthNZ.byok_config import (
+        runtime_base_url_override_provenance,
+    )
+    from tldw_Server_API.app.core.LLM_Calls.providers.google_embeddings_adapter import (
+        GoogleEmbeddingsAdapter,
+    )
+
+    monkeypatch.setattr(
+        module,
+        "create_client",
+        lambda **_kwargs: pytest.fail("invalid dimensions must fail before dispatch"),
+    )
+
+    with pytest.raises(ValueError, match="positive integer"):
+        GoogleEmbeddingsAdapter().embed(
+            {
+                "input": "note text",
+                "model": "text-embedding-004",
+                "dimensions": dimensions,
+                "api_key": "trusted-key",
+                "base_url": "https://pinned-google.example/v1",
+                "credentials_resolved": True,
+                "_runtime_base_url_override": runtime_base_url_override_provenance(),
+            }
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("status_code", "location"),
+    [
+        (307, "https://cross-origin.example/receive"),
+        (308, "https://cross-origin.example/receive"),
+        (307, "https://pinned-google.example/v1/redirected"),
+    ],
+)
+def test_resolved_google_request_rejects_redirect_without_replaying_note_text(
+    monkeypatch: pytest.MonkeyPatch,
+    status_code: int,
+    location: str,
+) -> None:
+    monkeypatch.delenv("LLM_EMBEDDINGS_NATIVE_HTTP_GOOGLE", raising=False)
+
+    import tldw_Server_API.app.core.LLM_Calls.providers.google_embeddings_adapter as module
+    from tldw_Server_API.app.core.AuthNZ.byok_config import (
+        runtime_base_url_override_provenance,
+    )
+    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatProviderError
+    from tldw_Server_API.app.core.LLM_Calls.providers.google_embeddings_adapter import (
+        GoogleEmbeddingsAdapter,
+    )
+
+    seen: list[tuple[str, str, bytes]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.url.host, request.url.path, request.content))
+        if len(seen) == 1:
+            return httpx.Response(status_code, headers={"location": location}, json={})
+        return httpx.Response(
+            200,
+            json={
+                "embeddings": [
+                    {"values": [0.1, 0.2]},
+                    {"values": [0.3, 0.4]},
+                ]
+            },
+        )
+
+    def create_client(**kwargs: object) -> httpx.Client:
+        return httpx.Client(transport=httpx.MockTransport(handler), **kwargs)
+
+    monkeypatch.setattr(module, "create_client", create_client)
+
+    with pytest.raises(ChatProviderError):
+        GoogleEmbeddingsAdapter().embed(
+            {
+                "input": ["note text must stay pinned", "second note text"],
+                "model": "text-embedding-004",
+                "api_key": "trusted-key",
+                "base_url": "https://pinned-google.example/v1",
+                "credentials_resolved": True,
+                "_runtime_base_url_override": runtime_base_url_override_provenance(),
+            }
+        )
+
+    assert [host for host, _path, _body in seen] == ["pinned-google.example"]
+    assert seen[0][1].endswith(":batchEmbedContents")
+    assert b"note text must stay pinned" in seen[0][2]
+
+
+@pytest.mark.unit
+def test_resolved_google_batch_error_never_fans_out_to_per_input_calls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("LLM_EMBEDDINGS_NATIVE_HTTP_GOOGLE", raising=False)
+
+    import tldw_Server_API.app.core.LLM_Calls.providers.google_embeddings_adapter as module
+    from tldw_Server_API.app.core.AuthNZ.byok_config import (
+        runtime_base_url_override_provenance,
+    )
+    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatProviderError
+    from tldw_Server_API.app.core.LLM_Calls.providers.google_embeddings_adapter import (
+        GoogleEmbeddingsAdapter,
+    )
+
+    urls: list[str] = []
+
+    class Response:
+        status_code = 500
+
+        def raise_for_status(self) -> None:
+            raise RuntimeError("raw-google-batch-error")
+
+    class Client:
+        def __enter__(self) -> "Client":
+            return self
+
+        def __exit__(self, *_args: object) -> bool:
+            return False
+
+        def post(self, url: str, **_kwargs: object) -> Response:
+            urls.append(url)
+            return Response()
+
+    monkeypatch.setattr(module, "create_client", lambda **_kwargs: Client())
+
+    with pytest.raises(ChatProviderError) as exc_info:
+        GoogleEmbeddingsAdapter().embed(
+            {
+                "input": ["first note", "second note"],
+                "model": "text-embedding-004",
+                "api_key": "trusted-key",
+                "base_url": "https://pinned-google.example/v1",
+                "credentials_resolved": True,
+                "_runtime_base_url_override": runtime_base_url_override_provenance(),
+            }
+        )
+
+    assert urls == [
+        "https://pinned-google.example/v1/models/text-embedding-004:batchEmbedContents"
+    ]
+    assert "raw-google-batch-error" not in str(exc_info.value)
 
 
 @pytest.mark.unit
@@ -370,6 +741,77 @@ def test_google_embeddings_uses_one_models_prefix_and_header_auth(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("status_code", [401, 403])
+def test_resolved_google_auth_failure_never_retries_with_query_key(
+    monkeypatch: pytest.MonkeyPatch,
+    status_code: int,
+) -> None:
+    monkeypatch.delenv("LLM_EMBEDDINGS_NATIVE_HTTP_GOOGLE", raising=False)
+    monkeypatch.setenv("GOOGLE_EMBEDDINGS_QUERY_KEY_FALLBACK", "1")
+
+    import tldw_Server_API.app.core.LLM_Calls.providers.google_embeddings_adapter as module
+    from tldw_Server_API.app.core.AuthNZ.byok_config import (
+        runtime_base_url_override_provenance,
+    )
+    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatProviderError
+    from tldw_Server_API.app.core.LLM_Calls.providers.google_embeddings_adapter import (
+        GoogleEmbeddingsAdapter,
+    )
+
+    calls: list[tuple[dict[str, str] | None, dict[str, str]]] = []
+
+    class Response:
+        def raise_for_status(self) -> None:
+            raise RuntimeError("raw-resolved-google-auth-error")
+
+        @property
+        def status_code(self) -> int:
+            return status_code
+
+    class Client:
+        def __enter__(self) -> "Client":
+            return self
+
+        def __exit__(self, *_args: object) -> bool:
+            return False
+
+        def post(
+            self,
+            _url: str,
+            *,
+            params: dict[str, str] | None = None,
+            headers: dict[str, str],
+            **_kwargs: object,
+        ) -> Response:
+            calls.append((params, dict(headers)))
+            return Response()
+
+    monkeypatch.setattr(module, "create_client", lambda **_kwargs: Client())
+
+    with pytest.raises(ChatProviderError):
+        GoogleEmbeddingsAdapter().embed(
+            {
+                "input": "note text",
+                "model": "text-embedding-004",
+                "api_key": "trusted-key",
+                "base_url": "https://google-compatible.example/v1",
+                "credentials_resolved": True,
+                "_runtime_base_url_override": runtime_base_url_override_provenance(),
+            }
+        )
+
+    assert calls == [
+        (
+            None,
+            {
+                "Content-Type": "application/json",
+                "x-goog-api-key": "trusted-key",
+            },
+        )
+    ]
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize("first_status", [401, 403])
 def test_google_custom_endpoint_query_key_fallback_requires_opt_in_and_auth_failure(
     monkeypatch: pytest.MonkeyPatch,
@@ -491,12 +933,16 @@ def test_google_query_key_fallback_never_runs_outside_explicit_custom_auth_case(
 
 @pytest.mark.unit
 @pytest.mark.concurrent
-def test_concurrent_google_official_hostname_equivalent_never_uses_query_key_fallback(
+def test_concurrent_resolved_google_never_retries_while_unresolved_custom_call_can(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A trailing-dot official host stays header-only beside a custom retry."""
+    """Resolved auth stays header-only beside an ordinary custom retry."""
     monkeypatch.setenv("LLM_EMBEDDINGS_NATIVE_HTTP_GOOGLE", "1")
     monkeypatch.setenv("GOOGLE_EMBEDDINGS_QUERY_KEY_FALLBACK", "1")
+    monkeypatch.setenv(
+        "GOOGLE_GEMINI_BASE_URL",
+        "https://google-compatible.example/v1",
+    )
 
     import tldw_Server_API.app.core.LLM_Calls.providers.google_embeddings_adapter as module
     from tldw_Server_API.app.core.AuthNZ.byok_config import (
@@ -546,29 +992,37 @@ def test_concurrent_google_official_hostname_equivalent_never_uses_query_key_fal
     provenance = runtime_base_url_override_provenance()
     adapter = GoogleEmbeddingsAdapter()
 
-    def _invoke(label: str, base_url: str, key: str):
-        return adapter.embed(
-            {
-                "input": label,
-                "model": f"embedding-{label}",
-                "api_key": key,
-                "base_url": base_url,
-                "credentials_resolved": True,
-                "_runtime_base_url_override": provenance,
-            }
-        )
+    def _invoke(
+        label: str,
+        key: str,
+        *,
+        resolved_base_url: str | None = None,
+    ):
+        request = {
+            "input": label,
+            "model": f"embedding-{label}",
+            "api_key": key,
+        }
+        if resolved_base_url is not None:
+            request.update(
+                {
+                    "base_url": resolved_base_url,
+                    "credentials_resolved": True,
+                    "_runtime_base_url_override": provenance,
+                }
+            )
+        return adapter.embed(request)
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         official = executor.submit(
             _invoke,
             "official",
-            "https://generativelanguage.googleapis.com./v1",
             "official-secret-key",
+            resolved_base_url="https://generativelanguage.googleapis.com./v1",
         )
         custom = executor.submit(
             _invoke,
             "custom",
-            "https://google-compatible.example/v1",
             "custom-secret-key",
         )
         try:

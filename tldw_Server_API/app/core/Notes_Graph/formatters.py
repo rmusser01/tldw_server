@@ -57,9 +57,13 @@ def to_cytoscape(graph: NoteGraphResponse) -> dict[str, Any]:
             data["weight"] = edge.weight
         if edge.label is not None:
             data["label"] = edge.label
+        if edge.evidence is not None:
+            data["evidence"] = edge.evidence.model_dump(mode="json")
+        if edge.evidence_omitted is not None:
+            data["evidence_omitted"] = edge.evidence_omitted
         cy_edges.append({"data": data})
 
-    return {
+    response = {
         "elements": {
             "nodes": cy_nodes,
             "edges": cy_edges,
@@ -72,3 +76,6 @@ def to_cytoscape(graph: NoteGraphResponse) -> dict[str, Any]:
         "radius_cap_applied": graph.radius_cap_applied,
         "suggestions_authorized": graph.suggestions_authorized,
     }
+    if graph.semantic_status is not None:
+        response["semantic_status"] = graph.semantic_status.model_dump(mode="json")
+    return response

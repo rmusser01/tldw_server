@@ -24,6 +24,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     logger,
 )
 from tldw_Server_API.app.core.Notes.wikilinks import parse_wikilinks
+from tldw_Server_API.app.core.Notes_Graph.semantic_content import semantic_content_fingerprint
 from tldw_Server_API.app.core.Sync.v2.models import validate_notes_note_upsert_payload
 from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_contract import (
     SYNC_ENVELOPE_MAX_BYTES,
@@ -72,6 +73,58 @@ class NoteStore:
             expected_time = expected_time.replace(tzinfo=timezone.utc)
         return actual_time.astimezone(timezone.utc) == expected_time.astimezone(timezone.utc)
 
+    @staticmethod
+    def _semantic_now() -> datetime:
+        return datetime.now(timezone.utc)
+
+    def _mark_note_semantic_dirty(
+        self,
+        conn: sqlite3.Connection | BackendConnectionWrapper,
+        *,
+        dataset_id: str | None,
+        note_id: str,
+        title: str,
+        content: str,
+        content_version: int,
+    ) -> None:
+        if dataset_id is None:
+            dataset_id = self._db.note_semantic_store.resolve_enabled_dataset_for_local_mutation(
+                tx=conn
+            )
+        self._db.note_semantic_store.mark_note_dirty(
+            tx=conn,
+            dataset_id=dataset_id,
+            note_id=note_id,
+            content_version=content_version,
+            content_fingerprint=semantic_content_fingerprint(title, content, content_version),
+            now=self._semantic_now(),
+        )
+
+    def _mark_note_semantic_tombstone(
+        self,
+        conn: sqlite3.Connection | BackendConnectionWrapper,
+        *,
+        dataset_id: str | None,
+        note_id: str,
+        title: str,
+        content: str,
+        content_version: int,
+        hard_delete: bool = False,
+    ) -> None:
+        if dataset_id is None:
+            dataset_id = self._db.note_semantic_store.resolve_enabled_dataset_for_local_mutation(
+                tx=conn
+            )
+        self._db.note_semantic_store.mark_note_tombstoned(
+            tx=conn,
+            dataset_id=dataset_id,
+            note_id=note_id,
+            content_version=content_version,
+            content_fingerprint=semantic_content_fingerprint(title, content, content_version),
+            hard_delete=hard_delete,
+            now=self._semantic_now(),
+        )
+
     # ------------------------------------------------------------------
     # Note creation
     # ------------------------------------------------------------------
@@ -84,6 +137,7 @@ class NoteStore:
         conversation_id: str | None = None,
         message_id: str | None = None,
         conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+        semantic_dataset_id: str | None = None,
     ) -> str | None:
         if not title or not title.strip():
             raise InputError("Note title cannot be empty.")  # noqa: TRY003
@@ -120,6 +174,14 @@ class NoteStore:
                     source_version=1,
                     projection=projection,
                     conn=transaction_conn,
+                )
+                self._mark_note_semantic_dirty(
+                    transaction_conn,
+                    dataset_id=semantic_dataset_id,
+                    note_id=final_note_id,
+                    title=title.strip(),
+                    content=content,
+                    content_version=1,
                 )
                 logger.info(f"Added note '{title.strip()}' with ID: {final_note_id}.")
                 return final_note_id
@@ -160,6 +222,7 @@ class NoteStore:
         expected_product_version: int | None = None,
         projection_timestamp: str | None = None,
         conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+        semantic_dataset_id: str | None = None,
     ) -> bool:
         """Create or update a note projection from an accepted Sync v2 envelope."""
 
@@ -219,7 +282,7 @@ class NoteStore:
         try:
             def _execute(transaction_conn: sqlite3.Connection | BackendConnectionWrapper) -> bool:
                 previous = transaction_conn.execute(
-                    "SELECT title, content FROM notes WHERE id = ?",
+                    "SELECT title, content, deleted FROM notes WHERE id = ?",
                     (normalized_note_id,),
                 ).fetchone()
                 if expected_product_version is None:
@@ -316,6 +379,17 @@ class NoteStore:
                     note_id=normalized_note_id,
                     deleted=False,
                 )
+                if previous is None or bool(previous["deleted"]) or (
+                    previous["title"] != exact_title or previous["content"] != content
+                ):
+                    self._mark_note_semantic_dirty(
+                        transaction_conn,
+                        dataset_id=semantic_dataset_id,
+                        note_id=normalized_note_id,
+                        title=exact_title,
+                        content=content,
+                        content_version=object_revision,
+                    )
                 if previous is not None and (
                     previous["title"] != exact_title or previous["content"] != content
                 ):
@@ -391,6 +465,7 @@ class NoteStore:
         object_revision: int,
         object_hash: str,
         conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+        semantic_dataset_id: str | None = None,
     ) -> bool:
         """Soft-delete a note projection from an accepted Sync v2 tombstone."""
 
@@ -420,6 +495,10 @@ class NoteStore:
 
         try:
             def _execute(transaction_conn: sqlite3.Connection | BackendConnectionWrapper) -> bool:
+                note = transaction_conn.execute(
+                    "SELECT title, content FROM notes WHERE id = ?",
+                    (normalized_note_id,),
+                ).fetchone()
                 cursor = transaction_conn.execute(query, params)
                 if cursor.rowcount == 0:
                     raise ConflictError(  # noqa: TRY003
@@ -437,6 +516,14 @@ class NoteStore:
                     transaction_conn,
                     note_id=normalized_note_id,
                     deleted=True,
+                )
+                self._mark_note_semantic_tombstone(
+                    transaction_conn,
+                    dataset_id=semantic_dataset_id,
+                    note_id=normalized_note_id,
+                    title=str(note["title"]),
+                    content=str(note["content"]),
+                    content_version=object_revision,
                 )
                 logger.info("Soft-deleted note projection from Sync v2 for ID: {}.", normalized_note_id)
                 return True
@@ -1747,6 +1834,34 @@ class NoteStore:
         cursor = self._db.execute_query(query, tuple(params))
         return [dict(row) for row in cursor.fetchall()]
 
+    def list_semantic_note_versions(self, *, limit: int) -> tuple[tuple[str, int], ...]:
+        """List active Note identities for a bounded semantic snapshot."""
+
+        if type(limit) is not int or not 1 <= limit <= 100_001:
+            raise ValueError("notes_semantic_note_limit_invalid")
+        deleted = False if self._db.backend_type == BackendType.POSTGRESQL else 0
+        rows = self._db.execute_query(
+            "SELECT id,version FROM notes WHERE deleted=? ORDER BY id LIMIT ?",
+            (deleted, limit),
+        ).fetchall()
+        return tuple((str(row["id"]), int(row["version"])) for row in rows)
+
+    def get_semantic_note_version(
+        self,
+        *,
+        note_id: str,
+        content_version: int,
+    ) -> dict[str, Any] | None:
+        """Read one exact active Note version for fenced semantic processing."""
+
+        deleted = False if self._db.backend_type == BackendType.POSTGRESQL else 0
+        row = self._db.execute_query(
+            "SELECT id,title,content,version FROM notes "
+            "WHERE id=? AND version=? AND deleted=?",
+            (note_id, content_version, deleted),
+        ).fetchone()
+        return dict(row) if row is not None else None
+
     def list_note_ids_page(
         self,
         *,
@@ -2047,6 +2162,7 @@ class NoteStore:
         update_data: dict[str, Any],
         expected_version: int,
         conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+        semantic_dataset_id: str | None = None,
     ) -> bool | None:
         if not update_data:
             raise InputError("No data provided for note update.")  # noqa: TRY003
@@ -2135,6 +2251,18 @@ class NoteStore:
                         note_id=note_id,
                         conn=transaction_conn,
                     )
+                    persisted = transaction_conn.execute(
+                        "SELECT title, content FROM notes WHERE id = ?",
+                        (note_id,),
+                    ).fetchone()
+                    self._mark_note_semantic_dirty(
+                        transaction_conn,
+                        dataset_id=semantic_dataset_id,
+                        note_id=note_id,
+                        title=str(persisted["title"]),
+                        content=str(persisted["content"]),
+                        content_version=next_version_val,
+                    )
                 logger.info(f"Updated note ID {note_id} from version {expected_version} to version {next_version_val}.")
                 return True
 
@@ -2164,7 +2292,12 @@ class NoteStore:
     # Note deletion and restoration
     # ------------------------------------------------------------------
 
-    def soft_delete_note(self, note_id: str, expected_version: int) -> bool | None:
+    def soft_delete_note(
+        self,
+        note_id: str,
+        expected_version: int,
+        semantic_dataset_id: str | None = None,
+    ) -> bool | None:
         now = self._db._get_current_utc_timestamp_iso()
         next_version_val = expected_version + 1
 
@@ -2189,6 +2322,11 @@ class NoteStore:
                         entity="notes", entity_id=note_id
                     )
 
+                note = conn.execute(
+                    "SELECT title, content FROM notes WHERE id = ?",
+                    (note_id,),
+                ).fetchone()
+
                 cursor = conn.execute(query, params)
 
                 if cursor.rowcount == 0:
@@ -2212,6 +2350,14 @@ class NoteStore:
                     conn=conn,
                 )
                 self._advance_studio_lifecycle(conn, note_id=note_id, deleted=True)
+                self._mark_note_semantic_tombstone(
+                    conn,
+                    dataset_id=semantic_dataset_id,
+                    note_id=note_id,
+                    title=str(note["title"]),
+                    content=str(note["content"]),
+                    content_version=next_version_val,
+                )
                 self._db.note_graph_suggestion_store.invalidate_for_note_change(
                     note_id=note_id,
                     conn=conn,
@@ -2226,17 +2372,35 @@ class NoteStore:
                          exc_info=True)
             raise
 
-    def delete_note(self, note_id: str, expected_version: int | None = None, hard_delete: bool = False) -> bool:
+    def delete_note(
+        self,
+        note_id: str,
+        expected_version: int | None = None,
+        hard_delete: bool = False,
+        semantic_dataset_id: str | None = None,
+    ) -> bool:
         """Soft or hard delete a note."""
         now = self._db._get_current_utc_timestamp_iso()
         try:
             with self._db.transaction() as conn:
-                row = conn.execute("SELECT id, version, deleted FROM notes WHERE id = ?", (note_id,)).fetchone()
+                row = conn.execute(
+                    "SELECT id, version, deleted, title, content FROM notes WHERE id = ?",
+                    (note_id,),
+                ).fetchone()
                 if not row:
                     return False
                 cur_ver = int(row["version"])
                 deleted = bool(row["deleted"])
                 if hard_delete:
+                    self._mark_note_semantic_tombstone(
+                        conn,
+                        dataset_id=semantic_dataset_id,
+                        note_id=note_id,
+                        title=str(row["title"]),
+                        content=str(row["content"]),
+                        content_version=cur_ver + 1,
+                        hard_delete=True,
+                    )
                     self._db._delete_note_clipper_sidecars(note_id, conn=conn)
                     conn.execute("DELETE FROM note_studio_documents WHERE note_id = ?", (note_id,))
                     conn.execute("DELETE FROM notes WHERE id = ?", (note_id,))
@@ -2259,6 +2423,14 @@ class NoteStore:
                         conn=conn,
                     )
                     self._advance_studio_lifecycle(conn, note_id=note_id, deleted=True)
+                    self._mark_note_semantic_tombstone(
+                        conn,
+                        dataset_id=semantic_dataset_id,
+                        note_id=note_id,
+                        title=str(row["title"]),
+                        content=str(row["content"]),
+                        content_version=cur_ver + 1,
+                    )
                     self._db.note_graph_suggestion_store.invalidate_for_note_change(
                         note_id=note_id,
                         conn=conn,
@@ -2269,7 +2441,12 @@ class NoteStore:
         except sqlite3.Error as e:
             raise CharactersRAGDBError(f"Failed to delete note: {e}") from e  # noqa: TRY003
 
-    def restore_note(self, note_id: str, expected_version: int) -> bool | None:
+    def restore_note(
+        self,
+        note_id: str,
+        expected_version: int,
+        semantic_dataset_id: str | None = None,
+    ) -> bool | None:
         """
         Restores a soft-deleted note using optimistic locking.
 
@@ -2301,7 +2478,10 @@ class NoteStore:
         try:
             with self._db.transaction() as conn:
                 # First check if record exists at all
-                check_cursor = conn.execute("SELECT deleted, version FROM notes WHERE id = ?", (note_id,))
+                check_cursor = conn.execute(
+                    "SELECT deleted, version, title, content FROM notes WHERE id = ?",
+                    (note_id,),
+                )
                 record_status = check_cursor.fetchone()
 
                 if not record_status:
@@ -2350,6 +2530,14 @@ class NoteStore:
                     conn=conn,
                 )
                 self._advance_studio_lifecycle(conn, note_id=note_id, deleted=False)
+                self._mark_note_semantic_dirty(
+                    conn,
+                    dataset_id=semantic_dataset_id,
+                    note_id=note_id,
+                    title=str(record_status["title"]),
+                    content=str(record_status["content"]),
+                    content_version=next_version_val,
+                )
                 logger.info(
                     f"Restored note ID {note_id} (was version {expected_version}), new version {next_version_val}.")
                 return True

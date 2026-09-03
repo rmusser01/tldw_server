@@ -153,6 +153,26 @@ def test_graph_returns_wikilink_edges(client_and_db):
     assert wl[0]["directed"] is True
 
 
+@pytest.mark.parametrize(
+    "edge_type_params",
+    [
+        [("edge_types", "manual,wikilink")],
+        [("edge_types", "manual"), ("edge_types", "wikilink")],
+    ],
+)
+def test_graph_accepts_csv_and_repeated_edge_types(client_and_db, edge_type_params):
+    client, _db = client_and_db
+    note_id = _create_note(client, "Filtered graph", "body")
+
+    response = client.get(
+        "/api/v1/notes/graph",
+        params=[("center_note_id", note_id), *edge_type_params],
+        headers=_headers(),
+    )
+
+    assert response.status_code == 200, response.text
+
+
 def test_graph_returns_tag_edges(client_and_db):
     client, db = client_and_db
     h = _headers()

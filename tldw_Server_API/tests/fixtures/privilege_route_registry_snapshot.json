@@ -3988,7 +3988,7 @@
           "type": "dependency"
         }
       ],
-      "description": "Returns available chat slash commands with their descriptions. When permission enforcement is enabled, commands requiring a permission are filtered by the current user's privileges in multi-user mode.",
+      "description": "Returns available chat slash commands with their descriptions. Commands requiring a permission are filtered by the current user's privileges.",
       "endpoint": "tldw_Server_API.app.api.v1.endpoints.chat.list_chat_commands",
       "methods": [
         "GET"
@@ -4036,6 +4036,11 @@
           "type": "dependency"
         },
         {
+          "id": "auth_deps.require_expected_user",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
           "id": "billing_deps._check_limit",
           "module": "tldw_Server_API.app.api.v1.API_Deps.billing_deps",
           "type": "dependency"
@@ -4043,6 +4048,11 @@
         {
           "id": "billing_deps.get_billing_org_id",
           "module": "tldw_Server_API.app.api.v1.API_Deps.billing_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "jobs_deps.try_get_job_manager",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.jobs_deps",
           "type": "dependency"
         },
         {
@@ -4954,6 +4964,11 @@
         },
         {
           "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.require_expected_user",
           "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
           "type": "dependency"
         },
@@ -6425,7 +6440,7 @@
           "type": "dependency"
         }
       ],
-      "description": "Returns available chat slash commands with their descriptions. When permission enforcement is enabled, commands requiring a permission are filtered by the current user's privileges in multi-user mode.",
+      "description": "Returns available chat slash commands with their descriptions. Commands requiring a permission are filtered by the current user's privileges.",
       "endpoint": "tldw_Server_API.app.api.v1.endpoints.chat.list_chat_commands",
       "methods": [
         "GET"
@@ -6475,6 +6490,11 @@
           "type": "dependency"
         },
         {
+          "id": "auth_deps.require_expected_user",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
           "id": "billing_deps._check_limit",
           "module": "tldw_Server_API.app.api.v1.API_Deps.billing_deps",
           "type": "dependency"
@@ -6482,6 +6502,11 @@
         {
           "id": "billing_deps.get_billing_org_id",
           "module": "tldw_Server_API.app.api.v1.API_Deps.billing_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "jobs_deps.try_get_job_manager",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.jobs_deps",
           "type": "dependency"
         },
         {
@@ -7694,6 +7719,11 @@
         },
         {
           "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.require_expected_user",
           "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
           "type": "dependency"
         },

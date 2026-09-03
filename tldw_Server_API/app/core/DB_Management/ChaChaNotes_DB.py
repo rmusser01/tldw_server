@@ -699,8 +699,8 @@ class CharactersRAGDB:
         is_memory_db (bool): True if the database is in-memory.
         db_path_str (str): String representation of the database path for SQLite connection.
     """
-    _CURRENT_SCHEMA_VERSION = 64  # Schema v64 adds durable Notes graph suggestion persistence
-    _POSTGRES_SCHEMA_VERSION = 64
+    _CURRENT_SCHEMA_VERSION = 67  # Schema v67 adds semantic operation/model authority
+    _POSTGRES_SCHEMA_VERSION = 67
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _LOCAL_UNBOUND_TASK_DATASET_ID = "local-unbound"
     _NOTE_TASK_V60_TABLES = (
@@ -7099,6 +7099,439 @@ DROP POLICY IF EXISTS note_graph_suggestion_evidence_tenant_isolation ON note_gr
 CREATE POLICY note_graph_suggestion_evidence_tenant_isolation ON note_graph_suggestion_evidence USING (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true)) WITH CHECK (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true));
 """
 
+    _MIGRATION_SQL_V64_TO_V65 = """
+CREATE TABLE note_semantic_index_configs(
+  owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(length(trim(dataset_id)) > 0),
+  desired_state TEXT NOT NULL CHECK(desired_state IN ('enabled', 'disabled')),
+  active_generation_id TEXT,
+  configuration_revision INTEGER NOT NULL DEFAULT 1 CHECK(configuration_revision >= 1),
+  semantic_index_revision INTEGER NOT NULL DEFAULT 0 CHECK(semantic_index_revision >= 0),
+  capability_revision TEXT,
+  disclosure_hash TEXT,
+  compatibility_hash TEXT,
+  provider TEXT,
+  model TEXT,
+  endpoint_origin_revision TEXT,
+  endpoint_origin_display TEXT,
+  data_boundary TEXT,
+  vector_backend TEXT,
+  storage_boundary TEXT,
+  storage_label TEXT,
+  metric TEXT NOT NULL DEFAULT 'cosine' CHECK(metric = 'cosine'),
+  dimension_state TEXT NOT NULL CHECK(dimension_state IN ('pending', 'resolved')),
+  dimensions INTEGER CHECK(dimensions IS NULL OR dimensions >= 1),
+  normalization_version TEXT NOT NULL CHECK(length(trim(normalization_version)) > 0),
+  chunker_version TEXT NOT NULL CHECK(length(trim(chunker_version)) > 0),
+  enabled_at DATETIME,
+  disabled_at DATETIME,
+  consented_at DATETIME,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(owner_user_id, dataset_id),
+  CHECK(
+    (dimension_state = 'pending' AND dimensions IS NULL AND compatibility_hash IS NULL)
+    OR
+    (dimension_state = 'resolved' AND dimensions IS NOT NULL AND compatibility_hash IS NOT NULL
+      AND length(compatibility_hash) BETWEEN 1 AND 128
+      AND substr(compatibility_hash, 1, 1) GLOB '[A-Za-z0-9]'
+      AND compatibility_hash NOT GLOB '*[^A-Za-z0-9._:-]*')
+  )
+);
+
+CREATE TABLE note_semantic_generations(
+  id TEXT PRIMARY KEY CHECK(length(trim(id)) > 0),
+  owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(length(trim(dataset_id)) > 0),
+  configuration_revision INTEGER NOT NULL CHECK(configuration_revision >= 1),
+  state TEXT NOT NULL CHECK(state IN ('staging', 'active', 'retired', 'failed', 'deleting')),
+  compatibility_hash TEXT,
+  dimension_state TEXT NOT NULL CHECK(dimension_state IN ('pending', 'resolved')),
+  dimensions INTEGER CHECK(dimensions IS NULL OR dimensions >= 1),
+  root_job_id TEXT,
+  expected_note_count INTEGER NOT NULL DEFAULT 0 CHECK(expected_note_count >= 0),
+  expected_chunk_count INTEGER NOT NULL DEFAULT 0 CHECK(expected_chunk_count >= 0),
+  published_note_count INTEGER NOT NULL DEFAULT 0 CHECK(published_note_count >= 0),
+  published_chunk_count INTEGER NOT NULL DEFAULT 0 CHECK(published_chunk_count >= 0),
+  manifest_hash TEXT,
+  publication_receipt TEXT,
+  terminal_error_code TEXT,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  published_at DATETIME,
+  retired_at DATETIME,
+  deleted_at DATETIME,
+  UNIQUE(owner_user_id, dataset_id, id),
+  FOREIGN KEY(owner_user_id, dataset_id) REFERENCES note_semantic_index_configs(owner_user_id, dataset_id) ON DELETE CASCADE ON UPDATE CASCADE,
+  CHECK(
+    (dimension_state = 'pending' AND dimensions IS NULL AND compatibility_hash IS NULL)
+    OR
+    (dimension_state = 'resolved' AND dimensions IS NOT NULL AND compatibility_hash IS NOT NULL
+      AND length(compatibility_hash) BETWEEN 1 AND 128
+      AND substr(compatibility_hash, 1, 1) GLOB '[A-Za-z0-9]'
+      AND compatibility_hash NOT GLOB '*[^A-Za-z0-9._:-]*')
+  )
+);
+
+CREATE TABLE note_semantic_note_state(
+  owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(length(trim(dataset_id)) > 0),
+  generation_id TEXT NOT NULL,
+  note_id TEXT NOT NULL,
+  content_version INTEGER NOT NULL CHECK(content_version >= 1),
+  content_fingerprint TEXT NOT NULL CHECK(
+    length(content_fingerprint) = 71
+    AND substr(content_fingerprint, 1, 7) = 'sha256:'
+    AND substr(content_fingerprint, 8) NOT GLOB '*[^0-9a-f]*'
+  ),
+  dirty_generation INTEGER NOT NULL CHECK(dirty_generation >= 1),
+  state TEXT NOT NULL CHECK(state IN ('pending', 'indexed', 'excluded', 'failed', 'tombstoned')),
+  chunk_count INTEGER NOT NULL DEFAULT 0 CHECK(chunk_count >= 0),
+  manifest_hash TEXT,
+  error_code TEXT,
+  published_at DATETIME,
+  PRIMARY KEY(owner_user_id, dataset_id, generation_id, note_id),
+  FOREIGN KEY(owner_user_id, dataset_id, generation_id) REFERENCES note_semantic_generations(owner_user_id, dataset_id, id) ON DELETE CASCADE ON UPDATE CASCADE,
+  FOREIGN KEY(owner_user_id, note_id) REFERENCES notes(client_id, id) ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+CREATE TABLE note_semantic_chunks(
+  chunk_id TEXT PRIMARY KEY CHECK(length(trim(chunk_id)) > 0),
+  owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(length(trim(dataset_id)) > 0),
+  generation_id TEXT NOT NULL,
+  note_id TEXT NOT NULL,
+  content_version INTEGER NOT NULL CHECK(content_version >= 1),
+  ordinal INTEGER NOT NULL CHECK(ordinal >= 0),
+  field TEXT NOT NULL CHECK(field IN ('title', 'content')),
+  start_offset INTEGER NOT NULL CHECK(start_offset >= 0),
+  end_offset INTEGER NOT NULL CHECK(end_offset > start_offset),
+  chunk_fingerprint TEXT NOT NULL CHECK(
+    length(chunk_fingerprint) = 71
+    AND substr(chunk_fingerprint, 1, 7) = 'sha256:'
+    AND substr(chunk_fingerprint, 8) NOT GLOB '*[^0-9a-f]*'
+  ),
+  normalization_version TEXT NOT NULL CHECK(length(trim(normalization_version)) > 0),
+  chunker_version TEXT NOT NULL CHECK(length(trim(chunker_version)) > 0),
+  UNIQUE(owner_user_id, dataset_id, chunk_id),
+  UNIQUE(owner_user_id, dataset_id, generation_id, note_id, ordinal),
+  FOREIGN KEY(owner_user_id, dataset_id, generation_id, note_id) REFERENCES note_semantic_note_state(owner_user_id, dataset_id, generation_id, note_id) ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+CREATE TABLE note_semantic_work(
+  id TEXT PRIMARY KEY CHECK(length(trim(id)) > 0),
+  owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(length(trim(dataset_id)) > 0),
+  kind TEXT NOT NULL CHECK(kind IN ('index_note', 'delete_note_vectors', 'delete_generation')),
+  note_id TEXT,
+  generation_id TEXT,
+  dirty_generation INTEGER CHECK(dirty_generation IS NULL OR dirty_generation >= 1),
+  fencing_token TEXT NOT NULL CHECK(length(trim(fencing_token)) > 0),
+  claim_state TEXT NOT NULL CHECK(claim_state IN ('pending', 'claimed', 'completed', 'failed')),
+  attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0 AND attempt_count <= 5),
+  next_eligible_at DATETIME NOT NULL,
+  claim_token TEXT,
+  claimed_at DATETIME,
+  error_code TEXT,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(owner_user_id, dataset_id, id),
+  FOREIGN KEY(owner_user_id, dataset_id, generation_id) REFERENCES note_semantic_generations(owner_user_id, dataset_id, id) ON DELETE CASCADE ON UPDATE CASCADE,
+  CHECK(generation_id IS NOT NULL AND (
+    (kind = 'delete_generation' AND note_id IS NULL AND dirty_generation IS NULL)
+    OR
+    (kind IN ('index_note', 'delete_note_vectors') AND note_id IS NOT NULL AND dirty_generation IS NOT NULL)
+  )),
+  CHECK((claim_state = 'claimed' AND claim_token IS NOT NULL AND claimed_at IS NOT NULL) OR (claim_state != 'claimed'))
+);
+
+CREATE UNIQUE INDEX idx_note_semantic_generations_one_active ON note_semantic_generations(owner_user_id, dataset_id) WHERE state = 'active';
+CREATE UNIQUE INDEX idx_note_semantic_generations_one_staging ON note_semantic_generations(owner_user_id, dataset_id) WHERE state = 'staging';
+CREATE INDEX idx_note_semantic_note_state_pending ON note_semantic_note_state(owner_user_id, dataset_id, generation_id, state, dirty_generation);
+CREATE INDEX idx_note_semantic_chunks_note ON note_semantic_chunks(owner_user_id, dataset_id, generation_id, note_id, ordinal);
+CREATE INDEX idx_note_semantic_work_claimable ON note_semantic_work(owner_user_id, dataset_id, claim_state, next_eligible_at, id);
+CREATE UNIQUE INDEX idx_note_semantic_work_note_coalesce ON note_semantic_work(owner_user_id, dataset_id, kind, note_id) WHERE note_id IS NOT NULL;
+CREATE UNIQUE INDEX idx_note_semantic_work_generation_coalesce ON note_semantic_work(owner_user_id, dataset_id, kind, generation_id) WHERE generation_id IS NOT NULL AND kind = 'delete_generation';
+"""
+
+    _MIGRATION_SQL_V64_TO_V65_POSTGRES = """
+CREATE TABLE IF NOT EXISTS note_semantic_index_configs(
+  owner_user_id TEXT NOT NULL CHECK(char_length(btrim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(char_length(btrim(dataset_id)) > 0),
+  desired_state TEXT NOT NULL CHECK(desired_state IN ('enabled', 'disabled')),
+  active_generation_id TEXT,
+  configuration_revision INTEGER NOT NULL DEFAULT 1 CHECK(configuration_revision >= 1),
+  semantic_index_revision INTEGER NOT NULL DEFAULT 0 CHECK(semantic_index_revision >= 0),
+  capability_revision TEXT, disclosure_hash TEXT, compatibility_hash TEXT, provider TEXT, model TEXT,
+  endpoint_origin_revision TEXT, endpoint_origin_display TEXT, data_boundary TEXT, vector_backend TEXT,
+  storage_boundary TEXT, storage_label TEXT,
+  metric TEXT NOT NULL DEFAULT 'cosine' CHECK(metric = 'cosine'),
+  dimension_state TEXT NOT NULL CHECK(dimension_state IN ('pending', 'resolved')),
+  dimensions INTEGER CHECK(dimensions IS NULL OR dimensions >= 1),
+  normalization_version TEXT NOT NULL CHECK(char_length(btrim(normalization_version)) > 0),
+  chunker_version TEXT NOT NULL CHECK(char_length(btrim(chunker_version)) > 0),
+  enabled_at TIMESTAMPTZ, disabled_at TIMESTAMPTZ, consented_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(owner_user_id, dataset_id),
+  CHECK(
+    (dimension_state = 'pending' AND dimensions IS NULL AND compatibility_hash IS NULL)
+    OR
+    (dimension_state = 'resolved' AND dimensions IS NOT NULL AND compatibility_hash IS NOT NULL
+      AND compatibility_hash ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$')
+  )
+);
+CREATE TABLE IF NOT EXISTS note_semantic_generations(
+  id TEXT PRIMARY KEY CHECK(char_length(btrim(id)) > 0),
+  owner_user_id TEXT NOT NULL CHECK(char_length(btrim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(char_length(btrim(dataset_id)) > 0),
+  configuration_revision INTEGER NOT NULL CHECK(configuration_revision >= 1),
+  state TEXT NOT NULL CHECK(state IN ('staging', 'active', 'retired', 'failed', 'deleting')),
+  compatibility_hash TEXT,
+  dimension_state TEXT NOT NULL CHECK(dimension_state IN ('pending', 'resolved')),
+  dimensions INTEGER CHECK(dimensions IS NULL OR dimensions >= 1), root_job_id TEXT,
+  expected_note_count INTEGER NOT NULL DEFAULT 0 CHECK(expected_note_count >= 0),
+  expected_chunk_count INTEGER NOT NULL DEFAULT 0 CHECK(expected_chunk_count >= 0),
+  published_note_count INTEGER NOT NULL DEFAULT 0 CHECK(published_note_count >= 0),
+  published_chunk_count INTEGER NOT NULL DEFAULT 0 CHECK(published_chunk_count >= 0),
+  manifest_hash TEXT, publication_receipt TEXT, terminal_error_code TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, published_at TIMESTAMPTZ,
+  retired_at TIMESTAMPTZ, deleted_at TIMESTAMPTZ,
+  UNIQUE(owner_user_id, dataset_id, id),
+  FOREIGN KEY(owner_user_id, dataset_id) REFERENCES note_semantic_index_configs(owner_user_id, dataset_id) ON DELETE CASCADE ON UPDATE CASCADE,
+  CHECK(
+    (dimension_state = 'pending' AND dimensions IS NULL AND compatibility_hash IS NULL)
+    OR
+    (dimension_state = 'resolved' AND dimensions IS NOT NULL AND compatibility_hash IS NOT NULL
+      AND compatibility_hash ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$')
+  )
+);
+CREATE TABLE IF NOT EXISTS note_semantic_note_state(
+  owner_user_id TEXT NOT NULL CHECK(char_length(btrim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(char_length(btrim(dataset_id)) > 0), generation_id TEXT NOT NULL, note_id TEXT NOT NULL,
+  content_version INTEGER NOT NULL CHECK(content_version >= 1), content_fingerprint TEXT NOT NULL CHECK(content_fingerprint ~ '^sha256:[0-9a-f]{64}$'),
+  dirty_generation INTEGER NOT NULL CHECK(dirty_generation >= 1),
+  state TEXT NOT NULL CHECK(state IN ('pending', 'indexed', 'excluded', 'failed', 'tombstoned')),
+  chunk_count INTEGER NOT NULL DEFAULT 0 CHECK(chunk_count >= 0), manifest_hash TEXT, error_code TEXT, published_at TIMESTAMPTZ,
+  PRIMARY KEY(owner_user_id, dataset_id, generation_id, note_id),
+  FOREIGN KEY(owner_user_id, dataset_id, generation_id) REFERENCES note_semantic_generations(owner_user_id, dataset_id, id) ON DELETE CASCADE ON UPDATE CASCADE,
+  FOREIGN KEY(owner_user_id, note_id) REFERENCES notes(client_id, id) ON DELETE CASCADE ON UPDATE CASCADE
+);
+CREATE TABLE IF NOT EXISTS note_semantic_chunks(
+  chunk_id TEXT PRIMARY KEY CHECK(char_length(btrim(chunk_id)) > 0),
+  owner_user_id TEXT NOT NULL CHECK(char_length(btrim(owner_user_id)) > 0), dataset_id TEXT NOT NULL CHECK(char_length(btrim(dataset_id)) > 0),
+  generation_id TEXT NOT NULL, note_id TEXT NOT NULL, content_version INTEGER NOT NULL CHECK(content_version >= 1), ordinal INTEGER NOT NULL CHECK(ordinal >= 0),
+  field TEXT NOT NULL CHECK(field IN ('title', 'content')), start_offset INTEGER NOT NULL CHECK(start_offset >= 0), end_offset INTEGER NOT NULL CHECK(end_offset > start_offset),
+  chunk_fingerprint TEXT NOT NULL CHECK(chunk_fingerprint ~ '^sha256:[0-9a-f]{64}$'), normalization_version TEXT NOT NULL CHECK(char_length(btrim(normalization_version)) > 0),
+  chunker_version TEXT NOT NULL CHECK(char_length(btrim(chunker_version)) > 0),
+  UNIQUE(owner_user_id, dataset_id, chunk_id), UNIQUE(owner_user_id, dataset_id, generation_id, note_id, ordinal),
+  FOREIGN KEY(owner_user_id, dataset_id, generation_id, note_id) REFERENCES note_semantic_note_state(owner_user_id, dataset_id, generation_id, note_id) ON DELETE CASCADE ON UPDATE CASCADE
+);
+CREATE TABLE IF NOT EXISTS note_semantic_work(
+  id TEXT PRIMARY KEY CHECK(char_length(btrim(id)) > 0),
+  owner_user_id TEXT NOT NULL CHECK(char_length(btrim(owner_user_id)) > 0), dataset_id TEXT NOT NULL CHECK(char_length(btrim(dataset_id)) > 0),
+  kind TEXT NOT NULL CHECK(kind IN ('index_note', 'delete_note_vectors', 'delete_generation')), note_id TEXT, generation_id TEXT,
+  dirty_generation INTEGER CHECK(dirty_generation IS NULL OR dirty_generation >= 1), fencing_token TEXT NOT NULL CHECK(char_length(btrim(fencing_token)) > 0),
+  claim_state TEXT NOT NULL CHECK(claim_state IN ('pending', 'claimed', 'completed', 'failed')),
+  attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0 AND attempt_count <= 5), next_eligible_at TIMESTAMPTZ NOT NULL,
+  claim_token TEXT, claimed_at TIMESTAMPTZ, error_code TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(owner_user_id, dataset_id, id),
+  FOREIGN KEY(owner_user_id, dataset_id, generation_id) REFERENCES note_semantic_generations(owner_user_id, dataset_id, id) ON DELETE CASCADE ON UPDATE CASCADE,
+  CHECK(generation_id IS NOT NULL AND (
+    (kind = 'delete_generation' AND note_id IS NULL AND dirty_generation IS NULL)
+    OR
+    (kind IN ('index_note', 'delete_note_vectors') AND note_id IS NOT NULL AND dirty_generation IS NOT NULL)
+  )),
+  CHECK((claim_state = 'claimed' AND claim_token IS NOT NULL AND claimed_at IS NOT NULL) OR (claim_state != 'claimed'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_note_semantic_generations_one_active ON note_semantic_generations(owner_user_id, dataset_id) WHERE state = 'active';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_note_semantic_generations_one_staging ON note_semantic_generations(owner_user_id, dataset_id) WHERE state = 'staging';
+CREATE INDEX IF NOT EXISTS idx_note_semantic_note_state_pending ON note_semantic_note_state(owner_user_id, dataset_id, generation_id, state, dirty_generation);
+CREATE INDEX IF NOT EXISTS idx_note_semantic_chunks_note ON note_semantic_chunks(owner_user_id, dataset_id, generation_id, note_id, ordinal);
+CREATE INDEX IF NOT EXISTS idx_note_semantic_work_claimable ON note_semantic_work(owner_user_id, dataset_id, claim_state, next_eligible_at, id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_note_semantic_work_note_coalesce ON note_semantic_work(owner_user_id, dataset_id, kind, note_id) WHERE note_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_note_semantic_work_generation_coalesce ON note_semantic_work(owner_user_id, dataset_id, kind, generation_id) WHERE generation_id IS NOT NULL AND kind = 'delete_generation';
+ALTER TABLE note_semantic_index_configs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE note_semantic_index_configs FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS note_semantic_index_configs_tenant_isolation ON note_semantic_index_configs;
+CREATE POLICY note_semantic_index_configs_tenant_isolation ON note_semantic_index_configs USING (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true)) WITH CHECK (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true));
+ALTER TABLE note_semantic_generations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE note_semantic_generations FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS note_semantic_generations_tenant_isolation ON note_semantic_generations;
+CREATE POLICY note_semantic_generations_tenant_isolation ON note_semantic_generations USING (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true)) WITH CHECK (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true));
+ALTER TABLE note_semantic_note_state ENABLE ROW LEVEL SECURITY;
+ALTER TABLE note_semantic_note_state FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS note_semantic_note_state_tenant_isolation ON note_semantic_note_state;
+CREATE POLICY note_semantic_note_state_tenant_isolation ON note_semantic_note_state USING (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true)) WITH CHECK (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true));
+ALTER TABLE note_semantic_chunks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE note_semantic_chunks FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS note_semantic_chunks_tenant_isolation ON note_semantic_chunks;
+CREATE POLICY note_semantic_chunks_tenant_isolation ON note_semantic_chunks USING (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true)) WITH CHECK (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true));
+ALTER TABLE note_semantic_work ENABLE ROW LEVEL SECURITY;
+ALTER TABLE note_semantic_work FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS note_semantic_work_tenant_isolation ON note_semantic_work;
+CREATE POLICY note_semantic_work_tenant_isolation ON note_semantic_work USING (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true)) WITH CHECK (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true));
+"""
+
+    _MIGRATION_SQL_V65_TO_V66 = """
+CREATE TABLE note_semantic_obsolete_vectors(
+  id TEXT PRIMARY KEY CHECK(length(trim(id)) > 0),
+  owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(length(trim(dataset_id)) > 0),
+  generation_id TEXT NOT NULL CHECK(length(trim(generation_id)) > 0),
+  vector_id TEXT NOT NULL CHECK(length(trim(vector_id)) > 0),
+  note_id TEXT,
+  source_kind TEXT NOT NULL CHECK(source_kind IN (
+    'unpublished','manifest_replace','tombstone','hard_delete','note_failure'
+  )),
+  dirty_generation INTEGER CHECK(dirty_generation IS NULL OR dirty_generation >= 1),
+  claim_state TEXT NOT NULL CHECK(claim_state IN ('pending','claimed','failed')),
+  attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0 AND attempt_count <= 5),
+  next_eligible_at DATETIME NOT NULL,
+  claim_token TEXT,
+  claimed_at DATETIME,
+  error_code TEXT,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(owner_user_id,dataset_id,generation_id,vector_id),
+  CHECK(
+    (claim_state='claimed' AND claim_token IS NOT NULL AND claimed_at IS NOT NULL)
+    OR
+    (claim_state<>'claimed' AND claim_token IS NULL AND claimed_at IS NULL)
+  )
+);
+CREATE INDEX idx_note_semantic_obsolete_vectors_claimable
+  ON note_semantic_obsolete_vectors(
+    owner_user_id,dataset_id,claim_state,next_eligible_at,generation_id,id
+  );
+CREATE INDEX idx_note_semantic_obsolete_vectors_generation
+  ON note_semantic_obsolete_vectors(owner_user_id,dataset_id,generation_id,vector_id);
+"""
+
+    _MIGRATION_SQL_V65_TO_V66_POSTGRES = """
+CREATE TABLE IF NOT EXISTS note_semantic_obsolete_vectors(
+  id TEXT PRIMARY KEY CHECK(char_length(btrim(id)) > 0),
+  owner_user_id TEXT NOT NULL CHECK(char_length(btrim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(char_length(btrim(dataset_id)) > 0),
+  generation_id TEXT NOT NULL CHECK(char_length(btrim(generation_id)) > 0),
+  vector_id TEXT NOT NULL CHECK(char_length(btrim(vector_id)) > 0),
+  note_id TEXT,
+  source_kind TEXT NOT NULL CHECK(source_kind IN (
+    'unpublished','manifest_replace','tombstone','hard_delete','note_failure'
+  )),
+  dirty_generation INTEGER CHECK(dirty_generation IS NULL OR dirty_generation >= 1),
+  claim_state TEXT NOT NULL CHECK(claim_state IN ('pending','claimed','failed')),
+  attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0 AND attempt_count <= 5),
+  next_eligible_at TIMESTAMPTZ NOT NULL,
+  claim_token TEXT,
+  claimed_at TIMESTAMPTZ,
+  error_code TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(owner_user_id,dataset_id,generation_id,vector_id),
+  CHECK(
+    (claim_state='claimed' AND claim_token IS NOT NULL AND claimed_at IS NOT NULL)
+    OR
+    (claim_state<>'claimed' AND claim_token IS NULL AND claimed_at IS NULL)
+  )
+);
+CREATE INDEX IF NOT EXISTS idx_note_semantic_obsolete_vectors_claimable
+  ON note_semantic_obsolete_vectors(
+    owner_user_id,dataset_id,claim_state,next_eligible_at,generation_id,id
+  );
+CREATE INDEX IF NOT EXISTS idx_note_semantic_obsolete_vectors_generation
+  ON note_semantic_obsolete_vectors(owner_user_id,dataset_id,generation_id,vector_id);
+ALTER TABLE note_semantic_obsolete_vectors ENABLE ROW LEVEL SECURITY;
+ALTER TABLE note_semantic_obsolete_vectors FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS note_semantic_obsolete_vectors_tenant_isolation
+  ON note_semantic_obsolete_vectors;
+CREATE POLICY note_semantic_obsolete_vectors_tenant_isolation
+  ON note_semantic_obsolete_vectors
+  USING (
+    owner_user_id=current_setting('app.current_user_id', true)
+    AND dataset_id=current_setting('app.current_dataset_id', true)
+  )
+  WITH CHECK (
+    owner_user_id=current_setting('app.current_user_id', true)
+    AND dataset_id=current_setting('app.current_dataset_id', true)
+  );
+"""
+
+    _MIGRATION_SQL_V66_TO_V67 = """
+ALTER TABLE note_semantic_index_configs ADD COLUMN model_revision TEXT;
+ALTER TABLE note_semantic_generations ADD COLUMN model_revision TEXT;
+CREATE UNIQUE INDEX idx_note_semantic_generations_root_job
+  ON note_semantic_generations(owner_user_id,dataset_id,root_job_id)
+  WHERE root_job_id IS NOT NULL;
+CREATE TABLE note_semantic_operation_receipts(
+  owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(length(trim(dataset_id)) > 0),
+  key_digest TEXT NOT NULL CHECK(length(key_digest) = 64),
+  action TEXT NOT NULL CHECK(action IN ('enable','cancel')),
+  request_fingerprint TEXT NOT NULL CHECK(length(request_fingerprint) = 64),
+  run_id TEXT,
+  expected_revision INTEGER NOT NULL CHECK(expected_revision >= 0),
+  state TEXT NOT NULL CHECK(state IN ('pending','completed')),
+  response_json TEXT CHECK(response_json IS NULL OR length(response_json) <= 8192),
+  expires_at DATETIME NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(owner_user_id,key_digest)
+);
+CREATE INDEX idx_note_semantic_operation_receipts_scope
+  ON note_semantic_operation_receipts(
+    owner_user_id,dataset_id,action,state,updated_at,key_digest
+  );
+CREATE INDEX idx_note_semantic_operation_receipts_expiry
+  ON note_semantic_operation_receipts(
+    owner_user_id,dataset_id,expires_at,key_digest
+  );
+"""
+
+    _MIGRATION_SQL_V66_TO_V67_POSTGRES = """
+ALTER TABLE note_semantic_index_configs
+  ADD COLUMN IF NOT EXISTS model_revision TEXT;
+ALTER TABLE note_semantic_generations
+  ADD COLUMN IF NOT EXISTS model_revision TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_note_semantic_generations_root_job
+  ON note_semantic_generations(owner_user_id,dataset_id,root_job_id)
+  WHERE root_job_id IS NOT NULL;
+CREATE TABLE IF NOT EXISTS note_semantic_operation_receipts(
+  owner_user_id TEXT NOT NULL CHECK(char_length(btrim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(char_length(btrim(dataset_id)) > 0),
+  key_digest TEXT NOT NULL CHECK(char_length(key_digest) = 64),
+  action TEXT NOT NULL CHECK(action IN ('enable','cancel')),
+  request_fingerprint TEXT NOT NULL CHECK(char_length(request_fingerprint) = 64),
+  run_id TEXT,
+  expected_revision INTEGER NOT NULL CHECK(expected_revision >= 0),
+  state TEXT NOT NULL CHECK(state IN ('pending','completed')),
+  response_json TEXT CHECK(response_json IS NULL OR octet_length(response_json) <= 8192),
+  expires_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(owner_user_id,key_digest)
+);
+CREATE INDEX IF NOT EXISTS idx_note_semantic_operation_receipts_scope
+  ON note_semantic_operation_receipts(
+    owner_user_id,dataset_id,action,state,updated_at,key_digest
+  );
+CREATE INDEX IF NOT EXISTS idx_note_semantic_operation_receipts_expiry
+  ON note_semantic_operation_receipts(
+    owner_user_id,dataset_id,expires_at,key_digest
+  );
+ALTER TABLE note_semantic_operation_receipts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE note_semantic_operation_receipts FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS note_semantic_operation_receipts_tenant_isolation
+  ON note_semantic_operation_receipts;
+CREATE POLICY note_semantic_operation_receipts_tenant_isolation
+  ON note_semantic_operation_receipts
+  USING (
+    owner_user_id=current_setting('app.current_user_id', true)
+    AND dataset_id=current_setting('app.current_dataset_id', true)
+  )
+  WITH CHECK (
+    owner_user_id=current_setting('app.current_user_id', true)
+    AND dataset_id=current_setting('app.current_dataset_id', true)
+  );
+"""
+
     _NOTE_GRAPH_SUGGESTION_RECEIPT_DELETE_SQLITE_TRIGGER_SQL = """
 CREATE TRIGGER note_graph_suggestion_operation_receipts_clear_references
 BEFORE DELETE ON note_graph_suggestion_operation_receipts
@@ -7268,6 +7701,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         *,
         backend: DatabaseBackend | None = None,
         config: ConfigParser | None = None,
+        require_existing_sqlite: bool = False,
     ):
         """
         Initializes the CharactersRAGDB instance.
@@ -7280,6 +7714,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                      or ":memory:" for an in-memory database.
             client_id: A unique identifier for this client instance. Used for
                        tracking changes in the sync log and records. Must not be empty.
+            require_existing_sqlite: Open file-backed SQLite with ``mode=rw`` so
+                                     construction cannot create a missing database.
 
         Raises:
             ValueError: If `client_id` is empty or None.
@@ -7296,7 +7732,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         if not client_id:
             raise ValueError("Client ID cannot be empty or None.")  # noqa: TRY003
+        if not isinstance(require_existing_sqlite, bool):
+            raise ValueError("require_existing_sqlite must be a boolean.")  # noqa: TRY003
         self.client_id = client_id
+        self._require_existing_sqlite = require_existing_sqlite
         self._local = threading.local()
         self._schema_lock = threading.RLock()
         self._bootstrapped_backend_targets: set[str] = set()
@@ -7335,6 +7774,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             NoteGraphSuggestionStore,
         )
         from tldw_Server_API.app.core.DB_Management.chacha.note_link_store import NotesLinkStore
+        from tldw_Server_API.app.core.DB_Management.chacha.note_semantic_store import NoteSemanticStore
         from tldw_Server_API.app.core.DB_Management.chacha.note_store import NoteStore
         from tldw_Server_API.app.core.DB_Management.chacha.persona_state_store import (
             PersonaStateStore,
@@ -7353,6 +7793,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         self.notes_link_store = NotesLinkStore(self)
         self.note_graph_projection_store = NoteGraphProjectionStore(self)
         self.note_graph_suggestion_store = NoteGraphSuggestionStore(self)
+        self.note_semantic_store = NoteSemanticStore(self)
         self.task_store = TaskStore(self)
         self.keyword_store = KeywordStore(self)
         self.persona_state_store = PersonaStateStore(self)
@@ -7362,6 +7803,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             self.is_memory_db = False
 
         if self.backend_type == BackendType.SQLITE and not self.is_memory_db:
+            if self._require_existing_sqlite and not self.db_path.is_file():
+                raise CharactersRAGDBError(  # noqa: TRY003
+                    "Existing SQLite database is required."
+                )
             db_parent = self.db_path.parent.resolve(strict=False)
             allowed_roots = self._sqlite_allowed_roots()
             if not any(self._path_is_within(db_parent, root) for root in allowed_roots):
@@ -7418,9 +7863,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._owner_managed_backend = False
                 return candidate, True
 
+        sqlite_path = self.db_path_str
+        if self._require_existing_sqlite and not self.is_memory_db:
+            sqlite_path = f"{self.db_path.as_uri()}?mode=rw"
         fallback_config = DatabaseConfig(
             backend_type=BackendType.SQLITE,
-            sqlite_path=self.db_path_str,
+            sqlite_path=sqlite_path,
         )
         if not self.is_memory_db:
             # Contract: default file-backed SQLite for CharactersRAGDB is intentionally
@@ -8279,6 +8727,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             (61, "_migrate_from_v61_to_v62_sqlite"),
             (62, "_migrate_from_v62_to_v63_sqlite"),
             (63, "_migrate_from_v63_to_v64_sqlite"),
+            (64, "_migrate_from_v64_to_v65_sqlite"),
+            (65, "_migrate_from_v65_to_v66_sqlite"),
+            (66, "_migrate_from_v66_to_v67_sqlite"),
         ):
             method = getattr(self, method_name, None)
             if method is not None:
@@ -13935,6 +14386,105 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 raise
             raise SchemaError(f"Notes graph suggestion v64 SQLite migration failed: {exc}") from exc
 
+    def _migrate_from_v64_to_v65_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Add the durable owner/dataset Notes semantic-index authority ledger."""
+        if self._get_db_version(conn) != 64:
+            raise SchemaError("Notes semantic v65 migration requires schema version 64.")  # noqa: TRY003
+        savepoint = "note_semantic_v65_migration"
+        savepoint_active = False
+        try:
+            conn.execute(f"SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
+            savepoint_active = True
+            for statement in split_sql_statements(self._MIGRATION_SQL_V64_TO_V65):
+                conn.execute(statement)
+            cursor = conn.execute(
+                "UPDATE db_schema_version SET version = ? WHERE schema_name = ? AND version = ?",
+                (65, self._SCHEMA_NAME, 64),
+            )
+            if cursor.rowcount != 1 or self._get_db_version(conn) != 65:
+                raise SchemaError("Notes semantic v65 SQLite version transition failed.")  # noqa: TRY003
+            conn.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
+            savepoint_active = False
+        except (SchemaError, sqlite3.Error) as exc:
+            if savepoint_active:
+                try:
+                    conn.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
+                    conn.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
+                except sqlite3.Error as rollback_exc:
+                    raise SchemaError(
+                        "Notes semantic v65 SQLite migration rollback failed: "
+                        f"{rollback_exc}"
+                    ) from exc
+            if isinstance(exc, SchemaError):
+                raise
+            raise SchemaError(f"Notes semantic v65 SQLite migration failed: {exc}") from exc
+
+    def _migrate_from_v65_to_v66_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Add crash-durable semantic obsolete-vector cleanup authority."""
+        if self._get_db_version(conn) != 65:
+            raise SchemaError("Notes semantic v66 migration requires schema version 65.")  # noqa: TRY003
+        savepoint = "note_semantic_v66_migration"
+        savepoint_active = False
+        try:
+            conn.execute(f"SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
+            savepoint_active = True
+            for statement in split_sql_statements(self._MIGRATION_SQL_V65_TO_V66):
+                conn.execute(statement)
+            cursor = conn.execute(
+                "UPDATE db_schema_version SET version=? WHERE schema_name=? AND version=?",
+                (66, self._SCHEMA_NAME, 65),
+            )
+            if cursor.rowcount != 1 or self._get_db_version(conn) != 66:
+                raise SchemaError("Notes semantic v66 SQLite version transition failed.")  # noqa: TRY003
+            conn.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
+            savepoint_active = False
+        except (SchemaError, sqlite3.Error) as exc:
+            if savepoint_active:
+                try:
+                    conn.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")  # nosec B608
+                    conn.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608
+                except sqlite3.Error as rollback_exc:
+                    raise SchemaError(
+                        "Notes semantic v66 SQLite migration rollback failed: "
+                        f"{rollback_exc}"
+                    ) from exc
+            if isinstance(exc, SchemaError):
+                raise
+            raise SchemaError(f"Notes semantic v66 SQLite migration failed: {exc}") from exc
+
+    def _migrate_from_v66_to_v67_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Add durable semantic operation and resolved-model authority."""
+        if self._get_db_version(conn) != 66:
+            raise SchemaError("Notes semantic v67 migration requires schema version 66.")
+        savepoint = "note_semantic_v67_migration"
+        savepoint_active = False
+        try:
+            conn.execute(f"SAVEPOINT {savepoint}")  # nosec B608
+            savepoint_active = True
+            for statement in split_sql_statements(self._MIGRATION_SQL_V66_TO_V67):
+                conn.execute(statement)
+            cursor = conn.execute(
+                "UPDATE db_schema_version SET version=? WHERE schema_name=? AND version=?",
+                (67, self._SCHEMA_NAME, 66),
+            )
+            if cursor.rowcount != 1 or self._get_db_version(conn) != 67:
+                raise SchemaError("Notes semantic v67 SQLite version transition failed.")
+            conn.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608
+            savepoint_active = False
+        except (SchemaError, sqlite3.Error) as exc:
+            if savepoint_active:
+                try:
+                    conn.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")  # nosec B608
+                    conn.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608
+                except sqlite3.Error as rollback_exc:
+                    raise SchemaError(
+                        "Notes semantic v67 SQLite migration rollback failed: "
+                        f"{rollback_exc}"
+                    ) from exc
+            if isinstance(exc, SchemaError):
+                raise
+            raise SchemaError(f"Notes semantic v67 SQLite migration failed: {exc}") from exc
+
     @staticmethod
     def _notes_moodboard_studio_v61_postgres_checkpoint(_stage: str) -> None:
         """Fault-injection seam after durable PostgreSQL v61 phase commits."""
@@ -17161,6 +17711,42 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if self._get_schema_version_postgres(conn) != 64:
             raise SchemaError("Notes graph suggestion v64 PostgreSQL version verification failed.")  # noqa: TRY003
 
+    def _migrate_from_v64_to_v65_postgres(self, conn: Any) -> None:
+        """Add durable, forced-RLS Notes semantic-index persistence."""
+        if self._get_schema_version_postgres(conn) != 64:
+            raise SchemaError("Notes semantic v65 PostgreSQL migration requires schema version 64.")  # noqa: TRY003
+        self._apply_postgres_migration_script(
+            self._MIGRATION_SQL_V64_TO_V65_POSTGRES,
+            conn,
+            expected_version=65,
+        )
+        if self._get_schema_version_postgres(conn) != 65:
+            raise SchemaError("Notes semantic v65 PostgreSQL version verification failed.")  # noqa: TRY003
+
+    def _migrate_from_v65_to_v66_postgres(self, conn: Any) -> None:
+        """Add forced-RLS crash-durable semantic cleanup authority."""
+        if self._get_schema_version_postgres(conn) != 65:
+            raise SchemaError("Notes semantic v66 PostgreSQL migration requires schema version 65.")  # noqa: TRY003
+        self._apply_postgres_migration_script(
+            self._MIGRATION_SQL_V65_TO_V66_POSTGRES,
+            conn,
+            expected_version=66,
+        )
+        if self._get_schema_version_postgres(conn) != 66:
+            raise SchemaError("Notes semantic v66 PostgreSQL version verification failed.")  # noqa: TRY003
+
+    def _migrate_from_v66_to_v67_postgres(self, conn: Any) -> None:
+        """Add forced-RLS operation receipts and resolved-model authority."""
+        if self._get_schema_version_postgres(conn) != 66:
+            raise SchemaError("Notes semantic v67 PostgreSQL migration requires schema version 66.")
+        self._apply_postgres_migration_script(
+            self._MIGRATION_SQL_V66_TO_V67_POSTGRES,
+            conn,
+            expected_version=67,
+        )
+        if self._get_schema_version_postgres(conn) != 67:
+            raise SchemaError("Notes semantic v67 PostgreSQL version verification failed.")
+
     def _configure_note_graph_suggestion_receipt_delete_trigger_postgres(self, conn: Any) -> None:
         """Clear only receipt IDs before PostgreSQL deletes an expiring receipt."""
         for statement in self._NOTE_GRAPH_SUGGESTION_RECEIPT_DELETE_POSTGRES_TRIGGER_STATEMENTS:
@@ -17921,6 +18507,25 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if missing:
             raise SchemaError(f"Notes graph suggestion v64 SQLite schema is incomplete: {sorted(missing)}")
 
+    def _ensure_note_semantic_schema_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Verify the schema-version-owned Notes semantic-index relations."""
+        if self._get_db_version(conn) < 65:
+            return
+        required_tables = {
+            "note_semantic_index_configs",
+            "note_semantic_generations",
+            "note_semantic_note_state",
+            "note_semantic_chunks",
+            "note_semantic_work",
+        }
+        if self._get_db_version(conn) >= 66:
+            required_tables.add("note_semantic_obsolete_vectors")
+        if self._get_db_version(conn) >= 67:
+            required_tables.add("note_semantic_operation_receipts")
+        missing = required_tables - self._sqlite_table_names(conn)
+        if missing:
+            raise SchemaError(f"Notes semantic v65 SQLite schema is incomplete: {sorted(missing)}")
+
     def _ensure_note_studio_schema_postgres(self, conn: Any) -> None:
         """Create the legacy sidecar before v63 or verify schema-owned v63 state."""
         if self._get_schema_version_postgres(conn) >= 63:
@@ -17965,6 +18570,27 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         ]
         if missing:
             raise SchemaError(f"Notes graph suggestion v64 PostgreSQL schema is incomplete: {missing}")
+
+    def _ensure_note_semantic_schema_postgres(self, conn: Any) -> None:
+        """Verify the forced-RLS Notes semantic-index relations."""
+        if self._get_schema_version_postgres(conn) < 65:
+            return
+        required_tables = (
+            "note_semantic_index_configs",
+            "note_semantic_generations",
+            "note_semantic_note_state",
+            "note_semantic_chunks",
+            "note_semantic_work",
+        )
+        if self._get_schema_version_postgres(conn) >= 66:
+            required_tables += ("note_semantic_obsolete_vectors",)
+        if self._get_schema_version_postgres(conn) >= 67:
+            required_tables += ("note_semantic_operation_receipts",)
+        missing = [
+            table for table in required_tables if not self.backend.table_exists(table, connection=conn)
+        ]
+        if missing:
+            raise SchemaError(f"Notes semantic v65 PostgreSQL schema is incomplete: {missing}")
 
     def _supports_notes_moodboard_studio_v61(self) -> bool:
         """Return whether this database instance has the v61 product catalog revision."""
@@ -20528,12 +21154,22 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if target_version >= 64 and current_db_version == 63:
                     self._migrate_from_v63_to_v64_sqlite(conn)
                     current_db_version = self._get_db_version(conn)
+                if target_version >= 65 and current_db_version == 64:
+                    self._migrate_from_v64_to_v65_sqlite(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 66 and current_db_version == 65:
+                    self._migrate_from_v65_to_v66_sqlite(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 67 and current_db_version == 66:
+                    self._migrate_from_v66_to_v67_sqlite(conn)
+                    current_db_version = self._get_db_version(conn)
 
                 self._ensure_recent_persona_schema_sqlite(conn)
                 self._ensure_recent_voice_command_schema_sqlite(conn)
                 self._ensure_note_folder_schema_sqlite(conn)
                 self._ensure_note_studio_schema_sqlite(conn)
                 self._ensure_note_graph_suggestion_schema_sqlite(conn)
+                self._ensure_note_semantic_schema_sqlite(conn)
                 self._ensure_web_clipper_schema_sqlite(conn)
                 self._ensure_prompt_presets_schema_sqlite(conn)
                 self._ensure_workspace_assistant_defaults_schema_sqlite(conn)
@@ -20553,6 +21189,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     self._ensure_note_graph_suggestion_schema_sqlite(conn)
                 elif final_version_check >= 60:
                     self._verify_note_task_schema_sqlite(conn)
+                if final_version_check >= 65:
+                    self._ensure_note_semantic_schema_sqlite(conn)
                 # Verify core FTS tables after migrations complete
                 self._verify_required_fts_tables_sqlite(conn)
                 self._ensure_workspace_subresource_schema_sqlite(conn)
@@ -24313,6 +24951,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     self._verify_notes_moodboard_studio_schema_postgres(conn)
                 if current_version >= 64:
                     self._ensure_note_graph_suggestion_schema_postgres(conn)
+                if current_version >= 65:
+                    self._ensure_note_semantic_schema_postgres(conn)
 
             if current_version < 36:
                 self._ensure_postgres_workspaces_table_base(conn)
@@ -24530,6 +25170,15 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             if current_version < 64:
                 self._migrate_from_v63_to_v64_postgres(conn)
                 current_version = 64
+            if current_version < 65:
+                self._migrate_from_v64_to_v65_postgres(conn)
+                current_version = 65
+            if target_version >= 66 and current_version < 66:
+                self._migrate_from_v65_to_v66_postgres(conn)
+                current_version = 66
+            if target_version >= 67 and current_version < 67:
+                self._migrate_from_v66_to_v67_postgres(conn)
+                current_version = 67
             self._runtime_schema_version = current_version
 
             if current_version > target_version:
@@ -24553,6 +25202,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             self._ensure_note_folder_schema_postgres(conn)
             self._ensure_note_studio_schema_postgres(conn)
             self._ensure_note_graph_suggestion_schema_postgres(conn)
+            self._ensure_note_semantic_schema_postgres(conn)
             self._ensure_web_clipper_schema_postgres(conn)
             self._ensure_prompt_presets_schema_postgres(conn)
             self._ensure_workspace_subresource_schema_postgres(conn)

@@ -2209,6 +2209,45 @@ def migration_096_add_admin_webhook_delivery_recovery(
     logger.info("Migration 096: Added admin webhook delivery recovery schema")
 
 
+def migration_097_seed_notes_graph_semantic_manage_permission(
+    conn: sqlite3.Connection,
+) -> None:
+    """Seed semantic management for approved existing Notes-writing roles."""
+
+    logger.info("Migration 097: START seed Notes graph semantic management permission")
+    required = ("roles", "permissions", "role_permissions")
+    if not all(_sqlite_table_exists(conn, table_name) for table_name in required):
+        logger.info("Migration 097: RBAC tables missing; skipping Notes semantic permission seed")
+        return
+    permission_insert = conn.execute(
+        "INSERT OR IGNORE INTO permissions (name, description, category) VALUES (?, ?, ?)",
+        (
+            "notes.graph.semantic.manage",
+            "Manage Notes semantic indexing",
+            "notes",
+        ),
+    )
+    if permission_insert.rowcount == 0:
+        conn.commit()
+        logger.info(
+            "Migration 097: Permission already exists; preserving role mappings"
+        )
+        return
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO role_permissions (role_id, permission_id)
+        SELECT r.id, p.id
+        FROM roles r
+        CROSS JOIN permissions p
+        WHERE r.name IN (?, ?, ?)
+          AND p.name = ?
+        """,
+        ("admin", "user", "moderator", "notes.graph.semantic.manage"),
+    )
+    conn.commit()
+    logger.info("Migration 097: Seeded Notes graph semantic management permission")
+
+
 def rollback_086_drop_prototype_workspace_tables(conn: sqlite3.Connection) -> None:
     """Rollback migration 086 by dropping prototype workspace metadata tables."""
     conn.execute("DROP TABLE IF EXISTS prototype_promotion_requests")
@@ -6510,6 +6549,11 @@ def get_authnz_migrations() -> list[Migration]:
             96,
             "Add admin webhook delivery recovery schema",
             migration_096_add_admin_webhook_delivery_recovery,
+        ),
+        Migration(
+            97,
+            "Seed Notes graph semantic management permission",
+            migration_097_seed_notes_graph_semantic_manage_permission,
         ),
     ]
 

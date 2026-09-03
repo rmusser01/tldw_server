@@ -82,9 +82,19 @@ def _extract_scope_matches(callable_obj: object, known_scopes: set[str]) -> tupl
     return matches, unknown
 
 
-def _extract_rate_limit_resources(callable_obj: object) -> set[str]:
-    value = getattr(callable_obj, "_tldw_rate_limit_resource", None)
-    return {value} if isinstance(value, str) and value else set()
+def _extract_rate_limit_resources(callable_obj: object) -> tuple[str, ...]:
+    resources: list[str] = []
+    singular = getattr(callable_obj, "_tldw_rate_limit_resource", None)
+    if isinstance(singular, str) and singular:
+        resources.append(singular)
+    plural = getattr(callable_obj, "_tldw_rate_limit_resources", ())
+    if isinstance(plural, (list, tuple)):
+        resources.extend(
+            resource
+            for resource in plural
+            if isinstance(resource, str) and resource
+        )
+    return tuple(dict.fromkeys(resources))
 
 
 def collect_privilege_route_registry(

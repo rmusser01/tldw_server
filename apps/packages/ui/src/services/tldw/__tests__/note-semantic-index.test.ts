@@ -1,0 +1,445 @@
+import { readFileSync } from "node:fs"
+import { resolve } from "node:path"
+
+import {
+  NotesSemanticClientError,
+  type NotesSemanticCapabilities,
+  type NotesSemanticIndexStatus,
+  type NotesSemanticMutation,
+  type NotesSemanticRun,
+  cancelNotesSemanticRun,
+  createNotesSemanticCommand,
+  createNotesSemanticRun,
+  deleteNotesSemanticIndex,
+  enableNotesSemanticIndex,
+  getNotesSemanticCapabilities,
+  getNotesSemanticRun,
+  getNotesSemanticStatus
+} from "@/services/note-semantic-index"
+import { beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest"
+
+import capabilityDriftApi from "../../../components/Notes/__tests__/fixtures/semantic-capability-drift-api.json"
+
+const mocks = vi.hoisted(() => ({ bgRequest: vi.fn() }))
+
+vi.mock("@/services/background-proxy", () => ({ bgRequest: mocks.bgRequest }))
+
+const run = (status = "queued") => ({
+  run_id: "6ec1dfbe-f86f-4d2b-93af-f88f64cd9701",
+  mode: "rebuild",
+  status,
+  revision: 9,
+  indexed_notes: 1,
+  excluded_notes: 0,
+  failed_notes: 0,
+  pending_notes: 3,
+  published_chunks: 2,
+  cleanup_complete: false,
+  error_code: null,
+  link: "/api/v1/notes/graph/semantic-index/runs/6ec1dfbe-f86f-4d2b-93af-f88f64cd9701"
+})
+
+const status = (state = "ready") => ({
+  state,
+  detail_reason: null,
+  desired_state: state === "off" ? "disabled" : "enabled",
+  configuration_revision: 9,
+  semantic_index_revision: 2,
+  active_generation_id: state === "off" ? null : "generation-a",
+  active_generation_usable: state !== "off",
+  indexed_notes: 4,
+  excluded_notes: 0,
+  failed_notes: 0,
+  pending_notes: 0,
+  published_chunks: 8,
+  cleanup_pending: false,
+  active_run: null
+})
+
+const capabilities = () => ({
+  active_note_count: 4,
+  estimated_chunk_count: 8,
+  estimated_run_count: 1,
+  provider_label: "OpenAI",
+  model: "text-embedding-3-small",
+  endpoint_display: "https://api.openai.com",
+  execution_boundary: "external",
+  storage_boundary: "local",
+  storage_label: "ChromaDB",
+  outbound_data_categories: ["note_content_chunks", "note_title"],
+  capability_revision: `sha256:${"a".repeat(64)}`,
+  indexing_available: true,
+  unavailable_reason: null,
+  metric: "cosine",
+  resolved_dimensions: 1536,
+  dimension_probe_required: false,
+  renewal_requires_delete: false,
+  manage_authorized: true
+})
+
+describe("Notes semantic index client", () => {
+  beforeEach(() => vi.resetAllMocks())
+
+  it("keeps public response types coupled to their Zod schemas", () => {
+    const source = readFileSync(
+      resolve(process.cwd(), "src/services/note-semantic-index.ts"),
+      "utf8"
+    )
+
+    expect(source).not.toMatch(/parseResponseAs\s*=\s*<T>/)
+    expectTypeOf(getNotesSemanticCapabilities).returns.toEqualTypeOf<
+      Promise<NotesSemanticCapabilities>
+    >()
+    expectTypeOf(getNotesSemanticStatus).returns.toEqualTypeOf<
+      Promise<NotesSemanticIndexStatus>
+    >()
+    expectTypeOf(createNotesSemanticRun).returns.toEqualTypeOf<
+      Promise<NotesSemanticRun>
+    >()
+    expectTypeOf(enableNotesSemanticIndex).returns.toEqualTypeOf<
+      Promise<NotesSemanticMutation>
+    >()
+  })
+
+  it("uses only the seven nested Notes semantic routes with dataset authority", async () => {
+    mocks.bgRequest
+      .mockResolvedValueOnce(capabilities())
+      .mockResolvedValueOnce(status())
+      .mockResolvedValueOnce(run())
+      .mockResolvedValueOnce({ resource: status("preparing"), run: run() })
+      .mockResolvedValueOnce({
+        resource: status("off"),
+        run: run("processing")
+      })
+      .mockResolvedValueOnce(run("processing"))
+      .mockResolvedValueOnce({
+        resource: status("updating"),
+        run: run("processing")
+      })
+
+    await getNotesSemanticCapabilities({ datasetId: "dataset / alpha" })
+    await getNotesSemanticStatus({ datasetId: "dataset / alpha" })
+    await createNotesSemanticRun({
+      datasetId: "dataset / alpha",
+      mode: "rebuild",
+      expectedRevision: 9,
+      idempotencyKey: "rebuild-key"
+    })
+    await enableNotesSemanticIndex({
+      datasetId: "dataset / alpha",
+      expectedRevision: 0,
+      capabilityRevision: `sha256:${"a".repeat(64)}`,
+      idempotencyKey: "enable-key"
+    })
+    await deleteNotesSemanticIndex({
+      datasetId: "dataset / alpha",
+      expectedRevision: 9,
+      idempotencyKey: "delete-key"
+    })
+    await getNotesSemanticRun({
+      datasetId: "dataset / alpha",
+      runId: "6ec1dfbe-f86f-4d2b-93af-f88f64cd9701"
+    })
+    await cancelNotesSemanticRun({
+      datasetId: "dataset / alpha",
+      runId: "6ec1dfbe-f86f-4d2b-93af-f88f64cd9701",
+      expectedRevision: 9,
+      idempotencyKey: "cancel-key"
+    })
+
+    const requests = mocks.bgRequest.mock.calls.map(([request]) => request)
+    expect(requests.map((request) => request.path)).toEqual([
+      "/api/v1/notes/graph/semantic-index/capabilities?dataset_id=dataset+%2F+alpha",
+      "/api/v1/notes/graph/semantic-index?dataset_id=dataset+%2F+alpha",
+      "/api/v1/notes/graph/semantic-index/runs?dataset_id=dataset+%2F+alpha",
+      "/api/v1/notes/graph/semantic-index?dataset_id=dataset+%2F+alpha",
+      "/api/v1/notes/graph/semantic-index?dataset_id=dataset+%2F+alpha",
+      "/api/v1/notes/graph/semantic-index/runs/6ec1dfbe-f86f-4d2b-93af-f88f64cd9701?dataset_id=dataset+%2F+alpha",
+      "/api/v1/notes/graph/semantic-index/runs/6ec1dfbe-f86f-4d2b-93af-f88f64cd9701/cancel?dataset_id=dataset+%2F+alpha"
+    ])
+    expect(
+      requests.every((request) => !String(request.path).includes("/jobs"))
+    ).toBe(true)
+  })
+
+  it("sends revision bodies and one idempotency header per command", async () => {
+    mocks.bgRequest
+      .mockResolvedValueOnce({ resource: status("preparing"), run: run() })
+      .mockResolvedValueOnce(run())
+      .mockResolvedValueOnce({
+        resource: status("off"),
+        run: run("processing")
+      })
+
+    await enableNotesSemanticIndex({
+      expectedRevision: 0,
+      capabilityRevision: `sha256:${"b".repeat(64)}`,
+      idempotencyKey: "enable-key"
+    })
+    await createNotesSemanticRun({
+      mode: "retry_failed",
+      expectedRevision: 3,
+      idempotencyKey: "retry-key"
+    })
+    await cancelNotesSemanticRun({
+      runId: "6ec1dfbe-f86f-4d2b-93af-f88f64cd9701",
+      expectedRevision: 11,
+      idempotencyKey: "cancel-key"
+    })
+
+    expect(mocks.bgRequest.mock.calls.map(([request]) => request.body)).toEqual(
+      [
+        {
+          expected_revision: 0,
+          capability_revision: `sha256:${"b".repeat(64)}`
+        },
+        { mode: "retry_failed", expected_revision: 3 },
+        { expected_revision: 11 }
+      ]
+    )
+    expect(
+      mocks.bgRequest.mock.calls.map(
+        ([request]) => request.headers["Idempotency-Key"]
+      )
+    ).toEqual(["enable-key", "retry-key", "cancel-key"])
+  })
+
+  it("creates a stable command key without exposing configuration overrides", () => {
+    const command = createNotesSemanticCommand()
+    expect(command.idempotencyKey).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+    )
+    expect(command).toEqual({ idempotencyKey: command.idempotencyKey })
+  })
+
+  it("maps foreign runs, permission denial, and stale revisions to stable errors", async () => {
+    mocks.bgRequest
+      .mockRejectedValueOnce({
+        status: 404,
+        details: {
+          detail: {
+            error_code: "notes_semantic_run_not_found",
+            message: "secret raw response"
+          }
+        }
+      })
+      .mockRejectedValueOnce({ status: 403, details: { detail: "forbidden" } })
+      .mockRejectedValueOnce({
+        status: 409,
+        details: {
+          detail: {
+            error_code: "notes_semantic_configuration_revision_conflict"
+          }
+        }
+      })
+
+    await expect(
+      getNotesSemanticRun({
+        runId: "6ec1dfbe-f86f-4d2b-93af-f88f64cd9701"
+      })
+    ).rejects.toMatchObject({
+      status: 404,
+      code: "notes_semantic_run_not_found"
+    })
+    await expect(
+      deleteNotesSemanticIndex({
+        expectedRevision: 9,
+        idempotencyKey: "delete-key"
+      })
+    ).rejects.toMatchObject({
+      status: 403,
+      code: "notes_semantic_permission_denied"
+    })
+    await expect(
+      createNotesSemanticRun({
+        mode: "rebuild",
+        expectedRevision: 9,
+        idempotencyKey: "rebuild-key"
+      })
+    ).rejects.toMatchObject({
+      status: 409,
+      code: "notes_semantic_configuration_revision_conflict"
+    })
+  })
+
+  it("fails closed on malformed capability, status, and run responses", async () => {
+    mocks.bgRequest
+      .mockResolvedValueOnce({ ...capabilities(), manage_authorized: "yes" })
+      .mockResolvedValueOnce({ ...status(), configuration_revision: -1 })
+      .mockResolvedValueOnce({ ...run(), status: "invented" })
+
+    await expect(getNotesSemanticCapabilities({})).rejects.toBeInstanceOf(
+      NotesSemanticClientError
+    )
+    await expect(getNotesSemanticStatus({})).rejects.toMatchObject({
+      code: "notes_semantic_invalid_response"
+    })
+    await expect(
+      getNotesSemanticRun({
+        runId: "6ec1dfbe-f86f-4d2b-93af-f88f64cd9701"
+      })
+    ).rejects.toMatchObject({ code: "notes_semantic_invalid_response" })
+  })
+
+  it.each([
+    [
+      "unknown outbound data",
+      { outbound_data_categories: ["note_title", "raw_note_content"] }
+    ],
+    ["incomplete outbound data", { outbound_data_categories: ["note_title"] }],
+    ["unavailable storage", { storage_boundary: "unavailable" }],
+    [
+      "an unavailable reason",
+      { unavailable_reason: "notes_semantic_provider_unavailable" }
+    ],
+    ["blank provider", { provider_label: " " }],
+    ["blank model", { model: "" }],
+    ["blank storage", { storage_label: "\t" }],
+    ["blank endpoint", { endpoint_display: "" }],
+    ["a missing endpoint", { endpoint_display: null }],
+    [
+      "a path-bearing endpoint",
+      {
+        endpoint_display: "https://proxy.example.test/v1/embeddings?key=secret"
+      }
+    ],
+    [
+      "contradictory pending dimensions",
+      { resolved_dimensions: null, dimension_probe_required: false }
+    ]
+  ])(
+    "rejects an available capability disclosure with %s",
+    async (_label, override) => {
+      mocks.bgRequest.mockResolvedValueOnce({
+        ...capabilities(),
+        ...override
+      })
+
+      await expect(getNotesSemanticCapabilities({})).rejects.toMatchObject({
+        code: "notes_semantic_invalid_response"
+      })
+    }
+  )
+
+  it("accepts a probe-eligible pending capability with a sanitized custom origin", async () => {
+    mocks.bgRequest.mockResolvedValueOnce({
+      ...capabilities(),
+      model: "custom-model",
+      endpoint_display: "https://proxy.example.test:8443",
+      resolved_dimensions: null,
+      dimension_probe_required: true
+    })
+
+    const disclosure = await getNotesSemanticCapabilities({})
+
+    expect(disclosure.endpoint_display).toBe("https://proxy.example.test:8443")
+    expect(disclosure.dimension_probe_required).toBe(true)
+    expect(disclosure.resolved_dimensions).toBeNull()
+  })
+
+  it("accepts a sanitized origin with an explicit default port", async () => {
+    mocks.bgRequest.mockResolvedValueOnce({
+      ...capabilities(),
+      endpoint_display: "https://proxy.example.test:443"
+    })
+
+    const disclosure = await getNotesSemanticCapabilities({})
+
+    expect(disclosure.endpoint_display).toBe("https://proxy.example.test:443")
+  })
+
+  it("matches a canonical IDNA origin to the WHATWG runtime host", async () => {
+    const endpoint = "https://xn--fa-hia.de"
+    const runtimeUrl = new URL("https://faß.de/v1")
+    mocks.bgRequest.mockResolvedValueOnce({
+      ...capabilities(),
+      endpoint_display: endpoint
+    })
+
+    const disclosure = await getNotesSemanticCapabilities({})
+
+    expect(runtimeUrl.hostname).toBe("xn--fa-hia.de")
+    expect(disclosure.endpoint_display).toBe(endpoint)
+  })
+
+  it.each(["https://[2001:db8::1]:8443", "https://xn--bcher-kva.example:8443"])(
+    "accepts canonical IPv6 and IDN origin %s",
+    async (endpoint) => {
+      mocks.bgRequest.mockResolvedValueOnce({
+        ...capabilities(),
+        endpoint_display: endpoint
+      })
+
+      const disclosure = await getNotesSemanticCapabilities({})
+
+      expect(disclosure.endpoint_display).toBe(endpoint)
+    }
+  )
+
+  it("accepts a missing endpoint only for a typed unavailable capability", async () => {
+    mocks.bgRequest
+      .mockResolvedValueOnce({
+        ...capabilities(),
+        endpoint_display: null,
+        indexing_available: false,
+        unavailable_reason: "notes_semantic_endpoint_unavailable",
+        resolved_dimensions: null,
+        dimension_probe_required: false
+      })
+      .mockResolvedValueOnce({
+        ...capabilities(),
+        endpoint_display: null,
+        indexing_available: false,
+        unavailable_reason: null,
+        resolved_dimensions: null,
+        dimension_probe_required: false
+      })
+
+    await expect(getNotesSemanticCapabilities({})).resolves.toMatchObject({
+      endpoint_display: null,
+      unavailable_reason: "notes_semantic_endpoint_unavailable"
+    })
+    await expect(getNotesSemanticCapabilities({})).rejects.toMatchObject({
+      code: "notes_semantic_invalid_response"
+    })
+  })
+
+  it("accepts the backend-produced capability drift contract", async () => {
+    mocks.bgRequest
+      .mockResolvedValueOnce(capabilityDriftApi.capabilities)
+      .mockResolvedValueOnce(capabilityDriftApi.status)
+
+    await expect(getNotesSemanticCapabilities({})).resolves.toEqual(
+      capabilityDriftApi.capabilities
+    )
+    await expect(getNotesSemanticStatus({})).resolves.toEqual(
+      capabilityDriftApi.status
+    )
+  })
+
+  it("accepts unresolved dimensions when another capability check is unavailable", async () => {
+    mocks.bgRequest.mockResolvedValueOnce({
+      ...capabilities(),
+      indexing_available: false,
+      unavailable_reason: "notes_semantic_provider_unavailable",
+      resolved_dimensions: null,
+      dimension_probe_required: false
+    })
+
+    const disclosure = await getNotesSemanticCapabilities({})
+
+    expect(disclosure.indexing_available).toBe(false)
+    expect(disclosure.dimension_probe_required).toBe(false)
+  })
+
+  it("accepts only the complete allowlisted outbound category set", async () => {
+    mocks.bgRequest.mockResolvedValueOnce(capabilities())
+
+    const disclosure = await getNotesSemanticCapabilities({})
+
+    expect(disclosure.outbound_data_categories).toEqual([
+      "note_content_chunks",
+      "note_title"
+    ])
+  })
+})

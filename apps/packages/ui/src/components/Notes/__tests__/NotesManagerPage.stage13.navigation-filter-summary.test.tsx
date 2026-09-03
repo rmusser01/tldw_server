@@ -121,9 +121,20 @@ vi.mock("@/services/settings/registry", async (importOriginal) => {
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     initialize: vi.fn(async () => undefined),
+    getConfig: vi.fn(async () => ({
+      serverUrl: "https://notes.example.test",
+      authMode: "single-user",
+      authSource: "cookie-session"
+    })),
     getChat: vi.fn(async () => null),
     listChatMessages: vi.fn(async () => []),
     getCharacter: vi.fn(async () => null)
+  }
+}))
+
+vi.mock("@/services/tldw/TldwAuth", () => ({
+  tldwAuth: {
+    getCurrentUser: vi.fn(async () => ({ id: 1, is_active: true }))
   }
 }))
 

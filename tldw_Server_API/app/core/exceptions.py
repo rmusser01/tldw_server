@@ -41,6 +41,16 @@ class TransactionPassthroughError(Exception):
     """Sanitized domain failure that may cross a rolled-back DB transaction."""
 
 
+class SemanticAPIError(RuntimeError):
+    """Stable HTTP-facing semantic application error."""
+
+    def __init__(self, status_code: int, code: str) -> None:
+        self.status_code = status_code
+        self.code = code
+        self.failure_code = code
+        super().__init__(code)
+
+
 class WebhookError(TransactionPassthroughError):
     """Expected webhook domain failure with no caller-controlled message text."""
 

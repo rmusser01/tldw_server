@@ -439,6 +439,7 @@ def test_sqlite_v63_to_v64_upgrade_creates_graph_suggestion_schema(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     db_path = tmp_path / "chacha-v63-upgrade.sqlite"
+    monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 64)
     base = _prepare_v63_database(db_path)
     base.close_all_connections()
     upgraded = _initialize(db_path)

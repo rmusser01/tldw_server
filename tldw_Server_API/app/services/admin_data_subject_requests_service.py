@@ -468,26 +468,70 @@ async def _erase_chat_messages(user_id: int) -> int:
     )
 
 
-async def _erase_notes(user_id: int) -> int:
-    """Hard-delete all notes for a user."""
-    path = DatabasePaths.get_chacha_db_path(user_id)
-    return await asyncio.to_thread(
-        _sqlite_hard_delete_sync,
-        path,
-        [
-            (
-                "DELETE FROM note_edges WHERE from_note_id IN (SELECT id FROM notes) "
-                "OR to_note_id IN (SELECT id FROM notes)",
-                (),
-            ),
-            (
-                "DELETE FROM note_wikilink_edges WHERE source_note_id IN (SELECT id FROM notes) "
-                "OR target_note_id IN (SELECT id FROM notes)",
-                (),
-            ),
-            ("DELETE FROM notes", ()),
-        ],
+def _build_notes_semantic_erasure_coordinator(user_id: int):
+    """Open the owner-bound Notes store used by semantic erasure."""
+
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+    from tldw_Server_API.app.core.Notes_Graph.semantic_api import (
+        load_semantic_settings,
     )
+    from tldw_Server_API.app.core.Notes_Graph.semantic_erasure import (
+        SemanticErasureCoordinator,
+    )
+
+    path = DatabasePaths.get_chacha_db_path(user_id)
+    db = CharactersRAGDB(
+        db_path=str(path),
+        client_id=str(user_id),
+        require_existing_sqlite=True,
+    )
+    try:
+        return SemanticErasureCoordinator(
+            db=db,
+            settings=load_semantic_settings(),
+            close_database_on_exit=True,
+        )
+    finally:
+        db.close_connection()
+
+
+def _notes_content_backend_is_postgres() -> bool:
+    """Return whether the canonical content store is configured for PostgreSQL."""
+
+    from tldw_Server_API.app.core.config import load_comprehensive_config
+    from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+    from tldw_Server_API.app.core.DB_Management.content_backend import (
+        load_content_db_settings,
+    )
+
+    settings = load_content_db_settings(load_comprehensive_config())
+    return settings.backend_type == BackendType.POSTGRESQL
+
+
+async def _erase_notes(user_id: int) -> int:
+    """Atomically finalize semantic state and canonical owner Notes."""
+
+    from tldw_Server_API.app.core.Notes_Graph.semantic_erasure import (
+        SemanticErasureError,
+    )
+
+    try:
+        is_postgres = _notes_content_backend_is_postgres()
+        path = DatabasePaths.get_chacha_db_path(user_id)
+        if not is_postgres and not path.exists():
+            return 0
+        coordinator = await asyncio.to_thread(
+            _build_notes_semantic_erasure_coordinator,
+            user_id,
+        )
+    except SemanticErasureError:
+        raise
+    except Exception:  # noqa: BLE001 - DSR receives a content-free code
+        raise SemanticErasureError(
+            "notes_semantic_erasure_backend_unavailable"
+        ) from None
+    result = await coordinator.erase()
+    return int(result.deleted_notes)
 
 
 async def _erase_embeddings(user_id: int) -> int:

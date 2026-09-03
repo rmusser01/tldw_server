@@ -1,0 +1,691 @@
+"""Nested HTTP contracts for Notes semantic-index management."""
+
+from __future__ import annotations
+
+from types import SimpleNamespace
+from uuid import UUID
+
+import pytest
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
+
+from tldw_Server_API.app.api.v1.endpoints import notes_semantic_index as endpoint
+from tldw_Server_API.app.core.AuthNZ.permissions import (
+    NOTES_GRAPH_READ,
+    NOTES_GRAPH_SEMANTIC_MANAGE,
+)
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.exceptions import SemanticAPIError as CoreSemanticAPIError
+from tldw_Server_API.app.core.Notes_Graph.semantic_api import SemanticAPIError
+from tldw_Server_API.app.core.Sync.v2.notes_link_coordinator import (
+    NotesLinkDatasetConflictError,
+    NotesLinkSyncInactiveDatasetError,
+)
+
+
+def test_semantic_api_error_uses_shared_core_exception() -> None:
+    assert SemanticAPIError is CoreSemanticAPIError
+
+
+class _FakeAPI:
+    owner_user_id = "owner-a"
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, object]]] = []
+        self.failures: dict[str, SemanticAPIError] = {}
+
+    def _record(self, name: str, **kwargs):
+        self.calls.append((name, kwargs))
+        failure = self.failures.get(name)
+        if failure is not None:
+            raise failure
+
+    def capabilities(self):
+        self._record("capabilities")
+        return {
+            "active_note_count": 4,
+            "estimated_chunk_count": 8,
+            "estimated_run_count": 1,
+            "provider_label": "OpenAI",
+            "model": "text-embedding-3-small",
+            "endpoint_display": "https://api.openai.com",
+            "execution_boundary": "external",
+            "storage_boundary": "local",
+            "storage_label": "ChromaDB",
+            "outbound_data_categories": ["note_content_chunks", "note_title"],
+            "capability_revision": f"sha256:{'a' * 64}",
+            "indexing_available": True,
+            "unavailable_reason": None,
+            "metric": "cosine",
+            "resolved_dimensions": 1536,
+            "dimension_probe_required": False,
+            "renewal_requires_delete": False,
+        }
+
+    def status(self):
+        self._record("status")
+        return {
+            "state": "ready",
+            "detail_reason": None,
+            "desired_state": "enabled",
+            "configuration_revision": 9,
+            "semantic_index_revision": 2,
+            "active_generation_id": "generation-a",
+            "active_generation_usable": True,
+            "indexed_notes": 4,
+            "excluded_notes": 0,
+            "failed_notes": 0,
+            "pending_notes": 0,
+            "published_chunks": 8,
+            "cleanup_pending": False,
+            "active_run": None,
+        }
+
+    def enable(self, **kwargs):
+        self._record("enable", **kwargs)
+        return _mutation("build")
+
+    def disable(self, **kwargs):
+        self._record("disable", **kwargs)
+        return _mutation("delete")
+
+    def create_run(self, **kwargs):
+        self._record("create_run", **kwargs)
+        return _run(kwargs["mode"])
+
+    def get_run(self, **kwargs):
+        self._record("get_run", **kwargs)
+        return _run("rebuild", run_id=str(kwargs["run_id"]))
+
+    def cancel_run(self, **kwargs):
+        self._record("cancel_run", **kwargs)
+        return _mutation("rebuild", run_id=str(kwargs["run_id"]))
+
+
+RUN_ID = "6ec1dfbe-f86f-4d2b-93af-f88f64cd9701"
+
+
+def _principal(
+    permissions: tuple[str, ...],
+) -> AuthPrincipal:
+    return AuthPrincipal(
+        kind="user",
+        user_id=1,
+        roles=["user"],
+        permissions=list(permissions),
+    )
+
+
+def _run(mode: str, *, run_id: str = RUN_ID) -> dict[str, object]:
+    return {
+        "run_id": run_id,
+        "mode": mode,
+        "status": "queued",
+        "revision": 9,
+        "indexed_notes": 0,
+        "excluded_notes": 0,
+        "failed_notes": 0,
+        "pending_notes": 4,
+        "published_chunks": 0,
+        "cleanup_complete": False,
+        "error_code": None,
+        "link": f"/api/v1/notes/graph/semantic-index/runs/{run_id}",
+    }
+
+
+def _mutation(mode: str, *, run_id: str = RUN_ID) -> dict[str, object]:
+    return {
+        "resource": {
+            "state": "preparing" if mode != "delete" else "off",
+            "detail_reason": "building" if mode != "delete" else "cleanup_pending",
+            "desired_state": "enabled" if mode != "delete" else "disabled",
+            "configuration_revision": 9,
+            "semantic_index_revision": 2,
+            "active_generation_id": None,
+            "active_generation_usable": False,
+            "indexed_notes": 0,
+            "excluded_notes": 0,
+            "failed_notes": 0,
+            "pending_notes": 4,
+            "published_chunks": 0,
+            "cleanup_pending": mode == "delete",
+            "active_run": None,
+        },
+        "run": _run(mode, run_id=run_id),
+    }
+
+
+@pytest.fixture
+def client():
+    api = _FakeAPI()
+    app = FastAPI()
+    app.include_router(endpoint.router, prefix="/api/v1/notes")
+    app.dependency_overrides[endpoint.get_semantic_api] = lambda: api
+    app.dependency_overrides[endpoint.require_semantic_read] = lambda: _principal(
+        (NOTES_GRAPH_READ, NOTES_GRAPH_SEMANTIC_MANAGE)
+    )
+    app.dependency_overrides[endpoint.require_semantic_manage] = lambda: object()
+    for route in endpoint.router.routes:
+        for dependency in route.dependant.dependencies:
+            call = dependency.call
+            if (
+                getattr(call, "_tldw_token_scope", False)
+                or getattr(call, "_tldw_rate_limit_resource", None) is not None
+            ):
+                app.dependency_overrides[call] = lambda: None
+    with TestClient(app) as test_client:
+        yield test_client, api, app
+
+
+def test_all_seven_routes_are_nested_and_main_status_has_no_history(client) -> None:
+    test_client, _api, app = client
+    expected = {
+        ("GET", "/api/v1/notes/graph/semantic-index/capabilities"),
+        ("GET", "/api/v1/notes/graph/semantic-index"),
+        ("PUT", "/api/v1/notes/graph/semantic-index"),
+        ("DELETE", "/api/v1/notes/graph/semantic-index"),
+        ("POST", "/api/v1/notes/graph/semantic-index/runs"),
+        ("GET", "/api/v1/notes/graph/semantic-index/runs/{run_id}"),
+        ("POST", "/api/v1/notes/graph/semantic-index/runs/{run_id}/cancel"),
+    }
+    actual = {
+        (method, route.path)
+        for route in app.routes
+        for method in getattr(route, "methods", set())
+        if "semantic-index" in route.path
+    }
+    assert actual == expected
+
+    response = test_client.get("/api/v1/notes/graph/semantic-index")
+    assert response.status_code == 200
+    assert "runs" not in response.json()
+    assert response.json()["active_run"] is None
+
+
+@pytest.mark.parametrize(
+    ("principal", "expected"),
+    [
+        (_principal((NOTES_GRAPH_READ, NOTES_GRAPH_SEMANTIC_MANAGE)), True),
+        (_principal((NOTES_GRAPH_READ,)), False),
+        (_principal((NOTES_GRAPH_READ, "*")), True),
+    ],
+    ids=["manage-granted", "manage-revoked", "admin-bypass"],
+)
+def test_capabilities_project_request_local_manage_authority(
+    client,
+    principal: AuthPrincipal,
+    expected: bool,
+) -> None:
+    test_client, _api, app = client
+    app.dependency_overrides[endpoint.require_semantic_read] = lambda: principal
+
+    response = test_client.get("/api/v1/notes/graph/semantic-index/capabilities")
+
+    assert response.status_code == 200
+    assert response.json()["manage_authorized"] is expected
+
+
+def test_unavailable_endpoint_capability_and_enabled_status_remain_typed(client) -> None:
+    test_client, api, _app = client
+    capability = api.capabilities()
+    capability.update(
+        {
+            "endpoint_display": None,
+            "indexing_available": False,
+            "unavailable_reason": "notes_semantic_endpoint_unavailable",
+            "resolved_dimensions": None,
+        }
+    )
+    resource = api.status()
+    resource.update(
+        {
+            "state": "needs_attention",
+            "detail_reason": "unavailable",
+            "desired_state": "enabled",
+        }
+    )
+    api.capabilities = lambda: capability
+    api.status = lambda: resource
+
+    capability_response = test_client.get("/api/v1/notes/graph/semantic-index/capabilities")
+    status_response = test_client.get("/api/v1/notes/graph/semantic-index")
+
+    assert capability_response.status_code == 200
+    assert capability_response.json()["endpoint_display"] is None
+    assert status_response.status_code == 200
+    assert status_response.json()["detail_reason"] == "unavailable"
+
+
+def test_enable_binds_capability_revision_and_returns_202(client) -> None:
+    test_client, api, _app = client
+    response = test_client.put(
+        "/api/v1/notes/graph/semantic-index",
+        headers={"Idempotency-Key": "enable-key"},
+        json={
+            "expected_revision": 0,
+            "capability_revision": f"sha256:{'a' * 64}",
+        },
+    )
+
+    assert response.status_code == 202
+    UUID(response.json()["run"]["run_id"])
+    assert api.calls[-1] == (
+        "enable",
+        {
+            "expected_revision": 0,
+            "capability_revision": f"sha256:{'a' * 64}",
+            "idempotency_key": "enable-key",
+        },
+    )
+
+
+def test_put_reuses_nested_enable_route_for_renewed_consent(client) -> None:
+    test_client, api, _app = client
+    capability_revision = f"sha256:{'b' * 64}"
+
+    response = test_client.put(
+        "/api/v1/notes/graph/semantic-index",
+        headers={"Idempotency-Key": "renew-consent-key"},
+        json={
+            "expected_revision": 9,
+            "capability_revision": capability_revision,
+        },
+    )
+
+    assert response.status_code == 202
+    assert api.calls[-1] == (
+        "enable",
+        {
+            "expected_revision": 9,
+            "capability_revision": capability_revision,
+            "idempotency_key": "renew-consent-key",
+        },
+    )
+
+
+def test_every_semantic_command_emits_its_durable_audit_event(
+    client,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    test_client, _api, _app = client
+    events: list[dict[str, object]] = []
+
+    async def capture(**kwargs: object) -> None:
+        events.append(dict(kwargs))
+
+    monkeypatch.setattr(
+        endpoint,
+        "emit_semantic_audit_event",
+        capture,
+        raising=False,
+    )
+
+    requests = (
+        (
+            "PUT",
+            "/api/v1/notes/graph/semantic-index",
+            {"expected_revision": 0, "capability_revision": f"sha256:{'a' * 64}"},
+        ),
+        (
+            "PUT",
+            "/api/v1/notes/graph/semantic-index",
+            {"expected_revision": 9, "capability_revision": f"sha256:{'b' * 64}"},
+        ),
+        (
+            "POST",
+            "/api/v1/notes/graph/semantic-index/runs",
+            {"mode": "rebuild", "expected_revision": 9},
+        ),
+        (
+            "POST",
+            "/api/v1/notes/graph/semantic-index/runs",
+            {"mode": "retry_failed", "expected_revision": 9},
+        ),
+        (
+            "POST",
+            f"/api/v1/notes/graph/semantic-index/runs/{RUN_ID}/cancel",
+            {"expected_revision": 9},
+        ),
+        (
+            "DELETE",
+            "/api/v1/notes/graph/semantic-index",
+            {"expected_revision": 9},
+        ),
+    )
+    for index, (method, path, body) in enumerate(requests):
+        response = test_client.request(
+            method,
+            path,
+            headers={"Idempotency-Key": f"audit-{index}"},
+            json=body,
+        )
+        assert response.status_code == 202
+
+    assert [event["event"] for event in events] == [
+        "enable",
+        "consent_renewal",
+        "rebuild",
+        "retry",
+        "cancel",
+        "disable",
+        "delete_request",
+    ]
+    assert all(event["owner_user_id"] == "owner-a" for event in events)
+
+
+def test_committed_command_remains_accepted_when_audit_backend_fails(
+    client,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    test_client, api, _app = client
+
+    async def unavailable(**_kwargs: object) -> None:
+        raise RuntimeError("audit unavailable")
+
+    monkeypatch.setattr(endpoint, "emit_semantic_audit_event", unavailable)
+
+    response = test_client.put(
+        "/api/v1/notes/graph/semantic-index",
+        headers={"Idempotency-Key": "audit-failure"},
+        json={
+            "expected_revision": 0,
+            "capability_revision": "sha256:" + "a" * 64,
+        },
+    )
+
+    assert response.status_code == 202
+    assert api.calls[-1][0] == "enable"
+
+
+def test_delete_and_cancel_return_202_with_revision_and_idempotency(client) -> None:
+    test_client, api, _app = client
+    deleted = test_client.request(
+        "DELETE",
+        "/api/v1/notes/graph/semantic-index",
+        headers={"Idempotency-Key": "delete-key"},
+        json={"expected_revision": 9},
+    )
+    cancelled = test_client.post(
+        f"/api/v1/notes/graph/semantic-index/runs/{RUN_ID}/cancel",
+        headers={"Idempotency-Key": "cancel-key"},
+        json={"expected_revision": 9},
+    )
+
+    assert deleted.status_code == cancelled.status_code == 202
+    assert api.calls[-2][0] == "disable"
+    assert api.calls[-1] == (
+        "cancel_run",
+        {
+            "run_id": UUID(RUN_ID),
+            "expected_revision": 9,
+            "idempotency_key": "cancel-key",
+        },
+    )
+
+
+@pytest.mark.parametrize("mode", ["rebuild", "retry_failed"])
+def test_run_creation_accepts_only_the_two_public_modes(client, mode: str) -> None:
+    test_client, api, _app = client
+    response = test_client.post(
+        "/api/v1/notes/graph/semantic-index/runs",
+        headers={"Idempotency-Key": f"run-{mode}"},
+        json={"mode": mode, "expected_revision": 9},
+    )
+
+    assert response.status_code == 202
+    assert response.json()["mode"] == mode
+    assert api.calls[-1][1]["mode"] == mode
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "body"),
+    [
+        ("PUT", "/api/v1/notes/graph/semantic-index", {"expected_revision": 0, "capability_revision": "cap"}),
+        ("DELETE", "/api/v1/notes/graph/semantic-index", {"expected_revision": 9}),
+        ("POST", "/api/v1/notes/graph/semantic-index/runs", {"mode": "rebuild", "expected_revision": 9}),
+        ("POST", f"/api/v1/notes/graph/semantic-index/runs/{RUN_ID}/cancel", {"expected_revision": 9}),
+    ],
+)
+def test_every_mutation_requires_idempotency_key(client, method, path, body) -> None:
+    test_client, _api, _app = client
+    response = test_client.request(method, path, json=body)
+    assert response.status_code == 422
+    assert response.json()["detail"]["error_code"] == "notes_semantic_invalid_request"
+
+
+def test_invalid_mode_and_revision_return_typed_422(client) -> None:
+    test_client, _api, _app = client
+    invalid_mode = test_client.post(
+        "/api/v1/notes/graph/semantic-index/runs",
+        headers={"Idempotency-Key": "invalid-mode"},
+        json={"mode": "repair_everything", "expected_revision": 9},
+    )
+    missing_revision = test_client.request(
+        "DELETE",
+        "/api/v1/notes/graph/semantic-index",
+        headers={"Idempotency-Key": "missing-revision"},
+        json={},
+    )
+
+    assert invalid_mode.status_code == missing_revision.status_code == 422
+    assert invalid_mode.json()["detail"]["error_code"] == "notes_semantic_invalid_request"
+    assert missing_revision.json()["detail"]["error_code"] == "notes_semantic_invalid_request"
+
+
+def test_foreign_run_is_404_and_conflicts_are_typed(client) -> None:
+    test_client, api, _app = client
+    api.failures["get_run"] = SemanticAPIError(404, "notes_semantic_run_not_found")
+    missing = test_client.get("/api/v1/notes/graph/semantic-index/runs/16f923f0-cfc5-455b-bc44-df610b433991")
+    api.failures["create_run"] = SemanticAPIError(409, "notes_semantic_writer_conflict")
+    conflict = test_client.post(
+        "/api/v1/notes/graph/semantic-index/runs",
+        headers={"Idempotency-Key": "conflict"},
+        json={"mode": "rebuild", "expected_revision": 9},
+    )
+
+    assert missing.status_code == 404
+    assert missing.json()["detail"]["error_code"] == "notes_semantic_run_not_found"
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"]["error_code"] == "notes_semantic_writer_conflict"
+
+
+def test_unavailable_enable_is_sanitized_503(client) -> None:
+    test_client, api, _app = client
+    api.failures["enable"] = SemanticAPIError(
+        503,
+        "notes_semantic_provider_unavailable",
+    )
+    response = test_client.put(
+        "/api/v1/notes/graph/semantic-index",
+        headers={"Idempotency-Key": "unavailable"},
+        json={
+            "expected_revision": 0,
+            "capability_revision": f"sha256:{'a' * 64}",
+        },
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == {
+        "error_code": "notes_semantic_provider_unavailable",
+        "message": "Semantic indexing is temporarily unavailable.",
+    }
+    assert "secret" not in response.text.lower()
+
+
+def test_quota_rejection_is_typed_429(client) -> None:
+    test_client, api, _app = client
+    api.failures["create_run"] = SemanticAPIError(
+        429,
+        "notes_semantic_quota_exceeded",
+    )
+
+    response = test_client.post(
+        "/api/v1/notes/graph/semantic-index/runs",
+        headers={"Idempotency-Key": "quota"},
+        json={"mode": "rebuild", "expected_revision": 9},
+    )
+
+    assert response.status_code == 429
+    assert response.json()["detail"] == {
+        "error_code": "notes_semantic_quota_exceeded",
+        "message": "The semantic indexing quota has been reached.",
+    }
+
+
+@pytest.mark.parametrize("denial_source", ["permission", "token-scope"])
+def test_manage_permission_failure_is_typed_403(client, denial_source: str) -> None:
+    test_client, _api, app = client
+
+    def forbidden():
+        raise HTTPException(
+            status_code=403,
+            detail="sensitive generic auth detail",
+            headers={"WWW-Authenticate": 'Bearer scope="notes"'},
+        )
+
+    if denial_source == "permission":
+        app.dependency_overrides[endpoint.require_semantic_manage] = forbidden
+    else:
+        scope_dependency = next(
+            dependency.call
+            for route in endpoint.router.routes
+            if route.path == "/graph/semantic-index/runs"
+            for dependency in route.dependant.dependencies
+            if getattr(dependency.call, "_tldw_token_scope", False)
+        )
+        app.dependency_overrides[scope_dependency] = forbidden
+
+    response = test_client.post(
+        "/api/v1/notes/graph/semantic-index/runs",
+        headers={"Idempotency-Key": "forbidden"},
+        json={"mode": "rebuild", "expected_revision": 9},
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {
+        "detail": {
+            "error_code": "notes_semantic_permission_denied",
+            "message": "Permission to access the Notes semantic index is required.",
+        }
+    }
+    assert response.headers["www-authenticate"] == 'Bearer scope="notes"'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "authority_failure",
+    [
+        NotesLinkDatasetConflictError(),
+        NotesLinkSyncInactiveDatasetError(),
+        None,
+    ],
+    ids=["foreign", "sync-inactive", "canonical-authority-absent"],
+)
+async def test_dataset_authority_failure_is_typed_404_and_releases_database(
+    monkeypatch: pytest.MonkeyPatch,
+    authority_failure: Exception | None,
+) -> None:
+    released: list[bool] = []
+
+    class FakeDB:
+        def release_context_connection(self) -> None:
+            released.append(True)
+
+    def resolve(**_kwargs):
+        if authority_failure is not None:
+            raise authority_failure
+        return None
+
+    monkeypatch.setattr(endpoint, "resolve_notes_link_dataset_authority", resolve)
+    dependency = endpoint.get_semantic_api(
+        dataset_id="dataset-a",
+        user=SimpleNamespace(id_str="owner-a"),
+        db=FakeDB(),
+        jobs=object(),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await dependency.__anext__()
+
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail["error_code"] == "notes_semantic_dataset_not_found"
+    assert released == [True]
+
+
+@pytest.mark.asyncio
+async def test_unexpected_dataset_and_release_failures_preserve_sanitized_503(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    secret = "sqlite:////private/notes.db?token=super-secret"  # nosec B105
+    warnings: list[str] = []
+
+    class FakeDB:
+        def release_context_connection(self) -> None:
+            raise RuntimeError(secret)
+
+    def unavailable(**_kwargs):
+        raise RuntimeError(secret)
+
+    monkeypatch.setattr(endpoint, "resolve_notes_link_dataset_authority", unavailable)
+    monkeypatch.setattr(
+        endpoint,
+        "logger",
+        SimpleNamespace(warning=lambda message: warnings.append(message)),
+        raising=False,
+    )
+    dependency = endpoint.get_semantic_api(
+        dataset_id="dataset-a",
+        user=SimpleNamespace(id_str="owner-a"),
+        db=FakeDB(),
+        jobs=object(),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await dependency.__anext__()
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail == {
+        "error_code": "notes_semantic_dataset_authority_unavailable",
+        "message": "Semantic dataset authority is temporarily unavailable.",
+    }
+    assert warnings == ["Notes semantic request database release failed"]
+    assert secret not in repr((exc_info.value.detail, warnings))
+
+
+@pytest.mark.asyncio
+async def test_release_failure_does_not_override_successful_dependency_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    secret = "postgresql://user:password@private/db?token=secret"  # nosec B105
+    warnings: list[str] = []
+
+    class FakeDB:
+        note_semantic_store = object()
+
+        def release_context_connection(self) -> None:
+            raise RuntimeError(secret)
+
+    monkeypatch.setattr(
+        endpoint,
+        "resolve_notes_link_dataset_authority",
+        lambda **_kwargs: (object(), SimpleNamespace(dataset_id="dataset-a")),
+    )
+    monkeypatch.setattr(
+        endpoint,
+        "logger",
+        SimpleNamespace(warning=lambda message: warnings.append(message)),
+        raising=False,
+    )
+    dependency = endpoint.get_semantic_api(
+        dataset_id="dataset-a",
+        user=SimpleNamespace(id_str="owner-a"),
+        db=FakeDB(),
+        jobs=object(),
+    )
+
+    api = await dependency.__anext__()
+    await dependency.aclose()
+
+    assert api._dataset_id == "dataset-a"
+    assert warnings == ["Notes semantic request database release failed"]
+    assert secret not in repr(warnings)

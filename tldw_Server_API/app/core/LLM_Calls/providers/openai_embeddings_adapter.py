@@ -4,6 +4,7 @@ from typing import Any
 
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import ensure_app_config
 from tldw_Server_API.app.core.LLM_Calls.payload_utils import (
+    EMBEDDING_REDIRECT_STATUS_CODES,
     resolve_runtime_embedding_base_url,
 )
 from tldw_Server_API.app.core.testing import is_truthy
@@ -94,8 +95,10 @@ class OpenAIEmbeddingsAdapter(EmbeddingsProvider):
             app_config = dict(app_config or {})
             app_config["openai_api"] = openai_cfg
 
-        # Native HTTP path (opt-in)
-        if self._use_native_http():
+        credentials_resolved = request.get("credentials_resolved") is True
+
+        # A server-resolved endpoint must not fall through to the redirecting legacy path.
+        if credentials_resolved or self._use_native_http():
             from tldw_Server_API.app.core.http_client import fetch as _fetch
             base_url = runtime_base_url or self._base_url(openai_cfg).rstrip("/")
             url = f"{base_url}/embeddings"
@@ -110,7 +113,16 @@ class OpenAIEmbeddingsAdapter(EmbeddingsProvider):
             headers = self._headers(api_key, app_config)
             provider_error: Exception | None = None
             try:
-                resp = _fetch(method="POST", url=url, headers=headers, json=payload, timeout=timeout or 60.0)
+                resp = _fetch(
+                    method="POST",
+                    url=url,
+                    headers=headers,
+                    json=payload,
+                    timeout=timeout or 60.0,
+                    allow_redirects=not credentials_resolved,
+                )
+                if getattr(resp, "status_code", None) in EMBEDDING_REDIRECT_STATUS_CODES:
+                    raise RuntimeError("Embedding provider redirected the request")
                 if resp.status_code >= 400:
                     resp.raise_for_status()
                 return resp.json()

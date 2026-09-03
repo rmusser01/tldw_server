@@ -1510,6 +1510,14 @@ OPENAPI_TAGS = [
         "externalDocs": {"description": "Graphing PRD", "url": _ext_url("/docs-static/Design/Graphing-Notes-PRD.md")},
     },
     {
+        "name": "notes-semantic-index",
+        "description": "Manage the opt-in Notes semantic index and its nested runs.",
+        "externalDocs": {
+            "description": "Notes semantic index API",
+            "url": _ext_url("/docs-static/API/Notes_Semantic_Index.md"),
+        },
+    },
+    {
         "name": "prompts",
         "description": "Manage prompt library entries, imports, exports, and metadata.",
         "externalDocs": {"description": "Prompts design", "url": _ext_url("/docs-static/Design/Prompts.md")},

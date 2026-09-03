@@ -70,6 +70,7 @@ from .migrations import (
     slides_archive_projection_ready_sqlite,
     slides_archive_values_equal,
 )
+from .notes_semantic_health import validate_notes_semantic_health_checkpoint
 from .operations.contracts import (
     ADMIN_WEBHOOK_DELIVERY_DOMAIN,
     ADMIN_WEBHOOK_DELIVERY_JOB_TYPE,
@@ -680,6 +681,7 @@ class JobManager:
         "writing": ("writing-review", "writing-ai"),
         "scheduled_tasks": ("scheduled-tasks",),
         "admin_webhooks": ("delivery",),
+        "notes": ("graph-suggestions", "semantic-index"),
     }
 
     # --- Shutdown/acquisition gate (process-wide) ---
@@ -896,6 +898,99 @@ class JobManager:
             with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
                 conn.rollback()
         return cur
+
+    @staticmethod
+    def _normalize_notes_semantic_health_sweep_row(row: Any) -> dict[str, Any]:
+        data = dict(row)
+        data.pop("singleton_id", None)
+        data["revision"] = int(data.get("revision") or 0)
+        for field_name in ("updated_at", "last_completed_at"):
+            value = _parse_dt(data.get(field_name))
+            if value is not None:
+                value = value.replace(tzinfo=_tz.utc) if value.tzinfo is None else value.astimezone(_tz.utc)
+            data[field_name] = value
+        return data
+
+    def get_notes_semantic_health_sweep(self) -> dict[str, Any]:
+        """Read the durable singleton cursor for Notes semantic health aggregation."""
+
+        conn = self._connect()
+        try:
+            if self.backend == "postgres":
+                with conn, self._pg_cursor(conn) as cur:
+                    cur.execute("SELECT * FROM notes_semantic_health_sweep WHERE singleton_id=1")
+                    row = cur.fetchone()
+            else:
+                row = conn.execute("SELECT * FROM notes_semantic_health_sweep WHERE singleton_id=1").fetchone()
+            if row is None:
+                raise RuntimeError("Notes semantic health sweep singleton is missing")
+            return self._normalize_notes_semantic_health_sweep_row(row)
+        finally:
+            conn.close()
+
+    def checkpoint_notes_semantic_health_sweep(
+        self,
+        *,
+        expected_revision: int,
+        after_owner_id: int | None,
+        after_dataset_id: str | None,
+        totals_json: str,
+        completed: bool,
+        now: datetime,
+    ) -> bool:
+        """CAS one content-free partial page or reset one completed sweep."""
+
+        if isinstance(expected_revision, bool) or not isinstance(expected_revision, int) or expected_revision < 0:
+            raise ValueError("semantic health revision must be nonnegative")
+        validate_notes_semantic_health_checkpoint(
+            after_owner_id=after_owner_id,
+            after_dataset_id=after_dataset_id,
+            totals_json=totals_json,
+        )
+        if completed and after_owner_id is not None:
+            raise ValueError("completed semantic health checkpoint must be reset")
+        now_utc = _require_aware_utc(now, field_name="now")
+        conn = self._connect()
+        try:
+            if self.backend == "postgres":
+                with conn, self._pg_cursor(conn) as cur:
+                    cur.execute(
+                        "UPDATE notes_semantic_health_sweep SET revision=revision+1,"
+                        "after_owner_id=%s,after_dataset_id=%s,"
+                        "totals_json=%s,updated_at=%s,"
+                        "last_completed_at=CASE WHEN %s THEN %s ELSE last_completed_at END "
+                        "WHERE singleton_id=1 AND revision=%s",
+                        (
+                            after_owner_id,
+                            after_dataset_id,
+                            totals_json,
+                            now_utc,
+                            completed,
+                            now_utc,
+                            expected_revision,
+                        ),
+                    )
+                    return bool(cur.rowcount == 1)
+            with conn:
+                result = conn.execute(
+                    "UPDATE notes_semantic_health_sweep SET revision=revision+1,"
+                    "after_owner_id=?,after_dataset_id=?,"
+                    "totals_json=?,updated_at=?,"
+                    "last_completed_at=CASE WHEN ? THEN ? ELSE last_completed_at END "
+                    "WHERE singleton_id=1 AND revision=?",
+                    (
+                        after_owner_id,
+                        after_dataset_id,
+                        totals_json,
+                        _sqlite_utc(now_utc),
+                        int(completed),
+                        _sqlite_utc(now_utc),
+                        expected_revision,
+                    ),
+                )
+                return bool(result.rowcount == 1)
+        finally:
+            conn.close()
 
     @staticmethod
     def _normalize_slides_reconciliation_row(row: Any) -> dict[str, Any]:

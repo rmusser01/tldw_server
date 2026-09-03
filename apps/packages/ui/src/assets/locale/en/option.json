@@ -1280,6 +1280,117 @@
   "libraryView": "Library View",
   "notes": "Notes",
   "notesSearch": {
+    "graphSimilarContent": "Similar content",
+    "semanticIndex": "Semantic index",
+    "semanticState": {
+      "off": "Off",
+      "preparing": "Preparing",
+      "ready": "Ready",
+      "updating": "Updating",
+      "needs_attention": "Needs attention"
+    },
+    "semanticStatusAnnouncement": "Semantic index {{state}}. {{detail}}",
+    "semanticProvider": "Provider",
+    "semanticModel": "Model",
+    "semanticEndpoint": "Endpoint destination",
+    "semanticExecutionBoundary": "Embedding execution",
+    "semanticStorageBoundary": "Vector storage",
+    "semanticBoundary": {
+      "external": "External",
+      "local": "Local",
+      "unavailable": "Unavailable"
+    },
+    "semanticOutboundData": "Data sent for indexing",
+    "semanticOutbound": {
+      "note_content_chunks": "Note body chunks",
+      "note_title": "Note titles"
+    },
+    "semanticActiveNotes": "{{count}} active Notes",
+    "semanticEstimate": "About {{chunks}} chunks across {{runs}} runs",
+    "semanticProgress": "{{indexed}} of {{total}} Notes indexed",
+    "semanticLoading": "Loading semantic index details.",
+    "semanticLoadFailed": "Semantic index details are unavailable.",
+    "semanticUnavailable": "Semantic indexing is unavailable with the current server configuration.",
+    "semanticPermissionReadOnly": "You can view similar content, but you do not have permission to manage the semantic index.",
+    "semanticOffline": "Semantic index management is unavailable while offline.",
+    "semanticShowEdges": "Show similar-content relationships",
+    "semanticEnable": "Enable semantic index",
+    "semanticRebuild": "Rebuild index",
+    "semanticRetry": "Retry failed Notes",
+    "semanticCancel": "Cancel indexing",
+    "semanticDelete": "Disable and delete index",
+    "semanticRenewConsent": "Review consent and rebuild",
+    "semanticDetail": {
+      "building": "The first semantic index is being built.",
+      "degraded": "Some Notes could not be indexed. Retry failed Notes or rebuild the index.",
+      "stale_configuration": "The embedding configuration changed. Review the current disclosure and renew consent before rebuilding.",
+      "consent_required": "Indexing requires renewed consent before work can continue.",
+      "cleanup_pending": "Indexed data is being removed.",
+      "cleanup_stalled": "Indexed data cleanup needs attention.",
+      "unavailable": "The configured embedding service is unavailable.",
+      "rebuild_required": "The current semantic index does not match this configuration. Rebuild it before using similar-content relationships.",
+      "generic": "Semantic index details changed. Review the current status."
+    },
+    "semanticConfirm": {
+      "enable": {
+        "title": "Enable semantic indexing?",
+        "body": "Notes will be indexed using the provider and data boundaries shown above.",
+        "confirm": "Enable"
+      },
+      "rebuild": {
+        "title": "Rebuild the semantic index?",
+        "body": "A new generation will replace the currently published index when it is ready.",
+        "confirm": "Rebuild"
+      },
+      "retry": {
+        "title": "Retry failed Notes?",
+        "body": "Only Notes that failed during the current generation will be retried.",
+        "confirm": "Retry"
+      },
+      "cancel": {
+        "title": "Cancel semantic indexing?",
+        "body": "The active run will stop. The last published graph remains available.",
+        "confirm": "Cancel indexing"
+      },
+      "renew": {
+        "title": "Review consent and rebuild?",
+        "body": "Review the current provider, model, data boundaries, and outbound data above before renewing consent.",
+        "confirm": "Renew consent and rebuild"
+      },
+      "deleteIndex": {
+        "title": "Disable and delete the semantic index?",
+        "body": "Published vectors and semantic relationships will be removed. Ordinary graph relationships are not affected. Offline backups may retain derived vectors until normal backup retention expires.",
+        "confirm": "Delete index"
+      }
+    },
+    "semanticEnableStarted": "Semantic indexing started.",
+    "semanticRenewStarted": "Consent renewed and semantic index rebuild started.",
+    "semanticRebuildStarted": "Semantic index rebuild started.",
+    "semanticRetryStarted": "Failed Notes are being retried.",
+    "semanticCancelRequested": "Semantic indexing cancellation requested.",
+    "semanticDeleteStarted": "Semantic index deletion started.",
+    "semanticActionFailed": "The semantic index action failed. Try again.",
+    "semanticBackendChangeRequiresDelete": "Vector storage changed. Delete the existing index before setting it up again.",
+    "semanticDimensionProbeDisclosure": "A fixed non-user probe will resolve dimensions after you consent and before any Note text is read or transferred.",
+    "semanticTechnicalDetails": "Technical details",
+    "semanticVectorBackend": "Vector backend",
+    "semanticDimensions": "Dimensions",
+    "semanticDimensionsPending": "Pending probe",
+    "semanticMetric": "Similarity metric",
+    "semanticMetricValue": {
+      "cosine": "Cosine"
+    },
+    "semanticConfigurationRevision": "Configuration revision",
+    "semanticIndexRevision": "Semantic index revision",
+    "semanticPublishedChunks": "Published chunks",
+    "semanticError": {
+      "permission": "Your semantic-index management permission changed. Refresh; contact an administrator if access is still needed.",
+      "refresh": "Semantic index details changed. Refresh and try again.",
+      "writerConflict": "Another semantic-index operation is active. Wait for it to finish, then try again.",
+      "quota": "The semantic-index quota is reached. Wait for capacity or ask an administrator to review limits.",
+      "backendChangeRequiresDelete": "Vector storage changed. Delete the existing index before setting it up again.",
+      "unavailable": "Semantic indexing is temporarily unavailable. Check the configured provider and worker, then try again."
+    },
     "placeholder": "Search titles and contents",
     "clear": "Clear search & filters",
     "keywordsPlaceholder": "Filter by tag",
@@ -1382,8 +1493,41 @@
       "wikilink": "Note links",
       "backlink": "Backlinks",
       "tag_membership": "Tag membership",
-      "source_membership": "Source membership"
+      "source_membership": "Source membership",
+      "semantic": "Similar content"
     },
+    "graphCanvasAria": "Notes relationship graph",
+    "graphEdgeLegend": "Relationship line styles",
+    "graphLegendAuthoritative": "Authoritative",
+    "graphPassageSimilarityShort": "passage similarity",
+    "graphSemanticNeighbors": "Neighbors",
+    "graphSemanticThreshold": "Minimum passage similarity",
+    "graphSemanticReset": "Reset Similar content controls",
+    "graphSemanticFocusRequired": "Focus a Note to load similar content.",
+    "graphPassageSimilarity": "Passage similarity: {{value}}",
+    "graphSimilarityBand": {
+      "low": "Low similarity",
+      "moderate": "Moderate similarity",
+      "high": "High similarity",
+      "very_high": "Very high similarity"
+    },
+    "graphSemanticProvider": "Provider and model",
+    "graphSemanticProviderModel": "{{provider}} / {{model}}",
+    "graphSemanticFreshness": "Content freshness",
+    "graphSemanticVersions": "Source v{{source}}, target v{{target}}",
+    "graphSemanticGenerationLabel": "Generation",
+    "graphSemanticGeneration": "Generation {{generation}}",
+    "graphSemanticIndexVersion": "Index versions",
+    "graphSemanticIndexVersionValue": "Index {{index}}, configuration {{configuration}}",
+    "graphSemanticModelRevision": "Model revision",
+    "graphSemanticNormalizationVersion": "Normalization version",
+    "graphSemanticChunkerVersion": "Chunker version",
+    "graphSemanticVersionUnavailable": "Unavailable",
+    "graphEvidenceOmitted": "Matched excerpts were omitted because the graph response reached its evidence limit.",
+    "graphSemanticTruncated": "Some similar relationships or matched excerpts were omitted because the graph reached a server limit.",
+    "graphCreateManualLink": "Create manual link",
+    "graphManualLinkCreated": "Manual link created.",
+    "graphManualLinkFailed": "The manual link could not be created. Try again.",
     "graphSuggestions": "Suggestions",
     "graphDetails": "Details",
     "graphInspector": "Graph inspector",

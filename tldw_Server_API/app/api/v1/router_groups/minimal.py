@@ -588,6 +588,13 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
             skip_context=minimal_skip_context,
         ),
         ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.notes_semantic_index",
+            log_name="notes_semantic_index",
+            prefix=f"{API_V1_PREFIX}/notes",
+            tags=("notes",),
+            skip_context=minimal_skip_context,
+        ),
+        ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.notes",
             log_name="notes",
             prefix=f"{API_V1_PREFIX}/notes",

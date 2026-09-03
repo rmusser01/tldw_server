@@ -3,23 +3,22 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List
 
 import pytest
 from fastapi import APIRouter, Depends, FastAPI
 
 from tldw_Server_API.app.core.AuthNZ.privilege_catalog import PrivilegeCatalog, load_catalog
+from tldw_Server_API.app.core.PrivilegeMaps import startup as privilege_startup
 from tldw_Server_API.app.core.PrivilegeMaps.introspection import (
     collect_privilege_route_registry,
     serialize_route_registry,
 )
-from tldw_Server_API.app.core.PrivilegeMaps import startup as privilege_startup
 from tldw_Server_API.app.main import app as fastapi_app
 
 
 def _build_test_catalog() -> PrivilegeCatalog:
     """Construct a minimal privilege catalog for introspection unit tests."""
-    payload: Dict[str, object] = {
+    payload: dict[str, object] = {
         "version": "test-1.0",
         "updated_at": datetime(2025, 1, 1, tzinfo=timezone.utc).isoformat(),
         "scopes": [
@@ -55,6 +54,7 @@ def _make_async_dependency(
     scope: str | None = None,
     endpoint: str | None = None,
     rate_resource: str | None = None,
+    rate_resources: tuple[str, ...] | None = None,
 ):
     async def _dependency():
         return None
@@ -62,12 +62,35 @@ def _make_async_dependency(
     _dependency.__name__ = name
     _dependency.__qualname__ = name
     if scope:
-        setattr(_dependency, "_tldw_scope_name", scope)
+        _dependency._tldw_scope_name = scope
     if endpoint:
-        setattr(_dependency, "_tldw_endpoint_id", endpoint)
+        _dependency._tldw_endpoint_id = endpoint
     if rate_resource:
-        setattr(_dependency, "_tldw_rate_limit_resource", rate_resource)
+        _dependency._tldw_rate_limit_resource = rate_resource
+    if rate_resources:
+        _dependency._tldw_rate_limit_resources = rate_resources
     return _dependency
+
+
+def test_collect_privilege_route_registry_supports_dynamic_rate_resources():
+    catalog = _build_test_catalog()
+    app = FastAPI()
+    scope_dep = _make_async_dependency("scope", scope="media.ingest")
+    rate_dep = _make_async_dependency(
+        "dynamic_rate",
+        rate_resources=("media.ingest", "rag.search"),
+    )
+
+    @app.get("/dynamic", dependencies=[Depends(scope_dep), Depends(rate_dep)])
+    async def dynamic_route():
+        return {"status": "ok"}
+
+    registry = collect_privilege_route_registry(app, catalog)
+
+    assert registry["media.ingest"][0].rate_limit_resources == (
+        "media.ingest",
+        "rag.search",
+    )
 
 
 def test_collect_privilege_route_registry_captures_metadata():
@@ -153,8 +176,8 @@ def test_collect_privilege_route_registry_strict_unknown_scope():
 def test_validate_privilege_metadata_on_startup_invokes_strict_mode(monkeypatch: pytest.MonkeyPatch):
     app = FastAPI()
     catalog = _build_test_catalog()
-    sample_registry: Dict[str, List[object]] = {"media.ingest": []}
-    calls: Dict[str, object] = {}
+    sample_registry: dict[str, list[object]] = {"media.ingest": []}
+    calls: dict[str, object] = {}
     monkeypatch.setenv("PRIVILEGE_METADATA_VALIDATE_ON_STARTUP", "1")
 
     def fake_load_catalog() -> PrivilegeCatalog:
