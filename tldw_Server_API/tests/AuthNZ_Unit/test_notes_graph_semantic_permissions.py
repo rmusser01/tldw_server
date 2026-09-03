@@ -6,7 +6,7 @@ import pytest
 
 from tldw_Server_API.app.core.AuthNZ.migrations import (
     get_authnz_migrations,
-    migration_096_seed_notes_graph_semantic_manage_permission,
+    migration_097_seed_notes_graph_semantic_manage_permission,
 )
 from tldw_Server_API.app.core.AuthNZ.permissions import (
     NOTES_GRAPH_READ,
@@ -61,31 +61,31 @@ def test_semantic_manage_permission_is_catalogued_for_single_user_defaults() -> 
     assert NOTES_GRAPH_SEMANTIC_MANAGE in Settings().SINGLE_USER_DEFAULT_PERMISSIONS
 
 
-def test_migration_096_grants_semantic_management_to_approved_roles() -> None:
+def test_migration_097_grants_semantic_management_to_approved_roles() -> None:
     conn = sqlite3.connect(":memory:")
     _create_rbac_schema(conn)
 
-    migration_096_seed_notes_graph_semantic_manage_permission(conn)
-    migration_096_seed_notes_graph_semantic_manage_permission(conn)
+    migration_097_seed_notes_graph_semantic_manage_permission(conn)
+    migration_097_seed_notes_graph_semantic_manage_permission(conn)
 
     assert _semantic_grants(conn) == {"admin", "user", "moderator"}
-    assert get_authnz_migrations()[-1].version == 96
+    assert get_authnz_migrations()[-1].version == 97
 
 
-def test_migration_096_rollback_reapply_preserves_revoked_mappings(tmp_path) -> None:
+def test_migration_097_rollback_reapply_preserves_revoked_mappings(tmp_path) -> None:
     db_path = tmp_path / "authnz.db"
     manager = MigrationManager(db_path)
     with sqlite3.connect(db_path) as conn:
         _create_rbac_schema(conn)
     manager.add_migration(
         Migration(
-            96,
+            97,
             "Seed Notes graph semantic management permission",
-            migration_096_seed_notes_graph_semantic_manage_permission,
+            migration_097_seed_notes_graph_semantic_manage_permission,
         )
     )
 
-    manager.migrate(96)
+    manager.migrate(97)
     with sqlite3.connect(db_path) as conn:
         assert _semantic_grants(conn) == {"admin", "user", "moderator"}
         conn.execute(
@@ -99,8 +99,8 @@ def test_migration_096_rollback_reapply_preserves_revoked_mappings(tmp_path) -> 
             (NOTES_GRAPH_SEMANTIC_MANAGE,),
         )
 
-    manager.rollback(95)
-    manager.migrate(96)
+    manager.rollback(96)
+    manager.migrate(97)
     with sqlite3.connect(db_path) as conn:
         assert _semantic_grants(conn) == {"admin", "moderator"}
         conn.execute(
@@ -113,8 +113,8 @@ def test_migration_096_rollback_reapply_preserves_revoked_mappings(tmp_path) -> 
             (NOTES_GRAPH_SEMANTIC_MANAGE,),
         )
 
-    manager.rollback(95)
-    manager.migrate(96)
+    manager.rollback(96)
+    manager.migrate(97)
     with sqlite3.connect(db_path) as conn:
         assert _semantic_grants(conn) == set()
 
