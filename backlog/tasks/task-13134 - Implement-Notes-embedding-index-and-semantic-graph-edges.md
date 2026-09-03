@@ -1,10 +1,10 @@
 ---
 id: TASK-13134
 title: Implement Notes embedding index and semantic graph edges
-status: Done
+status: In Progress
 assignee: []
 created_date: 2026-08-27 02:20
-updated_date: 2026-09-02 22:44
+updated_date: 2026-09-03 00:40
 labels:
 - notes
 - notes-graph
