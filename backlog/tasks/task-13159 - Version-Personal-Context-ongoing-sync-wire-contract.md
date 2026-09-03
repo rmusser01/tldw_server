@@ -1,10 +1,11 @@
 ---
 id: TASK-13159
 title: Version Personal Context ongoing-sync wire contract
-status: To Do
+status: Done
 assignee:
   - '@codex'
 created_date: '2026-09-03 13:39'
+updated_date: '2026-09-03 20:11'
 labels:
   - personal-context
   - sync
@@ -26,21 +27,39 @@ Define the server-owned version-1 wire contract for ongoing Personal Context syn
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Strict server models cover activation epoch and continuity token on every version-1 push, pull, conflict-list, and conflict-resolution exchange.
-- [ ] #2 Authority envelope role, publication identity, relay continuation, conflict candidate IDs, cleanup acknowledgments, and purge generation have bounded versioned schemas.
-- [ ] #3 A deterministic checked-in contract artifact carries its schema version, server source commit, and checksum and is suitable for exact vendoring by Chatbook.
-- [ ] #4 Valid and invalid fixtures prove unknown-field compatibility, strict required-field validation, bounded values, and rejection of client-spoofed home-authority metadata.
-- [ ] #5 The server continues advertising ongoing_sync_version=0 until later readiness work enables the complete implementation.
-- [ ] #6 New activation-acknowledgment and signed Sync-purge route surfaces return a bounded capability-unavailable response until their owning implementation tasks land.
-- [ ] #7 ADR required: no new ADR; backlog/decisions/002-personal-context-profile-authority-sync-and-encryption.md governs the contract.
+- [x] #1 Strict server models cover activation epoch and continuity token on every version-1 push, pull, conflict-list, and conflict-resolution exchange.
+- [x] #2 Authority envelope role, publication identity, relay continuation, conflict candidate IDs, cleanup acknowledgments, and purge generation have bounded versioned schemas.
+- [x] #3 A deterministic checked-in contract artifact carries its schema version, server source commit, and checksum and is suitable for exact vendoring by Chatbook.
+- [x] #4 Valid and invalid fixtures prove unknown-field compatibility, strict required-field validation, bounded values, and rejection of client-spoofed home-authority metadata.
+- [x] #5 The server continues advertising ongoing_sync_version=0 until later readiness work enables the complete implementation.
+- [x] #6 New activation-acknowledgment and signed Sync-purge route surfaces return a bounded capability-unavailable response until their owning implementation tasks land.
+- [x] #7 ADR required: no new ADR; backlog/decisions/002-personal-context-profile-authority-sync-and-encryption.md governs the contract.
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+ADR required: no new ADR. Existing backlog/decisions/002-personal-context-profile-authority-sync-and-encryption.md governs the contract.
+1. Add failing strict wire-contract and fail-closed endpoint tests.
+2. Define bounded ongoing-sync models and extend the existing Sync V2 schemas without altering unrelated domains.
+3. Register activation-acknowledgment and signed-purge routes that remain unavailable while version 0 is advertised.
+4. Generate deterministic schema and provenance manifest artifacts from the committed contract source.
+5. Run targeted model/endpoint tests, Ruff, Bandit for touched code, artifact reproducibility, and diff hygiene.
+6. Complete acceptance criteria and implementation notes, then commit source and generated artifacts at their planned provenance boundaries.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Defined strict ongoing-sync contract models, fail-closed versioned routes, and deterministic schema/provenance artifacts. Targeted verification passed: 259 tests, Ruff, and Bandit.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
