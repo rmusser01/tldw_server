@@ -2230,7 +2230,7 @@ def migration_097_seed_notes_graph_semantic_manage_permission(
     if permission_insert.rowcount == 0:
         conn.commit()
         logger.info(
-            "Migration 096: Permission already exists; preserving role mappings"
+            "Migration 097: Permission already exists; preserving role mappings"
         )
         return
     conn.execute(
