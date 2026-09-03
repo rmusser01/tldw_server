@@ -1,0 +1,74 @@
+# WebUI, Extension, and API Contracts Static Evidence
+
+Generated: 2026-06-27
+Domain: WebUI, Extension, and API Contracts
+Source report: Docs/superpowers/reviews/2026-06-27-repo-audit/domains/webui-extension-api-contracts.md
+
+## Local Verifier
+
+Command run from apps/packages/ui:
+
+node ../../extension/scripts/verify-openapi-client-paths.mjs
+
+Result:
+
+- Exit code 0.
+- Generated the backend OpenAPI contract from tldw_Server_API.app.main via the repository virtual environment.
+- Verified 303 ClientPath entries against OpenAPI.
+- Verified 49 MEDIA_ADD_SCHEMA_FALLBACK fields against /api/v1/media/add.
+- Warned that 10 reviewed client-path exceptions are outside the current OSS OpenAPI contract.
+- Eight of those exceptions are /api/v1/billing/* paths. The verifier text says public billing routes are intentionally absent from the OSS backend and points to tldw_Server_API/tests/Billing/test_billing_public_api_removed.py.
+
+## CANDIDATE-webui-extension-api-contracts-001
+
+Finding ID: AUDIT-2026-06-27-WEBUI-001
+Title: Billing settings call public billing routes that the OSS API intentionally omits
+
+Evidence:
+
+- apps/packages/ui/src/components/Option/Settings/tldw.tsx:214 guards billing loading only with multi-user login state.
+- apps/packages/ui/src/components/Option/Settings/tldw.tsx:223 calls /api/v1/billing/plans.
+- apps/packages/ui/src/components/Option/Settings/tldw.tsx:227 calls /api/v1/billing/subscription.
+- apps/packages/ui/src/components/Option/Settings/tldw.tsx:231 calls /api/v1/billing/usage.
+- apps/packages/ui/src/components/Option/Settings/tldw.tsx:302 calls /api/v1/billing/invoices?limit=20.
+- apps/packages/ui/src/components/Option/Settings/tldw.tsx:621 calls /api/v1/billing/checkout.
+- apps/packages/ui/src/components/Option/Settings/tldw.tsx:648 calls /api/v1/billing/portal.
+- apps/packages/ui/src/components/Option/Settings/tldw.tsx:670 calls /api/v1/billing/subscription/cancel.
+- apps/packages/ui/src/components/Option/Settings/tldw.tsx:696 calls /api/v1/billing/subscription/resume.
+- apps/packages/ui/src/components/Option/Settings/tldw.tsx:885 renders the billing settings when authMode is multi-user and the user is logged in.
+- apps/packages/ui/src/components/Option/Settings/tldw-settings-tabs.tsx:21 and :102 show the billing tab on the same condition.
+- tldw_Server_API/tests/Billing/test_billing_public_api_removed.py:14 asserts no public /api/v1/billing route is registered in the OSS app.
+- apps/extension/scripts/verify-openapi-client-paths.mjs:41 lists /api/v1/billing/* paths as known missing client paths.
+
+Conclusion:
+
+This is a client/backend API contract mismatch in the OSS deployment path. The UI presents and calls billing routes based on login state, while the backend intentionally does not expose those routes.
+
+## CANDIDATE-webui-extension-api-contracts-002
+
+Finding ID: AUDIT-2026-06-27-WEBUI-002
+Title: Speech playground TTS streaming uses query-token WebSocket auth rejected by default
+
+Evidence:
+
+- apps/packages/ui/src/components/Option/Speech/SpeechPlaygroundPage.tsx:1475 selects the JWT or API key token.
+- apps/packages/ui/src/components/Option/Speech/SpeechPlaygroundPage.tsx:1486 builds a ws:// URL.
+- apps/packages/ui/src/components/Option/Speech/SpeechPlaygroundPage.tsx:1487 appends ?token= to /api/v1/audio/stream/tts.
+- apps/packages/ui/src/components/Option/Speech/SpeechPlaygroundPage.tsx:1488 opens the WebSocket without sending an initial auth frame first.
+- tldw_Server_API/app/api/v1/endpoints/audio/audio_streaming.py:2955 defines the /stream/tts WebSocket route.
+- tldw_Server_API/app/api/v1/endpoints/audio/audio_streaming.py:2963 documents that initial auth message is supported and query-token auth is legacy.
+- tldw_Server_API/app/api/v1/endpoints/audio/audio_streaming.py:2966 says query-string auth is accepted only when AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH is enabled.
+- tldw_Server_API/app/core/Audio/streaming_service.py:524 disables legacy query-string token auth by default because URLs are captured in logs and browser history.
+- tldw_Server_API/app/core/Audio/streaming_service.py:526 and :618 only read query tokens when the explicit allow flag is enabled.
+- tldw_Server_API/tests/Audio/test_audio_streaming_service_core.py:37 tests that query-token auth is rejected by default for audio.stream.tts.
+- tldw_Server_API/tests/Audio/test_audio_streaming_service_core.py:67 tests that query-token auth works only when AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH is explicitly enabled.
+
+Conclusion:
+
+This is a streaming API contract mismatch. The browser client depends on a legacy auth mode that the backend rejects by default for the exact endpoint.
+
+## Residual Risk
+
+- Static inspection covered the scoped API client, extension, streaming, billing, upload, and job-status areas, plus the provided endpoint and test inventories.
+- Runtime browser and server reproduction was not performed because the domain-agent rules prohibit starting services, Docker, dependency installation, and network access.
+- The repo contains a large frontend surface, so broad scans were combined with focused review of the highest-risk API-contract call sites rather than line-by-line inspection of every TS/TSX file.
