@@ -21,6 +21,9 @@ from tldw_Server_API.app.services import storage_quota_service
 class _FakeStorage:
     def __init__(self) -> None:
         self.calls: List[Dict[str, Any]] = []
+        self.delete_calls: List[str] = []
+        self.delete_error: Exception | None = None
+        self.delete_result = True
 
     async def store(
         self,
@@ -49,6 +52,12 @@ class _FakeStorage:
         )
         return f"storage/{media_id}/{filename}"
 
+    async def delete(self, path: str) -> bool:
+        self.delete_calls.append(path)
+        if self.delete_error is not None:
+            raise self.delete_error
+        return self.delete_result
+
 
 class _FakeDB:
     def __init__(self) -> None:
@@ -58,6 +67,16 @@ class _FakeDB:
 
     def insert_media_file(self, **kwargs: Any) -> None:
         self.insert_calls.append(kwargs)
+
+
+class _FailingMediaFileDB(_FakeDB):
+    def __init__(self, error: BaseException | None = None) -> None:
+        super().__init__()
+        self.error = error or RuntimeError("media file registration failed")
+
+    def insert_media_file(self, **kwargs: Any) -> None:
+        super().insert_media_file(**kwargs)
+        raise self.error
 
 
 class _FakeQuotaService:
@@ -236,6 +255,227 @@ async def test_original_storage_uses_processing_source(monkeypatch, fake_db, fak
     stored_payloads = {call["data"] for call in storage.calls}
     assert stored_payloads == {b"file-one", b"file-two"}
     assert len(db.insert_calls) == 2
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_original_storage_deletes_blob_when_media_file_registration_fails(monkeypatch, fake_storage):
+    storage = fake_storage
+    db = _FailingMediaFileDB()
+
+    async def fake_save_uploaded_files(_files, temp_dir, **_kwargs):
+        file_path = Path(temp_dir) / "stored_one.pdf"
+        file_path.write_bytes(b"file-one")
+        return [{"path": file_path, "original_filename": "source.pdf"}], []
+
+    async def fake_process_doc_item_fn(
+        *,
+        item_input_ref: str,
+        processing_source: str,
+        media_type: Any,
+        **_kwargs: Any,
+    ) -> Dict[str, Any]:
+        return {
+            "status": "Success",
+            "input_ref": item_input_ref,
+            "processing_source": str(processing_source),
+            "media_type": media_type,
+            "metadata": {},
+            "content": "content",
+            "analysis": None,
+            "summary": None,
+            "analysis_details": None,
+            "db_id": 1,
+            "db_message": "ok",
+        }
+
+    monkeypatch.setattr(input_sourcing, "save_uploaded_files", fake_save_uploaded_files)
+    monkeypatch.setattr(ingestion_persistence, "process_document_like_item", fake_process_doc_item_fn)
+    monkeypatch.setattr(Storage, "get_storage_backend", lambda: storage)
+    monkeypatch.setattr(storage_quota_service, "StorageQuotaService", _FakeQuotaService)
+
+    form_data = SimpleNamespace(
+        media_type="pdf",
+        urls=[],
+        keep_original_file=True,
+        perform_chunking=False,
+        perform_analysis=False,
+        generate_embeddings=False,
+    )
+
+    response = await ingestion_persistence.add_media_orchestrate(
+        background_tasks=BackgroundTasks(),
+        form_data=form_data,
+        files=[object()],
+        db=db,
+        current_user=SimpleNamespace(id=1),
+        usage_log=SimpleNamespace(log_event=lambda *_args, **_kwargs: None),
+    )
+
+    body = json.loads(response.body)
+    result = body["results"][0]
+
+    assert storage.delete_calls == ["storage/1/original.pdf"]
+    assert result["original_file_stored"] is False
+    assert "original_file_path" not in result
+    assert len(db.insert_calls) == 1
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_generic_registration_failure_is_not_masked_by_cleanup_failure(monkeypatch, fake_storage):
+    storage = fake_storage
+    storage.delete_error = Exception("generic cleanup failure")
+    db = _FailingMediaFileDB(error=Exception("generic registration failure"))
+
+    async def fake_save_uploaded_files(_files, temp_dir, **_kwargs):
+        file_path = Path(temp_dir) / "stored_one.pdf"
+        file_path.write_bytes(b"file-one")
+        return [{"path": file_path, "original_filename": "source.pdf"}], []
+
+    async def fake_process_doc_item_fn(
+        *,
+        item_input_ref: str,
+        processing_source: str,
+        media_type: Any,
+        **_kwargs: Any,
+    ) -> Dict[str, Any]:
+        return {
+            "status": "Success",
+            "input_ref": item_input_ref,
+            "processing_source": str(processing_source),
+            "media_type": media_type,
+            "metadata": {},
+            "content": "content",
+            "analysis": None,
+            "summary": None,
+            "analysis_details": None,
+            "db_id": 1,
+            "db_message": "ok",
+        }
+
+    monkeypatch.setattr(input_sourcing, "save_uploaded_files", fake_save_uploaded_files)
+    monkeypatch.setattr(ingestion_persistence, "process_document_like_item", fake_process_doc_item_fn)
+    monkeypatch.setattr(Storage, "get_storage_backend", lambda: storage)
+    monkeypatch.setattr(storage_quota_service, "StorageQuotaService", _FakeQuotaService)
+
+    form_data = SimpleNamespace(
+        media_type="pdf",
+        urls=[],
+        keep_original_file=True,
+        perform_chunking=False,
+        perform_analysis=False,
+        generate_embeddings=False,
+    )
+
+    with pytest.raises(Exception, match="generic registration failure"):
+        await ingestion_persistence.add_media_orchestrate(
+            background_tasks=BackgroundTasks(),
+            form_data=form_data,
+            files=[object()],
+            db=db,
+            current_user=SimpleNamespace(id=1),
+            usage_log=SimpleNamespace(log_event=lambda *_args, **_kwargs: None),
+        )
+
+    assert storage.delete_calls == ["storage/1/original.pdf"]
+    assert len(db.insert_calls) == 1
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("delete_error", "delete_result", "expected_log"),
+    [
+        (
+            Exception("delete failed"),
+            True,
+            "Failed to delete stored original file storage/1/original.pdf after registration failure",
+        ),
+        (
+            None,
+            False,
+            "Stored original file storage/1/original.pdf was not deleted after registration failure",
+        ),
+    ],
+)
+async def test_original_storage_cleanup_failure_is_logged_without_masking_registration_error(
+    monkeypatch,
+    fake_storage,
+    delete_error,
+    delete_result,
+    expected_log,
+):
+    storage = fake_storage
+    storage.delete_error = delete_error
+    storage.delete_result = delete_result
+    db = _FailingMediaFileDB()
+    warning_messages: List[str] = []
+    sink_id = ingestion_persistence.logger.add(
+        lambda message: warning_messages.append(str(message)),
+        level="WARNING",
+    )
+
+    async def fake_save_uploaded_files(_files, temp_dir, **_kwargs):
+        file_path = Path(temp_dir) / "stored_one.pdf"
+        file_path.write_bytes(b"file-one")
+        return [{"path": file_path, "original_filename": "source.pdf"}], []
+
+    async def fake_process_doc_item_fn(
+        *,
+        item_input_ref: str,
+        processing_source: str,
+        media_type: Any,
+        **_kwargs: Any,
+    ) -> Dict[str, Any]:
+        return {
+            "status": "Success",
+            "input_ref": item_input_ref,
+            "processing_source": str(processing_source),
+            "media_type": media_type,
+            "metadata": {},
+            "content": "content",
+            "analysis": None,
+            "summary": None,
+            "analysis_details": None,
+            "db_id": 1,
+            "db_message": "ok",
+        }
+
+    monkeypatch.setattr(input_sourcing, "save_uploaded_files", fake_save_uploaded_files)
+    monkeypatch.setattr(ingestion_persistence, "process_document_like_item", fake_process_doc_item_fn)
+    monkeypatch.setattr(Storage, "get_storage_backend", lambda: storage)
+    monkeypatch.setattr(storage_quota_service, "StorageQuotaService", _FakeQuotaService)
+
+    form_data = SimpleNamespace(
+        media_type="pdf",
+        urls=[],
+        keep_original_file=True,
+        perform_chunking=False,
+        perform_analysis=False,
+        generate_embeddings=False,
+    )
+
+    try:
+        response = await ingestion_persistence.add_media_orchestrate(
+            background_tasks=BackgroundTasks(),
+            form_data=form_data,
+            files=[object()],
+            db=db,
+            current_user=SimpleNamespace(id=1),
+            usage_log=SimpleNamespace(log_event=lambda *_args, **_kwargs: None),
+        )
+    finally:
+        ingestion_persistence.logger.remove(sink_id)
+
+    body = json.loads(response.body)
+    result = body["results"][0]
+
+    assert storage.delete_calls == ["storage/1/original.pdf"]
+    assert result["original_file_stored"] is False
+    assert any(
+        expected_log in message for message in warning_messages
+    )
 
 
 @pytest.mark.unit

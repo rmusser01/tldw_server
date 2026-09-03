@@ -3320,15 +3320,35 @@ async def add_media_orchestrate(
                                     logger.debug("Failed to close original file handle for {}", source_file)
 
                             # Insert database record
-                            db.insert_media_file(
-                                media_id=media_id,
-                                file_type="original",
-                                storage_path=storage_path,
-                                original_filename=original_filename,
-                                file_size=file_size,
-                                mime_type=mime_type,
-                                checksum=checksum,
-                            )
+                            try:
+                                db.insert_media_file(
+                                    media_id=media_id,
+                                    file_type="original",
+                                    storage_path=storage_path,
+                                    original_filename=original_filename,
+                                    file_size=file_size,
+                                    mime_type=mime_type,
+                                    checksum=checksum,
+                                )
+                            except Exception:  # noqa: BLE001 - cleanup must run for any registration failure
+                                try:
+                                    deleted = await storage.delete(storage_path)
+                                    if not deleted:
+                                        logger.warning(
+                                            "Stored original file {} was not deleted after registration failure "
+                                            "for media_id={}",
+                                            storage_path,
+                                            media_id,
+                                        )
+                                except Exception as cleanup_err:  # noqa: BLE001 - cleanup failure must not mask registration error
+                                    logger.warning(
+                                        "Failed to delete stored original file {} after registration failure "
+                                        "for media_id={}: {}",
+                                        storage_path,
+                                        media_id,
+                                        cleanup_err,
+                                    )
+                                raise
 
                             logger.info(f"Stored original file for media_id={media_id}: {storage_path}")
                             result["original_file_stored"] = True
