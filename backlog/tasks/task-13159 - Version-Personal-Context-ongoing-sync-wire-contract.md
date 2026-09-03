@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@codex'
 created_date: '2026-09-03 13:39'
-updated_date: '2026-09-03 20:11'
+updated_date: '2026-09-03 20:28'
 labels:
   - personal-context
   - sync
@@ -51,7 +51,7 @@ ADR required: no new ADR. Existing backlog/decisions/002-personal-context-profil
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Defined strict ongoing-sync contract models, fail-closed versioned routes, and deterministic schema/provenance artifacts. Targeted verification passed: 259 tests, Ruff, and Bandit.
+Completed Fix Round 1: exported cleanup acknowledgement and proof-bearing version-one conflict-list response; enforced exact bounded exchange/digest values; rejected reserved home-authority spoofing and Personal Context conflict claims against non-Personal-Context stored conflicts. Verification: 264 targeted tests passed; Ruff, Bandit, artifact reproducibility, and diff hygiene passed.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
