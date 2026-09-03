@@ -7,6 +7,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from loguru import logger
 
 from tldw_Server_API.app.api.v1.endpoints import notes_graph as endpoint
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
@@ -432,21 +433,40 @@ def test_semantic_conversion_audit_failure_preserves_committed_manual_link(
         raise RuntimeError("audit unavailable")
 
     monkeypatch.setattr(endpoint, "_audit_semantic_conversion", fail_audit)
-
-    response = client.post(
-        f"/api/v1/notes/{source}/links",
-        json={
-            "to_note_id": target,
-            "semantic_conversion": {"generation_id": "generation-a"},
-        },
-        headers=_headers(),
-    )
+    records: list[dict[str, object]] = []
+    sink_id = logger.add(lambda message: records.append(message.record), level="WARNING")
+    try:
+        response = client.post(
+            f"/api/v1/notes/{source}/links",
+            json={
+                "to_note_id": target,
+                "semantic_conversion": {"generation_id": "generation-a"},
+            },
+            headers=_headers(),
+        )
+    finally:
+        logger.remove(sink_id)
 
     assert response.status_code == 200, response.text
     edge = response.json()["edge"]
     stored = db.notes_link_store.get(edge["edge_id"])
     assert stored is not None
     assert {stored.source_note_id, stored.target_note_id} == {source, target}
+    warning = next(
+        record
+        for record in records
+        if record["message"] == "Notes semantic conversion audit emission failed"
+    )
+    expected_context = {
+        "operation": "notes_semantic.manual_conversion",
+        "actor_user_id": "1",
+        "dataset_id": "legacy:1",
+        "source_note_id": source,
+        "target_note_id": target,
+        "generation_id": "generation-a",
+    }
+    assert expected_context.items() <= warning["extra"].items()
+    assert warning["exception"] is not None
 
 
 @pytest.mark.parametrize(

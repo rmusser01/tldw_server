@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import closing
 
 import pytest
 
@@ -62,13 +63,13 @@ def test_semantic_manage_permission_is_catalogued_for_single_user_defaults() -> 
 
 
 def test_migration_097_grants_semantic_management_to_approved_roles() -> None:
-    conn = sqlite3.connect(":memory:")
-    _create_rbac_schema(conn)
+    with closing(sqlite3.connect(":memory:")) as conn:
+        _create_rbac_schema(conn)
 
-    migration_097_seed_notes_graph_semantic_manage_permission(conn)
-    migration_097_seed_notes_graph_semantic_manage_permission(conn)
+        migration_097_seed_notes_graph_semantic_manage_permission(conn)
+        migration_097_seed_notes_graph_semantic_manage_permission(conn)
 
-    assert _semantic_grants(conn) == {"admin", "user", "moderator"}
+        assert _semantic_grants(conn) == {"admin", "user", "moderator"}
     assert get_authnz_migrations()[-1].version == 97
 
 

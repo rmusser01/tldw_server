@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import threading
-import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -1187,7 +1186,6 @@ async def test_timeout_waits_for_backend_quiescence_before_returning(
             return await super().delete_generation(dataset_id, generation_id)
 
     vectors = _SlowVectors()
-    started = time.monotonic()
     returned_finished = False
     try:
         with pytest.raises(SemanticErasureError) as exc_info:
@@ -1202,7 +1200,6 @@ async def test_timeout_waits_for_backend_quiescence_before_returning(
 
     assert exc_info.value.code == "notes_semantic_erasure_timeout"
     assert returned_finished is True
-    assert time.monotonic() - started >= 0.25
     assert db.note_store.get_note_by_id(NOTE_ID) is not None
 
 

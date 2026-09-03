@@ -56,6 +56,9 @@ from tldw_Server_API.app.core.Notes_Graph.graph_service import (
     encode_notes_link_cursor,
     notes_link_cursor_binding,
 )
+from tldw_Server_API.app.core.Notes_Graph.manual_link_service import (
+    create_manual_note_link,
+)
 from tldw_Server_API.app.core.Notes_Graph.semantic_api import (
     load_semantic_settings,
     resolve_semantic_capabilities,
@@ -217,12 +220,15 @@ def _semantic_projection_http_error(exc: SemanticProjectionError) -> HTTPExcepti
         status_code = status.HTTP_404_NOT_FOUND
     elif exc.code in {
         "notes_semantic_conversion_generation_stale",
+        "notes_semantic_conversion_manual_link_exists",
         "notes_semantic_conversion_pair_mismatch",
         "notes_semantic_cursor_mismatch",
     }:
         status_code = status.HTTP_409_CONFLICT
     if exc.code == "notes_semantic_cursor_mismatch":
         message = "The semantic graph cursor is stale or mismatched."
+    elif exc.code == "notes_semantic_conversion_manual_link_exists":
+        message = "A manual Notes link already exists."
     return HTTPException(
         status_code=status_code,
         detail={
@@ -359,21 +365,6 @@ def _link_error(exc: Exception) -> HTTPException:
     if isinstance(exc, (InputError, CharactersRAGDBError)):
         return map_db_error_to_http(exc, default_detail="Notes link operation failed")
     return HTTPException(status_code=500, detail="Notes link operation failed")
-
-
-def _has_existing_manual_link(
-    db: CharactersRAGDB,
-    *,
-    source_note_id: str,
-    target_note_id: str,
-) -> bool:
-    """Confirm that a duplicate conversion already has an authoritative link."""
-
-    expected_pair = {source_note_id, target_note_id}
-    return any(
-        link.type == "manual" and not link.deleted and {link.source_note_id, link.target_note_id} == expected_pair
-        for link in db.notes_link_store.list_for_notes([source_note_id, target_note_id])
-    )
 
 
 def _utc_now() -> str:
@@ -744,107 +735,34 @@ async def create_manual_link(
     to_note_id = _normalize_note_id(link.to_note_id)
 
     try:
-        directed = bool(link.directed)
-        weight = link.weight if link.weight is not None else 1.0
-        conversion = link.semantic_conversion
-        if conversion is not None:
-            owner_user_id = str(current_user.id_str)
-            dataset_key = _graph_dataset_key(
-                user_id=owner_user_id,
-                dataset_id=link.dataset_id,
-            )
-            service = NoteGraphService(
-                user_id=owner_user_id,
-                dataset_id=dataset_key,
-                db=db,
-                cache=_GRAPH_CACHE,
-            )
-            projector = _build_semantic_graph_projector(
-                owner_user_id=owner_user_id,
-                dataset_id=dataset_key,
-                db=db,
-                graph_service=service,
-            )
-            try:
-                await projector.validate_conversion(
-                    source_note_id=from_note_id,
-                    target_note_id=to_note_id,
-                    generation_id=conversion.generation_id,
-                )
-            except SemanticProjectionError as exc:
-                raise _semantic_projection_http_error(exc) from exc
-            directed = False
-            weight = 1.0
-        coordinator = resolve_notes_link_coordinator(
-            user_id=str(current_user.id_str),
-            note_db=db,
+        stored = await create_manual_note_link(
+            owner_user_id=str(current_user.id_str),
+            db=db,
+            source_note_id=from_note_id,
+            target_note_id=to_note_id,
+            directed=bool(link.directed),
+            weight=link.weight if link.weight is not None else 1.0,
+            label=link.label,
+            properties=dict(link.properties or {}),
             dataset_id=link.dataset_id,
+            idempotency_key=link.idempotency_key,
+            semantic_generation_id=(
+                link.semantic_conversion.generation_id
+                if link.semantic_conversion is not None
+                else None
+            ),
+            graph_cache=_GRAPH_CACHE,
+            projector_factory=_build_semantic_graph_projector,
+            audit_emitter=_audit_semantic_conversion,
+            coordinator_resolver=resolve_notes_link_coordinator,
         )
-        if coordinator is not None:
-            edge = coordinator.create(
-                source_note_id=from_note_id,
-                target_note_id=to_note_id,
-                directed=directed,
-                weight=weight,
-                label=link.label,
-                properties=link.properties or {},
-                idempotency_key=link.idempotency_key,
-            )
-            edge_response = _link_response(edge)
-        else:
-            legacy_metadata = dict(link.properties or {})
-            if link.label is not None:
-                legacy_metadata["label"] = link.label
-            edge_response = db.create_manual_note_edge(
-                user_id=str(current_user.id_str),
-                from_note_id=from_note_id,
-                to_note_id=to_note_id,
-                directed=directed,
-                weight=weight,
-                metadata=legacy_metadata,
-                created_by=f"user:{current_user.id_str}",
-            )
-            stored_edge_id = str(edge_response.get("edge_id") or "")
-            if stored_edge_id and hasattr(db, "notes_link_store"):
-                stored = db.notes_link_store.get(stored_edge_id)
-                if stored is not None:
-                    edge_response = _link_response(stored)
-        if conversion is not None:
-            try:
-                await _audit_semantic_conversion(
-                    actor_user_id=str(current_user.id_str),
-                    source_note_id=from_note_id,
-                    target_note_id=to_note_id,
-                    generation_id=conversion.generation_id,
-                    result="created",
-                    dataset_id=dataset_key,
-                )
-            except Exception:  # noqa: BLE001 - the link is already authoritative.
-                logger.warning("Notes semantic conversion audit emission failed")
+        edge_response = _link_response(stored) if isinstance(stored, NotesLink) else stored
         return {"status": "created", "edge": edge_response}
     except HTTPException:
         raise
+    except SemanticProjectionError as exc:
+        raise _semantic_projection_http_error(exc) from exc
     except Exception as exc:  # noqa: BLE001 - map the closed link error contract.
-        if link.semantic_conversion is not None and isinstance(
-            exc,
-            (ConflictError, NotesLinkPreflightError),
-        ):
-            try:
-                manual_link_exists = _has_existing_manual_link(
-                    db,
-                    source_note_id=from_note_id,
-                    target_note_id=to_note_id,
-                )
-            except (CharactersRAGDBError, InputError):
-                manual_link_exists = False
-            if manual_link_exists:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail={
-                        "error_code": ("notes_semantic_conversion_manual_link_exists"),
-                        "message": "A manual Notes link already exists.",
-                    },
-                ) from exc
         raise _link_error(exc) from exc
 
 
