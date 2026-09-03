@@ -20,6 +20,8 @@ from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
     SyncBlobUploadSessionResponse,
     SyncCapabilitiesResponse,
     SyncConflictResolveRequest,
+    SyncPersonalContextActivationAcknowledgeRequest,
+    SyncPersonalContextPurgeRequest,
     SyncDatasetEnrollRequest,
     SyncKeyRecoveryBundleRecord,
     SyncKeyRecoveryBundleRequest,
@@ -170,6 +172,10 @@ def test_personal_context_capability_contract_is_typed_and_bounded() -> None:
     assert capabilities.personal_context.model_dump() == {
         "available": False,
         "blockers": ["personal_context_profile_key_unavailable"],
+        "ongoing_sync_version": 0,
+        "ongoing_sync_blockers": [],
+        "activation_epoch": None,
+        "continuity_token": None,
         "authorization_policy": "server_trusted_v1",
         "min_schema_version": 1,
         "max_schema_version": 1,
@@ -1491,6 +1497,129 @@ def test_push_request_requires_top_level_device_id():
             {
                 "dataset_id": "dataset-1",
                 "envelopes": [_m1_envelope_payload()],
+            }
+        )
+
+
+def _ongoing_exchange_proof() -> dict[str, object]:
+    return {
+        "ongoing_sync_version": 1,
+        "activation_epoch": "epoch_0123456789abcdef",
+        "continuity_token": "continuity_0123456789abcdef",
+    }
+
+
+def test_ongoing_sync_models_preserve_version_zero_until_readiness() -> None:
+    capabilities = api_sync_models.PersonalContextSyncCapabilitiesResponse()
+
+    assert capabilities.ongoing_sync_version == 0
+    assert capabilities.ongoing_sync_blockers == []
+    assert capabilities.activation_epoch is None
+    assert capabilities.continuity_token is None
+
+    with pytest.raises(ValidationError):
+        api_sync_models.PersonalContextSyncCapabilitiesResponse.model_validate(
+            {
+                "ongoing_sync_version": 1,
+                "activation_epoch": "epoch_0123456789abcdef",
+                "continuity_token": "continuity_0123456789abcdef",
+                "ongoing_sync_blockers": ["personal_context_transport_unavailable"],
+            }
+        )
+
+
+def test_ongoing_exchange_shapes_are_available_on_sync_boundaries() -> None:
+    proof = _ongoing_exchange_proof()
+    push = SyncPushRequest.model_validate(
+        {
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "personal_context_exchange": proof,
+        }
+    )
+    pull = api_sync_models.SyncPullResponse.model_validate(
+        {
+            "dataset_id": "dataset-1",
+            "personal_context_relay": {
+                "state": "personal_context_relay_pending",
+                "scan_watermark": "cursor_0123456789abcdef",
+            },
+            "personal_context_exchange": proof,
+        }
+    )
+    response = SyncPushResponse.model_validate(
+        {
+            "dataset_id": "dataset-1",
+            "personal_context_exchange": proof,
+        }
+    )
+
+    assert push.personal_context_exchange is not None
+    assert pull.personal_context_relay is not None
+    assert response.personal_context_exchange == push.personal_context_exchange
+
+
+def test_personal_context_conflict_exchange_requires_protected_candidates() -> None:
+    proof = _ongoing_exchange_proof()
+    request = SyncConflictResolveRequest.model_validate(
+        {
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "personal_context_exchange": proof,
+            "resolutions": [
+                {
+                    "conflict_id": "conflict_0123456789abcdef",
+                    "action": "skip",
+                    "expected_local_envelope_id": "local_0123456789abcdef",
+                    "expected_remote_envelope_id": "remote_0123456789abcdef",
+                    "idempotency_key": "resolve_0123456789abcdef",
+                }
+            ],
+        }
+    )
+
+    assert request.resolutions[0].idempotency_key == "resolve_0123456789abcdef"
+    with pytest.raises(ValidationError):
+        SyncConflictResolveRequest.model_validate(
+            {
+                "dataset_id": "dataset-1",
+                "device_id": "device-1",
+                "personal_context_exchange": proof,
+                "resolutions": [{"conflict_id": "conflict_0123456789abcdef", "action": "skip"}],
+            }
+        )
+
+
+def test_ongoing_activation_and_purge_requests_are_strict() -> None:
+    proof = _ongoing_exchange_proof()
+    acknowledgment = SyncPersonalContextActivationAcknowledgeRequest.model_validate(
+        {
+            "dataset_id": "dataset_0123456789abcdef",
+            "device_id": "device_0123456789abcdef",
+            "activation_id": "activation_0123456789abcdef",
+            "baseline_digest": "a" * 64,
+            "local_receipt_id": "receipt_0123456789abcdef",
+            "personal_context_exchange": proof,
+        }
+    )
+    purge = SyncPersonalContextPurgeRequest.model_validate(
+        {
+            "dataset_id": "dataset_0123456789abcdef",
+            "device_id": "device_0123456789abcdef",
+            "request_id": "request_0123456789abcdef",
+            "expected_purge_generation": 0,
+            "idempotency_key": "purge_0123456789abcdef",
+            "signature": "s" * 32,
+        }
+    )
+
+    assert acknowledgment.personal_context_exchange.ongoing_sync_version == 1
+    assert purge.expected_purge_generation == 0
+    with pytest.raises(ValidationError):
+        SyncPersonalContextPurgeRequest.model_validate(
+            {
+                **purge.model_dump(),
+                "unexpected": "field",
             }
         )
 

@@ -602,6 +602,10 @@ class PersonalContextSyncCapabilities:
 
     available: bool = False
     blockers: tuple[str, ...] = ("personal_context_profile_key_unavailable",)
+    ongoing_sync_version: Literal[0, 1] = 0
+    ongoing_sync_blockers: tuple[str, ...] = ()
+    activation_epoch: str | None = None
+    continuity_token: str | None = None
     authorization_policy: Literal["server_trusted_v1"] = "server_trusted_v1"
     min_schema_version: int = 1
     max_schema_version: int = 1

@@ -230,6 +230,10 @@ def test_capabilities_endpoint_reports_supported_domains_and_encryption_posture(
         "max_proposals_per_turn": 5,
         "max_proposals_per_session": 25,
         "max_unresolved_proposals": 200,
+        "ongoing_sync_version": 0,
+        "ongoing_sync_blockers": [],
+        "activation_epoch": None,
+        "continuity_token": None,
     }
     assert body["domain_schemas"]["notes.note"]["upsert"]["properties"] == {
         "title": {"type": "string", "max_length": 255},
@@ -1126,6 +1130,73 @@ def test_pull_endpoint_maps_versioned_token_errors(
 
     assert response.status_code == expected_status
     assert response.json()["detail"]["error_code"] == error_code
+
+
+def test_ongoing_personal_context_routes_fail_closed_while_version_zero(
+    client: TestClient,
+) -> None:
+    acknowledgment = client.post(
+        "/api/v1/sync/personal-context/activation/acknowledge",
+        json={
+            "dataset_id": "dataset_0123456789abcdef",
+            "device_id": "device_0123456789abcdef",
+            "activation_id": "activation_0123456789abcdef",
+            "baseline_digest": "a" * 64,
+            "local_receipt_id": "receipt_0123456789abcdef",
+            "personal_context_exchange": {
+                "ongoing_sync_version": 1,
+                "activation_epoch": "epoch_0123456789abcdef",
+                "continuity_token": "continuity_0123456789abcdef",
+            },
+        },
+    )
+    purge = client.post(
+        "/api/v1/sync/personal-context/purge",
+        json={
+            "dataset_id": "dataset_0123456789abcdef",
+            "device_id": "device_0123456789abcdef",
+            "request_id": "request_0123456789abcdef",
+            "expected_purge_generation": 0,
+            "idempotency_key": "purge_0123456789abcdef",
+            "signature": "s" * 32,
+        },
+    )
+
+    assert acknowledgment.status_code == 409
+    assert purge.status_code == 409
+    assert acknowledgment.json()["detail"] == {
+        "code": "personal_context_ongoing_sync_unavailable"
+    }
+    assert purge.json()["detail"] == {
+        "code": "personal_context_ongoing_sync_unavailable"
+    }
+
+
+@pytest.mark.parametrize("path", ["pull", "conflicts"])
+def test_ongoing_personal_context_query_proof_rejects_half_present_pair(
+    client: TestClient,
+    path: str,
+) -> None:
+    response = client.get(
+        f"/api/v1/sync/{path}",
+        params={
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "personal_context_activation_epoch": "epoch_0123456789abcdef",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["error_code"] == "personal_context_exchange_incomplete"
+
+
+def test_conflict_list_page_is_bounded_to_twenty_items(client: TestClient) -> None:
+    response = client.get(
+        "/api/v1/sync/conflicts",
+        params={"dataset_id": "dataset-1", "limit": 21},
+    )
+
+    assert response.status_code == 422
 
 
 def test_background_sync_policy_lease_and_status_endpoints(
