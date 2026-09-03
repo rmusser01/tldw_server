@@ -15,11 +15,16 @@ from tldw_Server_API.app.core.AuthNZ.permissions import (
     NOTES_GRAPH_SEMANTIC_MANAGE,
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.exceptions import SemanticAPIError as CoreSemanticAPIError
 from tldw_Server_API.app.core.Notes_Graph.semantic_api import SemanticAPIError
 from tldw_Server_API.app.core.Sync.v2.notes_link_coordinator import (
     NotesLinkDatasetConflictError,
     NotesLinkSyncInactiveDatasetError,
 )
+
+
+def test_semantic_api_error_uses_shared_core_exception() -> None:
+    assert SemanticAPIError is CoreSemanticAPIError
 
 
 class _FakeAPI:

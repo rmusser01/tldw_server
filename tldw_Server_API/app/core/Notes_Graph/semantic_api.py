@@ -28,6 +28,7 @@ from tldw_Server_API.app.core.DB_Management.chacha.note_semantic_models import (
     SemanticOperationReceipt,
 )
 from tldw_Server_API.app.core.Embeddings.simplified_config import get_config
+from tldw_Server_API.app.core.exceptions import SemanticAPIError
 from tldw_Server_API.app.core.LLM_Calls.embeddings_adapter_registry import (
     get_embeddings_registry,
 )
@@ -65,18 +66,10 @@ _KNOWN_DIMENSIONS = {
 }
 
 
-class SemanticAPIError(RuntimeError):
-    """Stable HTTP-facing semantic application error."""
-
-    def __init__(self, status_code: int, code: str) -> None:
-        self.status_code = status_code
-        self.code = code
-        self.failure_code = code
-        super().__init__(code)
-
-
 @dataclass(frozen=True, slots=True)
 class SemanticStatusFacts:
+    """Durable facts used to derive the public semantic-index status."""
+
     desired_state: str
     has_active_generation: bool
     active_generation_usable: bool
