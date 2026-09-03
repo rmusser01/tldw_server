@@ -112,6 +112,7 @@ class TTSProvider(Enum):
     SUPERTONIC2 = "supertonic2"
     POCKET_TTS = "pocket_tts"
     POCKET_TTS_CPP = "pocket_tts_cpp"
+    AUDIO_CPP = "audio_cpp"
     ECHO_TTS = "echo_tts"
     QWEN3_TTS = "qwen3_tts"
     OMNIVOICE = "omnivoice"
@@ -339,6 +340,7 @@ class TTSAdapterRegistry:
         TTSProvider.SUPERTONIC2: "tldw_Server_API.app.core.TTS.adapters.supertonic2_adapter.Supertonic2OnnxAdapter",
         TTSProvider.POCKET_TTS: "tldw_Server_API.app.core.TTS.adapters.pocket_tts_adapter.PocketTTSOnnxAdapter",
         TTSProvider.POCKET_TTS_CPP: "tldw_Server_API.app.core.TTS.adapters.pocket_tts_cpp_adapter.PocketTTSCppAdapter",
+        TTSProvider.AUDIO_CPP: "tldw_Server_API.app.core.TTS.adapters.audio_cpp_adapter.AudioCppTTSAdapter",
         TTSProvider.ECHO_TTS: "tldw_Server_API.app.core.TTS.adapters.echo_tts_adapter.EchoTTSAdapter",
         TTSProvider.QWEN3_TTS: "tldw_Server_API.app.core.TTS.adapters.qwen3_tts_adapter.Qwen3TTSAdapter",
         TTSProvider.OMNIVOICE: "tldw_Server_API.app.core.TTS.adapters.omnivoice_adapter.OmniVoiceAdapter",
@@ -1391,7 +1393,7 @@ class TTSAdapterFactory:
         "dia-1.6b": TTSProvider.DIA,
 
         # Chatterbox models
-        **{alias: TTSProvider.CHATTERBOX for alias in CHATTERBOX_MODEL_PROVIDER_ALIASES},
+        **dict.fromkeys(CHATTERBOX_MODEL_PROVIDER_ALIASES, TTSProvider.CHATTERBOX),
 
         # VibeVoice models
         "vibevoice": TTSProvider.VIBEVOICE,
@@ -1445,6 +1447,12 @@ class TTSAdapterFactory:
         # PocketTTS.cpp models
         "pocket_tts_cpp": TTSProvider.POCKET_TTS_CPP,
         "pocket-tts-cpp": TTSProvider.POCKET_TTS_CPP,
+
+        # audio.cpp models use explicit namespaced aliases only. Bare
+        # "pocket-tts" remains mapped to the existing PocketTTS provider.
+        "audio_cpp:pocket-tts": TTSProvider.AUDIO_CPP,
+        "audio-cpp/pocket-tts": TTSProvider.AUDIO_CPP,
+        "audiocpp/pocket-tts": TTSProvider.AUDIO_CPP,
 
         # Echo-TTS models
         "echo-tts": TTSProvider.ECHO_TTS,
