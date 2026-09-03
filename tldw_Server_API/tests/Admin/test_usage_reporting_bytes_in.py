@@ -20,20 +20,12 @@ def _setup_env(tmp_path):
 
 async def _prepare_tables_and_seed_bytes_in():
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+    from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
     pool = await get_db_pool()
 
     # Ensure two users exist
-    import uuid as _uuid
-    await pool.execute(
-        "INSERT OR IGNORE INTO users (uuid, username, email, password_hash, is_active) VALUES (?,?,?,?,1)",
-        str(_uuid.uuid4()), "u_bytes1", "u_bytes1@example.com", "x"
-    )
-    await pool.execute(
-        "INSERT OR IGNORE INTO users (uuid, username, email, password_hash, is_active) VALUES (?,?,?,?,1)",
-        str(_uuid.uuid4()), "u_bytes2", "u_bytes2@example.com", "x"
-    )
-    u1 = await pool.fetchval("SELECT id FROM users WHERE username = ?", "u_bytes1")
-    u2 = await pool.fetchval("SELECT id FROM users WHERE username = ?", "u_bytes2")
+    u1 = await ensure_test_user(pool, "u_bytes1", "u_bytes1@example.com")
+    u2 = await ensure_test_user(pool, "u_bytes2", "u_bytes2@example.com")
 
     # Create usage_log with bytes_in column and usage_daily with bytes_in_total
     await pool.execute(

@@ -21,15 +21,11 @@ def _setup_env(tmp_path):
 
 async def _insert_usage_rows_sqlite():
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+    from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
 
     pool = await get_db_pool()
     # Create a test user to satisfy FK on usage_daily.user_id
-    import uuid as _uuid
-    await pool.execute(
-        "INSERT OR IGNORE INTO users (uuid, username, email, password_hash, is_active) VALUES (?,?,?,?,1)",
-        str(_uuid.uuid4()), "usageuser", "usageuser@example.com", "x"
-    )
-    user_id = await pool.fetchval("SELECT id FROM users WHERE username = ?", "usageuser")
+    user_id = await ensure_test_user(pool, "usageuser", "usageuser@example.com")
     # Ensure usage tables exist (migrations may be skipped in some single-user SQLite setups)
     await pool.execute(
         """
