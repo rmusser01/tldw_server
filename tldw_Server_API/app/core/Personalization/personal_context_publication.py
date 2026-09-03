@@ -431,12 +431,14 @@ class PersonalContextPublicationJournal:
     ) -> None:
         """Destroy one old-generation row DEK during an explicit profile purge."""
 
+        if row["row_state"] == "shredded":
+            return
         updated = connection.execute(
             """
             UPDATE personal_context_publication_rows
             SET wrapped_dek = ?, wrapped_dek_nonce = ?, row_state = 'shredded'
             WHERE profile_id = ? AND profile_publication_sequence = ?
-              AND batch_ordinal = ? AND row_state != 'shredded'
+              AND batch_ordinal = ?
             """,
             (
                 secrets.token_bytes(len(bytes(row["wrapped_dek"]))),

@@ -31,6 +31,9 @@ from tldw_profile_core import (
     SyncMode,
 )
 
+from tldw_Server_API.app.core.DB_Management.Personal_Context_Repository import (
+    _DIRECT_CONFIRMED_FULL_PROFILE_PURGE,
+)
 from tldw_Server_API.app.core.exceptions import (
     ProfileConflictError,
     ProfileKeyCollisionError,
@@ -1282,6 +1285,7 @@ class PersonalContextService:
             self._repository.purge_profile(
                 barrier,
                 expected_manifest_version=manifest.current_version_id,
+                journal_destruction_authorization=_DIRECT_CONFIRMED_FULL_PROFILE_PURGE,
             )
         except ConcurrentProfileUpdateError as exc:
             raise ProfileConflictError("Personal context profile changed") from exc

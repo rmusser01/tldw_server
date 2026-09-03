@@ -61,6 +61,7 @@ _MAX_RECORD_HEADS = 1_000
 _MAX_SCOPE_HEADS = 1_000
 _MAX_LIST_ROWS = 1_000
 _SYNC_HISTORY_KEY_LABEL = b"tldw-personal-context-sync-history-v1"
+_DIRECT_CONFIRMED_FULL_PROFILE_PURGE = object()
 
 
 def _now_text() -> str:
@@ -1158,7 +1159,7 @@ class PersonalContextRepository:
                 if latest[identity] is not row
             ]
             for row in superseded:
-                journal.transition_row_state(connection, row, row_state="shredded")
+                journal.transition_row_state(connection, row, row_state="staged")
             return len(superseded)
 
     def has_sync_profile_reservation(self) -> bool:
@@ -2433,8 +2434,23 @@ class PersonalContextRepository:
         manifest: ProfileManifest,
         *,
         expected_manifest_version: str,
+        journal_destruction_authorization: object | None = None,
     ) -> None:
-        """Advance the purge barrier and remove every readable profile body."""
+        """Advance the purge barrier and remove every readable profile body.
+
+        Only the service's confirmed direct full-profile purge may pass the
+        private authorization capability that destroys old journal DEKs.
+        Replica/materializer purge application deliberately omits it.
+        """
+
+        if journal_destruction_authorization not in (
+            None,
+            _DIRECT_CONFIRMED_FULL_PROFILE_PURGE,
+        ):
+            raise PermissionError("direct purge authorization is invalid")
+        destroy_journal_bodies = (
+            journal_destruction_authorization is _DIRECT_CONFIRMED_FULL_PROFILE_PURGE
+        )
 
         with self._database.transaction(immediate=True) as connection:
             keys = self._keys.load(manifest.profile_id, connection=connection)
@@ -2457,23 +2473,23 @@ class PersonalContextRepository:
                 expected_version_id=expected_manifest_version,
             )
             self._append_publication(connection, keys, manifest=manifest)
-            old_publication_rows = connection.execute(
-                """
-                SELECT rows.*
-                FROM personal_context_publication_rows AS rows
-                JOIN personal_context_publication_batches AS batches
-                  ON batches.profile_id = rows.profile_id
-                 AND batches.profile_publication_sequence = rows.profile_publication_sequence
-                WHERE rows.profile_id = ? AND batches.purge_generation < ?
-                  AND rows.row_state != 'shredded'
-                """,
-                (manifest.profile_id, manifest.purge_generation),
-            ).fetchall()
-            for publication_row in old_publication_rows:
-                PersonalContextPublicationJournal.cryptographically_shred_row(
-                    connection,
-                    publication_row,
-                )
+            if destroy_journal_bodies:
+                old_publication_rows = connection.execute(
+                    """
+                    SELECT rows.*
+                    FROM personal_context_publication_rows AS rows
+                    JOIN personal_context_publication_batches AS batches
+                      ON batches.profile_id = rows.profile_id
+                     AND batches.profile_publication_sequence = rows.profile_publication_sequence
+                    WHERE rows.profile_id = ? AND batches.purge_generation < ?
+                    """,
+                    (manifest.profile_id, manifest.purge_generation),
+                ).fetchall()
+                for publication_row in old_publication_rows:
+                    PersonalContextPublicationJournal.cryptographically_shred_row(
+                        connection,
+                        publication_row,
+                    )
             connection.execute(
                 """
                 UPDATE personal_context_publication_batches

@@ -410,7 +410,7 @@ def test_compaction_keeps_latest_head_and_does_not_touch_newer_sequences(
             """
         ).fetchall()
 
-    assert older[0] == "shredded"
+    assert older[0] == "staged"
     assert {row[0] for row in newer} == {"pending"}
 
 
@@ -518,6 +518,137 @@ def test_purge_terminalizes_old_publications_and_makes_them_undecryptable(
     assert status[0] == "purge_terminal"
     with pytest.raises(EnvelopeAuthenticationError):
         PersonalContextPublicationJournal(keys).decrypt_row(purged_row)
+
+
+def test_relay_applied_purge_cannot_invoke_direct_journal_shredding(
+    service: PersonalContextService,
+    database: PersonalizationDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest = service.create_profile()
+    service.create_record(_record(service))
+    keys = service._repository.key_material_for_test(manifest.profile_id)
+
+    def unexpected_shredding(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("relay must not authorize journal destruction")
+
+    monkeypatch.setattr(
+        PersonalContextPublicationJournal,
+        "cryptographically_shred_row",
+        unexpected_shredding,
+    )
+
+    barrier = service.apply_sync_object(
+        domain="personal_context.purge",
+        value={
+            "schema_version": 1,
+            "profile_id": manifest.profile_id,
+            "purge_generation": 1,
+        },
+        actor_type="sync",
+        actor_id="device-a",
+    )
+
+    assert barrier["purge_generation"] == 1
+    with database.transaction() as connection:
+        old_row = connection.execute(
+            """
+            SELECT * FROM personal_context_publication_rows
+            WHERE profile_publication_sequence = 2 AND batch_ordinal = 0
+            """
+        ).fetchone()
+    assert PersonalContextPublicationJournal(keys).decrypt_row(old_row)[0] == "personal_context.record"
+
+
+def test_direct_purge_shreds_previously_compacted_old_generation_rows(
+    service: PersonalContextService,
+    database: PersonalizationDB,
+) -> None:
+    service.create_profile()
+    first = service.create_record(_record(service, record_id="compacted-record"))
+    service.update_record(
+        first.record_id,
+        RecordMutation(
+            payload={
+                "kind": "preference",
+                "subject": first.record_id,
+                "polarity": "like",
+                "value": "changed",
+            }
+        ),
+        expected_version_id=first.version_id,
+    )
+    keys = service._repository.key_material_for_test("profile-1")
+    service._repository.compact_pre_activation("profile-1", through_sequence=3)
+    with database.transaction() as connection:
+        compacted = connection.execute(
+            """
+            SELECT * FROM personal_context_publication_rows
+            WHERE profile_publication_sequence = 2 AND batch_ordinal = 0
+            """
+        ).fetchone()
+    assert PersonalContextPublicationJournal(keys).decrypt_row(compacted)[0] == "personal_context.record"
+
+    service.purge_profile(
+        mode="everywhere",
+        confirmation="DELETE EVERYWHERE",
+        expected_purge_generation=0,
+    )
+
+    with database.transaction() as connection:
+        shredded = connection.execute(
+            """
+            SELECT * FROM personal_context_publication_rows
+            WHERE profile_publication_sequence = 2 AND batch_ordinal = 0
+            """
+        ).fetchone()
+        current_generation = connection.execute(
+            """
+            SELECT * FROM personal_context_publication_rows
+            WHERE purge_generation = 1
+            """
+        ).fetchone()
+    with pytest.raises(EnvelopeAuthenticationError):
+        PersonalContextPublicationJournal(keys).decrypt_row(shredded)
+    assert PersonalContextPublicationJournal(keys).decrypt_row(current_generation)[0] == "personal_context.manifest"
+    with database.transaction(immediate=True) as connection:
+        PersonalContextPublicationJournal.cryptographically_shred_row(
+            connection,
+            shredded,
+        )
+    with pytest.raises(EnvelopeAuthenticationError):
+        PersonalContextPublicationJournal(keys).decrypt_row(shredded)
+
+
+def test_mutation_and_compaction_never_invoke_direct_journal_shredding(
+    service: PersonalContextService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service.create_profile()
+    first = service.create_record(_record(service, record_id="non-destructive-record"))
+
+    def unexpected_shredding(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("only direct confirmed purge may destroy journal data")
+
+    monkeypatch.setattr(
+        PersonalContextPublicationJournal,
+        "cryptographically_shred_row",
+        unexpected_shredding,
+    )
+    service.update_record(
+        first.record_id,
+        RecordMutation(
+            payload={
+                "kind": "preference",
+                "subject": first.record_id,
+                "polarity": "like",
+                "value": "updated",
+            }
+        ),
+        expected_version_id=first.version_id,
+    )
+
+    assert service._repository.compact_pre_activation("profile-1", through_sequence=3) > 0
 
 
 def test_key_rotation_skips_purge_shredded_publication_rows(
