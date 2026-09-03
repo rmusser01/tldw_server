@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-02
 
-**Status:** Draft for owner review
+**Status:** Approved 2026-09-03
 
 **Applies to:** tldw_chatbook and tldw_server
 
@@ -13,7 +13,7 @@
 ```text
 ADR required: yes
 ADR path: backlog/decisions/102-personal-context-profile-authority-sync-and-encryption.md
-Server mirror: Backlog/decisions/002-personal-context-profile-authority-sync-and-encryption.md
+Server mirror: backlog/decisions/002-personal-context-profile-authority-sync-and-encryption.md
 Reason: This design fixes the long-lived authority, publication, retry,
 conflict, deletion, capability, and cross-database durability contracts for
 ongoing bidirectional Personal Context synchronization.
