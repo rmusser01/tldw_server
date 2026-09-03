@@ -47,12 +47,13 @@ async def ensure_test_user(
     """
     from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
 
-    existing = await pool.fetchval("SELECT id FROM users WHERE username = ?", username)
-    if existing is not None:
-        return int(existing)
-
     users_db = UsersDB(pool)
     await users_db.initialize()
+
+    existing = await users_db.get_user_by_username(username)
+    if existing is not None:
+        return int(existing["id"])
+
     created = await users_db.create_user(
         username=username,
         email=email or f"{username}@example.com",
