@@ -1,18 +1,39 @@
 from __future__ import annotations
 
+import hashlib
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
-from tldw_profile_core import ProfileControls, ProfileRecord, SyncMode
+from tldw_profile_core import (
+    ProfileControls,
+    ProfileManifest,
+    ProfileProposal,
+    ProfileRecord,
+    ProfileScope,
+    ProposalState,
+    SyncMode,
+    canonical_bytes,
+)
 from tldw_profile_core.models import AgentVisibility
 
+from tldw_Server_API.app.core.DB_Management import (
+    Personal_Context_Repository as personal_context_repository,
+)
 from tldw_Server_API.app.core.DB_Management.Personalization_DB import PersonalizationDB
+from tldw_Server_API.app.core.Personalization.personal_context_crypto import (
+    EnvelopeAuthenticationError,
+)
 from tldw_Server_API.app.core.Personalization.personal_context_publication import (
     IngressIdentity,
+    PersonalContextPublicationJournal,
+    PublicationObject,
 )
 from tldw_Server_API.app.core.Personalization.personal_context_repository import (
     PersonalContextRepository,
+)
+from tldw_Server_API.app.core.Personalization.personal_context_repository_models import (
+    ProfileStorageLockedError,
 )
 from tldw_Server_API.app.core.Personalization.personal_context_service import (
     PersonalContextService,
@@ -73,13 +94,27 @@ def _ingress(service: PersonalContextService, envelope_id: str) -> dict[str, obj
             dataset_id="dataset-a",
             device_id="device-a",
             client_envelope_id=envelope_id,
-            canonical_payload_digest="sha256:ingress-payload-a",
+            canonical_payload_digest=_digest(record),
             purge_generation=0,
         ),
         "domain": "personal_context.record",
         "value": record,
         "base_object_hash": None,
     }
+
+
+def _digest(value: object) -> str:
+    return "sha256:" + hashlib.sha256(canonical_bytes(value)).hexdigest()
+
+
+def _identity(value: object, envelope_id: str) -> IngressIdentity:
+    return IngressIdentity(
+        dataset_id="dataset-a",
+        device_id="device-a",
+        client_envelope_id=envelope_id,
+        canonical_payload_digest=_digest(value),
+        purge_generation=0,
+    )
 
 
 def test_record_mutation_commits_manifest_and_publication_batch_atomically(
@@ -116,8 +151,9 @@ def test_ingress_replay_returns_original_result_without_second_manifest_advance(
 ) -> None:
     service.create_profile()
 
-    first = service.apply_sync_ingress(**_ingress(service, "client-envelope-1"))
-    replay = service.apply_sync_ingress(**_ingress(service, "client-envelope-1"))
+    ingress = _ingress(service, "client-envelope-1")
+    first = service.apply_sync_ingress(**ingress)
+    replay = service.apply_sync_ingress(**ingress)
 
     assert replay == first
     assert service.get_manifest().revision == first.manifest_revision
@@ -129,19 +165,143 @@ def test_ingress_id_reuse_with_a_different_digest_is_rejected_before_mutation(
     service.create_profile()
     first = _ingress(service, "client-envelope-1")
     service.apply_sync_ingress(**first)
-    changed = dict(first)
-    changed["identity"] = IngressIdentity(
-        dataset_id="dataset-a",
-        device_id="device-a",
-        client_envelope_id="client-envelope-1",
-        canonical_payload_digest="sha256:different-payload",
-        purge_generation=0,
+    changed_record = ProfileRecord.model_validate(first["value"]).model_copy(
+        update={"version_id": "record-ingress-changed"}
     )
+    changed = dict(first)
+    changed["value"] = changed_record
+    changed["identity"] = _identity(changed_record, "client-envelope-1")
 
     with pytest.raises(ValueError, match="ingress identity reused"):
         service.apply_sync_ingress(**changed)
 
     assert service.get_manifest().revision == 1
+
+
+def test_ingress_rejects_stale_scope_base_hash_inside_the_write_transaction(
+    service: PersonalContextService,
+) -> None:
+    manifest = service.create_profile()
+    original = service.list_scopes()[0]
+    current_scope = original.model_copy(
+        update={"version_id": "scope-direct-v2", "updated_at": NOW + timedelta(seconds=2)}
+    )
+    current_manifest = ProfileManifest.model_validate(
+        {
+            **manifest.model_dump(mode="python"),
+            "revision": 1,
+            "updated_at": NOW + timedelta(seconds=2),
+            "current_version_id": "manifest-direct-v2",
+        }
+    )
+    service._repository.commit_scope_and_manifest(
+        current_scope,
+        current_manifest,
+        expected_scope_version=original.version_id,
+        expected_manifest_version=manifest.current_version_id,
+    )
+    stale = original.model_copy(
+        update={"version_id": "scope-stale-v2", "updated_at": NOW + timedelta(seconds=1)}
+    )
+
+    with pytest.raises(ProfileConflictError, match="changed concurrently"):
+        service.apply_sync_ingress(
+            identity=_identity(stale, "scope-stale"),
+            domain="personal_context.scope",
+            value=stale,
+            base_object_hash=_digest(original),
+        )
+
+    assert service._repository.get_scope(manifest.profile_id, original.scope_id) == current_scope
+
+
+def test_ingress_rejects_immutable_record_and_missing_scope_updates(
+    service: PersonalContextService,
+) -> None:
+    service.create_profile()
+    current = service.create_record(_record(service))
+    immutable = current.model_copy(
+        update={
+            "version_id": "record-immutable-v2",
+            "parent_version_id": current.version_id,
+            "created_at": current.created_at + timedelta(seconds=1),
+            "updated_at": current.updated_at + timedelta(seconds=1),
+        }
+    )
+    missing_scope = current.model_copy(
+        update={
+            "record_id": "record-missing-scope",
+            "version_id": "record-missing-scope-v1",
+            "scope_id": "scope-missing",
+            "parent_version_id": None,
+        }
+    )
+
+    with pytest.raises(ProfileConflictError, match="changed concurrently"):
+        service.apply_sync_ingress(
+            identity=_identity(immutable, "record-immutable"),
+            domain="personal_context.record",
+            value=immutable,
+            base_object_hash=_digest(current),
+        )
+    with pytest.raises(KeyError, match="scope"):
+        service.apply_sync_ingress(
+            identity=_identity(missing_scope, "record-missing-scope"),
+            domain="personal_context.record",
+            value=missing_scope,
+            base_object_hash=None,
+        )
+
+
+def test_ingress_rejects_a_second_global_scope_and_accepts_pending_to_terminal_proposal(
+    service: PersonalContextService,
+) -> None:
+    manifest = service.create_profile()
+    global_scope = service.list_scopes()[0]
+    duplicate_global = ProfileScope.model_validate(
+        {
+            **global_scope.model_dump(mode="python"),
+            "scope_id": "scope-other-global",
+            "version_id": "scope-other-global-v1",
+        }
+    )
+
+    with pytest.raises(ProfileConflictError, match="changed concurrently"):
+        service.apply_sync_ingress(
+            identity=_identity(duplicate_global, "scope-other-global"),
+            domain="personal_context.scope",
+            value=duplicate_global,
+            base_object_hash=None,
+        )
+
+    from tldw_Server_API.tests.Personalization.personal_context_test_support import proposal
+
+    pending = ProfileProposal.model_validate(
+        {
+            **proposal(profile_id=manifest.profile_id).model_dump(mode="python"),
+            "scope_id": global_scope.scope_id,
+            "proposed_record": _record(service, record_id="proposal-record"),
+        }
+    )
+    service.create_proposal(pending)
+    terminal = ProfileProposal.model_validate(
+        {
+            **pending.model_dump(mode="python"),
+            "state": ProposalState.REJECTED,
+            "proposed_record": None,
+            "confidence": None,
+        }
+    )
+
+    receipt = service.apply_sync_ingress(
+        identity=_identity(terminal, "proposal-terminal"),
+        domain="personal_context.proposal",
+        value=terminal,
+        base_object_hash=_digest(pending),
+    )
+
+    assert receipt.resulting_object_id == pending.proposal_id
+    assert service._repository.get_proposal(manifest.profile_id, pending.proposal_id) == terminal
 
 
 def test_device_only_ingress_is_excluded_from_the_authority_journal(
@@ -252,3 +412,198 @@ def test_compaction_keeps_latest_head_and_does_not_touch_newer_sequences(
 
     assert older[0] == "shredded"
     assert {row[0] for row in newer} == {"pending"}
+
+
+def test_publication_aead_rejects_tampered_operation_metadata(
+    service: PersonalContextService,
+    database: PersonalizationDB,
+) -> None:
+    service.create_profile()
+    service.create_record(_record(service))
+    keys = service._repository.key_material_for_test("profile-1")
+    with database.transaction(immediate=True) as connection:
+        connection.execute(
+            """
+            UPDATE personal_context_publication_rows
+            SET operation = 'tombstone'
+            WHERE profile_publication_sequence = 2 AND batch_ordinal = 0
+            """
+        )
+        tampered = connection.execute(
+            """
+            SELECT * FROM personal_context_publication_rows
+            WHERE profile_publication_sequence = 2 AND batch_ordinal = 0
+            """
+        ).fetchone()
+
+    with pytest.raises(EnvelopeAuthenticationError):
+        PersonalContextPublicationJournal(keys).decrypt_row(tampered)
+
+
+def test_expiring_proposal_at_repository_lock_still_commits_its_publication(
+    service: PersonalContextService,
+    database: PersonalizationDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest = service.create_profile()
+    scope = service.list_scopes()[0]
+    from tldw_Server_API.tests.Personalization.personal_context_test_support import proposal
+
+    pending = ProfileProposal.model_validate(
+        {
+            **proposal(profile_id=manifest.profile_id).model_dump(mode="python"),
+            "scope_id": scope.scope_id,
+            "proposed_record": _record(service, record_id="expiring-proposal-record"),
+        }
+    )
+    service.create_proposal(pending)
+    with database.transaction() as connection:
+        before = connection.execute(
+            "SELECT COUNT(*) FROM personal_context_publication_batches"
+        ).fetchone()[0]
+
+    class RepositoryExpiredClock(datetime):
+        @classmethod
+        def now(cls, _tz=None) -> datetime:
+            return NOW + timedelta(days=91)
+
+    monkeypatch.setattr(personal_context_repository, "datetime", RepositoryExpiredClock)
+    with pytest.raises(ValueError, match="proposal has expired"):
+        service.review_proposal(pending.proposal_id, action="accept")
+
+    with database.transaction() as connection:
+        after = connection.execute(
+            "SELECT COUNT(*) FROM personal_context_publication_batches"
+        ).fetchone()[0]
+    assert after == before + 1
+    assert service._repository.get_proposal(manifest.profile_id, pending.proposal_id).state is ProposalState.EXPIRED
+
+
+def test_purge_terminalizes_old_publications_and_makes_them_undecryptable(
+    service: PersonalContextService,
+    database: PersonalizationDB,
+) -> None:
+    service.create_profile()
+    service.create_record(_record(service))
+    keys = service._repository.key_material_for_test("profile-1")
+    with database.transaction() as connection:
+        old_row = connection.execute(
+            """
+            SELECT * FROM personal_context_publication_rows
+            WHERE profile_publication_sequence = 2 AND batch_ordinal = 0
+            """
+        ).fetchone()
+
+    service.purge_profile(
+        mode="everywhere",
+        confirmation="DELETE EVERYWHERE",
+        expected_purge_generation=0,
+    )
+
+    with database.transaction() as connection:
+        purged_row = connection.execute(
+            """
+            SELECT * FROM personal_context_publication_rows
+            WHERE profile_publication_sequence = 2 AND batch_ordinal = 0
+            """
+        ).fetchone()
+        status = connection.execute(
+            """
+            SELECT status FROM personal_context_publication_batches
+            WHERE profile_publication_sequence = 2
+            """
+        ).fetchone()
+
+    assert PersonalContextPublicationJournal(keys).decrypt_row(old_row)[0] == "personal_context.record"
+    assert status[0] == "purge_terminal"
+    with pytest.raises(EnvelopeAuthenticationError):
+        PersonalContextPublicationJournal(keys).decrypt_row(purged_row)
+
+
+def test_key_rotation_skips_purge_shredded_publication_rows(
+    service: PersonalContextService,
+) -> None:
+    service.create_profile()
+    service.create_record(_record(service))
+    service.purge_profile(
+        mode="everywhere",
+        confirmation="DELETE EVERYWHERE",
+        expected_purge_generation=0,
+    )
+
+    rotated = service._repository.rotate_encryption_key("profile-1")
+
+    assert rotated.key_version == 2
+
+
+def test_compaction_rejects_future_watermarks_and_missing_profile_keys(
+    service: PersonalContextService,
+    database: PersonalizationDB,
+) -> None:
+    service.create_profile()
+    service.create_record(_record(service))
+
+    with pytest.raises(ValueError, match="watermark"):
+        service._repository.compact_pre_activation("profile-1", through_sequence=99)
+
+    with database.transaction(immediate=True) as connection:
+        connection.execute(
+            "DELETE FROM personal_context_profile_keys WHERE profile_id = ?",
+            ("profile-1",),
+        )
+    with pytest.raises(ProfileStorageLockedError):
+        service._repository.compact_pre_activation("profile-1", through_sequence=2)
+
+
+def test_compaction_distinguishes_same_object_id_in_different_domains(
+    service: PersonalContextService,
+    database: PersonalizationDB,
+) -> None:
+    service.create_profile()
+    keys = service._repository.key_material_for_test("profile-1")
+    journal = PersonalContextPublicationJournal(keys)
+    with database.transaction(immediate=True) as connection:
+        journal.append_batch(
+            connection,
+            profile_id="profile-1",
+            purge_generation=0,
+            objects=(
+                PublicationObject(
+                    domain="personal_context.record",
+                    object_id="shared-opaque-id",
+                    version_id="record-v1",
+                    operation="upsert",
+                    role="semantic",
+                    canonical=b"{}",
+                ),
+            ),
+            now="2026-09-03T12:00:00.000Z",
+        )
+        journal.append_batch(
+            connection,
+            profile_id="profile-1",
+            purge_generation=0,
+            objects=(
+                PublicationObject(
+                    domain="personal_context.scope",
+                    object_id="shared-opaque-id",
+                    version_id="scope-v1",
+                    operation="upsert",
+                    role="semantic",
+                    canonical=b"{}",
+                ),
+            ),
+            now="2026-09-03T12:00:01.000Z",
+        )
+
+    service._repository.compact_pre_activation("profile-1", through_sequence=3)
+
+    with database.transaction() as connection:
+        states = connection.execute(
+            """
+            SELECT row_state FROM personal_context_publication_rows
+            WHERE profile_publication_sequence IN (2, 3)
+            ORDER BY profile_publication_sequence
+            """
+        ).fetchall()
+    assert [row[0] for row in states] == ["pending", "pending"]

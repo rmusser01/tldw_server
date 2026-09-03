@@ -134,6 +134,12 @@ class PersonalContextRepository:
             return canonical_bytes(value)
         return canonical_json_bytes(value)
 
+    @classmethod
+    def _canonical_digest(cls, value: BaseModel | Mapping[str, Any]) -> str:
+        """Return the exact canonical-byte digest used for ingress identity."""
+
+        return "sha256:" + hashlib.sha256(cls._canonical_payload(value)).hexdigest()
+
     @staticmethod
     def _integrity_tag(key: bytes, plaintext: bytes) -> str:
         digest = hmac.new(key, plaintext, hashlib.sha256).hexdigest()
@@ -823,13 +829,7 @@ class PersonalContextRepository:
     ) -> CanonicalApplyReceipt:
         """Atomically accept one ingress object and its authority publication."""
 
-        del base_object_hash
         with self._database.transaction(immediate=True) as connection:
-            replay = PersonalContextPublicationJournal.read_ingress_receipt(
-                connection, identity
-            )
-            if replay is not None:
-                return replay
             if domain == "personal_context.record":
                 record = ProfileRecord.model_validate(value)
                 if record.controls.sync_mode is SyncMode.DEVICE_ONLY:
@@ -867,11 +867,29 @@ class PersonalContextRepository:
                 operation = "upsert"
             else:
                 raise ValueError("Unsupported Personal Context Sync domain")
+            canonical_input: BaseModel | Mapping[str, Any]
+            if object_type == "record":
+                canonical_input = record
+            elif object_type == "scope":
+                canonical_input = scope
+            elif object_type == "proposal":
+                canonical_input = proposal
+            else:
+                canonical_input = manifest
+            if identity.canonical_payload_digest != self._canonical_digest(canonical_input):
+                raise ValueError("ingress canonical payload digest is invalid")
+            replay = PersonalContextPublicationJournal.read_ingress_receipt(
+                connection, identity
+            )
+            if replay is not None:
+                return replay
             keys = self._keys.load(profile_id, connection=connection)
             current = self._current_manifest_for_publication(connection, profile_id, keys)
             if identity.purge_generation != current.purge_generation:
                 raise ConcurrentProfileUpdateError("ingress purge generation changed")
             if object_type == "manifest":
+                if base_object_hash != self._canonical_digest(current):
+                    raise ConcurrentProfileUpdateError("manifest head changed concurrently")
                 self._validate_manifest_transition(
                     current, manifest, expected_version_id=current.current_version_id
                 )
@@ -893,9 +911,43 @@ class PersonalContextRepository:
                 )
             existing = self._head_row(connection, profile_id, object_type, object_id)
             expected_version = None if existing is None else str(existing["version_id"])
+            existing_value: BaseModel | None = None
+            if existing is not None:
+                try:
+                    model_type = {
+                        "record": ProfileRecord,
+                        "scope": ProfileScope,
+                        "proposal": ProfileProposal,
+                    }[object_type]
+                    existing_value = model_type.model_validate_json(
+                        self._decrypt_row(existing, keys)
+                    )
+                except (KeyError, ValidationError):
+                    raise ProfileIntegrityError("Canonical object validation failed") from None
+            expected_base_hash = (
+                None
+                if existing_value is None
+                else self._canonical_digest(existing_value)
+            )
+            if base_object_hash != expected_base_hash:
+                raise ConcurrentProfileUpdateError("canonical object changed concurrently")
             if object_type == "record":
                 if record.parent_version_id != expected_version:
                     raise ConcurrentProfileUpdateError("record parent does not match head")
+                scope_row = self._head_row(connection, profile_id, "scope", record.scope_id)
+                if scope_row is None:
+                    raise KeyError("Personal context scope not found")
+                if existing_value is not None:
+                    existing_record = ProfileRecord.model_validate(existing_value)
+                    if (
+                        existing_record.state is RecordState.DELETED
+                        or record.scope_id != existing_record.scope_id
+                        or record.kind is not existing_record.kind
+                        or record.created_at != existing_record.created_at
+                        or record.updated_at < existing_record.updated_at
+                        or record.version_id == existing_record.version_id
+                    ):
+                        raise ConcurrentProfileUpdateError("record head changed concurrently")
                 self._validate_new_head_quota(
                     connection, profile_id, object_type, _MAX_RECORD_HEADS,
                     expected_version_id=expected_version,
@@ -906,25 +958,85 @@ class PersonalContextRepository:
                 )
                 canonical_value: BaseModel | Mapping[str, Any] = record
             elif object_type == "scope":
+                if existing_value is not None:
+                    existing_scope = ProfileScope.model_validate(existing_value)
+                    if (
+                        scope.kind is not existing_scope.kind
+                        or scope.created_at != existing_scope.created_at
+                        or scope.updated_at < existing_scope.updated_at
+                        or scope.version_id == existing_scope.version_id
+                    ):
+                        raise ConcurrentProfileUpdateError("scope head changed concurrently")
+                elif scope.kind is ScopeKind.GLOBAL:
+                    scope_rows = connection.execute(
+                        """
+                        SELECT versions.*
+                        FROM personal_context_object_heads AS heads
+                        JOIN personal_context_object_versions AS versions
+                          ON versions.profile_id = heads.profile_id
+                         AND versions.object_type = heads.object_type
+                         AND versions.object_id = heads.object_id
+                         AND versions.version_id = heads.current_version_id
+                        WHERE heads.profile_id = ? AND heads.object_type = 'scope'
+                        """,
+                        (profile_id,),
+                    ).fetchall()
+                    for scope_row in scope_rows:
+                        candidate = ProfileScope.model_validate_json(
+                            self._decrypt_row(scope_row, keys)
+                        )
+                        if candidate.kind is ScopeKind.GLOBAL:
+                            raise ConcurrentProfileUpdateError(
+                                "global scope changed concurrently"
+                            )
                 self._validate_new_head_quota(
                     connection, profile_id, object_type, _MAX_SCOPE_HEADS,
                     expected_version_id=expected_version,
                 )
                 canonical_value = scope
             else:
-                if existing is not None:
-                    raise ConcurrentProfileUpdateError("proposal head changed concurrently")
-                canonical_value = proposal
-            self._insert_encrypted(
-                connection, keys, profile_id=profile_id, object_type=object_type,
-                object_id=object_id, version_id=version_id,
-                parent_version_id=expected_version, value=canonical_value,
-            )
-            self._set_head(
-                connection, profile_id=profile_id, object_type=object_type,
-                object_id=object_id, version_id=version_id,
-                expected_version_id=expected_version,
-            )
+                scope_row = self._head_row(connection, profile_id, "scope", proposal.scope_id)
+                if scope_row is None:
+                    raise KeyError("Personal context scope not found")
+                if proposal.state is ProposalState.PENDING:
+                    if existing is not None:
+                        raise ConcurrentProfileUpdateError("proposal head changed concurrently")
+                    canonical_value = proposal
+                else:
+                    if existing_value is None:
+                        raise ConcurrentProfileUpdateError("proposal head changed concurrently")
+                    existing_proposal = ProfileProposal.model_validate(existing_value)
+                    if existing_proposal.state is not ProposalState.PENDING:
+                        raise ConcurrentProfileUpdateError("proposal head changed concurrently")
+                    expected_receipt = ProfileProposal.model_validate(
+                        {
+                            **existing_proposal.model_dump(mode="python"),
+                            "state": proposal.state,
+                            "proposed_record": None,
+                            "confidence": None,
+                        }
+                    )
+                    if expected_receipt != proposal:
+                        raise ConcurrentProfileUpdateError("proposal head changed concurrently")
+                    canonical_value = self._replace_proposal_with_receipt(
+                        connection,
+                        keys,
+                        existing,
+                        existing_proposal,
+                        proposal.state,
+                        version_id=version_id,
+                    )
+            if object_type != "proposal" or proposal.state is ProposalState.PENDING:
+                self._insert_encrypted(
+                    connection, keys, profile_id=profile_id, object_type=object_type,
+                    object_id=object_id, version_id=version_id,
+                    parent_version_id=expected_version, value=canonical_value,
+                )
+                self._set_head(
+                    connection, profile_id=profile_id, object_type=object_type,
+                    object_id=object_id, version_id=version_id,
+                    expected_version_id=expected_version,
+                )
             next_manifest = ProfileManifest.model_validate(
                 {
                     **current.model_dump(mode="python"),
@@ -1004,39 +1116,50 @@ class PersonalContextRepository:
         if through_sequence < 1:
             raise ValueError("publication watermark must be positive")
         with self._database.transaction(immediate=True) as connection:
+            keys = self._keys.load(profile_id, connection=connection)
+            profile_row = connection.execute(
+                """
+                SELECT next_sequence FROM personal_context_publication_profiles
+                WHERE profile_id = ?
+                """,
+                (profile_id,),
+            ).fetchone()
+            if profile_row is None or through_sequence >= int(profile_row["next_sequence"]):
+                raise ValueError("publication watermark is not an exact committed head")
+            whole_batch = connection.execute(
+                """
+                SELECT 1 FROM personal_context_publication_batches
+                WHERE profile_id = ? AND profile_publication_sequence = ?
+                """,
+                (profile_id, through_sequence),
+            ).fetchone()
+            if whole_batch is None:
+                raise ValueError("publication watermark is not an exact committed head")
             rows = connection.execute(
                 """
-                SELECT profile_publication_sequence, batch_ordinal
-                FROM personal_context_publication_rows AS candidate
-                WHERE candidate.profile_id = ?
-                  AND candidate.profile_publication_sequence <= ?
-                  AND candidate.row_state != 'shredded'
-                  AND candidate.profile_publication_sequence < (
-                      SELECT MAX(newer.profile_publication_sequence)
-                      FROM personal_context_publication_rows AS newer
-                      WHERE newer.profile_id = candidate.profile_id
-                        AND newer.opaque_object_id = candidate.opaque_object_id
-                        AND newer.profile_publication_sequence <= ?
-                        AND newer.row_state != 'shredded'
-                  )
+                SELECT * FROM personal_context_publication_rows
+                WHERE profile_id = ? AND profile_publication_sequence <= ?
+                  AND row_state != 'shredded'
+                ORDER BY profile_publication_sequence, batch_ordinal
                 """,
-                (profile_id, through_sequence, through_sequence),
+                (profile_id, through_sequence),
             ).fetchall()
+            journal = PersonalContextPublicationJournal(keys)
+            latest: dict[tuple[str, str], sqlite3.Row] = {}
+            decoded: list[tuple[sqlite3.Row, tuple[str, str]]] = []
             for row in rows:
-                connection.execute(
-                    """
-                    UPDATE personal_context_publication_rows
-                    SET row_state = 'shredded'
-                    WHERE profile_id = ? AND profile_publication_sequence = ?
-                      AND batch_ordinal = ? AND row_state != 'shredded'
-                    """,
-                    (
-                        profile_id,
-                        int(row["profile_publication_sequence"]),
-                        int(row["batch_ordinal"]),
-                    ),
-                )
-            return len(rows)
+                domain, _canonical = journal.decrypt_row(row)
+                identity = (domain, str(row["opaque_object_id"]))
+                latest[identity] = row
+                decoded.append((row, identity))
+            superseded = [
+                row
+                for row, identity in decoded
+                if latest[identity] is not row
+            ]
+            for row in superseded:
+                journal.transition_row_state(connection, row, row_state="shredded")
+            return len(superseded)
 
     def has_sync_profile_reservation(self) -> bool:
         """Return whether the only durable state is one content-free key reservation."""
@@ -2145,7 +2268,7 @@ class PersonalContextRepository:
             if proposal.state is not ProposalState.PENDING:
                 raise ValueError("only pending proposals may be accepted")
             if proposal.expires_at <= datetime.now(UTC):
-                return self._replace_proposal_with_receipt(
+                receipt = self._replace_proposal_with_receipt(
                     connection,
                     keys,
                     proposal_row,
@@ -2153,6 +2276,22 @@ class PersonalContextRepository:
                     ProposalState.EXPIRED,
                     version_id=receipt_version,
                 )
+                self._append_publication(
+                    connection,
+                    keys,
+                    manifest=self._current_manifest_for_publication(
+                        connection, profile_id, keys
+                    ),
+                    semantic=(
+                        self._publication_object(
+                            receipt,
+                            domain="personal_context.proposal",
+                            object_id=receipt.proposal_id,
+                            version_id=receipt_version,
+                        ),
+                    ),
+                )
+                return receipt
             _row, current_manifest = self._read_manifest_for_update(
                 connection,
                 profile_id,
@@ -2318,6 +2457,32 @@ class PersonalContextRepository:
                 expected_version_id=expected_manifest_version,
             )
             self._append_publication(connection, keys, manifest=manifest)
+            old_publication_rows = connection.execute(
+                """
+                SELECT rows.*
+                FROM personal_context_publication_rows AS rows
+                JOIN personal_context_publication_batches AS batches
+                  ON batches.profile_id = rows.profile_id
+                 AND batches.profile_publication_sequence = rows.profile_publication_sequence
+                WHERE rows.profile_id = ? AND batches.purge_generation < ?
+                  AND rows.row_state != 'shredded'
+                """,
+                (manifest.profile_id, manifest.purge_generation),
+            ).fetchall()
+            for publication_row in old_publication_rows:
+                PersonalContextPublicationJournal.cryptographically_shred_row(
+                    connection,
+                    publication_row,
+                )
+            connection.execute(
+                """
+                UPDATE personal_context_publication_batches
+                SET status = 'purge_terminal', updated_at = ?
+                WHERE profile_id = ? AND purge_generation < ?
+                  AND status != 'purge_terminal'
+                """,
+                (_now_text(), manifest.profile_id, manifest.purge_generation),
+            )
             connection.execute(
                 """
                 DELETE FROM personal_context_object_heads
@@ -2491,7 +2656,7 @@ class PersonalContextRepository:
             publication_rows = connection.execute(
                 """
                 SELECT * FROM personal_context_publication_rows
-                WHERE profile_id = ?
+                WHERE profile_id = ? AND row_state != 'shredded'
                 """,
                 (profile_id,),
             ).fetchall()
@@ -2509,8 +2674,20 @@ class PersonalContextRepository:
                     batch_id=str(row["publication_batch_id"]),
                     sequence=int(row["profile_publication_sequence"]),
                     ordinal=int(row["batch_ordinal"]),
+                    batch_size=int(row["batch_size"]),
                     role=str(row["role"]),
                     purge_generation=int(row["purge_generation"]),
+                    object_id=str(row["opaque_object_id"]),
+                    version_id=str(row["opaque_version_id"]),
+                    operation=str(row["operation"]),
+                    deterministic_envelope_id=str(row["deterministic_envelope_id"]),
+                    integrity_tag=str(row["integrity_tag"]),
+                    sync_server_cursor=(
+                        None
+                        if row["sync_server_cursor"] is None
+                        else int(row["sync_server_cursor"])
+                    ),
+                    row_state=str(row["row_state"]),
                 )
                 try:
                     rewrapped = cipher.rewrap(
