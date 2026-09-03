@@ -43,6 +43,10 @@ from tldw_Server_API.app.core.Personalization.personal_context_export import (
     encrypt_recovery_export,
     require_confirmation,
 )
+from tldw_Server_API.app.core.Personalization.personal_context_publication import (
+    CanonicalApplyReceipt,
+    IngressIdentity,
+)
 from tldw_Server_API.app.core.Personalization.personal_context_repository import (
     PersonalContextRepository,
 )
@@ -623,6 +627,26 @@ class PersonalContextService:
         except (ConcurrentProfileUpdateError, ProfileSemanticKeyCollisionError) as exc:
             raise ProfileConflictError("Personal context changed concurrently") from exc
         raise ValueError("Unsupported Personal Context Sync domain")
+
+    def apply_sync_ingress(
+        self,
+        *,
+        identity: IngressIdentity,
+        domain: str,
+        value: ProfileManifest | ProfileScope | ProfileRecord | ProfileProposal | Mapping[str, Any],
+        base_object_hash: str | None,
+    ) -> CanonicalApplyReceipt:
+        """Materialize one authenticated client envelope with replay-safe receipt."""
+
+        try:
+            return self._repository.apply_ingress_and_publish(
+                identity=identity,
+                domain=domain,
+                value=value,
+                base_object_hash=base_object_hash,
+            )
+        except (ConcurrentProfileUpdateError, ProfileSemanticKeyCollisionError) as exc:
+            raise ProfileConflictError("Personal context changed concurrently") from exc
 
     def get_manifest(self) -> ProfileManifest:
         """Return the authenticated user's manifest."""

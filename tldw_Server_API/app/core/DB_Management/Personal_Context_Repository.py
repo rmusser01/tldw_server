@@ -8,7 +8,7 @@ import json
 import secrets
 import sqlite3
 import uuid
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any, TypeVar
 
@@ -21,6 +21,7 @@ from tldw_profile_core import (
     ProposalState,
     RecordState,
     ScopeKind,
+    SyncMode,
     canonical_bytes,
 )
 from tldw_profile_core.canonical import canonical_json_bytes
@@ -33,6 +34,13 @@ from tldw_Server_API.app.core.Personalization.personal_context_crypto import (
     EncryptedEnvelope,
     EnvelopeAuthenticationError,
     EnvelopeCipher,
+)
+from tldw_Server_API.app.core.Personalization.personal_context_publication import (
+    CanonicalApplyReceipt,
+    IngressIdentity,
+    PersonalContextPublicationJournal,
+    PublicationBatchReceipt,
+    PublicationObject,
 )
 from tldw_Server_API.app.core.Personalization.personal_context_repository_models import (
     ConcurrentProfileUpdateError,
@@ -56,9 +64,14 @@ _SYNC_HISTORY_KEY_LABEL = b"tldw-personal-context-sync-history-v1"
 
 
 def _now_text() -> str:
+    return _now_datetime().isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def _now_datetime() -> datetime:
+    """Return a profile-core-compatible millisecond UTC timestamp."""
+
     now = datetime.now(UTC)
-    now = now.replace(microsecond=now.microsecond // 1000 * 1000)
-    return now.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    return now.replace(microsecond=now.microsecond // 1000 * 1000)
 
 
 class PersonalContextRepository:
@@ -83,6 +96,10 @@ class PersonalContextRepository:
             "personal_context_object_heads",
             "personal_context_runtime_heads",
             "personal_context_receipts",
+            "personal_context_publication_profiles",
+            "personal_context_publication_batches",
+            "personal_context_publication_rows",
+            "personal_context_ingress_receipts",
         }
         with self._database.transaction() as connection:
             tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
@@ -121,6 +138,83 @@ class PersonalContextRepository:
     def _integrity_tag(key: bytes, plaintext: bytes) -> str:
         digest = hmac.new(key, plaintext, hashlib.sha256).hexdigest()
         return f"hmac-sha256-v1:{digest}"
+
+    @staticmethod
+    def _publication_object(
+        value: BaseModel | Mapping[str, Any],
+        *,
+        domain: str,
+        object_id: str,
+        version_id: str,
+        role: str = "semantic",
+        operation: str = "upsert",
+    ) -> PublicationObject:
+        """Build an encrypted-only source-publication payload from canonical bytes."""
+
+        return PublicationObject(
+            domain=domain,
+            object_id=object_id,
+            version_id=version_id,
+            operation=operation,  # type: ignore[arg-type]
+            role=role,  # type: ignore[arg-type]
+            canonical=PersonalContextRepository._canonical_payload(value),
+        )
+
+    def _append_publication(
+        self,
+        connection: sqlite3.Connection,
+        keys: ProfileKeyMaterial,
+        *,
+        manifest: ProfileManifest,
+        semantic: Sequence[PublicationObject] = (),
+        ingress: IngressIdentity | None = None,
+    ) -> PublicationBatchReceipt:
+        """Append semantic objects before the exact canonical manifest when supplied."""
+
+        objects = list(semantic)
+        if semantic or ingress is not None:
+            objects.append(
+                self._publication_object(
+                    manifest,
+                    domain="personal_context.manifest",
+                    object_id=manifest.profile_id,
+                    version_id=manifest.current_version_id,
+                    role="manifest",
+                )
+            )
+        else:
+            objects = [
+                self._publication_object(
+                    manifest,
+                    domain="personal_context.manifest",
+                    object_id=manifest.profile_id,
+                    version_id=manifest.current_version_id,
+                    role="manifest",
+                )
+            ]
+        return PersonalContextPublicationJournal(keys).append_batch(
+            connection,
+            profile_id=manifest.profile_id,
+            purge_generation=manifest.purge_generation,
+            objects=objects,
+            ingress=ingress,
+            manifest=manifest if ingress is not None else None,
+            now=_now_text(),
+        )
+
+    def _current_manifest_for_publication(
+        self,
+        connection: sqlite3.Connection,
+        profile_id: str,
+        keys: ProfileKeyMaterial,
+    ) -> ProfileManifest:
+        row = self._head_row(connection, profile_id, "manifest", profile_id)
+        if row is None:
+            raise ConcurrentProfileUpdateError("manifest head changed concurrently")
+        try:
+            return ProfileManifest.model_validate_json(self._decrypt_row(row, keys))
+        except ValidationError:
+            raise ProfileIntegrityError("Canonical object validation failed") from None
 
     def _insert_encrypted(
         self,
@@ -471,6 +565,10 @@ class PersonalContextRepository:
                 UNION ALL SELECT 1 FROM personal_context_object_heads
                 UNION ALL SELECT 1 FROM personal_context_runtime_heads
                 UNION ALL SELECT 1 FROM personal_context_receipts
+                UNION ALL SELECT 1 FROM personal_context_publication_profiles
+                UNION ALL SELECT 1 FROM personal_context_publication_batches
+                UNION ALL SELECT 1 FROM personal_context_publication_rows
+                UNION ALL SELECT 1 FROM personal_context_ingress_receipts
                 LIMIT 1
                 """
             ).fetchone()
@@ -484,6 +582,19 @@ class PersonalContextRepository:
                 global_scope,
                 runtime_policy=runtime_policy,
                 runtime_version_id=runtime_version_id,
+            )
+            self._append_publication(
+                connection,
+                keys,
+                manifest=manifest,
+                semantic=(
+                    self._publication_object(
+                        global_scope,
+                        domain="personal_context.scope",
+                        object_id=global_scope.scope_id,
+                        version_id=global_scope.version_id,
+                    ),
+                ),
             )
 
     def reserve_sync_profile(
@@ -504,6 +615,10 @@ class PersonalContextRepository:
                 UNION ALL SELECT 1 FROM personal_context_object_heads
                 UNION ALL SELECT 1 FROM personal_context_runtime_heads
                 UNION ALL SELECT 1 FROM personal_context_receipts
+                UNION ALL SELECT 1 FROM personal_context_publication_profiles
+                UNION ALL SELECT 1 FROM personal_context_publication_batches
+                UNION ALL SELECT 1 FROM personal_context_publication_rows
+                UNION ALL SELECT 1 FROM personal_context_ingress_receipts
                 LIMIT 1
                 """
             ).fetchone()
@@ -650,6 +765,10 @@ class PersonalContextRepository:
                 UNION ALL SELECT 1 FROM personal_context_object_heads
                 UNION ALL SELECT 1 FROM personal_context_runtime_heads
                 UNION ALL SELECT 1 FROM personal_context_receipts
+                UNION ALL SELECT 1 FROM personal_context_publication_profiles
+                UNION ALL SELECT 1 FROM personal_context_publication_batches
+                UNION ALL SELECT 1 FROM personal_context_publication_rows
+                UNION ALL SELECT 1 FROM personal_context_ingress_receipts
                 LIMIT 1
                 """
             ).fetchone()
@@ -675,11 +794,167 @@ class PersonalContextRepository:
                 runtime_policy=runtime_policy,
                 runtime_version_id=runtime_version_id,
             )
+            self._append_publication(
+                connection,
+                keys,
+                manifest=manifest,
+                semantic=(
+                    self._publication_object(
+                        global_scope,
+                        domain="personal_context.scope",
+                        object_id=global_scope.scope_id,
+                        version_id=global_scope.version_id,
+                    ),
+                ),
+            )
 
     def get_manifest(self, profile_id: str) -> ProfileManifest | None:
         """Return one authenticated manifest without cross-profile fallback."""
 
         return self._read_model(profile_id, "manifest", profile_id, ProfileManifest)
+
+    def apply_ingress_and_publish(
+        self,
+        *,
+        identity: IngressIdentity,
+        domain: str,
+        value: ProfileManifest | ProfileScope | ProfileRecord | ProfileProposal | Mapping[str, Any],
+        base_object_hash: str | None,
+    ) -> CanonicalApplyReceipt:
+        """Atomically accept one ingress object and its authority publication."""
+
+        del base_object_hash
+        with self._database.transaction(immediate=True) as connection:
+            replay = PersonalContextPublicationJournal.read_ingress_receipt(
+                connection, identity
+            )
+            if replay is not None:
+                return replay
+            if domain == "personal_context.record":
+                record = ProfileRecord.model_validate(value)
+                if record.controls.sync_mode is SyncMode.DEVICE_ONLY:
+                    raise ValueError("Device-only records cannot synchronize")
+                profile_id = record.profile_id
+                object_type = "record"
+                object_id = record.record_id
+                version_id = record.version_id
+                operation = "tombstone" if record.state is RecordState.DELETED else "upsert"
+            elif domain == "personal_context.scope":
+                scope = ProfileScope.model_validate(value)
+                profile_id = scope.profile_id
+                object_type = "scope"
+                object_id = scope.scope_id
+                version_id = scope.version_id
+                operation = "upsert"
+            elif domain == "personal_context.proposal":
+                proposal = ProfileProposal.model_validate(value)
+                if (
+                    proposal.proposed_record is not None
+                    and proposal.proposed_record.controls.sync_mode is SyncMode.DEVICE_ONLY
+                ):
+                    raise ValueError("Device-only proposals cannot synchronize")
+                profile_id = proposal.profile_id
+                object_type = "proposal"
+                object_id = proposal.proposal_id
+                version_id = str(uuid.uuid4())
+                operation = "upsert"
+            elif domain == "personal_context.manifest":
+                manifest = ProfileManifest.model_validate(value)
+                profile_id = manifest.profile_id
+                object_type = "manifest"
+                object_id = manifest.profile_id
+                version_id = manifest.current_version_id
+                operation = "upsert"
+            else:
+                raise ValueError("Unsupported Personal Context Sync domain")
+            keys = self._keys.load(profile_id, connection=connection)
+            current = self._current_manifest_for_publication(connection, profile_id, keys)
+            if identity.purge_generation != current.purge_generation:
+                raise ConcurrentProfileUpdateError("ingress purge generation changed")
+            if object_type == "manifest":
+                self._validate_manifest_transition(
+                    current, manifest, expected_version_id=current.current_version_id
+                )
+                self._insert_manifest_revision(
+                    connection, keys, manifest, expected_version_id=current.current_version_id
+                )
+                batch = self._append_publication(
+                    connection, keys, manifest=manifest, ingress=identity
+                )
+                return CanonicalApplyReceipt(
+                    resulting_object_id=manifest.profile_id,
+                    resulting_version_id=manifest.current_version_id,
+                    manifest_revision=manifest.revision,
+                    manifest_version_id=manifest.current_version_id,
+                    purge_generation=manifest.purge_generation,
+                    publication_batch_id=batch.publication_batch_id,
+                    profile_publication_sequence=batch.profile_publication_sequence,
+                    receipt_id=PersonalContextPublicationJournal._receipt_id(identity),
+                )
+            existing = self._head_row(connection, profile_id, object_type, object_id)
+            expected_version = None if existing is None else str(existing["version_id"])
+            if object_type == "record":
+                if record.parent_version_id != expected_version:
+                    raise ConcurrentProfileUpdateError("record parent does not match head")
+                self._validate_new_head_quota(
+                    connection, profile_id, object_type, _MAX_RECORD_HEADS,
+                    expected_version_id=expected_version,
+                )
+                self._validate_semantic_key_available(
+                    connection, keys, record,
+                    excluding_record_id=None if expected_version is None else record.record_id,
+                )
+                canonical_value: BaseModel | Mapping[str, Any] = record
+            elif object_type == "scope":
+                self._validate_new_head_quota(
+                    connection, profile_id, object_type, _MAX_SCOPE_HEADS,
+                    expected_version_id=expected_version,
+                )
+                canonical_value = scope
+            else:
+                if existing is not None:
+                    raise ConcurrentProfileUpdateError("proposal head changed concurrently")
+                canonical_value = proposal
+            self._insert_encrypted(
+                connection, keys, profile_id=profile_id, object_type=object_type,
+                object_id=object_id, version_id=version_id,
+                parent_version_id=expected_version, value=canonical_value,
+            )
+            self._set_head(
+                connection, profile_id=profile_id, object_type=object_type,
+                object_id=object_id, version_id=version_id,
+                expected_version_id=expected_version,
+            )
+            next_manifest = ProfileManifest.model_validate(
+                {
+                    **current.model_dump(mode="python"),
+                    "revision": current.revision + 1,
+                    "updated_at": _now_datetime(),
+                    "current_version_id": str(uuid.uuid4()),
+                }
+            )
+            self._insert_manifest_revision(
+                connection, keys, next_manifest,
+                expected_version_id=current.current_version_id,
+            )
+            semantic = self._publication_object(
+                canonical_value, domain=domain, object_id=object_id,
+                version_id=version_id, operation=operation,
+            )
+            batch = self._append_publication(
+                connection, keys, manifest=next_manifest,
+                semantic=(semantic,), ingress=identity,
+            )
+            return CanonicalApplyReceipt(
+                resulting_object_id=object_id,
+                resulting_version_id=version_id,
+                manifest_revision=next_manifest.revision,
+                manifest_version_id=next_manifest.current_version_id,
+                purge_generation=next_manifest.purge_generation,
+                publication_batch_id=batch.publication_batch_id,
+                profile_publication_sequence=batch.profile_publication_sequence,
+                receipt_id=PersonalContextPublicationJournal._receipt_id(identity),
+            )
 
     def get_scope(self, profile_id: str, scope_id: str) -> ProfileScope | None:
         """Return one authenticated scope for the exact profile."""
@@ -717,6 +992,51 @@ class PersonalContextRepository:
                 ).fetchone()
                 is not None
             )
+
+    def compact_pre_activation(self, profile_id: str, *, through_sequence: int) -> int:
+        """Mark superseded source bodies for later compaction below one watermark.
+
+        The exact encrypted bytes remain recoverable until the activation owner
+        completes its independent relay/coverage protocol.  This method only
+        advances content-free row state and never touches a newer sequence.
+        """
+
+        if through_sequence < 1:
+            raise ValueError("publication watermark must be positive")
+        with self._database.transaction(immediate=True) as connection:
+            rows = connection.execute(
+                """
+                SELECT profile_publication_sequence, batch_ordinal
+                FROM personal_context_publication_rows AS candidate
+                WHERE candidate.profile_id = ?
+                  AND candidate.profile_publication_sequence <= ?
+                  AND candidate.row_state != 'shredded'
+                  AND candidate.profile_publication_sequence < (
+                      SELECT MAX(newer.profile_publication_sequence)
+                      FROM personal_context_publication_rows AS newer
+                      WHERE newer.profile_id = candidate.profile_id
+                        AND newer.opaque_object_id = candidate.opaque_object_id
+                        AND newer.profile_publication_sequence <= ?
+                        AND newer.row_state != 'shredded'
+                  )
+                """,
+                (profile_id, through_sequence, through_sequence),
+            ).fetchall()
+            for row in rows:
+                connection.execute(
+                    """
+                    UPDATE personal_context_publication_rows
+                    SET row_state = 'shredded'
+                    WHERE profile_id = ? AND profile_publication_sequence = ?
+                      AND batch_ordinal = ? AND row_state != 'shredded'
+                    """,
+                    (
+                        profile_id,
+                        int(row["profile_publication_sequence"]),
+                        int(row["batch_ordinal"]),
+                    ),
+                )
+            return len(rows)
 
     def has_sync_profile_reservation(self) -> bool:
         """Return whether the only durable state is one content-free key reservation."""
@@ -1066,6 +1386,7 @@ class PersonalContextRepository:
                 manifest,
                 expected_version_id=expected_version_id,
             )
+            self._append_publication(connection, keys, manifest=manifest)
 
     def commit_scope_and_manifest(
         self,
@@ -1154,6 +1475,19 @@ class PersonalContextRepository:
                 manifest,
                 expected_version_id=expected_manifest_version,
             )
+            self._append_publication(
+                connection,
+                keys,
+                manifest=manifest,
+                semantic=(
+                    self._publication_object(
+                        scope,
+                        domain="personal_context.scope",
+                        object_id=scope.scope_id,
+                        version_id=scope.version_id,
+                    ),
+                ),
+            )
 
     def commit_scope(
         self,
@@ -1216,6 +1550,21 @@ class PersonalContextRepository:
                 version_id=scope.version_id,
                 expected_version_id=expected_version_id,
             )
+            self._append_publication(
+                connection,
+                keys,
+                manifest=self._current_manifest_for_publication(
+                    connection, scope.profile_id, keys
+                ),
+                semantic=(
+                    self._publication_object(
+                        scope,
+                        domain="personal_context.scope",
+                        object_id=scope.scope_id,
+                        version_id=scope.version_id,
+                    ),
+                ),
+            )
 
     def commit_record_version(
         self,
@@ -1266,6 +1615,26 @@ class PersonalContextRepository:
                 object_id=record.record_id,
                 version_id=record.version_id,
                 expected_version_id=expected_version_id,
+            )
+            self._append_publication(
+                connection,
+                keys,
+                manifest=self._current_manifest_for_publication(
+                    connection, record.profile_id, keys
+                ),
+                semantic=(
+                    self._publication_object(
+                        record,
+                        domain="personal_context.record",
+                        object_id=record.record_id,
+                        version_id=record.version_id,
+                        operation=(
+                            "tombstone"
+                            if record.state is RecordState.DELETED
+                            else "upsert"
+                        ),
+                    ),
+                ),
             )
 
     def commit_record_and_manifest(
@@ -1338,6 +1707,24 @@ class PersonalContextRepository:
                 keys,
                 manifest,
                 expected_version_id=expected_manifest_version,
+            )
+            self._append_publication(
+                connection,
+                keys,
+                manifest=manifest,
+                semantic=(
+                    self._publication_object(
+                        record,
+                        domain="personal_context.record",
+                        object_id=record.record_id,
+                        version_id=record.version_id,
+                        operation=(
+                            "tombstone"
+                            if record.state is RecordState.DELETED
+                            else "upsert"
+                        ),
+                    ),
+                ),
             )
 
     def get_record(self, profile_id: str, record_id: str) -> ProfileRecord | None:
@@ -1451,6 +1838,21 @@ class PersonalContextRepository:
                 version_id=version_id,
                 expected_version_id=None,
             )
+            self._append_publication(
+                connection,
+                keys,
+                manifest=self._current_manifest_for_publication(
+                    connection, proposal.profile_id, keys
+                ),
+                semantic=(
+                    self._publication_object(
+                        proposal,
+                        domain="personal_context.proposal",
+                        object_id=proposal.proposal_id,
+                        version_id=version_id,
+                    ),
+                ),
+            )
 
     def get_proposal(
         self,
@@ -1513,13 +1915,28 @@ class PersonalContextRepository:
                     raise ConcurrentProfileUpdateError(
                         "synced proposal receipt differs from pending content"
                     )
-                self._replace_proposal_with_receipt(
+                receipt = self._replace_proposal_with_receipt(
                     connection,
                     keys,
                     row,
                     current,
                     proposal.state,
                     version_id=version_id,
+                )
+                self._append_publication(
+                    connection,
+                    keys,
+                    manifest=self._current_manifest_for_publication(
+                        connection, proposal.profile_id, keys
+                    ),
+                    semantic=(
+                        self._publication_object(
+                            receipt,
+                            domain="personal_context.proposal",
+                            object_id=receipt.proposal_id,
+                            version_id=version_id,
+                        ),
+                    ),
                 )
                 return
 
@@ -1556,6 +1973,21 @@ class PersonalContextRepository:
                     proposal.proposal_id,
                     version_id,
                     _now_text(),
+                ),
+            )
+            self._append_publication(
+                connection,
+                keys,
+                manifest=self._current_manifest_for_publication(
+                    connection, proposal.profile_id, keys
+                ),
+                semantic=(
+                    self._publication_object(
+                        proposal,
+                        domain="personal_context.proposal",
+                        object_id=proposal.proposal_id,
+                        version_id=version_id,
+                    ),
                 ),
             )
 
@@ -1646,6 +2078,21 @@ class PersonalContextRepository:
                 current,
                 state,
                 version_id=version_id,
+            )
+            self._append_publication(
+                connection,
+                keys,
+                manifest=self._current_manifest_for_publication(
+                    connection, profile_id, keys
+                ),
+                semantic=(
+                    self._publication_object(
+                        resolved,
+                        domain="personal_context.proposal",
+                        object_id=resolved.proposal_id,
+                        version_id=version_id,
+                    ),
+                ),
             )
         return resolved
 
@@ -1771,6 +2218,30 @@ class PersonalContextRepository:
                 ProposalState.ACCEPTED,
                 version_id=receipt_version,
             )
+            self._append_publication(
+                connection,
+                keys,
+                manifest=manifest,
+                semantic=(
+                    self._publication_object(
+                        record,
+                        domain="personal_context.record",
+                        object_id=record.record_id,
+                        version_id=record.version_id,
+                        operation=(
+                            "tombstone"
+                            if record.state is RecordState.DELETED
+                            else "upsert"
+                        ),
+                    ),
+                    self._publication_object(
+                        receipt,
+                        domain="personal_context.proposal",
+                        object_id=receipt.proposal_id,
+                        version_id=receipt_version,
+                    ),
+                ),
+            )
         return receipt
 
     def _validate_semantic_key_available(
@@ -1846,6 +2317,7 @@ class PersonalContextRepository:
                 manifest,
                 expected_version_id=expected_manifest_version,
             )
+            self._append_publication(connection, keys, manifest=manifest)
             connection.execute(
                 """
                 DELETE FROM personal_context_object_heads
@@ -2016,6 +2488,62 @@ class PersonalContextRepository:
                 )
                 if updated.rowcount != 1:
                     raise ConcurrentProfileUpdateError("encrypted object changed concurrently")
+            publication_rows = connection.execute(
+                """
+                SELECT * FROM personal_context_publication_rows
+                WHERE profile_id = ?
+                """,
+                (profile_id,),
+            ).fetchall()
+            for row in publication_rows:
+                envelope = EncryptedEnvelope(
+                    algorithm=str(row["algorithm"]),
+                    nonce=bytes(row["nonce"]),
+                    wrapped_dek=bytes(row["wrapped_dek"]),
+                    wrapped_dek_nonce=bytes(row["wrapped_dek_nonce"]),
+                    ciphertext=bytes(row["ciphertext"]),
+                    key_version=int(row["key_version"]),
+                )
+                aad = PersonalContextPublicationJournal._aad(
+                    profile_id=profile_id,
+                    batch_id=str(row["publication_batch_id"]),
+                    sequence=int(row["profile_publication_sequence"]),
+                    ordinal=int(row["batch_ordinal"]),
+                    role=str(row["role"]),
+                    purge_generation=int(row["purge_generation"]),
+                )
+                try:
+                    rewrapped = cipher.rewrap(
+                        envelope,
+                        aad,
+                        new_encryption_key,
+                        new_key_version=new_key_version,
+                    )
+                except EnvelopeAuthenticationError:
+                    raise ProfileIntegrityError(
+                        "Encrypted publication authentication failed"
+                    ) from None
+                updated = connection.execute(
+                    """
+                    UPDATE personal_context_publication_rows
+                    SET wrapped_dek = ?, wrapped_dek_nonce = ?, key_version = ?
+                    WHERE profile_id = ? AND profile_publication_sequence = ?
+                      AND batch_ordinal = ? AND key_version = ?
+                    """,
+                    (
+                        rewrapped.wrapped_dek,
+                        rewrapped.wrapped_dek_nonce,
+                        rewrapped.key_version,
+                        profile_id,
+                        row["profile_publication_sequence"],
+                        row["batch_ordinal"],
+                        current_keys.key_version,
+                    ),
+                )
+                if updated.rowcount != 1:
+                    raise ConcurrentProfileUpdateError(
+                        "encrypted publication changed concurrently"
+                    )
             return self._keys.replace_encryption_key(
                 profile_id,
                 encryption_key=new_encryption_key,
