@@ -8,6 +8,9 @@ Related task: TASK-13144
 
 Related ADR: `backlog/decisions/002-personal-context-profile-authority-sync-and-encryption.md`
 
+Ongoing-sync extension:
+`Docs/superpowers/specs/2026-09-02-personal-context-ongoing-sync-design.md`
+
 ## Purpose
 
 The server is one encrypted canonical peer for the same Personal Context

@@ -4,6 +4,8 @@ Status: Accepted
 
 Date: 2026-08-30
 
+Amended: 2026-09-02
+
 Related Task: [TASK-13144](../tasks/task-13144%20-%20Add-encrypted-server-Personal-Context-repository.md)
 
 Supersedes: N/A
@@ -35,6 +37,25 @@ Authenticated APIs, migration, compatibility routes, runtime context, MCP
 tools, and Sync adapters must use those boundaries. Migration is per-user,
 forward-only, fenced, idempotent, and has no dual-write interval. Sync transports
 canonical whole objects but is neither application authority nor live storage.
+
+After linking, the server is the authoritative Personal Context manifest
+sequencer while both runtimes may originate authorized semantic mutations.
+Chatbook manifest advances remain speculative until their semantic commit is
+accepted and republished by the server. Device-only-only commits create no
+Sync outbox rows.
+
+Every direct server semantic mutation commits canonical state, the manifest
+advance, and encrypted source-publication rows atomically in
+`Personalization.db`. Idempotent relay publishes deterministic envelopes under
+a reserved home-authority device identity only after that commit. Pull performs
+mandatory recovery relay, and a durable activation baseline plus publication
+watermark protects existing links from races during upgrade.
+
+Ongoing synchronization is event-driven and uses bounded persisted retry. It
+extends the existing Sync V2 push, pull, and batched conflict-resolution
+contracts rather than creating a parallel transport, permanent poll, or push
+channel. Conflict candidates remain encrypted and pinned before cursor
+advancement; only the affected object freezes.
 
 ## Context
 
@@ -73,8 +94,20 @@ operator expectations while allowing a fenced migration from legacy tables.
   digest, not by best-effort projection.
 - Sync domains are added only after both local repositories and migration are
   complete.
+- Capability version `1` may be advertised only after atomic source
+  publication, recovery relay, reserved authority identity, conflict
+  extensions, purge fencing, and activation baselines are ready.
+- Links created before ongoing synchronization require an explicit activation
+  baseline and canonical home-manifest checkpoint; capability advertisement
+  alone does not activate them.
+- Cross-database publication is journaled, not atomic. A source row is
+  acknowledged only after its deterministic envelope is durable in Sync V2.
+- The server-generated OpenAPI/JSON Schema fragment is the wire-contract
+  authority for Personal Context capability, conflict, and server-origin
+  extensions; Chatbook vendors it with source commit and checksum.
 
 ## Links
 
 - [Server design](../../Docs/Design/2026-08-30-personal-context-profile-server-design.md)
+- [Ongoing synchronization amendment](../../Docs/superpowers/specs/2026-09-02-personal-context-ongoing-sync-design.md)
 - [Chatbook source specification](https://github.com/rmusser01/tldw_chatbook/blob/main/Docs/superpowers/specs/2026-08-28-unified-personal-context-profile-design.md)
