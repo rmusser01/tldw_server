@@ -72,6 +72,7 @@ const NotesGraphCanvas = React.forwardRef<
     const onSelectNodeRef = React.useRef(onSelectNode)
     const onSelectEdgeRef = React.useRef(onSelectEdge)
     const { t, i18n } = useTranslation("option")
+    const language = i18n?.resolvedLanguage ?? i18n?.language
     const translationRef = React.useRef(t)
     focusNoteIdRef.current = focusNoteId
     selectedNodeIdRef.current = selectedNodeId
@@ -318,8 +319,7 @@ const NotesGraphCanvas = React.forwardRef<
       }
     }, [
       graph,
-      i18n.language,
-      i18n.resolvedLanguage,
+      language,
       layout,
       provisionalOverlays,
       showProvisional,
