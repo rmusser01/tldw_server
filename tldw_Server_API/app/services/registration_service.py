@@ -11,13 +11,19 @@ import stat
 import string
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 from uuid import uuid4
 
 #
 # 3rd-party imports
 from loguru import logger
 
+from tldw_Server_API.app.core.Admin_Webhooks.domain import EventSourceKind
+from tldw_Server_API.app.core.Admin_Webhooks.producer import (
+    AdminWebhookEventProducer,
+    build_admin_webhook_event_producer,
+    build_user_created_data,
+)
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
     DirectoryCreationError,
@@ -29,7 +35,10 @@ from tldw_Server_API.app.core.AuthNZ.exceptions import (
     RegistrationError,
 )
 from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService, get_password_service
-from tldw_Server_API.app.core.AuthNZ.profile_version import VersionedUserWriteGateway
+from tldw_Server_API.app.core.AuthNZ.profile_version import (
+    VersionedUserWriteGateway,
+    normalize_profile_version,
+)
 
 #
 # Local imports
@@ -49,12 +58,16 @@ class RegistrationService:
         self,
         db_pool: Optional[DatabasePool] = None,
         password_service: Optional[PasswordService] = None,
-        settings: Optional[Settings] = None
+        settings: Optional[Settings] = None,
+        webhook_event_producer: AdminWebhookEventProducer | None = None,
+        command_id_factory: Callable[[], str] | None = None,
     ):
         """Initialize registration service"""
         self.settings = settings or get_settings()
         self.db_pool = db_pool
         self.password_service = password_service or get_password_service()
+        self._webhook_event_producer = webhook_event_producer
+        self._command_id_factory = command_id_factory or (lambda: str(uuid4()))
 
         # Check if registration is enabled
         self.registration_enabled = self.settings.ENABLE_REGISTRATION
@@ -86,6 +99,55 @@ class RegistrationService:
         """Initialize the registration service"""
         if not self.db_pool:
             self.db_pool = await get_db_pool()
+
+    def _event_producer(self) -> AdminWebhookEventProducer:
+        if self.db_pool is None:
+            raise RuntimeError("registration database is unavailable")
+        if self._webhook_event_producer is None:
+            self._webhook_event_producer = build_admin_webhook_event_producer(
+                self.db_pool
+            )
+        return self._webhook_event_producer
+
+    async def _user_event_snapshot(
+        self,
+        conn,
+        *,
+        user_id: int,
+        gateway: VersionedUserWriteGateway,
+    ) -> tuple[bool, datetime, datetime, datetime]:
+        if self._is_postgres_backend():
+            row = await conn.fetchrow(
+                "SELECT is_active, created_at, updated_at FROM users WHERE id = $1",
+                user_id,
+            )
+            if row is None:
+                raise RegistrationError("Registered user could not be read")
+            is_active = bool(row["is_active"])
+            created_at = row["created_at"]
+            updated_at = row["updated_at"]
+        else:
+            cursor = await conn.execute(
+                "SELECT is_active, created_at, updated_at FROM users WHERE id = ?",
+                (user_id,),
+            )
+            row = await cursor.fetchone()
+            if row is None:
+                raise RegistrationError("Registered user could not be read")
+            is_active = bool(row[0])
+            created_at = row[1]
+            updated_at = row[2]
+        resource_version = await gateway.capture_floor(
+            conn,
+            user_id=user_id,
+            lock_user=False,
+        )
+        return (
+            is_active,
+            normalize_profile_version(created_at, allow_naive=True),
+            normalize_profile_version(updated_at, allow_naive=True),
+            resource_version,
+        )
 
     def generate_registration_code(self, length: int = 24) -> str:
         """
@@ -298,6 +360,7 @@ class RegistrationService:
         is_verified_override: Optional[bool] = None,
         storage_quota_override: Optional[int] = None,
         system_provisioning: bool = False,
+        source_request_id: str | None = None,
     ) -> dict[str, Any]:
         """
         Register a new user with full transaction safety
@@ -333,6 +396,14 @@ class RegistrationService:
         # Validate password strength
         self.password_service.validate_password_strength(password, username)
 
+        event_producer = self._event_producer()
+        event_preparation = await event_producer.begin_capture(
+            source_component="registration_service",
+            source_request_id=source_request_id,
+        )
+        source_command_id = (
+            self._command_id_factory() if event_preparation is not None else None
+        )
         user_id = None
         directories_created = False
         code_info: Optional[dict[str, Any]] = None
@@ -475,6 +546,35 @@ class RegistrationService:
                     registration_code_org_role=code_info.get("org_role") if code_info else None,
                     registration_code_team_id=code_info.get("team_id") if code_info else None,
                 )
+
+                if event_preparation is not None:
+                    (
+                        persisted_active,
+                        created_at,
+                        updated_at,
+                        resource_version,
+                    ) = await self._user_event_snapshot(
+                        conn,
+                        user_id=user_id,
+                        gateway=gateway,
+                    )
+                    await event_producer.capture_in_transaction(
+                        event_preparation,
+                        tx=event_producer.bind_transaction(conn),
+                        event_type="user.created",
+                        source_kind=EventSourceKind.COMMAND,
+                        aggregate_type=None,
+                        aggregate_id=None,
+                        aggregate_version=None,
+                        source_command_id=source_command_id,
+                        data=build_user_created_data(
+                            user_id=user_id,
+                            is_active=persisted_active,
+                            resource_version=resource_version,
+                            created_at=created_at,
+                            updated_at=updated_at,
+                        ),
+                    )
 
                 # If we get here, everything succeeded
                 try:

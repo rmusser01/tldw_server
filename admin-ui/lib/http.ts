@@ -58,6 +58,7 @@ export type JsonResponse<T> = {
   status: number;
   etag: string | null;
   requestId: string | null;
+  retryAfterSeconds: number | null;
 };
 
 type ResponseType = 'json' | 'text' | 'blob';
@@ -112,6 +113,12 @@ const boundedRequestId = (value: unknown): string | null => (
   typeof value === 'string' && REQUEST_ID.test(value) ? value : null
 );
 
+const boundedRetryAfter = (value: string | null): number | null => {
+  if (value === null || !/^(0|[1-9][0-9]{0,4})$/.test(value)) return null;
+  const seconds = Number(value);
+  return Number.isSafeInteger(seconds) && seconds <= 86_400 ? seconds : null;
+};
+
 const parseWebhookError = (value: unknown): ParsedWebhookError | null => {
   if (!isRecord(value) || !hasExactKeys(value, ['error']) || !isRecord(value.error)) {
     return null;
@@ -139,7 +146,9 @@ const isProxyTransportError = (status: number, value: unknown): status is 502 | 
 
 const isWebhookEndpoint = (endpoint: string): boolean => {
   const path = endpoint.split('?', 1)[0];
-  return path === '/admin/webhooks' || path.startsWith('/admin/webhooks/');
+  return path === '/admin/webhooks'
+    || path.startsWith('/admin/webhooks/')
+    || /^\/admin\/incidents\/[^/]+\/notify-webhooks$/.test(path);
 };
 
 const buildRequestHeaders = (overrides?: HeadersInit): Headers => {
@@ -269,6 +278,7 @@ export const requestJsonWithMetadata = async <T>(
     status: response.status,
     etag: response.headers.get('etag'),
     requestId: boundedRequestId(response.headers.get('x-request-id')),
+    retryAfterSeconds: boundedRetryAfter(response.headers.get('retry-after')),
   };
 };
 

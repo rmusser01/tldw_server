@@ -14,7 +14,6 @@ from tldw_Server_API.app.core.Admin_Webhooks.audit import MutationAudit
 from tldw_Server_API.app.core.Admin_Webhooks.config import (
     AdminWebhookMode,
     AdminWebhookSettings,
-    WebhookRouteSelection,
 )
 from tldw_Server_API.app.core.Admin_Webhooks.control_plane import (
     AdminWebhookControlPlane,
@@ -536,7 +535,7 @@ async def test_fail_once_audit_error_is_preserved_across_postgres_transaction(
     monkeypatch.setattr(
         control_plane,
         "validate_webhook_target",
-        lambda url, *, allow_http_dev: ValidatedWebhookTarget(
+        lambda url, *, allow_http_dev, allow_e2e_loopback: ValidatedWebhookTarget(
             url=url,
             hostname="hooks.example.com",
             target_display="https://hooks.example.com",
@@ -550,7 +549,6 @@ async def test_fail_once_audit_error_is_preserved_across_postgres_transaction(
         repository=pg_repo.repository,
         settings=AdminWebhookSettings(
             mode=AdminWebhookMode.ON,
-            route_selection=WebhookRouteSelection.CANONICAL,
             registration_limit=100,
             active_limit=25,
             allow_http_dev=False,

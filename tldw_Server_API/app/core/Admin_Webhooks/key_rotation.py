@@ -33,6 +33,7 @@ from .domain import (
     WebhookError,
     WebhookErrorCode,
 )
+from .events import decrypt_pending_incident_marker_body
 
 PENDING_INCIDENT_MARKER_TABLE = "pending_incident_markers"
 PROTECTED_TABLE_ORDER = DATABASE_PROTECTED_TABLE_ORDER + (
@@ -527,18 +528,22 @@ class WebhookKeyRotationService:
                 }
                 changed = False
                 for marker in page:
-                    if marker.body.key_id == target:
-                        self._key_ring.decrypt_bytes(
-                            purpose=marker.envelope_purpose,
-                            identity=marker.envelope_identity,
-                            protected=marker.body,
-                        )
+                    _, source_identity = decrypt_pending_incident_marker_body(
+                        self._key_ring,
+                        marker,
+                    )
+                    target_identity = dict(marker.envelope_identity)
+                    if (
+                        marker.body.key_id == target
+                        and source_identity == target_identity
+                    ):
                         continue
                     replacement = self._key_ring.reencrypt_to_key(
                         marker.body,
                         purpose=marker.envelope_purpose,
-                        identity=marker.envelope_identity,
+                        identity=source_identity,
                         target_key_id=target,
+                        target_identity=target_identity,
                     )
                     position = marker_positions[marker.event_id]
                     raw_markers[position] = replace(
@@ -643,11 +648,7 @@ class WebhookKeyRotationService:
             for marker in markers:
                 if marker.body.key_id != target:
                     raise WebhookError(WebhookErrorCode.PRECONDITION_FAILED)
-                self._key_ring.decrypt_bytes(
-                    purpose=marker.envelope_purpose,
-                    identity=marker.envelope_identity,
-                    protected=marker.body,
-                )
+                decrypt_pending_incident_marker_body(self._key_ring, marker)
         return len(markers)
 
     async def _verified_inventory_count(

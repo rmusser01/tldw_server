@@ -44,7 +44,7 @@ def _configure_store(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[A
     return admin_system_ops_service, store_path
 
 
-def _create_incident(
+async def _create_incident(
     service: Any,
     *,
     title: str = "Queue backlog",
@@ -55,7 +55,7 @@ def _create_incident(
     actor: str = "alice_admin",
 ) -> dict[str, Any]:
     """Helper to create an incident with sensible defaults."""
-    return service.create_incident(
+    return await service.create_incident(
         title=title,
         status=status,
         severity=severity,
@@ -63,6 +63,30 @@ def _create_incident(
         tags=tags or ["queue"],
         actor=actor,
     )
+
+
+class TestSystemOpsStoreIntegrity:
+    """All store mutations fail closed when durable state is unreadable."""
+
+    def test_unrelated_write_does_not_replace_corrupted_durable_state(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        service, store_path = _configure_store(monkeypatch, tmp_path)
+        corrupted = b'{"webhook_pending_events":[{"event_id":"durable"}]'
+        store_path.write_bytes(corrupted)
+
+        with pytest.raises(ValueError, match="valid JSON"):
+            service.update_maintenance_state(
+                enabled=True,
+                message="Scheduled maintenance",
+                allowlist_user_ids=[],
+                allowlist_emails=[],
+                actor="admin_user",
+            )
+
+        assert store_path.read_bytes() == corrupted
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -146,11 +170,11 @@ class TestIncidentSlaMetrics:
         assert inc_b["mtta_minutes"] == 20.0
         assert inc_b["mttr_minutes"] == 60.0
 
-    def test_sla_metrics_null_when_not_acknowledged(self, monkeypatch, tmp_path):
+    async def test_sla_metrics_null_when_not_acknowledged(self, monkeypatch, tmp_path):
         """Open incidents without acknowledged_at have null MTTA."""
         service, _ = _configure_store(monkeypatch, tmp_path)
 
-        service.create_incident(
+        await service.create_incident(
             title="New issue",
             status="open",
             severity="low",
@@ -238,25 +262,27 @@ class TestIncidentSlaMetrics:
 class TestIncidentNotifications:
     """Tests for notify_incident_stakeholders service function."""
 
-    def test_notify_sends_to_all_recipients(self, monkeypatch, tmp_path):
+    async def test_notify_sends_to_all_recipients(self, monkeypatch, tmp_path):
         """All recipients receive notification and timeline event is added."""
         service, _ = _configure_store(monkeypatch, tmp_path)
-        incident = _create_incident(service)
+        incident = await _create_incident(service)
 
         # Mock the email service so no real emails are sent
         mock_email_svc = mock.MagicMock()
-        mock_email_svc.send_email = mock.AsyncMock(return_value=None)
+        mock_email_svc.send_email = mock.AsyncMock(return_value=True)
 
         monkeypatch.setattr(
             "tldw_Server_API.app.core.AuthNZ.email_service.get_email_service",
             lambda: mock_email_svc,
         )
 
-        result = service.notify_incident_stakeholders(
+        result = await service.notify_incident_stakeholders(
             incident_id=incident["id"],
             recipients=["alice@example.com", "bob@example.com", "carol@example.com"],
             message="Please review the incident.",
             actor="admin_user",
+            actor_id="user:7",
+            idempotency_key="stakeholder-notify-key-0001",
         )
 
         assert result["incident_id"] == incident["id"]
@@ -266,12 +292,12 @@ class TestIncidentNotifications:
         # Verify timeline event was appended to the incident
         updated = service.get_incident(incident_id=incident["id"])
         timeline_msgs = [e["message"] for e in updated["timeline"]]
-        assert any("3/3" in msg for msg in timeline_msgs)
+        assert sum("requested for 3" in msg for msg in timeline_msgs) == 1
 
-    def test_notify_handles_partial_failure(self, monkeypatch, tmp_path):
+    async def test_notify_handles_partial_failure(self, monkeypatch, tmp_path):
         """When one send fails, results include both sent and failed entries."""
         service, _ = _configure_store(monkeypatch, tmp_path)
-        incident = _create_incident(service)
+        incident = await _create_incident(service)
 
         call_count = 0
 
@@ -280,6 +306,7 @@ class TestIncidentNotifications:
             call_count += 1
             if kwargs.get("to_email") == "fail@example.com":
                 raise RuntimeError("SMTP connection refused")
+            return True
 
         mock_email_svc = mock.MagicMock()
         mock_email_svc.send_email = _send_email_side_effect
@@ -289,10 +316,12 @@ class TestIncidentNotifications:
             lambda: mock_email_svc,
         )
 
-        result = service.notify_incident_stakeholders(
+        result = await service.notify_incident_stakeholders(
             incident_id=incident["id"],
             recipients=["ok1@example.com", "fail@example.com", "ok2@example.com"],
             actor="admin_user",
+            actor_id="user:7",
+            idempotency_key="stakeholder-notify-key-0002",
         )
 
         statuses = {n["email"]: n["status"] for n in result["notifications"]}
@@ -300,44 +329,337 @@ class TestIncidentNotifications:
         assert statuses["fail@example.com"] == "failed"
         assert statuses["ok2@example.com"] == "sent"
 
-        # Timeline records the partial result
+        # Timeline records the durable request before provider delivery.
         updated = service.get_incident(incident_id=incident["id"])
         timeline_msgs = [e["message"] for e in updated["timeline"]]
-        assert any("2/3" in msg for msg in timeline_msgs)
+        assert sum("requested for 3" in msg for msg in timeline_msgs) == 1
 
-    def test_notify_nonexistent_incident_raises(self, monkeypatch, tmp_path):
+    async def test_notify_records_false_provider_result_as_failed(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        """A provider rejection returned as False must not be recorded as sent."""
+        service, _ = _configure_store(monkeypatch, tmp_path)
+        incident = await _create_incident(service)
+        mock_email_svc = mock.MagicMock()
+        mock_email_svc.send_email = mock.AsyncMock(return_value=False)
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.AuthNZ.email_service.get_email_service",
+            lambda: mock_email_svc,
+        )
+
+        result = await service.notify_incident_stakeholders(
+            incident_id=incident["id"],
+            recipients=["ops@example.com"],
+            actor="admin_user",
+            actor_id="user:7",
+            idempotency_key="stakeholder-notify-false-result-0001",
+        )
+
+        assert result["notifications"] == [
+            {
+                "email": "ops@example.com",
+                "status": "failed",
+                "error": "Delivery failed",
+            }
+        ]
+
+    async def test_notify_provider_setup_failure_preserves_pending_for_retry(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        """Provider setup happens before a recipient crosses the send boundary."""
+        service, store_path = _configure_store(monkeypatch, tmp_path)
+        incident = await _create_incident(service)
+        mock_email_svc = mock.MagicMock()
+        mock_email_svc.send_email = mock.AsyncMock(return_value=True)
+        setup_attempts = 0
+
+        def get_email_service():
+            nonlocal setup_attempts
+            setup_attempts += 1
+            if setup_attempts == 1:
+                raise RuntimeError("provider unavailable")
+            return mock_email_svc
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.AuthNZ.email_service.get_email_service",
+            get_email_service,
+        )
+        command = {
+            "incident_id": incident["id"],
+            "recipients": ["ops@example.com"],
+            "actor": "admin_user",
+            "actor_id": "user:7",
+            "idempotency_key": "stakeholder-notify-provider-setup-0001",
+        }
+
+        with pytest.raises(RuntimeError, match="provider unavailable"):
+            await service.notify_incident_stakeholders(**command)
+
+        stored = json.loads(store_path.read_text(encoding="utf-8"))
+        recipient = stored["incident_stakeholder_notification_commands"][0][
+            "recipients"
+        ][0]
+        assert recipient["status"] == "pending"
+
+        replay = await service.notify_incident_stakeholders(**command)
+
+        assert replay["replayed"] is True
+        assert replay["notifications"][0]["status"] == "sent"
+        mock_email_svc.send_email.assert_awaited_once()
+
+    async def test_notify_nonexistent_incident_raises(self, monkeypatch, tmp_path):
         """Notifying a nonexistent incident raises ValueError."""
         service, _ = _configure_store(monkeypatch, tmp_path)
 
         with pytest.raises(ValueError, match="not_found"):
-            service.notify_incident_stakeholders(
+            await service.notify_incident_stakeholders(
                 incident_id="inc_does_not_exist",
                 recipients=["someone@example.com"],
                 actor="admin_user",
+                actor_id="user:7",
+                idempotency_key="stakeholder-notify-key-0003",
             )
 
-    def test_notify_empty_recipients_skipped(self, monkeypatch, tmp_path):
+    async def test_notify_empty_recipients_skipped(self, monkeypatch, tmp_path):
         """Blank recipient strings are skipped."""
         service, _ = _configure_store(monkeypatch, tmp_path)
-        incident = _create_incident(service)
+        incident = await _create_incident(service)
 
         mock_email_svc = mock.MagicMock()
-        mock_email_svc.send_email = mock.AsyncMock(return_value=None)
+        mock_email_svc.send_email = mock.AsyncMock(return_value=True)
 
         monkeypatch.setattr(
             "tldw_Server_API.app.core.AuthNZ.email_service.get_email_service",
             lambda: mock_email_svc,
         )
 
-        result = service.notify_incident_stakeholders(
+        result = await service.notify_incident_stakeholders(
             incident_id=incident["id"],
             recipients=["", "  ", "valid@example.com"],
             actor="admin_user",
+            actor_id="user:7",
+            idempotency_key="stakeholder-notify-key-0004",
         )
 
         # Only the non-blank recipient should have been processed
         assert len(result["notifications"]) == 1
         assert result["notifications"][0]["email"] == "valid@example.com"
+
+    async def test_notify_replay_does_not_resend_and_changed_request_conflicts(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        """A scoped replay returns the durable result without another provider call."""
+        from tldw_Server_API.app.core.Admin_Webhooks.domain import (
+            WebhookError,
+            WebhookErrorCode,
+        )
+
+        service, _ = _configure_store(monkeypatch, tmp_path)
+        incident = await _create_incident(service)
+        mock_email_svc = mock.MagicMock()
+        mock_email_svc.send_email = mock.AsyncMock(return_value=True)
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.AuthNZ.email_service.get_email_service",
+            lambda: mock_email_svc,
+        )
+
+        first = await service.notify_incident_stakeholders(
+            incident_id=incident["id"],
+            recipients=["ops@example.com"],
+            message="Investigating",
+            actor="admin_user",
+            actor_id="user:7",
+            idempotency_key="stakeholder-notify-replay-0001",
+        )
+        replay = await service.notify_incident_stakeholders(
+            incident_id=incident["id"],
+            recipients=["ops@example.com"],
+            message="Investigating",
+            actor="admin_user",
+            actor_id="user:7",
+            idempotency_key="stakeholder-notify-replay-0001",
+        )
+
+        assert first["replayed"] is False
+        assert replay["replayed"] is True
+        assert replay["command_id"] == first["command_id"]
+        assert mock_email_svc.send_email.await_count == 1
+
+        with pytest.raises(WebhookError) as exc_info:
+            await service.notify_incident_stakeholders(
+                incident_id=incident["id"],
+                recipients=["ops@example.com"],
+                message="Different message",
+                actor="admin_user",
+                actor_id="user:7",
+                idempotency_key="stakeholder-notify-replay-0001",
+            )
+        assert exc_info.value.code is WebhookErrorCode.IDEMPOTENCY_CONFLICT
+        assert mock_email_svc.send_email.await_count == 1
+
+    async def test_notify_ambiguous_result_write_is_not_resent(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        """A crash after provider acceptance leaves an at-most-once unknown claim."""
+        service, _ = _configure_store(monkeypatch, tmp_path)
+        incident = await _create_incident(service)
+        sends: list[str] = []
+
+        class RecordingEmailService:
+            async def send_email(self, *, to_email: str, **kwargs: object) -> bool:
+                del kwargs
+                sends.append(to_email)
+                return True
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.AuthNZ.email_service.get_email_service",
+            lambda: RecordingEmailService(),
+        )
+        original_write = service._atomic_write_store
+        write_count = 0
+
+        def fail_result_write(path, store):
+            nonlocal write_count
+            write_count += 1
+            if write_count == 3:
+                raise OSError("injected result publication failure")
+            original_write(path, store)
+
+        monkeypatch.setattr(service, "_atomic_write_store", fail_result_write)
+        with pytest.raises(OSError, match="injected result publication failure"):
+            await service.notify_incident_stakeholders(
+                incident_id=incident["id"],
+                recipients=["ops@example.com"],
+                message="Investigating",
+                actor="admin_user",
+                actor_id="user:7",
+                idempotency_key="stakeholder-notify-ambiguous-0001",
+            )
+
+        monkeypatch.setattr(service, "_atomic_write_store", original_write)
+        replay = await service.notify_incident_stakeholders(
+            incident_id=incident["id"],
+            recipients=["ops@example.com"],
+            message="Investigating",
+            actor="admin_user",
+            actor_id="user:7",
+            idempotency_key="stakeholder-notify-ambiguous-0001",
+        )
+
+        assert sends == ["ops@example.com"]
+        assert replay["replayed"] is True
+        assert replay["notifications"] == [
+            {
+                "email": "ops@example.com",
+                "status": "unknown",
+                "error": "Delivery outcome is unknown; the recipient was not resent",
+            }
+        ]
+
+    async def test_notify_replay_rejects_a_corrupted_command_timestamp(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        """Durable command records fail closed when their timestamp is malformed."""
+        service, store_path = _configure_store(monkeypatch, tmp_path)
+        incident = await _create_incident(service)
+        mock_email_svc = mock.MagicMock()
+        mock_email_svc.send_email = mock.AsyncMock(return_value=True)
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.AuthNZ.email_service.get_email_service",
+            lambda: mock_email_svc,
+        )
+        await service.notify_incident_stakeholders(
+            incident_id=incident["id"],
+            recipients=["ops@example.com"],
+            actor="admin_user",
+            actor_id="user:7",
+            idempotency_key="stakeholder-notify-corrupt-0001",
+        )
+        stored = json.loads(store_path.read_text(encoding="utf-8"))
+        stored["incident_stakeholder_notification_commands"][0]["created_at"] = "not-a-time"
+        store_path.write_text(json.dumps(stored), encoding="utf-8")
+
+        with pytest.raises(ValueError, match="timestamp"):
+            await service.notify_incident_stakeholders(
+                incident_id=incident["id"],
+                recipients=["ops@example.com"],
+                actor="admin_user",
+                actor_id="user:7",
+                idempotency_key="stakeholder-notify-corrupt-0001",
+            )
+        assert mock_email_svc.send_email.await_count == 1
+
+    async def test_notify_prunes_only_expired_terminal_commands_at_capacity(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        """A completed command older than the replay window must not exhaust capacity."""
+        service, store_path = _configure_store(monkeypatch, tmp_path)
+        incident = await _create_incident(service)
+        fixed_now = datetime(2026, 9, 1, 12, tzinfo=timezone.utc)
+        monkeypatch.setattr(service, "_STAKEHOLDER_NOTIFICATION_COMMAND_LIMIT", 3)
+        monkeypatch.setattr(service, "_now_iso", lambda: fixed_now.isoformat())
+
+        def completed_command(index: int, created_at: datetime) -> dict[str, Any]:
+            return {
+                "command_id": f"sha256:{index:064x}",
+                "request_fingerprint": f"hmac-sha256:{index:064x}",
+                "incident_id": incident["id"],
+                "subject": "Incident update",
+                "text_body": "Incident update",
+                "recipients": [
+                    {"email": f"ops{index}@example.com", "status": "sent", "error": None}
+                ],
+                "created_at": created_at.isoformat(),
+            }
+
+        expired = completed_command(1, fixed_now - timedelta(days=31))
+        retained = completed_command(2, fixed_now - timedelta(days=1))
+        unknown = completed_command(3, fixed_now - timedelta(days=31))
+        unknown["recipients"][0]["status"] = "sending"
+        stored = json.loads(store_path.read_text(encoding="utf-8"))
+        stored["incident_stakeholder_notification_commands"] = [
+            expired,
+            retained,
+            unknown,
+        ]
+        store_path.write_text(json.dumps(stored), encoding="utf-8")
+
+        mock_email_svc = mock.MagicMock()
+        mock_email_svc.send_email = mock.AsyncMock(return_value=True)
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.AuthNZ.email_service.get_email_service",
+            lambda: mock_email_svc,
+        )
+
+        result = await service.notify_incident_stakeholders(
+            incident_id=incident["id"],
+            recipients=["new@example.com"],
+            actor="admin_user",
+            actor_id="user:7",
+            idempotency_key="stakeholder-notify-retention-0001",
+        )
+
+        commands = json.loads(store_path.read_text(encoding="utf-8"))[
+            "incident_stakeholder_notification_commands"
+        ]
+        assert {command["command_id"] for command in commands} == {
+            retained["command_id"],
+            unknown["command_id"],
+            result["command_id"],
+        }
+        mock_email_svc.send_email.assert_awaited_once()
 
 
 # ═══════════════════════════════════════════════════════════════════════════

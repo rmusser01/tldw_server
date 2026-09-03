@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
 import pytest
+
+pytestmark = pytest.mark.unit
 
 
 def _configure_store(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[Any, Path]:
@@ -14,8 +17,8 @@ def _configure_store(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[A
     return admin_system_ops_service, store_path
 
 
-def _create_incident(service: Any) -> dict[str, Any]:
-    return service.create_incident(
+async def _create_incident(service: Any) -> dict[str, Any]:
+    return await service.create_incident(
         title="Queue backlog",
         status="investigating",
         severity="high",
@@ -25,10 +28,13 @@ def _create_incident(service: Any) -> dict[str, Any]:
     )
 
 
-def test_create_incident_includes_authoritative_workflow_defaults(monkeypatch, tmp_path):
+async def test_create_incident_includes_authoritative_workflow_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     service, _ = _configure_store(monkeypatch, tmp_path)
 
-    incident = service.create_incident(
+    incident = await service.create_incident(
         title="Queue backlog",
         status="investigating",
         severity="high",
@@ -44,7 +50,10 @@ def test_create_incident_includes_authoritative_workflow_defaults(monkeypatch, t
     assert incident["action_items"] == []
 
 
-def test_list_incidents_backfills_missing_authoritative_workflow_fields(monkeypatch, tmp_path):
+async def test_list_incidents_backfills_missing_authoritative_workflow_fields(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     service, store_path = _configure_store(monkeypatch, tmp_path)
 
     store_path.write_text(
@@ -89,18 +98,37 @@ def test_list_incidents_backfills_missing_authoritative_workflow_fields(monkeypa
     )
 
     assert total == 1
+    assert incidents[0]["version"] == 1
     assert incidents[0]["assigned_to_user_id"] is None
     assert incidents[0]["assigned_to_label"] is None
     assert incidents[0]["root_cause"] is None
     assert incidents[0]["impact"] is None
     assert incidents[0]["action_items"] == []
 
+    updated = await service.update_incident(
+        incident_id="inc_legacy",
+        title=None,
+        status=None,
+        severity="high",
+        summary=None,
+        tags=None,
+        update_message=None,
+        actor="alice_admin",
+    )
 
-def test_update_incident_persists_assignment_and_can_clear_it(monkeypatch, tmp_path):
+    assert updated["version"] == 2
+    persisted = json.loads(store_path.read_text(encoding="utf-8"))
+    assert persisted["incidents"][0]["version"] == 2
+
+
+async def test_update_incident_persists_assignment_and_can_clear_it(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     service, _ = _configure_store(monkeypatch, tmp_path)
-    incident = _create_incident(service)
+    incident = await _create_incident(service)
 
-    assigned = service.update_incident(
+    assigned = await service.update_incident(
         incident_id=incident["id"],
         title=None,
         status=None,
@@ -117,7 +145,7 @@ def test_update_incident_persists_assignment_and_can_clear_it(monkeypatch, tmp_p
     assert assigned["assigned_to_label"] == "Alice Admin"
     assert assigned["timeline"][-1]["message"] == "Assigned to Alice Admin"
 
-    cleared = service.update_incident(
+    cleared = await service.update_incident(
         incident_id=incident["id"],
         title=None,
         status=None,
@@ -135,11 +163,14 @@ def test_update_incident_persists_assignment_and_can_clear_it(monkeypatch, tmp_p
     assert cleared["timeline"][-1]["message"] == "Assignment cleared"
 
 
-def test_update_incident_persists_postmortem_fields_and_normalizes_blank_action_items(monkeypatch, tmp_path):
+async def test_update_incident_persists_postmortem_fields_and_normalizes_blank_action_items(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     service, _ = _configure_store(monkeypatch, tmp_path)
-    incident = _create_incident(service)
+    incident = await _create_incident(service)
 
-    updated = service.update_incident(
+    updated = await service.update_incident(
         incident_id=incident["id"],
         title=None,
         status=None,
@@ -164,11 +195,14 @@ def test_update_incident_persists_postmortem_fields_and_normalizes_blank_action_
     assert updated["timeline"][-1]["message"] == "Post-mortem updated"
 
 
-def test_update_incident_distinguishes_omitted_fields_from_explicit_null(monkeypatch, tmp_path):
+async def test_update_incident_distinguishes_omitted_fields_from_explicit_null(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     service, _ = _configure_store(monkeypatch, tmp_path)
-    incident = _create_incident(service)
+    incident = await _create_incident(service)
 
-    seeded = service.update_incident(
+    seeded = await service.update_incident(
         incident_id=incident["id"],
         title=None,
         status=None,
@@ -182,7 +216,7 @@ def test_update_incident_distinguishes_omitted_fields_from_explicit_null(monkeyp
         actor="alice_admin",
     )
 
-    preserved = service.update_incident(
+    preserved = await service.update_incident(
         incident_id=incident["id"],
         title=None,
         status="mitigating",
@@ -198,7 +232,7 @@ def test_update_incident_distinguishes_omitted_fields_from_explicit_null(monkeyp
     assert preserved["impact"] == seeded["impact"]
     assert preserved["action_items"] == seeded["action_items"]
 
-    cleared = service.update_incident(
+    cleared = await service.update_incident(
         incident_id=incident["id"],
         title=None,
         status=None,
@@ -217,14 +251,17 @@ def test_update_incident_distinguishes_omitted_fields_from_explicit_null(monkeyp
     assert cleared["action_items"] == []
 
 
-def test_update_incident_does_not_append_timeline_or_persist_workflow_on_failed_validation(monkeypatch, tmp_path):
+async def test_update_incident_does_not_append_timeline_or_persist_workflow_on_failed_validation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     service, _ = _configure_store(monkeypatch, tmp_path)
-    incident = _create_incident(service)
+    incident = await _create_incident(service)
 
     original_timeline = list(incident["timeline"])
 
     with pytest.raises(ValueError, match="invalid_severity"):
-        service.update_incident(
+        await service.update_incident(
             incident_id=incident["id"],
             title=None,
             status=None,

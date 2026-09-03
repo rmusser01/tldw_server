@@ -42,7 +42,7 @@ from .catalog import (
     WebhookCatalogItem,
     normalize_subscriptions,
 )
-from .config import AdminWebhookMode, AdminWebhookSettings, WebhookRouteSelection
+from .config import AdminWebhookMode, AdminWebhookSettings
 from .crypto import (
     ProtectedValue,
     WebhookKeyError,
@@ -52,6 +52,9 @@ from .crypto import (
     load_webhook_key_ring,
 )
 from .domain import (
+    AdminWebhookActivationCheck,
+    AdminWebhookActivationPhase,
+    AdminWebhookActivationReasonCode,
     DeliveryBacklogCounts,
     DeliveryCapabilityStatus,
     DeliveryComponentStatus,
@@ -78,9 +81,7 @@ from .domain import (
 
 _REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 _SIGNING_SECRET_PATTERN = re.compile(r"^whsec_[0-9a-f]{64}$")
-_ACTIVE_ROTATION_PHASES = frozenset(
-    {"rewriting", "verifying", "awaiting_primary_cutover"}
-)
+_ACTIVE_ROTATION_PHASES = frozenset({"rewriting", "verifying", "awaiting_primary_cutover"})
 _FAILED_AUDIT_CODES = frozenset(
     {
         WebhookErrorCode.KEY_UNAVAILABLE,
@@ -97,6 +98,91 @@ _ADMISSION_DENIAL_CODES = frozenset(
         WebhookErrorCode.SECRET_ROTATION_REQUIRED,
     }
 )
+
+
+def evaluate_activation_readiness(
+    status: WebhookStatus,
+    *,
+    phase: AdminWebhookActivationPhase,
+    max_backlog_age_seconds: int,
+) -> AdminWebhookActivationCheck:
+    """Evaluate one read-only activation phase from sanitized current state."""
+
+    if not isinstance(phase, AdminWebhookActivationPhase):
+        raise TypeError("activation phase is invalid")
+    if (
+        isinstance(max_backlog_age_seconds, bool)
+        or not isinstance(max_backlog_age_seconds, int)
+        or not 1 <= max_backlog_age_seconds <= 86_400
+    ):
+        raise ValueError("activation backlog age is invalid")
+    delivery = status.delivery
+    schema_ready = bool(
+        status.schema_ready
+        and delivery.schema_ready
+        and delivery.delivery_schema_ready
+        and delivery.canonical_schema_version == 1
+    )
+    migration_complete = bool(status.migration.phase == "complete" and delivery.migration_complete)
+    key_available = bool(status.key_state == WebhookKeyLoadCode.AVAILABLE.value and delivery.key_ready)
+    key_ready = bool(key_available and delivery.key_primary_match)
+    jobs_ready = bool(delivery.jobs_database_ready and delivery.queue_ready and delivery.job_type_ready)
+    limits_ready = not (status.limits.registrations_over_limit or status.limits.active_registrations_over_limit)
+    worker_ready = delivery.worker.ready
+    reconciler_ready = delivery.reconciler.ready
+    retention_ready = delivery.retention.ready
+    runtime_ready = worker_ready and reconciler_ready and retention_ready
+    oldest_age = delivery.oldest_nonterminal_age_seconds
+    backlog_age_ready = oldest_age is None or oldest_age <= max_backlog_age_seconds
+    required_mode = (
+        AdminWebhookMode.MIGRATE.value if phase is AdminWebhookActivationPhase.PREDEPLOY else AdminWebhookMode.ON.value
+    )
+    reasons: list[AdminWebhookActivationReasonCode] = []
+    if status.mode != required_mode:
+        reasons.append(AdminWebhookActivationReasonCode.PHASE_MISMATCH)
+    if not schema_ready:
+        reasons.append(AdminWebhookActivationReasonCode.SCHEMA_UNREADY)
+    if not migration_complete:
+        reasons.append(AdminWebhookActivationReasonCode.MIGRATION_PENDING)
+    if not key_available:
+        reasons.append(AdminWebhookActivationReasonCode.KEY_UNAVAILABLE)
+    elif not key_ready:
+        reasons.append(AdminWebhookActivationReasonCode.KEY_CONFIGURATION_MISMATCH)
+    if not jobs_ready:
+        reasons.append(AdminWebhookActivationReasonCode.JOBS_UNAVAILABLE)
+    if status.limits.registrations_over_limit:
+        reasons.append(AdminWebhookActivationReasonCode.REGISTRATION_LIMIT_EXCEEDED)
+    if status.limits.active_registrations_over_limit:
+        reasons.append(AdminWebhookActivationReasonCode.ACTIVE_LIMIT_EXCEEDED)
+    if phase is AdminWebhookActivationPhase.LIVE:
+        if not worker_ready:
+            reasons.append(AdminWebhookActivationReasonCode.WORKER_UNAVAILABLE)
+        if not reconciler_ready:
+            reasons.append(AdminWebhookActivationReasonCode.RECONCILER_UNAVAILABLE)
+        if not retention_ready:
+            reasons.append(AdminWebhookActivationReasonCode.RETENTION_UNAVAILABLE)
+        if not backlog_age_ready:
+            reasons.append(AdminWebhookActivationReasonCode.BACKLOG_AGE_EXCEEDED)
+    return AdminWebhookActivationCheck(
+        phase=phase,
+        ready=not reasons,
+        mode=status.mode,
+        schema_ready=schema_ready,
+        migration_complete=migration_complete,
+        key_ready=key_ready,
+        jobs_ready=jobs_ready,
+        limits_ready=limits_ready,
+        worker_ready=worker_ready,
+        reconciler_ready=reconciler_ready,
+        retention_ready=retention_ready,
+        runtime_ready=runtime_ready,
+        backlog_age_ready=backlog_age_ready,
+        oldest_nonterminal_age_seconds=oldest_age,
+        max_backlog_age_seconds=max_backlog_age_seconds,
+        reason_codes=tuple(reasons),
+    )
+
+
 _CANCELLATION_TOKEN_DOMAIN = b"tldw-admin-webhook-cancel-v1\x00"
 
 
@@ -178,12 +264,8 @@ class UnavailableDeliveryCapability:
         _utc(now)
         components = {
             DeliveryRuntimeComponent.WORKER: DeliveryRuntimeReasonCode.WORKER_UNAVAILABLE,
-            DeliveryRuntimeComponent.RECONCILER: (
-                DeliveryRuntimeReasonCode.RECONCILER_UNAVAILABLE
-            ),
-            DeliveryRuntimeComponent.RETENTION: (
-                DeliveryRuntimeReasonCode.RETENTION_UNAVAILABLE
-            ),
+            DeliveryRuntimeComponent.RECONCILER: (DeliveryRuntimeReasonCode.RECONCILER_UNAVAILABLE),
+            DeliveryRuntimeComponent.RETENTION: (DeliveryRuntimeReasonCode.RETENTION_UNAVAILABLE),
         }
         statuses = {
             component: DeliveryComponentStatus(
@@ -239,13 +321,9 @@ def _database_unavailable_delivery_status(
         canonical_schema_version=migration.schema_version,
         schema_ready=migration.schema_version == 1,
         delivery_schema_ready=False,
-        migration_complete=(
-            migration.phase == "complete" and migration.completed_at is not None
-        ),
+        migration_complete=(migration.phase == "complete" and migration.completed_at is not None),
         key_ready=key_ready,
-        key_primary_match=(
-            key_ready and migration.active_primary_key_id == ring.primary_id
-        ),
+        key_primary_match=(key_ready and migration.active_primary_key_id == ring.primary_id),
         jobs_database_ready=False,
         queue_ready=False,
         job_type_ready=False,
@@ -288,11 +366,7 @@ def _validate_command_identity(
 ) -> None:
     if isinstance(actor_id, bool) or not isinstance(actor_id, int) or actor_id < 1:
         raise ValueError("actor_id must be a positive integer")
-    if webhook_id is not None and (
-        isinstance(webhook_id, bool)
-        or not isinstance(webhook_id, int)
-        or webhook_id < 1
-    ):
+    if webhook_id is not None and (isinstance(webhook_id, bool) or not isinstance(webhook_id, int) or webhook_id < 1):
         raise ValueError("webhook_id must be a positive integer")
     if not isinstance(request_id, str) or _REQUEST_ID_PATTERN.fullmatch(request_id) is None:
         raise ValueError("request_id is invalid")
@@ -645,10 +719,7 @@ class AdminWebhookControlPlane:
                     outcome=outcome.audit_outcome,
                 )
             value = outcome.value
-            if (
-                self._metrics is not None
-                and outcome.audit_outcome == "accepted"
-            ):
+            if self._metrics is not None and outcome.audit_outcome == "accepted":
                 try:
                     counts = await self._repository.registration_counts()
                     self._metrics.registration_counts(
@@ -677,10 +748,7 @@ class AdminWebhookControlPlane:
             if context.emitted:
                 mapped = _map_exception(exc)
                 if mapped is not None:
-                    if (
-                        self._metrics is not None
-                        and mapped.code in _ADMISSION_DENIAL_CODES
-                    ):
+                    if self._metrics is not None and mapped.code in _ADMISSION_DENIAL_CODES:
                         try:
                             self._metrics.admission_denied(mapped.code)
                         except Exception as metric_exc:  # noqa: BLE001 - metrics are fail-open
@@ -734,6 +802,7 @@ class AdminWebhookControlPlane:
         target = validate_webhook_target(
             command.url,
             allow_http_dev=self._settings.allow_http_dev,
+            allow_e2e_loopback=self._settings.allow_e2e_loopback,
         )
         return _NormalizedCreate(
             description=description,
@@ -767,6 +836,7 @@ class AdminWebhookControlPlane:
             target = validate_webhook_target(
                 changes.url,
                 allow_http_dev=self._settings.allow_http_dev,
+                allow_e2e_loopback=self._settings.allow_e2e_loopback,
             )
         if changes.event_types is not OMITTED:
             if not isinstance(changes.event_types, tuple):
@@ -817,8 +887,8 @@ class AdminWebhookControlPlane:
             )
             return normalized, scope, lookup_digest, request_fingerprint
 
-        normalized, scope_object, lookup_digest, request_fingerprint = (
-            await self._prepare_or_audit(context, audit_sink, prepare)
+        normalized, scope_object, lookup_digest, request_fingerprint = await self._prepare_or_audit(
+            context, audit_sink, prepare
         )
 
         async def operation(tx: AdminWebhookUnitOfWork) -> _TransactionOutcome[SecretMutationResult]:
@@ -827,8 +897,7 @@ class AdminWebhookControlPlane:
                 scope=scope_object,
                 request_fingerprint=request_fingerprint,
                 now=_utc(command.now),
-                expires_at=_utc(command.now)
-                + timedelta(seconds=self._settings.idempotency_ttl_seconds),
+                expires_at=_utc(command.now) + timedelta(seconds=self._settings.idempotency_ttl_seconds),
             )
             if claim.kind is IdempotencyLookupKind.CONFLICT:
                 raise WebhookError(WebhookErrorCode.IDEMPOTENCY_CONFLICT)
@@ -1015,19 +1084,15 @@ class AdminWebhookControlPlane:
                 self._new_cancellation_token_source(),
             )
 
-        expected_revision, normalized, cancellation_tokens = (
-            await self._prepare_or_audit(
-                context,
-                audit_sink,
-                prepare,
-            )
+        expected_revision, normalized, cancellation_tokens = await self._prepare_or_audit(
+            context,
+            audit_sink,
+            prepare,
         )
         delivery_status: DeliveryCapabilityStatus | None = None
         if normalized.active is True:
             try:
-                delivery_status = await self._delivery_capability.status(
-                    _utc(command.now)
-                )
+                delivery_status = await self._delivery_capability.status(_utc(command.now))
             except Exception:  # noqa: BLE001 - activation fails closed
                 delivery_status = None
 
@@ -1078,38 +1143,17 @@ class AdminWebhookControlPlane:
                 if current.registration.secret_rotation_required:
                     raise WebhookError(WebhookErrorCode.SECRET_ROTATION_REQUIRED)
                 self._require_registration_decryptable(current, ring)
-                if (
-                    delivery_status is None
-                    or not delivery_status.delivery_capability_ready
-                ):
+                if delivery_status is None or not delivery_status.delivery_capability_ready:
                     raise WebhookError(WebhookErrorCode.DELIVERY_UNAVAILABLE)
                 await tx.enforce_active_registration_limit(limit=self._settings.active_limit)
 
             repository_patch = RegistrationPatch(
-                description=(
-                    normalized.description
-                    if isinstance(normalized.description, str)
-                    else REPOSITORY_UNSET
-                ),
-                target=(
-                    repository_target
-                    if isinstance(repository_target, RegistrationTarget)
-                    else REPOSITORY_UNSET
-                ),
-                event_types=(
-                    normalized.event_types
-                    if isinstance(normalized.event_types, tuple)
-                    else REPOSITORY_UNSET
-                ),
-                active=(
-                    normalized.active
-                    if isinstance(normalized.active, bool)
-                    else REPOSITORY_UNSET
-                ),
+                description=(normalized.description if isinstance(normalized.description, str) else REPOSITORY_UNSET),
+                target=(repository_target if isinstance(repository_target, RegistrationTarget) else REPOSITORY_UNSET),
+                event_types=(normalized.event_types if isinstance(normalized.event_types, tuple) else REPOSITORY_UNSET),
+                active=(normalized.active if isinstance(normalized.active, bool) else REPOSITORY_UNSET),
                 timeout_seconds=(
-                    normalized.timeout_seconds
-                    if isinstance(normalized.timeout_seconds, int)
-                    else REPOSITORY_UNSET
+                    normalized.timeout_seconds if isinstance(normalized.timeout_seconds, int) else REPOSITORY_UNSET
                 ),
             )
             patched = await tx.patch_registration(
@@ -1122,12 +1166,9 @@ class AdminWebhookControlPlane:
             context.target_hostname = patched.registration.target_hostname
             context.event_types = patched.registration.event_types
             delivery_config_changed = (
-                patched.registration.target_version
-                != current.registration.target_version
-                or patched.registration.event_types
-                != current.registration.event_types
-                or patched.registration.timeout_seconds
-                != current.registration.timeout_seconds
+                patched.registration.target_version != current.registration.target_version
+                or patched.registration.event_types != current.registration.event_types
+                or patched.registration.timeout_seconds != current.registration.timeout_seconds
             )
             cancellation_reason: DeliveryReasonCode | None = None
             delivery_outcomes: tuple[CommittedDeliveryOutcome, ...] = ()
@@ -1326,8 +1367,7 @@ class AdminWebhookControlPlane:
                 scope=scope_object,
                 request_fingerprint=request_fingerprint,
                 now=_utc(command.now),
-                expires_at=_utc(command.now)
-                + timedelta(seconds=self._settings.idempotency_ttl_seconds),
+                expires_at=_utc(command.now) + timedelta(seconds=self._settings.idempotency_ttl_seconds),
             )
             if claim.kind is IdempotencyLookupKind.CONFLICT:
                 raise WebhookError(WebhookErrorCode.IDEMPOTENCY_CONFLICT)
@@ -1485,12 +1525,8 @@ class AdminWebhookControlPlane:
             registration_state = await self._repository.registration_limit_state(
                 limit=self._settings.registration_limit
             )
-            active_state = await self._repository.active_registration_limit_state(
-                limit=self._settings.active_limit
-            )
-            secret_rotation_required = (
-                await self._repository.count_secret_rotation_required()
-            )
+            active_state = await self._repository.active_registration_limit_state(limit=self._settings.active_limit)
+            secret_rotation_required = await self._repository.count_secret_rotation_required()
         except Exception as exc:
             mapped = _map_exception(exc)
             if mapped is not None:
@@ -1526,7 +1562,7 @@ class AdminWebhookControlPlane:
         )
         return WebhookStatus(
             mode=self._settings.mode.value,
-            route_selection=self._settings.route_selection.value,
+            route_selection="canonical",
             schema_ready=migration.schema_version >= 1,
             key_state=key_state,
             delivery_capability_ready=delivery.delivery_capability_ready,
@@ -1556,10 +1592,7 @@ class AdminWebhookControlPlane:
         ring = self._key_ring_result.ring
         if ring is None:
             return f"{self._key_ring_result.code.value}"
-        if (
-            migration.phase == "complete"
-            and migration.active_primary_key_id != ring.primary_id
-        ):
+        if migration.phase == "complete" and migration.active_primary_key_id != ring.primary_id:
             return WebhookErrorCode.KEY_CONFIGURATION_MISMATCH.value
         return f"{WebhookKeyLoadCode.AVAILABLE.value}"
 
@@ -1584,10 +1617,7 @@ async def get_admin_webhook_control_plane() -> AdminWebhookControlPlane:
     )
 
     jobs_probe = UnavailableJobsCapabilityProbe()
-    if (
-        settings.mode is AdminWebhookMode.ON
-        and settings.route_selection is WebhookRouteSelection.CANONICAL
-    ):
+    if settings.mode is AdminWebhookMode.ON:
         try:
             from tldw_Server_API.app.core.Jobs.manager import JobManager
 

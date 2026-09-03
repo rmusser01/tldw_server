@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 
 import type { WebhookApiError } from '@/lib/http';
+import { useSensitiveNavigationGuard } from '@/lib/use-sensitive-navigation-guard';
 import type { WebhookSecretResponse } from '@/types';
 import {
   isConditionalWebhookError,
@@ -16,9 +17,6 @@ type SecretCommandLease = {
   lifecycleGeneration: number;
   token: symbol;
 };
-type LegacySecretCommand = () => Promise<
-  Pick<WebhookSecretResponse, 'signing_secret' | 'replayed'>
->;
 
 type UseWebhookSecretCommandsOptions = {
   clearCreateForm: () => void;
@@ -56,6 +54,19 @@ export const useWebhookSecretCommands = ({
   const activeCommandRef = useRef<symbol | null>(null);
   const lifecycleGenerationRef = useRef(0);
   const copyAttemptRef = useRef(0);
+  const sensitiveCommandLocked = (
+    commandBusy
+    || activeCommandRef.current !== null
+    || pendingCommandRef.current !== null
+    || secretState !== null
+  );
+
+  useSensitiveNavigationGuard(sensitiveCommandLocked, () => {
+    showError(
+      'Navigation blocked',
+      'Finish the signing-secret command and store or replace its one-time secret before leaving this page.',
+    );
+  });
 
   const clearSensitiveCommandState = useCallback((synchronous = false) => {
     lifecycleGenerationRef.current += 1;
@@ -80,22 +91,15 @@ export const useWebhookSecretCommands = ({
   }, []);
 
   useEffect(() => {
-    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (!secretRef.current && !pendingCommandRef.current && !activeCommandRef.current) return;
-      event.preventDefault();
-      event.returnValue = '';
-    };
     const handlePageHide = () => {
       clearSensitiveCommandState(true);
     };
     const handlePageShow = (event: PageTransitionEvent) => {
       if (event.persisted) clearSensitiveCommandState(true);
     };
-    window.addEventListener('beforeunload', handleBeforeUnload);
     window.addEventListener('pagehide', handlePageHide);
     window.addEventListener('pageshow', handlePageShow);
     return () => {
-      window.removeEventListener('beforeunload', handleBeforeUnload);
       window.removeEventListener('pagehide', handlePageHide);
       window.removeEventListener('pageshow', handlePageShow);
       lifecycleGenerationRef.current += 1;
@@ -185,7 +189,7 @@ export const useWebhookSecretCommands = ({
       if (!isCurrent()) return;
       if (pending.command.canRetry) {
         setCommandError(
-          'The connection was lost after submission. Retry the same command, or reload and inspect inactive registrations before creating another one. A lost secret can only be replaced by generating a new secret.',
+          'The command result is ambiguous after submission. Retry the same command, or reload and inspect inactive registrations before creating another one. A lost secret can only be replaced by generating a new secret.',
         );
       } else {
         pendingCommandRef.current = null;
@@ -230,42 +234,6 @@ export const useWebhookSecretCommands = ({
     await runSecretCommand(pending, true, lease);
   }, [acquireCommandLease, runSecretCommand]);
 
-  const startLegacySecretCommand = useCallback(async (command: LegacySecretCommand) => {
-    const lease = acquireCommandLease();
-    if (!lease) return false;
-    setPendingOperation('create');
-    let secretRevealed = false;
-    try {
-      const response = await command();
-      if (!isCommandLeaseCurrent(lease)) return false;
-      setCreateOpen(false);
-      clearCreateForm();
-      secretRevealed = revealSecret(response, 'create', lease.lifecycleGeneration);
-      if (!secretRevealed) return false;
-      success('Legacy webhook created');
-      await loadControlPlane(0);
-      return true;
-    } catch {
-      if (isCommandLeaseCurrent(lease) && !secretRevealed) {
-        showError('Webhook creation failed', 'The legacy webhook could not be created.');
-      }
-      return false;
-    } finally {
-      if (isCommandLeaseCurrent(lease)) setPendingOperation(null);
-      releaseCommandLease(lease);
-    }
-  }, [
-    acquireCommandLease,
-    clearCreateForm,
-    isCommandLeaseCurrent,
-    loadControlPlane,
-    releaseCommandLease,
-    revealSecret,
-    setCreateOpen,
-    showError,
-    success,
-  ]);
-
   const handleCopySecret = useCallback(async () => {
     const current = secretRef.current;
     if (!current) return;
@@ -305,17 +273,11 @@ export const useWebhookSecretCommands = ({
     commandBusy,
     pendingOperation,
     hasPendingCommand: pendingCommandRef.current !== null,
-    sensitiveCommandLocked: (
-      commandBusy
-      || activeCommandRef.current !== null
-      || pendingCommandRef.current !== null
-      || secretState !== null
-    ),
+    sensitiveCommandLocked,
     setCommandError,
     setSecretAcknowledged,
     clearSensitiveCommandState,
     startSecretCommand,
-    startLegacySecretCommand,
     retrySecretCommand,
     handleCopySecret,
     requestSecretClose,

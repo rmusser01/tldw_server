@@ -1,18 +1,23 @@
 from __future__ import annotations
 
 import asyncio
-import shutil
 import os
 import secrets
+import shutil
 import sqlite3
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException, status
 from loguru import logger
 
+from tldw_Server_API.app.core.Admin_Webhooks.config import (
+    AdminWebhookMode,
+    AdminWebhookSettings,
+)
+from tldw_Server_API.app.core.Admin_Webhooks.crypto import load_webhook_key_ring
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.jwt_service import JWTService
 from tldw_Server_API.app.core.AuthNZ.orgs_teams import list_memberships_for_user
@@ -22,6 +27,9 @@ from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
 from tldw_Server_API.app.core.AuthNZ.session_manager import get_session_manager
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_single_user_instance
+from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
+    AdminWebhookRepository,
+)
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.TopicMonitoring_DB import TopicAlert, TopicMonitoringDB
 from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
@@ -39,6 +47,24 @@ _REQUESTER_EMAIL = "requester@example.local"
 _ORG_NAME = "Admin E2E"
 _ORG_SLUG = "admin-e2e"
 _SEEDED_ALERT_MESSAGE = "CPU high"
+_SYSTEM_TEMP_ROOT = (Path(os.path.sep) / "tmp").resolve()
+_ADMIN_E2E_ARTIFACT_ROOT = Path(tempfile.gettempdir()).resolve() / "tldw-admin-e2e"
+_ADMIN_E2E_MIGRATION_OPERATION_ID = "whmig_" + ("c" * 32)
+_ADMIN_E2E_DIGEST = "sha256:" + ("a" * 64)
+_ADMIN_E2E_FINGERPRINT = "hmac-sha256:" + ("b" * 64)
+_ADMIN_E2E_IDENTITY_FIELDS = (
+    "import_operation_id",
+    "fingerprint_key_id",
+    "active_primary_key_id",
+    "system_ops_webhook_fingerprint",
+    "legacy_table_fingerprint",
+    "redacted_report_digest",
+    "protected_backup_ciphertext_digest",
+    "report_file_identity",
+    "backup_file_identity",
+    "rollback_key_file_identity",
+    "expected_ciphertext_digest",
+)
 
 _SEEDED_PRINCIPALS: dict[str, dict[str, Any]] = {}
 
@@ -165,9 +191,11 @@ def _resolve_safe_backup_dir() -> Path | None:
     backup_dir = Path(raw_backup_root).expanduser().resolve(strict=False)
     allowed_roots = {
         Path(tempfile.gettempdir()).resolve(),
-        Path("/tmp").resolve(),
+        _SYSTEM_TEMP_ROOT,
     }
     for allowed_root in allowed_roots:
+        if backup_dir == allowed_root:
+            continue
         try:
             backup_dir.relative_to(allowed_root)
             return backup_dir
@@ -212,6 +240,107 @@ async def reset_admin_e2e_state() -> dict[str, Any]:
         deleted_backup_dirs,
     )
     return {"ok": True}
+
+
+def _admin_e2e_migration_identity(primary_key_id: str) -> dict[str, object]:
+    return {
+        "import_operation_id": _ADMIN_E2E_MIGRATION_OPERATION_ID,
+        "fingerprint_key_id": primary_key_id,
+        "active_primary_key_id": primary_key_id,
+        "system_ops_webhook_fingerprint": _ADMIN_E2E_FINGERPRINT,
+        "legacy_table_fingerprint": _ADMIN_E2E_FINGERPRINT,
+        "redacted_report_digest": _ADMIN_E2E_DIGEST,
+        "protected_backup_ciphertext_digest": _ADMIN_E2E_DIGEST,
+        "active_report_path": str(_ADMIN_E2E_ARTIFACT_ROOT / "webhook-report.json"),
+        "active_backup_path": str(_ADMIN_E2E_ARTIFACT_ROOT / "webhook-backup.enc"),
+        "active_key_path": str(_ADMIN_E2E_ARTIFACT_ROOT / "webhook-backup.key"),
+        "staging_report_path": str(_ADMIN_E2E_ARTIFACT_ROOT / "webhook-report.json.staging"),
+        "staging_backup_path": str(_ADMIN_E2E_ARTIFACT_ROOT / "webhook-backup.enc.staging"),
+        "staging_key_path": str(_ADMIN_E2E_ARTIFACT_ROOT / "webhook-backup.key.staging"),
+        "report_owner_id": 1,
+        "report_group_id": 1,
+        "report_mode": 384,
+        "report_file_identity": "admin-e2e:report",
+        "backup_owner_id": 1,
+        "backup_group_id": 1,
+        "backup_mode": 384,
+        "backup_file_identity": "admin-e2e:backup",
+        "rollback_key_owner_id": 1,
+        "rollback_key_group_id": 1,
+        "rollback_key_mode": 384,
+        "rollback_key_file_identity": "admin-e2e:key",
+        "rollback_retirement_phase": "retained",
+        "expected_ciphertext_digest": _ADMIN_E2E_DIGEST,
+    }
+
+
+async def prepare_admin_webhooks_for_admin_e2e() -> dict[str, Any]:
+    """Complete only a fresh canonical-webhook migration for real-backend e2e."""
+    settings = AdminWebhookSettings.from_environment(os.environ)
+    if settings.mode is not AdminWebhookMode.ON:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="admin_e2e_webhook_mode_not_on",
+        )
+
+    key_ring_result = load_webhook_key_ring()
+    ring = key_ring_result.ring
+    if ring is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="admin_e2e_webhook_key_unavailable",
+        )
+
+    pool = await get_db_pool()
+    repository = AdminWebhookRepository(pool)
+    now = datetime.now(timezone.utc)
+    migration_identity = _admin_e2e_migration_identity(ring.primary_id)
+    async with repository.transaction() as tx:
+        migration = await tx.lock_migration_state()
+        if migration.phase == "complete":
+            if migration.active_primary_key_id != ring.primary_id:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="admin_e2e_webhook_key_mismatch",
+                )
+            if any(
+                getattr(migration, field) != expected
+                for field, expected in migration_identity.items()
+                if field in _ADMIN_E2E_IDENTITY_FIELDS
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="admin_e2e_webhook_state_mismatch",
+                )
+            completed = migration
+        elif migration.phase != "migration_pending":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="admin_e2e_webhook_migration_in_progress",
+            )
+        else:
+            completed = await tx.compare_and_set_migration_state(
+                expected_revision=migration.state_revision,
+                updates={
+                    "phase": "complete",
+                    "import_operator_id": 1,
+                    "import_started_at": now,
+                    "import_approved_at": now,
+                    "artifacts_ready_at": now,
+                    "database_committed_at": now,
+                    "completed_at": now,
+                    "rollback_expires_at": now + timedelta(days=7),
+                    **migration_identity,
+                },
+                at=now,
+            )
+
+    return {
+        "ok": True,
+        "phase": "complete",
+        "active_primary_key_id": ring.primary_id,
+        "state_revision": completed.state_revision,
+    }
 
 
 def _fixture_secret(name: str) -> str:

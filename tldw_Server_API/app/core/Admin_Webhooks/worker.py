@@ -300,6 +300,7 @@ class AdminWebhookPreparedHandler:
         target = validate_webhook_target(
             target_url,
             allow_http_dev=self._settings.allow_http_dev,
+            allow_e2e_loopback=self._settings.allow_e2e_loopback,
         )
         if target.hostname != registration.target_hostname:
             raise ValueError("target hostname does not match registration")

@@ -31,6 +31,8 @@ import type {
   IncidentItem,
   IncidentNotifyResponse,
   IncidentsResponse,
+  IncidentWebhookNotifyRequest,
+  IncidentWebhookNotifyResponse,
   Invoice,
   MaintenanceRotationRunCreateRequest,
   MaintenanceRotationRunCreateResponse,
@@ -65,11 +67,21 @@ import type {
   WebhookCatalog,
   WebhookCreateRequest,
   WebhookDeleteResponse,
+  WebhookDelivery,
+  WebhookDeliveryAttempt,
+  WebhookDeliveryComponent,
+  WebhookDeliveryListResponse,
+  WebhookDeliveryReason,
+  WebhookDeliveryRuntimeReason,
   WebhookListResponse,
   WebhookPatchRequest,
+  WebhookRedeliveryRequest,
+  WebhookRedeliveryResponse,
   WebhookRegistration,
   WebhookSecretResponse,
   WebhookStatus,
+  WebhookTestRequest,
+  WebhookTestResponse,
 } from '@/types';
 export { ApiError };
 
@@ -133,54 +145,76 @@ function buildQueryString(params?: Record<string, QueryParamValue>): string {
 const STRONG_WEBHOOK_ETAG = /^"admin-webhook-([1-9][0-9]*)-r([1-9][0-9]*)"$/;
 const GENERATED_IDEMPOTENCY_KEY = /^[0-9a-f]{32}$/;
 const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/;
+const UUID4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const WEBHOOK_SIGNING_SECRET = /^whsec_[0-9a-f]{64}$/;
+const CANONICAL_WEBHOOK_API_VERSION = '2026-07-01';
+const CANONICAL_WEBHOOK_EVENT_TYPES = [
+  'user.created',
+  'user.deleted',
+  'incident.created',
+  'incident.updated',
+  'incident.resolved',
+  'incident.notify',
+] as const;
+const CANONICAL_WEBHOOK_EVENT_TYPE_SET = new Set<string>(CANONICAL_WEBHOOK_EVENT_TYPES);
+
+const DELIVERY_RUNTIME_REASONS = [
+  'mode_off',
+  'mode_migrate',
+  'schema_unready',
+  'migration_pending',
+  'key_unavailable',
+  'key_configuration_mismatch',
+  'jobs_unavailable',
+  'database_unavailable',
+  'worker_unavailable',
+  'reconciler_unavailable',
+  'retention_unavailable',
+  'heartbeat_stale',
+] as const satisfies readonly WebhookDeliveryRuntimeReason[];
+
+const DELIVERY_REASONS = [
+  'attempt_budget_exhausted',
+  'canceled_deleted',
+  'canceled_disabled',
+  'canceled_secret_rotation',
+  'delivery_expired',
+  'jobs_identity_conflict',
+  'outcome_unknown',
+  'superseded_config',
+  'test_attempt_interrupted',
+  'target_invalid',
+  'target_rejected',
+  'policy_error',
+  'clock_error',
+  'transport_error',
+  'http_redirect',
+  'http_client_error',
+  'http_request_timeout',
+  'http_rate_limited',
+  'http_server_error',
+  'http_status_invalid',
+  'http_hop_invalid_request',
+  'http_hop_dns_resolution_failed',
+  'http_hop_dns_timeout',
+  'http_hop_dns_address_denied',
+  'http_hop_connect_timeout',
+  'http_hop_read_timeout',
+  'http_hop_write_timeout',
+  'http_hop_total_timeout',
+  'http_hop_peer_verification_failed',
+  'http_hop_tls_error',
+  'http_hop_protocol_error',
+  'http_hop_response_headers_too_large',
+  'http_hop_response_too_large',
+  'http_hop_decompressed_response_too_large',
+  'http_hop_parser_input_too_large',
+  'http_hop_unsupported_content_encoding',
+  'http_hop_invalid_content_encoding',
+  'http_hop_transport_error',
+] as const satisfies readonly WebhookDeliveryReason[];
 
 type StrongWebhookResponse<T> = JsonResponse<T> & { etag: string };
-
-type LegacyWebhookDto = {
-  id: string;
-  url: string;
-  events: string[];
-  enabled: boolean;
-  created_at: string | null;
-  updated_at: string | null;
-};
-
-type LegacyWebhookCreateDto = LegacyWebhookDto & {
-  secret: string;
-};
-
-type LegacyWebhookDeliveryDto = {
-  id: string;
-  webhook_id: string;
-  event_type: string;
-  status_code: number | null;
-  response_time_ms: number | null;
-  success: boolean;
-  error: string | null;
-  attempted_at: string | null;
-  payload_preview: string | null;
-};
-
-export type LegacyWebhookView = {
-  id: string;
-  targetUrl: string;
-  eventTypes: string[];
-  enabled: boolean;
-  createdAt: string | null;
-  updatedAt: string | null;
-};
-
-export type LegacyWebhookDeliveryView = {
-  id: string;
-  webhookId: string;
-  eventType: string;
-  statusCode: number | null;
-  responseTimeMs: number | null;
-  success: boolean;
-  error: string | null;
-  attemptedAt: string | null;
-  payloadPreview: string | null;
-};
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
   value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -199,10 +233,6 @@ const isIntegerAtLeast = (value: unknown, minimum: number): value is number => (
   && value >= minimum
 );
 
-const isNullableSafeInteger = (value: unknown): value is number | null => (
-  value === null || (typeof value === 'number' && Number.isSafeInteger(value))
-);
-
 const isBoundedString = (value: unknown, minimum: number, maximum: number): value is string => (
   typeof value === 'string' && value.length >= minimum && value.length <= maximum
 );
@@ -211,6 +241,37 @@ const isIsoTimestamp = (value: unknown): value is string => (
   isBoundedString(value, 20, 64)
   && ISO_TIMESTAMP.test(value)
   && Number.isFinite(Date.parse(value))
+);
+
+const isIntegerBetween = (value: unknown, minimum: number, maximum: number): value is number => (
+  isIntegerAtLeast(value, minimum) && value <= maximum
+);
+
+const isNullableIntegerBetween = (
+  value: unknown,
+  minimum: number,
+  maximum: number,
+): value is number | null => value === null || isIntegerBetween(value, minimum, maximum);
+
+const isNullableIntegerAtLeast = (
+  value: unknown,
+  minimum: number,
+): value is number | null => value === null || isIntegerAtLeast(value, minimum);
+
+const isNullableIsoTimestamp = (value: unknown): value is string | null => (
+  value === null || isIsoTimestamp(value)
+);
+
+const isOneOf = <T extends string>(value: unknown, allowed: readonly T[]): value is T => (
+  typeof value === 'string' && allowed.includes(value as T)
+);
+
+const arraysEqual = <T>(left: readonly T[], right: readonly T[]): boolean => (
+  left.length === right.length && left.every((value, index) => value === right[index])
+);
+
+const isUuid4 = (value: unknown): value is string => (
+  typeof value === 'string' && UUID4.test(value)
 );
 
 const requireWebhookId = (id: number): number => {
@@ -236,13 +297,190 @@ const registrationIdentity = (value: unknown): { id: number; revision: number } 
   return { id: value.id, revision: value.revision };
 };
 
+const isWebhookRegistration = (value: unknown): value is WebhookRegistration => {
+  if (!isRecord(value) || !hasExactKeys(value, [
+    'id',
+    'description',
+    'target_display',
+    'target_hostname',
+    'event_types',
+    'active',
+    'timeout_seconds',
+    'revision',
+    'delivery_config_version',
+    'secret_version',
+    'secret_rotation_required',
+    'created_by',
+    'updated_by',
+    'created_at',
+    'updated_at',
+  ])) return false;
+  if (!Array.isArray(value.event_types) || value.event_types.length < 1) return false;
+  if (!value.event_types.every((eventType) => (
+    typeof eventType === 'string' && CANONICAL_WEBHOOK_EVENT_TYPE_SET.has(eventType)
+  ))) return false;
+  if (new Set(value.event_types).size !== value.event_types.length) return false;
+  try {
+    const display = new URL(value.target_display as string);
+    const displayHostname = display.hostname.replace(/^\[|\]$/gu, '');
+    if (display.origin !== value.target_display || displayHostname !== value.target_hostname) {
+      return false;
+    }
+  } catch {
+    return false;
+  }
+  return isIntegerAtLeast(value.id, 1)
+    && isBoundedString(value.description, 0, 500)
+    && isBoundedString(value.target_display, 1, 2_048)
+    && isBoundedString(value.target_hostname, 1, 253)
+    && typeof value.active === 'boolean'
+    && isIntegerBetween(value.timeout_seconds, 1, 30)
+    && isIntegerAtLeast(value.revision, 1)
+    && isIntegerAtLeast(value.delivery_config_version, 1)
+    && isIntegerAtLeast(value.secret_version, 1)
+    && typeof value.secret_rotation_required === 'boolean'
+    && isNullableIntegerAtLeast(value.created_by, 1)
+    && isNullableIntegerAtLeast(value.updated_by, 1)
+    && isIsoTimestamp(value.created_at)
+    && isIsoTimestamp(value.updated_at);
+};
+
+const isWebhookListResponse = (value: unknown): value is WebhookListResponse => (
+  isRecord(value)
+  && hasExactKeys(value, ['items', 'total', 'limit', 'offset'])
+  && Array.isArray(value.items)
+  && value.items.every(isWebhookRegistration)
+  && new Set(value.items.map((item) => item.id)).size === value.items.length
+  && isIntegerAtLeast(value.total, value.items.length)
+  && isIntegerBetween(value.limit, 1, 100)
+  && value.items.length <= value.limit
+  && isIntegerBetween(value.offset, 0, 1_000)
+);
+
+const isWebhookCatalog = (value: unknown): value is WebhookCatalog => (
+  isRecord(value)
+  && hasExactKeys(value, [
+    'api_version',
+    'events',
+    'registration_limit',
+    'active_limit',
+  ])
+  && value.api_version === CANONICAL_WEBHOOK_API_VERSION
+  && Array.isArray(value.events)
+  && value.events.length === CANONICAL_WEBHOOK_EVENT_TYPES.length
+  && value.events.every((item, index) => (
+    isRecord(item)
+    && hasExactKeys(item, ['event_type', 'description'])
+    && item.event_type === CANONICAL_WEBHOOK_EVENT_TYPES[index]
+    && isBoundedString(item.description, 1, 500)
+  ))
+  && isIntegerBetween(value.registration_limit, 1, 1_000)
+  && isIntegerBetween(value.active_limit, 1, value.registration_limit as number)
+);
+
+const canonicalizeWebhookEventTypes = (eventTypes: string[]): string[] => (
+  CANONICAL_WEBHOOK_EVENT_TYPES.filter((eventType) => eventTypes.includes(eventType))
+);
+
+const normalizedWebhookOrigin = (url: string): string | null => {
+  try {
+    const parsed = new URL(url);
+    const hostname = parsed.hostname.replace(/^\[|\]$/gu, '').replace(/\.$/u, '');
+    const host = hostname.includes(':') ? `[${hostname}]` : hostname;
+    return `${parsed.protocol}//${host}${parsed.port ? `:${parsed.port}` : ''}`;
+  } catch {
+    return null;
+  }
+};
+
+const registrationMatchesCreate = (
+  registration: WebhookRegistration,
+  body: WebhookCreateRequest,
+): boolean => {
+  const targetOrigin = normalizedWebhookOrigin(body.url);
+  if (targetOrigin === null) return false;
+  return registration.active === false
+    && registration.description === (body.description ?? '')
+    && registration.timeout_seconds === (body.timeout_seconds ?? 10)
+    && registration.target_display === targetOrigin
+    && arraysEqual(
+      registration.event_types,
+      canonicalizeWebhookEventTypes(body.event_types),
+    );
+};
+
+const registrationMatchesPatch = (
+  registration: WebhookRegistration,
+  body: WebhookPatchRequest,
+): boolean => {
+  if (body.description !== undefined && registration.description !== body.description) return false;
+  if (body.active !== undefined && registration.active !== body.active) return false;
+  if (
+    body.timeout_seconds !== undefined
+    && registration.timeout_seconds !== body.timeout_seconds
+  ) return false;
+  if (
+    body.event_types !== undefined
+    && !arraysEqual(
+      registration.event_types,
+      canonicalizeWebhookEventTypes(body.event_types),
+    )
+  ) return false;
+  if (body.url !== undefined) {
+    if (registration.target_display !== normalizedWebhookOrigin(body.url)) return false;
+  }
+  return true;
+};
+
+const requireWebhookRegistrationResponse = (
+  response: JsonResponse<unknown>,
+): JsonResponse<WebhookRegistration> => {
+  if (!isWebhookRegistration(response.data)) {
+    throw new WebhookContractError(
+      response.status,
+      'Webhook API returned an invalid registration response',
+      response.requestId,
+    );
+  }
+  return response as JsonResponse<WebhookRegistration>;
+};
+
+const isWebhookSecretResponse = (value: unknown): value is WebhookSecretResponse => (
+  isRecord(value)
+  && hasExactKeys(value, ['registration', 'signing_secret', 'replayed'])
+  && isWebhookRegistration(value.registration)
+  && typeof value.signing_secret === 'string'
+  && WEBHOOK_SIGNING_SECRET.test(value.signing_secret)
+  && typeof value.replayed === 'boolean'
+);
+
+const requireWebhookSecretResponse = (
+  response: JsonResponse<unknown>,
+): JsonResponse<WebhookSecretResponse> => {
+  if (!isWebhookSecretResponse(response.data)) {
+    throw new WebhookContractError(
+      response.status,
+      'Webhook API returned an invalid one-time-secret response',
+      response.requestId,
+    );
+  }
+  return response as JsonResponse<WebhookSecretResponse>;
+};
+
 export const requireStrongWebhookEtag = <T>(
   response: JsonResponse<T>,
   registration: unknown,
+  expectedWebhookId?: number,
 ): StrongWebhookResponse<T> => {
   const etag = parseStrongWebhookEtag(response.etag);
   const identity = registrationIdentity(registration);
-  if (!etag || !identity || etag.id !== identity.id || etag.revision !== identity.revision) {
+  if (
+    !etag
+    || !identity
+    || etag.id !== identity.id
+    || etag.revision !== identity.revision
+    || (expectedWebhookId !== undefined && identity.id !== expectedWebhookId)
+  ) {
     throw new WebhookContractError(
       response.status,
       'Webhook API returned a missing or mismatched strong ETag',
@@ -281,6 +519,78 @@ const requireStatus = <T>(
   return response;
 };
 
+const isDeliveryComponent = (
+  value: unknown,
+  component: WebhookDeliveryComponent['component'],
+): value is WebhookDeliveryComponent => {
+  if (!isRecord(value) || !hasExactKeys(value, [
+    'component',
+    'ready',
+    'reason_code',
+    'heartbeat_age_seconds',
+  ])) return false;
+  return value.component === component
+    && typeof value.ready === 'boolean'
+    && (value.reason_code === null || isOneOf(value.reason_code, DELIVERY_RUNTIME_REASONS))
+    && isNullableIntegerBetween(value.heartbeat_age_seconds, 0, Number.MAX_SAFE_INTEGER);
+};
+
+const isDeliveryCapability = (value: unknown): value is WebhookStatus['delivery'] => {
+  if (!isRecord(value) || !hasExactKeys(value, [
+    'canonical_schema_version',
+    'schema_ready',
+    'delivery_schema_ready',
+    'migration_complete',
+    'key_ready',
+    'key_primary_match',
+    'jobs_database_ready',
+    'queue_ready',
+    'job_type_ready',
+    'jobs_backend',
+    'worker',
+    'reconciler',
+    'retention',
+    'backlog',
+    'oldest_nonterminal_age_seconds',
+    'acquisition_ready',
+    'acquisition_reason_code',
+    'delivery_capability_ready',
+  ])) return false;
+  const booleanFields = [
+    'schema_ready',
+    'delivery_schema_ready',
+    'migration_complete',
+    'key_ready',
+    'key_primary_match',
+    'jobs_database_ready',
+    'queue_ready',
+    'job_type_ready',
+    'acquisition_ready',
+    'delivery_capability_ready',
+  ] as const;
+  if (!booleanFields.every((field) => typeof value[field] === 'boolean')) return false;
+  if (!isIntegerAtLeast(value.canonical_schema_version, 0)) return false;
+  if (!isOneOf(value.jobs_backend, ['sqlite', 'postgres', 'unavailable'] as const)) return false;
+  if (!isDeliveryComponent(value.worker, 'worker')) return false;
+  if (!isDeliveryComponent(value.reconciler, 'reconciler')) return false;
+  if (!isDeliveryComponent(value.retention, 'retention')) return false;
+  if (!isRecord(value.backlog) || !hasExactKeys(value.backlog, [
+    'pending',
+    'enqueue_claimed',
+    'queued',
+    'processing',
+    'retry_wait',
+  ])) return false;
+  if (!Object.values(value.backlog).every((count) => isIntegerAtLeast(count, 0))) return false;
+  if (!isNullableIntegerBetween(
+    value.oldest_nonterminal_age_seconds,
+    0,
+    Number.MAX_SAFE_INTEGER,
+  )) return false;
+  return value.acquisition_reason_code === null
+    || isOneOf(value.acquisition_reason_code, DELIVERY_RUNTIME_REASONS);
+};
+
 const isWebhookStatus = (value: unknown): value is WebhookStatus => {
   if (!isRecord(value) || !hasExactKeys(value, [
     'mode',
@@ -288,14 +598,17 @@ const isWebhookStatus = (value: unknown): value is WebhookStatus => {
     'schema_ready',
     'key_state',
     'delivery_capability_ready',
+    'delivery',
     'limits',
     'migration',
   ])) return false;
-  if (!['off', 'migrate', 'on'].includes(String(value.mode))) return false;
-  if (!['canonical', 'legacy'].includes(String(value.route_selection))) return false;
+  if (!isOneOf(value.mode, ['off', 'migrate', 'on'] as const)) return false;
+  if (value.route_selection !== 'canonical') return false;
   if (typeof value.schema_ready !== 'boolean') return false;
   if (!isBoundedString(value.key_state, 1, 128)) return false;
   if (typeof value.delivery_capability_ready !== 'boolean') return false;
+  if (!isDeliveryCapability(value.delivery)) return false;
+  if (value.delivery_capability_ready !== value.delivery.delivery_capability_ready) return false;
   if (!isRecord(value.limits) || !hasExactKeys(value.limits, [
     'registrations',
     'active_registrations',
@@ -329,9 +642,7 @@ const isWebhookStatus = (value: unknown): value is WebhookStatus => {
     if (!isIntegerAtLeast(value.migration[field], 0)) return false;
   }
   if (typeof value.migration.legacy_file_restore_permitted !== 'boolean') return false;
-  const rollback = value.migration.rollback_window_expires_at;
-  return rollback === null
-    || isIsoTimestamp(rollback);
+  return isNullableIsoTimestamp(value.migration.rollback_window_expires_at);
 };
 
 const getWebhookStatus = async (): Promise<WebhookStatus> => {
@@ -342,37 +653,55 @@ const getWebhookStatus = async (): Promise<WebhookStatus> => {
   return status;
 };
 
-const getCanonicalWebhooks = (
+const getCanonicalWebhooks = async (
   params: { limit?: number; offset?: number } = {},
 ): Promise<WebhookListResponse> => {
   const query = buildQueryString(params);
-  return requestJson<WebhookListResponse>(`/admin/webhooks${query ? `?${query}` : ''}`);
+  const response = await requestJson<unknown>(`/admin/webhooks${query ? `?${query}` : ''}`);
+  if (
+    !isWebhookListResponse(response)
+    || response.limit !== (params.limit ?? 50)
+    || response.offset !== (params.offset ?? 0)
+  ) {
+    throw new WebhookContractError(200, 'Webhook API returned an invalid registration list');
+  }
+  return response;
 };
 
 const getCanonicalWebhook = async (
   id: number,
 ): Promise<StrongWebhookResponse<WebhookRegistration>> => {
   const webhookId = requireWebhookId(id);
-  const response = requireStatus(
-    await requestJsonWithMetadata<WebhookRegistration>(`/admin/webhooks/${webhookId}`),
+  const response = requireWebhookRegistrationResponse(requireStatus(
+    await requestJsonWithMetadata<unknown>(`/admin/webhooks/${webhookId}`),
     200,
-  );
-  return requireStrongWebhookEtag(response, response.data);
+  ));
+  return requireStrongWebhookEtag(response, response.data, webhookId);
 };
 
 const createCanonicalWebhook = async (
   body: WebhookCreateRequest,
   key: string,
 ): Promise<StrongWebhookResponse<WebhookSecretResponse>> => {
-  const response = requireStatus(
-    await requestJsonWithMetadata<WebhookSecretResponse>('/admin/webhooks', {
+  const response = requireWebhookSecretResponse(requireStatus(
+    await requestJsonWithMetadata<unknown>('/admin/webhooks', {
       method: 'POST',
       headers: { 'Idempotency-Key': requireGeneratedIdempotencyKey(key) },
       body: JSON.stringify(body),
     }),
     201,
-  );
-  return requireStrongWebhookEtag(response, response.data?.registration);
+  ));
+  if (
+    response.data.replayed === false
+    && !registrationMatchesCreate(response.data.registration, body)
+  ) {
+    throw new WebhookContractError(
+      response.status,
+      'Webhook API returned a registration that does not match the create command',
+      response.requestId,
+    );
+  }
+  return requireStrongWebhookEtag(response, response.data.registration);
 };
 
 const updateCanonicalWebhook = async (
@@ -381,15 +710,22 @@ const updateCanonicalWebhook = async (
   etag: string,
 ): Promise<StrongWebhookResponse<WebhookRegistration>> => {
   const webhookId = requireWebhookId(id);
-  const response = requireStatus(
-    await requestJsonWithMetadata<WebhookRegistration>(`/admin/webhooks/${webhookId}`, {
+  const response = requireWebhookRegistrationResponse(requireStatus(
+    await requestJsonWithMetadata<unknown>(`/admin/webhooks/${webhookId}`, {
       method: 'PATCH',
       headers: { 'If-Match': requireCallerWebhookEtag(webhookId, etag) },
       body: JSON.stringify(body),
     }),
     200,
-  );
-  return requireStrongWebhookEtag(response, response.data);
+  ));
+  if (!registrationMatchesPatch(response.data, body)) {
+    throw new WebhookContractError(
+      response.status,
+      'Webhook API returned a registration that does not match the update command',
+      response.requestId,
+    );
+  }
+  return requireStrongWebhookEtag(response, response.data, webhookId);
 };
 
 const deleteCanonicalWebhook = async (
@@ -420,8 +756,8 @@ const rotateCanonicalWebhookSecret = async (
   key: string,
 ): Promise<StrongWebhookResponse<WebhookSecretResponse>> => {
   const webhookId = requireWebhookId(id);
-  const response = requireStatus(
-    await requestJsonWithMetadata<WebhookSecretResponse>(
+  const response = requireWebhookSecretResponse(requireStatus(
+    await requestJsonWithMetadata<unknown>(
       `/admin/webhooks/${webhookId}/rotate-secret`,
       {
         method: 'POST',
@@ -432,169 +768,387 @@ const rotateCanonicalWebhookSecret = async (
       },
     ),
     200,
+  ));
+  return requireStrongWebhookEtag(
+    response,
+    response.data.registration,
+    webhookId,
   );
-  return requireStrongWebhookEtag(response, response.data?.registration);
+};
+
+const isWebhookDeliveryAttempt = (value: unknown): value is WebhookDeliveryAttempt => {
+  if (!isRecord(value) || !hasExactKeys(value, [
+    'id',
+    'sequence',
+    'state',
+    'request_timeout_seconds',
+    'status_code',
+    'latency_ms',
+    'reason_code',
+    'requested_retry_delay_seconds',
+    'started_at',
+    'finished_at',
+  ])) return false;
+  return isUuid4(value.id)
+    && isIntegerBetween(value.sequence, 1, 4)
+    && isOneOf(value.state, [
+      'processing',
+      'succeeded',
+      'retryable',
+      'failed',
+      'canceled',
+      'superseded',
+      'outcome_unknown',
+    ] as const)
+    && isNullableIntegerBetween(value.request_timeout_seconds, 1, 30)
+    && isNullableIntegerBetween(value.status_code, 100, 599)
+    && isNullableIntegerBetween(value.latency_ms, 0, Number.MAX_SAFE_INTEGER)
+    && (value.reason_code === null || isOneOf(value.reason_code, DELIVERY_REASONS))
+    && isNullableIntegerBetween(value.requested_retry_delay_seconds, 1, 1_800)
+    && isIsoTimestamp(value.started_at)
+    && isNullableIsoTimestamp(value.finished_at);
+};
+
+const isWebhookDelivery = (value: unknown): value is WebhookDelivery => {
+  if (!isRecord(value) || !hasExactKeys(value, [
+    'id',
+    'event_id',
+    'event_type',
+    'webhook_id',
+    'kind',
+    'state',
+    'delivery_config_version',
+    'secret_version',
+    'attempt_count',
+    'status_code',
+    'latency_ms',
+    'reason_code',
+    'expires_at',
+    'created_at',
+    'updated_at',
+    'terminal_at',
+    'redelivery_of_id',
+    'completed_after_config_change',
+  ])) return false;
+  return isUuid4(value.id)
+    && isUuid4(value.event_id)
+    && isBoundedString(value.event_type, 1, 64)
+    && isIntegerAtLeast(value.webhook_id, 1)
+    && isOneOf(value.kind, ['automatic', 'manual', 'test'] as const)
+    && isOneOf(value.state, [
+      'pending',
+      'enqueue_claimed',
+      'queued',
+      'processing',
+      'retry_wait',
+      'succeeded',
+      'dead',
+      'canceled',
+      'superseded',
+    ] as const)
+    && isIntegerAtLeast(value.delivery_config_version, 1)
+    && isIntegerAtLeast(value.secret_version, 1)
+    && isIntegerBetween(value.attempt_count, 0, 4)
+    && isNullableIntegerBetween(value.status_code, 100, 599)
+    && isNullableIntegerBetween(value.latency_ms, 0, Number.MAX_SAFE_INTEGER)
+    && (value.reason_code === null || isOneOf(value.reason_code, DELIVERY_REASONS))
+    && isIsoTimestamp(value.expires_at)
+    && isIsoTimestamp(value.created_at)
+    && isIsoTimestamp(value.updated_at)
+    && isNullableIsoTimestamp(value.terminal_at)
+    && (value.redelivery_of_id === null || isUuid4(value.redelivery_of_id))
+    && typeof value.completed_after_config_change === 'boolean';
+};
+
+const parseWebhookDeliveryPage = (value: unknown): WebhookDeliveryListResponse => {
+  if (!isRecord(value) || !hasExactKeys(value, ['items', 'total', 'limit', 'offset'])) {
+    throw new WebhookContractError(200, 'Webhook API returned invalid delivery history');
+  }
+  if (
+    !Array.isArray(value.items)
+    || !isIntegerAtLeast(value.total, 0)
+    || !isIntegerBetween(value.limit, 1, 100)
+    || !isIntegerBetween(value.offset, 0, 1_000)
+  ) {
+    throw new WebhookContractError(200, 'Webhook API returned invalid delivery history');
+  }
+  const items = value.items.map((item) => {
+    if (
+      !isRecord(item)
+      || !hasExactKeys(item, ['delivery', 'attempts'])
+      || !isWebhookDelivery(item.delivery)
+      || !Array.isArray(item.attempts)
+      || item.attempts.length > 4
+      || !item.attempts.every(isWebhookDeliveryAttempt)
+    ) {
+      throw new WebhookContractError(200, 'Webhook API returned invalid delivery history');
+    }
+    return { delivery: item.delivery, attempts: item.attempts };
+  });
+  return { items, total: value.total, limit: value.limit, offset: value.offset };
+};
+
+const isWebhookTestResponse = (value: unknown): value is WebhookTestResponse => (
+  isRecord(value)
+  && hasExactKeys(value, ['delivery', 'attempt', 'idempotent_replay', 'in_progress'])
+  && isWebhookDelivery(value.delivery)
+  && isWebhookDeliveryAttempt(value.attempt)
+  && typeof value.idempotent_replay === 'boolean'
+  && typeof value.in_progress === 'boolean'
+);
+
+const isWebhookRedeliveryResponse = (value: unknown): value is WebhookRedeliveryResponse => (
+  isRecord(value)
+  && hasExactKeys(value, ['delivery', 'idempotent_replay'])
+  && isWebhookDelivery(value.delivery)
+  && typeof value.idempotent_replay === 'boolean'
+);
+
+const getCanonicalWebhookDeliveries = async (
+  id: number,
+  params: { limit?: number; offset?: number } = {},
+): Promise<WebhookDeliveryListResponse> => {
+  const webhookId = requireWebhookId(id);
+  const query = buildQueryString(params);
+  const value = await requestJson<unknown>(
+    `/admin/webhooks/${webhookId}/deliveries${query ? `?${query}` : ''}`,
+  );
+  return parseWebhookDeliveryPage(value);
+};
+
+const testCanonicalWebhook = async (
+  id: number,
+  body: WebhookTestRequest,
+  etag: string,
+  key: string,
+): Promise<JsonResponse<WebhookTestResponse>> => {
+  const webhookId = requireWebhookId(id);
+  if (!isIntegerAtLeast(body.delivery_config_version, 1)) {
+    throw new WebhookContractError(0, 'Webhook delivery configuration version is invalid');
+  }
+  const response = await requestJsonWithMetadata<unknown>(`/admin/webhooks/${webhookId}/test`, {
+    method: 'POST',
+    headers: {
+      'If-Match': requireCallerWebhookEtag(webhookId, etag),
+      'Idempotency-Key': requireGeneratedIdempotencyKey(key),
+    },
+    body: JSON.stringify(body),
+  });
+  if (
+    ![200, 202].includes(response.status)
+    || !isWebhookTestResponse(response.data)
+    || (response.status === 200 && response.data.in_progress)
+    || (response.status === 202 && !response.data.in_progress)
+    || (response.status === 202 && response.retryAfterSeconds === null)
+  ) {
+    throw new WebhookContractError(
+      response.status,
+      'Webhook API returned an invalid persisted test response',
+      response.requestId,
+    );
+  }
+  return { ...response, data: response.data };
+};
+
+const redeliverCanonicalWebhook = async (
+  id: number,
+  deliveryId: string,
+  body: WebhookRedeliveryRequest,
+  etag: string,
+  key: string,
+): Promise<JsonResponse<WebhookRedeliveryResponse>> => {
+  const webhookId = requireWebhookId(id);
+  if (
+    !isUuid4(deliveryId)
+    || !isIntegerAtLeast(body.delivery_config_version, 1)
+    || typeof body.confirm_changed_configuration !== 'boolean'
+  ) {
+    throw new WebhookContractError(0, 'Webhook redelivery request is invalid');
+  }
+  const response = requireStatus(
+    await requestJsonWithMetadata<unknown>(
+      `/admin/webhooks/${webhookId}/deliveries/${deliveryId}/redeliver`,
+      {
+        method: 'POST',
+        headers: {
+          'If-Match': requireCallerWebhookEtag(webhookId, etag),
+          'Idempotency-Key': requireGeneratedIdempotencyKey(key),
+        },
+        body: JSON.stringify(body),
+      },
+    ),
+    202,
+  );
+  if (!isWebhookRedeliveryResponse(response.data)) {
+    throw new WebhookContractError(
+      response.status,
+      'Webhook API returned an invalid redelivery response',
+      response.requestId,
+    );
+  }
+  return { ...response, data: response.data };
 };
 
 export const canonicalWebhookApi = Object.freeze({
   getWebhookStatus,
-  getWebhookCatalog: () => requestJson<WebhookCatalog>('/admin/webhooks/catalog'),
+  getWebhookCatalog: async (): Promise<WebhookCatalog> => {
+    const catalog = await requestJson<unknown>('/admin/webhooks/catalog');
+    if (!isWebhookCatalog(catalog)) {
+      throw new WebhookContractError(200, 'Webhook API returned an invalid event catalog');
+    }
+    return catalog;
+  },
   getWebhooks: getCanonicalWebhooks,
   getWebhook: getCanonicalWebhook,
   createWebhook: createCanonicalWebhook,
   updateWebhook: updateCanonicalWebhook,
   deleteWebhook: deleteCanonicalWebhook,
   rotateWebhookSecret: rotateCanonicalWebhookSecret,
+  getWebhookDeliveries: getCanonicalWebhookDeliveries,
+  testWebhook: testCanonicalWebhook,
+  redeliverWebhook: redeliverCanonicalWebhook,
 });
-
-const legacyWebhookView = (value: unknown): LegacyWebhookView => {
-  if (!isRecord(value)) {
-    throw new WebhookContractError(200, 'Legacy webhook API returned an invalid registration');
-  }
-  const dto = value as Partial<LegacyWebhookDto>;
-  if (
-    !isBoundedString(dto.id, 1, 256)
-    || !isBoundedString(dto.url, 1, 2_048)
-    || !Array.isArray(dto.events)
-    || !dto.events.every((event) => isBoundedString(event, 1, 128))
-    || typeof dto.enabled !== 'boolean'
-    || (dto.created_at !== null && typeof dto.created_at !== 'string')
-    || (dto.updated_at !== null && typeof dto.updated_at !== 'string')
-  ) {
-    throw new WebhookContractError(200, 'Legacy webhook API returned an invalid registration');
-  }
-  return {
-    id: dto.id,
-    targetUrl: dto.url,
-    eventTypes: [...dto.events],
-    enabled: dto.enabled,
-    createdAt: dto.created_at,
-    updatedAt: dto.updated_at,
-  };
-};
-
-const legacyWebhookDeliveryView = (value: unknown): LegacyWebhookDeliveryView => {
-  if (!isRecord(value) || !hasExactKeys(value, [
-    'id',
-    'webhook_id',
-    'event_type',
-    'status_code',
-    'response_time_ms',
-    'success',
-    'error',
-    'attempted_at',
-    'payload_preview',
-  ])) {
-    throw new WebhookContractError(200, 'Legacy webhook API returned an invalid delivery');
-  }
-  const dto = value as Partial<LegacyWebhookDeliveryDto>;
-  if (
-    !isBoundedString(dto.id, 1, 256)
-    || !isBoundedString(dto.webhook_id, 1, 256)
-    || !isBoundedString(dto.event_type, 0, 128)
-    || !isNullableSafeInteger(dto.status_code)
-    || (dto.response_time_ms !== null && !isIntegerAtLeast(dto.response_time_ms, 0))
-    || typeof dto.success !== 'boolean'
-    || (dto.error !== null && typeof dto.error !== 'string')
-    || (dto.attempted_at !== null && typeof dto.attempted_at !== 'string')
-    || (dto.payload_preview !== null && typeof dto.payload_preview !== 'string')
-  ) {
-    throw new WebhookContractError(200, 'Legacy webhook API returned an invalid delivery');
-  }
-  return {
-    id: dto.id,
-    webhookId: dto.webhook_id,
-    eventType: dto.event_type,
-    statusCode: dto.status_code,
-    responseTimeMs: dto.response_time_ms,
-    success: dto.success,
-    error: dto.error,
-    attemptedAt: dto.attempted_at,
-    payloadPreview: dto.payload_preview,
-  };
-};
-
-export const legacyWebhookApi = Object.freeze({
-  getWebhooks: async (
-    params: { limit?: number; offset?: number } = {},
-  ): Promise<{ items: LegacyWebhookView[]; total: number }> => {
-    const query = buildQueryString(params);
-    const response = await requestJson<unknown>(`/admin/webhooks${query ? `?${query}` : ''}`);
-    if (!isRecord(response) || !Array.isArray(response.items) || !isIntegerAtLeast(response.total, 0)) {
-      throw new WebhookContractError(200, 'Legacy webhook API returned an invalid list');
-    }
-    return {
-      items: response.items.map(legacyWebhookView),
-      total: response.total,
-    };
-  },
-  createWebhook: async (body: {
-    url: string;
-    events: string[];
-    enabled?: boolean;
-  }): Promise<{ registration: LegacyWebhookView; signingSecret: string }> => {
-    const response = await requestJson<unknown>('/admin/webhooks', {
-      method: 'POST',
-      body: JSON.stringify(body),
-    });
-    if (!isRecord(response) || !isBoundedString(response.secret, 1, 512)) {
-      throw new WebhookContractError(200, 'Legacy webhook API returned an invalid secret response');
-    }
-    return {
-      registration: legacyWebhookView(response as LegacyWebhookCreateDto),
-      signingSecret: response.secret,
-    };
-  },
-  updateWebhook: async (
-    id: string,
-    body: { url?: string; events?: string[]; enabled?: boolean },
-  ): Promise<LegacyWebhookView> => legacyWebhookView(await requestJson<unknown>(
-    `/admin/webhooks/${encodeURIComponent(id)}`,
-    { method: 'PATCH', body: JSON.stringify(body) },
-  )),
-  deleteWebhook: (id: string) => requestJson<{ message: string }>(
-    `/admin/webhooks/${encodeURIComponent(id)}`,
-    { method: 'DELETE' },
-  ),
-  testWebhook: async (id: string): Promise<LegacyWebhookDeliveryView> => legacyWebhookDeliveryView(
-    await requestJson<unknown>(`/admin/webhooks/${encodeURIComponent(id)}/test`, {
-      method: 'POST',
-    }),
-  ),
-  getWebhookDeliveries: async (
-    id: string,
-    params: { limit?: number; offset?: number } = {},
-  ): Promise<{ items: LegacyWebhookDeliveryView[]; total: number }> => {
-    const query = buildQueryString(params);
-    const response = await requestJson<unknown>(
-      `/admin/webhooks/${encodeURIComponent(id)}/deliveries${query ? `?${query}` : ''}`,
-    );
-    if (!isRecord(response) || !Array.isArray(response.items) || !isIntegerAtLeast(response.total, 0)) {
-      throw new WebhookContractError(200, 'Legacy webhook API returned an invalid delivery list');
-    }
-    return {
-      items: response.items.map(legacyWebhookDeliveryView),
-      total: response.total,
-    };
-  },
-});
-
-export type DetectedWebhookApi =
-  | { kind: 'canonical'; status: WebhookStatus; client: typeof canonicalWebhookApi }
-  | { kind: 'legacy'; status: WebhookStatus; client: typeof legacyWebhookApi };
-
-export const detectWebhookApi = async (): Promise<DetectedWebhookApi> => {
-  const status = await getWebhookStatus();
-  if (status.route_selection === 'canonical') {
-    return { kind: 'canonical', status, client: canonicalWebhookApi };
-  }
-  return { kind: 'legacy', status, client: legacyWebhookApi };
-};
 
 function requestRouterAnalytics(path: string, params?: Record<string, string>) {
   const queryParams = params ? new URLSearchParams(params).toString() : '';
   return requestJson(`/admin/router-analytics/${path}${queryParams ? `?${queryParams}` : ''}`);
 }
+
+const isIncidentWebhookNotifyResponse = (
+  value: unknown,
+): value is IncidentWebhookNotifyResponse => (
+  isRecord(value)
+  && hasExactKeys(value, [
+    'incident_id',
+    'event_id',
+    'event_type',
+    'command_id',
+    'accepted',
+    'replayed',
+  ])
+  && isBoundedString(value.incident_id, 1, 256)
+  && isUuid4(value.event_id)
+  && value.event_type === 'incident.notify'
+  && typeof value.command_id === 'string'
+  && /^sha256:[0-9a-f]{64}$/.test(value.command_id)
+  && value.accepted === true
+  && typeof value.replayed === 'boolean'
+);
+
+const notifyIncidentWebhooks = async (
+  incidentId: string,
+  body: IncidentWebhookNotifyRequest,
+  key: string,
+): Promise<IncidentWebhookNotifyResponse> => {
+  const normalizedIncidentId = incidentId.trim();
+  if (
+    !isBoundedString(normalizedIncidentId, 1, 256)
+    || (body.narrative !== null && !isBoundedString(body.narrative, 0, 4_096))
+    || !Number.isSafeInteger(body.expected_resource_version)
+    || body.expected_resource_version < 1
+  ) {
+    throw new WebhookContractError(0, 'Incident webhook command is invalid');
+  }
+  const response = requireStatus(
+    await requestJsonWithMetadata<unknown>(
+      `/admin/incidents/${encodeURIComponent(normalizedIncidentId)}/notify-webhooks`,
+      {
+        method: 'POST',
+        headers: { 'Idempotency-Key': requireGeneratedIdempotencyKey(key) },
+        body: JSON.stringify(body),
+      },
+    ),
+    202,
+  );
+  if (
+    !isIncidentWebhookNotifyResponse(response.data)
+    || response.data.incident_id !== normalizedIncidentId
+  ) {
+    throw new WebhookContractError(
+      response.status,
+      'Incident webhook API returned an invalid response',
+      response.requestId,
+    );
+  }
+  return response.data;
+};
+
+const isIncidentNotifyResponse = (value: unknown): value is IncidentNotifyResponse => {
+  if (!isRecord(value) || !hasExactKeys(value, [
+    'incident_id',
+    'command_id',
+    'replayed',
+    'notifications',
+  ])) return false;
+  if (
+    !isBoundedString(value.incident_id, 1, 256)
+    || typeof value.command_id !== 'string'
+    || !/^sha256:[0-9a-f]{64}$/.test(value.command_id)
+    || typeof value.replayed !== 'boolean'
+    || !Array.isArray(value.notifications)
+    || value.notifications.length > 100
+  ) return false;
+  const emails = new Set<string>();
+  for (const notification of value.notifications) {
+    if (!isRecord(notification) || !hasExactKeys(notification, [
+      'email',
+      'status',
+      'error',
+    ])) return false;
+    if (
+      !isBoundedString(notification.email, 3, 320)
+      || emails.has(notification.email)
+      || !isOneOf(notification.status, ['sent', 'failed', 'unknown'] as const)
+      || (
+        notification.error !== null
+        && !isBoundedString(notification.error, 1, 200)
+      )
+      || (notification.status === 'sent' && notification.error !== null)
+    ) return false;
+    emails.add(notification.email);
+  }
+  return true;
+};
+
+const notifyIncidentStakeholders = async (
+  incidentId: string,
+  body: { recipients: string[]; message?: string },
+  key: string,
+): Promise<IncidentNotifyResponse> => {
+  const normalizedIncidentId = incidentId.trim();
+  if (
+    !isBoundedString(normalizedIncidentId, 1, 256)
+    || !Array.isArray(body.recipients)
+    || body.recipients.length < 1
+    || body.recipients.length > 100
+    || !body.recipients.every((email) => isBoundedString(email, 3, 320))
+    || (body.message !== undefined && !isBoundedString(body.message, 0, 4_096))
+  ) {
+    throw new WebhookContractError(0, 'Incident stakeholder command is invalid');
+  }
+  const response = requireStatus(
+    await requestJsonWithMetadata<unknown>(
+      `/admin/incidents/${encodeURIComponent(normalizedIncidentId)}/notify`,
+      {
+        method: 'POST',
+        headers: { 'Idempotency-Key': requireGeneratedIdempotencyKey(key) },
+        body: JSON.stringify(body),
+      },
+    ),
+    200,
+  );
+  if (
+    !isIncidentNotifyResponse(response.data)
+    || response.data.incident_id !== normalizedIncidentId
+  ) {
+    throw new WebhookContractError(
+      response.status,
+      'Incident stakeholder API returned an invalid response',
+      response.requestId,
+    );
+  }
+  return response.data;
+};
 
 export async function getTeam(teamId: string) {
   return await requestJson(`/admin/teams/${encodeURIComponent(teamId)}`);
@@ -1090,16 +1644,8 @@ export const api = {
     requestJson(`/admin/incidents/${encodeURIComponent(incidentId)}`, {
       method: 'DELETE',
     }),
-  notifyIncidentStakeholders: (incidentId: string, data: { recipients: string[]; message?: string }) =>
-    requestJson<IncidentNotifyResponse>(`/admin/incidents/${encodeURIComponent(incidentId)}/notify`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }),
-  notifyIncident: (incidentId: string) =>
-    requestJson<{ notified: boolean; incident_id: string; webhooks_delivered: number }>(
-      `/admin/incidents/${encodeURIComponent(incidentId)}/notify`,
-      { method: 'POST' },
-    ),
+  notifyIncidentStakeholders,
+  notifyIncidentWebhooks,
   getIncidentSlaMetrics: () =>
     requestJson<{
       total_incidents: number;
@@ -2011,6 +2557,9 @@ export const api = {
   updateWebhook: updateCanonicalWebhook,
   deleteWebhook: deleteCanonicalWebhook,
   rotateWebhookSecret: rotateCanonicalWebhookSecret,
+  getWebhookDeliveries: getCanonicalWebhookDeliveries,
+  testWebhook: testCanonicalWebhook,
+  redeliverWebhook: redeliverCanonicalWebhook,
 };
 
 export default api;

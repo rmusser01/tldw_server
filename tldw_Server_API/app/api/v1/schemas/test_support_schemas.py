@@ -18,6 +18,15 @@ class AdminE2ERunDueBackupSchedulesResponse(BaseModel):
     triggered_runs: int = 0
 
 
+class AdminE2EPrepareAdminWebhooksResponse(BaseModel):
+    """Sanitized result for preparing canonical webhooks in an e2e database."""
+
+    ok: bool = True
+    phase: Literal["complete"]
+    active_primary_key_id: str
+    state_revision: int = Field(..., ge=1)
+
+
 class AdminE2ESeedRequest(BaseModel):
     """Request payload for deterministic admin e2e fixture seeding."""
 

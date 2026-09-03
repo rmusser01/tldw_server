@@ -10,7 +10,6 @@ from .catalog import (
 from .config import (
     AdminWebhookMode,
     AdminWebhookSettings,
-    WebhookRouteSelection,
 )
 from .crypto import (
     EVENT_BODY_MAX_BYTES,
@@ -60,8 +59,20 @@ from .domain import (
     validate_idempotency_key,
     validate_webhook_target,
 )
+from .producer import (
+    AdminWebhookEventProducer,
+    ProductionEventPreparation,
+    build_admin_webhook_event_producer,
+    build_incident_created_data,
+    build_incident_notify_data,
+    build_incident_resolved_data,
+    build_incident_updated_data,
+    build_user_created_data,
+    build_user_deleted_data,
+)
 
 __all__ = [
+    "AdminWebhookEventProducer",
     "AdminWebhookMode",
     "AdminWebhookSettings",
     "AttemptState",
@@ -86,6 +97,7 @@ __all__ = [
     "MIGRATION_DOMAIN_SYSTEM_OPS_RECORD",
     "MIGRATION_DOMAIN_SYSTEM_OPS_SUBTREE",
     "ProtectedValue",
+    "ProductionEventPreparation",
     "WebhookCatalogItem",
     "WebhookError",
     "WebhookErrorCode",
@@ -95,15 +107,21 @@ __all__ = [
     "WebhookEvent",
     "WebhookMigrationSummary",
     "WebhookRegistration",
-    "WebhookRouteSelection",
     "WebhookStatus",
     "WebhookKeyError",
     "WebhookKeyErrorCode",
     "WebhookKeyLoadCode",
     "WebhookKeyRing",
     "WebhookKeyRingLoadResult",
+    "build_admin_webhook_event_producer",
+    "build_incident_created_data",
+    "build_incident_notify_data",
+    "build_incident_resolved_data",
+    "build_incident_updated_data",
     "build_idempotency_scope",
     "build_registration_etag",
+    "build_user_created_data",
+    "build_user_deleted_data",
     "canonical_request_hash",
     "idempotency_lookup_digest",
     "load_webhook_key_ring",

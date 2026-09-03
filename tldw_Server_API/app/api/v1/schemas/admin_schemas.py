@@ -60,12 +60,15 @@ def validate_admin_webhook_url(value: str) -> str:
         raise ValueError(f"Webhook URL is not allowed: {reason}")
     return stripped
 
+
 #######################################################################################################################
 #
 # User Management Schemas
 
+
 class UserUpdateRequest(BaseModel):
     """Request to update user information"""
+
     email: EmailStr | None = None
     role: str | None = Field(None, pattern="^(user|admin)$")
     is_active: bool | None = None
@@ -134,6 +137,7 @@ class AdminMfaRequirementResponse(BaseModel):
 
 class AdminUserCreateRequest(BaseModel):
     """Request to create a user as an admin."""
+
     username: str = Field(
         ...,
         min_length=3,
@@ -164,6 +168,7 @@ class AdminUserCreateRequest(BaseModel):
 
 class UserSummary(BaseModel):
     """Summary information about a user"""
+
     id: int
     uuid: UUID
     username: str
@@ -207,6 +212,7 @@ class UserDetailResponse(BaseModel):
 
 class UserListResponse(BaseModel):
     """Response for user list endpoint"""
+
     users: list[UserSummary]
     total: int
     page: int
@@ -225,6 +231,7 @@ class UserListResponse(BaseModel):
 
 class UserQuotaUpdateRequest(BaseModel):
     """Request to update user storage quota"""
+
     storage_quota_mb: int = Field(..., ge=100, le=1000000)  # 100MB to 1TB
 
     model_config = ConfigDict(from_attributes=True)
@@ -303,8 +310,10 @@ class AdminContextIntegrityResponse(BaseModel):
 #
 # Registration Code Schemas
 
+
 class RegistrationCodeRequest(BaseModel):
     """Request to create a registration code"""
+
     max_uses: int = Field(1, ge=1, le=100)
     expiry_days: int = Field(7, ge=1, le=365)
     role_to_grant: str = Field("user", pattern="^(user|admin)$")
@@ -322,6 +331,7 @@ class RegistrationCodeRequest(BaseModel):
 
 class RegistrationCodeResponse(BaseModel):
     """Response with registration code details"""
+
     id: int
     code: str
     max_uses: int
@@ -351,6 +361,7 @@ class RegistrationCodeResponse(BaseModel):
 
 class RegistrationCodeListResponse(BaseModel):
     """Response for registration code list"""
+
     codes: list[RegistrationCodeResponse]
 
     model_config = ConfigDict(from_attributes=True)
@@ -358,6 +369,7 @@ class RegistrationCodeListResponse(BaseModel):
 
 class RegistrationSettingsResponse(BaseModel):
     """Registration configuration status for admin surfaces."""
+
     enable_registration: bool
     require_registration_code: bool
     auth_mode: str | None = None
@@ -369,6 +381,7 @@ class RegistrationSettingsResponse(BaseModel):
 
 class RegistrationSettingsUpdateRequest(BaseModel):
     """Request to update registration settings."""
+
     enable_registration: bool | None = None
     require_registration_code: bool | None = None
 
@@ -379,8 +392,10 @@ class RegistrationSettingsUpdateRequest(BaseModel):
 #
 # LLM Provider Overrides Schemas
 
+
 class LLMProviderOverrideRequest(BaseModel):
     """Request to upsert LLM provider overrides."""
+
     is_enabled: bool | None = None
     allowed_models: list[str] | None = None
     config: dict[str, Any] | None = None
@@ -393,6 +408,7 @@ class LLMProviderOverrideRequest(BaseModel):
 
 class LLMProviderOverrideResponse(BaseModel):
     """Response payload for LLM provider overrides."""
+
     provider: str
     is_enabled: bool | None = None
     allowed_models: list[str] | None = None
@@ -408,6 +424,7 @@ class LLMProviderOverrideResponse(BaseModel):
 
 class LLMProviderOverrideListResponse(BaseModel):
     """Response payload for listing LLM provider overrides."""
+
     items: list[LLMProviderOverrideResponse]
 
     model_config = ConfigDict(from_attributes=True)
@@ -415,6 +432,7 @@ class LLMProviderOverrideListResponse(BaseModel):
 
 class LLMProviderTestRequest(BaseModel):
     """Request to test LLM provider connectivity."""
+
     provider: str
     model: str | None = None
     api_key: str | None = None
@@ -426,6 +444,7 @@ class LLMProviderTestRequest(BaseModel):
 
 class LLMProviderTestResponse(BaseModel):
     """Response payload for LLM provider test results."""
+
     provider: str
     status: str
     model: str | None = None
@@ -437,8 +456,10 @@ class LLMProviderTestResponse(BaseModel):
 #
 # System Statistics Schemas
 
+
 class UserStats(BaseModel):
     """User statistics"""
+
     total: int
     active: int
     verified: int
@@ -450,6 +471,7 @@ class UserStats(BaseModel):
 
 class StorageStats(BaseModel):
     """Storage statistics"""
+
     total_used_mb: float
     total_quota_mb: float
     average_used_mb: float
@@ -460,6 +482,7 @@ class StorageStats(BaseModel):
 
 class SessionStats(BaseModel):
     """Session statistics"""
+
     active: int
     unique_users: int
 
@@ -468,6 +491,7 @@ class SessionStats(BaseModel):
 
 class TokensTodayStats(BaseModel):
     """Token usage stats for today"""
+
     prompt: int = 0
     completion: int = 0
     total: int = 0
@@ -477,6 +501,7 @@ class TokensTodayStats(BaseModel):
 
 class SystemStatsResponse(BaseModel):
     """System statistics response"""
+
     users: UserStats
     storage: StorageStats
     sessions: SessionStats
@@ -489,6 +514,7 @@ class SystemStatsResponse(BaseModel):
 
 class ActivityPoint(BaseModel):
     """Activity point for dashboard charts."""
+
     date: date
     bucket_start: datetime | None = None
     requests: NonNegativeInt
@@ -499,6 +525,7 @@ class ActivityPoint(BaseModel):
 
 class ActivitySummaryResponse(BaseModel):
     """Dashboard activity summary response."""
+
     days: int = Field(..., ge=0)
     granularity: Literal["hour", "day"] = "day"
     points: list[ActivityPoint]
@@ -555,8 +582,10 @@ class AdminTokenDecodeResponse(BaseModel):
 #
 # Security Alert Schemas
 
+
 class SecurityAlertSinkStatus(BaseModel):
     """Represents the status of an individual security alert sink."""
+
     sink: str
     configured: bool
     min_severity: str | None = None
@@ -567,6 +596,7 @@ class SecurityAlertSinkStatus(BaseModel):
 
 class SecurityAlertStatusResponse(BaseModel):
     """Aggregated security alert configuration and health."""
+
     enabled: bool
     min_severity: str
     last_dispatch_time: datetime | None
@@ -585,8 +615,10 @@ class SecurityAlertStatusResponse(BaseModel):
 #
 # Audit Log Schemas
 
+
 class AuditLogEntry(BaseModel):
     """Single audit log entry"""
+
     id: int
     user_id: int | None = None
     username: str | None = None
@@ -601,6 +633,7 @@ class AuditLogEntry(BaseModel):
 
 class AuditLogResponse(BaseModel):
     """Response for audit log endpoint"""
+
     entries: list[AuditLogEntry]
     total: int
     limit: int
@@ -620,8 +653,10 @@ class AuditLogResponse(BaseModel):
 #
 # Error Breakdown Schemas
 
+
 class ErrorBreakdownItem(BaseModel):
     """A single row in the error breakdown aggregation."""
+
     endpoint: str
     status_code: int
     count: int
@@ -632,6 +667,7 @@ class ErrorBreakdownItem(BaseModel):
 
 class ErrorBreakdownResponse(BaseModel):
     """Aggregated error breakdown over a recent period."""
+
     items: list[ErrorBreakdownItem]
     total_errors: int
     period: str = "24h"
@@ -643,8 +679,10 @@ class ErrorBreakdownResponse(BaseModel):
 #
 # Rate Limit Summary Schemas
 
+
 class RateLimitThrottledEntity(BaseModel):
     """A frequently throttled user/IP/entity."""
+
     entity: str
     rejections: int
     last_rejected_at: str | None = None
@@ -654,6 +692,7 @@ class RateLimitThrottledEntity(BaseModel):
 
 class RateLimitPolicyHeadroom(BaseModel):
     """Headroom utilization for a single policy."""
+
     policy_id: str
     resource_type: str | None = None
     scope: str | None = None
@@ -666,6 +705,7 @@ class RateLimitPolicyHeadroom(BaseModel):
 
 class RateLimitSummaryResponse(BaseModel):
     """Aggregated rate limit summary for a period."""
+
     total_throttle_events: int
     period: str = "24h"
     top_throttled_entities: list[RateLimitThrottledEntity]
@@ -678,8 +718,10 @@ class RateLimitSummaryResponse(BaseModel):
 #
 # Data Ops Schemas (Backups, Retention, Exports)
 
+
 class BackupItem(BaseModel):
     """Metadata for a backup artifact."""
+
     id: str
     dataset: str
     user_id: int | None = None
@@ -692,6 +734,7 @@ class BackupItem(BaseModel):
 
 class BackupListResponse(BaseModel):
     """Response for backup listing."""
+
     items: list[BackupItem]
     total: int
     limit: int
@@ -709,6 +752,7 @@ class BackupListResponse(BaseModel):
 
 class BackupCreateRequest(BaseModel):
     """Request to create a backup snapshot."""
+
     dataset: str
     user_id: int | None = None
     backup_type: str | None = Field("full", pattern="^(full|incremental)$")
@@ -719,6 +763,7 @@ class BackupCreateRequest(BaseModel):
 
 class BackupCreateResponse(BaseModel):
     """Response for backup creation."""
+
     item: BackupItem
 
     model_config = ConfigDict(from_attributes=True)
@@ -803,6 +848,7 @@ class BackupScheduleMutationResponse(BaseModel):
 
 class BackupRestoreRequest(BaseModel):
     """Request to restore a backup snapshot."""
+
     dataset: str
     user_id: int | None = None
     confirm: bool = False
@@ -812,6 +858,7 @@ class BackupRestoreRequest(BaseModel):
 
 class BackupRestoreResponse(BaseModel):
     """Response for backup restore."""
+
     status: str
     message: str
 
@@ -912,6 +959,7 @@ class MaintenanceRotationRunCreateResponse(BaseModel):
 
 class RetentionPolicy(BaseModel):
     """Retention policy descriptor."""
+
     key: str
     days: int | None = None
     description: str | None = None
@@ -921,6 +969,7 @@ class RetentionPolicy(BaseModel):
 
 class RetentionPoliciesResponse(BaseModel):
     """Response for retention policy listing."""
+
     policies: list[RetentionPolicy]
 
     model_config = ConfigDict(from_attributes=True)
@@ -928,6 +977,7 @@ class RetentionPoliciesResponse(BaseModel):
 
 class RetentionPolicyUpdateRequest(BaseModel):
     """Request to update a retention policy."""
+
     days: int = Field(..., ge=1, le=3650)
     preview_signature: str | None = Field(default=None, min_length=1, max_length=2048)
 
@@ -1115,6 +1165,7 @@ class DataSubjectRequestListResponse(BaseModel):
 #
 # Admin Monitoring Schemas
 
+
 class AdminAlertRuleResponse(BaseModel):
     """Admin alert-rule response payload."""
 
@@ -1243,8 +1294,10 @@ class AdminAlertHistoryListResponse(BaseModel):
 #
 # System Ops Schemas (Logs, Incidents, Maintenance, Feature Flags)
 
+
 class SystemLogEntry(BaseModel):
     """Single system log entry."""
+
     timestamp: datetime | None = None
     level: str | None = None
     message: str | None = None
@@ -1265,6 +1318,7 @@ class SystemLogEntry(BaseModel):
 
 class SystemLogsResponse(BaseModel):
     """Response for system log listing."""
+
     items: list[SystemLogEntry]
     total: int
     limit: int
@@ -1282,6 +1336,7 @@ class SystemLogsResponse(BaseModel):
 
 class MaintenanceState(BaseModel):
     """Maintenance mode state."""
+
     enabled: bool
     message: str = ""
     allowlist_user_ids: list[int] = []
@@ -1294,6 +1349,7 @@ class MaintenanceState(BaseModel):
 
 class MaintenanceUpdateRequest(BaseModel):
     """Request to update maintenance mode."""
+
     enabled: bool
     message: str | None = None
     allowlist_user_ids: list[int] | None = None
@@ -1304,6 +1360,7 @@ class MaintenanceUpdateRequest(BaseModel):
 
 class FeatureFlagSnapshot(BaseModel):
     """Feature flag state snapshot for change diffs."""
+
     scope: Literal["global", "org", "user"]
     enabled: bool
     org_id: int | None = None
@@ -1317,6 +1374,7 @@ class FeatureFlagSnapshot(BaseModel):
 
 class FeatureFlagHistoryEntry(BaseModel):
     """Feature flag change history entry."""
+
     timestamp: datetime
     enabled: bool
     actor: str | None = None
@@ -1329,6 +1387,7 @@ class FeatureFlagHistoryEntry(BaseModel):
 
 class FeatureFlagItem(BaseModel):
     """Feature flag descriptor."""
+
     key: str
     scope: Literal["global", "org", "user"]
     enabled: bool
@@ -1348,6 +1407,7 @@ class FeatureFlagItem(BaseModel):
 
 class FeatureFlagsResponse(BaseModel):
     """Response for feature flag listing."""
+
     items: list[FeatureFlagItem]
     total: int
 
@@ -1356,6 +1416,7 @@ class FeatureFlagsResponse(BaseModel):
 
 class FeatureFlagUpsertRequest(BaseModel):
     """Request to upsert a feature flag."""
+
     scope: Literal["global", "org", "user"]
     enabled: bool
     description: str | None = None
@@ -1395,6 +1456,7 @@ class FeatureFlagUpsertRequest(BaseModel):
 
 class IncidentEvent(BaseModel):
     """Incident timeline entry."""
+
     id: str
     message: str
     created_at: datetime
@@ -1405,6 +1467,7 @@ class IncidentEvent(BaseModel):
 
 class IncidentActionItem(BaseModel):
     """Structured incident action item."""
+
     id: str
     text: str
     done: bool = False
@@ -1414,7 +1477,9 @@ class IncidentActionItem(BaseModel):
 
 class IncidentItem(BaseModel):
     """Incident summary with timeline."""
+
     id: str
+    version: int = Field(ge=1)
     title: str
     status: Literal["open", "investigating", "mitigating", "resolved"]
     severity: Literal["low", "medium", "high", "critical"]
@@ -1441,6 +1506,7 @@ class IncidentItem(BaseModel):
 
 class IncidentListResponse(BaseModel):
     """Response for incident listing."""
+
     items: list[IncidentItem]
     total: int
     limit: int
@@ -1458,6 +1524,7 @@ class IncidentListResponse(BaseModel):
 
 class IncidentCreateRequest(BaseModel):
     """Request to create an incident."""
+
     title: str
     status: Literal["open", "investigating", "mitigating", "resolved"] | None = None
     severity: Literal["low", "medium", "high", "critical"] | None = None
@@ -1477,6 +1544,7 @@ class IncidentUpdateRequest(BaseModel):
     Callers must preserve that distinction via ``model_fields_set`` or
     ``model_dump(exclude_unset=True)`` when invoking the service layer.
     """
+
     title: str | None = None
     status: Literal["open", "investigating", "mitigating", "resolved"] | None = None
     severity: Literal["low", "medium", "high", "critical"] | None = None
@@ -1495,6 +1563,7 @@ class IncidentUpdateRequest(BaseModel):
 
 class IncidentEventCreateRequest(BaseModel):
     """Request to append a timeline entry."""
+
     message: str
 
     model_config = ConfigDict(from_attributes=True)
@@ -1502,31 +1571,55 @@ class IncidentEventCreateRequest(BaseModel):
 
 class IncidentNotifyRequest(BaseModel):
     """Request to notify stakeholders about an incident."""
-    recipients: list[str]
-    message: str | None = None
 
-    model_config = ConfigDict(from_attributes=True)
+    recipients: list[EmailStr] = Field(min_length=1, max_length=100)
+    message: str | None = Field(default=None, max_length=4_096)
+
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
 
 
 class IncidentNotifyRecipientResult(BaseModel):
     """Per-recipient delivery result."""
-    email: str
-    status: str
-    error: str | None = None
 
-    model_config = ConfigDict(from_attributes=True)
+    email: EmailStr
+    status: Literal["sent", "failed", "unknown"]
+    error: str | None = Field(default=None, max_length=200)
+
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
 
 
 class IncidentNotifyResponse(BaseModel):
-    """Response from incident stakeholder notification.
+    """Response from a stakeholder email notification."""
 
-    Used by both the email notification endpoint (populates ``notifications``)
-    and the webhook dispatch endpoint (populates ``webhooks_delivered``).
-    """
     incident_id: str
-    notifications: list[IncidentNotifyRecipientResult] = []
-    notified: bool = True
-    webhooks_delivered: int = 0
+    command_id: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    replayed: bool
+    notifications: list[IncidentNotifyRecipientResult] = Field(
+        default_factory=list,
+        max_length=100,
+    )
+
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+
+class IncidentWebhookNotifyRequest(BaseModel):
+    """Explicit optional receiver narrative for a durable webhook command."""
+
+    narrative: str | None = Field(default=None, max_length=4096)
+    expected_resource_version: int = Field(ge=1)
+
+    model_config = ConfigDict(from_attributes=True, extra="forbid", strict=True)
+
+
+class IncidentWebhookNotifyResponse(BaseModel):
+    """Bounded durable-command acceptance without delivery projections."""
+
+    incident_id: str
+    event_id: str
+    event_type: Literal["incident.notify"]
+    command_id: str
+    accepted: Literal[True]
+    replayed: bool
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -1538,6 +1631,7 @@ class IncidentNotifyResponse(BaseModel):
 
 class EmailDeliveryItem(BaseModel):
     """A single email delivery log entry."""
+
     id: str
     recipient: str = ""
     subject: str = ""
@@ -1551,6 +1645,7 @@ class EmailDeliveryItem(BaseModel):
 
 class EmailDeliveryListResponse(BaseModel):
     """Response for email delivery log listing."""
+
     items: list[EmailDeliveryItem]
     total: int
     limit: int
@@ -1573,6 +1668,7 @@ class EmailDeliveryListResponse(BaseModel):
 
 class WebhookItem(BaseModel):
     """Webhook summary (secret redacted)."""
+
     id: str
     url: str
     events: list[str] = []
@@ -1585,6 +1681,7 @@ class WebhookItem(BaseModel):
 
 class WebhookCreateResponse(BaseModel):
     """Response for webhook creation, includes the secret (shown once)."""
+
     id: str
     url: str
     secret: str
@@ -1598,6 +1695,7 @@ class WebhookCreateResponse(BaseModel):
 
 class WebhookListResponse(BaseModel):
     """Response for webhook listing."""
+
     items: list[WebhookItem]
     total: int
     limit: int | None = Field(default=None, ge=1, description="Alias for pagination.limit")
@@ -1615,6 +1713,7 @@ class WebhookListResponse(BaseModel):
 
 class WebhookCreateRequest(BaseModel):
     """Request to create a webhook."""
+
     url: str
     events: list[str]
     enabled: bool = True
@@ -1624,6 +1723,7 @@ class WebhookCreateRequest(BaseModel):
 
 class WebhookUpdateRequest(BaseModel):
     """Request to update a webhook (partial update)."""
+
     url: str | None = None
     events: list[str] | None = None
     enabled: bool | None = None
@@ -1633,6 +1733,7 @@ class WebhookUpdateRequest(BaseModel):
 
 class WebhookDeliveryItem(BaseModel):
     """A single webhook delivery record."""
+
     id: str
     webhook_id: str
     event_type: str = ""
@@ -1648,6 +1749,7 @@ class WebhookDeliveryItem(BaseModel):
 
 class WebhookDeliveryListResponse(BaseModel):
     """Response for webhook delivery listing."""
+
     items: list[WebhookDeliveryItem]
     total: int
     limit: int
@@ -1667,8 +1769,10 @@ class WebhookDeliveryListResponse(BaseModel):
 #
 # Batch Operation Schemas
 
+
 class BatchUserOperation(BaseModel):
     """Batch operation on multiple users"""
+
     user_ids: list[int]
     operation: str = Field(..., pattern="^(activate|deactivate|verify|lock|unlock|delete)$")
 
@@ -1677,6 +1781,7 @@ class BatchUserOperation(BaseModel):
 
 class BatchOperationResponse(BaseModel):
     """Response for batch operations"""
+
     success_count: int
     failed_count: int
     failed_ids: list[int] = []
@@ -1689,8 +1794,10 @@ class BatchOperationResponse(BaseModel):
 #
 # Usage Reporting Schemas
 
+
 class UsageDailyRow(BaseModel):
     """Single usage_daily record."""
+
     user_id: int
     day: date | str
     requests: int
@@ -1704,6 +1811,7 @@ class UsageDailyRow(BaseModel):
 
 class UsageDailyResponse(BaseModel):
     """Response for daily usage query."""
+
     items: list[UsageDailyRow]
     total: int
     page: int
@@ -1715,6 +1823,7 @@ class UsageDailyResponse(BaseModel):
 
 class UsageTopRow(BaseModel):
     """Aggregated usage by user for a date range."""
+
     user_id: int
     requests: int
     errors: int
@@ -1733,6 +1842,7 @@ class UsageTopResponse(BaseModel):
 
 class UsageAggregateResponse(BaseModel):
     """Response for manual usage aggregation."""
+
     status: str
     day: str | None = None
     reason: str | None = None
@@ -1781,6 +1891,7 @@ def _validate_usd_precision(value: Any | None) -> float | None:
 
 class BudgetAlertThresholds(BaseModel):
     """Alert thresholds for budgets (global + per-metric)."""
+
     global_: list[int] | None = Field(default=None, alias="global")
     per_metric: dict[str, list[int] | None] | None = None
 
@@ -1815,6 +1926,7 @@ class BudgetAlertThresholds(BaseModel):
 
 class BudgetEnforcementMode(BaseModel):
     """Enforcement mode for budgets (global + per-metric)."""
+
     global_: Literal["none", "soft", "hard"] | None = Field(default=None, alias="global")
     per_metric: dict[str, Literal["none", "soft", "hard"] | None] | None = None
 
@@ -1844,6 +1956,7 @@ class BudgetEnforcementMode(BaseModel):
 
 class BudgetSettings(BaseModel):
     """Budget configuration for an organization."""
+
     budget_day_usd: float | None = Field(None, ge=0)
     budget_month_usd: float | None = Field(None, ge=0)
     budget_day_tokens: int | None = Field(None, ge=0)
@@ -1877,6 +1990,7 @@ class BudgetSettings(BaseModel):
 
 class OrgBudgetUpdateRequest(BaseModel):
     """Upsert budget settings for an organization."""
+
     org_id: int = Field(..., ge=1)
     budgets: BudgetSettings | None = None
     clear_budgets: bool = False
@@ -1884,12 +1998,14 @@ class OrgBudgetUpdateRequest(BaseModel):
 
 class OrgBudgetSelfUpdateRequest(BaseModel):
     """Upsert budget settings for the current organization context."""
+
     budgets: BudgetSettings | None = None
     clear_budgets: bool = False
 
 
 class OrgBudgetItem(BaseModel):
     """Budget details for an organization."""
+
     org_id: int
     org_name: str
     org_slug: str | None = None
@@ -1934,6 +2050,7 @@ class BudgetForecastResponse(BaseModel):
 #######################################################################################################################
 #
 # LLM Usage Schemas
+
 
 class LLMUsageLogRow(BaseModel):
     id: int
@@ -2440,11 +2557,13 @@ class RouterAnalyticsLogResponse(BaseModel):
 #
 # Tool Permission Schemas (MCP Integration)
 
+
 class ToolPermissionCreateRequest(BaseModel):
     """Create a tool execute permission.
 
     If tool_name is "*", creates tools.execute:* (wildcard).
     """
+
     tool_name: str = Field(..., min_length=1)
     description: str | None = None
 
@@ -2460,11 +2579,13 @@ class ToolPermissionGrantRequest(BaseModel):
 
     tool_name '*' means tools.execute:*
     """
+
     tool_name: str = Field(..., min_length=1)
 
 
 class ToolPermissionBatchRequest(BaseModel):
     """Grant multiple tool execution permissions to a role in one call."""
+
     tool_names: list[str] = Field(..., min_length=1)
 
 
@@ -2474,6 +2595,7 @@ class ToolPermissionPrefixRequest(BaseModel):
     Examples:
       {"prefix": "tools.execute:media."} or {"prefix": "media."}
     """
+
     prefix: str = Field(..., min_length=1)
 
 
@@ -2481,8 +2603,10 @@ class ToolPermissionPrefixRequest(BaseModel):
 #
 # MCP Tool Catalog Schemas
 
+
 class ToolCatalogCreateRequest(BaseModel):
     """Create a new MCP tool catalog."""
+
     name: str = Field(..., min_length=1, max_length=200)
     description: str | None = None
     org_id: int | None = None
@@ -2505,6 +2629,7 @@ class ToolCatalogResponse(BaseModel):
 
 class ToolCatalogEntryCreateRequest(BaseModel):
     """Add a tool entry to a catalog."""
+
     tool_name: str = Field(..., min_length=1, max_length=200)
     module_id: str | None = Field(None, max_length=200)
 
@@ -2520,15 +2645,19 @@ class ToolCatalogEntryResponse(BaseModel):
 #
 # Kanban FTS Maintenance Schema
 
+
 class KanbanFtsMaintenanceResponse(BaseModel):
     """Response for Kanban FTS maintenance actions."""
+
     user_id: int
     action: Literal["optimize", "rebuild"]
     status: str = "ok"
 
+
 #
 #
 # Notes Title Settings Schema
+
 
 class NotesTitleSettingsUpdate(BaseModel):
     """Update payload for Notes auto-title settings.
@@ -2536,14 +2665,16 @@ class NotesTitleSettingsUpdate(BaseModel):
     - llm_enabled: enable/disable LLM-backed title generation
     - default_strategy: default strategy to use when clients send "heuristic"
     """
-    model_config = ConfigDict(extra='forbid')
+
+    model_config = ConfigDict(extra="forbid")
 
     llm_enabled: bool | None = Field(default=None)
-    default_strategy: Literal['heuristic', 'llm', 'llm_fallback'] | None = Field(default=None)
+    default_strategy: Literal["heuristic", "llm", "llm_fallback"] | None = Field(default=None)
 
 
 class NotesTitleSettingsResponse(BaseModel):
     """Response payload for Notes auto-title settings."""
+
     llm_enabled: bool
     default_strategy: str
     effective_strategy: str
@@ -2555,13 +2686,15 @@ class NotesTitleSettingsResponse(BaseModel):
 #
 # Cleanup worker settings (admin)
 
+
 class AdminCleanupSettingsUpdate(BaseModel):
     """Update payload for ephemeral cleanup worker settings.
 
     - enabled: turn cleanup worker on/off
     - interval_sec: run interval in seconds (60..604800)
     """
-    model_config = ConfigDict(extra='forbid')
+
+    model_config = ConfigDict(extra="forbid")
 
     enabled: bool | None = Field(default=None)
     interval_sec: int | None = Field(default=None, ge=60, le=604800)
@@ -2569,6 +2702,7 @@ class AdminCleanupSettingsUpdate(BaseModel):
 
 class AdminCleanupSettingsResponse(BaseModel):
     """Response payload for cleanup worker settings."""
+
     enabled: bool
     interval_sec: int
 
@@ -2577,6 +2711,7 @@ class AdminCleanupSettingsResponse(BaseModel):
 
 #
 # Unified Circuit Breaker (admin)
+
 
 class AdminCircuitBreakerStatus(BaseModel):
     """Circuit breaker status row exposed by `/api/v1/admin/circuit-breakers`.
@@ -2631,8 +2766,10 @@ class AdminCircuitBreakerListFilters(BaseModel):
 #
 # Per-API-Key Usage Attribution
 
+
 class ApiKeyDailySnapshot(BaseModel):
     """A single day's usage snapshot for an API key."""
+
     date: str
     requests: int = 0
     tokens: int = 0
@@ -2641,6 +2778,7 @@ class ApiKeyDailySnapshot(BaseModel):
 
 class ApiKeyUsageSummary(BaseModel):
     """Aggregated usage summary for a single API key."""
+
     key_id: str
     request_count: int = 0
     total_tokens: int = 0
@@ -2653,6 +2791,7 @@ class ApiKeyUsageSummary(BaseModel):
 
 class ApiKeyUsageTopItem(BaseModel):
     """A ranked entry in the top-keys-by-usage list."""
+
     key_id: str
     request_count: int = 0
     total_tokens: int = 0
@@ -2662,6 +2801,7 @@ class ApiKeyUsageTopItem(BaseModel):
 
 class ApiKeyUsageTopResponse(BaseModel):
     """Response for the top-keys-by-usage endpoint."""
+
     items: list[ApiKeyUsageTopItem] = Field(default_factory=list)
 
 

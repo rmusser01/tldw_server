@@ -1,21 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 
 import { usePrivilegedActionDialog } from '@/components/ui/privileged-action-dialog';
 import { useToast } from '@/components/ui/toast';
-import {
-  canonicalWebhookApi,
-  legacyWebhookApi,
-} from '@/lib/api-client';
-import type { LegacyWebhookView } from '@/lib/api-client';
-import { createIdempotentCommand } from '@/lib/idempotent-command';
+import { canonicalWebhookApi } from '@/lib/api-client';
+import { generateIdempotencyKey, createIdempotentCommand } from '@/lib/idempotent-command';
+import { WebhookTransportError } from '@/lib/http';
 import type {
   WebhookCreateRequest,
+  WebhookDelivery,
+  WebhookDeliveryListResponse,
   WebhookPatchRequest,
   WebhookRegistration,
 } from '@/types';
 import {
   activationBlockReason,
   isConditionalWebhookError,
+  queuedDeliveryWarning,
   registrationReviewSummary,
   safeWebhookError,
   type PendingSecretCommand,
@@ -36,32 +37,50 @@ type EditorState = {
   registration: WebhookRegistration;
 };
 
+type PendingTest = {
+  webhookId: number;
+  deliveryConfigVersion: number;
+  etag: string;
+  idempotencyKey: string;
+};
+
+type PendingRedelivery = PendingTest & {
+  deliveryId: string;
+  confirmChangedConfiguration: boolean;
+};
+
+const emptyDeliveryPage = (): WebhookDeliveryListResponse => ({
+  items: [],
+  total: 0,
+  limit: 50,
+  offset: 0,
+});
+
+const isAmbiguousTransportFailure = (error: unknown): boolean => (
+  error instanceof WebhookTransportError
+  || error instanceof TypeError
+  || (error instanceof Error && ['AbortError', 'NetworkError'].includes(error.name))
+);
+
 export const useWebhooksPageController = () => {
   const promptPrivileged = usePrivilegedActionDialog();
   const { success, error: showError } = useToast();
 
   const {
-    mode,
     status,
     catalog,
     canonicalPage,
-    legacyItems,
     offset,
     loading,
     statusError,
     conflict,
-    legacyExpandedId,
-    legacyDeliveries,
-    legacyDeliveryLoading,
+    ready,
     addDisabled,
     visibleTotal,
     visibleCount,
     hasPrevious,
     hasNext,
     setConflict,
-    setLegacyExpandedId,
-    setLegacyDeliveries,
-    setLegacyDeliveryLoading,
     loadControlPlane,
     recoverConditionalConflict,
     goToPage,
@@ -73,9 +92,6 @@ export const useWebhooksPageController = () => {
   const [createDescription, setCreateDescription] = useState('');
   const [createTimeout, setCreateTimeout] = useState('10');
   const [createEvents, setCreateEvents] = useState<string[]>([]);
-  const [legacyEvents, setLegacyEvents] = useState('');
-  const [legacyEnabled, setLegacyEnabled] = useState(true);
-
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [editDescription, setEditDescription] = useState('');
   const [editTimeout, setEditTimeout] = useState('10');
@@ -83,25 +99,67 @@ export const useWebhooksPageController = () => {
   const [replacementUrl, setReplacementUrl] = useState('');
   const [replacementUrlError, setReplacementUrlError] = useState('');
   const [mutatingId, setMutatingId] = useState<number | null>(null);
-  const legacyExpandedIdRef = useRef<string | null>(legacyExpandedId);
-  const activeLegacyDeliveryRequestRef = useRef<symbol | null>(null);
-  const activeLegacyDeliveryTestOwnerRef = useRef<symbol | null>(null);
-  const activeLegacyTestRequestRef = useRef<symbol | null>(null);
+
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [deliveryPage, setDeliveryPage] = useState<WebhookDeliveryListResponse>(emptyDeliveryPage);
+  const [deliveryLoading, setDeliveryLoading] = useState(false);
+  const [deliveryError, setDeliveryError] = useState('');
+  const [testingId, setTestingId] = useState<number | null>(null);
+  const [testStatus, setTestStatus] = useState('');
+  const [testRetryAvailable, setTestRetryAvailable] = useState(false);
+  const [redeliveringId, setRedeliveringId] = useState<string | null>(null);
+  const [redeliveryStatus, setRedeliveryStatus] = useState('');
+  const [redeliveryRetryAvailable, setRedeliveryRetryAvailable] = useState(false);
+
+  const expandedIdRef = useRef<number | null>(null);
+  const activeHistoryRequestRef = useRef<symbol | null>(null);
+  const pendingTestRef = useRef<PendingTest | null>(null);
+  const pendingRedeliveryRef = useRef<PendingRedelivery | null>(null);
+  const activeTestRef = useRef<symbol | null>(null);
+  const activeRedeliveryRef = useRef<symbol | null>(null);
+  const commandGenerationRef = useRef(0);
+
+  const clearDeliveryCommandState = useCallback((synchronous = false) => {
+    commandGenerationRef.current += 1;
+    pendingTestRef.current = null;
+    pendingRedeliveryRef.current = null;
+    activeTestRef.current = null;
+    activeRedeliveryRef.current = null;
+    activeHistoryRequestRef.current = null;
+    const clear = () => {
+      setTestingId(null);
+      setTestStatus('');
+      setTestRetryAvailable(false);
+      setRedeliveringId(null);
+      setRedeliveryStatus('');
+      setRedeliveryRetryAvailable(false);
+      setDeliveryLoading(false);
+    };
+    if (synchronous) {
+      flushSync(clear);
+    } else {
+      clear();
+    }
+  }, []);
 
   useEffect(() => {
-    if (legacyExpandedIdRef.current === legacyExpandedId) return;
-    legacyExpandedIdRef.current = legacyExpandedId;
-    activeLegacyDeliveryRequestRef.current = null;
-    activeLegacyDeliveryTestOwnerRef.current = null;
-    activeLegacyTestRequestRef.current = null;
-  }, [legacyExpandedId]);
-
-  useEffect(() => () => {
-    legacyExpandedIdRef.current = null;
-    activeLegacyDeliveryRequestRef.current = null;
-    activeLegacyDeliveryTestOwnerRef.current = null;
-    activeLegacyTestRequestRef.current = null;
-  }, []);
+    const handlePageHide = () => clearDeliveryCommandState(true);
+    const handlePageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) clearDeliveryCommandState(true);
+    };
+    window.addEventListener('pagehide', handlePageHide);
+    window.addEventListener('pageshow', handlePageShow);
+    return () => {
+      window.removeEventListener('pagehide', handlePageHide);
+      window.removeEventListener('pageshow', handlePageShow);
+      commandGenerationRef.current += 1;
+      pendingTestRef.current = null;
+      pendingRedeliveryRef.current = null;
+      activeTestRef.current = null;
+      activeRedeliveryRef.current = null;
+      activeHistoryRequestRef.current = null;
+    };
+  }, [clearDeliveryCommandState]);
 
   const clearCreateForm = useCallback(() => {
     setCreateUrl('');
@@ -109,8 +167,6 @@ export const useWebhooksPageController = () => {
     setCreateDescription('');
     setCreateTimeout('10');
     setCreateEvents([]);
-    setLegacyEvents('');
-    setLegacyEnabled(true);
   }, []);
 
   const {
@@ -127,7 +183,6 @@ export const useWebhooksPageController = () => {
     setSecretAcknowledged,
     clearSensitiveCommandState,
     startSecretCommand,
-    startLegacySecretCommand,
     retrySecretCommand: retryPendingSecretCommand,
     handleCopySecret,
     requestSecretClose,
@@ -169,33 +224,11 @@ export const useWebhooksPageController = () => {
         idempotencyKey,
       ),
     );
-    const pending: PendingSecretCommand = { command, operation: 'create', webhookId: null };
-    await startSecretCommand(pending);
+    await startSecretCommand({ command, operation: 'create', webhookId: null });
   };
 
   const retrySecretCommand = async () => {
-    if (!hasPendingCommand) return;
-    await retryPendingSecretCommand();
-  };
-
-  const beginLegacyCreate = async () => {
-    const events = legacyEvents.split(',').map((event) => event.trim()).filter(Boolean);
-    if (!createUrl.trim() || events.length === 0) return;
-    const destination = validateWebhookUrl(createUrl);
-    if (!destination.valid) {
-      setCreateUrlError(destination.message);
-      return;
-    }
-    setCreateUrlError('');
-    setCommandError('');
-    await startLegacySecretCommand(async () => {
-      const response = await legacyWebhookApi.createWebhook({
-        url: destination.value,
-        events,
-        enabled: legacyEnabled,
-      });
-      return { signing_secret: response.signingSecret, replayed: false };
-    });
+    if (hasPendingCommand) await retryPendingSecretCommand();
   };
 
   const openCreate = () => {
@@ -246,13 +279,16 @@ export const useWebhooksPageController = () => {
     webhookId: number,
     body: WebhookPatchRequest,
     action: string,
+    warnAboutQueuedDeliveries = true,
   ) => {
     setMutatingId(webhookId);
     try {
       const current = await canonicalWebhookApi.getWebhook(webhookId);
       const confirmed = await promptPrivileged({
         title: action,
-        message: registrationReviewSummary(current.data),
+        message: `${registrationReviewSummary(current.data)}${
+          warnAboutQueuedDeliveries ? ` ${queuedDeliveryWarning}` : ''
+        }`,
         confirmText: action,
         confirmationOnly: true,
       });
@@ -294,7 +330,10 @@ export const useWebhooksPageController = () => {
     }
     const timeout = Number(editTimeout);
     if (!Number.isInteger(timeout) || timeout < 1 || timeout > 30 || editEvents.length === 0) {
-      showError('Invalid webhook metadata', 'Select at least one event and use a timeout from 1 to 30 seconds.');
+      showError(
+        'Invalid webhook metadata',
+        'Select at least one event and use a timeout from 1 to 30 seconds.',
+      );
       return;
     }
     await performConditionalUpdate(editor.registration.id, {
@@ -312,6 +351,7 @@ export const useWebhooksPageController = () => {
       registration.id,
       { active: !registration.active },
       registration.active ? 'Disable webhook' : 'Enable webhook',
+      registration.active,
     );
   };
 
@@ -321,7 +361,7 @@ export const useWebhooksPageController = () => {
       const current = await canonicalWebhookApi.getWebhook(registration.id);
       const confirmed = await promptPrivileged({
         title: 'Delete webhook',
-        message: `${registrationReviewSummary(current.data)} Delete this registration? This cannot be undone.`,
+        message: `${registrationReviewSummary(current.data)} Delete this registration? This cannot be undone. ${queuedDeliveryWarning}`,
         confirmText: 'Delete webhook',
         confirmationOnly: true,
       });
@@ -351,7 +391,7 @@ export const useWebhooksPageController = () => {
       }
       const confirmed = await promptPrivileged({
         title: 'Generate a new signing secret',
-        message: `${registrationReviewSummary(current.data)} Generate a new signing secret? The previous secret will stop working.`,
+        message: `${registrationReviewSummary(current.data)} Generate a new signing secret? The previous secret will stop working. ${queuedDeliveryWarning}`,
         confirmText: 'Generate secret',
         confirmationOnly: true,
       });
@@ -386,163 +426,237 @@ export const useWebhooksPageController = () => {
     }
   };
 
-  const toggleLegacyEnabled = async (registration: LegacyWebhookView) => {
+  const loadDeliveryHistory = useCallback(async (webhookId: number) => {
+    const requestToken = Symbol('webhook-delivery-history');
+    activeHistoryRequestRef.current = requestToken;
+    setDeliveryLoading(true);
+    setDeliveryError('');
     try {
-      await legacyWebhookApi.updateWebhook(registration.id, { enabled: !registration.enabled });
-      success(registration.enabled ? 'Legacy webhook disabled' : 'Legacy webhook enabled');
-      await loadControlPlane(offset);
-    } catch {
-      showError('Legacy webhook update failed');
-    }
-  };
-
-  const deleteLegacyRegistration = async (registration: LegacyWebhookView) => {
-    const confirmed = await promptPrivileged({
-      title: 'Delete legacy webhook',
-      message: `Delete legacy webhook ${registration.id}? This cannot be undone.`,
-      confirmText: 'Delete webhook',
-      confirmationOnly: true,
-    });
-    if (!confirmed) return;
-    try {
-      await legacyWebhookApi.deleteWebhook(registration.id);
-      success('Legacy webhook deleted');
-      await loadControlPlane(0);
-    } catch {
-      showError('Legacy webhook deletion failed');
-    }
-  };
-
-  const beginLegacyDeliveryRequest = (
-    registrationId: string,
-    expandRegistration: boolean,
-    testOwnerToken: symbol | null = null,
-  ) => {
-    if (!expandRegistration && legacyExpandedIdRef.current !== registrationId) return null;
-    const requestToken = Symbol('legacy-delivery-history');
-    activeLegacyDeliveryRequestRef.current = requestToken;
-    activeLegacyDeliveryTestOwnerRef.current = testOwnerToken;
-    if (expandRegistration) {
-      legacyExpandedIdRef.current = registrationId;
-      activeLegacyTestRequestRef.current = null;
-      setLegacyExpandedId(registrationId);
-      setLegacyDeliveries([]);
-    }
-    setLegacyDeliveryLoading(true);
-    return requestToken;
-  };
-
-  const isActiveLegacyDeliveryRequest = (
-    registrationId: string,
-    requestToken: symbol,
-  ) => (
-    legacyExpandedIdRef.current === registrationId
-    && activeLegacyDeliveryRequestRef.current === requestToken
-    && (
-      activeLegacyDeliveryTestOwnerRef.current === null
-      || activeLegacyDeliveryTestOwnerRef.current === activeLegacyTestRequestRef.current
-    )
-  );
-
-  const loadLegacyDeliveryHistory = async (
-    registrationId: string,
-    requestToken: symbol,
-  ) => {
-    try {
-      const history = await legacyWebhookApi.getWebhookDeliveries(registrationId, {
+      const page = await canonicalWebhookApi.getWebhookDeliveries(webhookId, {
         limit: 50,
         offset: 0,
       });
-      if (!isActiveLegacyDeliveryRequest(registrationId, requestToken)) return;
-      setLegacyDeliveries(history.items);
-    } catch {
-      if (!isActiveLegacyDeliveryRequest(registrationId, requestToken)) return;
-      setLegacyDeliveries([]);
-      showError('Legacy delivery history could not be loaded');
-    } finally {
-      if (isActiveLegacyDeliveryRequest(registrationId, requestToken)) {
-        activeLegacyDeliveryRequestRef.current = null;
-        activeLegacyDeliveryTestOwnerRef.current = null;
-        setLegacyDeliveryLoading(false);
-      }
-    }
-  };
-
-  const testLegacyRegistration = async (registration: LegacyWebhookView) => {
-    const refreshIfStillExpanded = legacyExpandedIdRef.current === registration.id;
-    const testRequestToken = refreshIfStillExpanded ? Symbol('legacy-webhook-test') : null;
-    if (testRequestToken) {
-      activeLegacyTestRequestRef.current = testRequestToken;
-      if (activeLegacyDeliveryTestOwnerRef.current) {
-        activeLegacyDeliveryRequestRef.current = null;
-        activeLegacyDeliveryTestOwnerRef.current = null;
-        setLegacyDeliveryLoading(false);
-      }
-    }
-    try {
-      const delivery = await legacyWebhookApi.testWebhook(registration.id);
-      if (delivery.success) {
-        success('Legacy test delivery succeeded');
-      } else {
-        showError('Legacy test delivery failed');
-      }
       if (
-        testRequestToken
-        && activeLegacyTestRequestRef.current === testRequestToken
-        && legacyExpandedIdRef.current === registration.id
-      ) {
-        const requestToken = beginLegacyDeliveryRequest(
-          registration.id,
-          false,
-          testRequestToken,
-        );
-        if (requestToken) {
-          await loadLegacyDeliveryHistory(registration.id, requestToken);
-        }
-      }
-    } catch {
-      showError('Legacy test delivery failed');
+        activeHistoryRequestRef.current !== requestToken
+        || expandedIdRef.current !== webhookId
+      ) return;
+      setDeliveryPage(page);
+    } catch (error) {
+      if (
+        activeHistoryRequestRef.current !== requestToken
+        || expandedIdRef.current !== webhookId
+      ) return;
+      const bounded = safeWebhookError(error, 'Delivery history could not be loaded.');
+      setDeliveryPage(emptyDeliveryPage());
+      setDeliveryError(bounded.message);
     } finally {
-      if (activeLegacyTestRequestRef.current === testRequestToken) {
-        activeLegacyTestRequestRef.current = null;
+      if (activeHistoryRequestRef.current === requestToken) {
+        activeHistoryRequestRef.current = null;
+        setDeliveryLoading(false);
       }
     }
-  };
+  }, []);
 
-  const toggleLegacyDeliveries = async (registration: LegacyWebhookView) => {
-    if (legacyExpandedIdRef.current === registration.id) {
-      legacyExpandedIdRef.current = null;
-      activeLegacyDeliveryRequestRef.current = null;
-      activeLegacyDeliveryTestOwnerRef.current = null;
-      activeLegacyTestRequestRef.current = null;
-      setLegacyExpandedId(null);
-      setLegacyDeliveries([]);
-      setLegacyDeliveryLoading(false);
+  const toggleDeliveryHistory = async (registration: WebhookRegistration) => {
+    if (expandedIdRef.current === registration.id) {
+      expandedIdRef.current = null;
+      activeHistoryRequestRef.current = null;
+      setExpandedId(null);
+      setDeliveryPage(emptyDeliveryPage());
+      setDeliveryError('');
+      setDeliveryLoading(false);
       return;
     }
-    const requestToken = beginLegacyDeliveryRequest(registration.id, true);
-    if (requestToken) {
-      await loadLegacyDeliveryHistory(registration.id, requestToken);
+    expandedIdRef.current = registration.id;
+    activeHistoryRequestRef.current = null;
+    setExpandedId(registration.id);
+    setDeliveryPage(emptyDeliveryPage());
+    await loadDeliveryHistory(registration.id);
+  };
+
+  const runTestCommand = useCallback(async (pending: PendingTest) => {
+    const token = Symbol('webhook-test');
+    const generation = commandGenerationRef.current;
+    activeTestRef.current = token;
+    pendingTestRef.current = pending;
+    setTestingId(pending.webhookId);
+    setTestRetryAvailable(false);
+    setTestStatus('');
+    const current = () => (
+      commandGenerationRef.current === generation && activeTestRef.current === token
+    );
+    try {
+      const response = await canonicalWebhookApi.testWebhook(
+        pending.webhookId,
+        { delivery_config_version: pending.deliveryConfigVersion },
+        pending.etag,
+        pending.idempotencyKey,
+      );
+      if (!current()) return;
+      if (response.status === 202) {
+        setTestRetryAvailable(true);
+        setTestStatus(
+          `Test delivery is still processing. Retry the same test in ${response.retryAfterSeconds ?? 1}s.`,
+        );
+        return;
+      }
+      pendingTestRef.current = null;
+      setTestStatus(
+        response.data.delivery.state === 'succeeded'
+          ? 'Test delivery succeeded.'
+          : `Test delivery finished with state ${response.data.delivery.state}.`,
+      );
+      success('Webhook test completed');
+      if (expandedIdRef.current === pending.webhookId) {
+        await loadDeliveryHistory(pending.webhookId);
+      }
+    } catch (error) {
+      if (!current()) return;
+      if (isAmbiguousTransportFailure(error)) {
+        setTestRetryAvailable(true);
+        setTestStatus('The test result is unknown. Retry the same test to recover its persisted result.');
+      } else {
+        pendingTestRef.current = null;
+        const bounded = safeWebhookError(error, 'The persisted webhook test failed.');
+        showError('Webhook test failed', bounded.message);
+      }
+    } finally {
+      if (current()) {
+        activeTestRef.current = null;
+        setTestingId(null);
+      }
     }
+  }, [loadDeliveryHistory, showError, success]);
+
+  const testCanonicalRegistration = async (registration: WebhookRegistration) => {
+    pendingTestRef.current = null;
+    setTestRetryAvailable(false);
+    setTestStatus('');
+    try {
+      const current = await canonicalWebhookApi.getWebhook(registration.id);
+      const confirmed = await promptPrivileged({
+        title: 'Run webhook test',
+        message: `${registrationReviewSummary(current.data)} Send one persisted test to ${current.data.target_hostname}?`,
+        confirmText: 'Run test',
+        confirmationOnly: true,
+      });
+      if (!confirmed) return;
+      await runTestCommand({
+        webhookId: registration.id,
+        deliveryConfigVersion: current.data.delivery_config_version,
+        etag: current.etag,
+        idempotencyKey: generateIdempotencyKey(),
+      });
+    } catch (error) {
+      const bounded = safeWebhookError(error, 'The current webhook could not be loaded.');
+      showError('Webhook test failed', bounded.message);
+    }
+  };
+
+  const retrySameTest = async () => {
+    const pending = pendingTestRef.current;
+    if (pending) await runTestCommand(pending);
+  };
+
+  const runRedeliveryCommand = useCallback(async (pending: PendingRedelivery) => {
+    const token = Symbol('webhook-redelivery');
+    const generation = commandGenerationRef.current;
+    activeRedeliveryRef.current = token;
+    pendingRedeliveryRef.current = pending;
+    setRedeliveringId(pending.deliveryId);
+    setRedeliveryRetryAvailable(false);
+    setRedeliveryStatus('');
+    const current = () => (
+      commandGenerationRef.current === generation && activeRedeliveryRef.current === token
+    );
+    try {
+      await canonicalWebhookApi.redeliverWebhook(
+        pending.webhookId,
+        pending.deliveryId,
+        {
+          delivery_config_version: pending.deliveryConfigVersion,
+          confirm_changed_configuration: pending.confirmChangedConfiguration,
+        },
+        pending.etag,
+        pending.idempotencyKey,
+      );
+      if (!current()) return;
+      pendingRedeliveryRef.current = null;
+      setRedeliveryStatus('Manual redelivery accepted.');
+      success('Webhook redelivery accepted');
+      if (expandedIdRef.current === pending.webhookId) {
+        await loadDeliveryHistory(pending.webhookId);
+      }
+    } catch (error) {
+      if (!current()) return;
+      if (isAmbiguousTransportFailure(error)) {
+        setRedeliveryRetryAvailable(true);
+        setRedeliveryStatus(
+          'The redelivery result is unknown. Retry the same command to recover its acceptance.',
+        );
+      } else if (isConditionalWebhookError(error)) {
+        pendingRedeliveryRef.current = null;
+        await recoverConditionalConflict(error, pending.webhookId, 'manual redelivery');
+      } else {
+        pendingRedeliveryRef.current = null;
+        const bounded = safeWebhookError(error, 'The manual redelivery could not be accepted.');
+        showError('Webhook redelivery failed', bounded.message);
+      }
+    } finally {
+      if (current()) {
+        activeRedeliveryRef.current = null;
+        setRedeliveringId(null);
+      }
+    }
+  }, [loadDeliveryHistory, recoverConditionalConflict, showError, success]);
+
+  const redeliverWebhook = async (delivery: WebhookDelivery) => {
+    try {
+      const current = await canonicalWebhookApi.getWebhook(delivery.webhook_id);
+      const changed = delivery.delivery_config_version !== current.data.delivery_config_version;
+      const message = changed
+        ? `The configuration changed from version ${delivery.delivery_config_version} to ${current.data.delivery_config_version}. Redelivery will use the current redacted destination ${current.data.target_hostname}. Confirm delivery to the changed configuration.`
+        : `Redeliver ${delivery.event_type} to the current redacted destination ${current.data.target_hostname}?`;
+      const confirmed = await promptPrivileged({
+        title: 'Redeliver webhook event',
+        message,
+        confirmText: 'Redeliver event',
+        confirmationOnly: true,
+      });
+      if (!confirmed) return;
+      await runRedeliveryCommand({
+        webhookId: current.data.id,
+        deliveryId: delivery.id,
+        deliveryConfigVersion: current.data.delivery_config_version,
+        confirmChangedConfiguration: changed,
+        etag: current.etag,
+        idempotencyKey: generateIdempotencyKey(),
+      });
+    } catch (error) {
+      const bounded = safeWebhookError(error, 'The current webhook could not be loaded.');
+      showError('Webhook redelivery failed', bounded.message);
+    }
+  };
+
+  const retrySameRedelivery = async () => {
+    const pending = pendingRedeliveryRef.current;
+    if (pending) await runRedeliveryCommand(pending);
   };
 
   return {
-    mode,
     status,
     catalog,
     canonicalPage,
-    legacyItems,
     offset,
     loading,
     statusError,
+    ready,
     createOpen,
     createUrl,
     createUrlError,
     createDescription,
     createTimeout,
     createEvents,
-    legacyEvents,
-    legacyEnabled,
     creating,
     editor,
     editDescription,
@@ -559,11 +673,17 @@ export const useWebhooksPageController = () => {
     commandError,
     commandBusy,
     pendingOperation,
-    hasPendingCommand,
     sensitiveCommandLocked,
-    legacyExpandedId,
-    legacyDeliveries,
-    legacyDeliveryLoading,
+    expandedId,
+    deliveryPage,
+    deliveryLoading,
+    deliveryError,
+    testingId,
+    testStatus,
+    testRetryAvailable,
+    redeliveringId,
+    redeliveryStatus,
+    redeliveryRetryAvailable,
     addDisabled,
     visibleTotal,
     visibleCount,
@@ -578,8 +698,6 @@ export const useWebhooksPageController = () => {
     setEditDescription,
     setEditTimeout,
     setEditor,
-    setLegacyEnabled,
-    setLegacyEvents,
     setReplacementUrl,
     setReplacementUrlError,
     setSecretAcknowledged,
@@ -587,7 +705,6 @@ export const useWebhooksPageController = () => {
     loadControlPlane,
     retrySecretCommand,
     beginCanonicalCreate,
-    beginLegacyCreate,
     openCreate,
     handleCreateOpenChange,
     toggleCreateEvent,
@@ -600,10 +717,11 @@ export const useWebhooksPageController = () => {
     rotateCanonicalSecret,
     handleCopySecret,
     requestSecretClose,
-    toggleLegacyEnabled,
-    deleteLegacyRegistration,
-    testLegacyRegistration,
-    toggleLegacyDeliveries,
+    toggleDeliveryHistory,
+    testCanonicalRegistration,
+    retrySameTest,
+    redeliverWebhook,
+    retrySameRedelivery,
     goToPage,
   };
 };

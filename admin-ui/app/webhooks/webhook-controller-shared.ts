@@ -8,7 +8,6 @@ import type { WebhookRegistration, WebhookSecretResponse, WebhookStatus } from '
 
 export const WEBHOOK_PAGE_SIZE = 20;
 
-export type WebhookMode = 'canonical' | 'legacy' | null;
 export type SecretOperation = 'create' | 'rotate';
 
 export type SecretCommandResult = {
@@ -42,9 +41,13 @@ export type SafeError = {
 };
 
 export const canLoadCanonicalData = (status: WebhookStatus): boolean => (
-  status.mode !== 'off'
+  status.mode === 'on'
   && status.schema_ready
   && status.migration.phase === 'complete'
+);
+
+export const queuedDeliveryWarning = (
+  'Queued deliveries may be canceled or superseded. An in-flight HTTP request cannot be recalled and may complete using the configuration and secret version it captured.'
 );
 
 export const safeWebhookError = (error: unknown, fallback: string): SafeError => {

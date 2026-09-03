@@ -11,15 +11,16 @@ from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import SplitResult
 
 from tldw_Server_API.app.core.exceptions import WebhookError
 from tldw_Server_API.app.core.Security.egress import (
+    evaluate_admin_webhook_e2e_loopback_policy,
     evaluate_platform_webhook_url_policy,
 )
 
-from .crypto import ProtectedValue
+from .crypto import EVENT_BODY_MAX_BYTES, ProtectedValue
 from .target import parse_webhook_target_url
 
 
@@ -188,13 +189,9 @@ class DeliveryReasonCode(str, Enum):
     HTTP_HOP_PROTOCOL_ERROR = "http_hop_protocol_error"
     HTTP_HOP_RESPONSE_HEADERS_TOO_LARGE = "http_hop_response_headers_too_large"
     HTTP_HOP_RESPONSE_TOO_LARGE = "http_hop_response_too_large"
-    HTTP_HOP_DECOMPRESSED_RESPONSE_TOO_LARGE = (
-        "http_hop_decompressed_response_too_large"
-    )
+    HTTP_HOP_DECOMPRESSED_RESPONSE_TOO_LARGE = "http_hop_decompressed_response_too_large"
     HTTP_HOP_PARSER_INPUT_TOO_LARGE = "http_hop_parser_input_too_large"
-    HTTP_HOP_UNSUPPORTED_CONTENT_ENCODING = (
-        "http_hop_unsupported_content_encoding"
-    )
+    HTTP_HOP_UNSUPPORTED_CONTENT_ENCODING = "http_hop_unsupported_content_encoding"
     HTTP_HOP_INVALID_CONTENT_ENCODING = "http_hop_invalid_content_encoding"
     HTTP_HOP_TRANSPORT_ERROR = "http_hop_transport_error"
 
@@ -214,6 +211,31 @@ class DeliveryRuntimeReasonCode(str, Enum):
     RECONCILER_UNAVAILABLE = "reconciler_unavailable"
     RETENTION_UNAVAILABLE = "retention_unavailable"
     HEARTBEAT_STALE = "heartbeat_stale"
+
+
+class AdminWebhookActivationPhase(str, Enum):
+    """Closed two-phase activation check requested by an operator."""
+
+    PREDEPLOY = "predeploy"
+    LIVE = "live"
+
+
+class AdminWebhookActivationReasonCode(str, Enum):
+    """Closed reasons that can make an activation check fail."""
+
+    PHASE_MISMATCH = "phase_mismatch"
+    DATABASE_UNAVAILABLE = "database_unavailable"
+    SCHEMA_UNREADY = "schema_unready"
+    MIGRATION_PENDING = "migration_pending"
+    KEY_UNAVAILABLE = "key_unavailable"
+    KEY_CONFIGURATION_MISMATCH = "key_configuration_mismatch"
+    JOBS_UNAVAILABLE = "jobs_unavailable"
+    REGISTRATION_LIMIT_EXCEEDED = "registration_limit_exceeded"
+    ACTIVE_LIMIT_EXCEEDED = "active_limit_exceeded"
+    WORKER_UNAVAILABLE = "worker_unavailable"
+    RECONCILER_UNAVAILABLE = "reconciler_unavailable"
+    RETENTION_UNAVAILABLE = "retention_unavailable"
+    BACKLOG_AGE_EXCEEDED = "backlog_age_exceeded"
 
 
 class EventSourceKind(str, Enum):
@@ -302,8 +324,7 @@ class DeliveryHistoryItem:
         numbers = tuple(attempt.attempt_number for attempt in self.attempts)
         if (
             any(
-                not isinstance(attempt, WebhookDeliveryAttempt)
-                or attempt.delivery_id != self.delivery.id
+                not isinstance(attempt, WebhookDeliveryAttempt) or attempt.delivery_id != self.delivery.id
                 for attempt in self.attempts
             )
             or numbers != tuple(sorted(numbers))
@@ -381,10 +402,7 @@ class DeliveryBacklogCounts:
     retry_wait: int = 0
 
     def __post_init__(self) -> None:
-        if any(
-            isinstance(value, bool) or not isinstance(value, int) or value < 0
-            for value in self.__dict__.values()
-        ):
+        if any(isinstance(value, bool) or not isinstance(value, int) or value < 0 for value in self.__dict__.values()):
             raise ValueError("delivery backlog count is invalid")
 
 
@@ -482,13 +500,35 @@ class WebhookStatus:
     """Sanitized canonical control-plane and delivery status projection."""
 
     mode: str
-    route_selection: str
+    route_selection: Literal["canonical"]
     schema_ready: bool
     key_state: str
     delivery_capability_ready: bool
     delivery: DeliveryCapabilityStatus
     limits: WebhookLimits
     migration: WebhookMigrationSummary
+
+
+@dataclass(frozen=True)
+class AdminWebhookActivationCheck:
+    """Sanitized read-only result for one activation phase."""
+
+    phase: AdminWebhookActivationPhase
+    ready: bool
+    mode: str
+    schema_ready: bool
+    migration_complete: bool
+    key_ready: bool
+    jobs_ready: bool
+    limits_ready: bool
+    worker_ready: bool
+    reconciler_ready: bool
+    retention_ready: bool
+    runtime_ready: bool
+    backlog_age_ready: bool
+    oldest_nonterminal_age_seconds: int | None
+    max_backlog_age_seconds: int
+    reason_codes: tuple[AdminWebhookActivationReasonCode, ...]
 
 
 @dataclass(frozen=True)
@@ -529,7 +569,7 @@ class ValidatedWebhookTarget:
     target_display: str
 
 
-_PENDING_MARKER_FIELDS = frozenset(
+_LEGACY_PENDING_MARKER_FIELDS = frozenset(
     {
         "event_id",
         "event_type",
@@ -539,13 +579,19 @@ _PENDING_MARKER_FIELDS = frozenset(
         "aggregate_id",
         "aggregate_version",
         "source_command_id",
+        "source_component",
+        "source_request_id",
         "body_ciphertext_json",
         "body_key_id",
+        "body_size_bytes",
         "created_at",
     }
 )
+_PENDING_MARKER_FIELDS = _LEGACY_PENDING_MARKER_FIELDS | {"request_fingerprint"}
 _MARKER_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,255}$")
 _MARKER_COMPONENT_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
+_MARKER_REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+_MARKER_REQUEST_FINGERPRINT_PATTERN = re.compile(r"^hmac-sha256:[0-9a-f]{64}$")
 
 
 @dataclass(frozen=True)
@@ -560,8 +606,13 @@ class PendingIncidentWebhookMarker:
     aggregate_id: str | None
     aggregate_version: str | None
     source_command_id: str | None
+    source_component: str
+    source_request_id: str | None
     body: ProtectedValue
+    body_size_bytes: int
     created_at: datetime
+    request_fingerprint: str | None = None
+    uses_legacy_aad: bool = False
 
     def __post_init__(self) -> None:
         if _MARKER_ID_PATTERN.fullmatch(self.event_id) is None:
@@ -574,8 +625,29 @@ class PendingIncidentWebhookMarker:
             raise ValueError("pending marker API version is invalid")
         if self.source_kind not in {"aggregate", "command"}:
             raise ValueError("pending marker source kind is invalid")
+        if _MARKER_COMPONENT_PATTERN.fullmatch(self.source_component) is None:
+            raise ValueError("pending marker source component is invalid")
+        if self.source_request_id is not None and (
+            _MARKER_REQUEST_ID_PATTERN.fullmatch(self.source_request_id) is None
+        ):
+            raise ValueError("pending marker source request ID is invalid")
+        if self.request_fingerprint is not None and (
+            _MARKER_REQUEST_FINGERPRINT_PATTERN.fullmatch(
+                self.request_fingerprint
+            )
+            is None
+        ):
+            raise ValueError("pending marker request fingerprint is invalid")
+        if not isinstance(self.uses_legacy_aad, bool):
+            raise TypeError("pending marker legacy AAD flag must be boolean")
         if not isinstance(self.body, ProtectedValue):
             raise TypeError("pending marker body must be protected")
+        if (
+            isinstance(self.body_size_bytes, bool)
+            or not isinstance(self.body_size_bytes, int)
+            or not 1 <= self.body_size_bytes <= EVENT_BODY_MAX_BYTES
+        ):
+            raise ValueError("pending marker body size is invalid")
         if not isinstance(self.created_at, datetime) or self.created_at.tzinfo is None:
             raise ValueError("pending marker timestamp must be timezone-aware")
 
@@ -586,8 +658,7 @@ class PendingIncidentWebhookMarker:
         )
         if self.source_kind == "aggregate":
             if self.source_command_id is not None or any(
-                value is None or _MARKER_ID_PATTERN.fullmatch(value) is None
-                for value in aggregate_values
+                value is None or _MARKER_ID_PATTERN.fullmatch(value) is None for value in aggregate_values
             ):
                 raise ValueError("pending aggregate marker identity is invalid")
         elif (
@@ -606,7 +677,12 @@ class PendingIncidentWebhookMarker:
         identity: dict[str, str | int] = {
             "event_id": self.event_id,
             "api_version": self.api_version,
+            "source_component": self.source_component,
         }
+        if self.source_request_id is not None:
+            identity["source_request_id"] = self.source_request_id
+        if self.request_fingerprint is not None:
+            identity["request_fingerprint"] = self.request_fingerprint
         if self.source_kind == "command":
             source_command_id = self.source_command_id
             if source_command_id is None:
@@ -616,17 +692,41 @@ class PendingIncidentWebhookMarker:
             aggregate_type = self.aggregate_type
             aggregate_id = self.aggregate_id
             aggregate_version = self.aggregate_version
-            if (
-                aggregate_type is None
-                or aggregate_id is None
-                or aggregate_version is None
-            ):
+            if aggregate_type is None or aggregate_id is None or aggregate_version is None:
                 raise ValueError("pending aggregate marker identity is invalid")
             identity.update(
                 {
                     "aggregate_type": aggregate_type,
                     "aggregate_id": aggregate_id,
                     "aggregate_version": aggregate_version,
+                }
+            )
+        return identity
+
+    @property
+    def legacy_envelope_identity(self) -> Mapping[str, str | int]:
+        """Return the pre-authenticated-metadata AAD for legacy readback."""
+
+        identity: dict[str, str | int] = {
+            "event_id": self.event_id,
+            "api_version": self.api_version,
+        }
+        if self.source_kind == "command":
+            if self.source_command_id is None:
+                raise ValueError("pending command marker identity is invalid")
+            identity["source_command_id"] = self.source_command_id
+        else:
+            if (
+                self.aggregate_type is None
+                or self.aggregate_id is None
+                or self.aggregate_version is None
+            ):
+                raise ValueError("pending aggregate marker identity is invalid")
+            identity.update(
+                {
+                    "aggregate_type": self.aggregate_type,
+                    "aggregate_id": self.aggregate_id,
+                    "aggregate_version": self.aggregate_version,
                 }
             )
         return identity
@@ -642,16 +742,24 @@ class PendingIncidentWebhookMarker:
             "aggregate_id": self.aggregate_id,
             "aggregate_version": self.aggregate_version,
             "source_command_id": self.source_command_id,
+            "source_component": self.source_component,
+            "source_request_id": self.source_request_id,
+            "request_fingerprint": self.request_fingerprint,
             "body_ciphertext_json": self.body.ciphertext_json,
             "body_key_id": self.body.key_id,
+            "body_size_bytes": self.body_size_bytes,
             "created_at": self.created_at.astimezone(timezone.utc).isoformat(),
         }
 
     @classmethod
     def from_store_record(cls, value: object) -> PendingIncidentWebhookMarker:
         """Parse one exact marker record without permissive coercion."""
-        if not isinstance(value, dict) or set(value) != _PENDING_MARKER_FIELDS:
+        if not isinstance(value, dict) or set(value) not in {
+            _LEGACY_PENDING_MARKER_FIELDS,
+            _PENDING_MARKER_FIELDS,
+        }:
             raise ValueError("pending incident marker record is invalid")
+        uses_legacy_aad = set(value) == _LEGACY_PENDING_MARKER_FIELDS
 
         def optional_text(name: str) -> str | None:
             item = value[name]
@@ -667,6 +775,7 @@ class PendingIncidentWebhookMarker:
             "event_type",
             "api_version",
             "source_kind",
+            "source_component",
             "body_ciphertext_json",
             "body_key_id",
             "created_at",
@@ -676,9 +785,7 @@ class PendingIncidentWebhookMarker:
                 raise ValueError("pending incident marker record is invalid")
             required_text[name] = item
         try:
-            created_at = datetime.fromisoformat(
-                required_text["created_at"].replace("Z", "+00:00")
-            )
+            created_at = datetime.fromisoformat(required_text["created_at"].replace("Z", "+00:00"))
         except ValueError:
             raise ValueError("pending incident marker record is invalid") from None
         return cls(
@@ -690,11 +797,20 @@ class PendingIncidentWebhookMarker:
             aggregate_id=optional_text("aggregate_id"),
             aggregate_version=optional_text("aggregate_version"),
             source_command_id=optional_text("source_command_id"),
+            source_component=required_text["source_component"],
+            source_request_id=optional_text("source_request_id"),
             body=ProtectedValue(
                 ciphertext_json=required_text["body_ciphertext_json"],
                 key_id=required_text["body_key_id"],
             ),
+            body_size_bytes=value["body_size_bytes"],
             created_at=created_at,
+            request_fingerprint=(
+                optional_text("request_fingerprint")
+                if "request_fingerprint" in value
+                else None
+            ),
+            uses_legacy_aad=uses_legacy_aad,
         )
 
 
@@ -781,9 +897,7 @@ def idempotency_lookup_digest(
     """Return the domain-separated lookup digest for a raw command key."""
     key = validate_idempotency_key(idempotency_key)
     payload = _canonical_json_bytes({"scope": asdict(scope)})
-    digest = hashlib.sha256(
-        _LOOKUP_DOMAIN + payload + b"\x00" + key.encode("ascii")
-    ).hexdigest()
+    digest = hashlib.sha256(_LOOKUP_DOMAIN + payload + b"\x00" + key.encode("ascii")).hexdigest()
     return f"sha256:{digest}"
 
 
@@ -841,13 +955,18 @@ def validate_webhook_target(
     url: str,
     *,
     allow_http_dev: bool,
+    allow_e2e_loopback: bool = False,
 ) -> ValidatedWebhookTarget:
     """Apply strict syntax and central destination policy to a target URL."""
     parsed, normalized_host = _parse_and_normalize_target(url)
     scheme = parsed.scheme.lower()
     if scheme != "https" and not (scheme == "http" and allow_http_dev):
         raise WebhookError(WebhookErrorCode.VALIDATION_FAILED)
-    result = evaluate_platform_webhook_url_policy(url)
+    result = (
+        evaluate_admin_webhook_e2e_loopback_policy(url)
+        if allow_e2e_loopback
+        else evaluate_platform_webhook_url_policy(url)
+    )
     if not result.allowed:
         raise WebhookError(WebhookErrorCode.TARGET_REJECTED)
     return ValidatedWebhookTarget(

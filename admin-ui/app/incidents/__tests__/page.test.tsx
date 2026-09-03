@@ -1,11 +1,13 @@
 /* @vitest-environment jsdom */
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import IncidentsPage from '../page';
 import { api } from '@/lib/api-client';
+import { ApiError, WebhookContractError } from '@/lib/http';
 import { usePagedResource } from '@/lib/use-paged-resource';
+import type { IncidentItem } from '@/types/incidents';
 
 const confirmMock = vi.hoisted(() => vi.fn());
 const toastSuccessMock = vi.hoisted(() => vi.fn());
@@ -55,6 +57,7 @@ vi.mock('@/lib/api-client', () => ({
     addIncidentEvent: vi.fn(),
     deleteIncident: vi.fn(),
     notifyIncidentStakeholders: vi.fn(),
+    notifyIncidentWebhooks: vi.fn(),
     getIncidentSlaMetrics: vi.fn(),
   },
 }));
@@ -62,8 +65,37 @@ vi.mock('@/lib/api-client', () => ({
 const apiMock = vi.mocked(api);
 const usePagedResourceMock = vi.mocked(usePagedResource);
 
+const WEBHOOK_INCIDENT: IncidentItem = {
+  id: 'inc-webhook',
+  version: 7,
+  title: 'API gateway timeout',
+  status: 'investigating',
+  severity: 'high',
+  summary: 'Gateway returning 504s',
+  tags: ['gateway'],
+  created_at: '2026-03-27T08:00:00Z',
+  updated_at: '2026-03-27T08:05:00Z',
+  resolved_at: null,
+  assigned_to_user_id: null,
+  assigned_to_label: null,
+  root_cause: null,
+  impact: null,
+  action_items: [],
+  timeline: [],
+};
+
+const showWebhookIncident = () => {
+  usePagedResourceMock.mockReturnValue({
+    items: [WEBHOOK_INCIDENT],
+    total: 1,
+    loading: false,
+    error: '',
+    reload: reloadMock,
+  });
+};
+
 beforeEach(() => {
-  localStorage.clear();
+  window.localStorage.clear();
   confirmMock.mockResolvedValue(true);
   toastSuccessMock.mockClear();
   toastErrorMock.mockClear();
@@ -79,7 +111,17 @@ beforeEach(() => {
   apiMock.deleteIncident.mockResolvedValue({});
   apiMock.notifyIncidentStakeholders.mockResolvedValue({
     incident_id: '',
+    command_id: `sha256:${'1'.repeat(64)}`,
+    replayed: false,
     notifications: [],
+  });
+  apiMock.notifyIncidentWebhooks.mockResolvedValue({
+    incident_id: 'inc-3',
+    event_id: '22222222-2222-4222-8222-222222222222',
+    event_type: 'incident.notify',
+    command_id: `sha256:${'3'.repeat(64)}`,
+    accepted: true,
+    replayed: false,
   });
   apiMock.getIncidentSlaMetrics.mockResolvedValue({
     total_incidents: 0,
@@ -95,7 +137,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.resetAllMocks();
-  localStorage.clear();
+  window.localStorage.clear();
 });
 
 describe('IncidentsPage Stage 3 workflows', () => {
@@ -103,6 +145,7 @@ describe('IncidentsPage Stage 3 workflows', () => {
     usePagedResourceMock.mockReturnValue({
       items: [{
         id: 'inc-1',
+        version: 1,
         title: 'Queue latency spike',
         status: 'resolved',
         severity: 'high',
@@ -125,6 +168,7 @@ describe('IncidentsPage Stage 3 workflows', () => {
     });
     apiMock.updateIncident.mockResolvedValue({
       id: 'inc-1',
+      version: 1,
       title: 'Queue latency spike',
       status: 'resolved',
       severity: 'high',
@@ -165,6 +209,7 @@ describe('IncidentsPage Stage 3 workflows', () => {
     usePagedResourceMock.mockReturnValue({
       items: [{
         id: 'inc-1',
+        version: 1,
         title: 'Queue latency spike',
         status: 'resolved',
         severity: 'high',
@@ -187,6 +232,7 @@ describe('IncidentsPage Stage 3 workflows', () => {
     });
     apiMock.updateIncident.mockResolvedValue({
       id: 'inc-1',
+      version: 1,
       title: 'Queue latency spike',
       status: 'resolved',
       severity: 'high',
@@ -234,6 +280,7 @@ describe('IncidentsPage Stage 3 workflows', () => {
     usePagedResourceMock.mockReturnValue({
       items: [{
         id: 'inc-1',
+        version: 1,
         title: 'Queue latency spike',
         status: 'resolved',
         severity: 'high',
@@ -285,6 +332,7 @@ describe('IncidentsPage Stage 3 workflows', () => {
     usePagedResourceMock.mockReturnValue({
       items: [{
         id: 'inc-2',
+        version: 1,
         title: 'Database outage',
         status: 'resolved',
         severity: 'critical',
@@ -326,6 +374,7 @@ describe('IncidentsPage Stage 3 workflows', () => {
     usePagedResourceMock.mockReturnValue({
       items: [{
         id: 'inc-2',
+        version: 1,
         title: 'Database outage',
         status: 'resolved',
         severity: 'critical',
@@ -348,6 +397,7 @@ describe('IncidentsPage Stage 3 workflows', () => {
     });
     apiMock.updateIncident.mockResolvedValue({
       id: 'inc-2',
+      version: 1,
       title: 'Database outage',
       status: 'resolved',
       severity: 'critical',
@@ -397,13 +447,14 @@ describe('IncidentsPage Stage 3 workflows', () => {
       );
     });
     expect(apiMock.addIncidentEvent).not.toHaveBeenCalled();
-    expect(localStorage.getItem('admin.incidents.workflow.v1')).toBeNull();
+    expect(window.localStorage.getItem('admin.incidents.workflow.v1')).toBeNull();
   });
 
   it('opens notify dialog, sends notification, and displays delivery results', async () => {
     usePagedResourceMock.mockReturnValue({
       items: [{
         id: 'inc-3',
+        version: 1,
         title: 'API gateway timeout',
         status: 'investigating',
         severity: 'high',
@@ -426,6 +477,8 @@ describe('IncidentsPage Stage 3 workflows', () => {
     });
     apiMock.notifyIncidentStakeholders.mockResolvedValue({
       incident_id: 'inc-3',
+      command_id: `sha256:${'1'.repeat(64)}`,
+      replayed: false,
       notifications: [
         { email: 'alice@example.com', status: 'sent' },
         { email: 'bob@example.com', status: 'failed', error: 'SMTP timeout' },
@@ -452,10 +505,14 @@ describe('IncidentsPage Stage 3 workflows', () => {
     await user.click(screen.getByTestId('notify-send-button'));
 
     await waitFor(() => {
-      expect(apiMock.notifyIncidentStakeholders).toHaveBeenCalledWith('inc-3', {
-        recipients: ['alice@example.com', 'bob@example.com'],
-        message: 'Please investigate urgently',
-      });
+      expect(apiMock.notifyIncidentStakeholders).toHaveBeenCalledWith(
+        'inc-3',
+        {
+          recipients: ['alice@example.com', 'bob@example.com'],
+          message: 'Please investigate urgently',
+        },
+        expect.stringMatching(/^[0-9a-f]{32}$/),
+      );
     });
 
     // Delivery results should display
@@ -468,10 +525,292 @@ describe('IncidentsPage Stage 3 workflows', () => {
     expect(reloadMock).toHaveBeenCalled();
   });
 
+  it('retries an ambiguous stakeholder notification with the same command key', async () => {
+    usePagedResourceMock.mockReturnValue({
+      items: [{
+        id: 'inc-3',
+        version: 1,
+        title: 'API gateway timeout',
+        status: 'investigating',
+        severity: 'high',
+        summary: 'Gateway returning 504s',
+        tags: ['gateway'],
+        created_at: '2026-03-27T08:00:00Z',
+        updated_at: '2026-03-27T08:00:00Z',
+        resolved_at: null,
+        assigned_to_user_id: null,
+        assigned_to_label: null,
+        root_cause: null,
+        impact: null,
+        action_items: [],
+        timeline: [],
+      }],
+      total: 1,
+      loading: false,
+      error: '',
+      reload: reloadMock,
+    });
+    apiMock.notifyIncidentStakeholders
+      .mockRejectedValueOnce(new ApiError(503, 'Service unavailable'))
+      .mockResolvedValueOnce({
+        incident_id: 'inc-3',
+        command_id: `sha256:${'1'.repeat(64)}`,
+        replayed: true,
+        notifications: [{ email: 'alice@example.com', status: 'sent' }],
+      });
+    const user = userEvent.setup();
+    render(<IncidentsPage />);
+    await user.click(await screen.findByTestId('incident-notify-inc-3'));
+    await user.type(screen.getByTestId('notify-recipients-input'), 'alice@example.com');
+    await user.click(screen.getByTestId('notify-send-button'));
+
+    const retry = await screen.findByRole('button', { name: /retry same command/i });
+    expect(screen.getByText(/result is unknown/i)).toBeInTheDocument();
+    await user.click(retry);
+    await screen.findByTestId('notify-results');
+
+    expect(apiMock.notifyIncidentStakeholders).toHaveBeenCalledTimes(2);
+    expect(apiMock.notifyIncidentStakeholders.mock.calls[0]?.[2]).toBe(
+      apiMock.notifyIncidentStakeholders.mock.calls[1]?.[2],
+    );
+  });
+
+  it('previews and confirms an idempotent webhook receiver narrative', async () => {
+    showWebhookIncident();
+
+    const user = userEvent.setup();
+    render(<IncidentsPage />);
+
+    await user.click(await screen.findByTestId('incident-webhook-notify-inc-webhook'));
+    const dialog = screen.getByRole('dialog', { name: /notify webhook receivers/i });
+    const preview = within(dialog).getByTestId('incident-webhook-preview');
+    expect(within(preview).getByText('incident.notify')).toBeInTheDocument();
+    expect(within(preview).getByText('inc-webhook')).toBeInTheDocument();
+    expect(within(preview).getByText('investigating')).toBeInTheDocument();
+    expect(within(preview).getByText('high')).toBeInTheDocument();
+    expect(within(preview).getByText('resource_version')).toBeInTheDocument();
+    expect(within(preview).getByText('7')).toBeInTheDocument();
+    expect(within(preview).getByText('2026-03-27T08:05:00Z')).toBeInTheDocument();
+    expect(within(preview).queryByText('API gateway timeout')).not.toBeInTheDocument();
+    expect(within(preview).queryByText('Gateway returning 504s')).not.toBeInTheDocument();
+
+    await user.type(
+      within(dialog).getByLabelText(/receiver narrative/i),
+      '  Customer imports are delayed; no data loss is known.  ',
+    );
+    expect(within(preview).getByText('"Customer imports are delayed; no data loss is known."'))
+      .toBeInTheDocument();
+    expect(within(dialog).getByLabelText(/receiver narrative/i).getAttribute('maxlength'))
+      .toBe('4096');
+    const send = within(dialog).getByRole('button', { name: /send webhook notification/i });
+    expect(send).toBeDisabled();
+    await user.click(within(dialog).getByLabelText(/i reviewed this narrative/i));
+    await user.click(send);
+
+    await waitFor(() => expect(apiMock.notifyIncidentWebhooks).toHaveBeenCalledWith(
+      'inc-webhook',
+      {
+        narrative: 'Customer imports are delayed; no data loss is known.',
+        expected_resource_version: 7,
+      },
+      expect.stringMatching(/^[0-9a-f]{32}$/),
+    ));
+    expect(await within(dialog).findByText(/command accepted/i)).toBeInTheDocument();
+  });
+
+  it('cancels the webhook preview without creating a command', async () => {
+    showWebhookIncident();
+    const user = userEvent.setup();
+    render(<IncidentsPage />);
+
+    await user.click(await screen.findByTestId('incident-webhook-notify-inc-webhook'));
+    const dialog = screen.getByRole('dialog', { name: /notify webhook receivers/i });
+    await user.click(within(dialog).getByRole('button', { name: /cancel/i }));
+
+    expect(screen.queryByRole('dialog', { name: /notify webhook receivers/i }))
+      .not.toBeInTheDocument();
+    expect(apiMock.notifyIncidentWebhooks).not.toHaveBeenCalled();
+  });
+
+  it('retries an ambiguous webhook command with the same memory-only key', async () => {
+    showWebhookIncident();
+    apiMock.notifyIncidentWebhooks
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockResolvedValueOnce({
+        incident_id: WEBHOOK_INCIDENT.id,
+        event_id: '22222222-2222-4222-8222-222222222222',
+        event_type: 'incident.notify',
+        command_id: `sha256:${'3'.repeat(64)}`,
+        accepted: true,
+        replayed: true,
+      });
+    const user = userEvent.setup();
+    render(<IncidentsPage />);
+
+    await user.click(await screen.findByTestId('incident-webhook-notify-inc-webhook'));
+    const dialog = screen.getByRole('dialog', { name: /notify webhook receivers/i });
+    await user.click(within(dialog).getByLabelText(/i reviewed this narrative/i));
+    await user.click(within(dialog).getByRole('button', { name: /send webhook notification/i }));
+
+    const retry = await within(dialog).findByRole('button', { name: /retry same command/i });
+    expect(within(dialog).getByRole('button', { name: /cancel/i })).toBeDisabled();
+    const beforeUnload = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(beforeUnload);
+    expect(beforeUnload.defaultPrevented).toBe(true);
+    await user.click(retry);
+
+    await waitFor(() => expect(apiMock.notifyIncidentWebhooks).toHaveBeenCalledTimes(2));
+    expect(apiMock.notifyIncidentWebhooks.mock.calls[0]?.[2]).toBe(
+      apiMock.notifyIncidentWebhooks.mock.calls[1]?.[2],
+    );
+    expect(await within(dialog).findByText(/original idempotent submission/i)).toBeInTheDocument();
+  });
+
+  it('blocks same-tab SPA navigation while a webhook command is ambiguous', async () => {
+    showWebhookIncident();
+    apiMock.notifyIncidentWebhooks.mockRejectedValueOnce(new TypeError('fetch failed'));
+    const user = userEvent.setup();
+    render(<IncidentsPage />);
+
+    await user.click(await screen.findByTestId('incident-webhook-notify-inc-webhook'));
+    const dialog = screen.getByRole('dialog', { name: /notify webhook receivers/i });
+    await user.click(within(dialog).getByLabelText(/i reviewed this narrative/i));
+    await user.click(within(dialog).getByRole('button', { name: /send webhook notification/i }));
+    await within(dialog).findByRole('button', { name: /retry same command/i });
+    const link = document.createElement('a');
+    link.href = '/webhooks';
+    document.body.append(link);
+
+    const allowed = link.dispatchEvent(new MouseEvent('click', {
+      bubbles: true,
+      cancelable: true,
+    }));
+
+    expect(allowed).toBe(false);
+    link.remove();
+  });
+
+  it('retries an ambiguous HTTP 500 with the same memory-only key', async () => {
+    showWebhookIncident();
+    apiMock.notifyIncidentWebhooks
+      .mockRejectedValueOnce(new ApiError(500, 'Internal server error'))
+      .mockResolvedValueOnce({
+        incident_id: WEBHOOK_INCIDENT.id,
+        event_id: '22222222-2222-4222-8222-222222222222',
+        event_type: 'incident.notify',
+        command_id: `sha256:${'3'.repeat(64)}`,
+        accepted: true,
+        replayed: true,
+      });
+    const user = userEvent.setup();
+    render(<IncidentsPage />);
+
+    await user.click(await screen.findByTestId('incident-webhook-notify-inc-webhook'));
+    const dialog = screen.getByRole('dialog', { name: /notify webhook receivers/i });
+    await user.click(within(dialog).getByLabelText(/i reviewed this narrative/i));
+    await user.click(within(dialog).getByRole('button', { name: /send webhook notification/i }));
+    await user.click(await within(dialog).findByRole('button', { name: /retry same command/i }));
+
+    await waitFor(() => expect(apiMock.notifyIncidentWebhooks).toHaveBeenCalledTimes(2));
+    expect(apiMock.notifyIncidentWebhooks.mock.calls[0]?.[2]).toBe(
+      apiMock.notifyIncidentWebhooks.mock.calls[1]?.[2],
+    );
+  });
+
+  it('retries a malformed accepted response without allowing the command payload to change', async () => {
+    showWebhookIncident();
+    apiMock.notifyIncidentWebhooks
+      .mockRejectedValueOnce(new WebhookContractError(202, 'Invalid accepted response'))
+      .mockResolvedValueOnce({
+        incident_id: WEBHOOK_INCIDENT.id,
+        event_id: '22222222-2222-4222-8222-222222222222',
+        event_type: 'incident.notify',
+        command_id: `sha256:${'3'.repeat(64)}`,
+        accepted: true,
+        replayed: true,
+      });
+    const user = userEvent.setup();
+    render(<IncidentsPage />);
+
+    await user.click(await screen.findByTestId('incident-webhook-notify-inc-webhook'));
+    const dialog = screen.getByRole('dialog', { name: /notify webhook receivers/i });
+    const narrative = within(dialog).getByLabelText(/receiver narrative/i);
+    const reviewed = within(dialog).getByLabelText(/i reviewed this narrative/i);
+    await user.type(narrative, 'Original receiver narrative');
+    await user.click(reviewed);
+    await user.click(within(dialog).getByRole('button', { name: /send webhook notification/i }));
+
+    const retry = await within(dialog).findByRole('button', { name: /retry same command/i });
+    expect(narrative).toBeDisabled();
+    expect(reviewed).toBeDisabled();
+    expect(within(dialog).getByTestId('incident-webhook-preview').textContent)
+      .toContain('Original receiver narrative');
+    await user.click(retry);
+
+    await waitFor(() => expect(apiMock.notifyIncidentWebhooks).toHaveBeenCalledTimes(2));
+    expect(apiMock.notifyIncidentWebhooks.mock.calls[0]?.[1]).toEqual(
+      apiMock.notifyIncidentWebhooks.mock.calls[1]?.[1],
+    );
+    expect(apiMock.notifyIncidentWebhooks.mock.calls[0]?.[2]).toBe(
+      apiMock.notifyIncidentWebhooks.mock.calls[1]?.[2],
+    );
+  });
+
+  it('clears ambiguous command state and rendered narrative synchronously on pagehide', async () => {
+    showWebhookIncident();
+    apiMock.notifyIncidentWebhooks.mockRejectedValue(new TypeError('fetch failed'));
+    const user = userEvent.setup();
+    render(<IncidentsPage />);
+
+    await user.click(await screen.findByTestId('incident-webhook-notify-inc-webhook'));
+    const dialog = screen.getByRole('dialog', { name: /notify webhook receivers/i });
+    await user.type(within(dialog).getByLabelText(/receiver narrative/i), 'Private operator note');
+    await user.click(within(dialog).getByLabelText(/i reviewed this narrative/i));
+    await user.click(within(dialog).getByRole('button', { name: /send webhook notification/i }));
+    await within(dialog).findByRole('button', { name: /retry same command/i });
+
+    const key = apiMock.notifyIncidentWebhooks.mock.calls[0]?.[2];
+    expect(key).toMatch(/^[0-9a-f]{32}$/);
+    expect(JSON.stringify({ ...window.localStorage })).not.toContain(key);
+    expect(JSON.stringify({ ...window.sessionStorage })).not.toContain(key);
+    expect(window.location.href).not.toContain(key ?? '');
+
+    await act(async () => {
+      window.dispatchEvent(new Event('pagehide'));
+    });
+
+    expect(screen.queryByRole('dialog', { name: /notify webhook receivers/i }))
+      .not.toBeInTheDocument();
+    expect(screen.queryByText('Private operator note')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /retry same command/i })).not.toBeInTheDocument();
+  });
+
+  it('surfaces a same-key conflict without offering an ambiguous retry', async () => {
+    showWebhookIncident();
+    apiMock.notifyIncidentWebhooks.mockRejectedValue(
+      new ApiError(409, 'Idempotency key conflicts with another command'),
+    );
+    const user = userEvent.setup();
+    render(<IncidentsPage />);
+
+    await user.click(await screen.findByTestId('incident-webhook-notify-inc-webhook'));
+    const dialog = screen.getByRole('dialog', { name: /notify webhook receivers/i });
+    await user.click(within(dialog).getByLabelText(/i reviewed this narrative/i));
+    await user.click(within(dialog).getByRole('button', { name: /send webhook notification/i }));
+
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith(
+      'Idempotency key conflicts with another command',
+    ));
+    expect(within(dialog).queryByRole('button', { name: /retry same command/i }))
+      .not.toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: /cancel/i })).not.toBeDisabled();
+  });
+
   it('renders SLA metric cards with avg MTTA, avg MTTR, P95, and resolved count', async () => {
     usePagedResourceMock.mockReturnValue({
       items: [{
         id: 'inc-sla',
+        version: 1,
         title: 'SLA test incident',
         status: 'resolved',
         severity: 'medium',
@@ -520,6 +859,7 @@ describe('IncidentsPage Stage 3 workflows', () => {
     usePagedResourceMock.mockReturnValue({
       items: [{
         id: 'inc-rb',
+        version: 1,
         title: 'Runbook test',
         status: 'investigating',
         severity: 'high',
@@ -555,6 +895,7 @@ describe('IncidentsPage Stage 3 workflows', () => {
     usePagedResourceMock.mockReturnValue({
       items: [{
         id: 'inc-no-rb',
+        version: 1,
         title: 'No runbook test',
         status: 'open',
         severity: 'low',
@@ -586,6 +927,7 @@ describe('IncidentsPage Stage 3 workflows', () => {
     usePagedResourceMock.mockReturnValue({
       items: [{
         id: 'inc-unsafe',
+        version: 1,
         title: 'Unsafe runbook test',
         status: 'open',
         severity: 'medium',
@@ -628,6 +970,7 @@ describe('IncidentsPage Stage 3 workflows', () => {
     usePagedResourceMock.mockReturnValue({
       items: [{
         id: 'inc-notify',
+        version: 1,
         title: 'Notify dialog test',
         status: 'investigating',
         severity: 'medium',

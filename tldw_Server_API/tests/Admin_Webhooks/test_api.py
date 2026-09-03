@@ -70,7 +70,7 @@ def _registration(*, revision: int = 1) -> WebhookRegistration:
     )
 
 
-def _status(*, route_selection: str = "canonical") -> WebhookStatus:
+def _status() -> WebhookStatus:
     worker = DeliveryComponentStatus(
         component=DeliveryRuntimeComponent.WORKER,
         ready=False,
@@ -111,7 +111,7 @@ def _status(*, route_selection: str = "canonical") -> WebhookStatus:
     )
     return WebhookStatus(
         mode="on",
-        route_selection=route_selection,
+        route_selection="canonical",
         schema_ready=True,
         key_state="available",
         delivery_capability_ready=False,
@@ -274,9 +274,7 @@ class _FakeDeliveryService:
         limit: int,
         offset: int,
     ) -> SimpleNamespace:
-        self.calls.append(
-            ("list_delivery_history", (webhook_id, limit, offset))
-        )
+        self.calls.append(("list_delivery_history", (webhook_id, limit, offset)))
         if self.history_error is not None:
             raise self.history_error
         item = SimpleNamespace(
@@ -298,9 +296,7 @@ class _FakeDeliveryService:
         if self.fail_test_before_audit:
             raise WebhookError(WebhookErrorCode.PRECONDITION_FAILED)
         state = AttemptState.PROCESSING if self.processing else AttemptState.SUCCEEDED
-        delivery_state = (
-            DeliveryState.PROCESSING if self.processing else DeliveryState.SUCCEEDED
-        )
+        delivery_state = DeliveryState.PROCESSING if self.processing else DeliveryState.SUCCEEDED
         await audit_sink(
             delivery_module.TestWebhookAudit(
                 actor_id=command.actor_id,
@@ -363,6 +359,7 @@ class _FakeDeliveryService:
             idempotent_replay=False,
         )
 
+
 def _principal(*, admin: bool = True, user_id: int | None = 7) -> AuthPrincipal:
     return AuthPrincipal(
         kind="user" if user_id is not None else "service",
@@ -413,15 +410,15 @@ def _client(
     delivery_service = _FakeDeliveryService()
     mandatory_audit = AsyncMock()
     read_audit = AsyncMock()
+    rate_limit = AsyncMock()
     monkeypatch.setattr(admin_webhooks, "get_admin_webhook_control_plane", AsyncMock(return_value=service))
     monkeypatch.setattr(admin_webhooks, "_require_platform_admin", require_platform_admin)
     monkeypatch.setattr(admin_webhooks, "emit_mandatory_webhook_audit", mandatory_audit)
     monkeypatch.setattr(admin_webhooks, "_emit_admin_audit_event", read_audit)
+    monkeypatch.setattr(admin_webhooks, "check_rate_limit", rate_limit)
     app.dependency_overrides[admin_webhooks.get_auth_principal] = auth_dependency
     if hasattr(admin_webhooks, "get_admin_webhook_delivery_service"):
-        app.dependency_overrides[
-            admin_webhooks.get_admin_webhook_delivery_service
-        ] = lambda: delivery_service
+        app.dependency_overrides[admin_webhooks.get_admin_webhook_delivery_service] = lambda: delivery_service
     app.include_router(admin_webhooks.status_router, prefix="/api/v1/admin")
     app.include_router(admin_webhooks.canonical_router, prefix="/api/v1/admin")
     return TestClient(app, raise_server_exceptions=False), service, mandatory_audit, read_audit
@@ -505,10 +502,20 @@ def test_status_api_preserves_exact_degraded_reason_and_factual_fields(
         worker = replace(worker, ready=False, reason_code=reason)
     delivery = replace(
         base.delivery,
-        jobs_database_ready=(reason not in {DeliveryRuntimeReasonCode.JOBS_UNAVAILABLE, DeliveryRuntimeReasonCode.DATABASE_UNAVAILABLE}),
-        queue_ready=(reason not in {DeliveryRuntimeReasonCode.JOBS_UNAVAILABLE, DeliveryRuntimeReasonCode.DATABASE_UNAVAILABLE}),
-        job_type_ready=(reason not in {DeliveryRuntimeReasonCode.JOBS_UNAVAILABLE, DeliveryRuntimeReasonCode.DATABASE_UNAVAILABLE}),
-        jobs_backend=("unavailable" if reason in {DeliveryRuntimeReasonCode.JOBS_UNAVAILABLE, DeliveryRuntimeReasonCode.DATABASE_UNAVAILABLE} else "sqlite"),
+        jobs_database_ready=(
+            reason not in {DeliveryRuntimeReasonCode.JOBS_UNAVAILABLE, DeliveryRuntimeReasonCode.DATABASE_UNAVAILABLE}
+        ),
+        queue_ready=(
+            reason not in {DeliveryRuntimeReasonCode.JOBS_UNAVAILABLE, DeliveryRuntimeReasonCode.DATABASE_UNAVAILABLE}
+        ),
+        job_type_ready=(
+            reason not in {DeliveryRuntimeReasonCode.JOBS_UNAVAILABLE, DeliveryRuntimeReasonCode.DATABASE_UNAVAILABLE}
+        ),
+        jobs_backend=(
+            "unavailable"
+            if reason in {DeliveryRuntimeReasonCode.JOBS_UNAVAILABLE, DeliveryRuntimeReasonCode.DATABASE_UNAVAILABLE}
+            else "sqlite"
+        ),
         worker=worker,
         acquisition_ready=False,
         acquisition_reason_code=reason,
@@ -1010,9 +1017,7 @@ def _delivery_client(
     assert hasattr(admin_webhooks, "get_admin_webhook_delivery_service"), (
         "Task 10 delivery-service dependency is missing"
     )
-    app.dependency_overrides[
-        admin_webhooks.get_admin_webhook_delivery_service
-    ] = lambda: service
+    app.dependency_overrides[admin_webhooks.get_admin_webhook_delivery_service] = lambda: service
     app.include_router(admin_webhooks.status_router, prefix="/api/v1/admin")
     app.include_router(admin_webhooks.canonical_router, prefix="/api/v1/admin")
     return TestClient(app, raise_server_exceptions=False), service, mandatory_audit, read_audit
@@ -1060,9 +1065,7 @@ def _unexpected_error_client(
     )
     monkeypatch.setattr(admin_webhooks, "_emit_admin_audit_event", AsyncMock())
     app.dependency_overrides[admin_webhooks.get_auth_principal] = auth_dependency
-    app.dependency_overrides[
-        admin_webhooks.get_admin_webhook_delivery_service
-    ] = lambda: UnexpectedDeliveryService()
+    app.dependency_overrides[admin_webhooks.get_admin_webhook_delivery_service] = lambda: UnexpectedDeliveryService()
     app.include_router(admin_webhooks.status_router, prefix="/api/v1/admin")
     app.include_router(admin_webhooks.canonical_router, prefix="/api/v1/admin")
     return TestClient(app, raise_server_exceptions=False), observed
@@ -1356,3 +1359,188 @@ def test_delivery_operation_validation_is_closed_and_does_not_audit_framework_fa
     assert canary not in str(response.headers)
     assert canary not in caplog.text
     mandatory_audit.assert_not_awaited()
+
+
+@pytest.mark.unit
+def test_incident_notify_uses_canonical_route_and_preserves_backend_command_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: dict[str, object] = {}
+
+    async def notify(**kwargs):
+        observed.update(kwargs)
+        result = SimpleNamespace(
+            incident_id="inc-41",
+            event_id="88888888-8888-4888-8888-888888888888",
+            event_type="incident.notify",
+            command_id="sha256:" + ("6" * 64),
+            accepted=True,
+            replayed=False,
+        )
+        await kwargs["audit_sink"](result)
+        return result
+
+    monkeypatch.setattr(
+        admin_webhooks,
+        "svc_notify_incident_webhooks",
+        notify,
+        raising=False,
+    )
+    client, _, _, read_audit = _client(monkeypatch)
+
+    response = client.post(
+        "/api/v1/admin/incidents/inc-41/notify-webhooks",
+        headers={"Idempotency-Key": IDEMPOTENCY_KEY},
+        json={"narrative": "Receiver-safe summary", "expected_resource_version": 7},
+    )
+
+    assert response.status_code == 202
+    assert response.json()["command_id"] == "sha256:" + ("6" * 64)
+    assert observed["expected_resource_version"] == 7
+    assert observed["source_request_id"] == REQUEST_ID
+    assert callable(observed["audit_sink"])
+    read_audit.assert_awaited_once()
+
+
+@pytest.mark.unit
+def test_incident_notify_stops_at_explicit_rate_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = AsyncMock()
+    client, _, _, read_audit = _client(monkeypatch)
+    monkeypatch.setattr(admin_webhooks, "svc_notify_incident_webhooks", service)
+    monkeypatch.setattr(
+        admin_webhooks,
+        "check_rate_limit",
+        AsyncMock(
+            side_effect=HTTPException(
+                status_code=429,
+                detail="limiter-internal-canary",
+                headers={"Retry-After": "17"},
+            )
+        ),
+    )
+
+    response = client.post(
+        "/api/v1/admin/incidents/inc-41/notify-webhooks",
+        headers={"Idempotency-Key": IDEMPOTENCY_KEY},
+        json={"narrative": "safe", "expected_resource_version": 7},
+    )
+
+    assert response.status_code == 429
+    assert response.headers["retry-after"] == "17"
+    assert response.json()["error"]["code"] == "authentication_rate_limited"
+    service.assert_not_awaited()
+    read_audit.assert_not_awaited()
+
+
+@pytest.mark.unit
+def test_incident_notify_validation_is_canonical_and_redacted(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    client, _, _, read_audit = _client(monkeypatch)
+    canary = "incident-notify-secret-canary"
+
+    response = client.post(
+        "/api/v1/admin/incidents/inc-41/notify-webhooks",
+        headers={"Idempotency-Key": canary},
+        json={
+            "narrative": "safe",
+            "expected_resource_version": 7,
+            "legacy_secret": canary,
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"] == {
+        "code": "admin_webhook_validation_failed",
+        "message": "Webhook request validation failed",
+        "request_id": REQUEST_ID,
+    }
+    assert canary not in response.text
+    assert canary not in str(response.headers)
+    assert canary not in caplog.text
+    read_audit.assert_not_awaited()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("invalid_version", [True, "7", 7.0])
+def test_incident_notify_rejects_coerced_resource_versions(
+    monkeypatch: pytest.MonkeyPatch,
+    invalid_version: object,
+) -> None:
+    client, _, _, read_audit = _client(monkeypatch)
+
+    response = client.post(
+        "/api/v1/admin/incidents/inc-41/notify-webhooks",
+        headers={"Idempotency-Key": IDEMPOTENCY_KEY},
+        json={"narrative": "safe", "expected_resource_version": invalid_version},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "admin_webhook_validation_failed"
+    read_audit.assert_not_awaited()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("service_error", "status_code", "error_code", "message"),
+    [
+        (
+            WebhookError(WebhookErrorCode.IDEMPOTENCY_CONFLICT),
+            409,
+            "idempotency_conflict",
+            "Idempotency key conflicts with an existing request",
+        ),
+        (
+            WebhookError(WebhookErrorCode.PRECONDITION_FAILED),
+            412,
+            "precondition_failed",
+            "Webhook precondition failed",
+        ),
+        (
+            WebhookError(WebhookErrorCode.DISABLED),
+            503,
+            "admin_webhooks_disabled",
+            "Admin webhooks are disabled",
+        ),
+        (
+            WebhookError(WebhookErrorCode.NOT_FOUND),
+            404,
+            "admin_webhook_not_found",
+            "Webhook resource was not found",
+        ),
+    ],
+)
+def test_incident_notify_domain_failures_use_canonical_envelopes(
+    monkeypatch: pytest.MonkeyPatch,
+    service_error: Exception,
+    status_code: int,
+    error_code: str,
+    message: str,
+) -> None:
+    async def notify(**_kwargs):
+        raise service_error
+
+    monkeypatch.setattr(
+        admin_webhooks,
+        "svc_notify_incident_webhooks",
+        notify,
+        raising=False,
+    )
+    client, _, _, read_audit = _client(monkeypatch)
+
+    response = client.post(
+        "/api/v1/admin/incidents/inc-41/notify-webhooks",
+        headers={"Idempotency-Key": IDEMPOTENCY_KEY},
+        json={"narrative": "safe", "expected_resource_version": 7},
+    )
+
+    assert response.status_code == status_code
+    assert response.json()["error"] == {
+        "code": error_code,
+        "message": message,
+        "request_id": REQUEST_ID,
+    }
+    read_audit.assert_not_awaited()

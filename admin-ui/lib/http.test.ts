@@ -52,6 +52,7 @@ describe('http auth transport', () => {
         headers: {
           'Content-Type': 'application/json',
           ETag: '"admin-webhook-41-r2"',
+          'Retry-After': '17',
           'X-Request-ID': 'request-41',
         },
       }
@@ -69,6 +70,7 @@ describe('http auth transport', () => {
       status: 200,
       etag: '"admin-webhook-41-r2"',
       requestId: 'request-41',
+      retryAfterSeconds: 17,
     });
   });
 
@@ -122,6 +124,36 @@ describe('http auth transport', () => {
       expect(error).not.toHaveProperty('responseText');
     }
   );
+
+  it('preserves bounded canonical conflicts for the incident webhook command route', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      error: {
+        code: 'admin_webhook_idempotency_conflict',
+        message: 'Idempotency key conflicts with another command',
+        request_id: 'request-incident-conflict',
+      },
+    }), {
+      status: 409,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Request-ID': 'request-incident-conflict',
+      },
+    })));
+    const { requestJson, WebhookApiError } = await import('./http');
+
+    const error = await requestJson('/admin/incidents/inc-41/notify-webhooks', {
+      method: 'POST',
+    }).catch((caught) => caught);
+
+    expect(error).toBeInstanceOf(WebhookApiError);
+    expect(error).toMatchObject({
+      status: 409,
+      code: 'admin_webhook_idempotency_conflict',
+      message: 'Idempotency key conflicts with another command',
+      requestId: 'request-incident-conflict',
+      detail: undefined,
+    });
+  });
 
   it('rejects malformed canonical errors without retaining a response canary', async () => {
     const canary = 'forbidden-response-canary';

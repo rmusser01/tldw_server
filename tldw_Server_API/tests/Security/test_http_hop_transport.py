@@ -930,6 +930,46 @@ async def test_public_http_hop_uses_real_socket_without_following_redirect(
     assert _header_values(requests[0], b"x-request-id") == [b"loopback-smoke"]
 
 
+async def test_admin_webhook_e2e_loopback_hop_is_narrow_and_status_only() -> None:
+    requests: list[bytes] = []
+
+    async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        try:
+            requests.append(await reader.readuntil(b"\r\n\r\n"))
+            writer.write(b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n")
+            await writer.drain()
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+    server = await asyncio.start_server(handle, "127.0.0.1", 0)
+    assert server.sockets
+    port = int(server.sockets[0].getsockname()[1])
+
+    async with server:
+        response = await http_hop.request_admin_webhook_e2e_loopback_status(
+            _request(
+                scheme="http",
+                host="127.0.0.1",
+                port=port,
+                method="POST",
+                target="/admin-webhooks",
+                body=b"{}",
+            )
+        )
+
+    assert response.status_code == 204
+    assert response.retry_after_seconds is None
+    assert len(requests) == 1
+
+    for host in ("localhost", "127.0.0.2", "10.0.0.7", "::1"):
+        with pytest.raises(http_hop.HTTPHopError) as exc_info:
+            await http_hop.request_admin_webhook_e2e_loopback_status(
+                _request(scheme="http", host=host, port=port)
+            )
+        assert exc_info.value.code == "dns_address_denied"
+
+
 async def test_ambient_http_client_state_is_ignored(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

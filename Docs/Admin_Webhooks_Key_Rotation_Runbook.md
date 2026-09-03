@@ -71,16 +71,22 @@ Never initialize durable state by manually updating the database.
 ## Rotation Impact
 
 Rotation is maintenance for every operation that writes protected values and
-for any replay that would disclose a signing secret. In PR 1 this blocks:
+for any replay that would disclose a signing secret. In the complete canonical
+runtime this blocks:
 
 - create registration;
 - destination replacement;
 - signing-secret rotation;
-- secret-bearing create/rotate replay.
+- secret-bearing create/rotate replay;
+- user event capture in its source database transaction;
+- incident mutation/notification marker publication;
+- automatic/manual event capture and delivery work that requires protected
+  target, secret, or event-body access.
 
 Metadata-only updates, disable, soft delete, redacted reads, and status remain
-available where mode permits. Later delivery/producer releases apply the same
-gate to protected event and delivery work.
+available where mode permits. In mode `on`, a protected-write key failure aborts
+the source user/incident mutation rather than committing a domain change without
+its canonical event.
 
 Legacy import and key rotation are mutually exclusive. Start neither while the
 other has an active durable phase.
@@ -246,6 +252,12 @@ approved key-retention policy. Retained database, file, snapshot, and backup
 data encrypted under a removed key may become unrecoverable; verify backup and
 legal-retention requirements before destruction.
 
+Before retiring any source key, perform the coordinated incident-marker backup
+and restore/readback proof in the migration runbook against a snapshot that
+still contains both keys. Record which secret-manager versions are required by
+each retained backup. A successful live zero-source-envelope scan does not prove
+that an older retained backup no longer needs the source key.
+
 ## Failure Handling
 
 | Condition | Required action |
@@ -258,6 +270,19 @@ legal-retention requirements before destruction.
 | Crash in `awaiting_primary_cutover` | Keep both keys; finish all-node target-primary rollout, then rerun finalize. |
 | Lagging node after finalize | Remove it from service and deploy target primary; do not revert durable state. |
 | Protected inventory/readback mismatch | Keep writes blocked, preserve both keys and evidence, and forward-fix. |
+
+For a key loss while no rotation is active:
+
+- leave mode `off` or move every node to `off` through the reviewed deployment
+  path;
+- preserve AuthNZ, Jobs, `system_ops.json`, and backup bytes unchanged;
+- do not retry source mutations until the exact approved key version is
+  restored and every node reports `key_state=available`;
+- treat pending incident markers as durable encrypted work. The reconciler must
+  remain failed closed and leave them byte-for-byte unchanged;
+- after key recovery, run strict marker readback, `activation-check --phase
+  predeploy`, one no-traffic live canary, and the reconciliation proof before
+  admitting normal traffic.
 
 Never write plaintext as an emergency measure, manually alter key IDs in stored
 envelopes or migration state, delete pending file markers, or remove the source

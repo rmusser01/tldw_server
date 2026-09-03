@@ -894,6 +894,37 @@ def evaluate_platform_webhook_url_policy(url: str) -> URLPolicyResult:
     )
 
 
+def evaluate_admin_webhook_e2e_loopback_policy(url: str) -> URLPolicyResult:
+    """Allow only the exact IPv4 loopback target used by isolated admin E2E."""
+    try:
+        parsed = urlparse(url)
+        host = _normalize_hostname(parsed.hostname or "")
+    except (TypeError, ValueError):
+        parsed = None
+        host = ""
+    if (
+        parsed is None
+        or parsed.scheme.lower() != "http"
+        or host != "127.0.0.1"
+        or parsed.username is not None
+        or parsed.password is not None
+        or bool(parsed.fragment)
+    ):
+        return URLPolicyResult(
+            False,
+            "Admin webhook E2E loopback target denied",
+            reason_code="address_forbidden",
+        )
+    return evaluate_url_policy(
+        url,
+        allowlist=[],
+        denylist=[],
+        block_private_override=False,
+        resolved_ips_override=("127.0.0.1",),
+        sensitive_observability=True,
+    )
+
+
 def is_webhook_url_allowed_for_tenant(url: str, tenant_id: str) -> bool:
     """Webhook egress evaluation with per-tenant allow/deny lists.
 

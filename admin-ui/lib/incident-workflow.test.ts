@@ -10,6 +10,7 @@ import {
 
 const makeIncident = (overrides: Partial<IncidentItem> = {}): IncidentItem => ({
   id: 'inc-1',
+  version: 1,
   title: 'Queue latency spike',
   status: 'open',
   severity: 'high',

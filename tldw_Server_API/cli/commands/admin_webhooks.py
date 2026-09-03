@@ -6,20 +6,34 @@ import asyncio
 import json
 import os
 import secrets
-from collections.abc import Awaitable, Callable
+import sqlite3
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal, TypeVar
+from urllib.parse import quote
 
+import aiosqlite
 import click
+from loguru import logger
 
 from tldw_Server_API.app.core.Admin_Webhooks.audit import (
     emit_mandatory_webhook_operation_audit,
 )
 from tldw_Server_API.app.core.Admin_Webhooks.config import AdminWebhookSettings
+from tldw_Server_API.app.core.Admin_Webhooks.control_plane import (
+    AdminWebhookControlPlane,
+    evaluate_activation_readiness,
+)
 from tldw_Server_API.app.core.Admin_Webhooks.crypto import load_webhook_key_ring
-from tldw_Server_API.app.core.Admin_Webhooks.domain import WebhookError
+from tldw_Server_API.app.core.Admin_Webhooks.domain import (
+    AdminWebhookActivationCheck,
+    AdminWebhookActivationPhase,
+    AdminWebhookActivationReasonCode,
+    WebhookError,
+)
 from tldw_Server_API.app.core.Admin_Webhooks.key_rotation import (
     WebhookKeyRotationService,
 )
@@ -29,11 +43,24 @@ from tldw_Server_API.app.core.Admin_Webhooks.legacy_import import (
     LegacyImportService,
     LegacyRejectionReason,
 )
-from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
+from tldw_Server_API.app.core.Admin_Webhooks.observability import (
+    AdminWebhookDeliveryCapability,
+    JobsCapabilityStatus,
+)
+from tldw_Server_API.app.core.AuthNZ.database import (
+    DatabasePool,
+    _apply_single_user_fallback,
+)
 from tldw_Server_API.app.core.AuthNZ.settings import Settings
 from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
     AdminWebhookRepository,
 )
+from tldw_Server_API.app.core.Jobs.operations.contracts import (
+    ADMIN_WEBHOOK_DELIVERY_DOMAIN,
+    ADMIN_WEBHOOK_DELIVERY_JOB_TYPE,
+    ADMIN_WEBHOOK_DELIVERY_QUEUE,
+)
+from tldw_Server_API.app.core.Utils.Utils import get_project_root
 from tldw_Server_API.app.services import admin_system_ops_service as system_ops
 
 T = TypeVar("T")
@@ -54,6 +81,248 @@ def _print_json(value: object) -> None:
             default=_json_default,
         )
     )
+
+
+class _ReadOnlyJobsCapabilityProbe:
+    """Inspect configured Jobs readiness without creating or migrating tables."""
+
+    @staticmethod
+    def _configured_job_type_ready() -> bool:
+        allowed = {
+            item.strip()
+            for variable in (
+                "JOBS_ALLOWED_JOB_TYPES",
+                "JOBS_ALLOWED_JOB_TYPES_ADMIN_WEBHOOKS",
+            )
+            for item in os.getenv(variable, "").split(",")
+            if item.strip()
+        }
+        return not allowed or ADMIN_WEBHOOK_DELIVERY_JOB_TYPE in allowed
+
+    @staticmethod
+    def _sqlite_path() -> Path:
+        configured = str(os.getenv("JOBS_DB_PATH") or "").strip()
+        if configured:
+            path = Path(configured).expanduser()
+            if not path.is_absolute():
+                path = Path(get_project_root()) / path
+            return path.resolve(strict=False)
+        return (Path(get_project_root()) / "Databases" / "jobs.db").resolve(strict=False)
+
+    @staticmethod
+    def _sqlite_database_ready(path: Path) -> bool:
+        if not path.is_file():
+            return False
+        uri = f"file:{quote(str(path), safe='/')}?mode=ro"
+        try:
+            with sqlite3.connect(uri, uri=True) as connection:
+                connection.execute("SELECT 1 FROM jobs LIMIT 0").fetchone()
+        except (OSError, sqlite3.Error):
+            return False
+        return True
+
+    @staticmethod
+    def _postgres_database_ready(dsn: str) -> bool:
+        try:
+            import psycopg
+
+            with psycopg.connect(
+                dsn,
+                autocommit=True,
+                connect_timeout=5,
+            ) as connection:
+                connection.execute("SELECT 1 FROM jobs LIMIT 0").fetchone()
+        except Exception:  # noqa: BLE001 - readiness is deliberately fail-closed
+            return False
+        return True
+
+    async def status(self) -> JobsCapabilityStatus:
+        from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+        queues = getattr(JobManager, "DOMAIN_ALLOWED_QUEUES", {})
+        queue_ready = isinstance(queues, dict) and ADMIN_WEBHOOK_DELIVERY_QUEUE in queues.get(
+            ADMIN_WEBHOOK_DELIVERY_DOMAIN, ()
+        )
+        job_type_ready = bool(callable(getattr(JobManager, "admit_job", None)) and self._configured_job_type_ready())
+        dsn = str(os.getenv("JOBS_DB_URL") or "").strip()
+        if dsn.startswith(("postgres://", "postgresql://")):
+            backend = "postgres"
+            database_ready = await asyncio.to_thread(
+                self._postgres_database_ready,
+                dsn,
+            )
+        elif dsn:
+            backend = "unavailable"
+            database_ready = False
+        else:
+            backend = "sqlite"
+            database_ready = await asyncio.to_thread(
+                self._sqlite_database_ready,
+                self._sqlite_path(),
+            )
+        return JobsCapabilityStatus(
+            database_ready=database_ready,
+            queue_ready=queue_ready,
+            job_type_ready=job_type_ready,
+            backend=backend,
+        )
+
+
+class _ReadOnlyAdminWebhookPool:
+    """Minimal AuthNZ pool adapter that cannot initialize or mutate schema."""
+
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+        self.pool: object | None = None
+        self.db_path: str | None = None
+        self._sqlite_uri = False
+        self._sqlite_fs_path: str | None = None
+        self._initialized = False
+        self._resolver = DatabasePool(settings)
+
+    async def initialize(self) -> None:
+        if self._initialized:
+            return
+        if self._resolver._should_use_postgres():
+            import asyncpg
+
+            self.pool = await asyncpg.create_pool(
+                self.settings.DATABASE_URL,
+                min_size=getattr(self.settings, "DATABASE_POOL_MIN_SIZE", 1),
+                max_size=getattr(self.settings, "DATABASE_POOL_MAX_SIZE", 10),
+                max_queries=getattr(self.settings, "DATABASE_MAX_QUERIES", 50_000),
+                max_inactive_connection_lifetime=getattr(
+                    self.settings,
+                    "DATABASE_MAX_INACTIVE_CONNECTION_LIFETIME",
+                    300,
+                ),
+                command_timeout=60,
+                server_settings={"default_transaction_read_only": "on"},
+            )
+            self._initialized = True
+            return
+
+        raw_url = _apply_single_user_fallback(
+            self.settings.DATABASE_URL,
+            auth_mode=getattr(self.settings, "AUTH_MODE", "single_user"),
+        )
+        _db_path, _uri, filesystem_path = DatabasePool._resolve_sqlite_paths(raw_url)
+        if not filesystem_path or filesystem_path == ":memory:":
+            raise OSError("admin webhook database unavailable")
+        path = Path(filesystem_path).expanduser().resolve(strict=False)
+        if not path.is_file():
+            raise OSError("admin webhook database unavailable")
+        self._sqlite_fs_path = str(path)
+        self.db_path = f"file:{quote(str(path), safe='/')}?mode=ro"
+        self._sqlite_uri = True
+        self._initialized = True
+
+    @asynccontextmanager
+    async def acquire(self, *, timeout: float | None = None) -> AsyncIterator[object]:
+        if not self._initialized:
+            await self.initialize()
+        if self.pool is not None:
+            connection = await self.pool.acquire(timeout=timeout)  # type: ignore[attr-defined]
+            try:
+                yield connection
+            finally:
+                await self.pool.release(connection)  # type: ignore[attr-defined]
+            return
+
+        connection = await aiosqlite.connect(self.db_path, uri=self._sqlite_uri)
+        try:
+            await connection.execute("PRAGMA query_only=ON")
+            await connection.execute("PRAGMA foreign_keys=ON")
+            await connection.execute("PRAGMA busy_timeout=5000")
+            connection.row_factory = aiosqlite.Row
+            yield connection
+        finally:
+            await connection.close()
+
+    async def close(self) -> None:
+        if self.pool is not None:
+            await self.pool.close()  # type: ignore[attr-defined]
+        self.pool = None
+        self._initialized = False
+
+
+async def _with_activation_check(
+    *,
+    phase: AdminWebhookActivationPhase,
+    settings: AdminWebhookSettings,
+) -> AdminWebhookActivationCheck:
+    pool = _ReadOnlyAdminWebhookPool(Settings())
+    await pool.initialize()
+    try:
+        repository = AdminWebhookRepository(pool)
+        key_ring_result = load_webhook_key_ring()
+        delivery_capability = AdminWebhookDeliveryCapability(
+            repository=repository,
+            key_ring_result=key_ring_result,
+            jobs_probe=_ReadOnlyJobsCapabilityProbe(),
+            heartbeat_freshness_seconds=(settings.delivery_heartbeat_freshness_seconds),
+        )
+        control_plane = AdminWebhookControlPlane(
+            repository=repository,
+            settings=settings,
+            key_ring_result=key_ring_result,
+            delivery_capability=delivery_capability,
+        )
+        status = await control_plane.status(now=datetime.now(timezone.utc))
+        return evaluate_activation_readiness(
+            status,
+            phase=phase,
+            max_backlog_age_seconds=(settings.activation_max_backlog_age_seconds),
+        )
+    finally:
+        await pool.close()
+
+
+def _closed_activation_check(
+    *,
+    phase: AdminWebhookActivationPhase,
+    settings: AdminWebhookSettings,
+) -> AdminWebhookActivationCheck:
+    expected_mode = "migrate" if phase is AdminWebhookActivationPhase.PREDEPLOY else "on"
+    reasons = []
+    if settings.mode.value != expected_mode:
+        reasons.append(AdminWebhookActivationReasonCode.PHASE_MISMATCH)
+    reasons.append(AdminWebhookActivationReasonCode.DATABASE_UNAVAILABLE)
+    return AdminWebhookActivationCheck(
+        phase=phase,
+        ready=False,
+        mode=settings.mode.value,
+        schema_ready=False,
+        migration_complete=False,
+        key_ready=False,
+        jobs_ready=False,
+        limits_ready=False,
+        worker_ready=False,
+        reconciler_ready=False,
+        retention_ready=False,
+        runtime_ready=False,
+        backlog_age_ready=False,
+        oldest_nonterminal_age_seconds=None,
+        max_backlog_age_seconds=settings.activation_max_backlog_age_seconds,
+        reason_codes=tuple(reasons),
+    )
+
+
+def _run_activation_check(
+    phase: AdminWebhookActivationPhase,
+) -> AdminWebhookActivationCheck:
+    try:
+        settings = AdminWebhookSettings.from_environment(os.environ)
+    except Exception:  # noqa: BLE001 - never expose configuration details
+        raise click.ClickException("admin_webhook_configuration_invalid") from None
+    try:
+        return asyncio.run(_with_activation_check(phase=phase, settings=settings))
+    except Exception as exc:  # noqa: BLE001 - unavailable state is closed and sanitized
+        logger.opt(exception=exc).error(
+            "Admin webhook activation check failed phase={}",
+            phase.value,
+        )
+        return _closed_activation_check(phase=phase, settings=settings)
 
 
 async def _with_runtime(
@@ -111,6 +380,20 @@ def _request_id(prefix: str) -> str:
 @click.group(name="admin-webhooks")
 def admin_webhooks_group() -> None:
     """Manage canonical outgoing-webhook migration and key operations."""
+
+
+@admin_webhooks_group.command("activation-check")
+@click.option(
+    "--phase",
+    required=True,
+    type=click.Choice([value.value for value in AdminWebhookActivationPhase]),
+)
+def activation_check(*, phase: str) -> None:
+    """Evaluate one read-only canonical activation phase."""
+    result = _run_activation_check(AdminWebhookActivationPhase(phase))
+    _print_json(asdict(result))
+    if not result.ready:
+        raise click.exceptions.Exit(1)
 
 
 @admin_webhooks_group.command("import-legacy")

@@ -42,11 +42,7 @@ from .audit import (
     emit_mandatory_webhook_operation_audit,
 )
 from .catalog import EVENT_CATALOG, normalize_subscriptions
-from .config import (
-    AdminWebhookMode,
-    AdminWebhookSettings,
-    WebhookRouteSelection,
-)
+from .config import AdminWebhookMode, AdminWebhookSettings
 from .crypto import (
     MIGRATION_DOMAIN_DATABASE_RECORD,
     MIGRATION_DOMAIN_DATABASE_TABLE,
@@ -1188,6 +1184,7 @@ class LegacyImportService:
             target = validate_webhook_target(
                 url,
                 allow_http_dev=self._settings.allow_http_dev,
+                allow_e2e_loopback=self._settings.allow_e2e_loopback,
             )
         except WebhookError:
             raise _RecordIssue("target_rejected") from None
@@ -2750,10 +2747,7 @@ class LegacyImportService:
         """Apply one literal approved report through the durable import stages."""
         if not isinstance(request, LegacyImportRequest):
             raise TypeError("LegacyImportRequest is required")
-        if (
-            self._settings.mode is not AdminWebhookMode.MIGRATE
-            or self._settings.route_selection is not WebhookRouteSelection.CANONICAL
-        ):
+        if self._settings.mode is not AdminWebhookMode.MIGRATE:
             raise LegacyImportError(LegacyImportErrorCode.PRECONDITION_FAILED)
         initial_state = await self._repository.get_migration_state()
         if initial_state.phase == "complete":

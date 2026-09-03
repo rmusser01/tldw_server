@@ -2,16 +2,9 @@
 
 ## Scope And Release Boundary
 
-This document covers the canonical admin-webhook control plane delivered in PR
-1. It provides registration management, migration, protected storage, key
-rotation, and status reporting. It does **not** provide outbound delivery,
-automatic event producers, test sends, delivery history, redelivery, worker
-health, or activation readiness.
-
-PR 1 must remain default-off. In this release,
-`delivery_capability_ready` is always `false`, and an inactive registration
-cannot be activated. Delivery requires the later delivery and producer PRs plus
-their activation gates.
+This document covers the canonical admin-webhook control plane, durable delivery
+runtime, and activation status. The subsystem remains default-off until the
+operator completes migration and the two-phase activation procedure.
 
 ## Access And Authorization
 
@@ -32,15 +25,16 @@ receive the same values before traffic is admitted.
 | Variable | Default | Accepted values and effect |
 | --- | --- | --- |
 | `TLDW_ADMIN_WEBHOOKS_MODE` | `off` | `off`, `migrate`, or `on`. CRUD is unavailable in `off`; import tooling is used in `migrate`; canonical CRUD is available in `on` only after migration is complete. |
-| `TLDW_ADMIN_WEBHOOKS_LEGACY_COMPAT` | `false` | Exact `true` or `false`. `true` mounts the temporary legacy route family and is valid only when mode is `off`. |
+| `TLDW_ADMIN_WEBHOOKS_LEGACY_COMPAT` | `false` | Deprecated deployment input. Omit it or use exact `false`; exact `true` is a sanitized startup configuration error. It never selects routes. |
 | `TLDW_ADMIN_WEBHOOK_REGISTRATION_LIMIT` | `100` | Integer 1-1,000. Bounds all non-deleted registrations. |
 | `TLDW_ADMIN_WEBHOOK_ACTIVE_LIMIT` | `25` | Integer 1-1,000 and no greater than the registration limit. Bounds active registrations. |
 | `TLDW_ADMIN_WEBHOOKS_ALLOW_HTTP_DEV` | `false` | Exact `true` or `false`. Allows `http` targets only in a validated non-production environment. Enabling it in production is a startup error. |
 | `TLDW_ADMIN_WEBHOOK_ROLLBACK_WINDOW_DAYS` | `7` | Integer 1-30. Controls how long the encrypted legacy-file backup and separate rollback key may remain usable. |
+| `TLDW_ADMIN_WEBHOOK_ACTIVATION_MAX_BACKLOG_AGE_SECONDS` | `300` | Integer 1-86,400. Maximum oldest nonterminal delivery age accepted by the live activation check. |
 | `TLDW_ADMIN_WEBHOOK_KEYS_JSON` | none | Strict JSON object mapping key IDs to canonical base64 encodings of exactly 32 random bytes. Required for migration and protected operations. Duplicate IDs, invalid JSON/base64, and wrong key sizes fail closed. |
 | `TLDW_ADMIN_WEBHOOK_PRIMARY_KEY_ID` | none | Key ID present in `TLDW_ADMIN_WEBHOOK_KEYS_JSON`; 1-64 characters from `[A-Za-z0-9._-]`. New protected values use this key. |
 
-The idempotency retention period is fixed at 86,400 seconds in PR 1 and has no
+The idempotency retention period is fixed at 86,400 seconds and has no
 environment override.
 
 ### Egress Policy Composition
@@ -78,38 +72,27 @@ The shared policy also uses:
 | `WORKFLOWS_EGRESS_DNS_MAX_OUTSTANDING` | `64` | Positive bound on concurrent resolver work. |
 | `WORKFLOWS_EGRESS_DNS_SLOT_WAIT_SECONDS` | `0.05` | Non-negative bounded wait for a resolver slot. |
 
-Registration-time validation does not guarantee future delivery. The later
-delivery implementation must repeat DNS and egress checks for every attempt.
+Registration-time validation does not guarantee future delivery. Delivery
+repeats DNS and egress checks for every attempt.
 
-## Route Selection And Upgrade Warning
+## Canonical Routing
 
-Status is always mounted. Exactly one CRUD route family is mounted in each
-process:
+Status and every canonical route are mounted in every mode. `off` returns the
+bounded disabled error for blocked operations, `migrate` returns the bounded
+migration-pending error, and `on` permits operations only when their canonical
+readiness rules pass. Status retains `route_selection=canonical` for one
+response-compatibility cycle; there is no selectable legacy route family.
 
-| Mode | Legacy compatibility | Selected routes | Result |
-| --- | --- | --- | --- |
-| `off` | `false` | canonical | Status works; canonical CRUD returns `503 admin_webhooks_disabled`; every historical webhook and incident-notify route is disabled. |
-| `off` | `true` | legacy | Temporary historical CRUD, test, delivery, and incident-notify routes remain reachable; canonical catalog and rotate routes are absent. |
-| `migrate` | `false` | canonical | Status and offline migration are available; canonical CRUD returns `503 admin_webhook_migration_pending`. |
-| `on` | `false` | canonical | Canonical PR 1 CRUD is available after migration completion and valid key setup; delivery remains unavailable. |
+Clients must never treat a 404, network failure, or malformed status response
+as permission to use a different API. A multi-process deployment is not
+switched by changing one node: drain/restart and verify every process reports
+the intended mode.
 
-`legacy compatibility=true` with `migrate` or `on` is rejected at startup.
-
-**Upgrade warning:** leaving both variables at their defaults selects canonical
-routes in `off` mode. This intentionally disables all historical webhook CRUD,
-test, delivery, and incident-notify routes. Operators must explicitly choose
-temporary compatibility or complete the reviewed migration. Clients must never
-treat a 404, network failure, or malformed status response as permission to
-fall back to legacy routes.
-
-A multi-process deployment is not switched by changing one node. Drain/restart
-and verify every process uses the intended selector.
-
-## Canonical PR 1 API
+## Canonical API
 
 | Method and path | Required headers | Result |
 | --- | --- | --- |
-| `GET /api/v1/admin/webhooks/status` | normal admin auth | Mode, selected route family, schema/key/migration state, limits, rollback eligibility, and `delivery_capability_ready`. |
+| `GET /api/v1/admin/webhooks/status` | normal admin auth | Mode, canonical route literal, schema/key/migration state, limits, delivery runtime health, backlog, and rollback eligibility. |
 | `GET /api/v1/admin/webhooks/catalog` | normal admin auth | Immutable event catalog (`2026-07-01`) and effective limits. |
 | `GET /api/v1/admin/webhooks?limit=50&offset=0` | normal admin auth | Redacted registrations ordered by numeric ID descending. `limit` is 1-100; `offset` is 0-1,000. |
 | `POST /api/v1/admin/webhooks` | `Idempotency-Key` | Creates an inactive registration and returns its signing secret once. |
@@ -117,9 +100,11 @@ and verify every process uses the intended selector.
 | `PATCH /api/v1/admin/webhooks/{id}` | `If-Match` | Updates one or more non-null fields: `description`, full replacement `url`, `event_types`, `active`, or `timeout_seconds`. |
 | `DELETE /api/v1/admin/webhooks/{id}` | `If-Match` | Soft-deletes a registration. |
 | `POST /api/v1/admin/webhooks/{id}/rotate-secret` | `If-Match`, `Idempotency-Key` | Rotates an inactive registration and returns the new signing secret once. |
-
-Canonical PR 1 intentionally has no `/{id}/test`, `/{id}/deliveries`, manual
-redelivery, or `/incidents/{id}/notify-webhooks` route.
+| `POST /api/v1/admin/webhooks/{id}/test` | `If-Match`, `Idempotency-Key` | Persists one synthetic test delivery command. |
+| `GET /api/v1/admin/webhooks/{id}/deliveries` | normal admin auth | Sanitized durable delivery and attempt history. |
+| `POST /api/v1/admin/webhooks/{id}/deliveries/{delivery_id}/redeliver` | `If-Match`, `Idempotency-Key` | Persists one eligible manual redelivery command. |
+| `POST /api/v1/admin/incidents/{id}/notify-webhooks` | `Idempotency-Key` | Persists one durable incident notification event. |
+| `POST /api/v1/admin/incidents/{id}/notify` | `Idempotency-Key` | Separately persists and sends one at-most-once stakeholder-email command. |
 
 The catalog currently contains:
 
@@ -132,6 +117,11 @@ The catalog currently contains:
 
 Wildcards and unknown events are rejected. Creation is always inactive.
 Timeouts are 1-30 seconds and default to 10.
+
+The public request envelope, exact event-specific payload schemas, signature
+algorithm, deduplication rules, and response behavior are defined in the
+[Admin Webhooks Receiver Guide](Admin_Webhooks_Receiver_Guide.md). Treat that
+guide and the catalog API version as one compatibility contract.
 
 ## Conditional Requests And Idempotency
 
@@ -262,6 +252,16 @@ Common statuses are:
 Use the closed `error.code` and `request_id` for response handling and support
 correlation. Do not parse human-readable message text.
 
+Stakeholder email is not webhook delivery. Each recipient is durably claimed
+before the provider call; a crash after that boundary is reported as `unknown`
+and is never resent automatically. Only a literal provider result of `true` is
+recorded as sent. Exact command replays are retained for at least 30 days.
+When the 1,000-command store reaches capacity, only fully `sent`/`failed`
+commands older than 30 days are eligible for pruning; `pending` and `sending`
+commands are never pruned automatically. If no command is eligible, admission
+fails closed until an operator resolves capacity. Never reuse an idempotency
+key for a changed recipient list or message.
+
 ## Operator Checks
 
 Before any canonical management session:
@@ -270,9 +270,16 @@ Before any canonical management session:
    and route selection.
 2. Confirm `schema_ready=true` and migration phase `complete` before mode `on`.
 3. Confirm `key_state=available` and configured limits are not exceeded.
-4. Treat `delivery_capability_ready=false` as expected for PR 1 and as a hard
-   activation stop.
-5. Use the migration and key-rotation runbooks for all offline state changes.
+4. Treat `delivery_capability_ready=false` as a hard live-activation stop.
+5. Run `tldw-admin-webhooks activation-check --phase predeploy` while every
+   node remains in `migrate` before deploying an `on` canary.
+6. Run `tldw-admin-webhooks activation-check --phase live` only against the
+   no-traffic canary before enabling a registration or admitting producer
+   traffic.
+7. Use the migration and key-rotation runbooks for all offline state changes.
 
 See [Admin Webhooks Migration Runbook](Admin_Webhooks_Migration_Runbook.md) and
 [Admin Webhooks Key Rotation Runbook](Admin_Webhooks_Key_Rotation_Runbook.md).
+The complete private-beta rollout, controlled probes, dead-delivery triage, and
+safe-disable procedure are in the
+[Admin Webhooks Delivery Runbook](Admin_Webhooks_Delivery_Runbook.md).

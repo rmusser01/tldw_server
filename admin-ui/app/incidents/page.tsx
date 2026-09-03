@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useDeferredValue, useEffect, useMemo, useState, Suspense } from 'react';
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, Suspense } from 'react';
+import { flushSync } from 'react-dom';
 import { PermissionGuard } from '@/components/PermissionGuard';
 import { ResponsiveLayout } from '@/components/ResponsiveLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -11,12 +12,24 @@ import { Label } from '@/components/ui/label';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Pagination } from '@/components/ui/pagination';
 import { useConfirm } from '@/components/ui/confirm-dialog';
 import { useToast } from '@/components/ui/toast';
 import { api } from '@/lib/api-client';
+import {
+  createIdempotentCommand,
+  generateIdempotencyKey,
+  type IdempotentCommand,
+} from '@/lib/idempotent-command';
+import { ApiError, WebhookContractError } from '@/lib/http';
 import { formatDateTime } from '@/lib/format';
 import {
   addIncidentActionItem,
@@ -32,11 +45,15 @@ import {
 } from '@/lib/incident-workflow';
 import { useUrlPagination } from '@/lib/use-url-state';
 import { usePagedResource } from '@/lib/use-paged-resource';
+import { useSensitiveNavigationGuard } from '@/lib/use-sensitive-navigation-guard';
 import type { IncidentItem } from '@/types/incidents';
-import { AlertTriangle, Bell, ExternalLink, Mail, RefreshCw, Trash2, X } from 'lucide-react';
+import { AlertTriangle, Bell, ExternalLink, Mail, RefreshCw, Trash2 } from 'lucide-react';
 import { ExportMenu } from '@/components/ui/export-menu';
 import { exportIncidents, ExportFormat } from '@/lib/export';
-import type { IncidentNotifyResponse } from '@/types/incidents';
+import type {
+  IncidentNotifyResponse,
+  IncidentWebhookNotifyResponse,
+} from '@/types/incidents';
 
 const STATUSES = ['open', 'investigating', 'mitigating', 'resolved'] as const;
 const SEVERITIES = ['low', 'medium', 'high', 'critical'] as const;
@@ -85,6 +102,23 @@ const formatDuration = (ms: number): string => {
 type IncidentAssignableUser = {
   id: string;
   label: string;
+};
+
+type PendingIncidentWebhookCommand = {
+  incidentId: string;
+  narrative: string | null;
+  expectedResourceVersion: number;
+  idempotencyKey: string;
+};
+
+type StakeholderNotificationCommandBody = {
+  incidentId: string;
+  recipients: string[];
+  message?: string;
+};
+
+type PendingStakeholderNotificationCommand = {
+  command: IdempotentCommand<IncidentNotifyResponse>;
 };
 
 const normalizeAssignableUsers = (payload: unknown): IncidentAssignableUser[] => {
@@ -144,6 +178,29 @@ function IncidentsPageContent() {
   const [notifyMessage, setNotifyMessage] = useState('');
   const [notifying, setNotifying] = useState(false);
   const [notifyResults, setNotifyResults] = useState<IncidentNotifyResponse | null>(null);
+  const [notifyCommandMessage, setNotifyCommandMessage] = useState('');
+  const [notifyRetryAvailable, setNotifyRetryAvailable] = useState(false);
+  const pendingStakeholderCommandRef = useRef<PendingStakeholderNotificationCommand | null>(null);
+  const activeStakeholderCommandRef = useRef<symbol | null>(null);
+  const stakeholderCommandGenerationRef = useRef(0);
+  const [webhookNotifyIncident, setWebhookNotifyIncident] = useState<IncidentItem | null>(null);
+  const [webhookNarrative, setWebhookNarrative] = useState('');
+  const [webhookNarrativeReviewed, setWebhookNarrativeReviewed] = useState(false);
+  const [webhookNotifying, setWebhookNotifying] = useState(false);
+  const [webhookNotifyResult, setWebhookNotifyResult] = useState<IncidentWebhookNotifyResponse | null>(null);
+  const [webhookNotifyMessage, setWebhookNotifyMessage] = useState('');
+  const [webhookRetryAvailable, setWebhookRetryAvailable] = useState(false);
+  const pendingWebhookCommandRef = useRef<PendingIncidentWebhookCommand | null>(null);
+  const activeWebhookCommandRef = useRef<symbol | null>(null);
+  const webhookCommandGenerationRef = useRef(0);
+
+  useSensitiveNavigationGuard(
+    notifying || notifyRetryAvailable || webhookNotifying || webhookRetryAvailable,
+    () => showError(
+      'Navigation blocked',
+      'Finish or retry the active notification command before leaving this page.',
+    ),
+  );
 
   const params = useMemo(() => {
     const offset = Math.max(0, (page - 1) * pageSize);
@@ -202,6 +259,48 @@ function IncidentsPageContent() {
       active = false;
     };
   }, [showError]);
+
+  useEffect(() => {
+    const clearIncidentCommands = () => {
+      stakeholderCommandGenerationRef.current += 1;
+      pendingStakeholderCommandRef.current = null;
+      activeStakeholderCommandRef.current = null;
+      webhookCommandGenerationRef.current += 1;
+      pendingWebhookCommandRef.current = null;
+      activeWebhookCommandRef.current = null;
+      flushSync(() => {
+        setNotifyIncidentId(null);
+        setNotifyRecipients('');
+        setNotifyMessage('');
+        setNotifying(false);
+        setNotifyResults(null);
+        setNotifyCommandMessage('');
+        setNotifyRetryAvailable(false);
+        setWebhookNotifyIncident(null);
+        setWebhookNarrative('');
+        setWebhookNarrativeReviewed(false);
+        setWebhookNotifying(false);
+        setWebhookNotifyResult(null);
+        setWebhookNotifyMessage('');
+        setWebhookRetryAvailable(false);
+      });
+    };
+    const handlePageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) clearIncidentCommands();
+    };
+    window.addEventListener('pagehide', clearIncidentCommands);
+    window.addEventListener('pageshow', handlePageShow);
+    return () => {
+      window.removeEventListener('pagehide', clearIncidentCommands);
+      window.removeEventListener('pageshow', handlePageShow);
+      stakeholderCommandGenerationRef.current += 1;
+      pendingStakeholderCommandRef.current = null;
+      activeStakeholderCommandRef.current = null;
+      webhookCommandGenerationRef.current += 1;
+      pendingWebhookCommandRef.current = null;
+      activeWebhookCommandRef.current = null;
+    };
+  }, []);
 
   const setIncidentUpdating = useCallback((incidentId: string, isUpdating: boolean) => {
     setUpdatingIncidents((prev) => {
@@ -266,7 +365,7 @@ function IncidentsPageContent() {
     }
   };
 
-  const handleStatusChange = async (incidentId: string, nextStatus: IncidentItem['status'], previousStatus: IncidentItem['status']) => {
+  const handleStatusChange = async (incidentId: string, nextStatus: IncidentItem['status']) => {
     // Optimistic update: show the new status immediately
     setOptimisticStatuses((prev) => ({ ...prev, [incidentId]: nextStatus }));
 
@@ -402,62 +501,232 @@ function IncidentsPageContent() {
     }
   };
 
+  const runStakeholderNotificationCommand = async (
+    pending: PendingStakeholderNotificationCommand,
+    retry: boolean,
+  ) => {
+    const generation = stakeholderCommandGenerationRef.current;
+    const token = Symbol('stakeholder-notification-command');
+    activeStakeholderCommandRef.current = token;
+    pendingStakeholderCommandRef.current = pending;
+    setNotifying(true);
+    setNotifyRetryAvailable(false);
+    setNotifyCommandMessage('');
+    try {
+      const result = retry ? await pending.command.retry() : await pending.command.run();
+      if (
+        stakeholderCommandGenerationRef.current !== generation
+        || activeStakeholderCommandRef.current !== token
+      ) return;
+      pendingStakeholderCommandRef.current = null;
+      setNotifyResults(result);
+      const sentCount = result.notifications.filter((n) => n.status === 'sent').length;
+      const unknownCount = result.notifications.filter((n) => n.status === 'unknown').length;
+      setNotifyCommandMessage(
+        unknownCount > 0
+          ? (
+            `${unknownCount} delivery outcome(s) are unknown and were not resent. `
+            + 'Confirm with the recipients before starting a new command.'
+          )
+          : result.replayed
+            ? 'Recovered the durable result from the original command.'
+            : '',
+      );
+      success(`Notification sent to ${sentCount}/${result.notifications.length} recipient(s)`);
+      await reload();
+    } catch (err: unknown) {
+      if (
+        stakeholderCommandGenerationRef.current !== generation
+        || activeStakeholderCommandRef.current !== token
+      ) return;
+      if (pending.command.canRetry) {
+        setNotifyRetryAvailable(true);
+        setNotifyCommandMessage(
+          'The command result is unknown. Retry the same command to recover its durable result.',
+        );
+      } else {
+        pendingStakeholderCommandRef.current = null;
+        const message = err instanceof Error && err.message
+          ? err.message
+          : 'Failed to send notifications';
+        showError(message);
+      }
+    } finally {
+      if (
+        stakeholderCommandGenerationRef.current === generation
+        && activeStakeholderCommandRef.current === token
+      ) {
+        activeStakeholderCommandRef.current = null;
+        setNotifying(false);
+      }
+    }
+  };
+
   const handleNotifyStakeholders = async () => {
-    if (!notifyIncidentId) return;
+    if (!notifyIncidentId || notifying || pendingStakeholderCommandRef.current) return;
     const emails = notifyRecipients
       .split(',')
-      .map((e) => e.trim())
+      .map((email) => email.trim())
       .filter(Boolean);
     if (emails.length === 0) {
       showError('At least one recipient email is required');
       return;
     }
-    try {
-      setNotifying(true);
-      const result = await api.notifyIncidentStakeholders(notifyIncidentId, {
-        recipients: emails,
-        ...(notifyMessage.trim() ? { message: notifyMessage.trim() } : {}),
-      });
-      setNotifyResults(result);
-      const sentCount = result.notifications.filter((n) => n.status === 'sent').length;
-      success(`Notification sent to ${sentCount}/${result.notifications.length} recipient(s)`);
-      await reload();
-    } catch (err: unknown) {
-      const message = err instanceof Error && err.message ? err.message : 'Failed to send notifications';
-      showError(message);
-    } finally {
-      setNotifying(false);
-    }
+    const body: StakeholderNotificationCommandBody = {
+      incidentId: notifyIncidentId,
+      recipients: emails,
+      ...(notifyMessage.trim() ? { message: notifyMessage.trim() } : {}),
+    };
+    const pending: PendingStakeholderNotificationCommand = {
+      command: createIdempotentCommand(
+        'notify_stakeholders',
+        body,
+        ({ body: commandBody, idempotencyKey }) => api.notifyIncidentStakeholders(
+          commandBody.incidentId,
+          {
+            recipients: [...commandBody.recipients],
+            ...(commandBody.message ? { message: commandBody.message } : {}),
+          },
+          idempotencyKey,
+        ),
+      ),
+    };
+    await runStakeholderNotificationCommand(pending, false);
+  };
+
+  const retryStakeholderNotificationCommand = async () => {
+    const pending = pendingStakeholderCommandRef.current;
+    if (pending) await runStakeholderNotificationCommand(pending, true);
   };
 
   const openNotifyDialog = (incidentId: string) => {
+    stakeholderCommandGenerationRef.current += 1;
+    pendingStakeholderCommandRef.current = null;
+    activeStakeholderCommandRef.current = null;
     setNotifyIncidentId(incidentId);
     setNotifyRecipients('');
     setNotifyMessage('');
     setNotifyResults(null);
+    setNotifyCommandMessage('');
+    setNotifyRetryAvailable(false);
   };
 
   const closeNotifyDialog = () => {
+    if (notifying || notifyRetryAvailable) return;
+    stakeholderCommandGenerationRef.current += 1;
+    pendingStakeholderCommandRef.current = null;
+    activeStakeholderCommandRef.current = null;
     setNotifyIncidentId(null);
     setNotifyRecipients('');
     setNotifyMessage('');
     setNotifyResults(null);
+    setNotifyCommandMessage('');
+    setNotifyRetryAvailable(false);
   };
 
-  const [notifyingId, setNotifyingId] = useState<string | null>(null);
+  const openWebhookNotifyDialog = (incident: IncidentItem) => {
+    webhookCommandGenerationRef.current += 1;
+    pendingWebhookCommandRef.current = null;
+    activeWebhookCommandRef.current = null;
+    setWebhookNotifyIncident(incident);
+    setWebhookNarrative('');
+    setWebhookNarrativeReviewed(false);
+    setWebhookNotifyResult(null);
+    setWebhookNotifyMessage('');
+    setWebhookRetryAvailable(false);
+  };
 
-  const handleNotifyIncident = async (incidentId: string) => {
-    setNotifyingId(incidentId);
+  const closeWebhookNotifyDialog = () => {
+    if (webhookNotifying || webhookRetryAvailable) return;
+    webhookCommandGenerationRef.current += 1;
+    pendingWebhookCommandRef.current = null;
+    activeWebhookCommandRef.current = null;
+    setWebhookNotifyIncident(null);
+    setWebhookNarrative('');
+    setWebhookNarrativeReviewed(false);
+    setWebhookNotifyResult(null);
+    setWebhookNotifyMessage('');
+    setWebhookRetryAvailable(false);
+  };
+
+  const runWebhookNotifyCommand = async (pending: PendingIncidentWebhookCommand) => {
+    const generation = webhookCommandGenerationRef.current;
+    const token = Symbol('incident-webhook-command');
+    activeWebhookCommandRef.current = token;
+    pendingWebhookCommandRef.current = pending;
+    setWebhookNotifying(true);
+    setWebhookRetryAvailable(false);
+    setWebhookNotifyMessage('');
     try {
-      const result = await api.notifyIncident(incidentId);
-      success(`Notification sent to ${result.webhooks_delivered} webhook${result.webhooks_delivered !== 1 ? 's' : ''}`);
+      const result = await api.notifyIncidentWebhooks(
+        pending.incidentId,
+        {
+          narrative: pending.narrative,
+          expected_resource_version: pending.expectedResourceVersion,
+        },
+        pending.idempotencyKey,
+      );
+      if (
+        webhookCommandGenerationRef.current !== generation
+        || activeWebhookCommandRef.current !== token
+      ) return;
+      pendingWebhookCommandRef.current = null;
+      setWebhookNotifyResult(result);
+      setWebhookNotifyMessage(
+        result.replayed
+          ? 'Webhook command accepted from the original idempotent submission.'
+          : 'Webhook command accepted for durable delivery.',
+      );
+      success('Webhook notification command accepted');
     } catch (err: unknown) {
-      const message = err instanceof Error && err.message ? err.message : 'Failed to notify';
-      showError(message);
+      if (
+        webhookCommandGenerationRef.current !== generation
+        || activeWebhookCommandRef.current !== token
+      ) return;
+      const ambiguous = err instanceof TypeError
+        || (err instanceof WebhookContractError && err.status >= 200 && err.status <= 299)
+        || (err instanceof ApiError && err.status >= 500 && err.status <= 599)
+        || (err instanceof Error && ['AbortError', 'NetworkError'].includes(err.name));
+      if (ambiguous) {
+        setWebhookRetryAvailable(true);
+        setWebhookNotifyMessage(
+          'The command result is unknown. Retry the same command to recover its durable acceptance.',
+        );
+      } else {
+        pendingWebhookCommandRef.current = null;
+        const message = err instanceof Error && err.message
+          ? err.message
+          : 'Failed to notify webhook receivers';
+        showError(message);
+      }
     } finally {
-      setNotifyingId(null);
+      if (
+        webhookCommandGenerationRef.current === generation
+        && activeWebhookCommandRef.current === token
+      ) {
+        activeWebhookCommandRef.current = null;
+        setWebhookNotifying(false);
+      }
     }
   };
+
+  const handleNotifyIncidentWebhooks = async () => {
+    if (!webhookNotifyIncident || !webhookNarrativeReviewed) return;
+    const narrative = webhookNarrative.trim() || null;
+    await runWebhookNotifyCommand({
+      incidentId: webhookNotifyIncident.id,
+      narrative,
+      expectedResourceVersion: webhookNotifyIncident.version,
+      idempotencyKey: generateIdempotencyKey(),
+    });
+  };
+
+  const retryIncidentWebhookCommand = async () => {
+    const pending = pendingWebhookCommandRef.current;
+    if (pending) await runWebhookNotifyCommand(pending);
+  };
+
+  const webhookNarrativePayload = webhookNarrative.trim() || null;
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
@@ -759,6 +1028,17 @@ function IncidentsPageContent() {
                       <Button
                         variant="ghost"
                         size="icon"
+                        onClick={() => openWebhookNotifyDialog(incident)}
+                        aria-label={`Notify webhook receivers for incident ${incident.id}`}
+                        title="Queue webhook notification"
+                        disabled={isUpdating}
+                        data-testid={`incident-webhook-notify-${incident.id}`}
+                      >
+                        <Bell className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
                         onClick={() => {
                           void handleDeleteIncident(incident.id);
                         }}
@@ -801,7 +1081,7 @@ function IncidentsPageContent() {
                           id={`status-${incident.id}`}
                           value={displayStatus}
                           onChange={(e) => {
-                            void handleStatusChange(incident.id, e.target.value as IncidentItem['status'], displayStatus);
+                            void handleStatusChange(incident.id, e.target.value as IncidentItem['status']);
                           }}
                           disabled={isUpdating}
                         >
@@ -1031,6 +1311,9 @@ function IncidentsPageContent() {
             <DialogContent data-testid="notify-dialog-overlay">
               <DialogHeader>
                 <DialogTitle>Notify Stakeholders</DialogTitle>
+                <DialogDescription>
+                  Send an email update to the selected incident stakeholders.
+                </DialogDescription>
               </DialogHeader>
               <div className="space-y-4">
                 <div className="space-y-1">
@@ -1041,7 +1324,8 @@ function IncidentsPageContent() {
                     placeholder="alice@example.com, bob@example.com"
                     value={notifyRecipients}
                     onChange={(e) => setNotifyRecipients(e.target.value)}
-                    disabled={notifying}
+                    disabled={notifying || notifyRetryAvailable || notifyResults !== null}
+                    maxLength={10_000}
                   />
                 </div>
                 <div className="space-y-1">
@@ -1053,25 +1337,45 @@ function IncidentsPageContent() {
                     placeholder="Optional custom message for stakeholders"
                     value={notifyMessage}
                     onChange={(e) => setNotifyMessage(e.target.value)}
-                    disabled={notifying}
+                    disabled={notifying || notifyRetryAvailable || notifyResults !== null}
+                    maxLength={4096}
                   />
                 </div>
+                {notifyCommandMessage ? (
+                  <Alert variant={notifyRetryAvailable ? 'destructive' : 'default'}>
+                    <AlertDescription>{notifyCommandMessage}</AlertDescription>
+                  </Alert>
+                ) : null}
                 <div className="flex justify-end gap-2">
-                  <Button variant="outline" onClick={closeNotifyDialog} disabled={notifying}>
-                    Cancel
-                  </Button>
                   <Button
-                    onClick={() => {
-                      void handleNotifyStakeholders();
-                    }}
-                    disabled={notifying}
-                    loading={notifying}
-                    loadingText="Sending..."
-                    data-testid="notify-send-button"
+                    variant="outline"
+                    onClick={closeNotifyDialog}
+                    disabled={notifying || notifyRetryAvailable}
                   >
-                    <Mail className="mr-2 h-4 w-4" />
-                    Send Notification
+                    {notifyResults ? 'Close' : 'Cancel'}
                   </Button>
+                  {notifyRetryAvailable ? (
+                    <Button
+                      onClick={() => { void retryStakeholderNotificationCommand(); }}
+                      loading={notifying}
+                      loadingText="Retrying..."
+                    >
+                      Retry same command
+                    </Button>
+                  ) : notifyResults === null ? (
+                    <Button
+                      onClick={() => {
+                        void handleNotifyStakeholders();
+                      }}
+                      disabled={notifying}
+                      loading={notifying}
+                      loadingText="Sending..."
+                      data-testid="notify-send-button"
+                    >
+                      <Mail className="mr-2 h-4 w-4" />
+                      Send Notification
+                    </Button>
+                  ) : null}
                 </div>
                 {notifyResults && (
                   <div className="space-y-2 rounded-md border p-3" data-testid="notify-results">
@@ -1087,6 +1391,127 @@ function IncidentsPageContent() {
                   </div>
                 )}
               </div>
+            </DialogContent>
+          </Dialog>
+
+          <Dialog
+            open={!!webhookNotifyIncident}
+            onOpenChange={(open) => { if (!open) closeWebhookNotifyDialog(); }}
+          >
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Notify webhook receivers</DialogTitle>
+                <DialogDescription>
+                  Review the exact public event data before creating a durable notification.
+                </DialogDescription>
+              </DialogHeader>
+              {webhookNotifyIncident ? (
+                <div className="space-y-4">
+                  <div className="space-y-1">
+                    <Label htmlFor="incident-webhook-narrative">Receiver narrative (optional)</Label>
+                    <textarea
+                      id="incident-webhook-narrative"
+                      className="flex min-h-24 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      value={webhookNarrative}
+                      onChange={(event) => {
+                        setWebhookNarrative(event.target.value);
+                        setWebhookNarrativeReviewed(false);
+                      }}
+                      maxLength={4096}
+                      disabled={webhookNotifying || webhookRetryAvailable || webhookNotifyResult !== null}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      This text is delivered to configured receivers. Do not include secrets.
+                    </p>
+                  </div>
+                  <section className="space-y-2" aria-label="Outbound event preview">
+                    <div className="flex flex-wrap items-baseline justify-between gap-2">
+                      <h3 className="text-sm font-semibold">Outbound event preview</h3>
+                      <span className="text-xs text-muted-foreground">
+                        Envelope timestamp assigned at command acceptance
+                      </span>
+                    </div>
+                    <dl
+                      className="grid grid-cols-[minmax(8rem,auto)_1fr] gap-x-4 gap-y-2 border-y py-3 text-sm"
+                      data-testid="incident-webhook-preview"
+                    >
+                      <dt className="text-muted-foreground">type</dt>
+                      <dd className="font-mono">incident.notify</dd>
+                      <dt className="text-muted-foreground">incident_id</dt>
+                      <dd className="break-all font-mono">{webhookNotifyIncident.id}</dd>
+                      <dt className="text-muted-foreground">state</dt>
+                      <dd className="font-mono">{webhookNotifyIncident.status}</dd>
+                      <dt className="text-muted-foreground">severity</dt>
+                      <dd className="font-mono">{webhookNotifyIncident.severity}</dd>
+                      <dt className="text-muted-foreground">resource_version</dt>
+                      <dd className="font-mono">{webhookNotifyIncident.version}</dd>
+                      <dt className="text-muted-foreground">created_at</dt>
+                      <dd className="break-all font-mono">{webhookNotifyIncident.created_at}</dd>
+                      <dt className="text-muted-foreground">updated_at</dt>
+                      <dd className="break-all font-mono">{webhookNotifyIncident.updated_at}</dd>
+                      <dt className="text-muted-foreground">resolved_at</dt>
+                      <dd className="break-all font-mono">
+                        {webhookNotifyIncident.resolved_at ?? 'null'}
+                      </dd>
+                      <dt className="text-muted-foreground">narrative</dt>
+                      <dd className="break-all whitespace-pre-wrap font-mono">
+                        {JSON.stringify(webhookNarrativePayload)}
+                      </dd>
+                    </dl>
+                  </section>
+                  <div className="flex items-start gap-2">
+                    <Checkbox
+                      id="incident-webhook-reviewed"
+                      checked={webhookNarrativeReviewed}
+                      onCheckedChange={(checked) => setWebhookNarrativeReviewed(Boolean(checked))}
+                      disabled={webhookNotifying || webhookRetryAvailable || webhookNotifyResult !== null}
+                    />
+                    <Label htmlFor="incident-webhook-reviewed" className="font-normal leading-5">
+                      I reviewed this narrative and the incident details above.
+                    </Label>
+                  </div>
+                  {webhookNotifyMessage ? (
+                    <Alert variant={webhookRetryAvailable ? 'destructive' : 'default'}>
+                      <AlertDescription className="space-y-1">
+                        <p>{webhookNotifyMessage}</p>
+                        {webhookNotifyResult ? (
+                          <p className="break-all font-mono text-xs">
+                            Event {webhookNotifyResult.event_id}; command {webhookNotifyResult.command_id}
+                          </p>
+                        ) : null}
+                      </AlertDescription>
+                    </Alert>
+                  ) : null}
+                  <div className="flex flex-wrap justify-end gap-2">
+                    <Button
+                      variant="outline"
+                      onClick={closeWebhookNotifyDialog}
+                      disabled={webhookNotifying || webhookRetryAvailable}
+                    >
+                      {webhookNotifyResult ? 'Close' : 'Cancel'}
+                    </Button>
+                    {webhookRetryAvailable ? (
+                      <Button
+                        onClick={() => { void retryIncidentWebhookCommand(); }}
+                        loading={webhookNotifying}
+                        loadingText="Retrying..."
+                      >
+                        Retry same command
+                      </Button>
+                    ) : webhookNotifyResult === null ? (
+                      <Button
+                        onClick={() => { void handleNotifyIncidentWebhooks(); }}
+                        disabled={!webhookNarrativeReviewed || webhookNotifying}
+                        loading={webhookNotifying}
+                        loadingText="Sending..."
+                      >
+                        <Bell className="mr-2 h-4 w-4" />
+                        Send webhook notification
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
             </DialogContent>
           </Dialog>
         </div>

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 from collections.abc import AsyncIterator
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -15,7 +16,15 @@ from tldw_Server_API.app.core.Admin_Webhooks.audit import (
     WebhookOperationalReasonCode,
 )
 from tldw_Server_API.app.core.Admin_Webhooks.catalog import EVENT_API_VERSION
-from tldw_Server_API.app.core.Admin_Webhooks.crypto import WebhookKeyRing
+from tldw_Server_API.app.core.Admin_Webhooks.config import (
+    AdminWebhookMode,
+    AdminWebhookSettings,
+)
+from tldw_Server_API.app.core.Admin_Webhooks.crypto import (
+    WebhookKeyLoadCode,
+    WebhookKeyRing,
+    WebhookKeyRingLoadResult,
+)
 from tldw_Server_API.app.core.Admin_Webhooks.domain import (
     PendingIncidentWebhookMarker,
     WebhookError,
@@ -27,6 +36,9 @@ from tldw_Server_API.app.core.Admin_Webhooks.domain import (
 from tldw_Server_API.app.core.Admin_Webhooks.key_rotation import (
     PROTECTED_TABLE_ORDER,
     WebhookKeyRotationService,
+)
+from tldw_Server_API.app.core.Admin_Webhooks.producer import (
+    AdminWebhookEventProducer,
 )
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
 from tldw_Server_API.app.core.AuthNZ.exceptions import TransactionError
@@ -267,15 +279,20 @@ def _seed_pending_marker(path: Path, ring: WebhookKeyRing) -> None:
         aggregate_id=None,
         aggregate_version=None,
         source_command_id="incident-command-pending-1",
+        source_component="admin_system_ops",
+        source_request_id="request-pending-1",
         body=ring.encrypt_bytes(
             purpose="pending_incident.body",
             identity={
                 "event_id": "pending-event-1",
                 "api_version": EVENT_API_VERSION,
+                "source_component": "admin_system_ops",
+                "source_request_id": "request-pending-1",
                 "source_command_id": "incident-command-pending-1",
             },
             plaintext=b'{"incident_id":"incident-pending"}',
         ),
+        body_size_bytes=len(b'{"incident_id":"incident-pending"}'),
         created_at=NOW,
     )
     store = system_ops._default_store()
@@ -340,9 +357,7 @@ async def test_start_audits_before_state_change_and_persists_operation(
 
     async def ordered_sink(record: OperationalAudit) -> None:
         if record.outcome == "accepted":
-            phases_seen_by_sink.append(
-                (await rotation.repository.get_migration_state()).rotation_phase
-            )
+            phases_seen_by_sink.append((await rotation.repository.get_migration_state()).rotation_phase)
         rotation.audits.append(record)
 
     progress = await rotation.service.start(
@@ -360,6 +375,49 @@ async def test_start_audits_before_state_change_and_persists_operation(
     assert progress.table_cursor == PROTECTED_TABLE_ORDER[0]
     assert progress.key_cursor is None
     assert progress.processed_count == 0
+
+
+@pytest.mark.unit
+async def test_rotation_start_waits_for_incident_marker_publication_guard(
+    rotation: RotationFixture,
+) -> None:
+    producer = AdminWebhookEventProducer(
+        repository=rotation.repository,
+        settings=AdminWebhookSettings(
+            mode=AdminWebhookMode.ON,
+            registration_limit=100,
+            active_limit=25,
+            allow_http_dev=False,
+            idempotency_ttl_seconds=86_400,
+            rollback_window_days=7,
+        ),
+        key_ring_result=WebhookKeyRingLoadResult(
+            ring=rotation.source_ring,
+            code=WebhookKeyLoadCode.AVAILABLE,
+        ),
+        event_id_factory=lambda: "45000000-0000-4000-8000-000000000001",
+        delivery_id_factory=lambda: "45000000-0000-4000-8000-000000000002",
+        clock=lambda: NOW,
+    )
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def hold_publication() -> None:
+        async with producer.incident_marker_publication_guard():
+            entered.set()
+            await release.wait()
+
+    publication = asyncio.create_task(hold_publication())
+    await entered.wait()
+    rotation_start = asyncio.create_task(rotation.start())
+    await asyncio.sleep(0.05)
+
+    assert rotation_start.done() is False
+
+    release.set()
+    await publication
+    progress = await rotation_start
+    assert progress.phase == "rewriting"
     assert progress.verified_count == 0
     assert progress.started_at == NOW
     assert progress.completed_at is None
@@ -550,9 +608,7 @@ async def test_resume_rewrites_every_inventory_then_verify_and_finalize_cutover(
             protected=row.protected,
         )
     store = system_ops._load_store_strict(rotation.store_path)
-    marker = PendingIncidentWebhookMarker.from_store_record(
-        store["webhook_pending_events"][0]
-    )
+    marker = PendingIncidentWebhookMarker.from_store_record(store["webhook_pending_events"][0])
     assert marker.body.key_id == TARGET_KEY_ID
     rotation.target_ring.decrypt_bytes(
         purpose=marker.envelope_purpose,
@@ -590,10 +646,7 @@ async def test_resume_rewrites_every_inventory_then_verify_and_finalize_cutover(
     assert durable.active_primary_key_id == TARGET_KEY_ID
     assert durable.rotation_phase == "complete"
     assert durable.rotation_verified_count == durable.rotation_processed_count == 7
-    assert [
-        (record.action, record.outcome, record.reason_code)
-        for record in rotation.audits
-    ] == [
+    assert [(record.action, record.outcome, record.reason_code) for record in rotation.audits] == [
         ("admin_webhook.key_rotation.start", "accepted", None),
         ("admin_webhook.key_rotation.start", "completed", None),
         ("admin_webhook.key_rotation.resume", "accepted", None),
@@ -621,6 +674,53 @@ async def test_resume_rewrites_every_inventory_then_verify_and_finalize_cutover(
         "rotation-finalize-0123456789",
         "rotation-finalize-0123456789",
     ]
+
+
+@pytest.mark.unit
+async def test_resume_rewrites_legacy_pending_marker_shape_and_aad(
+    rotation: RotationFixture,
+) -> None:
+    store = system_ops._load_store_strict(rotation.store_path)
+    marker = PendingIncidentWebhookMarker.from_store_record(
+        store["webhook_pending_events"][0]
+    )
+    plaintext = rotation.source_ring.decrypt_bytes(
+        purpose=marker.envelope_purpose,
+        identity=marker.envelope_identity,
+        protected=marker.body,
+    )
+    legacy = replace(
+        marker,
+        body=rotation.source_ring.encrypt_bytes(
+            purpose=marker.envelope_purpose,
+            identity=marker.legacy_envelope_identity,
+            plaintext=plaintext,
+        ),
+    )
+    legacy_record = legacy.to_store_record()
+    legacy_record.pop("request_fingerprint")
+    store["webhook_pending_events"] = [legacy_record]
+    system_ops._atomic_write_store(rotation.store_path, store)
+
+    await rotation.start()
+    rewritten = await rotation.service.resume(
+        OPERATION_ID,
+        operator_id=9,
+        request_id="rotation-resume-legacy-marker",
+        audit_sink=rotation.audit_sink,
+    )
+
+    assert rewritten.phase == "verifying"
+    current_store = system_ops._load_store_strict(rotation.store_path)
+    current_record = current_store["webhook_pending_events"][0]
+    assert "request_fingerprint" in current_record
+    current = PendingIncidentWebhookMarker.from_store_record(current_record)
+    assert current.body.key_id == TARGET_KEY_ID
+    rotation.target_ring.decrypt_bytes(
+        purpose=current.envelope_purpose,
+        identity=current.envelope_identity,
+        protected=current.body,
+    )
 
 
 @pytest.mark.unit
@@ -691,9 +791,7 @@ async def test_resume_recovers_file_publication_before_cursor_commit_once(
     assert crashed.value.code is WebhookErrorCode.OPERATION_FAILED
 
     store = system_ops._load_store_strict(rotation.store_path)
-    marker = PendingIncidentWebhookMarker.from_store_record(
-        store["webhook_pending_events"][0]
-    )
+    marker = PendingIncidentWebhookMarker.from_store_record(store["webhook_pending_events"][0])
     assert marker.body.key_id == TARGET_KEY_ID
     durable = await rotation.repository.get_migration_state()
     assert durable.rotation_processed_count == 6
@@ -1049,6 +1147,47 @@ async def test_malformed_pending_marker_fails_without_file_or_cursor_publication
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    "failure",
+    ("duplicate_id", "identity_substitution", "key_loss"),
+)
+async def test_pending_marker_integrity_failure_never_drops_or_rewrites_records(
+    rotation: RotationFixture,
+    failure: str,
+) -> None:
+    store = system_ops._load_store_strict(rotation.store_path)
+    marker_record = dict(store["webhook_pending_events"][0])
+    if failure == "duplicate_id":
+        store["webhook_pending_events"] = [marker_record, dict(marker_record)]
+    elif failure == "identity_substitution":
+        marker_record["source_command_id"] = "incident-command-substituted-1"
+        store["webhook_pending_events"] = [marker_record]
+    else:
+        marker_record["body_key_id"] = "key-not-configured"
+        store["webhook_pending_events"] = [marker_record]
+    system_ops._atomic_write_store(rotation.store_path, store)
+    before = rotation.store_path.read_bytes()
+
+    await rotation.start()
+    with pytest.raises(WebhookError) as exc_info:
+        await rotation.service.resume(
+            OPERATION_ID,
+            operator_id=9,
+            request_id=f"rotation-resume-marker-{failure}",
+            audit_sink=rotation.audit_sink,
+        )
+
+    expected_code = (
+        WebhookErrorCode.PRECONDITION_FAILED if failure == "duplicate_id" else WebhookErrorCode.KEY_UNAVAILABLE
+    )
+    assert exc_info.value.code is expected_code
+    durable = await rotation.repository.get_migration_state()
+    assert durable.rotation_table_cursor == "pending_incident_markers"
+    assert durable.rotation_key_cursor is None
+    assert rotation.store_path.read_bytes() == before
+
+
+@pytest.mark.unit
 async def test_finalize_requires_source_key_and_repeats_full_readback(
     rotation: RotationFixture,
 ) -> None:
@@ -1119,6 +1258,8 @@ def test_pending_aggregate_marker_round_trips_exact_closed_shape() -> None:
     identity = {
         "event_id": "pending-aggregate-1",
         "api_version": EVENT_API_VERSION,
+        "source_component": "admin_system_ops",
+        "source_request_id": "request-pending-aggregate-1",
         "aggregate_type": "incident",
         "aggregate_id": "incident-42",
         "aggregate_version": "7",
@@ -1132,11 +1273,14 @@ def test_pending_aggregate_marker_round_trips_exact_closed_shape() -> None:
         aggregate_id="incident-42",
         aggregate_version="7",
         source_command_id=None,
+        source_component="admin_system_ops",
+        source_request_id="request-pending-aggregate-1",
         body=ring.encrypt_bytes(
             purpose="pending_incident.body",
             identity=identity,
             plaintext=b'{"incident_id":"incident-42"}',
         ),
+        body_size_bytes=len(b'{"incident_id":"incident-42"}'),
         created_at=NOW,
     )
 

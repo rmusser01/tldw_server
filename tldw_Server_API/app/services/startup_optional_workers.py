@@ -161,8 +161,6 @@ def _env_enabled_predicate(
 def _jobs_webhooks_worker_enabled(
     _context: WorkerLifecycleContext | None,
 ) -> bool:
-    if _admin_webhook_delivery_runtime_enabled(_context):
-        return False
     enabled = _env_flag_enabled("JOBS_WEBHOOKS_ENABLED")
     has_url = bool(os.getenv("JOBS_WEBHOOKS_URL"))
     outbox_enabled = _env_flag_enabled("JOBS_EVENTS_OUTBOX")
@@ -178,16 +176,12 @@ def _admin_webhook_delivery_runtime_enabled(
         from tldw_Server_API.app.core.Admin_Webhooks.config import (
             AdminWebhookMode,
             AdminWebhookSettings,
-            WebhookRouteSelection,
         )
 
         settings = AdminWebhookSettings.from_environment(os.environ)
     except (TypeError, ValueError):
         return False
-    return (
-        settings.mode is AdminWebhookMode.ON
-        and settings.route_selection is WebhookRouteSelection.CANONICAL
-    )
+    return settings.mode is AdminWebhookMode.ON
 
 
 async def start_optional_workers(

@@ -33,6 +33,7 @@ from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
     RuntimeHeartbeatWrite,
 )
 from tldw_Server_API.app.core.Jobs.operations.contracts import JobIdentityLookupResult
+from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
 from tldw_Server_API.tests.Admin_Webhooks.test_event_expansion import (
     _captured_delivery,
     canonical_uuid4,
@@ -525,6 +526,69 @@ async def test_runtime_supervises_independent_loops_and_awaits_shutdown(
 
 
 @pytest.mark.unit
+async def test_incident_markers_run_before_delivery_repairs_and_fail_independently(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = importlib.import_module(
+        "tldw_Server_API.app.services.admin_webhook_delivery_runtime"
+    )
+    stop_event = asyncio.Event()
+    calls: list[str] = []
+    writes: list[RuntimeHeartbeatWrite] = []
+
+    class IncidentReconciler:
+        async def reconcile_once(self) -> None:
+            calls.append("incident_markers")
+            raise RuntimeError("bounded incident marker failure")
+
+    class DeliveryReconciler:
+        async def reconcile_enqueue_once(self) -> None:
+            calls.append("enqueue")
+
+        async def reconcile_pending_dispositions_once(self) -> None:
+            calls.append("dispositions")
+
+        async def recover_stale_test_attempts_once(self) -> None:
+            calls.append("stale_tests")
+
+        async def reconcile_expired_once(self) -> None:
+            calls.append("expiry")
+
+    class Repository:
+        async def upsert_runtime_heartbeat(
+            self,
+            write: RuntimeHeartbeatWrite,
+        ) -> None:
+            writes.append(write)
+
+    async def stop_after_iteration(_stop: asyncio.Event, _seconds: float) -> None:
+        stop_event.set()
+
+    monkeypatch.setattr(runtime, "_wait_interruptibly", stop_after_iteration)
+    components = SimpleNamespace(
+        incident_reconciler=IncidentReconciler(),
+        reconciler=DeliveryReconciler(),
+        reconciler_repository=Repository(),
+        reconciler_instance_id=canonical_uuid4("task-12-incident-reconciler"),
+        settings=SimpleNamespace(delivery_loop_interval_seconds=1),
+        clock=lambda: NOW,
+    )
+
+    await runtime._run_reconciler_loop(stop_event, components)
+
+    assert calls == [
+        "incident_markers",
+        "enqueue",
+        "dispositions",
+        "stale_tests",
+        "expiry",
+    ]
+    assert writes[0].ready is False
+    assert writes[0].reason_code is DeliveryRuntimeReasonCode.RECONCILER_UNAVAILABLE
+    assert writes[-1].ready is False
+
+
+@pytest.mark.unit
 async def test_worker_supervisor_uses_fresh_generation_after_sdk_exit() -> None:
     runtime = importlib.import_module("tldw_Server_API.app.services.admin_webhook_delivery_runtime")
     writes: list[RuntimeHeartbeatWrite] = []
@@ -572,10 +636,21 @@ async def test_worker_supervisor_uses_fresh_generation_after_sdk_exit() -> None:
         ) -> None:
             writes.append(write)
 
+    class Capability:
+        async def status(self, _now: datetime) -> object:
+            return SimpleNamespace(
+                acquisition_ready=True,
+                acquisition_reason_code=None,
+            )
+
     components = SimpleNamespace(
         jobs=JobsRuntime(),
+        capability=Capability(),
         worker_repository=Repository(),
-        settings=SimpleNamespace(delivery_loop_interval_seconds=0.01),
+        settings=SimpleNamespace(
+            delivery_loop_interval_seconds=0.01,
+            delivery_heartbeat_interval_seconds=7,
+        ),
         clock=lambda: NOW,
     )
 
@@ -598,6 +673,91 @@ async def test_worker_supervisor_uses_fresh_generation_after_sdk_exit() -> None:
 
 
 @pytest.mark.unit
+async def test_real_idle_worker_keeps_heartbeat_running_during_max_backoff(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = importlib.import_module("tldw_Server_API.app.services.admin_webhook_delivery_runtime")
+    stop_event = asyncio.Event()
+    writes: list[RuntimeHeartbeatWrite] = []
+    heartbeat_waits: list[float] = []
+    worker_sleeps: list[float] = []
+
+    class EmptyManager:
+        def acquire_next_job(self, **_kwargs: object) -> None:
+            return None
+
+    sdk = WorkerSDK(
+        EmptyManager(),
+        WorkerConfig(
+            domain="admin_webhooks",
+            queue="delivery",
+            worker_id=canonical_uuid4("idle-heartbeat-worker"),
+            backoff_base_seconds=30,
+            backoff_max_seconds=30,
+        ),
+    )
+
+    async def hold_worker_backoff(seconds: float) -> None:
+        worker_sleeps.append(seconds)
+        await asyncio.sleep(0.05)
+        sdk.stop()
+
+    sdk._sleep_chunked = hold_worker_backoff
+
+    class JobsRuntime:
+        async def refresh(self) -> object:
+            return SimpleNamespace(
+                worker_sdk=sdk,
+                worker_handler=SimpleNamespace(
+                    handler_error_disposition=lambda *_args: None,
+                    on_disposition_applied=lambda *_args: None,
+                ),
+                worker_instance_id=canonical_uuid4("idle-heartbeat-generation"),
+            )
+
+    class Capability:
+        async def status(self, _now: datetime) -> object:
+            return SimpleNamespace(
+                acquisition_ready=True,
+                acquisition_reason_code=None,
+            )
+
+    class Repository:
+        async def upsert_runtime_heartbeat(self, write: RuntimeHeartbeatWrite) -> None:
+            writes.append(write)
+
+    async def advance_heartbeat_loop(
+        _stop: asyncio.Event,
+        seconds: float,
+    ) -> None:
+        heartbeat_waits.append(seconds)
+        if len(heartbeat_waits) == 3:
+            stop_event.set()
+        await asyncio.sleep(0)
+
+    monkeypatch.setattr(runtime, "_wait_interruptibly", advance_heartbeat_loop)
+    components = SimpleNamespace(
+        jobs=JobsRuntime(),
+        capability=Capability(),
+        worker_repository=Repository(),
+        settings=SimpleNamespace(
+            delivery_loop_interval_seconds=1,
+            delivery_heartbeat_interval_seconds=10,
+        ),
+        clock=lambda: NOW,
+    )
+
+    await asyncio.wait_for(runtime._run_worker_loop(stop_event, components), timeout=1)
+
+    assert worker_sleeps == [30.0]
+    assert len(heartbeat_waits) == 3
+    assert all(0 <= wait <= 10 for wait in heartbeat_waits)
+    assert len([write for write in writes if write.ready]) >= 3
+    assert writes[-1].ready is False
+    assert writes[-1].reason_code is DeliveryRuntimeReasonCode.WORKER_UNAVAILABLE
+
+
+@pytest.mark.unit
 async def test_runtime_recovers_after_jobs_constructor_fails_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -609,11 +769,12 @@ async def test_runtime_recovers_after_jobs_constructor_fails_once(
     )
     settings = SimpleNamespace(
         mode=runtime.AdminWebhookMode.ON,
-        route_selection=runtime.WebhookRouteSelection.CANONICAL,
         delivery_claim_ttl_seconds=60,
         delivery_loop_interval_seconds=0.01,
+        delivery_heartbeat_interval_seconds=7,
         delivery_heartbeat_freshness_seconds=30,
         allow_http_dev=False,
+        allow_e2e_loopback=False,
     )
     manager_calls = 0
     worker_started = asyncio.Event()

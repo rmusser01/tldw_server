@@ -89,9 +89,8 @@ Choose one of these controlled states:
 
 - drain and stop every process that can write the legacy database or
   `system_ops.json`; or
-- roll every process to canonical selector mode `migrate` with
-  `TLDW_ADMIN_WEBHOOKS_LEGACY_COMPAT=false`, then keep product and operator
-  mutation traffic drained for the import.
+- roll every process to `TLDW_ADMIN_WEBHOOKS_MODE=migrate`, then keep product
+  and operator mutation traffic drained for the import.
 
 A single-node environment change is insufficient in a multi-process deployment.
 Old application nodes, CLI sessions, background workers, and admin sessions are
@@ -106,24 +105,10 @@ curl --fail-with-body --silent --show-error \
 ```
 
 Require `mode=migrate` and `route_selection=canonical` for a migrate rollout.
-Then prove the legacy-only routes are unreachable on each node:
-
-```bash
-curl --silent --output /dev/null --write-out '%{http_code}\n' \
-  -X POST -H "Authorization: Bearer ${ADMIN_TOKEN}" \
-  "${NODE_BASE}/api/v1/admin/webhooks/1/test"
-
-curl --silent --output /dev/null --write-out '%{http_code}\n' \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
-  "${NODE_BASE}/api/v1/admin/webhooks/1/deliveries"
-
-curl --silent --output /dev/null --write-out '%{http_code}\n' \
-  -X POST -H "Authorization: Bearer ${ADMIN_TOKEN}" \
-  "${NODE_BASE}/api/v1/admin/incidents/1/notify-webhooks"
-```
-
-Each must return 404 in canonical selection. Also verify there is no direct
-legacy database/file writer outside the HTTP processes. Record a signed
+Canonical routes are always mounted, so do not use 404 responses as a selector
+or compatibility probe. Mutations blocked by migrate mode return the canonical
+bounded mode error. Also verify there is no direct legacy database/file writer
+outside the HTTP processes. Record a signed
 operator acknowledgement that **all writers are quiesced**. The CLI's
 `--all-writers-quiesced` flag asserts this external fact; it cannot prove it.
 
@@ -250,8 +235,8 @@ Before admitting any canonical management traffic, record all of the following:
 4. The active strict `system_ops.json` snapshot is valid JSON and no longer has
    top-level `webhooks` or `webhook_deliveries`; unrelated top-level fields are
    unchanged.
-5. Legacy database rows remain intact; PR 1 does not drop or sanitize the legacy
-   table.
+5. Legacy database rows remain intact; the importer does not drop or sanitize
+   the legacy table.
 6. When backup artifacts apply, record owner/group/mode/size and the encrypted
    backup's SHA-256 without printing rollback-key content:
 
@@ -267,21 +252,91 @@ readback and canonical decrypt/readback. Preserve the command output, sanitized
 status, source mapping review, artifact metadata, and ciphertext digest as the
 migration evidence bundle.
 
-Do not switch mode to `on` merely because import passed. PR 1 has no delivery
-substrate and cannot pass the final activation gate.
+Do not switch mode to `on` merely because import passed. Provision the key ring
+and Jobs contract, rotate imported secrets, and pass the read-only
+`tldw-admin-webhooks activation-check --phase predeploy` gate first.
 
-## 5. Structural File Recovery
+## 5. Canonical Incident-Marker Backup And Restore
+
+In canonical mode, `system_ops.json` may contain a top-level
+`webhook_pending_events` list. Each entry contains source identity and an
+encrypted incident event body. The reconciler commits that event and automatic
+fanout to AuthNZ before removing the exact marker. These markers are current
+durable work, not legacy migration fields and not disposable cache.
+
+### 5.1 Backup And Readback
+
+For a coordinated backup proof:
+
+1. Preserve every webhook encryption key referenced by current database rows,
+   retained backups, and pending markers.
+2. Set canonical mode `off`, drain incident/user mutation traffic, and stop the
+   webhook runtime on every node. Record that all writers and reconcilers are
+   quiesced.
+3. Take the approved AuthNZ database backup and copy the active
+   `system_ops.json` from the same quiesced window. Keep the file backup private
+   and record owner, group, mode, size, timestamp, and SHA-256 without recording
+   its content.
+4. Read back the copied file through the application's strict
+   `_load_store_strict()` reader and parse `webhook_pending_events` through
+   `_pending_incident_markers()`. Use an approved maintenance entry point with
+   the same application version; do not use `jq`, regex, or permissive JSON
+   parsing as integrity proof.
+5. Record only the marker count, event IDs, event types, body key IDs, and the
+   file digest. Do not print ciphertext or decrypt event bodies into evidence.
+6. Prove the database backup is restorable through the database provider's
+   normal restore drill and bind its restore reference to the file digest in
+   the change record.
+
+Quiescing both stores is the default because a database snapshot taken before a
+marker's event commit plus a file snapshot taken after marker removal can lose
+the recoverable source coordinate. Do not claim independent uncoordinated
+snapshots form one consistent webhook recovery point.
+
+### 5.2 Restore And Reconciliation Proof
+
+Restore only into an isolated recovery environment first:
+
+1. Keep canonical mode `off` and restore both the AuthNZ database and active
+   file from the recorded coordinated set. Do not overlay only selected JSON
+   fields.
+2. Restore the exact key-ring versions required by the backup. Strict-read and
+   parse every pending marker. A missing key, invalid ciphertext envelope,
+   duplicate source, malformed marker, or unreadable file is a hard stop.
+3. Compare the sanitized database migration/key state, file digest, incident
+   versions, and pending marker inventory to the backup record.
+4. Start one isolated mode-`on` canary with no external traffic. Require fresh
+   reconciler/worker status, then allow the reconciler to drain the restored
+   markers.
+5. Prove each restored marker either inserted its canonical event and expected
+   automatic fanout or matched the already committed source event exactly. The
+   marker must disappear only after database commit. Capture IDs/counts and
+   sanitized status, never plaintext bodies or destination data.
+6. Repeat strict file readback and database checks, then destroy the isolated
+   restore according to the provider drill procedure.
+
+A file backup containing a marker can safely replay against a database that
+already contains its exact event because source identity and body are verified
+before exact marker removal. The reverse mismatch is unsafe: restoring an older
+database with a newer file from which a marker was already removed can omit an
+event. Escalate any asymmetric restore to incident review; never synthesize or
+delete a marker manually.
+
+If a required key is unavailable, remain in mode `off`, preserve the restored
+bytes unchanged, and recover the approved key version. The reconciler fails
+closed and must not skip, discard, or replace an undecryptable marker.
+
+## 6. Structural File Recovery
 
 Use this only after a failed migration decision and only while status reports
 `legacy_file_restore_permitted=true`. The extraction command independently
 enforces completed migration, retained artifacts, an unexpired window, and no
 first canonical activity. A favorable status display does not bypass the CLI.
 
-### 5.1 Stop And Reconfirm
+### 6.1 Stop And Reconfirm
 
 1. Stop/quiesce every canonical and legacy writer on every node.
-2. Set `TLDW_ADMIN_WEBHOOKS_MODE=off` and
-   `TLDW_ADMIN_WEBHOOKS_LEGACY_COMPAT=false` everywhere; verify status per node.
+2. Set `TLDW_ADMIN_WEBHOOKS_MODE=off` everywhere; verify status per node.
 3. Capture a fresh database backup and a fresh hash/copy of the current active
    `system_ops.json`.
 4. Reconfirm `legacy_file_restore_permitted=true`, retained/unexpired artifacts,
@@ -292,7 +347,7 @@ If the status flag is false or extraction returns
 `admin_webhook_rollback_window_closed`, stop. Keep canonical mode off and
 forward-fix.
 
-### 5.2 Extract To A New Private File
+### 6.2 Extract To A New Private File
 
 The output must not exist, must be outside application data, and must be in a
 pre-existing private parent directory:
@@ -310,7 +365,7 @@ The command writes one new `0600` file and never emits plaintext to stdout.
 Never redirect or pipe extraction output, reuse an old plaintext file, or place
 the output beside the active store.
 
-### 5.3 Review And Merge Structurally
+### 6.3 Review And Merge Structurally
 
 Use the strict, bounded application reader for both the extracted snapshot and
 the current active snapshot. Compare complete top-level structures. The second
@@ -335,7 +390,7 @@ After publication, strict-read the active file, verify the two restored fields
 and every unrelated field, restart only the intended legacy-compatible build,
 and capture status and route-selection evidence.
 
-### 5.4 Destroy Plaintext Recovery Material
+### 6.4 Destroy Plaintext Recovery Material
 
 Delete the extracted file as soon as verification completes, then fsync the
 parent directory where operationally supported. Record deletion without
@@ -344,7 +399,7 @@ physically erase blocks on copy-on-write, journaled, SSD, snapshot, or backed-up
 storage. The extraction directory and its backups must therefore be treated as
 secret-bearing for their full retention lifecycle.
 
-## 6. Retire Rollback Artifacts
+## 7. Retire Rollback Artifacts
 
 The default rollback window is seven days and may be configured only from 1 to
 30 days. Do not retain the active one-time rollback key past the approved
@@ -373,8 +428,8 @@ makes its encrypted backup unusable but is not a claim of physical media erasure
 Stop the procedure and preserve evidence when any of these occurs:
 
 - any writer cannot be accounted for or quiesced;
-- any node reports a different mode or route selection;
-- a legacy-only route remains reachable;
+- any node reports a different mode;
+- any node reports a route selection other than `canonical`;
 - source fingerprints or the approved digest change;
 - unresolved records remain;
 - artifact ownership, mode, inode identity, or digest differs;

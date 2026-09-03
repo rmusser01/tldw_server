@@ -21,7 +21,6 @@ from tldw_Server_API.app.core.Admin_Webhooks.audit import MutationAudit
 from tldw_Server_API.app.core.Admin_Webhooks.config import (
     AdminWebhookMode,
     AdminWebhookSettings,
-    WebhookRouteSelection,
 )
 from tldw_Server_API.app.core.Admin_Webhooks.control_plane import (
     AdminWebhookControlPlane,
@@ -349,8 +348,13 @@ async def test_admission_denial_metric_is_emitted_after_limit_rollback(
 
 @pytest.fixture(autouse=True)
 def allow_test_webhook_targets(monkeypatch: pytest.MonkeyPatch) -> None:
-    def validate(url: str, *, allow_http_dev: bool) -> ValidatedWebhookTarget:
-        del allow_http_dev
+    def validate(
+        url: str,
+        *,
+        allow_http_dev: bool,
+        allow_e2e_loopback: bool,
+    ) -> ValidatedWebhookTarget:
+        del allow_http_dev, allow_e2e_loopback
         parsed = urlsplit(url)
         hostname = parsed.hostname or ""
         return ValidatedWebhookTarget(
@@ -374,7 +378,6 @@ def _settings(
 ) -> AdminWebhookSettings:
     return AdminWebhookSettings(
         mode=mode,
-        route_selection=WebhookRouteSelection.CANONICAL,
         registration_limit=registration_limit,
         active_limit=active_limit,
         allow_http_dev=False,
@@ -978,8 +981,13 @@ async def test_target_policy_denial_does_not_put_target_canary_in_audit(
     plane: ControlPlaneFixture,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def deny(_url: str, *, allow_http_dev: bool) -> object:
-        del allow_http_dev
+    def deny(
+        _url: str,
+        *,
+        allow_http_dev: bool,
+        allow_e2e_loopback: bool,
+    ) -> object:
+        del allow_http_dev, allow_e2e_loopback
         raise WebhookError(WebhookErrorCode.TARGET_REJECTED)
 
     monkeypatch.setattr(control_plane, "validate_webhook_target", deny)

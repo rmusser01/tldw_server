@@ -15,6 +15,16 @@ export type ManagedBackendProcess = {
 const repoRoot = resolve(process.cwd(), '..');
 const lifecycleScript = resolve(repoRoot, 'tldw_Server_API/scripts/server_lifecycle.py');
 const tempRoot = realpathSync('/tmp');
+const MANAGED_JWT_WEBHOOK_ENV = {
+  TLDW_ADMIN_WEBHOOKS_MODE: 'on',
+  TLDW_ADMIN_WEBHOOKS_ALLOW_HTTP_DEV: 'true',
+  TLDW_ADMIN_WEBHOOKS_E2E_LOOPBACK: 'true',
+  TLDW_ADMIN_WEBHOOK_KEYS_JSON:
+    '{"admin-e2e-primary":"d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3c="}',
+  TLDW_ADMIN_WEBHOOK_PRIMARY_KEY_ID: 'admin-e2e-primary',
+  TLDW_ADMIN_WEBHOOK_DELIVERY_HEARTBEAT_INTERVAL_SECONDS: '1',
+  TLDW_ADMIN_WEBHOOK_DELIVERY_HEARTBEAT_FRESHNESS_SECONDS: '10',
+};
 
 const getPythonCommand = (): string => {
   if (process.env.TLDW_ADMIN_E2E_PYTHON) {
@@ -72,6 +82,7 @@ export const buildBackendEnv = (
   JWT_SECRET_KEY: process.env.JWT_SECRET_KEY || 'playwright-test-secret-1234567890',
   SINGLE_USER_API_KEY: process.env.SINGLE_USER_API_KEY || 'single-user-admin-key',
   SINGLE_USER_TEST_API_KEY: process.env.SINGLE_USER_TEST_API_KEY || 'single-user-admin-key',
+  ...(project.projectName === 'chromium-real-jwt' ? MANAGED_JWT_WEBHOOK_ENV : {}),
   DATABASE_URL:
     process.env.DATABASE_URL
     || `sqlite:////${tempRoot.replace(/^\/+/, '')}/${project.serverLabel}-authnz.db`,

@@ -6,6 +6,7 @@ import string
 from collections.abc import Awaitable
 from datetime import datetime, timezone
 from typing import Any, Callable
+from uuid import uuid4
 
 from fastapi import HTTPException, status
 from loguru import logger
@@ -17,10 +18,17 @@ from tldw_Server_API.app.api.v1.schemas.admin_schemas import (
     UserUpdateRequest,
     unwrap_optional_secret,
 )
+from tldw_Server_API.app.core.Admin_Webhooks.domain import EventSourceKind
+from tldw_Server_API.app.core.Admin_Webhooks.producer import (
+    AdminWebhookEventProducer,
+    build_admin_webhook_event_producer,
+    build_user_deleted_data,
+)
 from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditEventCategory,
     AuditEventType,
 )
+from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
     DuplicateUserError,
     RegistrationDisabledError,
@@ -34,6 +42,7 @@ from tldw_Server_API.app.core.AuthNZ.profile_version import (
     ProfileVersionNotFound,
     UserVersionOwnership,
     VersionedUserWriteGateway,
+    normalize_profile_version,
 )
 from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
 from tldw_Server_API.app.core.AuthNZ.settings import get_profile
@@ -169,10 +178,63 @@ async def _sync_system_role_membership(
     )
 
 
+async def _insert_user_deactivation_audit(
+    db,
+    *,
+    is_pg: bool,
+    actor_id: int | None,
+    target_user_id: int,
+    reason: str | None,
+) -> None:
+    """Insert the required account audit in the source mutation transaction."""
+
+    details = json.dumps(
+        {
+            "actor_id": actor_id,
+            "target_user_id": target_user_id,
+            "reason": reason,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    if is_pg:
+        await db.execute(
+            """
+            INSERT INTO audit_logs (
+                user_id, action, resource_type, resource_id, status, details
+            ) VALUES ($1, $2, $3, $4, $5, $6)
+            """,
+            actor_id,
+            "admin_user_deactivated",
+            "user_account",
+            target_user_id,
+            "success",
+            details,
+        )
+        return
+    await db.execute(
+        """
+        INSERT INTO audit_logs (
+            user_id, action, resource_type, resource_id, status, details
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            actor_id,
+            "admin_user_deactivated",
+            "user_account",
+            target_user_id,
+            "success",
+            details,
+        ),
+    )
+
+
 async def create_user(
     payload: AdminUserCreateRequest,
     principal: AuthPrincipal,
     registration_service,
+    *,
+    source_request_id: str | None = None,
 ):
     profile = get_profile()
     if isinstance(profile, str) and profile.strip().lower() in {"local-single-user", "single_user"}:
@@ -192,6 +254,7 @@ async def create_user(
             is_active_override=payload.is_active,
             is_verified_override=payload.is_verified,
             storage_quota_override=payload.storage_quota_mb,
+            source_request_id=source_request_id,
         )
         repo = await AuthnzUsersRepo.from_pool()
         user = await repo.get_user_by_id(int(user_info["user_id"]))
@@ -742,10 +805,12 @@ async def delete_user(
     principal: AuthPrincipal,
     user_id: int,
     request,
-    db,
     password_service,
     *,
-    is_pg_fn: Callable[[], Awaitable[bool]],
+    db_pool: DatabasePool | None = None,
+    webhook_event_producer: AdminWebhookEventProducer | None = None,
+    command_id_factory: Callable[[], str] | None = None,
+    source_request_id: str | None = None,
 ) -> dict[str, str]:
     try:
         if principal.user_id is not None and str(user_id) == str(principal.user_id):
@@ -758,40 +823,117 @@ async def delete_user(
             user_id,
             require_hierarchy=True,
         )
-        reason = await verify_privileged_action(
-            principal,
-            db,
-            password_service,
-            reason=getattr(request, "reason", None),
-            admin_password=unwrap_optional_secret(getattr(request, "admin_password", None)),
-            admin_reauth_token=unwrap_optional_secret(getattr(request, "admin_reauth_token", None)),
+        pool = db_pool or await get_db_pool()
+        is_pg = bool(getattr(pool, "pool", None)) or str(
+            getattr(pool, "backend", "")
+        ).strip().lower() in {"postgres", "postgresql", "pg"}
+        event_producer = webhook_event_producer or build_admin_webhook_event_producer(pool)
+        event_preparation = await event_producer.begin_capture(
+            source_component="admin_users_service",
+            source_request_id=source_request_id,
         )
-
-        is_pg = await is_pg_fn()
+        source_command_id = (
+            (command_id_factory or (lambda: str(uuid4())))()
+            if event_preparation is not None
+            else None
+        )
         gateway = VersionedUserWriteGateway("postgres" if is_pg else "sqlite")
-        if is_pg:
-            await gateway.execute_update(
+        reason: str | None = None
+        async with pool.transaction() as db:
+            reason = await verify_privileged_action(
+                principal,
                 db,
-                user_id=user_id,
-                profile_visible_fields=("is_active",),
-                statement=(
-                    "UPDATE users SET is_active = FALSE, "
-                    "updated_at = CURRENT_TIMESTAMP WHERE id = $1"
+                password_service,
+                reason=getattr(request, "reason", None),
+                admin_password=unwrap_optional_secret(
+                    getattr(request, "admin_password", None)
                 ),
-                parameters=(user_id,),
-            )
-        else:
-            await gateway.execute_update(
-                db,
-                user_id=user_id,
-                profile_visible_fields=("is_active",),
-                statement=(
-                    "UPDATE users SET is_active = 0, "
-                    "updated_at = datetime('now') WHERE id = ?"
+                admin_reauth_token=unwrap_optional_secret(
+                    getattr(request, "admin_reauth_token", None)
                 ),
-                parameters=(user_id,),
             )
+            if is_pg:
+                row = await db.fetchrow(
+                    "SELECT is_active, created_at FROM users WHERE id = $1 FOR UPDATE",
+                    user_id,
+                )
+            else:
+                cursor = await db.execute(
+                    "SELECT is_active, created_at FROM users WHERE id = ?",
+                    (user_id,),
+                )
+                row = await cursor.fetchone()
+            if row is None:
+                raise UserNotFoundError(f"User {user_id}")
+            if not bool(row["is_active"] if is_pg else row[0]):
+                return {"message": f"User {user_id} has been deactivated"}
+            created_at = row["created_at"] if is_pg else row[1]
 
+            await gateway.execute_update(
+                db,
+                user_id=user_id,
+                profile_visible_fields=("is_active",),
+                statement=(
+                    "UPDATE users SET is_active = FALSE, updated_at = CURRENT_TIMESTAMP "
+                    "WHERE id = $1"
+                    if is_pg
+                    else "UPDATE users SET is_active = 0, updated_at = datetime('now') "
+                    "WHERE id = ?"
+                ),
+                parameters=(user_id,),
+            )
+            if is_pg:
+                updated_row = await db.fetchrow(
+                    "SELECT updated_at FROM users WHERE id = $1",
+                    user_id,
+                )
+            else:
+                cursor = await db.execute(
+                    "SELECT updated_at FROM users WHERE id = ?",
+                    (user_id,),
+                )
+                updated_row = await cursor.fetchone()
+            if updated_row is None:
+                raise UserNotFoundError(f"User {user_id}")
+            if is_pg:
+                updated_at = updated_row["updated_at"]
+            else:
+                updated_at = updated_row[0]
+            resource_version = await gateway.capture_floor(
+                db,
+                user_id=user_id,
+                lock_user=False,
+            )
+            if event_preparation is not None:
+                await event_producer.capture_in_transaction(
+                    event_preparation,
+                    tx=event_producer.bind_transaction(db),
+                    event_type="user.deleted",
+                    source_kind=EventSourceKind.COMMAND,
+                    aggregate_type=None,
+                    aggregate_id=None,
+                    aggregate_version=None,
+                    source_command_id=source_command_id,
+                    data=build_user_deleted_data(
+                        user_id=user_id,
+                        resource_version=resource_version,
+                        created_at=normalize_profile_version(
+                            created_at,
+                            allow_naive=True,
+                        ),
+                        updated_at=normalize_profile_version(
+                            updated_at,
+                            allow_naive=True,
+                        ),
+                    ),
+                )
+            await _insert_user_deactivation_audit(
+                db,
+                is_pg=is_pg,
+                actor_id=principal.user_id,
+                target_user_id=user_id,
+                reason=reason,
+            )
         await _emit_admin_account_audit_event(
             actor_id=principal.user_id,
             target_user_id=user_id,
@@ -807,6 +949,11 @@ async def delete_user(
 
         return {"message": f"User {user_id} has been deactivated"}
 
+    except (ProfileVersionNotFound, UserNotFoundError) as err:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User {user_id} not found",
+        ) from err
     except HTTPException:
         raise
     except Exception as e:

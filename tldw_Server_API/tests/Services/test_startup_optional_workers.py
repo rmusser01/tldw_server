@@ -173,7 +173,7 @@ def test_canonical_admin_webhook_runtime_spec_uses_only_validated_on_mode(
     runtime = specs["admin_webhook_delivery_runtime_task"]
     assert runtime.task_name == "admin_webhook_delivery_runtime_task"
     assert runtime.enabled(_context()) is runtime_enabled
-    assert specs["jobs_webhooks_task"].enabled(_context()) is (not runtime_enabled)
+    assert specs["jobs_webhooks_task"].enabled(_context()) is True
 
 
 def test_canonical_runtime_factory_calls_only_new_runtime(

@@ -62,6 +62,8 @@ EXPECTED_SPLIT_ADMIN_OPERATIONS: set[tuple[str, str]] = {
     ("POST", "/api/v1/admin/incidents"),
     ("PATCH", "/api/v1/admin/incidents/{incident_id}"),
     ("POST", "/api/v1/admin/incidents/{incident_id}/events"),
+    ("POST", "/api/v1/admin/incidents/{incident_id}/notify"),
+    ("POST", "/api/v1/admin/incidents/{incident_id}/notify-webhooks"),
     ("DELETE", "/api/v1/admin/incidents/{incident_id}"),
     ("POST", "/api/v1/admin/llm-usage/pricing/reload"),
     ("POST", "/api/v1/admin/chat/model-aliases/reload"),
@@ -153,6 +155,60 @@ def test_admin_split_openapi_schema_contracts(monkeypatch, tmp_path) -> None:
     monitoring_history_get = paths["/api/v1/admin/monitoring/alerts/history"]["get"]
     monitoring_history_schema = monitoring_history_get["responses"]["200"]["content"]["application/json"]["schema"]
     assert monitoring_history_schema["$ref"].endswith("/AdminAlertHistoryListResponse")
+
+    incident_notify = paths["/api/v1/admin/incidents/{incident_id}/notify-webhooks"]["post"]
+    idempotency_header = next(
+        parameter
+        for parameter in incident_notify["parameters"]
+        if parameter["in"] == "header" and parameter["name"] == "Idempotency-Key"
+    )
+    assert idempotency_header["required"] is True
+    assert idempotency_header["schema"]["minLength"] == 16
+    assert idempotency_header["schema"]["maxLength"] == 255
+    assert incident_notify["responses"]["202"]["content"]["application/json"]["schema"][
+        "$ref"
+    ].endswith("/IncidentWebhookNotifyResponse")
+
+    notify_request = spec["components"]["schemas"]["IncidentWebhookNotifyRequest"]
+    assert set(notify_request["required"]) == {"expected_resource_version"}
+    assert notify_request["additionalProperties"] is False
+    assert notify_request["properties"]["narrative"]["anyOf"][0]["maxLength"] == 4096
+    assert notify_request["properties"]["expected_resource_version"]["minimum"] == 1
+    notify_response = spec["components"]["schemas"]["IncidentWebhookNotifyResponse"]
+    assert set(notify_response["properties"]) == {
+        "incident_id",
+        "event_id",
+        "event_type",
+        "command_id",
+        "accepted",
+        "replayed",
+    }
+    assert "webhooks_delivered" not in notify_response["properties"]
+
+    stakeholder_notify = paths["/api/v1/admin/incidents/{incident_id}/notify"]["post"]
+    stakeholder_idempotency_header = next(
+        parameter
+        for parameter in stakeholder_notify["parameters"]
+        if parameter["in"] == "header" and parameter["name"] == "Idempotency-Key"
+    )
+    assert stakeholder_idempotency_header["required"] is True
+    assert stakeholder_idempotency_header["schema"]["minLength"] == 16
+    assert stakeholder_idempotency_header["schema"]["maxLength"] == 255
+    assert stakeholder_notify["responses"]["200"]["content"]["application/json"]["schema"][
+        "$ref"
+    ].endswith("/IncidentNotifyResponse")
+
+    stakeholder_request = spec["components"]["schemas"]["IncidentNotifyRequest"]
+    assert stakeholder_request["additionalProperties"] is False
+    assert stakeholder_request["properties"]["recipients"]["minItems"] == 1
+    assert stakeholder_request["properties"]["recipients"]["maxItems"] == 100
+    stakeholder_response = spec["components"]["schemas"]["IncidentNotifyResponse"]
+    assert set(stakeholder_response["properties"]) == {
+        "incident_id",
+        "command_id",
+        "replayed",
+        "notifications",
+    }
 
 
 def test_admin_root_module_has_no_route_handlers() -> None:

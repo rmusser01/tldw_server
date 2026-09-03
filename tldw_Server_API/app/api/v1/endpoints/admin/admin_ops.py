@@ -5,9 +5,9 @@ import os
 import time
 from collections.abc import Awaitable
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Annotated, Any, Callable
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
@@ -33,15 +33,12 @@ from tldw_Server_API.app.api.v1.schemas.admin_schemas import (
     MaintenanceRotationRunListResponse,
     MaintenanceState,
     MaintenanceUpdateRequest,
-    WebhookCreateRequest,
-    WebhookCreateResponse,
-    WebhookDeliveryItem,
-    WebhookDeliveryListResponse,
-    WebhookItem,
-    WebhookListResponse,
-    WebhookUpdateRequest,
 )
 from tldw_Server_API.app.api.v1.schemas.auth_schemas import MessageResponse
+from tldw_Server_API.app.core.Admin_Webhooks.domain import (
+    WebhookError,
+    normalize_request_id,
+)
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.repos.rbac_repo import AuthnzRbacRepo
@@ -63,9 +60,6 @@ from tldw_Server_API.app.services.admin_system_ops_service import (
     create_report_schedule as svc_create_report_schedule,
 )
 from tldw_Server_API.app.services.admin_system_ops_service import (
-    create_webhook as svc_create_webhook,
-)
-from tldw_Server_API.app.services.admin_system_ops_service import (
     delete_feature_flag as svc_delete_feature_flag,
 )
 from tldw_Server_API.app.services.admin_system_ops_service import (
@@ -75,13 +69,7 @@ from tldw_Server_API.app.services.admin_system_ops_service import (
     delete_report_schedule as svc_delete_report_schedule,
 )
 from tldw_Server_API.app.services.admin_system_ops_service import (
-    delete_webhook as svc_delete_webhook,
-)
-from tldw_Server_API.app.services.admin_system_ops_service import (
     get_digest_preference as svc_get_digest_preference,
-)
-from tldw_Server_API.app.services.admin_system_ops_service import (
-    get_incident as svc_get_incident,
 )
 from tldw_Server_API.app.services.admin_system_ops_service import (
     get_maintenance_state as svc_get_maintenance_state,
@@ -102,12 +90,6 @@ from tldw_Server_API.app.services.admin_system_ops_service import (
     list_report_schedules as svc_list_report_schedules,
 )
 from tldw_Server_API.app.services.admin_system_ops_service import (
-    list_webhook_deliveries as svc_list_webhook_deliveries,
-)
-from tldw_Server_API.app.services.admin_system_ops_service import (
-    list_webhooks as svc_list_webhooks,
-)
-from tldw_Server_API.app.services.admin_system_ops_service import (
     mark_report_schedule_sent as svc_mark_report_schedule_sent,
 )
 from tldw_Server_API.app.services.admin_system_ops_service import (
@@ -115,9 +97,6 @@ from tldw_Server_API.app.services.admin_system_ops_service import (
 )
 from tldw_Server_API.app.services.admin_system_ops_service import (
     record_health_snapshot as svc_record_health_snapshot,
-)
-from tldw_Server_API.app.services.admin_system_ops_service import (
-    send_test_webhook as svc_send_test_webhook,
 )
 from tldw_Server_API.app.services.admin_system_ops_service import (
     set_digest_preference as svc_set_digest_preference,
@@ -132,9 +111,6 @@ from tldw_Server_API.app.services.admin_system_ops_service import (
     update_report_schedule as svc_update_report_schedule,
 )
 from tldw_Server_API.app.services.admin_system_ops_service import (
-    update_webhook as svc_update_webhook,
-)
-from tldw_Server_API.app.services.admin_system_ops_service import (
     upsert_feature_flag as svc_upsert_feature_flag,
 )
 
@@ -144,7 +120,6 @@ if TYPE_CHECKING:
     )
 
 router = APIRouter()
-legacy_webhooks_router = APIRouter()
 
 _INCIDENT_ASSIGNABLE_ROLES = frozenset({"admin", "owner", "super_admin"})
 
@@ -592,14 +567,19 @@ async def create_incident(
     _require_platform_admin(principal)
     actor = principal.email or principal.username or (str(principal.user_id) if principal.user_id is not None else None)
     try:
-        incident = svc_create_incident(
+        incident = await svc_create_incident(
             title=payload.title,
             status=payload.status,
             severity=payload.severity,
             summary=payload.summary,
             tags=payload.tags,
             actor=actor,
+            source_request_id=normalize_request_id(
+                getattr(request.state, "request_id", None)
+            ),
         )
+    except WebhookError as exc:
+        raise HTTPException(status_code=exc.http_status, detail=exc.code.value) from exc
     except ValueError as exc:
         detail = str(exc)
         if detail in {"invalid_title", "invalid_status", "invalid_severity"}:
@@ -707,7 +687,7 @@ async def update_incident(
             else:
                 assignee_fields = await _resolve_incident_assignee(int(assignee_user_id))
 
-        incident = svc_update_incident(
+        incident = await svc_update_incident(
             incident_id=incident_id,
             title=payload.title,
             status=payload.status,
@@ -718,7 +698,12 @@ async def update_incident(
             **workflow_fields,
             update_message=payload.update_message,
             actor=actor,
+            source_request_id=normalize_request_id(
+                getattr(request.state, "request_id", None)
+            ),
         )
+    except WebhookError as exc:
+        raise HTTPException(status_code=exc.http_status, detail=exc.code.value) from exc
     except ValueError as exc:
         detail = str(exc)
         if detail == "not_found":
@@ -751,11 +736,16 @@ async def add_incident_event(
     _require_platform_admin(principal)
     actor = principal.email or principal.username or (str(principal.user_id) if principal.user_id is not None else None)
     try:
-        incident = svc_add_incident_event(
+        incident = await svc_add_incident_event(
             incident_id=incident_id,
             message=payload.message,
             actor=actor,
+            source_request_id=normalize_request_id(
+                getattr(request.state, "request_id", None)
+            ),
         )
+    except WebhookError as exc:
+        raise HTTPException(status_code=exc.http_status, detail=exc.code.value) from exc
     except ValueError as exc:
         detail = str(exc)
         if detail == "invalid_message":
@@ -808,6 +798,15 @@ async def notify_incident_stakeholders(
     incident_id: str,
     payload: IncidentNotifyRequest,
     request: Request,
+    idempotency_key: Annotated[
+        str,
+        Header(
+            alias="Idempotency-Key",
+            min_length=16,
+            max_length=255,
+            pattern=r"^[A-Za-z0-9._:-]{16,255}$",
+        ),
+    ],
     principal: AuthPrincipal = Depends(get_auth_principal),
 ) -> IncidentNotifyResponse:
     """Send email notifications to stakeholders about an incident."""
@@ -816,12 +815,19 @@ async def notify_incident_stakeholders(
     if not payload.recipients:
         raise HTTPException(status_code=400, detail="recipients_required")
     try:
-        result = svc_notify_incident_stakeholders(
+        result = await svc_notify_incident_stakeholders(
             incident_id=incident_id,
-            recipients=payload.recipients,
+            recipients=[str(recipient) for recipient in payload.recipients],
             message=payload.message,
             actor=actor,
+            actor_id=principal.principal_id,
+            idempotency_key=idempotency_key,
+            source_request_id=normalize_request_id(
+                getattr(request.state, "request_id", None)
+            ),
         )
+    except WebhookError as exc:
+        raise HTTPException(status_code=exc.http_status, detail=exc.code.value) from exc
     except ValueError as exc:
         detail = str(exc)
         if detail == "not_found":
@@ -835,251 +841,16 @@ async def notify_incident_stakeholders(
         resource_type="incident",
         resource_id=incident_id,
         action="incident.notify",
-        metadata={"recipient_count": len(payload.recipients)},
+        metadata={
+            "recipient_count": len(payload.recipients),
+            "command_id": result["command_id"],
+            "replayed": result["replayed"],
+            "unknown_count": sum(
+                item["status"] == "unknown" for item in result["notifications"]
+            ),
+        },
     )
     return IncidentNotifyResponse(**result)
-
-
-@legacy_webhooks_router.post(
-    "/incidents/{incident_id}/notify-webhooks",
-    response_model=IncidentNotifyResponse,
-)
-async def notify_incident_webhooks(
-    incident_id: str,
-    request: Request,
-    principal: AuthPrincipal = Depends(get_auth_principal),
-) -> IncidentNotifyResponse:
-    """Send a notification about an incident to configured webhook channels.
-
-    Dispatches an ``incident.notify`` event to all active admin webhooks
-    with the incident's severity, title, status, and affected services.
-    """
-    _require_platform_admin(principal)
-
-    # Fetch the incident
-    incident = svc_get_incident(incident_id=incident_id)
-    if incident is None:
-        raise HTTPException(status_code=404, detail="incident_not_found")
-
-    from tldw_Server_API.app.services.admin_webhooks_service import get_admin_webhooks_service
-
-    svc = get_admin_webhooks_service()
-    wh_payload = {
-        "incident_id": incident.get("id"),
-        "title": incident.get("title"),
-        "severity": incident.get("severity"),
-        "status": incident.get("status"),
-        "summary": incident.get("summary"),
-        "tags": incident.get("tags", []),
-        "notified_by": principal.email or principal.username or str(principal.user_id),
-    }
-    delivered = await svc.dispatch_event("incident.notify", wh_payload)
-
-    await _emit_admin_audit_event(
-        request,
-        principal,
-        event_type="ops.incident",
-        category="system",
-        resource_type="incident",
-        resource_id=incident_id,
-        action="incident.notify",
-        metadata={"delivered_to": delivered},
-    )
-
-    return IncidentNotifyResponse(
-        notified=True,
-        incident_id=incident_id,
-        webhooks_delivered=delivered,
-    )
-
-
-# ---------------------------------------------------------------------------------------------------------------------
-# Webhooks
-# ---------------------------------------------------------------------------------------------------------------------
-
-
-@legacy_webhooks_router.get("/webhooks", response_model=WebhookListResponse)
-async def list_webhooks(
-    principal: AuthPrincipal = Depends(get_auth_principal),
-) -> WebhookListResponse:
-    """List all configured webhooks (secrets redacted)."""
-    _require_platform_admin(principal)
-    items = svc_list_webhooks()
-    limit = len(items)
-    return WebhookListResponse(
-        items=[WebhookItem(**item) for item in items],
-        total=len(items),
-        pagination=build_offset_pagination_meta(
-            total=len(items),
-            limit=limit,
-            offset=0,
-            count=len(items),
-        ),
-    )
-
-
-@legacy_webhooks_router.post("/webhooks", response_model=WebhookCreateResponse)
-async def create_webhook(
-    payload: WebhookCreateRequest,
-    request: Request,
-    principal: AuthPrincipal = Depends(get_auth_principal),
-) -> WebhookCreateResponse:
-    """Create a new webhook. The secret is returned once in this response."""
-    _require_platform_admin(principal)
-    try:
-        webhook = svc_create_webhook(
-            url=payload.url,
-            events=payload.events,
-            enabled=payload.enabled,
-        )
-    except ValueError as exc:
-        detail = str(exc)
-        if detail in {"invalid_url", "invalid_events"}:
-            raise HTTPException(status_code=400, detail=detail) from exc
-        raise HTTPException(status_code=400, detail="invalid_webhook") from exc
-    await _emit_admin_audit_event(
-        request,
-        principal,
-        event_type="config.changed",
-        category="system",
-        resource_type="webhook",
-        resource_id=webhook.get("id"),
-        action="webhook.create",
-        metadata={
-            "event_count": len(webhook.get("events") or []),
-            "enabled": bool(webhook.get("enabled")),
-        },
-    )
-    return WebhookCreateResponse(**webhook)
-
-
-@legacy_webhooks_router.patch("/webhooks/{webhook_id}", response_model=WebhookItem)
-async def update_webhook(
-    webhook_id: str,
-    payload: WebhookUpdateRequest,
-    request: Request,
-    principal: AuthPrincipal = Depends(get_auth_principal),
-) -> WebhookItem:
-    """Update a webhook. Secret is never returned after creation."""
-    _require_platform_admin(principal)
-    try:
-        webhook = svc_update_webhook(
-            webhook_id=webhook_id,
-            url=payload.url,
-            events=payload.events,
-            enabled=payload.enabled,
-        )
-    except ValueError as exc:
-        detail = str(exc)
-        if detail == "not_found":
-            raise HTTPException(status_code=404, detail="webhook_not_found") from exc
-        if detail in {"invalid_url", "invalid_events"}:
-            raise HTTPException(status_code=400, detail=detail) from exc
-        raise HTTPException(status_code=400, detail="invalid_webhook") from exc
-    await _emit_admin_audit_event(
-        request,
-        principal,
-        event_type="config.changed",
-        category="system",
-        resource_type="webhook",
-        resource_id=webhook_id,
-        action="webhook.update",
-        metadata={
-            "event_count": len(webhook.get("events") or []),
-            "enabled": bool(webhook.get("enabled")),
-        },
-    )
-    return WebhookItem(**webhook)
-
-
-@legacy_webhooks_router.delete("/webhooks/{webhook_id}", response_model=MessageResponse)
-async def delete_webhook(
-    webhook_id: str,
-    request: Request,
-    principal: AuthPrincipal = Depends(get_auth_principal),
-) -> MessageResponse:
-    """Delete a webhook."""
-    _require_platform_admin(principal)
-    try:
-        svc_delete_webhook(webhook_id=webhook_id)
-    except ValueError as exc:
-        detail = str(exc)
-        if detail == "not_found":
-            raise HTTPException(status_code=404, detail="webhook_not_found") from exc
-        raise HTTPException(status_code=400, detail="invalid_webhook") from exc
-    await _emit_admin_audit_event(
-        request,
-        principal,
-        event_type="config.changed",
-        category="system",
-        resource_type="webhook",
-        resource_id=webhook_id,
-        action="webhook.delete",
-        metadata={},
-    )
-    return MessageResponse(message="webhook_deleted")
-
-
-@legacy_webhooks_router.get(
-    "/webhooks/{webhook_id}/deliveries",
-    response_model=WebhookDeliveryListResponse,
-)
-async def list_webhook_deliveries(
-    webhook_id: str,
-    limit: int = Query(default=50, ge=1, le=1000),
-    offset: int = Query(default=0, ge=0),
-    principal: AuthPrincipal = Depends(get_auth_principal),
-) -> WebhookDeliveryListResponse:
-    """List delivery history for a webhook, newest first."""
-    _require_platform_admin(principal)
-    items, total = svc_list_webhook_deliveries(
-        webhook_id=webhook_id,
-        limit=limit,
-        offset=offset,
-    )
-    return WebhookDeliveryListResponse(
-        items=[WebhookDeliveryItem(**item) for item in items],
-        total=total,
-        limit=limit,
-        offset=offset,
-        pagination=build_offset_pagination_meta(
-            total=total,
-            limit=limit,
-            offset=offset,
-            count=len(items),
-        ),
-    )
-
-
-@legacy_webhooks_router.post(
-    "/webhooks/{webhook_id}/test",
-    response_model=WebhookDeliveryItem,
-)
-async def test_webhook(
-    webhook_id: str,
-    request: Request,
-    principal: AuthPrincipal = Depends(get_auth_principal),
-) -> WebhookDeliveryItem:
-    """Send a test payload to a webhook and record the delivery result."""
-    _require_platform_admin(principal)
-    try:
-        delivery = await asyncio.to_thread(svc_send_test_webhook, webhook_id=webhook_id)
-    except ValueError as exc:
-        detail = str(exc)
-        if detail == "not_found":
-            raise HTTPException(status_code=404, detail="webhook_not_found") from exc
-        raise HTTPException(status_code=400, detail="test_delivery_failed") from exc
-    await _emit_admin_audit_event(
-        request,
-        principal,
-        event_type="config.changed",
-        category="system",
-        resource_type="webhook",
-        resource_id=webhook_id,
-        action="webhook.test",
-        metadata={"success": delivery.get("success"), "status_code": delivery.get("status_code")},
-    )
-    return WebhookDeliveryItem(**delivery)
 
 
 # ---------------------------------------------------------------------------------------------------------------------

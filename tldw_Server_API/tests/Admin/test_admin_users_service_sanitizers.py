@@ -18,7 +18,6 @@ from tldw_Server_API.app.core.AuthNZ.exceptions import (
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.services import admin_users_service as service
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -254,20 +253,19 @@ async def test_delete_user_sanitizes_generic_failure_log(monkeypatch) -> None:
     async def _allow_reauth(*_args, **_kwargs) -> str:
         return "Support case 123"
 
-    async def _raise_is_pg() -> bool:
+    async def _raise_pool():
         raise RuntimeError("delete user failed at /private/users.db")
 
     monkeypatch.setattr(service.admin_scope_service, "enforce_admin_user_scope", _allow_scope)
     monkeypatch.setattr(service, "verify_privileged_action", _allow_reauth)
+    monkeypatch.setattr(service, "get_db_pool", _raise_pool)
 
     await _assert_admin_user_500_log_sanitized(
         lambda: service.delete_user(
             _principal(),
             42,
             SimpleNamespace(reason="Support case 123"),
-            db=object(),
             password_service=object(),
-            is_pg_fn=_raise_is_pg,
         ),
         "Failed to delete user",
         "Failed to delete user",

@@ -27,6 +27,7 @@ from tldw_Server_API.app.api.v1.schemas.admin_schemas import (
     UserUpdateRequest,
 )
 from tldw_Server_API.app.api.v1.schemas.auth_schemas import MessageResponse
+from tldw_Server_API.app.core.Admin_Webhooks.domain import normalize_request_id
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.testing import is_test_mode
@@ -85,6 +86,7 @@ router = APIRouter()
 @router.post("/users", response_model=UserSummary)
 async def admin_create_user(
     payload: AdminUserCreateRequest,
+    request: Request,
     principal: AuthPrincipal = Depends(get_auth_principal),
     registration_service=Depends(get_registration_service_dep),
 ) -> UserSummary:
@@ -95,6 +97,9 @@ async def admin_create_user(
         payload=payload,
         principal=principal,
         registration_service=registration_service,
+        source_request_id=normalize_request_id(
+            getattr(request.state, "request_id", None)
+        ),
     )
 
 
@@ -520,15 +525,16 @@ async def set_user_mfa_requirement(
 async def delete_user(
     user_id: int,
     request: AdminPrivilegedActionRequest,
+    http_request: Request,
     principal: AuthPrincipal = Depends(get_auth_principal),
-    db: Any = Depends(get_db_transaction),
     password_service=Depends(get_password_service_dep),
 ) -> MessageResponse:
     return await admin_users_service.delete_user(
         principal,
         user_id,
         request,
-        db,
         password_service,
-        is_pg_fn=_get_is_pg_fn(),
+        source_request_id=normalize_request_id(
+            getattr(http_request.state, "request_id", None)
+        ),
     )

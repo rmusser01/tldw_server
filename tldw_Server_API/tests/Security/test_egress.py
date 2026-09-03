@@ -119,6 +119,33 @@ def test_platform_webhook_policy_blocks_private_targets_when_ambient_false(
 
 
 @pytest.mark.unit
+def test_admin_webhook_e2e_policy_allows_only_exact_ipv4_loopback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(egress.PROFILENAME, "permissive")
+    monkeypatch.setenv(egress.BLOCK_PRIVATE_ENV, "true")
+
+    allowed = egress.evaluate_admin_webhook_e2e_loopback_policy(
+        "http://127.0.0.1:49152/admin-webhooks"
+    )
+    assert allowed.allowed is True
+    assert allowed.resolved_ips == ("127.0.0.1",)
+
+    for url in (
+        "https://127.0.0.1:49152/admin-webhooks",
+        "http://localhost:49152/admin-webhooks",
+        "http://[::1]:49152/admin-webhooks",
+        "http://127.0.0.2:49152/admin-webhooks",
+        "http://10.0.0.7:49152/admin-webhooks",
+        "http://operator@127.0.0.1:49152/admin-webhooks",
+        "http://127.0.0.1:49152/admin-webhooks#fragment",
+    ):
+        result = egress.evaluate_admin_webhook_e2e_loopback_policy(url)
+        assert result.allowed is False
+        assert result.reason_code == "address_forbidden"
+
+
+@pytest.mark.unit
 def test_platform_webhook_policy_preserves_deny_precedence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

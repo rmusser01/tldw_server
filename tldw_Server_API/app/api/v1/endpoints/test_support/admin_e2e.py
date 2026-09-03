@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, status
 from tldw_Server_API.app.api.v1.schemas.test_support_schemas import (
     AdminE2EBootstrapJwtSessionRequest,
     AdminE2EBootstrapJwtSessionResponse,
+    AdminE2EPrepareAdminWebhooksResponse,
     AdminE2EResetResponse,
     AdminE2ERunDueBackupSchedulesResponse,
     AdminE2ESeedRequest,
@@ -15,6 +16,7 @@ from tldw_Server_API.app.api.v1.schemas.test_support_schemas import (
 )
 from tldw_Server_API.app.services.admin_e2e_support_service import (
     bootstrap_admin_e2e_jwt_session,
+    prepare_admin_webhooks_for_admin_e2e,
     reset_admin_e2e_state,
     run_due_backup_schedules_for_admin_e2e,
     seed_admin_e2e_scenario,
@@ -71,3 +73,14 @@ async def bootstrap_jwt_session(
 async def run_due_backup_schedules() -> AdminE2ERunDueBackupSchedulesResponse:
     """Trigger a deterministic scheduler tick for backup schedule browser tests."""
     return AdminE2ERunDueBackupSchedulesResponse(**(await run_due_backup_schedules_for_admin_e2e()))
+
+
+@router.post(
+    "/prepare-admin-webhooks",
+    response_model=AdminE2EPrepareAdminWebhooksResponse,
+)
+async def prepare_admin_webhooks() -> AdminE2EPrepareAdminWebhooksResponse:
+    """Prepare a fresh e2e database for the canonical webhook runtime."""
+    return AdminE2EPrepareAdminWebhooksResponse(
+        **(await prepare_admin_webhooks_for_admin_e2e())
+    )

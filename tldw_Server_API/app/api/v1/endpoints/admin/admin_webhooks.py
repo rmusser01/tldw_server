@@ -25,6 +25,10 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     check_rate_limit,
     get_auth_principal,
 )
+from tldw_Server_API.app.api.v1.schemas.admin_schemas import (
+    IncidentWebhookNotifyRequest,
+    IncidentWebhookNotifyResponse,
+)
 from tldw_Server_API.app.api.v1.schemas.admin_webhooks import (
     AdminWebhookRegistrationResponse,
     AdminWebhookStatusResponse,
@@ -90,6 +94,12 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import (
     MandatoryAuditWriteError,
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.services.admin_system_ops_service import (
+    IncidentWebhookCommandAcceptance,
+)
+from tldw_Server_API.app.services.admin_system_ops_service import (
+    notify_incident_webhooks as svc_notify_incident_webhooks,
+)
 
 _DOMAIN_ERRORS: dict[WebhookErrorCode, tuple[int, str]] = {
     WebhookErrorCode.VALIDATION_FAILED: (422, "Webhook request validation failed"),
@@ -102,7 +112,7 @@ _DOMAIN_ERRORS: dict[WebhookErrorCode, tuple[int, str]] = {
     WebhookErrorCode.PRECONDITION_REQUIRED: (428, "Current webhook ETag is required"),
     WebhookErrorCode.PRECONDITION_FAILED: (412, "Webhook precondition failed"),
     WebhookErrorCode.TARGET_REJECTED: (422, "Webhook target was rejected"),
-    WebhookErrorCode.NOT_FOUND: (404, "Webhook registration was not found"),
+    WebhookErrorCode.NOT_FOUND: (404, "Webhook resource was not found"),
     WebhookErrorCode.DISABLED: (503, "Admin webhooks are disabled"),
     WebhookErrorCode.MIGRATION_PENDING: (503, "Admin webhook migration is not complete"),
     WebhookErrorCode.REGISTRATION_LIMIT: (409, "Webhook registration limit reached"),
@@ -590,6 +600,59 @@ def _history_item_response(
         ),
         attempts=[_attempt_response(attempt) for attempt in item.attempts],
     )
+
+
+@canonical_router.post(
+    "/incidents/{incident_id}/notify-webhooks",
+    response_model=IncidentWebhookNotifyResponse,
+    status_code=202,
+)
+async def notify_incident_webhooks(
+    incident_id: str,
+    payload: IncidentWebhookNotifyRequest,
+    request: Request,
+    idempotency_key: Annotated[
+        str,
+        Header(
+            alias="Idempotency-Key",
+            min_length=16,
+            max_length=255,
+            pattern=_IDEMPOTENCY_KEY_PATTERN,
+        ),
+    ],
+    principal: AuthPrincipal = Depends(get_auth_principal),
+    _rate_limit: None = Depends(_enforce_admin_webhook_rate_limit),
+) -> IncidentWebhookNotifyResponse:
+    """Accept one durable, idempotent incident webhook notification."""
+
+    _require_platform_admin(principal)
+
+    async def audit_sink(result: IncidentWebhookCommandAcceptance) -> None:
+        await _emit_admin_audit_event(
+            request,
+            principal,
+            event_type="ops.incident",
+            category="system",
+            resource_type="incident",
+            resource_id=incident_id,
+            action="incident.notify",
+            metadata={
+                "event_id": result.event_id,
+                "command_id": result.command_id,
+                "replayed": result.replayed,
+            },
+        )
+
+    result = await svc_notify_incident_webhooks(
+        incident_id=incident_id,
+        narrative=payload.narrative,
+        expected_resource_version=payload.expected_resource_version,
+        actor_id=principal.principal_id,
+        idempotency_key=idempotency_key,
+        source_request_id=_request_id(request),
+        audit_sink=audit_sink,
+    )
+    return IncidentWebhookNotifyResponse.model_validate(result)
 
 
 @status_router.get("/webhooks/status", response_model=AdminWebhookStatusResponse)
