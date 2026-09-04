@@ -91,16 +91,18 @@ def personal_context_service_for_user(
         relay = sync.personal_context_relay
         if relay is None:
             return
-        for dataset in sync.store.list_datasets_for_user(str(user_id)):
-            state = dataset.metadata.get("personal_context")
-            if isinstance(state, dict) and state.get("profile_id") == profile_id:
-                relay.relay_profile(
-                    user_id=str(user_id),
-                    profile_id=profile_id,
-                    dataset_id=dataset.dataset_id,
-                    after_server_cursor=None,
-                )
-                return
+        dataset = sync.store.personal_context_dataset_for_profile(
+            user_id=str(user_id),
+            profile_id=profile_id,
+        )
+        if dataset is None:
+            return
+        relay.relay_profile(
+            user_id=str(user_id),
+            profile_id=profile_id,
+            dataset_id=dataset.dataset_id,
+            after_server_cursor=None,
+        )
 
     service.set_after_commit_purge_cleanup(purge_cleanup_after_commit)
     service.set_after_commit_relay(relay_after_commit)

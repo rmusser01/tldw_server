@@ -73,3 +73,19 @@ ingress result lineage: an absent revision with no base is genesis 1; an absent
 revision with a complete strict base is `base_revision + 1`. Projection may verify
 that predecessor before the ingress receipt and may advance transactionally after
 authenticated authority finalize, but it must not become historical receipt proof.
+
+## Stable basetemp evidence must respect production path policy
+
+**Incident (TASK-13172, 2026-09-04):** The first combined 14-file certification
+run forced `--basetemp=/tmp/tldw-task-13172-remediation-matrix`. Hundreds of
+otherwise unrelated cases failed or errored because legacy harnesses construct
+`PersonalizationDB.for_path(tmp_path / "personalization.db")`, and the production
+trusted-root guard correctly rejects `/private/tmp`. The same first seven gates
+passed 214/214 when rerun under pytest's trusted default temporary root, and the
+remaining groups passed 239/239 and 300/300.
+
+**Evidence and rule:** Use a stable exact basetemp only for fixtures that place
+their application databases under an explicitly configured trusted root. For a
+mixed legacy matrix, preserve the production path guard and record conclusive
+group results under pytest's trusted temp root; never weaken storage validation
+to make evidence paths prettier.

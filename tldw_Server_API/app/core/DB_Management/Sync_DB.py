@@ -3985,11 +3985,39 @@ class SyncDatabase:
         ):
             raise SyncStoreError("personal_context_authority_mismatch")
         with self.backend.transaction() as connection:
-            row = self._require_dataset_owner_for_update(
-                dataset_id,
-                user_id,
-                connection=connection,
+            lock_suffix = (
+                " FOR UPDATE"
+                if self.backend_type == BackendType.POSTGRESQL
+                else ""
             )
+            owner_rows = self.execute(
+                """SELECT * FROM sync_datasets
+                    WHERE owner_user_id = ?
+                    ORDER BY dataset_id"""
+                + lock_suffix,  # nosec B608 - backend-controlled row lock suffix.
+                (user_id,),
+                connection=connection,
+            ).rows
+            row = next(
+                (candidate for candidate in owner_rows if candidate.get("dataset_id") == dataset_id),
+                None,
+            )
+            if row is None:
+                raise SyncDatasetNotFoundError(f"Sync dataset not found: {dataset_id}")
+            for candidate in owner_rows:
+                if (
+                    candidate.get("dataset_id") == dataset_id
+                    or candidate.get("archived_at") is not None
+                ):
+                    continue
+                candidate_metadata = decode_json(
+                    candidate.get("metadata_json"),
+                    default=None,
+                )
+                if not isinstance(candidate_metadata, dict):
+                    raise SyncStoreError("personal_context_authority_mismatch")
+                if candidate_metadata.get("personal_context") is not None:
+                    raise SyncStoreError("personal_context_authority_mismatch")
             metadata = decode_json(row.get("metadata_json"), default={})
             if not isinstance(metadata, dict):
                 raise SyncStoreError("personal_context_authority_mismatch")
@@ -4052,6 +4080,51 @@ class SyncDatabase:
             if updated is None:
                 raise SyncDatasetNotFoundError(f"Sync dataset not found: {dataset_id}")
         return _dataset_from_row(updated)
+
+    def personal_context_authority_dataset(
+        self,
+        *,
+        user_id: str,
+        profile_id: str | None = None,
+    ) -> SyncDataset | None:
+        """Return the sole active authority binding, rejecting corrupt ambiguity."""
+
+        rows = self.execute(
+            """SELECT * FROM sync_datasets
+                WHERE owner_user_id = ? AND archived_at IS NULL
+                ORDER BY dataset_id""",
+            (user_id,),
+        ).rows
+        bound: list[tuple[dict[str, Any], dict[str, object]]] = []
+        for row in rows:
+            metadata = decode_json(row.get("metadata_json"), default=None)
+            if not isinstance(metadata, dict):
+                raise SyncStoreError("personal_context_authority_mismatch")
+            state = metadata.get("personal_context")
+            if state is None:
+                continue
+            if not isinstance(state, dict):
+                raise SyncStoreError("personal_context_authority_mismatch")
+            required = ("profile_id", "authority_id", "integrity_key_id", "link_state")
+            generation = state.get("purge_generation")
+            if (
+                any(
+                    not isinstance(state.get(name), str) or not state[name]
+                    for name in required
+                )
+                or type(generation) is not int
+                or generation < 0
+                or state.get("link_state") not in {"bootstrap_pending", "complete"}
+            ):
+                raise SyncStoreError("personal_context_authority_mismatch")
+            bound.append((row, state))
+        if len(bound) > 1:
+            raise SyncStoreError("personal_context_authority_mismatch")
+        if not bound or (
+            profile_id is not None and bound[0][1]["profile_id"] != profile_id
+        ):
+            return None
+        return _dataset_from_row(bound[0][0])
 
     def ensure_personal_context_transport_domains(
         self,

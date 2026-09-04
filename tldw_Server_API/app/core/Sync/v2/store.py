@@ -290,6 +290,27 @@ class SyncV2Store:
             link_state=link_state,
         )
 
+    def personal_context_authority_dataset_for_user(
+        self,
+        user_id: str,
+    ) -> SyncDataset | None:
+        """Return the user's sole active Personal Context authority dataset."""
+
+        return self.db.personal_context_authority_dataset(user_id=user_id)
+
+    def personal_context_dataset_for_profile(
+        self,
+        *,
+        user_id: str,
+        profile_id: str,
+    ) -> SyncDataset | None:
+        """Return one exact active profile binding or fail closed on ambiguity."""
+
+        return self.db.personal_context_authority_dataset(
+            user_id=user_id,
+            profile_id=profile_id,
+        )
+
     def ensure_personal_context_transport_domains(
         self,
         *,

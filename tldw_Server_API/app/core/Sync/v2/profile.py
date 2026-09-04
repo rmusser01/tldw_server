@@ -497,6 +497,21 @@ class SyncV2ProfileManager:
         dataset = self._default_personal_dataset(user_id)
         if dataset is None:
             dataset = self.store.get_or_create_default_personal_dataset(user_id)
+        try:
+            authority_dataset = self.store.personal_context_authority_dataset_for_user(
+                user_id
+            )
+        except SyncStoreError as exc:
+            raise PersonalContextBootstrapError(
+                "personal_context_authority_mismatch"
+            ) from exc
+        if (
+            authority_dataset is not None
+            and authority_dataset.dataset_id != dataset.dataset_id
+        ):
+            raise PersonalContextBootstrapError(
+                "personal_context_authority_mismatch"
+            )
         dataset = self.store.ensure_personal_context_transport_domains(
             dataset_id=dataset.dataset_id,
             user_id=user_id,
