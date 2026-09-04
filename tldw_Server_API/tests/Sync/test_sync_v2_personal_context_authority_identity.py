@@ -133,7 +133,7 @@ class AuthorityHarness:
             row,
             "dataset-a",
             "user-a",
-        )
+        ).server_cursor
 
     def persist_staged_row(self) -> tuple[PublicationSourceRow, int]:
         """Stage the current source and persist its cursor without finalizing it."""
@@ -835,7 +835,7 @@ def test_relay_resume_reverifies_staged_authority_before_apply(
     stored = authority_harness.store.get_envelope_by_server_cursor(cursor)
     assert stored is not None
     assert stored.apply_status == "pending"
-    assert authority_harness.source_row_state(row) == "staged"
+    assert authority_harness.source_row_state(row) == "acknowledged"
     assert authority_harness.has_attention(row) is False
     assert result.staged_rows == 0
     assert result.continuation == "personal_context_relay_pending"
@@ -863,7 +863,7 @@ def test_relay_resume_reverifies_staged_ingress_receipt_before_apply(
     stored = ingress_harness.store.get_envelope_by_server_cursor(cursor)
     assert stored is not None
     assert stored.apply_status == "pending"
-    assert ingress_harness.source_row_state(row) == "staged"
+    assert ingress_harness.source_row_state(row) == "acknowledged"
     assert ingress_harness.has_attention(row) is False
     assert result.staged_rows == 0
     assert result.continuation == "personal_context_relay_pending"

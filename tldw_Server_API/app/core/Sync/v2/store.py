@@ -1240,6 +1240,7 @@ class SyncV2Store:
     def mark_personal_context_authority_applied(
         self,
         server_cursor: int,
+        **identity: Any,
     ) -> SyncEnvelope:
         """Apply one verified authority row inside its existing Sync guard."""
 
@@ -1247,6 +1248,7 @@ class SyncV2Store:
             raise SyncStoreError("Personal Context authority finalize requires a guard")
         return self.db.mark_personal_context_authority_applied(
             server_cursor,
+            **identity,
             connection=self._connection,
         )
 

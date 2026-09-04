@@ -115,6 +115,32 @@ class PublicationSourceRow:
 
 
 @dataclass(frozen=True, slots=True)
+class AuthorityStageReceipt:
+    """Content-free identity of one durable hidden Sync authority row."""
+
+    server_cursor: int
+    deterministic_envelope_id: str
+    publication_batch_id: str
+    profile_publication_sequence: int
+    batch_ordinal: int
+    batch_size: int
+    purge_generation: int
+
+
+@dataclass(frozen=True, slots=True)
+class PublicationStageIdentity:
+    """Content-free source identity retained after canonical bytes are shredded."""
+
+    profile_id: str
+    deterministic_envelope_id: str
+    publication_batch_id: str
+    profile_publication_sequence: int
+    batch_ordinal: int
+    batch_size: int
+    purge_generation: int
+
+
+@dataclass(frozen=True, slots=True)
 class PublicationSourceBatch:
     """Earliest nonterminal authority-publication batch for a profile."""
 
@@ -144,6 +170,47 @@ class PersonalContextPublicationRelayStore:
 
     def __init__(self, database: PersonalizationDB) -> None:
         self._database = database
+
+    def unfinished_stage_identities(
+        self,
+        profile_id: str,
+        *,
+        row_limit: int,
+    ) -> tuple[PublicationStageIdentity, ...]:
+        """Return bounded terminal source identities that may own hidden orphans."""
+
+        if row_limit < 1:
+            raise ValueError("publication row limit must be positive")
+        with self._database.transaction() as connection:
+            rows = connection.execute(
+                """
+                SELECT r.profile_id, r.deterministic_envelope_id,
+                       r.publication_batch_id, r.profile_publication_sequence,
+                       r.batch_ordinal, r.batch_size, r.purge_generation
+                FROM personal_context_publication_rows r
+                JOIN personal_context_publication_batches b
+                  ON b.profile_id = r.profile_id
+                 AND b.profile_publication_sequence = r.profile_publication_sequence
+                WHERE r.profile_id = ? AND r.sync_server_cursor IS NULL
+                  AND b.status = 'purge_terminal'
+                  AND r.row_state = 'shredded'
+                ORDER BY r.profile_publication_sequence, r.batch_ordinal
+                LIMIT ?
+                """,
+                (profile_id, row_limit),
+            ).fetchall()
+        return tuple(
+            PublicationStageIdentity(
+                profile_id=str(row["profile_id"]),
+                deterministic_envelope_id=str(row["deterministic_envelope_id"]),
+                publication_batch_id=str(row["publication_batch_id"]),
+                profile_publication_sequence=int(row["profile_publication_sequence"]),
+                batch_ordinal=int(row["batch_ordinal"]),
+                batch_size=int(row["batch_size"]),
+                purge_generation=int(row["purge_generation"]),
+            )
+            for row in rows
+        )
 
     def canonical_ingress_receipt_for_source(
         self,
@@ -364,15 +431,24 @@ class PersonalContextPublicationRelayStore:
                 )
             finally:
                 if claimed:
+                    released_at_ns = time.time_ns()
                     with self._database.transaction(immediate=True) as connection:
-                        connection.execute(
+                        released = connection.execute(
                             """
                             UPDATE personal_context_publication_relay_leases
                             SET expires_at_ns = ?
                             WHERE profile_id = ? AND owner_token = ?
+                              AND expires_at_ns > ?
                             """,
-                            (time.time_ns(), profile_id, owner_token),
+                            (
+                                released_at_ns,
+                                profile_id,
+                                owner_token,
+                                released_at_ns,
+                            ),
                         )
+                        if released.rowcount != 1:
+                            raise RuntimeError("publication relay lease changed")
 
     def renew_lease(self, lease: PublicationRelayLease) -> bool:
         """CAS-renew the current owner before an external stage transition."""
@@ -396,7 +472,11 @@ class PersonalContextPublicationRelayStore:
         with self._database.transaction(immediate=True) as connection:
             current = connection.execute(
                 """
-                SELECT b.status, b.purge_generation, r.row_state
+                SELECT b.status, b.publication_batch_id AS batch_id,
+                       b.purge_generation AS batch_generation,
+                       r.publication_batch_id AS row_batch_id,
+                       r.batch_size, r.purge_generation AS row_generation,
+                       r.deterministic_envelope_id, r.row_state
                 FROM personal_context_publication_batches b
                 JOIN personal_context_publication_rows r
                   ON r.profile_id = b.profile_id
@@ -416,9 +496,16 @@ class PersonalContextPublicationRelayStore:
         return bool(
             lease_row is not None
             and lease.profile_id == row.profile_id
+            and row.relay_owner_token == lease.owner_token
             and current is not None
             and current["status"] not in {"complete", "covered_by_activation", "purge_terminal"}
-            and int(current["purge_generation"]) == row.purge_generation
+            and str(current["batch_id"]) == row.publication_batch_id
+            and int(current["batch_generation"]) == row.purge_generation
+            and str(current["row_batch_id"]) == row.publication_batch_id
+            and int(current["batch_size"]) == row.batch_size
+            and int(current["row_generation"]) == row.purge_generation
+            and str(current["deterministic_envelope_id"])
+            == row.deterministic_envelope_id
             and current["row_state"] in {"pending", "staged", "acknowledged"}
         )
 
@@ -427,6 +514,7 @@ class PersonalContextPublicationRelayStore:
         profile_id: str,
         *,
         row_limit: int,
+        lease: PublicationRelayLease | None = None,
     ) -> PublicationSourceBatch | None:
         """Claim and decrypt only the earliest incomplete sequence under SQLite lock."""
 
@@ -438,6 +526,15 @@ class PersonalContextPublicationRelayStore:
         )
 
         with self._database.transaction(immediate=True) as connection:
+            if lease is not None:
+                owned = connection.execute(
+                    """SELECT 1 FROM personal_context_publication_relay_leases
+                       WHERE profile_id = ? AND owner_token = ?
+                         AND expires_at_ns > ?""",
+                    (lease.profile_id, lease.owner_token, time.time_ns()),
+                ).fetchone()
+                if lease.profile_id != profile_id or owned is None:
+                    raise RuntimeError("publication relay lease changed")
             batch = connection.execute(
                 """
                 SELECT * FROM personal_context_publication_batches
@@ -459,15 +556,23 @@ class PersonalContextPublicationRelayStore:
             ).fetchone()
             if attention is not None:
                 raise PublicationRelayPoisoned("Personal Context relay needs attention")
-            connection.execute(
+            updated = connection.execute(
                 """
                 UPDATE personal_context_publication_batches
                 SET status = 'relaying', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
                 WHERE profile_id = ? AND profile_publication_sequence = ?
+                  AND publication_batch_id = ? AND purge_generation = ?
                   AND status IN ('pending', 'relaying')
                 """,
-                (profile_id, batch["profile_publication_sequence"]),
+                (
+                    profile_id,
+                    batch["profile_publication_sequence"],
+                    batch["publication_batch_id"],
+                    batch["purge_generation"],
+                ),
             )
+            if updated.rowcount != 1:
+                raise RuntimeError("publication relay source claim changed")
             keys = ServerProfileKeyProvider(self._database).load(profile_id, connection=connection)
             journal = PersonalContextPublicationJournal(keys)
             rows = connection.execute(
@@ -487,12 +592,13 @@ class PersonalContextPublicationRelayStore:
             try:
                 domain, canonical = journal.decrypt_row(row)
             except Exception as exc:  # noqa: BLE001 - ciphertext must fail closed.
-                with self._database.transaction(immediate=True) as connection:
-                    self._mark_attention_in_transaction(
-                        connection,
-                        profile_id=profile_id,
-                        sequence=sequence,
-                    )
+                self._mark_corrupt_source_attention(
+                    profile_id=profile_id,
+                    sequence=sequence,
+                    batch_id=batch_id,
+                    purge_generation=int(batch["purge_generation"]),
+                    lease=lease,
+                )
                 raise PublicationRelayPoisoned(
                     "Personal Context relay needs attention"
                 ) from exc
@@ -527,21 +633,63 @@ class PersonalContextPublicationRelayStore:
             rows=tuple(source_rows),
         )
 
+    def _mark_corrupt_source_attention(
+        self,
+        *,
+        profile_id: str,
+        sequence: int,
+        batch_id: str,
+        purge_generation: int,
+        lease: PublicationRelayLease | None,
+    ) -> None:
+        """Poison only an exact corrupt batch still owned by the caller."""
+
+        if lease is None or lease.profile_id != profile_id:
+            raise RuntimeError("publication relay source claim changed")
+        with self._database.transaction(immediate=True) as connection:
+            owned = connection.execute(
+                """SELECT 1 FROM personal_context_publication_relay_leases
+                   WHERE profile_id = ? AND owner_token = ? AND expires_at_ns > ?""",
+                (profile_id, lease.owner_token, time.time_ns()),
+            ).fetchone()
+            current = connection.execute(
+                """SELECT 1 FROM personal_context_publication_batches
+                   WHERE profile_id = ? AND profile_publication_sequence = ?
+                     AND publication_batch_id = ? AND purge_generation = ?
+                     AND status = 'relaying'""",
+                (profile_id, sequence, batch_id, purge_generation),
+            ).fetchone()
+            if owned is None or current is None:
+                raise RuntimeError("publication relay source claim changed")
+            self._insert_attention_in_transaction(
+                connection,
+                profile_id=profile_id,
+                sequence=sequence,
+            )
+
     @staticmethod
-    def _mark_attention_in_transaction(
+    def _insert_attention_in_transaction(
         connection: sqlite3.Connection,
         *,
         profile_id: str,
         sequence: int,
     ) -> None:
-        connection.execute(
-            """
-            INSERT OR IGNORE INTO personal_context_publication_relay_attention(
-                profile_id, profile_publication_sequence, error_code, created_at
-            ) VALUES (?, ?, 'relay_poisoned', strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-            """,
+        inserted = connection.execute(
+            """INSERT OR IGNORE INTO personal_context_publication_relay_attention(
+                   profile_id, profile_publication_sequence, error_code, created_at
+               ) VALUES (?, ?, 'relay_poisoned', strftime('%Y-%m-%dT%H:%M:%fZ','now'))""",
             (profile_id, sequence),
         )
+        if inserted.rowcount == 1:
+            return
+        existing = connection.execute(
+            """SELECT 1 FROM personal_context_publication_relay_attention
+               WHERE profile_id = ? AND profile_publication_sequence = ?
+                 AND error_code = 'relay_poisoned'""",
+            (profile_id, sequence),
+        ).fetchone()
+        if existing is None:
+            raise RuntimeError("publication relay attention changed")
 
     def mark_attention(
         self,
@@ -571,7 +719,7 @@ class PersonalContextPublicationRelayStore:
             ).fetchone()
             if owned is None or current is None or lease.profile_id != batch.profile_id:
                 raise RuntimeError("publication relay source claim changed")
-            self._mark_attention_in_transaction(
+            self._insert_attention_in_transaction(
                 connection,
                 profile_id=batch.profile_id,
                 sequence=batch.profile_publication_sequence,
@@ -609,12 +757,27 @@ class PersonalContextPublicationRelayStore:
                 "SELECT purge_generation FROM personal_context_publication_profiles WHERE profile_id = ?",
                 (row.profile_id,),
             ).fetchone()
-            if profile is None or int(profile["purge_generation"]) != row.purge_generation:
-                raise RuntimeError("publication row is stale")
+            batch = connection.execute(
+                """SELECT * FROM personal_context_publication_batches
+                   WHERE profile_id = ? AND profile_publication_sequence = ?""",
+                (row.profile_id, row.profile_publication_sequence),
+            ).fetchone()
+            if not self._source_claim_matches(
+                row=row,
+                lease=lease,
+                lease_row=lease_row,
+                profile=profile,
+                batch=batch,
+                current=current,
+                allowed_states={"staged", "acknowledged"},
+            ):
+                raise RuntimeError("publication relay source claim changed")
             if current["row_state"] == "acknowledged":
-                if int(current["sync_server_cursor"]) != server_cursor:
+                if current["sync_server_cursor"] is None or int(current["sync_server_cursor"]) != server_cursor:
                     raise RuntimeError("publication receipt changed concurrently")
                 return
+            if current["sync_server_cursor"] is None or int(current["sync_server_cursor"]) != server_cursor:
+                raise RuntimeError("publication receipt changed concurrently")
             journal = PersonalContextPublicationJournal(
                 ServerProfileKeyProvider(self._database).load(row.profile_id, connection=connection)
             )
@@ -650,20 +813,29 @@ class PersonalContextPublicationRelayStore:
                 "SELECT purge_generation FROM personal_context_publication_profiles WHERE profile_id = ?",
                 (row.profile_id,),
             ).fetchone()
-            if (
-                lease_row is None
-                or lease.profile_id != row.profile_id
-                or current is None
-                or profile is None
-                or int(profile["purge_generation"]) != row.purge_generation
-                or current["row_state"] not in {"pending", "staged"}
+            batch = connection.execute(
+                """SELECT * FROM personal_context_publication_batches
+                   WHERE profile_id = ? AND profile_publication_sequence = ?""",
+                (row.profile_id, row.profile_publication_sequence),
+            ).fetchone()
+            if not self._source_claim_matches(
+                row=row,
+                lease=lease,
+                lease_row=lease_row,
+                profile=profile,
+                batch=batch,
+                current=current,
+                allowed_states={"pending", "staged"},
             ):
                 raise RuntimeError("publication relay source claim changed")
             if (
                 current["row_state"] == "staged"
+                and current["sync_server_cursor"] is not None
                 and int(current["sync_server_cursor"]) == server_cursor
             ):
                 return
+            if current["row_state"] != "pending" or current["sync_server_cursor"] is not None:
+                raise RuntimeError("publication receipt changed concurrently")
             journal = PersonalContextPublicationJournal(
                 ServerProfileKeyProvider(self._database).load(
                     row.profile_id, connection=connection
@@ -675,6 +847,149 @@ class PersonalContextPublicationRelayStore:
                 row_state="staged",
                 sync_server_cursor=server_cursor,
             )
+
+    @staticmethod
+    def _source_claim_matches(
+        *,
+        row: PublicationSourceRow,
+        lease: PublicationRelayLease,
+        lease_row: sqlite3.Row | None,
+        profile: sqlite3.Row | None,
+        batch: sqlite3.Row | None,
+        current: sqlite3.Row | None,
+        allowed_states: set[str],
+    ) -> bool:
+        """Match one source snapshot to the exact live lease and batch identity."""
+
+        return bool(
+            lease_row is not None
+            and lease.profile_id == row.profile_id
+            and row.relay_owner_token == lease.owner_token
+            and profile is not None
+            and int(profile["purge_generation"]) == row.purge_generation
+            and batch is not None
+            and str(batch["publication_batch_id"]) == row.publication_batch_id
+            and int(batch["purge_generation"]) == row.purge_generation
+            and str(batch["status"]) == "relaying"
+            and current is not None
+            and str(current["publication_batch_id"]) == row.publication_batch_id
+            and int(current["batch_ordinal"]) == row.batch_ordinal
+            and int(current["batch_size"]) == row.batch_size
+            and int(current["purge_generation"]) == row.purge_generation
+            and str(current["deterministic_envelope_id"])
+            == row.deterministic_envelope_id
+            and str(current["row_state"]) in allowed_states
+        )
+
+    def stage_receipt_state(
+        self,
+        row: PublicationSourceRow,
+        receipt: AuthorityStageReceipt,
+        *,
+        lease: PublicationRelayLease,
+    ) -> Literal["bound", "claimable", "lost"]:
+        """Classify an uncertain source-stage outcome without changing either DB."""
+
+        if (
+            receipt.deterministic_envelope_id != row.deterministic_envelope_id
+            or receipt.publication_batch_id != row.publication_batch_id
+            or receipt.profile_publication_sequence
+            != row.profile_publication_sequence
+            or receipt.batch_ordinal != row.batch_ordinal
+            or receipt.batch_size != row.batch_size
+            or receipt.purge_generation != row.purge_generation
+        ):
+            return "lost"
+        with self._database.transaction() as connection:
+            lease_row = connection.execute(
+                """SELECT 1 FROM personal_context_publication_relay_leases
+                   WHERE profile_id = ? AND owner_token = ? AND expires_at_ns > ?""",
+                (lease.profile_id, lease.owner_token, time.time_ns()),
+            ).fetchone()
+            profile = connection.execute(
+                "SELECT purge_generation FROM personal_context_publication_profiles WHERE profile_id = ?",
+                (row.profile_id,),
+            ).fetchone()
+            batch = connection.execute(
+                """SELECT * FROM personal_context_publication_batches
+                   WHERE profile_id = ? AND profile_publication_sequence = ?""",
+                (row.profile_id, row.profile_publication_sequence),
+            ).fetchone()
+            current = connection.execute(
+                """SELECT * FROM personal_context_publication_rows
+                   WHERE profile_id = ? AND profile_publication_sequence = ?
+                     AND batch_ordinal = ?""",
+                (row.profile_id, row.profile_publication_sequence, row.batch_ordinal),
+            ).fetchone()
+        if not self._source_claim_matches(
+            row=row,
+            lease=lease,
+            lease_row=lease_row,
+            profile=profile,
+            batch=batch,
+            current=current,
+            allowed_states={"pending", "staged"},
+        ):
+            return "lost"
+        if current is not None and current["row_state"] == "staged":
+            if (
+                current["sync_server_cursor"] is not None
+                and int(current["sync_server_cursor"]) == receipt.server_cursor
+            ):
+                return "bound"
+            return "lost"
+        return "claimable"
+
+    def receipt_is_acknowledged(
+        self,
+        row: PublicationSourceRow,
+        receipt: AuthorityStageReceipt,
+        *,
+        lease: PublicationRelayLease,
+    ) -> bool:
+        """Return whether one exact live source claim durably acknowledges a receipt."""
+
+        with self._database.transaction() as connection:
+            lease_row = connection.execute(
+                """SELECT 1 FROM personal_context_publication_relay_leases
+                   WHERE profile_id = ? AND owner_token = ? AND expires_at_ns > ?""",
+                (lease.profile_id, lease.owner_token, time.time_ns()),
+            ).fetchone()
+            profile = connection.execute(
+                "SELECT purge_generation FROM personal_context_publication_profiles WHERE profile_id = ?",
+                (row.profile_id,),
+            ).fetchone()
+            batch = connection.execute(
+                """SELECT * FROM personal_context_publication_batches
+                   WHERE profile_id = ? AND profile_publication_sequence = ?""",
+                (row.profile_id, row.profile_publication_sequence),
+            ).fetchone()
+            current = connection.execute(
+                """SELECT * FROM personal_context_publication_rows
+                   WHERE profile_id = ? AND profile_publication_sequence = ?
+                     AND batch_ordinal = ?""",
+                (row.profile_id, row.profile_publication_sequence, row.batch_ordinal),
+            ).fetchone()
+        return bool(
+            receipt.deterministic_envelope_id == row.deterministic_envelope_id
+            and receipt.publication_batch_id == row.publication_batch_id
+            and receipt.profile_publication_sequence == row.profile_publication_sequence
+            and receipt.batch_ordinal == row.batch_ordinal
+            and receipt.batch_size == row.batch_size
+            and receipt.purge_generation == row.purge_generation
+            and self._source_claim_matches(
+                row=row,
+                lease=lease,
+                lease_row=lease_row,
+                profile=profile,
+                batch=batch,
+                current=current,
+                allowed_states={"acknowledged"},
+            )
+            and current is not None
+            and current["sync_server_cursor"] is not None
+            and int(current["sync_server_cursor"]) == receipt.server_cursor
+        )
 
     def complete_if_acknowledged(
         self,
@@ -698,21 +1013,49 @@ class PersonalContextPublicationRelayStore:
                 """
                 SELECT 1 FROM personal_context_publication_rows
                 WHERE profile_id = ? AND profile_publication_sequence = ?
+                  AND publication_batch_id = ? AND purge_generation = ?
                   AND row_state != 'acknowledged'
                 LIMIT 1
                 """,
-                (batch.profile_id, batch.profile_publication_sequence),
+                (
+                    batch.profile_id,
+                    batch.profile_publication_sequence,
+                    batch.publication_batch_id,
+                    batch.rows[0].purge_generation if batch.rows else -1,
+                ),
             ).fetchone()
             if pending is not None:
+                return False
+            expected_size = batch.rows[0].batch_size if batch.rows else 0
+            exact = connection.execute(
+                """SELECT COUNT(*) AS row_count FROM personal_context_publication_rows
+                   WHERE profile_id = ? AND profile_publication_sequence = ?
+                     AND publication_batch_id = ? AND purge_generation = ?
+                     AND batch_size = ? AND row_state = 'acknowledged'""",
+                (
+                    batch.profile_id,
+                    batch.profile_publication_sequence,
+                    batch.publication_batch_id,
+                    batch.rows[0].purge_generation if batch.rows else -1,
+                    expected_size,
+                ),
+            ).fetchone()
+            if exact is None or int(exact["row_count"]) != expected_size:
                 return False
             updated = connection.execute(
                 """
                 UPDATE personal_context_publication_batches
                 SET status = 'complete', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
                 WHERE profile_id = ? AND profile_publication_sequence = ?
+                  AND publication_batch_id = ? AND purge_generation = ?
                   AND status = 'relaying'
                 """,
-                (batch.profile_id, batch.profile_publication_sequence),
+                (
+                    batch.profile_id,
+                    batch.profile_publication_sequence,
+                    batch.publication_batch_id,
+                    batch.rows[0].purge_generation if batch.rows else -1,
+                ),
             )
             return updated.rowcount == 1
 
@@ -1057,7 +1400,13 @@ class PersonalContextPublicationJournal:
             SET nonce = ?, wrapped_dek = ?, wrapped_dek_nonce = ?, ciphertext = ?,
                 key_version = ?, algorithm = ?, row_state = ?, sync_server_cursor = ?
             WHERE profile_id = ? AND profile_publication_sequence = ?
-              AND batch_ordinal = ? AND row_state = ?
+              AND publication_batch_id = ? AND batch_ordinal = ?
+              AND batch_size = ? AND purge_generation = ?
+              AND deterministic_envelope_id = ? AND role = ?
+              AND opaque_object_id = ? AND opaque_version_id = ?
+              AND operation = ? AND row_state = ?
+              AND ((sync_server_cursor IS NULL AND ? IS NULL)
+                   OR sync_server_cursor = ?)
             """,
             (
                 envelope.nonce,
@@ -1070,8 +1419,18 @@ class PersonalContextPublicationJournal:
                 sync_server_cursor if sync_server_cursor is not None else row["sync_server_cursor"],
                 row["profile_id"],
                 row["profile_publication_sequence"],
+                row["publication_batch_id"],
                 row["batch_ordinal"],
+                row["batch_size"],
+                row["purge_generation"],
+                row["deterministic_envelope_id"],
+                row["role"],
+                row["opaque_object_id"],
+                row["opaque_version_id"],
+                row["operation"],
                 row["row_state"],
+                row["sync_server_cursor"],
+                row["sync_server_cursor"],
             ),
         )
         if updated.rowcount != 1:

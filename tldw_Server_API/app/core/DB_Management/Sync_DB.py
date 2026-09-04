@@ -8237,7 +8237,9 @@ class SyncDatabase:
         profile_id: str,
         purge_generation: int,
         publication_batch_id: str,
+        profile_publication_sequence: int,
         batch_ordinal: int,
+        batch_size: int,
     ) -> bool:
         """Delete only an exact, still-pending internal authority publication."""
 
@@ -8270,7 +8272,10 @@ class SyncDatabase:
                 or not isinstance(authority, dict)
                 or authority.get("role") != "home_authority"
                 or authority.get("publication_batch_id") != publication_batch_id
+                or authority.get("profile_publication_sequence")
+                != profile_publication_sequence
                 or authority.get("batch_ordinal") != batch_ordinal
+                or authority.get("batch_size") != batch_size
             ):
                 return False
             current = _first(
@@ -8284,8 +8289,15 @@ class SyncDatabase:
             deleted = self.execute(
                 """DELETE FROM sync_envelopes
                     WHERE server_sequence = ? AND dataset_id = ?
-                      AND client_envelope_id = ? AND apply_status = 'pending'""",
-                (server_cursor, dataset_id, client_envelope_id),
+                      AND client_envelope_id = ? AND device_id = 'server-origin'
+                      AND status = 'accepted' AND apply_status = 'pending'
+                      AND routing_metadata_json = ?""",
+                (
+                    server_cursor,
+                    dataset_id,
+                    client_envelope_id,
+                    row["routing_metadata_json"],
+                ),
                 connection=connection,
             )
             if deleted.rowcount != 1:
@@ -8302,13 +8314,15 @@ class SyncDatabase:
                     )
                 )
                 if previous is None:
-                    self.execute(
+                    repaired = self.execute(
                         """DELETE FROM sync_current_heads
                             WHERE dataset_id = ? AND domain = ? AND object_id = ?
                               AND latest_server_cursor = ?""",
                         (dataset_id, row["domain"], row["entity_id"], server_cursor),
                         connection=connection,
                     )
+                    if repaired.rowcount != 1:
+                        raise SyncStoreError("personal_context_authority_cancel_raced")
                 else:
                     repaired = self.execute(
                         """UPDATE sync_current_heads SET latest_server_cursor = ?
@@ -8331,19 +8345,19 @@ class SyncDatabase:
         self,
         server_cursor: int,
         *,
+        dataset_id: str,
+        client_envelope_id: str,
+        profile_id: str,
+        purge_generation: int,
+        publication_batch_id: str,
+        profile_publication_sequence: int,
+        batch_ordinal: int,
+        batch_size: int,
         connection: Any,
     ) -> SyncEnvelope:
         """Apply one verified authority row with pending/applied CAS semantics."""
 
         with self.backend.transaction(connection) as conn:
-            updated = self.execute(
-                """UPDATE sync_envelopes
-                   SET apply_status = 'applied', apply_error_code = NULL,
-                       apply_error_message = NULL, applied_at = ?
-                   WHERE server_sequence = ? AND apply_status = 'pending'""",
-                (utcnow_iso(), server_cursor),
-                connection=conn,
-            )
             row = _first(
                 self.execute(
                     "SELECT * FROM sync_envelopes WHERE server_sequence = ?",
@@ -8351,11 +8365,64 @@ class SyncDatabase:
                     connection=conn,
                 )
             )
-            if row is None or (
-                updated.rowcount != 1 and row.get("apply_status") != "applied"
-            ):
+            if row is None:
                 raise SyncStoreError("personal_context_authority_finalize_raced")
-        return _envelope_from_row(row)
+            routing = decode_json(row.get("routing_metadata_json"), default={})
+            authority = (
+                routing.get("personal_context_authority")
+                if isinstance(routing, dict)
+                else None
+            )
+            exact = bool(
+                row.get("dataset_id") == dataset_id
+                and row.get("client_envelope_id") == client_envelope_id
+                and row.get("device_id") == "server-origin"
+                and row.get("domain") in PERSONAL_CONTEXT_SYNC_DOMAINS
+                and row.get("status") == "accepted"
+                and isinstance(routing, dict)
+                and routing.get("profile_id") == profile_id
+                and routing.get("purge_generation") == purge_generation
+                and isinstance(authority, dict)
+                and authority.get("role") == "home_authority"
+                and authority.get("publication_batch_id") == publication_batch_id
+                and authority.get("profile_publication_sequence")
+                == profile_publication_sequence
+                and authority.get("batch_ordinal") == batch_ordinal
+                and authority.get("batch_size") == batch_size
+            )
+            if not exact:
+                raise SyncStoreError("personal_context_authority_finalize_raced")
+            if row.get("apply_status") == "applied":
+                return _envelope_from_row(row)
+            if row.get("apply_status") != "pending":
+                raise SyncStoreError("personal_context_authority_finalize_raced")
+            updated = self.execute(
+                """UPDATE sync_envelopes
+                   SET apply_status = 'applied', apply_error_code = NULL,
+                       apply_error_message = NULL, applied_at = ?
+                   WHERE server_sequence = ? AND dataset_id = ?
+                     AND client_envelope_id = ? AND device_id = 'server-origin'
+                     AND status = 'accepted' AND apply_status = 'pending'
+                     AND routing_metadata_json = ?""",
+                (
+                    utcnow_iso(),
+                    server_cursor,
+                    dataset_id,
+                    client_envelope_id,
+                    row["routing_metadata_json"],
+                ),
+                connection=conn,
+            )
+            stored = _first(
+                self.execute(
+                    "SELECT * FROM sync_envelopes WHERE server_sequence = ?",
+                    (server_cursor,),
+                    connection=conn,
+                )
+            )
+            if updated.rowcount != 1 or stored is None:
+                raise SyncStoreError("personal_context_authority_finalize_raced")
+        return _envelope_from_row(stored)
 
     def mark_personal_context_ingress_applied(
         self,

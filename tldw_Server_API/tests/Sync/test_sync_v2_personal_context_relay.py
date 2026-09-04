@@ -14,6 +14,7 @@ from tldw_profile_core import ProfileRecord
 from tldw_profile_core.canonical import canonical_json_bytes
 
 from tldw_Server_API.app.core.Personalization.personal_context_publication import (
+    AuthorityStageReceipt,
     PersonalContextPublicationRelayStore,
     PublicationSourceBatch,
     PublicationSourceRow,
@@ -28,7 +29,10 @@ def test_relay_bounds_source_decryption_before_loading_a_batch() -> None:
         def profile_lease(self, _profile_id):
             yield SimpleNamespace(owner_token="owner")
 
-        def earliest_nonterminal_batch(self, _profile_id, *, row_limit):
+        def earliest_nonterminal_batch(
+            self, _profile_id, *, row_limit, lease=None
+        ):
+            del lease
             assert row_limit == 7
             return None
 
@@ -210,7 +214,6 @@ def test_real_relay_extends_current_sync_heads_across_publication_batches(
             (
                 replace(
                     source_row,
-                    deterministic_envelope_id="forged-integrity-envelope",
                     integrity_tag="hmac-sha256-v1:" + "0" * 64,
                 ),
                 "dataset-a",
@@ -223,7 +226,7 @@ def test_real_relay_extends_current_sync_heads_across_publication_batches(
                     profile_id="profile-other",
                 ),
                 "dataset-a",
-                PersonalContextAuthoritySourceError,
+                SyncStoreError,
             ),
             (
                 replace(
@@ -232,7 +235,7 @@ def test_real_relay_extends_current_sync_heads_across_publication_batches(
                     purge_generation=1,
                 ),
                 "dataset-a",
-                PersonalContextAuthoritySourceError,
+                SyncStoreError,
             ),
             (
                 replace(
@@ -275,10 +278,7 @@ def test_real_relay_extends_current_sync_heads_across_publication_batches(
                     sync_integrity_key=lambda _profile_id: result,
                 ),
             )
-            wrong_key_row = replace(
-                source_row,
-                deterministic_envelope_id=f"wrong-key-{key_result[0]}",
-            )
+            wrong_key_row = source_row
             with pytest.raises(error_type):
                 wrong_key_service.stage_personal_context_authority(
                     wrong_key_row, "dataset-a", "user-a"
@@ -286,17 +286,19 @@ def test_real_relay_extends_current_sync_heads_across_publication_batches(
             assert store.get_envelope_by_client_id(
                 "dataset-a", wrong_key_row.deterministic_envelope_id
             ) is None
-        cancelled_cursor = service.stage_personal_context_authority(
+        cancelled_receipt = service.stage_personal_context_authority(
             source_row, "dataset-a", "user-a"
         )
-        cancelled = store.get_envelope_by_server_cursor(cancelled_cursor)
+        cancelled = store.get_envelope_by_server_cursor(
+            cancelled_receipt.server_cursor
+        )
         assert cancelled is not None
         assert cancelled.apply_status == "pending"
         with store.db.backend.transaction() as connection:
             store.db.execute(
                 "UPDATE sync_envelopes SET schema_version = 2 "
                 "WHERE server_sequence = ?",
-                (cancelled_cursor,),
+                (cancelled_receipt.server_cursor,),
                 connection=connection,
             )
         with pytest.raises(SyncStoreError, match="authority receipt is invalid"):
@@ -307,19 +309,22 @@ def test_real_relay_extends_current_sync_heads_across_publication_batches(
             )
         service.cancel_personal_context_authority(
             source_row,
-            cancelled_cursor,
+            cancelled_receipt,
             "dataset-a",
             "user-a",
         )
-        assert store.get_envelope_by_server_cursor(cancelled_cursor) is None
+        assert (
+            store.get_envelope_by_server_cursor(cancelled_receipt.server_cursor)
+            is None
+        )
         assert store.get_current_head(
             "dataset-a", source_row.domain, source_row.object_id
         ) is None
-    expired_cursor: int | None = None
+    expired_receipt: AuthorityStageReceipt | None = None
 
-    def expire_after_stage(row, dataset_id: str, user_id: str) -> int:
-        nonlocal expired_cursor
-        expired_cursor = service.stage_personal_context_authority(
+    def expire_after_stage(row, dataset_id: str, user_id: str) -> AuthorityStageReceipt:
+        nonlocal expired_receipt
+        expired_receipt = service.stage_personal_context_authority(
             row,
             dataset_id,
             user_id,
@@ -330,7 +335,7 @@ def test_real_relay_extends_current_sync_heads_across_publication_batches(
                 "SET expires_at_ns = 0 WHERE profile_id = ?",
                 (manifest.profile_id,),
             )
-        return expired_cursor
+        return expired_receipt
 
     expired = PersonalContextRelay(
         publications=PersonalContextPublicationRelayStore(personal_db),
@@ -345,8 +350,8 @@ def test_real_relay_extends_current_sync_heads_across_publication_batches(
         row_budget=1,
     )
     assert expired.continuation == "personal_context_relay_pending"
-    assert expired_cursor is not None
-    assert store.get_envelope_by_server_cursor(expired_cursor) is None
+    assert expired_receipt is not None
+    assert store.get_envelope_by_server_cursor(expired_receipt.server_cursor) is None
 
     original_acknowledge = publications.acknowledge_row
     interrupted = True
@@ -366,18 +371,18 @@ def test_real_relay_extends_current_sync_heads_across_publication_batches(
         cancel_authority=service.cancel_personal_context_authority,
     )
 
-    with pytest.raises(RuntimeError, match="crash after durable Sync insert"):
-        relay.relay_profile(
-            user_id="user-a",
-            profile_id=manifest.profile_id,
-            dataset_id="dataset-a",
-            after_server_cursor=None,
-        )
+    interrupted_result = relay.relay_profile(
+        user_id="user-a",
+        profile_id=manifest.profile_id,
+        dataset_id="dataset-a",
+        after_server_cursor=None,
+    )
+    assert interrupted_result.continuation == "personal_context_relay_pending"
     scope_head = store.get_current_head(
         "dataset-a", "personal_context.scope", canonical.list_scopes()[0].scope_id
     )
     assert scope_head is not None
-    assert scope_head.apply_status == "applied"
+    assert scope_head.apply_status == "pending"
 
     publications = PersonalContextPublicationRelayStore(personal_db)
     relay = PersonalContextRelay(
@@ -578,7 +583,9 @@ class _Publications:
         _profile_id: str,
         *,
         row_limit: int,
+        lease: object | None = None,
     ) -> PublicationSourceBatch:
+        del lease
         assert row_limit > 0
         if all(row.row_state == "acknowledged" for row in self.rows):
             return None  # type: ignore[return-value]
@@ -630,6 +637,18 @@ def _row(ordinal: int, role: str) -> PublicationSourceRow:
     )
 
 
+def _stage_receipt(row: PublicationSourceRow, cursor: int) -> AuthorityStageReceipt:
+    return AuthorityStageReceipt(
+        server_cursor=cursor,
+        deterministic_envelope_id=row.deterministic_envelope_id,
+        publication_batch_id=row.publication_batch_id,
+        profile_publication_sequence=row.profile_publication_sequence,
+        batch_ordinal=row.batch_ordinal,
+        batch_size=row.batch_size,
+        purge_generation=row.purge_generation,
+    )
+
+
 def test_relay_never_stages_manifest_before_semantic_siblings() -> None:
     from tldw_Server_API.app.core.Sync.v2.personal_context_relay import PersonalContextRelay
 
@@ -637,12 +656,19 @@ def test_relay_never_stages_manifest_before_semantic_siblings() -> None:
     staged: list[str] = []
     relay = PersonalContextRelay(
         publications=publications,
-        stage_authority=lambda row, _dataset, _user: staged.append(row.role) or row.batch_ordinal + 1,
+        stage_authority=lambda row, _dataset, _user: (
+            staged.append(row.role) or _stage_receipt(row, row.batch_ordinal + 1)
+        ),
     )
 
     publications.failed_after = 0
-    with pytest.raises(RuntimeError, match="injected interruption"):
-        relay.relay_profile(user_id="user-a", profile_id="profile-a", dataset_id="dataset-a", after_server_cursor=None)
+    first = relay.relay_profile(
+        user_id="user-a",
+        profile_id="profile-a",
+        dataset_id="dataset-a",
+        after_server_cursor=None,
+    )
+    assert first.continuation == "personal_context_relay_pending"
     assert staged == ["semantic"]
     publications.failed_after = None
     relay.relay_profile(user_id="user-a", profile_id="profile-a", dataset_id="dataset-a", after_server_cursor=None)

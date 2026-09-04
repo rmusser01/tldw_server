@@ -182,6 +182,7 @@ from .security import (
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.Personalization.personal_context_publication import (
+        AuthorityStageReceipt,
         CanonicalApplyReceipt,
         PersonalContextPublicationRelayStore,
         PublicationSourceRow,
@@ -1761,8 +1762,12 @@ class SyncV2Service:
         row: object,
         dataset_id: str,
         user_id: str,
-    ) -> int:
+    ) -> AuthorityStageReceipt:
         """Persist one authenticated journal row as internal home-authority egress."""
+
+        from tldw_Server_API.app.core.Personalization.personal_context_publication import (
+            AuthorityStageReceipt,
+        )
 
         from .personal_context_relay import PersonalContextAuthoritySourceError
         from .server_origin import insert_personal_context_authority
@@ -1790,7 +1795,7 @@ class SyncV2Service:
             or type(purge_generation) is not int
             or purge_generation != getattr(row, "purge_generation", None)
         ):
-            raise PersonalContextAuthoritySourceError("Personal Context authority source binding is invalid")
+            raise SyncStoreError("Personal Context authority source binding is stale")
         relay_token = getattr(row, "relay_owner_token", None)
         if not isinstance(relay_token, str) or not relay_token:
             raise SyncStoreError("Personal Context authority relay claim is invalid")
@@ -1870,12 +1875,23 @@ class SyncV2Service:
         ):
             existing = current_head
         if existing is not None:
-            return self._verify_personal_context_authority_receipt(
+            server_cursor = self._verify_personal_context_authority_receipt(
                 dataset=dataset,
                 stored=existing,
                 row=row,
                 user_id=user_id,
                 sync_store=self.store,
+            )
+            return AuthorityStageReceipt(
+                server_cursor=server_cursor,
+                deterministic_envelope_id=deterministic_id,
+                publication_batch_id=str(getattr(row, "publication_batch_id", "")),
+                profile_publication_sequence=int(
+                    getattr(row, "profile_publication_sequence", 0)
+                ),
+                batch_ordinal=int(getattr(row, "batch_ordinal", -1)),
+                batch_size=int(getattr(row, "batch_size", 0)),
+                purge_generation=int(getattr(row, "purge_generation", -1)),
             )
         base_server_cursor = None
         base_object_revision = None
@@ -1990,7 +2006,17 @@ class SyncV2Service:
         )
         if stored.server_cursor is None:
             raise SyncStoreError("Personal Context authority receipt is unavailable")
-        return stored.server_cursor
+        return AuthorityStageReceipt(
+            server_cursor=stored.server_cursor,
+            deterministic_envelope_id=deterministic_id,
+            publication_batch_id=str(getattr(row, "publication_batch_id", "")),
+            profile_publication_sequence=int(
+                getattr(row, "profile_publication_sequence", 0)
+            ),
+            batch_ordinal=int(getattr(row, "batch_ordinal", -1)),
+            batch_size=int(getattr(row, "batch_size", 0)),
+            purge_generation=int(getattr(row, "purge_generation", -1)),
+        )
 
     def _is_exact_ingress_confirmation(
         self,
@@ -2109,21 +2135,41 @@ class SyncV2Service:
     def finalize_personal_context_authority(
         self,
         row: object,
-        server_cursor: int,
+        receipt: AuthorityStageReceipt,
         dataset_id: str,
         user_id: str,
     ) -> None:
         """Expose one staged authority row only while its source lease still owns it."""
 
+        from tldw_Server_API.app.core.Personalization.personal_context_publication import (
+            AuthorityStageReceipt,
+            PersonalContextPublicationRelayStore,
+            PublicationRelayLease,
+        )
+
         dataset = self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
-        staged = self.store.get_envelope_by_server_cursor(server_cursor)
+        if not isinstance(receipt, AuthorityStageReceipt):
+            raise SyncStoreError("Personal Context authority receipt is invalid")
+        relay_token = getattr(row, "relay_owner_token", None)
+        if not isinstance(relay_token, str) or not relay_token:
+            raise SyncStoreError("Personal Context authority receipt is invalid")
+        canonical_service = self._personal_context_service_for_user(user_id)
+        publication_store = PersonalContextPublicationRelayStore(
+            canonical_service._repository.database
+        )
+        lease = PublicationRelayLease(str(getattr(row, "profile_id", "")), relay_token)
+        if not publication_store.receipt_is_acknowledged(
+            row, receipt, lease=lease
+        ):
+            raise SyncStoreError("Personal Context authority source is not acknowledged")
+        staged = self.store.get_envelope_by_server_cursor(receipt.server_cursor)
         if staged is None:
             raise SyncStoreError("Personal Context authority receipt is invalid")
         with self.store.materialization_guard(
             [staged],
             require_predecessors=False,
         ) as guarded:
-            stored = guarded.get_envelope_by_server_cursor(server_cursor)
+            stored = guarded.get_envelope_by_server_cursor(receipt.server_cursor)
             if stored is None:
                 raise SyncStoreError("Personal Context authority receipt is invalid")
             self._verify_personal_context_authority_receipt(
@@ -2133,28 +2179,71 @@ class SyncV2Service:
                 user_id=user_id,
                 sync_store=guarded,
             )
-            guarded.mark_personal_context_authority_applied(server_cursor)
+            guarded.mark_personal_context_authority_applied(
+                receipt.server_cursor,
+                dataset_id=dataset_id,
+                client_envelope_id=receipt.deterministic_envelope_id,
+                profile_id=str(getattr(row, "profile_id", "")),
+                purge_generation=receipt.purge_generation,
+                publication_batch_id=receipt.publication_batch_id,
+                profile_publication_sequence=receipt.profile_publication_sequence,
+                batch_ordinal=receipt.batch_ordinal,
+                batch_size=receipt.batch_size,
+            )
 
     def cancel_personal_context_authority(
         self,
         row: object,
-        server_cursor: int,
+        receipt: AuthorityStageReceipt | None,
         dataset_id: str,
         user_id: str,
-    ) -> None:
+    ) -> bool:
         """Compensate an invisible authority insert after its source claim is lost."""
 
+        from tldw_Server_API.app.core.Personalization.personal_context_publication import (
+            AuthorityStageReceipt,
+        )
+
         self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
+        if receipt is None:
+            stored = self.store.get_envelope_by_client_id(
+                dataset_id,
+                str(getattr(row, "deterministic_envelope_id", "")),
+            )
+            if stored is None:
+                return False
+            if stored.server_cursor is None:
+                raise SyncStoreError("Personal Context authority cancellation raced")
+            receipt = AuthorityStageReceipt(
+                server_cursor=stored.server_cursor,
+                deterministic_envelope_id=str(
+                    getattr(row, "deterministic_envelope_id", "")
+                ),
+                publication_batch_id=str(
+                    getattr(row, "publication_batch_id", "")
+                ),
+                profile_publication_sequence=int(
+                    getattr(row, "profile_publication_sequence", 0)
+                ),
+                batch_ordinal=int(getattr(row, "batch_ordinal", -1)),
+                batch_size=int(getattr(row, "batch_size", 0)),
+                purge_generation=int(getattr(row, "purge_generation", -1)),
+            )
+        elif self.store.get_envelope_by_server_cursor(receipt.server_cursor) is None:
+            return False
         if not self.store.discard_pending_personal_context_authority(
-            server_cursor=server_cursor,
+            server_cursor=receipt.server_cursor,
             dataset_id=dataset_id,
-            client_envelope_id=str(getattr(row, "deterministic_envelope_id", "")),
+            client_envelope_id=receipt.deterministic_envelope_id,
             profile_id=str(getattr(row, "profile_id", "")),
-            purge_generation=int(getattr(row, "purge_generation", -1)),
-            publication_batch_id=str(getattr(row, "publication_batch_id", "")),
-            batch_ordinal=int(getattr(row, "batch_ordinal", -1)),
+            purge_generation=receipt.purge_generation,
+            publication_batch_id=receipt.publication_batch_id,
+            profile_publication_sequence=receipt.profile_publication_sequence,
+            batch_ordinal=receipt.batch_ordinal,
+            batch_size=receipt.batch_size,
         ):
             raise SyncStoreError("Personal Context authority cancellation raced")
+        return True
 
     def _notes_task_domains_ready(self, dataset: SyncDataset | None) -> bool:
         """Return the single service-level task/activity activation predicate."""
