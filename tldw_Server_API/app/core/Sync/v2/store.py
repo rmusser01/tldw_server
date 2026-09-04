@@ -1045,6 +1045,17 @@ class SyncV2Store:
             connection=self._connection,
         )
 
+    def get_personal_context_ingress_receipt(
+        self,
+        server_cursor: int,
+    ) -> Mapping[str, Any] | None:
+        """Read the canonical apply receipt bound to one exact ingress cursor."""
+
+        return self.db.get_personal_context_ingress_receipt(
+            server_cursor,
+            connection=self._connection,
+        )
+
     def summarize_domain_envelopes(
         self,
         dataset_id: str,

@@ -138,6 +138,79 @@ class PersonalContextPublicationRelayStore:
     def __init__(self, database: PersonalizationDB) -> None:
         self._database = database
 
+    def canonical_ingress_receipt_for_source(
+        self,
+        row: PublicationSourceRow,
+    ) -> CanonicalApplyReceipt | None:
+        """Resolve the one canonical ingress receipt that produced a source row."""
+
+        with self._database.transaction() as connection:
+            matches = connection.execute(
+                """
+                SELECT receipt.*
+                FROM personal_context_ingress_receipts AS receipt
+                JOIN personal_context_publication_batches AS batch
+                  ON batch.publication_batch_id = receipt.publication_batch_id
+                 AND batch.profile_publication_sequence = receipt.profile_publication_sequence
+                JOIN personal_context_publication_rows AS source
+                  ON source.publication_batch_id = batch.publication_batch_id
+                 AND source.profile_publication_sequence = batch.profile_publication_sequence
+                WHERE batch.profile_id = ?
+                  AND batch.publication_batch_id = ?
+                  AND batch.profile_publication_sequence = ?
+                  AND batch.purge_generation = ?
+                  AND source.batch_ordinal = ?
+                  AND source.batch_size = ?
+                  AND source.role = ?
+                  AND source.opaque_object_id = ?
+                  AND source.opaque_version_id = ?
+                  AND source.operation = ?
+                  AND source.deterministic_envelope_id = ?
+                  AND receipt.resulting_object_id = source.opaque_object_id
+                  AND receipt.resulting_version_id = source.opaque_version_id
+                  AND EXISTS (
+                        SELECT 1
+                        FROM personal_context_publication_rows AS manifest
+                        WHERE manifest.publication_batch_id = batch.publication_batch_id
+                          AND manifest.profile_publication_sequence = batch.profile_publication_sequence
+                          AND manifest.role = 'manifest'
+                          AND manifest.opaque_version_id = receipt.resulting_manifest_version_id
+                  )
+                LIMIT 2
+                """,
+                (
+                    row.profile_id,
+                    row.publication_batch_id,
+                    row.profile_publication_sequence,
+                    row.purge_generation,
+                    row.batch_ordinal,
+                    row.batch_size,
+                    row.role,
+                    row.object_id,
+                    row.version_id,
+                    row.operation,
+                    row.deterministic_envelope_id,
+                ),
+            ).fetchall()
+        if len(matches) != 1:
+            return None
+        receipt = matches[0]
+        return CanonicalApplyReceipt(
+            resulting_object_id=str(receipt["resulting_object_id"]),
+            resulting_version_id=str(receipt["resulting_version_id"]),
+            manifest_revision=int(receipt["resulting_manifest_revision"]),
+            manifest_version_id=str(receipt["resulting_manifest_version_id"]),
+            purge_generation=int(receipt["purge_generation"]),
+            publication_batch_id=str(receipt["publication_batch_id"]),
+            profile_publication_sequence=int(receipt["profile_publication_sequence"]),
+            receipt_id=str(receipt["receipt_id"]),
+            dataset_id=str(receipt["dataset_id"]),
+            device_id=str(receipt["device_id"]),
+            client_envelope_id=str(receipt["client_envelope_id"]),
+            canonical_payload_digest=str(receipt["canonical_payload_digest"]),
+            wire_entity_version=str(receipt["wire_entity_version"]),
+        )
+
     @contextmanager
     def profile_lease(self, profile_id: str) -> Iterator[PublicationRelayLease | None]:
         """Acquire a recoverable SQLite lease shared by every process entry point."""

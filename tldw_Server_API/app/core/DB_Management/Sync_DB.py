@@ -8422,6 +8422,23 @@ class SyncDatabase:
                 raise SyncStoreError("personal_context_ingress_receipt_mismatch")
         return _envelope_from_row(row)
 
+    def get_personal_context_ingress_receipt(
+        self,
+        server_cursor: int,
+        *,
+        connection: Any | None = None,
+    ) -> dict[str, Any] | None:
+        """Return the exact canonical apply receipt stored for one ingress cursor."""
+
+        return _first(
+            self.execute(
+                """SELECT * FROM sync_personal_context_ingress_receipts
+                   WHERE server_sequence = ?""",
+                (server_cursor,),
+                connection=connection,
+            )
+        )
+
     def mark_bootstrap_envelope_verified(
         self,
         server_cursor: int,
