@@ -44,6 +44,8 @@ class _Publications:
         return True
 
     def earliest_nonterminal_batch(self, _profile_id: str) -> PublicationSourceBatch:
+        if all(row.row_state == "acknowledged" for row in self.rows):
+            return None  # type: ignore[return-value]
         return PublicationSourceBatch("profile-a", 1, "batch-a", tuple(self.rows))
 
     def acknowledge_row(self, row: PublicationSourceRow, *, server_cursor: int, lease: object) -> None:
