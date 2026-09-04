@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@codex'
 created_date: '2026-09-04 03:29'
-updated_date: '2026-09-04 05:07'
+updated_date: '2026-09-04 05:24'
 labels:
   - personal-context
   - sync
@@ -51,7 +51,8 @@ Remediate TASK-13161 by requiring deterministic home-authority replay and client
 - Added a canonical HMAC attestation over every stable stage-derived authority envelope field, the authenticated payload digest, source identity, and any originating cross-store ingress receipt. One complete verifier is reused for deterministic staging and finalization; final verification and pending/applied CAS now share one guarded Sync transaction. Randomized AEAD bytes remain verified by restore rather than regenerated for equality.
 - Reads the Sync receipt by exact cursor first, then reads the Personalization receipt through its `(dataset_id, device_id, client_envelope_id)` primary key and verifies the exact batch, source, and manifest facts. Semantic, companion-manifest, and purge-barrier authorities all retain the correct originating receipt identity; purge wire versions compare in canonical string form.
 - Added real temporary Personalization and Sync SQLite coverage for persisted authority-envelope mutations, first-stage and post-stage receipt mutations, staged relay-resume tampering, semantic and manifest companions, exact purge confirmation, duplicate same-batch receipts, deterministic retry, and the existing new/updated/repeated publication paths. Tamper failures remain retryable and neither apply nor acknowledge source rows or create durable poison.
-- Verification: targeted pytest `67 passed, 7 warnings`; Ruff passed with `--no-cache` after the sandbox denied the worktree cache write; Bandit exited 0 with existing comment/nosec parser warnings; `git diff --check` passed. The pytest warnings/log noise are existing environment configuration issues (cache permission, isolated `USER_DB_BASE_DIR`, legacy test API-key format, and `system_log_buffer` permission noise), not new product warnings.
+- Review round 2 requires both receipts before first-stage companion-manifest signing whenever its acknowledged semantic/purge authority has a client-ingress base. The same existing exact-ingress predicate now validates the origin envelope during first stage, deterministic reuse, and finalization; missing or mismatched receipts fail retryably before insertion.
+- Verification: targeted pytest `70 passed, 7 warnings`; Ruff passed with `--no-cache` after the sandbox denied the worktree cache write; Bandit exited 0 with existing comment/nosec parser warnings; `git diff --check` passed. The pytest warnings/log noise are existing environment configuration issues (cache permission, isolated `USER_DB_BASE_DIR`, legacy test API-key format, and `system_log_buffer` permission noise), not new product warnings.
 - Modified `service.py`, `store.py`, `Sync_DB.py`, `personal_context_publication.py`, and `test_sync_v2_personal_context_authority_identity.py`. Ordinary `_evaluate_envelope` and current-head CAS logic were not changed. No new ADR was required; ADR-002 governs. No full suite was run per repository policy, and no blockers remain.
 <!-- SECTION:NOTES:END -->
 

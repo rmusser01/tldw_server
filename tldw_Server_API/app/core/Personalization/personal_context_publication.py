@@ -180,6 +180,25 @@ class PersonalContextPublicationRelayStore:
                    LIMIT 2""",
                 (row.profile_id, row.profile_publication_sequence),
             ).fetchall()
+            origins = (
+                connection.execute(
+                    """SELECT * FROM personal_context_publication_rows
+                       WHERE profile_id = ? AND profile_publication_sequence = ?
+                         AND batch_ordinal < ?
+                         AND role IN ('semantic', 'purge_barrier')
+                         AND row_state = 'acknowledged'
+                         AND sync_server_cursor IS NOT NULL
+                       ORDER BY batch_ordinal
+                       LIMIT 2""",
+                    (
+                        row.profile_id,
+                        row.profile_publication_sequence,
+                        row.batch_ordinal,
+                    ),
+                ).fetchall()
+                if row.role == "manifest"
+                else []
+            )
         if batch is None or source is None or len(manifests) != 1:
             return None
         manifest = manifests[0]
@@ -210,6 +229,26 @@ class PersonalContextPublicationRelayStore:
             and str(manifest["opaque_version_id"])
             == str(receipt["resulting_manifest_version_id"])
         )
+        manifest_origin_matches = False
+        if len(origins) == 1:
+            origin = origins[0]
+            manifest_origin_matches = (
+                str(origin["publication_batch_id"]) == row.publication_batch_id
+                and int(origin["batch_size"]) == row.batch_size
+                and int(origin["purge_generation"]) == row.purge_generation
+                and (
+                    str(origin["role"]) == "semantic"
+                    and str(receipt["resulting_object_id"])
+                    == str(origin["opaque_object_id"])
+                    and str(receipt["resulting_version_id"])
+                    == str(origin["opaque_version_id"])
+                    or str(origin["role"]) == "purge_barrier"
+                    and str(receipt["resulting_object_id"])
+                    == str(manifest["opaque_object_id"])
+                    and str(receipt["resulting_version_id"])
+                    == str(manifest["opaque_version_id"])
+                )
+            )
         result_matches = (
             row.role == "semantic"
             and str(receipt["resulting_object_id"]) == row.object_id
@@ -217,6 +256,7 @@ class PersonalContextPublicationRelayStore:
         ) or (
             row.role == "manifest"
             and str(receipt["resulting_manifest_version_id"]) == row.version_id
+            and manifest_origin_matches
         ) or (
             row.role == "purge_barrier"
             and str(receipt["resulting_object_id"])

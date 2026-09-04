@@ -24,6 +24,7 @@ from tldw_Server_API.app.core.Personalization.personal_context_publication impor
     PersonalContextPublicationJournal,
     PersonalContextPublicationRelayStore,
     PublicationObject,
+    PublicationRelayLease,
     PublicationSourceRow,
 )
 from tldw_Server_API.app.core.Personalization.personal_context_repository import (
@@ -449,6 +450,15 @@ class IngressHarness(AuthorityHarness):
                 "UPDATE sync_personal_context_ingress_receipts "
                 f"SET {assignments[column]} WHERE server_sequence = ?",  # noqa: S608
                 (changed, self.ingress_cursor),
+                connection=connection,
+            )
+
+    def delete_sync_receipt(self) -> None:
+        with self.store.db.backend.transaction() as connection:
+            self.store.db.execute(
+                """DELETE FROM sync_personal_context_ingress_receipts
+                   WHERE server_sequence = ?""",
+                (self.ingress_cursor,),
                 connection=connection,
             )
 
@@ -913,3 +923,68 @@ def test_authority_receipt_lookup_uses_exact_sync_ingress_identity(
 
         assert cursor > ingress_harness.ingress_cursor
         assert ingress_harness.source_row_state(row) == "pending"
+
+
+@pytest.mark.parametrize(
+    "receipt_state",
+    ["missing_sync", "sync_mismatch", "canonical_mismatch"],
+)
+def test_manifest_prestage_requires_complete_matching_origin_receipt(
+    ingress_harness: IngressHarness,
+    receipt_state: str,
+) -> None:
+    """A companion manifest cannot sign an absent or mismatched origin receipt."""
+
+    semantic_row, _semantic_cursor = ingress_harness.persist_staged_row()
+    ingress_harness.resume_relay()
+    assert ingress_harness.source_row_state(semantic_row) == "acknowledged"
+
+    if receipt_state == "missing_sync":
+        ingress_harness.delete_sync_receipt()
+    elif receipt_state == "sync_mismatch":
+        ingress_harness.tamper_sync_receipt(
+            "canonical_payload_digest", "sha256:" + "0" * 64
+        )
+    else:
+        ingress_harness.tamper_canonical_receipt(
+            "canonical_payload_digest", "sha256:" + "0" * 64
+        )
+
+    error: SyncStoreError | None = None
+    with ingress_harness.claimed_row() as manifest_row:
+        assert manifest_row.role == "manifest"
+        lease = PublicationRelayLease(
+            manifest_row.profile_id,
+            str(manifest_row.relay_owner_token),
+        )
+        try:
+            cursor = ingress_harness.stage(manifest_row)
+        except SyncStoreError as exc:
+            error = exc
+        else:
+            ingress_harness.publications.record_staged_row(
+                manifest_row,
+                server_cursor=cursor,
+                lease=lease,
+            )
+            ingress_harness.service.finalize_personal_context_authority(
+                manifest_row,
+                cursor,
+                "dataset-a",
+                "user-a",
+            )
+            ingress_harness.publications.acknowledge_row(
+                manifest_row,
+                server_cursor=cursor,
+                lease=lease,
+            )
+
+        stored = ingress_harness.store.get_envelope_by_client_id(
+            "dataset-a",
+            manifest_row.deterministic_envelope_id,
+        )
+        assert ingress_harness.source_row_state(manifest_row) == "pending"
+        assert stored is None
+        assert isinstance(error, SyncStoreError)
+        assert str(error) == "Personal Context authority receipt is invalid"
+        assert ingress_harness.has_attention(manifest_row) is False

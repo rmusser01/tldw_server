@@ -1554,6 +1554,7 @@ class SyncV2Service:
             canonical_receipt,
             sync_ingress_receipt,
         ) = self._personal_context_authority_source_receipts(
+            dataset=dataset,
             row=row,
             authority_envelope=stored,
             publication_store=publication_store,
@@ -1631,6 +1632,7 @@ class SyncV2Service:
     def _personal_context_authority_source_receipts(
         self,
         *,
+        dataset: SyncDataset,
         row: object,
         authority_envelope: SyncEnvelope | SyncEnvelopeCreate,
         publication_store: PersonalContextPublicationRelayStore,
@@ -1653,6 +1655,8 @@ class SyncV2Service:
                 else sync_store.get_envelope_by_server_cursor(origin_cursor)
             )
             origin_authority = None if origin is None else origin.authority
+            if origin_cursor is None:
+                return None, None, None
             if (
                 origin is None
                 or origin.device_id != _SERVER_ORIGIN_DEVICE_ID
@@ -1666,8 +1670,10 @@ class SyncV2Service:
                 or origin_authority.batch_ordinal
                 >= int(getattr(row, "batch_ordinal", -1))
             ):
-                return ingress_cursor, None, None
+                raise SyncStoreError("Personal Context authority receipt is invalid")
             ingress_cursor = origin.base_server_cursor
+            if ingress_cursor is None:
+                return None, None, None
         sync_receipt = (
             None
             if ingress_cursor is None
@@ -1685,6 +1691,33 @@ class SyncV2Service:
                 ),
             )
         )
+        if getattr(row, "role", None) == "manifest" and (
+            canonical_receipt is None
+            or sync_receipt is None
+            or origin is None
+            or ingress_cursor is None
+        ):
+            raise SyncStoreError("Personal Context authority receipt is invalid")
+        if getattr(row, "role", None) == "manifest":
+            ingress = sync_store.get_envelope_by_server_cursor(ingress_cursor)
+            try:
+                origin_canonical = canonical_json_bytes(
+                    self._restore_personal_context_from_storage(dataset, origin).payload
+                )
+            except (SyncStoreError, TypeError, ValueError) as exc:
+                raise SyncStoreError(
+                    "Personal Context authority receipt is invalid"
+                ) from exc
+            if not self._is_exact_ingress_confirmation(
+                dataset=dataset,
+                current_head=ingress,
+                envelope=origin,
+                canonical=origin_canonical,
+                source_row=row,
+                canonical_receipt=canonical_receipt,
+                sync_ingress_receipt=sync_receipt,
+            ):
+                raise SyncStoreError("Personal Context authority receipt is invalid")
         return ingress_cursor, canonical_receipt, sync_receipt
 
     def stage_personal_context_authority(
@@ -1861,6 +1894,7 @@ class SyncV2Service:
             canonical_receipt,
             sync_ingress_receipt,
         ) = self._personal_context_authority_source_receipts(
+            dataset=dataset,
             row=row,
             authority_envelope=envelope,
             publication_store=publication_store,
