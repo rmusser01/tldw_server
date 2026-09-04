@@ -9611,11 +9611,17 @@ class SyncDatabase:
         self,
         conflict_id: str,
         *,
+        dataset_id: str | None = None,
         connection: Any | None = None,
         for_update: bool = False,
     ) -> SyncConflict | None:
         """Return a conflict by ID without scanning dataset conflict lists."""
 
+        sql = "SELECT * FROM sync_conflicts WHERE conflict_id = ?"
+        params: list[Any] = [conflict_id]
+        if dataset_id is not None:
+            sql += " AND dataset_id = ?"
+            params.append(dataset_id)
         suffix = (
             " FOR UPDATE"
             if for_update and self.backend_type == BackendType.POSTGRESQL
@@ -9623,9 +9629,8 @@ class SyncDatabase:
         )
         row = _first(
             self.execute(
-                "SELECT * FROM sync_conflicts WHERE conflict_id = ?"
-                + suffix,  # nosec B608 - suffix is backend controlled.
-                (conflict_id,),
+                sql + suffix,  # nosec B608 - suffix is backend controlled.
+                tuple(params),
                 connection=connection,
             )
         )

@@ -2320,29 +2320,6 @@ class SyncConflictResolveRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    @model_validator(mode="after")
-    def _validate_personal_context_resolution(self) -> SyncConflictResolveRequest:
-        """Require content-free optimistic candidates for version-one conflicts."""
-
-        for resolution in self.resolutions:
-            personal_fields = (
-                resolution.expected_local_envelope_id,
-                resolution.expected_remote_envelope_id,
-                resolution.idempotency_key,
-            )
-            if self.personal_context_exchange is None:
-                if any(value is not None for value in personal_fields):
-                    raise ValueError("Personal Context conflict fields require an exchange proof")
-                continue
-            if any(value is None for value in personal_fields):
-                raise ValueError("Personal Context conflicts require expected IDs and idempotency key")
-            if (
-                resolution.resolution_envelope is not None
-                and not resolution.resolution_envelope.domain.startswith("personal_context.")
-            ):
-                raise ValueError("Personal Context conflict fields are forbidden for non-Personal-Context conflicts")
-        return self
-
 
 class SyncConflictListResponse(BaseModel):
     """Proof-bearing version-one response for a Personal Context conflict list."""

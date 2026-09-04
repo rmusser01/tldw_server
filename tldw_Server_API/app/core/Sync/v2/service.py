@@ -6526,7 +6526,16 @@ class SyncV2Service:
         user_id: str,
         dataset_id: str,
         device_id: str,
-        resolutions: Sequence[tuple[str, str, SyncEnvelopeCreate | None]],
+        resolutions: Sequence[
+            tuple[
+                str,
+                str,
+                SyncEnvelopeCreate | None,
+                str | None,
+                str | None,
+                str | None,
+            ]
+        ],
         personal_context_exchange: object | None = None,
     ) -> tuple[
         list[tuple[int, SyncConflict]],
@@ -6542,17 +6551,12 @@ class SyncV2Service:
                 store=guarded_store,
             )
             selected: dict[str, SyncConflict | None] = {}
-            for conflict_id, _action, _envelope in resolutions:
-                if conflict_id not in selected:
-                    conflict = guarded_store.get_conflict(
-                        conflict_id,
-                        for_update=True,
-                    )
-                    selected[conflict_id] = (
-                        conflict
-                        if conflict is not None and conflict.dataset_id == dataset_id
-                        else None
-                    )
+            for conflict_id in sorted({resolution[0] for resolution in resolutions}):
+                selected[conflict_id] = guarded_store.get_conflict(
+                    conflict_id,
+                    dataset_id=dataset_id,
+                    for_update=True,
+                )
             verified_exchange = None
             if any(
                 conflict is not None
@@ -6567,13 +6571,43 @@ class SyncV2Service:
                     store=guarded_store,
                 )
 
+            invalid_personal_context_items = {
+                index
+                for index, (
+                    conflict_id,
+                    _action,
+                    resolution_envelope,
+                    expected_local_envelope_id,
+                    expected_remote_envelope_id,
+                    idempotency_key,
+                ) in enumerate(resolutions)
+                if (
+                    selected[conflict_id] is not None
+                    and selected[conflict_id].domain in PERSONAL_CONTEXT_SYNC_DOMAINS
+                    and (
+                        expected_local_envelope_id is None
+                        or expected_remote_envelope_id is None
+                        or idempotency_key is None
+                        or (
+                            resolution_envelope is not None
+                            and resolution_envelope.domain
+                            not in PERSONAL_CONTEXT_SYNC_DOMAINS
+                        )
+                    )
+                )
+            }
             resolved: list[tuple[int, SyncConflict]] = []
             rejected: list[int] = []
-            for index, (conflict_id, action, resolution_envelope) in enumerate(
-                resolutions
-            ):
+            for index, (
+                conflict_id,
+                action,
+                resolution_envelope,
+                _expected_local_envelope_id,
+                _expected_remote_envelope_id,
+                _idempotency_key,
+            ) in enumerate(resolutions):
                 conflict = selected[conflict_id]
-                if conflict is None:
+                if conflict is None or index in invalid_personal_context_items:
                     rejected.append(index)
                     continue
                 try:

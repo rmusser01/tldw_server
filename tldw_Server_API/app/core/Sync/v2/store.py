@@ -1562,10 +1562,12 @@ class SyncV2Store:
         self,
         conflict_id: str,
         *,
+        dataset_id: str | None = None,
         for_update: bool = False,
     ) -> SyncConflict | None:
         return self.db.get_conflict(
             conflict_id,
+            dataset_id=dataset_id,
             connection=self._connection,
             for_update=for_update,
         )

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Literal, cast
 
 import pytest
@@ -11,6 +12,7 @@ from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.api.v1.endpoints import sync as sync_endpoint
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.backends.postgresql_backend import (
     PostgreSQLBackend,
 )
@@ -27,6 +29,7 @@ from tldw_Server_API.app.core.Sync.v2.personal_context_ongoing_contract import (
     PersonalContextExchangeProof,
 )
 from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service
+from tldw_Server_API.app.core.Sync.v2.store import SyncV2Store
 from tldw_Server_API.tests.Personalization.personal_context_test_support import (
     preference_record,
 )
@@ -37,6 +40,7 @@ from tldw_Server_API.tests.Sync.test_sync_v2_personal_context_transport import (
     _envelope,
     _service,
 )
+from tldw_Server_API.tests.Sync.test_sync_v2_service import _OutcomeMaterializer
 
 pytestmark = pytest.mark.unit
 
@@ -259,6 +263,89 @@ def _insert_mixed_conflicts_with_sources(
                 metadata={"private_marker": f"secret-{conflict_id}"},
             )
         )
+
+
+def _insert_conflict_set_with_sources(
+    service: SyncV2Service,
+    conflicts: list[
+        tuple[str, Literal["notes.note", "personal_context.record"]]
+    ],
+) -> None:
+    envelopes: list[SyncEnvelopeCreate] = []
+    for conflict_id, domain in conflicts:
+        if domain == DOMAIN:
+            payload = preference_record(
+                record_id=f"record-{conflict_id}",
+                version_id=f"version-{conflict_id}",
+            ).model_dump(mode="json")
+            envelopes.append(
+                _envelope(
+                    payload,
+                    client_envelope_id=f"client-envelope-{conflict_id}",
+                )
+            )
+        else:
+            envelopes.append(
+                SyncEnvelopeCreate(
+                    dataset_id=DATASET_ID,
+                    client_envelope_id=f"client-envelope-{conflict_id}",
+                    device_id="device-a",
+                    domain="notes.note",
+                    operation="upsert",
+                    object_id=f"note-{conflict_id}",
+                    payload={"title": "Note", "content": "body"},
+                    payload_hash=f"sha256:{conflict_id}",
+                )
+            )
+    stored = [
+        service.store.insert_envelope(replace(item, apply_status="conflict"))
+        for item in envelopes
+    ]
+    for (conflict_id, _domain), envelope in zip(
+        conflicts,
+        stored,
+        strict=True,
+    ):
+        service.store.insert_conflict(
+            SyncConflictCreate(
+                conflict_id=conflict_id,
+                dataset_id=DATASET_ID,
+                domain=envelope.domain,
+                object_id=envelope.object_id,
+                conflict_type="revision_mismatch",
+                local_envelope_id=envelope.client_envelope_id,
+                remote_envelope_id=f"remote-envelope-{conflict_id}",
+                server_sequence=envelope.server_cursor,
+                metadata={"private_marker": f"secret-{conflict_id}"},
+            )
+        )
+
+
+def _notes_resolution(
+    conflict_id: str,
+    action: Literal["skip", "overwrite", "duplicate_rename"],
+) -> dict[str, object]:
+    resolution: dict[str, object] = {
+        "conflict_id": conflict_id,
+        "action": action,
+    }
+    if action != "skip":
+        object_id = (
+            f"renamed-note-{conflict_id}"
+            if action == "duplicate_rename"
+            else f"note-{conflict_id}"
+        )
+        resolution["resolution_envelope"] = {
+            "dataset_id": DATASET_ID,
+            "client_envelope_id": f"resolution-envelope-{conflict_id}",
+            "device_id": "device-a",
+            "domain": "notes.note",
+            "operation": "upsert",
+            "object_id": object_id,
+            "payload": {"title": "Resolved", "content": action},
+            "payload_hash": f"sha256:resolution-{conflict_id}",
+        }
+    return resolution
 
 
 def _request_operation(
@@ -649,13 +736,20 @@ def test_mixed_selected_conflicts_with_exact_proof_resolve_in_request_order(
             "personal_context_exchange": EXCHANGE.model_dump(mode="json"),
             "resolutions": [
                 {
-                    "conflict_id": conflict_id,
+                    "conflict_id": conflict_ids[0],
                     "action": "skip",
-                    "expected_local_envelope_id": f"local-{conflict_id}",
-                    "expected_remote_envelope_id": f"remote-{conflict_id}",
-                    "idempotency_key": f"idempotency-{conflict_id}",
-                }
-                for conflict_id in conflict_ids
+                },
+                {
+                    "conflict_id": conflict_ids[1],
+                    "action": "skip",
+                    "expected_local_envelope_id": (
+                        f"client-envelope-{conflict_ids[1]}"
+                    ),
+                    "expected_remote_envelope_id": (
+                        f"remote-envelope-{conflict_ids[1]}"
+                    ),
+                    "idempotency_key": f"idempotency-{conflict_ids[1]}",
+                },
             ],
         },
     )
@@ -670,6 +764,102 @@ def test_mixed_selected_conflicts_with_exact_proof_resolve_in_request_order(
         "dismissed",
         "dismissed",
     ]
+
+
+@pytest.mark.parametrize("notes_action", ["overwrite", "duplicate_rename"])
+def test_mixed_exact_proof_preserves_native_notes_resolution_actions(
+    tmp_path: Path,
+    notes_action: Literal["overwrite", "duplicate_rename"],
+) -> None:
+    service, _target, _sqlite_path = _service(tmp_path)
+    service.materializers["notes.note"] = _OutcomeMaterializer()
+    note_id = f"mixed-{notes_action}-note"
+    personal_id = f"mixed-{notes_action}-personal"
+    _insert_conflict_set_with_sources(
+        service,
+        [(note_id, "notes.note"), (personal_id, DOMAIN)],
+    )
+
+    response = _client(service).post(
+        "/api/v1/sync/conflicts/resolve",
+        json={
+            "dataset_id": DATASET_ID,
+            "device_id": "device-a",
+            "personal_context_exchange": EXCHANGE.model_dump(mode="json"),
+            "resolutions": [
+                _notes_resolution(note_id, notes_action),
+                {
+                    "conflict_id": personal_id,
+                    "action": "skip",
+                    "expected_local_envelope_id": (
+                        f"client-envelope-{personal_id}"
+                    ),
+                    "expected_remote_envelope_id": (
+                        f"remote-envelope-{personal_id}"
+                    ),
+                    "idempotency_key": f"idempotency-{personal_id}",
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert [item["conflict_id"] for item in response.json()["resolved"]] == [
+        note_id,
+        personal_id,
+    ]
+    assert response.json()["rejected"] == []
+    assert [service.store.get_conflict(item).status for item in (note_id, personal_id)] == [
+        "resolved",
+        "dismissed",
+    ]
+    resolved_note = service.store.get_conflict(note_id)
+    stored_resolution = service.store.get_envelope_by_client_id(
+        DATASET_ID,
+        f"resolution-envelope-{note_id}",
+    )
+    assert resolved_note is not None
+    assert stored_resolution is not None
+    assert resolved_note.resolved_by_envelope_id == stored_resolution.envelope_id
+    assert stored_resolution.apply_status == "applied"
+    assert stored_resolution.object_id == (
+        f"renamed-note-{note_id}"
+        if notes_action == "duplicate_rename"
+        else f"note-{note_id}"
+    )
+
+
+def test_bad_personal_context_item_shape_is_rejected_before_resolution_loop(
+    tmp_path: Path,
+) -> None:
+    service, _target, _sqlite_path = _service(tmp_path)
+    personal_id = "bad-shape-personal"
+    note_id = "bad-shape-note"
+    _insert_conflict_set_with_sources(
+        service,
+        [(note_id, "notes.note"), (personal_id, DOMAIN)],
+    )
+
+    response = _client(service).post(
+        "/api/v1/sync/conflicts/resolve",
+        json={
+            "dataset_id": DATASET_ID,
+            "device_id": "device-a",
+            "personal_context_exchange": EXCHANGE.model_dump(mode="json"),
+            "resolutions": [
+                {"conflict_id": personal_id, "action": "skip"},
+                _notes_resolution(note_id, "skip"),
+            ],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert [item["conflict_id"] for item in response.json()["rejected"]] == [
+        personal_id
+    ]
+    assert [item["conflict_id"] for item in response.json()["resolved"]] == [note_id]
+    assert service.store.get_conflict(personal_id).status == "unresolved"
+    assert service.store.get_conflict(note_id).status == "dismissed"
 
 
 def test_mixed_selected_conflicts_with_stale_proof_mutate_nothing(
@@ -690,13 +880,20 @@ def test_mixed_selected_conflicts_with_stale_proof_mutate_nothing(
             "personal_context_exchange": stale.model_dump(mode="json"),
             "resolutions": [
                 {
-                    "conflict_id": conflict_id,
+                    "conflict_id": conflict_ids[0],
                     "action": "skip",
-                    "expected_local_envelope_id": f"local-{conflict_id}",
-                    "expected_remote_envelope_id": f"remote-{conflict_id}",
-                    "idempotency_key": f"idempotency-{conflict_id}",
-                }
-                for conflict_id in conflict_ids
+                },
+                {
+                    "conflict_id": conflict_ids[1],
+                    "action": "skip",
+                    "expected_local_envelope_id": (
+                        f"client-envelope-{conflict_ids[1]}"
+                    ),
+                    "expected_remote_envelope_id": (
+                        f"remote-envelope-{conflict_ids[1]}"
+                    ),
+                    "idempotency_key": f"idempotency-{conflict_ids[1]}",
+                },
             ],
         },
     )
@@ -914,6 +1111,92 @@ def test_conflict_resolution_savepoint_sql_is_sqlite_and_postgres_portable(
         )
         assert prepared == query
         assert params is None
+
+
+def test_postgres_conflict_row_lock_is_scoped_to_the_guarded_dataset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = cast(SyncDatabase, object.__new__(SyncDatabase))
+    database.backend = SimpleNamespace(
+        config=SimpleNamespace(backend_type=BackendType.POSTGRESQL)
+    )
+    calls: list[tuple[str, tuple[object, ...]]] = []
+
+    def record(
+        query: str,
+        params: tuple[object, ...],
+        **_kwargs: object,
+    ) -> SimpleNamespace:
+        calls.append((" ".join(query.split()), params))
+        return SimpleNamespace(rows=[])
+
+    monkeypatch.setattr(database, "execute", record)
+
+    assert (
+        database.get_conflict(
+            "foreign-conflict",
+            dataset_id=DATASET_ID,
+            for_update=True,
+        )
+        is None
+    )
+    assert calls == [
+        (
+            "SELECT * FROM sync_conflicts WHERE conflict_id = ? "
+            "AND dataset_id = ? FOR UPDATE",
+            ("foreign-conflict", DATASET_ID),
+        )
+    ]
+    prepared, params = PostgreSQLBackend._prepare_query(
+        cast(Any, database),
+        calls[0][0],
+        calls[0][1],
+    )
+    assert prepared.endswith("conflict_id = %s AND dataset_id = %s FOR UPDATE")
+    assert params == ("foreign-conflict", DATASET_ID)
+
+
+def test_conflict_batch_locks_unique_selected_ids_in_sorted_dataset_scope(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, _target, _sqlite_path = _service(tmp_path)
+    calls: list[tuple[str, str | None, bool]] = []
+
+    def record(
+        _store: SyncV2Store,
+        conflict_id: str,
+        *,
+        dataset_id: str | None = None,
+        for_update: bool = False,
+    ) -> None:
+        calls.append((conflict_id, dataset_id, for_update))
+        return None
+
+    monkeypatch.setattr(SyncV2Store, "get_conflict", record)
+    response = _client(service).post(
+        "/api/v1/sync/conflicts/resolve",
+        json={
+            "dataset_id": DATASET_ID,
+            "device_id": "device-a",
+            "resolutions": [
+                {"conflict_id": "lock-b", "action": "skip"},
+                {"conflict_id": "lock-a", "action": "skip"},
+                {"conflict_id": "lock-b", "action": "skip"},
+            ],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert calls == [
+        ("lock-a", DATASET_ID, True),
+        ("lock-b", DATASET_ID, True),
+    ]
+    assert [item["conflict_id"] for item in response.json()["rejected"]] == [
+        "lock-b",
+        "lock-a",
+        "lock-b",
+    ]
 
 
 @pytest.mark.parametrize(

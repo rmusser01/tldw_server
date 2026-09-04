@@ -1429,33 +1429,49 @@ def test_conflict_batch_endpoint_resolves_locked_m1_request_shape():
         def __init__(self):
             self.calls = []
 
-        def resolve_conflict(self, **kwargs):
-            self.calls.append(kwargs)
-            public_action = kwargs["action"]
-            server_cursor = 123 if public_action == "duplicate_rename" else 12
-            envelope_id = (
-                "srv_env_000000000123"
-                if public_action == "duplicate_rename"
-                else kwargs.get("resolved_by_envelope_id")
-            )
-            return SyncConflict(
-                conflict_id=kwargs["conflict_id"],
-                dataset_id="dataset-1",
-                domain="notes.note",
-                object_id="note-1",
-                conflict_type="version_divergence",
-                status="dismissed" if public_action == "skip" else "resolved",
-                base_envelope_id=None,
-                local_envelope_id=None,
-                remote_envelope_id=None,
-                server_cursor=server_cursor,
-                metadata={},
-                created_at="2026-05-23T18:12:44Z",
-                resolved_at="2026-05-23T18:13:44Z",
-                resolved_by_device_id=kwargs["resolved_by_device_id"],
-                resolved_by_envelope_id=envelope_id,
-                resolution_action=public_action,
-            )
+        def resolve_conflicts_batch(self, **kwargs):
+            results = []
+            for index, resolution in enumerate(kwargs["resolutions"]):
+                conflict_id, public_action, resolution_envelope, *_fields = resolution
+                call = {
+                    "conflict_id": conflict_id,
+                    "dataset_id": kwargs["dataset_id"],
+                    "action": public_action,
+                    "resolution_envelope": resolution_envelope,
+                }
+                self.calls.append(call)
+                server_cursor = 123 if public_action == "duplicate_rename" else 12
+                envelope_id = (
+                    "srv_env_000000000123"
+                    if public_action == "duplicate_rename"
+                    else None
+                )
+                results.append(
+                    (
+                        index,
+                        SyncConflict(
+                            conflict_id=conflict_id,
+                            dataset_id="dataset-1",
+                            domain="notes.note",
+                            object_id="note-1",
+                            conflict_type="version_divergence",
+                            status=(
+                                "dismissed" if public_action == "skip" else "resolved"
+                            ),
+                            base_envelope_id=None,
+                            local_envelope_id=None,
+                            remote_envelope_id=None,
+                            server_cursor=server_cursor,
+                            metadata={},
+                            created_at="2026-05-23T18:12:44Z",
+                            resolved_at="2026-05-23T18:13:44Z",
+                            resolved_by_device_id=kwargs["device_id"],
+                            resolved_by_envelope_id=envelope_id,
+                            resolution_action=public_action,
+                        ),
+                    )
+                )
+            return results, [], None
 
     service = FakeSyncService()
     request = SyncConflictResolveRequest.model_validate(
@@ -1683,13 +1699,25 @@ def test_personal_context_conflict_list_response_requires_a_proof() -> None:
         )
 
 
-def test_personal_context_conflict_exchange_requires_protected_candidates() -> None:
+def test_conflict_request_defers_personal_context_shape_to_loaded_conflict() -> None:
     proof = _ongoing_exchange_proof()
     request = SyncConflictResolveRequest.model_validate(
         {
             "dataset_id": "dataset-1",
             "device_id": "device-1",
             "personal_context_exchange": proof,
+            "resolutions": [
+                {
+                    "conflict_id": "conflict_0123456789abcdef",
+                    "action": "skip",
+                }
+            ],
+        }
+    )
+    unproven = SyncConflictResolveRequest.model_validate(
+        {
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
             "resolutions": [
                 {
                     "conflict_id": "conflict_0123456789abcdef",
@@ -1702,16 +1730,8 @@ def test_personal_context_conflict_exchange_requires_protected_candidates() -> N
         }
     )
 
-    assert request.resolutions[0].idempotency_key == "resolve_0123456789abcdef"
-    with pytest.raises(ValidationError):
-        SyncConflictResolveRequest.model_validate(
-            {
-                "dataset_id": "dataset-1",
-                "device_id": "device-1",
-                "personal_context_exchange": proof,
-                "resolutions": [{"conflict_id": "conflict_0123456789abcdef", "action": "skip"}],
-            }
-        )
+    assert request.resolutions[0].idempotency_key is None
+    assert unproven.resolutions[0].idempotency_key == "resolve_0123456789abcdef"
 
 
 def test_ongoing_activation_and_purge_requests_are_strict() -> None:

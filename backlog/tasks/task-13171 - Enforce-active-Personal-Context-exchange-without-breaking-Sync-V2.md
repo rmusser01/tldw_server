@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@codex'
 created_date: '2026-09-04 03:34'
-updated_date: '2026-09-04 22:41'
+updated_date: '2026-09-04 23:04'
 labels:
   - personal-context
   - sync
@@ -55,6 +55,10 @@ Implemented one selected-operation Personal Context exchange gate across push, p
 Review round 1 changes requested: require currently registered active device inside the sole exchange validator; resolve mixed Notes plus Personal Context batches per selected item; close the preflight-to-resolution TOCTOU gap with one service-owned transaction/snapshot; and fail closed for exact malformed persisted/request proof text. TDD review plan: reproduce every finding, report RED evidence and atomic coordinator design, implement minimally, rerun targeted endpoint/transport/service/conflict/concurrency/static checks, update this task and the task-6 report, then make one scoped review commit.
 
 Review round 1 completed: `require_active_exchange` now verifies that the explicit requesting device is currently active and non-revoked, strictly revalidates both persisted and supplied proof shapes, and fails closed for malformed Unicode and non-mapping stored state. Conflict resolution now uses one service-owned dataset transaction and selected-row snapshot, gates selected Personal Context before any savepoint or mutation, and contains ordinary per-item failures with backend-portable savepoints while preserving input order, duplicate replay, and missing/foreign/already-resolved behavior. Mixed exact-proof Notes plus Personal Context batches resolve normally; bad proof mutates neither. The expanded 84-case gate, endpoint/transport, conflict service/store, Personal Context service/contract, Ruff, Bandit, and diff checks passed. ADR required: no new ADR; ADR-002 remains the governing decision.
+
+Review round 2 changes requested: remove batch-proof-driven Personal Context shape rules from the request schema so Notes skip/overwrite/duplicate-rename retain native semantics in a mixed exact-proof batch; enforce strict Personal Context item shape only after the atomic service snapshot identifies a selected Personal Context conflict; and scope row-lock lookups by both dataset and conflict ID while locking unique selected IDs in deterministic sorted order. TDD round-2 plan: reproduce mixed-action and PostgreSQL lock-scope/order findings, report exact RED evidence and the service-validation/locking design, implement minimally, rerun the full gate and affected endpoint/transport/service/store/backend/security matrices, update this task and the task-6 report, then make one scoped review commit. ADR required: no new ADR; ADR-002 already governs these validation and isolation boundaries.
+
+Review round 2 completed: the request schema now preserves only generic per-item structural validation, while the atomic service snapshot determines which selected conflicts require Personal Context-specific candidate shape. The central exchange gate still runs before shape rejection or mutation. Dataset-scoped parameterized row lookup prevents foreign-row locks, and unique selected IDs are locked in deterministic sorted order before results are mapped back to original input order and duplicate semantics. Mixed exact-proof Notes skip, overwrite, and duplicate-rename use native Notes shapes and materialize successfully alongside Personal Context items. Focused review, full 89-case gate, 130 endpoint/transport cases, 154 request-model cases, conflict service/store, Personal Context service/contract, Ruff, Bandit, and diff checks passed. The previously baselined PostgreSQL link-receipt fixture failure remains excluded and untouched. ADR required: no new ADR; ADR-002 remains the governing decision.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

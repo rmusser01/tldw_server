@@ -1817,6 +1817,9 @@ def resolve_sync_v2_conflicts(
                     if resolution.resolution_envelope is not None
                     else None
                 ),
+                resolution.expected_local_envelope_id,
+                resolution.expected_remote_envelope_id,
+                resolution.idempotency_key,
             )
             for resolution in request.resolutions
         ]

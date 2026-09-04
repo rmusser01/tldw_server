@@ -1263,7 +1263,7 @@ def test_non_personal_context_conflict_list_ignores_unverified_pc_proof(
     assert response.json() == []
 
 
-def test_personal_context_skip_rejects_non_personal_context_stored_conflict(
+def test_notes_skip_with_exchange_proof_stays_domain_native(
     client: TestClient,
     sync_service: SyncV2Service,
 ) -> None:
@@ -1302,9 +1302,6 @@ def test_personal_context_skip_rejects_non_personal_context_stored_conflict(
                 {
                     "conflict_id": "conflict-non-personal-context",
                     "action": "skip",
-                    "expected_local_envelope_id": "local_0123456789abcdef",
-                    "expected_remote_envelope_id": "remote_0123456789abcdef",
-                    "idempotency_key": "resolve_0123456789abcdef",
                 }
             ],
         },
