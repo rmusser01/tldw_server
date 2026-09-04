@@ -52,16 +52,22 @@ def _digest(canonical: bytes) -> str:
 
 def _parse_proposal(canonical: bytes) -> ProfileProposal:
     try:
-        return ProfileProposal.model_validate_json(canonical)
+        parsed = ProfileProposal.model_validate_json(canonical)
     except (TypeError, ValueError):
-        raise AssertionError("protected canonical parse failed") from None
+        parsed = None
+    if parsed is None:
+        raise AssertionError("protected canonical parse failed")
+    return parsed
 
 
 def _parse_manifest(canonical: bytes) -> ProfileManifest:
     try:
-        return ProfileManifest.model_validate_json(canonical)
+        parsed = ProfileManifest.model_validate_json(canonical)
     except (TypeError, ValueError):
-        raise AssertionError("protected canonical parse failed") from None
+        parsed = None
+    if parsed is None:
+        raise AssertionError("protected canonical parse failed")
+    return parsed
 
 
 def _record(service: PersonalContextService, record_id: str) -> ProfileRecord:
@@ -550,12 +556,17 @@ def test_protected_canonical_parse_failure_is_content_free() -> None:
     with pytest.raises(AssertionError) as error:
         _parse_proposal(canonical_json_bytes(malformed))
 
-    error_text = str(error.value)
-    leaked = PROTECTED_CANARY in error_text
-    assert error_text == "protected canonical parse failed"
-    assert leaked is False
-    assert error.value.__cause__ is None
-    assert error.value.__suppress_context__ is True
+    diagnostic_is_content_free = (
+        str(error.value) == "protected canonical parse failed"
+        and PROTECTED_CANARY not in str(error.value)
+        and error.value.__cause__ is None
+        and error.value.__context__ is None
+    )
+    if not diagnostic_is_content_free:
+        pytest.fail(
+            "protected canonical diagnostic was not content-free",
+            pytrace=False,
+        )
 
 
 def test_modern_receipt_replay_does_not_enter_legacy_validation(
