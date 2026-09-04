@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@codex'
 created_date: '2026-09-04 03:29'
-updated_date: '2026-09-04 05:36'
+updated_date: '2026-09-04 05:49'
 labels:
   - personal-context
   - sync
@@ -55,6 +55,11 @@ Remediate TASK-13161 by requiring deterministic home-authority replay and client
 - Review round 3 classifies a companion manifest's exact origin base before receipt resolution. An absent base or a validated applied same-object `home_authority` base is a direct receipt-free publication; only `client_ingress` enters the strict two-store receipt verifier, while unknown or malformed authority/base relationships fail retryably.
 - Verification: targeted pytest `71 passed, 7 warnings`; Ruff passed with `--no-cache` after the sandbox denied the worktree cache write; Bandit exited 0 with existing comment/nosec parser warnings; `git diff --check` passed. The pytest warnings/log noise are existing environment configuration issues (cache permission, isolated `USER_DB_BASE_DIR`, legacy test API-key format, and `system_log_buffer` permission noise), not new product warnings.
 - Modified `service.py`, `store.py`, `Sync_DB.py`, `personal_context_publication.py`, and `test_sync_v2_personal_context_authority_identity.py`. Ordinary `_evaluate_envelope` and current-head CAS logic were not changed. No new ADR was required; ADR-002 governs. No full suite was run per repository policy, and no blockers remain.
+
+- Review round 4 now allows a missing originating authority cursor only for the authenticated single-row, ordinal-zero manifest shape. Multi-row or later-ordinal manifests with zero or multiple acknowledged semantic/purge origins raise retryable `SyncStoreError` before authority insertion; exact `client_ingress` receipt validation and validated same-object `home_authority` behavior are unchanged.
+- Added a real two-store deleted-origin regression proving an ingress-derived `batch_size=2` manifest remains pending with no Sync manifest insert/apply/source acknowledgement or durable poison, plus a real direct single-row manifest preservation case proving receipt-free completion with both ingress-receipt stores empty.
+- Round-4 TDD evidence: valid RED was `1 failed, 8 warnings`, with actual state complete/1 staged/applied/acknowledged/no attention; focused GREEN was `1 passed, 7 warnings`. Final targeted identity, relay, and materializer run passed `73 tests, 7 warnings in 6.59s`. Ruff passed with `--no-cache`; Bandit exited 0 with existing parser warnings; `git diff --check` passed.
+- Round 4 modified `service.py` and `test_sync_v2_personal_context_authority_identity.py` plus task/report hygiene. No schema, migration, dependency, later remediation, or ADR change was needed; ADR-002 remains governing. No full suite was run per instruction.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

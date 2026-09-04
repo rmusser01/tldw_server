@@ -1656,7 +1656,12 @@ class SyncV2Service:
             )
             origin_authority = None if origin is None else origin.authority
             if origin_cursor is None:
-                return None, None, None
+                if (
+                    int(getattr(row, "batch_size", 0)) == 1
+                    and int(getattr(row, "batch_ordinal", -1)) == 0
+                ):
+                    return None, None, None
+                raise SyncStoreError("Personal Context authority receipt is invalid")
             if (
                 origin is None
                 or origin.device_id != _SERVER_ORIGIN_DEVICE_ID

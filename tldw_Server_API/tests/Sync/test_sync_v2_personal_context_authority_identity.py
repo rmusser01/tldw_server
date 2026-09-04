@@ -154,7 +154,7 @@ class AuthorityHarness:
             )
             return row, cursor
 
-    def resume_relay(self):
+    def resume_relay(self, *, row_budget: int = 1):
         """Run the real relay entry point against a previously staged source."""
 
         return PersonalContextRelay(
@@ -167,7 +167,7 @@ class AuthorityHarness:
             profile_id=self.manifest.profile_id,
             dataset_id="dataset-a",
             after_server_cursor=None,
-            row_budget=1,
+            row_budget=row_budget,
             wall_time_ms=5_000,
         )
 
@@ -989,6 +989,134 @@ def test_manifest_prestage_requires_complete_matching_origin_receipt(
         assert isinstance(error, SyncStoreError)
         assert str(error) == "Personal Context authority receipt is invalid"
         assert ingress_harness.has_attention(manifest_row) is False
+
+
+def test_manifest_prestage_rejects_missing_declared_origin(
+    ingress_harness: IngressHarness,
+) -> None:
+    """A multi-row manifest cannot become direct when its origin disappears."""
+
+    semantic_row, _semantic_cursor = ingress_harness.persist_staged_row()
+    ingress_harness.resume_relay()
+    assert ingress_harness.source_row_state(semantic_row) == "acknowledged"
+
+    with ingress_harness.claimed_row() as manifest_row:
+        assert manifest_row.role == "manifest"
+        assert manifest_row.batch_size == 2
+        assert manifest_row.batch_ordinal == 1
+    with ingress_harness.personal_db.transaction(immediate=True) as connection:
+        connection.execute(
+            """DELETE FROM personal_context_publication_rows
+               WHERE profile_id = ? AND profile_publication_sequence = ?
+                 AND batch_ordinal = ?""",
+            (
+                semantic_row.profile_id,
+                semantic_row.profile_publication_sequence,
+                semantic_row.batch_ordinal,
+            ),
+        )
+
+    result = ingress_harness.resume_relay(row_budget=2)
+
+    stored = ingress_harness.store.get_envelope_by_client_id(
+        "dataset-a",
+        manifest_row.deterministic_envelope_id,
+    )
+    assert (
+        result.continuation,
+        result.staged_rows,
+        None if stored is None else stored.apply_status,
+        ingress_harness.source_row_state(manifest_row),
+        ingress_harness.has_attention(manifest_row),
+    ) == (
+        "personal_context_relay_pending",
+        0,
+        None,
+        "pending",
+        False,
+    )
+
+
+def test_direct_single_row_manifest_relays_without_origin_receipts(
+    authority_harness: AuthorityHarness,
+) -> None:
+    """A genuine one-row manifest publication remains receipt-free."""
+
+    relay = PersonalContextRelay(
+        publications=authority_harness.publications,
+        stage_authority=authority_harness.service.stage_personal_context_authority,
+        finalize_authority=authority_harness.service.finalize_personal_context_authority,
+        cancel_authority=authority_harness.service.cancel_personal_context_authority,
+    )
+    initial = relay.relay_profile(
+        user_id="user-a",
+        profile_id=authority_harness.manifest.profile_id,
+        dataset_id="dataset-a",
+        after_server_cursor=None,
+        wall_time_ms=5_000,
+    )
+    assert initial.continuation == "complete"
+
+    manifest_v1 = authority_harness.canonical._repository.get_manifest(
+        authority_harness.manifest.profile_id
+    )
+    assert manifest_v1 is not None
+    manifest_v2 = type(manifest_v1).model_validate(
+        {
+            **manifest_v1.model_dump(mode="python"),
+            "revision": manifest_v1.revision + 1,
+            "updated_at": manifest_v1.updated_at + timedelta(seconds=1),
+            "current_version_id": "direct-manifest-v2",
+        }
+    )
+    authority_harness.canonical._repository.commit_manifest_version(
+        manifest_v2,
+        expected_version_id=manifest_v1.current_version_id,
+    )
+    batch = authority_harness.publications.earliest_nonterminal_batch(
+        manifest_v1.profile_id,
+        row_limit=100,
+    )
+    assert batch is not None
+    assert [(row.role, row.batch_ordinal, row.batch_size) for row in batch.rows] == [
+        ("manifest", 0, 1)
+    ]
+
+    result = relay.relay_profile(
+        user_id="user-a",
+        profile_id=manifest_v1.profile_id,
+        dataset_id="dataset-a",
+        after_server_cursor=None,
+        wall_time_ms=5_000,
+    )
+
+    assert result.continuation == "complete"
+    assert authority_harness.source_row_state(batch.rows[0]) == "acknowledged"
+    manifest_head = authority_harness.store.get_current_head(
+        "dataset-a",
+        "personal_context.manifest",
+        manifest_v1.profile_id,
+    )
+    assert manifest_head is not None
+    assert manifest_head.entity_version == manifest_v2.current_version_id
+    assert manifest_head.authority is not None
+    assert manifest_head.authority.role == "home_authority"
+    with authority_harness.personal_db.transaction() as connection:
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM personal_context_ingress_receipts"
+            ).fetchone()[0]
+            == 0
+        )
+    with authority_harness.store.db.backend.transaction() as connection:
+        assert (
+            authority_harness.store.db.execute(
+                "SELECT COUNT(*) AS receipt_count "
+                "FROM sync_personal_context_ingress_receipts",
+                connection=connection,
+            ).rows[0]["receipt_count"]
+            == 0
+        )
 
 
 def test_direct_record_update_relays_manifest_without_ingress_receipts(
