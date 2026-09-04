@@ -13,6 +13,8 @@ from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 
 from .errors import SyncStoreError
 from .models import (
+    PERSONAL_CONTEXT_SYNC_DOMAINS,
+    SYNC_REBASE_REQUIRED_AFTER_CONFLICT_RESOLUTION,
     ConflictStatus,
     SyncApplyStatus,
     SyncAttachment,
@@ -914,8 +916,14 @@ class SyncV2Store:
         row_budget: int = 100,
         wall_time_ms: int = 100,
         deadline_ns: int | None = None,
+        domains: Sequence[SyncDomain] | None = None,
+        adapter_versions: Sequence[int] | None = None,
+        exclude_device_id: str | None = None,
+        profile_id: str | None = None,
+        integrity_key_id: str | None = None,
+        purge_generation: int | None = None,
     ) -> PersonalContextAuthorityScan:
-        """Find post-filter lookahead without skipping a hidden raw prefix."""
+        """Scan a mixed page without exposing or advancing past unsafe PC rows."""
 
         if row_budget < 1 or wall_time_ms < 1:
             raise ValueError("Personal Context scan limits must be positive")
@@ -924,12 +932,14 @@ class SyncV2Store:
         visible: list[SyncEnvelope] = []
         source_exhausted = False
         deadline_ns = deadline_ns or monotonic_ns() + wall_time_ms * 1_000_000
-        domains = (
-            "personal_context.manifest",
-            "personal_context.scope",
-            "personal_context.record",
-            "personal_context.proposal",
-            "personal_context.purge",
+        selected_domains = tuple(domains or PERSONAL_CONTEXT_SYNC_DOMAINS)
+        conflict = self.get_unresolved_materialization_conflict(dataset_id)
+        conflict_cursor = (
+            conflict.server_sequence
+            if conflict is not None
+            and conflict.conflict_type
+            != SYNC_REBASE_REQUIRED_AFTER_CONFLICT_RESOLUTION
+            else None
         )
         while raw_seen < row_budget and monotonic_ns() < deadline_ns and len(visible) <= limit:
             chunk_limit = min(row_budget - raw_seen, max(1, limit + 1))
@@ -937,8 +947,10 @@ class SyncV2Store:
                 dataset_id,
                 raw_cursor,
                 limit=chunk_limit,
-                domains=domains,
+                domains=selected_domains,
+                adapter_versions=adapter_versions,
                 status="accepted",
+                exclude_device_id=exclude_device_id,
             )
             if not raw:
                 source_exhausted = True
@@ -946,16 +958,38 @@ class SyncV2Store:
             barrier = False
             for envelope in raw:
                 raw_seen += 1
+                if (
+                    conflict_cursor is not None
+                    and envelope.server_sequence >= conflict_cursor
+                ):
+                    barrier = True
+                    break
                 authority = envelope.authority
                 if (
-                    authority is not None
+                    envelope.domain in PERSONAL_CONTEXT_SYNC_DOMAINS
+                    and (
+                        envelope.routing_metadata.get("profile_id") != profile_id
+                        or envelope.routing_metadata.get("integrity_key_id")
+                        != integrity_key_id
+                        or envelope.routing_metadata.get("purge_generation")
+                        != purge_generation
+                    )
+                ):
+                    raw_cursor = envelope.server_cursor or raw_cursor
+                    continue
+                if (
+                    envelope.domain in PERSONAL_CONTEXT_SYNC_DOMAINS
+                    and authority is not None
                     and authority.role == "home_authority"
                     and envelope.apply_status != "applied"
                 ):
                     barrier = True
                     break
                 raw_cursor = envelope.server_cursor or raw_cursor
-                if (
+                if envelope.domain not in PERSONAL_CONTEXT_SYNC_DOMAINS:
+                    if envelope.apply_status not in {"conflict", "superseded"}:
+                        visible.append(envelope)
+                elif (
                     envelope.apply_status == "applied"
                     and authority is not None
                     and authority.role == "home_authority"
@@ -1183,6 +1217,14 @@ class SyncV2Store:
             apply_error_message=apply_error_message,
             connection=self._connection,
         )
+
+    def discard_pending_personal_context_authority(
+        self,
+        **identity: Any,
+    ) -> bool:
+        """Remove one exact invisible authority row after a lost source claim."""
+
+        return self.db.discard_pending_personal_context_authority(**identity)
 
     def mark_bootstrap_envelope_verified(
         self,

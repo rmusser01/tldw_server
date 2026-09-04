@@ -888,17 +888,22 @@ class PersonalContextRepository:
             )
             if identity.wire_entity_version != expected_wire_version:
                 raise ValueError("ingress wire entity version is invalid")
-            replay = PersonalContextPublicationJournal.read_ingress_receipt(
-                connection, identity
+            keys = self._keys.load(profile_id, connection=connection)
+            replay = PersonalContextPublicationJournal(keys).read_ingress_receipt(
+                connection,
+                identity,
             )
             if replay is not None:
                 return replay
-            keys = self._keys.load(profile_id, connection=connection)
             current = self._current_manifest_for_publication(connection, profile_id, keys)
             if identity.purge_generation != current.purge_generation:
                 raise ConcurrentProfileUpdateError("ingress purge generation changed")
             if object_type == "manifest":
-                if base_object_hash != self._canonical_digest(current):
+                current_hashes = {
+                    self._canonical_digest(current),
+                    self._integrity_tag(keys.integrity_key, self._canonical_payload(current)),
+                }
+                if base_object_hash not in current_hashes:
                     raise ConcurrentProfileUpdateError("manifest head changed concurrently")
                 self._validate_manifest_transition(
                     current, manifest, expected_version_id=current.current_version_id
@@ -939,12 +944,18 @@ class PersonalContextRepository:
                     )
                 except (KeyError, ValidationError):
                     raise ProfileIntegrityError("Canonical object validation failed") from None
-            expected_base_hash = (
-                None
+            expected_base_hashes = (
+                {None}
                 if existing_value is None
-                else self._canonical_digest(existing_value)
+                else {
+                    self._canonical_digest(existing_value),
+                    self._integrity_tag(
+                        keys.integrity_key,
+                        self._canonical_payload(existing_value),
+                    ),
+                }
             )
-            if base_object_hash != expected_base_hash:
+            if base_object_hash not in expected_base_hashes:
                 raise ConcurrentProfileUpdateError("canonical object changed concurrently")
             if object_type == "record":
                 if record.parent_version_id != expected_version:

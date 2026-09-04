@@ -2,18 +2,52 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 from contextlib import contextmanager
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
+from tldw_profile_core import ProfileRecord
+from tldw_profile_core.canonical import canonical_json_bytes
 
 from tldw_Server_API.app.core.Personalization.personal_context_publication import (
     PersonalContextPublicationRelayStore,
     PublicationSourceBatch,
     PublicationSourceRow,
 )
+
+
+def test_relay_bounds_source_decryption_before_loading_a_batch() -> None:
+    """The source fetch receives the remaining total inspection budget."""
+
+    class BoundedSource:
+        @contextmanager
+        def profile_lease(self, _profile_id):
+            yield SimpleNamespace(owner_token="owner")
+
+        def earliest_nonterminal_batch(self, _profile_id, *, row_limit):
+            assert row_limit == 7
+            return None
+
+    from tldw_Server_API.app.core.Sync.v2.personal_context_relay import (
+        PersonalContextRelay,
+    )
+
+    result = PersonalContextRelay(
+        publications=BoundedSource(),
+        stage_authority=lambda *_args: 1,
+    ).relay_profile(
+        user_id="user-a",
+        profile_id="profile-a",
+        dataset_id="dataset-a",
+        after_server_cursor=None,
+        row_budget=7,
+    )
+
+    assert result.continuation == "complete"
 
 
 def test_real_relay_extends_current_sync_heads_across_publication_batches(
@@ -33,9 +67,16 @@ def test_real_relay_extends_current_sync_heads_across_publication_batches(
     from tldw_Server_API.app.core.Sync.v2.domain_adapters.personal_context import (
         PersonalContextDomainAdapter,
     )
+    from tldw_Server_API.app.core.Sync.v2.materializers.personal_context import (
+        PersonalContextMaterializer,
+    )
     from tldw_Server_API.app.core.Sync.v2.models import (
         PERSONAL_CONTEXT_SYNC_DOMAINS,
         SyncDatasetCreate,
+        SyncEnvelopeCreate,
+    )
+    from tldw_Server_API.app.core.Sync.v2.personal_context_ongoing_contract import (
+        PersonalContextExchangeProof,
     )
     from tldw_Server_API.app.core.Sync.v2.personal_context_relay import (
         PersonalContextAuthoritySourceError,
@@ -61,7 +102,7 @@ def test_real_relay_extends_current_sync_heads_across_publication_batches(
         id_factory=next_id,
     )
     manifest = canonical.create_profile()
-    canonical.create_manual_record(
+    record = canonical.create_manual_record(
         scope_id=canonical.list_scopes()[0].scope_id,
         payload={
             "kind": "preference",
@@ -87,7 +128,25 @@ def test_real_relay_extends_current_sync_heads_across_publication_batches(
     service = SyncV2Service(
         store=store,
         adapters=adapters,
+        materializers={
+            domain: PersonalContextMaterializer(
+                domain=domain,
+                service_resolver=lambda _user_id: canonical,
+            )
+            for domain in PERSONAL_CONTEXT_SYNC_DOMAINS
+        },
         personal_context_service_resolver=lambda _user_id: canonical,
+    )
+    service.register_device(
+        user_id="user-a",
+        display_name="device-a",
+        client_type="chatbook",
+        device_id="device-a",
+        capabilities={
+            "supported_adapter_versions": {
+                domain: [1] for domain in PERSONAL_CONTEXT_SYNC_DOMAINS
+            }
+        },
     )
     store.enroll_dataset(
         SyncDatasetCreate(
@@ -100,11 +159,25 @@ def test_real_relay_extends_current_sync_heads_across_publication_batches(
                     "profile_id": manifest.profile_id,
                     "integrity_key_id": key_id,
                     "purge_generation": 0,
+                    "link_state": "complete",
+                    "ongoing_sync_version": 1,
+                    "activation_epoch": "epoch_0123456789abcdef",
+                    "continuity_token": "continuity_0123456789abcdef",
                 }
             },
         )
     )
+    store.complete_personal_context_link_receipt(
+        user_id="user-a",
+        dataset_id="dataset-a",
+        device_id="device-a",
+        profile_id=manifest.profile_id,
+        integrity_key_id=key_id,
+        purge_generation=0,
+        bootstrap_cursor="fixture-cursor",
+    )
     staging_errors: list[str] = []
+    finalization_errors: list[str] = []
 
     def stage(row, dataset_id: str, user_id: str) -> int:
         try:
@@ -113,10 +186,22 @@ def test_real_relay_extends_current_sync_heads_across_publication_batches(
             staging_errors.append(f"{row.domain}:{row.role}:{exc!r}")
             raise
 
+    def finalize(row, server_cursor: int, dataset_id: str, user_id: str) -> None:
+        try:
+            service.finalize_personal_context_authority(
+                row, server_cursor, dataset_id, user_id
+            )
+        except Exception as exc:
+            finalization_errors.append(f"{row.domain}:{row.role}:{exc!r}")
+            raise
+
     publications = PersonalContextPublicationRelayStore(personal_db)
     with publications.profile_lease(manifest.profile_id) as binding_lease:
         assert binding_lease is not None
-        source_batch = publications.earliest_nonterminal_batch(manifest.profile_id)
+        source_batch = publications.earliest_nonterminal_batch(
+            manifest.profile_id,
+            row_limit=100,
+        )
         assert source_batch is not None
         source_row = replace(
             source_batch.rows[0], relay_owner_token=binding_lease.owner_token
@@ -201,6 +286,68 @@ def test_real_relay_extends_current_sync_heads_across_publication_batches(
             assert store.get_envelope_by_client_id(
                 "dataset-a", wrong_key_row.deterministic_envelope_id
             ) is None
+        cancelled_cursor = service.stage_personal_context_authority(
+            source_row, "dataset-a", "user-a"
+        )
+        cancelled = store.get_envelope_by_server_cursor(cancelled_cursor)
+        assert cancelled is not None
+        assert cancelled.apply_status == "pending"
+        with store.db.backend.transaction() as connection:
+            store.db.execute(
+                "UPDATE sync_envelopes SET schema_version = 2 "
+                "WHERE server_sequence = ?",
+                (cancelled_cursor,),
+                connection=connection,
+            )
+        with pytest.raises(SyncStoreError, match="authority receipt is invalid"):
+            service.stage_personal_context_authority(
+                source_row,
+                "dataset-a",
+                "user-a",
+            )
+        service.cancel_personal_context_authority(
+            source_row,
+            cancelled_cursor,
+            "dataset-a",
+            "user-a",
+        )
+        assert store.get_envelope_by_server_cursor(cancelled_cursor) is None
+        assert store.get_current_head(
+            "dataset-a", source_row.domain, source_row.object_id
+        ) is None
+    expired_cursor: int | None = None
+
+    def expire_after_stage(row, dataset_id: str, user_id: str) -> int:
+        nonlocal expired_cursor
+        expired_cursor = service.stage_personal_context_authority(
+            row,
+            dataset_id,
+            user_id,
+        )
+        with personal_db.transaction(immediate=True) as connection:
+            connection.execute(
+                "UPDATE personal_context_publication_relay_leases "
+                "SET expires_at_ns = 0 WHERE profile_id = ?",
+                (manifest.profile_id,),
+            )
+        return expired_cursor
+
+    expired = PersonalContextRelay(
+        publications=PersonalContextPublicationRelayStore(personal_db),
+        stage_authority=expire_after_stage,
+        finalize_authority=finalize,
+        cancel_authority=service.cancel_personal_context_authority,
+    ).relay_profile(
+        user_id="user-a",
+        profile_id=manifest.profile_id,
+        dataset_id="dataset-a",
+        after_server_cursor=None,
+        row_budget=1,
+    )
+    assert expired.continuation == "personal_context_relay_pending"
+    assert expired_cursor is not None
+    assert store.get_envelope_by_server_cursor(expired_cursor) is None
+
     original_acknowledge = publications.acknowledge_row
     interrupted = True
 
@@ -215,7 +362,8 @@ def test_real_relay_extends_current_sync_heads_across_publication_batches(
     relay = PersonalContextRelay(
         publications=publications,
         stage_authority=stage,
-        finalize_authority=service.finalize_personal_context_authority,
+        finalize_authority=finalize,
+        cancel_authority=service.cancel_personal_context_authority,
     )
 
     with pytest.raises(RuntimeError, match="crash after durable Sync insert"):
@@ -229,13 +377,14 @@ def test_real_relay_extends_current_sync_heads_across_publication_batches(
         "dataset-a", "personal_context.scope", canonical.list_scopes()[0].scope_id
     )
     assert scope_head is not None
-    assert scope_head.apply_status == "pending"
+    assert scope_head.apply_status == "applied"
 
     publications = PersonalContextPublicationRelayStore(personal_db)
     relay = PersonalContextRelay(
         publications=publications,
         stage_authority=stage,
-        finalize_authority=service.finalize_personal_context_authority,
+        finalize_authority=finalize,
+        cancel_authority=service.cancel_personal_context_authority,
     )
     result = relay.relay_profile(
         user_id="user-a",
@@ -252,6 +401,85 @@ def test_real_relay_extends_current_sync_heads_across_publication_batches(
     assert manifest_head.object_revision == 2
     assert manifest_head.base_server_cursor is not None
 
+    record_head = store.get_current_head(
+        "dataset-a", "personal_context.record", record.record_id
+    )
+    assert record_head is not None
+    updated = ProfileRecord.model_validate(
+        {
+            **record.model_dump(mode="python"),
+            "version_id": "client-record-v2",
+            "parent_version_id": record.version_id,
+            "updated_at": record.updated_at + timedelta(seconds=1),
+            "payload": {
+                **record.payload.model_dump(mode="python"),
+                "value": "structured",
+            },
+        }
+    )
+    updated_payload = updated.model_dump(mode="json")
+    updated_canonical = canonical_json_bytes(updated_payload)
+    exchange = PersonalContextExchangeProof(
+        ongoing_sync_version=1,
+        activation_epoch="epoch_0123456789abcdef",
+        continuity_token="continuity_0123456789abcdef",
+    )
+    pushed = service.push(
+        user_id="user-a",
+        dataset_id="dataset-a",
+        device_id="device-a",
+        envelopes=[
+            SyncEnvelopeCreate(
+                dataset_id="dataset-a",
+                client_envelope_id="device-a:record:v2",
+                device_id="device-a",
+                domain="personal_context.record",
+                operation="upsert",
+                object_id=record.record_id,
+                parent_id=record.scope_id,
+                adapter_version=1,
+                schema_version=1,
+                payload=updated_payload,
+                payload_hash="hmac-sha256-v1:"
+                + hmac.new(integrity_key, updated_canonical, hashlib.sha256).hexdigest(),
+                payload_size_bytes=len(updated_canonical),
+                base_server_cursor=record_head.server_cursor,
+                base_object_revision=record_head.object_revision,
+                base_object_hash=record_head.payload_hash,
+                object_revision=(record_head.object_revision or 0) + 1,
+                base_version=record.version_id,
+                entity_version=updated.version_id,
+                encryption_metadata={"policy": "server_trusted_v1"},
+                routing_metadata={
+                    "integrity_key_id": key_id,
+                    "profile_id": manifest.profile_id,
+                    "purge_generation": 0,
+                },
+            )
+        ],
+        personal_context_exchange=exchange,
+    )
+    assert pushed.rejected == []
+    assert pushed.conflicts == []
+    assert len(pushed.accepted) == 1
+
+    confirmation = relay.relay_profile(
+        user_id="user-a",
+        profile_id=manifest.profile_id,
+        dataset_id="dataset-a",
+        after_server_cursor=None,
+    )
+
+    assert confirmation.continuation == "complete", (staging_errors, finalization_errors)
+    confirmed_head = store.get_current_head(
+        "dataset-a", "personal_context.record", record.record_id
+    )
+    assert confirmed_head is not None
+    assert confirmed_head.authority is not None
+    assert confirmed_head.authority.role == "home_authority"
+    assert confirmed_head.entity_version == updated.version_id
+    assert confirmed_head.apply_status == "applied"
+
 
 def test_relay_exports_a_result_type() -> None:
     """The relay boundary is available independently of HTTP transport."""
@@ -261,6 +489,68 @@ def test_relay_exports_a_result_type() -> None:
     )
 
     assert PersonalContextRelayResult.__name__ == "PersonalContextRelayResult"
+
+
+def test_corrupt_source_persists_content_free_attention_after_rollback(
+    tmp_path, monkeypatch
+) -> None:
+    """Authenticated source corruption must still block after service reconstruction."""
+
+    from tldw_Server_API.app.core.DB_Management.Personalization_DB import PersonalizationDB
+    from tldw_Server_API.app.core.Personalization.personal_context_repository import (
+        PersonalContextRepository,
+    )
+    from tldw_Server_API.app.core.Personalization.personal_context_service import (
+        PersonalContextService,
+    )
+    from tldw_Server_API.app.core.Sync.v2.personal_context_relay import (
+        PersonalContextRelay,
+    )
+    from tldw_Server_API.tests.Personalization.personal_context_test_support import (
+        encoded_master_key,
+    )
+
+    monkeypatch.setenv("TLDW_PERSONAL_CONTEXT_MASTER_KEY", encoded_master_key())
+    database = PersonalizationDB.for_path(tmp_path / "poison.db")
+    canonical = PersonalContextService(PersonalContextRepository(database))
+    manifest = canonical.create_profile()
+    with database.transaction(immediate=True) as connection:
+        connection.execute(
+            "UPDATE personal_context_publication_rows SET ciphertext = ? "
+            "WHERE profile_id = ? AND profile_publication_sequence = 1 "
+            "AND batch_ordinal = 0",
+            (b"corrupt", manifest.profile_id),
+        )
+
+    first = PersonalContextRelay(
+        publications=PersonalContextPublicationRelayStore(database),
+        stage_authority=lambda *_args: pytest.fail("corrupt source reached staging"),
+    ).relay_profile(
+        user_id="user-a",
+        profile_id=manifest.profile_id,
+        dataset_id="dataset-a",
+        after_server_cursor=None,
+    )
+    second = PersonalContextRelay(
+        publications=PersonalContextPublicationRelayStore(database),
+        stage_authority=lambda *_args: pytest.fail("poisoned source reached staging"),
+    ).relay_profile(
+        user_id="user-a",
+        profile_id=manifest.profile_id,
+        dataset_id="dataset-a",
+        after_server_cursor=None,
+    )
+
+    assert first.continuation == "relay_poisoned"
+    assert second.continuation == "relay_poisoned"
+    with database.transaction() as connection:
+        attention = connection.execute(
+            "SELECT error_code FROM personal_context_publication_relay_attention "
+            "WHERE profile_id = ? AND profile_publication_sequence = 1",
+            (manifest.profile_id,),
+        ).fetchone()
+    assert attention is not None
+    assert tuple(attention) == ("relay_poisoned",)
 
 
 class _Publications:
@@ -283,10 +573,21 @@ class _Publications:
     def row_is_current(self, _row: PublicationSourceRow, _lease: object) -> bool:
         return True
 
-    def earliest_nonterminal_batch(self, _profile_id: str) -> PublicationSourceBatch:
+    def earliest_nonterminal_batch(
+        self,
+        _profile_id: str,
+        *,
+        row_limit: int,
+    ) -> PublicationSourceBatch:
+        assert row_limit > 0
         if all(row.row_state == "acknowledged" for row in self.rows):
             return None  # type: ignore[return-value]
-        return PublicationSourceBatch("profile-a", 1, "batch-a", tuple(self.rows))
+        return PublicationSourceBatch(
+            "profile-a",
+            1,
+            "batch-a",
+            tuple(self.rows[:row_limit]),
+        )
 
     def acknowledge_row(self, row: PublicationSourceRow, *, server_cursor: int, lease: object) -> None:
         del lease
@@ -295,13 +596,26 @@ class _Publications:
         self.acknowledged.append(server_cursor)
         self.rows[row.batch_ordinal] = replace(row, row_state="acknowledged", sync_server_cursor=server_cursor)
 
+    def record_staged_row(
+        self, row: PublicationSourceRow, *, server_cursor: int, lease: object
+    ) -> None:
+        assert lease.owner_token == "lease-token"
+        self.rows[row.batch_ordinal] = replace(
+            row,
+            row_state="staged",
+            sync_server_cursor=server_cursor,
+        )
+
     def complete_if_acknowledged(
         self, _batch: PublicationSourceBatch, *, lease: object
     ) -> bool:
         assert lease.owner_token == "lease-token"
         return all(row.row_state == "acknowledged" for row in self.rows)
 
-    def mark_attention(self, _batch: PublicationSourceBatch) -> None:
+    def mark_attention(
+        self, _batch: PublicationSourceBatch, *, lease: object
+    ) -> None:
+        assert lease.owner_token == "lease-token"
         self.attention = True
 
 
@@ -332,7 +646,7 @@ def test_relay_never_stages_manifest_before_semantic_siblings() -> None:
     assert staged == ["semantic"]
     publications.failed_after = None
     relay.relay_profile(user_id="user-a", profile_id="profile-a", dataset_id="dataset-a", after_server_cursor=None)
-    assert staged == ["semantic", "semantic", "manifest"]
+    assert staged == ["semantic", "manifest"]
 
 
 def test_relay_poison_blocks_the_earliest_batch_without_error_body() -> None:

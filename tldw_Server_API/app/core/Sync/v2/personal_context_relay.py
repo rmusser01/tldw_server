@@ -28,6 +28,7 @@ class PersonalContextRelayResult:
 
 AuthorityStager = Callable[[PublicationSourceRow, str, str], int]
 AuthorityFinalizer = Callable[[PublicationSourceRow, int, str, str], None]
+AuthorityCanceller = Callable[[PublicationSourceRow, int, str, str], None]
 
 
 class PersonalContextAuthoritySourceError(RuntimeError):
@@ -41,6 +42,7 @@ class PersonalContextRelay:
     publications: Any
     stage_authority: AuthorityStager
     finalize_authority: AuthorityFinalizer | None = None
+    cancel_authority: AuthorityCanceller | None = None
     clock_ns: Callable[[], int] = monotonic_ns
 
     def relay_profile(
@@ -69,7 +71,10 @@ class PersonalContextRelay:
             inspected = 0
             while True:
                 try:
-                    batch = self.publications.earliest_nonterminal_batch(profile_id)
+                    batch = self.publications.earliest_nonterminal_batch(
+                        profile_id,
+                        row_limit=row_budget - inspected,
+                    )
                 except PublicationRelayPoisoned:
                     return PersonalContextRelayResult(staged, False, False, "relay_poisoned", inspected)
                 if batch is None:
@@ -85,8 +90,7 @@ class PersonalContextRelay:
                         if self.finalize_authority is not None:
                             cursor = row.sync_server_cursor
                             if cursor is None:
-                                self.publications.mark_attention(batch)
-                                return PersonalContextRelayResult(staged, False, False, "relay_poisoned", inspected)
+                                return PersonalContextRelayResult(staged, False, False, "personal_context_relay_pending", inspected)
                             claimed_row = replace(row, relay_owner_token=lease.owner_token)
                             if not self.publications.renew_lease(lease) or not self.publications.row_is_current(claimed_row, lease):
                                 return PersonalContextRelayResult(staged, False, False, "personal_context_relay_pending", inspected)
@@ -97,34 +101,67 @@ class PersonalContextRelay:
                         continue
                     if row.role == "manifest" and any(item.role == "semantic" and item.batch_ordinal not in acknowledged_ordinals for item in batch.rows):
                         return PersonalContextRelayResult(staged, False, False, "personal_context_relay_pending", inspected)
-                    if not self.publications.renew_lease(lease):
-                        return PersonalContextRelayResult(staged, False, False, "personal_context_relay_pending", inspected)
                     claimed_row = replace(row, relay_owner_token=lease.owner_token)
-                    if not self.publications.row_is_current(claimed_row, lease):
+                    cursor = row.sync_server_cursor
+                    if row.row_state == "staged" and cursor is None:
                         return PersonalContextRelayResult(staged, False, False, "personal_context_relay_pending", inspected)
-                    try:
-                        cursor = self.stage_authority(claimed_row, dataset_id, user_id)
-                    except PersonalContextAuthoritySourceError:
-                        self.publications.mark_attention(batch)
-                        return PersonalContextRelayResult(staged, False, False, "relay_poisoned", inspected)
-                    except Exception:  # noqa: BLE001 - storage/head/transport failures retry.
-                        return PersonalContextRelayResult(staged, False, False, "personal_context_relay_pending", inspected)
-                    if isinstance(cursor, bool) or not isinstance(cursor, int) or cursor < 1:
-                        raise RuntimeError("authority relay receipt is invalid")
-                    if not self.publications.renew_lease(lease) or not self.publications.row_is_current(claimed_row, lease):
-                        return PersonalContextRelayResult(staged, False, False, "personal_context_relay_pending", inspected)
-                    self.publications.acknowledge_row(claimed_row, server_cursor=cursor, lease=lease)
-                    if self.finalize_authority is not None:
+                    if row.row_state == "pending":
                         if not self.publications.renew_lease(lease) or not self.publications.row_is_current(claimed_row, lease):
                             return PersonalContextRelayResult(staged, False, False, "personal_context_relay_pending", inspected)
                         try:
-                            self.finalize_authority(claimed_row, cursor, dataset_id, user_id)
-                        except Exception:  # noqa: BLE001 - acknowledged receipt repairs on retry.
+                            cursor = self.stage_authority(claimed_row, dataset_id, user_id)
+                        except PersonalContextAuthoritySourceError:
+                            self.publications.mark_attention(batch, lease=lease)
+                            return PersonalContextRelayResult(staged, False, False, "relay_poisoned", inspected)
+                        except Exception:  # noqa: BLE001 - storage/head/transport failures retry.
                             return PersonalContextRelayResult(staged, False, False, "personal_context_relay_pending", inspected)
+                        if isinstance(cursor, bool) or not isinstance(cursor, int) or cursor < 1:
+                            return PersonalContextRelayResult(staged, False, False, "personal_context_relay_pending", inspected)
+                        if not self.publications.renew_lease(lease) or not self.publications.row_is_current(claimed_row, lease):
+                            self._cancel(claimed_row, cursor, dataset_id, user_id)
+                            return PersonalContextRelayResult(staged, False, False, "personal_context_relay_pending", inspected)
+                        try:
+                            self.publications.record_staged_row(
+                                claimed_row,
+                                server_cursor=cursor,
+                                lease=lease,
+                            )
+                        except Exception:  # noqa: BLE001 - lost source CAS needs compensation.
+                            self._cancel(claimed_row, cursor, dataset_id, user_id)
+                            return PersonalContextRelayResult(staged, False, False, "personal_context_relay_pending", inspected)
+                    if cursor is None:
+                        return PersonalContextRelayResult(staged, False, False, "personal_context_relay_pending", inspected)
+                    if not self.publications.renew_lease(lease) or not self.publications.row_is_current(claimed_row, lease):
+                        self._cancel(claimed_row, cursor, dataset_id, user_id)
+                        return PersonalContextRelayResult(staged, False, False, "personal_context_relay_pending", inspected)
+                    if self.finalize_authority is not None:
+                        try:
+                            self.finalize_authority(claimed_row, cursor, dataset_id, user_id)
+                        except Exception:  # noqa: BLE001 - staged receipt repairs on retry.
+                            return PersonalContextRelayResult(staged, False, False, "personal_context_relay_pending", inspected)
+                    if not self.publications.renew_lease(lease) or not self.publications.row_is_current(claimed_row, lease):
+                        return PersonalContextRelayResult(staged, False, False, "personal_context_relay_pending", inspected)
+                    self.publications.acknowledge_row(claimed_row, server_cursor=cursor, lease=lease)
                     acknowledged_ordinals.add(row.batch_ordinal)
                     staged += 1
                 if not self.publications.complete_if_acknowledged(batch, lease=lease):
                     return PersonalContextRelayResult(staged, False, False, "personal_context_relay_pending", inspected)
+
+    def _cancel(
+        self,
+        row: PublicationSourceRow,
+        server_cursor: int,
+        dataset_id: str,
+        user_id: str,
+    ) -> None:
+        """Best-effort compensation; only the exact pending row can be removed."""
+
+        if self.cancel_authority is None:
+            return
+        try:
+            self.cancel_authority(row, server_cursor, dataset_id, user_id)
+        except Exception:  # noqa: BLE001 - cancellation is best-effort retry cleanup.
+            return
 
 
 __all__ = [

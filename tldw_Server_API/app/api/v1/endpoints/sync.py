@@ -296,6 +296,14 @@ def _safe_sync_v2_http_error(exc: Exception, **context: object) -> HTTPException
         return HTTPException(status_code=status_code, detail=detail)
     if isinstance(exc, SyncStoreError):
         lowered = str(exc).lower()
+        if "personal_context_activation_required" in lowered:
+            return HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "error_code": "personal_context_activation_required",
+                    "message": "An active Personal Context exchange is required.",
+                },
+            )
         notes_task_activation_errors = {
             "notes_task_sync_domains_incomplete": (
                 status.HTTP_400_BAD_REQUEST,
@@ -1650,6 +1658,7 @@ def push_sync_v2_envelopes(
             envelopes=[_core_envelope_from_api(envelope) for envelope in request.envelopes],
             base_server_cursor=request.base_server_cursor,
             stop_on_conflict=request.options.stop_on_conflict,
+            personal_context_exchange=request.personal_context_exchange,
         )
     except Exception as exc:
         raise _safe_sync_v2_http_error(
@@ -1665,6 +1674,7 @@ def push_sync_v2_envelopes(
         rejected=[SyncPushRejectedEnvelope(**asdict(item)) for item in result.rejected],
         conflicts=[SyncPushConflictEnvelope(**asdict(item)) for item in result.conflicts],
         next_cursor=result.next_cursor,
+        personal_context_exchange=result.personal_context_exchange,
     )
 
 
@@ -1730,7 +1740,7 @@ def pull_sync_v2_envelopes(
         next_cursor=result.next_cursor,
         has_more=result.has_more,
         personal_context_relay=result.personal_context_relay,
-        personal_context_exchange=personal_context_exchange,
+        personal_context_exchange=result.personal_context_exchange,
     )
 
 
@@ -1753,10 +1763,16 @@ def list_sync_v2_conflicts(
         personal_context_continuity_token,
     )
     try:
+        verified_exchange = service.verified_active_exchange_if_enrolled(
+            user_id=_sync_user_id(user),
+            dataset_id=dataset_id,
+            exchange=personal_context_exchange,
+        )
         conflicts = service.list_conflicts(
             user_id=_sync_user_id(user),
             dataset_id=dataset_id,
             status=conflict_status,
+            personal_context_exchange=personal_context_exchange,
         )[:limit]
     except Exception as exc:
         raise _safe_sync_v2_http_error(
@@ -1766,12 +1782,12 @@ def list_sync_v2_conflicts(
             conflict_status=conflict_status,
         ) from exc
     api_conflicts = [_api_conflict_from_core(conflict) for conflict in conflicts]
-    if personal_context_exchange is None:
+    if verified_exchange is None:
         return api_conflicts
     return SyncConflictListResponse(
         dataset_id=dataset_id,
         conflicts=api_conflicts,
-        personal_context_exchange=personal_context_exchange,
+        personal_context_exchange=verified_exchange,
     )
 
 
@@ -1789,6 +1805,21 @@ def resolve_sync_v2_conflicts(
     resolved: list[SyncConflictResolveResolvedItem] = []
     rejected: list[SyncConflictResolveRejectedItem] = []
     server_cursors: list[int] = []
+    try:
+        verified_exchange = service.require_active_exchange_for_conflicts(
+            user_id=user_id,
+            dataset_id=request.dataset_id,
+            device_id=request.device_id,
+            conflict_ids=[item.conflict_id for item in request.resolutions],
+            exchange=request.personal_context_exchange,
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=user_id,
+            dataset_id=request.dataset_id,
+            device_id=request.device_id,
+        ) from exc
     for resolution in request.resolutions:
         resolution_envelope = (
             _core_envelope_from_api(resolution.resolution_envelope)
@@ -1805,6 +1836,7 @@ def resolve_sync_v2_conflicts(
                 resolved_by_device_id=request.device_id,
                 notes=None,
                 require_personal_context_conflict=request.personal_context_exchange is not None,
+                personal_context_exchange=request.personal_context_exchange,
             )
         except Exception as exc:
             logger.bind(
@@ -1840,7 +1872,7 @@ def resolve_sync_v2_conflicts(
         server_cursor=max(server_cursors, default=None),
         resolved=resolved,
         rejected=rejected,
-        personal_context_exchange=request.personal_context_exchange,
+        personal_context_exchange=verified_exchange,
     )
 
 

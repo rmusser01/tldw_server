@@ -3826,16 +3826,35 @@ class SyncDatabase:
                     connection=connection,
                 )
             )
-            metadata = decode_json(
-                row.get("metadata_json") if row is not None else None,
-                default={},
-            )
+            raw_metadata = row.get("metadata_json") if row is not None else None
+            metadata = decode_json(raw_metadata, default={})
             binding = metadata.get("personal_context") if isinstance(metadata, dict) else None
             if not isinstance(binding, dict) or (
                 binding.get("profile_id") != profile_id
                 or binding.get("integrity_key_id") != integrity_key_id
                 or binding.get("purge_generation") != purge_generation
+                or binding.get("link_state") not in {"bootstrap_pending", "complete"}
             ):
+                raise SyncStoreError("personal_context_link_binding_stale")
+            completed_metadata = dict(metadata)
+            completed_binding = dict(binding)
+            completed_binding["link_state"] = "complete"
+            completed_metadata["personal_context"] = completed_binding
+            updated = self.execute(
+                """UPDATE sync_datasets
+                      SET metadata_json = ?, updated_at = ?
+                    WHERE dataset_id = ? AND owner_user_id = ?
+                      AND metadata_json = ?""",
+                (
+                    encode_json(completed_metadata, default={}),
+                    utcnow_iso(),
+                    dataset_id,
+                    user_id,
+                    raw_metadata,
+                ),
+                connection=connection,
+            )
+            if updated.rowcount != 1:
                 raise SyncStoreError("personal_context_link_binding_stale")
             self.execute(
                 """INSERT INTO sync_personal_context_link_receipts
@@ -8208,6 +8227,105 @@ class SyncDatabase:
         if row is None:
             raise SyncStoreError(f"Sync envelope not found for server cursor: {server_cursor}")
         return _envelope_from_row(row)
+
+    def discard_pending_personal_context_authority(
+        self,
+        *,
+        server_cursor: int,
+        dataset_id: str,
+        client_envelope_id: str,
+        profile_id: str,
+        purge_generation: int,
+        publication_batch_id: str,
+        batch_ordinal: int,
+    ) -> bool:
+        """Delete only an exact, still-pending internal authority publication."""
+
+        with self.backend.transaction() as connection:
+            row = _first(
+                self.execute(
+                    "SELECT * FROM sync_envelopes WHERE server_sequence = ?",
+                    (server_cursor,),
+                    connection=connection,
+                )
+            )
+            if row is None:
+                return True
+            routing = decode_json(row.get("routing_metadata_json"), default={})
+            authority = (
+                routing.get("personal_context_authority")
+                if isinstance(routing, dict)
+                else None
+            )
+            if (
+                row.get("dataset_id") != dataset_id
+                or row.get("client_envelope_id") != client_envelope_id
+                or row.get("device_id") != "server-origin"
+                or row.get("domain") not in PERSONAL_CONTEXT_SYNC_DOMAINS
+                or row.get("status") != "accepted"
+                or row.get("apply_status") != "pending"
+                or not isinstance(routing, dict)
+                or routing.get("profile_id") != profile_id
+                or routing.get("purge_generation") != purge_generation
+                or not isinstance(authority, dict)
+                or authority.get("role") != "home_authority"
+                or authority.get("publication_batch_id") != publication_batch_id
+                or authority.get("batch_ordinal") != batch_ordinal
+            ):
+                return False
+            current = _first(
+                self.execute(
+                    """SELECT latest_server_cursor FROM sync_current_heads
+                        WHERE dataset_id = ? AND domain = ? AND object_id = ?""",
+                    (dataset_id, row["domain"], row["entity_id"]),
+                    connection=connection,
+                )
+            )
+            deleted = self.execute(
+                """DELETE FROM sync_envelopes
+                    WHERE server_sequence = ? AND dataset_id = ?
+                      AND client_envelope_id = ? AND apply_status = 'pending'""",
+                (server_cursor, dataset_id, client_envelope_id),
+                connection=connection,
+            )
+            if deleted.rowcount != 1:
+                return False
+            if current is not None and int(current["latest_server_cursor"]) == server_cursor:
+                previous = _first(
+                    self.execute(
+                        """SELECT server_sequence FROM sync_envelopes
+                            WHERE dataset_id = ? AND domain = ? AND entity_id = ?
+                              AND status = 'accepted'
+                            ORDER BY server_sequence DESC LIMIT 1""",
+                        (dataset_id, row["domain"], row["entity_id"]),
+                        connection=connection,
+                    )
+                )
+                if previous is None:
+                    self.execute(
+                        """DELETE FROM sync_current_heads
+                            WHERE dataset_id = ? AND domain = ? AND object_id = ?
+                              AND latest_server_cursor = ?""",
+                        (dataset_id, row["domain"], row["entity_id"], server_cursor),
+                        connection=connection,
+                    )
+                else:
+                    repaired = self.execute(
+                        """UPDATE sync_current_heads SET latest_server_cursor = ?
+                            WHERE dataset_id = ? AND domain = ? AND object_id = ?
+                              AND latest_server_cursor = ?""",
+                        (
+                            int(previous["server_sequence"]),
+                            dataset_id,
+                            row["domain"],
+                            row["entity_id"],
+                            server_cursor,
+                        ),
+                        connection=connection,
+                    )
+                    if repaired.rowcount != 1:
+                        raise SyncStoreError("personal_context_authority_cancel_raced")
+            return True
 
     def mark_personal_context_ingress_applied(
         self,

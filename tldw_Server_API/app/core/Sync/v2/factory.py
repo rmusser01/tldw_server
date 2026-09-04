@@ -202,6 +202,7 @@ def sync_v2_service_for_user(user_id: str) -> SyncV2Service:
         ),
         stage_authority=service.stage_personal_context_authority,
         finalize_authority=service.finalize_personal_context_authority,
+        cancel_authority=service.cancel_personal_context_authority,
     )
     def relay_after_commit(profile_id: str) -> None:
         """Best-effort recovery hook; durable journal debt survives all failures."""

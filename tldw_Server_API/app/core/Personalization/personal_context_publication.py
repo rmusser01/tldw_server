@@ -233,8 +233,16 @@ class PersonalContextPublicationRelayStore:
             and current["row_state"] in {"pending", "staged", "acknowledged"}
         )
 
-    def earliest_nonterminal_batch(self, profile_id: str) -> PublicationSourceBatch | None:
+    def earliest_nonterminal_batch(
+        self,
+        profile_id: str,
+        *,
+        row_limit: int,
+    ) -> PublicationSourceBatch | None:
         """Claim and decrypt only the earliest incomplete sequence under SQLite lock."""
+
+        if row_limit < 1:
+            raise ValueError("publication row limit must be positive")
 
         from tldw_Server_API.app.core.DB_Management.Personal_Context_Key_Store import (
             ServerProfileKeyProvider,
@@ -278,48 +286,57 @@ class PersonalContextPublicationRelayStore:
                 SELECT * FROM personal_context_publication_rows
                 WHERE profile_id = ? AND profile_publication_sequence = ?
                 ORDER BY batch_ordinal ASC
+                LIMIT ?
                 """,
-                (profile_id, batch["profile_publication_sequence"]),
+                (profile_id, batch["profile_publication_sequence"], row_limit),
             ).fetchall()
-            source_rows: list[PublicationSourceRow] = []
-            for row in rows:
-                try:
-                    domain, canonical = journal.decrypt_row(row)
-                except Exception as exc:  # noqa: BLE001 - ciphertext must fail closed.
+            sequence = int(batch["profile_publication_sequence"])
+            batch_id = str(batch["publication_batch_id"])
+
+        source_rows: list[PublicationSourceRow] = []
+        for row in rows:
+            try:
+                domain, canonical = journal.decrypt_row(row)
+            except Exception as exc:  # noqa: BLE001 - ciphertext must fail closed.
+                with self._database.transaction(immediate=True) as connection:
                     self._mark_attention_in_transaction(
                         connection,
                         profile_id=profile_id,
-                        sequence=int(batch["profile_publication_sequence"]),
+                        sequence=sequence,
                     )
-                    raise PublicationRelayPoisoned(
-                        "Personal Context relay needs attention"
-                    ) from exc
-                source_rows.append(
-                    PublicationSourceRow(
-                        profile_id=profile_id,
-                        profile_publication_sequence=int(row["profile_publication_sequence"]),
-                        publication_batch_id=str(row["publication_batch_id"]),
-                        batch_ordinal=int(row["batch_ordinal"]),
-                        batch_size=int(row["batch_size"]),
-                        purge_generation=int(row["purge_generation"]),
-                        role=str(row["role"]),  # type: ignore[arg-type]
-                        object_id=str(row["opaque_object_id"]),
-                        version_id=str(row["opaque_version_id"]),
-                        operation=str(row["operation"]),  # type: ignore[arg-type]
-                        deterministic_envelope_id=str(row["deterministic_envelope_id"]),
-                        integrity_tag=str(row["integrity_tag"]),
-                        domain=domain,
-                        canonical=canonical,
-                        sync_server_cursor=(None if row["sync_server_cursor"] is None else int(row["sync_server_cursor"])),
-                        row_state=str(row["row_state"]),
-                    )
+                raise PublicationRelayPoisoned(
+                    "Personal Context relay needs attention"
+                ) from exc
+            source_rows.append(
+                PublicationSourceRow(
+                    profile_id=profile_id,
+                    profile_publication_sequence=int(row["profile_publication_sequence"]),
+                    publication_batch_id=str(row["publication_batch_id"]),
+                    batch_ordinal=int(row["batch_ordinal"]),
+                    batch_size=int(row["batch_size"]),
+                    purge_generation=int(row["purge_generation"]),
+                    role=str(row["role"]),  # type: ignore[arg-type]
+                    object_id=str(row["opaque_object_id"]),
+                    version_id=str(row["opaque_version_id"]),
+                    operation=str(row["operation"]),  # type: ignore[arg-type]
+                    deterministic_envelope_id=str(row["deterministic_envelope_id"]),
+                    integrity_tag=str(row["integrity_tag"]),
+                    domain=domain,
+                    canonical=canonical,
+                    sync_server_cursor=(
+                        None
+                        if row["sync_server_cursor"] is None
+                        else int(row["sync_server_cursor"])
+                    ),
+                    row_state=str(row["row_state"]),
                 )
-            return PublicationSourceBatch(
-                profile_id=profile_id,
-                profile_publication_sequence=int(batch["profile_publication_sequence"]),
-                publication_batch_id=str(batch["publication_batch_id"]),
-                rows=tuple(source_rows),
             )
+        return PublicationSourceBatch(
+            profile_id=profile_id,
+            profile_publication_sequence=sequence,
+            publication_batch_id=batch_id,
+            rows=tuple(source_rows),
+        )
 
     @staticmethod
     def _mark_attention_in_transaction(
@@ -337,10 +354,34 @@ class PersonalContextPublicationRelayStore:
             (profile_id, sequence),
         )
 
-    def mark_attention(self, batch: PublicationSourceBatch) -> None:
+    def mark_attention(
+        self,
+        batch: PublicationSourceBatch,
+        *,
+        lease: PublicationRelayLease,
+    ) -> None:
         """Persist attention without preserving canonical values or exception text."""
 
         with self._database.transaction(immediate=True) as connection:
+            owned = connection.execute(
+                """SELECT 1 FROM personal_context_publication_relay_leases
+                   WHERE profile_id = ? AND owner_token = ? AND expires_at_ns > ?""",
+                (lease.profile_id, lease.owner_token, time.time_ns()),
+            ).fetchone()
+            current = connection.execute(
+                """SELECT 1 FROM personal_context_publication_batches
+                   WHERE profile_id = ? AND profile_publication_sequence = ?
+                     AND publication_batch_id = ? AND status = 'relaying'
+                     AND purge_generation = ?""",
+                (
+                    batch.profile_id,
+                    batch.profile_publication_sequence,
+                    batch.publication_batch_id,
+                    batch.rows[0].purge_generation if batch.rows else -1,
+                ),
+            ).fetchone()
+            if owned is None or current is None or lease.profile_id != batch.profile_id:
+                raise RuntimeError("publication relay source claim changed")
             self._mark_attention_in_transaction(
                 connection,
                 profile_id=batch.profile_id,
@@ -392,6 +433,57 @@ class PersonalContextPublicationRelayStore:
                 connection,
                 current,
                 row_state="acknowledged",
+                sync_server_cursor=server_cursor,
+            )
+
+    def record_staged_row(
+        self, row: PublicationSourceRow, *, server_cursor: int, lease: PublicationRelayLease
+    ) -> None:
+        """Persist an invisible Sync cursor under the exact live source claim."""
+
+        from tldw_Server_API.app.core.DB_Management.Personal_Context_Key_Store import (
+            ServerProfileKeyProvider,
+        )
+
+        with self._database.transaction(immediate=True) as connection:
+            lease_row = connection.execute(
+                """SELECT 1 FROM personal_context_publication_relay_leases
+                   WHERE profile_id = ? AND owner_token = ? AND expires_at_ns > ?""",
+                (lease.profile_id, lease.owner_token, time.time_ns()),
+            ).fetchone()
+            current = connection.execute(
+                """SELECT * FROM personal_context_publication_rows
+                   WHERE profile_id = ? AND profile_publication_sequence = ?
+                     AND batch_ordinal = ?""",
+                (row.profile_id, row.profile_publication_sequence, row.batch_ordinal),
+            ).fetchone()
+            profile = connection.execute(
+                "SELECT purge_generation FROM personal_context_publication_profiles WHERE profile_id = ?",
+                (row.profile_id,),
+            ).fetchone()
+            if (
+                lease_row is None
+                or lease.profile_id != row.profile_id
+                or current is None
+                or profile is None
+                or int(profile["purge_generation"]) != row.purge_generation
+                or current["row_state"] not in {"pending", "staged"}
+            ):
+                raise RuntimeError("publication relay source claim changed")
+            if (
+                current["row_state"] == "staged"
+                and int(current["sync_server_cursor"]) == server_cursor
+            ):
+                return
+            journal = PersonalContextPublicationJournal(
+                ServerProfileKeyProvider(self._database).load(
+                    row.profile_id, connection=connection
+                )
+            )
+            journal.transition_row_state(
+                connection,
+                current,
+                row_state="staged",
                 sync_server_cursor=server_cursor,
             )
 
@@ -816,9 +908,8 @@ class PersonalContextPublicationJournal:
         if updated.rowcount != 1:
             raise RuntimeError("publication row changed concurrently")
 
-    @classmethod
     def read_ingress_receipt(
-        cls,
+        self,
         connection: sqlite3.Connection,
         identity: IngressIdentity,
     ) -> CanonicalApplyReceipt | None:
@@ -833,11 +924,84 @@ class PersonalContextPublicationJournal:
         ).fetchone()
         if row is None:
             return None
-        if (
-            str(row["canonical_payload_digest"]) != identity.canonical_payload_digest
-            or int(row["purge_generation"]) != identity.purge_generation
-            or str(row["wire_entity_version"]) != identity.wire_entity_version
-        ):
+        old_identity_matches = (
+            str(row["dataset_id"]) == identity.dataset_id
+            and str(row["device_id"]) == identity.device_id
+            and str(row["client_envelope_id"]) == identity.client_envelope_id
+            and str(row["canonical_payload_digest"])
+            == identity.canonical_payload_digest
+            and int(row["purge_generation"]) == identity.purge_generation
+            and str(row["receipt_id"]) == self._receipt_id(identity)
+            and bool(str(row["resulting_object_id"]))
+            and bool(str(row["resulting_version_id"]))
+            and int(row["resulting_manifest_revision"]) >= 0
+            and bool(str(row["resulting_manifest_version_id"]))
+            and bool(str(row["publication_batch_id"]))
+            and int(row["profile_publication_sequence"]) >= 1
+        )
+        if not old_identity_matches:
+            raise ValueError("ingress identity reused with a different payload")
+        source_row = connection.execute(
+            """
+            SELECT result.*
+            FROM personal_context_publication_batches AS batch
+            JOIN personal_context_publication_rows AS result
+              ON result.publication_batch_id = batch.publication_batch_id
+             AND result.profile_publication_sequence = batch.profile_publication_sequence
+            WHERE batch.publication_batch_id = ?
+              AND batch.profile_publication_sequence = ?
+              AND batch.purge_generation = ?
+              AND result.opaque_object_id = ?
+              AND result.opaque_version_id = ?
+              AND EXISTS (
+                    SELECT 1 FROM personal_context_publication_rows AS manifest
+                    WHERE manifest.publication_batch_id = batch.publication_batch_id
+                      AND manifest.profile_publication_sequence = batch.profile_publication_sequence
+                      AND manifest.role = 'manifest'
+                      AND manifest.opaque_version_id = ?
+              )
+            LIMIT 1
+            """,
+            (
+                row["publication_batch_id"],
+                row["profile_publication_sequence"],
+                row["purge_generation"],
+                row["resulting_object_id"],
+                row["resulting_version_id"],
+                row["resulting_manifest_version_id"],
+            ),
+        ).fetchone()
+        if source_row is None:
+            raise ValueError("ingress identity reused with a different payload")
+        try:
+            _domain, canonical = self.decrypt_row(source_row)
+        except Exception as exc:  # noqa: BLE001 - legacy backfill must fail closed.
+            raise ValueError(
+                "ingress identity reused with a different payload"
+            ) from exc
+        source_digest = "sha256:" + hashlib.sha256(canonical).hexdigest()
+        if not hmac.compare_digest(source_digest, identity.canonical_payload_digest):
+            raise ValueError("ingress identity reused with a different payload")
+        stored_wire_version = str(row["wire_entity_version"])
+        if stored_wire_version == "":
+            updated = connection.execute(
+                """
+                UPDATE personal_context_ingress_receipts
+                SET wire_entity_version = ?
+                WHERE dataset_id = ? AND device_id = ? AND client_envelope_id = ?
+                  AND wire_entity_version = ''
+                """,
+                (
+                    identity.wire_entity_version,
+                    identity.dataset_id,
+                    identity.device_id,
+                    identity.client_envelope_id,
+                ),
+            )
+            if updated.rowcount != 1:
+                raise ValueError("ingress identity reused with a different payload")
+            stored_wire_version = identity.wire_entity_version
+        if stored_wire_version != identity.wire_entity_version:
             raise ValueError("ingress identity reused with a different payload")
         return CanonicalApplyReceipt(
             resulting_object_id=str(row["resulting_object_id"]),
@@ -852,5 +1016,5 @@ class PersonalContextPublicationJournal:
             device_id=str(row["device_id"]),
             client_envelope_id=str(row["client_envelope_id"]),
             canonical_payload_digest=str(row["canonical_payload_digest"]),
-            wire_entity_version=str(row["wire_entity_version"]),
+            wire_entity_version=stored_wire_version,
         )

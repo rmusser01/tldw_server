@@ -40,3 +40,20 @@ boundary made the real authenticated bootstrap, stale-completion, receipt, and
 post-link push flow pass. When a feature composes storage, canonical models, and
 HTTP dependencies, include at least one test through the production factory;
 service fakes cannot prove cross-layer serialization contracts.
+
+## After-commit callbacks may precede outer projection terminalization
+
+**Incident (TASK-13161, 2026-09-03):** The real authenticated factory test pushed
+a new Personal Context record successfully, but the canonical after-commit relay
+then poisoned its authority batch. Unit relay tests were green. The callback ran
+after the canonical database commit but before the enclosing Sync materializer
+marked the identical client-ingress envelope applied; the envelope also relied on
+projected object state because its wire row omitted `object_revision`.
+
+**Evidence and rule:** A production-factory push followed by a real pull reproduced
+the failure. Restricting self-head confirmation to an exact authenticated
+client-ingress match in either legal pending/applied state, and deriving its base
+revision/hash from current projected state, made the same after-commit relay and
+exact-once pull pass. For cross-store callbacks, test the actual outer transaction
+ordering and use the store's projected head facts rather than assuming envelope
+terminal state or optional wire revision fields are already complete.

@@ -157,6 +157,7 @@ def test_record_mutation_commits_manifest_and_publication_batch_atomically(
 
 def test_ingress_replay_returns_original_result_without_second_manifest_advance(
     service: PersonalContextService,
+    database: PersonalizationDB,
 ) -> None:
     service.create_profile()
 
@@ -166,6 +167,83 @@ def test_ingress_replay_returns_original_result_without_second_manifest_advance(
 
     assert replay == first
     assert service.get_manifest().revision == first.manifest_revision
+
+    with database.transaction(immediate=True) as connection:
+        connection.execute(
+            "UPDATE personal_context_ingress_receipts "
+            "SET wire_entity_version = '' WHERE receipt_id = ?",
+            (first.receipt_id,),
+        )
+
+    legacy_replay = service.apply_sync_ingress(**ingress)
+
+    assert legacy_replay == first
+    with database.transaction() as connection:
+        stored_wire_version = connection.execute(
+            "SELECT wire_entity_version FROM personal_context_ingress_receipts "
+            "WHERE receipt_id = ?",
+            (first.receipt_id,),
+        ).fetchone()[0]
+    assert stored_wire_version == first.wire_entity_version
+
+
+def test_legacy_ingress_receipt_mismatch_does_not_backfill_wire_identity(
+    service: PersonalContextService,
+    database: PersonalizationDB,
+) -> None:
+    service.create_profile()
+    ingress = _ingress(service, "client-envelope-legacy-mismatch")
+    first = service.apply_sync_ingress(**ingress)
+    with database.transaction(immediate=True) as connection:
+        connection.execute(
+            "UPDATE personal_context_ingress_receipts "
+            "SET wire_entity_version = '', canonical_payload_digest = ? "
+            "WHERE receipt_id = ?",
+            ("sha256:" + "0" * 64, first.receipt_id),
+        )
+
+    with pytest.raises(ValueError, match="ingress identity reused"):
+        service.apply_sync_ingress(**ingress)
+
+    with database.transaction() as connection:
+        stored_wire_version = connection.execute(
+            "SELECT wire_entity_version FROM personal_context_ingress_receipts "
+            "WHERE receipt_id = ?",
+            (first.receipt_id,),
+        ).fetchone()[0]
+    assert stored_wire_version == ""
+
+
+def test_legacy_receipt_does_not_backfill_when_source_ciphertext_is_corrupt(
+    service: PersonalContextService,
+    database: PersonalizationDB,
+) -> None:
+    service.create_profile()
+    ingress = _ingress(service, "client-envelope-corrupt-source")
+    first = service.apply_sync_ingress(**ingress)
+    with database.transaction(immediate=True) as connection:
+        connection.execute(
+            "UPDATE personal_context_ingress_receipts "
+            "SET wire_entity_version = '' WHERE receipt_id = ?",
+            (first.receipt_id,),
+        )
+        connection.execute(
+            "UPDATE personal_context_publication_rows "
+            "SET ciphertext = ? WHERE publication_batch_id = ? "
+            "AND opaque_object_id = ?",
+            (b"corrupt", first.publication_batch_id, first.resulting_object_id),
+        )
+
+    with pytest.raises(ValueError, match="ingress identity reused"):
+        service.apply_sync_ingress(**ingress)
+
+    with database.transaction() as connection:
+        stored_wire_version = connection.execute(
+            "SELECT wire_entity_version FROM personal_context_ingress_receipts "
+            "WHERE receipt_id = ?",
+            (first.receipt_id,),
+        ).fetchone()[0]
+    assert stored_wire_version == ""
 
 
 def test_ingress_id_reuse_with_a_different_digest_is_rejected_before_mutation(
