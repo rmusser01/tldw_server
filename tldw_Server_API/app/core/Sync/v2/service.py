@@ -12,6 +12,7 @@ import os
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
+from time import monotonic_ns
 from typing import Literal
 from uuid import RFC_4122, UUID, uuid4
 
@@ -3700,6 +3701,7 @@ class SyncV2Service:
                     device_id=device_id,
                 )
             )
+            recovery_deadline_ns = monotonic_ns() + 100_000_000
             if (
                 personal_context_egress_authorized
                 and self.personal_context_relay is not None
@@ -3712,6 +3714,7 @@ class SyncV2Service:
                     after_server_cursor=since_sequence,
                     row_budget=100,
                     wall_time_ms=100,
+                    deadline_ns=recovery_deadline_ns,
                 )
             scan = (
                 self.store.scan_personal_context_authority(
@@ -3722,6 +3725,7 @@ class SyncV2Service:
                         1,
                         100 - (0 if relay_result is None else relay_result.staged_rows),
                     ),
+                    deadline_ns=recovery_deadline_ns,
                 )
                 if personal_context_egress_authorized
                 else PersonalContextAuthorityScan(

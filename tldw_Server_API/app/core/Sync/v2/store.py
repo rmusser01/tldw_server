@@ -913,6 +913,7 @@ class SyncV2Store:
         limit: int,
         row_budget: int = 100,
         wall_time_ms: int = 100,
+        deadline_ns: int | None = None,
     ) -> PersonalContextAuthorityScan:
         """Find post-filter lookahead without skipping a hidden raw prefix."""
 
@@ -922,7 +923,7 @@ class SyncV2Store:
         raw_seen = 0
         visible: list[SyncEnvelope] = []
         source_exhausted = False
-        deadline_ns = monotonic_ns() + wall_time_ms * 1_000_000
+        deadline_ns = deadline_ns or monotonic_ns() + wall_time_ms * 1_000_000
         domains = (
             "personal_context.manifest",
             "personal_context.scope",

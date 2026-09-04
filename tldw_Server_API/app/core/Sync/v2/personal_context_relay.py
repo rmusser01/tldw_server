@@ -45,13 +45,14 @@ class PersonalContextRelay:
         after_server_cursor: int | None,
         row_budget: int = 100,
         wall_time_ms: int = 100,
+        deadline_ns: int | None = None,
     ) -> PersonalContextRelayResult:
         """Stage the first incomplete batch only, bounded by rows and wall time."""
 
         del after_server_cursor
         if row_budget < 1 or wall_time_ms < 1:
             raise ValueError("relay limits must be positive")
-        deadline_ns = self.clock_ns() + wall_time_ms * 1_000_000
+        deadline_ns = deadline_ns or self.clock_ns() + wall_time_ms * 1_000_000
         with self.publications.profile_lease(profile_id) as lease:
             if lease is None:
                 return PersonalContextRelayResult(
