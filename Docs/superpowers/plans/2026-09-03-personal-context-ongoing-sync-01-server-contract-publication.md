@@ -10,6 +10,8 @@
 
 **Spec:** `Docs/superpowers/specs/2026-09-02-personal-context-ongoing-sync-design.md`
 
+> **Remediation status (2026-09-04):** TASK-13161 was reopened after its fifth review found unresolved identity, legacy receipt, crash recovery, failure-classification, recovery-budget, conflict-gating, production-certification, and stale-ciphertext retention defects. Do not treat Task 3 below as complete. Execute `Docs/superpowers/plans/2026-09-04-personal-context-relay-remediation.md` (TASK-13166 through TASK-13172) before TASK-13161 can close.
+
 ## Global Constraints
 
 - ADR required: no new ADR. Use `backlog/decisions/002-personal-context-profile-authority-sync-and-encryption.md`.
