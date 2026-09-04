@@ -9,7 +9,10 @@ from dataclasses import dataclass
 from time import monotonic_ns
 from typing import Any, Literal
 
-from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
+from tldw_Server_API.app.core.DB_Management.Sync_DB import (
+    PersonalContextHistoryShredReceipt,
+    SyncDatabase,
+)
 
 from .errors import SyncStoreError
 from .models import (
@@ -308,8 +311,16 @@ class SyncV2Store:
             purge_generation=purge_generation,
         )
 
-    def list_datasets_for_user(self, user_id: str) -> list[SyncDataset]:
-        return self.db.list_datasets_for_user(user_id)
+    def list_datasets_for_user(
+        self,
+        user_id: str,
+        *,
+        include_archived: bool = False,
+    ) -> list[SyncDataset]:
+        return self.db.list_datasets_for_user(
+            user_id,
+            include_archived=include_archived,
+        )
 
     def list_devices_for_user(
         self,
@@ -1262,6 +1273,27 @@ class SyncV2Store:
         return self.db.discard_pending_personal_context_authority(
             **identity,
             connection=self._connection,
+        )
+
+    def shred_personal_context_profile_history(
+        self,
+        *,
+        dataset_id: str,
+        user_id: str,
+        profile_id: str,
+        old_generation_through: int,
+        purge_generation: int,
+    ) -> PersonalContextHistoryShredReceipt:
+        """Scrub one authorized old-generation Personal Context history."""
+
+        if self._connection is not None:
+            raise SyncStoreError("Personal Context cleanup owns its Sync transaction")
+        return self.db.shred_personal_context_profile_history(
+            dataset_id=dataset_id,
+            user_id=user_id,
+            profile_id=profile_id,
+            old_generation_through=old_generation_through,
+            purge_generation=purge_generation,
         )
 
     def mark_personal_context_authority_applied(

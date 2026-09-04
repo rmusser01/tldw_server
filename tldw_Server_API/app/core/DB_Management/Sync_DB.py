@@ -6,10 +6,11 @@ import hashlib
 import json
 import os
 import re
+import sqlite3
 import typing
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -153,6 +154,16 @@ _NOTES_TASK_READINESS_TRANSITIONS = {
     "ready": frozenset({"ready"}),
 }
 _NOTES_TASK_LOCAL_UNBOUND_DATASET_ID = "local-unbound"
+
+
+@dataclass(frozen=True, slots=True)
+class PersonalContextHistoryShredReceipt:
+    """Content-free proof that one old Personal Context generation was scrubbed."""
+
+    dataset_id: str
+    profile_id: str
+    old_generation_through: int
+    purge_generation: int
 
 
 def _moodboard_studio_cursor_regressed(
@@ -4061,15 +4072,18 @@ class SyncDatabase:
             return None
         return _dataset_from_row(row)
 
-    def list_datasets_for_user(self, user_id: str) -> list[SyncDataset]:
-        """List active Sync v2 datasets owned by a user."""
+    def list_datasets_for_user(
+        self,
+        user_id: str,
+        *,
+        include_archived: bool = False,
+    ) -> list[SyncDataset]:
+        """List Sync v2 datasets owned by a user."""
 
+        archived_predicate = "" if include_archived else " AND archived_at IS NULL"
         result = self.execute(
-            """
-            SELECT * FROM sync_datasets
-             WHERE owner_user_id = ? AND archived_at IS NULL
-             ORDER BY created_at ASC, dataset_id ASC
-            """,
+            "SELECT * FROM sync_datasets WHERE owner_user_id = ?"
+            f"{archived_predicate} ORDER BY created_at ASC, dataset_id ASC",  # nosec B608
             (user_id,),
         )
         return [_dataset_from_row(row) for row in result.rows]
@@ -8355,6 +8369,285 @@ class SyncDatabase:
             if repaired.rowcount != 1:
                 raise SyncStoreError("personal_context_authority_cancel_raced")
             return "removed"
+
+    def shred_personal_context_profile_history(
+        self,
+        *,
+        dataset_id: str,
+        user_id: str,
+        profile_id: str,
+        old_generation_through: int,
+        purge_generation: int,
+    ) -> PersonalContextHistoryShredReceipt:
+        """Irreversibly remove one profile's readable old-generation Sync material."""
+
+        if (
+            not dataset_id
+            or not user_id
+            or not profile_id
+            or old_generation_through < 0
+            or purge_generation != old_generation_through + 1
+        ):
+            raise SyncStoreError("Personal Context cleanup authority is invalid")
+        if self.backend_type != BackendType.SQLITE:
+            raise SyncStoreError(
+                "Personal Context cleanup needs a reviewed backend retention policy"
+            )
+        connection = self.backend.get_pool().get_connection()
+        if not isinstance(connection, sqlite3.Connection):
+            raise SyncStoreError("Personal Context SQLite cleanup connection is invalid")
+        secure_delete = connection.execute("PRAGMA secure_delete = ON").fetchone()
+        if secure_delete is None or int(secure_delete[0]) != 1:
+            raise SyncStoreError("Personal Context SQLite secure delete is unavailable")
+
+        personal_context_domains = tuple(sorted(PERSONAL_CONTEXT_SYNC_DOMAINS))
+        domain_placeholders = ", ".join("?" for _ in personal_context_domains)
+        with self.backend.transaction(connection) as transaction:
+            dataset_row = self._require_dataset_owner_for_update(
+                dataset_id,
+                user_id,
+                connection=transaction,
+            )
+            metadata = decode_json(dataset_row.get("metadata_json"), default=None)
+            state = metadata.get("personal_context") if isinstance(metadata, dict) else None
+            if not isinstance(state, dict) or state.get("profile_id") != profile_id:
+                raise SyncStoreError("Personal Context cleanup profile does not own dataset")
+            current_generation = state.get("purge_generation")
+            if (
+                not isinstance(current_generation, int)
+                or isinstance(current_generation, bool)
+                or current_generation < old_generation_through
+            ):
+                raise SyncStoreError("Personal Context cleanup generation is invalid")
+
+            candidate_rows = self.execute(
+                f"""
+                SELECT server_sequence, domain, entity_id, client_envelope_id,
+                       routing_metadata_json
+                  FROM sync_envelopes
+                 WHERE dataset_id = ?
+                   AND domain IN ({domain_placeholders})
+                 ORDER BY server_sequence
+                """,  # nosec B608 - placeholders cover the fixed domain constant.
+                (dataset_id, *personal_context_domains),
+                connection=transaction,
+            ).rows
+            targets: list[Mapping[str, Any]] = []
+            for row in candidate_rows:
+                routing = decode_json(row.get("routing_metadata_json"), default=None)
+                generation = routing.get("purge_generation") if isinstance(routing, dict) else None
+                if (
+                    isinstance(routing, dict)
+                    and routing.get("profile_id") == profile_id
+                    and isinstance(generation, int)
+                    and not isinstance(generation, bool)
+                    and generation <= old_generation_through
+                ):
+                    targets.append(row)
+
+            target_cursors = {int(row["server_sequence"]) for row in targets}
+            target_envelope_ids = {str(row["client_envelope_id"]) for row in targets}
+            for row in targets:
+                original_routing = str(row["routing_metadata_json"])
+                original_generation = decode_json(original_routing, default={}).get(
+                    "purge_generation"
+                )
+                shredded_routing = encode_json(
+                    {
+                        "profile_id": profile_id,
+                        "purge_generation": original_generation,
+                        "retention_state": "shredded",
+                    },
+                    default={},
+                )
+                updated = self.execute(
+                    """
+                    UPDATE sync_envelopes
+                       SET stable_key = NULL,
+                           mutation_group_id = NULL,
+                           mutation_step = NULL,
+                           mutation_step_count = NULL,
+                           mutation_plan_hash = NULL,
+                           base_object_hash = NULL,
+                           base_version = NULL,
+                           entity_version = NULL,
+                           dependency_json = '[]',
+                           routing_metadata_json = ?,
+                           payload_ciphertext = NULL,
+                           payload_json = '{}',
+                           payload_clear_json = '{}',
+                           payload_hash = NULL,
+                           payload_size_bytes = 0,
+                           encryption_metadata_json = '{}',
+                           apply_status = CASE
+                               WHEN apply_status = 'applied' THEN 'applied'
+                               ELSE 'superseded'
+                           END,
+                           apply_error_code = CASE
+                               WHEN apply_status = 'applied' THEN NULL
+                               ELSE 'personal_context_purged'
+                           END,
+                           apply_error_message = NULL
+                     WHERE server_sequence = ? AND dataset_id = ? AND domain = ?
+                       AND routing_metadata_json = ?
+                    """,
+                    (
+                        shredded_routing,
+                        int(row["server_sequence"]),
+                        dataset_id,
+                        str(row["domain"]),
+                        original_routing,
+                    ),
+                    connection=transaction,
+                )
+                if updated.rowcount != 1:
+                    raise SyncStoreError("Personal Context cleanup envelope predicate raced")
+
+            for cursor in target_cursors:
+                updated_receipt = self.execute(
+                    """
+                    UPDATE sync_personal_context_ingress_receipts
+                       SET canonical_payload_digest = 'shredded'
+                     WHERE dataset_id = ? AND server_sequence = ?
+                    """,
+                    (dataset_id, cursor),
+                    connection=transaction,
+                )
+                if updated_receipt.rowcount not in {0, 1}:
+                    raise SyncStoreError("Personal Context ingress receipt cleanup widened")
+
+            conflict_rows = self.execute(
+                f"""
+                SELECT conflict_id, server_sequence, base_envelope_id,
+                       local_envelope_id, remote_envelope_id
+                  FROM sync_conflicts
+                 WHERE dataset_id = ?
+                   AND domain IN ({domain_placeholders})
+                """,  # nosec B608 - placeholders cover the fixed domain constant.
+                (dataset_id, *personal_context_domains),
+                connection=transaction,
+            ).rows
+            conflict_ids = [
+                str(row["conflict_id"])
+                for row in conflict_rows
+                if (
+                    row.get("server_sequence") in target_cursors
+                    or any(
+                        value in target_envelope_ids
+                        for value in (
+                            row.get("base_envelope_id"),
+                            row.get("local_envelope_id"),
+                            row.get("remote_envelope_id"),
+                        )
+                        if value is not None
+                    )
+                )
+            ]
+            for conflict_id in conflict_ids:
+                updated_conflict = self.execute(
+                    """
+                    UPDATE sync_conflicts
+                       SET status = 'superseded', metadata_json = '{}',
+                           resolved_by_envelope_id = NULL,
+                           resolved_by_device_id = NULL,
+                           resolution_action = 'personal_context_purged',
+                           resolution_notes = NULL,
+                           resolved_at = COALESCE(resolved_at, ?)
+                     WHERE conflict_id = ? AND dataset_id = ?
+                    """,
+                    (utcnow_iso(), conflict_id, dataset_id),
+                    connection=transaction,
+                )
+                if updated_conflict.rowcount != 1:
+                    raise SyncStoreError("Personal Context conflict cleanup widened")
+
+            for cursor in target_cursors:
+                current_heads = self.execute(
+                    """
+                    DELETE FROM sync_current_heads
+                     WHERE dataset_id = ? AND latest_server_cursor = ?
+                       AND domain IN (
+                           'personal_context.manifest', 'personal_context.scope',
+                           'personal_context.record', 'personal_context.proposal',
+                           'personal_context.purge'
+                       )
+                    """,
+                    (dataset_id, cursor),
+                    connection=transaction,
+                )
+                if current_heads.rowcount not in {0, 1}:
+                    raise SyncStoreError("Personal Context current-head cleanup widened")
+                object_states = self.execute(
+                    """
+                    DELETE FROM sync_object_state
+                     WHERE dataset_id = ? AND latest_server_cursor = ?
+                       AND domain IN (
+                           'personal_context.manifest', 'personal_context.scope',
+                           'personal_context.record', 'personal_context.proposal',
+                           'personal_context.purge'
+                       )
+                    """,
+                    (dataset_id, cursor),
+                    connection=transaction,
+                )
+                if object_states.rowcount not in {0, 1}:
+                    raise SyncStoreError("Personal Context object-state cleanup widened")
+
+            key_count_row = _first(
+                self.execute(
+                    """
+                    SELECT COUNT(*) AS count FROM sync_key_records
+                     WHERE dataset_id = ? AND user_id = ?
+                       AND key_purpose = 'personal_context_integrity'
+                    """,
+                    (dataset_id, user_id),
+                    connection=transaction,
+                )
+            )
+            expected_key_count = int(key_count_row.get("count") or 0) if key_count_row else 0
+            deleted_keys = self.execute(
+                """
+                DELETE FROM sync_key_records
+                 WHERE dataset_id = ? AND user_id = ?
+                   AND key_purpose = 'personal_context_integrity'
+                """,
+                (dataset_id, user_id),
+                connection=transaction,
+            )
+            if deleted_keys.rowcount != expected_key_count:
+                raise SyncStoreError("Personal Context key cleanup predicate raced")
+
+            if current_generation < purge_generation:
+                state["purge_generation"] = purge_generation
+                metadata["personal_context"] = state
+                updated_dataset = self.execute(
+                    """
+                    UPDATE sync_datasets
+                       SET metadata_json = ?, updated_at = ?
+                     WHERE dataset_id = ? AND owner_user_id = ?
+                       AND metadata_json = ?
+                    """,
+                    (
+                        encode_json(metadata, default={}),
+                        utcnow_iso(),
+                        dataset_id,
+                        user_id,
+                        str(dataset_row["metadata_json"]),
+                    ),
+                    connection=transaction,
+                )
+                if updated_dataset.rowcount != 1:
+                    raise SyncStoreError("Personal Context cleanup generation raced")
+
+        checkpoint = connection.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+        if checkpoint is None or int(checkpoint[0]) != 0:
+            raise SyncStoreError("Personal Context cleanup WAL checkpoint is incomplete")
+        return PersonalContextHistoryShredReceipt(
+            dataset_id=dataset_id,
+            profile_id=profile_id,
+            old_generation_through=old_generation_through,
+            purge_generation=purge_generation,
+        )
 
     def mark_personal_context_authority_applied(
         self,

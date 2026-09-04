@@ -306,6 +306,26 @@ class PersonalizationDB:
                         PRIMARY KEY (profile_id, profile_publication_sequence)
                     );
 
+                    CREATE TABLE IF NOT EXISTS personal_context_purge_cleanup_intents (
+                        intent_id TEXT PRIMARY KEY,
+                        profile_id TEXT NOT NULL,
+                        old_generation_through INTEGER NOT NULL CHECK (old_generation_through >= 0),
+                        purge_generation INTEGER NOT NULL CHECK (purge_generation = old_generation_through + 1),
+                        origin TEXT NOT NULL CHECK (origin = 'direct_confirmed_full_profile_purge'),
+                        state TEXT NOT NULL CHECK (state IN ('pending','claimed','complete')),
+                        owner_token TEXT,
+                        claim_expires_at_ns INTEGER,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        completed_at TEXT,
+                        CHECK (
+                            (state = 'pending' AND owner_token IS NULL AND claim_expires_at_ns IS NULL AND completed_at IS NULL)
+                            OR (state = 'claimed' AND owner_token IS NOT NULL AND claim_expires_at_ns IS NOT NULL AND completed_at IS NULL)
+                            OR (state = 'complete' AND owner_token IS NOT NULL AND claim_expires_at_ns IS NULL AND completed_at IS NOT NULL)
+                        ),
+                        UNIQUE (profile_id, purge_generation)
+                    );
+
                     CREATE TABLE IF NOT EXISTS personal_context_publication_batches (
                         profile_id TEXT NOT NULL,
                         profile_publication_sequence INTEGER NOT NULL,
@@ -375,6 +395,8 @@ class PersonalizationDB:
                         ON personal_context_publication_rows(profile_id, row_state, profile_publication_sequence, batch_ordinal);
                     CREATE INDEX IF NOT EXISTS idx_personal_context_publication_batches_status
                         ON personal_context_publication_batches(profile_id, status, profile_publication_sequence);
+                    CREATE INDEX IF NOT EXISTS idx_personal_context_purge_cleanup_state
+                        ON personal_context_purge_cleanup_intents(state, created_at, intent_id);
                     """
                 )
                 conn.commit()
@@ -423,6 +445,16 @@ class PersonalizationDB:
             return checkpoint is not None and int(checkpoint[0]) == 0
         except (sqlite3.Error, TypeError, ValueError):
             return False
+
+    def checkpoint_retention_history(self) -> bool:
+        """Require old SQLite WAL frames to leave the application-owned store."""
+
+        with self._lock:
+            connection = self._connect()
+            try:
+                return self._truncate_wal_if_possible(connection)
+            finally:
+                connection.close()
 
     def _migrate_schema(self) -> None:
         """Add columns that may be missing in databases created before schema updates."""

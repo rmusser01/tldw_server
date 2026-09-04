@@ -220,6 +220,23 @@ def sync_v2_service_for_user(user_id: str) -> SyncV2Service:
             return
 
     publication_service.set_after_commit_relay(relay_after_commit)
+
+    def purge_cleanup_after_commit(intent: object) -> None:
+        """Scrub all Sync datasets bound to an already-authorized direct purge."""
+
+        for dataset in store.list_datasets_for_user(user_id, include_archived=True):
+            state = dataset.metadata.get("personal_context")
+            if not isinstance(state, Mapping) or state.get("profile_id") != getattr(
+                intent, "profile_id", None
+            ):
+                continue
+            service.shred_authorized_personal_context_history(
+                intent,
+                user_id=user_id,
+                dataset_id=dataset.dataset_id,
+            )
+
+    publication_service.set_after_commit_purge_cleanup(purge_cleanup_after_commit)
     return service
 
 

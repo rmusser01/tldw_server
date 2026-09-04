@@ -33,6 +33,7 @@ from tldw_profile_core import (
 
 from tldw_Server_API.app.core.DB_Management.Personal_Context_Repository import (
     _DIRECT_CONFIRMED_FULL_PROFILE_PURGE,
+    DirectPurgeCleanupIntent,
 )
 from tldw_Server_API.app.core.exceptions import (
     ProfileConflictError,
@@ -135,17 +136,72 @@ class PersonalContextService:
         id_factory: Callable[[str], str] | None = None,
         workspace_access: Callable[[str], bool] | None = None,
         after_commit_relay: Callable[[str], None] | None = None,
+        after_commit_purge_cleanup: Callable[[DirectPurgeCleanupIntent], None]
+        | None = None,
     ) -> None:
         self._repository = repository
         self._clock = clock or (lambda: datetime.now(UTC))
         self._id_factory = id_factory or (lambda label: f"{label}-{uuid.uuid4()}")
         self._workspace_access = workspace_access or (lambda _workspace_id: False)
         self._after_commit_relay = after_commit_relay
+        self._after_commit_purge_cleanup = after_commit_purge_cleanup
 
     def set_after_commit_relay(self, callback: Callable[[str], None] | None) -> None:
         """Install the best-effort relay hook after authenticated wiring exists."""
 
         self._after_commit_relay = callback
+
+    def set_after_commit_purge_cleanup(
+        self,
+        callback: Callable[[DirectPurgeCleanupIntent], None] | None,
+    ) -> None:
+        """Install the direct-purge-only cleanup worker after authenticated wiring."""
+
+        self._after_commit_purge_cleanup = callback
+
+    def _run_direct_purge_cleanup(
+        self,
+        *,
+        profile_id: str | None = None,
+        purge_generation: int | None = None,
+    ) -> str:
+        """Claim and execute only a previously minted direct-purge cleanup intent."""
+
+        if self._after_commit_purge_cleanup is None:
+            return "none"
+        owner_token = self._id_factory("purge-cleanup-owner")
+        intent = self._repository.claim_direct_purge_cleanup(
+            owner_token=owner_token,
+            profile_id=profile_id,
+            purge_generation=purge_generation,
+        )
+        if intent is None:
+            return "none"
+        try:
+            self._after_commit_purge_cleanup(intent)
+            if not self._repository.checkpoint_direct_purge_storage():
+                raise RuntimeError("Personal Context retention checkpoint is incomplete")
+            self._repository.complete_direct_purge_cleanup(intent)
+        except Exception:  # noqa: BLE001 - cleanup debt remains durable and retryable.
+            try:
+                self._repository.release_direct_purge_cleanup(intent)
+            except Exception:  # noqa: BLE001 - an expired owner fence remains recoverable.
+                return "failed"
+            return "failed"
+        return "complete"
+
+    def recover_direct_purge_cleanup(self, *, limit: int = 100) -> int:
+        """Run the dedicated recovery path for already-authorized cleanup debt."""
+
+        if limit < 1 or limit > 1_000:
+            raise ValueError("cleanup recovery limit must be between 1 and 1000")
+        completed = 0
+        for _attempt in range(limit):
+            outcome = self._run_direct_purge_cleanup()
+            if outcome != "complete":
+                break
+            completed += 1
+        return completed
 
     def _relay_after_commit(self, profile_id: str) -> None:
         """Schedule recovery only after the canonical transaction committed."""
@@ -1299,6 +1355,21 @@ class PersonalContextService:
             raise ValueError("confirmation must be exactly 'DELETE EVERYWHERE'")
         manifest = self._writable_manifest()
         if manifest.purge_generation != expected_purge_generation:
+            existing_intent = self._repository.direct_purge_cleanup(
+                manifest.profile_id,
+                purge_generation=manifest.purge_generation,
+            )
+            if (
+                manifest.purge_generation == expected_purge_generation + 1
+                and existing_intent is not None
+                and existing_intent.old_generation_through == expected_purge_generation
+            ):
+                self._run_direct_purge_cleanup(
+                    profile_id=manifest.profile_id,
+                    purge_generation=manifest.purge_generation,
+                )
+                self._relay_after_commit(manifest.profile_id)
+                return manifest
             raise ProfileConflictError("Personal context purge generation changed")
         next_manifest = self._next_manifest(manifest)
         barrier = ProfileManifest.model_validate(
@@ -1315,5 +1386,9 @@ class PersonalContextService:
             )
         except ConcurrentProfileUpdateError as exc:
             raise ProfileConflictError("Personal context profile changed") from exc
+        self._run_direct_purge_cleanup(
+            profile_id=manifest.profile_id,
+            purge_generation=barrier.purge_generation,
+        )
         self._relay_after_commit(manifest.profile_id)
         return barrier

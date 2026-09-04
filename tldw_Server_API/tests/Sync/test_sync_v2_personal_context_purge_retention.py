@@ -1,0 +1,685 @@
+"""Retention boundaries for authorized Personal Context global purge."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import sqlite3
+from dataclasses import replace
+from pathlib import Path
+
+import pytest
+
+from tldw_Server_API.app.core.DB_Management.Personalization_DB import (
+    PersonalizationDB,
+)
+from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
+from tldw_Server_API.app.core.Personalization.personal_context_crypto import (
+    EnvelopeAuthenticationError,
+)
+from tldw_Server_API.app.core.Personalization.personal_context_publication import (
+    PersonalContextPublicationJournal,
+)
+from tldw_Server_API.app.core.Personalization.personal_context_repository import (
+    PersonalContextRepository,
+)
+from tldw_Server_API.app.core.Personalization.personal_context_repository_models import (
+    ProfileIntegrityError,
+)
+from tldw_Server_API.app.core.Personalization.personal_context_service import (
+    PersonalContextService,
+)
+from tldw_Server_API.app.core.Sync.v2.models import (
+    SyncConflictCreate,
+    SyncDatasetCreate,
+    SyncEnvelopeCreate,
+    SyncKeyRecordCreate,
+)
+from tldw_Server_API.app.core.Sync.v2.personal_context_ongoing_contract import (
+    PersonalContextAuthorityMetadata,
+)
+from tldw_Server_API.app.core.Sync.v2.personal_context_relay import (
+    PersonalContextRelay,
+)
+from tldw_Server_API.app.core.Sync.v2.store import SyncStoreError, SyncV2Store
+from tldw_Server_API.tests.Sync.test_sync_v2_personal_context_authority_identity import (
+    AuthorityHarness,
+)
+
+_AUTHORITY_CANARY = "authority-retention-canary-8e531c31"
+_INGRESS_CANARY = "ingress-retention-canary-c94fe170"
+_CONFLICT_CANARY = "conflict-retention-canary-771c341a"
+_KEY_CANARY = "key-retention-canary-d158e4bb"
+_ORPHAN_CANARY = "orphan-retention-canary-e2e81718"
+_RECEIPT_CANARY = "receipt-retention-canary-8251be46"
+_SOURCE_CANARY = "source-retention-canary-70eaf67d"
+
+
+def _matches_canary(value: str | None, canary: str) -> bool:
+    """Compare secret test markers without exposing them in assertion output."""
+
+    if value is None:
+        return False
+    return hashlib.sha256(value.encode()).digest() == hashlib.sha256(
+        canary.encode()
+    ).digest()
+
+
+def _drain(runtime: AuthorityHarness) -> None:
+    relay = PersonalContextRelay(
+        publications=runtime.publications,
+        stage_authority=runtime.service.stage_personal_context_authority,
+        finalize_authority=runtime.service.finalize_personal_context_authority,
+        cancel_authority=runtime.service.cancel_personal_context_authority,
+    )
+    for _attempt in range(20):
+        result = relay.relay_profile(
+            user_id="user-a",
+            profile_id=runtime.manifest.profile_id,
+            dataset_id="dataset-a",
+            after_server_cursor=None,
+            wall_time_ms=5_000,
+        )
+        if result.continuation == "complete":
+            return
+    raise AssertionError("authority relay did not drain")
+
+
+def _intent_rows(database: PersonalizationDB) -> list[sqlite3.Row]:
+    with database.transaction() as connection:
+        return connection.execute(
+            "SELECT * FROM personal_context_purge_cleanup_intents ORDER BY created_at"
+        ).fetchall()
+
+
+def _install_cleanup_callback(runtime: AuthorityHarness) -> None:
+    runtime.canonical.set_after_commit_purge_cleanup(
+        lambda intent: runtime.service.shred_authorized_personal_context_history(
+            intent,
+            user_id="user-a",
+            dataset_id="dataset-a",
+        )
+    )
+
+
+def _stage_retention_canaries(runtime: AuthorityHarness) -> tuple[int, int, sqlite3.Row]:
+    """Install one old authority, ingress, conflict, and recovery-key package."""
+
+    scope_id = runtime.canonical.list_scopes()[0].scope_id
+    runtime.canonical.create_manual_record(
+        scope_id=scope_id,
+        payload={
+            "kind": "preference",
+            "subject": "purge.retention",
+            "polarity": "like",
+            "value": _SOURCE_CANARY,
+        },
+        semantic_key={"namespace": "preference", "subject": "purge.retention"},
+        controls={"sync_mode": "syncable", "agent_visibility": "agent_visible"},
+    )
+    keys = runtime.canonical._repository.key_material_for_test(runtime.manifest.profile_id)
+    with runtime.personal_db.transaction() as connection:
+        source_before = connection.execute(
+            """SELECT rows.* FROM personal_context_publication_rows rows
+               JOIN personal_context_publication_batches batches
+                 ON batches.profile_id = rows.profile_id
+                AND batches.profile_publication_sequence = rows.profile_publication_sequence
+               WHERE rows.profile_id = ? AND rows.role = 'semantic'
+                 AND batches.purge_generation = 0
+               ORDER BY rows.profile_publication_sequence DESC LIMIT 1""",
+            (runtime.manifest.profile_id,),
+        ).fetchone()
+    assert source_before is not None
+    assert PersonalContextPublicationJournal(keys).decrypt_row(source_before)[0] == "personal_context.record"
+
+    _drain(runtime)
+    authority = runtime.store.list_envelopes_for_entity(
+        "dataset-a",
+        "personal_context.record",
+        entity_id="record-1",
+        limit=10,
+    )
+    if not authority:
+        authority = runtime.store.list_envelopes_after(
+            "dataset-a",
+            0,
+            limit=100,
+            domains=["personal_context.record"],
+        )
+    authority_cursor = authority[-1].server_sequence
+
+    dataset = runtime.store.get_dataset("dataset-a")
+    ingress = SyncEnvelopeCreate(
+        dataset_id="dataset-a",
+        client_envelope_id="old-client-ingress",
+        device_id="device-a",
+        domain="personal_context.record",
+        operation="upsert",
+        object_id="old-ingress-object",
+        object_revision=1,
+        schema_version=1,
+        adapter_version=1,
+        payload={"opaque": "placeholder"},
+        payload_hash="hmac-sha256-v1:" + "0" * 64,
+        payload_size_bytes=24,
+        entity_version="old-ingress-version",
+        encryption_metadata={"policy": "server_trusted_v1"},
+        routing_metadata={
+            "profile_id": runtime.manifest.profile_id,
+            "integrity_key_id": dataset.metadata["personal_context"]["integrity_key_id"],
+            "purge_generation": 0,
+            "personal_context_authority": PersonalContextAuthorityMetadata(
+                role="client_ingress"
+            ).model_dump(mode="json"),
+        },
+    )
+    ingress = runtime.service._protect_personal_context_for_storage(dataset, ingress)
+    stored_ingress = runtime.store.insert_envelope(ingress)
+    orphan = runtime.store.insert_envelope(
+        replace(
+            ingress,
+            client_envelope_id="old-orphan",
+            object_id="old-orphan-object",
+            entity_version="old-orphan-version",
+        )
+    )
+
+    runtime.store.insert_conflict(
+        SyncConflictCreate(
+            conflict_id="old-personal-context-conflict",
+            dataset_id="dataset-a",
+            domain="personal_context.record",
+            entity_id="old-ingress-object",
+            conflict_type="personal_context_base_conflict",
+            local_envelope_id="old-client-ingress",
+            server_sequence=stored_ingress.server_sequence,
+            metadata={"protected_candidate": _CONFLICT_CANARY},
+        )
+    )
+    runtime.store.store_key_record(
+        SyncKeyRecordCreate(
+            key_record_id="old-personal-context-key",
+            dataset_id="dataset-a",
+            user_id="user-a",
+            device_id="device-a",
+            key_purpose="personal_context_integrity",
+            wrapped_key_blob=_KEY_CANARY,
+            kdf_metadata={"algorithm": "test"},
+            encryption_policy="server_trusted_v1",
+            key_epoch=1,
+        )
+    )
+    runtime.store.store_key_record(
+        SyncKeyRecordCreate(
+            key_record_id="rotated-personal-context-key",
+            dataset_id="dataset-a",
+            user_id="user-a",
+            device_id="device-a",
+            key_purpose="personal_context_integrity",
+            wrapped_key_blob=_KEY_CANARY + "-rotated",
+            kdf_metadata={"algorithm": "test"},
+            encryption_policy="server_trusted_v1",
+            key_epoch=2,
+            rotation_of_key_record_id="old-personal-context-key",
+            rotation_source_key_record_ids=("old-personal-context-key",),
+        )
+    )
+    with runtime.store.db.backend.transaction() as connection:
+        for cursor, canary in (
+            (authority_cursor, _AUTHORITY_CANARY),
+            (stored_ingress.server_sequence, _INGRESS_CANARY),
+            (orphan.server_sequence, _ORPHAN_CANARY),
+        ):
+            runtime.store.db.execute(
+                """UPDATE sync_envelopes
+                   SET payload_ciphertext = ?, encryption_metadata_json = ?
+                   WHERE dataset_id = ? AND server_sequence = ?""",
+                (
+                    canary,
+                    json.dumps(
+                        {
+                            "personal_context_at_rest": {
+                                "version": 1,
+                                "algorithm": "AES-256-GCM",
+                                "nonce": canary + "-nonce",
+                                "wrapped_dek": canary + "-dek",
+                                "wrapped_dek_nonce": canary + "-dek-nonce",
+                                "key_version": 1,
+                            }
+                        },
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                    "dataset-a",
+                    cursor,
+                ),
+                connection=connection,
+            )
+        runtime.store.db.execute(
+            """UPDATE sync_envelopes SET apply_status = 'superseded'
+               WHERE dataset_id = ? AND server_sequence = ?""",
+            ("dataset-a", orphan.server_sequence),
+            connection=connection,
+        )
+        runtime.store.db.execute(
+            """
+            INSERT INTO sync_personal_context_ingress_receipts(
+                server_sequence, dataset_id, device_id, client_envelope_id,
+                canonical_payload_digest, purge_generation, resulting_object_id,
+                resulting_internal_version_id, manifest_revision,
+                manifest_version_id, publication_batch_id,
+                profile_publication_sequence, receipt_id, wire_entity_version
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                stored_ingress.server_sequence,
+                "dataset-a",
+                "device-a",
+                stored_ingress.client_envelope_id,
+                _RECEIPT_CANARY,
+                0,
+                "old-ingress-object",
+                "old-internal-version",
+                1,
+                "old-manifest-version",
+                "old-publication-batch",
+                1,
+                "old-receipt",
+                "old-wire-version",
+            ),
+            connection=connection,
+        )
+    return authority_cursor, stored_ingress.server_sequence, source_before
+
+
+def test_only_confirmed_direct_purge_mints_cleanup_authority(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = AuthorityHarness(tmp_path, monkeypatch)
+
+    with pytest.raises(ValueError, match="confirmation"):
+        runtime.canonical.purge_profile(
+            mode="everywhere",
+            confirmation="delete",
+            expected_purge_generation=0,
+        )
+    assert _intent_rows(runtime.personal_db) == []
+
+    runtime.canonical.create_manual_record(
+        scope_id=runtime.canonical.list_scopes()[0].scope_id,
+        payload={
+            "kind": "preference",
+            "subject": "non.purge",
+            "polarity": "like",
+            "value": "ordinary mutation",
+        },
+        semantic_key=None,
+        controls={"sync_mode": "syncable", "agent_visibility": "agent_visible"},
+    )
+    runtime.canonical._repository.compact_pre_activation(
+        runtime.manifest.profile_id,
+        through_sequence=2,
+    )
+    assert _intent_rows(runtime.personal_db) == []
+
+    runtime.canonical.purge_profile(
+        mode="everywhere",
+        confirmation="DELETE EVERYWHERE",
+        expected_purge_generation=0,
+    )
+    intents = _intent_rows(runtime.personal_db)
+    assert len(intents) == 1
+    assert (
+        intents[0]["profile_id"],
+        intents[0]["old_generation_through"],
+        intents[0]["purge_generation"],
+        intents[0]["state"],
+    ) == (runtime.manifest.profile_id, 0, 1, "pending")
+    repository = runtime.canonical._repository
+    claimed = repository.claim_direct_purge_cleanup(owner_token="owner-a")
+    assert claimed is not None
+    claimed_again = repository.claim_direct_purge_cleanup(owner_token="owner-a")
+    assert claimed_again == claimed
+    with pytest.raises(ProfileIntegrityError):
+        repository.complete_direct_purge_cleanup(
+            replace(claimed, owner_token="owner-b")
+        )
+    repository.complete_direct_purge_cleanup(claimed)
+    repository.complete_direct_purge_cleanup(claimed)
+
+
+def test_remote_purge_application_never_mints_cleanup_authority(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = AuthorityHarness(tmp_path, monkeypatch)
+
+    runtime.canonical.apply_sync_object(
+        domain="personal_context.purge",
+        value={
+            "schema_version": 1,
+            "profile_id": runtime.manifest.profile_id,
+            "purge_generation": 1,
+        },
+        actor_type="sync",
+        actor_id="device-a",
+    )
+
+    assert _intent_rows(runtime.personal_db) == []
+
+
+def test_cleanup_failure_is_restartable_but_generic_relay_and_scan_are_non_destructive(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = AuthorityHarness(tmp_path, monkeypatch)
+    authority_cursor, _ingress_cursor, _source = _stage_retention_canaries(runtime)
+
+    def fail_cleanup(_intent: object) -> None:
+        raise RuntimeError("simulated cleanup failure")
+
+    runtime.canonical.set_after_commit_purge_cleanup(fail_cleanup)
+    runtime.canonical.purge_profile(
+        mode="everywhere",
+        confirmation="DELETE EVERYWHERE",
+        expected_purge_generation=0,
+    )
+    assert _intent_rows(runtime.personal_db)[0]["state"] == "pending"
+
+    before = runtime.store.get_envelope_by_server_cursor(authority_cursor)
+    assert before is not None
+    assert _matches_canary(before.payload_ciphertext, _AUTHORITY_CANARY)
+    runtime.resume_relay(row_budget=10)
+    runtime.store.scan_personal_context_authority(
+        "dataset-a",
+        after_server_cursor=0,
+        limit=10,
+        profile_id=runtime.manifest.profile_id,
+        integrity_key_id=runtime.store.get_dataset("dataset-a").metadata[
+            "personal_context"
+        ]["integrity_key_id"],
+        purge_generation=1,
+    )
+    after = runtime.store.get_envelope_by_server_cursor(authority_cursor)
+    assert after is not None
+    assert _matches_canary(after.payload_ciphertext, _AUTHORITY_CANARY)
+
+    restarted = PersonalContextService(
+        PersonalContextRepository(PersonalizationDB.for_path(runtime.personal_db.db_path))
+    )
+    restarted.set_after_commit_purge_cleanup(
+        lambda intent: runtime.service.shred_authorized_personal_context_history(
+            intent,
+            user_id="user-a",
+            dataset_id="dataset-a",
+        )
+    )
+    assert restarted.recover_direct_purge_cleanup() == 1
+    assert _intent_rows(runtime.personal_db)[0]["state"] == "complete"
+
+
+def test_authorized_cleanup_scrubs_old_material_and_preserves_unrelated_rows(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = AuthorityHarness(tmp_path, monkeypatch)
+    authority_cursor, ingress_cursor, source_before = _stage_retention_canaries(runtime)
+    keys = runtime.canonical._repository.key_material_for_test(runtime.manifest.profile_id)
+    runtime.store.enroll_dataset(
+        SyncDatasetCreate(
+            dataset_id="dataset-b",
+            owner_user_id="user-a",
+            encryption_policy="server_trusted_v1",
+            domains=list(runtime.store.get_dataset("dataset-a").domains),
+            metadata={
+                "personal_context": {
+                    "profile_id": "other-profile",
+                    "integrity_key_id": "other-key",
+                    "purge_generation": 0,
+                    "ongoing_sync_version": 1,
+                }
+            },
+        )
+    )
+    with runtime.store.db.backend.transaction() as connection:
+        runtime.store.db.execute(
+            """INSERT INTO sync_envelopes(
+                   dataset_id, domain, entity_id, operation, client_envelope_id,
+                   server_timestamp, payload_json, payload_clear_json,
+                   routing_metadata_json, encryption_metadata_json,
+                   adapter_version, status, apply_status
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                "dataset-a",
+                "notes.note",
+                "unrelated-note",
+                "upsert",
+                "unrelated-note-envelope",
+                "2026-09-04T00:00:00Z",
+                '{"body":"unchanged"}',
+                '{"body":"unchanged"}',
+                "{}",
+                "{}",
+                1,
+                "accepted",
+                "applied",
+            ),
+            connection=connection,
+        )
+        unrelated_before = runtime.store.db.execute(
+            "SELECT * FROM sync_envelopes WHERE client_envelope_id = ?",
+            ("unrelated-note-envelope",),
+            connection=connection,
+        ).rows[0]
+        runtime.store.db.execute(
+            """INSERT INTO sync_envelopes(
+                   dataset_id, domain, entity_id, operation, client_envelope_id,
+                   server_timestamp, payload_json, payload_clear_json,
+                   routing_metadata_json, encryption_metadata_json,
+                   adapter_version, status, apply_status
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                "dataset-a",
+                "personal_context.record",
+                "current-record",
+                "upsert",
+                "current-generation-envelope",
+                "2026-09-04T00:00:01Z",
+                '{"body":"current"}',
+                '{"body":"current"}',
+                json.dumps(
+                    {
+                        "profile_id": runtime.manifest.profile_id,
+                        "purge_generation": 1,
+                    }
+                ),
+                "{}",
+                1,
+                "accepted",
+                "applied",
+            ),
+            connection=connection,
+        )
+        runtime.store.db.execute(
+            """INSERT INTO sync_envelopes(
+                   dataset_id, domain, entity_id, operation, client_envelope_id,
+                   server_timestamp, payload_json, payload_clear_json,
+                   routing_metadata_json, encryption_metadata_json,
+                   adapter_version, status, apply_status
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                "dataset-b",
+                "personal_context.record",
+                "other-profile-record",
+                "upsert",
+                "other-profile-envelope",
+                "2026-09-04T00:00:02Z",
+                '{"body":"other"}',
+                '{"body":"other"}',
+                '{"profile_id":"other-profile","purge_generation":0}',
+                "{}",
+                1,
+                "accepted",
+                "applied",
+            ),
+            connection=connection,
+        )
+        current_before = runtime.store.db.execute(
+            "SELECT * FROM sync_envelopes WHERE client_envelope_id = ?",
+            ("current-generation-envelope",),
+            connection=connection,
+        ).rows[0]
+        other_profile_before = runtime.store.db.execute(
+            "SELECT * FROM sync_envelopes WHERE client_envelope_id = ?",
+            ("other-profile-envelope",),
+            connection=connection,
+        ).rows[0]
+
+    _install_cleanup_callback(runtime)
+    runtime.canonical.purge_profile(
+        mode="everywhere",
+        confirmation="DELETE EVERYWHERE",
+        expected_purge_generation=0,
+    )
+
+    assert _intent_rows(runtime.personal_db)[0]["state"] == "complete"
+    for cursor in (authority_cursor, ingress_cursor):
+        stored = runtime.store.get_envelope_by_server_cursor(cursor)
+        assert stored is not None
+        assert stored.payload_ciphertext is None
+        assert stored.payload == {}
+        assert stored.encryption_metadata == {}
+        assert stored.routing_metadata == {
+            "profile_id": runtime.manifest.profile_id,
+            "purge_generation": 0,
+            "retention_state": "shredded",
+        }
+    conflict = runtime.store.get_conflict("old-personal-context-conflict")
+    assert conflict is not None and conflict.status == "superseded"
+    assert conflict.metadata == {}
+    assert runtime.store.list_key_records(
+        "dataset-a",
+        user_id="user-a",
+        key_purpose="personal_context_integrity",
+    ) == []
+    receipt = runtime.store.get_personal_context_ingress_receipt(ingress_cursor)
+    assert receipt is not None and receipt["canonical_payload_digest"] == "shredded"
+    with runtime.personal_db.transaction() as connection:
+        source_after = connection.execute(
+            """SELECT * FROM personal_context_publication_rows
+               WHERE profile_id = ? AND profile_publication_sequence = ?
+                 AND batch_ordinal = ?""",
+            (
+                source_before["profile_id"],
+                source_before["profile_publication_sequence"],
+                source_before["batch_ordinal"],
+            ),
+        ).fetchone()
+    with pytest.raises(EnvelopeAuthenticationError):
+        PersonalContextPublicationJournal(keys).decrypt_row(source_after)
+
+    with runtime.store.db.backend.transaction() as connection:
+        unrelated_after = runtime.store.db.execute(
+            "SELECT * FROM sync_envelopes WHERE client_envelope_id = ?",
+            ("unrelated-note-envelope",),
+            connection=connection,
+        ).rows[0]
+        current_after = runtime.store.db.execute(
+            "SELECT * FROM sync_envelopes WHERE client_envelope_id = ?",
+            ("current-generation-envelope",),
+            connection=connection,
+        ).rows[0]
+        other_profile_after = runtime.store.db.execute(
+            "SELECT * FROM sync_envelopes WHERE client_envelope_id = ?",
+            ("other-profile-envelope",),
+            connection=connection,
+        ).rows[0]
+    assert unrelated_after == unrelated_before
+    assert current_after == current_before
+    assert other_profile_after == other_profile_before
+    state = runtime.store.get_dataset("dataset-a").metadata["personal_context"]
+    assert state["purge_generation"] == 1
+    assert state["ongoing_sync_version"] == 1
+
+    sync_path = Path(runtime.store.db.backend.config.sqlite_path)
+    personalization_path = Path(runtime.personal_db.db_path)
+    artifact_bytes = b"".join(
+        path.read_bytes()
+        for path in (
+            sync_path,
+            Path(f"{sync_path}-wal"),
+            Path(f"{sync_path}-shm"),
+            personalization_path,
+            Path(f"{personalization_path}-wal"),
+            Path(f"{personalization_path}-shm"),
+        )
+        if path.exists()
+    )
+    assert not any(
+        token.encode("utf-8") in artifact_bytes
+        for token in (
+            _AUTHORITY_CANARY,
+            _INGRESS_CANARY,
+            _CONFLICT_CANARY,
+            _KEY_CANARY,
+            _ORPHAN_CANARY,
+            _RECEIPT_CANARY,
+            _SOURCE_CANARY,
+        )
+    )
+
+
+def test_cleanup_is_idempotent_and_rejects_wrong_profile_or_generation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = AuthorityHarness(tmp_path, monkeypatch)
+    _stage_retention_canaries(runtime)
+    _install_cleanup_callback(runtime)
+    runtime.canonical.purge_profile(
+        mode="everywhere",
+        confirmation="DELETE EVERYWHERE",
+        expected_purge_generation=0,
+    )
+    intent = runtime.canonical._repository.claim_direct_purge_cleanup(
+        owner_token="replay-owner"
+    )
+    assert intent is None
+
+    completed = runtime.canonical._repository.completed_direct_purge_cleanup(
+        runtime.manifest.profile_id,
+        purge_generation=1,
+    )
+    assert completed is not None
+    first = runtime.service.shred_authorized_personal_context_history(
+        completed,
+        user_id="user-a",
+        dataset_id="dataset-a",
+    )
+    second = runtime.service.shred_authorized_personal_context_history(
+        completed,
+        user_id="user-a",
+        dataset_id="dataset-a",
+    )
+    assert first == second
+
+    wrong = completed.__class__(
+        intent_id=completed.intent_id,
+        profile_id="other-profile",
+        old_generation_through=completed.old_generation_through,
+        purge_generation=completed.purge_generation,
+        state=completed.state,
+        owner_token=completed.owner_token,
+    )
+    with pytest.raises(SyncStoreError):
+        runtime.service.shred_authorized_personal_context_history(
+            wrong,
+            user_id="user-a",
+            dataset_id="dataset-a",
+        )
+
+    sync_db = SyncDatabase(sqlite_path=tmp_path / "sync.db")
+    assert SyncV2Store(sync_db).get_dataset("dataset-a").metadata[
+        "personal_context"
+    ]["purge_generation"] == 1

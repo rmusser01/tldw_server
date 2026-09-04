@@ -1345,6 +1345,33 @@ class SyncV2Service:
         )
         self.personal_context_relay = personal_context_relay
 
+    def shred_authorized_personal_context_history(
+        self,
+        intent: object,
+        *,
+        user_id: str,
+        dataset_id: str,
+    ) -> object:
+        """Execute only a claimed or completed direct-purge cleanup capability."""
+
+        from tldw_Server_API.app.core.DB_Management.Personal_Context_Repository import (
+            DirectPurgeCleanupIntent,
+        )
+
+        if not isinstance(intent, DirectPurgeCleanupIntent) or (
+            intent.state == "claimed" and not intent.owner_token
+        ):
+            raise SyncStoreError("Personal Context cleanup intent is unauthorized")
+        if intent.state not in {"claimed", "complete"}:
+            raise SyncStoreError("Personal Context cleanup intent is not executable")
+        return self.store.shred_personal_context_profile_history(
+            dataset_id=dataset_id,
+            user_id=user_id,
+            profile_id=intent.profile_id,
+            old_generation_through=intent.old_generation_through,
+            purge_generation=intent.purge_generation,
+        )
+
     def require_active_exchange(
         self,
         *,

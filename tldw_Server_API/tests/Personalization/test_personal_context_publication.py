@@ -654,7 +654,11 @@ def test_relay_applied_purge_cannot_invoke_direct_journal_shredding(
             WHERE profile_publication_sequence = 2 AND batch_ordinal = 0
             """
         ).fetchone()
+        cleanup_intents = connection.execute(
+            "SELECT COUNT(*) FROM personal_context_purge_cleanup_intents"
+        ).fetchone()[0]
     assert PersonalContextPublicationJournal(keys).decrypt_row(old_row)[0] == "personal_context.record"
+    assert cleanup_intents == 0
 
 
 def test_direct_purge_shreds_previously_compacted_old_generation_rows(

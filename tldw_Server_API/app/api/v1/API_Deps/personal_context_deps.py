@@ -59,6 +59,28 @@ def personal_context_service_for_user(
         clock=clock,
         id_factory=id_factory,
     )
+
+    def purge_cleanup_after_commit(intent: object) -> None:
+        """Scrub every active or archived Sync dataset bound to this profile."""
+
+        from tldw_Server_API.app.core.Sync.v2.factory import sync_v2_service_for_user
+
+        sync = sync_v2_service_for_user(str(user_id))
+        for dataset in sync.store.list_datasets_for_user(
+            str(user_id),
+            include_archived=True,
+        ):
+            state = dataset.metadata.get("personal_context")
+            if not isinstance(state, dict) or state.get("profile_id") != getattr(
+                intent, "profile_id", None
+            ):
+                continue
+            sync.shred_authorized_personal_context_history(
+                intent,
+                user_id=str(user_id),
+                dataset_id=dataset.dataset_id,
+            )
+
     def relay_after_commit(profile_id: str) -> None:
         from tldw_Server_API.app.core.Sync.v2.factory import sync_v2_service_for_user
 
@@ -77,6 +99,7 @@ def personal_context_service_for_user(
                 )
                 return
 
+    service.set_after_commit_purge_cleanup(purge_cleanup_after_commit)
     service.set_after_commit_relay(relay_after_commit)
     return service
 

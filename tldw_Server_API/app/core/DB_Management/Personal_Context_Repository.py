@@ -10,8 +10,9 @@ import sqlite3
 import time
 import uuid
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, TypeVar
+from typing import Any, Literal, TypeVar
 
 from pydantic import BaseModel, ValidationError
 from tldw_profile_core import (
@@ -63,6 +64,20 @@ _MAX_SCOPE_HEADS = 1_000
 _MAX_LIST_ROWS = 1_000
 _SYNC_HISTORY_KEY_LABEL = b"tldw-personal-context-sync-history-v1"
 _DIRECT_CONFIRMED_FULL_PROFILE_PURGE = object()
+_DIRECT_PURGE_CLEANUP_ORIGIN = "direct_confirmed_full_profile_purge"
+_DIRECT_PURGE_CLAIM_SECONDS = 60
+
+
+@dataclass(frozen=True, slots=True)
+class DirectPurgeCleanupIntent:
+    """Content-free authority for one direct-purge retention cleanup."""
+
+    intent_id: str
+    profile_id: str
+    old_generation_through: int
+    purge_generation: int
+    state: Literal["pending", "claimed", "complete"]
+    owner_token: str | None
 
 
 def _now_text() -> str:
@@ -102,6 +117,7 @@ class PersonalContextRepository:
             "personal_context_publication_batches",
             "personal_context_publication_rows",
             "personal_context_ingress_receipts",
+            "personal_context_purge_cleanup_intents",
         }
         with self._database.transaction() as connection:
             tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
@@ -2529,6 +2545,30 @@ class PersonalContextRepository:
                         connection,
                         publication_row,
                     )
+                now = _now_text()
+                inserted = connection.execute(
+                    """
+                    INSERT INTO personal_context_purge_cleanup_intents(
+                        intent_id, profile_id, old_generation_through,
+                        purge_generation, origin, state, owner_token,
+                        claim_expires_at_ns, created_at, updated_at, completed_at
+                    ) VALUES (?, ?, ?, ?, ?, 'pending', NULL, NULL, ?, ?, NULL)
+                    ON CONFLICT(profile_id, purge_generation) DO NOTHING
+                    """,
+                    (
+                        str(uuid.uuid4()),
+                        manifest.profile_id,
+                        current.purge_generation,
+                        manifest.purge_generation,
+                        _DIRECT_PURGE_CLEANUP_ORIGIN,
+                        now,
+                        now,
+                    ),
+                )
+                if inserted.rowcount != 1:
+                    raise ProfileIntegrityError(
+                        "Direct purge cleanup intent already exists"
+                    )
             connection.execute(
                 """
                 UPDATE personal_context_publication_batches
@@ -2566,6 +2606,197 @@ class PersonalContextRepository:
                 "DELETE FROM personal_context_receipts WHERE profile_id = ?",
                 (manifest.profile_id,),
             )
+
+    @staticmethod
+    def _direct_purge_cleanup_intent(row: sqlite3.Row) -> DirectPurgeCleanupIntent:
+        """Decode one content-free cleanup-intent row."""
+
+        state = str(row["state"])
+        if state not in {"pending", "claimed", "complete"}:
+            raise ProfileIntegrityError("Direct purge cleanup intent state is invalid")
+        return DirectPurgeCleanupIntent(
+            intent_id=str(row["intent_id"]),
+            profile_id=str(row["profile_id"]),
+            old_generation_through=int(row["old_generation_through"]),
+            purge_generation=int(row["purge_generation"]),
+            state=state,
+            owner_token=None if row["owner_token"] is None else str(row["owner_token"]),
+        )
+
+    def direct_purge_cleanup(
+        self,
+        profile_id: str,
+        *,
+        purge_generation: int,
+    ) -> DirectPurgeCleanupIntent | None:
+        """Return one already-authorized cleanup intent without claiming it."""
+
+        with self._database.transaction() as connection:
+            row = connection.execute(
+                """
+                SELECT * FROM personal_context_purge_cleanup_intents
+                WHERE profile_id = ? AND purge_generation = ? AND origin = ?
+                """,
+                (profile_id, purge_generation, _DIRECT_PURGE_CLEANUP_ORIGIN),
+            ).fetchone()
+        return None if row is None else self._direct_purge_cleanup_intent(row)
+
+    def completed_direct_purge_cleanup(
+        self,
+        profile_id: str,
+        *,
+        purge_generation: int,
+    ) -> DirectPurgeCleanupIntent | None:
+        """Return one completed cleanup intent for idempotency verification."""
+
+        intent = self.direct_purge_cleanup(
+            profile_id,
+            purge_generation=purge_generation,
+        )
+        return intent if intent is not None and intent.state == "complete" else None
+
+    def checkpoint_direct_purge_storage(self) -> bool:
+        """Confirm the application-owned canonical WAL no longer holds old frames."""
+
+        return self._database.checkpoint_retention_history()
+
+    def claim_direct_purge_cleanup(
+        self,
+        *,
+        owner_token: str,
+        profile_id: str | None = None,
+        purge_generation: int | None = None,
+    ) -> DirectPurgeCleanupIntent | None:
+        """Owner-fence the oldest pending or expired direct-purge cleanup intent."""
+
+        if not owner_token or len(owner_token.encode("utf-8")) > 256:
+            raise ValueError("cleanup owner token is invalid")
+        if (profile_id is None) != (purge_generation is None):
+            raise ValueError("cleanup profile and generation filters must be paired")
+        now_ns = time.time_ns()
+        expires_ns = now_ns + (_DIRECT_PURGE_CLAIM_SECONDS * 1_000_000_000)
+        filters = ""
+        params: list[Any] = [owner_token, now_ns, _DIRECT_PURGE_CLEANUP_ORIGIN]
+        if profile_id is not None and purge_generation is not None:
+            filters = " AND profile_id = ? AND purge_generation = ?"
+            params.extend((profile_id, purge_generation))
+        with self._database.transaction(immediate=True) as connection:
+            row = connection.execute(
+                f"""
+                SELECT * FROM personal_context_purge_cleanup_intents
+                WHERE (state = 'pending' OR (state = 'claimed' AND owner_token = ?)
+                       OR (state = 'claimed' AND claim_expires_at_ns <= ?))
+                  AND origin = ?{filters}
+                ORDER BY created_at, intent_id
+                LIMIT 1
+                """,  # nosec B608 - only the fixed optional predicate is composed.
+                tuple(params),
+            ).fetchone()
+            if row is None:
+                return None
+            updated = connection.execute(
+                """
+                UPDATE personal_context_purge_cleanup_intents
+                SET state = 'claimed', owner_token = ?, claim_expires_at_ns = ?,
+                    updated_at = ?
+                WHERE intent_id = ? AND origin = ?
+                  AND (state = 'pending' OR (state = 'claimed' AND owner_token = ?)
+                       OR (state = 'claimed' AND claim_expires_at_ns <= ?))
+                """,
+                (
+                    owner_token,
+                    expires_ns,
+                    _now_text(),
+                    row["intent_id"],
+                    _DIRECT_PURGE_CLEANUP_ORIGIN,
+                    owner_token,
+                    now_ns,
+                ),
+            )
+            if updated.rowcount != 1:
+                raise ProfileIntegrityError("Direct purge cleanup claim raced")
+            claimed = connection.execute(
+                "SELECT * FROM personal_context_purge_cleanup_intents WHERE intent_id = ?",
+                (row["intent_id"],),
+            ).fetchone()
+        if claimed is None:
+            raise ProfileIntegrityError("Direct purge cleanup claim disappeared")
+        return self._direct_purge_cleanup_intent(claimed)
+
+    def release_direct_purge_cleanup(self, intent: DirectPurgeCleanupIntent) -> None:
+        """Return one failed owned claim to pending for prompt recovery."""
+
+        if intent.state != "claimed" or intent.owner_token is None:
+            raise ValueError("cleanup intent is not owner-claimed")
+        with self._database.transaction(immediate=True) as connection:
+            updated = connection.execute(
+                """
+                UPDATE personal_context_purge_cleanup_intents
+                SET state = 'pending', owner_token = NULL,
+                    claim_expires_at_ns = NULL, updated_at = ?
+                WHERE intent_id = ? AND profile_id = ? AND purge_generation = ?
+                  AND state = 'claimed' AND owner_token = ? AND origin = ?
+                """,
+                (
+                    _now_text(),
+                    intent.intent_id,
+                    intent.profile_id,
+                    intent.purge_generation,
+                    intent.owner_token,
+                    _DIRECT_PURGE_CLEANUP_ORIGIN,
+                ),
+            )
+            if updated.rowcount != 1:
+                raise ProfileIntegrityError("Direct purge cleanup release lost ownership")
+
+    def complete_direct_purge_cleanup(self, intent: DirectPurgeCleanupIntent) -> None:
+        """Complete exactly one cleanup claim under its current owner fence."""
+
+        if intent.state != "claimed" or intent.owner_token is None:
+            raise ValueError("cleanup intent is not owner-claimed")
+        now = _now_text()
+        with self._database.transaction(immediate=True) as connection:
+            updated = connection.execute(
+                """
+                UPDATE personal_context_purge_cleanup_intents
+                SET state = 'complete', claim_expires_at_ns = NULL,
+                    updated_at = ?, completed_at = ?
+                WHERE intent_id = ? AND profile_id = ? AND purge_generation = ?
+                  AND state = 'claimed' AND owner_token = ? AND origin = ?
+                """,
+                (
+                    now,
+                    now,
+                    intent.intent_id,
+                    intent.profile_id,
+                    intent.purge_generation,
+                    intent.owner_token,
+                    _DIRECT_PURGE_CLEANUP_ORIGIN,
+                ),
+            )
+            if updated.rowcount != 1:
+                completed = connection.execute(
+                    """
+                    SELECT state, owner_token
+                    FROM personal_context_purge_cleanup_intents
+                    WHERE intent_id = ? AND profile_id = ? AND purge_generation = ?
+                      AND origin = ?
+                    """,
+                    (
+                        intent.intent_id,
+                        intent.profile_id,
+                        intent.purge_generation,
+                        _DIRECT_PURGE_CLEANUP_ORIGIN,
+                    ),
+                ).fetchone()
+                if (
+                    completed is None
+                    or completed["state"] != "complete"
+                    or completed["owner_token"] != intent.owner_token
+                ):
+                    raise ProfileIntegrityError(
+                        "Direct purge cleanup completion lost ownership"
+                    )
 
     def proposal_version_count(self, profile_id: str, proposal_id: str) -> int:
         """Return retained proposal version count for privacy evidence."""

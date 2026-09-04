@@ -1,10 +1,11 @@
 ---
 id: TASK-13169
 title: Purge stale Personal Context Sync ciphertext safely
-status: To Do
+status: Done
 assignee:
   - '@codex'
 created_date: '2026-09-04 03:34'
+updated_date: '2026-09-04 09:19'
 labels:
   - personal-context
   - sync
@@ -30,21 +31,38 @@ Remediate TASK-13161 by binding cryptographic cleanup of stale Personal Context 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Authenticated explicit direct full-profile purge cryptographically shreds or otherwise makes unrecoverable every old-generation Personal Context Sync authority and ingress payload and wrapped data key, including pending, orphaned, superseded, and history-key-protected rows.
-- [ ] #2 Pull, relay recovery, compaction, listing, and ordinary mutation never trigger destructive profile cleanup.
-- [ ] #3 Content-free tombstone and generation-fence evidence remains sufficient for retry and audit while current-generation data, other profiles, and other datasets are unaffected.
-- [ ] #4 Cleanup is idempotent, restartable after partial failure, and covers retained backup artifacts within the documented profile-purge boundary.
-- [ ] #5 Before explicit purge, non-destructive scans skip stale-generation rows without exposing them or allowing an orphaned pending row to block eligible current-generation delivery.
-- [ ] #6 Real SQLite tests and DB, WAL, backup, and key-rotation canaries prove old ciphertext cannot be recovered after authorized purge.
-- [ ] #7 ADR required: no new ADR; backlog/decisions/002-personal-context-profile-authority-sync-and-encryption.md governs direct-purge-only cryptographic shredding.
+- [x] #1 Authenticated explicit direct full-profile purge cryptographically shreds or otherwise makes unrecoverable every old-generation Personal Context Sync authority and ingress payload and wrapped data key, including pending, orphaned, superseded, and history-key-protected rows.
+- [x] #2 Pull, relay recovery, compaction, listing, and ordinary mutation never trigger destructive profile cleanup.
+- [x] #3 Content-free tombstone and generation-fence evidence remains sufficient for retry and audit while current-generation data, other profiles, and other datasets are unaffected.
+- [x] #4 Cleanup is idempotent, restartable after partial failure, and covers retained backup artifacts within the documented profile-purge boundary.
+- [x] #5 Before explicit purge, non-destructive scans skip stale-generation rows without exposing them or allowing an orphaned pending row to block eligible current-generation delivery.
+- [x] #6 Real SQLite tests and DB, WAL, backup, and key-rotation canaries prove old ciphertext cannot be recovered after authorized purge.
+- [x] #7 ADR required: no new ADR; backlog/decisions/002-personal-context-profile-authority-sync-and-encryption.md governs direct-purge-only cryptographic shredding.
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. Add RED direct-purge authorization and ciphertext-retention tests. 2. Journal cleanup authority only in the confirmed direct purge transaction. 3. Shred old-generation Sync payload/key material idempotently and repair barriers. 4. Keep pull and relay non-destructive. 5. Inventory application-owned backup boundaries and verify canaries. 6. Self-review and close the task. ADR required: no new ADR; ADR-002 and the approved spec govern.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+- Added a content-free, constrained Personalization cleanup-intent journal minted atomically only by authenticated direct full-profile purge. Claim, release, and completion are retry-safe and owner-fenced, and the separate after-commit callback leaves durable pending work on failure.
+- Added exact dataset/profile/generation-scoped SQLite cryptographic shredding for old Personal Context authority, ingress, orphan/superseded state, conflicts, receipts, wrapped DEKs/nonces/ciphertext, and all associated device-wrapped integrity-key rotations. Applied acknowledgement/fence evidence remains content-free; stale heads are repaired; unrelated rows are preserved.
+- Wired active and archived Sync datasets in both authenticated API and Sync factory assembly. Remote/client purge, pull, relay, compaction, listing, and ordinary mutation never mint or execute this cleanup; dedicated restart recovery consumes only previously authorized intents.
+- Inventoried active DB/WAL/SHM, in-place migration, managed backup, generated snapshot/export, master-key, canonical profile-key, and Sync key-record custody. The application has no managed Personalization/Sync backup target; operator-created backups and previously exported recovery bundles are explicitly outside the guarantee. SQLite is proven; non-SQLite cleanup fails closed/pending and would require a separately reviewed retention policy.
+- Real-SQLite RED began with `5 failed`. Final focused purge-retention, relay-recovery, publication, and service verification passed: `85 passed, 7 warnings in 6.11s`. Ruff passed all touched Python files; Bandit exited 0 with only parser/accepted `nosec B608` warnings and no findings; `git diff --check` passed.
+- Detailed authorization, artifact inventory, destructive-predicate review, and canary evidence are recorded in `.superpowers/sdd/2026-09-04-personal-context-relay-remediation/task-4-report.md`. ADR required: no new ADR; ADR-002 and the approved ongoing-sync specification govern. `ongoing_sync_version` remains unchanged. No full suite was run, per the task brief.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
