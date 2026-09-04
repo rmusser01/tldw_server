@@ -7,6 +7,7 @@ import hmac
 import json
 import secrets
 import sqlite3
+import time
 import uuid
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
@@ -2461,6 +2462,15 @@ class PersonalContextRepository:
         )
 
         with self._database.transaction(immediate=True) as connection:
+            lease = connection.execute(
+                """
+                SELECT 1 FROM personal_context_publication_relay_leases
+                WHERE profile_id = ? AND expires_at_ns > ?
+                """,
+                (manifest.profile_id, time.time_ns()),
+            ).fetchone()
+            if lease is not None:
+                raise ConcurrentProfileUpdateError("Personal context relay is active")
             keys = self._keys.load(manifest.profile_id, connection=connection)
             _row, current = self._read_manifest_for_update(
                 connection,

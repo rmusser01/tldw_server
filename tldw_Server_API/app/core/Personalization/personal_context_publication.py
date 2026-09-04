@@ -152,7 +152,9 @@ class PersonalContextPublicationRelayStore:
                     SET owner_token = ?, expires_at_ns = ?
                     WHERE profile_id = ? AND expires_at_ns <= ?
                     """,
-                    (owner_token, now + 120_000_000, profile_id, now),
+                    # Pull recovery bounds every held external stage to 100 ms;
+                    # retain the durable fence long enough to cover it safely.
+                    (owner_token, now + 1_000_000_000, profile_id, now),
                 ).rowcount == 1
             try:
                 yield claimed
