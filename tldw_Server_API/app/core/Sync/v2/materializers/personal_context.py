@@ -19,7 +19,11 @@ from tldw_Server_API.app.core.Personalization.personal_context_service import (
     ProfileConflictError,
 )
 
-from ..models import SyncEnvelope, SyncObjectState
+from ..models import (
+    SyncEnvelope,
+    SyncObjectState,
+    resolve_personal_context_ingress_result_revision,
+)
 from .base import MaterializationResult
 
 _MODELS = {
@@ -72,6 +76,21 @@ class PersonalContextMaterializer:
                 envelope.domain,
                 envelope.object_id,
             )
+            object_revision = resolve_personal_context_ingress_result_revision(
+                object_revision=envelope.object_revision,
+                base_server_cursor=envelope.base_server_cursor,
+                base_object_revision=envelope.base_object_revision,
+                base_object_hash=envelope.base_object_hash,
+                base_version=envelope.base_version,
+            )
+            if object_revision is None:
+                raise ValueError("Personal Context ingress lineage is invalid")
+            if envelope.object_revision is None and not _predecessor_matches(
+                envelope,
+                current_state,
+                result_revision=object_revision,
+            ):
+                raise ProfileConflictError("Personal Context predecessor changed")
             service = self.service_resolver(str(dataset.owner_user_id))
             if service is None:
                 raise RuntimeError("service unavailable")
@@ -140,11 +159,6 @@ class PersonalContextMaterializer:
                 store,
                 "personal_context_projection_failed",
             )
-        object_revision = envelope.object_revision
-        if object_revision is None:
-            object_revision = (
-                1 if current_state is None else current_state.object_revision + 1
-            )
         store.upsert_object_state(
             SyncObjectState(
                 dataset_id=envelope.dataset_id,
@@ -178,6 +192,28 @@ class PersonalContextMaterializer:
             error_code=error_code,
             message="Personal Context projection failed",
         )
+
+
+def _predecessor_matches(
+    envelope: SyncEnvelope,
+    state: SyncObjectState | None,
+    *,
+    result_revision: int,
+) -> bool:
+    """Verify mutable projection only as the referenced predecessor snapshot."""
+
+    if result_revision == 1:
+        return state is None
+    return bool(
+        state is not None
+        and state.dataset_id == envelope.dataset_id
+        and state.domain == envelope.domain
+        and state.object_id == envelope.object_id
+        and state.latest_server_cursor == envelope.base_server_cursor
+        and state.object_revision == envelope.base_object_revision
+        and state.object_hash == envelope.base_object_hash
+        and state.deleted is False
+    )
 
 
 def _parse_value(domain: str, payload: Mapping[str, Any]) -> Any:

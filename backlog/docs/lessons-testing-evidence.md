@@ -63,7 +63,13 @@ later proved that deriving the outgoing base was insufficient: receipt confirmat
 still compared authority lineage to the immutable envelope's absent wire revision,
 so repeated polls remained permanently pending. A real two-store test that asserted
 raw revision `None`, projected revision 1, and both semantic and manifest successors
-at lineage 1→2 caught the gap. When projected state substitutes for an omitted wire
-fact, use that same exact state consistently for both construction and confirmation
-inside the owning transaction; reject mismatched identity, cursor, hash, deletion,
-and malformed revision rather than partially mixing raw and projected facts.
+at lineage 1→2 caught the gap.
+
+**Correction after review (TASK-13170, 2026-09-04):** Making latest projected state
+the missing revision's authority proof then created an unbudgeted persistent read and
+permanently rejected a lagging companion after a later legitimate materialization
+moved projection forward. The durable fix derives revision only from the immutable
+ingress result lineage: an absent revision with no base is genesis 1; an absent
+revision with a complete strict base is `base_revision + 1`. Projection may verify
+that predecessor before the ingress receipt and may advance transactionally after
+authenticated authority finalize, but it must not become historical receipt proof.

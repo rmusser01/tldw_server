@@ -119,6 +119,7 @@ from .models import (
     normalize_supported_adapter_versions,
     normalize_sync_timestamp,
     normalize_sync_v2_requested_domains,
+    resolve_personal_context_ingress_result_revision,
     sync_v2_advertised_domain_schemas,
     sync_v2_attachment_ref_v2_is_writable,
     sync_v2_dataset_writable_adapter_versions,
@@ -1841,7 +1842,6 @@ class SyncV2Service:
                 source_row=row,
                 canonical_receipt=canonical_receipt,
                 sync_ingress_receipt=resolved_sync_receipt,
-                sync_store=sync_store,
             ):
                 raise SyncStoreError("Personal Context authority receipt is invalid")
         return ingress_cursor, canonical_receipt, resolved_sync_receipt
@@ -1961,11 +1961,16 @@ class SyncV2Service:
                 dataset_id, profile_id
             ) as guarded:
                 with publication_store.authority_staging_guard(row, lease=lease):
-                    current_head = guarded.get_current_head(
-                        dataset_id,
-                        domain,  # type: ignore[arg-type]
-                        str(getattr(row, "object_id", "")),
-                    )
+                    try:
+                        current_head = guarded.get_current_head(
+                            dataset_id,
+                            domain,  # type: ignore[arg-type]
+                            str(getattr(row, "object_id", "")),
+                        )
+                    except (OverflowError, TypeError, ValueError) as exc:
+                        raise SyncStoreError(
+                            "Personal Context authority receipt is invalid"
+                        ) from exc
                     existing = guarded.get_envelope_by_client_id(
                         dataset_id, deterministic_id
                     )
@@ -2002,34 +2007,19 @@ class SyncV2Service:
                     object_revision = 1
                     if current_head is not None:
                         base_server_cursor = current_head.server_cursor
-                        if current_head.object_revision is None:
-                            projected_revision = self._exact_ingress_projected_revision(
-                                current_head,
-                                guarded,
+                        base_object_revision = resolve_personal_context_ingress_result_revision(
+                            object_revision=current_head.object_revision,
+                            base_server_cursor=current_head.base_server_cursor,
+                            base_object_revision=current_head.base_object_revision,
+                            base_object_hash=current_head.base_object_hash,
+                            base_version=current_head.base_version,
+                        )
+                        if base_object_revision is None:
+                            raise SyncStoreError(
+                                "Personal Context authority receipt is invalid"
                             )
-                            if projected_revision is None:
-                                raise SyncStoreError(
-                                    "Personal Context authority receipt is invalid"
-                                )
-                            base_object_revision = projected_revision
-                            base_object_hash = current_head.payload_hash
-                        else:
-                            current_state = guarded.get_object_state(
-                                dataset_id,
-                                domain,  # type: ignore[arg-type]
-                                str(getattr(row, "object_id", "")),
-                            )
-                            if (
-                                current_state is not None
-                                and current_state.latest_server_cursor
-                                == current_head.server_cursor
-                            ):
-                                base_object_revision = current_state.object_revision
-                                base_object_hash = current_state.object_hash
-                            else:
-                                base_object_revision = current_head.object_revision
-                                base_object_hash = current_head.payload_hash
-                        object_revision = (base_object_revision or 0) + 1
+                        base_object_hash = current_head.payload_hash
+                        object_revision = base_object_revision + 1
                     envelope = SyncEnvelopeCreate(
                         dataset_id=dataset_id,
                         client_envelope_id=deterministic_id,
@@ -2078,7 +2068,6 @@ class SyncV2Service:
                             source_row=row,
                             canonical_receipt=canonical_receipt,
                             sync_ingress_receipt=sync_ingress_receipt,
-                            sync_store=guarded,
                         )
                     ):
                         raise SyncStoreError(
@@ -2155,7 +2144,6 @@ class SyncV2Service:
         source_row: PublicationSourceRow,
         canonical_receipt: CanonicalApplyReceipt | None,
         sync_ingress_receipt: Mapping[str, object] | None,
-        sync_store: SyncV2Store,
     ) -> bool:
         """Allow only canonical authority confirmation of an identical ingress head."""
 
@@ -2166,14 +2154,15 @@ class SyncV2Service:
             or sync_ingress_receipt is None
         ):
             return False
-        current_revision = current_head.object_revision
+        current_revision = resolve_personal_context_ingress_result_revision(
+            object_revision=current_head.object_revision,
+            base_server_cursor=current_head.base_server_cursor,
+            base_object_revision=current_head.base_object_revision,
+            base_object_hash=current_head.base_object_hash,
+            base_version=current_head.base_version,
+        )
         if current_revision is None:
-            current_revision = self._exact_ingress_projected_revision(
-                current_head,
-                sync_store,
-            )
-            if current_revision is None:
-                return False
+            return False
         authority = current_head.authority
         canonical_digest = "sha256:" + hashlib.sha256(canonical).hexdigest()
         source_receipt_result_matches = (
@@ -2267,35 +2256,6 @@ class SyncV2Service:
             return hmac.compare_digest(canonical_json_bytes(restored.payload), canonical)
         except (SyncStoreError, TypeError, ValueError):
             return False
-
-    @staticmethod
-    def _exact_ingress_projected_revision(
-        current_head: SyncEnvelope,
-        sync_store: SyncV2Store,
-    ) -> int | None:
-        """Resolve an omitted ingress revision only from its exact projected head."""
-
-        try:
-            state = sync_store.get_object_state(
-                current_head.dataset_id,
-                current_head.domain,
-                current_head.object_id,
-            )
-        except (SyncStoreError, TypeError, ValueError):
-            return None
-        if (
-            state is None
-            or state.dataset_id != current_head.dataset_id
-            or state.domain != current_head.domain
-            or state.object_id != current_head.object_id
-            or type(state.object_revision) is not int
-            or state.object_revision < 1
-            or state.latest_server_cursor != current_head.server_cursor
-            or state.object_hash != current_head.payload_hash
-            or state.deleted != current_head.deleted
-        ):
-            return None
-        return state.object_revision
 
     def finalize_personal_context_authority(
         self,

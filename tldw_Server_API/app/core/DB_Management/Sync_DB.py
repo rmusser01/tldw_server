@@ -88,6 +88,7 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     SyncObjectState,
     SyncRestoreManifestStats,
     normalize_sync_timestamp,
+    resolve_personal_context_ingress_result_revision,
 )
 from tldw_Server_API.app.core.Sync.v2.mutation_group_validation import (
     SYNC_MUTATION_GROUP_MAX_SIZE,
@@ -7258,14 +7259,33 @@ class SyncDatabase:
                 ):
                     raise SyncHeadConflictError()
                 return
-            current = _envelope_from_row(row)
-            expected_cursor = current.server_cursor
-            if current.object_revision is None and row.get("projected_object_revision") is not None:
-                expected_revision = int(row["projected_object_revision"])
-                expected_hash = row.get("projected_object_hash")
+            authority = envelope.routing_metadata.get("personal_context_authority")
+            is_personal_context_authority = (
+                envelope.domain in PERSONAL_CONTEXT_SYNC_DOMAINS
+                and isinstance(authority, Mapping)
+                and authority.get("role") == "home_authority"
+            )
+            if is_personal_context_authority:
+                expected_cursor = row.get("server_sequence")
+                expected_revision = resolve_personal_context_ingress_result_revision(
+                    object_revision=row.get("object_revision"),
+                    base_server_cursor=row.get("base_server_cursor"),
+                    base_object_revision=row.get("base_object_revision"),
+                    base_object_hash=row.get("base_object_hash"),
+                    base_version=_version_from_storage(row.get("base_version")),
+                )
+                expected_hash = row.get("payload_hash")
+                if type(expected_cursor) is not int or expected_revision is None:
+                    raise SyncHeadConflictError()
             else:
-                expected_revision = current.object_revision
-                expected_hash = current.payload_hash
+                current = _envelope_from_row(row)
+                expected_cursor = current.server_cursor
+                if current.object_revision is None and row.get("projected_object_revision") is not None:
+                    expected_revision = int(row["projected_object_revision"])
+                    expected_hash = row.get("projected_object_hash")
+                else:
+                    expected_revision = current.object_revision
+                    expected_hash = current.payload_hash
 
         if (
             envelope.base_server_cursor != expected_cursor
@@ -8733,6 +8753,18 @@ class SyncDatabase:
                     connection=conn,
                 )
             )
+            head = _first(
+                self.execute(
+                    """SELECT latest_server_cursor FROM sync_current_heads
+                       WHERE dataset_id = ? AND domain = ? AND object_id = ?""",
+                    (
+                        dataset_id,
+                        None if row is None else row.get("domain"),
+                        None if row is None else row.get("entity_id"),
+                    ),
+                    connection=conn,
+                )
+            )
             if row is None:
                 raise SyncStoreError("personal_context_authority_finalize_raced")
             routing = decode_json(row.get("routing_metadata_json"), default={})
@@ -8762,7 +8794,26 @@ class SyncDatabase:
                 raise SyncStoreError("personal_context_authority_finalize_raced")
             if row.get("apply_status") == "applied":
                 return _envelope_from_row(row)
-            if row.get("apply_status") != "pending":
+            if (
+                row.get("apply_status") != "pending"
+                or head is None
+                or head.get("latest_server_cursor") != server_cursor
+            ):
+                raise SyncStoreError("personal_context_authority_finalize_raced")
+            object_revision = resolve_personal_context_ingress_result_revision(
+                object_revision=row.get("object_revision"),
+                base_server_cursor=row.get("base_server_cursor"),
+                base_object_revision=row.get("base_object_revision"),
+                base_object_hash=row.get("base_object_hash"),
+                base_version=_version_from_storage(row.get("base_version")),
+            )
+            if (
+                object_revision is None
+                or not isinstance(row.get("entity_id"), str)
+                or not isinstance(row.get("payload_hash"), str)
+                or type(row.get("deleted")) is not int
+                or row.get("deleted") not in {0, 1}
+            ):
                 raise SyncStoreError("personal_context_authority_finalize_raced")
             updated = self.execute(
                 """UPDATE sync_envelopes
@@ -8778,6 +8829,18 @@ class SyncDatabase:
                     dataset_id,
                     client_envelope_id,
                     row["routing_metadata_json"],
+                ),
+                connection=conn,
+            )
+            self.upsert_object_state(
+                SyncObjectState(
+                    dataset_id=dataset_id,
+                    domain=row["domain"],
+                    object_id=row["entity_id"],
+                    object_revision=object_revision,
+                    object_hash=row["payload_hash"],
+                    latest_server_cursor=server_cursor,
+                    deleted=bool(row["deleted"]),
                 ),
                 connection=conn,
             )

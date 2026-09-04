@@ -77,6 +77,84 @@ def _encryption_policy_model_classes():
     )
 
 
+@pytest.mark.parametrize(
+    ("values", "expected"),
+    [
+        ({"object_revision": 7}, 7),
+        ({"object_revision": True}, None),
+        ({"object_revision": 0}, None),
+        ({"object_revision": 2**63}, None),
+        ({}, 1),
+        (
+            {
+                "base_server_cursor": 8,
+                "base_object_revision": 4,
+                "base_object_hash": "sha256:base",
+                "base_version": "record-v4",
+            },
+            5,
+        ),
+        ({"base_server_cursor": 8}, None),
+        (
+            {
+                "base_server_cursor": True,
+                "base_object_revision": 4,
+                "base_object_hash": "sha256:base",
+            },
+            None,
+        ),
+        (
+            {
+                "base_server_cursor": 8,
+                "base_object_revision": 0,
+                "base_object_hash": "sha256:base",
+            },
+            None,
+        ),
+        (
+            {
+                "base_server_cursor": 8,
+                "base_object_revision": 2**63 - 1,
+                "base_object_hash": "sha256:base",
+            },
+            None,
+        ),
+        (
+            {
+                "base_server_cursor": 8,
+                "base_object_revision": 4,
+                "base_object_hash": "",
+            },
+            None,
+        ),
+        (
+            {
+                "base_server_cursor": 8,
+                "base_object_revision": 4,
+                "base_object_hash": "sha256:base",
+                "base_version": 3,
+            },
+            None,
+        ),
+        ({"base_version": "unexpected-genesis-base"}, None),
+    ],
+)
+def test_personal_context_ingress_result_revision_is_strict(
+    values: dict[str, object],
+    expected: int | None,
+) -> None:
+    fields: dict[str, object] = {
+        "object_revision": None,
+        "base_server_cursor": None,
+        "base_object_revision": None,
+        "base_object_hash": None,
+        "base_version": None,
+    }
+    fields.update(values)
+
+    assert core_sync_models.resolve_personal_context_ingress_result_revision(**fields) == expected
+
+
 def _m1_envelope_payload(**overrides):
     payload = {
         "client_envelope_id": "env-1",

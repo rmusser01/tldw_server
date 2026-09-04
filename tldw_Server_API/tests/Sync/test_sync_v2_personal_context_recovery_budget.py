@@ -658,6 +658,13 @@ def test_companion_manifest_proof_can_be_exact_row_one_hundred(
     else:
         runtime = PurgeIngressHarness(tmp_path, monkeypatch)
         authority = _complete_purge_authority(runtime)
+    monkeypatch.setattr(
+        runtime.store,
+        "get_object_state",
+        lambda *_args, **_kwargs: pytest.fail(
+            "authority pull must not spend an unbudgeted projection row"
+        ),
+    )
     clock = _ManualClock()
     tracker = _ProofQueryTracker(clock)
     tracker.install(runtime, monkeypatch)
@@ -845,6 +852,13 @@ def test_ingress_manifest_proof_rows_share_the_pull_budget(
     runtime = IngressHarness(tmp_path, monkeypatch)
     _complete_real_authority(runtime)
     _semantic, manifest = _ingress_authorities(runtime)
+    monkeypatch.setattr(
+        runtime.store,
+        "get_object_state",
+        lambda *_args, **_kwargs: pytest.fail(
+            "authority pull must not spend an unbudgeted projection row"
+        ),
+    )
     clock = _ManualClock()
     tracker = _ProofQueryTracker(clock)
     tracker.install(runtime, monkeypatch)

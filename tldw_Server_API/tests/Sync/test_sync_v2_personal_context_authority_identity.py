@@ -45,7 +45,6 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     PERSONAL_CONTEXT_SYNC_DOMAINS,
     SyncDatasetCreate,
     SyncEnvelopeCreate,
-    SyncObjectState,
 )
 from tldw_Server_API.app.core.Sync.v2.personal_context_ongoing_contract import (
     PersonalContextAuthorityMetadata,
@@ -81,6 +80,8 @@ class AuthorityHarness:
         key_id, integrity_key = self.canonical.sync_integrity_key(
             self.manifest.profile_id
         )
+        self.integrity_key = integrity_key
+        self.integrity_key_id = key_id
         self.store = SyncV2Store(SyncDatabase(sqlite_path=tmp_path / "sync.db"))
         adapters = SyncAdapterRegistry(
             [
@@ -660,6 +661,79 @@ class FirstIngressHarness(AuthorityHarness):
                 connection=connection,
             )
 
+    def push_omitted_revision_update(self) -> tuple[int, ProfileRecord]:
+        """Apply a real update whose wire revision is omitted but base is complete."""
+
+        head = self.store.get_current_head(
+            "dataset-a", "personal_context.record", self.record.record_id
+        )
+        assert head is not None
+        assert head.object_revision is not None
+        updated = ProfileRecord.model_validate(
+            {
+                **self.record.model_dump(mode="python"),
+                "version_id": "first-client-record-v2",
+                "parent_version_id": self.record.version_id,
+                "updated_at": self.record.updated_at + timedelta(seconds=1),
+                "payload": {
+                    **self.record.payload.model_dump(mode="python"),
+                    "value": "structured",
+                },
+            }
+        )
+        canonical = canonical_json_bytes(updated.model_dump(mode="json"))
+        pushed = self.service.push(
+            user_id="user-a",
+            dataset_id="dataset-a",
+            device_id="device-a",
+            envelopes=[
+                SyncEnvelopeCreate(
+                    dataset_id="dataset-a",
+                    client_envelope_id="device-a:first-record:v2",
+                    device_id="device-a",
+                    domain="personal_context.record",
+                    operation="upsert",
+                    object_id=updated.record_id,
+                    parent_id=updated.scope_id,
+                    adapter_version=1,
+                    schema_version=1,
+                    payload=updated.model_dump(mode="json"),
+                    payload_hash="hmac-sha256-v1:"
+                    + hmac.new(
+                        self.integrity_key, canonical, hashlib.sha256
+                    ).hexdigest(),
+                    payload_size_bytes=len(canonical),
+                    base_server_cursor=head.server_cursor,
+                    base_object_revision=head.object_revision,
+                    base_object_hash=head.payload_hash,
+                    base_version=self.record.version_id,
+                    entity_version=updated.version_id,
+                    encryption_metadata={"policy": "server_trusted_v1"},
+                    routing_metadata={
+                        "integrity_key_id": self.integrity_key_id,
+                        "profile_id": self.manifest.profile_id,
+                        "purge_generation": 0,
+                    },
+                )
+            ],
+            personal_context_exchange=PersonalContextExchangeProof(
+                ongoing_sync_version=1,
+                activation_epoch="epoch_0123456789abcdef",
+                continuity_token="continuity_0123456789abcdef",
+            ),
+        )
+        assert pushed.rejected == []
+        assert pushed.conflicts == []
+        assert len(pushed.accepted) == 1
+        stored = self.store.get_envelope_by_server_cursor(
+            pushed.accepted[0].server_sequence
+        )
+        assert stored is not None
+        assert stored.object_revision is None
+        assert pushed.accepted[0].apply_status == "applied"
+        return pushed.accepted[0].server_sequence, updated
+
+
 class PurgeIngressHarness(AuthorityHarness):
     """Real stores containing a receipt-bound, non-materialized client purge."""
 
@@ -923,74 +997,260 @@ def test_first_ingress_without_wire_revision_relays_semantic_and_manifest(
         assert authority.authority.role == "home_authority"
 
 
-@pytest.mark.parametrize(
-    "case",
-    ["missing", "latest_cursor", "object_hash", "deleted"],
-)
-def test_first_ingress_projection_must_match_immutable_head(
+@pytest.mark.parametrize("case", ["missing", "latest_cursor", "object_hash", "deleted"])
+def test_first_ingress_projection_tamper_does_not_change_immutable_lineage(
     first_ingress_harness: FirstIngressHarness,
     case: str,
 ) -> None:
-    """Absent or divergent durable projection facts cannot authorize a successor."""
+    """A durable ingress receipt, rather than mutable latest projection, proves lineage."""
 
     first_ingress_harness.corrupt_projected_state(case)
     with first_ingress_harness.claimed_row() as row:
         assert row.role == "semantic"
-        with pytest.raises(SyncStoreError, match="authority receipt is invalid"):
-            first_ingress_harness.stage(row)
-        assert first_ingress_harness.store.get_envelope_by_client_id(
-            "dataset-a", row.deterministic_envelope_id
-        ) is None
+        cursor = first_ingress_harness.stage(row)
+        authority = first_ingress_harness.store.get_envelope_by_server_cursor(cursor)
+        assert authority is not None
+        assert authority.base_object_revision == 1
+        assert authority.object_revision == 2
+        assert (
+            first_ingress_harness.store.get_envelope_by_client_id(
+                "dataset-a", row.deterministic_envelope_id
+            )
+            is not None
+        )
         assert first_ingress_harness.source_row_state(row) == "pending"
 
 
-@pytest.mark.parametrize(
-    ("field", "changed"),
-    [
-        ("dataset_id", "other-dataset"),
-        ("domain", "personal_context.scope"),
-        ("object_id", "other-object"),
-        ("object_revision", True),
-        ("object_revision", "1"),
-        ("object_revision", 0),
-        ("object_revision", -1),
-    ],
-)
-def test_first_ingress_projection_rejects_wrong_identity_or_revision_type(
+def test_first_ingress_authority_stage_never_reads_projection(
     first_ingress_harness: FirstIngressHarness,
     monkeypatch: pytest.MonkeyPatch,
-    field: str,
-    changed: object,
 ) -> None:
-    """Unexpected projected-state shapes remain a fail-closed receipt barrier."""
+    """Authority staging spends no hidden row on latest projection state."""
 
-    original = SyncV2Store.get_object_state
+    def forbidden_projection_read(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("authority lineage must not read sync_object_state")
 
-    def altered_state(
-        store: SyncV2Store,
-        dataset_id: str,
-        domain: str,
-        object_id: str,
-    ) -> SyncObjectState | None:
-        state = original(store, dataset_id, domain, object_id)  # type: ignore[arg-type]
-        if (
-            state is None
-            or dataset_id != "dataset-a"
-            or domain != "personal_context.record"
-            or object_id != first_ingress_harness.record.record_id
-        ):
-            return state
-        return replace(state, **{field: changed})
-
-    monkeypatch.setattr(SyncV2Store, "get_object_state", altered_state)
+    monkeypatch.setattr(SyncV2Store, "get_object_state", forbidden_projection_read)
     with first_ingress_harness.claimed_row() as row:
         assert row.role == "semantic"
-        with pytest.raises(SyncStoreError, match="authority receipt is invalid"):
+        cursor = first_ingress_harness.stage(row)
+        assert cursor > first_ingress_harness.ingress_cursor
+        assert first_ingress_harness.source_row_state(row) == "pending"
+
+
+@pytest.mark.parametrize("malformed", [1.5, "not-an-integer", float("inf")])
+def test_personal_context_authority_cas_rejects_malformed_raw_revision(
+    first_ingress_harness: FirstIngressHarness,
+    malformed: object,
+) -> None:
+    """Storage affinity coercion cannot turn a malformed raw revision into authority."""
+
+    first_ingress_harness.update_sync(
+        first_ingress_harness.ingress_cursor,
+        "object_revision = ?",
+        (malformed,),
+    )
+    with first_ingress_harness.claimed_row() as row:
+        with pytest.raises(SyncStoreError):
             first_ingress_harness.stage(row)
         assert first_ingress_harness.store.get_envelope_by_client_id(
             "dataset-a", row.deterministic_envelope_id
         ) is None
-        assert first_ingress_harness.source_row_state(row) == "pending"
+
+
+def test_later_projection_does_not_barrier_lagging_companion_manifest(
+    first_ingress_harness: FirstIngressHarness,
+) -> None:
+    """A companion remains authentic after a later ingress moves projection forward."""
+
+    first = first_ingress_harness.resume_relay(row_budget=1)
+    assert first.staged_rows == 1
+    rows = first_ingress_harness.pending_rows()
+    semantic, manifest = rows
+    assert first_ingress_harness.source_row_state(semantic) == "acknowledged"
+    assert first_ingress_harness.source_row_state(manifest) == "pending"
+    update_cursor, updated = first_ingress_harness.push_omitted_revision_update()
+    update = first_ingress_harness.store.get_envelope_by_server_cursor(update_cursor)
+    state = first_ingress_harness.store.get_object_state(
+        "dataset-a", "personal_context.record", updated.record_id
+    )
+    assert update is not None
+    assert update.object_revision is None
+    assert state is not None
+    assert state.object_revision == 3
+    assert state.latest_server_cursor == update_cursor
+
+    result = first_ingress_harness.resume_relay(row_budget=100)
+
+    assert result.continuation == "complete"
+    assert first_ingress_harness.source_row_state(manifest) == "acknowledged"
+    authority = first_ingress_harness.store.get_current_head(
+        "dataset-a", "personal_context.record", updated.record_id
+    )
+    assert authority is not None
+    assert authority.base_object_revision == 3
+    assert authority.object_revision == 4
+
+
+def test_authority_projection_advances_only_on_authenticated_finalize_and_retries(
+    first_ingress_harness: FirstIngressHarness,
+) -> None:
+    """Stage stays invisible; acknowledged finalize projects exact authority once."""
+
+    with first_ingress_harness.publications.profile_lease(
+        first_ingress_harness.manifest.profile_id
+    ) as lease:
+        assert lease is not None
+        batch = first_ingress_harness.publications.earliest_nonterminal_batch(
+            first_ingress_harness.manifest.profile_id,
+            row_limit=100,
+        )
+        assert batch is not None
+        source = next(row for row in batch.rows if row.role == "semantic")
+        row = replace(source, relay_owner_token=lease.owner_token)
+        receipt = first_ingress_harness.service.stage_personal_context_authority(
+            row, "dataset-a", "user-a"
+        )
+        staged_state = first_ingress_harness.store.get_object_state(
+            "dataset-a", "personal_context.record", first_ingress_harness.record.record_id
+        )
+        assert staged_state is not None
+        assert staged_state.object_revision == 1
+        assert staged_state.latest_server_cursor == first_ingress_harness.ingress_cursor
+
+        first_ingress_harness.publications.record_staged_row(
+            row, server_cursor=receipt.server_cursor, lease=lease
+        )
+        first_ingress_harness.publications.acknowledge_row(
+            row, server_cursor=receipt.server_cursor, lease=lease
+        )
+        first_ingress_harness.service.finalize_personal_context_authority(
+            row, receipt, "dataset-a", "user-a"
+        )
+        projected = first_ingress_harness.store.get_object_state(
+            "dataset-a", "personal_context.record", first_ingress_harness.record.record_id
+        )
+        assert projected is not None
+        assert projected.object_revision == 2
+        assert projected.object_hash == first_ingress_harness.ingress.payload_hash
+        assert projected.latest_server_cursor == receipt.server_cursor
+        assert projected.deleted is False
+
+        first_ingress_harness.service.finalize_personal_context_authority(
+            row, receipt, "dataset-a", "user-a"
+        )
+        assert (
+            first_ingress_harness.store.get_object_state(
+                "dataset-a",
+                "personal_context.record",
+                first_ingress_harness.record.record_id,
+            )
+            == projected
+        )
+
+
+def test_authority_finalize_failure_rolls_back_projection_and_apply(
+    first_ingress_harness: FirstIngressHarness,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sync authority apply and projection share one rollback boundary."""
+
+    original = SyncDatabase.upsert_object_state
+    with first_ingress_harness.publications.profile_lease(
+        first_ingress_harness.manifest.profile_id
+    ) as lease:
+        assert lease is not None
+        batch = first_ingress_harness.publications.earliest_nonterminal_batch(
+            first_ingress_harness.manifest.profile_id,
+            row_limit=100,
+        )
+        assert batch is not None
+        row = replace(batch.rows[0], relay_owner_token=lease.owner_token)
+        receipt = first_ingress_harness.service.stage_personal_context_authority(
+            row, "dataset-a", "user-a"
+        )
+        first_ingress_harness.publications.record_staged_row(
+            row, server_cursor=receipt.server_cursor, lease=lease
+        )
+        first_ingress_harness.publications.acknowledge_row(
+            row, server_cursor=receipt.server_cursor, lease=lease
+        )
+
+        def fail_projection(database: SyncDatabase, *args: object, **kwargs: object):
+            if database is first_ingress_harness.store.db:
+                raise RuntimeError("injected projection failure")
+            return original(database, *args, **kwargs)
+
+        monkeypatch.setattr(SyncDatabase, "upsert_object_state", fail_projection)
+        with pytest.raises(RuntimeError, match="injected projection failure"):
+            first_ingress_harness.service.finalize_personal_context_authority(
+                row, receipt, "dataset-a", "user-a"
+            )
+
+    stored = first_ingress_harness.store.get_envelope_by_server_cursor(
+        receipt.server_cursor
+    )
+    state = first_ingress_harness.store.get_object_state(
+        "dataset-a", "personal_context.record", first_ingress_harness.record.record_id
+    )
+    assert stored is not None
+    assert stored.apply_status == "pending"
+    assert state is not None
+    assert state.object_revision == 1
+
+
+def test_authority_finalize_rejects_a_concurrently_replaced_current_head(
+    first_ingress_harness: FirstIngressHarness,
+) -> None:
+    """A stale staged row cannot project after its exact current head changes."""
+
+    with first_ingress_harness.publications.profile_lease(
+        first_ingress_harness.manifest.profile_id
+    ) as lease:
+        assert lease is not None
+        batch = first_ingress_harness.publications.earliest_nonterminal_batch(
+            first_ingress_harness.manifest.profile_id,
+            row_limit=100,
+        )
+        assert batch is not None
+        row = replace(batch.rows[0], relay_owner_token=lease.owner_token)
+        receipt = first_ingress_harness.service.stage_personal_context_authority(
+            row, "dataset-a", "user-a"
+        )
+        first_ingress_harness.publications.record_staged_row(
+            row, server_cursor=receipt.server_cursor, lease=lease
+        )
+        first_ingress_harness.publications.acknowledge_row(
+            row, server_cursor=receipt.server_cursor, lease=lease
+        )
+        with first_ingress_harness.store.db.backend.transaction() as connection:
+            first_ingress_harness.store.db.execute(
+                """UPDATE sync_current_heads SET latest_server_cursor = ?
+                   WHERE dataset_id = ? AND domain = ? AND object_id = ?""",
+                (
+                    first_ingress_harness.ingress_cursor,
+                    "dataset-a",
+                    "personal_context.record",
+                    first_ingress_harness.record.record_id,
+                ),
+                connection=connection,
+            )
+
+        with pytest.raises(SyncStoreError, match="authority_finalize_raced"):
+            first_ingress_harness.service.finalize_personal_context_authority(
+                row, receipt, "dataset-a", "user-a"
+            )
+
+    stored = first_ingress_harness.store.get_envelope_by_server_cursor(
+        receipt.server_cursor
+    )
+    state = first_ingress_harness.store.get_object_state(
+        "dataset-a", "personal_context.record", first_ingress_harness.record.record_id
+    )
+    assert stored is not None
+    assert stored.apply_status == "pending"
+    assert state is not None
+    assert state.object_revision == 1
 
 
 @pytest.mark.parametrize(
