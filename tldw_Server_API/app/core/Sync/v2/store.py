@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from copy import copy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from time import monotonic_ns
 from typing import Any, Literal
 
@@ -65,6 +65,7 @@ from .models import (
     SyncObjectState,
     SyncRestoreManifestStats,
 )
+from .personal_context_relay import PersonalContextRecoveryBudget
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,6 +77,7 @@ class PersonalContextAuthorityScan:
     has_visible_lookahead: bool
     source_exhausted: bool = False
     raw_rows_scanned: int = 0
+    raw_envelopes: list[SyncEnvelope] = field(default_factory=list)
 
 
 class SyncV2Store:
@@ -951,6 +953,7 @@ class SyncV2Store:
         row_budget: int = 100,
         wall_time_ms: int = 100,
         deadline_ns: int | None = None,
+        budget: PersonalContextRecoveryBudget | None = None,
         domains: Sequence[SyncDomain] | None = None,
         adapter_versions: Sequence[int] | None = None,
         exclude_device_id: str | None = None,
@@ -960,13 +963,20 @@ class SyncV2Store:
     ) -> PersonalContextAuthorityScan:
         """Scan a mixed page without exposing or advancing past unsafe PC rows."""
 
-        if row_budget < 1 or wall_time_ms < 1:
-            raise ValueError("Personal Context scan limits must be positive")
+        if budget is None:
+            if row_budget < 1 or wall_time_ms < 1:
+                raise ValueError("Personal Context scan limits must be positive")
+            budget = PersonalContextRecoveryBudget(
+                deadline_ns=deadline_ns
+                or monotonic_ns() + wall_time_ms * 1_000_000,
+                remaining_rows=row_budget,
+                clock_ns=monotonic_ns,
+            )
         raw_cursor = after_server_cursor
-        raw_seen = 0
+        starting_rows = budget.remaining_rows
         visible: list[SyncEnvelope] = []
+        safe_raw: list[SyncEnvelope] = []
         source_exhausted = False
-        deadline_ns = deadline_ns or monotonic_ns() + wall_time_ms * 1_000_000
         selected_domains = tuple(domains or PERSONAL_CONTEXT_SYNC_DOMAINS)
         conflict = self.get_unresolved_materialization_conflict(dataset_id)
         conflict_cursor = (
@@ -976,8 +986,8 @@ class SyncV2Store:
             != SYNC_REBASE_REQUIRED_AFTER_CONFLICT_RESOLUTION
             else None
         )
-        while raw_seen < row_budget and monotonic_ns() < deadline_ns and len(visible) <= limit:
-            chunk_limit = min(row_budget - raw_seen, max(1, limit + 1))
+        while budget.can_inspect() and len(visible) <= limit:
+            chunk_limit = min(budget.remaining_rows, max(1, limit + 1))
             raw = self.list_envelopes_after(
                 dataset_id,
                 raw_cursor,
@@ -991,8 +1001,11 @@ class SyncV2Store:
                 source_exhausted = True
                 break
             barrier = False
+            bounded = False
             for envelope in raw:
-                raw_seen += 1
+                if not budget.consume():
+                    bounded = True
+                    break
                 if (
                     conflict_cursor is not None
                     and envelope.server_sequence >= conflict_cursor
@@ -1011,16 +1024,21 @@ class SyncV2Store:
                     )
                 ):
                     raw_cursor = envelope.server_cursor or raw_cursor
+                    safe_raw.append(envelope)
                     continue
-                if (
-                    envelope.domain in PERSONAL_CONTEXT_SYNC_DOMAINS
-                    and authority is not None
-                    and authority.role == "home_authority"
-                    and envelope.apply_status != "applied"
-                ):
-                    barrier = True
-                    break
+                if envelope.domain in PERSONAL_CONTEXT_SYNC_DOMAINS:
+                    if authority is None:
+                        barrier = True
+                        break
+                    if authority.role == "home_authority":
+                        if envelope.apply_status != "applied":
+                            barrier = True
+                            break
+                    elif authority.role != "client_ingress":
+                        barrier = True
+                        break
                 raw_cursor = envelope.server_cursor or raw_cursor
+                safe_raw.append(envelope)
                 if envelope.domain not in PERSONAL_CONTEXT_SYNC_DOMAINS:
                     if envelope.apply_status not in {"conflict", "superseded"}:
                         visible.append(envelope)
@@ -1030,7 +1048,7 @@ class SyncV2Store:
                     and authority.role == "home_authority"
                 ):
                     visible.append(envelope)
-            if barrier:
+            if barrier or bounded:
                 break
             if len(raw) < chunk_limit:
                 source_exhausted = True
@@ -1040,7 +1058,8 @@ class SyncV2Store:
             visible_envelopes=visible[:limit],
             has_visible_lookahead=len(visible) > limit,
             source_exhausted=source_exhausted,
-            raw_rows_scanned=raw_seen,
+            raw_rows_scanned=starting_rows - budget.remaining_rows,
+            raw_envelopes=safe_raw,
         )
 
     def mark_personal_context_ingress_applied(

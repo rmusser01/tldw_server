@@ -36,6 +36,9 @@ from tldw_Server_API.app.core.Personalization.personal_context_repository_models
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.Personalization_DB import PersonalizationDB
+    from tldw_Server_API.app.core.Sync.v2.personal_context_relay import (
+        PersonalContextRecoveryBudget,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,11 +181,16 @@ class PersonalContextPublicationRelayStore:
         profile_id: str,
         *,
         row_limit: int,
+        budget: PersonalContextRecoveryBudget | None = None,
     ) -> tuple[PublicationStageIdentity, ...]:
         """Return bounded terminal source identities that may own hidden orphans."""
 
         if row_limit < 1:
             raise ValueError("publication row limit must be positive")
+        if budget is not None:
+            if not budget.can_inspect():
+                return ()
+            row_limit = min(row_limit, budget.remaining_rows)
         with self._database.transaction() as connection:
             rows = connection.execute(
                 """
@@ -201,23 +209,29 @@ class PersonalContextPublicationRelayStore:
                 """,
                 (profile_id, row_limit),
             ).fetchall()
-        return tuple(
-            PublicationStageIdentity(
-                profile_id=str(row["profile_id"]),
-                deterministic_envelope_id=str(row["deterministic_envelope_id"]),
-                publication_batch_id=str(row["publication_batch_id"]),
-                profile_publication_sequence=int(row["profile_publication_sequence"]),
-                batch_ordinal=int(row["batch_ordinal"]),
-                batch_size=int(row["batch_size"]),
-                purge_generation=int(row["purge_generation"]),
-                sync_server_cursor=(
-                    None
-                    if row["sync_server_cursor"] is None
-                    else int(row["sync_server_cursor"])
-                ),
+        identities: list[PublicationStageIdentity] = []
+        for row in rows:
+            if budget is not None and not budget.consume():
+                break
+            identities.append(
+                PublicationStageIdentity(
+                    profile_id=str(row["profile_id"]),
+                    deterministic_envelope_id=str(row["deterministic_envelope_id"]),
+                    publication_batch_id=str(row["publication_batch_id"]),
+                    profile_publication_sequence=int(
+                        row["profile_publication_sequence"]
+                    ),
+                    batch_ordinal=int(row["batch_ordinal"]),
+                    batch_size=int(row["batch_size"]),
+                    purge_generation=int(row["purge_generation"]),
+                    sync_server_cursor=(
+                        None
+                        if row["sync_server_cursor"] is None
+                        else int(row["sync_server_cursor"])
+                    ),
+                )
             )
-            for row in rows
-        )
+        return tuple(identities)
 
     def canonical_ingress_receipt_for_source(
         self,
@@ -569,11 +583,16 @@ class PersonalContextPublicationRelayStore:
         *,
         row_limit: int,
         lease: PublicationRelayLease | None = None,
+        budget: PersonalContextRecoveryBudget | None = None,
     ) -> PublicationSourceBatch | None:
         """Claim and decrypt only the earliest incomplete sequence under SQLite lock."""
 
         if row_limit < 1:
             raise ValueError("publication row limit must be positive")
+        if budget is not None:
+            if not budget.can_inspect():
+                return None
+            row_limit = min(row_limit, budget.remaining_rows)
 
         from tldw_Server_API.app.core.DB_Management.Personal_Context_Key_Store import (
             ServerProfileKeyProvider,
@@ -643,6 +662,8 @@ class PersonalContextPublicationRelayStore:
 
         source_rows: list[PublicationSourceRow] = []
         for row in rows:
+            if budget is not None and not budget.consume():
+                break
             try:
                 domain, canonical = journal.decrypt_row(row)
             except Exception as exc:  # noqa: BLE001 - ciphertext must fail closed.

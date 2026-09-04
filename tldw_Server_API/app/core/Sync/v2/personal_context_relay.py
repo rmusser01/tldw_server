@@ -28,6 +28,34 @@ class PersonalContextRelayResult:
     inspected_rows: int = 0
 
 
+@dataclass(slots=True)
+class PersonalContextRecoveryBudget:
+    """One consumable row allowance and absolute deadline for a pull."""
+
+    deadline_ns: int
+    remaining_rows: int
+    clock_ns: Callable[[], int] = monotonic_ns
+    relay: PersonalContextRelayResult | None = None
+
+    def deadline_open(self) -> bool:
+        """Return whether recovery may still do deadline-bound work."""
+
+        return self.clock_ns() < self.deadline_ns
+
+    def can_inspect(self) -> bool:
+        """Return whether one more row may be queried and inspected."""
+
+        return self.remaining_rows > 0 and self.deadline_open()
+
+    def consume(self) -> bool:
+        """Spend one row immediately before its decrypt or classification."""
+
+        if not self.can_inspect():
+            return False
+        self.remaining_rows -= 1
+        return True
+
+
 AuthorityStager = Callable[[PublicationSourceRow, str, str], AuthorityStageReceipt]
 AuthorityFinalizer = Callable[
     [PublicationSourceRow, AuthorityStageReceipt, str, str], None
@@ -62,29 +90,41 @@ class PersonalContextRelay:
         row_budget: int = 100,
         wall_time_ms: int = 100,
         deadline_ns: int | None = None,
+        budget: PersonalContextRecoveryBudget | None = None,
     ) -> PersonalContextRelayResult:
         """Stage the first incomplete batch only, bounded by rows and wall time."""
 
         del after_server_cursor
         if row_budget < 1 or wall_time_ms < 1:
             raise ValueError("relay limits must be positive")
-        deadline_ns = deadline_ns or self.clock_ns() + wall_time_ms * 1_000_000
+        if budget is None:
+            budget = PersonalContextRecoveryBudget(
+                deadline_ns=deadline_ns
+                or self.clock_ns() + wall_time_ms * 1_000_000,
+                remaining_rows=row_budget,
+                clock_ns=self.clock_ns,
+            )
+        starting_rows = budget.remaining_rows
         try:
             with self.publications.profile_lease(profile_id) as lease:
                 if lease is None:
-                    return self._pending()
-                return self._relay_owned(
-                    lease=lease,
-                    user_id=user_id,
-                    profile_id=profile_id,
-                    dataset_id=dataset_id,
-                    row_budget=row_budget,
-                    deadline_ns=deadline_ns,
-                )
+                    result = self._pending()
+                else:
+                    result = self._relay_owned(
+                        lease=lease,
+                        user_id=user_id,
+                        profile_id=profile_id,
+                        dataset_id=dataset_id,
+                        budget=budget,
+                    )
         except PublicationRelayPoisoned:
-            return PersonalContextRelayResult(0, False, False, "relay_poisoned")
+            result = PersonalContextRelayResult(0, False, False, "relay_poisoned")
         except Exception:  # noqa: BLE001 - DB/lease/adapter races remain retryable.
-            return self._pending()
+            result = self._pending()
+        return replace(
+            result,
+            inspected_rows=starting_rows - budget.remaining_rows,
+        )
 
     def _relay_owned(
         self,
@@ -93,16 +133,18 @@ class PersonalContextRelay:
         user_id: str,
         profile_id: str,
         dataset_id: str,
-        row_budget: int,
-        deadline_ns: int,
+        budget: PersonalContextRecoveryBudget,
     ) -> PersonalContextRelayResult:
         staged = 0
-        inspected = 0
         unfinished_lookup = getattr(self.publications, "unfinished_stage_identities", None)
-        if unfinished_lookup is not None:
-            for identity in unfinished_lookup(profile_id, row_limit=row_budget):
-                if inspected >= row_budget or self.clock_ns() >= deadline_ns:
-                    return self._pending(staged, inspected)
+        if unfinished_lookup is not None and budget.can_inspect():
+            for identity in unfinished_lookup(
+                profile_id,
+                row_limit=budget.remaining_rows,
+                budget=budget,
+            ):
+                if not budget.deadline_open():
+                    return self._pending(staged)
                 claimed_identity = replace(
                     identity, relay_owner_token=lease.owner_token
                 )
@@ -110,26 +152,28 @@ class PersonalContextRelay:
                     claimed_identity, None, dataset_id, user_id
                 )
                 if cancellation == "failed":
-                    return self._pending(staged, inspected)
+                    return self._pending(staged)
                 try:
                     self.publications.retire_terminal_stage_identity(
                         claimed_identity, lease=lease
                     )
                 except Exception:  # noqa: BLE001 - exact cleanup retries after races.
-                    return self._pending(staged, inspected)
-                inspected += 1
-            if inspected >= row_budget:
-                return self._pending(staged, inspected)
+                    return self._pending(staged)
+            if not budget.can_inspect():
+                return self._pending(staged)
 
         while True:
+            if not budget.can_inspect():
+                return self._pending(staged)
             batch = self.publications.earliest_nonterminal_batch(
                 profile_id,
-                row_limit=row_budget - inspected,
+                row_limit=budget.remaining_rows,
                 lease=lease,
+                budget=budget,
             )
             if batch is None:
                 return PersonalContextRelayResult(
-                    staged, True, False, "complete", inspected
+                    staged, True, False, "complete"
                 )
             acknowledged_ordinals = {
                 row.batch_ordinal
@@ -137,22 +181,21 @@ class PersonalContextRelay:
                 if row.row_state == "acknowledged"
             }
             for row in batch.rows:
-                if inspected >= row_budget or self.clock_ns() >= deadline_ns:
-                    return self._pending(staged, inspected)
-                inspected += 1
+                if not budget.deadline_open():
+                    return self._pending(staged)
                 claimed_row = replace(row, relay_owner_token=lease.owner_token)
 
                 if row.row_state == "acknowledged":
                     receipt = self._receipt_for_row(row)
                     if receipt is None or not self._renewed_current(claimed_row, lease):
-                        return self._pending(staged, inspected)
+                        return self._pending(staged)
                     if self.finalize_authority is not None:
                         try:
                             self.finalize_authority(
                                 claimed_row, receipt, dataset_id, user_id
                             )
                         except Exception:  # noqa: BLE001 - exact applied replay retries.
-                            return self._pending(staged, inspected)
+                            return self._pending(staged)
                     continue
 
                 if row.role == "manifest" and any(
@@ -160,12 +203,12 @@ class PersonalContextRelay:
                     and item.batch_ordinal not in acknowledged_ordinals
                     for item in batch.rows
                 ):
-                    return self._pending(staged, inspected)
+                    return self._pending(staged)
 
                 receipt = self._receipt_for_row(row)
                 if row.row_state == "pending":
                     if not self._renewed_current(claimed_row, lease):
-                        return self._pending(staged, inspected)
+                        return self._pending(staged)
                     try:
                         receipt = self.stage_authority(
                             claimed_row, dataset_id, user_id
@@ -173,14 +216,14 @@ class PersonalContextRelay:
                     except PersonalContextAuthoritySourceError:
                         self.publications.mark_attention(batch, lease=lease)
                         return PersonalContextRelayResult(
-                            staged, False, False, "relay_poisoned", inspected
+                            staged, False, False, "relay_poisoned"
                         )
                     except Exception:  # noqa: BLE001 - storage/head/adapter failures retry.
-                        return self._pending(staged, inspected)
+                        return self._pending(staged)
                     if not self._receipt_matches(claimed_row, receipt):
-                        return self._pending(staged, inspected)
+                        return self._pending(staged)
                     if not self._renewed_current(claimed_row, lease):
-                        return self._pending(staged, inspected)
+                        return self._pending(staged)
                     try:
                         self.publications.record_staged_row(
                             claimed_row,
@@ -195,12 +238,12 @@ class PersonalContextRelay:
                             self._cancel(
                                 claimed_row, receipt, dataset_id, user_id
                             )
-                        return self._pending(staged, inspected)
+                        return self._pending(staged)
 
                 if receipt is None or not self._receipt_matches(claimed_row, receipt):
-                    return self._pending(staged, inspected)
+                    return self._pending(staged)
                 if not self._renewed_current(claimed_row, lease):
-                    return self._pending(staged, inspected)
+                    return self._pending(staged)
                 try:
                     self.publications.acknowledge_row(
                         claimed_row,
@@ -208,22 +251,22 @@ class PersonalContextRelay:
                         lease=lease,
                     )
                 except Exception:  # noqa: BLE001 - durable staged source retries.
-                    return self._pending(staged, inspected)
+                    return self._pending(staged)
                 acknowledged_ordinals.add(row.batch_ordinal)
 
                 if not self._renewed_current(claimed_row, lease):
-                    return self._pending(staged, inspected)
+                    return self._pending(staged)
                 if self.finalize_authority is not None:
                     try:
                         self.finalize_authority(
                             claimed_row, receipt, dataset_id, user_id
                         )
                     except Exception:  # noqa: BLE001 - acknowledged source repairs on retry.
-                        return self._pending(staged, inspected)
+                        return self._pending(staged)
                 staged += 1
 
             if not self.publications.complete_if_acknowledged(batch, lease=lease):
-                return self._pending(staged, inspected)
+                return self._pending(staged)
 
     def _renewed_current(self, row: PublicationSourceRow, lease: Any) -> bool:
         return bool(
@@ -284,6 +327,7 @@ class PersonalContextRelay:
 
 __all__ = [
     "PersonalContextAuthoritySourceError",
+    "PersonalContextRecoveryBudget",
     "PersonalContextRelay",
     "PersonalContextRelayResult",
 ]

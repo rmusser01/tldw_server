@@ -774,13 +774,11 @@ def test_personal_context_domain_subset_does_not_advance_unrequested_stream(
 
 def test_expired_absolute_recovery_deadline_does_not_advance_cursor(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from tldw_Server_API.app.core.Sync.v2 import service as service_module
-
     service, _target, _sqlite_path = _service(tmp_path)
     _insert_authority(service, record_id="deadline-authority", sequence=1)
-    monkeypatch.setattr(service_module, "monotonic_ns", lambda: 0)
+    ticks = iter((0, 100_000_000))
+    service._recovery_clock_ns = lambda: next(ticks, 100_000_000)
 
     pulled = service.pull(
         user_id="user-a",

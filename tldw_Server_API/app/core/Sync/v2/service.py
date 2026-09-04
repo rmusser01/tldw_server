@@ -150,7 +150,12 @@ from .personal_context_ongoing_contract import (
     PersonalContextExchangeProof,
     PersonalContextRelayContinuation,
 )
-from .personal_context_relay import PersonalContextRelayResult
+from .personal_context_relay import (
+    PersonalContextRecoveryBudget as _PersonalContextRecoveryBudget,
+)
+from .personal_context_relay import (
+    PersonalContextRelayResult,
+)
 from .profile import (
     PersonalContextBootstrap,
     SyncNotesAttachmentBootstrapDiagnostics,
@@ -1136,15 +1141,6 @@ class SyncPullResult:
 
 
 @dataclass(frozen=True, slots=True)
-class _PersonalContextRecovery:
-    """One shared deadline and inspection budget for a PC pull attempt."""
-
-    deadline_ns: int
-    remaining_rows: int
-    relay: PersonalContextRelayResult | None = None
-
-
-@dataclass(frozen=True, slots=True)
 class SyncRestoreManifestDevice:
     device_id: str
     display_name: str | None
@@ -1323,6 +1319,7 @@ class SyncV2Service:
         personal_context_key_fingerprint: Callable[..., str] | None = None,
         personal_context_authority_id: str = "tldw-server",
         personal_context_relay: object | None = None,
+        recovery_clock_ns: Callable[[], int] | None = None,
     ) -> None:
         self.store = store
         self.adapters = adapters
@@ -1344,6 +1341,7 @@ class SyncV2Service:
             str(personal_context_authority_id).strip() or "tldw-server"
         )
         self.personal_context_relay = personal_context_relay
+        self._recovery_clock_ns = recovery_clock_ns
 
     def shred_authorized_personal_context_history(
         self,
@@ -4798,8 +4796,8 @@ class SyncV2Service:
                 result,
                 has_more=result.has_more
                 or versioned_relay.state != "complete",
-                personal_context_relay=replace(
-                    versioned_relay, scan_watermark=result.next_cursor
+                personal_context_relay=versioned_relay.model_copy(
+                    update={"scan_watermark": result.next_cursor}
                 ),
                 personal_context_exchange=verified_exchange,
             )
@@ -4828,8 +4826,7 @@ class SyncV2Service:
                     dataset_id,
                     after_server_cursor=since_sequence,
                     limit=page_limit,
-                    row_budget=recovery.remaining_rows,
-                    deadline_ns=recovery.deadline_ns,
+                    budget=recovery,
                     domains=selected_domains,
                     adapter_versions=[1],
                     exclude_device_id=(
@@ -4851,19 +4848,34 @@ class SyncV2Service:
                         else None
                     ),
                 )
-                if verified_exchange is not None and recovery.remaining_rows > 0
+                if verified_exchange is not None and recovery.can_inspect()
                 else PersonalContextAuthorityScan(
                     raw_scan_watermark=since_sequence,
                     visible_envelopes=[],
                     has_visible_lookahead=False,
                 )
             )
-            page = [
-                self._restore_personal_context_from_storage(dataset, envelope)
-                for envelope in scan.visible_envelopes
-            ]
+            page, restore_barrier = self._restore_recovery_page(
+                dataset=dataset,
+                envelopes=scan.visible_envelopes,
+                page_limit=page_limit,
+                budget=recovery,
+            )
+            if restore_barrier is not None:
+                next_sequence = max(
+                    (
+                        envelope.server_sequence
+                        for envelope in scan.raw_envelopes
+                        if envelope.server_sequence < restore_barrier
+                    ),
+                    default=since_sequence,
+                )
+            elif scan.has_visible_lookahead and page:
+                next_sequence = page[-1].server_sequence
+            else:
+                next_sequence = scan.raw_scan_watermark
             if recovery.relay is not None:
-                relay_watermarks = dict.fromkeys(streams, scan.raw_scan_watermark)
+                relay_watermarks = dict.fromkeys(streams, next_sequence)
                 relay_continuation = PersonalContextRelayContinuation(
                     state=recovery.relay.continuation,
                     scan_watermark=self._encode_pull_token(
@@ -4873,11 +4885,6 @@ class SyncV2Service:
                         watermarks=relay_watermarks,
                     ),
                 )
-            next_sequence = (
-                page[-1].server_sequence
-                if scan.has_visible_lookahead and page
-                else scan.raw_scan_watermark
-            )
             if next_sequence != since_sequence:
                 self._update_cursors(
                     dataset_id,
@@ -4892,6 +4899,7 @@ class SyncV2Service:
                 envelopes=page,
                 next_cursor=str(next_sequence),
                 has_more=scan.has_visible_lookahead
+                or restore_barrier is not None
                 or not scan.source_exhausted
                 or (relay_continuation is not None and relay_continuation.state != "complete"),
                 personal_context_relay=relay_continuation,
@@ -9423,6 +9431,35 @@ class SyncV2Service:
             for domain, versions in advertised.items()
         }
 
+    def _restore_recovery_page(
+        self,
+        *,
+        dataset: SyncDataset,
+        envelopes: Sequence[SyncEnvelope],
+        page_limit: int,
+        budget: _PersonalContextRecoveryBudget,
+    ) -> tuple[list[SyncEnvelope], int | None]:
+        """Restore selected authority without crossing the pull deadline."""
+
+        restored: list[SyncEnvelope] = []
+        for envelope in envelopes[:page_limit]:
+            if (
+                envelope.domain in PERSONAL_CONTEXT_SYNC_DOMAINS
+                and not budget.deadline_open()
+            ):
+                return restored, envelope.server_sequence
+            restored.append(
+                self._restore_personal_context_from_storage(dataset, envelope)
+            )
+        return restored, None
+
+    def _recovery_now_ns(self) -> int:
+        """Read the injectable recovery clock without freezing the default."""
+
+        if self._recovery_clock_ns is not None:
+            return self._recovery_clock_ns()
+        return monotonic_ns()
+
     def _coordinate_personal_context_recovery(
         self,
         *,
@@ -9430,15 +9467,20 @@ class SyncV2Service:
         user_id: str,
         after_server_cursor: int | None,
         enabled: bool,
-    ) -> _PersonalContextRecovery:
+    ) -> _PersonalContextRecoveryBudget:
         """Run every PC pull mode under one absolute deadline and row budget."""
 
         if not enabled:
-            return _PersonalContextRecovery(
+            return _PersonalContextRecoveryBudget(
                 deadline_ns=2**63 - 1,
                 remaining_rows=self.settings.max_pull_page_size + 1,
+                clock_ns=self._recovery_now_ns,
             )
-        deadline_ns = monotonic_ns() + 100_000_000
+        budget = _PersonalContextRecoveryBudget(
+            deadline_ns=self._recovery_now_ns() + 100_000_000,
+            remaining_rows=100,
+            clock_ns=self._recovery_now_ns,
+        )
         state = dataset.metadata.get("personal_context")
         profile_id = state.get("profile_id") if isinstance(state, Mapping) else None
         relay: PersonalContextRelayResult | None = None
@@ -9452,20 +9494,10 @@ class SyncV2Service:
                 profile_id=profile_id,
                 dataset_id=dataset.dataset_id,
                 after_server_cursor=after_server_cursor,
-                row_budget=100,
-                wall_time_ms=100,
-                deadline_ns=deadline_ns,
+                budget=budget,
             )
-        inspected = (
-            0
-            if relay is None
-            else int(getattr(relay, "inspected_rows", relay.staged_rows))
-        )
-        return _PersonalContextRecovery(
-            deadline_ns=deadline_ns,
-            remaining_rows=max(0, 100 - inspected),
-            relay=relay,
-        )
+        budget.relay = relay
+        return budget
 
     def _pull_versioned(
         self,
@@ -9478,7 +9510,7 @@ class SyncV2Service:
         streams: Sequence[tuple[SyncDomain, int]],
         page_size: int | None,
         include_own_changes: bool,
-        recovery: _PersonalContextRecovery,
+        recovery: _PersonalContextRecoveryBudget,
     ) -> SyncPullResult:
         """Pull a token-paginated page without advancing past hidden conflicts."""
 
@@ -9513,55 +9545,64 @@ class SyncV2Service:
         personal_context_state = dataset.metadata.get("personal_context")
         raw_envelopes, visible, blocker_cursor, source_exhausted = (
             self._scan_versioned_pull_page(
-            dataset_id=dataset.dataset_id,
-            device_id=device.device_id,
-            watermarks=watermarks,
-            page_limit=page_limit,
-            include_own_changes=include_own_changes,
-            personal_context_egress_authorized=(
-                _personal_context_exchange_is_active(
-                    dataset, personal_context_exchange
-                )
-                and _personal_context_link_is_complete(
-                    self.store,
-                    dataset,
-                    user_id=user_id,
-                    device_id=device.device_id,
-                )
-            ),
-            row_budget=recovery.remaining_rows,
-            deadline_ns=recovery.deadline_ns,
-            profile_id=(
-                personal_context_state.get("profile_id")
-                if isinstance(personal_context_state, Mapping)
-                else None
-            ),
-            integrity_key_id=(
-                personal_context_state.get("integrity_key_id")
-                if isinstance(personal_context_state, Mapping)
-                else None
-            ),
-            purge_generation=(
-                personal_context_state.get("purge_generation")
-                if isinstance(personal_context_state, Mapping)
-                else None
-            ),
+                dataset_id=dataset.dataset_id,
+                device_id=device.device_id,
+                watermarks=watermarks,
+                page_limit=page_limit,
+                include_own_changes=include_own_changes,
+                personal_context_egress_authorized=(
+                    _personal_context_exchange_is_active(
+                        dataset, personal_context_exchange
+                    )
+                    and _personal_context_link_is_complete(
+                        self.store,
+                        dataset,
+                        user_id=user_id,
+                        device_id=device.device_id,
+                    )
+                ),
+                budget=recovery,
+                profile_id=(
+                    personal_context_state.get("profile_id")
+                    if isinstance(personal_context_state, Mapping)
+                    else None
+                ),
+                integrity_key_id=(
+                    personal_context_state.get("integrity_key_id")
+                    if isinstance(personal_context_state, Mapping)
+                    else None
+                ),
+                purge_generation=(
+                    personal_context_state.get("purge_generation")
+                    if isinstance(personal_context_state, Mapping)
+                    else None
+                ),
             )
         )
-        page = [
-            self._restore_personal_context_from_storage(dataset, envelope)
-            for envelope in visible[:page_limit]
-        ]
+        page, restore_barrier = self._restore_recovery_page(
+            dataset=dataset,
+            envelopes=visible,
+            page_limit=page_limit,
+            budget=recovery,
+        )
         has_visible_lookahead = len(visible) > page_limit
-        has_more = has_visible_lookahead or not source_exhausted
+        has_more = (
+            has_visible_lookahead
+            or restore_barrier is not None
+            or not source_exhausted
+        )
         safe_raw_envelopes = [
             envelope
             for envelope in raw_envelopes
-            if blocker_cursor is None or envelope.server_sequence < blocker_cursor
+            if (blocker_cursor is None or envelope.server_sequence < blocker_cursor)
+            and (
+                restore_barrier is None
+                or envelope.server_sequence < restore_barrier
+            )
         ]
         boundary = (
             page[-1].server_sequence
-            if has_visible_lookahead and page
+            if has_visible_lookahead and page and restore_barrier is None
             else max(
                 (envelope.server_sequence for envelope in safe_raw_envelopes),
                 default=0,
@@ -9620,8 +9661,7 @@ class SyncV2Service:
         page_limit: int,
         include_own_changes: bool,
         personal_context_egress_authorized: bool,
-        row_budget: int,
-        deadline_ns: int,
+        budget: _PersonalContextRecoveryBudget,
         profile_id: object,
         integrity_key_id: object,
         purge_generation: object,
@@ -9640,15 +9680,10 @@ class SyncV2Service:
             != SYNC_REBASE_REQUIRED_AFTER_CONFLICT_RESOLUTION
             else None
         )
-        if row_budget < len(scan_watermarks):
-            return raw, visible, blocker_cursor, False
-
-        inspected = 0
         candidates: dict[tuple[SyncDomain, int], SyncEnvelope] = {}
 
         def load_candidate(stream: tuple[SyncDomain, int]) -> bool:
-            nonlocal inspected
-            if inspected >= row_budget:
+            if not budget.can_inspect():
                 return False
             domain, adapter_version = stream
             rows = self.store.list_envelopes_after(
@@ -9663,15 +9698,20 @@ class SyncV2Service:
             if not rows:
                 exhausted_streams.add(stream)
                 return True
+            if not budget.consume():
+                return False
             candidates[stream] = rows[0]
-            inspected += 1
             return True
 
         for stream in scan_watermarks:
             if not load_candidate(stream):
                 return raw, visible, blocker_cursor, False
 
-        while candidates and monotonic_ns() < deadline_ns and len(visible) <= page_limit:
+        while (
+            candidates
+            and budget.deadline_open()
+            and len(visible) <= page_limit
+        ):
             stream, envelope = min(
                 candidates.items(),
                 key=lambda candidate: candidate[1].server_sequence,
@@ -9694,18 +9734,20 @@ class SyncV2Service:
             if (
                 envelope.domain in PERSONAL_CONTEXT_SYNC_DOMAINS
                 and not stale_personal_context
-                and envelope.authority is not None
-                and envelope.authority.role == "home_authority"
-                and envelope.apply_status != "applied"
             ):
-                break
+                if envelope.authority is None:
+                    break
+                if envelope.authority.role == "home_authority":
+                    if envelope.apply_status != "applied":
+                        break
+                elif envelope.authority.role != "client_ingress":
+                    break
             raw.append(envelope)
             scan_watermarks[stream] = envelope.server_sequence
             candidates.pop(stream)
             if (
                 not stale_personal_context
-                and
-                envelope.apply_status not in {"conflict", "superseded"}
+                and envelope.apply_status not in {"conflict", "superseded"}
                 and _personal_context_pull_visible(
                     envelope,
                     authorized=personal_context_egress_authorized,

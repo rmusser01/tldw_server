@@ -30,10 +30,11 @@ def test_relay_bounds_source_decryption_before_loading_a_batch() -> None:
             yield SimpleNamespace(owner_token="owner")
 
         def earliest_nonterminal_batch(
-            self, _profile_id, *, row_limit, lease=None
+            self, _profile_id, *, row_limit, lease=None, budget=None
         ):
             del lease
             assert row_limit == 7
+            assert budget is not None
             return None
 
     from tldw_Server_API.app.core.Sync.v2.personal_context_relay import (
@@ -400,6 +401,7 @@ def test_real_relay_extends_current_sync_heads_across_publication_batches(
         profile_id=manifest.profile_id,
         dataset_id="dataset-a",
         after_server_cursor=None,
+        wall_time_ms=5_000,
     )
 
     assert result.continuation == "complete", staging_errors
@@ -477,6 +479,7 @@ def test_real_relay_extends_current_sync_heads_across_publication_batches(
         profile_id=manifest.profile_id,
         dataset_id="dataset-a",
         after_server_cursor=None,
+        wall_time_ms=5_000,
     )
 
     assert confirmation.continuation == "complete", (staging_errors, finalization_errors)
@@ -588,16 +591,23 @@ class _Publications:
         *,
         row_limit: int,
         lease: object | None = None,
+        budget: object | None = None,
     ) -> PublicationSourceBatch:
         del lease
         assert row_limit > 0
+        assert budget is not None
         if all(row.row_state == "acknowledged" for row in self.rows):
             return None  # type: ignore[return-value]
+        selected: list[PublicationSourceRow] = []
+        for row in self.rows[:row_limit]:
+            if not budget.consume():
+                break
+            selected.append(row)
         return PublicationSourceBatch(
             "profile-a",
             1,
             "batch-a",
-            tuple(self.rows[:row_limit]),
+            tuple(selected),
         )
 
     def acknowledge_row(self, row: PublicationSourceRow, *, server_cursor: int, lease: object) -> None:
