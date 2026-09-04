@@ -1752,6 +1752,8 @@ def pull_sync_v2_envelopes(
 def list_sync_v2_conflicts(
     dataset_id: str,
     conflict_status: ConflictStatus | None = Query(None, alias="status"),
+    domain: SyncDomain | None = Query(None),
+    device_id: str | None = Query(None, min_length=1),
     limit: int = Query(20, ge=1, le=20),
     personal_context_activation_epoch: str | None = Query(None, min_length=16, max_length=256),
     personal_context_continuity_token: str | None = Query(None, min_length=16, max_length=256),
@@ -1763,22 +1765,22 @@ def list_sync_v2_conflicts(
         personal_context_continuity_token,
     )
     try:
-        verified_exchange = service.verified_active_exchange_if_enrolled(
-            user_id=_sync_user_id(user),
-            dataset_id=dataset_id,
-            exchange=personal_context_exchange,
-        )
-        conflicts = service.list_conflicts(
+        conflicts, verified_exchange = service.list_conflicts_with_exchange(
             user_id=_sync_user_id(user),
             dataset_id=dataset_id,
             status=conflict_status,
+            domain=domain,
+            limit=limit,
+            device_id=device_id,
             personal_context_exchange=personal_context_exchange,
-        )[:limit]
+        )
     except Exception as exc:
         raise _safe_sync_v2_http_error(
             exc,
             user_id=_sync_user_id(user),
             dataset_id=dataset_id,
+            device_id=device_id,
+            domain=domain,
             conflict_status=conflict_status,
         ) from exc
     api_conflicts = [_api_conflict_from_core(conflict) for conflict in conflicts]

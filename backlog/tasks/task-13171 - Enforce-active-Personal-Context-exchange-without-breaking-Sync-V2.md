@@ -1,10 +1,11 @@
 ---
 id: TASK-13171
 title: Enforce active Personal Context exchange without breaking Sync V2
-status: To Do
+status: Done
 assignee:
   - '@codex'
 created_date: '2026-09-04 03:34'
+updated_date: '2026-09-04 21:56'
 labels:
   - personal-context
   - sync
@@ -30,22 +31,40 @@ Remediate TASK-13161 by applying one precise active-exchange proof gate to Perso
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 One service gate protects Personal Context version-one push, pull, conflict listing, and conflict resolution with the exact persisted activation epoch and token plus a completed link receipt for the requesting device.
-- [ ] #2 A Personal Context version-zero ongoing exchange returns activation_required before mutation, delivery, or cursor advancement.
-- [ ] #3 Legacy first-link flows and operations containing no selected Personal Context data continue to work.
-- [ ] #4 A mixed Personal Context and Notes dataset can list and resolve unrelated Notes conflicts without Personal Context activation proof.
-- [ ] #5 Personal Context conflict listing uses the real requesting device identity and completed link receipt, and conflict resolution gates from the selected conflict identities rather than unrelated dataset contents.
-- [ ] #6 Only verified stored proof is echoed; exact, stale epoch, stale token, missing proof, incomplete link, tampered proof, and wrong-device cases have distinct verified outcomes.
-- [ ] #7 Production TestClient tests cover push, pull, conflict list, and conflict resolve across Personal Context-only, mixed-domain, legacy, missing, stale, incomplete-link, tampered, and exact-proof cases.
-- [ ] #8 ADR required: no new ADR; backlog/decisions/002-personal-context-profile-authority-sync-and-encryption.md governs activation proofs and compatibility.
+- [x] #1 One service gate protects Personal Context version-one push, pull, conflict listing, and conflict resolution with the exact persisted activation epoch and token plus a completed link receipt for the requesting device.
+- [x] #2 A Personal Context version-zero ongoing exchange returns activation_required before mutation, delivery, or cursor advancement.
+- [x] #3 Legacy first-link flows and operations containing no selected Personal Context data continue to work.
+- [x] #4 A mixed Personal Context and Notes dataset can list and resolve unrelated Notes conflicts without Personal Context activation proof.
+- [x] #5 Personal Context conflict listing uses the real requesting device identity and completed link receipt, and conflict resolution gates from the selected conflict identities rather than unrelated dataset contents.
+- [x] #6 Only verified stored proof is echoed; exact, stale epoch, stale token, missing proof, incomplete link, tampered proof, and wrong-device cases have distinct verified outcomes.
+- [x] #7 Production TestClient tests cover push, pull, conflict list, and conflict resolve across Personal Context-only, mixed-domain, legacy, missing, stale, incomplete-link, tampered, and exact-proof cases.
+- [x] #8 ADR required: no new ADR; backlog/decisions/002-personal-context-profile-authority-sync-and-encryption.md governs activation proofs and compatibility.
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. Add RED TestClient proof and mixed-conflict tests. 2. Centralize selected-operation Personal Context detection. 3. Require exact proof plus completed device link only for selected Personal Context work. 4. Preserve version-zero and unrelated Sync behavior. 5. Run targeted endpoint and security checks. 6. Self-review and close the task. ADR required: no new ADR; ADR-002 governs.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Implemented one selected-operation Personal Context exchange gate across push, pull, bounded conflict listing, and selected-ID resolution. Exact persisted activation proof and the explicit requesting device's completed link receipt are validated only by require_active_exchange; responses echo persisted verified proof. Added backward-compatible conflict-list domain/device_id queries and parameterized domain/status/order/limit/offset DB selection. Added a 51-case TestClient and service/store matrix covering exact, missing, stale, wrong-device, incomplete-link, tampered, version-zero, mixed Notes, pagination, non-leakage, and pre-effect behavior. ADR required: no new ADR; ADR-002 governs. Targeted endpoint/transport/service/conflict tests, Ruff, Bandit, and diff-check passed. The pre-existing PostgreSQL fake receipt-lock failure was reconfirmed on the predecessor baseline and excluded; this task does not modify link receipts. Details: .superpowers/sdd/2026-09-04-personal-context-relay-remediation/task-6-report.md.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Personal Context Sync V2 exchange gates now apply only to selected work, require exact persisted proof plus the real device's completed link receipt before effects, and preserve legacy and Notes-only compatibility. ongoing_sync_version remains 0.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

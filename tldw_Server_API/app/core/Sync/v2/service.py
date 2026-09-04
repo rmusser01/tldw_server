@@ -1381,23 +1381,30 @@ class SyncV2Service:
         supplied_token = getattr(exchange, "continuity_token", None)
         if (
             not isinstance(state, Mapping)
+            or type(state.get("ongoing_sync_version")) is not int
             or state.get("ongoing_sync_version") != 1
             or state.get("link_state") != "complete"
+            or not isinstance(device_id, str)
+            or not device_id
+            or type(getattr(exchange, "ongoing_sync_version", None)) is not int
             or getattr(exchange, "ongoing_sync_version", None) != 1
             or not isinstance(epoch, str)
             or not isinstance(token, str)
             or not isinstance(supplied_epoch, str)
             or not isinstance(supplied_token, str)
-            or not hmac.compare_digest(epoch, supplied_epoch)
-            or not hmac.compare_digest(token, supplied_token)
-            or (
-                device_id is not None
-                and not _personal_context_link_is_complete(
-                    self.store,
-                    dataset,
-                    user_id=user_id,
-                    device_id=device_id,
-                )
+            or not hmac.compare_digest(
+                epoch.encode(errors="surrogatepass"),
+                supplied_epoch.encode(errors="surrogatepass"),
+            )
+            or not hmac.compare_digest(
+                token.encode(errors="surrogatepass"),
+                supplied_token.encode(errors="surrogatepass"),
+            )
+            or not _personal_context_link_is_complete(
+                self.store,
+                dataset,
+                user_id=user_id,
+                device_id=device_id,
             )
         ):
             raise SyncStoreError("personal_context_activation_required")
@@ -4862,7 +4869,7 @@ class SyncV2Service:
                 dataset=dataset,
                 device=device,
                 user_id=user_id,
-                personal_context_exchange=personal_context_exchange,
+                verified_personal_context_exchange=verified_exchange,
                 cursor=cursor,
                 streams=streams,
                 page_size=page_size,
@@ -6456,18 +6463,55 @@ class SyncV2Service:
         user_id: str,
         dataset_id: str,
         status: ConflictStatus | None = None,
+        domain: SyncDomain | None = None,
+        limit: int | None = None,
+        offset: int = 0,
         device_id: str | None = None,
         personal_context_exchange: object | None = None,
     ) -> list[SyncConflict]:
+        conflicts, _verified_exchange = self.list_conflicts_with_exchange(
+            user_id=user_id,
+            dataset_id=dataset_id,
+            status=status,
+            domain=domain,
+            limit=limit,
+            offset=offset,
+            device_id=device_id,
+            personal_context_exchange=personal_context_exchange,
+        )
+        return conflicts
+
+    def list_conflicts_with_exchange(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        status: ConflictStatus | None = None,
+        domain: SyncDomain | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+        device_id: str | None = None,
+        personal_context_exchange: object | None = None,
+    ) -> tuple[list[SyncConflict], PersonalContextExchangeProof | None]:
+        """Return one selected page only after any Personal Context proof passes."""
+
         dataset = self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
-        if any(domain in PERSONAL_CONTEXT_SYNC_DOMAINS for domain in dataset.domains):
-            self.require_active_exchange(
+        conflicts = self.store.list_conflicts(
+            dataset_id,
+            status=status,
+            domain=domain,
+            limit=limit,
+            offset=offset,
+        )
+        verified_exchange = None
+        if any(conflict.domain in PERSONAL_CONTEXT_SYNC_DOMAINS for conflict in conflicts):
+            verified_exchange = self.require_active_exchange(
                 dataset=dataset,
                 user_id=user_id,
                 device_id=device_id,
                 exchange=personal_context_exchange,
             )
-        return self.store.list_conflicts(dataset_id, status=status)
+        return conflicts, verified_exchange
 
     def resolve_conflict(
         self,
@@ -9651,7 +9695,7 @@ class SyncV2Service:
         dataset: SyncDataset,
         device: SyncDevice,
         user_id: str,
-        personal_context_exchange: object | None,
+        verified_personal_context_exchange: PersonalContextExchangeProof | None,
         cursor: str | int | None,
         streams: Sequence[tuple[SyncDomain, int]],
         page_size: int | None,
@@ -9699,15 +9743,7 @@ class SyncV2Service:
                 page_limit=page_limit,
                 include_own_changes=include_own_changes,
                 personal_context_egress_authorized=(
-                    _personal_context_exchange_is_active(
-                        dataset, personal_context_exchange
-                    )
-                    and _personal_context_link_is_complete(
-                        self.store,
-                        dataset,
-                        user_id=user_id,
-                        device_id=device.device_id,
-                    )
+                    verified_personal_context_exchange is not None
                 ),
                 budget=recovery,
                 profile_id=(
@@ -10773,7 +10809,7 @@ def _personal_context_link_is_complete(
     return (
         isinstance(state.get("profile_id"), str)
         and isinstance(state.get("integrity_key_id"), str)
-        and isinstance(state.get("purge_generation"), int)
+        and type(state.get("purge_generation")) is int
         and store.has_personal_context_link_receipt(
             user_id=user_id,
             dataset_id=dataset.dataset_id,
@@ -10782,29 +10818,6 @@ def _personal_context_link_is_complete(
             integrity_key_id=state["integrity_key_id"],
             purge_generation=state["purge_generation"],
         )
-    )
-
-
-def _personal_context_exchange_is_active(
-    dataset: SyncDataset,
-    exchange: object | None,
-) -> bool:
-    """Match a supplied proof to the persisted active activation state exactly."""
-
-    if exchange is None:
-        return False
-    state = dataset.metadata.get("personal_context")
-    epoch = state.get("activation_epoch") if isinstance(state, Mapping) else None
-    token = state.get("continuity_token") if isinstance(state, Mapping) else None
-    supplied_epoch = getattr(exchange, "activation_epoch", None)
-    supplied_token = getattr(exchange, "continuity_token", None)
-    return bool(
-        isinstance(epoch, str)
-        and isinstance(token, str)
-        and isinstance(supplied_epoch, str)
-        and isinstance(supplied_token, str)
-        and hmac.compare_digest(epoch, supplied_epoch)
-        and hmac.compare_digest(token, supplied_token)
     )
 
 

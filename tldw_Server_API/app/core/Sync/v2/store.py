@@ -1515,8 +1515,17 @@ class SyncV2Store:
         dataset_id: str,
         *,
         status: ConflictStatus | None = None,
+        domain: SyncDomain | None = None,
+        limit: int | None = None,
+        offset: int = 0,
     ) -> list[SyncConflict]:
-        return self.db.list_conflicts(dataset_id, status=status)
+        return self.db.list_conflicts(
+            dataset_id,
+            status=status,
+            domain=domain,
+            limit=limit,
+            offset=offset,
+        )
 
     def get_conflict(self, conflict_id: str) -> SyncConflict | None:
         return self.db.get_conflict(conflict_id, connection=self._connection)

@@ -9535,13 +9535,28 @@ class SyncDatabase:
         dataset_id: str,
         *,
         status: ConflictStatus | None = None,
+        domain: SyncDomain | None = None,
+        limit: int | None = None,
+        offset: int = 0,
     ) -> list[SyncConflict]:
+        if limit is not None and limit < 1:
+            raise SyncStoreError("Sync conflict limit must be greater than zero")
+        if offset < 0:
+            raise SyncStoreError("Sync conflict offset must be non-negative")
+        if offset and limit is None:
+            raise SyncStoreError("Sync conflict offset requires a limit")
         params: list[Any] = [dataset_id]
         sql = "SELECT * FROM sync_conflicts WHERE dataset_id = ?"
         if status is not None:
             sql += " AND status = ?"
             params.append(status)
+        if domain is not None:
+            sql += " AND domain = ?"
+            params.append(domain)
         sql += " ORDER BY created_at ASC, conflict_id ASC"
+        if limit is not None:
+            sql += " LIMIT ? OFFSET ?"
+            params.extend((limit, offset))
         result = self.execute(sql, tuple(params))
         return [_conflict_from_row(row) for row in result.rows]
 
