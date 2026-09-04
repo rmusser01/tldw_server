@@ -3630,10 +3630,36 @@ class SyncV2Service:
 
         selected_domains = self._selected_pull_domains(dataset, device, domains)
         streams = self._pull_adapter_streams(device, selected_domains)
-        if any(adapter_version != 1 for _domain, adapter_version in streams) or (
+        versioned_mode = any(adapter_version != 1 for _domain, adapter_version in streams) or (
             isinstance(cursor, str) and "." in cursor
+        )
+        versioned_relay: PersonalContextRelayContinuation | None = None
+        state = dataset.metadata.get("personal_context")
+        profile_id = state.get("profile_id") if isinstance(state, Mapping) else None
+        if (
+            versioned_mode
+            and any(domain in PERSONAL_CONTEXT_SYNC_DOMAINS for domain in selected_domains)
+            and _personal_context_exchange_is_active(dataset, personal_context_exchange)
+            and _personal_context_link_is_complete(
+                self.store, dataset, user_id=user_id, device_id=device_id
+            )
+            and self.personal_context_relay is not None
+            and isinstance(profile_id, str)
         ):
-            return self._pull_versioned(
+            recovered = self.personal_context_relay.relay_profile(
+                user_id=user_id,
+                profile_id=profile_id,
+                dataset_id=dataset_id,
+                after_server_cursor=None,
+                row_budget=100,
+                wall_time_ms=100,
+            )
+            versioned_relay = PersonalContextRelayContinuation(
+                state=recovered.continuation,
+                scan_watermark=None,
+            )
+        if versioned_mode:
+            result = self._pull_versioned(
                 dataset=dataset,
                 device=device,
                 user_id=user_id,
@@ -3642,6 +3668,16 @@ class SyncV2Service:
                 streams=streams,
                 page_size=page_size,
                 include_own_changes=include_own_changes,
+            )
+            if versioned_relay is None:
+                return result
+            return replace(
+                result,
+                has_more=result.has_more
+                or versioned_relay.state != "complete",
+                personal_context_relay=replace(
+                    versioned_relay, scan_watermark=result.next_cursor
+                ),
             )
         since_sequence = self._resolve_cursor(dataset_id, device_id, cursor, selected_domains)
         page_limit = min(page_size or self.settings.max_pull_page_size, self.settings.max_pull_page_size)
