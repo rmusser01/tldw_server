@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@codex'
 created_date: '2026-09-04 03:34'
-updated_date: '2026-09-04 21:15'
+updated_date: '2026-09-04 21:31'
 labels:
   - personal-context
   - sync
@@ -51,6 +51,8 @@ Remediate TASK-13161 by routing every Personal Context pull shape through one ex
 8. Replace round 6's mutable latest-projection proof with one pure immutable-envelope lineage resolver shared by Personal Context materialization, authority staging, confirmation, and the narrow home-authority CAS. Add RED coverage for historical companion relay, exact budget/query counts, genesis/update lineage, strict malformed/overflow rejection, predecessor validation before receipt, projection independence, and concurrent-head rejection. Preserve the round-6 Sync→source guard ordering, then run focused and affected matrices plus static/security checks. ADR required: no new ADR; ADR-002 already governs immutable Personal Context authority lineage.
 
 9. Reproduce PostgreSQL authority-finalize decoding with native boolean `deleted` values through the existing backend seam, then accept only exact booleans or exact SQLite integers `0`/`1` and normalize once for projection. Keep all receipt, tag, current-head, rollback, and retry checks unchanged; verify focused PostgreSQL-shaped and SQLite paths plus affected matrices and static/security checks. ADR required: no new ADR; this is a backend representation correction under ADR-002 with no contract or schema change.
+
+10. Reproduce PostgreSQL parameter rejection at the actual staged-authority `sync_envelopes` INSERT and finalized-authority `sync_object_state` UPSERT seams for both live and tombstone rows, including transactional rollback and retry. Bind native booleans for these cross-backend `deleted` writes, preserve the strict read decoder and SQLite behavior, then run focused stage/finalize and affected recovery matrices plus static/security checks. ADR required: no new ADR; ADR-002 already governs the unchanged authority transaction and storage contract.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -83,6 +85,10 @@ Remediate TASK-13161 by routing every Personal Context pull shape through one ex
 - Round-7 RED reproduced `6 failed` across projection tamper, unbudgeted projection-read, and historical companion cases. Final verification passed: focused immutable-lineage smoke `41`; model resolver `13`; materializer `14`; authority identity `75`; recovery budget `109`; transport `17`; relay recovery `32`; relay compatibility `6`; Sync service `165`; and the deterministic production endpoint `1` within its unchanged ten-poll bound. Scoped Ruff, Bandit, and `git diff --check` passed. One pre-existing PostgreSQL fake-backend test remains excluded: the exact test also fails at detached parent `d663a7b8` with `SyncStoreError('personal_context_link_binding_stale')` at `Sync_DB.py:3861`, proving it predates round 7.
 - ADR required: no. ADR-002 already governs bounded recovery and Personal Context egress. No schema, migration, dependency, public protocol, activation, or broad cleanup was introduced; the round-7 projection-as-proof incident is recorded in `backlog/docs/lessons-testing-evidence.md`.
 - Known skip: the full repository suite was not run, per the task's targeted-verification scope.
+
+Reopened for review round 9 after PostgreSQL binding analysis showed the normalized authority deletion flag was converted back to integer 0/1 at both the staged sync_envelopes INSERT and sync_object_state projection UPSERT. PostgreSQL BOOLEAN rejects those bound integers and rolls back otherwise valid authority stage/finalize transactions; round 9 will reproduce the actual translated parameter seam before normalizing both writes to native bool without changing the strict read gate.
+
+Review round 9 binds the existing boolean deleted fields directly at the staged sync_envelopes INSERT and finalized sync_object_state UPSERT. Exact RED was 4 failures at prepared PostgreSQL parameters 32 and 6 for live/tombstone; GREEN passed 14 focused decoder/stage/finalize cases, 4 SQLite object-state cases, 184 authority/budget, 55 transport/relay, and 165 service tests. Ruff, Bandit, and diff checks passed. The strict read gate, rollback/idempotency checks, and all authority proofs are unchanged. ADR-002 remains governing; no schema, protocol, dependency, activation, or general lesson change was needed.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
