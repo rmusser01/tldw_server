@@ -3400,6 +3400,7 @@ def test_personal_context_endpoints_use_real_factory_bootstrap_and_complete_flow
 ) -> None:
     """The typed flow plans read-only state and materializes it only on completion."""
 
+    factory_personal_context_service._recovery_clock_ns = lambda: 0
     client = _client_for_factory_service(factory_personal_context_service)
     missing = client.post(
         "/api/v1/sync/personal-context/bootstrap",

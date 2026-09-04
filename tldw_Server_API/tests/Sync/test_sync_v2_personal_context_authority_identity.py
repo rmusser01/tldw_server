@@ -45,6 +45,7 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     PERSONAL_CONTEXT_SYNC_DOMAINS,
     SyncDatasetCreate,
     SyncEnvelopeCreate,
+    SyncObjectState,
 )
 from tldw_Server_API.app.core.Sync.v2.personal_context_ongoing_contract import (
     PersonalContextAuthorityMetadata,
@@ -55,6 +56,7 @@ from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service
 from tldw_Server_API.app.core.Sync.v2.store import SyncStoreError, SyncV2Store
 from tldw_Server_API.tests.Personalization.personal_context_test_support import (
     encoded_master_key,
+    preference_record,
 )
 
 
@@ -508,6 +510,156 @@ class IngressHarness(AuthorityHarness):
             )
 
 
+class FirstIngressHarness(AuthorityHarness):
+    """Real stores whose first record ingress omits its optional wire revision."""
+
+    def __init__(self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+        super().__init__(tmp_path, monkeypatch)
+        key_id, integrity_key = self.canonical.sync_integrity_key(
+            self.manifest.profile_id
+        )
+        self.service.materializers = {
+            domain: PersonalContextMaterializer(
+                domain=domain,
+                service_resolver=lambda _user_id: self.canonical,
+            )
+            for domain in PERSONAL_CONTEXT_SYNC_DOMAINS
+        }
+        self.service.register_device(
+            user_id="user-a",
+            display_name="device-a",
+            client_type="chatbook",
+            device_id="device-a",
+            capabilities={
+                "supported_adapter_versions": {
+                    domain: [1] for domain in PERSONAL_CONTEXT_SYNC_DOMAINS
+                }
+            },
+        )
+        self.store.complete_personal_context_link_receipt(
+            user_id="user-a",
+            dataset_id="dataset-a",
+            device_id="device-a",
+            profile_id=self.manifest.profile_id,
+            integrity_key_id=key_id,
+            purge_generation=0,
+            bootstrap_cursor="fixture-cursor",
+        )
+        relay = PersonalContextRelay(
+            publications=self.publications,
+            stage_authority=self.service.stage_personal_context_authority,
+            finalize_authority=self.service.finalize_personal_context_authority,
+            cancel_authority=self.service.cancel_personal_context_authority,
+        )
+        for _ in range(10):
+            initial = relay.relay_profile(
+                user_id="user-a",
+                profile_id=self.manifest.profile_id,
+                dataset_id="dataset-a",
+                after_server_cursor=None,
+                wall_time_ms=5_000,
+            )
+            if initial.continuation == "complete":
+                break
+        assert initial.continuation == "complete"
+
+        seed = preference_record(
+            self.manifest.profile_id,
+            record_id="first-client-record",
+            version_id="first-client-record-v1",
+        )
+        self.record = ProfileRecord.model_validate(
+            {
+                **seed.model_dump(mode="python"),
+                "scope_id": self.canonical.list_scopes()[0].scope_id,
+            }
+        )
+        canonical = canonical_json_bytes(self.record.model_dump(mode="json"))
+        pushed = self.service.push(
+            user_id="user-a",
+            dataset_id="dataset-a",
+            device_id="device-a",
+            envelopes=[
+                SyncEnvelopeCreate(
+                    dataset_id="dataset-a",
+                    client_envelope_id="device-a:first-record",
+                    device_id="device-a",
+                    domain="personal_context.record",
+                    operation="upsert",
+                    object_id=self.record.record_id,
+                    parent_id=self.record.scope_id,
+                    adapter_version=1,
+                    schema_version=1,
+                    payload=self.record.model_dump(mode="json"),
+                    payload_hash="hmac-sha256-v1:"
+                    + hmac.new(integrity_key, canonical, hashlib.sha256).hexdigest(),
+                    payload_size_bytes=len(canonical),
+                    entity_version=self.record.version_id,
+                    encryption_metadata={"policy": "server_trusted_v1"},
+                    routing_metadata={
+                        "integrity_key_id": key_id,
+                        "profile_id": self.manifest.profile_id,
+                        "purge_generation": 0,
+                    },
+                )
+            ],
+            personal_context_exchange=PersonalContextExchangeProof(
+                ongoing_sync_version=1,
+                activation_epoch="epoch_0123456789abcdef",
+                continuity_token="continuity_0123456789abcdef",
+            ),
+        )
+        assert pushed.rejected == []
+        assert pushed.conflicts == []
+        assert len(pushed.accepted) == 1
+        self.ingress_cursor = pushed.accepted[0].server_sequence
+        self.ingress = self.store.get_envelope_by_server_cursor(self.ingress_cursor)
+        assert self.ingress is not None
+        assert self.ingress.object_revision is None
+        self.projected_state = self.store.get_object_state(
+            "dataset-a", "personal_context.record", self.record.record_id
+        )
+        assert self.projected_state is not None
+        assert self.projected_state.dataset_id == self.ingress.dataset_id
+        assert self.projected_state.domain == self.ingress.domain
+        assert self.projected_state.object_id == self.ingress.object_id
+        assert self.projected_state.object_revision == 1
+        assert self.projected_state.latest_server_cursor == self.ingress_cursor
+        assert self.projected_state.object_hash == self.ingress.payload_hash
+        assert self.projected_state.deleted == self.ingress.deleted
+
+    def pending_rows(self) -> tuple[PublicationSourceRow, ...]:
+        batch = self.publications.earliest_nonterminal_batch(
+            self.manifest.profile_id,
+            row_limit=100,
+        )
+        assert batch is not None
+        return batch.rows
+
+    def corrupt_projected_state(self, case: str) -> None:
+        if case == "missing":
+            with self.store.db.backend.transaction() as connection:
+                self.store.db.execute(
+                    "DELETE FROM sync_object_state WHERE dataset_id = ? "
+                    "AND domain = ? AND object_id = ?",
+                    ("dataset-a", "personal_context.record", self.record.record_id),
+                    connection=connection,
+                )
+            return
+        assignments = {
+            "latest_cursor": ("latest_server_cursor = ?", self.ingress_cursor + 1),
+            "object_hash": ("object_hash = ?", "hmac-sha256-v1:" + "0" * 64),
+            "deleted": ("deleted = ?", 1),
+        }
+        assignment, value = assignments[case]
+        with self.store.db.backend.transaction() as connection:
+            self.store.db.execute(
+                f"UPDATE sync_object_state SET {assignment} "  # noqa: S608
+                "WHERE dataset_id = ? AND domain = ? AND object_id = ?",
+                (value, "dataset-a", "personal_context.record", self.record.record_id),
+                connection=connection,
+            )
+
 class PurgeIngressHarness(AuthorityHarness):
     """Real stores containing a receipt-bound, non-materialized client purge."""
 
@@ -667,6 +819,11 @@ def ingress_harness(tmp_path, monkeypatch) -> IngressHarness:
 
 
 @pytest.fixture
+def first_ingress_harness(tmp_path, monkeypatch) -> FirstIngressHarness:
+    return FirstIngressHarness(tmp_path, monkeypatch)
+
+
+@pytest.fixture
 def purge_ingress_harness(tmp_path, monkeypatch) -> PurgeIngressHarness:
     return PurgeIngressHarness(tmp_path, monkeypatch)
 
@@ -728,6 +885,112 @@ def test_ingress_confirmation_accepts_exact_cross_store_receipt(
         assert cursor > ingress_harness.ingress_cursor
         assert ingress_harness.stage(row) == cursor
         assert ingress_harness.source_row_state(row) == "pending"
+
+
+def test_first_ingress_without_wire_revision_relays_semantic_and_manifest(
+    first_ingress_harness: FirstIngressHarness,
+) -> None:
+    """Projected revision 1 authenticates both successors without mutating ingress."""
+
+    rows = first_ingress_harness.pending_rows()
+    assert [row.role for row in rows] == ["semantic", "manifest"]
+
+    for _ in range(10):
+        result = first_ingress_harness.resume_relay(row_budget=100)
+        if result.continuation == "complete":
+            break
+
+    assert result.continuation == "complete"
+    assert all(
+        first_ingress_harness.source_row_state(row) == "acknowledged" for row in rows
+    )
+    unchanged = first_ingress_harness.store.get_envelope_by_server_cursor(
+        first_ingress_harness.ingress_cursor
+    )
+    assert unchanged is not None
+    assert unchanged.object_revision is None
+    for domain, object_id in (
+        ("personal_context.record", first_ingress_harness.record.record_id),
+        ("personal_context.manifest", first_ingress_harness.manifest.profile_id),
+    ):
+        authority = first_ingress_harness.store.get_current_head(
+            "dataset-a", domain, object_id
+        )
+        assert authority is not None
+        assert authority.base_object_revision == 1
+        assert authority.object_revision == 2
+        assert authority.authority is not None
+        assert authority.authority.role == "home_authority"
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["missing", "latest_cursor", "object_hash", "deleted"],
+)
+def test_first_ingress_projection_must_match_immutable_head(
+    first_ingress_harness: FirstIngressHarness,
+    case: str,
+) -> None:
+    """Absent or divergent durable projection facts cannot authorize a successor."""
+
+    first_ingress_harness.corrupt_projected_state(case)
+    with first_ingress_harness.claimed_row() as row:
+        assert row.role == "semantic"
+        with pytest.raises(SyncStoreError, match="authority receipt is invalid"):
+            first_ingress_harness.stage(row)
+        assert first_ingress_harness.store.get_envelope_by_client_id(
+            "dataset-a", row.deterministic_envelope_id
+        ) is None
+        assert first_ingress_harness.source_row_state(row) == "pending"
+
+
+@pytest.mark.parametrize(
+    ("field", "changed"),
+    [
+        ("dataset_id", "other-dataset"),
+        ("domain", "personal_context.scope"),
+        ("object_id", "other-object"),
+        ("object_revision", True),
+        ("object_revision", "1"),
+        ("object_revision", 0),
+        ("object_revision", -1),
+    ],
+)
+def test_first_ingress_projection_rejects_wrong_identity_or_revision_type(
+    first_ingress_harness: FirstIngressHarness,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    changed: object,
+) -> None:
+    """Unexpected projected-state shapes remain a fail-closed receipt barrier."""
+
+    original = SyncV2Store.get_object_state
+
+    def altered_state(
+        store: SyncV2Store,
+        dataset_id: str,
+        domain: str,
+        object_id: str,
+    ) -> SyncObjectState | None:
+        state = original(store, dataset_id, domain, object_id)  # type: ignore[arg-type]
+        if (
+            state is None
+            or dataset_id != "dataset-a"
+            or domain != "personal_context.record"
+            or object_id != first_ingress_harness.record.record_id
+        ):
+            return state
+        return replace(state, **{field: changed})
+
+    monkeypatch.setattr(SyncV2Store, "get_object_state", altered_state)
+    with first_ingress_harness.claimed_row() as row:
+        assert row.role == "semantic"
+        with pytest.raises(SyncStoreError, match="authority receipt is invalid"):
+            first_ingress_harness.stage(row)
+        assert first_ingress_harness.store.get_envelope_by_client_id(
+            "dataset-a", row.deterministic_envelope_id
+        ) is None
+        assert first_ingress_harness.source_row_state(row) == "pending"
 
 
 @pytest.mark.parametrize(

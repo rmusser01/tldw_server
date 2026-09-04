@@ -57,3 +57,13 @@ revision/hash from current projected state, made the same after-commit relay and
 exact-once pull pass. For cross-store callbacks, test the actual outer transaction
 ordering and use the store's projected head facts rather than assuming envelope
 terminal state or optional wire revision fields are already complete.
+
+**Follow-up (TASK-13170, 2026-09-04):** The original production-factory endpoint
+later proved that deriving the outgoing base was insufficient: receipt confirmation
+still compared authority lineage to the immutable envelope's absent wire revision,
+so repeated polls remained permanently pending. A real two-store test that asserted
+raw revision `None`, projected revision 1, and both semantic and manifest successors
+at lineage 1→2 caught the gap. When projected state substitutes for an omitted wire
+fact, use that same exact state consistently for both construction and confirmation
+inside the owning transaction; reject mismatched identity, cursor, hash, deletion,
+and malformed revision rather than partially mixing raw and projected facts.
