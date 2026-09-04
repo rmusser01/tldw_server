@@ -3641,7 +3641,9 @@ class SyncV2Service:
             state = dataset.metadata.get("personal_context")
             profile_id = state.get("profile_id") if isinstance(state, Mapping) else None
             personal_context_egress_authorized = (
-                personal_context_exchange is not None
+                _personal_context_exchange_is_active(
+                    dataset, personal_context_exchange
+                )
                 and _personal_context_link_is_complete(
                     self.store,
                     dataset,
@@ -3680,9 +3682,15 @@ class SyncV2Service:
                 for envelope in scan.visible_envelopes
             ]
             if relay_result is not None:
+                relay_watermarks = dict.fromkeys(streams, scan.raw_scan_watermark)
                 relay_continuation = PersonalContextRelayContinuation(
                     state=relay_result.continuation,
-                    scan_watermark=str(scan.raw_scan_watermark),
+                    scan_watermark=self._encode_pull_token(
+                        dataset_id=dataset_id,
+                        device_id=device_id,
+                        version_set=self._pull_version_set(device),
+                        watermarks=relay_watermarks,
+                    ),
                 )
             next_sequence = (
                 page[-1].server_sequence
@@ -3716,7 +3724,9 @@ class SyncV2Service:
             include_own_changes=include_own_changes,
             adapter_versions=[1],
             personal_context_egress_authorized=(
-                personal_context_exchange is not None
+                _personal_context_exchange_is_active(
+                    dataset, personal_context_exchange
+                )
                 and _personal_context_link_is_complete(
                     self.store,
                     dataset,
@@ -8270,7 +8280,9 @@ class SyncV2Service:
             page_limit=page_limit,
             include_own_changes=include_own_changes,
             personal_context_egress_authorized=(
-                personal_context_exchange is not None
+                _personal_context_exchange_is_active(
+                    dataset, personal_context_exchange
+                )
                 and _personal_context_link_is_complete(
                     self.store,
                     dataset,
@@ -9252,6 +9264,29 @@ def _personal_context_link_is_complete(
             integrity_key_id=state["integrity_key_id"],
             purge_generation=state["purge_generation"],
         )
+    )
+
+
+def _personal_context_exchange_is_active(
+    dataset: SyncDataset,
+    exchange: object | None,
+) -> bool:
+    """Match a supplied proof to the persisted active activation state exactly."""
+
+    if exchange is None:
+        return False
+    state = dataset.metadata.get("personal_context")
+    epoch = state.get("activation_epoch") if isinstance(state, Mapping) else None
+    token = state.get("continuity_token") if isinstance(state, Mapping) else None
+    supplied_epoch = getattr(exchange, "activation_epoch", None)
+    supplied_token = getattr(exchange, "continuity_token", None)
+    return bool(
+        isinstance(epoch, str)
+        and isinstance(token, str)
+        and isinstance(supplied_epoch, str)
+        and isinstance(supplied_token, str)
+        and hmac.compare_digest(epoch, supplied_epoch)
+        and hmac.compare_digest(token, supplied_token)
     )
 
 
