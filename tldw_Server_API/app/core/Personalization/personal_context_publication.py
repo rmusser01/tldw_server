@@ -15,7 +15,14 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
-from tldw_profile_core import ProfileManifest
+from tldw_profile_core import (
+    ProfileManifest,
+    ProfileProposal,
+    ProfileRecord,
+    ProfileScope,
+    RecordState,
+    canonical_bytes,
+)
 from tldw_profile_core.canonical import canonical_json_bytes
 
 from tldw_Server_API.app.core.Personalization.personal_context_crypto import (
@@ -717,6 +724,13 @@ class PersonalContextPublicationJournal:
         self._keys = keys
 
     @staticmethod
+    def _has_exact_integer_fields(
+        row: sqlite3.Row,
+        fields: Sequence[str],
+    ) -> bool:
+        return all(type(row[field]) is int for field in fields)
+
+    @staticmethod
     def _aad(
         *,
         profile_id: str,
@@ -1090,6 +1104,362 @@ class PersonalContextPublicationJournal:
         if updated.rowcount != 1:
             raise RuntimeError("publication row changed concurrently")
 
+    def _decrypt_canonical_object_row(self, row: sqlite3.Row) -> bytes:
+        """Authenticate one canonical repository row needed by legacy validation."""
+
+        if not self._has_exact_integer_fields(
+            row,
+            ("schema_version", "key_version", "payload_size_bytes"),
+        ):
+            raise EnvelopeAuthenticationError("canonical object authentication failed")
+        schema_version = int(row["schema_version"])
+        if schema_version != 1 or int(row["key_version"]) != self._keys.key_version:
+            raise EnvelopeAuthenticationError("canonical object authentication failed")
+        aad = canonical_json_bytes(
+            {
+                "envelope": "tldw-personal-context-server-v1",
+                "object_id": str(row["object_id"]),
+                "object_type": str(row["object_type"]),
+                "profile_id": str(row["profile_id"]),
+                "schema_version": schema_version,
+                "version_id": str(row["version_id"]),
+            }
+        )
+        plaintext = EnvelopeCipher(
+            self._keys.encryption_key,
+            key_version=self._keys.key_version,
+        ).decrypt(
+            EncryptedEnvelope(
+                algorithm=str(row["algorithm"]),
+                nonce=bytes(row["nonce"]),
+                wrapped_dek=bytes(row["wrapped_dek"]),
+                wrapped_dek_nonce=bytes(row["wrapped_dek_nonce"]),
+                ciphertext=bytes(row["ciphertext"]),
+                key_version=int(row["key_version"]),
+            ),
+            aad,
+        )
+        expected = "hmac-sha256-v1:" + hmac.new(
+            self._keys.integrity_key,
+            plaintext,
+            hashlib.sha256,
+        ).hexdigest()
+        if (
+            not hmac.compare_digest(expected, str(row["integrity_tag"]))
+            or len(plaintext) != int(row["payload_size_bytes"])
+        ):
+            raise EnvelopeAuthenticationError("canonical object authentication failed")
+        return plaintext
+
+    @staticmethod
+    def _source_identity(
+        domain: str,
+        canonical: bytes,
+    ) -> tuple[str, str, str | None, str, str]:
+        """Parse one canonical source into its expected journal and wire identity."""
+
+        if domain == "personal_context.record":
+            value = ProfileRecord.model_validate_json(canonical)
+            if canonical_bytes(value) != canonical:
+                raise ValueError("non-canonical source")
+            operation = "tombstone" if value.state is RecordState.DELETED else "upsert"
+            return (
+                value.profile_id,
+                value.record_id,
+                value.version_id,
+                operation,
+                value.version_id,
+            )
+        if domain == "personal_context.scope":
+            value = ProfileScope.model_validate_json(canonical)
+            if canonical_bytes(value) != canonical:
+                raise ValueError("non-canonical source")
+            return value.profile_id, value.scope_id, value.version_id, "upsert", value.version_id
+        if domain == "personal_context.proposal":
+            value = ProfileProposal.model_validate_json(canonical)
+            if canonical_bytes(value) != canonical:
+                raise ValueError("non-canonical source")
+            wire_version = "sync-proposal-sha256:" + hashlib.sha256(canonical).hexdigest()
+            return value.profile_id, value.proposal_id, None, "upsert", wire_version
+        if domain == "personal_context.manifest":
+            value = ProfileManifest.model_validate_json(canonical)
+            if canonical_bytes(value) != canonical:
+                raise ValueError("non-canonical source")
+            return (
+                value.profile_id,
+                value.profile_id,
+                value.current_version_id,
+                "upsert",
+                value.current_version_id,
+            )
+        raise ValueError("unsupported source domain")
+
+    def _validate_legacy_receipt_source(
+        self,
+        connection: sqlite3.Connection,
+        receipt: sqlite3.Row,
+        identity: IngressIdentity,
+    ) -> str:
+        """Return the source-proven legacy wire version or fail content-free."""
+
+        error = "ingress identity reused with a different payload"
+        try:
+            batches = connection.execute(
+                """
+                SELECT * FROM personal_context_publication_batches
+                WHERE publication_batch_id = ? AND profile_publication_sequence = ?
+                LIMIT 2
+                """,
+                (
+                    receipt["publication_batch_id"],
+                    receipt["profile_publication_sequence"],
+                ),
+            ).fetchall()
+            rows = connection.execute(
+                """
+                SELECT * FROM personal_context_publication_rows
+                WHERE publication_batch_id = ? AND profile_publication_sequence = ?
+                ORDER BY batch_ordinal
+                LIMIT 3
+                """,
+                (
+                    receipt["publication_batch_id"],
+                    receipt["profile_publication_sequence"],
+                ),
+            ).fetchall()
+            if len(batches) != 1 or len(rows) not in {1, 2}:
+                raise ValueError(error)
+            batch = batches[0]
+            if not self._has_exact_integer_fields(
+                batch,
+                ("profile_publication_sequence", "purge_generation", "batch_size"),
+            ):
+                raise ValueError(error)
+            for publication_row in rows:
+                if not self._has_exact_integer_fields(
+                    publication_row,
+                    (
+                        "profile_publication_sequence",
+                        "batch_ordinal",
+                        "batch_size",
+                        "purge_generation",
+                        "key_version",
+                        "payload_size_bytes",
+                    ),
+                ) or (
+                    publication_row["sync_server_cursor"] is not None
+                    and type(publication_row["sync_server_cursor"]) is not int
+                ):
+                    raise ValueError(error)
+            manifest_rows = [row for row in rows if str(row["role"]) == "manifest"]
+            result_rows = [
+                row
+                for row in rows
+                if str(row["opaque_object_id"]) == str(receipt["resulting_object_id"])
+                and str(row["opaque_version_id"])
+                == str(receipt["resulting_version_id"])
+            ]
+            if len(manifest_rows) != 1 or len(result_rows) != 1:
+                raise ValueError(error)
+            source_row = result_rows[0]
+            manifest_row = manifest_rows[0]
+            source_is_manifest = (
+                int(source_row["batch_ordinal"]) == int(manifest_row["batch_ordinal"])
+            )
+
+            decrypted: dict[int, tuple[str, bytes]] = {}
+            for publication_row in rows:
+                domain, canonical = self.decrypt_row(publication_row)
+                payload = canonical_json_bytes(
+                    {"canonical": canonical.decode("utf-8"), "domain": domain}
+                )
+                if len(payload) != int(publication_row["payload_size_bytes"]):
+                    raise ValueError(error)
+                decrypted[int(publication_row["batch_ordinal"])] = (domain, canonical)
+            if len(decrypted) != len(rows):
+                raise ValueError(error)
+
+            manifest_domain, manifest_canonical = decrypted[int(manifest_row["batch_ordinal"])]
+            manifest = ProfileManifest.model_validate_json(manifest_canonical)
+            if (
+                manifest_domain != "personal_context.manifest"
+                or canonical_bytes(manifest) != manifest_canonical
+                or str(manifest_row["operation"]) != "upsert"
+                or str(manifest_row["opaque_object_id"]) != manifest.profile_id
+                or str(manifest_row["opaque_version_id"]) != manifest.current_version_id
+                or int(receipt["resulting_manifest_revision"]) != manifest.revision
+                or str(receipt["resulting_manifest_version_id"])
+                != manifest.current_version_id
+            ):
+                raise ValueError(error)
+
+            source_domain, source_canonical = decrypted[int(source_row["batch_ordinal"])]
+            profile_id, object_id, object_version, operation, wire_version = (
+                self._source_identity(source_domain, source_canonical)
+            )
+            if (
+                str(source_row["role"])
+                != ("manifest" if source_is_manifest else "semantic")
+                or str(source_row["operation"]) != operation
+                or str(source_row["opaque_object_id"]) != object_id
+                or (
+                    object_version is not None
+                    and str(source_row["opaque_version_id"]) != object_version
+                )
+                or str(receipt["resulting_object_id"]) != object_id
+                or str(receipt["resulting_version_id"])
+                != str(source_row["opaque_version_id"])
+                or not hmac.compare_digest(
+                    "sha256:" + hashlib.sha256(source_canonical).hexdigest(),
+                    str(receipt["canonical_payload_digest"]),
+                )
+                or not hmac.compare_digest(
+                    str(receipt["canonical_payload_digest"]),
+                    identity.canonical_payload_digest,
+                )
+                or wire_version != identity.wire_entity_version
+            ):
+                raise ValueError(error)
+
+            expected_size = 1 if source_is_manifest else 2
+            row_states = {str(row["row_state"]) for row in rows}
+            if (
+                profile_id != manifest.profile_id
+                or int(source_row["batch_ordinal"]) != 0
+                or int(manifest_row["batch_ordinal"]) != expected_size - 1
+                or str(batch["profile_id"]) != profile_id
+                or str(batch["publication_batch_id"])
+                != self._batch_id(
+                    profile_id,
+                    int(receipt["profile_publication_sequence"]),
+                    int(receipt["purge_generation"]),
+                )
+                or int(batch["purge_generation"]) != int(receipt["purge_generation"])
+                or int(batch["batch_size"]) != expected_size
+                or len(rows) != expected_size
+                or manifest.purge_generation != int(receipt["purge_generation"])
+                or any(
+                    str(row["profile_id"]) != profile_id
+                    or str(row["publication_batch_id"])
+                    != str(batch["publication_batch_id"])
+                    or int(row["profile_publication_sequence"])
+                    != int(receipt["profile_publication_sequence"])
+                    or int(row["purge_generation"]) != int(receipt["purge_generation"])
+                    or int(row["batch_size"]) != expected_size
+                    or int(row["batch_ordinal"]) not in range(expected_size)
+                    or str(row["deterministic_envelope_id"])
+                    != self._envelope_id(
+                        str(batch["publication_batch_id"]),
+                        int(row["batch_ordinal"]),
+                    )
+                    for row in rows
+                )
+                or any(
+                    (
+                        str(row["row_state"]) == "pending"
+                        and row["sync_server_cursor"] is not None
+                    )
+                    or (
+                        str(row["row_state"]) in {"staged", "acknowledged"}
+                        and row["sync_server_cursor"] is None
+                    )
+                    for row in rows
+                )
+                or (
+                    str(batch["status"]) == "pending"
+                    and row_states != {"pending"}
+                )
+                or (
+                    str(batch["status"]) == "complete"
+                    and row_states != {"acknowledged"}
+                )
+            ):
+                raise ValueError(error)
+
+            historical_rows = connection.execute(
+                """
+                SELECT * FROM personal_context_object_versions
+                WHERE profile_id = ? AND object_type = 'manifest'
+                  AND object_id = ? AND version_id = ?
+                LIMIT 2
+                """,
+                (profile_id, profile_id, manifest.current_version_id),
+            ).fetchall()
+            current_rows = connection.execute(
+                """
+                SELECT versions.*
+                FROM personal_context_object_heads AS heads
+                JOIN personal_context_object_versions AS versions
+                  ON versions.profile_id = heads.profile_id
+                 AND versions.object_type = heads.object_type
+                 AND versions.object_id = heads.object_id
+                 AND versions.version_id = heads.current_version_id
+                WHERE heads.profile_id = ? AND heads.object_type = 'manifest'
+                  AND heads.object_id = ?
+                LIMIT 2
+                """,
+                (profile_id, profile_id),
+            ).fetchall()
+            if len(historical_rows) != 1 or len(current_rows) != 1:
+                raise ValueError(error)
+            historical_row = historical_rows[0]
+            current_row = current_rows[0]
+            historical = ProfileManifest.model_validate_json(
+                self._decrypt_canonical_object_row(historical_row)
+            )
+            current = ProfileManifest.model_validate_json(
+                self._decrypt_canonical_object_row(current_row)
+            )
+            if (
+                historical != manifest
+                or str(historical_row["version_id"]) != manifest.current_version_id
+                or current.profile_id != manifest.profile_id
+                or current.current_version_id != str(current_row["version_id"])
+                or current.created_at != manifest.created_at
+                or current.revision < manifest.revision
+                or current.updated_at < manifest.updated_at
+                or current.purge_generation < manifest.purge_generation
+                or (
+                    current.revision == manifest.revision
+                    and current.current_version_id != manifest.current_version_id
+                )
+            ):
+                raise ValueError(error)
+
+            parent_version = historical_row["parent_version_id"]
+            if manifest.revision == 0:
+                if parent_version is not None:
+                    raise ValueError(error)
+            else:
+                parent_rows = connection.execute(
+                    """
+                    SELECT * FROM personal_context_object_versions
+                    WHERE profile_id = ? AND object_type = 'manifest'
+                      AND object_id = ? AND version_id = ?
+                    LIMIT 2
+                    """,
+                    (profile_id, profile_id, parent_version),
+                ).fetchall()
+                if len(parent_rows) != 1:
+                    raise ValueError(error)
+                parent = ProfileManifest.model_validate_json(
+                    self._decrypt_canonical_object_row(parent_rows[0])
+                )
+                if (
+                    parent.current_version_id != parent_version
+                    or parent.profile_id != manifest.profile_id
+                    or parent.revision + 1 != manifest.revision
+                    or parent.created_at != manifest.created_at
+                    or parent.updated_at > manifest.updated_at
+                    or parent.purge_generation > manifest.purge_generation
+                ):
+                    raise ValueError(error)
+            return wire_version
+        except Exception as exc:  # noqa: BLE001 - legacy repair must fail closed.
+            if isinstance(exc, ValueError) and str(exc) == error:
+                raise
+            raise ValueError(error) from None
+
     def read_ingress_receipt(
         self,
         connection: sqlite3.Connection,
@@ -1106,66 +1476,43 @@ class PersonalContextPublicationJournal:
         ).fetchone()
         if row is None:
             return None
-        old_identity_matches = (
-            str(row["dataset_id"]) == identity.dataset_id
-            and str(row["device_id"]) == identity.device_id
-            and str(row["client_envelope_id"]) == identity.client_envelope_id
-            and str(row["canonical_payload_digest"])
-            == identity.canonical_payload_digest
-            and int(row["purge_generation"]) == identity.purge_generation
-            and str(row["receipt_id"]) == self._receipt_id(identity)
-            and bool(str(row["resulting_object_id"]))
-            and bool(str(row["resulting_version_id"]))
-            and int(row["resulting_manifest_revision"]) >= 0
-            and bool(str(row["resulting_manifest_version_id"]))
-            and bool(str(row["publication_batch_id"]))
-            and int(row["profile_publication_sequence"]) >= 1
-        )
-        if not old_identity_matches:
-            raise ValueError("ingress identity reused with a different payload")
-        source_row = connection.execute(
-            """
-            SELECT result.*
-            FROM personal_context_publication_batches AS batch
-            JOIN personal_context_publication_rows AS result
-              ON result.publication_batch_id = batch.publication_batch_id
-             AND result.profile_publication_sequence = batch.profile_publication_sequence
-            WHERE batch.publication_batch_id = ?
-              AND batch.profile_publication_sequence = ?
-              AND batch.purge_generation = ?
-              AND result.opaque_object_id = ?
-              AND result.opaque_version_id = ?
-              AND EXISTS (
-                    SELECT 1 FROM personal_context_publication_rows AS manifest
-                    WHERE manifest.publication_batch_id = batch.publication_batch_id
-                      AND manifest.profile_publication_sequence = batch.profile_publication_sequence
-                      AND manifest.role = 'manifest'
-                      AND manifest.opaque_version_id = ?
-              )
-            LIMIT 1
-            """,
+        if not self._has_exact_integer_fields(
+            row,
             (
-                row["publication_batch_id"],
-                row["profile_publication_sequence"],
-                row["purge_generation"],
-                row["resulting_object_id"],
-                row["resulting_version_id"],
-                row["resulting_manifest_version_id"],
+                "purge_generation",
+                "resulting_manifest_revision",
+                "profile_publication_sequence",
             ),
-        ).fetchone()
-        if source_row is None:
+        ):
             raise ValueError("ingress identity reused with a different payload")
         try:
-            _domain, canonical = self.decrypt_row(source_row)
-        except Exception as exc:  # noqa: BLE001 - legacy backfill must fail closed.
-            raise ValueError(
-                "ingress identity reused with a different payload"
-            ) from exc
-        source_digest = "sha256:" + hashlib.sha256(canonical).hexdigest()
-        if not hmac.compare_digest(source_digest, identity.canonical_payload_digest):
+            old_identity_matches = (
+                str(row["dataset_id"]) == identity.dataset_id
+                and str(row["device_id"]) == identity.device_id
+                and str(row["client_envelope_id"]) == identity.client_envelope_id
+                and str(row["canonical_payload_digest"])
+                == identity.canonical_payload_digest
+                and int(row["purge_generation"]) == identity.purge_generation
+                and str(row["receipt_id"]) == self._receipt_id(identity)
+                and bool(str(row["resulting_object_id"]))
+                and bool(str(row["resulting_version_id"]))
+                and int(row["resulting_manifest_revision"]) >= 0
+                and bool(str(row["resulting_manifest_version_id"]))
+                and bool(str(row["publication_batch_id"]))
+                and int(row["profile_publication_sequence"]) >= 1
+            )
+        except (KeyError, TypeError, ValueError):
+            raise ValueError("ingress identity reused with a different payload") from None
+        if not old_identity_matches:
             raise ValueError("ingress identity reused with a different payload")
+        source_wire_version = self._validate_legacy_receipt_source(
+            connection,
+            row,
+            identity,
+        )
         stored_wire_version = str(row["wire_entity_version"])
         if stored_wire_version == "":
+            stored_wire_version = source_wire_version
             updated = connection.execute(
                 """
                 UPDATE personal_context_ingress_receipts
@@ -1174,7 +1521,7 @@ class PersonalContextPublicationJournal:
                   AND wire_entity_version = ''
                 """,
                 (
-                    identity.wire_entity_version,
+                    stored_wire_version,
                     identity.dataset_id,
                     identity.device_id,
                     identity.client_envelope_id,
@@ -1182,8 +1529,10 @@ class PersonalContextPublicationJournal:
             )
             if updated.rowcount != 1:
                 raise ValueError("ingress identity reused with a different payload")
-            stored_wire_version = identity.wire_entity_version
-        if stored_wire_version != identity.wire_entity_version:
+        if (
+            stored_wire_version != identity.wire_entity_version
+            or stored_wire_version != source_wire_version
+        ):
             raise ValueError("ingress identity reused with a different payload")
         return CanonicalApplyReceipt(
             resulting_object_id=str(row["resulting_object_id"]),
