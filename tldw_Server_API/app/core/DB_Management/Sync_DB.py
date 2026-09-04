@@ -8370,25 +8370,21 @@ class SyncDatabase:
                 raise SyncStoreError("personal_context_authority_cancel_raced")
             return "removed"
 
-    def shred_personal_context_profile_history(
+    def _shred_authorized_personal_context_profile_history(
         self,
-        *,
-        dataset_id: str,
-        user_id: str,
-        profile_id: str,
-        old_generation_through: int,
-        purge_generation: int,
+        claim: object,
     ) -> PersonalContextHistoryShredReceipt:
         """Irreversibly remove one profile's readable old-generation Sync material."""
 
-        if (
-            not dataset_id
-            or not user_id
-            or not profile_id
-            or old_generation_through < 0
-            or purge_generation != old_generation_through + 1
-        ):
-            raise SyncStoreError("Personal Context cleanup authority is invalid")
+        try:
+            claim._require_database_execution(self)
+            dataset_id = claim.dataset_id
+            user_id = claim.user_id
+            profile_id = claim.profile_id
+            old_generation_through = claim.old_generation_through
+            purge_generation = claim.purge_generation
+        except (AttributeError, PermissionError) as exc:
+            raise SyncStoreError("Personal Context cleanup authority is invalid") from exc
         if self.backend_type != BackendType.SQLITE:
             raise SyncStoreError(
                 "Personal Context cleanup needs a reviewed backend retention policy"
@@ -8396,9 +8392,7 @@ class SyncDatabase:
         connection = self.backend.get_pool().get_connection()
         if not isinstance(connection, sqlite3.Connection):
             raise SyncStoreError("Personal Context SQLite cleanup connection is invalid")
-        secure_delete = connection.execute("PRAGMA secure_delete = ON").fetchone()
-        if secure_delete is None or int(secure_delete[0]) != 1:
-            raise SyncStoreError("Personal Context SQLite secure delete is unavailable")
+        self._require_personal_context_retention_prerequisites(connection)
 
         personal_context_domains = tuple(sorted(PERSONAL_CONTEXT_SYNC_DOMAINS))
         domain_placeholders = ", ".join("?" for _ in personal_context_domains)
@@ -8639,15 +8633,72 @@ class SyncDatabase:
                 if updated_dataset.rowcount != 1:
                     raise SyncStoreError("Personal Context cleanup generation raced")
 
-        checkpoint = connection.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
-        if checkpoint is None or int(checkpoint[0]) != 0:
-            raise SyncStoreError("Personal Context cleanup WAL checkpoint is incomplete")
+        self._maintain_personal_context_retention_storage(connection)
         return PersonalContextHistoryShredReceipt(
             dataset_id=dataset_id,
             profile_id=profile_id,
             old_generation_through=old_generation_through,
             purge_generation=purge_generation,
         )
+
+    def _require_personal_context_retention_prerequisites(
+        self,
+        connection: sqlite3.Connection,
+    ) -> None:
+        """Require verified secure deletion and WAL before destructive cleanup."""
+
+        try:
+            secure_delete = connection.execute("PRAGMA secure_delete = ON").fetchone()
+            journal_mode = connection.execute("PRAGMA journal_mode").fetchone()
+        except (sqlite3.Error, TypeError, ValueError) as exc:
+            raise SyncStoreError(
+                "Personal Context SQLite retention prerequisites are unavailable"
+            ) from exc
+        if secure_delete is None or int(secure_delete[0]) != 1:
+            raise SyncStoreError("Personal Context SQLite secure delete is unavailable")
+        if journal_mode is None or str(journal_mode[0]).lower() != "wal":
+            raise SyncStoreError("Personal Context SQLite WAL mode is required")
+
+    def _maintain_personal_context_retention_storage(
+        self,
+        connection: sqlite3.Connection,
+    ) -> None:
+        """Rewrite the main DB, empty its freelist, and truncate all WAL frames."""
+
+        self._require_personal_context_retention_prerequisites(connection)
+        try:
+            connection.execute("VACUUM")
+            freelist = connection.execute("PRAGMA freelist_count").fetchone()
+            prior_timeout = connection.execute("PRAGMA busy_timeout").fetchone()
+            connection.execute("PRAGMA busy_timeout = 0")
+            try:
+                checkpoint = connection.execute(
+                    "PRAGMA wal_checkpoint(TRUNCATE)"
+                ).fetchone()
+            finally:
+                timeout = 10_000 if prior_timeout is None else int(prior_timeout[0])
+                connection.execute(f"PRAGMA busy_timeout = {timeout}")
+            database_rows = connection.execute("PRAGMA database_list").fetchall()
+            main_path = next(
+                (str(row[2]) for row in database_rows if str(row[1]) == "main"),
+                "",
+            )
+            wal_path = Path(f"{main_path}-wal") if main_path else None
+            wal_is_empty = (
+                wal_path is None
+                or not wal_path.exists()
+                or wal_path.stat().st_size == 0
+            )
+        except (OSError, sqlite3.Error, TypeError, ValueError) as exc:
+            raise SyncStoreError(
+                "Personal Context SQLite retention maintenance failed"
+            ) from exc
+        if freelist is None or int(freelist[0]) != 0:
+            raise SyncStoreError("Personal Context cleanup freelist is not empty")
+        if checkpoint is None or tuple(map(int, checkpoint)) != (0, 0, 0):
+            raise SyncStoreError("Personal Context cleanup WAL checkpoint is incomplete")
+        if not wal_is_empty:
+            raise SyncStoreError("Personal Context cleanup WAL artifact is not empty")
 
     def mark_personal_context_authority_applied(
         self,

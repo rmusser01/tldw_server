@@ -447,14 +447,50 @@ class PersonalizationDB:
             return False
 
     def checkpoint_retention_history(self) -> bool:
-        """Require old SQLite WAL frames to leave the application-owned store."""
+        """Rewrite free pages and require an empty application-owned WAL."""
 
         with self._lock:
             connection = self._connect()
             try:
-                return self._truncate_wal_if_possible(connection)
+                if not self.retention_prerequisites_verified(connection):
+                    return False
+                connection.execute("VACUUM")
+                freelist = connection.execute("PRAGMA freelist_count").fetchone()
+                if freelist is None or int(freelist[0]) != 0:
+                    return False
+                prior_timeout = connection.execute("PRAGMA busy_timeout").fetchone()
+                connection.execute("PRAGMA busy_timeout = 0")
+                try:
+                    checkpoint = connection.execute(
+                        "PRAGMA wal_checkpoint(TRUNCATE)"
+                    ).fetchone()
+                finally:
+                    timeout = 5000 if prior_timeout is None else int(prior_timeout[0])
+                    connection.execute(f"PRAGMA busy_timeout = {timeout}")
+                if checkpoint is None or tuple(map(int, checkpoint)) != (0, 0, 0):
+                    return False
+                wal_path = Path(f"{self.db_path}-wal")
+                return not wal_path.exists() or wal_path.stat().st_size == 0
+            except (OSError, sqlite3.Error, TypeError, ValueError):
+                return False
             finally:
                 connection.close()
+
+    @staticmethod
+    def retention_prerequisites_verified(connection: sqlite3.Connection) -> bool:
+        """Return whether destructive retention work is safe on this connection."""
+
+        try:
+            secure_delete = connection.execute("PRAGMA secure_delete").fetchone()
+            journal_mode = connection.execute("PRAGMA journal_mode").fetchone()
+            return (
+                secure_delete is not None
+                and int(secure_delete[0]) == 1
+                and journal_mode is not None
+                and str(journal_mode[0]).lower() == "wal"
+            )
+        except (sqlite3.Error, TypeError, ValueError):
+            return False
 
     def _migrate_schema(self) -> None:
         """Add columns that may be missing in databases created before schema updates."""

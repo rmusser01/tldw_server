@@ -190,19 +190,6 @@ class PersonalContextService:
             return "failed"
         return "complete"
 
-    def recover_direct_purge_cleanup(self, *, limit: int = 100) -> int:
-        """Run the dedicated recovery path for already-authorized cleanup debt."""
-
-        if limit < 1 or limit > 1_000:
-            raise ValueError("cleanup recovery limit must be between 1 and 1000")
-        completed = 0
-        for _attempt in range(limit):
-            outcome = self._run_direct_purge_cleanup()
-            if outcome != "complete":
-                break
-            completed += 1
-        return completed
-
     def _relay_after_commit(self, profile_id: str) -> None:
         """Schedule recovery only after the canonical transaction committed."""
 
@@ -1353,7 +1340,7 @@ class PersonalContextService:
             raise ValueError("purge mode must be everywhere")
         if confirmation != "DELETE EVERYWHERE":
             raise ValueError("confirmation must be exactly 'DELETE EVERYWHERE'")
-        manifest = self._writable_manifest()
+        manifest = self._manifest()
         if manifest.purge_generation != expected_purge_generation:
             existing_intent = self._repository.direct_purge_cleanup(
                 manifest.profile_id,
@@ -1371,6 +1358,8 @@ class PersonalContextService:
                 self._relay_after_commit(manifest.profile_id)
                 return manifest
             raise ProfileConflictError("Personal context purge generation changed")
+        if not self._repository.list_scopes(manifest.profile_id, limit=1):
+            raise ProfileUnsupportedOperationError("profile_purge_pending")
         next_manifest = self._next_manifest(manifest)
         barrier = ProfileManifest.model_validate(
             {

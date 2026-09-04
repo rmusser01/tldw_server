@@ -9,7 +9,16 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.api.v1.API_Deps.personal_context_deps import (
+    get_personal_context_service,
+)
+from tldw_Server_API.app.api.v1.endpoints.personal_context import router
+from tldw_Server_API.app.core.DB_Management.Personal_Context_Repository import (
+    DirectPurgeCleanupIntent,
+)
 from tldw_Server_API.app.core.DB_Management.Personalization_DB import (
     PersonalizationDB,
 )
@@ -52,6 +61,9 @@ _CONFLICT_CANARY = "conflict-retention-canary-771c341a"
 _KEY_CANARY = "key-retention-canary-d158e4bb"
 _ORPHAN_CANARY = "orphan-retention-canary-e2e81718"
 _RECEIPT_CANARY = "receipt-retention-canary-8251be46"
+_CANONICAL_RECEIPT_CANARY = "canonical-receipt-retention-canary-b819d05a"
+_FREELIST_CANARY = "freelist-retention-canary-1d9a967c"
+_SECOND_DATASET_CANARY = "second-dataset-retention-canary-f3f319ad"
 _SOURCE_CANARY = "source-retention-canary-70eaf67d"
 
 
@@ -92,14 +104,39 @@ def _intent_rows(database: PersonalizationDB) -> list[sqlite3.Row]:
         ).fetchall()
 
 
+def _sqlite_artifact_bytes(*database_paths: Path) -> bytes:
+    """Read active application-owned SQLite artifacts for opaque canary checks."""
+
+    return b"".join(
+        artifact.read_bytes()
+        for database_path in database_paths
+        for artifact in (
+            database_path,
+            Path(f"{database_path}-wal"),
+            Path(f"{database_path}-shm"),
+        )
+        if artifact.exists()
+    )
+
+
+def _sqlite_artifacts_contain(database_path: Path, canary: str) -> bool:
+    """Check opaque marker presence without exposing its value on assertion failure."""
+
+    return canary.encode() in _sqlite_artifact_bytes(database_path)
+
+
 def _install_cleanup_callback(runtime: AuthorityHarness) -> None:
-    runtime.canonical.set_after_commit_purge_cleanup(
-        lambda intent: runtime.service.shred_authorized_personal_context_history(
+    def cleanup(intent: DirectPurgeCleanupIntent) -> None:
+        claim = runtime.canonical._repository.verify_direct_purge_cleanup_claim(
             intent,
             user_id="user-a",
             dataset_id="dataset-a",
+            store=runtime.store,
+            database=runtime.store.db,
         )
-    )
+        runtime.service.shred_authorized_personal_context_history(claim)
+
+    runtime.canonical.set_after_commit_purge_cleanup(cleanup)
 
 
 def _stage_retention_canaries(runtime: AuthorityHarness) -> tuple[int, int, sqlite3.Row]:
@@ -129,8 +166,48 @@ def _stage_retention_canaries(runtime: AuthorityHarness) -> tuple[int, int, sqli
                ORDER BY rows.profile_publication_sequence DESC LIMIT 1""",
             (runtime.manifest.profile_id,),
         ).fetchone()
+        source_manifest_row = connection.execute(
+            """SELECT * FROM personal_context_publication_rows
+               WHERE profile_id = ? AND profile_publication_sequence = ?
+                 AND publication_batch_id = ? AND role = 'manifest'""",
+            (
+                runtime.manifest.profile_id,
+                source_before["profile_publication_sequence"],
+                source_before["publication_batch_id"],
+            ),
+        ).fetchone()
     assert source_before is not None
+    assert source_manifest_row is not None
     assert PersonalContextPublicationJournal(keys).decrypt_row(source_before)[0] == "personal_context.record"
+    with runtime.personal_db.transaction() as connection:
+        connection.execute(
+            """
+            INSERT INTO personal_context_ingress_receipts(
+                dataset_id, device_id, client_envelope_id,
+                canonical_payload_digest, purge_generation, wire_entity_version,
+                resulting_object_id, resulting_version_id,
+                resulting_manifest_revision, resulting_manifest_version_id,
+                publication_batch_id, profile_publication_sequence,
+                receipt_id, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "dataset-a",
+                "device-a",
+                "canonical-old-ingress",
+                _CANONICAL_RECEIPT_CANARY,
+                0,
+                "canonical-old-wire-version",
+                str(source_before["opaque_object_id"]),
+                str(source_before["opaque_version_id"]),
+                1,
+                str(source_manifest_row["opaque_version_id"]),
+                str(source_before["publication_batch_id"]),
+                int(source_before["profile_publication_sequence"]),
+                "canonical-old-receipt",
+                "2026-09-04T00:00:00Z",
+            ),
+        )
 
     _drain(runtime)
     authority = runtime.store.list_envelopes_for_entity(
@@ -292,6 +369,74 @@ def _stage_retention_canaries(runtime: AuthorityHarness) -> tuple[int, int, sqli
     return authority_cursor, stored_ingress.server_sequence, source_before
 
 
+def _stage_dataset_canary(
+    runtime: AuthorityHarness,
+    *,
+    dataset_id: str,
+    client_envelope_id: str,
+    canary: str,
+) -> int:
+    """Stage one protected old-generation envelope in an enrolled dataset."""
+
+    dataset = runtime.store.get_dataset(dataset_id)
+    envelope = SyncEnvelopeCreate(
+        dataset_id=dataset_id,
+        client_envelope_id=client_envelope_id,
+        device_id="device-a",
+        domain="personal_context.record",
+        operation="upsert",
+        object_id=f"{client_envelope_id}-object",
+        object_revision=1,
+        schema_version=1,
+        adapter_version=1,
+        payload={"opaque": "placeholder"},
+        payload_hash="hmac-sha256-v1:" + "0" * 64,
+        payload_size_bytes=24,
+        entity_version=f"{client_envelope_id}-version",
+        encryption_metadata={"policy": "server_trusted_v1"},
+        routing_metadata={
+            "profile_id": runtime.manifest.profile_id,
+            "integrity_key_id": dataset.metadata["personal_context"][
+                "integrity_key_id"
+            ],
+            "purge_generation": 0,
+            "personal_context_authority": PersonalContextAuthorityMetadata(
+                role="client_ingress"
+            ).model_dump(mode="json"),
+        },
+    )
+    protected = runtime.service._protect_personal_context_for_storage(dataset, envelope)
+    stored = runtime.store.insert_envelope(protected)
+    with runtime.store.db.backend.transaction() as connection:
+        updated = runtime.store.db.execute(
+            """UPDATE sync_envelopes
+               SET payload_ciphertext = ?, encryption_metadata_json = ?
+               WHERE dataset_id = ? AND server_sequence = ?""",
+            (
+                canary,
+                json.dumps(
+                    {
+                        "personal_context_at_rest": {
+                            "version": 1,
+                            "algorithm": "AES-256-GCM",
+                            "nonce": canary + "-nonce",
+                            "wrapped_dek": canary + "-dek",
+                            "wrapped_dek_nonce": canary + "-dek-nonce",
+                            "key_version": 1,
+                        }
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+                dataset_id,
+                stored.server_sequence,
+            ),
+            connection=connection,
+        )
+        assert updated.rowcount == 1
+    return stored.server_sequence
+
+
 def test_only_confirmed_direct_purge_mints_cleanup_authority(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -369,6 +514,73 @@ def test_remote_purge_application_never_mints_cleanup_authority(
     assert _intent_rows(runtime.personal_db) == []
 
 
+def test_expired_verified_claim_cannot_execute_or_complete_cleanup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = AuthorityHarness(tmp_path, monkeypatch)
+    runtime.canonical.purge_profile(
+        mode="everywhere",
+        confirmation="DELETE EVERYWHERE",
+        expected_purge_generation=0,
+    )
+    repository = runtime.canonical._repository
+    intent = repository.claim_direct_purge_cleanup(owner_token="expired-owner")
+    assert intent is not None
+    claim = repository.verify_direct_purge_cleanup_claim(
+        intent,
+        user_id="user-a",
+        dataset_id="dataset-a",
+        store=runtime.store,
+        database=runtime.store.db,
+    )
+    with runtime.personal_db.transaction(immediate=True) as connection:
+        connection.execute(
+            """UPDATE personal_context_purge_cleanup_intents
+               SET claim_expires_at_ns = 0 WHERE intent_id = ?""",
+            (intent.intent_id,),
+        )
+
+    with pytest.raises(SyncStoreError, match="unauthorized"):
+        runtime.service.shred_authorized_personal_context_history(claim)
+    with pytest.raises(ProfileIntegrityError, match="lost ownership"):
+        repository.complete_direct_purge_cleanup(intent)
+
+
+def test_forged_same_profile_claim_cannot_execute_remote_purge_cleanup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = AuthorityHarness(tmp_path, monkeypatch)
+    authority_cursor, _ingress_cursor, _source = _stage_retention_canaries(runtime)
+    runtime.canonical.apply_sync_object(
+        domain="personal_context.purge",
+        value={
+            "schema_version": 1,
+            "profile_id": runtime.manifest.profile_id,
+            "purge_generation": 1,
+        },
+        actor_type="sync",
+        actor_id="future-signed-purge",
+    )
+    assert _intent_rows(runtime.personal_db) == []
+
+    forged = DirectPurgeCleanupIntent(
+        intent_id="forged-remote-cleanup",
+        profile_id=runtime.manifest.profile_id,
+        old_generation_through=0,
+        purge_generation=1,
+        state="claimed",
+        owner_token="forged-owner",
+    )
+    with pytest.raises(SyncStoreError, match="unauthorized"):
+        runtime.service.shred_authorized_personal_context_history(forged)
+
+    retained = runtime.store.get_envelope_by_server_cursor(authority_cursor)
+    assert retained is not None
+    assert _matches_canary(retained.payload_ciphertext, _AUTHORITY_CANARY)
+
+
 def test_cleanup_failure_is_restartable_but_generic_relay_and_scan_are_non_destructive(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -408,15 +620,357 @@ def test_cleanup_failure_is_restartable_but_generic_relay_and_scan_are_non_destr
     restarted = PersonalContextService(
         PersonalContextRepository(PersonalizationDB.for_path(runtime.personal_db.db_path))
     )
-    restarted.set_after_commit_purge_cleanup(
-        lambda intent: runtime.service.shred_authorized_personal_context_history(
+
+    def cleanup(intent: DirectPurgeCleanupIntent) -> None:
+        claim = restarted._repository.verify_direct_purge_cleanup_claim(
             intent,
             user_id="user-a",
             dataset_id="dataset-a",
+            store=runtime.store,
+            database=runtime.store.db,
+        )
+        runtime.service.shred_authorized_personal_context_history(claim)
+
+    restarted.set_after_commit_purge_cleanup(cleanup)
+    recovered = restarted.purge_profile(
+        mode="everywhere",
+        confirmation="DELETE EVERYWHERE",
+        expected_purge_generation=0,
+    )
+    assert recovered.purge_generation == 1
+    assert _intent_rows(runtime.personal_db)[0]["state"] == "complete"
+
+
+def test_restarted_endpoint_exact_direct_purge_retry_reclaims_expired_cleanup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = AuthorityHarness(tmp_path, monkeypatch)
+    _stage_retention_canaries(runtime)
+
+    def fail_cleanup(_intent: DirectPurgeCleanupIntent) -> None:
+        raise RuntimeError("cleanup unavailable")
+
+    runtime.canonical.set_after_commit_purge_cleanup(fail_cleanup)
+    app = FastAPI()
+    app.include_router(router, prefix="/api/v1/personal-context")
+    app.dependency_overrides[get_personal_context_service] = lambda: runtime.canonical
+    request = {
+        "mode": "everywhere",
+        "confirmation": "DELETE EVERYWHERE",
+        "expected_purge_generation": 0,
+    }
+
+    with TestClient(app) as client:
+        first = client.post("/api/v1/personal-context/purge", json=request)
+        assert first.status_code == 200
+        abandoned = runtime.canonical._repository.claim_direct_purge_cleanup(
+            owner_token="abandoned-owner"
+        )
+        assert abandoned is not None
+        with runtime.personal_db.transaction(immediate=True) as connection:
+            connection.execute(
+                """UPDATE personal_context_purge_cleanup_intents
+                   SET claim_expires_at_ns = 0 WHERE intent_id = ?""",
+                (abandoned.intent_id,),
+            )
+
+        restarted = PersonalContextService(
+            PersonalContextRepository(
+                PersonalizationDB.for_path(runtime.personal_db.db_path)
+            )
+        )
+
+        def cleanup(intent: DirectPurgeCleanupIntent) -> None:
+            claim = restarted._repository.verify_direct_purge_cleanup_claim(
+                intent,
+                user_id="user-a",
+                dataset_id="dataset-a",
+                store=runtime.store,
+                database=runtime.store.db,
+            )
+            runtime.service.shred_authorized_personal_context_history(claim)
+
+        restarted.set_after_commit_purge_cleanup(cleanup)
+        app.dependency_overrides[get_personal_context_service] = lambda: restarted
+        wrong_confirmation = client.post(
+            "/api/v1/personal-context/purge",
+            json={**request, "confirmation": "delete"},
+        )
+        assert wrong_confirmation.status_code == 422
+        different_generation = client.post(
+            "/api/v1/personal-context/purge",
+            json={**request, "expected_purge_generation": 1},
+        )
+        assert different_generation.status_code == 409
+
+        retried = client.post("/api/v1/personal-context/purge", json=request)
+
+    assert retried.status_code == 200
+    assert retried.json()["purge_generation"] == 1
+    assert _intent_rows(runtime.personal_db)[0]["state"] == "complete"
+
+
+@pytest.mark.parametrize("failure", ["non_wal", "secure_delete_unavailable"])
+def test_direct_purge_refuses_unverified_canonical_sqlite_retention_prerequisites(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    runtime = AuthorityHarness(tmp_path, monkeypatch)
+    _stage_retention_canaries(runtime)
+    _install_cleanup_callback(runtime)
+    original_connect = runtime.personal_db._connect
+
+    def restricted_connect() -> sqlite3.Connection:
+        connection = original_connect()
+        if failure == "non_wal":
+            connection.execute("PRAGMA journal_mode=DELETE")
+        else:
+            connection.set_authorizer(
+                lambda action, name, _argument, _database, _source: (
+                    sqlite3.SQLITE_DENY
+                    if action == sqlite3.SQLITE_PRAGMA
+                    and str(name).lower() == "secure_delete"
+                    else sqlite3.SQLITE_OK
+                )
+            )
+        return connection
+
+    monkeypatch.setattr(runtime.personal_db, "_connect", restricted_connect)
+    with pytest.raises(ProfileIntegrityError, match="retention prerequisites"):
+        runtime.canonical.purge_profile(
+            mode="everywhere",
+            confirmation="DELETE EVERYWHERE",
+            expected_purge_generation=0,
+        )
+
+    assert runtime.canonical.get_manifest().purge_generation == 0
+    assert _intent_rows(runtime.personal_db) == []
+
+
+@pytest.mark.parametrize("failure", ["non_wal", "secure_delete_unavailable"])
+def test_unverified_sync_retention_prerequisite_leaves_cleanup_pending_until_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    runtime = AuthorityHarness(tmp_path, monkeypatch)
+    authority_cursor, _ingress_cursor, _source = _stage_retention_canaries(runtime)
+    _install_cleanup_callback(runtime)
+    connection = runtime.store.db.backend.get_pool().get_connection()
+    if failure == "non_wal":
+        connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        assert connection.execute("PRAGMA journal_mode=DELETE").fetchone()[0] == "delete"
+    else:
+        connection.set_authorizer(
+            lambda action, name, _argument, _database, _source: (
+                sqlite3.SQLITE_DENY
+                if action == sqlite3.SQLITE_PRAGMA
+                and str(name).lower() == "secure_delete"
+                else sqlite3.SQLITE_OK
+            )
+        )
+
+    runtime.canonical.purge_profile(
+        mode="everywhere",
+        confirmation="DELETE EVERYWHERE",
+        expected_purge_generation=0,
+    )
+
+    assert _intent_rows(runtime.personal_db)[0]["state"] == "pending"
+    retained = runtime.store.get_envelope_by_server_cursor(authority_cursor)
+    assert retained is not None
+    assert _matches_canary(retained.payload_ciphertext, _AUTHORITY_CANARY)
+
+    if failure == "non_wal":
+        assert connection.execute("PRAGMA journal_mode=WAL").fetchone()[0] == "wal"
+    else:
+        connection.set_authorizer(None)
+    runtime.canonical.purge_profile(
+        mode="everywhere",
+        confirmation="DELETE EVERYWHERE",
+        expected_purge_generation=0,
+    )
+    assert _intent_rows(runtime.personal_db)[0]["state"] == "complete"
+
+
+def test_busy_wal_checkpoint_leaves_intent_pending_until_reader_releases(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = AuthorityHarness(tmp_path, monkeypatch)
+    _stage_retention_canaries(runtime)
+    _install_cleanup_callback(runtime)
+    sync_path = Path(runtime.store.db.backend.config.sqlite_path)
+    reader = sqlite3.connect(sync_path, isolation_level=None)
+    reader.execute("PRAGMA journal_mode=WAL")
+    reader.execute("BEGIN")
+    reader.execute("SELECT COUNT(*) FROM sync_envelopes").fetchone()
+    try:
+        runtime.canonical.purge_profile(
+            mode="everywhere",
+            confirmation="DELETE EVERYWHERE",
+            expected_purge_generation=0,
+        )
+        assert _intent_rows(runtime.personal_db)[0]["state"] == "pending"
+    finally:
+        reader.rollback()
+        reader.close()
+
+    runtime.canonical.purge_profile(
+        mode="everywhere",
+        confirmation="DELETE EVERYWHERE",
+        expected_purge_generation=0,
+    )
+    assert _intent_rows(runtime.personal_db)[0]["state"] == "complete"
+
+
+def test_restart_recovery_rewrites_main_database_freelist_residue(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = AuthorityHarness(tmp_path, monkeypatch)
+    _stage_retention_canaries(runtime)
+    sync_path = Path(runtime.store.db.backend.config.sqlite_path)
+
+    def cleanup_then_leave_residue(intent: DirectPurgeCleanupIntent) -> None:
+        claim = runtime.canonical._repository.verify_direct_purge_cleanup_claim(
+            intent,
+            user_id="user-a",
+            dataset_id="dataset-a",
+            store=runtime.store,
+            database=runtime.store.db,
+        )
+        runtime.service.shred_authorized_personal_context_history(claim)
+        connection = runtime.store.db.backend.get_pool().get_connection()
+        connection.execute("PRAGMA secure_delete=OFF")
+        runtime.store.store_key_record(
+            SyncKeyRecordCreate(
+                key_record_id="freelist-residue",
+                dataset_id="dataset-a",
+                user_id="user-a",
+                device_id="device-a",
+                key_purpose="personal_context_integrity",
+                wrapped_key_blob=_FREELIST_CANARY * 8_192,
+                kdf_metadata={"algorithm": "test"},
+                encryption_policy="server_trusted_v1",
+                key_epoch=3,
+            )
+        )
+        connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        with runtime.store.db.backend.transaction(connection) as transaction:
+            runtime.store.db.execute(
+                "DELETE FROM sync_key_records WHERE key_record_id = ?",
+                ("freelist-residue",),
+                connection=transaction,
+            )
+        connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        connection.execute("PRAGMA secure_delete=ON")
+        raise RuntimeError("maintenance interrupted after logical deletion")
+
+    runtime.canonical.set_after_commit_purge_cleanup(cleanup_then_leave_residue)
+    runtime.canonical.purge_profile(
+        mode="everywhere",
+        confirmation="DELETE EVERYWHERE",
+        expected_purge_generation=0,
+    )
+    assert _intent_rows(runtime.personal_db)[0]["state"] == "pending"
+    assert _sqlite_artifacts_contain(sync_path, _FREELIST_CANARY)
+
+    restarted = PersonalContextService(
+        PersonalContextRepository(PersonalizationDB.for_path(runtime.personal_db.db_path))
+    )
+
+    def recover_cleanup(intent: DirectPurgeCleanupIntent) -> None:
+        claim = restarted._repository.verify_direct_purge_cleanup_claim(
+            intent,
+            user_id="user-a",
+            dataset_id="dataset-a",
+            store=runtime.store,
+            database=runtime.store.db,
+        )
+        runtime.service.shred_authorized_personal_context_history(claim)
+
+    restarted.set_after_commit_purge_cleanup(recover_cleanup)
+    restarted.purge_profile(
+        mode="everywhere",
+        confirmation="DELETE EVERYWHERE",
+        expected_purge_generation=0,
+    )
+    assert _intent_rows(runtime.personal_db)[0]["state"] == "complete"
+    assert runtime.store.db.backend.get_pool().get_connection().execute(
+        "PRAGMA freelist_count"
+    ).fetchone()[0] == 0
+    assert not _sqlite_artifacts_contain(sync_path, _FREELIST_CANARY)
+
+
+def test_partial_multi_dataset_cleanup_is_retry_safe_and_converges(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = AuthorityHarness(tmp_path, monkeypatch)
+    first_cursor, _ingress_cursor, _source = _stage_retention_canaries(runtime)
+    original_dataset = runtime.store.get_dataset("dataset-a")
+    runtime.store.enroll_dataset(
+        SyncDatasetCreate(
+            dataset_id="dataset-b",
+            owner_user_id="user-a",
+            encryption_policy="server_trusted_v1",
+            domains=list(original_dataset.domains),
+            metadata={
+                "personal_context": {
+                    **original_dataset.metadata["personal_context"],
+                    "profile_id": runtime.manifest.profile_id,
+                    "purge_generation": 0,
+                }
+            },
         )
     )
-    assert restarted.recover_direct_purge_cleanup() == 1
+    second_cursor = _stage_dataset_canary(
+        runtime,
+        dataset_id="dataset-b",
+        client_envelope_id="second-dataset-old-envelope",
+        canary=_SECOND_DATASET_CANARY,
+    )
+    fail_after_first = True
+
+    def cleanup(intent: DirectPurgeCleanupIntent) -> None:
+        nonlocal fail_after_first
+        for dataset_id in ("dataset-a", "dataset-b"):
+            claim = runtime.canonical._repository.verify_direct_purge_cleanup_claim(
+                intent,
+                user_id="user-a",
+                dataset_id=dataset_id,
+                store=runtime.store,
+                database=runtime.store.db,
+            )
+            runtime.service.shred_authorized_personal_context_history(claim)
+            if fail_after_first:
+                fail_after_first = False
+                raise RuntimeError("second dataset unavailable")
+
+    runtime.canonical.set_after_commit_purge_cleanup(cleanup)
+    runtime.canonical.purge_profile(
+        mode="everywhere",
+        confirmation="DELETE EVERYWHERE",
+        expected_purge_generation=0,
+    )
+    assert _intent_rows(runtime.personal_db)[0]["state"] == "pending"
+    first = runtime.store.get_envelope_by_server_cursor(first_cursor)
+    second = runtime.store.get_envelope_by_server_cursor(second_cursor)
+    assert first is not None and first.payload_ciphertext is None
+    assert second is not None
+    assert _matches_canary(second.payload_ciphertext, _SECOND_DATASET_CANARY)
+
+    runtime.canonical.purge_profile(
+        mode="everywhere",
+        confirmation="DELETE EVERYWHERE",
+        expected_purge_generation=0,
+    )
     assert _intent_rows(runtime.personal_db)[0]["state"] == "complete"
+    second = runtime.store.get_envelope_by_server_cursor(second_cursor)
+    assert second is not None and second.payload_ciphertext is None
 
 
 def test_authorized_cleanup_scrubs_old_material_and_preserves_unrelated_rows(
@@ -536,6 +1090,41 @@ def test_authorized_cleanup_scrubs_old_material_and_preserves_unrelated_rows(
             connection=connection,
         ).rows[0]
 
+    with runtime.personal_db.transaction() as connection:
+        connection.execute(
+            """
+            INSERT INTO personal_context_ingress_receipts(
+                dataset_id, device_id, client_envelope_id,
+                canonical_payload_digest, purge_generation, wire_entity_version,
+                resulting_object_id, resulting_version_id,
+                resulting_manifest_revision, resulting_manifest_version_id,
+                publication_batch_id, profile_publication_sequence,
+                receipt_id, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "unrelated-dataset",
+                "unrelated-device",
+                "unrelated-ingress",
+                "unrelated-digest",
+                0,
+                "unrelated-wire-version",
+                "unrelated-object",
+                "unrelated-version",
+                1,
+                "unrelated-manifest-version",
+                "unrelated-batch",
+                1,
+                "unrelated-receipt",
+                "2026-09-04T00:00:00Z",
+            ),
+        )
+        unrelated_receipt_before = connection.execute(
+            """SELECT * FROM personal_context_ingress_receipts
+               WHERE receipt_id = ?""",
+            ("unrelated-receipt",),
+        ).fetchone()
+
     _install_cleanup_callback(runtime)
     runtime.canonical.purge_profile(
         mode="everywhere",
@@ -576,6 +1165,18 @@ def test_authorized_cleanup_scrubs_old_material_and_preserves_unrelated_rows(
                 source_before["batch_ordinal"],
             ),
         ).fetchone()
+        old_canonical_receipt = connection.execute(
+            """SELECT * FROM personal_context_ingress_receipts
+               WHERE receipt_id = ?""",
+            ("canonical-old-receipt",),
+        ).fetchone()
+        unrelated_receipt_after = connection.execute(
+            """SELECT * FROM personal_context_ingress_receipts
+               WHERE receipt_id = ?""",
+            ("unrelated-receipt",),
+        ).fetchone()
+    assert old_canonical_receipt is None
+    assert unrelated_receipt_after == unrelated_receipt_before
     with pytest.raises(EnvelopeAuthenticationError):
         PersonalContextPublicationJournal(keys).decrypt_row(source_after)
 
@@ -625,6 +1226,7 @@ def test_authorized_cleanup_scrubs_old_material_and_preserves_unrelated_rows(
             _KEY_CANARY,
             _ORPHAN_CANARY,
             _RECEIPT_CANARY,
+            _CANONICAL_RECEIPT_CANARY,
             _SOURCE_CANARY,
         )
     )
@@ -635,7 +1237,7 @@ def test_cleanup_is_idempotent_and_rejects_wrong_profile_or_generation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     runtime = AuthorityHarness(tmp_path, monkeypatch)
-    _stage_retention_canaries(runtime)
+    authority_cursor, _ingress_cursor, _source = _stage_retention_canaries(runtime)
     _install_cleanup_callback(runtime)
     runtime.canonical.purge_profile(
         mode="everywhere",
@@ -652,17 +1254,17 @@ def test_cleanup_is_idempotent_and_rejects_wrong_profile_or_generation(
         purge_generation=1,
     )
     assert completed is not None
-    first = runtime.service.shred_authorized_personal_context_history(
-        completed,
-        user_id="user-a",
-        dataset_id="dataset-a",
+    first = runtime.store.get_envelope_by_server_cursor(authority_cursor)
+    repeated = runtime.canonical.purge_profile(
+        mode="everywhere",
+        confirmation="DELETE EVERYWHERE",
+        expected_purge_generation=0,
     )
-    second = runtime.service.shred_authorized_personal_context_history(
-        completed,
-        user_id="user-a",
-        dataset_id="dataset-a",
-    )
+    second = runtime.store.get_envelope_by_server_cursor(authority_cursor)
+    assert repeated.purge_generation == 1
     assert first == second
+    with pytest.raises(SyncStoreError, match="unauthorized"):
+        runtime.service.shred_authorized_personal_context_history(completed)
 
     wrong = completed.__class__(
         intent_id=completed.intent_id,
@@ -673,11 +1275,7 @@ def test_cleanup_is_idempotent_and_rejects_wrong_profile_or_generation(
         owner_token=completed.owner_token,
     )
     with pytest.raises(SyncStoreError):
-        runtime.service.shred_authorized_personal_context_history(
-            wrong,
-            user_id="user-a",
-            dataset_id="dataset-a",
-        )
+        runtime.service.shred_authorized_personal_context_history(wrong)
 
     sync_db = SyncDatabase(sqlite_path=tmp_path / "sync.db")
     assert SyncV2Store(sync_db).get_dataset("dataset-a").metadata[

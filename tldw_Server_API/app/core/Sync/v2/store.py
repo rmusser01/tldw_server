@@ -1275,26 +1275,19 @@ class SyncV2Store:
             connection=self._connection,
         )
 
-    def shred_personal_context_profile_history(
+    def _shred_authorized_personal_context_history(
         self,
-        *,
-        dataset_id: str,
-        user_id: str,
-        profile_id: str,
-        old_generation_through: int,
-        purge_generation: int,
+        claim: object,
     ) -> PersonalContextHistoryShredReceipt:
-        """Scrub one authorized old-generation Personal Context history."""
+        """Scrub history only through one target-bound verified claim."""
 
         if self._connection is not None:
             raise SyncStoreError("Personal Context cleanup owns its Sync transaction")
-        return self.db.shred_personal_context_profile_history(
-            dataset_id=dataset_id,
-            user_id=user_id,
-            profile_id=profile_id,
-            old_generation_through=old_generation_through,
-            purge_generation=purge_generation,
-        )
+        try:
+            claim._require_live_execution(store=self, database=self.db)
+        except (AttributeError, PermissionError) as exc:
+            raise SyncStoreError("Personal Context cleanup intent is unauthorized") from exc
+        return self.db._shred_authorized_personal_context_profile_history(claim)
 
     def mark_personal_context_authority_applied(
         self,

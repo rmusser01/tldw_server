@@ -66,6 +66,7 @@ _SYNC_HISTORY_KEY_LABEL = b"tldw-personal-context-sync-history-v1"
 _DIRECT_CONFIRMED_FULL_PROFILE_PURGE = object()
 _DIRECT_PURGE_CLEANUP_ORIGIN = "direct_confirmed_full_profile_purge"
 _DIRECT_PURGE_CLAIM_SECONDS = 60
+_VERIFIED_DIRECT_PURGE_EXECUTION = object()
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,6 +79,87 @@ class DirectPurgeCleanupIntent:
     purge_generation: int
     state: Literal["pending", "claimed", "complete"]
     owner_token: str | None
+
+
+class _VerifiedDirectPurgeCleanupClaim:
+    """Opaque live-journal claim bound to one authenticated Sync target."""
+
+    __slots__ = (
+        "_database",
+        "_dataset_id",
+        "_intent",
+        "_provenance",
+        "_repository",
+        "_store",
+        "_user_id",
+    )
+
+    def __init__(
+        self,
+        *,
+        repository: PersonalContextRepository,
+        intent: DirectPurgeCleanupIntent,
+        user_id: str,
+        dataset_id: str,
+        store: object,
+        database: object,
+        provenance: object,
+    ) -> None:
+        if provenance is not _VERIFIED_DIRECT_PURGE_EXECUTION:
+            raise PermissionError("direct purge execution provenance is invalid")
+        self._repository = repository
+        self._intent = intent
+        self._user_id = user_id
+        self._dataset_id = dataset_id
+        self._store = store
+        self._database = database
+        self._provenance = provenance
+
+    @property
+    def profile_id(self) -> str:
+        return self._intent.profile_id
+
+    @property
+    def old_generation_through(self) -> int:
+        return self._intent.old_generation_through
+
+    @property
+    def purge_generation(self) -> int:
+        return self._intent.purge_generation
+
+    @property
+    def user_id(self) -> str:
+        return self._user_id
+
+    @property
+    def dataset_id(self) -> str:
+        return self._dataset_id
+
+    def _require_live_execution(
+        self,
+        *,
+        store: object,
+        database: object,
+    ) -> None:
+        """Fail unless provenance, target identity, and journal ownership remain live."""
+
+        if (
+            self._provenance is not _VERIFIED_DIRECT_PURGE_EXECUTION
+            or self._store is not store
+            or self._database is not database
+        ):
+            raise PermissionError("direct purge execution target is invalid")
+        self._repository._require_live_direct_purge_cleanup_claim(self._intent)
+
+    def _require_database_execution(self, database: object) -> None:
+        """Fail unless this exact database still has the live verified claim."""
+
+        if (
+            self._provenance is not _VERIFIED_DIRECT_PURGE_EXECUTION
+            or self._database is not database
+        ):
+            raise PermissionError("direct purge execution database is invalid")
+        self._repository._require_live_direct_purge_cleanup_claim(self._intent)
 
 
 def _now_text() -> str:
@@ -2499,6 +2581,12 @@ class PersonalContextRepository:
         )
 
         with self._database.transaction(immediate=True) as connection:
+            if destroy_journal_bodies and not self._database.retention_prerequisites_verified(
+                connection
+            ):
+                raise ProfileIntegrityError(
+                    "Canonical SQLite retention prerequisites are not verified"
+                )
             lease = connection.execute(
                 """
                 SELECT 1 FROM personal_context_publication_relay_leases
@@ -2529,6 +2617,57 @@ class PersonalContextRepository:
             )
             self._append_publication(connection, keys, manifest=manifest)
             if destroy_journal_bodies:
+                old_ingress_receipts = connection.execute(
+                    """
+                    SELECT DISTINCT receipts.dataset_id, receipts.device_id,
+                           receipts.client_envelope_id, receipts.receipt_id,
+                           receipts.purge_generation,
+                           receipts.publication_batch_id,
+                           receipts.profile_publication_sequence
+                    FROM personal_context_ingress_receipts AS receipts
+                    JOIN personal_context_publication_batches AS batches
+                      ON batches.publication_batch_id = receipts.publication_batch_id
+                     AND batches.profile_publication_sequence = receipts.profile_publication_sequence
+                     AND batches.purge_generation = receipts.purge_generation
+                    JOIN personal_context_publication_rows AS result
+                      ON result.profile_id = batches.profile_id
+                     AND result.publication_batch_id = batches.publication_batch_id
+                     AND result.profile_publication_sequence = batches.profile_publication_sequence
+                     AND result.opaque_object_id = receipts.resulting_object_id
+                     AND result.opaque_version_id = receipts.resulting_version_id
+                    JOIN personal_context_publication_rows AS published_manifest
+                      ON published_manifest.profile_id = batches.profile_id
+                     AND published_manifest.publication_batch_id = batches.publication_batch_id
+                     AND published_manifest.profile_publication_sequence = batches.profile_publication_sequence
+                     AND published_manifest.role = 'manifest'
+                     AND published_manifest.opaque_version_id = receipts.resulting_manifest_version_id
+                    WHERE batches.profile_id = ? AND batches.purge_generation < ?
+                    """,
+                    (manifest.profile_id, manifest.purge_generation),
+                ).fetchall()
+                for receipt in old_ingress_receipts:
+                    deleted = connection.execute(
+                        """
+                        DELETE FROM personal_context_ingress_receipts
+                        WHERE dataset_id = ? AND device_id = ?
+                          AND client_envelope_id = ? AND receipt_id = ?
+                          AND purge_generation = ? AND publication_batch_id = ?
+                          AND profile_publication_sequence = ?
+                        """,
+                        (
+                            receipt["dataset_id"],
+                            receipt["device_id"],
+                            receipt["client_envelope_id"],
+                            receipt["receipt_id"],
+                            receipt["purge_generation"],
+                            receipt["publication_batch_id"],
+                            receipt["profile_publication_sequence"],
+                        ),
+                    )
+                    if deleted.rowcount != 1:
+                        raise ProfileIntegrityError(
+                            "Canonical ingress receipt changed during direct purge"
+                        )
                 old_publication_rows = connection.execute(
                     """
                     SELECT rows.*
@@ -2655,6 +2794,60 @@ class PersonalContextRepository:
         )
         return intent if intent is not None and intent.state == "complete" else None
 
+    def _require_live_direct_purge_cleanup_claim(
+        self,
+        intent: DirectPurgeCleanupIntent,
+    ) -> None:
+        """Re-read the exact claimed direct-purge journal row or fail closed."""
+
+        if intent.state != "claimed" or intent.owner_token is None:
+            raise PermissionError("direct purge cleanup claim is not live")
+        with self._database.transaction() as connection:
+            row = connection.execute(
+                """
+                SELECT 1 FROM personal_context_purge_cleanup_intents
+                WHERE intent_id = ? AND profile_id = ?
+                  AND old_generation_through = ? AND purge_generation = ?
+                  AND origin = ? AND state = 'claimed' AND owner_token = ?
+                  AND claim_expires_at_ns > ?
+                """,
+                (
+                    intent.intent_id,
+                    intent.profile_id,
+                    intent.old_generation_through,
+                    intent.purge_generation,
+                    _DIRECT_PURGE_CLEANUP_ORIGIN,
+                    intent.owner_token,
+                    time.time_ns(),
+                ),
+            ).fetchone()
+        if row is None:
+            raise PermissionError("direct purge cleanup claim is not live")
+
+    def verify_direct_purge_cleanup_claim(
+        self,
+        intent: DirectPurgeCleanupIntent,
+        *,
+        user_id: str,
+        dataset_id: str,
+        store: object,
+        database: object,
+    ) -> _VerifiedDirectPurgeCleanupClaim:
+        """Issue an opaque capability for one exact live claim and Sync target."""
+
+        if not user_id or not dataset_id or store is None or database is None:
+            raise ValueError("direct purge cleanup execution target is invalid")
+        self._require_live_direct_purge_cleanup_claim(intent)
+        return _VerifiedDirectPurgeCleanupClaim(
+            repository=self,
+            intent=intent,
+            user_id=user_id,
+            dataset_id=dataset_id,
+            store=store,
+            database=database,
+            provenance=_VERIFIED_DIRECT_PURGE_EXECUTION,
+        )
+
     def checkpoint_direct_purge_storage(self) -> bool:
         """Confirm the application-owned canonical WAL no longer holds old frames."""
 
@@ -2763,6 +2956,7 @@ class PersonalContextRepository:
                     updated_at = ?, completed_at = ?
                 WHERE intent_id = ? AND profile_id = ? AND purge_generation = ?
                   AND state = 'claimed' AND owner_token = ? AND origin = ?
+                  AND claim_expires_at_ns > ?
                 """,
                 (
                     now,
@@ -2772,6 +2966,7 @@ class PersonalContextRepository:
                     intent.purge_generation,
                     intent.owner_token,
                     _DIRECT_PURGE_CLEANUP_ORIGIN,
+                    time.time_ns(),
                 ),
             )
             if updated.rowcount != 1:

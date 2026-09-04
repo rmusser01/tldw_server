@@ -75,11 +75,14 @@ def personal_context_service_for_user(
                 intent, "profile_id", None
             ):
                 continue
-            sync.shred_authorized_personal_context_history(
+            claim = service._repository.verify_direct_purge_cleanup_claim(
                 intent,
                 user_id=str(user_id),
                 dataset_id=dataset.dataset_id,
+                store=sync.store,
+                database=sync.store.db,
             )
+            sync.shred_authorized_personal_context_history(claim)
 
     def relay_after_commit(profile_id: str) -> None:
         from tldw_Server_API.app.core.Sync.v2.factory import sync_v2_service_for_user

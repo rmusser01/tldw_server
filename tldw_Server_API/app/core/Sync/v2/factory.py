@@ -230,11 +230,14 @@ def sync_v2_service_for_user(user_id: str) -> SyncV2Service:
                 intent, "profile_id", None
             ):
                 continue
-            service.shred_authorized_personal_context_history(
+            claim = publication_service._repository.verify_direct_purge_cleanup_claim(
                 intent,
                 user_id=user_id,
                 dataset_id=dataset.dataset_id,
+                store=store,
+                database=store.db,
             )
+            service.shred_authorized_personal_context_history(claim)
 
     publication_service.set_after_commit_purge_cleanup(purge_cleanup_after_commit)
     return service

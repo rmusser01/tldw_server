@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@codex'
 created_date: '2026-09-04 03:34'
-updated_date: '2026-09-04 09:19'
+updated_date: '2026-09-04 10:10'
 labels:
   - personal-context
   - sync
@@ -49,11 +49,12 @@ Remediate TASK-13161 by binding cryptographic cleanup of stale Personal Context 
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-- Added a content-free, constrained Personalization cleanup-intent journal minted atomically only by authenticated direct full-profile purge. Claim, release, and completion are retry-safe and owner-fenced, and the separate after-commit callback leaves durable pending work on failure.
+- Added a content-free, constrained Personalization cleanup-intent journal minted atomically only by authenticated direct full-profile purge. Claim, release, and completion are retry-safe and owner-fenced. Broad cleanup now requires an opaque repository-issued capability bound to the exact authenticated user, dataset, store/database, intent, profile, generations, owner, unexpired lease, and live journal state; public or forged intent values are not executable.
 - Added exact dataset/profile/generation-scoped SQLite cryptographic shredding for old Personal Context authority, ingress, orphan/superseded state, conflicts, receipts, wrapped DEKs/nonces/ciphertext, and all associated device-wrapped integrity-key rotations. Applied acknowledgement/fence evidence remains content-free; stale heads are repaired; unrelated rows are preserved.
-- Wired active and archived Sync datasets in both authenticated API and Sync factory assembly. Remote/client purge, pull, relay, compaction, listing, and ordinary mutation never mint or execute this cleanup; dedicated restart recovery consumes only previously authorized intents.
-- Inventoried active DB/WAL/SHM, in-place migration, managed backup, generated snapshot/export, master-key, canonical profile-key, and Sync key-record custody. The application has no managed Personalization/Sync backup target; operator-created backups and previously exported recovery bundles are explicitly outside the guarantee. SQLite is proven; non-SQLite cleanup fails closed/pending and would require a separately reviewed retention policy.
-- Real-SQLite RED began with `5 failed`. Final focused purge-retention, relay-recovery, publication, and service verification passed: `85 passed, 7 warnings in 6.11s`. Ruff passed all touched Python files; Bandit exited 0 with only parser/accepted `nosec B608` warnings and no findings; `git diff --check` passed.
+- Wired active and archived Sync datasets in both authenticated API and Sync factory assembly. Remote/client/future-signed purge, pull, relay, compaction, listing, and ordinary mutation never mint or execute this cleanup. After failure or restart, only the same authenticated endpoint request with exact `DELETE EVERYWHERE` and the prior expected generation can reclaim it; wrong/different requests reject.
+- Deleted old canonical ingress digests in the purge transaction through exact publication batch/profile/generation/result/manifest lineage and checked one-row destructive predicates. Before logical deletion, both canonical and Sync SQLite stores require verified `secure_delete=ON` and WAL mode. Completion additionally requires `VACUUM`, an empty freelist, exact successful WAL truncation, and an absent/empty WAL for the canonical store and every affected Sync database.
+- Inventoried and re-audited active DB/WAL/SHM, in-place migration, managed backup, generated snapshot/export, master-key, canonical profile-key, and Sync key-record custody. The application has no managed Personalization/Sync backup target; operator-created backups and previously exported recovery bundles are explicitly outside the guarantee. SQLite is proven; non-SQLite cleanup fails closed/pending and would require a separately reviewed retention policy.
+- Real-SQLite RED reproductions covered all four review findings. Final focused purge-retention, relay-recovery, publication, and service verification passed: `95 passed, 6 warnings`. Ruff passed all touched Python files; Bandit exited 0 with only parser/accepted `nosec B608` warnings and no findings; `git diff --check` passed.
 - Detailed authorization, artifact inventory, destructive-predicate review, and canary evidence are recorded in `.superpowers/sdd/2026-09-04-personal-context-relay-remediation/task-4-report.md`. ADR required: no new ADR; ADR-002 and the approved ongoing-sync specification govern. `ongoing_sync_version` remains unchanged. No full suite was run, per the task brief.
 <!-- SECTION:NOTES:END -->
 
