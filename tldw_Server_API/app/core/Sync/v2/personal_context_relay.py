@@ -34,7 +34,7 @@ AuthorityFinalizer = Callable[
 ]
 AuthorityCanceller = Callable[
     [PublicationSourceRow | PublicationStageIdentity, AuthorityStageReceipt | None, str, str],
-    bool,
+    Literal["removed", "absent", "applied"],
 ]
 
 
@@ -103,11 +103,23 @@ class PersonalContextRelay:
             for identity in unfinished_lookup(profile_id, row_limit=row_budget):
                 if inspected >= row_budget or self.clock_ns() >= deadline_ns:
                     return self._pending(staged, inspected)
-                cancellation = self._cancel(identity, None, dataset_id, user_id)
+                claimed_identity = replace(
+                    identity, relay_owner_token=lease.owner_token
+                )
+                cancellation = self._cancel(
+                    claimed_identity, None, dataset_id, user_id
+                )
                 if cancellation == "failed":
                     return self._pending(staged, inspected)
-                if cancellation == "removed":
-                    inspected += 1
+                try:
+                    self.publications.retire_terminal_stage_identity(
+                        claimed_identity, lease=lease
+                    )
+                except Exception:  # noqa: BLE001 - exact cleanup retries after races.
+                    return self._pending(staged, inspected)
+                inspected += 1
+            if inspected >= row_budget:
+                return self._pending(staged, inspected)
 
         while True:
             batch = self.publications.earliest_nonterminal_batch(
@@ -168,7 +180,6 @@ class PersonalContextRelay:
                     if not self._receipt_matches(claimed_row, receipt):
                         return self._pending(staged, inspected)
                     if not self._renewed_current(claimed_row, lease):
-                        self._cancel(claimed_row, receipt, dataset_id, user_id)
                         return self._pending(staged, inspected)
                     try:
                         self.publications.record_staged_row(
@@ -180,7 +191,7 @@ class PersonalContextRelay:
                         state = self.publications.stage_receipt_state(
                             claimed_row, receipt, lease=lease
                         )
-                        if state == "lost":
+                        if state == "claimable":
                             self._cancel(
                                 claimed_row, receipt, dataset_id, user_id
                             )
@@ -259,16 +270,16 @@ class PersonalContextRelay:
         receipt: AuthorityStageReceipt | None,
         dataset_id: str,
         user_id: str,
-    ) -> Literal["removed", "absent", "failed"]:
+    ) -> Literal["removed", "absent", "applied", "failed"]:
         """Best-effort compensation; only the exact pending row can be removed."""
 
         if self.cancel_authority is None:
             return "failed"
         try:
-            removed = self.cancel_authority(row, receipt, dataset_id, user_id)
+            outcome = self.cancel_authority(row, receipt, dataset_id, user_id)
         except Exception:  # noqa: BLE001 - cancellation is best-effort retry cleanup.
             return "failed"
-        return "removed" if removed else "absent"
+        return outcome if outcome in {"removed", "absent", "applied"} else "failed"
 
 
 __all__ = [

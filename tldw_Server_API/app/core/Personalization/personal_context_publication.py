@@ -138,6 +138,8 @@ class PublicationStageIdentity:
     batch_ordinal: int
     batch_size: int
     purge_generation: int
+    sync_server_cursor: int | None
+    relay_owner_token: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -186,13 +188,13 @@ class PersonalContextPublicationRelayStore:
                 """
                 SELECT r.profile_id, r.deterministic_envelope_id,
                        r.publication_batch_id, r.profile_publication_sequence,
-                       r.batch_ordinal, r.batch_size, r.purge_generation
+                       r.batch_ordinal, r.batch_size, r.purge_generation,
+                       r.sync_server_cursor
                 FROM personal_context_publication_rows r
                 JOIN personal_context_publication_batches b
                   ON b.profile_id = r.profile_id
                  AND b.profile_publication_sequence = r.profile_publication_sequence
-                WHERE r.profile_id = ? AND r.sync_server_cursor IS NULL
-                  AND b.status = 'purge_terminal'
+                WHERE r.profile_id = ? AND b.status = 'purge_terminal'
                   AND r.row_state = 'shredded'
                 ORDER BY r.profile_publication_sequence, r.batch_ordinal
                 LIMIT ?
@@ -208,6 +210,11 @@ class PersonalContextPublicationRelayStore:
                 batch_ordinal=int(row["batch_ordinal"]),
                 batch_size=int(row["batch_size"]),
                 purge_generation=int(row["purge_generation"]),
+                sync_server_cursor=(
+                    None
+                    if row["sync_server_cursor"] is None
+                    else int(row["sync_server_cursor"])
+                ),
             )
             for row in rows
         )
@@ -508,6 +515,53 @@ class PersonalContextPublicationRelayStore:
             == row.deterministic_envelope_id
             and current["row_state"] in {"pending", "staged", "acknowledged"}
         )
+
+    @contextmanager
+    def authority_staging_guard(
+        self,
+        row: PublicationSourceRow,
+        *,
+        lease: PublicationRelayLease,
+    ) -> Iterator[None]:
+        """Hold one exact live pending source claim through the hidden Sync insert."""
+
+        with self._database.transaction(immediate=True) as connection:
+            lease_row = connection.execute(
+                """SELECT 1 FROM personal_context_publication_relay_leases
+                   WHERE profile_id = ? AND owner_token = ? AND expires_at_ns > ?""",
+                (lease.profile_id, lease.owner_token, time.time_ns()),
+            ).fetchone()
+            profile = connection.execute(
+                """SELECT purge_generation
+                   FROM personal_context_publication_profiles WHERE profile_id = ?""",
+                (row.profile_id,),
+            ).fetchone()
+            batch = connection.execute(
+                """SELECT * FROM personal_context_publication_batches
+                   WHERE profile_id = ? AND profile_publication_sequence = ?""",
+                (row.profile_id, row.profile_publication_sequence),
+            ).fetchone()
+            current = connection.execute(
+                """SELECT * FROM personal_context_publication_rows
+                   WHERE profile_id = ? AND profile_publication_sequence = ?
+                     AND batch_ordinal = ?""",
+                (row.profile_id, row.profile_publication_sequence, row.batch_ordinal),
+            ).fetchone()
+            if not (
+                self._source_claim_matches(
+                    row=row,
+                    lease=lease,
+                    lease_row=lease_row,
+                    profile=profile,
+                    batch=batch,
+                    current=current,
+                    allowed_states={"pending"},
+                )
+                and current is not None
+                and current["sync_server_cursor"] is None
+            ):
+                raise RuntimeError("publication authority staging claim changed")
+            yield
 
     def earliest_nonterminal_batch(
         self,
@@ -921,6 +975,8 @@ class PersonalContextPublicationRelayStore:
                      AND batch_ordinal = ?""",
                 (row.profile_id, row.profile_publication_sequence, row.batch_ordinal),
             ).fetchone()
+        if self._receipt_matches_current(row, receipt, current, "staged"):
+            return "bound"
         if not self._source_claim_matches(
             row=row,
             lease=lease,
@@ -931,14 +987,32 @@ class PersonalContextPublicationRelayStore:
             allowed_states={"pending", "staged"},
         ):
             return "lost"
-        if current is not None and current["row_state"] == "staged":
-            if (
-                current["sync_server_cursor"] is not None
-                and int(current["sync_server_cursor"]) == receipt.server_cursor
-            ):
-                return "bound"
-            return "lost"
         return "claimable"
+
+    @staticmethod
+    def _receipt_matches_current(
+        row: PublicationSourceRow,
+        receipt: AuthorityStageReceipt,
+        current: sqlite3.Row | None,
+        row_state: str,
+    ) -> bool:
+        """Match a structured receipt to one exact durable source row."""
+
+        return bool(
+            current is not None
+            and str(current["profile_id"]) == row.profile_id
+            and int(current["profile_publication_sequence"])
+            == row.profile_publication_sequence
+            and str(current["publication_batch_id"]) == receipt.publication_batch_id
+            and int(current["batch_ordinal"]) == receipt.batch_ordinal
+            and int(current["batch_size"]) == receipt.batch_size
+            and int(current["purge_generation"]) == receipt.purge_generation
+            and str(current["deterministic_envelope_id"])
+            == receipt.deterministic_envelope_id
+            and str(current["row_state"]) == row_state
+            and current["sync_server_cursor"] is not None
+            and int(current["sync_server_cursor"]) == receipt.server_cursor
+        )
 
     def receipt_is_acknowledged(
         self,
@@ -990,6 +1064,175 @@ class PersonalContextPublicationRelayStore:
             and current["sync_server_cursor"] is not None
             and int(current["sync_server_cursor"]) == receipt.server_cursor
         )
+
+    @contextmanager
+    def authority_finalization_guard(
+        self,
+        row: PublicationSourceRow,
+        receipt: AuthorityStageReceipt,
+        *,
+        lease: PublicationRelayLease,
+    ) -> Iterator[None]:
+        """Hold the exact acknowledged source claim through external Sync apply."""
+
+        with self._database.transaction(immediate=True) as connection:
+            lease_row = connection.execute(
+                """SELECT 1 FROM personal_context_publication_relay_leases
+                   WHERE profile_id = ? AND owner_token = ? AND expires_at_ns > ?""",
+                (lease.profile_id, lease.owner_token, time.time_ns()),
+            ).fetchone()
+            profile = connection.execute(
+                """SELECT purge_generation
+                   FROM personal_context_publication_profiles WHERE profile_id = ?""",
+                (row.profile_id,),
+            ).fetchone()
+            batch = connection.execute(
+                """SELECT * FROM personal_context_publication_batches
+                   WHERE profile_id = ? AND profile_publication_sequence = ?""",
+                (row.profile_id, row.profile_publication_sequence),
+            ).fetchone()
+            current = connection.execute(
+                """SELECT * FROM personal_context_publication_rows
+                   WHERE profile_id = ? AND profile_publication_sequence = ?
+                     AND batch_ordinal = ?""",
+                (row.profile_id, row.profile_publication_sequence, row.batch_ordinal),
+            ).fetchone()
+            if not (
+                self._receipt_matches_current(row, receipt, current, "acknowledged")
+                and self._source_claim_matches(
+                    row=row,
+                    lease=lease,
+                    lease_row=lease_row,
+                    profile=profile,
+                    batch=batch,
+                    current=current,
+                    allowed_states={"acknowledged"},
+                )
+            ):
+                raise RuntimeError("publication authority finalization claim changed")
+            yield
+
+    @contextmanager
+    def authority_compensation_guard(
+        self,
+        row: PublicationSourceRow | PublicationStageIdentity,
+        *,
+        lease: PublicationRelayLease,
+    ) -> Iterator[None]:
+        """Authorize one exact pending-row cancellation while fencing takeover."""
+
+        with self._database.transaction(immediate=True) as connection:
+            lease_row = connection.execute(
+                """SELECT 1 FROM personal_context_publication_relay_leases
+                   WHERE profile_id = ? AND owner_token = ? AND expires_at_ns > ?""",
+                (lease.profile_id, lease.owner_token, time.time_ns()),
+            ).fetchone()
+            batch = connection.execute(
+                """SELECT * FROM personal_context_publication_batches
+                   WHERE profile_id = ? AND profile_publication_sequence = ?""",
+                (row.profile_id, row.profile_publication_sequence),
+            ).fetchone()
+            current = connection.execute(
+                """SELECT * FROM personal_context_publication_rows
+                   WHERE profile_id = ? AND profile_publication_sequence = ?
+                     AND batch_ordinal = ?""",
+                (row.profile_id, row.profile_publication_sequence, row.batch_ordinal),
+            ).fetchone()
+            exact = bool(
+                lease_row is not None
+                and lease.profile_id == row.profile_id
+                and row.relay_owner_token == lease.owner_token
+                and batch is not None
+                and str(batch["publication_batch_id"]) == row.publication_batch_id
+                and int(batch["purge_generation"]) == row.purge_generation
+                and current is not None
+                and str(current["publication_batch_id"]) == row.publication_batch_id
+                and int(current["batch_ordinal"]) == row.batch_ordinal
+                and int(current["batch_size"]) == row.batch_size
+                and int(current["purge_generation"]) == row.purge_generation
+                and str(current["deterministic_envelope_id"])
+                == row.deterministic_envelope_id
+            )
+            if isinstance(row, PublicationSourceRow):
+                authorized = bool(
+                    exact
+                    and str(batch["status"]) == "relaying"
+                    and str(current["row_state"]) == "pending"
+                    and current["sync_server_cursor"] is None
+                )
+            else:
+                cursor_matches = bool(
+                    (row.sync_server_cursor is None and current["sync_server_cursor"] is None)
+                    or (
+                        row.sync_server_cursor is not None
+                        and current["sync_server_cursor"] is not None
+                        and int(current["sync_server_cursor"])
+                        == row.sync_server_cursor
+                    )
+                )
+                authorized = bool(
+                    exact
+                    and cursor_matches
+                    and str(batch["status"]) == "purge_terminal"
+                    and str(current["row_state"]) == "shredded"
+                )
+            if not authorized:
+                raise RuntimeError("publication authority cancellation is not authorized")
+            yield
+
+    def retire_terminal_stage_identity(
+        self,
+        identity: PublicationStageIdentity,
+        *,
+        lease: PublicationRelayLease,
+    ) -> None:
+        """Durably retire one exactly reconciled shredded terminal source identity."""
+
+        with self._database.transaction(immediate=True) as connection:
+            lease_row = connection.execute(
+                """SELECT 1 FROM personal_context_publication_relay_leases
+                   WHERE profile_id = ? AND owner_token = ? AND expires_at_ns > ?""",
+                (lease.profile_id, lease.owner_token, time.time_ns()),
+            ).fetchone()
+            if (
+                lease_row is None
+                or lease.profile_id != identity.profile_id
+                or identity.relay_owner_token != lease.owner_token
+            ):
+                raise RuntimeError("publication relay lease changed")
+            retired = connection.execute(
+                """DELETE FROM personal_context_publication_rows
+                   WHERE profile_id = ? AND profile_publication_sequence = ?
+                     AND publication_batch_id = ? AND batch_ordinal = ?
+                     AND batch_size = ? AND purge_generation = ?
+                     AND deterministic_envelope_id = ? AND row_state = 'shredded'
+                     AND ((sync_server_cursor IS NULL AND ? IS NULL)
+                          OR sync_server_cursor = ?)
+                     AND EXISTS (
+                         SELECT 1 FROM personal_context_publication_batches b
+                         WHERE b.profile_id = personal_context_publication_rows.profile_id
+                           AND b.profile_publication_sequence =
+                               personal_context_publication_rows.profile_publication_sequence
+                           AND b.publication_batch_id = ?
+                           AND b.purge_generation = ?
+                           AND b.status = 'purge_terminal'
+                     )""",
+                (
+                    identity.profile_id,
+                    identity.profile_publication_sequence,
+                    identity.publication_batch_id,
+                    identity.batch_ordinal,
+                    identity.batch_size,
+                    identity.purge_generation,
+                    identity.deterministic_envelope_id,
+                    identity.sync_server_cursor,
+                    identity.sync_server_cursor,
+                    identity.publication_batch_id,
+                    identity.purge_generation,
+                ),
+            )
+            if retired.rowcount != 1:
+                raise RuntimeError("publication terminal identity changed concurrently")
 
     def complete_if_acknowledged(
         self,

@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from copy import copy
 from dataclasses import dataclass
 from time import monotonic_ns
-from typing import Any
+from typing import Any, Literal
 
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 
@@ -116,6 +116,30 @@ class SyncV2Store:
                     connection=connection,
                 )
             yield guarded
+
+    @contextmanager
+    def personal_context_authority_guard(
+        self,
+        dataset_id: str,
+        profile_id: str,
+    ) -> Iterator[SyncV2Store]:
+        """Hold the dataset transaction before entering an authority source guard."""
+
+        with self.db.materialization_transaction(
+            [(dataset_id, "personal_context.manifest", profile_id)]
+        ) as connection:
+            guarded = copy(self)
+            guarded._connection = connection
+            yield guarded
+
+    def commit_personal_context_authority(self) -> None:
+        """Commit the authority transaction while its external source guard is held."""
+
+        if self._connection is None:
+            raise SyncStoreError("Personal Context authority guard is required")
+        self.db.commit_personal_context_authority_transaction(
+            connection=self._connection
+        )
 
     @contextmanager
     def retention_guard(self, dataset_id: str, blob_id: str) -> Iterator[SyncV2Store]:
@@ -1232,10 +1256,13 @@ class SyncV2Store:
     def discard_pending_personal_context_authority(
         self,
         **identity: Any,
-    ) -> bool:
-        """Remove one exact invisible authority row after a lost source claim."""
+    ) -> Literal["removed", "absent", "applied", "mismatch"]:
+        """Classify or remove one exact invisible authority row."""
 
-        return self.db.discard_pending_personal_context_authority(**identity)
+        return self.db.discard_pending_personal_context_authority(
+            **identity,
+            connection=self._connection,
+        )
 
     def mark_personal_context_authority_applied(
         self,

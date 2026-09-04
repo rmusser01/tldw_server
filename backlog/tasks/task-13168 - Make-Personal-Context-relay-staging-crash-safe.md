@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@codex'
 created_date: '2026-09-04 03:33'
-updated_date: '2026-09-04 07:32'
+updated_date: '2026-09-04 08:24'
 labels:
   - personal-context
   - sync
@@ -50,13 +50,13 @@ Remediate TASK-13161 by making hidden authority staging, source acknowledgement,
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Implemented deterministic hidden-row recovery with structured stage receipts, acknowledgement-before-finalization ordering, full source and Sync CAS fencing, and narrowly authorized purge compensation. Lease release and decrypt-time poison now require the exact live owner; attention also fences batch, source sequence, purge generation, and relaying state. Added persisted two-database restart, lease takeover/expiry, retry classification, corrupt-source, stale-poison, and plaintext-artifact regressions. Reused the existing server-origin insert seam; no schema, migration, dependency, protocol-version, or new ADR was required. Focused verification: 92 passed; Ruff, Bandit, and diff check passed. Sandbox-only cache/log-buffer permission warnings are the only known noise; no blockers.
+Implemented deterministic hidden-row recovery with structured stage receipts, acknowledgement-before-finalization ordering, exact source/Sync CAS fencing, and narrowly authorized purge compensation. Review round 1 then hardened stale-owner recovery, fenced staging and finalization through the actual Sync commit using the existing Sync-then-source lock order, and made terminal cleanup cover cursor-bearing identities while durably advancing past safely reconciled bounded prefixes. Applied history and unrelated rows are never deleted; cursor/identity disagreement, adapter rejection, head contention, database exceptions, and lease races remain retryable. Persisted two-database tests cover every durable boundary, two relay instances, purge, slow stage/finalize commit interleavings, corrupt-source restart, and plaintext scans across DB/WAL/SHM/log artifacts. No schema, migration, dependency, protocol-version, new ADR, or later-task activation was required. Focused verification: 104 passed; Ruff, Bandit, and diff check passed. Sandbox-only cache/log-buffer permission warnings are the only known noise; no blockers.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Personal Context authority relay staging is crash-safe and converges exactly once across every durable boundary while keeping hidden rows invisible until source acknowledgement. Exact live-owner CAS prevents stale durable poison, retryable races remain pending, and narrow compensation preserves unrelated/applied history.
+Personal Context authority relay staging now converges exactly once across every durable and commit boundary while keeping authority hidden until source acknowledgement. Exact source/Sync guards prevent stale takeover, purge, and finalization races; bounded terminal cleanup preserves applied and unrelated history.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

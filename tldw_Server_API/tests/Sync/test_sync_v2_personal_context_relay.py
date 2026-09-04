@@ -351,7 +351,11 @@ def test_real_relay_extends_current_sync_heads_across_publication_batches(
     )
     assert expired.continuation == "personal_context_relay_pending"
     assert expired_receipt is not None
-    assert store.get_envelope_by_server_cursor(expired_receipt.server_cursor) is None
+    expired_staged = store.get_envelope_by_server_cursor(
+        expired_receipt.server_cursor
+    )
+    assert expired_staged is not None
+    assert expired_staged.apply_status == "pending"
 
     original_acknowledge = publications.acknowledge_row
     interrupted = True

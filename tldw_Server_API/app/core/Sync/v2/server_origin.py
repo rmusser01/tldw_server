@@ -23,6 +23,7 @@ from .models import (
 )
 from .personal_context_ongoing_contract import PersonalContextAuthorityMetadata
 from .service import SyncV2Service
+from .store import SyncV2Store
 
 SERVER_ORIGIN_DEVICE_ID = "server-origin"
 
@@ -32,12 +33,14 @@ def insert_personal_context_authority(
     *,
     envelope: SyncEnvelopeCreate,
     authority: PersonalContextAuthorityMetadata,
+    sync_store: SyncV2Store | None = None,
 ) -> SyncEnvelope:
     """Insert one internal-only already-canonical Personal Context egress row."""
 
     if authority.role != "home_authority":
         raise SyncStoreError("Personal Context authority role is required")
-    stored = service.store.insert_envelope(
+    store = service.store if sync_store is None else sync_store
+    stored = store.insert_envelope(
         replace(
             envelope,
             device_id=SERVER_ORIGIN_DEVICE_ID,

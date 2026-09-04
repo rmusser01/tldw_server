@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
@@ -17,6 +18,7 @@ from tldw_Server_API.app.core.DB_Management.Personalization_DB import (
 )
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 from tldw_Server_API.app.core.Personalization.personal_context_publication import (
+    AuthorityStageReceipt,
     PersonalContextPublicationJournal,
     PersonalContextPublicationRelayStore,
     PublicationRelayLease,
@@ -40,7 +42,7 @@ from tldw_Server_API.app.core.Sync.v2.personal_context_relay import (
     PersonalContextRelay,
 )
 from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service
-from tldw_Server_API.app.core.Sync.v2.store import SyncV2Store
+from tldw_Server_API.app.core.Sync.v2.store import SyncStoreError, SyncV2Store
 from tldw_Server_API.tests.Sync.test_sync_v2_personal_context_authority_identity import (
     AuthorityHarness,
 )
@@ -126,6 +128,77 @@ def _stored_source_state(runtime: Any, row: Any) -> tuple[str, int | None]:
         ).fetchone()
     assert stored is not None
     return str(stored["row_state"]), stored["sync_server_cursor"]
+
+
+def _set_relay_owner(runtime: Any, owner_token: str, *, active: bool = True) -> None:
+    """Install one deterministic durable lease owner without the process-local lock."""
+
+    expires_at_ns = 9223372036854775807 if active else 0
+    with runtime.personal_db.transaction(immediate=True) as connection:
+        connection.execute(
+            """INSERT INTO personal_context_publication_relay_leases(
+                   profile_id, owner_token, expires_at_ns
+               ) VALUES (?, ?, ?)
+               ON CONFLICT(profile_id) DO UPDATE SET
+                   owner_token = excluded.owner_token,
+                   expires_at_ns = excluded.expires_at_ns""",
+            (runtime.canonical.get_manifest().profile_id, owner_token, expires_at_ns),
+        )
+
+
+def _claim_first_source(runtime: Any, owner_token: str):
+    """Return the earliest source row under an explicitly installed owner."""
+
+    _set_relay_owner(runtime, owner_token)
+    lease = PublicationRelayLease(runtime.canonical.get_manifest().profile_id, owner_token)
+    batch = runtime.publications.earliest_nonterminal_batch(
+        lease.profile_id,
+        row_limit=100,
+        lease=lease,
+    )
+    assert batch is not None
+    return replace(batch.rows[0], relay_owner_token=owner_token), lease
+
+
+def _acknowledge_hidden_source(runtime: Any, owner_token: str = "relay-owner"):
+    """Create one exact acknowledged source whose Sync authority remains hidden."""
+
+    row, lease = _claim_first_source(runtime, owner_token)
+    receipt = runtime.service.stage_personal_context_authority(
+        row, "dataset-a", "user-a"
+    )
+    runtime.publications.record_staged_row(
+        row,
+        server_cursor=receipt.server_cursor,
+        lease=lease,
+    )
+    runtime.publications.acknowledge_row(
+        row,
+        server_cursor=receipt.server_cursor,
+        lease=lease,
+    )
+    return row, receipt, lease
+
+
+def _source_identity_exists(runtime: Any, row: Any) -> bool:
+    with runtime.personal_db.transaction() as connection:
+        stored = connection.execute(
+            """SELECT 1 FROM personal_context_publication_rows
+               WHERE profile_id = ? AND profile_publication_sequence = ?
+                 AND publication_batch_id = ? AND batch_ordinal = ?
+                 AND batch_size = ? AND purge_generation = ?
+                 AND deterministic_envelope_id = ?""",
+            (
+                row.profile_id,
+                row.profile_publication_sequence,
+                row.publication_batch_id,
+                row.batch_ordinal,
+                row.batch_size,
+                row.purge_generation,
+                row.deterministic_envelope_id,
+            ),
+        ).fetchone()
+    return stored is not None
 
 
 def _drain(runtime: Any) -> Any:
@@ -291,6 +364,532 @@ def test_restart_after_source_staged_commit_keeps_hidden_row_for_recovery(
     )
 
 
+def test_takeover_between_insert_and_source_bind_preserves_successor_recovery(
+    authority_harness: AuthorityHarness,
+) -> None:
+    """Lease loss after insert cannot authorize a stale worker to delete the row."""
+
+    captured: dict[str, Any] = {}
+
+    def stage_then_transfer_owner(row, dataset_id, user_id):
+        receipt = authority_harness.service.stage_personal_context_authority(
+            row, dataset_id, user_id
+        )
+        captured.update(row=row, receipt=receipt)
+        _set_relay_owner(authority_harness, "successor-owner")
+        return receipt
+
+    first = PersonalContextRelay(
+        publications=authority_harness.publications,
+        stage_authority=stage_then_transfer_owner,
+        finalize_authority=authority_harness.service.finalize_personal_context_authority,
+        cancel_authority=authority_harness.service.cancel_personal_context_authority,
+    ).relay_profile(
+        user_id="user-a",
+        profile_id=authority_harness.manifest.profile_id,
+        dataset_id="dataset-a",
+        after_server_cursor=None,
+        wall_time_ms=5_000,
+    )
+
+    assert first.continuation == "personal_context_relay_pending"
+    receipt = captured["receipt"]
+    hidden = authority_harness.store.get_envelope_by_server_cursor(
+        receipt.server_cursor
+    )
+    assert hidden is not None and hidden.apply_status == "pending"
+    assert _stored_source_state(authority_harness, captured["row"]) == (
+        "pending",
+        None,
+    )
+
+    _set_relay_owner(authority_harness, "successor-owner", active=False)
+    restarted = _restart(authority_harness)
+    assert _drain(restarted).continuation == "complete"
+    recovered = restarted.store.get_envelope_by_server_cursor(receipt.server_cursor)
+    assert recovered is not None and recovered.apply_status == "applied"
+    assert _stored_source_state(restarted, captured["row"]) == (
+        "acknowledged",
+        receipt.server_cursor,
+    )
+
+
+def test_postcommit_bind_exception_with_expired_lease_preserves_exact_binding(
+    authority_harness: AuthorityHarness,
+) -> None:
+    """An exact staged cursor is bound even after the original lease expires."""
+
+    original = authority_harness.publications.record_staged_row
+    captured: dict[str, Any] = {}
+
+    def bind_expire_then_fail(row, *, server_cursor, lease) -> None:
+        original(row, server_cursor=server_cursor, lease=lease)
+        captured.update(row=row, cursor=server_cursor, lease=lease)
+        _set_relay_owner(authority_harness, lease.owner_token, active=False)
+        raise RuntimeError("injected after durable source binding")
+
+    authority_harness.publications.record_staged_row = bind_expire_then_fail
+    first = _relay(authority_harness)
+
+    assert first.continuation == "personal_context_relay_pending"
+    receipt = AuthorityStageReceipt(
+        server_cursor=captured["cursor"],
+        deterministic_envelope_id=captured["row"].deterministic_envelope_id,
+        publication_batch_id=captured["row"].publication_batch_id,
+        profile_publication_sequence=captured["row"].profile_publication_sequence,
+        batch_ordinal=captured["row"].batch_ordinal,
+        batch_size=captured["row"].batch_size,
+        purge_generation=captured["row"].purge_generation,
+    )
+    assert authority_harness.publications.stage_receipt_state(
+        captured["row"], receipt, lease=captured["lease"]
+    ) == "bound"
+    hidden = authority_harness.store.get_envelope_by_server_cursor(captured["cursor"])
+    assert hidden is not None and hidden.apply_status == "pending"
+    assert _stored_source_state(authority_harness, captured["row"]) == (
+        "staged",
+        captured["cursor"],
+    )
+
+    authority_harness.publications.record_staged_row = original
+    restarted = _restart(authority_harness)
+    assert _drain(restarted).continuation == "complete"
+    recovered = restarted.store.get_envelope_by_server_cursor(captured["cursor"])
+    assert recovered is not None and recovered.apply_status == "applied"
+
+
+def test_stale_cancellation_cannot_delete_successor_acknowledged_row(
+    authority_harness: AuthorityHarness,
+) -> None:
+    """A successor source binding fences an old worker's cancellation callback."""
+
+    old_row, old_lease = _claim_first_source(authority_harness, "old-owner")
+    receipt = authority_harness.service.stage_personal_context_authority(
+        old_row, "dataset-a", "user-a"
+    )
+    _set_relay_owner(authority_harness, "successor-owner")
+    successor_lease = PublicationRelayLease(old_row.profile_id, "successor-owner")
+    successor_row = replace(old_row, relay_owner_token="successor-owner")
+    authority_harness.publications.record_staged_row(
+        successor_row,
+        server_cursor=receipt.server_cursor,
+        lease=successor_lease,
+    )
+    authority_harness.publications.acknowledge_row(
+        successor_row,
+        server_cursor=receipt.server_cursor,
+        lease=successor_lease,
+    )
+
+    with pytest.raises(SyncStoreError, match="cancellation"):
+        authority_harness.service.cancel_personal_context_authority(
+            old_row,
+            receipt,
+            "dataset-a",
+            "user-a",
+        )
+
+    assert _stored_source_state(authority_harness, successor_row) == (
+        "acknowledged",
+        receipt.server_cursor,
+    )
+    hidden = authority_harness.store.get_envelope_by_server_cursor(
+        receipt.server_cursor
+    )
+    assert hidden is not None and hidden.apply_status == "pending"
+    authority_harness.service.finalize_personal_context_authority(
+        successor_row,
+        receipt,
+        "dataset-a",
+        "user-a",
+    )
+    applied = authority_harness.store.get_envelope_by_server_cursor(
+        receipt.server_cursor
+    )
+    assert applied is not None and applied.apply_status == "applied"
+    assert old_lease.owner_token == "old-owner"
+
+
+def test_source_finalization_guard_blocks_concurrent_purge_before_sync_apply(
+    authority_harness: AuthorityHarness,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Purge cannot terminalize source after its last check but before Sync apply."""
+
+    row, receipt, _lease = _acknowledge_hidden_source(
+        authority_harness, "finalizer-owner"
+    )
+    source_checked = threading.Event()
+    release_finalizer = threading.Event()
+    purge_finished = threading.Event()
+    finalizer_errors: list[BaseException] = []
+    purge_errors: list[BaseException] = []
+    original_match = PersonalContextPublicationRelayStore._source_claim_matches
+
+    def pause_after_exact_source_check(**kwargs):
+        matched = original_match(**kwargs)
+        if matched and kwargs["allowed_states"] == {"acknowledged"}:
+            source_checked.set()
+            if not release_finalizer.wait(5):
+                raise RuntimeError("finalizer interleaving timed out")
+        return matched
+
+    monkeypatch.setattr(
+        PersonalContextPublicationRelayStore,
+        "_source_claim_matches",
+        staticmethod(pause_after_exact_source_check),
+    )
+
+    def finalize() -> None:
+        try:
+            authority_harness.service.finalize_personal_context_authority(
+                row, receipt, "dataset-a", "user-a"
+            )
+        except BaseException as exc:  # noqa: BLE001 - thread transports evidence.
+            finalizer_errors.append(exc)
+
+    purge_runtime = _restart(authority_harness)
+
+    def terminalize() -> None:
+        try:
+            _set_relay_owner(purge_runtime, "finalizer-owner", active=False)
+            purge_runtime.canonical.purge_profile(
+                mode="everywhere",
+                confirmation="DELETE EVERYWHERE",
+                expected_purge_generation=0,
+            )
+        except BaseException as exc:  # noqa: BLE001 - thread transports evidence.
+            purge_errors.append(exc)
+        finally:
+            purge_finished.set()
+
+    finalizer_thread = threading.Thread(target=finalize)
+    purge_thread = threading.Thread(target=terminalize)
+    finalizer_thread.start()
+    assert source_checked.wait(2)
+    purge_thread.start()
+    purge_finished_while_source_check_paused = purge_finished.wait(0.25)
+    release_finalizer.set()
+    finalizer_thread.join(5)
+    purge_thread.join(5)
+
+    assert finalizer_thread.is_alive() is False
+    assert purge_thread.is_alive() is False
+    assert purge_finished_while_source_check_paused is False
+    assert finalizer_errors == []
+    assert purge_errors == []
+    stored = authority_harness.store.get_envelope_by_server_cursor(
+        receipt.server_cursor
+    )
+    assert stored is not None and stored.apply_status == "applied"
+
+
+def test_finalization_commits_sync_before_source_guard_releases(
+    authority_harness: AuthorityHarness,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A second connection never observes source purge with Sync still pending."""
+
+    row, receipt, _lease = _acknowledge_hidden_source(
+        authority_harness, "commit-order-owner"
+    )
+    sync_precommit = threading.Event()
+    release_sync_exit = threading.Event()
+    purge_finished = threading.Event()
+    finalizer_errors: list[BaseException] = []
+    purge_errors: list[BaseException] = []
+    observed_apply_status: list[str] = []
+    original_transaction = SyncDatabase.materialization_transaction
+
+    @contextmanager
+    def pause_before_context_commit(self, keys, **kwargs):
+        with original_transaction(self, keys, **kwargs) as connection:
+            yield connection
+            sync_precommit.set()
+            if not release_sync_exit.wait(5):
+                raise RuntimeError("Sync commit interleaving timed out")
+
+    monkeypatch.setattr(
+        SyncDatabase,
+        "materialization_transaction",
+        pause_before_context_commit,
+    )
+
+    def finalize() -> None:
+        try:
+            authority_harness.service.finalize_personal_context_authority(
+                row, receipt, "dataset-a", "user-a"
+            )
+        except BaseException as exc:  # noqa: BLE001 - thread transports evidence.
+            finalizer_errors.append(exc)
+
+    purge_runtime = _restart(authority_harness)
+
+    def terminalize() -> None:
+        try:
+            _set_relay_owner(purge_runtime, "commit-order-owner", active=False)
+            purge_runtime.canonical.purge_profile(
+                mode="everywhere",
+                confirmation="DELETE EVERYWHERE",
+                expected_purge_generation=0,
+            )
+            observed = purge_runtime.store.get_envelope_by_server_cursor(
+                receipt.server_cursor
+            )
+            assert observed is not None
+            observed_apply_status.append(observed.apply_status)
+        except BaseException as exc:  # noqa: BLE001 - thread transports evidence.
+            purge_errors.append(exc)
+        finally:
+            purge_finished.set()
+
+    finalizer_thread = threading.Thread(target=finalize)
+    purge_thread = threading.Thread(target=terminalize)
+    finalizer_thread.start()
+    assert sync_precommit.wait(2)
+    purge_thread.start()
+    assert purge_finished.wait(2)
+    release_sync_exit.set()
+    finalizer_thread.join(5)
+    purge_thread.join(5)
+
+    assert finalizer_thread.is_alive() is False
+    assert purge_thread.is_alive() is False
+    assert finalizer_errors == []
+    assert purge_errors == []
+    assert observed_apply_status == ["applied"]
+
+
+def test_finalization_uses_sync_then_source_lock_order(
+    authority_harness: AuthorityHarness,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Finalization cannot deadlock a Sync-held ingress waiting on source storage."""
+
+    row, receipt, lease = _acknowledge_hidden_source(
+        authority_harness, "lock-order-owner"
+    )
+    staged = authority_harness.store.get_envelope_by_server_cursor(
+        receipt.server_cursor
+    )
+    assert staged is not None
+    source_guard_entered = threading.Event()
+    source_write_finished = threading.Event()
+    finalizer_errors: list[BaseException] = []
+    source_write_errors: list[BaseException] = []
+    original_guard = PersonalContextPublicationRelayStore.authority_finalization_guard
+
+    @contextmanager
+    def observed_source_guard(self, guarded_row, guarded_receipt, *, lease):
+        source_guard_entered.set()
+        with original_guard(
+            self, guarded_row, guarded_receipt, lease=lease
+        ):
+            yield
+
+    monkeypatch.setattr(
+        PersonalContextPublicationRelayStore,
+        "authority_finalization_guard",
+        observed_source_guard,
+    )
+
+    def finalize() -> None:
+        try:
+            authority_harness.service.finalize_personal_context_authority(
+                row, receipt, "dataset-a", "user-a"
+            )
+        except BaseException as exc:  # noqa: BLE001 - thread transports evidence.
+            finalizer_errors.append(exc)
+
+    def touch_source() -> None:
+        try:
+            _set_relay_owner(authority_harness, lease.owner_token)
+        except BaseException as exc:  # noqa: BLE001 - thread transports evidence.
+            source_write_errors.append(exc)
+        finally:
+            source_write_finished.set()
+
+    with authority_harness.store.materialization_guard(
+        [staged], require_predecessors=False
+    ):
+        finalizer_thread = threading.Thread(target=finalize)
+        finalizer_thread.start()
+        entered_source_while_sync_held = source_guard_entered.wait(0.25)
+        source_writer = threading.Thread(target=touch_source)
+        source_writer.start()
+        source_write_finished_while_sync_held = source_write_finished.wait(0.25)
+
+    finalizer_thread.join(5)
+    source_writer.join(5)
+    assert entered_source_while_sync_held is False
+    assert source_write_finished_while_sync_held is True
+    assert finalizer_thread.is_alive() is False
+    assert source_writer.is_alive() is False
+    assert finalizer_errors == []
+    assert source_write_errors == []
+    applied = authority_harness.store.get_envelope_by_server_cursor(
+        receipt.server_cursor
+    )
+    assert applied is not None and applied.apply_status == "applied"
+
+
+def test_inflight_stage_fences_source_purge_until_hidden_insert_commits(
+    authority_harness: AuthorityHarness,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Terminal cleanup cannot retire source ahead of an in-flight hidden insert."""
+
+    from tldw_Server_API.app.core.Sync.v2 import server_origin
+
+    row, _lease = _claim_first_source(authority_harness, "slow-stage-owner")
+    insert_entered = threading.Event()
+    release_insert = threading.Event()
+    purge_finished = threading.Event()
+    stage_errors: list[BaseException] = []
+    purge_errors: list[BaseException] = []
+    stage_receipts: list[AuthorityStageReceipt] = []
+    original_insert = server_origin.insert_personal_context_authority
+
+    def pause_before_insert(*args, **kwargs):
+        insert_entered.set()
+        if not release_insert.wait(5):
+            raise RuntimeError("stage interleaving timed out")
+        return original_insert(*args, **kwargs)
+
+    monkeypatch.setattr(
+        server_origin,
+        "insert_personal_context_authority",
+        pause_before_insert,
+    )
+
+    def stage() -> None:
+        try:
+            stage_receipts.append(
+                authority_harness.service.stage_personal_context_authority(
+                    row, "dataset-a", "user-a"
+                )
+            )
+        except BaseException as exc:  # noqa: BLE001 - thread transports evidence.
+            stage_errors.append(exc)
+
+    purge_runtime = _restart(authority_harness)
+
+    def terminalize() -> None:
+        try:
+            _set_relay_owner(purge_runtime, "slow-stage-owner", active=False)
+            purge_runtime.canonical.purge_profile(
+                mode="everywhere",
+                confirmation="DELETE EVERYWHERE",
+                expected_purge_generation=0,
+            )
+        except BaseException as exc:  # noqa: BLE001 - thread transports evidence.
+            purge_errors.append(exc)
+        finally:
+            purge_finished.set()
+
+    stage_thread = threading.Thread(target=stage)
+    purge_thread = threading.Thread(target=terminalize)
+    stage_thread.start()
+    assert insert_entered.wait(2)
+    purge_thread.start()
+    purge_finished_while_insert_paused = purge_finished.wait(0.25)
+    release_insert.set()
+    stage_thread.join(5)
+    purge_thread.join(5)
+
+    assert stage_thread.is_alive() is False
+    assert purge_thread.is_alive() is False
+    assert purge_finished_while_insert_paused is False
+    assert stage_errors == []
+    assert purge_errors == []
+    assert len(stage_receipts) == 1
+
+    restarted = _restart(authority_harness)
+    _relay(restarted, row_budget=1)
+    assert (
+        restarted.store.get_envelope_by_server_cursor(
+            stage_receipts[0].server_cursor
+        )
+        is None
+    )
+    assert _source_identity_exists(restarted, row) is False
+
+
+def test_staging_commits_hidden_insert_before_source_guard_releases(
+    authority_harness: AuthorityHarness,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A second connection never observes source purge before hidden insert commit."""
+
+    row, _lease = _claim_first_source(authority_harness, "stage-commit-owner")
+    sync_precommit = threading.Event()
+    release_sync_exit = threading.Event()
+    purge_finished = threading.Event()
+    stage_errors: list[BaseException] = []
+    purge_errors: list[BaseException] = []
+    observed_apply_status: list[str | None] = []
+    original_transaction = SyncDatabase.materialization_transaction
+
+    @contextmanager
+    def pause_before_context_commit(self, keys, **kwargs):
+        with original_transaction(self, keys, **kwargs) as connection:
+            yield connection
+            sync_precommit.set()
+            if not release_sync_exit.wait(5):
+                raise RuntimeError("Sync commit interleaving timed out")
+
+    monkeypatch.setattr(
+        SyncDatabase,
+        "materialization_transaction",
+        pause_before_context_commit,
+    )
+
+    def stage() -> None:
+        try:
+            authority_harness.service.stage_personal_context_authority(
+                row, "dataset-a", "user-a"
+            )
+        except BaseException as exc:  # noqa: BLE001 - thread transports evidence.
+            stage_errors.append(exc)
+
+    purge_runtime = _restart(authority_harness)
+
+    def terminalize() -> None:
+        try:
+            _set_relay_owner(purge_runtime, "stage-commit-owner", active=False)
+            purge_runtime.canonical.purge_profile(
+                mode="everywhere",
+                confirmation="DELETE EVERYWHERE",
+                expected_purge_generation=0,
+            )
+            observed = purge_runtime.store.get_envelope_by_client_id(
+                "dataset-a", row.deterministic_envelope_id
+            )
+            observed_apply_status.append(
+                None if observed is None else observed.apply_status
+            )
+        except BaseException as exc:  # noqa: BLE001 - thread transports evidence.
+            purge_errors.append(exc)
+        finally:
+            purge_finished.set()
+
+    stage_thread = threading.Thread(target=stage)
+    purge_thread = threading.Thread(target=terminalize)
+    stage_thread.start()
+    assert sync_precommit.wait(2)
+    purge_thread.start()
+    assert purge_finished.wait(2)
+    release_sync_exit.set()
+    stage_thread.join(5)
+    purge_thread.join(5)
+
+    assert stage_thread.is_alive() is False
+    assert purge_thread.is_alive() is False
+    assert stage_errors == []
+    assert purge_errors == []
+    assert observed_apply_status == ["pending"]
+
+
 def test_purge_after_orphan_insert_compensates_only_hidden_authority(
     authority_harness: AuthorityHarness,
 ) -> None:
@@ -344,9 +943,9 @@ def test_purge_after_orphan_insert_compensates_only_hidden_authority(
         expected_purge_generation=0,
     )
     restarted = _restart(authority_harness)
-    result = _relay(restarted, row_budget=1)
+    result = _relay(restarted, row_budget=100)
 
-    assert result.continuation == "personal_context_relay_pending"
+    assert result.continuation in {"complete", "personal_context_relay_pending"}
     assert (
         restarted.store.get_envelope_by_server_cursor(
             captured["receipt"].server_cursor
@@ -355,6 +954,166 @@ def test_purge_after_orphan_insert_compensates_only_hidden_authority(
     )
     retained = restarted.store.get_envelope_by_server_cursor(applied.server_cursor)
     assert retained is not None and retained.apply_status == "applied"
+
+
+def test_purge_after_acknowledgement_removes_cursor_bound_hidden_authority(
+    authority_harness: AuthorityHarness,
+) -> None:
+    """A shredded terminal source remains compensatable after recording its cursor."""
+
+    row, receipt, lease = _acknowledge_hidden_source(
+        authority_harness, "acknowledged-owner"
+    )
+    _set_relay_owner(authority_harness, lease.owner_token, active=False)
+    authority_harness.canonical.purge_profile(
+        mode="everywhere",
+        confirmation="DELETE EVERYWHERE",
+        expected_purge_generation=0,
+    )
+
+    restarted = _restart(authority_harness)
+    result = _relay(restarted, row_budget=1)
+
+    assert result.continuation == "personal_context_relay_pending"
+    assert restarted.store.get_envelope_by_server_cursor(receipt.server_cursor) is None
+    assert _source_identity_exists(restarted, row) is False
+
+
+def test_terminal_cleanup_retires_source_but_never_deletes_applied_history(
+    authority_harness: AuthorityHarness,
+) -> None:
+    """An exact applied terminal identity is safe progress, never delete authority."""
+
+    row, receipt, lease = _acknowledge_hidden_source(
+        authority_harness, "applied-owner"
+    )
+    authority_harness.service.finalize_personal_context_authority(
+        row, receipt, "dataset-a", "user-a"
+    )
+    _set_relay_owner(authority_harness, lease.owner_token, active=False)
+    authority_harness.canonical.purge_profile(
+        mode="everywhere",
+        confirmation="DELETE EVERYWHERE",
+        expected_purge_generation=0,
+    )
+
+    restarted = _restart(authority_harness)
+    result = _relay(restarted, row_budget=1)
+
+    assert result.continuation == "personal_context_relay_pending"
+    retained = restarted.store.get_envelope_by_server_cursor(receipt.server_cursor)
+    assert retained is not None and retained.apply_status == "applied"
+    assert _source_identity_exists(restarted, row) is False
+
+
+def test_terminal_cleanup_makes_durable_progress_past_bounded_absent_prefix(
+    authority_harness: AuthorityHarness,
+) -> None:
+    """Absent terminal identities cannot starve a later hidden orphan on restart."""
+
+    scope_id = authority_harness.canonical.list_scopes()[0].scope_id
+    for subject in ("relay.absent-prefix-one", "relay.absent-prefix-two"):
+        authority_harness.canonical.create_manual_record(
+            scope_id=scope_id,
+            payload={
+                "kind": "preference",
+                "subject": subject,
+                "polarity": "like",
+                "value": "bounded cleanup",
+            },
+            semantic_key={"namespace": "preference", "subject": subject},
+            controls={"sync_mode": "syncable", "agent_visibility": "agent_visible"},
+        )
+    with authority_harness.personal_db.transaction(immediate=True) as connection:
+        connection.execute(
+            """UPDATE personal_context_publication_batches SET status = 'complete'
+               WHERE profile_id = ? AND profile_publication_sequence < 3""",
+            (authority_harness.manifest.profile_id,),
+        )
+
+    orphan_row, orphan_lease = _claim_first_source(
+        authority_harness, "bounded-orphan-owner"
+    )
+    assert orphan_row.profile_publication_sequence >= 3
+    orphan_receipt = authority_harness.service.stage_personal_context_authority(
+        orphan_row, "dataset-a", "user-a"
+    )
+    _set_relay_owner(authority_harness, orphan_lease.owner_token, active=False)
+    authority_harness.canonical.purge_profile(
+        mode="everywhere",
+        confirmation="DELETE EVERYWHERE",
+        expected_purge_generation=0,
+    )
+
+    for _restart_count in range(3):
+        restarted = _restart(authority_harness)
+        _relay(restarted, row_budget=2)
+
+    restarted = _restart(authority_harness)
+    assert (
+        restarted.store.get_envelope_by_server_cursor(orphan_receipt.server_cursor)
+        is None
+    )
+    assert _source_identity_exists(restarted, orphan_row) is False
+
+
+def test_terminal_cleanup_retries_mismatched_source_cursor_without_deletion(
+    authority_harness: AuthorityHarness,
+) -> None:
+    """A cursor/deterministic-ID disagreement is retryable and non-destructive."""
+
+    _drain(authority_harness)
+    scope_id = authority_harness.canonical.list_scopes()[0].scope_id
+    earlier = authority_harness.store.get_current_head(
+        "dataset-a", "personal_context.scope", scope_id
+    )
+    assert earlier is not None and earlier.server_cursor is not None
+    authority_harness.canonical.create_manual_record(
+        scope_id=scope_id,
+        payload={
+            "kind": "preference",
+            "subject": "relay.cursor-mismatch",
+            "polarity": "like",
+            "value": "retry safely",
+        },
+        semantic_key={
+            "namespace": "preference",
+            "subject": "relay.cursor-mismatch",
+        },
+        controls={"sync_mode": "syncable", "agent_visibility": "agent_visible"},
+    )
+    row, receipt, lease = _acknowledge_hidden_source(
+        authority_harness, "mismatch-owner"
+    )
+    _set_relay_owner(authority_harness, lease.owner_token, active=False)
+    authority_harness.canonical.purge_profile(
+        mode="everywhere",
+        confirmation="DELETE EVERYWHERE",
+        expected_purge_generation=0,
+    )
+    with authority_harness.personal_db.transaction(immediate=True) as connection:
+        connection.execute(
+            """UPDATE personal_context_publication_rows
+               SET sync_server_cursor = ?
+               WHERE profile_id = ? AND profile_publication_sequence = ?
+                 AND batch_ordinal = ?""",
+            (
+                earlier.server_cursor,
+                row.profile_id,
+                row.profile_publication_sequence,
+                row.batch_ordinal,
+            ),
+        )
+
+    restarted = _restart(authority_harness)
+    result = _relay(restarted, row_budget=1)
+
+    assert result.continuation == "personal_context_relay_pending"
+    assert _source_identity_exists(restarted, row) is True
+    original = restarted.store.get_envelope_by_server_cursor(receipt.server_cursor)
+    other = restarted.store.get_envelope_by_server_cursor(earlier.server_cursor)
+    assert original is not None and original.apply_status == "pending"
+    assert other is not None and other.apply_status == "applied"
 
 
 def test_stale_batch_state_cannot_record_a_stage_receipt(

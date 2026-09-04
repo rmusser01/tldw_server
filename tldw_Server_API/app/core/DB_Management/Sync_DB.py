@@ -2539,6 +2539,18 @@ class SyncDatabase:
                 raise SyncMaterializationBusyError() from exc
             raise
 
+    def commit_personal_context_authority_transaction(
+        self,
+        *,
+        connection: Any,
+    ) -> None:
+        """Commit a guarded authority mutation before its source fence releases."""
+
+        try:
+            connection.commit()
+        except Exception as exc:
+            raise SyncStoreError("sync_personal_context_authority_commit_failed") from exc
+
     @contextmanager
     def personal_context_transport_snapshot(
         self,
@@ -8240,10 +8252,11 @@ class SyncDatabase:
         profile_publication_sequence: int,
         batch_ordinal: int,
         batch_size: int,
-    ) -> bool:
-        """Delete only an exact, still-pending internal authority publication."""
+        connection: Any | None = None,
+    ) -> typing.Literal["removed", "absent", "applied", "mismatch"]:
+        """Classify or delete one exact pending internal authority publication."""
 
-        with self.backend.transaction() as connection:
+        with self.backend.transaction(connection) as connection:
             row = _first(
                 self.execute(
                     "SELECT * FROM sync_envelopes WHERE server_sequence = ?",
@@ -8252,7 +8265,7 @@ class SyncDatabase:
                 )
             )
             if row is None:
-                return True
+                return "absent"
             routing = decode_json(row.get("routing_metadata_json"), default={})
             authority = (
                 routing.get("personal_context_authority")
@@ -8265,7 +8278,6 @@ class SyncDatabase:
                 or row.get("device_id") != "server-origin"
                 or row.get("domain") not in PERSONAL_CONTEXT_SYNC_DOMAINS
                 or row.get("status") != "accepted"
-                or row.get("apply_status") != "pending"
                 or not isinstance(routing, dict)
                 or routing.get("profile_id") != profile_id
                 or routing.get("purge_generation") != purge_generation
@@ -8277,7 +8289,11 @@ class SyncDatabase:
                 or authority.get("batch_ordinal") != batch_ordinal
                 or authority.get("batch_size") != batch_size
             ):
-                return False
+                return "mismatch"
+            if row.get("apply_status") == "applied":
+                return "applied"
+            if row.get("apply_status") != "pending":
+                return "mismatch"
             current = _first(
                 self.execute(
                     """SELECT latest_server_cursor FROM sync_current_heads
@@ -8286,6 +8302,8 @@ class SyncDatabase:
                     connection=connection,
                 )
             )
+            if current is None or int(current["latest_server_cursor"]) != server_cursor:
+                return "mismatch"
             deleted = self.execute(
                 """DELETE FROM sync_envelopes
                     WHERE server_sequence = ? AND dataset_id = ?
@@ -8301,45 +8319,42 @@ class SyncDatabase:
                 connection=connection,
             )
             if deleted.rowcount != 1:
-                return False
-            if current is not None and int(current["latest_server_cursor"]) == server_cursor:
-                previous = _first(
-                    self.execute(
-                        """SELECT server_sequence FROM sync_envelopes
-                            WHERE dataset_id = ? AND domain = ? AND entity_id = ?
-                              AND status = 'accepted'
-                            ORDER BY server_sequence DESC LIMIT 1""",
-                        (dataset_id, row["domain"], row["entity_id"]),
-                        connection=connection,
-                    )
+                return "mismatch"
+            previous = _first(
+                self.execute(
+                    """SELECT server_sequence FROM sync_envelopes
+                        WHERE dataset_id = ? AND domain = ? AND entity_id = ?
+                          AND status = 'accepted'
+                        ORDER BY server_sequence DESC LIMIT 1""",
+                    (dataset_id, row["domain"], row["entity_id"]),
+                    connection=connection,
                 )
-                if previous is None:
-                    repaired = self.execute(
-                        """DELETE FROM sync_current_heads
-                            WHERE dataset_id = ? AND domain = ? AND object_id = ?
-                              AND latest_server_cursor = ?""",
-                        (dataset_id, row["domain"], row["entity_id"], server_cursor),
-                        connection=connection,
-                    )
-                    if repaired.rowcount != 1:
-                        raise SyncStoreError("personal_context_authority_cancel_raced")
-                else:
-                    repaired = self.execute(
-                        """UPDATE sync_current_heads SET latest_server_cursor = ?
-                            WHERE dataset_id = ? AND domain = ? AND object_id = ?
-                              AND latest_server_cursor = ?""",
-                        (
-                            int(previous["server_sequence"]),
-                            dataset_id,
-                            row["domain"],
-                            row["entity_id"],
-                            server_cursor,
-                        ),
-                        connection=connection,
-                    )
-                    if repaired.rowcount != 1:
-                        raise SyncStoreError("personal_context_authority_cancel_raced")
-            return True
+            )
+            if previous is None:
+                repaired = self.execute(
+                    """DELETE FROM sync_current_heads
+                        WHERE dataset_id = ? AND domain = ? AND object_id = ?
+                          AND latest_server_cursor = ?""",
+                    (dataset_id, row["domain"], row["entity_id"], server_cursor),
+                    connection=connection,
+                )
+            else:
+                repaired = self.execute(
+                    """UPDATE sync_current_heads SET latest_server_cursor = ?
+                        WHERE dataset_id = ? AND domain = ? AND object_id = ?
+                          AND latest_server_cursor = ?""",
+                    (
+                        int(previous["server_sequence"]),
+                        dataset_id,
+                        row["domain"],
+                        row["entity_id"],
+                        server_cursor,
+                    ),
+                    connection=connection,
+                )
+            if repaired.rowcount != 1:
+                raise SyncStoreError("personal_context_authority_cancel_raced")
+            return "removed"
 
     def mark_personal_context_authority_applied(
         self,
