@@ -8811,9 +8811,14 @@ class SyncDatabase:
                 object_revision is None
                 or not isinstance(row.get("entity_id"), str)
                 or not isinstance(row.get("payload_hash"), str)
-                or type(row.get("deleted")) is not int
-                or row.get("deleted") not in {0, 1}
             ):
+                raise SyncStoreError("personal_context_authority_finalize_raced")
+            raw_deleted = row.get("deleted")
+            if type(raw_deleted) is bool:
+                deleted = raw_deleted
+            elif type(raw_deleted) is int and raw_deleted in {0, 1}:
+                deleted = bool(raw_deleted)
+            else:
                 raise SyncStoreError("personal_context_authority_finalize_raced")
             updated = self.execute(
                 """UPDATE sync_envelopes
@@ -8840,7 +8845,7 @@ class SyncDatabase:
                     object_revision=object_revision,
                     object_hash=row["payload_hash"],
                     latest_server_cursor=server_cursor,
-                    deleted=bool(row["deleted"]),
+                    deleted=deleted,
                 ),
                 connection=conn,
             )
