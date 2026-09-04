@@ -80,8 +80,7 @@ class PersonalContextMaterializer:
                 return MaterializationResult(status="skipped")
             if authority is not None and authority.role == "client_ingress":
                 purge_generation = _purge_generation(dataset)
-                receipt = service.apply_sync_ingress(
-                    identity=IngressIdentity(
+                identity = IngressIdentity(
                         dataset_id=envelope.dataset_id,
                         device_id=str(envelope.device_id or ""),
                         client_envelope_id=envelope.client_envelope_id,
@@ -89,7 +88,9 @@ class PersonalContextMaterializer:
                             "sha256:" + hashlib.sha256(canonical_bytes(value)).hexdigest()
                         ),
                         purge_generation=purge_generation,
-                    ),
+                    )
+                receipt = service.apply_sync_ingress(
+                    identity=identity,
                     domain=self.domain,
                     value=value,
                     base_object_hash=envelope.base_object_hash,
@@ -97,6 +98,7 @@ class PersonalContextMaterializer:
                 if not _valid_ingress_receipt(
                     receipt,
                     envelope=envelope,
+                    identity=identity,
                     purge_generation=purge_generation,
                 ):
                     raise ValueError("Personal Context ingress receipt is invalid")
@@ -208,6 +210,7 @@ def _valid_ingress_receipt(
     receipt: object,
     *,
     envelope: SyncEnvelope,
+    identity: IngressIdentity,
     purge_generation: int,
 ) -> bool:
     """Bind a canonical receipt to this exact encrypted ingress envelope."""
@@ -224,11 +227,17 @@ def _valid_ingress_receipt(
     )
     return (
         receipt.receipt_id == expected_id
+        and receipt.dataset_id == identity.dataset_id
+        and receipt.device_id == identity.device_id
+        and receipt.client_envelope_id == identity.client_envelope_id
+        and receipt.canonical_payload_digest == identity.canonical_payload_digest
         and receipt.purge_generation == purge_generation
         and receipt.resulting_object_id == envelope.object_id
         and receipt.resulting_version_id == str(envelope.entity_version)
         and bool(receipt.publication_batch_id)
         and receipt.profile_publication_sequence > 0
+        and receipt.manifest_revision >= 0
+        and bool(receipt.manifest_version_id)
     )
 
 

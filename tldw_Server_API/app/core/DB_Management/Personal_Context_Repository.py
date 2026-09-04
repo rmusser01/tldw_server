@@ -909,6 +909,10 @@ class PersonalContextRepository:
                     publication_batch_id=batch.publication_batch_id,
                     profile_publication_sequence=batch.profile_publication_sequence,
                     receipt_id=PersonalContextPublicationJournal._receipt_id(identity),
+                    dataset_id=identity.dataset_id,
+                    device_id=identity.device_id,
+                    client_envelope_id=identity.client_envelope_id,
+                    canonical_payload_digest=identity.canonical_payload_digest,
                 )
             existing = self._head_row(connection, profile_id, object_type, object_id)
             expected_version = None if existing is None else str(existing["version_id"])
@@ -1067,6 +1071,10 @@ class PersonalContextRepository:
                 publication_batch_id=batch.publication_batch_id,
                 profile_publication_sequence=batch.profile_publication_sequence,
                 receipt_id=PersonalContextPublicationJournal._receipt_id(identity),
+                dataset_id=identity.dataset_id,
+                device_id=identity.device_id,
+                client_envelope_id=identity.client_envelope_id,
+                canonical_payload_digest=identity.canonical_payload_digest,
             )
 
     def get_scope(self, profile_id: str, scope_id: str) -> ProfileScope | None:

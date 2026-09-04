@@ -76,6 +76,10 @@ class CanonicalApplyReceipt:
     publication_batch_id: str
     profile_publication_sequence: int
     receipt_id: str
+    dataset_id: str
+    device_id: str
+    client_envelope_id: str
+    canonical_payload_digest: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -775,4 +779,8 @@ class PersonalContextPublicationJournal:
             publication_batch_id=str(row["publication_batch_id"]),
             profile_publication_sequence=int(row["profile_publication_sequence"]),
             receipt_id=str(row["receipt_id"]),
+            dataset_id=str(row["dataset_id"]),
+            device_id=str(row["device_id"]),
+            client_envelope_id=str(row["client_envelope_id"]),
+            canonical_payload_digest=str(row["canonical_payload_digest"]),
         )

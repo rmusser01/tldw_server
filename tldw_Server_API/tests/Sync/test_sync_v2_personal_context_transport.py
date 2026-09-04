@@ -73,6 +73,10 @@ class _RecordingService:
                     f"{identity.dataset_id}:{identity.device_id}:{identity.client_envelope_id}",
                 )
             ),
+            dataset_id=identity.dataset_id,
+            device_id=identity.device_id,
+            client_envelope_id=identity.client_envelope_id,
+            canonical_payload_digest=identity.canonical_payload_digest,
         )
 
 
