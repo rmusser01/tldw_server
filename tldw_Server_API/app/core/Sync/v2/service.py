@@ -2341,6 +2341,8 @@ class SyncV2Service:
                         batch_ordinal=receipt.batch_ordinal,
                         batch_size=receipt.batch_size,
                     )
+                    if outcome == "removed":
+                        guarded.commit_personal_context_authority()
         except RuntimeError as exc:
             if str(exc) == "publication authority cancellation is not authorized":
                 raise SyncStoreError(

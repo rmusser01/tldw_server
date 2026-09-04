@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@codex'
 created_date: '2026-09-04 03:33'
-updated_date: '2026-09-04 08:24'
+updated_date: '2026-09-04 08:41'
 labels:
   - personal-context
   - sync
@@ -50,7 +50,7 @@ Remediate TASK-13161 by making hidden authority staging, source acknowledgement,
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Implemented deterministic hidden-row recovery with structured stage receipts, acknowledgement-before-finalization ordering, exact source/Sync CAS fencing, and narrowly authorized purge compensation. Review round 1 then hardened stale-owner recovery, fenced staging and finalization through the actual Sync commit using the existing Sync-then-source lock order, and made terminal cleanup cover cursor-bearing identities while durably advancing past safely reconciled bounded prefixes. Applied history and unrelated rows are never deleted; cursor/identity disagreement, adapter rejection, head contention, database exceptions, and lease races remain retryable. Persisted two-database tests cover every durable boundary, two relay instances, purge, slow stage/finalize commit interleavings, corrupt-source restart, and plaintext scans across DB/WAL/SHM/log artifacts. No schema, migration, dependency, protocol-version, new ADR, or later-task activation was required. Focused verification: 104 passed; Ruff, Bandit, and diff check passed. Sandbox-only cache/log-buffer permission warnings are the only known noise; no blockers.
+Implemented deterministic hidden-row recovery with structured stage receipts, acknowledgement-before-finalization ordering, exact source/Sync CAS fencing, and narrowly authorized purge compensation. Review round 1 then hardened stale-owner recovery, fenced staging and finalization through the actual Sync commit using the existing Sync-then-source lock order, and made terminal cleanup cover cursor-bearing identities while durably advancing past safely reconciled bounded prefixes. Review round 2 fenced an exact removed compensation through its Sync commit before releasing the source guard; a successor therefore cannot acknowledge a row an older compensation later deletes. Applied history and unrelated rows are never deleted; cursor/identity disagreement, adapter rejection, head contention, database exceptions, and lease races remain retryable. Persisted two-database tests cover every durable boundary, two relay instances, purge, slow stage/finalize/compensation commit interleavings, corrupt-source restart, and plaintext scans across DB/WAL/SHM/log artifacts. No schema, migration, dependency, protocol-version, new ADR, or later-task activation was required. Focused verification: 105 passed; Ruff, Bandit, and diff check passed. Sandbox-only cache/log-buffer permission warnings are the only known noise; no blockers.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

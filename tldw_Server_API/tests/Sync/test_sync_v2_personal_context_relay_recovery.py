@@ -510,6 +510,122 @@ def test_stale_cancellation_cannot_delete_successor_acknowledged_row(
     assert old_lease.owner_token == "old-owner"
 
 
+def test_compensation_commits_delete_before_source_guard_releases(
+    authority_harness: AuthorityHarness,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A successor cannot acknowledge a row an older compensation later deletes."""
+
+    _drain(authority_harness)
+    scope_id = authority_harness.canonical.list_scopes()[0].scope_id
+    applied = authority_harness.store.get_current_head(
+        "dataset-a", "personal_context.scope", scope_id
+    )
+    assert applied is not None and applied.server_cursor is not None
+    authority_harness.canonical.create_manual_record(
+        scope_id=scope_id,
+        payload={
+            "kind": "preference",
+            "subject": "relay.compensation-commit",
+            "polarity": "like",
+            "value": "fence successor recovery",
+        },
+        semantic_key={
+            "namespace": "preference",
+            "subject": "relay.compensation-commit",
+        },
+        controls={"sync_mode": "syncable", "agent_visibility": "agent_visible"},
+    )
+    old_row, old_lease = _claim_first_source(
+        authority_harness, "old-compensation-owner"
+    )
+    old_receipt = authority_harness.service.stage_personal_context_authority(
+        old_row, "dataset-a", "user-a"
+    )
+    successor = _restart(authority_harness)
+    delete_precommit = threading.Event()
+    release_cancel_exit = threading.Event()
+    cancel_errors: list[BaseException] = []
+    cancel_outcomes: list[str] = []
+    original_transaction = SyncDatabase.materialization_transaction
+
+    @contextmanager
+    def pause_old_cancel_before_context_commit(self, keys, **kwargs):
+        with original_transaction(self, keys, **kwargs) as connection:
+            yield connection
+            if threading.current_thread().name == "old-compensator":
+                delete_precommit.set()
+                if not release_cancel_exit.wait(5):
+                    raise RuntimeError("compensation commit interleaving timed out")
+
+    monkeypatch.setattr(
+        SyncDatabase,
+        "materialization_transaction",
+        pause_old_cancel_before_context_commit,
+    )
+
+    def cancel() -> None:
+        try:
+            cancel_outcomes.append(
+                authority_harness.service.cancel_personal_context_authority(
+                    old_row,
+                    old_receipt,
+                    "dataset-a",
+                    "user-a",
+                )
+            )
+        except BaseException as exc:  # noqa: BLE001 - thread transports evidence.
+            cancel_errors.append(exc)
+
+    cancel_thread = threading.Thread(target=cancel, name="old-compensator")
+    cancel_thread.start()
+    assert delete_precommit.wait(2)
+
+    try:
+        _set_relay_owner(authority_harness, old_lease.owner_token, active=False)
+        successor_row, successor_lease = _claim_first_source(
+            successor, "successor-compensation-owner"
+        )
+        successor_receipt = successor.service.stage_personal_context_authority(
+            successor_row, "dataset-a", "user-a"
+        )
+        successor.publications.record_staged_row(
+            successor_row,
+            server_cursor=successor_receipt.server_cursor,
+            lease=successor_lease,
+        )
+        successor.publications.acknowledge_row(
+            successor_row,
+            server_cursor=successor_receipt.server_cursor,
+            lease=successor_lease,
+        )
+    finally:
+        release_cancel_exit.set()
+    cancel_thread.join(5)
+
+    assert cancel_thread.is_alive() is False
+    assert cancel_errors == []
+    assert cancel_outcomes == ["removed"]
+    assert successor_receipt.server_cursor != old_receipt.server_cursor
+    assert _stored_source_state(successor, successor_row) == (
+        "acknowledged",
+        successor_receipt.server_cursor,
+    )
+    recovered = successor.store.get_envelope_by_server_cursor(
+        successor_receipt.server_cursor
+    )
+    assert recovered is not None and recovered.apply_status == "pending"
+    retained = successor.store.get_envelope_by_server_cursor(applied.server_cursor)
+    assert retained is not None and retained.apply_status == "applied"
+    with successor.personal_db.transaction() as connection:
+        attention = connection.execute(
+            """SELECT 1 FROM personal_context_publication_relay_attention
+               WHERE profile_id = ?""",
+            (successor_row.profile_id,),
+        ).fetchone()
+    assert attention is None
+
+
 def test_source_finalization_guard_blocks_concurrent_purge_before_sync_apply(
     authority_harness: AuthorityHarness,
     monkeypatch: pytest.MonkeyPatch,
