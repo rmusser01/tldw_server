@@ -3718,6 +3718,10 @@ class SyncV2Service:
                     dataset_id,
                     after_server_cursor=since_sequence,
                     limit=page_limit,
+                    row_budget=max(
+                        1,
+                        100 - (0 if relay_result is None else relay_result.staged_rows),
+                    ),
                 )
                 if personal_context_egress_authorized
                 else PersonalContextAuthorityScan(

@@ -70,6 +70,7 @@ class PersonalContextAuthorityScan:
     visible_envelopes: list[SyncEnvelope]
     has_visible_lookahead: bool
     source_exhausted: bool = False
+    raw_rows_scanned: int = 0
 
 
 class SyncV2Store:
@@ -941,17 +942,26 @@ class SyncV2Store:
             if not raw:
                 source_exhausted = True
                 break
-            raw_seen += len(raw)
-            raw_cursor = max(
-                (item.server_cursor or raw_cursor for item in raw), default=raw_cursor
-            )
-            visible.extend(
-                envelope
-                for envelope in raw
-                if envelope.apply_status == "applied"
-                and envelope.authority is not None
-                and envelope.authority.role == "home_authority"
-            )
+            barrier = False
+            for envelope in raw:
+                raw_seen += 1
+                authority = envelope.authority
+                if (
+                    authority is not None
+                    and authority.role == "home_authority"
+                    and envelope.apply_status != "applied"
+                ):
+                    barrier = True
+                    break
+                raw_cursor = envelope.server_cursor or raw_cursor
+                if (
+                    envelope.apply_status == "applied"
+                    and authority is not None
+                    and authority.role == "home_authority"
+                ):
+                    visible.append(envelope)
+            if barrier:
+                break
             if len(raw) < chunk_limit:
                 source_exhausted = True
                 break
@@ -960,6 +970,7 @@ class SyncV2Store:
             visible_envelopes=visible[:limit],
             has_visible_lookahead=len(visible) > limit,
             source_exhausted=source_exhausted,
+            raw_rows_scanned=raw_seen,
         )
 
     def mark_personal_context_ingress_applied(
