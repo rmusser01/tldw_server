@@ -32,6 +32,7 @@ from tldw_Server_API.app.core.Personalization.personal_context_repository import
 )
 from tldw_Server_API.app.core.Personalization.personal_context_service import (
     PersonalContextService,
+    RecordMutation,
 )
 from tldw_Server_API.app.core.Sync.v2.adapters import SyncAdapterRegistry
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.personal_context import (
@@ -988,3 +989,120 @@ def test_manifest_prestage_requires_complete_matching_origin_receipt(
         assert isinstance(error, SyncStoreError)
         assert str(error) == "Personal Context authority receipt is invalid"
         assert ingress_harness.has_attention(manifest_row) is False
+
+
+def test_direct_record_update_relays_manifest_without_ingress_receipts(
+    authority_harness: AuthorityHarness,
+) -> None:
+    """A direct update may build on an applied home-authority head."""
+
+    record_v1 = authority_harness.canonical.create_manual_record(
+        scope_id=authority_harness.canonical.list_scopes()[0].scope_id,
+        payload={
+            "kind": "preference",
+            "subject": "response.detail",
+            "polarity": "like",
+            "value": "concise",
+        },
+        semantic_key={"namespace": "preference", "subject": "response.detail"},
+        controls={"sync_mode": "syncable", "agent_visibility": "agent_visible"},
+    )
+    relay = PersonalContextRelay(
+        publications=authority_harness.publications,
+        stage_authority=authority_harness.service.stage_personal_context_authority,
+        finalize_authority=authority_harness.service.finalize_personal_context_authority,
+        cancel_authority=authority_harness.service.cancel_personal_context_authority,
+    )
+    for _ in range(10):
+        result = relay.relay_profile(
+            user_id="user-a",
+            profile_id=authority_harness.manifest.profile_id,
+            dataset_id="dataset-a",
+            after_server_cursor=None,
+            wall_time_ms=5_000,
+        )
+        if result.continuation == "complete":
+            break
+    assert result.continuation == "complete"
+    record_v1_head = authority_harness.store.get_current_head(
+        "dataset-a", "personal_context.record", record_v1.record_id
+    )
+    manifest_v1_head = authority_harness.store.get_current_head(
+        "dataset-a",
+        "personal_context.manifest",
+        authority_harness.manifest.profile_id,
+    )
+    assert record_v1_head is not None
+    assert record_v1_head.authority is not None
+    assert record_v1_head.authority.role == "home_authority"
+    assert manifest_v1_head is not None
+    assert manifest_v1_head.authority is not None
+    assert manifest_v1_head.authority.role == "home_authority"
+
+    record_v2 = authority_harness.canonical.update_record(
+        record_v1.record_id,
+        RecordMutation(
+            payload={
+                "kind": "preference",
+                "subject": "response.detail",
+                "polarity": "like",
+                "value": "structured",
+            }
+        ),
+        expected_version_id=record_v1.version_id,
+    )
+    batch_v2 = authority_harness.publications.earliest_nonterminal_batch(
+        authority_harness.manifest.profile_id,
+        row_limit=100,
+    )
+    assert batch_v2 is not None
+    assert [row.role for row in batch_v2.rows] == ["semantic", "manifest"]
+
+    for _ in range(10):
+        result = relay.relay_profile(
+            user_id="user-a",
+            profile_id=authority_harness.manifest.profile_id,
+            dataset_id="dataset-a",
+            after_server_cursor=None,
+            wall_time_ms=5_000,
+        )
+        if result.continuation == "complete":
+            break
+
+    assert result.continuation == "complete"
+    assert all(
+        authority_harness.source_row_state(row) == "acknowledged"
+        for row in batch_v2.rows
+    )
+    record_v2_head = authority_harness.store.get_current_head(
+        "dataset-a", "personal_context.record", record_v2.record_id
+    )
+    manifest_v2_head = authority_harness.store.get_current_head(
+        "dataset-a",
+        "personal_context.manifest",
+        authority_harness.manifest.profile_id,
+    )
+    assert record_v2_head is not None
+    assert record_v2_head.entity_version == record_v2.version_id
+    assert record_v2_head.authority is not None
+    assert record_v2_head.authority.role == "home_authority"
+    assert manifest_v2_head is not None
+    assert manifest_v2_head.server_cursor != manifest_v1_head.server_cursor
+    assert manifest_v2_head.authority is not None
+    assert manifest_v2_head.authority.role == "home_authority"
+    with authority_harness.personal_db.transaction() as connection:
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM personal_context_ingress_receipts"
+            ).fetchone()[0]
+            == 0
+        )
+    with authority_harness.store.db.backend.transaction() as connection:
+        assert (
+            authority_harness.store.db.execute(
+                "SELECT COUNT(*) AS receipt_count "
+                "FROM sync_personal_context_ingress_receipts",
+                connection=connection,
+            ).rows[0]["receipt_count"]
+            == 0
+        )

@@ -1674,6 +1674,38 @@ class SyncV2Service:
             ingress_cursor = origin.base_server_cursor
             if ingress_cursor is None:
                 return None, None, None
+            origin_base = sync_store.get_envelope_by_server_cursor(ingress_cursor)
+            origin_base_authority = (
+                None if origin_base is None else origin_base.authority
+            )
+            if (
+                origin_base is not None
+                and origin_base_authority is not None
+                and origin_base_authority.role == "home_authority"
+            ):
+                if (
+                    origin_base.device_id != _SERVER_ORIGIN_DEVICE_ID
+                    or origin_base.status != "accepted"
+                    or origin_base.apply_status != "applied"
+                    or origin_base.dataset_id != origin.dataset_id
+                    or origin_base.domain != origin.domain
+                    or origin_base.object_id != origin.object_id
+                    or origin.base_object_revision != origin_base.object_revision
+                    or origin.base_object_hash != origin_base.payload_hash
+                    or origin.base_version != origin_base.entity_version
+                    or origin.object_revision
+                    != (origin_base.object_revision or 0) + 1
+                ):
+                    raise SyncStoreError(
+                        "Personal Context authority receipt is invalid"
+                    )
+                return None, None, None
+            if (
+                origin_base is None
+                or origin_base_authority is None
+                or origin_base_authority.role != "client_ingress"
+            ):
+                raise SyncStoreError("Personal Context authority receipt is invalid")
         sync_receipt = (
             None
             if ingress_cursor is None
@@ -1699,7 +1731,6 @@ class SyncV2Service:
         ):
             raise SyncStoreError("Personal Context authority receipt is invalid")
         if getattr(row, "role", None) == "manifest":
-            ingress = sync_store.get_envelope_by_server_cursor(ingress_cursor)
             try:
                 origin_canonical = canonical_json_bytes(
                     self._restore_personal_context_from_storage(dataset, origin).payload
@@ -1710,7 +1741,7 @@ class SyncV2Service:
                 ) from exc
             if not self._is_exact_ingress_confirmation(
                 dataset=dataset,
-                current_head=ingress,
+                current_head=origin_base,
                 envelope=origin,
                 canonical=origin_canonical,
                 source_row=row,
