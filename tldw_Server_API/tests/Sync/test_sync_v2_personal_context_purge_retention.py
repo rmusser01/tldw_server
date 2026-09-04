@@ -18,6 +18,7 @@ from tldw_Server_API.app.api.v1.API_Deps.personal_context_deps import (
 from tldw_Server_API.app.api.v1.endpoints.personal_context import router
 from tldw_Server_API.app.core.DB_Management.Personal_Context_Repository import (
     DirectPurgeCleanupIntent,
+    _VerifiedDirectPurgeCleanupClaim,
 )
 from tldw_Server_API.app.core.DB_Management.Personalization_DB import (
     PersonalizationDB,
@@ -137,6 +138,70 @@ def _install_cleanup_callback(runtime: AuthorityHarness) -> None:
         runtime.service.shred_authorized_personal_context_history(claim)
 
     runtime.canonical.set_after_commit_purge_cleanup(cleanup)
+
+
+def _execute_cleanup_layer(
+    runtime: AuthorityHarness,
+    layer: str,
+    claim: object,
+) -> object:
+    """Invoke one destructive boundary directly for authorization negatives."""
+
+    if layer == "service":
+        return runtime.service.shred_authorized_personal_context_history(claim)
+    if layer == "store":
+        return runtime.store._shred_authorized_personal_context_history(claim)
+    if layer == "database":
+        return runtime.store.db._shred_authorized_personal_context_profile_history(
+            claim
+        )
+    raise AssertionError("unknown cleanup layer")
+
+
+def _issue_cleanup_capability(
+    runtime: AuthorityHarness,
+    *,
+    owner_token: str = "verified-owner",
+) -> tuple[object, DirectPurgeCleanupIntent, object]:
+    """Create one direct purge and issue its target-bound cleanup capability."""
+
+    runtime.canonical.purge_profile(
+        mode="everywhere",
+        confirmation="DELETE EVERYWHERE",
+        expected_purge_generation=0,
+    )
+    repository = runtime.canonical._repository
+    intent = repository.claim_direct_purge_cleanup(owner_token=owner_token)
+    assert intent is not None
+    capability = repository.verify_direct_purge_cleanup_claim(
+        intent,
+        user_id="user-a",
+        dataset_id="dataset-a",
+        store=runtime.store,
+        database=runtime.store.db,
+    )
+    return repository, intent, capability
+
+
+def _enroll_matching_dataset(runtime: AuthorityHarness, dataset_id: str) -> None:
+    """Enroll another dataset for the same user and Personal Context profile."""
+
+    original = runtime.store.get_dataset("dataset-a")
+    runtime.store.enroll_dataset(
+        SyncDatasetCreate(
+            dataset_id=dataset_id,
+            owner_user_id="user-a",
+            encryption_policy="server_trusted_v1",
+            domains=list(original.domains),
+            metadata={
+                "personal_context": {
+                    **original.metadata["personal_context"],
+                    "profile_id": runtime.manifest.profile_id,
+                    "purge_generation": 0,
+                }
+            },
+        )
+    )
 
 
 def _stage_retention_canaries(runtime: AuthorityHarness) -> tuple[int, int, sqlite3.Row]:
@@ -575,6 +640,260 @@ def test_forged_same_profile_claim_cannot_execute_remote_purge_cleanup(
     )
     with pytest.raises(SyncStoreError, match="unauthorized"):
         runtime.service.shred_authorized_personal_context_history(forged)
+
+    retained = runtime.store.get_envelope_by_server_cursor(authority_cursor)
+    assert retained is not None
+    assert _matches_canary(retained.payload_ciphertext, _AUTHORITY_CANARY)
+
+
+@pytest.mark.parametrize("layer", ["store", "database"])
+def test_lower_cleanup_layers_reject_duck_typed_same_profile_claim(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    layer: str,
+) -> None:
+    runtime = AuthorityHarness(tmp_path, monkeypatch)
+    authority_cursor, _ingress_cursor, _source = _stage_retention_canaries(runtime)
+    runtime.canonical.apply_sync_object(
+        domain="personal_context.purge",
+        value={
+            "schema_version": 1,
+            "profile_id": runtime.manifest.profile_id,
+            "purge_generation": 1,
+        },
+        actor_type="sync",
+        actor_id="future-signed-purge",
+    )
+    assert _intent_rows(runtime.personal_db) == []
+
+    class ForgedCleanupClaim:
+        dataset_id = "dataset-a"
+        user_id = "user-a"
+        profile_id = runtime.manifest.profile_id
+        old_generation_through = 0
+        purge_generation = 1
+
+        @staticmethod
+        def _require_live_execution(*, store: object, database: object) -> None:
+            return None
+
+        @staticmethod
+        def _require_database_execution(database: object) -> None:
+            return None
+
+    with pytest.raises(SyncStoreError, match="unauthorized|authority is invalid"):
+        _execute_cleanup_layer(runtime, layer, ForgedCleanupClaim())
+
+    retained = runtime.store.get_envelope_by_server_cursor(authority_cursor)
+    assert retained is not None
+    assert _matches_canary(retained.payload_ciphertext, _AUTHORITY_CANARY)
+
+
+def test_cleanup_capability_rejects_normal_target_field_assignment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = AuthorityHarness(tmp_path, monkeypatch)
+    authority_cursor, _ingress_cursor, _source = _stage_retention_canaries(runtime)
+    repository, intent, capability = _issue_cleanup_capability(runtime)
+    replacements = {
+        "_dataset_id": "dataset-b",
+        "_user_id": "user-b",
+        "_store": object(),
+        "_database": object(),
+        "_repository": object(),
+        "_intent": replace(intent, owner_token="other-owner"),
+        "_provenance": object(),
+        "_authentication_tag": b"other-tag",
+    }
+
+    for attribute, value in replacements.items():
+        fresh = repository.verify_direct_purge_cleanup_claim(
+            intent,
+            user_id="user-a",
+            dataset_id="dataset-a",
+            store=runtime.store,
+            database=runtime.store.db,
+        )
+        with pytest.raises((AttributeError, TypeError)):
+            setattr(fresh, attribute, value)
+
+    for field_name, value in {
+        "profile_id": "other-profile",
+        "old_generation_through": 1,
+        "purge_generation": 2,
+        "intent_id": "other-intent",
+        "owner_token": "other-owner",
+    }.items():
+        with pytest.raises((AttributeError, TypeError)):
+            setattr(intent, field_name, value)
+
+    retained = runtime.store.get_envelope_by_server_cursor(authority_cursor)
+    assert retained is not None
+    assert _matches_canary(retained.payload_ciphertext, _AUTHORITY_CANARY)
+
+
+@pytest.mark.parametrize("layer", ["service", "store", "database"])
+def test_forced_cleanup_capability_dataset_retarget_is_rejected_at_every_layer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    layer: str,
+) -> None:
+    runtime = AuthorityHarness(tmp_path, monkeypatch)
+    _stage_retention_canaries(runtime)
+    _enroll_matching_dataset(runtime, "dataset-b")
+    second_cursor = _stage_dataset_canary(
+        runtime,
+        dataset_id="dataset-b",
+        client_envelope_id="retargeted-dataset-envelope",
+        canary=_SECOND_DATASET_CANARY,
+    )
+    _repository, _intent, capability = _issue_cleanup_capability(runtime)
+    object.__setattr__(capability, "_dataset_id", "dataset-b")
+
+    with pytest.raises(SyncStoreError, match="unauthorized|authority is invalid"):
+        _execute_cleanup_layer(runtime, layer, capability)
+
+    retained = runtime.store.get_envelope_by_server_cursor(second_cursor)
+    assert retained is not None
+    assert _matches_canary(retained.payload_ciphertext, _SECOND_DATASET_CANARY)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "user",
+        "store",
+        "database",
+        "repository",
+        "provenance",
+        "authentication_tag",
+        "profile",
+        "old_generation",
+        "purge_generation",
+        "intent_id",
+        "owner",
+    ],
+)
+def test_forced_cleanup_capability_identity_tampering_is_rejected_by_database(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+) -> None:
+    runtime = AuthorityHarness(tmp_path, monkeypatch)
+    authority_cursor, _ingress_cursor, _source = _stage_retention_canaries(runtime)
+    _repository, intent, capability = _issue_cleanup_capability(runtime)
+
+    class ForgedRepository:
+        @staticmethod
+        def _require_live_direct_purge_cleanup_claim(
+            cleanup_intent: DirectPurgeCleanupIntent,
+        ) -> None:
+            return None
+
+    if mutation == "user":
+        attribute, value = "_user_id", "user-b"
+    elif mutation == "store":
+        attribute, value = "_store", object()
+    elif mutation == "database":
+        attribute, value = "_database", object()
+    elif mutation == "repository":
+        attribute, value = "_repository", ForgedRepository()
+    elif mutation == "provenance":
+        attribute, value = "_provenance", object()
+    elif mutation == "authentication_tag":
+        attribute, value = "_authentication_tag", b"other-tag"
+    else:
+        intent_changes = {
+            "profile": {"profile_id": "other-profile"},
+            "old_generation": {"old_generation_through": 1},
+            "purge_generation": {"purge_generation": 2},
+            "intent_id": {"intent_id": "other-intent"},
+            "owner": {"owner_token": "other-owner"},
+        }
+        attribute, value = "_intent", replace(intent, **intent_changes[mutation])
+    object.__setattr__(capability, attribute, value)
+
+    with pytest.raises(SyncStoreError, match="unauthorized|authority is invalid"):
+        _execute_cleanup_layer(runtime, "database", capability)
+
+    retained = runtime.store.get_envelope_by_server_cursor(authority_cursor)
+    assert retained is not None
+    assert _matches_canary(retained.payload_ciphertext, _AUTHORITY_CANARY)
+
+
+@pytest.mark.parametrize("layer", ["service", "store", "database"])
+def test_cleanup_layers_reject_subclass_without_invoking_spoofed_validator(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    layer: str,
+) -> None:
+    runtime = AuthorityHarness(tmp_path, monkeypatch)
+    authority_cursor, _ingress_cursor, _source = _stage_retention_canaries(runtime)
+    validator_calls: list[str] = []
+
+    class SpoofedCapability(_VerifiedDirectPurgeCleanupClaim):
+        @property
+        def dataset_id(self) -> str:
+            return "dataset-a"
+
+        @property
+        def user_id(self) -> str:
+            return "user-a"
+
+        @property
+        def profile_id(self) -> str:
+            return runtime.manifest.profile_id
+
+        @property
+        def old_generation_through(self) -> int:
+            return 0
+
+        @property
+        def purge_generation(self) -> int:
+            return 1
+
+        @staticmethod
+        def _require_live_execution(*, store: object, database: object) -> None:
+            validator_calls.append("store")
+
+        @staticmethod
+        def _require_database_execution(database: object) -> None:
+            validator_calls.append("database")
+
+    spoofed = object.__new__(SpoofedCapability)
+    with pytest.raises(SyncStoreError, match="unauthorized|authority is invalid"):
+        _execute_cleanup_layer(runtime, layer, spoofed)
+    assert validator_calls == []
+
+    retained = runtime.store.get_envelope_by_server_cursor(authority_cursor)
+    assert retained is not None
+    assert _matches_canary(retained.payload_ciphertext, _AUTHORITY_CANARY)
+
+
+@pytest.mark.parametrize("claim_state", ["expired", "complete"])
+@pytest.mark.parametrize("layer", ["service", "store", "database"])
+def test_cleanup_layers_reject_capability_after_live_claim_loss(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    claim_state: str,
+    layer: str,
+) -> None:
+    runtime = AuthorityHarness(tmp_path, monkeypatch)
+    authority_cursor, _ingress_cursor, _source = _stage_retention_canaries(runtime)
+    repository, intent, capability = _issue_cleanup_capability(runtime)
+    if claim_state == "expired":
+        with runtime.personal_db.transaction(immediate=True) as connection:
+            connection.execute(
+                """UPDATE personal_context_purge_cleanup_intents
+                   SET claim_expires_at_ns = 0 WHERE intent_id = ?""",
+                (intent.intent_id,),
+            )
+    else:
+        repository.complete_direct_purge_cleanup(intent)
+
+    with pytest.raises(SyncStoreError, match="unauthorized|authority is invalid"):
+        _execute_cleanup_layer(runtime, layer, capability)
 
     retained = runtime.store.get_envelope_by_server_cursor(authority_cursor)
     assert retained is not None

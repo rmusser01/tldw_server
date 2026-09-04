@@ -8376,15 +8376,10 @@ class SyncDatabase:
     ) -> PersonalContextHistoryShredReceipt:
         """Irreversibly remove one profile's readable old-generation Sync material."""
 
-        try:
-            claim._require_database_execution(self)
-            dataset_id = claim.dataset_id
-            user_id = claim.user_id
-            profile_id = claim.profile_id
-            old_generation_through = claim.old_generation_through
-            purge_generation = claim.purge_generation
-        except (AttributeError, PermissionError) as exc:
-            raise SyncStoreError("Personal Context cleanup authority is invalid") from exc
+        from tldw_Server_API.app.core.DB_Management.Personal_Context_Repository import (
+            _validate_direct_purge_cleanup_claim,
+        )
+
         if self.backend_type != BackendType.SQLITE:
             raise SyncStoreError(
                 "Personal Context cleanup needs a reviewed backend retention policy"
@@ -8397,6 +8392,20 @@ class SyncDatabase:
         personal_context_domains = tuple(sorted(PERSONAL_CONTEXT_SYNC_DOMAINS))
         domain_placeholders = ", ".join("?" for _ in personal_context_domains)
         with self.backend.transaction(connection) as transaction:
+            try:
+                execution = _validate_direct_purge_cleanup_claim(
+                    claim,
+                    expected_database=self,
+                )
+            except PermissionError as exc:
+                raise SyncStoreError(
+                    "Personal Context cleanup authority is invalid"
+                ) from exc
+            dataset_id = execution.dataset_id
+            user_id = execution.user_id
+            profile_id = execution.profile_id
+            old_generation_through = execution.old_generation_through
+            purge_generation = execution.purge_generation
             dataset_row = self._require_dataset_owner_for_update(
                 dataset_id,
                 user_id,

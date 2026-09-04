@@ -1281,11 +1281,19 @@ class SyncV2Store:
     ) -> PersonalContextHistoryShredReceipt:
         """Scrub history only through one target-bound verified claim."""
 
+        from tldw_Server_API.app.core.DB_Management.Personal_Context_Repository import (
+            _validate_direct_purge_cleanup_claim,
+        )
+
         if self._connection is not None:
             raise SyncStoreError("Personal Context cleanup owns its Sync transaction")
         try:
-            claim._require_live_execution(store=self, database=self.db)
-        except (AttributeError, PermissionError) as exc:
+            _validate_direct_purge_cleanup_claim(
+                claim,
+                expected_store=self,
+                expected_database=self.db,
+            )
+        except PermissionError as exc:
             raise SyncStoreError("Personal Context cleanup intent is unauthorized") from exc
         return self.db._shred_authorized_personal_context_profile_history(claim)
 

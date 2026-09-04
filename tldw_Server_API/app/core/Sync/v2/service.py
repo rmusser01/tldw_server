@@ -1352,13 +1352,15 @@ class SyncV2Service:
         """Execute only a live repository-verified direct-purge capability."""
 
         from tldw_Server_API.app.core.DB_Management.Personal_Context_Repository import (
-            _VerifiedDirectPurgeCleanupClaim,
+            _validate_direct_purge_cleanup_claim,
         )
 
-        if not isinstance(claim, _VerifiedDirectPurgeCleanupClaim):
-            raise SyncStoreError("Personal Context cleanup intent is unauthorized")
         try:
-            claim._require_live_execution(store=self.store, database=self.store.db)
+            _validate_direct_purge_cleanup_claim(
+                claim,
+                expected_store=self.store,
+                expected_database=self.store.db,
+            )
         except PermissionError as exc:
             raise SyncStoreError("Personal Context cleanup intent is unauthorized") from exc
         return self.store._shred_authorized_personal_context_history(claim)

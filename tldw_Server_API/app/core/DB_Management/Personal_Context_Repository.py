@@ -67,6 +67,7 @@ _DIRECT_CONFIRMED_FULL_PROFILE_PURGE = object()
 _DIRECT_PURGE_CLEANUP_ORIGIN = "direct_confirmed_full_profile_purge"
 _DIRECT_PURGE_CLAIM_SECONDS = 60
 _VERIFIED_DIRECT_PURGE_EXECUTION = object()
+_DIRECT_PURGE_CAPABILITY_SIGNING_KEY = secrets.token_bytes(32)
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,85 +82,153 @@ class DirectPurgeCleanupIntent:
     owner_token: str | None
 
 
+@dataclass(frozen=True, slots=True, repr=False)
 class _VerifiedDirectPurgeCleanupClaim:
     """Opaque live-journal claim bound to one authenticated Sync target."""
 
-    __slots__ = (
-        "_database",
-        "_dataset_id",
-        "_intent",
-        "_provenance",
-        "_repository",
-        "_store",
-        "_user_id",
-    )
+    _repository: PersonalContextRepository
+    _intent: DirectPurgeCleanupIntent
+    _user_id: str
+    _dataset_id: str
+    _store: object
+    _database: object
+    _provenance: object
+    _authentication_tag: bytes
 
-    def __init__(
-        self,
-        *,
-        repository: PersonalContextRepository,
-        intent: DirectPurgeCleanupIntent,
-        user_id: str,
-        dataset_id: str,
-        store: object,
-        database: object,
-        provenance: object,
-    ) -> None:
-        if provenance is not _VERIFIED_DIRECT_PURGE_EXECUTION:
-            raise PermissionError("direct purge execution provenance is invalid")
-        self._repository = repository
-        self._intent = intent
-        self._user_id = user_id
-        self._dataset_id = dataset_id
-        self._store = store
-        self._database = database
-        self._provenance = provenance
+
+@dataclass(frozen=True, slots=True)
+class _DirectPurgeCleanupExecution:
+    """Validated immutable target snapshot for destructive Sync SQL."""
+
+    repository: PersonalContextRepository
+    intent: DirectPurgeCleanupIntent
+    user_id: str
+    dataset_id: str
+    store: object
+    database: object
 
     @property
     def profile_id(self) -> str:
-        return self._intent.profile_id
+        return self.intent.profile_id
 
     @property
     def old_generation_through(self) -> int:
-        return self._intent.old_generation_through
+        return self.intent.old_generation_through
 
     @property
     def purge_generation(self) -> int:
-        return self._intent.purge_generation
+        return self.intent.purge_generation
 
-    @property
-    def user_id(self) -> str:
-        return self._user_id
 
-    @property
-    def dataset_id(self) -> str:
-        return self._dataset_id
+def _direct_purge_capability_tag(
+    *,
+    repository: PersonalContextRepository,
+    intent: DirectPurgeCleanupIntent,
+    user_id: str,
+    dataset_id: str,
+    store: object,
+    database: object,
+) -> bytes:
+    """Authenticate every scalar and object-identity cleanup target."""
 
-    def _require_live_execution(
-        self,
-        *,
-        store: object,
-        database: object,
-    ) -> None:
-        """Fail unless provenance, target identity, and journal ownership remain live."""
+    source_database = object.__getattribute__(repository, "_database")
+    payload = canonical_json_bytes(
+        {
+            "repository_identity": id(repository),
+            "source_database_identity": id(source_database),
+            "store_identity": id(store),
+            "database_identity": id(database),
+            "user_id": user_id,
+            "dataset_id": dataset_id,
+            "intent_id": intent.intent_id,
+            "profile_id": intent.profile_id,
+            "old_generation_through": intent.old_generation_through,
+            "purge_generation": intent.purge_generation,
+            "state": intent.state,
+            "owner_token": intent.owner_token,
+        }
+    )
+    return hmac.new(
+        _DIRECT_PURGE_CAPABILITY_SIGNING_KEY,
+        payload,
+        hashlib.sha256,
+    ).digest()
 
-        if (
-            self._provenance is not _VERIFIED_DIRECT_PURGE_EXECUTION
-            or self._store is not store
-            or self._database is not database
-        ):
-            raise PermissionError("direct purge execution target is invalid")
-        self._repository._require_live_direct_purge_cleanup_claim(self._intent)
 
-    def _require_database_execution(self, database: object) -> None:
-        """Fail unless this exact database still has the live verified claim."""
+def _validate_direct_purge_cleanup_claim(
+    claim: object,
+    *,
+    expected_store: object | None = None,
+    expected_database: object | None = None,
+) -> _DirectPurgeCleanupExecution:
+    """Return a live target snapshot only for an exact untampered capability."""
 
-        if (
-            self._provenance is not _VERIFIED_DIRECT_PURGE_EXECUTION
-            or self._database is not database
-        ):
-            raise PermissionError("direct purge execution database is invalid")
-        self._repository._require_live_direct_purge_cleanup_claim(self._intent)
+    if type(claim) is not _VerifiedDirectPurgeCleanupClaim:
+        raise PermissionError("direct purge execution capability type is invalid")
+    repository = object.__getattribute__(claim, "_repository")
+    raw_intent = object.__getattribute__(claim, "_intent")
+    user_id = object.__getattribute__(claim, "_user_id")
+    dataset_id = object.__getattribute__(claim, "_dataset_id")
+    store = object.__getattribute__(claim, "_store")
+    database = object.__getattribute__(claim, "_database")
+    provenance = object.__getattribute__(claim, "_provenance")
+    authentication_tag = object.__getattribute__(claim, "_authentication_tag")
+    if (
+        type(repository) is not PersonalContextRepository
+        or type(raw_intent) is not DirectPurgeCleanupIntent
+        or type(user_id) is not str
+        or not user_id
+        or type(dataset_id) is not str
+        or not dataset_id
+        or store is None
+        or database is None
+        or provenance is not _VERIFIED_DIRECT_PURGE_EXECUTION
+        or type(authentication_tag) is not bytes
+        or (expected_store is not None and store is not expected_store)
+        or (expected_database is not None and database is not expected_database)
+        or type(raw_intent.intent_id) is not str
+        or not raw_intent.intent_id
+        or type(raw_intent.profile_id) is not str
+        or not raw_intent.profile_id
+        or type(raw_intent.old_generation_through) is not int
+        or raw_intent.old_generation_through < 0
+        or type(raw_intent.purge_generation) is not int
+        or raw_intent.purge_generation != raw_intent.old_generation_through + 1
+        or raw_intent.state != "claimed"
+        or type(raw_intent.owner_token) is not str
+        or not raw_intent.owner_token
+    ):
+        raise PermissionError("direct purge execution target is invalid")
+    intent = DirectPurgeCleanupIntent(
+        intent_id=raw_intent.intent_id,
+        profile_id=raw_intent.profile_id,
+        old_generation_through=raw_intent.old_generation_through,
+        purge_generation=raw_intent.purge_generation,
+        state=raw_intent.state,
+        owner_token=raw_intent.owner_token,
+    )
+    expected_tag = _direct_purge_capability_tag(
+        repository=repository,
+        intent=intent,
+        user_id=user_id,
+        dataset_id=dataset_id,
+        store=store,
+        database=database,
+    )
+    if not hmac.compare_digest(authentication_tag, expected_tag):
+        raise PermissionError("direct purge execution capability was modified")
+    PersonalContextRepository._require_live_direct_purge_cleanup_claim(
+        repository,
+        intent,
+    )
+    return _DirectPurgeCleanupExecution(
+        repository=repository,
+        intent=intent,
+        user_id=user_id,
+        dataset_id=dataset_id,
+        store=store,
+        database=database,
+    )
 
 
 def _now_text() -> str:
@@ -2839,13 +2908,21 @@ class PersonalContextRepository:
             raise ValueError("direct purge cleanup execution target is invalid")
         self._require_live_direct_purge_cleanup_claim(intent)
         return _VerifiedDirectPurgeCleanupClaim(
-            repository=self,
-            intent=intent,
-            user_id=user_id,
-            dataset_id=dataset_id,
-            store=store,
-            database=database,
-            provenance=_VERIFIED_DIRECT_PURGE_EXECUTION,
+            _repository=self,
+            _intent=intent,
+            _user_id=user_id,
+            _dataset_id=dataset_id,
+            _store=store,
+            _database=database,
+            _provenance=_VERIFIED_DIRECT_PURGE_EXECUTION,
+            _authentication_tag=_direct_purge_capability_tag(
+                repository=self,
+                intent=intent,
+                user_id=user_id,
+                dataset_id=dataset_id,
+                store=store,
+                database=database,
+            ),
         )
 
     def checkpoint_direct_purge_storage(self) -> bool:
