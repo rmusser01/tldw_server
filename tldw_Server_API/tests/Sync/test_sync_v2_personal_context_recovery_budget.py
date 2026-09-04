@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from contextlib import contextmanager
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any
 
@@ -42,17 +44,6 @@ class _ManualClock:
 
     def __call__(self) -> int:
         return self.now_ns
-
-
-class _ScriptedClock:
-    def __init__(self, values: list[int]) -> None:
-        self.values = values
-        self.index = 0
-
-    def __call__(self) -> int:
-        value = self.values[min(self.index, len(self.values) - 1)]
-        self.index += 1
-        return value
 
 
 class _BudgetConsumingRelay:
@@ -246,6 +237,63 @@ class _ManyBatchSource:
         return True
 
 
+class _LeaseFlipSource(_ManyBatchSource):
+    """Expire the shared deadline from a successful current-row check."""
+
+    def __init__(
+        self,
+        *,
+        row_state: str,
+        expire_on_current_call: int,
+        clock: _ManualClock,
+    ) -> None:
+        super().__init__(1)
+        self.row_state = row_state
+        self.expire_on_current_call = expire_on_current_call
+        self.clock = clock
+        self.current_calls = 0
+        self.actions: list[str] = []
+
+    def earliest_nonterminal_batch(
+        self,
+        profile_id: str,
+        *,
+        row_limit: int,
+        lease: object,
+        budget: _PersonalContextRecoveryBudget,
+    ) -> PublicationSourceBatch | None:
+        batch = super().earliest_nonterminal_batch(
+            profile_id,
+            row_limit=row_limit,
+            lease=lease,
+            budget=budget,
+        )
+        if batch is None:
+            return None
+        row = replace(
+            batch.rows[0],
+            row_state=self.row_state,
+            sync_server_cursor=(1 if self.row_state == "acknowledged" else None),
+        )
+        return replace(batch, rows=(row,))
+
+    def row_is_current(self, _row: object, _lease: object) -> bool:
+        self.current_calls += 1
+        if self.current_calls == self.expire_on_current_call:
+            self.clock.now_ns = 100_000_000
+        return True
+
+    def record_staged_row(self, *_args: Any, **_kwargs: Any) -> None:
+        self.actions.append("record")
+
+    def acknowledge_row(self, *_args: Any, **_kwargs: Any) -> None:
+        self.actions.append("acknowledge")
+
+    def complete_if_acknowledged(self, *_args: Any, **_kwargs: Any) -> bool:
+        self.actions.append("complete")
+        return True
+
+
 def test_relay_never_queries_a_zero_limit_after_exactly_one_hundred_batches() -> None:
     """The old loop queried row_limit=0 after using its final allowance."""
 
@@ -321,6 +369,160 @@ def test_relay_does_not_restore_authority_after_source_selection_expires() -> No
     assert staged == []
 
 
+@pytest.mark.parametrize(
+    ("row_state", "expire_on_current_call", "expected_actions"),
+    [
+        pytest.param("pending", 1, [], id="before-stage"),
+        pytest.param("pending", 2, ["stage"], id="before-record"),
+        pytest.param(
+            "pending",
+            3,
+            ["stage", "record"],
+            id="before-acknowledge",
+        ),
+        pytest.param(
+            "pending",
+            4,
+            ["stage", "record", "acknowledge"],
+            id="before-finalize",
+        ),
+        pytest.param("acknowledged", 1, [], id="acknowledged-before-finalize"),
+    ],
+)
+def test_relay_rechecks_deadline_after_each_successful_current_row_check(
+    row_state: str,
+    expire_on_current_call: int,
+    expected_actions: list[str],
+) -> None:
+    """Lease/current validation may itself consume the remaining wall time."""
+
+    clock = _ManualClock()
+    publications = _LeaseFlipSource(
+        row_state=row_state,
+        expire_on_current_call=expire_on_current_call,
+        clock=clock,
+    )
+    budget = _PersonalContextRecoveryBudget(
+        deadline_ns=100,
+        remaining_rows=100,
+        clock_ns=clock,
+    )
+
+    def stage(row: PublicationSourceRow, *_args: Any) -> AuthorityStageReceipt:
+        publications.actions.append("stage")
+        return AuthorityStageReceipt(
+            server_cursor=1,
+            deterministic_envelope_id=row.deterministic_envelope_id,
+            publication_batch_id=row.publication_batch_id,
+            profile_publication_sequence=row.profile_publication_sequence,
+            batch_ordinal=row.batch_ordinal,
+            batch_size=row.batch_size,
+            purge_generation=row.purge_generation,
+        )
+
+    def finalize(*_args: Any) -> None:
+        publications.actions.append("finalize")
+
+    result = PersonalContextRelay(
+        publications=publications,
+        stage_authority=stage,
+        finalize_authority=finalize,
+    ).relay_profile(
+        user_id="user-a",
+        profile_id="profile-a",
+        dataset_id="dataset-a",
+        after_server_cursor=None,
+        budget=budget,
+    )
+
+    assert result.continuation == "personal_context_relay_pending"
+    assert publications.actions == expected_actions
+
+
+def test_row_current_deadline_expiry_cannot_advance_pull_watermark(tmp_path) -> None:
+    """A relay deadline race cannot hand later raw rows a fresh clock window."""
+
+    service, _target, _sqlite_path = _service(tmp_path)
+    clock = _ManualClock()
+    publications = _LeaseFlipSource(
+        row_state="pending",
+        expire_on_current_call=1,
+        clock=clock,
+    )
+    service._recovery_clock_ns = clock
+    service.personal_context_relay = PersonalContextRelay(
+        publications=publications,
+        stage_authority=lambda *_args: publications.actions.append("stage"),
+    )
+    _insert_hidden_ingress(service, ordinal=1)
+
+    pulled = service.pull(
+        user_id="user-a",
+        dataset_id=DATASET_ID,
+        device_id="device-b",
+        domains=[DOMAIN],
+        cursor=0,
+        include_own_changes=True,
+        personal_context_exchange=EXCHANGE,
+    )
+
+    assert pulled.next_cursor == "0"
+    assert pulled.has_more is True
+    assert publications.actions == []
+
+
+def test_relay_rechecks_deadline_before_completing_the_batch() -> None:
+    """Finalization may consume the remaining time before the batch-state write."""
+
+    clock = _ManualClock()
+    publications = _LeaseFlipSource(
+        row_state="pending",
+        expire_on_current_call=99,
+        clock=clock,
+    )
+    budget = _PersonalContextRecoveryBudget(
+        deadline_ns=100,
+        remaining_rows=100,
+        clock_ns=clock,
+    )
+
+    def stage(row: PublicationSourceRow, *_args: Any) -> AuthorityStageReceipt:
+        publications.actions.append("stage")
+        return AuthorityStageReceipt(
+            server_cursor=1,
+            deterministic_envelope_id=row.deterministic_envelope_id,
+            publication_batch_id=row.publication_batch_id,
+            profile_publication_sequence=row.profile_publication_sequence,
+            batch_ordinal=row.batch_ordinal,
+            batch_size=row.batch_size,
+            purge_generation=row.purge_generation,
+        )
+
+    def finalize(*_args: Any) -> None:
+        publications.actions.append("finalize")
+        clock.now_ns = 100
+
+    result = PersonalContextRelay(
+        publications=publications,
+        stage_authority=stage,
+        finalize_authority=finalize,
+    ).relay_profile(
+        user_id="user-a",
+        profile_id="profile-a",
+        dataset_id="dataset-a",
+        after_server_cursor=None,
+        budget=budget,
+    )
+
+    assert result.continuation == "personal_context_relay_pending"
+    assert publications.actions == [
+        "stage",
+        "record",
+        "acknowledge",
+        "finalize",
+    ]
+
+
 def test_real_source_decryption_stops_when_deadline_expires_between_rows(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
@@ -364,15 +566,35 @@ def test_real_source_decryption_stops_when_deadline_expires_between_rows(
     assert budget.remaining_rows == 99
 
 
-def test_raw_scan_checks_deadline_before_each_classification(tmp_path) -> None:
-    """A batch-level deadline check would classify every fetched row."""
+def test_raw_scan_rechecks_deadline_after_each_classification(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A receipt lookup that crosses the deadline cannot advance its row."""
 
     service, _target, _sqlite_path = _service(tmp_path)
     cursors = [_insert_hidden_ingress(service, ordinal=index) for index in range(3)]
+    clock = _ManualClock()
     budget = _PersonalContextRecoveryBudget(
         deadline_ns=100,
         remaining_rows=100,
-        clock_ns=_ScriptedClock([0, 0, 100]),
+        clock_ns=clock,
+    )
+    original_classify = service.store.classify_personal_context_recovery_row
+    classify_calls = 0
+
+    def expire_during_second_classification(*args: Any, **kwargs: Any):
+        nonlocal classify_calls
+        classify_calls += 1
+        result = original_classify(*args, **kwargs)
+        if classify_calls == 2:
+            clock.now_ns = 100
+        return result
+
+    monkeypatch.setattr(
+        service.store,
+        "classify_personal_context_recovery_row",
+        expire_during_second_classification,
     )
 
     scan = service.store.scan_personal_context_authority(
@@ -387,10 +609,10 @@ def test_raw_scan_checks_deadline_before_each_classification(tmp_path) -> None:
         purge_generation=0,
     )
 
-    assert scan.raw_rows_scanned == 1
+    assert scan.raw_rows_scanned == 2
     assert scan.raw_scan_watermark == cursors[0]
     assert scan.source_exhausted is False
-    assert budget.remaining_rows == 99
+    assert budget.remaining_rows == 98
 
 
 @pytest.mark.parametrize("signed", [False, True])
@@ -506,7 +728,7 @@ def test_current_unclassified_personal_context_row_is_a_watermark_barrier(
     """An ineligible row is skippable only after a permanent hidden role is proven."""
 
     service, _target, _sqlite_path = _service(tmp_path)
-    cursor = _insert_hidden_ingress(service, ordinal=1)
+    cursor = _insert_hidden_ingress(service, ordinal=1, attested=False)
     with service.store.db.backend.transaction() as connection:
         service.store.db.execute(
             "UPDATE sync_envelopes SET routing_metadata_json = ? WHERE server_sequence = ?",
@@ -585,3 +807,289 @@ def test_conflict_barrier_advances_only_the_inspected_hidden_prefix(
     assert scan.visible_envelopes == []
     assert scan.source_exhausted is False
     assert budget.remaining_rows == 98
+
+
+def _tampered_home_authority_routing(case: str) -> object:
+    routing: dict[str, object] = {
+        "integrity_key_id": "personal-context-integrity-v1",
+        "profile_id": "profile-a",
+        "purge_generation": 0,
+        "personal_context_authority": {
+            "role": "home_authority",
+            "publication_batch_id": "publication-batch-0001",
+            "profile_publication_sequence": 1,
+            "batch_ordinal": 0,
+            "batch_size": 1,
+        },
+    }
+    if case == "missing":
+        routing.pop("profile_id")
+    elif case == "malformed":
+        routing["profile_id"] = []
+    elif case == "generation-type-drift":
+        routing["purge_generation"] = "0"
+    elif case == "role-tamper":
+        routing["personal_context_authority"] = {"role": "client_ingress"}
+    else:  # pragma: no cover - the parametrization is closed.
+        raise AssertionError(f"unknown tamper case: {case}")
+    return routing
+
+
+@pytest.mark.parametrize("signed", [False, True], ids=["legacy", "signed"])
+@pytest.mark.parametrize(
+    "tamper_case",
+    ["missing", "malformed", "generation-type-drift", "role-tamper"],
+)
+def test_tampered_home_authority_never_enters_the_safe_watermark_prefix(
+    tmp_path,
+    signed: bool,
+    tamper_case: str,
+) -> None:
+    """Mutable routing cannot relabel applied home authority as safe hidden ingress."""
+
+    service, _target, _sqlite_path = _service(tmp_path)
+    service.personal_context_relay = _BudgetConsumingRelay(0)
+    service._recovery_clock_ns = _ManualClock()
+    authority_cursor = _insert_authority(
+        service,
+        record_id="tampered-authority",
+        sequence=1,
+    )
+    with service.store.db.backend.transaction() as connection:
+        service.store.db.execute(
+            "UPDATE sync_envelopes SET routing_metadata_json = ? "
+            "WHERE server_sequence = ?",
+            (
+                json.dumps(
+                    _tampered_home_authority_routing(tamper_case),
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+                authority_cursor,
+            ),
+            connection=connection,
+        )
+
+    cursor: str | int = 0
+    if signed:
+        device = service._require_registered_device("user-a", "device-b")
+        cursor = service._encode_pull_token(
+            dataset_id=DATASET_ID,
+            device_id="device-b",
+            version_set=service._pull_version_set(device),
+            watermarks={(DOMAIN, 1): 0},
+        )
+
+    pulled = service.pull(
+        user_id="user-a",
+        dataset_id=DATASET_ID,
+        device_id="device-b",
+        domains=[DOMAIN],
+        cursor=cursor,
+        include_own_changes=True,
+        personal_context_exchange=EXCHANGE,
+    )
+
+    assert pulled.envelopes == []
+    assert pulled.has_more is True
+    if signed:
+        device = service._require_registered_device("user-a", "device-b")
+        decoded = service._decode_pull_token(
+            pulled.next_cursor,
+            dataset_id=DATASET_ID,
+            device_id="device-b",
+            version_set=service._pull_version_set(device),
+            streams=[(DOMAIN, 1)],
+        )
+        assert decoded[(DOMAIN, 1)] == 0
+    else:
+        assert pulled.next_cursor == "0"
+
+
+@pytest.mark.parametrize(
+    ("column", "value"),
+    [
+        ("dataset_id", "dataset-tampered"),
+        ("device_id", "device-tampered"),
+        ("client_envelope_id", "ingress-tampered"),
+        ("wire_entity_version", "version-tampered"),
+    ],
+)
+def test_hidden_ingress_requires_an_exact_receipt_identity(
+    tmp_path,
+    column: str,
+    value: str,
+) -> None:
+    """A receipt for a different ingress identity cannot authorize a safe skip."""
+
+    service, _target, _sqlite_path = _service(tmp_path)
+    cursor = _insert_hidden_ingress(service, ordinal=1)
+    statements = {
+        "dataset_id": (
+            "UPDATE sync_personal_context_ingress_receipts SET dataset_id = ? "
+            "WHERE server_sequence = ?"
+        ),
+        "device_id": (
+            "UPDATE sync_personal_context_ingress_receipts SET device_id = ? "
+            "WHERE server_sequence = ?"
+        ),
+        "client_envelope_id": (
+            "UPDATE sync_personal_context_ingress_receipts "
+            "SET client_envelope_id = ? WHERE server_sequence = ?"
+        ),
+        "wire_entity_version": (
+            "UPDATE sync_personal_context_ingress_receipts "
+            "SET wire_entity_version = ? WHERE server_sequence = ?"
+        ),
+    }
+    with service.store.db.backend.transaction() as connection:
+        service.store.db.execute(
+            statements[column],
+            (value, cursor),
+            connection=connection,
+        )
+    budget = _PersonalContextRecoveryBudget(
+        deadline_ns=100,
+        remaining_rows=100,
+        clock_ns=_ManualClock(),
+    )
+
+    scan = service.store.scan_personal_context_authority(
+        DATASET_ID,
+        after_server_cursor=0,
+        limit=10,
+        budget=budget,
+        domains=[DOMAIN],
+        adapter_versions=[1],
+        profile_id="profile-a",
+        integrity_key_id="personal-context-integrity-v1",
+        purge_generation=0,
+    )
+
+    assert scan.raw_scan_watermark == 0
+    assert scan.visible_envelopes == []
+    assert scan.source_exhausted is False
+
+
+def test_attested_ingress_remains_safe_when_mutable_routing_is_stale(tmp_path) -> None:
+    """The exact canonical receipt, not mutable routing, proves client ingress."""
+
+    service, _target, _sqlite_path = _service(tmp_path)
+    cursor = _insert_hidden_ingress(service, ordinal=1)
+    with service.store.db.backend.transaction() as connection:
+        service.store.db.execute(
+            "UPDATE sync_envelopes SET routing_metadata_json = '{}' "
+            "WHERE server_sequence = ?",
+            (cursor,),
+            connection=connection,
+        )
+    budget = _PersonalContextRecoveryBudget(
+        deadline_ns=100,
+        remaining_rows=100,
+        clock_ns=_ManualClock(),
+    )
+
+    scan = service.store.scan_personal_context_authority(
+        DATASET_ID,
+        after_server_cursor=0,
+        limit=10,
+        budget=budget,
+        domains=[DOMAIN],
+        adapter_versions=[1],
+        profile_id="profile-a",
+        integrity_key_id="personal-context-integrity-v1",
+        purge_generation=1,
+    )
+
+    assert scan.raw_scan_watermark == cursor
+    assert scan.visible_envelopes == []
+    assert scan.source_exhausted is True
+
+
+def test_shredded_routing_marker_alone_cannot_hide_authority(tmp_path) -> None:
+    """Mutable retention metadata is insufficient without cleanup's empty shape."""
+
+    service, _target, _sqlite_path = _service(tmp_path)
+    cursor = _insert_authority(service, record_id="marker-only", sequence=1)
+    stored = service.store.get_envelope_by_server_cursor(cursor)
+    assert stored is not None
+    routing = dict(stored.routing_metadata)
+    routing["retention_state"] = "shredded"
+    with service.store.db.backend.transaction() as connection:
+        service.store.db.execute(
+            "UPDATE sync_envelopes SET routing_metadata_json = ? "
+            "WHERE server_sequence = ?",
+            (json.dumps(routing, sort_keys=True), cursor),
+            connection=connection,
+        )
+    budget = _PersonalContextRecoveryBudget(
+        deadline_ns=100,
+        remaining_rows=100,
+        clock_ns=_ManualClock(),
+    )
+
+    scan = service.store.scan_personal_context_authority(
+        DATASET_ID,
+        after_server_cursor=0,
+        limit=10,
+        budget=budget,
+        domains=[DOMAIN],
+        adapter_versions=[1],
+        profile_id="profile-a",
+        integrity_key_id="personal-context-integrity-v1",
+        purge_generation=0,
+    )
+
+    assert [item.server_cursor for item in scan.visible_envelopes] == [cursor]
+    assert scan.raw_scan_watermark == cursor
+
+
+def test_structurally_shredded_authority_is_safe_to_skip(tmp_path) -> None:
+    """Cleanup's content-free row shape may advance an old-generation watermark."""
+
+    service, _target, _sqlite_path = _service(tmp_path)
+    cursor = _insert_authority(service, record_id="shredded", sequence=1)
+    routing = json.dumps(
+        {
+            "profile_id": "profile-a",
+            "purge_generation": 0,
+            "retention_state": "shredded",
+        },
+        sort_keys=True,
+    )
+    with service.store.db.backend.transaction() as connection:
+        service.store.db.execute(
+            """UPDATE sync_envelopes
+               SET stable_key = NULL, mutation_group_id = NULL,
+                   mutation_step = NULL, mutation_step_count = NULL,
+                   mutation_plan_hash = NULL, base_object_hash = NULL,
+                   base_version = NULL, entity_version = NULL,
+                   dependency_json = '[]', routing_metadata_json = ?,
+                   payload_ciphertext = NULL, payload_json = '{}',
+                   payload_clear_json = '{}', payload_hash = NULL,
+                   payload_size_bytes = 0, encryption_metadata_json = '{}'
+               WHERE server_sequence = ?""",
+            (routing, cursor),
+            connection=connection,
+        )
+    budget = _PersonalContextRecoveryBudget(
+        deadline_ns=100,
+        remaining_rows=100,
+        clock_ns=_ManualClock(),
+    )
+
+    scan = service.store.scan_personal_context_authority(
+        DATASET_ID,
+        after_server_cursor=0,
+        limit=10,
+        budget=budget,
+        domains=[DOMAIN],
+        adapter_versions=[1],
+        profile_id="profile-a",
+        integrity_key_id="personal-context-integrity-v1",
+        purge_generation=1,
+    )
+
+    assert scan.raw_scan_watermark == cursor
+    assert scan.visible_envelopes == []
+    assert scan.source_exhausted is True

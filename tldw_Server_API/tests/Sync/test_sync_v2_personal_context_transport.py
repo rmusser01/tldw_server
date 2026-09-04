@@ -296,7 +296,12 @@ def _insert_authority(
     return stored.server_cursor
 
 
-def _insert_hidden_ingress(service: SyncV2Service, *, ordinal: int) -> int:
+def _insert_hidden_ingress(
+    service: SyncV2Service,
+    *,
+    ordinal: int,
+    attested: bool = True,
+) -> int:
     record_id = f"hidden-{ordinal:03d}"
     payload = preference_record(
         record_id=record_id,
@@ -318,6 +323,34 @@ def _insert_hidden_ingress(service: SyncV2Service, *, ordinal: int) -> int:
         service._protect_personal_context_for_storage(dataset, envelope)
     )
     assert stored.server_cursor is not None
+    if attested:
+        service.store.mark_personal_context_ingress_applied(
+            server_cursor=stored.server_cursor,
+            receipt=CanonicalApplyReceipt(
+                resulting_object_id=record_id,
+                resulting_version_id=str(stored.entity_version),
+                manifest_revision=ordinal,
+                manifest_version_id=f"manifest-hidden-{ordinal:03d}",
+                purge_generation=0,
+                publication_batch_id=f"publication-hidden-{ordinal:03d}",
+                profile_publication_sequence=ordinal + 1,
+                receipt_id=str(
+                    uuid.uuid5(
+                        uuid.NAMESPACE_URL,
+                        "tldw:personal-context:ingress:"
+                        f"{stored.dataset_id}:{stored.device_id}:"
+                        f"{stored.client_envelope_id}",
+                    )
+                ),
+                dataset_id=stored.dataset_id,
+                device_id=str(stored.device_id),
+                client_envelope_id=stored.client_envelope_id,
+                canonical_payload_digest=(
+                    "sha256:" + hashlib.sha256(canonical_json_bytes(payload)).hexdigest()
+                ),
+                wire_entity_version=str(stored.entity_version),
+            ),
+        )
     return stored.server_cursor
 
 
@@ -593,11 +626,15 @@ def test_legacy_authority_pull_stops_before_pending_barrier(
     assert pending_cursor > first_cursor
 
 
-def test_old_generation_authority_is_invisible_and_cannot_barrier_active_scan(
+def test_unattested_old_generation_authority_is_a_scan_barrier(
     tmp_path: Path,
 ) -> None:
     service, _target, _sqlite_path = _service(tmp_path)
-    _insert_authority(service, record_id="old-applied", sequence=1)
+    old_applied_cursor = _insert_authority(
+        service,
+        record_id="old-applied",
+        sequence=1,
+    )
     pending_cursor = _insert_authority(
         service,
         record_id="old-pending",
@@ -618,8 +655,9 @@ def test_old_generation_authority_is_invisible_and_cannot_barrier_active_scan(
     )
 
     assert scan.visible_envelopes == []
-    assert scan.raw_scan_watermark == pending_cursor
-    assert scan.source_exhausted is True
+    assert scan.raw_scan_watermark == 0
+    assert scan.source_exhausted is False
+    assert pending_cursor > old_applied_cursor
 
 
 def test_signed_mixed_pull_preserves_each_stream_watermark_without_duplicates(

@@ -9721,32 +9721,23 @@ class SyncV2Service:
                 and envelope.server_sequence >= blocker_cursor
             ):
                 break
-            stale_personal_context = bool(
-                envelope.domain in PERSONAL_CONTEXT_SYNC_DOMAINS
-                and (
-                    envelope.routing_metadata.get("profile_id") != profile_id
-                    or envelope.routing_metadata.get("integrity_key_id")
-                    != integrity_key_id
-                    or envelope.routing_metadata.get("purge_generation")
-                    != purge_generation
-                )
-            )
-            if (
-                envelope.domain in PERSONAL_CONTEXT_SYNC_DOMAINS
-                and not stale_personal_context
-            ):
-                if envelope.authority is None:
+            classification: Literal["hidden", "authority", "barrier"] | None = None
+            if envelope.domain in PERSONAL_CONTEXT_SYNC_DOMAINS:
+                if not budget.deadline_open():
                     break
-                if envelope.authority.role == "home_authority":
-                    if envelope.apply_status != "applied":
-                        break
-                elif envelope.authority.role != "client_ingress":
+                classification = self.store.classify_personal_context_recovery_row(
+                    envelope,
+                    profile_id=profile_id,
+                    integrity_key_id=integrity_key_id,
+                    purge_generation=purge_generation,
+                )
+                if not budget.deadline_open() or classification == "barrier":
                     break
             raw.append(envelope)
             scan_watermarks[stream] = envelope.server_sequence
             candidates.pop(stream)
             if (
-                not stale_personal_context
+                classification != "hidden"
                 and envelope.apply_status not in {"conflict", "superseded"}
                 and _personal_context_pull_visible(
                     envelope,

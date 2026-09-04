@@ -187,7 +187,9 @@ class PersonalContextRelay:
 
                 if row.row_state == "acknowledged":
                     receipt = self._receipt_for_row(row)
-                    if receipt is None or not self._renewed_current(claimed_row, lease):
+                    if receipt is None or not self._renewed_current(
+                        claimed_row, lease, budget
+                    ):
                         return self._pending(staged)
                     if self.finalize_authority is not None:
                         try:
@@ -207,13 +209,15 @@ class PersonalContextRelay:
 
                 receipt = self._receipt_for_row(row)
                 if row.row_state == "pending":
-                    if not self._renewed_current(claimed_row, lease):
+                    if not self._renewed_current(claimed_row, lease, budget):
                         return self._pending(staged)
                     try:
                         receipt = self.stage_authority(
                             claimed_row, dataset_id, user_id
                         )
                     except PersonalContextAuthoritySourceError:
+                        if not budget.deadline_open():
+                            return self._pending(staged)
                         self.publications.mark_attention(batch, lease=lease)
                         return PersonalContextRelayResult(
                             staged, False, False, "relay_poisoned"
@@ -222,7 +226,7 @@ class PersonalContextRelay:
                         return self._pending(staged)
                     if not self._receipt_matches(claimed_row, receipt):
                         return self._pending(staged)
-                    if not self._renewed_current(claimed_row, lease):
+                    if not self._renewed_current(claimed_row, lease, budget):
                         return self._pending(staged)
                     try:
                         self.publications.record_staged_row(
@@ -242,7 +246,7 @@ class PersonalContextRelay:
 
                 if receipt is None or not self._receipt_matches(claimed_row, receipt):
                     return self._pending(staged)
-                if not self._renewed_current(claimed_row, lease):
+                if not self._renewed_current(claimed_row, lease, budget):
                     return self._pending(staged)
                 try:
                     self.publications.acknowledge_row(
@@ -254,7 +258,7 @@ class PersonalContextRelay:
                     return self._pending(staged)
                 acknowledged_ordinals.add(row.batch_ordinal)
 
-                if not self._renewed_current(claimed_row, lease):
+                if not self._renewed_current(claimed_row, lease, budget):
                     return self._pending(staged)
                 if self.finalize_authority is not None:
                     try:
@@ -265,13 +269,21 @@ class PersonalContextRelay:
                         return self._pending(staged)
                 staged += 1
 
+            if not budget.deadline_open():
+                return self._pending(staged)
             if not self.publications.complete_if_acknowledged(batch, lease=lease):
                 return self._pending(staged)
 
-    def _renewed_current(self, row: PublicationSourceRow, lease: Any) -> bool:
+    def _renewed_current(
+        self,
+        row: PublicationSourceRow,
+        lease: Any,
+        budget: PersonalContextRecoveryBudget,
+    ) -> bool:
         return bool(
             self.publications.renew_lease(lease)
             and self.publications.row_is_current(row, lease)
+            and budget.deadline_open()
         )
 
     @staticmethod

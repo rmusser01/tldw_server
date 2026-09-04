@@ -80,6 +80,33 @@ class PersonalContextAuthorityScan:
     raw_envelopes: list[SyncEnvelope] = field(default_factory=list)
 
 
+def _personal_context_row_is_structurally_shredded(
+    envelope: SyncEnvelope,
+) -> bool:
+    """Recognize cleanup output without trusting its mutable routing marker alone."""
+
+    routing = envelope.routing_metadata
+    return bool(
+        isinstance(routing, Mapping)
+        and routing.get("retention_state") == "shredded"
+        and envelope.stable_key is None
+        and envelope.mutation_group_id is None
+        and envelope.mutation_step is None
+        and envelope.mutation_step_count is None
+        and envelope.mutation_plan_hash is None
+        and envelope.base_object_hash is None
+        and envelope.base_version is None
+        and envelope.entity_version is None
+        and not envelope.dependencies
+        and envelope.payload_ciphertext is None
+        and envelope.payload == {}
+        and envelope.payload_clear == {}
+        and envelope.payload_hash is None
+        and envelope.payload_size_bytes == 0
+        and envelope.encryption_metadata == {}
+    )
+
+
 class SyncV2Store:
     """Core Sync v2 persistence interface backed by DB_Management."""
 
@@ -1012,29 +1039,20 @@ class SyncV2Store:
                 ):
                     barrier = True
                     break
-                authority = envelope.authority
-                if (
-                    envelope.domain in PERSONAL_CONTEXT_SYNC_DOMAINS
-                    and (
-                        envelope.routing_metadata.get("profile_id") != profile_id
-                        or envelope.routing_metadata.get("integrity_key_id")
-                        != integrity_key_id
-                        or envelope.routing_metadata.get("purge_generation")
-                        != purge_generation
-                    )
-                ):
-                    raw_cursor = envelope.server_cursor or raw_cursor
-                    safe_raw.append(envelope)
-                    continue
                 if envelope.domain in PERSONAL_CONTEXT_SYNC_DOMAINS:
-                    if authority is None:
-                        barrier = True
+                    if not budget.deadline_open():
+                        bounded = True
                         break
-                    if authority.role == "home_authority":
-                        if envelope.apply_status != "applied":
-                            barrier = True
-                            break
-                    elif authority.role != "client_ingress":
+                    classification = self.classify_personal_context_recovery_row(
+                        envelope,
+                        profile_id=profile_id,
+                        integrity_key_id=integrity_key_id,
+                        purge_generation=purge_generation,
+                    )
+                    if not budget.deadline_open():
+                        bounded = True
+                        break
+                    if classification == "barrier":
                         barrier = True
                         break
                 raw_cursor = envelope.server_cursor or raw_cursor
@@ -1042,11 +1060,7 @@ class SyncV2Store:
                 if envelope.domain not in PERSONAL_CONTEXT_SYNC_DOMAINS:
                     if envelope.apply_status not in {"conflict", "superseded"}:
                         visible.append(envelope)
-                elif (
-                    envelope.apply_status == "applied"
-                    and authority is not None
-                    and authority.role == "home_authority"
-                ):
+                elif classification == "authority":
                     visible.append(envelope)
             if barrier or bounded:
                 break
@@ -1060,6 +1074,70 @@ class SyncV2Store:
             source_exhausted=source_exhausted,
             raw_rows_scanned=starting_rows - budget.remaining_rows,
             raw_envelopes=safe_raw,
+        )
+
+    def classify_personal_context_recovery_row(
+        self,
+        envelope: SyncEnvelope,
+        *,
+        profile_id: str | None,
+        integrity_key_id: str | None,
+        purge_generation: int | None,
+    ) -> Literal["hidden", "authority", "barrier"]:
+        """Classify a raw Personal Context row using durable provenance facts."""
+
+        if _personal_context_row_is_structurally_shredded(envelope):
+            return "hidden"
+        if self._personal_context_ingress_is_attested(envelope):
+            return "hidden"
+
+        routing = envelope.routing_metadata
+        routed_generation = (
+            routing.get("purge_generation")
+            if isinstance(routing, Mapping)
+            else None
+        )
+        current_route = bool(
+            isinstance(routing, Mapping)
+            and isinstance(profile_id, str)
+            and bool(profile_id)
+            and routing.get("profile_id") == profile_id
+            and isinstance(integrity_key_id, str)
+            and bool(integrity_key_id)
+            and routing.get("integrity_key_id") == integrity_key_id
+            and isinstance(routed_generation, int)
+            and not isinstance(routed_generation, bool)
+            and isinstance(purge_generation, int)
+            and not isinstance(purge_generation, bool)
+            and routed_generation == purge_generation
+        )
+        authority = envelope.authority
+        if (
+            current_route
+            and authority is not None
+            and authority.role == "home_authority"
+            and envelope.apply_status == "applied"
+        ):
+            return "authority"
+        return "barrier"
+
+    def _personal_context_ingress_is_attested(
+        self,
+        envelope: SyncEnvelope,
+    ) -> bool:
+        cursor = envelope.server_cursor
+        if cursor is None:
+            return False
+        receipt = self.get_personal_context_ingress_receipt(cursor)
+        return bool(
+            receipt is not None
+            and receipt.get("server_sequence") == cursor
+            and receipt.get("dataset_id") == envelope.dataset_id
+            and receipt.get("device_id") == envelope.device_id
+            and receipt.get("device_id") != "server-origin"
+            and receipt.get("client_envelope_id") == envelope.client_envelope_id
+            and receipt.get("wire_entity_version")
+            == str(envelope.entity_version)
         )
 
     def mark_personal_context_ingress_applied(
