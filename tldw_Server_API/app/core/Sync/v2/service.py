@@ -3636,6 +3636,7 @@ class SyncV2Service:
             PERSONAL_CONTEXT_SYNC_DOMAINS
         )
         relay_continuation: PersonalContextRelayContinuation | None = None
+        relay_result: object | None = None
         if personal_context_pull:
             state = dataset.metadata.get("personal_context")
             profile_id = state.get("profile_id") if isinstance(state, Mapping) else None
@@ -3661,10 +3662,6 @@ class SyncV2Service:
                     row_budget=100,
                     wall_time_ms=100,
                 )
-                relay_continuation = PersonalContextRelayContinuation(
-                    state=relay_result.continuation,
-                    scan_watermark=str(since_sequence),
-                )
             scan = (
                 self.store.scan_personal_context_authority(
                     dataset_id,
@@ -3682,6 +3679,11 @@ class SyncV2Service:
                 self._restore_personal_context_from_storage(dataset, envelope)
                 for envelope in scan.visible_envelopes
             ]
+            if relay_result is not None:
+                relay_continuation = PersonalContextRelayContinuation(
+                    state=relay_result.continuation,
+                    scan_watermark=str(scan.raw_scan_watermark),
+                )
             next_sequence = (
                 page[-1].server_sequence
                 if scan.has_visible_lookahead and page
@@ -3701,6 +3703,7 @@ class SyncV2Service:
                 envelopes=page,
                 next_cursor=str(next_sequence),
                 has_more=scan.has_visible_lookahead
+                or not scan.source_exhausted
                 or (relay_continuation is not None and relay_continuation.state != "complete"),
                 personal_context_relay=relay_continuation,
             )

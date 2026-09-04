@@ -6,6 +6,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from copy import copy
 from dataclasses import dataclass
+from time import monotonic_ns
 from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
@@ -68,6 +69,7 @@ class PersonalContextAuthorityScan:
     raw_scan_watermark: int
     visible_envelopes: list[SyncEnvelope]
     has_visible_lookahead: bool
+    source_exhausted: bool = False
 
 
 class SyncV2Store:
@@ -908,36 +910,56 @@ class SyncV2Store:
         *,
         after_server_cursor: int,
         limit: int,
+        row_budget: int = 100,
+        wall_time_ms: int = 100,
     ) -> PersonalContextAuthorityScan:
-        """Scan raw Personal Context history without promoting ingress to egress."""
+        """Find post-filter lookahead without skipping a hidden raw prefix."""
 
-        raw = self.list_envelopes_after(
-            dataset_id,
-            after_server_cursor,
-            limit=limit + 1,
-            domains=(
-                "personal_context.manifest",
-                "personal_context.scope",
-                "personal_context.record",
-                "personal_context.proposal",
-                "personal_context.purge",
-            ),
-            status="accepted",
+        if row_budget < 1 or wall_time_ms < 1:
+            raise ValueError("Personal Context scan limits must be positive")
+        raw_cursor = after_server_cursor
+        raw_seen = 0
+        visible: list[SyncEnvelope] = []
+        source_exhausted = False
+        deadline_ns = monotonic_ns() + wall_time_ms * 1_000_000
+        domains = (
+            "personal_context.manifest",
+            "personal_context.scope",
+            "personal_context.record",
+            "personal_context.proposal",
+            "personal_context.purge",
         )
-        visible = [
-            envelope
-            for envelope in raw
-            if envelope.apply_status == "applied"
-            and envelope.authority is not None
-            and envelope.authority.role == "home_authority"
-        ]
+        while raw_seen < row_budget and monotonic_ns() < deadline_ns and len(visible) <= limit:
+            chunk_limit = min(row_budget - raw_seen, max(1, limit + 1))
+            raw = self.list_envelopes_after(
+                dataset_id,
+                raw_cursor,
+                limit=chunk_limit,
+                domains=domains,
+                status="accepted",
+            )
+            if not raw:
+                source_exhausted = True
+                break
+            raw_seen += len(raw)
+            raw_cursor = max(
+                (item.server_cursor or raw_cursor for item in raw), default=raw_cursor
+            )
+            visible.extend(
+                envelope
+                for envelope in raw
+                if envelope.apply_status == "applied"
+                and envelope.authority is not None
+                and envelope.authority.role == "home_authority"
+            )
+            if len(raw) < chunk_limit:
+                source_exhausted = True
+                break
         return PersonalContextAuthorityScan(
-            raw_scan_watermark=max(
-                (item.server_cursor or after_server_cursor for item in raw),
-                default=after_server_cursor,
-            ),
+            raw_scan_watermark=raw_cursor,
             visible_envelopes=visible[:limit],
             has_visible_lookahead=len(visible) > limit,
+            source_exhausted=source_exhausted,
         )
 
     def mark_personal_context_ingress_applied(

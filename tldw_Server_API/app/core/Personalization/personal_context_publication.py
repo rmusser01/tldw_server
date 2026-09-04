@@ -110,6 +110,10 @@ class PublicationSourceBatch:
     rows: tuple[PublicationSourceRow, ...]
 
 
+class PublicationRelayPoisoned(RuntimeError):
+    """Content-free durable attention state for the earliest corrupt batch."""
+
+
 class PersonalContextPublicationRelayStore:
     """SQLite-backed source-journal access for the cross-database relay."""
 
@@ -203,6 +207,15 @@ class PersonalContextPublicationRelayStore:
             ).fetchone()
             if batch is None:
                 return None
+            attention = connection.execute(
+                """
+                SELECT 1 FROM personal_context_publication_relay_attention
+                WHERE profile_id = ? AND profile_publication_sequence = ?
+                """,
+                (profile_id, batch["profile_publication_sequence"]),
+            ).fetchone()
+            if attention is not None:
+                raise PublicationRelayPoisoned("Personal Context relay needs attention")
             connection.execute(
                 """
                 UPDATE personal_context_publication_batches
@@ -224,7 +237,17 @@ class PersonalContextPublicationRelayStore:
             ).fetchall()
             source_rows: list[PublicationSourceRow] = []
             for row in rows:
-                domain, canonical = journal.decrypt_row(row)
+                try:
+                    domain, canonical = journal.decrypt_row(row)
+                except Exception as exc:  # noqa: BLE001 - ciphertext must fail closed.
+                    self._mark_attention_in_transaction(
+                        connection,
+                        profile_id=profile_id,
+                        sequence=int(batch["profile_publication_sequence"]),
+                    )
+                    raise PublicationRelayPoisoned(
+                        "Personal Context relay needs attention"
+                    ) from exc
                 source_rows.append(
                     PublicationSourceRow(
                         profile_id=profile_id,
@@ -250,6 +273,32 @@ class PersonalContextPublicationRelayStore:
                 profile_publication_sequence=int(batch["profile_publication_sequence"]),
                 publication_batch_id=str(batch["publication_batch_id"]),
                 rows=tuple(source_rows),
+            )
+
+    @staticmethod
+    def _mark_attention_in_transaction(
+        connection: sqlite3.Connection,
+        *,
+        profile_id: str,
+        sequence: int,
+    ) -> None:
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO personal_context_publication_relay_attention(
+                profile_id, profile_publication_sequence, error_code, created_at
+            ) VALUES (?, ?, 'relay_poisoned', strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+            """,
+            (profile_id, sequence),
+        )
+
+    def mark_attention(self, batch: PublicationSourceBatch) -> None:
+        """Persist attention without preserving canonical values or exception text."""
+
+        with self._database.transaction(immediate=True) as connection:
+            self._mark_attention_in_transaction(
+                connection,
+                profile_id=batch.profile_id,
+                sequence=batch.profile_publication_sequence,
             )
 
     def acknowledge_row(self, row: PublicationSourceRow, *, server_cursor: int) -> None:

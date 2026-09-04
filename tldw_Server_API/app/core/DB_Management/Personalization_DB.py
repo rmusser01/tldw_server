@@ -298,6 +298,14 @@ class PersonalizationDB:
                         expires_at_ns INTEGER NOT NULL
                     );
 
+                    CREATE TABLE IF NOT EXISTS personal_context_publication_relay_attention (
+                        profile_id TEXT NOT NULL,
+                        profile_publication_sequence INTEGER NOT NULL,
+                        error_code TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        PRIMARY KEY (profile_id, profile_publication_sequence)
+                    );
+
                     CREATE TABLE IF NOT EXISTS personal_context_publication_batches (
                         profile_id TEXT NOT NULL,
                         profile_publication_sequence INTEGER NOT NULL,

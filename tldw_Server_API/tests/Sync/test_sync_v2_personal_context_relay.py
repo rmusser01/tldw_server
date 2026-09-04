@@ -30,6 +30,7 @@ class _Publications:
             _row(1, "manifest"),
         ]
         self.acknowledged: list[int] = []
+        self.attention = False
         self.failed_after: int | None = None
 
     @contextmanager
@@ -50,6 +51,9 @@ class _Publications:
 
     def complete_if_acknowledged(self, _batch: PublicationSourceBatch) -> bool:
         return all(row.row_state == "acknowledged" for row in self.rows)
+
+    def mark_attention(self, _batch: PublicationSourceBatch) -> None:
+        self.attention = True
 
 
 def _row(ordinal: int, role: str) -> PublicationSourceRow:
@@ -80,3 +84,20 @@ def test_relay_never_stages_manifest_before_semantic_siblings() -> None:
     publications.failed_after = None
     relay.relay_profile(user_id="user-a", profile_id="profile-a", dataset_id="dataset-a", after_server_cursor=None)
     assert staged == ["semantic", "semantic", "manifest"]
+
+
+def test_relay_poison_blocks_the_earliest_batch_without_error_body() -> None:
+    from tldw_Server_API.app.core.Sync.v2.personal_context_relay import PersonalContextRelay
+
+    publications = _Publications()
+    relay = PersonalContextRelay(
+        publications=publications,
+        stage_authority=lambda *_args: (_ for _ in ()).throw(RuntimeError("secret")),
+    )
+
+    result = relay.relay_profile(
+        user_id="user-a", profile_id="profile-a", dataset_id="dataset-a", after_server_cursor=None
+    )
+
+    assert result.continuation == "relay_poisoned"
+    assert publications.attention is True

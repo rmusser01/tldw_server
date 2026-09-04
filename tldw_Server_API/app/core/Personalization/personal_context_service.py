@@ -134,11 +134,29 @@ class PersonalContextService:
         clock: Callable[[], datetime] | None = None,
         id_factory: Callable[[str], str] | None = None,
         workspace_access: Callable[[str], bool] | None = None,
+        after_commit_relay: Callable[[str], None] | None = None,
     ) -> None:
         self._repository = repository
         self._clock = clock or (lambda: datetime.now(UTC))
         self._id_factory = id_factory or (lambda label: f"{label}-{uuid.uuid4()}")
         self._workspace_access = workspace_access or (lambda _workspace_id: False)
+        self._after_commit_relay = after_commit_relay
+
+    def set_after_commit_relay(self, callback: Callable[[str], None] | None) -> None:
+        """Install the best-effort relay hook after authenticated wiring exists."""
+
+        self._after_commit_relay = callback
+
+    def _relay_after_commit(self, profile_id: str) -> None:
+        """Schedule recovery only after the canonical transaction committed."""
+
+        if self._after_commit_relay is None:
+            return
+        try:
+            self._after_commit_relay(profile_id)
+        except Exception:  # noqa: BLE001 - post-commit delivery must be isolated.
+            # Relay debt is durable; mutation success must never depend on egress.
+            return
 
     def _now(self) -> datetime:
         value = self._clock()
@@ -421,6 +439,7 @@ class PersonalContextService:
                 raise ProfileConflictError(
                     "Personal context profile already exists"
                 ) from exc
+            self._relay_after_commit(planned.manifest.profile_id)
             return planned.manifest
 
         now = self._now()
@@ -452,6 +471,7 @@ class PersonalContextService:
             )
         except ProfileAlreadyExistsError as exc:
             raise ProfileConflictError("Personal context profile already exists") from exc
+        self._relay_after_commit(manifest.profile_id)
         return manifest
 
     def apply_sync_object(
@@ -642,12 +662,14 @@ class PersonalContextService:
         """Materialize one authenticated client envelope with replay-safe receipt."""
 
         try:
-            return self._repository.apply_ingress_and_publish(
+            receipt = self._repository.apply_ingress_and_publish(
                 identity=identity,
                 domain=domain,
                 value=value,
                 base_object_hash=base_object_hash,
             )
+            self._relay_after_commit(self._profile_id())
+            return receipt
         except (ConcurrentProfileUpdateError, ProfileSemanticKeyCollisionError) as exc:
             raise ProfileConflictError("Personal context changed concurrently") from exc
 
@@ -689,6 +711,7 @@ class PersonalContextService:
             )
         except ConcurrentProfileUpdateError as exc:
             raise ProfileConflictError("Personal context profile changed") from exc
+        self._relay_after_commit(manifest.profile_id)
         return scope
 
     def workspace_id_for_scope(self, scope_id: str) -> str:
@@ -802,6 +825,7 @@ class PersonalContextService:
             raise ProfileKeyCollisionError("Active semantic key already exists") from exc
         except ConcurrentProfileUpdateError as exc:
             raise ProfileConflictError("Personal context profile changed") from exc
+        self._relay_after_commit(manifest.profile_id)
         return record
 
     def create_manual_record(self, **values: Any) -> ProfileRecord:
@@ -925,6 +949,7 @@ class PersonalContextService:
             raise ProfileKeyCollisionError("Active semantic key already exists") from exc
         except ConcurrentProfileUpdateError as exc:
             raise ProfileConflictError("Personal context record changed") from exc
+        self._relay_after_commit(manifest.profile_id)
         return replacement
 
     def update_record(
@@ -1019,6 +1044,7 @@ class PersonalContextService:
             )
         except ConcurrentProfileUpdateError as exc:
             raise ProfileConflictError("Personal context proposal changed") from exc
+        self._relay_after_commit(profile_id)
         return proposal
 
     def _current_proposals(self, profile_id: str) -> tuple[ProfileProposal, ...]:
@@ -1289,4 +1315,5 @@ class PersonalContextService:
             )
         except ConcurrentProfileUpdateError as exc:
             raise ProfileConflictError("Personal context profile changed") from exc
+        self._relay_after_commit(manifest.profile_id)
         return barrier

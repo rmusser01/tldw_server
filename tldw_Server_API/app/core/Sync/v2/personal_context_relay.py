@@ -8,6 +8,7 @@ from time import monotonic_ns
 from typing import Any, Literal
 
 from tldw_Server_API.app.core.Personalization.personal_context_publication import (
+    PublicationRelayPoisoned,
     PublicationSourceRow,
 )
 
@@ -56,7 +57,10 @@ class PersonalContextRelay:
                 return PersonalContextRelayResult(
                     0, False, False, "personal_context_relay_pending"
                 )
-            batch = self.publications.earliest_nonterminal_batch(profile_id)
+            try:
+                batch = self.publications.earliest_nonterminal_batch(profile_id)
+            except PublicationRelayPoisoned:
+                return PersonalContextRelayResult(0, False, False, "relay_poisoned")
             if batch is None:
                 return PersonalContextRelayResult(0, True, False, "complete")
             staged = 0
@@ -82,7 +86,13 @@ class PersonalContextRelay:
                     return PersonalContextRelayResult(
                         staged, False, False, "personal_context_relay_pending"
                     )
-                cursor = self.stage_authority(row, dataset_id, user_id)
+                try:
+                    cursor = self.stage_authority(row, dataset_id, user_id)
+                except Exception:  # noqa: BLE001 - poison blocks later authority batches.
+                    self.publications.mark_attention(batch)
+                    return PersonalContextRelayResult(
+                        staged, False, False, "relay_poisoned"
+                    )
                 if isinstance(cursor, bool) or not isinstance(cursor, int) or cursor < 1:
                     raise RuntimeError("authority relay receipt is invalid")
                 if not self.publications.row_is_current(row):

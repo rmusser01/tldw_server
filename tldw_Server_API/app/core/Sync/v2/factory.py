@@ -202,6 +202,22 @@ def sync_v2_service_for_user(user_id: str) -> SyncV2Service:
         ),
         stage_authority=service.stage_personal_context_authority,
     )
+    def relay_after_commit(profile_id: str) -> None:
+        """Best-effort recovery hook; durable journal debt survives all failures."""
+
+        for dataset in store.list_datasets_for_user(user_id):
+            state = dataset.metadata.get("personal_context")
+            if not isinstance(state, Mapping) or state.get("profile_id") != profile_id:
+                continue
+            service.personal_context_relay.relay_profile(
+                user_id=user_id,
+                profile_id=profile_id,
+                dataset_id=dataset.dataset_id,
+                after_server_cursor=None,
+            )
+            return
+
+    publication_service.set_after_commit_relay(relay_after_commit)
     return service
 
 
