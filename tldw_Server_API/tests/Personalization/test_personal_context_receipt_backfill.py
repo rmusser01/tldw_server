@@ -43,10 +43,25 @@ from tldw_Server_API.tests.Personalization.personal_context_test_support import 
 )
 
 REPLAY_ERROR = "ingress identity reused with a different payload"
+PROTECTED_CANARY = "PRIVATE-PROFILE-DIAGNOSTIC-CANARY"
 
 
 def _digest(canonical: bytes) -> str:
     return "sha256:" + hashlib.sha256(canonical).hexdigest()
+
+
+def _parse_proposal(canonical: bytes) -> ProfileProposal:
+    try:
+        return ProfileProposal.model_validate_json(canonical)
+    except (TypeError, ValueError):
+        raise AssertionError("protected canonical parse failed") from None
+
+
+def _parse_manifest(canonical: bytes) -> ProfileManifest:
+    try:
+        return ProfileManifest.model_validate_json(canonical)
+    except (TypeError, ValueError):
+        raise AssertionError("protected canonical parse failed") from None
 
 
 def _record(service: PersonalContextService, record_id: str) -> ProfileRecord:
@@ -324,7 +339,7 @@ class LegacyReceiptHarness:
             self.rewrite_row(role="semantic", fields={"operation": "tombstone"})
         elif fact == "manifest_sibling":
             row = self.row(role="manifest")
-            manifest = ProfileManifest.model_validate_json(
+            manifest = _parse_manifest(
                 self.journal.decrypt_row(row)[1]  # type: ignore[arg-type]
             )
             changed = manifest.model_copy(update={"revision": manifest.revision + 10})
@@ -528,6 +543,21 @@ def test_matching_legacy_receipt_backfills_only_wire_identity(
     assert after == before
 
 
+def test_protected_canonical_parse_failure_is_content_free() -> None:
+    malformed = proposal().model_dump(mode="json")
+    malformed["confidence"] = PROTECTED_CANARY
+
+    with pytest.raises(AssertionError) as error:
+        _parse_proposal(canonical_json_bytes(malformed))
+
+    error_text = str(error.value)
+    leaked = PROTECTED_CANARY in error_text
+    assert error_text == "protected canonical parse failed"
+    assert leaked is False
+    assert error.value.__cause__ is None
+    assert error.value.__suppress_context__ is True
+
+
 def test_modern_receipt_replay_does_not_enter_legacy_validation(
     harness: LegacyReceiptHarness,
     monkeypatch: pytest.MonkeyPatch,
@@ -564,21 +594,26 @@ def test_supported_legacy_ingress_backfills_domain_specific_identity(
 
     assert replay == harness.receipt
     assert source_domain == harness.domain
-    assert source_canonical == harness.canonical
+    assert hmac.compare_digest(
+        _digest(source_canonical),
+        _digest(harness.canonical),
+    )
     assert str(source["opaque_object_id"]) == harness.expected_object_id
     assert replay.resulting_object_id == harness.expected_object_id
     assert str(source["opaque_version_id"]) == replay.resulting_version_id
     assert replay.wire_entity_version == harness.identity.wire_entity_version
     if harness.domain == "personal_context.proposal":
         assert replay.resulting_version_id != replay.wire_entity_version
-        stored_proposal = ProfileProposal.model_validate_json(source_canonical)
+        stored_proposal = _parse_proposal(source_canonical)
+        has_proposed_record = stored_proposal.proposed_record is not None
+        has_confidence = stored_proposal.confidence is not None
         if harness.case == "proposal-pending":
             assert stored_proposal.state is ProposalState.PENDING
-            assert stored_proposal.proposed_record is not None
+            assert has_proposed_record is True
         else:
             assert stored_proposal.state is ProposalState.REJECTED
-            assert stored_proposal.proposed_record is None
-            assert stored_proposal.confidence is None
+            assert has_proposed_record is False
+            assert has_confidence is False
     else:
         assert replay.resulting_version_id == replay.wire_entity_version
 
@@ -681,7 +716,7 @@ def test_later_valid_manifest_head_keeps_exact_legacy_receipt_replayable(
 def test_later_terminal_proposal_keeps_pending_legacy_receipt_replayable(
     harness: LegacyReceiptHarness,
 ) -> None:
-    pending = ProfileProposal.model_validate_json(harness.canonical)
+    pending = _parse_proposal(harness.canonical)
     terminal = pending.model_copy(
         update={
             "state": ProposalState.REJECTED,

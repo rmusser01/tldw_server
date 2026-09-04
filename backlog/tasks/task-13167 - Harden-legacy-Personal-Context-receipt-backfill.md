@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@codex'
 created_date: '2026-09-04 03:32'
-updated_date: '2026-09-04 06:28'
+updated_date: '2026-09-04 06:36'
 labels:
   - personal-context
   - sync
@@ -49,7 +49,7 @@ Remediate TASK-13161 by permitting legacy empty wire-identity backfill only afte
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Implemented fail-closed legacy empty-wire receipt validation at the existing publication-journal seam. The validator authenticates and compares exact SQLite types and values across the receipt, source row, manifest sibling, deterministic batch shape and relay state, canonical historical manifest and parent lineage, and current manifest before one checked empty-only CAS. Review round 1 restored the pre-TASK-13167 modern nonempty-receipt source verification path so only empty receipts enter the legacy helper. The real-SQLite matrix now covers record, scope, manifest, pending proposal, and terminal proposal representations plus representative domain/state binding mismatches and later valid terminal advancement. No schema, migration, repository API, dependency, or new ADR was required; ADR-002 governs. Verification: 59 focused tests passed; Ruff passed; Bandit passed with no findings; git diff --check passed. The full suite was not run per the task plan; no blockers remain.
+Implemented fail-closed legacy empty-wire receipt validation at the existing publication-journal seam. The validator authenticates and compares exact SQLite types and values across the receipt, source row, manifest sibling, deterministic batch shape and relay state, canonical historical manifest and parent lineage, and current manifest before one checked empty-only CAS. Review round 1 restored the pre-TASK-13167 modern nonempty-receipt source verification path and added real-SQLite record, scope, manifest, pending-proposal, and terminal-proposal coverage. Review round 2 made focused test diagnostics content-free: decrypted bodies are compared through digests, canonical model parse failures use one fixed suppressed-context assertion, and body-shape assertions reduce to booleans. A synthetic canary proves Pydantic input excerpts are not retained in the raised test diagnostic. No production change was needed in round 2. No schema, migration, repository API, dependency, or new ADR was required; ADR-002 governs. Verification: 60 focused tests passed; Ruff passed; Bandit passed with no findings; git diff --check passed. The full suite was not run per the task plan; no blockers remain.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
