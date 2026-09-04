@@ -102,6 +102,7 @@ class PublicationSourceRow:
     canonical: bytes
     sync_server_cursor: int | None
     row_state: str
+    relay_owner_token: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,6 +119,14 @@ class PublicationRelayPoisoned(RuntimeError):
     """Content-free durable attention state for the earliest corrupt batch."""
 
 
+@dataclass(frozen=True, slots=True)
+class PublicationRelayLease:
+    """Opaque owner-fenced claim for one bounded external relay operation."""
+
+    profile_id: str
+    owner_token: str
+
+
 class PersonalContextPublicationRelayStore:
     """SQLite-backed source-journal access for the cross-database relay."""
 
@@ -128,7 +137,7 @@ class PersonalContextPublicationRelayStore:
         self._database = database
 
     @contextmanager
-    def profile_lease(self, profile_id: str) -> Iterator[bool]:
+    def profile_lease(self, profile_id: str) -> Iterator[PublicationRelayLease | None]:
         """Acquire a recoverable SQLite lease shared by every process entry point."""
 
         key = (self._database.db_path, profile_id)
@@ -157,7 +166,11 @@ class PersonalContextPublicationRelayStore:
                     (owner_token, now + 1_000_000_000, profile_id, now),
                 ).rowcount == 1
             try:
-                yield claimed
+                yield (
+                    PublicationRelayLease(profile_id, owner_token)
+                    if claimed
+                    else None
+                )
             finally:
                 if claimed:
                     with self._database.transaction(immediate=True) as connection:
@@ -170,7 +183,23 @@ class PersonalContextPublicationRelayStore:
                             (time.time_ns(), profile_id, owner_token),
                         )
 
-    def row_is_current(self, row: PublicationSourceRow) -> bool:
+    def renew_lease(self, lease: PublicationRelayLease) -> bool:
+        """CAS-renew the current owner before an external stage transition."""
+
+        now = time.time_ns()
+        with self._database.transaction(immediate=True) as connection:
+            return connection.execute(
+                """
+                UPDATE personal_context_publication_relay_leases
+                SET expires_at_ns = ?
+                WHERE profile_id = ? AND owner_token = ? AND expires_at_ns > ?
+                """,
+                (now + 1_000_000_000, lease.profile_id, lease.owner_token, now),
+            ).rowcount == 1
+
+    def row_is_current(
+        self, row: PublicationSourceRow, lease: PublicationRelayLease
+    ) -> bool:
         """Recheck purge and terminal state immediately before external staging."""
 
         with self._database.transaction(immediate=True) as connection:
@@ -186,8 +215,17 @@ class PersonalContextPublicationRelayStore:
                 """,
                 (row.profile_id, row.profile_publication_sequence, row.batch_ordinal),
             ).fetchone()
+            lease_row = connection.execute(
+                """
+                SELECT 1 FROM personal_context_publication_relay_leases
+                WHERE profile_id = ? AND owner_token = ? AND expires_at_ns > ?
+                """,
+                (lease.profile_id, lease.owner_token, time.time_ns()),
+            ).fetchone()
         return bool(
-            current is not None
+            lease_row is not None
+            and lease.profile_id == row.profile_id
+            and current is not None
             and current["status"] not in {"complete", "covered_by_activation", "purge_terminal"}
             and int(current["purge_generation"]) == row.purge_generation
             and current["row_state"] in {"pending", "staged", "acknowledged"}
@@ -307,7 +345,9 @@ class PersonalContextPublicationRelayStore:
                 sequence=batch.profile_publication_sequence,
             )
 
-    def acknowledge_row(self, row: PublicationSourceRow, *, server_cursor: int) -> None:
+    def acknowledge_row(
+        self, row: PublicationSourceRow, *, server_cursor: int, lease: PublicationRelayLease
+    ) -> None:
         """Record an exact durable Sync receipt without persisting canonical data."""
 
         from tldw_Server_API.app.core.DB_Management.Personal_Context_Key_Store import (
@@ -315,6 +355,15 @@ class PersonalContextPublicationRelayStore:
         )
 
         with self._database.transaction(immediate=True) as connection:
+            lease_row = connection.execute(
+                """
+                SELECT 1 FROM personal_context_publication_relay_leases
+                WHERE profile_id = ? AND owner_token = ? AND expires_at_ns > ?
+                """,
+                (lease.profile_id, lease.owner_token, time.time_ns()),
+            ).fetchone()
+            if lease_row is None:
+                raise RuntimeError("publication relay lease changed")
             current = connection.execute(
                 """
                 SELECT * FROM personal_context_publication_rows

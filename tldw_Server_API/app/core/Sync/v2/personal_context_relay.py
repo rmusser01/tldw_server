@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from time import monotonic_ns
 from typing import Any, Literal
 
@@ -52,8 +52,8 @@ class PersonalContextRelay:
         if row_budget < 1 or wall_time_ms < 1:
             raise ValueError("relay limits must be positive")
         deadline_ns = self.clock_ns() + wall_time_ms * 1_000_000
-        with self.publications.profile_lease(profile_id) as leased:
-            if not leased:
+        with self.publications.profile_lease(profile_id) as lease:
+            if lease is None:
                 return PersonalContextRelayResult(
                     0, False, False, "personal_context_relay_pending"
                 )
@@ -82,12 +82,17 @@ class PersonalContextRelay:
                     return PersonalContextRelayResult(
                         staged, False, False, "personal_context_relay_pending"
                     )
-                if not self.publications.row_is_current(row):
+                if not self.publications.renew_lease(lease):
+                    return PersonalContextRelayResult(
+                        staged, False, False, "personal_context_relay_pending"
+                    )
+                claimed_row = replace(row, relay_owner_token=lease.owner_token)
+                if not self.publications.row_is_current(claimed_row, lease):
                     return PersonalContextRelayResult(
                         staged, False, False, "personal_context_relay_pending"
                     )
                 try:
-                    cursor = self.stage_authority(row, dataset_id, user_id)
+                    cursor = self.stage_authority(claimed_row, dataset_id, user_id)
                 except Exception:  # noqa: BLE001 - poison blocks later authority batches.
                     self.publications.mark_attention(batch)
                     return PersonalContextRelayResult(
@@ -95,11 +100,13 @@ class PersonalContextRelay:
                     )
                 if isinstance(cursor, bool) or not isinstance(cursor, int) or cursor < 1:
                     raise RuntimeError("authority relay receipt is invalid")
-                if not self.publications.row_is_current(row):
+                if not self.publications.renew_lease(lease) or not self.publications.row_is_current(claimed_row, lease):
                     return PersonalContextRelayResult(
                         staged, False, False, "personal_context_relay_pending"
                     )
-                self.publications.acknowledge_row(row, server_cursor=cursor)
+                self.publications.acknowledge_row(
+                    claimed_row, server_cursor=cursor, lease=lease
+                )
                 acknowledged_ordinals.add(row.batch_ordinal)
                 staged += 1
             complete = self.publications.complete_if_acknowledged(batch)

@@ -1193,10 +1193,23 @@ class SyncV2Service:
             or purge_generation != getattr(row, "purge_generation", None)
         ):
             raise SyncStoreError("Personal Context authority source binding is invalid")
+        relay_token = getattr(row, "relay_owner_token", None)
+        if not isinstance(relay_token, str) or not relay_token:
+            raise SyncStoreError("Personal Context authority relay claim is invalid")
         try:
-            _key_id, integrity_key = self._personal_context_service_for_user(
-                user_id
-            ).sync_integrity_key(profile_id)
+            canonical_service = self._personal_context_service_for_user(user_id)
+            _key_id, integrity_key = canonical_service.sync_integrity_key(profile_id)
+            from tldw_Server_API.app.core.Personalization.personal_context_publication import (
+                PersonalContextPublicationRelayStore,
+                PublicationRelayLease,
+            )
+
+            if not PersonalContextPublicationRelayStore(
+                canonical_service._repository.database
+            ).row_is_current(
+                row, PublicationRelayLease(profile_id, relay_token)
+            ):
+                raise SyncStoreError("Personal Context authority relay claim is stale")
         except (AttributeError, KeyError, RuntimeError, TypeError, ValueError) as exc:
             raise SyncStoreError("Personal Context authority integrity is unavailable") from exc
         if _key_id != integrity_key_id or len(integrity_key) != 32:

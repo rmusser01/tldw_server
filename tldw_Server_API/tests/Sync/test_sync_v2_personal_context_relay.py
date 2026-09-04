@@ -35,15 +35,19 @@ class _Publications:
 
     @contextmanager
     def profile_lease(self, _profile_id: str):
-        yield True
+        yield type("Lease", (), {"owner_token": "lease-token"})()
 
-    def row_is_current(self, _row: PublicationSourceRow) -> bool:
+    def renew_lease(self, _lease: object) -> bool:
+        return True
+
+    def row_is_current(self, _row: PublicationSourceRow, _lease: object) -> bool:
         return True
 
     def earliest_nonterminal_batch(self, _profile_id: str) -> PublicationSourceBatch:
         return PublicationSourceBatch("profile-a", 1, "batch-a", tuple(self.rows))
 
-    def acknowledge_row(self, row: PublicationSourceRow, *, server_cursor: int) -> None:
+    def acknowledge_row(self, row: PublicationSourceRow, *, server_cursor: int, lease: object) -> None:
+        del lease
         if self.failed_after is not None and row.batch_ordinal == self.failed_after:
             raise RuntimeError("injected interruption")
         self.acknowledged.append(server_cursor)
